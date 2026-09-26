@@ -1,0 +1,11 @@
+# Isolated operator-only environment for scripts/convert_evidence_verifier.py.
+# These versions produced the native parity result recorded in ADR-0038 on
+# 2026-09-02. They intentionally do not replace requirements-ml.txt because
+# the older Qwen conversion has a different, incompatible toolchain window.
+coremltools==9.0
+torch==2.7.0
+transformers==4.49.0
+numpy==2.4.6
+tokenizers==0.21.4
+sentencepiece==0.2.2
+safetensors==0.6.2

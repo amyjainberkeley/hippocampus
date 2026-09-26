@@ -52,6 +52,17 @@ final class MenuBarQuickActionsTests: XCTestCase {
         XCTAssertEqual(labels.count, 4)
     }
 
+    func testDefaultOffRunningTopologyIsIdleWithStartRecordingControl() {
+        XCTAssertEqual(
+            MenuBarStatus.derive(from: .running, captureEnabled: false),
+            .idle
+        )
+        XCTAssertEqual(
+            RecordingControl.derive(from: .running, captureEnabled: false),
+            .start
+        )
+    }
+
     /// User-pause round-trip through the menu-bar quick-actions
     /// coordinator: user flips ⌘⇧P → controller flips → supervisor
     /// hypothetically mirrors → derivation shows `.paused`. On
@@ -67,7 +78,7 @@ final class MenuBarQuickActionsTests: XCTestCase {
 
         UserPauseController.shared.setPaused(false)
         XCTAssertFalse(UserPauseController.shared.isPaused)
-        XCTAssertEqual(MenuBarStatus.derive(from: .running), .recording)
+        XCTAssertNotEqual(MenuBarStatus.derive(from: .running), .recording)
     }
 
     /// TCC-revoke + user-pause interplay: if the user has ALSO
@@ -81,8 +92,6 @@ final class MenuBarQuickActionsTests: XCTestCase {
             from: .paused,
             tccRevokedSurface: .screenRecording
         )
-        guard case .error = status else {
-            return XCTFail("expected .error, got \(status)")
-        }
+        XCTAssertEqual(status, .paused)
     }
 }

@@ -8,14 +8,30 @@ the eval story. Paired with `../../scripts/eval/` (the runners) and
 
 - `brief-quality.md` — the brief-authoring eval scorecard
   (ADR-0018 §7 gate). Rubric, corpus source, scoring.
+- `brief-extractive-baseline.md` — the measured shipping-author baseline and
+  its explicit limits.
 - `recall-quality.md` — the recall-quality benchmark methodology
   (paired with `../../scripts/eval/recall/`).
+- `work-memory-baseline.json` — the committed lexical and hybrid
+  baseline report for the synthetic work-memory corpus, including reproducible
+  code/model/dataset identity, regression thresholds, fixed launch-quality
+  targets, misses, and explicit answerable/unanswerable denominators.
+- `agent-handoff-v1.md` — methodology for the 36-task production-path
+  retrieval and `mci_context` sidecar. The adjacent result artifact measures
+  semantic relevance, temporal updates, contradictions, duplicate OCR,
+  provenance, abstention, and bounded agent handoff without claiming answer
+  generation.
+- `agent-handoff-v1-result.json` — the accepted 72-row lexical/hybrid result,
+  with exact per-case evidence and a pinned SHA-256 sidecar.
 
 ## Related
 
 - `../../scripts/eval/` — the runners that produce scorecards.
 - `../../core/brief-eval/` — the in-tree Rust brief-eval crate.
 - `../../eval/ner-corpus/` — the NER corpus used by ADR-0029.
+- `../../eval/work-memory/` — the synthetic work-memory corpus and
+  README for the benchmark runner.
+- `../../eval/agent-handoff/` — the deterministic agent-handoff-v1 corpus.
 - `../decisions/0018-brief-authoring-approval-pipeline.md`,
   `0029-step2-7-corpus-gate.md`.
 

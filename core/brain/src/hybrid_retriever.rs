@@ -18,11 +18,12 @@
 //! - **Semantic:** query embedded with the query-side prefix per
 //!   ADR-0011 §3, then [`BrainStore::vec_search`] over the candidate
 //!   pool (default `k_sem = 200`).
-//! - **Min-max normalization** of both score lists across the
-//!   response set (Bruch et al. ACM TOIS 2023, arXiv:2210.11934).
+//! - **Rank-aware normalization** maps lexical and semantic positions to
+//!   reciprocal ranks. Tied raw scores share a rank, and raw cosine remains
+//!   available separately to the evidence critic.
 //! - **Fuse** per ADR-0010 §5 + the Phase-6-close recall-surface fusion:
-//!   `score = w_sem · sem̂ + w_lex · lex̂ + w_rec · exp(−λ · Δt_h)
-//!   + w_entity · ent̂ + w_src · src` with default weights
+//!   `score = w_sem * rr_sem + w_lex * rr_lex + w_rec * decay + w_entity * ent_hat + w_src * src`
+//!   with default weights
 //!   [`FusionWeights::default`] = `0.40 / 0.30 / 0.10 / 0.15 / 0.05`.
 //!   `ent̂` is the query-aware deterministic entity-match signal (see
 //!   [`HybridRetriever::derive_query_entity_ids`]): the query is run
@@ -84,7 +85,10 @@ use std::sync::Arc;
 use crate::extraction::tier1::{Tier1Extractor, KIND_REDACTED_TOKEN};
 use crate::extraction::tier2::{KIND_LOCATION, KIND_ORGANIZATION, KIND_PERSON_NAME};
 use crate::{
-    BrainStore, Embedder, EntityId, EventId, RetrievalHit, RetrievalQuery, RetrieveError,
+    evidence_features_for_candidates, explicit_evidence_signal,
+    has_explicit_current_supersession_context, BrainStore, Embedder, EntityId, EventId,
+    EvidenceCandidate, EvidenceExcerpt, EvidenceSufficiencyPolicy, EvidenceVerdict,
+    EvidenceVerifier, ExplicitEvidenceSignal, RetrievalHit, RetrievalQuery, RetrieveError,
     Retriever, TimeRange,
 };
 
@@ -93,8 +97,8 @@ use crate::{
 // ---------------------------------------------------------------------------
 
 /// Default lexical candidate-pool size (`k_lex` in ADR-0010 §5 / ADR-0016
-/// §1.5). 200 hits before fusion gives enough headroom for the min-max
-/// normalization to be meaningful on a corpus of any size while staying
+/// §1.5). 200 hits before fusion gives enough headroom for rank-aware
+/// fusion on a corpus of any size while staying
 /// well inside the brute-force regime for `vec_search` at `<10⁶` events
 /// (ADR-0011 §5 scaling ladder).
 pub const DEFAULT_K_LEX: usize = 200;
@@ -102,6 +106,14 @@ pub const DEFAULT_K_LEX: usize = 200;
 /// Default semantic candidate-pool size (`k_sem` in ADR-0010 §5 / ADR-0016
 /// §1.5). Symmetric with [`DEFAULT_K_LEX`].
 pub const DEFAULT_K_SEM: usize = 200;
+
+/// Maximum number of ranked events presented to the semantic verifier.
+///
+/// This is intentionally independent of [`RetrievalQuery::limit`], which is
+/// a display/output preference. Verification may need a small evidence set to
+/// resolve multi-event support or contradiction even when a caller only wants
+/// one visible result.
+pub const DEFAULT_VERIFICATION_CANDIDATE_LIMIT: usize = 8;
 
 /// Anchor-then-window half-width, microseconds. ADR-0010 §6 specifies
 /// `±5 min` around the anchor's `ts_us`; this constant is that bound.
@@ -112,29 +124,235 @@ pub const ANCHOR_WINDOW_US: u64 = 5 * 60 * 1_000_000;
 /// [`RecencyConfig`] and the eval gate at P3.7 close (ADR-0010 §7).
 pub const DEFAULT_HALF_LIFE_HOURS: f32 = 24.0;
 
+/// Capture fidelity used as an additive ranking prior.
+///
+/// The ordering reflects how directly the stored bytes represent the source:
+/// an explicit user assertion, typed structured-app record, local artifact,
+/// browser page text, accessibility text, then OCR. It affects ordering only;
+/// source quality cannot turn unsupported evidence into a match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SourceQuality {
+    /// User-authored correction or annotation.
+    UserAuthored,
+    /// Typed record from GitHub, Linear, Slack, mail, or similar application.
+    StructuredApp,
+    /// Local file or terminal transcript.
+    LocalArtifact,
+    /// Browser page text with an attributable URL.
+    BrowserPage,
+    /// Accessibility-tree text with application attribution.
+    Accessibility,
+    /// OCR-only text without a stronger source identity.
+    Ocr,
+}
+
+impl SourceQuality {
+    /// Stable ranking score. These values are not confidence probabilities.
+    #[must_use]
+    pub const fn score(self) -> f32 {
+        match self {
+            Self::UserAuthored => 1.00,
+            Self::StructuredApp => 0.95,
+            Self::LocalArtifact => 0.88,
+            Self::BrowserPage => 0.80,
+            Self::Accessibility => 0.68,
+            Self::Ocr => 0.52,
+        }
+    }
+}
+
+/// Extant canonical-event evidence attached to one retrieval match.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RetrievalEvidence {
+    /// Event that supports the match.
+    pub event_id: EventId,
+    /// Best available stable locator.
+    pub source_locator: Option<String>,
+    /// Capture-fidelity class used by ranking.
+    pub source_quality: SourceQuality,
+}
+
+/// Cross-query-comparable signals used to decide whether evidence exists.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RetrievalSignals {
+    /// Raw semantic cosine before any query-local normalization.
+    pub raw_semantic_cosine: Option<f32>,
+    /// Fraction of information-bearing query terms present in the event.
+    pub query_coverage: f32,
+    /// Fraction of information-bearing document terms present in the query.
+    pub document_coverage: f32,
+    /// Raw top-1 minus top-2 semantic margin for this query.
+    pub semantic_margin: f32,
+    /// Whether lexical and semantic retrieval selected the same event.
+    pub lexical_semantic_agreement: bool,
+}
+
+/// One ranked hit with its evidence and abstention signals.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RetrievalMatch {
+    /// Ranked retrieval hit.
+    pub hit: RetrievalHit,
+    /// Canonical event evidence.
+    pub evidence: RetrievalEvidence,
+    /// Raw/calibrated match-decision signals.
+    pub signals: RetrievalSignals,
+}
+
+/// Why retrieval intentionally returned no evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NothingMatchedReason {
+    /// No candidate events were available in scope.
+    NoCandidates,
+    /// Candidates existed, but none passed the evidence floor.
+    EvidenceFloor,
+    /// Caller requested zero results.
+    ZeroLimit,
+}
+
+/// Named capability missing from a degraded retrieval.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetrievalDegradation {
+    /// Query embedding or vector search was unavailable.
+    EmbeddingsUnavailable,
+    /// Lexical search was unavailable.
+    LexicalUnavailable,
+    /// Neither lexical nor semantic retrieval was available.
+    LexicalAndEmbeddingsUnavailable,
+    /// The independently calibrated evidence-sufficiency critic did not
+    /// qualify, so ranking is available but answerability is not.
+    EvidenceSufficiencyUnqualified,
+    /// A configured semantic verifier failed or returned malformed source
+    /// attribution, so ranked context remains explicitly untrusted.
+    EvidenceVerifierUnavailable,
+}
+
+/// Typed production retrieval result.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RetrievalOutcome {
+    /// Evidence passed the explicit relevance floor.
+    Matched {
+        /// Ranked, evidence-backed matches.
+        matches: Vec<RetrievalMatch>,
+    },
+    /// Retrieved evidence directly contradicts an asserted query.
+    Contradicted {
+        /// Ranked events cited by the verifier as contradictory evidence.
+        matches: Vec<RetrievalMatch>,
+    },
+    /// Retrieval completed normally and found no support.
+    NothingMatched {
+        /// Inspectable abstention reason.
+        reason: NothingMatchedReason,
+    },
+    /// One retrieval capability was unavailable; fallback evidence is not
+    /// relabeled as a full match.
+    Degraded {
+        /// Missing capability.
+        degradation: RetrievalDegradation,
+        /// Inspectable fallback ranking.
+        fallback_matches: Vec<RetrievalMatch>,
+    },
+}
+
+/// Run lexical-only retrieval through the same typed production boundary as
+/// hybrid retrieval.
+pub fn lexical_retrieval_outcome<S: BrainStore>(
+    store: &S,
+    query: &RetrievalQuery,
+) -> Result<RetrievalOutcome, RetrieveError> {
+    if query.text.trim().is_empty() {
+        return Err(RetrieveError::InvalidInput("empty query text".into()));
+    }
+    if query.limit == 0 {
+        return Ok(RetrievalOutcome::NothingMatched {
+            reason: NothingMatchedReason::ZeroLimit,
+        });
+    }
+    let Ok(raw) = store.fts5_search(&query.text, query.limit) else {
+        return Ok(RetrievalOutcome::Degraded {
+            degradation: RetrievalDegradation::LexicalUnavailable,
+            fallback_matches: Vec::new(),
+        });
+    };
+    let ranked = ranked_map(raw);
+    let mut candidates: Vec<(EventId, (f32, usize))> = ranked.into_iter().collect();
+    candidates.sort_by(|a, b| a.1 .1.cmp(&b.1 .1).then_with(|| a.0.cmp(&b.0)));
+    let mut matches = Vec::new();
+    for (id, (_, rank)) in candidates {
+        let Some(event) = store
+            .get_event(id)
+            .map_err(|error| RetrieveError::Backend(error.to_string()))?
+        else {
+            continue;
+        };
+        if query
+            .time_filter
+            .is_some_and(|range| event.ts_us < range.from_us || event.ts_us > range.to_us)
+            || query
+                .app_filter
+                .as_deref()
+                .is_some_and(|app| event.app_bundle_id.as_deref() != Some(app))
+        {
+            continue;
+        }
+        let signals = RetrievalSignals {
+            raw_semantic_cosine: None,
+            query_coverage: lexical_coverage(&query.text, &event.text),
+            document_coverage: lexical_coverage(&event.text, &query.text),
+            semantic_margin: 0.0,
+            lexical_semantic_agreement: true,
+        };
+        let quality = classify_source_quality(&event);
+        let rank_value = rank_score(Some(rank));
+        matches.push(RetrievalMatch {
+            hit: RetrievalHit {
+                event_id: id,
+                score_lexical: rank_value,
+                score_semantic: 0.0,
+                score_recency: 0.0,
+                score_source: quality.score(),
+                score_combined: rank_value,
+            },
+            evidence: RetrievalEvidence {
+                event_id: id,
+                source_locator: event.url.clone(),
+                source_quality: quality,
+            },
+            signals,
+        });
+    }
+    if matches.is_empty() {
+        Ok(RetrievalOutcome::NothingMatched {
+            reason: NothingMatchedReason::EvidenceFloor,
+        })
+    } else {
+        Ok(RetrievalOutcome::Matched { matches })
+    }
+}
+
 // ---------------------------------------------------------------------------
 // FusionWeights — defaults per ADR-0010 §5
 // ---------------------------------------------------------------------------
 
-/// Convex-combination weights for the min-max CC fusion (ADR-0010 §5 +
+/// Convex-combination weights for rank-aware fusion (ADR-0010 §5 +
 /// the Phase-6-close recall-surface fusion).
 ///
 /// Weights are convex (each in `[0, 1]`) but the impl does not enforce
 /// `w_sem + w_lex + w_rec + w_entity + w_src == 1.0` — the fusion is
 /// monotone in each term regardless, and the eval gate at P3.7 close
-/// (ADR-0010 §7) tunes the actual values. The defaults
+/// (ADR-0010 §7) established the existing defaults
 /// `0.40 / 0.30 / 0.10 / 0.15 / 0.05` rebalance the ADR-0010 §5 starting
 /// set (`0.5 / 0.3 / 0.15 / — / 0.05`) to fund the new `w_entity` arm:
 /// `0.10` of the budget comes from `w_sem` (semantic stays the lead arm)
 /// and `0.05` from `w_rec` (the query-aware entity match already
 /// concentrates on the events a recency-seeking query is reaching for, so
 /// a slightly lighter standalone recency weight avoids double-counting).
-/// `w_lex` / `w_src` are left at their eval-tuned values.
+/// `w_lex` / `w_src` retain their established values.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FusionWeights {
-    /// Weight on the min-max-normalized semantic cosine.
+    /// Weight on reciprocal semantic rank.
     pub w_sem: f32,
-    /// Weight on the min-max-normalized BM25 / FTS5 rank.
+    /// Weight on reciprocal BM25 / FTS5 rank.
     pub w_lex: f32,
     /// Weight on the recency-decay term `exp(−λ · Δt_hours)`.
     pub w_rec: f32,
@@ -143,10 +361,7 @@ pub struct FusionWeights {
     /// candidate when the query references no known entity, so the arm is
     /// inert on entity-free queries.
     pub w_entity: f32,
-    /// Weight on the source-quality prior. Reserved for Phase 7
-    /// (browser-extension page-text > AX > OCR); the Phase-3
-    /// retriever uses `src ≡ 0.0` for every event so the term
-    /// contributes nothing until that prior lands.
+    /// Weight on the documented source-quality prior.
     pub w_src: f32,
 }
 
@@ -167,7 +382,7 @@ impl Default for FusionWeights {
 // ---------------------------------------------------------------------------
 
 /// Configures the exponential decay for the recency arm of the
-/// min-max CC fusion (ADR-0010 §5).
+/// rank-aware fusion (ADR-0010 §5).
 ///
 /// `recency(e) = exp(−λ · Δt_h)` where `λ = ln(2) / half_life_hours`.
 /// The default [`DEFAULT_HALF_LIFE_HOURS`] = 24.0 gives a score of 0.5
@@ -242,6 +457,32 @@ pub struct HybridRetriever<S: BrainStore, E: Embedder> {
     k_lex: usize,
     /// Semantic candidate-pool size (`k_sem`).
     k_sem: usize,
+    /// Ranked evidence-set size presented to the semantic verifier before the
+    /// caller's display limit is applied.
+    verification_candidate_limit: usize,
+    /// Legacy score critic retained only for test/stub ranking mechanics.
+    /// Production construction leaves this absent.
+    evidence_policy: Option<EvidenceSufficiencyPolicy>,
+    /// Optional local semantic verifier. When present, this source-attributed
+    /// judgment replaces the legacy score-only critic.
+    evidence_verifier: Option<Arc<dyn EvidenceVerifier>>,
+}
+
+enum CandidateArms {
+    Ready {
+        lexical: HashMap<EventId, (f32, usize)>,
+        semantic: HashMap<EventId, (f32, usize)>,
+    },
+    Degraded(RetrievalOutcome),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EvidenceAssessment {
+    Supported(Vec<u64>),
+    Contradicted(Vec<u64>),
+    Unsupported,
+    Unqualified,
+    VerifierUnavailable,
 }
 
 impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
@@ -258,20 +499,22 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
             now_us,
             k_lex: DEFAULT_K_LEX,
             k_sem: DEFAULT_K_SEM,
+            verification_candidate_limit: DEFAULT_VERIFICATION_CANDIDATE_LIMIT,
+            evidence_policy: None,
+            evidence_verifier: None,
         }
     }
 
-    /// Override the fusion weights. The eval gate at P3.7 close
-    /// (ADR-0010 §7) is the canonical place to tune these.
+    /// Override the fusion weights. Production changes require an independent
+    /// calibration and regression review.
     #[must_use]
     pub fn with_weights(mut self, weights: FusionWeights) -> Self {
         self.weights = weights;
         self
     }
 
-    /// Override the recency decay curve. The eval gate at P3.7 close
-    /// (ADR-0010 §7) is the canonical place to tune this alongside
-    /// the fusion weights.
+    /// Override the recency decay curve. Production changes require an
+    /// independent calibration and regression review.
     #[must_use]
     pub fn with_recency(mut self, config: RecencyConfig) -> Self {
         self.recency = config;
@@ -285,6 +528,34 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
     pub fn with_pools(mut self, k_lex: usize, k_sem: usize) -> Self {
         self.k_lex = k_lex;
         self.k_sem = k_sem;
+        self
+    }
+
+    /// Override the bounded evidence-set size presented to the verifier.
+    /// A zero value is clamped to one so a configured verifier is never called
+    /// with an empty set after retrieval found candidates.
+    #[must_use]
+    pub fn with_verification_candidate_limit(mut self, limit: usize) -> Self {
+        self.verification_candidate_limit = limit.max(1);
+        self
+    }
+
+    /// Override the evidence critic in tests that exercise ranking mechanics.
+    /// Production callers always use the independently frozen default.
+    #[cfg(any(test, feature = "stubs"))]
+    #[must_use]
+    pub fn with_evidence_policy(mut self, policy: EvidenceSufficiencyPolicy) -> Self {
+        self.evidence_policy = Some(policy);
+        self
+    }
+
+    /// Attach a local semantic evidence verifier.
+    ///
+    /// Verifier output is checked for confidence bounds and source provenance
+    /// before it can promote retrieval output to [`RetrievalOutcome::Matched`].
+    #[must_use]
+    pub fn with_evidence_verifier(mut self, verifier: Arc<dyn EvidenceVerifier>) -> Self {
+        self.evidence_verifier = Some(verifier);
         self
     }
 
@@ -346,6 +617,26 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
 
 impl<S: BrainStore, E: Embedder> Retriever for HybridRetriever<S, E> {
     fn retrieve(&self, query: &RetrievalQuery) -> Result<Vec<RetrievalHit>, RetrieveError> {
+        match self.retrieve_outcome(query)? {
+            RetrievalOutcome::Matched { matches } => {
+                Ok(matches.into_iter().map(|value| value.hit).collect())
+            }
+            RetrievalOutcome::Contradicted { .. } | RetrievalOutcome::NothingMatched { .. } => {
+                Ok(Vec::new())
+            }
+            RetrievalOutcome::Degraded { degradation, .. } => Err(RetrieveError::Backend(format!(
+                "retrieval degraded: {degradation:?}"
+            ))),
+        }
+    }
+}
+
+impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
+    /// Run retrieval through the typed production outcome boundary.
+    pub fn retrieve_outcome(
+        &self,
+        query: &RetrievalQuery,
+    ) -> Result<RetrievalOutcome, RetrieveError> {
         if query.text.is_empty() {
             return Err(RetrieveError::InvalidInput("empty query text".into()));
         }
@@ -357,86 +648,50 @@ impl<S: BrainStore, E: Embedder> Retriever for HybridRetriever<S, E> {
             }
         }
         if query.limit == 0 {
-            return Ok(Vec::new());
+            return Ok(RetrievalOutcome::NothingMatched {
+                reason: NothingMatchedReason::ZeroLimit,
+            });
         }
 
         match self.route(query) {
-            RetrievalShape::Plain => self.plain_retrieve(query, query.time_filter),
-            RetrievalShape::AnchorThenWindow => self.anchor_then_window_retrieve(query),
+            RetrievalShape::Plain => self.plain_retrieve_outcome(query, query.time_filter),
+            RetrievalShape::AnchorThenWindow => self.anchor_then_window_outcome(query),
             RetrievalShape::TimeRangeExtraction(extracted) => {
                 let effective = intersect_ranges(query.time_filter, Some(extracted));
-                self.plain_retrieve(query, effective)
+                self.plain_retrieve_outcome(query, effective)
             }
         }
     }
-}
 
-impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
     /// Plain hybrid recall with an optional pre-applied time-range filter
     /// (the router-derived range for `TimeRangeExtraction`, the
     /// caller's `query.time_filter` for `Plain`, or the anchor window
     /// for `AnchorThenWindow`).
-    fn plain_retrieve(
+    fn plain_retrieve_outcome(
         &self,
         query: &RetrievalQuery,
         time_filter: Option<TimeRange>,
-    ) -> Result<Vec<RetrievalHit>, RetrieveError> {
-        let q_emb = self
-            .embedder
-            .embed_one(&query.text)
-            .map_err(|e| RetrieveError::Backend(e.to_string()))?;
-        let lex = self
-            .store
-            .fts5_search(&query.text, self.k_lex)
-            .map_err(|e| RetrieveError::Backend(e.to_string()))?;
-        // ADR-0011 §5 candidate-pool pre-filter. When the query carries
-        // a time / app scope (either from the router — anchor window,
-        // extracted time range — or from the caller-supplied
-        // `RetrievalQuery::app_filter`), push those into the store so
-        // brute-force cosine walks only the in-scope vectors instead of
-        // the whole `event_vectors` table. Semantic ranks are otherwise
-        // unchanged: the pool narrowing is a subset of the row set the
-        // full-KNN would have scored, and the retriever's row-level
-        // app/time guard downstream is still authoritative. When both
-        // filters are `None` the store's default impl delegates to
-        // `vec_search` — byte-identical fallback (full KNN).
-        let sem = self
-            .store
-            .vec_search_filtered(&q_emb, self.k_sem, time_filter, query.app_filter.as_deref())
-            .map_err(|e| RetrieveError::Backend(e.to_string()))?;
-
-        let lex_map: HashMap<EventId, f32> = lex.into_iter().collect();
-        let sem_map: HashMap<EventId, f32> = sem.into_iter().collect();
-
-        let lex_bounds = minmax(lex_map.values().copied());
-        let sem_bounds = minmax(sem_map.values().copied());
+    ) -> Result<RetrievalOutcome, RetrieveError> {
+        let (lex_map, sem_map) = match self.candidate_arms(query, time_filter)? {
+            CandidateArms::Ready { lexical, semantic } => (lexical, semantic),
+            CandidateArms::Degraded(outcome) => return Ok(outcome),
+        };
 
         let mut candidate_ids: HashSet<EventId> = HashSet::new();
         candidate_ids.extend(lex_map.keys().copied());
         candidate_ids.extend(sem_map.keys().copied());
 
-        // Query-aware deterministic entity signal (Phase-6-close
-        // recall-surface fusion, Option A). Derive the entity ids the query
-        // references, then in ONE additional store read count how many of
-        // them each candidate event mentions. `entity_max` normalizes the
-        // per-event counts into `ent̂ ∈ [0, 1]`. Both the derivation and
-        // the count are best-effort: a backend without the graph surface
-        // yields an empty set / map, so the arm contributes `0` for every
-        // candidate and the ranking is byte-identical to the four-arm
-        // fusion (the read-only no-op the negative-control test pins).
-        let query_entity_ids = self.derive_query_entity_ids(&query.text);
-        let entity_counts: HashMap<EventId, u32> = if query_entity_ids.is_empty() {
-            HashMap::new()
-        } else {
-            let qids: Vec<EntityId> = query_entity_ids.into_iter().collect();
-            let candidate_vec: Vec<EventId> = candidate_ids.iter().copied().collect();
-            self.store
-                .mention_match_for_events(&qids, &candidate_vec)
-                .unwrap_or_default()
-        };
-        let entity_max = entity_counts.values().copied().max().unwrap_or(0);
+        let (entity_counts, entity_max) = self.entity_match_counts(&query.text, &candidate_ids);
 
-        let mut hits: Vec<RetrievalHit> = Vec::with_capacity(candidate_ids.len());
+        let mut semantic_scores: Vec<f32> = sem_map.values().map(|value| value.0).collect();
+        semantic_scores.sort_by(|left, right| right.total_cmp(left));
+        let semantic_margin = semantic_scores
+            .first()
+            .zip(semantic_scores.get(1))
+            .map_or(0.0, |(top, second)| (top - second).max(0.0));
+        let mut critic_rows: Vec<(EventId, String, f32)> = Vec::new();
+        let mut evidence_rows: Vec<(EventId, String)> = Vec::new();
+        let mut matches: Vec<RetrievalMatch> = Vec::with_capacity(candidate_ids.len());
         for id in candidate_ids {
             let event_opt = self
                 .store
@@ -455,18 +710,17 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
                 }
             }
 
-            let lex_raw = lex_map.get(&id).copied().unwrap_or(0.0);
-            let sem_raw = sem_map.get(&id).copied().unwrap_or(0.0);
-            let lex_hat = minmax_normalize(lex_raw, lex_bounds.0, lex_bounds.1);
-            let sem_hat = minmax_normalize(sem_raw, sem_bounds.0, sem_bounds.1);
+            let lex_rank = lex_map.get(&id).map(|value| value.1);
+            let sem_raw = sem_map.get(&id).map(|value| value.0);
+            let sem_rank = sem_map.get(&id).map(|value| value.1);
+            let lex_rank_score = rank_score(lex_rank);
+            let sem_rank_score = rank_score(sem_rank);
             let recency = recency_decay(self.now_us, event.ts_us, self.recency.half_life_hours);
             // Query-aware entity match, normalized across the candidate pool
             // by the pool max. A genuine zero (no matching mention) stays a
-            // zero — unlike the cosine/BM25 arms it is NOT min-max-mapped to
-            // the `0.5` degenerate midpoint, because "mentions none of the
-            // query's entities" is a meaningful absence, not missing rank
-            // info. When `entity_max == 0` (entity-free query) the arm is
-            // `0` for every candidate.
+            // zero. "Mentions none of the query's entities" is a meaningful
+            // absence, not missing rank information. When `entity_max == 0`
+            // (entity-free query) the arm is `0` for every candidate.
             let entity_hat = if entity_max > 0 {
                 #[allow(clippy::cast_precision_loss)]
                 let n = entity_counts.get(&id).copied().unwrap_or(0) as f32;
@@ -476,15 +730,12 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
             } else {
                 0.0
             };
-            // Phase 3 has no source-quality prior wired yet (extension
-            // page-text path is Phase 7; manual user-tag is later).
-            // `src ≡ 0.0` for every event keeps the term inert until
-            // that prior lands.
-            let src = 0.0_f32;
+            let quality = classify_source_quality(&event);
+            let src = quality.score();
             let combined = self.weights.w_sem.mul_add(
-                sem_hat,
+                sem_rank_score,
                 self.weights.w_lex.mul_add(
-                    lex_hat,
+                    lex_rank_score,
                     self.weights.w_rec.mul_add(
                         recency,
                         self.weights
@@ -493,21 +744,309 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
                     ),
                 ),
             );
-            hits.push(RetrievalHit {
-                event_id: id,
-                score_lexical: lex_hat,
-                score_semantic: sem_hat,
-                score_recency: recency,
-                score_combined: combined,
+            let query_coverage = lexical_coverage(&query.text, &event.text);
+            let document_coverage = lexical_coverage(&event.text, &query.text);
+            let signals = RetrievalSignals {
+                raw_semantic_cosine: sem_raw,
+                query_coverage,
+                document_coverage,
+                semantic_margin,
+                lexical_semantic_agreement: lex_rank == Some(1) && sem_rank == Some(1),
+            };
+            if let Some(raw_semantic_cosine) = sem_raw {
+                critic_rows.push((id, event.text.clone(), raw_semantic_cosine));
+            }
+            evidence_rows.push((id, event.text.clone()));
+            matches.push(RetrievalMatch {
+                hit: RetrievalHit {
+                    event_id: id,
+                    score_lexical: lex_rank_score,
+                    score_semantic: sem_rank_score,
+                    score_recency: recency,
+                    score_source: src,
+                    score_combined: combined,
+                },
+                evidence: RetrievalEvidence {
+                    event_id: id,
+                    source_locator: event.url.clone(),
+                    source_quality: quality,
+                },
+                signals,
             });
         }
-        hits.sort_by(|a, b| {
-            b.score_combined
-                .partial_cmp(&a.score_combined)
-                .unwrap_or(std::cmp::Ordering::Equal)
+        let evidence_assessment =
+            self.rank_and_assess(query, &mut matches, &critic_rows, &evidence_rows);
+        Ok(Self::finalize_retrieval_outcome(
+            matches,
+            evidence_assessment,
+            lex_map.is_empty() && sem_map.is_empty(),
+            query.limit,
+        ))
+    }
+
+    fn entity_match_counts(
+        &self,
+        query_text: &str,
+        candidate_ids: &HashSet<EventId>,
+    ) -> (HashMap<EventId, u32>, u32) {
+        let query_entity_ids = self.derive_query_entity_ids(query_text);
+        let counts = if query_entity_ids.is_empty() {
+            HashMap::new()
+        } else {
+            let query_ids = query_entity_ids.into_iter().collect::<Vec<_>>();
+            let candidates = candidate_ids.iter().copied().collect::<Vec<_>>();
+            self.store
+                .mention_match_for_events(&query_ids, &candidates)
+                .unwrap_or_default()
+        };
+        let maximum = counts.values().copied().max().unwrap_or(0);
+        (counts, maximum)
+    }
+
+    fn rank_and_assess(
+        &self,
+        query: &RetrievalQuery,
+        matches: &mut [RetrievalMatch],
+        critic_rows: &[(EventId, String, f32)],
+        evidence_rows: &[(EventId, String)],
+    ) -> EvidenceAssessment {
+        let candidates = critic_rows
+            .iter()
+            .map(|(event_id, text, raw_semantic_cosine)| EvidenceCandidate {
+                stable_id: event_id.0,
+                text,
+                raw_semantic_cosine: *raw_semantic_cosine,
+            })
+            .collect::<Vec<_>>();
+        matches.sort_by(|left, right| {
+            right
+                .hit
+                .score_combined
+                .total_cmp(&left.hit.score_combined)
+                .then_with(|| left.hit.event_id.cmp(&right.hit.event_id))
         });
-        hits.truncate(query.limit);
-        Ok(hits)
+
+        if matches!(
+            explicit_evidence_signal(&query.text, &candidates),
+            ExplicitEvidenceSignal::RelationUnsupported
+        ) && !has_explicit_current_supersession_context(&query.text, &candidates)
+        {
+            return EvidenceAssessment::Unsupported;
+        }
+
+        if let Some(verifier) = &self.evidence_verifier {
+            let evidence_by_id = evidence_rows
+                .iter()
+                .map(|(event_id, text)| (*event_id, text.as_str()))
+                .collect::<HashMap<_, _>>();
+            let excerpts = matches
+                .iter()
+                .take(self.verification_candidate_limit)
+                .filter_map(|value| {
+                    evidence_by_id
+                        .get(&value.hit.event_id)
+                        .map(|text| EvidenceExcerpt {
+                            stable_id: value.hit.event_id.0,
+                            text,
+                        })
+                })
+                .collect::<Vec<_>>();
+            return match verifier.verify(&query.text, &excerpts) {
+                Ok(verdict) if verdict.is_well_formed(&excerpts) => match verdict {
+                    EvidenceVerdict::Supported { evidence_ids, .. } => {
+                        EvidenceAssessment::Supported(evidence_ids)
+                    }
+                    EvidenceVerdict::Contradicted { evidence_ids, .. } => {
+                        EvidenceAssessment::Contradicted(evidence_ids)
+                    }
+                    EvidenceVerdict::Insufficient { .. } => EvidenceAssessment::Unsupported,
+                },
+                Ok(_) | Err(_) => EvidenceAssessment::VerifierUnavailable,
+            };
+        }
+
+        let Some(evidence_policy) = self.evidence_policy else {
+            return EvidenceAssessment::VerifierUnavailable;
+        };
+        if !evidence_policy.validation_qualified {
+            return EvidenceAssessment::Unqualified;
+        }
+        if evidence_features_for_candidates(&query.text, &candidates)
+            .is_some_and(|features| evidence_policy.is_sufficient(features))
+        {
+            EvidenceAssessment::Supported(
+                matches
+                    .iter()
+                    .take(query.limit)
+                    .map(|value| value.hit.event_id.0)
+                    .collect(),
+            )
+        } else {
+            EvidenceAssessment::Unsupported
+        }
+    }
+
+    fn candidate_arms(
+        &self,
+        query: &RetrievalQuery,
+        time_filter: Option<TimeRange>,
+    ) -> Result<CandidateArms, RetrieveError> {
+        let lex_result = self.store.fts5_search(&query.text, self.k_lex);
+        let Ok(q_emb) = self.embedder.embed_one(&query.text) else {
+            return match lex_result {
+                Ok(lex) => Ok(CandidateArms::Degraded(RetrievalOutcome::Degraded {
+                    degradation: RetrievalDegradation::EmbeddingsUnavailable,
+                    fallback_matches: self.fallback_matches(query, time_filter, lex, false)?,
+                })),
+                Err(_) => Ok(CandidateArms::Degraded(RetrievalOutcome::Degraded {
+                    degradation: RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
+                    fallback_matches: Vec::new(),
+                })),
+            };
+        };
+        // ADR-0011 §5 candidate-pool pre-filter. When the query carries
+        // a time / app scope (either from the router — anchor window,
+        // extracted time range — or from the caller-supplied
+        // `RetrievalQuery::app_filter`), push those into the store so
+        // brute-force cosine walks only the in-scope vectors instead of
+        // the whole `event_vectors` table. Semantic ranks are otherwise
+        // unchanged: the pool narrowing is a subset of the row set the
+        // full-KNN would have scored, and the retriever's row-level
+        // app/time guard downstream is still authoritative. When both
+        // filters are `None` the store's default impl delegates to
+        // `vec_search` — byte-identical fallback (full KNN).
+        let Ok(sem) = self.store.vec_search_filtered(
+            &q_emb,
+            self.k_sem,
+            time_filter,
+            query.app_filter.as_deref(),
+        ) else {
+            return match lex_result {
+                Ok(lex) => Ok(CandidateArms::Degraded(RetrievalOutcome::Degraded {
+                    degradation: RetrievalDegradation::EmbeddingsUnavailable,
+                    fallback_matches: self.fallback_matches(query, time_filter, lex, false)?,
+                })),
+                Err(_) => Ok(CandidateArms::Degraded(RetrievalOutcome::Degraded {
+                    degradation: RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
+                    fallback_matches: Vec::new(),
+                })),
+            };
+        };
+        let Ok(lex) = lex_result else {
+            return Ok(CandidateArms::Degraded(RetrievalOutcome::Degraded {
+                degradation: RetrievalDegradation::LexicalUnavailable,
+                fallback_matches: self.fallback_matches(query, time_filter, sem, true)?,
+            }));
+        };
+        Ok(CandidateArms::Ready {
+            lexical: ranked_map(lex),
+            semantic: ranked_map(sem),
+        })
+    }
+
+    fn finalize_retrieval_outcome(
+        mut matches: Vec<RetrievalMatch>,
+        assessment: EvidenceAssessment,
+        candidate_arms_empty: bool,
+        display_limit: usize,
+    ) -> RetrievalOutcome {
+        if matches.is_empty() {
+            return RetrievalOutcome::NothingMatched {
+                reason: if candidate_arms_empty {
+                    NothingMatchedReason::NoCandidates
+                } else {
+                    NothingMatchedReason::EvidenceFloor
+                },
+            };
+        }
+        match assessment {
+            EvidenceAssessment::Supported(evidence_ids) => {
+                retain_cited_matches(&mut matches, &evidence_ids);
+                RetrievalOutcome::Matched { matches }
+            }
+            EvidenceAssessment::Contradicted(evidence_ids) => {
+                retain_cited_matches(&mut matches, &evidence_ids);
+                RetrievalOutcome::Contradicted { matches }
+            }
+            EvidenceAssessment::Unsupported => RetrievalOutcome::NothingMatched {
+                reason: NothingMatchedReason::EvidenceFloor,
+            },
+            EvidenceAssessment::Unqualified => RetrievalOutcome::Degraded {
+                degradation: RetrievalDegradation::EvidenceSufficiencyUnqualified,
+                fallback_matches: {
+                    matches.truncate(display_limit);
+                    matches
+                },
+            },
+            EvidenceAssessment::VerifierUnavailable => RetrievalOutcome::Degraded {
+                degradation: RetrievalDegradation::EvidenceVerifierUnavailable,
+                fallback_matches: {
+                    matches.truncate(display_limit);
+                    matches
+                },
+            },
+        }
+    }
+
+    fn fallback_matches(
+        &self,
+        query: &RetrievalQuery,
+        time_filter: Option<TimeRange>,
+        raw: Vec<(EventId, f32)>,
+        semantic: bool,
+    ) -> Result<Vec<RetrievalMatch>, RetrieveError> {
+        let mut out = Vec::new();
+        for (index, (id, score)) in raw.into_iter().enumerate() {
+            let Some(event) = self
+                .store
+                .get_event(id)
+                .map_err(|e| RetrieveError::Backend(e.to_string()))?
+            else {
+                continue;
+            };
+            if time_filter
+                .is_some_and(|range| event.ts_us < range.from_us || event.ts_us > range.to_us)
+                || query
+                    .app_filter
+                    .as_deref()
+                    .is_some_and(|app| event.app_bundle_id.as_deref() != Some(app))
+            {
+                continue;
+            }
+            let rank = Some(index + 1);
+            let rank_value = rank_score(rank);
+            let quality = classify_source_quality(&event);
+            out.push(RetrievalMatch {
+                hit: RetrievalHit {
+                    event_id: id,
+                    score_lexical: if semantic { 0.0 } else { rank_value },
+                    score_semantic: if semantic { rank_value } else { 0.0 },
+                    score_recency: recency_decay(
+                        self.now_us,
+                        event.ts_us,
+                        self.recency.half_life_hours,
+                    ),
+                    score_source: quality.score(),
+                    score_combined: rank_value,
+                },
+                evidence: RetrievalEvidence {
+                    event_id: id,
+                    source_locator: event.url.clone(),
+                    source_quality: quality,
+                },
+                signals: RetrievalSignals {
+                    raw_semantic_cosine: semantic.then_some(score),
+                    query_coverage: lexical_coverage(&query.text, &event.text),
+                    document_coverage: lexical_coverage(&event.text, &query.text),
+                    semantic_margin: 0.0,
+                    lexical_semantic_agreement: false,
+                },
+            });
+            if out.len() == query.limit {
+                break;
+            }
+        }
+        Ok(out)
     }
 
     /// Derive the set of [`EntityId`]s a query references, via the
@@ -593,35 +1132,52 @@ impl<S: BrainStore, E: Embedder> HybridRetriever<S, E> {
     /// If the semantic top-1 returns nothing (empty store) or the
     /// anchor event row is missing (rare race), falls back to plain
     /// hybrid with the caller's `time_filter` untouched.
-    fn anchor_then_window_retrieve(
+    fn anchor_then_window_outcome(
         &self,
         query: &RetrievalQuery,
-    ) -> Result<Vec<RetrievalHit>, RetrieveError> {
-        let q_emb = self
-            .embedder
-            .embed_one(&query.text)
-            .map_err(|e| RetrieveError::Backend(e.to_string()))?;
-        let sem_top = self
-            .store
-            .vec_search(&q_emb, 1)
-            .map_err(|e| RetrieveError::Backend(e.to_string()))?;
+    ) -> Result<RetrievalOutcome, RetrieveError> {
+        let Ok(q_emb) = self.embedder.embed_one(&query.text) else {
+            return self.plain_retrieve_outcome(query, query.time_filter);
+        };
+        let Ok(sem_top) = self.store.vec_search(&q_emb, 1) else {
+            return match self.store.fts5_search(&query.text, self.k_lex) {
+                Ok(lexical) => Ok(RetrievalOutcome::Degraded {
+                    degradation: RetrievalDegradation::EmbeddingsUnavailable,
+                    fallback_matches: self.fallback_matches(
+                        query,
+                        query.time_filter,
+                        lexical,
+                        false,
+                    )?,
+                }),
+                Err(_) => Ok(RetrievalOutcome::Degraded {
+                    degradation: RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
+                    fallback_matches: Vec::new(),
+                }),
+            };
+        };
         let Some((anchor_id, _)) = sem_top.into_iter().next() else {
-            return self.plain_retrieve(query, query.time_filter);
+            return self.plain_retrieve_outcome(query, query.time_filter);
         };
         let Some(anchor) = self
             .store
             .get_event(anchor_id)
             .map_err(|e| RetrieveError::Backend(e.to_string()))?
         else {
-            return self.plain_retrieve(query, query.time_filter);
+            return self.plain_retrieve_outcome(query, query.time_filter);
         };
         let window = TimeRange {
             from_us: anchor.ts_us.saturating_sub(ANCHOR_WINDOW_US),
             to_us: anchor.ts_us.saturating_add(ANCHOR_WINDOW_US),
         };
         let effective = intersect_ranges(query.time_filter, Some(window));
-        self.plain_retrieve(query, effective)
+        self.plain_retrieve_outcome(query, effective)
     }
+}
+
+fn retain_cited_matches(matches: &mut Vec<RetrievalMatch>, evidence_ids: &[u64]) {
+    let cited = evidence_ids.iter().copied().collect::<HashSet<_>>();
+    matches.retain(|value| cited.contains(&value.hit.event_id.0));
 }
 
 // ---------------------------------------------------------------------------
@@ -658,6 +1214,93 @@ pub fn minmax_normalize(v: f32, mn: f32, mx: f32) -> f32 {
         return 0.5;
     }
     ((v - mn) / (mx - mn)).clamp(0.0, 1.0)
+}
+
+fn rank_score(rank: Option<usize>) -> f32 {
+    match rank {
+        Some(0) | None => 0.0,
+        Some(value) => {
+            #[allow(clippy::cast_precision_loss)]
+            let value = value as f32;
+            value.recip()
+        }
+    }
+}
+
+fn ranked_map(values: Vec<(EventId, f32)>) -> HashMap<EventId, (f32, usize)> {
+    let mut out = HashMap::with_capacity(values.len());
+    let mut previous_score: Option<f32> = None;
+    let mut shared_rank = 0;
+    for (index, (id, score)) in values.into_iter().enumerate() {
+        if previous_score.is_none_or(|previous| previous.total_cmp(&score).is_ne()) {
+            shared_rank = index + 1;
+            previous_score = Some(score);
+        }
+        out.insert(id, (score, shared_rank));
+    }
+    out
+}
+
+fn classify_source_quality(event: &crate::Event) -> SourceQuality {
+    let locator = event.url.as_deref().unwrap_or("").to_ascii_lowercase();
+    if locator.starts_with("user://") {
+        SourceQuality::UserAuthored
+    } else if [
+        "github://",
+        "linear://",
+        "slack://",
+        "mail://",
+        "calendar://",
+        "notion://",
+    ]
+    .iter()
+    .any(|prefix| locator.starts_with(prefix))
+    {
+        SourceQuality::StructuredApp
+    } else if locator.starts_with("file://") || locator.starts_with("terminal://") {
+        SourceQuality::LocalArtifact
+    } else if locator.starts_with("http://")
+        || locator.starts_with("https://")
+        || locator.starts_with("browser://")
+    {
+        SourceQuality::BrowserPage
+    } else if event.app_bundle_id.is_some() || event.window_title.is_some() {
+        SourceQuality::Accessibility
+    } else {
+        SourceQuality::Ocr
+    }
+}
+
+fn lexical_coverage(query: &str, evidence: &str) -> f32 {
+    let query_terms = content_terms(query);
+    if query_terms.is_empty() {
+        return 0.0;
+    }
+    let evidence_terms: HashSet<String> = content_terms(evidence).into_iter().collect();
+    let covered = query_terms
+        .iter()
+        .filter(|term| evidence_terms.contains(*term))
+        .count();
+    #[allow(clippy::cast_precision_loss)]
+    let ratio = covered as f32 / query_terms.len() as f32;
+    ratio
+}
+
+fn content_terms(text: &str) -> Vec<String> {
+    const STOP: &[&str] = &[
+        "a", "an", "and", "are", "as", "at", "be", "did", "do", "for", "from", "how", "i", "in",
+        "is", "it", "of", "on", "or", "the", "to", "was", "we", "what", "where", "which", "who",
+        "why", "with",
+    ];
+    let mut out = Vec::new();
+    for raw in text.split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-') {
+        let term = raw.trim().to_ascii_lowercase();
+        if term.len() < 2 || STOP.contains(&term.as_str()) || out.contains(&term) {
+            continue;
+        }
+        out.push(term);
+    }
+    out
 }
 
 /// Exponential recency decay per ADR-0010 §5:
@@ -911,7 +1554,7 @@ mod tests {
     #[test]
     fn recency_decay_at_half_life_is_half() {
         let now = 1_000 * MICROS_PER_HOUR;
-        let then = now - (DEFAULT_HALF_LIFE_HOURS as u64) * MICROS_PER_HOUR;
+        let then = now - 24 * MICROS_PER_HOUR;
         let r = recency_decay(now, then, DEFAULT_HALF_LIFE_HOURS);
         assert!((r - 0.5).abs() < 1e-4, "at half-life got {r}, want ~0.5");
     }

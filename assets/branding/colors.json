@@ -1,34 +1,78 @@
 {
   "brand": {
-    "background": {
-      "primary": "#0D0D0D",
-      "secondary": "#1A1A1A",
-      "elevated": "#262626"
-    },
-    "foreground": {
-      "primary": "#E0E0E0",
-      "secondary": "#999999",
-      "muted": "#666666"
-    },
-    "accent": {
-      "mint": "#7AFFC1",
-      "mint-dim": "#3D8060",
-      "mint-subtle": "#1A3D2E"
+    "approvedPalette": {
+      "snowCanvas": "#F7F8FA",
+      "clearSurface": "#FFFFFF",
+      "ink": "#1D1D1F",
+      "graphite": "#6E6E73",
+      "cobaltAction": "#0A66D8",
+      "coralChangeMarker": "#C7473A"
     },
     "semantic": {
-      "error": "#FF6B6B",
-      "warning": "#FFD93D",
-      "success": "#7AFFC1"
-    },
-    "surface": {
-      "card": "#1A1A1A",
-      "card-border": "#333333",
-      "input": "#0D0D0D",
-      "input-border": "#404040"
+      "accent": {
+        "light": "#0A66D8",
+        "dark": "#6EA8FF"
+      },
+      "accentSubtle": {
+        "light": "#EAF2FC",
+        "dark": "#172A42"
+      },
+      "accentDim": {
+        "light": "#527EAE",
+        "dark": "#9DC2F5"
+      },
+      "background": {
+        "light": "#F7F8FA",
+        "dark": "#17191D"
+      },
+      "surface": {
+        "light": "#FFFFFF",
+        "dark": "#202226"
+      },
+      "surfaceElevated": {
+        "light": "#FFFFFF",
+        "dark": "#292C31"
+      },
+      "foreground": {
+        "light": "#1D1D1F",
+        "dark": "#F5F5F7"
+      },
+      "foregroundSecondary": {
+        "light": "#6E6E73",
+        "dark": "#B8B8BD"
+      },
+      "foregroundMuted": {
+        "light": "#8E8E93",
+        "dark": "#85858B"
+      },
+      "border": {
+        "light": "#E2E4E8",
+        "dark": "#383A3F"
+      },
+      "borderStrong": {
+        "light": "#C9CCD2",
+        "dark": "#51545B"
+      },
+      "change": {
+        "light": "#C7473A",
+        "dark": "#FF8B7F"
+      },
+      "error": {
+        "light": "#C7473A",
+        "dark": "#FF8B7F"
+      },
+      "warning": {
+        "light": "#9A6700",
+        "dark": "#E9B949"
+      },
+      "success": {
+        "light": "#247A47",
+        "dark": "#67C58A"
+      }
     }
   },
   "notes": {
-    "palette-rationale": "Dark backgrounds reduce visual noise for an always-on status-bar app. Mint accent chosen for high contrast on dark surfaces without the aggression of blue/green. Matches ADR-0017 onboarding dark-mode context.",
-    "accessibility": "All foreground/background pairs meet WCAG AA (4.5:1 minimum). Mint on primary-bg = 11.2:1."
+    "accessibility": "Foreground/background pairs are adaptive and avoid the prior neon mint field.",
+    "palette-rationale": "The V1 recall workspace uses a light Snow canvas, Clear surfaces, Ink text, Graphite metadata, Cobalt actions, and Coral change/error markers. Dark appearance keeps the same semantic relationships without forcing dark mode."
   }
 }

@@ -3,7 +3,7 @@
 // FocusTracker — focused-window provider for ADR-0031 Option (a)
 // capture-scope. PROTECTED-SET per AGENT_PROTOCOL §5.
 //
-// Polls the OS at 1 Hz for the focused window's `(bundleId, windowId,
+// Polls the OS at 5 Hz for the focused window's `(bundleId, windowId,
 // axRect)` and writes a generation-tagged snapshot to `FocusedWindowStore`.
 // Consumers:
 //   - `SCContentFilterFactory.makeFocusedWindowFilter(...)` reads the
@@ -57,11 +57,9 @@ import ApplicationServices
 /// identifier the live SCStream's `SCContentFilter` factory matches
 /// against `SCShareableContent.current.windows[i].windowID`.
 ///
-/// `axRect` is the AX-reported screen rect (display coordinates). It is
-/// observability-only inside V2-P1: the live SCStream filter is built
-/// from the `SCWindow` matched by `windowId`, not from the rect. Surfaced
-/// here so future telemetry can correlate window geometry with the
-/// `frames_focus_race_dropped` counter without a second AX read.
+/// `axRect` is the AX-reported screen rect (display coordinates). Production
+/// requires it to map the actual AX-focused window to the public WindowServer
+/// `CGWindowID`; a missing geometry observation fails closed.
 ///
 /// `Equatable` so `FocusedWindowStore` can detect "no change" cheaply and
 /// avoid bumping the generation when the focus tick is a no-op.
@@ -105,23 +103,30 @@ public struct FocusedWindowSnapshot: Sendable, Equatable {
 ///
 /// ## Trait-level invariants (binding on every impl)
 ///
-/// - **MUST be non-blocking on the hot path.** The tracker polls at 1 Hz
-///   on a dedicated background queue; the SCStream callback never invokes
-///   this trait directly. Production reads MUST respect the timeout
-///   discipline (`AXFocusedWindowReader` caps the AX read at 250 ms; the
-///   tick falls back to a CGWindowList enumeration if AX times out).
+/// - **MUST keep identity reads bounded on the hot path.** Both polling and
+///   callback-time validation read the AX-focused window geometry and match it
+///   to WindowServer identity. A missing or ambiguous observation fails closed.
 /// - **MUST return `nil` cleanly on every failure mode.** Permission
 ///   denial, no frontmost app, Electron AX intermittency, AX timeout,
 ///   missing `kAXFocusedWindowAttribute`, hostile non-AXUIElement
 ///   responses — every one resolves to `nil`. Impls do not throw, do
-///   not log noisily, do not retry within the same call.
-/// - **MUST be `Sendable`.** The tick runs on a detached background
-///   queue; the snapshot store receives values across an isolation
-///   boundary.
+///   not log noisily, and do not publish an identity that changes during
+///   the bounded confirmation read.
+/// - **MUST be `Sendable`.** The tick runs on a background queue and the
+///   callback-time identity refresh runs on the SCStream sample queue.
 public protocol FocusedWindowReader: Sendable {
     /// Synchronous read of the current focused window. `nil` cleanly
     /// for every failure mode per the trait invariants above.
     func readFocusedWindow() -> FocusedWindow?
+
+    /// Capture-binding identity for callback-time validation.
+    func readFocusedWindowIdentity() -> FocusedWindow?
+}
+
+public extension FocusedWindowReader {
+    func readFocusedWindowIdentity() -> FocusedWindow? {
+        readFocusedWindow()
+    }
 }
 
 // MARK: - FocusedWindowStore
@@ -146,16 +151,29 @@ public actor FocusedWindowStore {
         self.cell = OSAllocatedUnfairLock(initialState: initial)
     }
 
-    /// Replace the stored snapshot. The generation increments iff the
-    /// new `focused` value differs from the existing one (Equatable on
-    /// the whole struct — bundleId / windowId / axRect compared
-    /// field-by-field).
+    /// Replace the stored snapshot. The generation tracks the capture-filter
+    /// identity (`bundleId`, `windowId`) only. Geometry remains current for
+    /// diagnostics without forcing a filter rebind when a window moves or AX
+    /// reports a slightly different rectangle.
     public func store(_ focused: FocusedWindow?) async {
+        storeSync(focused)
+    }
+
+    /// Synchronous form for the tracker's serial timer queue. Publishing under
+    /// the cell lock preserves observation order without spawning detached tasks.
+    public nonisolated func storeSync(_ focused: FocusedWindow?) {
         cell.withLock { state in
-            if state.focused != focused {
+            let bindingChanged = state.focused?.bundleId != focused?.bundleId
+                || state.focused?.windowId != focused?.windowId
+            if bindingChanged {
                 state = FocusedWindowSnapshot(
                     focused: focused,
                     generation: state.generation &+ 1
+                )
+            } else if state.focused != focused {
+                state = FocusedWindowSnapshot(
+                    focused: focused,
+                    generation: state.generation
                 )
             }
         }
@@ -171,10 +189,10 @@ public actor FocusedWindowStore {
 
 // MARK: - FocusTracker
 
-/// Production `FocusTracker`. Polls a `FocusedWindowReader` at a
-/// configurable cadence (default 1000 ms — matches
-/// `StreamPolicy.cascadeFloorIntervalMs` from PR #39 + ADR-0015 §3) and
-/// pushes each observation to the shared `FocusedWindowStore`.
+/// Production `FocusTracker`. Polls focused-window identity at a configurable
+/// cadence (default 200 ms) and pushes each observation to the shared
+/// `FocusedWindowStore`. Production identity includes bounded AX geometry reads
+/// because public macOS APIs expose no direct AX-to-`CGWindowID` bridge.
 ///
 /// `start()` is idempotent (second call while running is a no-op).
 /// `stop()` cancels the timer; calling `stop()` before `start()` is also
@@ -194,7 +212,7 @@ public final class FocusTracker: @unchecked Sendable {
     /// `AXFocusedWindowReader`. Tests: stub.
     private let reader: any FocusedWindowReader
 
-    /// Polling cadence, milliseconds. Default 1000 ms (1 Hz).
+    /// Polling cadence, milliseconds. Default 200 ms (5 Hz).
     private let intervalMs: UInt64
 
     /// Serial queue the timer fires on. Dedicated to the focus tracker
@@ -214,13 +232,13 @@ public final class FocusTracker: @unchecked Sendable {
     ///     consistency gate MUST pass the shared instance.
     ///   - reader: focused-window source. Defaults to the real
     ///     AX-backed reader.
-    ///   - intervalMs: poll period, milliseconds. Defaults to 1000.
+    ///   - intervalMs: poll period, milliseconds. Defaults to 200.
     ///   - queue: dispatch queue for the timer. Defaults to a dedicated
     ///     serial queue.
     public init(
         store: FocusedWindowStore = FocusedWindowStore(),
         reader: any FocusedWindowReader = AXFocusedWindowReader(),
-        intervalMs: UInt64 = 1000,
+        intervalMs: UInt64 = 200,
         queue: DispatchQueue = DispatchQueue(
             label: "mci.context.focustracker",
             qos: .utility
@@ -284,21 +302,29 @@ public final class FocusTracker: @unchecked Sendable {
         store.currentSync()
     }
 
+    /// Read and publish one focused-window observation before an owner chooses
+    /// its initial ScreenCaptureKit filter. Unlike `start()`, this method is
+    /// awaitable, so callers never need to race the timer queue's first write.
+    public func refreshOnce() async {
+        let focused = reader.readFocusedWindowIdentity()
+        store.storeSync(focused)
+    }
+
+    /// Revalidate identity immediately before an extracted frame can reach raw
+    /// pixel admission. Callers invoke this only for complete frames with a
+    /// dirty region, so idle callbacks never enumerate WindowServer windows.
+    public func refreshBindingOnceSync() {
+        store.storeSync(reader.readFocusedWindowIdentity())
+    }
+
     /// One poll tick — read the source, push to the store. Static so
     /// the timer block does not capture `self`.
     private static func tick(
         reader: any FocusedWindowReader,
         store: FocusedWindowStore
     ) {
-        let focused = reader.readFocusedWindow()
-        // The actor-isolated `store(_:)` is `async`; schedule onto a
-        // detached task. Ordering across ticks is preserved by the
-        // serial timer queue (tick N+1 cannot enqueue before tick N
-        // has handed off to the actor — `Task` enqueue order from a
-        // serial queue is deterministic).
-        Task.detached(priority: .utility) {
-            await store.store(focused)
-        }
+        let focused = reader.readFocusedWindowIdentity()
+        store.storeSync(focused)
     }
 
     /// Synchronous test hook — one tick, awaiting the store write.
@@ -348,6 +374,14 @@ public struct AXFocusedWindowReader: FocusedWindowReader {
     }
 
     public func readFocusedWindow() -> FocusedWindow? {
+        readIdentityWithPid()?.1
+    }
+
+    public func readFocusedWindowIdentity() -> FocusedWindow? {
+        readIdentityWithPid()?.1
+    }
+
+    private func readIdentityWithPid() -> (pid_t, FocusedWindow)? {
         guard let pidBundle = pidSource.frontmostPidAndBundle() else { return nil }
         let (pid, bundleId) = pidBundle
 
@@ -355,19 +389,47 @@ public struct AXFocusedWindowReader: FocusedWindowReader {
         // class as a nil frontmost: collapse cleanly to nil.
         guard !bundleId.isEmpty else { return nil }
 
-        guard let windowId = windowIdSource.focusedWindowID(pid: pid) else {
+        // AX identifies the actually focused window but does not expose a
+        // public CGWindowID. Resolve twice around a frontmost-process check so
+        // a same-application A -> B focus switch cannot publish A's stale ID.
+        guard let first = resolveWindowIdentity(pid: pid) else { return nil }
+
+        // The process can change while WindowServer is being queried. Re-read
+        // the frontmost identity before publishing so a pid/window pair from an
+        // earlier app cannot be attributed to the newly active app.
+        guard frontmostStillMatches(pid: pid, bundleId: bundleId),
+              let confirmed = resolveWindowIdentity(pid: pid),
+              confirmed.windowId == first.windowId,
+              frontmostStillMatches(pid: pid, bundleId: bundleId)
+        else {
             return nil
         }
 
-        // AX rect is observability-only inside V2-P1; nil is acceptable.
-        // Pass the timeout that matches `RealAXTitleReader`'s 250 ms cap.
-        let axRect = axRectReader.readRect(pid: pid, timeoutMs: 250)
-
-        return FocusedWindow(
-            bundleId: bundleId,
-            windowId: windowId,
-            axRect: axRect
+        return (
+            pid,
+            FocusedWindow(
+                bundleId: bundleId,
+                windowId: confirmed.windowId,
+                axRect: confirmed.axRect
+            )
         )
+    }
+
+    private func resolveWindowIdentity(pid: pid_t) -> (windowId: CGWindowID, axRect: CGRect)? {
+        guard let axRect = axRectReader.readRect(pid: pid, timeoutMs: 250),
+              let windowId = windowIdSource.focusedWindowID(
+                  pid: pid,
+                  axFocusedRect: axRect
+              )
+        else {
+            return nil
+        }
+        return (windowId, axRect)
+    }
+
+    private func frontmostStillMatches(pid: pid_t, bundleId: String) -> Bool {
+        guard let confirmed = pidSource.frontmostPidAndBundle() else { return false }
+        return confirmed.0 == pid && confirmed.1 == bundleId
     }
 }
 
@@ -380,19 +442,12 @@ public protocol FrontmostPidSource: Sendable {
     func frontmostPidAndBundle() -> (pid_t, String)?
 }
 
-/// Production `FrontmostPidSource` over
-/// `NSWorkspace.shared.frontmostApplication`.
+/// Compatibility name for the fresh AX-backed production focus source.
 public struct NSWorkspaceFrontmostPidSource: FrontmostPidSource {
     public init() {}
 
     public func frontmostPidAndBundle() -> (pid_t, String)? {
-        #if canImport(AppKit)
-        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
-        guard let bundleId = app.bundleIdentifier else { return nil }
-        return (app.processIdentifier, bundleId)
-        #else
-        return nil
-        #endif
+        AXFocusedApplicationSource().frontmostPidAndBundle()
     }
 }
 
@@ -496,22 +551,60 @@ public struct RealAXFocusedWindowRectReader: AXFocusedWindowRectReader {
 /// process. Internal seam so tests can simulate missing-window /
 /// Electron-AX-intermittency cases.
 public protocol FocusedWindowIDSource: Sendable {
-    /// `CGWindowID` of the focused (top-most on-screen, layer 0) window
-    /// owned by `pid`, or `nil` when no such window can be resolved.
-    func focusedWindowID(pid: pid_t) -> CGWindowID?
+    /// Match the public AX-focused geometry to a WindowServer identity owned by
+    /// `pid`, or return nil rather than guessing another window from the app.
+    func focusedWindowID(pid: pid_t, axFocusedRect: CGRect) -> CGWindowID?
 }
 
-/// Production focused-window-ID resolver via
-/// `CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)`,
-/// filtered by `kCGWindowOwnerPID == pid` AND `kCGWindowLayer == 0`,
-/// returning the first match (the on-screen window list is ordered
-/// front-to-back).
+public struct CGWindowIdentityCandidate: Sendable, Equatable {
+    public let windowId: CGWindowID
+    public let bounds: CGRect
+
+    public init(windowId: CGWindowID, bounds: CGRect) {
+        self.windowId = windowId
+        self.bounds = bounds
+    }
+}
+
+/// Public-API bridge between AX focused geometry and `CGWindowID`. Exactly one
+/// WindowServer surface must match. Multiple same-bounds surfaces are ambiguous
+/// under public APIs and fail closed instead of relying on list order.
+public enum FocusedWindowIdentityPolicy {
+    public static func selectWindowID(
+        axFocusedRect: CGRect,
+        frontToBackCandidates: [CGWindowIdentityCandidate],
+        tolerance: CGFloat = 2
+    ) -> CGWindowID? {
+        let focused = axFocusedRect.standardized
+        guard focused.width > 0, focused.height > 0, tolerance >= 0 else {
+            return nil
+        }
+        let matches = frontToBackCandidates.filter { candidate in
+            let bounds = candidate.bounds.standardized
+            guard bounds.width > 0, bounds.height > 0 else { return false }
+            let deltas = [
+                abs(bounds.minX - focused.minX),
+                abs(bounds.minY - focused.minY),
+                abs(bounds.width - focused.width),
+                abs(bounds.height - focused.height),
+            ]
+            return deltas.allSatisfy { $0 <= tolerance }
+        }
+        guard matches.count == 1 else { return nil }
+        return matches[0].windowId
+    }
+}
+
+/// Production focused-window-ID resolver via the documented AX position/size
+/// attributes and `CGWindowListCopyWindowInfo`. It considers every on-screen
+/// window owned by the process so focused panels and sheets are not discarded
+/// solely because they use a nonzero WindowServer layer.
 ///
 /// `// UNVERIFIED — needs live macOS; do not claim working`.
 public struct CGWindowListFocusedWindowIDSource: FocusedWindowIDSource {
     public init() {}
 
-    public func focusedWindowID(pid: pid_t) -> CGWindowID? {
+    public func focusedWindowID(pid: pid_t, axFocusedRect: CGRect) -> CGWindowID? {
         #if canImport(AppKit)
         // `.optionOnScreenOnly` excludes minimized + off-display windows.
         // `kCGNullWindowID` means "no relative anchor"; the list is in
@@ -527,19 +620,29 @@ public struct CGWindowListFocusedWindowIDSource: FocusedWindowIDSource {
         else {
             return nil
         }
+        var candidates: [CGWindowIdentityCandidate] = []
         for entry in raw {
             guard let ownerPid = entry[kCGWindowOwnerPID as String] as? pid_t,
                   ownerPid == pid
             else { continue }
-            let layer = entry[kCGWindowLayer as String] as? Int ?? 0
-            guard layer == 0 else { continue }
-            if let id = entry[kCGWindowNumber as String] as? CGWindowID {
-                return id
-            }
+            guard let id = entry[kCGWindowNumber as String] as? CGWindowID,
+                  let rawBounds = entry[kCGWindowBounds as String],
+                  let bounds = CGRect(
+                      // CGWindowListCopyWindowInfo documents kCGWindowBounds
+                      // as a CFDictionary. The outer result has already been
+                      // bridged to [[String: Any]].
+                      dictionaryRepresentation: rawBounds as! CFDictionary
+                  )
+            else { continue }
+            candidates.append(CGWindowIdentityCandidate(windowId: id, bounds: bounds))
         }
-        return nil
+        return FocusedWindowIdentityPolicy.selectWindowID(
+            axFocusedRect: axFocusedRect,
+            frontToBackCandidates: candidates
+        )
         #else
         _ = pid
+        _ = axFocusedRect
         return nil
         #endif
     }

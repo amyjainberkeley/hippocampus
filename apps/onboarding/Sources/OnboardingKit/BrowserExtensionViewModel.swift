@@ -85,69 +85,9 @@ public final class BrowserExtensionViewModel: ObservableObject {
         case .chromium:
             installChromiumExtension(for: browser)
         case .safari:
-            #if canImport(AppKit)
-            openSafariThenSendCommandComma()
-            #endif
+            browserLauncher.openSafariSettings()
         }
     }
-
-    #if canImport(AppKit)
-    /// Launch / activate Safari, then send ⌘, via AppleScript so
-    /// Safari opens its own Settings window (where the Extensions
-    /// panel lives — Safari doesn't have a URL-scheme deep-link to
-    /// that panel on macOS Sequoia / Tahoe).
-    ///
-    /// First time this runs, macOS prompts the user to grant the
-    /// Hippocampus app permission to control "System Events" (the
-    /// AppleScript automation TCC). Denying it just means the
-    /// keystroke step no-ops — Safari is still in the foreground
-    /// and the slide copy tells the user where to go from there
-    /// ("Settings → Extensions"). So the fallback is still
-    /// useful, just one extra click for the user.
-    ///
-    /// CEO dogfood 2026-05-26: "open safari settings just opens
-    /// safari but not setting and it doesnt do anything" — the
-    /// previous attempt opened Safari but left the user one ⌘,
-    /// short of where they needed to be.
-    private func openSafariThenSendCommandComma() {
-        let safariURL = NSWorkspace.shared.urlForApplication(
-            withBundleIdentifier: "com.apple.Safari"
-        )
-        guard let safariURL else { return }
-
-        let config = NSWorkspace.OpenConfiguration()
-        config.activates = true
-        NSWorkspace.shared.openApplication(
-            at: safariURL,
-            configuration: config
-        ) { _, _ in
-            // Run the AppleScript on the main thread, after a small
-            // delay to let Safari finish activating. Without the
-            // delay, the keystroke can land on the previous frontmost
-            // app instead of Safari.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                Self.sendCommandCommaToSafari()
-            }
-        }
-    }
-
-    private nonisolated static func sendCommandCommaToSafari() {
-        let script = """
-        tell application "Safari" to activate
-        delay 0.1
-        tell application "System Events"
-            keystroke "," using command down
-        end tell
-        """
-        let task = Process()
-        task.launchPath = "/usr/bin/osascript"
-        task.arguments = ["-e", script]
-        // Swallow errors — if the user denies the AppleScript
-        // automation TCC, Safari is still up and slide copy
-        // tells them what to do (Settings → Extensions).
-        try? task.run()
-    }
-    #endif
 
     /// The Chromium install flow:
     ///
@@ -231,14 +171,49 @@ public struct DefaultChromiumExtensionLocator: ChromiumExtensionLocator {
 public protocol BrowserLauncher: Sendable {
     func openInBrowser(browserName: String, url: String) -> Bool
     func revealInFinder(_ url: URL)
+    func openSafariSettings()
 }
 
 public struct DefaultBrowserLauncher: BrowserLauncher {
     public init() {}
 
+    public func openSafariSettings() {
+        #if canImport(AppKit)
+        guard let safariURL = NSWorkspace.shared.urlForApplication(
+            withBundleIdentifier: "com.apple.Safari"
+        ) else { return }
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        // AppKit invokes completion on a concurrent queue. This callback must
+        // not inherit the view model's main-actor isolation.
+        NSWorkspace.shared.openApplication(at: safariURL, configuration: config) { @Sendable _, _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                Self.sendCommandCommaToSafari()
+            }
+        }
+        #endif
+    }
+
+    #if canImport(AppKit)
+    private static func sendCommandCommaToSafari() {
+        let script = """
+        tell application "Safari" to activate
+        delay 0.1
+        tell application "System Events"
+            keystroke "," using command down
+        end tell
+        """
+        let task = ChildProcessEnvironment.makeProcess()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        task.arguments = ["-e", script]
+        // Preserve the existing manual Settings fallback if Automation is denied.
+        try? task.run()
+    }
+    #endif
+
     public func openInBrowser(browserName: String, url: String) -> Bool {
         #if canImport(AppKit)
-        let proc = Process()
+        let proc = ChildProcessEnvironment.makeProcess()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         proc.arguments = ["-a", browserName, url]
         do {

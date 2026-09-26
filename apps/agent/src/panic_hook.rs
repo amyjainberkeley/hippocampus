@@ -192,8 +192,8 @@ mod tests {
         let rec = PanicRecord {
             ts: "0.000".to_string(),
             thread: "t".to_string(),
-            location: "".to_string(),
-            message: "".to_string(),
+            location: String::new(),
+            message: String::new(),
         };
         let line = rec.to_json_line();
         for forbidden in [

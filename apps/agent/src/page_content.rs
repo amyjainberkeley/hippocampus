@@ -6,10 +6,10 @@
 //! `~/Library/Application Support/MCI/page_content.sock`. This module
 //! provides:
 //!
-//! - [`PageContentCache`]: an in-memory URL → full_text cache with a
+//! - [`PageContentCache`]: an in-memory URL → `full_text` cache with a
 //!   configurable TTL (default 5 s). The agent's runner checks this
 //!   cache when processing `OCREvent` frames from the helper — if a
-//!   cached PageContentEvent exists for the same URL, the extension's
+//!   cached `PageContentEvent` exists for the same URL, the extension's
 //!   full text is preferred over pixel-OCR text.
 //!
 //! - [`PageContentListener`]: accepts connections on the UNIX socket
@@ -91,6 +91,7 @@ impl PageContentCache {
     }
 
     /// Look up cached page content for a URL. Returns `None` if absent or expired.
+    #[must_use]
     pub fn get(&self, url: &str) -> Option<CachedPageContent> {
         let map = self.inner.lock().expect("cache lock");
         let entry = map.get(url)?;
@@ -114,6 +115,12 @@ impl PageContentCache {
     #[must_use]
     pub fn len(&self) -> usize {
         self.inner.lock().expect("cache lock").len()
+    }
+
+    /// Whether the cache currently contains no entries.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.inner.lock().expect("cache lock").is_empty()
     }
 }
 

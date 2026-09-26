@@ -30,6 +30,7 @@
 #![deny(missing_docs)]
 
 pub mod author;
+pub mod extractive_author;
 pub mod lifecycle;
 pub mod llama_author;
 pub mod llama_backend;

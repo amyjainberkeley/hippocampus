@@ -9,17 +9,70 @@ set -euo pipefail
 # Options:
 #   --skip-build    Skip calling build-app.sh (assume .app already assembled)
 #   --debug         Use debug profile for build-app.sh
+#   --development-ad-hoc  Allow unstable ad-hoc signing with --debug only
 #   --dist DIR      Output directory (default: dist/)
+#   --verify-assets Verify canonical installer brand assets and exit
 #   --help          Show this help
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_APP="$REPO_ROOT/apps/hippocampus/Resources/build-app.sh"
+BUILD_PROVENANCE_TOOL="$REPO_ROOT/scripts/build-provenance.py"
+PRODUCT_SOURCE_DIGEST_TOOL="$REPO_ROOT/scripts/product-source-digest.py"
+APP_GROUP_CONTRACT="$REPO_ROOT/scripts/lib/app-group-contract.sh"
+INSTALLER_RUNTIME="$REPO_ROOT/scripts/lib/installer-runtime.sh"
 INSTALLER_ASSETS="$REPO_ROOT/assets/installer"
+CANONICAL_APP_ICON="$REPO_ROOT/assets/branding/AppIcon.icns"
+VOLUME_ICON="$INSTALLER_ASSETS/volume-icon.icns"
+GENERATE_EULA="$INSTALLER_ASSETS/generate-eula.py"
+DMG_LAYOUT="$INSTALLER_ASSETS/dmg-layout.py"
+INSTALLER_PYTHON="${INSTALLER_PYTHON:-python3}"
+
+if [[ ! -f "$APP_GROUP_CONTRACT" ]]; then
+    echo "FATAL: App Group contract helper missing at $APP_GROUP_CONTRACT" >&2
+    exit 1
+fi
+if [[ ! -f "$INSTALLER_RUNTIME" ]]; then
+    echo "FATAL: Installer runtime helper missing at $INSTALLER_RUNTIME" >&2
+    exit 1
+fi
+if [[ ! -x "$BUILD_PROVENANCE_TOOL" ]]; then
+    echo "FATAL: Build provenance tool missing at $BUILD_PROVENANCE_TOOL" >&2
+    exit 1
+fi
+if [[ ! -x "$PRODUCT_SOURCE_DIGEST_TOOL" ]]; then
+    echo "FATAL: Product source digest tool missing at $PRODUCT_SOURCE_DIGEST_TOOL" >&2
+    exit 1
+fi
+# shellcheck source=/dev/null
+source "$APP_GROUP_CONTRACT"
+# shellcheck source=/dev/null
+source "$INSTALLER_RUNTIME"
+
+MOUNT_DIR=""
+SIGNING_SCRATCH=""
+DMG_STAGING=""
+TEMP_DMG=""
+TEMP_DMG_ROOT=""
+APP_ZIP=""
+FINAL_DMG_PENDING=""
+
+installer_on_exit() {
+    local status=$?
+    trap - EXIT
+    hippocampus_installer_cleanup "$status"
+    exit "$status"
+}
+
+trap installer_on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 SKIP_BUILD=0
 BUILD_PROFILE="release"
 DIST_DIR="$REPO_ROOT/dist"
+VERIFY_ASSETS_ONLY=0
+DEVELOPMENT_ADHOC=0
 
 usage() {
     cat <<EOF
@@ -30,13 +83,16 @@ Produce a distributable Hippocampus DMG installer.
 Options:
   --skip-build    Skip build-app.sh (assume .app is already assembled)
   --debug         Pass --debug to build-app.sh
+  --development-ad-hoc  Allow unstable ad-hoc signing with --debug only
   --dist DIR      Output directory (default: dist/)
+  --verify-assets Verify canonical installer brand assets and exit
   --help          Show this help
 
 Prerequisites:
   - macOS with hdiutil (ships with Xcode CLT)
-  - Pre-built binaries (swift build + cargo build) unless --skip-build
+  - Pre-built binaries (scripts/swift-package.sh + cargo build) unless --skip-build
   - codesign (Xcode CLT)
+  - INSTALLER_PYTHON: isolated Python >=3.10 with hashed scripts/installer-requirements.txt
 
 Output:
   dist/Hippocampus-<version>.dmg
@@ -48,11 +104,46 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --skip-build) SKIP_BUILD=1; shift ;;
         --debug) BUILD_PROFILE="debug"; shift ;;
+        --development-ad-hoc) DEVELOPMENT_ADHOC=1; shift ;;
         --dist) DIST_DIR="$2"; shift 2 ;;
+        --verify-assets) VERIFY_ASSETS_ONLY=1; shift ;;
         --help|-h) usage; exit 0 ;;
         *) echo "ERROR: Unknown option: $1"; usage; exit 1 ;;
     esac
 done
+
+verify_brand_assets() {
+    if [[ ! -f "$CANONICAL_APP_ICON" ]]; then
+        echo "ERROR: Canonical app icon not found at $CANONICAL_APP_ICON" >&2
+        return 1
+    fi
+    if [[ ! -f "$VOLUME_ICON" ]]; then
+        echo "ERROR: Installer volume icon not found at $VOLUME_ICON" >&2
+        return 1
+    fi
+    if ! cmp -s "$CANONICAL_APP_ICON" "$VOLUME_ICON"; then
+        echo "ERROR: Installer volume icon differs from canonical AppIcon.icns" >&2
+        echo "Regenerate it with:" >&2
+        echo "  cp assets/branding/AppIcon.icns assets/installer/volume-icon.icns" >&2
+        return 1
+    fi
+}
+
+verify_legal_assets() {
+    if [[ ! -f "$GENERATE_EULA" ]]; then
+        echo "ERROR: Legal artifact generator not found at $GENERATE_EULA" >&2
+        return 1
+    fi
+    python3 "$GENERATE_EULA" --check
+}
+
+verify_brand_assets
+verify_legal_assets
+
+if [[ "$VERIFY_ASSETS_ONLY" -eq 1 ]]; then
+    echo "Installer brand and legal assets match their canonical sources."
+    exit 0
+fi
 
 # --- Pre-flight checks ---
 
@@ -66,6 +157,9 @@ require_cmd() {
 
 require_cmd hdiutil
 require_cmd codesign
+require_cmd xcrun
+require_cmd SetFile
+"$INSTALLER_PYTHON" "$DMG_LAYOUT" --check-dependencies
 
 # --- Detect Developer ID signing identity ---
 
@@ -79,29 +173,83 @@ fi
 if [[ -n "$DEVELOPER_ID" ]]; then
     echo "Developer ID: $DEVELOPER_ID"
     SIGNING_MODE="developer-id"
-else
-    echo "No Developer ID found — falling back to ad-hoc signing"
+elif [[ "$BUILD_PROFILE" == "debug" && "$DEVELOPMENT_ADHOC" -eq 1 ]]; then
+    echo "No Developer ID found - using development-only ad-hoc signing"
     SIGNING_MODE="ad-hoc"
+elif [[ "$DEVELOPMENT_ADHOC" -eq 1 ]]; then
+    echo "FATAL: Ad-hoc signing is development-only and requires --debug" >&2
+    exit 1
+else
+    echo "FATAL: Release installer requires a stable Developer ID Application identity" >&2
+    echo "Use --debug --development-ad-hoc only for a disposable local artifact." >&2
+    exit 1
 fi
 
 # --- Detect notarytool credentials ---
 
 NOTARIZE=0
+NOTARY_PROFILE="notarytool-profile"
 if [[ "$SIGNING_MODE" == "developer-id" ]]; then
-    if xcrun notarytool history --keychain-profile "notarytool-profile" \
+    if xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" \
         &>/dev/null; then
         NOTARIZE=1
         echo "Notarization: enabled (keychain profile found)"
-    elif [[ -n "${NOTARYTOOL_APPLE_ID:-}" && -n "${NOTARYTOOL_TEAM_ID:-}" && \
-            -n "${NOTARYTOOL_PASSWORD:-}" ]]; then
-        NOTARIZE=1
-        echo "Notarization: enabled (env credentials)"
     else
-        echo "WARNING: Notarization skipped — no keychain profile 'notarytool-profile'"
-        echo "         and no NOTARYTOOL_APPLE_ID/TEAM_ID/PASSWORD env vars found."
-        echo "  Setup: xcrun notarytool store-credentials notarytool-profile"
+        if [[ "$BUILD_PROFILE" == "release" ]]; then
+            echo "FATAL: Release installer requires notarization credentials" >&2
+            echo "Store the Keychain profile '$NOTARY_PROFILE' before building." >&2
+            exit 1
+        fi
+        echo "WARNING: Debug artifact will not be notarized because credentials are absent."
     fi
 fi
+
+notarize_and_record() {
+    local artifact="$1"
+    local label="$2"
+    local submission="$DIST_DIR/notary-${label}-submission.json"
+    local log="$DIST_DIR/notary-${label}-log.json"
+    local submit_status submission_id status
+
+    mkdir -p "$DIST_DIR"
+    rm -f "$submission" "$log"
+
+    set +e
+    xcrun notarytool submit "$artifact" --keychain-profile "$NOTARY_PROFILE" \
+        --wait --output-format json >"$submission"
+    submit_status=$?
+    set -e
+
+    read -r submission_id status < <(
+        python3 - "$submission" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        result = json.load(handle)
+except (OSError, ValueError, TypeError):
+    print("- -")
+else:
+    print(result.get("id", "-"), result.get("status", "-"))
+PY
+    )
+
+    if [[ "$submission_id" != "-" ]]; then
+        if ! xcrun notarytool log "$submission_id" "$log" \
+            --keychain-profile "$NOTARY_PROFILE"; then
+            echo "ERROR: Could not retrieve the $label notarization log." >&2
+            return 1
+        fi
+        echo "  Notarization $label submission: $submission_id"
+    fi
+
+    if [[ "$submit_status" -ne 0 || "$status" != "Accepted" ]]; then
+        echo "ERROR: $label notarization was not accepted (status: $status)." >&2
+        echo "  Review: $submission and $log" >&2
+        return 1
+    fi
+}
 
 # --- Extract version from Info.plist ---
 
@@ -134,6 +282,9 @@ if [[ "$SKIP_BUILD" -eq 0 ]]; then
     if [[ "$BUILD_PROFILE" == "debug" ]]; then
         BUILD_ARGS+=(--debug)
     fi
+    if [[ "$DEVELOPMENT_ADHOC" -eq 1 ]]; then
+        BUILD_ARGS+=(--development-ad-hoc)
+    fi
     # ${VAR[@]+"${VAR[@]}"} expands safely when array is empty under `set -u`.
     "$BUILD_APP" ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"}
     echo ""
@@ -145,6 +296,13 @@ if [[ ! -d "$APP_PATH" ]]; then
     exit 1
 fi
 
+SOURCE_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+SOURCE_DIGEST="$(python3 "$PRODUCT_SOURCE_DIGEST_TOOL" --repo-root "$REPO_ROOT")"
+python3 "$BUILD_PROVENANCE_TOOL" verify --app "$APP_PATH" \
+    --expected-source-head "$SOURCE_HEAD" \
+    --expected-source-digest "$SOURCE_DIGEST" \
+    --forbid-current-source
+
 # --- Completeness gate: refuse to ship a DMG missing the bundled embedder ---
 #
 # Cycle 8.24 (`bc5af6af…`) shipped a 14 MB DMG instead of the expected ~73 MB
@@ -152,7 +310,7 @@ fi
 # before running this script. build-app.sh logged
 # `WARNING: ArcticEmbedS .mlpackage not found at $REPO_ROOT/models/...` and
 # continued anyway, producing a .app with no embedder under
-# Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc. The DMG built + signed
+# Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc. The DMG built + signed
 # + notarized + stapled cleanly because nothing in the signing or notary path
 # inspects resource completeness — but first-launch semantic search silently
 # falls back to a zero-vector stub. By the time CEO mounted the DMG, the bug
@@ -160,16 +318,16 @@ fi
 #
 # This gate trips BEFORE codesign / launch-verify / notarize so the operator
 # fixes the worktree and re-runs from scratch instead of shipping broken.
-EMBEDDER_PATH="$APP_PATH/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc"
+EMBEDDER_PATH="$APP_PATH/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc"
 if [[ ! -d "$EMBEDDER_PATH" ]]; then
-    echo "FATAL: ArcticEmbedS_INT8.mlmodelc missing at:"
+    echo "FATAL: ArcticEmbedS_FP16.mlmodelc missing at:"
     echo "         $EMBEDDER_PATH"
     echo ""
     echo "Refusing to ship a DMG with broken semantic search."
     echo ""
     echo "Root cause is almost always: the build worktree does not have the"
     echo "models/ directory. The embedder lives at"
-    echo "  <repo>/models/ArcticEmbedS_INT8.{mlpackage,mlmodelc}"
+    echo "  <repo>/models/ArcticEmbedS_FP16.{mlpackage,mlmodelc}"
     echo "and is .gitignored (~64 MB). For worktree builds, copy it in from"
     echo "the primary checkout before re-running:"
     echo ""
@@ -181,83 +339,13 @@ if [[ ! -d "$EMBEDDER_PATH" ]]; then
     exit 1
 fi
 
-# --- Completeness gate: refuse to ship a DMG missing the bundled NER model ---
-#
-# Mirror of the embedder gate above for the V2-P5+ sync NER tier
-# (bert-base-NER, CEO-ratified 2026-06-04). build-app.sh bundles
-# bert_base_NER_INT8.mlmodelc and trips its OWN fail-loud gate — but
-# `--skip-build` bypasses build-app.sh entirely (same reason the embedder
-# gate is re-run here). Without this check, `build-installer.sh --skip-build`
-# over a `.app` assembled before the NER-bundling change — or one whose NER
-# copy silently failed/was stripped — would package + codesign + notarize a
-# DMG whose sync NER tier is dead, with nothing in the signing/notary path
-# catching it. The model is a first-class bundled asset now (like the
-# embedder), so its absence is a ship-blocker, not a warning.
-NER_MODEL_PATH="$APP_PATH/Contents/Resources/Models/bert_base_NER_INT8.mlmodelc"
-if [[ ! -d "$NER_MODEL_PATH" ]]; then
-    echo "FATAL: bert_base_NER_INT8.mlmodelc missing at:"
-    echo "         $NER_MODEL_PATH"
-    echo ""
-    echo "Refusing to ship a DMG whose sync NER tier is disabled."
-    echo ""
-    echo "The NER model lives at <repo>/models/bert_base_NER_INT8.{mlpackage,mlmodelc}"
-    echo "and is .gitignored (~103 MB compiled). For worktree builds, copy it in"
-    echo "from the primary checkout before re-running:"
-    echo ""
-    echo "  cp -R /Users/ao/Documents/GitHub/mci/models <worktree>/"
-    echo ""
-    echo "Then re-run (without --skip-build): ./scripts/build-installer.sh"
+# Validate the entire model contract even when assembly was skipped.
+VERIFY_SCRIPT="$REPO_ROOT/scripts/verify-models.sh"
+if [[ ! -x "$VERIFY_SCRIPT" ]]; then
+    echo "FATAL: Required scripts/verify-models.sh is missing or not executable." >&2
     exit 1
 fi
-# Structural completeness — a compiled .mlmodelc must carry its MIL program,
-# compiled model description, and weight blob. Catches a truncated copy that
-# passes the directory-exists check but fails Core ML load at runtime.
-if [[ ! -f "$NER_MODEL_PATH/model.mil" || ! -d "$NER_MODEL_PATH/weights" || ! -f "$NER_MODEL_PATH/coremldata.bin" ]]; then
-    echo "FATAL: bundled NER model is structurally incomplete at:"
-    echo "         $NER_MODEL_PATH"
-    echo "       (missing model.mil, weights/, or coremldata.bin). Refusing to ship."
-    exit 1
-fi
-
-# --- Completeness gate: refuse to ship a DMG missing the bundled Qwen3 brief-author ---
-#
-# Cycle 8.42 EnviousWispr peer-study finding (see
-# docs/research/2026-07-13-enviouswispr-peer-study.md §5). Mirror of the
-# embedder + NER gates above for the Qwen3-1.7B FP16 brief-author. build-app.sh
-# bundles Qwen3-1.7B-FP16.mlmodelc under Contents/Resources/Models/qwen3-1.7b-fp16/
-# and trips its OWN fail-loud gate — but `--skip-build` bypasses build-app.sh
-# entirely (same reason the embedder + NER gates are re-run here). Without this
-# check, `build-installer.sh --skip-build` over a `.app` assembled before the
-# Qwen3-bundling change — or one whose Qwen3 copy silently failed / was stripped
-# — would package + codesign + notarize a DMG whose daily-brief tab hangs at the
-# "Prepare your brain" slide on first-run (the exact EnviousWispr failure class
-# this cycle's fix closes). The model is a first-class bundled asset now (like
-# the embedder + NER), so its absence is a ship-blocker, not a warning.
-QWEN3_MODEL_PATH="$APP_PATH/Contents/Resources/Models/qwen3-1.7b-fp16/Qwen3-1.7B-FP16.mlmodelc"
-if [[ ! -d "$QWEN3_MODEL_PATH" ]]; then
-    echo "FATAL: Qwen3-1.7B-FP16.mlmodelc missing at:"
-    echo "         $QWEN3_MODEL_PATH"
-    echo ""
-    echo "Refusing to ship a DMG whose daily-brief author would silently fall"
-    echo "back to run_disabled_idle on first launch — the exact EnviousWispr"
-    echo "failure class the cycle 8.42 bundling change closes."
-    echo ""
-    echo "The Qwen3 model lives at <repo>/models/Qwen3-1.7B-FP16.{mlpackage,mlmodelc}"
-    echo "and is .gitignored (~3.4 GB compiled). For worktree builds, copy it"
-    echo "in from the primary checkout before re-running:"
-    echo ""
-    echo "  cp -R /Users/ao/Documents/GitHub/mci/models <worktree>/"
-    echo ""
-    echo "Then re-run (without --skip-build): ./scripts/build-installer.sh"
-    exit 1
-fi
-# Structural completeness — same invariants as NER + embedder.
-if [[ ! -f "$QWEN3_MODEL_PATH/model.mil" || ! -d "$QWEN3_MODEL_PATH/weights" || ! -f "$QWEN3_MODEL_PATH/coremldata.bin" ]]; then
-    echo "FATAL: bundled Qwen3 model is structurally incomplete at:"
-    echo "         $QWEN3_MODEL_PATH"
-    echo "       (missing model.mil, weights/, or coremldata.bin). Refusing to ship."
-    exit 1
-fi
+"$VERIFY_SCRIPT" --app "$APP_PATH"
 
 # Launch-verify gate — FATAL.
 # Second invocation (build-app.sh runs it once on the just-built bundle).
@@ -269,14 +357,50 @@ LAUNCH_VERIFY="$REPO_ROOT/scripts/verify-app-launches.sh"
 if [[ -x "$LAUNCH_VERIFY" ]]; then
     echo ""
     echo "--- Launch-verify gate (pre-notarize) ---"
-    "$LAUNCH_VERIFY" "$APP_PATH"
+    VERIFY_CLEAN_HOME=1 VERIFY_EXPECT_ONBOARDING=1 \
+        "$LAUNCH_VERIFY" "$APP_PATH"
 else
-    echo "WARNING: scripts/verify-app-launches.sh not found — skipping launch gate."
+    echo "FATAL: Required scripts/verify-app-launches.sh is missing or not executable." >&2
+    exit 1
 fi
 
-# --- Step 2: Codesign (Developer ID or ad-hoc) ---
+# --- Step 2: Codesign (Developer ID or explicit debug-only ad-hoc) ---
 
-ENTITLEMENTS="$REPO_ROOT/apps/hippocampus/Resources/Hippocampus.entitlements"
+if ! EXPECTED_APP_GROUP_ID=$(hippocampus_resolve_app_group_id "$SIGNING_MODE" "$DEVELOPER_ID"); then
+    echo "FATAL: Unable to resolve the macOS App Group identity." >&2
+    exit 1
+fi
+BUNDLED_APP_GROUP_ID=$(/usr/libexec/PlistBuddy -c \
+    'Print :HippocampusAppGroupIdentifier' \
+    "$APP_PATH/Contents/Info.plist" 2>/dev/null || true)
+if [[ "$BUNDLED_APP_GROUP_ID" != "$EXPECTED_APP_GROUP_ID" ]]; then
+    echo "FATAL: Bundled App Group identity does not match the signing identity." >&2
+    echo "  expected: $EXPECTED_APP_GROUP_ID" >&2
+    echo "  bundled:  ${BUNDLED_APP_GROUP_ID:-missing}" >&2
+    exit 1
+fi
+
+APPEX_PATH="$APP_PATH/Contents/PlugIns/HippocampusSafariExtension.appex"
+if [[ -d "$APPEX_PATH" ]]; then
+    BUNDLED_APPEX_GROUP_ID=$(/usr/libexec/PlistBuddy -c \
+        'Print :HippocampusAppGroupIdentifier' \
+        "$APPEX_PATH/Contents/Info.plist" 2>/dev/null || true)
+    if [[ "$BUNDLED_APPEX_GROUP_ID" != "$EXPECTED_APP_GROUP_ID" ]]; then
+        echo "FATAL: Safari extension App Group identity differs from its host app." >&2
+        exit 1
+    fi
+fi
+
+SIGNING_SCRATCH=$(mktemp -d -t hippocampus-installer-signing)
+ENTITLEMENTS="$SIGNING_SCRATCH/Hippocampus.entitlements"
+CAPTURE_HELPER_ENTITLEMENTS="$REPO_ROOT/apps/hippocampus/Resources/MCICaptureHelper.entitlements"
+APPEX_ENTITLEMENTS="$SIGNING_SCRATCH/HippocampusSafariExtension.entitlements"
+hippocampus_render_app_group_entitlements \
+    "$REPO_ROOT/apps/hippocampus/Resources/Hippocampus.entitlements" \
+    "$ENTITLEMENTS" "$EXPECTED_APP_GROUP_ID"
+hippocampus_render_app_group_entitlements \
+    "$REPO_ROOT/extensions/safari/appex/HippocampusSafariExtension.entitlements" \
+    "$APPEX_ENTITLEMENTS" "$EXPECTED_APP_GROUP_ID"
 
 if [[ "$SIGNING_MODE" == "developer-id" ]]; then
     echo "--- Codesigning with Developer ID (hardened runtime) ---"
@@ -284,8 +408,6 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
     # Sign embedded binaries first (inside-out signing order)
 
     # Sign Safari extension .appex (innermost)
-    APPEX_PATH="$APP_PATH/Contents/PlugIns/HippocampusSafariExtension.appex"
-    APPEX_ENTITLEMENTS="$REPO_ROOT/extensions/safari/appex/HippocampusSafariExtension.entitlements"
     if [[ -d "$APPEX_PATH" ]]; then
         codesign --force --options=runtime --timestamp \
             --sign "$DEVELOPER_ID" \
@@ -295,30 +417,26 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
 
     codesign --force --options=runtime --timestamp \
         --sign "$DEVELOPER_ID" \
-        --entitlements "$ENTITLEMENTS" \
+        --entitlements "$CAPTURE_HELPER_ENTITLEMENTS" \
         "$APP_PATH/Contents/MacOS/MCICaptureHelper"
 
     codesign --force --options=runtime --timestamp \
         --sign "$DEVELOPER_ID" \
-        --entitlements "$ENTITLEMENTS" \
         "$APP_PATH/Contents/MacOS/mci-agent"
 
     codesign --force --options=runtime --timestamp \
         --sign "$DEVELOPER_ID" \
-        --entitlements "$ENTITLEMENTS" \
         "$APP_PATH/Contents/MacOS/recall-ui"
 
     if [[ -f "$APP_PATH/Contents/MacOS/onboarding" ]]; then
         codesign --force --options=runtime --timestamp \
             --sign "$DEVELOPER_ID" \
-            --entitlements "$ENTITLEMENTS" \
             "$APP_PATH/Contents/MacOS/onboarding"
     fi
 
     if [[ -f "$APP_PATH/Contents/MacOS/hippocampus-native-host" ]]; then
         codesign --force --options=runtime --timestamp \
             --sign "$DEVELOPER_ID" \
-            --entitlements "$ENTITLEMENTS" \
             "$APP_PATH/Contents/MacOS/hippocampus-native-host"
     fi
 
@@ -383,6 +501,11 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
         --entitlements "$ENTITLEMENTS" \
         "$APP_PATH/Contents/MacOS/Hippocampus"
 
+    python3 "$BUILD_PROVENANCE_TOOL" verify --app "$APP_PATH" \
+        --expected-source-head "$SOURCE_HEAD" \
+        --expected-source-digest "$SOURCE_DIGEST" \
+        --forbid-current-source
+
     # Sign top-level app bundle (covers everything)
     codesign --force --options=runtime --timestamp \
         --sign "$DEVELOPER_ID" \
@@ -393,9 +516,25 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
     codesign --verify --deep --strict "$APP_PATH"
     echo "  Signature valid."
 else
-    echo "--- Ad-hoc codesigning (dev iteration) ---"
-    codesign --force --deep --sign - "$APP_PATH"
+    echo "--- Verifying development-only ad-hoc signature ---"
+    codesign --verify --deep --strict "$APP_PATH"
 fi
+EXPECTED_SIGNED_TEAM_ID=""
+if [[ "$SIGNING_MODE" == "developer-id" ]]; then
+    EXPECTED_SIGNED_TEAM_ID="${EXPECTED_APP_GROUP_ID%%.*}"
+fi
+if ! hippocampus_verify_signed_app_group \
+    "$APP_PATH" "$EXPECTED_APP_GROUP_ID" "$EXPECTED_SIGNED_TEAM_ID"; then
+    echo "FATAL: Signed host App Group does not match its bundle/signing identity." >&2
+    exit 1
+fi
+if [[ -d "$APPEX_PATH" ]] && ! hippocampus_verify_signed_app_group \
+    "$APPEX_PATH" "$EXPECTED_APP_GROUP_ID" "$EXPECTED_SIGNED_TEAM_ID"; then
+    echo "FATAL: Signed Safari App Group does not match its host/signing identity." >&2
+    exit 1
+fi
+rm -rf "$SIGNING_SCRATCH"
+SIGNING_SCRATCH=""
 
 # --- Step 2.5: Notarize + staple the .app ITSELF (not just the DMG) ---
 #
@@ -422,17 +561,7 @@ if [[ "$NOTARIZE" -eq 1 ]]; then
     rm -f "$APP_ZIP"
     /usr/bin/ditto -c -k --keepParent "$APP_PATH" "$APP_ZIP"
 
-    APP_NOTARY_ARGS=()
-    if xcrun notarytool history --keychain-profile "notarytool-profile" \
-        &>/dev/null; then
-        APP_NOTARY_ARGS+=(--keychain-profile "notarytool-profile")
-    else
-        APP_NOTARY_ARGS+=(--apple-id "$NOTARYTOOL_APPLE_ID")
-        APP_NOTARY_ARGS+=(--team-id "$NOTARYTOOL_TEAM_ID")
-        APP_NOTARY_ARGS+=(--password "$NOTARYTOOL_PASSWORD")
-    fi
-
-    if xcrun notarytool submit "$APP_ZIP" "${APP_NOTARY_ARGS[@]}" --wait; then
+    if notarize_and_record "$APP_ZIP" app; then
         xcrun stapler staple "$APP_PATH"
         echo "  .app notarized + stapled (ticket embedded in bundle)"
         # Verify the staple was attached + the .app is Gatekeeper-clean.
@@ -458,62 +587,55 @@ if [[ "$NOTARIZE" -eq 1 ]]; then
             echo "WARNING: syspolicy_check not found — Gatekeeper first-launch"
             echo "  predictor unavailable. Install Xcode 16 CLT to enable."
         fi
+        python3 "$BUILD_PROVENANCE_TOOL" verify --app "$APP_PATH" \
+            --expected-source-head "$SOURCE_HEAD" \
+            --expected-source-digest "$SOURCE_DIGEST" \
+            --forbid-current-source
+        echo "  Post-staple build provenance valid"
     else
         echo ""
         echo "ERROR: .app notarization failed. App is signed but NOT notarized."
-        echo "  Check: xcrun notarytool log <submission-id> ${APP_NOTARY_ARGS[*]}"
         exit 1
     fi
 
     rm -f "$APP_ZIP"
+    APP_ZIP=""
 fi
 
 # --- Step 3: Prepare DMG staging directory ---
 
 DMG_NAME="Hippocampus-${VERSION}"
 DMG_STAGING=$(mktemp -d -t hippocampus-dmg)
-trap 'rm -rf "$DMG_STAGING"' EXIT
 
 echo "--- Staging DMG contents ---"
 
 cp -R "$APP_PATH" "$DMG_STAGING/Hippocampus.app"
 ln -s /Applications "$DMG_STAGING/Applications"
 
-# Copy volume icon
-VOLUME_ICON="$INSTALLER_ASSETS/volume-icon.icns"
-if [[ -f "$VOLUME_ICON" ]]; then
-    cp "$VOLUME_ICON" "$DMG_STAGING/.VolumeIcon.icns"
-fi
+# Stage the canonical app icon. The verified installer mirror exists to make
+# accidental brand drift visible in source control and CI.
+cp "$CANONICAL_APP_ICON" "$DMG_STAGING/.VolumeIcon.icns"
 
-# Regenerate background image if missing
-BACKGROUND_PNG="$INSTALLER_ASSETS/background.png"
-if [[ ! -f "$BACKGROUND_PNG" ]]; then
-    echo "Generating DMG background image..."
-    GENERATE_BG="$INSTALLER_ASSETS/generate-background.py"
-    if [[ -f "$GENERATE_BG" ]]; then
-        python3 "$GENERATE_BG" "$BACKGROUND_PNG"
-    else
-        echo "WARNING: No background generator found, DMG will use default Finder background"
-    fi
-fi
+# Render from current source into staging, never reuse a stale source bitmap.
+mkdir -p "$DMG_STAGING/.background"
+BACKGROUND_PNG="$DMG_STAGING/.background/background.png"
+python3 "$INSTALLER_ASSETS/generate-background.py" "$BACKGROUND_PNG" \
+    --build-note "Build ${SOURCE_HEAD:0:12} / source ${SOURCE_DIGEST:0:12}"
 
-# Regenerate EULA / SLA resources if missing
+# The legal artifact was verified against its source before any release work.
+# Modern macOS no longer supports the old unflatten/Rez/flatten mount-time SLA
+# flow, so ship the canonical terms as a visible document in the image.
 EULA_RTF="$INSTALLER_ASSETS/EULA.rtf"
-SLA_R="$INSTALLER_ASSETS/sla.r"
-GENERATE_EULA="$INSTALLER_ASSETS/generate-eula.py"
-if [[ ! -f "$EULA_RTF" || ! -f "$SLA_R" ]] && [[ -f "$GENERATE_EULA" ]]; then
-    echo "Generating EULA.rtf + sla.r from terms-of-service.md..."
-    python3 "$GENERATE_EULA"
+if [[ ! -f "$EULA_RTF" ]]; then
+    echo "ERROR: Generated license is missing: $EULA_RTF" >&2
+    exit 1
 fi
-
-# Create .background directory (hidden in DMG)
-if [[ -f "$BACKGROUND_PNG" ]]; then
-    mkdir -p "$DMG_STAGING/.background"
-    cp "$BACKGROUND_PNG" "$DMG_STAGING/.background/background.png"
-fi
+mkdir -p "$DMG_STAGING/Legal"
+cp "$EULA_RTF" "$DMG_STAGING/Legal/License.rtf"
 
 echo "  Hippocampus.app -> staging/"
 echo "  Applications symlink -> staging/"
+echo "  Legal/License.rtf -> staging/"
 
 # --- Step 4: Create temporary read-write DMG ---
 
@@ -522,8 +644,11 @@ echo "--- Creating DMG ---"
 
 mkdir -p "$DIST_DIR"
 
-TEMP_DMG="$DIST_DIR/${DMG_NAME}-temp.dmg"
+# A failed detach must not let a later build overwrite its still-mounted image.
+TEMP_DMG_ROOT="$(mktemp -d "$DIST_DIR/.hippocampus-rw.XXXXXX")"
+TEMP_DMG="$TEMP_DMG_ROOT/image.dmg"
 FINAL_DMG="$DIST_DIR/${DMG_NAME}.dmg"
+FINAL_DMG_PENDING="$FINAL_DMG"
 
 # Remove stale outputs
 rm -f "$TEMP_DMG" "$FINAL_DMG" "${FINAL_DMG}.sha256"
@@ -543,82 +668,23 @@ echo "Staged content: ${STAGING_MB} MB → RW image size: ${DMG_RW_SIZE_MB} MB"
 # Create read-write DMG (oversized, will be compacted)
 hdiutil create \
     -srcfolder "$DMG_STAGING" \
-    -volname "Hippocampus" \
+    -volname "Hippocampus ${SOURCE_HEAD:0:12}" \
     -fs HFS+ \
     -fsargs "-c c=64,a=16,e=16" \
     -format UDRW \
     -size "${DMG_RW_SIZE_MB}m" \
     "$TEMP_DMG"
 
-# --- Step 5: Apply window layout via AppleScript ---
-#
-# The goal here is to persist a `.DS_Store` inside the DMG that pins the
-# Finder window bounds, view style, icon positions, and background image
-# — mirroring what Raycast / Granola / Linear all ship. The pattern that
-# survives the UDRW → UDZO convert step:
-#   1. Mount UDRW.
-#   2. Run AppleScript that sets layout + forces Finder to flush.
-#   3. Stamp .VolumeIcon flag via SetFile.
-#   4. `sync` + a short settle delay so .DS_Store hits the journal.
-#   5. `hdiutil detach -force` so a still-open Finder handle can't block.
-#
-# Empirical evidence (PR #213 §6 P1): prior versions ran osascript then
-# detached immediately, leaving no .DS_Store in the final DMG. Inspecting
-# Raycast's 10244-byte .DS_Store confirmed the layout-persistence target.
+# --- Step 5: Persist deterministic Finder layout without opening Finder ---
 
-APPLESCRIPT="$INSTALLER_ASSETS/dmg-layout.applescript"
-if [[ -f "$APPLESCRIPT" ]] && [[ -f "$BACKGROUND_PNG" ]]; then
-    echo ""
-    echo "--- Applying DMG window layout ---"
-
-    # Detach any stale Hippocampus volume from a prior failed run. Without
-    # this, the new mount lands on /Volumes/Hippocampus 1 and our
-    # AppleScript (which derives the disk name from the mount path's
-    # basename) would still find it, but a leftover /Volumes/Hippocampus
-    # can leave dangling Finder windows or mask its background lookup.
-    for stale in /Volumes/Hippocampus /Volumes/Hippocampus\ *; do
-        if [[ -d "$stale" ]]; then
-            echo "  Detaching stale volume: $stale"
-            hdiutil detach "$stale" -force -quiet 2>/dev/null || true
-        fi
-    done
-
-    MOUNT_DIR=$(hdiutil attach -readwrite -noverify -noautoopen "$TEMP_DMG" | grep "/Volumes/" | sed 's/.*\/Volumes/\/Volumes/')
-    MOUNT_DIR=$(echo "$MOUNT_DIR" | xargs)
-
-    if [[ -d "$MOUNT_DIR" ]]; then
-        # Give Finder a moment to notice the new volume before scripting it.
-        sleep 2
-
-        if ! osascript "$APPLESCRIPT" "$MOUNT_DIR"; then
-            echo "WARNING: AppleScript layout failed (non-fatal — Finder layout is cosmetic)"
-        fi
-
-        # Set volume icon flag
-        if [[ -f "$MOUNT_DIR/.VolumeIcon.icns" ]]; then
-            SetFile -c icnC "$MOUNT_DIR/.VolumeIcon.icns" 2>/dev/null || true
-            SetFile -a C "$MOUNT_DIR" 2>/dev/null || true
-        fi
-
-        # Make sure .DS_Store has actually been written before we detach.
-        sync
-        sleep 2
-
-        if [[ -f "$MOUNT_DIR/.DS_Store" ]]; then
-            DS_SIZE=$(stat -f%z "$MOUNT_DIR/.DS_Store" 2>/dev/null || echo 0)
-            echo "  .DS_Store persisted: ${DS_SIZE} bytes"
-        else
-            echo "WARNING: .DS_Store missing after AppleScript (DMG will open with default layout)"
-        fi
-
-        # -force so a lingering Finder reference can't keep the volume busy.
-        hdiutil detach "$MOUNT_DIR" -force -quiet || hdiutil detach "$MOUNT_DIR" -quiet
-    else
-        echo "WARNING: Could not mount temp DMG for layout (non-fatal)"
-    fi
-else
-    echo "Skipping DMG window layout (no AppleScript or background image)"
-fi
+echo ""
+echo "--- Applying headless DMG window layout ---"
+hippocampus_installer_mount "$TEMP_DMG"
+"$INSTALLER_PYTHON" "$DMG_LAYOUT" "$MOUNT_DIR"
+SetFile -c icnC "$MOUNT_DIR/.VolumeIcon.icns"
+SetFile -a C "$MOUNT_DIR"
+sync
+hippocampus_installer_unmount
 
 # --- Step 6: Convert to compressed read-only DMG ---
 
@@ -632,69 +698,48 @@ hdiutil convert \
     -o "$FINAL_DMG"
 
 rm -f "$TEMP_DMG"
+TEMP_DMG=""
+rmdir "$TEMP_DMG_ROOT"
+TEMP_DMG_ROOT=""
 
-# --- Step 6.5: Attach Software License Agreement ---
+# --- Step 7: Sign the outer disk image ---
 
-SLA_R="$INSTALLER_ASSETS/sla.r"
-if [[ -f "$SLA_R" ]]; then
-    if command -v Rez &>/dev/null; then
-        echo ""
-        echo "--- Attaching Software License Agreement ---"
-        if hdiutil unflatten "$FINAL_DMG" 2>/dev/null; then
-            if Rez -append "$SLA_R" -o "$FINAL_DMG" 2>/dev/null; then
-                hdiutil flatten "$FINAL_DMG" 2>/dev/null
-                echo "  SLA attached (license shown on DMG mount)."
-            else
-                echo "WARNING: Rez failed — SLA not attached (non-fatal)."
-                echo "         EULA available at hippocampus.ai/legal"
-                hdiutil flatten "$FINAL_DMG" 2>/dev/null || true
-            fi
-        else
-            echo "WARNING: hdiutil unflatten failed — SLA not attached (non-fatal)."
-        fi
-    else
-        echo ""
-        echo "NOTE: Rez not found — skipping SLA attachment."
-        echo "      Install Xcode Command Line Tools for SLA support."
-    fi
+if [[ "$SIGNING_MODE" == "developer-id" ]]; then
+    echo ""
+    echo "--- Signing outer DMG with Developer ID ---"
+    codesign --timestamp --sign "$DEVELOPER_ID" "$FINAL_DMG"
+    codesign --verify --strict --verbose=2 "$FINAL_DMG"
 fi
 
-# --- Step 7: Notarize + staple (Developer ID only) ---
+# --- Step 8: Notarize + staple (Developer ID only) ---
 
 if [[ "$NOTARIZE" -eq 1 ]]; then
     echo ""
     echo "--- Submitting DMG for notarization ---"
 
-    NOTARY_ARGS=()
-    if xcrun notarytool history --keychain-profile "notarytool-profile" \
-        &>/dev/null; then
-        NOTARY_ARGS+=(--keychain-profile "notarytool-profile")
-    else
-        NOTARY_ARGS+=(--apple-id "$NOTARYTOOL_APPLE_ID")
-        NOTARY_ARGS+=(--team-id "$NOTARYTOOL_TEAM_ID")
-        NOTARY_ARGS+=(--password "$NOTARYTOOL_PASSWORD")
-    fi
-
-    if xcrun notarytool submit "$FINAL_DMG" "${NOTARY_ARGS[@]}" --wait; then
+    if notarize_and_record "$FINAL_DMG" dmg; then
         echo ""
         echo "--- Stapling notarization ticket ---"
         xcrun stapler staple "$FINAL_DMG"
+        xcrun stapler validate "$FINAL_DMG"
+        codesign --verify --strict --verbose=2 "$FINAL_DMG"
+        spctl --assess --type open --context context:primary-signature --verbose=2 "$FINAL_DMG"
         echo "  DMG notarized and stapled."
     else
         echo ""
         echo "ERROR: Notarization failed. DMG is signed but NOT notarized."
-        echo "  Check: xcrun notarytool log <submission-id> ${NOTARY_ARGS[*]}"
         exit 1
     fi
 fi
 
-# --- Step 8: Write SHA-256 sidecar ---
+# --- Step 9: Write SHA-256 sidecar ---
 
 echo ""
 echo "--- Computing SHA-256 ---"
 
 SHASUM=$(shasum -a 256 "$FINAL_DMG" | awk '{print $1}')
 echo "$SHASUM  $(basename "$FINAL_DMG")" > "${FINAL_DMG}.sha256"
+FINAL_DMG_PENDING=""
 
 # --- Done ---
 

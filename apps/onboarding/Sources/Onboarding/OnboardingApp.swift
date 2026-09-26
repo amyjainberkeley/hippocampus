@@ -55,14 +55,18 @@ struct OnboardingApp: App {
         let fda: any FullDiskAccessPermission = StubFullDiskAccessPermission()
         #endif
 
+        let initialStep = ProcessInfo.processInfo.environment["MCI_ONBOARDING_STEP"]
+            .flatMap(OnboardingStep.init(launchRoute:))
         _flowVM = StateObject(wrappedValue: OnboardingFlowViewModel(
             screenRecording: sr,
             accessibility: ax,
             automation: am,
-            fullDiskAccess: fda
+            fullDiskAccess: fda,
+            initialStep: initialStep
         ))
+        let baselineStore = SignedBaselineAllowlistStore()
         _trustVM = StateObject(wrappedValue: TrustPanelViewModel(
-            allowlistStore: StubAllowlistStore(),
+            allowlistStore: baselineStore,
             denylistStore: DiskDenylistEditorStore()
         ))
         _retentionVM = StateObject(wrappedValue: RetentionViewModel(
@@ -93,7 +97,7 @@ struct OnboardingApp: App {
         ))
 
         _allowlistEditorVM = StateObject(wrappedValue: AllowlistEditorViewModel(
-            baselineStore: StubAllowlistStore(),
+            baselineStore: baselineStore,
             userStore: FileUserAllowlistStore(),
             detector: appsDetector,
             fdaPermission: fdaPermission
@@ -107,6 +111,7 @@ struct OnboardingApp: App {
     var body: some Scene {
         WindowGroup {
             OnboardingFlowView()
+                .preferredColorScheme(.light)
                 .environmentObject(flowVM)
                 .environmentObject(trustVM)
                 .environmentObject(retentionVM)

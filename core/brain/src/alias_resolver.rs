@@ -1443,7 +1443,7 @@ mod tests {
             (EventId(1), vec![ph.id.clone()]),
             (EventId(2), vec![ph.id.clone()]),
         ];
-        let out = r().resolve(&[ph.clone()], &co);
+        let out = r().resolve(std::slice::from_ref(&ph), &co);
         assert_eq!(out.len(), 1, "the recurring handle is one identity");
         let idy = identity_of(&out, &ph.id).expect("handle anchored");
         assert_eq!(idy.identity_kind, IDENTITY_PERSON);
@@ -1463,7 +1463,7 @@ mod tests {
             (EventId(1), vec![mail.id.clone()]),
             (EventId(2), vec![mail.id.clone()]),
         ];
-        let out = r().resolve(&[mail.clone()], &co);
+        let out = r().resolve(std::slice::from_ref(&mail), &co);
         assert_eq!(out.len(), 1);
         let idy = identity_of(&out, &mail.id).expect("email handle anchored");
         assert_eq!(idy.identity_kind, IDENTITY_PERSON);
@@ -1484,7 +1484,7 @@ mod tests {
         // from a web page) is below the recurrence gate → no identity.
         let ph = phone("15559998888");
         let co = vec![(EventId(1), vec![ph.id.clone()])];
-        let out = r().resolve(&[ph.clone()], &co);
+        let out = r().resolve(std::slice::from_ref(&ph), &co);
         assert!(
             out.is_empty(),
             "a one-off handle must not become a spurious identity"
@@ -1496,7 +1496,7 @@ mod tests {
         // Defensive: a handle entity that never appears in any event's
         // co-occurrence list (0 sites) is not anchored.
         let ph = phone("15557776666");
-        let out = r().resolve(&[ph.clone()], &[]);
+        let out = r().resolve(std::slice::from_ref(&ph), &[]);
         assert!(out.is_empty());
     }
 

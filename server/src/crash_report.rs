@@ -49,6 +49,7 @@ pub struct CrashReportLogConfig {
 impl CrashReportLogConfig {
     /// Build config from `MCI_SERVER_LOG_DIR` env var (default
     /// `/tmp/mci-server`).
+    #[must_use]
     pub fn from_env() -> Self {
         let dir =
             std::env::var("MCI_SERVER_LOG_DIR").unwrap_or_else(|_| "/tmp/mci-server".to_string());
@@ -68,6 +69,7 @@ pub struct CrashReportLog {
 
 impl CrashReportLog {
     /// Construct. No I/O until first `append`.
+    #[must_use]
     pub fn new(cfg: CrashReportLogConfig) -> Self {
         Self {
             cfg,

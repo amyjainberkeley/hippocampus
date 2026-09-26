@@ -1,36 +1,7 @@
 // SPDX-License-Identifier: TBD-private
 //
-// MenuBarStatus — status-light rendering for the menu-bar icon.
-//
-// Ships pattern #3 (P0) from the Raycast/Cotypist peer study
-// (docs/research/2026-07-13-raycast-cotypist-stripe-peer-study.md) and
-// closes polish gap #1 from the cycle 8.44 product-readiness audit
-// ("No 'recording active' pulse in the menu-bar icon").
-//
-// Prior UX (see HippocampusApp.MenuBarIcon): a single template glyph +
-// an `exclamationmark.circle.fill` swap on `.crashed`. Users had no
-// ambient signal for whether capture was actively running, paused by
-// them, or wedged in an error state that hadn't yet flipped the
-// supervisor to `.crashed` (e.g. TCC revoked mid-run, disk full,
-// integrity-check failure surfaced via `helper_health.jsonl`). This
-// file derives four visually distinct states from `SupervisorState`
-// (+ an optional error reason) and hands the current one to a small
-// SwiftUI view that owns the pulse animation.
-//
-// Constraints (see agent brief):
-//   - UI-only. No changes to capture / OCR cascade / XPC surface /
-//     entitlements / redaction / notarization / Gatekeeper /
-//     mci.sqlite.
-//   - No new bridge into MCICaptureHelper's XPC surface — status is
-//     derived from the existing @Published `ProcessSupervisor.state`
-//     + `HealthSnapshot` (both already reflect helper heartbeats via
-//     `HealthSnapshot.readFromLog` on the `helper-health.jsonl`
-//     ring).
-//   - No telemetry. The status is a pure function of local state.
-//   - Pulse must be near-zero on battery. We use SwiftUI's
-//     `.animation` driver against a 2 s `Timer.publish` — one wake
-//     per two seconds is well below display-link cost (~120 Hz) and
-//     inside the NSStatusItem's own draw budget.
+// Local capture status for the menu-bar icon and Preferences.
+// Only the agent's durable receipt can establish that memory was saved.
 
 import Foundation
 import SwiftUI
@@ -38,31 +9,34 @@ import SwiftUI
 import AppKit
 #endif
 
-/// The four visual states encoded by the menu-bar icon.
-///
-/// Precedence when multiple could apply (checked top-down by
-/// `MenuBarStatus.derive`):
-///
-///   1. `.error` — any hard failure signal (supervisor `.crashed`,
-///      integrity-check failure, TCC revoked) wins over everything
-///      else. The user needs to see this above all.
-///   2. `.paused` — user-initiated pause (`SupervisorState.paused`).
-///   3. `.recording` — supervisor `.running`. This is the pulse case.
-///   4. `.idle` — everything else (`.idle`, `.starting`, `.stopped`).
+/// Capture status derived from user intent and committed storage evidence.
+/// A running process or helper delivery counter never proves saved memory.
 public enum MenuBarStatus: Equatable, Sendable {
     case idle
+    case starting
     case recording
     case paused
     case error(reason: String)
+    case needsPermission(TCCRevokedReason)
+    case blocked(reason: String)
+    case stale(reason: String)
+    case noMemory
+    case unchanged
 
     /// Short label rendered in the drop-down header row + used in
     /// tests to check state distinctness.
     public var displayText: String {
         switch self {
-        case .idle: return "Idle"
-        case .recording: return "Recording"
+        case .idle: return "Off"
+        case .starting: return "Starting capture"
+        case .recording: return "Saving memory"
         case .paused: return "Paused"
         case .error: return "Error"
+        case .needsPermission: return "Needs permission"
+        case .blocked: return "Blocked"
+        case .stale: return "Status unavailable"
+        case .noMemory: return "No saved memory yet"
+        case .unchanged: return "No recent changes"
         }
     }
 
@@ -71,58 +45,147 @@ public enum MenuBarStatus: Equatable, Sendable {
     /// surfaces read as the same signal.
     public var indicatorColor: Color {
         switch self {
-        case .idle: return .secondary
+        case .idle, .starting, .unchanged: return .secondary
         case .recording: return .green
         case .paused: return .yellow
         case .error: return .red
+        case .needsPermission, .blocked, .stale, .noMemory: return .orange
         }
     }
 
-    /// Whether the icon should pulse. Only `.recording` pulses — this
-    /// is the "capture is live" ambient signal from the Raycast study.
-    public var shouldPulse: Bool {
-        if case .recording = self { return true }
-        return false
-    }
+    /// Menu-bar status is static, including while saving memory.
+    public var shouldPulse: Bool { false }
 
-    /// Derive from the current supervisor state + optional error
-    /// overrides. `integrityError` and `tccRevokedSurface` are `nil`
-    /// in the common case; when either is non-nil it forces `.error`
-    /// regardless of the underlying supervisor state.
-    ///
-    /// Precedence when multiple errors overlap:
-    ///   1. `tccRevokedSurface` — TCC revoke is user-recoverable in
-    ///      one click, and the actionable notification hangs off THIS
-    ///      reason string. Surface it first.
-    ///   2. `integrityError` — DB integrity failure, wired separately.
-    ///   3. `.crashed(reason)` from the supervisor.
-    ///
-    /// Cycle 8.45 audit risk #2: `tccRevokedSurface` is populated from
-    /// the `helper_health tcc_revoked=<surface>` breadcrumb the helper
-    /// emits via `TCCHelperHealth.line(...)`. The app-side status
-    /// coordinator maps the enum to the human-readable reason string
-    /// via `TCCRevokedReason`.
+    /// Explicit off/pause wins; permission and storage failures then take
+    /// precedence over evidence of previous successful saves.
     public static func derive(
         from state: SupervisorState,
+        captureEnabled: Bool = true,
         integrityError: String? = nil,
-        tccRevokedSurface: TCCRevokedReason? = nil
+        tccRevokedSurface: TCCRevokedReason? = nil,
+        receipt: CaptureStatusReceipt? = nil,
+        helperHealth: HealthSnapshot? = nil,
+        captureStartedAt: Date? = nil,
+        now: Date = Date()
     ) -> MenuBarStatus {
+        // A failed shutdown is not proof of being off. Keep that failure visible
+        // even after the requested setting has correctly been latched false.
+        if case .crashed(let reason) = state {
+            return .error(reason: reason)
+        }
+        guard captureEnabled else { return .idle }
+        if state == .paused { return .paused }
         if let reason = tccRevokedSurface {
-            return .error(reason: reason.menuBarReason)
+            return .needsPermission(reason)
         }
         if let reason = integrityError {
             return .error(reason: reason)
         }
-        switch state {
-        case .crashed(let reason):
-            return .error(reason: reason)
-        case .paused:
-            return .paused
-        case .running:
-            return .recording
-        case .idle, .starting, .stopped:
-            return .idle
+        if state == .starting { return .starting }
+        guard state == .running else { return .idle }
+        guard let receipt else {
+            return .stale(reason: "Saved memory could not be verified. The capture status is missing or unreadable.")
         }
+        guard isFresh(receipt.updatedAt, now: now),
+              captureStartedAt.map({ receipt.updatedAt >= $0 }) ?? true else {
+            return .stale(reason: "Capture status is out of date. Saved counts below are from the last report.")
+        }
+        if let code = receipt.blockedReason ?? receipt.suppressionReason {
+            switch code {
+            case "screen_recording_permission": return .needsPermission(.screenRecording)
+            case "accessibility_permission": return .needsPermission(.accessibility)
+            case "unchanged_screen", "deduplicated":
+                if receipt.storedFrameCount == 0 { return .noMemory }
+            default: return .blocked(reason: suppressionText(code))
+            }
+        }
+        guard receipt.storedFrameCount > 0, let saved = receipt.lastStoredFrameAt else {
+            return .noMemory
+        }
+        // Storage heartbeat is not capture activity. A new run must save its own
+        // frame before showing saving status; static-screen dedup stays neutral.
+        if captureStartedAt.map({ saved >= $0 }) ?? false,
+           now.timeIntervalSince(saved) >= 0,
+           now.timeIntervalSince(saved) <= 600,
+           receipt.suppressionReason == nil {
+            return .recording
+        }
+        if let helperHealth, isFresh(helperHealth.lastUpdated, now: now),
+           captureStartedAt.map({ helperHealth.lastUpdated >= $0 }) ?? false {
+            return .unchanged
+        }
+        return .stale(reason: "No recent saved frame or capture heartbeat. Check capture settings and logs.")
+    }
+
+    private static func isFresh(_ date: Date, now: Date) -> Bool {
+        (0...120).contains(now.timeIntervalSince(date))
+    }
+
+    private static func suppressionText(_ code: String) -> String {
+        switch code {
+        case "app_denied", "denylist-source", "denylist-postcapture": return "The current source is excluded by your privacy settings."
+        case "secure_input", "secure-event-input", "ax-secure-subrole": return "Secure input is active. Capture will resume when it ends."
+        case "os-blacked-region": return "macOS protected the current screen region from capture."
+        case "ocr-time-secret": return "Sensitive content was filtered before it could be saved."
+        case "failsafe-unknown": return "The current content could not be checked for privacy. Switch to another window."
+        case "focus-race-dropped": return "The active window changed during capture. Waiting for a stable window."
+        case "private_browsing": return "Private browsing is excluded from capture."
+        case "browser_window_unknown": return "The browser window's privacy mode could not be verified. Switch to a supported normal window."
+        case "app_identity_unknown": return "The current app could not be identified. Switch to an identifiable app."
+        case "storage_error", "store_unavailable", "ingest_failed": return "Memory could not be saved. Check available disk space and capture logs."
+        case "helper_disconnected": return "The screen capture helper disconnected. Restart capture and check the logs."
+        case "capture_failed": return "Screen capture failed. Check permissions and capture logs."
+        case "capture_disabled": return "The capture service reports that capture is disabled. Review capture settings."
+        default: return "Capture was blocked for an unrecognized reason. Review capture settings and logs."
+        }
+    }
+
+    public var detailText: String {
+        switch self {
+        case .idle: return "Capture is off or has not started."
+        case .starting: return "Starting the capture service. Waiting for saved memory to be verified."
+        case .recording: return "A recent frame was saved to memory."
+        case .paused: return "Capture is paused. Existing memories remain available."
+        case .error(let reason), .blocked(let reason), .stale(let reason): return reason
+        case .needsPermission(let permission):
+            switch permission {
+            case .screenRecording: return "Screen Recording permission is required to capture the screen."
+            case .accessibility: return "Accessibility permission is required to inspect screen content safely."
+            case .fullDiskAccess: return "Full Disk Access permission is required."
+            case .automation: return "Automation permission is required."
+            }
+        case .noMemory: return "No captured frames have been saved to memory."
+        case .unchanged: return "Capture is responding. No new frame has been saved recently."
+        }
+    }
+
+    public var action: CaptureStatusAction? {
+        switch self {
+        case .idle: return .start
+        case .paused: return .resume
+        case .needsPermission(let permission): return .openPermission(permission)
+        case .error: return .openLogs
+        case .blocked, .stale, .noMemory: return .reviewCapture
+        case .starting, .recording, .unchanged: return nil
+        }
+    }
+}
+
+/// The capture command visible in the status menu. The agent can be
+/// healthy while screen capture is disabled, so topology state alone
+/// cannot decide whether Start or Stop Recording is appropriate.
+public enum RecordingControl: Equatable, Sendable {
+    case none
+    case start
+    case stop
+
+    public static func derive(
+        from state: SupervisorState,
+        captureEnabled: Bool
+    ) -> RecordingControl {
+        if state == .starting { return .none }
+        if captureEnabled && state.isActive { return .stop }
+        return .start
     }
 }
 
@@ -204,63 +267,18 @@ public enum TCCRevokedReason: String, Sendable, Equatable, CaseIterable {
 
 // MARK: - View
 
-/// The label SwiftUI hands to `MenuBarExtra`. Wraps
-/// `MenuBarStatusIcon` (the raw NSImage renderer) in a view that owns
-/// the pulse animation and the overlay glyphs.
-///
-/// Pulse implementation: a `TimelineView` on `.periodic(by: 2.0)`
-/// fires exactly once every 2 seconds — this is a plain
-/// Core-Foundation timer under the hood, NOT a display-link. Each
-/// tick alternates the target opacity between 1.0 and 0.7, and the
-/// `.animation(.easeInOut(duration: 2.0))` modifier lets Core
-/// Animation interpolate the layer opacity on GPU with no CPU
-/// wake-ups between ticks. Total cost: one main-thread callback per
-/// 2 s, plus the CA implicit animation the OS was going to run
-/// anyway. This is the "CALayer + implicit animation, not display
-/// link" approach the agent brief calls for. When
-/// `shouldPulse == false` we pin opacity to 1.0 and don't install a
-/// schedule at all.
+/// A static label for MenuBarExtra. Animating its opacity repeatedly updates
+/// the AppKit status button and layout; no clock or animation belongs here.
 public struct MenuBarStatusLabel: View {
     public let status: MenuBarStatus
-
-    /// Pulse period: opacity ping-pongs between `pulseMin` and 1.0
-    /// with this cadence. 2 s matches the agent brief.
-    static let pulsePeriod: TimeInterval = 2.0
-    static let pulseMin: Double = 0.7
 
     public init(status: MenuBarStatus) {
         self.status = status
     }
 
     public var body: some View {
-        Group {
-            if status.shouldPulse {
-                TimelineView(.periodic(from: .now, by: Self.pulsePeriod)) { context in
-                    iconImage
-                        .opacity(Self.pulseOpacity(at: context.date))
-                        .animation(
-                            .easeInOut(duration: Self.pulsePeriod),
-                            value: Self.pulseOpacity(at: context.date)
-                        )
-                }
-            } else {
-                iconImage.opacity(1.0)
-            }
-        }
-        .accessibilityLabel("Hippocampus — \(status.displayText)")
-    }
-
-    /// Alternates between `pulseMin` and 1.0 on `pulsePeriod`
-    /// boundaries. Together with `.easeInOut(duration: pulsePeriod)`
-    /// this produces a smooth breathing curve — the animation
-    /// modifier interpolates the endpoints, so we only need to
-    /// deliver the target value, not the continuous curve. Pure
-    /// function → trivially testable.
-    static func pulseOpacity(at date: Date) -> Double {
-        let period = pulsePeriod * 2.0  // full cycle = min → max → min
-        let t = date.timeIntervalSinceReferenceDate
-            .truncatingRemainder(dividingBy: period)
-        return t < pulsePeriod ? 1.0 : pulseMin
+        iconImage
+            .accessibilityLabel("Hippocampus — \(status.displayText)")
     }
 
     @ViewBuilder
@@ -287,33 +305,49 @@ public struct MenuBarStatusLabel: View {
 /// duplicate the lookup here so `HippocampusKit` doesn't depend on
 /// the executable target — the load falls back to a 22×22 blank
 /// canvas if the resource is missing (unit tests, headless CI).
+@MainActor
 public enum MenuBarStatusIcon {
 
     /// Canonical NSStatusItem size on macOS 14+. Matches the
     /// existing MenuBarIcon fallback.
     static let baseSize = NSSize(width: 22, height: 22)
 
+    // Fixed, reason-independent cache: repeated health updates must not load
+    // templates or allocate another rendered image for the same visual state.
+    private static let base = loadBaseTemplate()
+    private static let idle = withAlpha(base, alpha: 0.55)
+    private static let starting = overlay(base: base, glyph: "clock", tint: nil)
+    private static let paused = overlay(base: base, glyph: "pause.fill", tint: nil)
+    private static let error = overlay(base: base, glyph: "circle.fill", tint: .systemRed)
+    private static let permission = overlay(base: base, glyph: "lock.fill", tint: .systemOrange)
+    private static let blocked = overlay(base: base, glyph: "exclamationmark.triangle.fill", tint: .systemOrange)
+    private static let stale = overlay(base: base, glyph: "clock.fill", tint: .systemOrange)
+    private static let unchanged = overlay(base: base, glyph: "minus", tint: nil)
+
     public static func image(for status: MenuBarStatus) -> NSImage {
-        let base = loadBaseTemplate()
         switch status {
         case .idle:
-            // Slightly muted; NSStatusItem template tinting already
-            // adapts to the menu bar, but a subtle alpha communicates
-            // "not actively capturing" without going grey-out.
-            return withAlpha(base, alpha: 0.55)
+            return idle
         case .recording:
-            // Pulse handled at the view level; the base glyph is
-            // untouched here so the animation reads as opacity change
-            // rather than a jerky glyph swap.
             return base
+        case .starting:
+            return starting
         case .paused:
-            return overlay(base: base, glyph: "pause.fill", tint: nil)
+            return paused
         case .error:
-            return overlay(base: base, glyph: "circle.fill", tint: .systemRed)
+            return error
+        case .needsPermission:
+            return permission
+        case .blocked, .noMemory:
+            return blocked
+        case .stale:
+            return stale
+        case .unchanged:
+            return unchanged
         }
     }
 
-    static func loadBaseTemplate() -> NSImage {
+    private static func loadBaseTemplate() -> NSImage {
         if let bundled = NSImage(named: "statusbar-icon") {
             bundled.isTemplate = true
             return bundled

@@ -11,15 +11,17 @@ Safari
  └─ content.js  (extracts page text, sends to background)
      └─ background.js  (receives page_content, calls sendNativeMessage)
          └─ SafariWebExtensionHandler.swift  (.appex, receives native message)
-             └─ App Group shared container  (group.ai.hippocampus)
+             └─ signed App Group shared container
                  └─ Hippocampus.app reads safari-inbox/ → mci-agent
 ```
 
 Unlike the Chromium extension (which uses stdio native messaging), Safari Web
 Extensions route native messages through a `SafariWebExtensionHandler` class
 inside the `.appex` bundle. The handler writes each message as a JSON file to
-the App Group shared container (`group.ai.hippocampus/safari-inbox/`), where
-the container app picks it up.
+the signed App Group's `safari-inbox/` directory, where the container app
+picks it up. `build-app.sh` renders one identity into both bundles: local
+ad-hoc builds use `group.ai.hippocampus`, while Developer ID builds derive
+`<TeamIdentifier>.ai.hippocampus` from the selected certificate.
 
 ## Bundle structure
 
@@ -71,8 +73,11 @@ bundle, and embeds it in `Hippocampus.app/Contents/PlugIns/`.
 
 ## Enabling in Safari
 
-1. Build and launch `Hippocampus.app` (must be codesigned — ad-hoc is fine for
-   local dev, but Developer ID is required for distribution).
+1. Build and launch `Hippocampus.app`. Ad-hoc signing is sufficient for bundle
+   and UI development, but it does not prove App Group container access.
+   Distribution and release-grade relay verification require the stable
+   Developer ID identity. V1 uses Apple's macOS-only Team-ID-prefixed group,
+   which Apple supports without a provisioning profile.
 2. Open **Safari → Settings → Extensions** (⌘,).
 3. Check **Hippocampus** in the extension list.
 4. Grant permission when prompted ("Allow for one day" / "Always allow on
@@ -98,11 +103,14 @@ codesign -dvvv Hippocampus.app/Contents/PlugIns/HippocampusSafariExtension.appex
 ls Hippocampus.app/Contents/PlugIns/HippocampusSafariExtension.appex/Contents/Resources/
 ```
 
-To test the full flow: enable the extension in Safari, visit a page, then
-check for JSON files in the App Group container:
+To test the full flow: enable the extension in Safari, visit a page, read the
+resolved group from the assembled extension, then inspect that container:
 
 ```bash
-ls ~/Library/Group\ Containers/group.ai.hippocampus/safari-inbox/
+GROUP_ID=$(/usr/libexec/PlistBuddy -c \
+  'Print :HippocampusAppGroupIdentifier' \
+  Hippocampus.app/Contents/PlugIns/HippocampusSafariExtension.appex/Contents/Info.plist)
+ls "$HOME/Library/Group Containers/$GROUP_ID/safari-inbox/"
 ```
 
 ## Private Browsing
@@ -119,3 +127,9 @@ invariant from the Chromium extension's `"incognito": "split"` manifest key.
   is an independent message → file write.
 - **Developer ID required for distribution**: Safari will not load unsigned
   `.appex` bundles outside of local development.
+- **macOS-only identity**: V1 deliberately uses
+  `<TeamIdentifier>.ai.hippocampus`, which Apple documents as usable without a
+  provisioning profile. Before a cross-platform product, migrate to a
+  registered `group.` identifier and embed matching profiles. Apple recommends
+  explicit profiles even on macOS when preserving the entitlements-validated
+  flag is important.

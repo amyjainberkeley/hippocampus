@@ -24,15 +24,13 @@
 //!
 //! # Idempotence across processes
 //!
-//! The aggregator dedupes resources through an in-memory set scoped to
-//! one process lifetime. For the long-running agent that is correct. For
-//! a command that runs and exits it is not: every invocation would start
-//! cold, re-read every resource, and write a duplicate event for each
-//! one. So before reconciling, this seeds the aggregator's seen-set from
-//! the brain itself via
-//! [`SqlCipherBrainStore::distinct_urls_for_app`] — the aggregator
-//! writes the resource URI verbatim into `events.url`, so for an
-//! `mcp:<server>` tag that URL set is exactly the already-ingested set.
+//! The aggregator tracks the latest content digest for each stable resource
+//! URI in memory. A command that runs and exits must restore those revisions
+//! or every invocation would start cold and append duplicate events. Before
+//! reconciling, both this command and the app-owned background loop seed the
+//! aggregator's revision map from the brain via
+//! [`SqlCipherBrainStore::events_by_app_bundle_id`] — revision markers
+//! at the start of MCP event text preserve each URI's latest content digest.
 //! A second `mcp-sync` over an unchanged server writes nothing.
 //!
 //! # Counting
@@ -54,9 +52,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use mci_brain::{BrainStore, SqlCipherBrainStore};
-use mci_mcp_client::{McpServersConfig, ServerRegistry};
+use mci_mcp_client::{McpServersConfig, ServerRegistration, ServerRegistry};
 
-use crate::mcp_aggregator::{source_tag, McpAggregator};
+use crate::mcp_aggregator::{resource_revision_from_event_text, source_tag, McpAggregator};
 use crate::mcp_client_supervisor::{boot_at, BootStatus};
 
 /// A minimal `mcp-servers.toml` that parses and registers. Shown to the
@@ -265,17 +263,7 @@ pub async fn sync_registry(
         None,
     );
 
-    // Restart-idempotence: teach this cold process what earlier runs
-    // already ingested. See the module doc.
-    for registration in &registrations {
-        let tag = source_tag(&registration.name);
-        let seen = store
-            .distinct_urls_for_app(&tag)
-            .map_err(|e| McpSyncError::Store(e.to_string()))?;
-        aggregator
-            .seed_seen_resources(&registration.name, seen)
-            .await;
-    }
+    seed_resource_revisions_from_store(&registrations, &store, &aggregator).await?;
 
     // Count what the store gained, not what the aggregator offered. The
     // writers can reject or skip; the delta cannot lie.
@@ -300,6 +288,35 @@ pub async fn sync_registry(
         resources_cataloged: snap.resources_catalog_only,
         events_written: after.saturating_sub(before),
     })
+}
+
+/// Seed an aggregator with the latest persisted content revision for each
+/// `(server, URI)` before its first reconcile. Shared by one-shot sync and the
+/// app-owned background loop so process restarts preserve idempotence.
+///
+/// # Errors
+/// [`McpSyncError::Store`] if persisted event metadata cannot be read.
+pub async fn seed_resource_revisions_from_store(
+    registrations: &[ServerRegistration],
+    store: &SqlCipherBrainStore,
+    aggregator: &McpAggregator,
+) -> Result<(), McpSyncError> {
+    for registration in registrations {
+        let tag = source_tag(&registration.name);
+        let revisions = store
+            .events_by_app_bundle_id(&tag, usize::MAX)
+            .map_err(|e| McpSyncError::Store(e.to_string()))?;
+        let revisions = revisions.into_iter().filter_map(|event| {
+            Some((
+                event.url?,
+                resource_revision_from_event_text(&event.text_snippet)?,
+            ))
+        });
+        aggregator
+            .seed_resource_revisions(&registration.name, revisions)
+            .await;
+    }
+    Ok(())
 }
 
 /// One-line summary of a pass, in the shape the other `mci-agent` arms

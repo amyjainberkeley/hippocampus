@@ -22,9 +22,9 @@
 //!   older JS (top-frame-only) hits the same code path with
 //!   `frame_url == parent_url == url`.
 //! - Secret-pattern filter runs before any content reaches the socket.
-//! - Incognito exclusion: drop any message with `incognito: true` BEFORE
-//!   denylist / filter / socket write. Belt-and-suspenders with the JS
-//!   guards in `extensions/chromium/content.js` and `background.js` so a
+//! - Incognito exclusion: require the privacy field during deserialization,
+//!   then drop `incognito: true` BEFORE denylist / filter / socket write.
+//!   Belt-and-suspenders with the JS guards in `extensions/chromium/` so a
 //!   JS regression cannot reach the brain. Per docs/DESIGN.md, incognito
 //!   exclusion ships WITH capture, not as a later phase.
 //! - No local cache of page content — strictly forward-and-forget.
@@ -56,11 +56,9 @@ struct BrowserMessage {
     tab_id: u32,
     #[serde(default = "default_browser")]
     source_browser: String,
-    /// Set true by `background.js` when the tab is incognito. Defaults
-    /// to false so the host fails-closed only on an explicit positive
-    /// signal — a missing field (older JS) is treated as non-incognito,
-    /// consistent with how the field was added.
-    #[serde(default)]
+    /// Required privacy classification from `background.js`. Omitting or
+    /// mistyping this field makes deserialization fail before persistence;
+    /// only an explicit false value reaches normal processing.
     incognito: bool,
     /// The frame's own URL. Set by `background.js` from `sender.url`
     /// (Chromium fills this with the frame URL, even cross-origin).
@@ -88,6 +86,28 @@ struct BrowserMessage {
     #[serde(default)]
     #[allow(dead_code)]
     frame_id: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct CaptureAuthorizationRequest {
+    incognito: bool,
+}
+
+#[derive(Debug)]
+enum NativeRequest {
+    CaptureAuthorization { incognito: bool },
+    PageContent(BrowserMessage),
+}
+
+fn parse_native_request(raw: &[u8]) -> serde_json::Result<NativeRequest> {
+    let value = serde_json::from_slice::<serde_json::Value>(raw)?;
+    if value.get("type").and_then(serde_json::Value::as_str) == Some("capture_authorization") {
+        let request = serde_json::from_value::<CaptureAuthorizationRequest>(value)?;
+        return Ok(NativeRequest::CaptureAuthorization {
+            incognito: request.incognito,
+        });
+    }
+    serde_json::from_value::<BrowserMessage>(value).map(NativeRequest::PageContent)
 }
 
 fn default_is_top_frame() -> bool {
@@ -134,7 +154,9 @@ fn read_native_message(reader: &mut impl Read) -> io::Result<Option<Vec<u8>>> {
 }
 
 fn write_native_message(writer: &mut impl Write, msg: &[u8]) -> io::Result<()> {
-    let len = (msg.len() as u32).to_le_bytes();
+    let len = u32::try_from(msg.len())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "native message too large"))?
+        .to_le_bytes();
     writer.write_all(&len)?;
     writer.write_all(msg)?;
     writer.flush()
@@ -146,7 +168,7 @@ fn truncate_at_sentence_boundary(text: &str, max_bytes: usize) -> &str {
     }
     let slice = &text[..max_bytes];
     if let Some(pos) = slice.rfind(". ") {
-        &text[..pos + 1]
+        &text[..=pos]
     } else if let Some(pos) = slice.rfind('\n') {
         &text[..pos]
     } else {
@@ -265,18 +287,32 @@ fn main() {
     let mut stdout = io::stdout().lock();
 
     while let Some(raw) = read_native_message(&mut stdin).unwrap_or(None) {
-        let Ok(msg) = serde_json::from_slice::<BrowserMessage>(&raw) else {
+        let Ok(request) = parse_native_request(&raw) else {
             let ack = serde_json::json!({"status": "error", "reason": "invalid_json"});
             let _ = write_native_message(&mut stdout, ack.to_string().as_bytes());
             continue;
         };
 
-        if process_message(&msg, &mut socket).is_ok() {
-            let ack = serde_json::json!({"status": "ok"});
-            let _ = write_native_message(&mut stdout, ack.to_string().as_bytes());
-        } else {
-            let ack = serde_json::json!({"status": "error", "reason": "socket_write"});
-            let _ = write_native_message(&mut stdout, ack.to_string().as_bytes());
+        match request {
+            NativeRequest::CaptureAuthorization { incognito } => {
+                let status = if incognito {
+                    "capture_disabled"
+                } else {
+                    "authorized"
+                };
+                let ack = serde_json::json!({"status": status});
+                let _ = write_native_message(&mut stdout, ack.to_string().as_bytes());
+            }
+            NativeRequest::PageContent(msg) => {
+                if process_message(&msg, &mut socket).is_ok() {
+                    let ack = serde_json::json!({"status": "ok"});
+                    let _ = write_native_message(&mut stdout, ack.to_string().as_bytes());
+                } else {
+                    let ack = serde_json::json!({"status": "error", "reason": "socket_write"});
+                    let _ = write_native_message(&mut stdout, ack.to_string().as_bytes());
+                    return;
+                }
+            }
         }
     }
 }
@@ -289,7 +325,8 @@ mod tests {
     fn read_native_message_roundtrip() {
         let payload = b"{\"test\":true}";
         let mut buf = Vec::new();
-        buf.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        let payload_len = u32::try_from(payload.len()).expect("fixture fits native message frame");
+        buf.extend_from_slice(&payload_len.to_le_bytes());
         buf.extend_from_slice(payload);
 
         let result = read_native_message(&mut &buf[..]).unwrap().unwrap();
@@ -346,7 +383,8 @@ mod tests {
             "text": "Hello",
             "ts_us": 1000000,
             "tab_id": 5,
-            "source_browser": "safari"
+            "source_browser": "safari",
+            "incognito": false
         }"#;
         let msg: BrowserMessage = serde_json::from_str(json).unwrap();
         assert_eq!(msg.url, "https://example.com");
@@ -355,20 +393,46 @@ mod tests {
     }
 
     #[test]
-    fn browser_message_defaults() {
+    fn authorization_request_contains_no_page_content() {
+        let request =
+            parse_native_request(br#"{"type":"capture_authorization","incognito":false}"#)
+                .expect("parse authorization request");
+
+        assert!(matches!(
+            request,
+            NativeRequest::CaptureAuthorization { incognito: false }
+        ));
+    }
+
+    #[test]
+    fn authorization_request_requires_privacy_classification() {
+        assert!(parse_native_request(br#"{"type":"capture_authorization"}"#).is_err());
+    }
+
+    #[test]
+    fn browser_message_rejects_missing_incognito_classification() {
         let json = r#"{
             "url": "https://example.com",
             "title": "Ex",
             "text": "hi",
             "ts_us": 0
         }"#;
+        let result = serde_json::from_str::<BrowserMessage>(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn browser_message_defaults_non_privacy_fields() {
+        let json = r#"{
+            "url": "https://example.com",
+            "title": "Ex",
+            "text": "hi",
+            "ts_us": 0,
+            "incognito": false
+        }"#;
         let msg: BrowserMessage = serde_json::from_str(json).unwrap();
         assert_eq!(msg.source_browser, "chrome");
         assert_eq!(msg.tab_id, 0);
-        // CSO invariant: a missing `incognito` field defaults to false.
-        // An older JS client that does not forward the flag must NOT be
-        // treated as incognito (would suppress everything). The block
-        // arms only on an explicit positive signal.
         assert!(!msg.incognito);
     }
 
@@ -440,7 +504,7 @@ mod tests {
     // ---- SH Fork E1 (all_frames:true) per-frame coverage --------------
 
     /// Builder for an SH-Fork-E1-era top-frame message. Use this in
-    /// tests so adding more fields to BrowserMessage doesn't churn the
+    /// tests so adding more fields to `BrowserMessage` doesn't churn the
     /// suite.
     fn top_frame_msg(url: &str, title: &str, text: &str, incognito: bool) -> BrowserMessage {
         BrowserMessage {
@@ -486,7 +550,8 @@ mod tests {
             "url": "https://example.com",
             "title": "Ex",
             "text": "hi",
-            "ts_us": 0
+            "ts_us": 0,
+            "incognito": false
         }"#;
         let msg: BrowserMessage = serde_json::from_str(json).unwrap();
         // CSO invariant: an older background.js (no per-frame fields)
@@ -509,7 +574,8 @@ mod tests {
             "frame_url": "https://js.stripe.com/v3/elements-inner-payment.html",
             "parent_url": "https://merchant.example.com/checkout",
             "is_top_frame": false,
-            "frame_id": 3
+            "frame_id": 3,
+            "incognito": false
         }"#;
         let msg: BrowserMessage = serde_json::from_str(json).unwrap();
         assert!(!msg.is_top_frame);

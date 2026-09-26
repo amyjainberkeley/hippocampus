@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import RecallUIKit
 import SwiftUI
 
@@ -13,6 +14,10 @@ final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Se
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
+        #if DEBUG
+        if NativePreviewConfiguration(arguments: CommandLine.arguments) != nil { return }
+        #endif
+
         // Cycle 8.51 — enterprise audit trail. Record every launch to
         // the plaintext audit log so the "who touched user data when"
         // trail is complete for a security-review buyer. Fire-and-forget:
@@ -25,26 +30,48 @@ final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Se
             ]
         )
 
-        // Wire the CEO-directed Spotlight-like recall popup: ⇧⌘Space
-        // toggles a floating panel that types-through to the same
-        // FFI search path as the main recall UI. Registration is
-        // best-effort — if Carbon returns an error (e.g. another app
-        // has claimed the same combo), we surface a menu-bar hint
-        // and continue booting so the recall UI proper still works.
+        // The always-running Hippocampus shell owns the system-wide hotkey.
+        // This child process owns only the popup and handles the initial
+        // command passed by the shell.
         MainActor.assumeIsolated {
             GlobalRecallPopupController.shared.configure(reader: MCIRecallApp.reader)
-            let result = GlobalHotkeyManager.shared.registerDefault {
-                GlobalRecallPopupController.shared.toggle()
+            DistributedNotificationCenter.default().addObserver(
+                self,
+                selector: #selector(receiveRecallCommand(_:)),
+                name: RecallLaunchRequest.distributedCommandName,
+                object: nil
+            )
+            let launchRequest = RecallLaunchRequest(
+                environment: ProcessInfo.processInfo.environment
+            )
+            if launchRequest.openPopup {
+                DispatchQueue.main.async {
+                    GlobalRecallPopupController.shared.show()
+                }
             }
-            if case .osError = result {
-                // Not fatal; the popup can still be invoked via the
-                // hippocampus://recall?popup=1 URL or the ⌘K Action
-                // Panel command. Log so support has a trail.
-                NSLog(
-                    "MCI: global hotkey registration failed (%@); " +
-                    "popup remains accessible via ⌘K command / URL scheme.",
-                    String(describing: result)
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        DistributedNotificationCenter.default().removeObserver(self)
+    }
+
+    @objc
+    private func receiveRecallCommand(_ notification: Notification) {
+        guard let request = RecallLaunchRequest(userInfo: notification.userInfo) else { return }
+        Task { @MainActor in
+            NSApp.activate(ignoringOtherApps: true)
+            if let tab = request.navigationTab {
+                let navigationRequest = RecallLaunchRequest(
+                    tab: tab, focusEventId: request.focusEventId, openPopup: false
                 )
+                NotificationCenter.default.post(
+                    name: RecallLaunchRequest.localCommandName,
+                    object: navigationRequest
+                )
+            }
+            if request.openPopup {
+                GlobalRecallPopupController.shared.show()
             }
         }
     }
@@ -60,25 +87,34 @@ struct MCIRecallApp: App {
     fileprivate static let reader: BrainReader = Self.makeReader()
 
     var body: some Scene {
-        WindowGroup("Hippocampus Recall") {
+        WindowGroup("Hippocampus") {
+            #if DEBUG
+            if let preview = NativePreviewConfiguration(arguments: CommandLine.arguments) {
+                NativeRecallPreview(configuration: preview)
+            } else {
+                liveWorkspace
+            }
+            #else
+            liveWorkspace
+            #endif
+        }
+        .defaultPosition(.center)
+        .defaultSize(width: 920, height: 620)
+    }
+
+    @ViewBuilder
+    private var liveWorkspace: some View {
+            let launchRequest = RecallLaunchRequest(
+                environment: ProcessInfo.processInfo.environment
+            )
             RootView(
                 reader: MCIRecallApp.reader,
-                initialTab: MCIRecallApp.initialTabFromEnv()
+                initialTab: launchRequest.initialTab,
+                initialFocusEventId: launchRequest.focusEventId
             )
-            .frame(minWidth: 720, minHeight: 480)
+            .preferredColorScheme(.light)
+            .frame(minWidth: 720, minHeight: 440)
             .background(Color.brandBgPrimary)
-            .preferredColorScheme(.dark)
-            .onOpenURL { url in
-                // `hippocampus://recall?popup=1` — invoked by the
-                // ⌘K Action Panel from other Hippocampus apps or a
-                // command-palette shortcut. Presents the global
-                // popup without touching the current tab state.
-                let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
-                let items = comps?.queryItems ?? []
-                if items.contains(where: { $0.name == "popup" && $0.value == "1" }) {
-                    GlobalRecallPopupController.shared.show()
-                }
-            }
             .task {
                 // Per `docs/design/brief-viewer-spec.md` §"When the user
                 // discovers their first brief": on Recall app launch, ask
@@ -94,34 +130,35 @@ struct MCIRecallApp: App {
                     latestBriefDate: latestDate
                 )
             }
-        }
-        .defaultPosition(.center)
-        .defaultSize(width: 900, height: 600)
-    }
-
-    /// Read `MCI_INITIAL_TAB` set by Hippocampus.app when handling a
-    /// `hippocampus://recall?tab=…` deep-link. Defaults to `.search`.
-    @MainActor
-    private static func initialTabFromEnv() -> RecallTab {
-        guard let raw = ProcessInfo.processInfo.environment[RecallTab.initialTabEnvVar],
-              let tab = RecallTab.from(deepLinkValue: raw)
-        else {
-            return .search
-        }
-        return tab
     }
 
     @MainActor
     private static func makeReader() -> BrainReader {
-        guard let keyHex = ProcessInfo.processInfo.environment["MCI_DB_KEY_HEX"],
-              !keyHex.isEmpty
-        else {
-            return StubBrainReader()
-        }
+        let environment = ProcessInfo.processInfo.environment
+        let reference = KeychainDatabaseKeyReference.from(environment: environment)
         do {
-            return try FFIBrainReader(path: defaultBrainPath(), keyHex: keyHex)
+            let keyHex = try DevelopmentDatabaseKeyMaterial.hex(from: environment)
+                ?? KeychainDatabaseKeyResolver().resolveHex(reference: reference)
+            let path = environment["MCI_DB_PATH"] ?? defaultBrainPath()
+            if let modelPath = embeddingModelPath(environment: environment) {
+                do {
+                    return try FFIBrainReader(
+                        path: path,
+                        keyHex: keyHex,
+                        modelPath: modelPath
+                    )
+                } catch {
+                    NSLog(
+                        "MCI: semantic Recall unavailable; retrying lexical mode: %@",
+                        error.localizedDescription
+                    )
+                }
+            }
+            return try FFIBrainReader(path: path, keyHex: keyHex)
         } catch {
-            return StubBrainReader()
+            let message = "Recall cannot open the encrypted brain: \(error.localizedDescription)"
+            NSLog("MCI: %@", message)
+            return UnavailableBrainReader(message: message)
         }
     }
 
@@ -135,21 +172,47 @@ struct MCIRecallApp: App {
         return (supportDir as NSString)
             .appendingPathComponent("MCI/mci.sqlite")
     }
+
+    private static func embeddingModelPath(environment: [String: String]) -> String? {
+        if let configured = environment["MCI_ARCTIC_MODEL_PATH"], !configured.isEmpty {
+            return configured
+        }
+        guard let resources = Bundle.main.resourceURL else { return nil }
+        let bundled = resources
+            .appendingPathComponent("Models", isDirectory: true)
+            .appendingPathComponent("ArcticEmbedS_FP16.mlmodelc", isDirectory: true)
+        return FileManager.default.fileExists(atPath: bundled.path) ? bundled.path : nil
+    }
 }
 
 struct RootView: View {
     let reader: BrainReader
-    @State private var selectedTab: RecallTab
+    @State private var selection: MemoryWorkspaceSelection
     @State private var searchFocusTrigger = false
-    @ObservedObject private var actionPanelRegistry = ActionPanelRegistry.shared
+    @State private var focusRequest: RecallFocusRequest?
+    @State private var nextFocusSequence: UInt64
+    @State private var latestBriefRequest: UUID?
+    private let actionPanelRegistry = ActionPanelRegistry.shared
+    @State private var isHelpVisible = ActionPanelRegistry.shared.isHelpVisible
     // Cycle 8.54 — "What's new" release-notes modal. Coordinator owns
     // the last-shown-version bookkeeping (UserDefaults) + the parsed
     // release loaded from Contents/Resources/CHANGELOG.md.
     @StateObject private var whatsNewCoord = WhatsNewCoordinator()
 
-    init(reader: BrainReader, initialTab: RecallTab = .search) {
+    init(
+        reader: BrainReader,
+        initialTab: RecallTab = RecallTab.defaultTab,
+        initialFocusEventId: UInt64? = nil
+    ) {
         self.reader = reader
-        self._selectedTab = State(initialValue: initialTab)
+        self._selection = State(initialValue: MemoryWorkspaceSelection(initialTab: initialFocusEventId == nil ? initialTab : .search))
+        self._focusRequest = State(
+            initialValue: initialFocusEventId.map {
+                RecallFocusRequest(eventId: $0, sequence: 1)
+            }
+        )
+        self._nextFocusSequence = State(initialValue: initialFocusEventId == nil ? 1 : 2)
+        self._latestBriefRequest = State(initialValue: initialTab == .brief && initialFocusEventId == nil ? UUID() : nil)
     }
 
     /// Global (non-contextual) commands. Registered once for the
@@ -165,28 +228,17 @@ struct RootView: View {
                 category: .search,
                 description: "Focus the search field and clear it."
             ) {
-                selectedTab = .search
+                selection = .search
                 searchFocusTrigger.toggle()
             },
             .init(
                 id: "app.showTimeline",
-                title: "Show Timeline",
+                title: "Show History",
                 shortcut: "⌘T",
                 category: .app,
                 description: "Switch to the timeline of recent events."
             ) {
-                selectedTab = .timeline
-            },
-            // V2-P13 (Phase D scaffold) — command-palette entry for the
-            // Rewind-style visual timeline strip.
-            .init(
-                id: "app.showTimelineStrip",
-                title: "Show Timeline Strip",
-                shortcut: "⌘8",
-                category: .app,
-                description: "Rewind-style visual timeline strip (scaffold; live data awaits V2-P1 M4 lift)."
-            ) {
-                selectedTab = .timelineStrip
+                selection = .timeline
             },
             .init(
                 id: "app.openSettings",
@@ -195,27 +247,16 @@ struct RootView: View {
                 category: .app,
                 description: "Open the settings and dictionary tab."
             ) {
-                selectedTab = .settings
+                selection = .settings
             },
             .init(
                 id: "app.openCustomNames",
                 title: "Open Custom Names Dictionary",
-                shortcut: "⌘6",
+                shortcut: "⌘\(MemoryWorkspaceSelection.settings.keyboardShortcutLabel)",
                 category: .app,
                 description: "Edit user-defined entity aliases."
             ) {
-                selectedTab = .settings
-            },
-            .init(
-                id: "app.toggleDarkMode",
-                title: "Toggle Dark Mode",
-                shortcut: "⌘⇧D",
-                category: .app,
-                description: "Recall UI is dark-locked today; reserved for future light mode."
-            ) {
-                // No-op stub: recall UI is dark-locked today (see
-                // `preferredColorScheme(.dark)` in MCIRecallApp).
-                // Registered for discoverability per peer study §4.
+                selection = .settings
             },
             .init(
                 id: "app.togglePlayback",
@@ -224,7 +265,7 @@ struct RootView: View {
                 category: .app,
                 description: "Play or pause the timeline scrubber."
             ) {
-                selectedTab = .timeline
+                selection = .timeline
             },
             .init(
                 id: "app.refreshBrain",
@@ -235,14 +276,10 @@ struct RootView: View {
             ) {
                 Task { @MainActor in
                     actionPanelRegistry.beginRefresh()
-                    // Simulated async re-query pass. Brain is read-only
-                    // via FFI (ADR-0016 §4.3) — the actual work is a
-                    // best-effort flush of caches on the search view
-                    // model. Kept off the UI thread so the spinner
-                    // renders even on cold-start slow FFI opens.
-                    try? await Task.sleep(nanoseconds: 350_000_000)
+                    MemoryRefreshSignal.post()
+                    await Task.yield()
                     actionPanelRegistry.endRefresh()
-                    ToastNotifier.shared.notify("Brain refreshed")
+                    ToastNotifier.shared.notify("Refreshing memory")
                 }
             },
             .init(
@@ -303,15 +340,6 @@ struct RootView: View {
                 GlobalRecallPopupController.shared.show()
             },
             .init(
-                id: "app.showChat",
-                title: "Show Chat",
-                shortcut: "⌘9",
-                category: .app,
-                description: "Preview the future chat-with-your-memory surface (ships in v1.5)."
-            ) {
-                selectedTab = .chat
-            },
-            .init(
                 id: "app.quit",
                 title: "Quit Hippocampus Recall",
                 shortcut: "⌘Q",
@@ -324,116 +352,60 @@ struct RootView: View {
     }
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            SearchView(
-                viewModel: SearchViewModel(reader: reader),
-                focusTrigger: searchFocusTrigger,
-                reader: reader
-            )
-            .tag(RecallTab.search)
-            .tabItem { Label("Search", systemImage: "magnifyingglass") }
-
-            TimelineView(viewModel: TimelineViewModel(reader: reader), reader: reader)
-                .tag(RecallTab.timeline)
-                .tabItem { Label("Timeline", systemImage: "clock") }
-
-            EpisodesView(viewModel: EpisodesViewModel(reader: reader))
-                .tag(RecallTab.episodes)
-                .tabItem { Label("Episodes", systemImage: "rectangle.stack") }
-
-            BriefView(
-                viewModel: BriefViewModel(
-                    reader: reader,
-                    isModelPresentProbe: {
-                        ModelPresenceProbe.isBriefModelInstalled()
-                    },
-                    hasFullDayCapture: true
-                ),
-                onRequestModelDownload: {
-                    // The recall-ui doesn't own the download UI (PR #134
-                    // lives in Hippocampus.app). Surface a hippocampus://
-                    // deep-link so the menu-bar app handles it.
-                    if let url = URL(string: "hippocampus://recall?tab=brief&download=1") {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
-            )
-            .tag(RecallTab.brief)
-            .tabItem { Label("Brief", systemImage: "doc.text") }
-
-            PrivacyMomentsView(
-                viewModel: PrivacyMomentsViewModel(reader: reader)
-            )
-            .tag(RecallTab.privacy)
-            .tabItem { Label("Privacy Moments", systemImage: "eye.slash") }
-
-            UserDictionaryEditor()
-                .tag(RecallTab.settings)
-                .tabItem { Label("Settings", systemImage: "gearshape") }
-
-            // Cycle 8.47 (PR #76 follow-up): wire the mutator when the
-            // reader is FFI-backed so the destructive-action buttons
-            // route through the real delete pathway. StubBrainReader
-            // callers (preview / smoke) get a nil mutator and see
-            // disabled-behavior on delete.
-            PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator)
-                .tag(RecallTab.privacyDashboard)
-                .tabItem { Label("Privacy", systemImage: "lock.shield") }
-
-            // V2-P13 (Phase D scaffold): Rewind-style visual timeline
-            // strip. See ADR-0036. Live rendering awaits V2-P1 M4 lift
-            // + real captures; scaffold renders MCIEmptyState until
-            // then.
-            TimelineStripView(reader: reader)
-                .tag(RecallTab.timelineStrip)
-                .tabItem { Label("Strip", systemImage: "chart.bar.doc.horizontal") }
-
-            // Cycle 8.52 — Chat surface STUB (⌘9). UI-only preview of the
-            // V2-P12 chat-with-your-memory experience per ADR-0035 (Proposed).
-            // No ML runtime loaded; replies are placeholder strings framed as
-            // "coming in v1.5" so the CEO can review the shape before
-            // ratifying ADR-0035.
-            ChatSurfaceView()
-                .tag(RecallTab.chat)
-                .tabItem {
-                    Label("Chat", systemImage: "bubble.left.and.text.bubble.right")
-                }
-        }
-        .padding(.top, 6)
+        MemoryWorkspaceView(
+            reader: reader,
+            selection: $selection,
+            searchFocusTrigger: searchFocusTrigger,
+            focusRequest: focusRequest,
+            latestBriefRequest: latestBriefRequest
+        )
         .background(Color.brandBgPrimary)
-        .focusable()
+        .onChange(of: selection) { _, destination in
+            if destination != .now { latestBriefRequest = nil }
+        }
+        .onOpenURL { url in
+            guard let request = RecallLaunchRequest(url: url) else { return }
+            apply(request)
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: RecallLaunchRequest.localCommandName)
+        ) { notification in
+            guard let request = notification.object as? RecallLaunchRequest else { return }
+            apply(request)
+        }
+        .focusable(true, interactions: .automatic)
         .onKeyPress(
-            keys: [
-                .init("1"), .init("2"), .init("3"), .init("4"),
-                .init("5"), .init("6"), .init("7"), .init("8"), .init("9"),
-            ],
+            keys: Set(
+                MCI.Workspace.allDestinations.compactMap { destination in
+                    destination.keyboardShortcut.first.map { KeyEquivalent($0) }
+                }
+            ).union([KeyEquivalent("5")]),
             phases: .down
         ) { press in
-            guard press.modifiers == .command else { return .ignored }
-            switch press.key {
-            case KeyEquivalent("1"): selectedTab = .search
-            case KeyEquivalent("2"): selectedTab = .timeline
-            case KeyEquivalent("3"): selectedTab = .episodes
-            case KeyEquivalent("4"): selectedTab = .brief
-            case KeyEquivalent("5"): selectedTab = .privacy
-            case KeyEquivalent("6"): selectedTab = .settings
-            case KeyEquivalent("7"): selectedTab = .privacyDashboard
-            // V2-P13 (Phase D scaffold) — ⌘8 = timeline strip tab.
-            case KeyEquivalent("8"): selectedTab = .timelineStrip
-            case KeyEquivalent("9"): selectedTab = .chat
-            default: return .ignored
+            guard
+                press.modifiers == .command,
+                let destination = MemoryWorkspaceSelection(
+                    keyboardShortcut: press.key.character
+                )
+            else {
+                return .ignored
+            }
+            if press.key.character == "5" {
+                apply(RecallLaunchRequest(tab: .brief, focusEventId: nil, openPopup: false))
+            } else {
+                selection = destination
             }
             return .handled
         }
         .onKeyPress(.init("f"), phases: .down) { press in
             guard press.modifiers == .command else { return .ignored }
-            selectedTab = .search
+            selection = .search
             searchFocusTrigger.toggle()
             return .handled
         }
         .onKeyPress(.init("b"), phases: .down) { press in
             guard press.modifiers == .command else { return .ignored }
-            selectedTab = .brief
+            apply(RecallLaunchRequest(tab: .brief, focusEventId: nil, openPopup: false))
             return .handled
         }
         .onKeyPress(.init("/"), phases: .down) { press in
@@ -452,7 +424,13 @@ struct RootView: View {
         }
         .registerActionPanelCommands(globalCommands, registry: actionPanelRegistry)
         .actionPanelHost(registry: actionPanelRegistry)
-        .sheet(isPresented: $actionPanelRegistry.isHelpVisible) {
+        .onReceive(actionPanelRegistry.$isHelpVisible.removeDuplicates().receive(on: RunLoop.main)) {
+            isHelpVisible = $0
+        }
+        .sheet(isPresented: Binding(
+            get: { isHelpVisible },
+            set: { isHelpVisible = $0; actionPanelRegistry.isHelpVisible = $0 }
+        )) {
             KeyboardShortcutsSheet(registry: actionPanelRegistry)
         }
         .sheet(isPresented: $whatsNewCoord.isVisible) {
@@ -466,33 +444,22 @@ struct RootView: View {
             whatsNewCoord.maybeShowOnBoot()
         }
     }
-}
 
-/// Best-effort probe for whether the daily-brief author model has been
-/// downloaded. The recall-ui does NOT own model lifecycle (PR #134's
-/// ModelDownloadView in Hippocampus.app does); we just want to know
-/// whether the file exists on disk so the Brief tab can render the
-/// right empty state.
-///
-/// Mirrors `ModelDownloadManager.isModelAvailable(modelID:)` —
-/// checks `~/Library/Application Support/MCI/Models/<modelID>/` exists.
-/// Kept inside the recall-ui rather than via FFI/IPC because (a) it's
-/// a plain filesystem read, (b) the recall-ui already runs under the
-/// user's HOME, and (c) a missing-file false-negative just renders
-/// the "Enable on-device brief model" CTA which is benign.
-enum ModelPresenceProbe {
-    static let qwen3ModelID = "qwen3-1.7b-fp16"
-
-    static func isBriefModelInstalled(modelID: String = qwen3ModelID) -> Bool {
-        // Per `docs/decisions/0028-brief-author-model-qwen3-1.7b-coreml.md` §4,
-        // models live in ~/Library/Application Support/MCI/Models/<id>/.
-        let supportDir = NSSearchPathForDirectoriesInDomains(
-            .applicationSupportDirectory,
-            .userDomainMask,
-            true
-        ).first ?? NSTemporaryDirectory()
-        let path = (supportDir as NSString)
-            .appendingPathComponent("MCI/Models/\(modelID)")
-        return FileManager.default.fileExists(atPath: path)
+    private func apply(_ request: RecallLaunchRequest) {
+        if request.openPopup {
+            GlobalRecallPopupController.shared.show()
+        }
+        if let tab = request.navigationTab {
+            selection = MemoryWorkspaceSelection(initialTab: tab)
+            latestBriefRequest = tab == .brief ? UUID() : nil
+        }
+        if let eventId = request.focusEventId {
+            selection = .search
+            focusRequest = RecallFocusRequest(
+                eventId: eventId,
+                sequence: nextFocusSequence
+            )
+            nextFocusSequence &+= 1
+        }
     }
 }

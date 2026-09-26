@@ -1,0 +1,196 @@
+# Safe Product Continuation Implementation Plan
+
+> For agentic workers: use subagent-driven development for independent slices;
+> keep capture runtime integration and installed verification with the main agent.
+
+**Goal:** Continue the owner's approved local screen-memory product, fixing
+privacy and reliability before extending usefulness and distributability.
+
+**Architecture:** Keep the signed native Swift app/helper, encrypted Rust brain,
+bounded local context compiler and explicit client opt-ins. Derived knowledge
+must retain evidence, distinguish observations from inference, and never execute
+instructions found in captured content. No always-on remote inference.
+
+**Tech stack:** Swift/AppKit/SwiftUI/ScreenCaptureKit, Rust, SQLCipher, existing
+Core ML retrieval artifact; pinned existing dependency ecosystem.
+
+**Spec:** `docs/audit/2026-09-05-product-repair.md`, Remaining Acceptance Gates,
+and the owner's follow-up approval to continue all gaps with safety first.
+
+## Global Constraints
+
+- Preserve production memory, user changes, keys, OS permissions and consent.
+- No keylogging, protection bypass, unapproved external sharing or autogrants.
+- No claim of zero bugs, virus-free software, trusted answers or universal capture.
+- Test behavioral failures before fixes; retain failing qualification results.
+- macOS 14 remains the deployment floor. Do not introduce new dependencies
+  without a justified source/integrity and compatibility review.
+- Keep the installed artifact until an integrated successor passes
+  relevant tests, build provenance, signing and native downstream verification.
+- No public release or remote upload of memory without the separate release and
+  consent gates. Public model inputs and second-Mac proof remain explicit gates.
+
+## 1. Capture Stops And Recovery
+
+Files: `SCStreamCaptureSession.swift`, its lifetime tests, and parent
+`ProcessSupervisor.swift` / `ProcessSupervisorTests.swift`.
+
+- [x] Reproduce delayed retired-stream classification without trusting frame counters.
+- [x] Restrict generic fatal callbacks to live owned streams; preserve real current-stream
+  failure visibility and terminal handling when an intentional OS stop fails.
+- [x] Classify ScreenCaptureKit's `SCStreamErrorUserStopped` separately. Helper
+  exit code 82 means explicit user stop; 81 remains generic runtime failure.
+- [x] Add the parent behavioral regression:
+  `topology.fireUnexpectedExit(forLaunchAt: 0, label: "helper", status: 82)`
+  must persist capture off, quiesce the topology and never schedule capture retry.
+- [x] A failed persistence/teardown while disabling capture must not roll back
+  to capture-on. Failure remains visible and requires an explicit new enable.
+- [x] Run both focused suites, then complete optimized capture and parent suites.
+- [x] Prove ordinary Finder/TextEdit switching, fresh image capture and owned
+  helper process-failure recovery on the signed installed app.
+- [ ] Qualify real OS sleep/wake and owner-controlled explicit Stop/revocation.
+
+## 2. Useful Evidence Briefs
+
+Files: `core/brief/src/extractive_author.rs`, corresponding brief/eval tests,
+`apps/agent/src/brief_worker.rs` only when author integration requires it.
+
+- [x] Add behavioral cases for repeated OCR, Finder chrome, useful work facts,
+  conflicting statements, malicious instructions and missing evidence.
+- [x] Rank and organize source-preserving draft extracts; do not manufacture
+  paraphrases, commitments, completion status or time worked.
+- [x] Keep citations resolvable, output bounded, and authoring entirely local.
+- [x] Run fixed historic and new quality checks separately, reporting both.
+- [x] Inspect the resulting native brief and its authenticated source navigation.
+
+## 3. Release And Dependency Hygiene
+
+Files: audit workflow, scoped security scripts and a new supply-chain report.
+
+- [x] Run available lockfile advisory checks without uploading private content.
+- [x] Audit scanner pinning, stale ignore rules, failure propagation and reports.
+- [x] Reproduce and repair silent-green checks with fixture tests; unavailable
+  scanners must be reported as unavailable, not clean.
+- [x] Report dependency changes separately before applying upgrades. Preserve
+  production lockfile compatibility and verify each selected upgrade.
+- [x] Check bundled-model integrity, package provenance, signed nested
+  executables and no credentials in packaged/client configuration.
+
+## 4. Measured Activity
+
+Files: helper context/IPC, Rust IPC/ingestion/store, Recall bridge/day view.
+
+- [ ] Specify a narrow versioned activity-sample contract after reading the
+  existing wire/storage boundaries. No schema shortcut through OCR text.
+- [x] Use a read-only system idle-duration query, never an event tap or key log.
+- [ ] Admit samples only through the same foreground identity/consent/privacy
+  boundaries. Unknown or absent readings never imply active work.
+- [ ] Bound sampling, retention and storage; do not derive hours from sparse
+  screenshots or carry state across sleep, pauses, large gaps or app switches.
+- [ ] Prove cross-language decoding, deletion/retention, timestamp limits and
+  native active/idle/unknown presentation with deterministic clock fixtures.
+
+## 5. Reviewable Commitments
+
+- [ ] Inspect existing claim/entity/episode stores before selecting a schema.
+- [ ] Separate source-quoted candidates from user-confirmed commitments.
+- [ ] Test quoted third-party promises, negations, hypothetical text, conflicting
+  dates, prompt injection and source deletion before presenting suggestions.
+- [ ] Add explicit confirm/dismiss/done controls. No automatic reminders or
+  external actions based only on a guessed obligation.
+- [ ] Bind every candidate to viewable source evidence; measure false positives
+  on held-out synthetic workdays and retain abstention.
+
+## 6. Browser And Permission Qualification
+
+- [ ] Owner handles any exact Hippocampus-to-browser Automation consent prompt.
+- [ ] Distinct normal/private synthetic markers verify both retention and
+  exclusion; unsupported/ambiguous cases remain visibly withheld.
+- [ ] Owner-controlled permission revoke/restore verifies stopped capture and
+  subsequent legitimate recovery, with no reset/grant by automation.
+
+## 7. Client Continuity And Sharing Boundary
+
+- [x] Re-run actual Codex retrieval/context against fresh retained evidence,
+  preserving observations-only truth status.
+- [ ] Re-run bounded Claude startup delivery on the final artifact. Do not
+  infer successful model use from hook delivery.
+- [ ] Test malformed client config, missing binaries, timeouts and uninstall;
+  preserve unrelated settings and never export raw keys.
+- [ ] Keep sharing explicitly initiated, source-previewed and bounded. A local
+  archive/installer is not permission to upload the owner's memory or release.
+
+## 8. Integrated Release
+
+- [ ] Independent correctness and security review of the complete diff.
+- [ ] Run affected suites, full compatibility gates, resource measurements and
+  installed screen/search/image/context loop from the exact assembled source.
+- [x] Sign/notarize/staple app and DMG, preserve prior installation, verify
+  provenance after copying, and leave the usable native app open.
+- [x] Refresh `docs/STATUS.md` and the owner-facing built/gaps ledger only with
+  observed evidence. Second-Mac and public release gates remain unqualified
+  until actually exercised.
+
+## Integration Evidence, September 6
+
+Complete optimized suites: capture 674, parent 323, Recall 409 XCTest plus three
+Swift Testing handoff tests passed. Brief generation has 17 agent integration
+tests; the unchanged eight-day corpus and the new ten-case extractive corpus
+pass. The latter improved from 2/10 on the baseline to 10/10 on its finite
+source-containment/noise/formatting checks. It does not establish semantic truth.
+Oversized-input regressions also bound escaped brief bodies to 16 KB without
+truncating evidence sentences. Strict Clippy passed for brief/eval targets.
+
+The final serial debug Rust workspace passed 1,972 tests, with nine ignored,
+across 130 groups (`/tmp/hippocampus-workspace-final-20260906.log`). The first
+concurrent-build run's two tier2 timing failures remain recorded. A release
+test attempt was refused by the intentional test-key-wrap compile guard; that
+guard was not disabled. Eight release-safety fixtures, 16 audit fixtures and
+224 release-contract checks pass. Routine local/CI checks now run the safety
+fixtures as blocking gates, with a behavioral failure-propagation test.
+
+The activity reader currently drives bounded quiet-input sampling only. It
+admits first/new-window samples and resumes ordinary cadence on input; it does
+not discard passive reading/meetings or persist measured work time. Phase 4's
+wire/store/UI contract is still unbuilt.
+
+The source-link native UI parses only the versioned extractive format, treats
+captured markup as inert text and opens the existing authenticated source
+viewer. Empty/overflow/malformed citations have regression coverage. Installed
+`11194ae` showed source-linked briefs, native screenshot search and authenticated
+TextEdit event 1755 pixels. The real Codex MCP connection returned its synthetic
+marker with observations-only truth status. Durable proof is in
+`/Users/amy/hippo-work/releases/2026-09-06-11194ae/`.
+
+Subagent review was initially unavailable due to account limits, then became
+available for the recovery follow-up. It found four actionable race/state bugs;
+tests reproduced each before correction, and re-review found no remaining
+actionable issues in that scoped diff. This is not a whole-product independent
+security review. A capture-off persistence
+failure is visibly latched for the running parent, but cannot guarantee that
+intent survives a future relaunch if the disk write itself failed.
+
+The installed app later became disconnected after replacement startup failed
+with `noDisplay`. Follow-up `eff26a3` adds bounded retries across startup failures
+and eligible workspace-wake recovery while preserving Stop/pause/revocation/Quit.
+It also repairs restored-query loading, debounced typing and stale search races,
+and excludes Finder gallery noise exposed by native brief review. Parent race
+red/green logs are `/tmp/hippocampus-review-races-red-20260906.log`,
+`/tmp/hippocampus-review-integration-red-20260906.log` and
+`/tmp/hippocampus-parent-shipping-final-20260906.log`.
+The corrected successor was signed, notarized, stapled and installed as
+`2e5fc82`. Synthetic event 1802 reached Codex; after an owned helper termination,
+event 1803 was stored roughly three seconds later and displayed in the native
+authenticated screenshot viewer. Restored-query loading, typing without Enter,
+brief generation and brief-to-event-1803 navigation passed. The three native
+proof screenshots are in `/Users/amy/hippo-work/releases/2026-09-06-2e5fc82/`.
+Clipped/repeated OCR remains visible in drafts and is an explicit quality gap.
+The parent was deliberately stopped for native inspection and resumed through
+the Capture control; owner permissions and capture settings were not changed.
+
+Build-only follow-up `8b8598b` closes a second launch-verifier isolation gap:
+both assembly and installer now require disposable HOME and first-run
+onboarding. The regression failed before correction, then all eight safety
+fixtures and 224 release-contract checks passed. The already notarized app
+independently passed the clean-home/onboarding launch check; its executable
+provenance remains `2e5fc82`, not the later packaging-only commit.

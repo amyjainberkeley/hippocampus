@@ -1,0 +1,412 @@
+{
+  "dataset_id": "hippocampus-evidence-sufficiency-calibration-v1",
+  "description": "Disjoint household and everyday-life evidence-sufficiency calibration. It contains no Task 3 questions, entities, source sessions, software-work facts, ownership, approval, duration, due-date, or count answers.",
+  "target_positive_coverage": 0.90,
+  "cases": [
+    {
+      "id": "fit-instrument",
+      "split": "fit",
+      "query": "Which instrument did Nila practice before supper?",
+      "supporting_documents": [
+        "Nila practiced the cello in the dining room before supper.",
+        "The cello case was resting beside the dining-room chair.",
+        "Supper was served after the music practice ended."
+      ],
+      "insufficient_documents": [
+        "Nila practiced music in the dining room before supper.",
+        "A closed instrument case was beside the chair.",
+        "Supper was served after practice ended."
+      ]
+    },
+    {
+      "id": "fit-fabric",
+      "split": "fit",
+      "query": "What fabric was used for the reading-room curtains?",
+      "supporting_documents": [
+        "The reading-room curtains were sewn from heavy linen.",
+        "The curtains were rehung after the windows were cleaned.",
+        "Morning light reaches the reading room from the east."
+      ],
+      "insufficient_documents": [
+        "The reading-room curtains were rehung after cleaning.",
+        "A fabric sample was left near the sewing machine.",
+        "Morning light reaches the room from the east."
+      ]
+    },
+    {
+      "id": "fit-spice",
+      "split": "fit",
+      "query": "Which spice did Imani add to the pear compote?",
+      "supporting_documents": [
+        "Imani stirred cardamom into the pear compote near the end.",
+        "The pear compote cooled in a glass bowl.",
+        "Several spice jars remained on the counter."
+      ],
+      "insufficient_documents": [
+        "Imani stirred a spice into the pear compote near the end.",
+        "The compote cooled in a glass bowl.",
+        "Several labeled spice jars remained on the counter."
+      ]
+    },
+    {
+      "id": "fit-hiding-place",
+      "split": "fit",
+      "query": "Where did the tortoise hide during the rain?",
+      "supporting_documents": [
+        "During the rain, the tortoise hid beneath the rosemary planter.",
+        "The rosemary planter stands beside the back step.",
+        "Rainwater collected along the garden path."
+      ],
+      "insufficient_documents": [
+        "The tortoise disappeared from view during the rain.",
+        "Several planters stand beside the back step.",
+        "Rainwater collected along the garden path."
+      ]
+    },
+    {
+      "id": "fit-cause",
+      "split": "fit",
+      "query": "What caused the hallway lamp to flicker?",
+      "supporting_documents": [
+        "The hallway lamp flickered because its bulb was loose in the socket.",
+        "The lamp stopped flickering after the bulb was tightened.",
+        "The hallway outlet tested normally."
+      ],
+      "insufficient_documents": [
+        "The hallway lamp flickered twice in the evening.",
+        "The lamp was checked and later stopped flickering.",
+        "The hallway outlet tested normally."
+      ]
+    },
+    {
+      "id": "fit-transport",
+      "split": "fit",
+      "query": "How did Rowan cross the inlet?",
+      "supporting_documents": [
+        "Rowan crossed the inlet on the small passenger ferry.",
+        "The ferry dock was quiet when Rowan arrived.",
+        "The road around the inlet remained open."
+      ],
+      "insufficient_documents": [
+        "Rowan crossed the inlet before noon.",
+        "The dock was quiet when Rowan arrived.",
+        "The road around the inlet remained open."
+      ]
+    },
+    {
+      "id": "fit-paint-color",
+      "split": "fit",
+      "query": "Which color was selected for the studio door?",
+      "supporting_documents": [
+        "Ultramarine was selected for the studio door.",
+        "The studio door was sanded before painting.",
+        "Three paint samples were viewed in daylight."
+      ],
+      "insufficient_documents": [
+        "One color was selected for the studio door.",
+        "The studio door was sanded before painting.",
+        "Three paint samples were viewed in daylight."
+      ]
+    },
+    {
+      "id": "fit-winter-room",
+      "split": "fit",
+      "query": "Which room held the citrus trees during winter?",
+      "supporting_documents": [
+        "The conservatory held the citrus trees during winter.",
+        "The trees received afternoon light through tall windows.",
+        "Their pots were moved indoors before the first frost."
+      ],
+      "insufficient_documents": [
+        "One room held the citrus trees during winter.",
+        "The trees received afternoon light through tall windows.",
+        "Their pots were moved indoors before the first frost."
+      ]
+    },
+    {
+      "id": "fit-river-bird",
+      "split": "fit",
+      "query": "Which bird nested beside the river path?",
+      "supporting_documents": [
+        "A kingfisher nested beside the river path.",
+        "The nest was hidden above the waterline.",
+        "Walkers kept to the opposite bank."
+      ],
+      "insufficient_documents": [
+        "A bird nested beside the river path.",
+        "The nest was hidden above the waterline.",
+        "Walkers kept to the opposite bank."
+      ]
+    },
+    {
+      "id": "fit-repair-tool",
+      "split": "fit",
+      "query": "What tool tightened the loose bicycle pedal?",
+      "supporting_documents": [
+        "A torque wrench tightened the loose bicycle pedal.",
+        "The pedal was checked again after a short ride.",
+        "The bicycle chain needed no adjustment."
+      ],
+      "insufficient_documents": [
+        "A tool tightened the loose bicycle pedal.",
+        "The pedal was checked again after a short ride.",
+        "The bicycle chain needed no adjustment."
+      ]
+    },
+    {
+      "id": "fit-bowl-material",
+      "split": "fit",
+      "query": "What material is the blue serving bowl made from?",
+      "supporting_documents": [
+        "The blue serving bowl is made from porcelain.",
+        "The bowl is kept on the upper kitchen shelf.",
+        "Its rim has a narrow white stripe."
+      ],
+      "insufficient_documents": [
+        "The blue serving bowl is made from a material chosen for durability.",
+        "The bowl is kept on the upper kitchen shelf.",
+        "Its rim has a narrow white stripe."
+      ]
+    },
+    {
+      "id": "fit-blanket-pattern",
+      "split": "fit",
+      "query": "Which pattern was woven into the guest-room blanket?",
+      "supporting_documents": [
+        "A basketweave pattern was woven into the guest-room blanket.",
+        "The blanket was finished before the cold weather arrived.",
+        "Matching yarn remains in the cedar chest."
+      ],
+      "insufficient_documents": [
+        "A pattern was woven into the guest-room blanket.",
+        "The blanket was finished before the cold weather arrived.",
+        "Matching yarn remains in the cedar chest."
+      ]
+    },
+    {
+      "id": "calibration-finish",
+      "split": "calibration",
+      "query": "Which finish was chosen for the pantry shelves?",
+      "supporting_documents": [
+        "A matte finish was chosen for the pantry shelves.",
+        "The pantry shelves were sanded before finishing.",
+        "Two finish samples had been compared in daylight."
+      ],
+      "insufficient_documents": [
+        "A finish was chosen for the pantry shelves.",
+        "The shelves were sanded before finishing.",
+        "Two samples had been compared in daylight."
+      ]
+    },
+    {
+      "id": "calibration-trail",
+      "split": "calibration",
+      "query": "Which trail did Sora take to the overlook?",
+      "supporting_documents": [
+        "Sora took the Juniper Loop trail to reach the overlook.",
+        "The overlook faces the western ridge.",
+        "A second trail was closed for maintenance."
+      ],
+      "insufficient_documents": [
+        "Sora took a marked trail to reach the overlook.",
+        "The overlook faces the western ridge.",
+        "A second trail was closed for maintenance."
+      ]
+    },
+    {
+      "id": "calibration-room",
+      "split": "calibration",
+      "query": "In which room was the fern moved for winter?",
+      "supporting_documents": [
+        "The fern was moved into the sunroom for winter.",
+        "The fern needed more light during the cold months.",
+        "Several pots were moved indoors."
+      ],
+      "insufficient_documents": [
+        "The fern was moved indoors for winter.",
+        "It needed more light during the cold months.",
+        "Several rooms had space for plants."
+      ]
+    },
+    {
+      "id": "calibration-wood",
+      "split": "calibration",
+      "query": "What wood is the small writing desk made from?",
+      "supporting_documents": [
+        "The small writing desk is made from walnut.",
+        "The desk has two shallow drawers.",
+        "A protective pad covers its top."
+      ],
+      "insufficient_documents": [
+        "The small writing desk has two shallow drawers.",
+        "The desk was refinished last spring.",
+        "A protective pad covers its wooden top."
+      ]
+    },
+    {
+      "id": "calibration-language",
+      "split": "calibration",
+      "query": "Which language was the lullaby sung in?",
+      "supporting_documents": [
+        "The lullaby was sung in Icelandic.",
+        "The melody came from an old family recording.",
+        "The singer repeated the final verse."
+      ],
+      "insufficient_documents": [
+        "The lullaby was sung softly from memory.",
+        "The melody came from an old family recording.",
+        "The singer repeated the final verse."
+      ]
+    },
+    {
+      "id": "calibration-tea",
+      "split": "calibration",
+      "query": "Which tea did Keon order with lunch?",
+      "supporting_documents": [
+        "Keon ordered oolong tea with lunch.",
+        "Lunch arrived before the tea cooled.",
+        "The cafe also served several herbal blends."
+      ],
+      "insufficient_documents": [
+        "Keon ordered tea with lunch.",
+        "Lunch arrived before the drink cooled.",
+        "The cafe served several different blends."
+      ]
+    },
+    {
+      "id": "calibration-route",
+      "split": "calibration",
+      "query": "Which route did Mara take to the harbor?",
+      "supporting_documents": [
+        "Mara took the coastal road to reach the harbor.",
+        "The coastal road remained open throughout the morning.",
+        "Mara arrived at the harbor before the market opened."
+      ],
+      "insufficient_documents": [
+        "Mara reached the harbor before the market opened.",
+        "Two roads remained open throughout the morning.",
+        "Traffic was light near the waterfront."
+      ]
+    },
+    {
+      "id": "calibration-container",
+      "split": "calibration",
+      "query": "What container holds the spare sewing needles?",
+      "supporting_documents": [
+        "The spare sewing needles are kept in a blue tin.",
+        "The tin sits inside the top drawer.",
+        "Thread and buttons are stored separately."
+      ],
+      "insufficient_documents": [
+        "The spare sewing needles were put away after use.",
+        "Several containers sit inside the top drawer.",
+        "Thread and buttons are stored separately."
+      ]
+    },
+    {
+      "id": "calibration-cause",
+      "split": "calibration",
+      "query": "What caused the porch bell to stop ringing?",
+      "supporting_documents": [
+        "The porch bell stopped ringing because its wire came loose.",
+        "It worked again after the wire was secured.",
+        "The button itself was undamaged."
+      ],
+      "insufficient_documents": [
+        "The porch bell stopped ringing during the afternoon.",
+        "It worked again after a short repair.",
+        "The button itself was undamaged."
+      ]
+    },
+    {
+      "id": "validation-adhesive",
+      "split": "validation",
+      "query": "What adhesive repaired the cracked planter?",
+      "supporting_documents": [
+        "Two-part epoxy repaired the cracked planter.",
+        "The planter was left indoors while the repair cured.",
+        "The crack ran along the lower rim."
+      ],
+      "insufficient_documents": [
+        "The cracked planter was repaired indoors.",
+        "The repair was left to cure overnight.",
+        "The crack ran along the lower rim."
+      ]
+    },
+    {
+      "id": "validation-entrance",
+      "split": "validation",
+      "query": "Which entrance leads directly to the sculpture garden?",
+      "supporting_documents": [
+        "The north entrance leads directly to the sculpture garden.",
+        "The sculpture garden is behind the main gallery.",
+        "The east entrance opens near the cafe."
+      ],
+      "insufficient_documents": [
+        "One entrance leads directly to the sculpture garden.",
+        "The garden is behind the main gallery.",
+        "The east entrance opens near the cafe."
+      ]
+    },
+    {
+      "id": "validation-flower",
+      "split": "validation",
+      "query": "Which flowers filled the copper vase?",
+      "supporting_documents": [
+        "Orange dahlias filled the copper vase.",
+        "The copper vase stood on the mantel.",
+        "Loose leaves were trimmed from the stems."
+      ],
+      "insufficient_documents": [
+        "Fresh flowers filled the copper vase.",
+        "The vase stood on the mantel.",
+        "Loose leaves were trimmed from the stems."
+      ]
+    },
+    {
+      "id": "validation-storage",
+      "split": "validation",
+      "query": "Where are the spare watercolor brushes stored?",
+      "supporting_documents": [
+        "The spare watercolor brushes are stored in the blue cabinet.",
+        "The cabinet stands beside the studio sink.",
+        "The active brushes remain in a jar."
+      ],
+      "insufficient_documents": [
+        "The spare watercolor brushes were put away.",
+        "A cabinet stands beside the studio sink.",
+        "The active brushes remain in a jar."
+      ]
+    },
+    {
+      "id": "validation-bird",
+      "split": "validation",
+      "query": "Which bird called from the chimney at dusk?",
+      "supporting_documents": [
+        "A tawny owl called from the chimney at dusk.",
+        "The call continued after the garden grew dark.",
+        "Small birds had already left the roof."
+      ],
+      "insufficient_documents": [
+        "A bird called from the chimney at dusk.",
+        "The call continued after the garden grew dark.",
+        "Small birds had already left the roof."
+      ]
+    },
+    {
+      "id": "validation-pattern",
+      "split": "validation",
+      "query": "What pattern was woven into the hallway runner?",
+      "supporting_documents": [
+        "A herringbone pattern was woven into the hallway runner.",
+        "The runner extends from the stairs to the front door.",
+        "Its edges were recently rebound."
+      ],
+      "insufficient_documents": [
+        "A pattern was woven into the hallway runner.",
+        "The runner extends from the stairs to the front door.",
+        "Its edges were recently rebound."
+      ]
+    }
+  ]
+}

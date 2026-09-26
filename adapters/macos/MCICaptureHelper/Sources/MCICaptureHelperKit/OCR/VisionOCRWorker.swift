@@ -9,20 +9,10 @@
 //
 // PROTECTED-SET per AGENT_PROTOCOL §5.
 //
-// ┌──────────────────────────────────────────────────────────────────┐
-// │ SCOPE OF P3.5 — NO CASCADE WIRING.                                │
-// │                                                                  │
-// │ This worker EXISTS but nothing in production invokes it yet.     │
-// │ `SCStreamCaptureSession.swift` is NOT modified by this PR; the   │
-// │ wire schema is NOT bumped; the IPC seam carries no OCR payload.  │
-// │ All of that lands in the CSO-gated P3.6 PR alongside the         │
-// │ cascade-twice plumbing (cascade §6 OCR-time secret/PII regex     │
-// │ re-runs over the OCR'd text before any IPC emission).            │
-// │                                                                  │
-// │ The §4 invariants in ADR-0016 are therefore VACUOUSLY HELD this  │
-// │ PR — the worker has no production caller, so it cannot leak.     │
-// │ The CSO sign-off block on the PR body asserts this explicitly.   │
-// └──────────────────────────────────────────────────────────────────┘
+// Production submits only pixel-time-cleared frames, then routes text
+// through `CascadeTwiceOCREmitter` before IPC publication. The runner's
+// serial execution lane ensures a timed-out Vision call cannot create an
+// unbounded set of blocked operations or retained pixel buffers.
 //
 // Cites ADR-0016 §1.1 (single worker actor, bounded MPSC channel,
 // dirty-rect ROI scoping, per-job wall-clock timeout, drop-oldest
@@ -44,7 +34,7 @@ import Foundation
 ///     to enqueue work; results land on the supplied @Sendable
 ///     completion
 ///   - call `stop()` to cancel the consumer; pending jobs are
-///     discarded (completions are NOT invoked for discarded jobs)
+///     discarded through their `onDrop` callbacks
 ///
 /// `start()` and `stop()` are idempotent; submitting after `stop()`
 /// silently drops the work (it cannot run — by design; a stopped
@@ -100,23 +90,34 @@ public actor VisionOCRWorker {
     public func stop() {
         guard !stopped else { return }
         stopped = true
+        engine.stop()
         consumer?.cancel()
-        consumer = nil
+        let abandoned = queue
         queue.removeAll()
+        for job in abandoned {
+            job.onDrop()
+        }
         if let a = awaiter {
             awaiter = nil
             a.resume()
         }
     }
 
+    /// Stop accepting OCR jobs and wait for the owned consumer to exit.
+    /// A timed-out Vision call may still occupy the runner's quarantined serial
+    /// lane, but its late result cannot invoke this worker's completion again.
+    public func stopAndDrain() async {
+        stop()
+        let task = consumer
+        await task?.value
+        consumer = nil
+    }
+
     /// Submit one OCR job. If the queue is at capacity, the oldest
     /// pending job is dropped, `ocr_dropped_count` (`droppedCount()`)
-    /// is incremented, and the new job is enqueued. A dropped job's
-    /// completion is NOT invoked — the caller treats fire-and-forget
-    /// submission with no delivery guarantee, exactly mirroring the
-    /// `frames_redacted_by_failsafe` pattern from PR #47.
-    ///
-    /// Submits on a stopped worker are silently discarded.
+    /// is incremented, and the new job is enqueued. This compatibility
+    /// overload does not expose drop notification; baseline-owning callers use
+    /// the `onDrop` overload below. Submits on a stopped worker are discarded.
     public func submit(
         pixelBuffer: CVPixelBuffer,
         dirtyRectsBoundingROI: CGRect,
@@ -139,12 +140,28 @@ public actor VisionOCRWorker {
         input: OCREngineInput,
         completion: @Sendable @escaping (OCRResult) -> Void
     ) {
-        guard !stopped else { return }
-        if queue.count >= capacity {
-            _ = queue.removeFirst()
-            dropped &+= 1
+        submit(input: input, onDrop: {}, completion: completion)
+    }
+
+    /// Submission variant for owners that must roll back state when OCR work
+    /// cannot run. `onDrop` fires exactly once for stopped-worker rejection,
+    /// queue eviction, or shutdown abandonment; it never fires for a job whose
+    /// result completion runs.
+    public func submit(
+        input: OCREngineInput,
+        onDrop: @Sendable @escaping () -> Void,
+        completion: @Sendable @escaping (OCRResult) -> Void
+    ) {
+        guard !stopped else {
+            onDrop()
+            return
         }
-        queue.append(Job(input: input, completion: completion))
+        if queue.count >= capacity {
+            let evicted = queue.removeFirst()
+            dropped &+= 1
+            evicted.onDrop()
+        }
+        queue.append(Job(input: input, onDrop: onDrop, completion: completion))
         if let a = awaiter {
             awaiter = nil
             a.resume()
@@ -183,6 +200,11 @@ public actor VisionOCRWorker {
                 // because the completion is @Sendable and we want a
                 // strict order-of-delivery guarantee (test #1).
                 job.completion(result)
+                if result.timedOut, !Task.isCancelled, !stopped {
+                    // Let a bounded queued retry survive quarantine without
+                    // extending recognition or admitting concurrent Vision work.
+                    _ = await engine.waitUntilAvailable(timeoutMs: timeoutMs)
+                }
             } else {
                 await waitForJob()
             }
@@ -213,6 +235,7 @@ public actor VisionOCRWorker {
 
     private struct Job {
         let input: OCREngineInput
+        let onDrop: @Sendable () -> Void
         let completion: @Sendable (OCRResult) -> Void
     }
 }

@@ -27,7 +27,7 @@
 //!      (drop the watcher handle by aborting the task).
 //!    - If `target == WantRunning` and `current != Running`: probe
 //!      FDA. Granted → spawn pump task → `Running`. Denied →
-//!      `AccessDenied` + tracing::warn! one-shot per state-change.
+//!      `AccessDenied` + `tracing::warn`! one-shot per state-change.
 //!
 //! # FDA probe
 //!
@@ -131,7 +131,6 @@ impl FdaProber for DiskFdaProber {
     fn probe_messages(&self) -> FdaProbe {
         match mci_messages_reader::discover_chat_db() {
             Ok(_loc) => FdaProbe::Granted,
-            Err(mci_messages_reader::MessagesReaderError::AccessDenied { .. }) => FdaProbe::Denied,
             Err(mci_messages_reader::MessagesReaderError::ChatDbMissing(_)) => {
                 FdaProbe::SourceMissing
             }
@@ -146,7 +145,6 @@ impl FdaProber for DiskFdaProber {
         match mci_mail_reader::discover_accounts() {
             Ok((_root, accounts)) if accounts.is_empty() => FdaProbe::SourceMissing,
             Ok(_) => FdaProbe::Granted,
-            Err(mci_mail_reader::MailReaderError::AccessDenied { .. }) => FdaProbe::Denied,
             Err(mci_mail_reader::MailReaderError::DataRootMissing(_)) => FdaProbe::SourceMissing,
             Err(_) => FdaProbe::Denied,
         }
@@ -225,7 +223,7 @@ impl PumpSupervisor {
 
     /// Take a snapshot of the supervisor state. Used by tests and by
     /// any external surface that wants to render
-    /// "Messages: AccessDenied" / "Mail: Running" without touching the
+    /// "Messages: `AccessDenied`" / "Mail: Running" without touching the
     /// pump internals.
     pub async fn state_snapshot(&self) -> SupervisorStateSnapshot {
         let inner = self.state.lock().await;
@@ -508,7 +506,7 @@ mod tests {
     use std::sync::Mutex as StdMutex;
 
     /// Programmable prober — tests flip the per-bundle return value
-    /// to drive PumpState transitions deterministically.
+    /// to drive `PumpState` transitions deterministically.
     struct StubProber {
         messages: StdMutex<FdaProbe>,
         mail: StdMutex<FdaProbe>,

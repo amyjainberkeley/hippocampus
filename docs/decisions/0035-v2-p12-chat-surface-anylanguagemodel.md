@@ -1,6 +1,8 @@
 # ADR-0035 — V2-P12 chat surface via `AnyLanguageModel` + `foundation-models-utilities` + MLX-Swift (parallel track to ADR-0033)
 
 - Status: **Proposed** (2026-07-13; awaits CEO ratification via `docs/AGENT_QUESTIONS.md`)
+- Superseded by ADR-0039 for any default bundled-model or release-size claim.
+  No chat model may enter the public bundle without a new measured decision.
 - Owners: **Director-Brain** (proposal + Phase 7 PR 18 implementation seat); **CSO** (veto-gate on network-provider trait exclusion — zero-network invariant)
 - Reviewers: CTO (adapter-tier discipline, Phase-7 sequencing); CSO (protected-set — see below); CEO (ratification via AGENT_QUESTIONS)
 - Phase: **Phase 7 PR 18** (V2-P12 chat surface — SwiftUI recall/chat UI)

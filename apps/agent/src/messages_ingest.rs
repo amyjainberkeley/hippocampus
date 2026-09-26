@@ -4,14 +4,14 @@
 //! # Where this module sits
 //!
 //! - **V2-P7** (PR #248) shipped `mci-messages-reader` (READ-ONLY
-//!   chat.db reader + FSEvents watcher) and
+//!   chat.db reader + `FSEvents` watcher) and
 //!   `mci_brain::redaction::messages_plugin` (the §3(f)
 //!   cascade-equivalent + corpus). Both were inert by design — V2-P7
 //!   landed the contract + corpus + library but DID NOT wire the
 //!   agent-side ingest.
 //! - **V2-P10** (this PR) wires the ingest plumbing: poll
 //!   `mci_messages_reader::list_recent_messages` since a watermark on
-//!   every FSEvents `chat.db` touch, project each row to a
+//!   every `FSEvents` `chat.db` touch, project each row to a
 //!   [`mci_brain::redaction::messages_plugin::MessagesPluginEvent`],
 //!   run the cascade-equivalent, and `put_event` on
 //!   [`MessagesPluginDecision::drop_event = false`] outcomes.
@@ -22,28 +22,28 @@
 //! body byte is materialized into the brain. There is no
 //! delete-after-write path.
 //!
-//! # MessagesPluginPump shape (per the dispatch + ADR-0030 §3(f))
+//! # `MessagesPluginPump` shape (per the dispatch + ADR-0030 §3(f))
 //!
 //! For an `Allow` outcome (cascade `drop_event = false`):
 //!
 //! - `app_bundle_id = "com.apple.MobileSMS"`
 //! - `window_title = "from <handle>"` / `"to <handle>"` — **the WHO.**
-//!    The participant handle the cascade just vetted (denylist +
-//!    sensitive-domain already drop the event upstream, so anything
-//!    here is user-allowed) becomes the window "title", with the
-//!    direction word carrying `is_from_me`. The incoming "who" is the
-//!    sender's `handle.id`; the outgoing "who" is the recipient set the
-//!    reader resolves from the message's chat (a group chat names every
-//!    recipient, joined with `, `). `None` only when no counterparty is
-//!    resolvable (an outgoing row whose chat has no remote handle).
+//!   The participant handle the cascade just vetted (denylist +
+//!   sensitive-domain already drop the event upstream, so anything
+//!   here is user-allowed) becomes the window "title", with the
+//!   direction word carrying `is_from_me`. The incoming "who" is the
+//!   sender's `handle.id`; the outgoing "who" is the recipient set the
+//!   reader resolves from the message's chat (a group chat names every
+//!   recipient, joined with `, `). `None` only when no counterparty is
+//!   resolvable (an outgoing row whose chat has no remote handle).
 //! - `url = None` — Messages has no URL surface
 //! - `tab_id = None`
 //! - `text = ADR-0010 §1.3 context header + redacted_body` — the header
-//!    co-locates the `window_title` (= the handle) into `events.text`, so
-//!    the handle is BOTH displayable AND extractable. `redacted_body`
-//!    already carries the §3(a) `[REDACTED:SMS_OTP]` /
-//!    `[REDACTED:BANK_NOTIFICATION]` substitutions from the cascade. The
-//!    pump does NOT re-redact.
+//!   co-locates the `window_title` (= the handle) into `events.text`, so
+//!   the handle is BOTH displayable AND extractable. `redacted_body`
+//!   already carries the §3(a) `[REDACTED:SMS_OTP]` /
+//!   `[REDACTED:BANK_NOTIFICATION]` substitutions from the cascade. The
+//!   pump does NOT re-redact.
 //!
 //! After `put_event`, the Allow arm runs the **Tier-1 regex extractor**
 //! (same as the screen/page `BrainPump`) so the handle — now in
@@ -119,7 +119,7 @@ pub struct MessagesIngestCounters {
     /// when the pump is invoked at all (which the supervisor avoids
     /// when the master switch is off); the increment surfaces a
     /// misconfiguration (e.g. supervisor started the pump but cfg
-    /// has plugin_enabled=false).
+    /// has `plugin_enabled=false`).
     pub plugin_disabled: AtomicU64,
     /// Cascade dropped because `body = None` (attachment-only /
     /// system rows).
@@ -426,7 +426,10 @@ impl MessagesPluginPump {
             tab_id: None,
             embedding,
         };
-        let id = match self.store.put_event(&event) {
+        let id = match self
+            .store
+            .put_event_with_source(&event, mci_brain::EventSource::StructuredApp)
+        {
             Ok(id) => id,
             Err(err) => {
                 self.counter.store_errors.fetch_add(1, Ordering::Relaxed);
@@ -471,7 +474,7 @@ impl MessagesPluginPump {
 
     fn bump_drop_counter(&self, reason: Option<MessagesPluginDropReason>) {
         let counter = match reason {
-            Some(MessagesPluginDropReason::PluginDisabled) => &self.counter.plugin_disabled,
+            Some(MessagesPluginDropReason::PluginDisabled) | None => &self.counter.plugin_disabled,
             Some(MessagesPluginDropReason::PluginNoBody) => &self.counter.plugin_no_body,
             Some(MessagesPluginDropReason::ParticipantDenylisted) => {
                 &self.counter.participant_denylisted
@@ -485,7 +488,6 @@ impl MessagesPluginPump {
             Some(MessagesPluginDropReason::SensitiveUrlInBody) => {
                 &self.counter.sensitive_url_in_body
             }
-            None => &self.counter.plugin_disabled,
         };
         counter.fetch_add(1, Ordering::Relaxed);
     }
@@ -571,20 +573,19 @@ fn now_unix_seconds() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .ok()
-        .map(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
-        .unwrap_or(0)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
 fn unix_seconds_to_us(unix_seconds: i64) -> u64 {
-    let s = unix_seconds.max(0) as u64;
+    let s = u64::try_from(unix_seconds.max(0)).unwrap_or(0);
     s.saturating_mul(1_000_000)
 }
 
-/// Run the FSEvents watcher for one [`ChatDbLocation`] until the
+/// Run the `FSEvents` watcher for one [`ChatDbLocation`] until the
 /// watcher closes.
 ///
 /// On every `chat.db` touch the pump re-polls `list_recent_messages`
-/// since the watermark and ingests each row. FSEvents fires a burst
+/// since the watermark and ingests each row. `FSEvents` fires a burst
 /// of touches for the WAL + chat.db itself per inbound message; the
 /// watermark-based polling collapses the burst into a single read.
 ///
@@ -641,7 +642,7 @@ mod tests {
             is_from_me,
             service: ChatService::IMessage,
             body: body.map(str::to_owned),
-            handle_rowid: if is_from_me { 0 } else { 1 },
+            handle_rowid: i64::from(!is_from_me),
             sender_handle: sender.map(str::to_owned),
             has_attachments: false,
             recipient_handles: Vec::new(),

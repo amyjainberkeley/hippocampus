@@ -1,0 +1,582 @@
+import Darwin
+import Foundation
+import HippocampusKit
+
+@main
+struct SupervisorLifecycleBehavior {
+    @MainActor
+    static func main() async throws {
+        proveTerminationRequiresExplicitIntent()
+        try await proveNormalQuitComposition()
+        try await proveResistantRestartComposition()
+        try await provePauseBeforeStartPreventsLaunch()
+        try await provePauseInterruptsStartup()
+        try await proveUserPauseOwnsNoChildProcesses()
+        try await proveLatestPauseIntentWins()
+        try await proveShutdownCancelsKeyPreparation()
+        try await proveShutdownCancelsReadiness()
+        try await proveShutdownCancelsCaptureReconfiguration()
+        try await proveShutdownWinsBlockedInitialReconfigurationStop()
+        try await proveConsentRevocationFailureStillStopsTopology()
+        try await proveConsentRevocationFailureStillStopsTopologyOnPause()
+        try await proveConsentRevocationFailureStillStopsTopologyOnCaptureChange()
+    }
+
+    @MainActor
+    private static func proveTerminationRequiresExplicitIntent() {
+        let requests = ApplicationTerminationRequestGate()
+
+        precondition(requests.takeRequestedIntent() == nil)
+
+        requests.request(.quit)
+        precondition(requests.takeRequestedIntent() == .quit)
+        precondition(requests.takeRequestedIntent() == nil)
+
+        requests.request(.restart)
+        precondition(requests.takeRequestedIntent() == .restart)
+        precondition(requests.takeRequestedIntent() == nil)
+    }
+
+    @MainActor
+    private static func proveNormalQuitComposition() async throws {
+        let topology = RealProcessTopology(resistsTermination: false)
+        let supervisor = makeSupervisor(topology: topology)
+        try await supervisor.startAndWaitForReadiness()
+        let launcher = RecordingRestartLauncher(supervisor: supervisor, topology: topology)
+        let coordinator = ApplicationTerminationCoordinator(
+            supervisor: supervisor,
+            restartLauncher: launcher,
+            shutdownTimeout: 1,
+            cleanup: {}
+        )
+        var replies: [Bool] = []
+
+        await coordinator.terminate(intent: .quit) { replies.append($0) }
+
+        precondition(supervisor.state == .stopped)
+        precondition(replies == [true])
+        precondition(launcher.scheduleCount == 0)
+        precondition(topology.trackedPIDs.allSatisfy { !SupervisorProcessShutdown.pidIsAlive($0) })
+    }
+
+    @MainActor
+    private static func proveResistantRestartComposition() async throws {
+        let topology = RealProcessTopology(resistsTermination: true)
+        let supervisor = makeSupervisor(topology: topology)
+        try await supervisor.startAndWaitForReadiness()
+        let launcher = RecordingRestartLauncher(supervisor: supervisor, topology: topology)
+        let coordinator = ApplicationTerminationCoordinator(
+            supervisor: supervisor,
+            restartLauncher: launcher,
+            shutdownTimeout: 0.1,
+            cleanup: {}
+        )
+        var replies: [Bool] = []
+
+        await coordinator.terminate(intent: .restart) { replies.append($0) }
+
+        precondition(supervisor.state == .stopped)
+        precondition(replies == [true])
+        precondition(launcher.scheduleCount == 1)
+        precondition(launcher.observedStoppedBeforeScheduling)
+        precondition(launcher.observedDeadChildrenBeforeScheduling)
+        precondition(topology.trackedPIDs.allSatisfy { !SupervisorProcessShutdown.pidIsAlive($0) })
+    }
+
+    @MainActor
+    private static func provePauseBeforeStartPreventsLaunch() async throws {
+        let topology = SuspendingLifecycleTopology()
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: FixtureKeyCustodyPreparer()
+        )
+
+        supervisor.setPaused(true)
+        try await supervisor.startAndWaitForReadiness()
+
+        precondition(supervisor.state == .paused)
+        precondition(topology.launchCount == 0)
+        precondition(!topology.isRunning)
+    }
+
+    @MainActor
+    private static func provePauseInterruptsStartup() async throws {
+        let readinessGate = FixtureSuspension()
+        let topology = SuspendingLifecycleTopology(readinessGate: readinessGate)
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: FixtureKeyCustodyPreparer()
+        )
+        let startup = Task { @MainActor in
+            try await supervisor.startAndWaitForReadiness()
+        }
+        await readinessGate.waitUntilEntered()
+
+        supervisor.setPaused(true)
+        await topology.waitUntilStopped()
+        readinessGate.resume()
+        _ = try? await startup.value
+        while supervisor.state != .paused { await Task.yield() }
+
+        precondition(topology.launchCount == 1)
+        precondition(!topology.isRunning)
+    }
+
+    @MainActor
+    private static func proveUserPauseOwnsNoChildProcesses() async throws {
+        let topology = RealProcessTopology(resistsTermination: true)
+        let supervisor = makeSupervisor(topology: topology)
+        try await supervisor.startAndWaitForReadiness()
+        let firstGenerationPIDs = topology.trackedPIDs
+
+        try await supervisor.setPausedAndWait(true)
+
+        precondition(supervisor.state == .paused)
+        precondition(!topology.isRunning)
+        precondition(firstGenerationPIDs.allSatisfy { !SupervisorProcessShutdown.pidIsAlive($0) })
+
+        try await supervisor.setPausedAndWait(false)
+
+        precondition(supervisor.state == .running)
+        precondition(topology.isRunning)
+        precondition(Set(topology.trackedPIDs).isDisjoint(with: firstGenerationPIDs))
+        try await supervisor.shutdownAndWait(timeout: 0.1)
+    }
+
+    @MainActor
+    private static func proveLatestPauseIntentWins() async throws {
+        let stopGate = FixtureSuspension()
+        let topology = SuspendingLifecycleTopology()
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: FixtureKeyCustodyPreparer()
+        )
+        try await supervisor.startAndWaitForReadiness()
+        topology.suspendStop(onCall: 1, at: stopGate)
+
+        supervisor.setPaused(true)
+        await stopGate.waitUntilEntered()
+        supervisor.setPaused(false)
+        stopGate.resume()
+
+        while topology.launchCount < 2 { await Task.yield() }
+        while supervisor.state != .running { await Task.yield() }
+        precondition(topology.isRunning)
+        try await supervisor.shutdownAndWait()
+    }
+
+    @MainActor
+    private static func makeSupervisor(topology: RealProcessTopology) -> ProcessSupervisor {
+        ProcessSupervisor(
+            locator: FixtureBinaryLocator(),
+            keyStore: FixtureKeyStore(),
+            runtimeConfig: FixtureRuntimeConfig(),
+            topology: topology,
+            keyCustodyPreparer: FixtureKeyCustodyPreparer(),
+            readinessTimeout: 1
+        )
+    }
+
+    @MainActor
+    private static func proveShutdownCancelsKeyPreparation() async throws {
+        let preparationGate = FixtureSuspension()
+        let topology = SuspendingLifecycleTopology()
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: SuspendingKeyCustodyPreparer(gate: preparationGate)
+        )
+        let startup = Task { @MainActor in try await supervisor.startAndWaitForReadiness() }
+        await preparationGate.waitUntilEntered()
+        let shutdown = Task { @MainActor in try await supervisor.shutdownAndWait() }
+        await topology.waitUntilStopped()
+        preparationGate.resume()
+        try await shutdown.value
+        _ = try? await startup.value
+
+        precondition(supervisor.state == .stopped)
+        precondition(topology.launchCount == 0)
+        precondition(!topology.isRunning)
+    }
+
+    @MainActor
+    private static func proveShutdownCancelsReadiness() async throws {
+        let readinessGate = FixtureSuspension()
+        let topology = SuspendingLifecycleTopology(readinessGate: readinessGate)
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: FixtureKeyCustodyPreparer()
+        )
+        let startup = Task { @MainActor in try await supervisor.startAndWaitForReadiness() }
+        await readinessGate.waitUntilEntered()
+        let shutdown = Task { @MainActor in try await supervisor.shutdownAndWait() }
+        await topology.waitUntilStopped()
+        readinessGate.resume()
+        try await shutdown.value
+        _ = try? await startup.value
+
+        precondition(supervisor.state == .stopped)
+        precondition(topology.launchCount == 1)
+        precondition(!topology.isRunning)
+    }
+
+    @MainActor
+    private static func proveShutdownCancelsCaptureReconfiguration() async throws {
+        let readinessGate = FixtureSuspension()
+        let topology = SuspendingLifecycleTopology()
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: FixtureKeyCustodyPreparer()
+        )
+        try await supervisor.startAndWaitForReadiness()
+        topology.suspendNextReadiness(on: readinessGate)
+
+        let reconfiguration = Task { @MainActor in
+            try await supervisor.applyCaptureEnabled(true)
+        }
+        await readinessGate.waitUntilEntered()
+        let shutdown = Task { @MainActor in try await supervisor.shutdownAndWait() }
+        await topology.waitUntilStopped(minimumCount: 2)
+        readinessGate.resume()
+        try await shutdown.value
+        _ = try? await reconfiguration.value
+
+        precondition(supervisor.state == .stopped)
+        precondition(!supervisor.captureEnabled)
+        precondition(topology.launchCount == 2)
+        precondition(!topology.isRunning)
+    }
+
+    @MainActor
+    private static func proveShutdownWinsBlockedInitialReconfigurationStop() async throws {
+        let stopGate = FixtureSuspension()
+        let topology = SuspendingLifecycleTopology()
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: FixtureKeyCustodyPreparer()
+        )
+        try await supervisor.startAndWaitForReadiness()
+        topology.suspendStop(onCall: 1, at: stopGate)
+
+        let reconfiguration = Task { @MainActor in
+            try await supervisor.applyCaptureEnabled(true)
+        }
+        await stopGate.waitUntilEntered()
+        let shutdown = Task { @MainActor in try await supervisor.shutdownAndWait() }
+        await topology.waitUntilStopped(minimumCount: 2)
+        try await shutdown.value
+        precondition(supervisor.state == .stopped)
+
+        stopGate.resume()
+        _ = try? await reconfiguration.value
+        precondition(supervisor.state == .stopped)
+        precondition(!topology.isRunning)
+    }
+
+    @MainActor
+    private static func proveConsentRevocationFailureStillStopsTopology() async throws {
+        let topology = SuspendingLifecycleTopology()
+        let consent = FixtureCaptureConsentAuthority()
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: FixtureKeyCustodyPreparer(),
+            captureConsentAuthority: consent
+        )
+        try await supervisor.startAndWaitForReadiness()
+        consent.failDisable = true
+
+        do {
+            try await supervisor.shutdownAndWait()
+            preconditionFailure("consent revocation failure must remain visible")
+        } catch {}
+
+        precondition(topology.stopCount == 1)
+        precondition(!topology.isRunning)
+        guard case .crashed = supervisor.state else {
+            preconditionFailure("consent revocation failure must publish a crashed state")
+        }
+    }
+
+    @MainActor
+    private static func proveConsentRevocationFailureStillStopsTopologyOnPause() async throws {
+        let topology = SuspendingLifecycleTopology()
+        let consent = FixtureCaptureConsentAuthority()
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: FixtureKeyCustodyPreparer(),
+            captureConsentAuthority: consent
+        )
+        try await supervisor.startAndWaitForReadiness()
+        consent.failDisable = true
+
+        do {
+            try await supervisor.setPausedAndWait(true)
+            preconditionFailure("pause must surface consent revocation failure")
+        } catch {}
+
+        precondition(topology.stopCount == 1)
+        precondition(!topology.isRunning)
+        guard case .crashed = supervisor.state else {
+            preconditionFailure("pause revocation failure must publish a crashed state")
+        }
+    }
+
+    @MainActor
+    private static func proveConsentRevocationFailureStillStopsTopologyOnCaptureChange() async throws {
+        let topology = SuspendingLifecycleTopology()
+        let consent = FixtureCaptureConsentAuthority()
+        let supervisor = makeSupervisor(
+            topology: topology,
+            keyCustodyPreparer: FixtureKeyCustodyPreparer(),
+            captureConsentAuthority: consent
+        )
+        try await supervisor.startAndWaitForReadiness()
+        consent.failDisable = true
+
+        do {
+            try await supervisor.applyCaptureEnabled(true)
+            preconditionFailure("capture change must surface consent revocation failure")
+        } catch {}
+
+        precondition(topology.stopCount == 1)
+        precondition(!topology.isRunning)
+        precondition(!supervisor.captureEnabled)
+        guard case .crashed = supervisor.state else {
+            preconditionFailure("capture-change revocation failure must publish a crashed state")
+        }
+    }
+
+    @MainActor
+    private static func makeSupervisor(
+        topology: any SupervisorTopologyControlling,
+        keyCustodyPreparer: any KeyCustodyPreparing,
+        captureConsentAuthority: any CaptureConsentControlling = FixtureCaptureConsentAuthority()
+    ) -> ProcessSupervisor {
+        ProcessSupervisor(
+            locator: FixtureBinaryLocator(),
+            keyStore: FixtureKeyStore(),
+            runtimeConfig: FixtureRuntimeConfig(),
+            topology: topology,
+            keyCustodyPreparer: keyCustodyPreparer,
+            captureConsentAuthority: captureConsentAuthority,
+            readinessTimeout: 1
+        )
+    }
+}
+
+private struct FixtureBinaryLocator: BinaryLocator {
+    func helperPath() -> URL? { URL(fileURLWithPath: "/bin/sh") }
+    func agentPath() -> URL? { URL(fileURLWithPath: "/bin/sh") }
+    func recallUIPath() -> URL? { nil }
+    func onboardingPath() -> URL? { nil }
+    func brainCLIPath() -> URL? { nil }
+    func knownSafeAppsPath() -> URL? { nil }
+}
+
+private final class FixtureKeyStore: KeyStore, @unchecked Sendable {
+    func readKey() throws -> String { String(repeating: "ab", count: 32) }
+    func writeKey(_ hex: String) throws { _ = hex }
+}
+
+private struct FixtureRuntimeConfig: RuntimeConfiguring {
+    var crashReportOptedIn: Bool { false }
+    var captureEnabled: Bool { false }
+    func setCrashReportOptedIn(_ value: Bool) throws { _ = value }
+    func setCaptureEnabled(_ value: Bool) throws { _ = value }
+}
+
+private final class FixtureCaptureConsentAuthority: CaptureConsentControlling, @unchecked Sendable {
+    var failDisable = false
+
+    func enable(generationID: String) throws { _ = generationID }
+
+    func disable() throws {
+        if failDisable { throw FixtureConsentError.revocationFailed }
+    }
+}
+
+private enum FixtureConsentError: Error {
+    case revocationFailed
+}
+
+@MainActor
+private final class FixtureKeyCustodyPreparer: KeyCustodyPreparing {
+    func prepare(
+        agentURL: URL,
+        databaseURL: URL,
+        keyReference: KeychainKeyReference
+    ) async throws {
+        _ = (agentURL, databaseURL, keyReference)
+    }
+}
+
+@MainActor
+private final class FixtureSuspension {
+    private var entered = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func suspend() async {
+        entered = true
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func waitUntilEntered() async {
+        while !entered { await Task.yield() }
+    }
+
+    func resume() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+@MainActor
+private final class SuspendingKeyCustodyPreparer: KeyCustodyPreparing {
+    private let gate: FixtureSuspension
+
+    init(gate: FixtureSuspension) { self.gate = gate }
+
+    func prepare(
+        agentURL: URL,
+        databaseURL: URL,
+        keyReference: KeychainKeyReference
+    ) async throws {
+        _ = (agentURL, databaseURL, keyReference)
+        await gate.suspend()
+    }
+}
+
+@MainActor
+private final class SuspendingLifecycleTopology: SupervisorTopologyControlling {
+    private var readinessGate: FixtureSuspension?
+    private var blockedStopCall: Int?
+    private var stopGate: FixtureSuspension?
+    private(set) var isRunning = false
+    private(set) var launchCount = 0
+    private(set) var stopCount = 0
+
+    init(readinessGate: FixtureSuspension? = nil) {
+        self.readinessGate = readinessGate
+    }
+
+    func suspendNextReadiness(on gate: FixtureSuspension) {
+        readinessGate = gate
+    }
+
+    func suspendStop(onCall call: Int, at gate: FixtureSuspension) {
+        blockedStopCall = call
+        stopGate = gate
+    }
+
+    func launch(
+        plan: ProcessSupervisorLaunchPlan,
+        generation: SupervisorProcessGeneration,
+        onUnexpectedExit: @escaping @MainActor @Sendable (String, Int32) -> Void
+    ) async throws {
+        _ = (plan, generation, onUnexpectedExit)
+        launchCount += 1
+        isRunning = true
+    }
+
+    func waitForReadiness(
+        generation: SupervisorProcessGeneration,
+        timeout: TimeInterval
+    ) async throws {
+        _ = (generation, timeout)
+        if let readinessGate {
+            self.readinessGate = nil
+            await readinessGate.suspend()
+        }
+    }
+
+    func stop(timeout: TimeInterval) async throws {
+        _ = timeout
+        stopCount += 1
+        if stopCount == blockedStopCall, let stopGate {
+            self.stopGate = nil
+            await stopGate.suspend()
+        }
+        isRunning = false
+    }
+
+    func setPaused(_ paused: Bool) throws { _ = paused }
+
+    func waitUntilStopped(minimumCount: Int = 1) async {
+        while stopCount < minimumCount { await Task.yield() }
+    }
+}
+
+@MainActor
+private final class RealProcessTopology: SupervisorTopologyControlling {
+    let resistsTermination: Bool
+    private(set) var trackedPIDs: [pid_t] = []
+    private var processes: [Process] = []
+
+    init(resistsTermination: Bool) {
+        self.resistsTermination = resistsTermination
+    }
+
+    var isRunning: Bool {
+        processes.count == 2 && processes.allSatisfy(\.isRunning)
+    }
+
+    func launch(
+        plan: ProcessSupervisorLaunchPlan,
+        generation: SupervisorProcessGeneration,
+        onUnexpectedExit: @escaping @MainActor @Sendable (String, Int32) -> Void
+    ) async throws {
+        _ = (plan, generation, onUnexpectedExit)
+        let trap = resistsTermination ? "trap '' TERM" : "trap 'exit 0' TERM"
+        processes = try [launchShell("\(trap); while :; do sleep 1; done"),
+                         launchShell("\(trap); while :; do sleep 1; done")]
+        trackedPIDs = processes.map(\.processIdentifier)
+        try await Task.sleep(for: .milliseconds(75))
+    }
+
+    func waitForReadiness(
+        generation: SupervisorProcessGeneration,
+        timeout: TimeInterval
+    ) async throws {
+        _ = (generation, timeout)
+        precondition(isRunning)
+    }
+
+    func stop(timeout: TimeInterval) async throws {
+        try await SupervisorProcessShutdown.stop(
+            processes: processes,
+            termTimeout: timeout
+        )
+        processes = []
+    }
+
+    func setPaused(_ paused: Bool) throws { _ = paused }
+
+    private func launchShell(_ script: String) throws -> Process {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", script]
+        try process.run()
+        return process
+    }
+}
+
+@MainActor
+private final class RecordingRestartLauncher: ApplicationRestartLaunching {
+    private unowned let supervisor: ProcessSupervisor
+    private unowned let topology: RealProcessTopology
+    private(set) var scheduleCount = 0
+    private(set) var observedStoppedBeforeScheduling = false
+    private(set) var observedDeadChildrenBeforeScheduling = false
+
+    init(supervisor: ProcessSupervisor, topology: RealProcessTopology) {
+        self.supervisor = supervisor
+        self.topology = topology
+    }
+
+    func scheduleRestart() throws {
+        scheduleCount += 1
+        observedStoppedBeforeScheduling = supervisor.state == .stopped
+        observedDeadChildrenBeforeScheduling = topology.trackedPIDs.allSatisfy {
+            !SupervisorProcessShutdown.pidIsAlive($0)
+        }
+    }
+}

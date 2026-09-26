@@ -69,6 +69,8 @@ public struct InCallbackSample: Sendable, Equatable {
     public let userIdle: Bool
     public let frameStatusComplete: Bool
     public let dirtyRects: [DirtyRect]
+    public let frameWidth: Int
+    public let frameHeight: Int
     public let dhash: DHash
     public let appBundleId: String?
     /// The 9×8 row-major luminance grid the callback already extracts
@@ -83,6 +85,8 @@ public struct InCallbackSample: Sendable, Equatable {
         userIdle: Bool,
         frameStatusComplete: Bool,
         dirtyRects: [DirtyRect],
+        frameWidth: Int,
+        frameHeight: Int,
         dhash: DHash,
         appBundleId: String?,
         grayscale: [UInt8]
@@ -90,20 +94,78 @@ public struct InCallbackSample: Sendable, Equatable {
         self.userIdle = userIdle
         self.frameStatusComplete = frameStatusComplete
         self.dirtyRects = dirtyRects
+        self.frameWidth = frameWidth
+        self.frameHeight = frameHeight
         self.dhash = dhash
         self.appBundleId = appBundleId
         self.grayscale = grayscale
     }
 }
 
-/// The live SCStream session. `@unchecked Sendable`: its only mutable
-/// state is the prior-dHash, guarded by an `NSLock`; the SCStream is
-/// set once on `start()`.
+/// A terminal loss of the live ScreenCaptureKit stream after the helper has
+/// become ready. This deliberately carries no framework error text: Apple
+/// errors can contain host-specific detail, while the owner only needs the
+/// fact that capture is no longer live.
+public enum CaptureRuntimeFailure: Error, Sendable, Equatable {
+    case streamStoppedUnexpectedly
+    case userStoppedCapture
+    case activityDeliveryFailed
+
+    var helperExitStatus: Int32 {
+        switch self {
+        case .streamStoppedUnexpectedly: 81
+        case .userStoppedCapture: 82
+        case .activityDeliveryFailed: 83
+        }
+    }
+
+    static func forStreamStop(_ error: Error, sourceIsLive: Bool) -> Self? {
+        let error = error as NSError
+        if error.domain == SCStreamErrorDomain,
+           error.code == SCStreamError.Code.userStopped.rawValue
+        {
+            return .userStoppedCapture
+        }
+        guard sourceIsLive else { return nil }
+        return .streamStoppedUnexpectedly
+    }
+}
+
+/// The owner action for a terminal capture failure. Production uses the
+/// fail-loud default, which terminates the helper nonzero so its supervisor
+/// cannot continue reporting a healthy capture child. Tests inject a recorder.
+public typealias CaptureRuntimeFailureHandler = @Sendable (CaptureRuntimeFailure) -> Void
+
+/// OS reads and timing only. Session admission and the capture privacy cascade
+/// remain in the sampler task; headless tests do not replace their decisions.
+internal struct MeasuredActivityDependencies: Sendable {
+    let now: @Sendable () -> (tsUs: UInt64, uptimeNs: UInt64)
+    let sleep: @Sendable (UInt64) async throws -> Void
+    let sessionEligible: @Sendable () -> Bool
+    let secondsSinceLastInput: @Sendable () -> TimeInterval?
+
+    static let live = MeasuredActivityDependencies(
+        now: {
+            (UInt64(max(0, Date().timeIntervalSince1970 * 1_000_000)),
+             DispatchTime.now().uptimeNanoseconds)
+        },
+        sleep: { try await Task.sleep(nanoseconds: $0) },
+        sessionEligible: { ActivitySessionReader().permitsMeasurement() },
+        secondsSinceLastInput: { SystemUserActivityReader().secondsSinceLastInput() }
+    )
+}
+
+/// The live SCStream session. `@unchecked Sendable`: lifecycle, stream
+/// identity, focus generation, and visual-baseline state are guarded by the
+/// session lock; asynchronous frame work crosses owned bounded dispatchers.
 public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     private let pipeline: SCStreamPipeline
     private let denylist: Denylist
     private let policy: StreamPolicy
     private let sampleQueue: DispatchQueue
+    private let captureDispatcher = OrderedCaptureDispatcher(
+        capacity: VisionOCRWorker.defaultCapacity
+    )
     /// ADR-0013 §2 probe, pre-fed in the callback before the cascade
     /// runs on the same frame. `nil` is permitted (legacy
     /// construction / headless tests that never need §2 to fire);
@@ -139,6 +201,12 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// is wired up.
     private let ocrPostAllowEmitter: (any OCRPostAllowEmitter)?
 
+    /// Invoked once when ScreenCaptureKit terminates an active stream without
+    /// the session initiating the stop. The default exits the helper, which is
+    /// the production owner signal available without keeping a dead capture
+    /// process alive just to emit later heartbeats.
+    private let runtimeFailureHandler: CaptureRuntimeFailureHandler
+
     /// ADR-0031 §5 V2-P1 — focused-window observation store. When
     /// non-`nil`, `start()` builds a focused-window `SCContentFilter`
     /// (Option (a)) instead of the display-scoped filter, and the
@@ -152,14 +220,6 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// `nil` even when `focusedWindowStore` is non-`nil` (tests own
     /// the store directly and feed it via `FocusTracker.tickOnce(...)`).
     private let focusTracker: FocusTracker?
-
-    /// Cycle 8.44 audit risk #1 — screen-share leak detector. When
-    /// supplied, `start()` also starts the detector, and the session
-    /// registers itself as the detector's observer so it can pause
-    /// SCStream when a Zoom/Meet/AirPlay session is active. `nil`
-    /// preserves pre-cycle-8.44 behaviour (no screen-share awareness)
-    /// — used by tests + any legacy build.
-    private let screenShareDetector: ScreenShareDetector?
 
     /// Cycle 8.45 audit risk #2 — TCC-revoked-mid-run monitor. When
     /// supplied, `start()` seeds the initial TCC snapshot and starts
@@ -195,7 +255,26 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
 
     private let lock = NSLock()
     private var priorDHash: DHash?
+    private var priorDHashGeneration: UInt64 = 0
+    private var priorDHashCaptureOrdinal: UInt64 = 0
+    private var retryOCRGeneration: UInt64?
+    private var captureOrdinal: UInt64 = 0
     private var stream: SCStream?
+    /// Immutable generation provenance for every live or draining stream.
+    /// Callback admission uses the callback's `SCStream` identity, never a
+    /// mutable "current filter" guess.
+    private var streamFocusGenerations: [ObjectIdentifier: UInt64] = [:]
+    private var candidateStreams: [ObjectIdentifier: SCStream] = [:]
+    /// Invalidates async stream construction across stop and TCC transitions.
+    private var captureEpoch: UInt64 = 0
+    private var captureLifecycleActive: Bool = false
+    private var shutdownRequested: Bool = false
+
+    /// The first unexpected delegate termination is terminal for this
+    /// session. Guarded by `lock`: ScreenCaptureKit may deliver more than one
+    /// error callback while its internal teardown is in flight.
+    private var runtimeFailure: CaptureRuntimeFailure?
+    private let activitySchedule = CaptureActivitySchedule()
 
     /// ADR-0031 §5.3 — the focus generation the currently-installed
     /// SCStream `SCContentFilter` was rebound under. Guarded by `lock`.
@@ -214,6 +293,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// SCStream filter follows focus changes promptly. Guarded by
     /// `lock`; cancelled on `stop()`.
     private var rebindTask: Task<Void, Never>?
+    private var measuredActivityTask: Task<Void, Never>?
+    private let measuresActivity: Bool
 
     /// V2-P1 third-lift (Phase 7 PR 13 wiring): per-session count of
     /// race-gate drops observed so far. Used to throttle the stderr
@@ -233,26 +314,10 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// on the wire.
     private var firstSampleLogged: Bool = false
 
-    /// Cycle 8.44 audit risk #1 — set to `true` while the detector
-    /// says a Zoom/Meet/AirPlay session is active. Guarded by `lock`.
-    /// While `true`, `start()` skips actually starting the SCStream
-    /// (the detector's observer callback stops the stream and this
-    /// flag prevents an accidental resume from a competing code path)
-    /// and `pauseForScreenShare` / `resumeFromScreenShare` toggle it.
-    private var pausedForScreenShare: Bool = false
-
-    /// The last SCStream instance that was paused because of screen-
-    /// share detection. Not retained across pauses (we call
-    /// `stopCapture()`, so the stream is dead after pause) — this
-    /// exists only to prove idempotence in tests.
-    private var lastPausedActor: String?
-
     /// Cycle 8.45 audit risk #2 — set to `true` while the TCC monitor
     /// says at least one required surface is revoked. Guarded by `lock`.
     /// While `true`, `resumeFromTCC` is a no-op until every revoked
-    /// surface has restored. Independent of `pausedForScreenShare` so
-    /// the two pause reasons compose (e.g. TCC revoked mid-Zoom-share
-    /// → both flags set → resume only when BOTH clear).
+    /// surface has restored.
     private var pausedForTCC: Bool = false
 
     /// The surfaces currently observed as revoked. Populated by the
@@ -272,8 +337,11 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         ocrPostAllowEmitter: (any OCRPostAllowEmitter)? = nil,
         focusedWindowStore: FocusedWindowStore? = nil,
         focusTracker: FocusTracker? = nil,
-        screenShareDetector: ScreenShareDetector? = nil,
-        tccStatusMonitor: TCCStatusMonitor? = nil
+        tccStatusMonitor: TCCStatusMonitor? = nil,
+        measuresActivity: Bool = false,
+        runtimeFailureHandler: @escaping CaptureRuntimeFailureHandler = { failure in
+            SCStreamCaptureSession.terminateHelper(for: failure)
+        }
     ) {
         self.pipeline = pipeline
         self.denylist = denylist
@@ -284,13 +352,13 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         self.ocrPostAllowEmitter = ocrPostAllowEmitter
         self.focusedWindowStore = focusedWindowStore
         self.focusTracker = focusTracker
-        self.screenShareDetector = screenShareDetector
         self.tccStatusMonitor = tccStatusMonitor
+        self.measuresActivity = measuresActivity
+        self.runtimeFailureHandler = runtimeFailureHandler
         self.sampleQueue = DispatchQueue(label: "com.mci.capture.sample", qos: .userInitiated)
         super.init()
-        // The detector / monitor hold `weak` observers, so this create-
-        // then-set pattern is safe: no retain cycle.
-        self.screenShareDetector?.setObserver(self)
+        // The monitor holds a weak observer, so this create-then-set
+        // pattern does not create a retain cycle.
         self.tccStatusMonitor?.setObserver(self)
     }
 
@@ -302,28 +370,19 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// screen + Screen-Recording TCC grant. Only reachable via the
     /// non-default `--capture` dev flag (Amendment 1 §4).
     ///
-    /// ADR-0031 V2-P1 third-lift (Phase 7 PR 13 wiring): when
-    /// `focusedWindowStore` was supplied, the FocusTracker is started
-    /// first, an initial focused-window snapshot is read, and the
-    /// SCStream filter is bound to a MULTI-WINDOW include-set via
-    /// `SCContentFilterFactory.makeMultiWindowFilter(...)` — the
-    /// FORK 3 = B ratified `SCContentFilter(display:including:
-    /// exceptingWindows:)` shape (redesign memo §1.1 +
-    /// `orchestrator-ratification-state-2026-05-31.md` §1). The include
-    /// list is seeded with the focused window; co-view candidates are
-    /// currently empty pending CEO §6.1 co-view-heuristic ratification
-    /// — this matches redesign-memo §6.1 alternative A (focused-only-
-    /// via-multi-window-API), which delivers the API-correctness value
-    /// of the third lift without depending on unratified heuristics.
+    /// With a focused-window store, start the tracker first and bind Apple's
+    /// desktop-independent window filter to that identity. This avoids the
+    /// prior first-display include filter's blank output on other monitors.
+    /// Only the focused window is eligible; co-view capture is not enabled.
     ///
     /// When no focused window is observable on the initial read (login
     /// window, fast-user-switch, no eligible window), `start()` refuses
-    /// to build a multi-window filter and logs one stderr breadcrumb
+    /// to bind a window filter and logs one stderr breadcrumb
     /// (`helper_health: no_eligible_window`) to satisfy the task
     /// discipline "do NOT throw — this is a routine no-content case."
     /// The session falls back to the pre-V2-P1 `makeDisplayFilter(...)`
     /// so startup is never blocked; the background rebind task will
-    /// swap to the multi-window filter once focus becomes observable.
+    /// bind the window once focus becomes observable.
     /// The race gate covers the transition (sentinel `installedFocus
     /// Generation == 0` fail-close, §5.2 hardening).
     ///
@@ -331,47 +390,40 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// pre-V2-P1 display-filter behaviour byte-for-byte (legacy /
     /// headless test path).
     public func start() async throws {
+        try prepareCaptureStart()
         // Verified live on macOS 26 Tahoe, 2026-05-19, Step-1 PASS (PR #31 → a19211b, see docs/audit/2026-05-19-step1-live-scstream.md).
         // Force the §2 probe back to its fail-safe initial state so a
         // stale flag from a prior session cannot bleed into this one.
         blackedRegionProbe?.reset()
 
-        // ADR-0031: start the FocusTracker before reading the initial
-        // snapshot. Idempotent on a tracker that's already running.
+        // Publish one focus observation before selecting the initial filter.
+        // `start()`'s immediate timer tick is asynchronous and cannot provide
+        // this ordering guarantee by itself.
+        await focusTracker?.refreshOnce()
         focusTracker?.start()
+
+        // Establish the permission state before either ScreenCaptureKit API is
+        // allowed to run. A denied boot surface leaves the session paused; the
+        // monitor will call `resumeFromTCC` after consent is restored.
+        await activateTCCMonitoring()
+        guard let lifecycleEpoch = beginCaptureLifecycle() else { return }
 
         let filter: SCContentFilter
         let initialFocusGeneration: UInt64
         let initialIncludeListSize: UInt32
         if let store = focusedWindowStore {
             let initialSnapshot = store.currentSync()
-            // Runtime guard: the initial focused-window read may miss
-            // (no frontmost, login window, fast-user-switch transition,
-            // lock screen, no eligible window). Do NOT construct the
-            // multi-window filter with an empty include-set — that
-            // would throw `emptyIncludeSet` from the factory (correct
-            // fail-closed direction, but startup is not the right place
-            // to surface that as an error). Instead, log a helper_health
-            // stderr breadcrumb and fall back to the display filter so
-            // capture is never blocked; the background rebind task will
-            // pick up the first focused window observation and swap to
-            // the multi-window include-set. This satisfies the task's
-            // "graceful log-and-skip, not throw" discipline for the
-            // no-eligible-window case.
+            // Bind the window itself: choosing the first display can produce
+            // blank frames when focus is on another monitor. Until focus is
+            // observable, generation zero prevents fallback pixels reaching OCR.
             if let focused = initialSnapshot.focused,
-               let multiWindowFilter = try await SCContentFilterFactory.makeMultiWindowFilter(
-                   focusedWindowId: focused.windowId,
-                   // Seed-only include-set pending CEO §6.1 co-view
-                   // heuristic ratification. Redesign memo §6.1 alt A.
-                   coViewWindowIds: [],
+               let focusedFilter = try await SCContentFilterFactory.makeFocusedWindowFilter(
+                   windowId: focused.windowId,
                    denylist: denylist
                )
             {
-                filter = multiWindowFilter
+                filter = focusedFilter
                 initialFocusGeneration = initialSnapshot.generation
-                // Seed-only include-set ⇒ size 1. The factory's non-
-                // empty post-condition (redesign memo §1.1 + scaffold
-                // helper's precondition) guarantees ≥1.
                 initialIncludeListSize = 1
             } else {
                 // Runtime guard: no eligible window is observable at
@@ -381,8 +433,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
                 FileHandle.standardError.write(
                     ("mci-capture-helper: helper_health: no_eligible_window "
                      + "at startup — falling back to display filter; the "
-                     + "rebind task will swap to the multi-window include-"
-                     + "set once focus is observable.\n")
+                     + "rebind task will bind the focused window "
+                     + "once focus is observable.\n")
                         .data(using: .utf8) ?? Data()
                 )
                 filter = try await SCContentFilterFactory.makeDisplayFilter(denylist: denylist)
@@ -397,30 +449,36 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             initialFocusGeneration = 0
             initialIncludeListSize = 0
         }
-        let configuration = SCStreamConfigFactory.makeConfiguration(policy: policy)
+        let configuration = try SCStreamConfigFactory.makeConfiguration(policy: policy, filter: filter)
         let scStream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try scStream.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleQueue)
-        try await scStream.startCapture()
-        storeStream(scStream)
-        storeInstalledFocusGeneration(initialFocusGeneration)
+        guard registerCandidateStream(
+            scStream,
+            generation: initialFocusGeneration,
+            epoch: lifecycleEpoch
+        ) else {
+            throw CancellationError()
+        }
+        do {
+            try await scStream.startCapture()
+        } catch {
+            discardCandidateStream(scStream)
+            _ = await stopExpectedStream(scStream, failureSite: .startupTeardown)
+            throw error
+        }
+        let installed = commitCandidateStream(
+            scStream,
+            generation: initialFocusGeneration,
+            epoch: lifecycleEpoch
+        )
+        guard installed.installed else {
+            discardCandidateStream(scStream)
+            _ = await stopExpectedStream(scStream, failureSite: .startupTeardown)
+            return
+        }
         storeIncludeListSize(initialIncludeListSize)
         startRebindTaskIfNeeded()
-
-        // Cycle 8.44 audit risk #1 — start the screen-share detector
-        // after the SCStream is live. The detector will pause the
-        // stream immediately if a share is already active on start
-        // (fail-safe: on start we don't know share state until the
-        // first debounced verdict lands).
-        screenShareDetector?.start()
-
-        // Cycle 8.45 audit risk #2 — seed the initial TCC snapshot
-        // (so the first tick does NOT fire spurious "revoked"
-        // transitions for surfaces already in their boot state) then
-        // start the poll. Any subsequent revoke fires
-        // `tccStatusDidTransition` on this session (observer conformance
-        // below), which drives pauseForTCC.
-        tccStatusMonitor?.seedInitialSnapshot()
-        tccStatusMonitor?.start()
+        startMeasuredActivityIfNeeded()
     }
 
     /// Stop the live capture stream (idempotent).
@@ -428,58 +486,261 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// `// UNVERIFIED — needs live macOS; do not claim working`.
     public func stop() async throws {
         // UNVERIFIED — needs live macOS; do not claim working.
-        cancelRebindTask()
+        invalidateCaptureLifecycle(shutdown: true)
+        let rebind = cancelRebindTask()
+        let activity = cancelMeasuredActivity()
         focusTracker?.stop()
-        screenShareDetector?.stop()
-        tccStatusMonitor?.stop()
-        let s = takeStream()
-        try await s?.stopCapture()
+        let streams = takeAllStreamsExpectingTermination()
+        var firstStopError: Error?
+        for stream in streams {
+            do {
+                try await stream.stopCapture()
+            } catch {
+                if firstStopError == nil { firstStopError = error }
+            }
+        }
+        await rebind?.value
+        await activity?.value
+        await tccStatusMonitor?.stopAndDrain()
+        await captureDispatcher.finishAndDrain()
+        await ocrPostAllowEmitter?.stopAndDrain()
         // No frames will arrive after `stopCapture()`; clear the §2
         // verdict so a subsequent `start()` begins from fail-safe.
         blackedRegionProbe?.reset()
-        // Clear the paused-for-share + paused-for-TCC flags so a fresh
-        // `start()` on the same instance doesn't erroneously refuse to
-        // bring up the SCStream (the detector + monitor will re-arm on
-        // the next `start()`).
+        // Clear the TCC pause so a fresh `start()` on the same instance
+        // can re-arm the monitor from a clean state.
         lock.withLock {
-            pausedForScreenShare = false
-            lastPausedActor = nil
             pausedForTCC = false
             revokedSurfaces.removeAll()
         }
+        if let firstStopError { throw firstStopError }
     }
 
     // Locked critical sections live in non-async helpers: `NSLock` is
     // unavailable from async contexts under Swift 6 strict concurrency,
     // and these are the only mutable state.
-    private func storeStream(_ s: SCStream) {
-        lock.lock(); stream = s; lock.unlock()
+    internal func prepareCaptureStart() throws {
+        if let failure = currentRuntimeFailure() {
+            // A terminal callback requires a fresh owner, never a silent restart.
+            throw failure
+        }
+        lock.withLock { shutdownRequested = false }
     }
 
-    private func takeStream() -> SCStream? {
+    internal func beginCaptureLifecycle() -> UInt64? {
         lock.lock(); defer { lock.unlock() }
-        let s = stream
+        guard !pausedForTCC,
+              !shutdownRequested,
+              runtimeFailure == nil
+        else {
+            return nil
+        }
+        captureEpoch &+= 1
+        captureLifecycleActive = true
+        return captureEpoch
+    }
+
+    private func invalidateCaptureLifecycle(shutdown: Bool = false) {
+        lock.lock()
+        captureEpoch &+= 1
+        captureLifecycleActive = false
+        if shutdown { shutdownRequested = true }
+        installedFocusGeneration = 0
+        priorDHash = nil
+        priorDHashGeneration = 0
+        priorDHashCaptureOrdinal = 0
+        retryOCRGeneration = nil
+        lock.unlock()
+    }
+
+    private func currentActiveCaptureEpoch() -> UInt64? {
+        lock.lock(); defer { lock.unlock() }
+        guard captureLifecycleActive,
+              !pausedForTCC,
+              !shutdownRequested,
+              runtimeFailure == nil
+        else {
+            return nil
+        }
+        return captureEpoch
+    }
+
+    internal func registerCandidateStream(
+        _ candidate: SCStream,
+        generation: UInt64,
+        epoch: UInt64
+    ) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard captureLifecycleActive,
+              captureEpoch == epoch,
+              !pausedForTCC,
+              !shutdownRequested,
+              runtimeFailure == nil
+        else {
+            return false
+        }
+        streamFocusGenerations[ObjectIdentifier(candidate)] = generation
+        candidateStreams[ObjectIdentifier(candidate)] = candidate
+        installedFocusGeneration = generation
+        priorDHash = nil
+        priorDHashGeneration = generation
+        priorDHashCaptureOrdinal = 0
+        retryOCRGeneration = nil
+        return true
+    }
+
+    private func discardCandidateStream(_ candidate: SCStream) {
+        lock.lock(); defer { lock.unlock() }
+        streamFocusGenerations.removeValue(forKey: ObjectIdentifier(candidate))
+        candidateStreams.removeValue(forKey: ObjectIdentifier(candidate))
+        installedFocusGeneration = stream.flatMap {
+            streamFocusGenerations[ObjectIdentifier($0)]
+        } ?? 0
+        priorDHash = nil
+        priorDHashGeneration = installedFocusGeneration
+        priorDHashCaptureOrdinal = 0
+        retryOCRGeneration = nil
+    }
+
+    internal func commitCandidateStream(
+        _ candidate: SCStream,
+        generation: UInt64,
+        epoch: UInt64
+    ) -> (installed: Bool, replaced: SCStream?) {
+        lock.lock(); defer { lock.unlock() }
+        guard captureLifecycleActive,
+              captureEpoch == epoch,
+              !pausedForTCC,
+              !shutdownRequested,
+              runtimeFailure == nil,
+              streamFocusGenerations[ObjectIdentifier(candidate)] == generation
+        else {
+            return (false, nil)
+        }
+        let old = stream
+        candidateStreams.removeValue(forKey: ObjectIdentifier(candidate))
+        stream = candidate
+        installedFocusGeneration = generation
+        priorDHash = nil
+        priorDHashGeneration = generation
+        priorDHashCaptureOrdinal = 0
+        retryOCRGeneration = nil
+        if let old, old !== candidate {
+            streamFocusGenerations.removeValue(forKey: ObjectIdentifier(old))
+        }
+        return (true, old)
+    }
+
+    private func streamFocusGeneration(_ source: SCStream) -> UInt64? {
+        lock.lock(); defer { lock.unlock() }
+        return streamFocusGenerations[ObjectIdentifier(source)]
+    }
+
+    private func takeAllStreamsExpectingTermination() -> [SCStream] {
+        lock.lock(); defer { lock.unlock() }
+        var streams = Array(candidateStreams.values)
+        if let stream,
+           !streams.contains(where: { $0 === stream })
+        {
+            streams.append(stream)
+        }
         stream = nil
-        return s
+        candidateStreams.removeAll()
+        streamFocusGenerations.removeAll()
+        installedFocusGeneration = 0
+        priorDHash = nil
+        priorDHashGeneration = 0
+        priorDHashCaptureOrdinal = 0
+        retryOCRGeneration = nil
+        // Removing admission identities also retires their delegate callbacks,
+        // including callbacks delivered after stopCapture() has returned.
+        return streams
     }
 
-    /// Roll the prior-dHash window and return the previous value.
-    private func rollPriorDHash(_ next: DHash) -> DHash? {
+    /// Stop a stream already registered as an intentional teardown. A failed
+    /// stop can leave pixels flowing after the session claims capture is off,
+    /// so it is a terminal owner failure rather than ignorable cleanup noise.
+    internal func stopExpectedStream(
+        _ stream: SCStream, failureSite: CaptureRuntimeFailureSite
+    ) async -> Bool {
+        do {
+            try await stream.stopCapture()
+            return true
+        } catch {
+            reportTerminalCaptureFailure(error: error, site: failureSite)
+            return false
+        }
+    }
+
+    private func reportTerminalCaptureFailure(error: Error, site: CaptureRuntimeFailureSite) {
+        guard let diagnostic = claimUnexpectedStreamTermination(nil, error: error, site: site) else { return }
+        handleClaimedRuntimeFailure(diagnostic)
+    }
+
+    private func currentRuntimeFailure() -> CaptureRuntimeFailure? {
         lock.lock(); defer { lock.unlock() }
-        let prior = priorDHash
+        return runtimeFailure
+    }
+
+    private func isShutdownRequested() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return shutdownRequested
+    }
+
+    private func currentPriorDHash(for generation: UInt64) -> DHash? {
+        lock.lock(); defer { lock.unlock() }
+        guard priorDHashGeneration == generation else { return nil }
+        return priorDHash
+    }
+
+    private func commitPriorDHash(
+        _ next: DHash,
+        generation: UInt64,
+        captureOrdinal: UInt64
+    ) {
+        lock.lock(); defer { lock.unlock() }
+        guard installedFocusGeneration == generation else { return }
         priorDHash = next
-        return prior
+        priorDHashGeneration = generation
+        priorDHashCaptureOrdinal = captureOrdinal
+        if retryOCRGeneration == generation {
+            retryOCRGeneration = nil
+        }
+    }
+
+    private func revokePriorDHashForRetry(
+        generation: UInt64,
+        captureOrdinal: UInt64
+    ) {
+        lock.lock(); defer { lock.unlock() }
+        guard CaptureBaselinePolicy.shouldRevokeForRetry(
+            currentGeneration: priorDHashGeneration,
+            currentCaptureOrdinal: priorDHashCaptureOrdinal,
+            retryGeneration: generation,
+            retryCaptureOrdinal: captureOrdinal
+        ) else {
+            return
+        }
+        priorDHash = nil
+        priorDHashCaptureOrdinal = 0
+        retryOCRGeneration = generation
+    }
+
+    private func isOCRRetryPending(for generation: UInt64) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return retryOCRGeneration == generation
+    }
+
+    private func allocateCaptureOrdinal() -> UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        captureOrdinal &+= 1
+        return captureOrdinal
     }
 
     /// Read the currently-installed focus generation. Lock-guarded.
     private func currentInstalledFocusGeneration() -> UInt64 {
         lock.lock(); defer { lock.unlock() }
         return installedFocusGeneration
-    }
-
-    /// Write the currently-installed focus generation. Lock-guarded.
-    private func storeInstalledFocusGeneration(_ gen: UInt64) {
-        lock.lock(); installedFocusGeneration = gen; lock.unlock()
     }
 
     /// Write the include-list size observed at the most recent
@@ -525,25 +786,19 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         return focusRaceDropSeen
     }
 
-    /// Start the background rebind task that observes focus changes
-    /// and calls `updateContentFilter` on the live SCStream. Lock-
-    /// guarded; second call while running is a no-op.
+    /// Start the background task that replaces the stream when focus changes.
+    /// Lock-guarded; second call while running is a no-op.
     ///
-    /// Cadence is faster than the FocusTracker's 1 Hz poll so the
-    /// SCStream filter follows focus changes promptly (target: ≤200 ms
-    /// between FocusTracker observation and SCStream rebind). The race
-    /// gate covers the residual window.
+    /// Cadence matches the FocusTracker's default 200 ms identity poll. The
+    /// generation gate covers the residual window while replacement starts.
     private func startRebindTaskIfNeeded() {
         guard focusedWindowStore != nil else { return }
         lock.lock()
         guard rebindTask == nil else { lock.unlock(); return }
         let store = focusedWindowStore!
         let task = Task { [weak self] in
-            // Poll cadence: 200 ms. The FocusTracker writes at 1 Hz;
-            // this task picks up the change within one poll interval.
-            // The race gate covers the residual window between
-            // observation here and SCStream filter applying on the
-            // sample queue.
+            // Poll cadence: 200 ms. The generation gate covers the interval
+            // between observation and the replacement stream becoming active.
             while !Task.isCancelled {
                 let snap = store.currentSync()
                 let installed = self?.currentInstalledFocusGeneration() ?? 0
@@ -563,35 +818,95 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     }
 
     /// Cancel the rebind task (idempotent).
-    private func cancelRebindTask() {
+    @discardableResult
+    private func cancelRebindTask() -> Task<Void, Never>? {
         lock.lock()
         let t = rebindTask
         rebindTask = nil
         lock.unlock()
         t?.cancel()
+        return t
     }
 
-    /// ADR-0031 §5.2 — rebind the live SCStream to the supplied focused
-    /// window's `SCContentFilter`. Updates the installed-focus generation
-    /// AFTER `updateContentFilter` returns so the race gate observes
-    /// the new generation only once the filter is actually in force.
+    internal func startMeasuredActivityIfNeeded(dependencies: MeasuredActivityDependencies = .live) {
+        guard measuresActivity, let store = focusedWindowStore,
+              let epoch = currentActiveCaptureEpoch() else { return }
+        lock.withLock {
+            guard measuredActivityTask == nil else { return }
+            measuredActivityTask = Task { [weak self] in
+                var sampler = ActivityIntervalSampler(captureGeneration: UUID().uuidString)
+                while !Task.isCancelled {
+                    guard let self, self.currentActiveCaptureEpoch() == epoch else { break }
+                    let sessionEligible = dependencies.sessionEligible()
+                    self.focusTracker?.refreshBindingOnceSync()
+                    let before = store.currentSync()
+                    let context = Self.buildWorkflowContext(
+                        snapshot: self.contextSnapshot, urlProvider: self.urlProvider,
+                        fallbackAppBundleId: "", focusedSnapshot: before
+                    )
+                    // Reuse every capture privacy gate. No text, title, URL or pixels
+                    // cross the activity wire; an uncertain gate loses attribution.
+                    let privacy = self.pipeline.snapshotPixelPrivacy(context: context, capturedWindow: before.focused)
+                    self.focusTracker?.refreshBindingOnceSync()
+                    let after = store.currentSync()
+                    guard !Task.isCancelled, self.currentActiveCaptureEpoch() == epoch else { break }
+                    let now = dependencies.now()
+                    let observation = ActivityObservation(
+                        tsUs: now.tsUs,
+                        uptimeNs: now.uptimeNs,
+                        focusGeneration: after.generation,
+                        appBundleId: after.focused?.bundleId,
+                        state: UserActivityState.classify(secondsSinceLastInput: dependencies.secondsSinceLastInput()),
+                        admitted: sessionEligible && dependencies.sessionEligible()
+                            && privacy.permitsRawPixels && before == after && after.focused != nil
+                    )
+                    if let interval = sampler.sample(observation) {
+                        do {
+                            try await self.pipeline.emitActivityInterval(interval) { [weak self] in
+                                self?.currentActiveCaptureEpoch() == epoch
+                            }
+                        } catch {
+                            self.invalidateCaptureLifecycle(shutdown: true)
+                            self.lock.withLock { self.runtimeFailure = .activityDeliveryFailed }
+                            self.handleClaimedRuntimeFailure(CaptureRuntimeDiagnostic(
+                                failure: .activityDeliveryFailed, site: .activityDelivery, error: error
+                            ))
+                            break
+                        }
+                    }
+                    try? await dependencies.sleep(4_000_000_000)
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    private func cancelMeasuredActivity() -> Task<Void, Never>? {
+        let task = lock.withLock {
+            let task = measuredActivityTask
+            measuredActivityTask = nil
+            return task
+        }
+        task?.cancel()
+        return task
+    }
+
+    /// Replace the live stream for a new focused-window generation. A stream's
+    /// generation is registered before `startCapture()` can emit its first
+    /// callback and never changes afterward. Queued callbacks from the replaced
+    /// stream therefore retain their old provenance and fail the generation gate.
     ///
-    /// `// UNVERIFIED — needs live macOS; do not claim working`. The
-    /// `updateContentFilter` call requires a running `SCStream`; the
-    /// rebind decision (when to rebind, what filter to build) is
+    /// `// UNVERIFIED — needs live macOS; do not claim working`. Stream
+    /// replacement requires a live display; the filter-selection decision is
     /// auditable headlessly via the
     /// `SCContentFilterFactory.selectFocusedWindow(...)` helper.
     public func rebindFocusedWindow(
         focusedWindow: FocusedWindow,
         snapshotGeneration: UInt64
     ) async throws {
-        guard let currentStream = currentStream() else { return }
-        // V2-P1 third-lift (Phase 7 PR 13 wiring): the rebind path
-        // also uses the multi-window FORK 3 = B API form. Seed-only
-        // include-set pending CEO §6.1 co-view heuristic ratification.
-        guard let newFilter = try await SCContentFilterFactory.makeMultiWindowFilter(
-            focusedWindowId: focusedWindow.windowId,
-            coViewWindowIds: [],
+        guard let lifecycleEpoch = currentActiveCaptureEpoch() else { return }
+        guard let newFilter = try await SCContentFilterFactory.makeFocusedWindowFilter(
+            windowId: focusedWindow.windowId,
             denylist: denylist
         ) else {
             // Focused window was not in `SCShareableContent` (closed /
@@ -603,17 +918,56 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             // window per ADR-0013 §1.
             return
         }
-        try await currentStream.updateContentFilter(newFilter)
-        storeInstalledFocusGeneration(snapshotGeneration)
+        guard currentActiveCaptureEpoch() == lifecycleEpoch,
+              focusedWindowStore?.currentSync().generation == snapshotGeneration
+        else {
+            return
+        }
+
+        let configuration = try SCStreamConfigFactory.makeConfiguration(policy: policy, filter: newFilter)
+        let replacement = SCStream(
+            filter: newFilter,
+            configuration: configuration,
+            delegate: self
+        )
+        try replacement.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleQueue)
+        guard registerCandidateStream(
+            replacement,
+            generation: snapshotGeneration,
+            epoch: lifecycleEpoch
+        ) else {
+            return
+        }
+        do {
+            try await replacement.startCapture()
+        } catch {
+            discardCandidateStream(replacement)
+            _ = await stopExpectedStream(replacement, failureSite: .rebindTeardown)
+            throw error
+        }
+        guard focusedWindowStore?.currentSync().generation == snapshotGeneration else {
+            discardCandidateStream(replacement)
+            _ = await stopExpectedStream(replacement, failureSite: .rebindTeardown)
+            return
+        }
+        let installed = commitCandidateStream(
+            replacement,
+            generation: snapshotGeneration,
+            epoch: lifecycleEpoch
+        )
+        guard installed.installed else {
+            discardCandidateStream(replacement)
+            _ = await stopExpectedStream(replacement, failureSite: .rebindTeardown)
+            return
+        }
         // Seed-only include-set (redesign-memo §6.1 alt A) ⇒ size 1.
         // Future co-view-heuristic wiring lifts this above 1.
         storeIncludeListSize(1)
-    }
-
-    /// Lock-guarded read of the live SCStream pointer.
-    private func currentStream() -> SCStream? {
-        lock.lock(); defer { lock.unlock() }
-        return stream
+        if let replaced = installed.replaced,
+           !(await stopExpectedStream(replaced, failureSite: .rebindTeardown))
+        {
+            throw CaptureRuntimeFailure.streamStoppedUnexpectedly
+        }
     }
 
     /// Atomically claim the right to emit the one-shot "first sample
@@ -697,8 +1051,24 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
                 pageText: nil
             )
         }
-        let snap = snapshotActor.currentSync()
+        let observation = snapshotActor.currentObservationSync()
+        let snap = observation.context
         let effectiveBundleId: String? = focusedBundleId ?? snap.appBundleId
+        let admittedWindowTitle: String?
+        if let focusedSnapshot {
+            admittedWindowTitle = FocusedContextPolicy.admittedWindowTitle(
+                snapshotBundleId: snap.appBundleId,
+                effectiveBundleId: effectiveBundleId,
+                snapshotFocusGeneration: observation.focusGeneration,
+                effectiveFocusGeneration: focusedSnapshot.generation,
+                windowTitle: snap.windowTitle
+            )
+        } else {
+            // Legacy display-scoped construction has no focus provenance to
+            // compare. Preserve its existing context behavior; production
+            // focused-window capture always takes the generation-bound branch.
+            admittedWindowTitle = snap.windowTitle
+        }
         let resolvedUrl: String?
         if let id = effectiveBundleId, !id.isEmpty {
             // V2-P2: pass the focused-window CGWindowID so the URL
@@ -715,84 +1085,17 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         }
         return WorkflowContext(
             appBundleId: effectiveBundleId,
-            windowTitle: snap.windowTitle,
+            windowTitle: admittedWindowTitle,
             url: resolvedUrl,
             pageText: nil
         )
     }
 
-    // MARK: - Cycle 8.44 — screen-share pause/resume
-
-    /// Pause the live SCStream because a screen-share was detected.
-    /// Idempotent. Emits a stderr `helper_health screen_share_active=
-    /// true actor=<bundleId>` breadcrumb so the parent app (Hippocampus)
-    /// can drive the menu-bar red pill until the sibling
-    /// `MenuBarStatus.pausedForScreenShare(actor:)` enum lands (mission
-    /// brief §7). Content-free: only bundle-id + boolean cross the
-    /// process boundary. The pause drops the SCStream strong ref, so
-    /// the ingest pipeline sees a clean capture-off surface (M4 kill-
-    /// switch pattern).
-    ///
-    /// `// UNVERIFIED — needs live macOS; do not claim working` for
-    /// the OS-touching `stopCapture()`; state-flag logic is headless-
-    /// tested.
-    public func pauseForScreenShare(actor: String?) async {
-        let early = lock.withLock { () -> Bool in
-            if pausedForScreenShare { return true }
-            pausedForScreenShare = true
-            lastPausedActor = actor
-            return false
-        }
-        if early { return }
-
-        FileHandle.standardError.write(
-            "mci-capture-helper: helper_health screen_share_active=true actor=\(actor ?? "unknown")\n"
-                .data(using: .utf8) ?? Data()
-        )
-
-        // UNVERIFIED — needs live macOS; do not claim working.
-        let s = takeStream()
-        try? await s?.stopCapture()
-    }
-
-    /// Resume from a screen-share pause. Idempotent. If the underlying
-    /// SCStream rebuild throws (e.g. TCC revoked during the pause), the
-    /// session stays paused and the next detector cycle can retry —
-    /// fail-safe = pause more aggressively (mission constraint).
-    ///
+    /// Bring up only the SCStream after a required TCC permission is
+    /// restored. The focus tracker and TCC monitor remain active while
+    /// capture is paused, so they must not be started a second time.
     /// `// UNVERIFIED — needs live macOS; do not claim working`.
-    public func resumeFromScreenShare() async throws {
-        let early = lock.withLock { () -> Bool in
-            if !pausedForScreenShare { return true }
-            // Clear optimistically so `start()` doesn't recurse; restore on
-            // throw so the next detector cycle retries.
-            pausedForScreenShare = false
-            return false
-        }
-        if early { return }
-
-        FileHandle.standardError.write(
-            "mci-capture-helper: helper_health screen_share_active=false\n"
-                .data(using: .utf8) ?? Data()
-        )
-
-        do {
-            try await bringUpSCStreamOnly()
-        } catch {
-            lock.withLock { pausedForScreenShare = true }
-            FileHandle.standardError.write(
-                "mci-capture-helper: SCStream resume-from-pause failed (staying paused): \(error)\n"
-                    .data(using: .utf8) ?? Data()
-            )
-            throw error
-        }
-    }
-
-    /// Bring up ONLY the SCStream (used by `resumeFromScreenShare`),
-    /// bypassing `focusTracker.start()` / `screenShareDetector.start()`
-    /// — those are already running from the initial `start()`.
-    /// `// UNVERIFIED — needs live macOS; do not claim working`.
-    private func bringUpSCStreamOnly() async throws {
+    private func bringUpSCStreamOnly(lifecycleEpoch: UInt64) async throws {
         // UNVERIFIED — needs live macOS; do not claim working.
         let filter: SCContentFilter
         let initialFocusGeneration: UInt64
@@ -814,27 +1117,54 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             filter = try await SCContentFilterFactory.makeDisplayFilter(denylist: denylist)
             initialFocusGeneration = 0
         }
-        let configuration = SCStreamConfigFactory.makeConfiguration(policy: policy)
+        let configuration = try SCStreamConfigFactory.makeConfiguration(policy: policy, filter: filter)
         let scStream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try scStream.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleQueue)
-        try await scStream.startCapture()
-        storeStream(scStream)
-        storeInstalledFocusGeneration(initialFocusGeneration)
-    }
-
-    /// Test-only accessor — proves the pause state without exposing
-    /// the mutable field. Not public API.
-    internal func isPausedForScreenShareForTest() -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        return pausedForScreenShare
-    }
-
-    internal func lastPausedActorForTest() -> String? {
-        lock.lock(); defer { lock.unlock() }
-        return lastPausedActor
+        guard registerCandidateStream(
+            scStream,
+            generation: initialFocusGeneration,
+            epoch: lifecycleEpoch
+        ) else {
+            throw CancellationError()
+        }
+        do {
+            try await scStream.startCapture()
+        } catch {
+            discardCandidateStream(scStream)
+            _ = await stopExpectedStream(scStream, failureSite: .tccResumeTeardown)
+            throw error
+        }
+        let installed = commitCandidateStream(
+            scStream,
+            generation: initialFocusGeneration,
+            epoch: lifecycleEpoch
+        )
+        guard installed.installed else {
+            discardCandidateStream(scStream)
+            _ = await stopExpectedStream(scStream, failureSite: .tccResumeTeardown)
+            throw CancellationError()
+        }
+        if let replaced = installed.replaced,
+           !(await stopExpectedStream(replaced, failureSite: .tccResumeTeardown))
+        {
+            throw CaptureRuntimeFailure.streamStoppedUnexpectedly
+        }
     }
 
     // MARK: - Cycle 8.45 — TCC pause/resume
+
+    /// Apply the boot-time permission snapshot, then begin transition
+    /// monitoring. The monitor itself intentionally does not emit callbacks
+    /// while seeding, so startup owns the initial fail-closed state explicitly.
+    internal func activateTCCMonitoring() async {
+        guard let tccStatusMonitor else { return }
+        tccStatusMonitor.seedInitialSnapshot()
+        let initialStatuses = tccStatusMonitor.currentStatuses()
+        for (surface, status) in initialStatuses where status == .denied {
+            await pauseForTCC(surface: surface)
+        }
+        tccStatusMonitor.start()
+    }
 
     /// Pause the live SCStream because the TCC monitor observed a
     /// mid-run permission revoke. Idempotent per-surface. Emits a
@@ -858,6 +1188,13 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             revokedSurfaces.insert(surface)
             let wasPaused = pausedForTCC
             pausedForTCC = true
+            captureEpoch &+= 1
+            captureLifecycleActive = false
+            installedFocusGeneration = 0
+            priorDHash = nil
+            priorDHashGeneration = 0
+            priorDHashCaptureOrdinal = 0
+            retryOCRGeneration = nil
             return (alreadyRevoked, wasPaused)
         }
 
@@ -875,9 +1212,14 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
 
         guard !wasPaused else { return }
 
+        let activity = cancelMeasuredActivity()
+        await activity?.value
+
         // UNVERIFIED — needs live macOS; do not claim working.
-        let s = takeStream()
-        try? await s?.stopCapture()
+        let streams = takeAllStreamsExpectingTermination()
+        for stream in streams {
+            _ = await stopExpectedStream(stream, failureSite: .tccPauseTeardown)
+        }
     }
 
     /// Resume from a TCC pause. Called by the observer when the
@@ -891,11 +1233,10 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     ///
     /// `// UNVERIFIED — needs live macOS; do not claim working`.
     public func resumeFromTCC(surface: TCCSurface) async throws {
-        let (stillRevoked, stillSharing) = lock.withLock { () -> (Bool, Bool) in
+        guard !isShutdownRequested() else { return }
+        let stillRevoked = lock.withLock { () -> Bool in
             revokedSurfaces.remove(surface)
-            let stillRevoked = !revokedSurfaces.isEmpty
-            let stillSharing = pausedForScreenShare
-            return (stillRevoked, stillSharing)
+            return !revokedSurfaces.isEmpty
         }
 
         FileHandle.standardError.write(
@@ -908,25 +1249,31 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             ).data(using: .utf8) ?? Data()
         )
 
-        if stillRevoked || stillSharing {
-            // Other pause reasons remain — do not bring up the SCStream.
-            // The next resume path (TCC restore or screen-share end)
-            // will retry when it's actually safe.
+        if stillRevoked {
+            // Another required permission remains revoked. Its restoration
+            // will retry once every required TCC surface is available.
             return
         }
 
         lock.withLock { pausedForTCC = false }
 
         do {
-            try await bringUpSCStreamOnly()
+            guard let lifecycleEpoch = beginCaptureLifecycle() else {
+                throw CancellationError()
+            }
+            try await bringUpSCStreamOnly(lifecycleEpoch: lifecycleEpoch)
+            startRebindTaskIfNeeded()
+            startMeasuredActivityIfNeeded()
         } catch {
+            if isShutdownRequested() { return }
             // The OS hasn't caught up on the grant yet — go back to
-            // paused so the next monitor tick can retry via the same
-            // "granted debounced → resume" path.
+            // paused and require two fresh granted samples so the monitor
+            // emits another denied-to-granted transition.
             lock.withLock {
                 pausedForTCC = true
                 revokedSurfaces.insert(surface)
             }
+            tccStatusMonitor?.requireFreshGrantForRetry(surface: surface)
             FileHandle.standardError.write(
                 "mci-capture-helper: SCStream resume-from-TCC-\(surface.rawValue) failed (staying paused): \(error)\n"
                     .data(using: .utf8) ?? Data()
@@ -960,7 +1307,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// exactly-once `defer` on every exit ⇒ no pool-stall, no stored
     /// frame.
     public func stream(
-        _: SCStream,
+        _ stream: SCStream,
         didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
         of outputType: SCStreamOutputType
     ) {
@@ -982,28 +1329,48 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             )
         }
 
-        guard let sample = Self.extractSynchronously(from: sampleBuffer) else { return }
-
-        // ADR-0013 §2 pre-feed: stamp the latest blacked-region
-        // verdict from the synchronously-extracted 9×8 luminance grid
-        // BEFORE the cascade runs on this frame. O(72), well under
-        // the 100 µs/frame hot-path budget. The cascade reads back
-        // via `BlackedRegionProbe.hasBlackedRegion()` inside
-        // `SCStreamPipeline.process(...)`.
-        blackedRegionProbe?.update(grayscale: sample.grayscale)
-
-        // Roll the prior-dHash window — pure bookkeeping, not the
-        // surface. The callback is synchronous so the lock is fine
-        // here; the helper is shared with the async start/stop path.
-        let prior = rollPriorDHash(sample.dhash)
-
-        let frame = CapturedSampleExtractor.makeCandidateFrame(
-            userIdle: sample.userIdle,
-            frameStatusComplete: sample.frameStatusComplete,
-            dirtyRects: sample.dirtyRects,
-            dhash: sample.dhash,
-            priorDhash: prior
+        processScreenSample(
+            sampleBuffer,
+            requiredFocusGeneration: streamFocusGeneration(stream)
         )
+    }
+
+    /// Shared ingestion path for focused-window streaming frames. No caller can
+    /// reach OCR without passing the generation gate, the pixel-time privacy
+    /// snapshot, and `SCStreamPipeline.process(...)`.
+    private func processScreenSample(
+        _ sampleBuffer: CMSampleBuffer,
+        requiredFocusGeneration: UInt64?
+    ) {
+        guard let sample = Self.extractSynchronously(from: sampleBuffer) else { return }
+        guard activitySchedule.shouldProcess(
+            inputQuiet: sample.userIdle,
+            focusGeneration: requiredFocusGeneration,
+            now: DispatchTime.now().uptimeNanoseconds
+        ) else { return }
+        let callbackOrdinal = allocateCaptureOrdinal()
+        let baselineGeneration = requiredFocusGeneration ?? 0
+        let retryPending = isOCRRetryPending(for: baselineGeneration)
+        let effectiveDirtyRects = CaptureBaselinePolicy.effectiveDirtyRects(
+            reported: sample.dirtyRects,
+            frameStatusComplete: sample.frameStatusComplete,
+            frameWidth: sample.frameWidth,
+            frameHeight: sample.frameHeight,
+            retryPending: retryPending
+        )
+
+        // ADR-0013 §2: classify this frame's synchronously extracted 9×8
+        // luminance grid as a pure value. O(72), well under the hot-path
+        // budget; no shared probe state can bleed across queued frames.
+        let frameHasBlackedRegion = blackedRegionProbe.map { probe in
+            probe.classify(grayscale: sample.grayscale)
+        }
+
+        // Close the interval between periodic focus polls only for frames that
+        // can reach OCR. Idle/incomplete callbacks remain a lock-only path.
+        if sample.frameStatusComplete, !effectiveDirtyRects.isEmpty {
+            focusTracker?.refreshBindingOnceSync()
+        }
 
         // ADR-0031 §5.3 — race-consistency gate. When the session is
         // wired with a `focusedWindowStore` (Option (a) is active),
@@ -1044,21 +1411,16 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         let focusedSnapshot: FocusedWindowSnapshot? = focusedWindowStore?.currentSync()
         if focusedWindowStore != nil {
             let installedGen = currentInstalledFocusGeneration()
-            if installedGen == 0 || focusedSnapshot?.generation != installedGen {
+            if !CaptureGenerationPolicy.shouldAdmit(
+                streamGeneration: requiredFocusGeneration,
+                installedGeneration: installedGen,
+                observedGeneration: focusedSnapshot?.generation
+            ) {
                 let nowUsForRace = UInt64(max(0, Date().timeIntervalSince1970 * 1_000_000))
                 let raceBundle = focusedSnapshot?.focused?.bundleId ?? ""
-                // Build the surface lease + release the surface in the
-                // pipeline's emit helper. We construct the lease here
-                // (same shape as the normal path) so the IOSurface
-                // retain lifecycle is identical to a `.suppress` exit.
-                let raceReleaser: any SurfaceReleasing
-                if CMSampleBufferGetImageBuffer(sampleBuffer) != nil {
-                    // `// UNVERIFIED — needs live macOS; do not claim working`.
-                    raceReleaser = BorrowedNoRetainReleaser()
-                } else {
-                    raceReleaser = BorrowedNoRetainReleaser()
-                }
-                let raceLease = SurfaceLease(releaser: raceReleaser)
+                // The race gate runs before raw-pixel admission. Its
+                // tombstone owns no CVPixelBuffer or IOSurface retain.
+                let raceLease = SurfaceLease(releaser: BorrowedNoRetainReleaser())
                 // V2-P1 third-lift (Phase 7 PR 13 wiring): throttled
                 // stderr breadcrumb for `frames_focus_race_dropped`
                 // counter increments. Log the first drop + every 100
@@ -1078,16 +1440,35 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
                     )
                 }
                 let pipeline = self.pipeline
-                Task.detached {
-                    try? await pipeline.emitFocusRaceDropped(
-                        tsUs: nowUsForRace,
-                        appBundle: raceBundle,
-                        lease: raceLease
-                    )
-                }
+                captureDispatcher.submit(
+                    captureOrdinal: callbackOrdinal,
+                    operation: {
+                        try? await pipeline.emitFocusRaceDropped(
+                            tsUs: nowUsForRace,
+                            appBundle: raceBundle,
+                            lease: raceLease
+                        )
+                    },
+                    onDrop: {
+                        raceLease.release()
+                    }
+                )
                 return
             }
         }
+
+        // Read without mutating. The baseline is committed only after the
+        // pixel-time privacy snapshot permits raw pixels.
+        let prior = currentPriorDHash(for: baselineGeneration)
+        let frame = CapturedSampleExtractor.makeCandidateFrame(
+            // Quiet-input cadence was applied above. Still admit meaningful
+            // changes while reading or watching a meeting without typing.
+            userIdle: false,
+            frameStatusComplete: sample.frameStatusComplete,
+            dirtyRects: effectiveDirtyRects,
+            dhash: sample.dhash,
+            priorDhash: prior
+        )
 
         // ADR-0015 §6 P2.5 — context join. Delegates to the pure
         // `buildWorkflowContext(...)` helper below so the wiring is
@@ -1105,6 +1486,62 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             focusedSnapshot: focusedSnapshot
         )
         let nowUs = UInt64(max(0, Date().timeIntervalSince1970 * 1_000_000))
+        let evidenceCandidate = focusedSnapshot?.focused.map { focused in
+            KeyframeEvidenceCandidate(
+                captureOrdinal: callbackOrdinal,
+                focusedWindowId: UInt32(focused.windowId),
+                dhash: sample.dhash,
+                monotonicNanoseconds: DispatchTime.now().uptimeNanoseconds
+            )
+        }
+
+        // Freeze every mutable pixel-time privacy signal while this callback
+        // still owns the frame. A later secure-input/AX/blacked-region change
+        // must never authorize these pixels. Disallowed frames are dispatched
+        // without obtaining or retaining their CVPixelBuffer.
+        let pipelineSnapshot = self.pipeline
+        let privacySnapshot = pipelineSnapshot.snapshotPixelPrivacy(
+            context: context,
+            hasBlackedRegion: frameHasBlackedRegion,
+            capturedWindow: focusedSnapshot?.focused
+        )
+        if privacySnapshot.permitsRawPixels, focusedWindowStore != nil {
+            // Accessibility and browser queries can outlive a focus switch.
+            // Rebind before retaining pixels, never authorize a queued old window.
+            focusTracker?.refreshBindingOnceSync()
+            if !CaptureGenerationPolicy.shouldAdmit(
+                streamGeneration: requiredFocusGeneration,
+                installedGeneration: currentInstalledFocusGeneration(),
+                observedGeneration: focusedWindowStore?.currentSync().generation
+            ) {
+                let lease = SurfaceLease(releaser: BorrowedNoRetainReleaser())
+                captureDispatcher.submit(captureOrdinal: callbackOrdinal, operation: {
+                    try? await pipelineSnapshot.emitFocusRaceDropped(
+                        tsUs: nowUs, appBundle: context.appBundleId ?? "", lease: lease
+                    )
+                }, onDrop: { lease.release() })
+                return
+            }
+        }
+        if !privacySnapshot.permitsRawPixels {
+            let lease = SurfaceLease(releaser: BorrowedNoRetainReleaser())
+            captureDispatcher.submit(
+                captureOrdinal: callbackOrdinal,
+                operation: {
+                    _ = try? await pipelineSnapshot.process(
+                        frame: frame,
+                        context: context,
+                        nowUs: nowUs,
+                        lease: lease,
+                        privacySnapshot: privacySnapshot
+                    )
+                },
+                onDrop: {
+                    lease.release()
+                }
+            )
+            return
+        }
 
         // PR-2: retain the pixel buffer (⇒ its IOSurface) so a future
         // encoder (PR-3) can read it after the callback returns. The
@@ -1126,19 +1563,13 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         // Build the OCR input in the callback's synchronous frame —
         // `OCREngineInput` is `@unchecked Sendable` (it documents the
         // single-owner-while-in-flight contract), so it crosses the
-        // `Task.detached` boundary into the cascade-twice path cleanly.
+        // owned dispatcher boundary into the cascade-twice path cleanly.
         // `nil` when the sample carries no pixel buffer; the OCR path
         // is then skipped (no OCREvent ever reaches the wire).
         let ocrInput: OCREngineInput?
-        // DOGFOOD #3 — wrap the same retained `CVPixelBuffer` in an
-        // `EncoderInput` so the cascade's `.allow` branch can hand it
-        // to `VideoToolboxHEVCEncoder`. `@unchecked Sendable` for the
-        // same reason `OCREngineInput` is — single-owner-while-in-
-        // flight; the encoder runs to completion before the pipeline's
-        // `defer { lease.release() }` fires, so the `CVPixelBuffer`
-        // outlives the encoder call without a second retain. `nil`
-        // preserves the pre-DOGFOOD#3 OS-free behaviour (the encoder
-        // no-ops and the pipeline still encodes-or-suppresses).
+        // Preserve the encoder seam for pipeline ordering tests, but
+        // production wires the no-op encoder. The post-OCR coordinator
+        // is the only visual persistence path.
         let encoderInput: EncoderInput?
         if let pb = CMSampleBufferGetImageBuffer(sampleBuffer) {
             // UNVERIFIED — needs live macOS; do not claim working.
@@ -1148,7 +1579,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             let roi = OCRROIComputer.normalizedBoundingROI(
                 widthPx: CVPixelBufferGetWidth(pb),
                 heightPx: CVPixelBufferGetHeight(pb),
-                dirtyRects: sample.dirtyRects
+                dirtyRects: effectiveDirtyRects
             )
             ocrInput = OCREngineInput(pixelBuffer: pb, roi: roi)
             encoderInput = EncoderInput(pixelBuffer: pb)
@@ -1160,58 +1591,160 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         let lease = SurfaceLease(releaser: releaser)
 
         // Only `Sendable` values are captured — NOT the sample buffer.
-        let pipeline = self.pipeline
         let ocrEmitter = self.ocrPostAllowEmitter
-        Task.detached {
-            // The single sink for a captured frame is the cascade-gated
-            // pipeline. On `.allow` the pipeline hands `encoderInput`
-            // to whichever `FrameEncoder` is wired:
-            //   - default / no `--capture` build: `DeferredVideoToolboxEncoder`
-            //     (no-op, stores nothing). Amendment 1 §4 binding.
-            //   - `--capture` dev path (DOGFOOD #3): `VideoToolboxHEVCEncoder`
-            //     produces an HEVC IDR and hands it to an in-memory
-            //     `EncodedSampleSink` (not persisted to disk; the next
-            //     PR wires the OCR consumer).
-            // A `.suppress` decision emits a tombstone and never reaches
-            // encode — Amendment 1 §3(a)/(c) preserved by construction.
-            let outcome = try? await pipeline.process(
-                frame: frame,
-                context: context,
-                nowUs: nowUs,
-                lease: lease,
-                encoderInput: encoderInput
-            )
-            // ADR-0016 P3.6 — cascade-twice. On `.encoded` (pixel-time
-            // cascade returned `.allow`), submit to OCR + run §6
-            // re-cascade + emit OCREvent or tombstone-6. The emitter
-            // owns ALL of that; the callback's only job is to dispatch.
-            //
-            // Privacy invariant (ADR-0016 §4.2): there is NO call site
-            // that emits `OCREvent` other than `ocrEmitter` here, and
-            // that call is structurally gated by the pixel-time
-            // cascade's `.encoded` outcome.
-            if case .encoded = outcome,
-               let emitter = ocrEmitter,
-               let input = ocrInput
-            {
-                await emitter.processAfterAllow(
-                    tsUs: nowUs,
+        captureDispatcher.submit(
+            captureOrdinal: callbackOrdinal,
+            operation: {
+                // The single sink for a captured frame is the cascade-gated
+                // pipeline. Production always hands `encoderInput` to the
+                // no-op encoder; only the twice-cleared OCR branch below can
+                // ask the retention coordinator to persist visual evidence.
+                // A `.suppress` decision emits a tombstone and never reaches
+                // encode — Amendment 1 §3(a)/(c) preserved by construction.
+                let outcome = try? await pipelineSnapshot.process(
+                    frame: frame,
                     context: context,
-                    input: input
+                    nowUs: nowUs,
+                    lease: lease,
+                    encoderInput: encoderInput,
+                    privacySnapshot: privacySnapshot
                 )
+                // Commit only a successfully processed, cascade-allowed frame.
+                // The generation check prevents an old queued operation from
+                // poisoning a replacement stream's baseline.
+                if CaptureBaselinePolicy.shouldCommit(outcome: outcome) {
+                    self.commitPriorDHash(
+                        sample.dhash,
+                        generation: baselineGeneration,
+                        captureOrdinal: callbackOrdinal
+                    )
+                }
+                // ADR-0016 P3.6 — cascade-twice. On `.encoded` (pixel-time
+                // cascade returned `.allow`), submit to OCR + run §6
+                // re-cascade + emit OCREvent or tombstone-6. The emitter
+                // owns ALL of that; the callback's only job is to dispatch.
+                //
+                // Privacy invariant (ADR-0016 §4.2): there is NO call site
+                // that emits `OCREvent` other than `ocrEmitter` here, and
+                // that call is structurally gated by the pixel-time
+                // cascade's `.encoded` outcome.
+                if OCRDispatchPolicy.shouldSubmit(
+                    outcome: outcome,
+                    hasInput: ocrInput != nil
+                ),
+                   let emitter = ocrEmitter,
+                   let input = ocrInput
+                {
+                    await emitter.processAfterAllow(
+                        captureOrdinal: callbackOrdinal,
+                        tsUs: nowUs,
+                        context: context,
+                        input: input,
+                        evidenceCandidate: evidenceCandidate,
+                        disposition: { [weak self] disposition in
+                            guard disposition == .retryableNoContent else { return }
+                            self?.revokePriorDHashForRetry(
+                                generation: baselineGeneration,
+                                captureOrdinal: callbackOrdinal
+                            )
+                        }
+                    )
+                }
+            },
+            onDrop: {
+                lease.release()
             }
-        }
+        )
     }
 
     // MARK: - SCStreamDelegate
 
     /// `// UNVERIFIED — needs live macOS; do not claim working`.
-    public func stream(_: SCStream, didStopWithError error: Error) {
+    public func stream(_ stream: SCStream, didStopWithError error: Error) {
         // UNVERIFIED — needs live macOS; do not claim working.
-        FileHandle.standardError.write(
-            "mci-capture-helper: SCStream stopped with error: \(error)\n"
-                .data(using: .utf8) ?? Data()
-        )
+        guard let diagnostic = claimUnexpectedStreamTermination(
+            stream, error: error, site: .streamDelegate
+        ) else { return }
+        handleClaimedRuntimeFailure(diagnostic)
+    }
+
+    private func handleClaimedRuntimeFailure(_ diagnostic: CaptureRuntimeDiagnostic) {
+        // Stop every in-process source of post-failure work before the owner
+        // action. The handler's production default exits immediately; the
+        // detached drain remains useful for an embedding owner that replaces
+        // it with a notification during integration.
+        cancelRebindTask()
+        cancelMeasuredActivity()
+        focusTracker?.stop()
+        tccStatusMonitor?.stop()
+        let dispatcher = captureDispatcher
+        let emitter = ocrPostAllowEmitter
+        Task {
+            await dispatcher.cancelAndDrain()
+            await emitter?.stopAndDrain()
+        }
+        FileHandle.standardError.write(Data(diagnostic.healthLogLine.utf8))
+        runtimeFailureHandler(diagnostic.failure)
+    }
+
+    /// Test seam for the shared state transition behind the framework-only
+    /// delegate callback. Live ScreenCaptureKit cannot be instantiated in a
+    /// headless XCTest process; this executes the exact one-shot owner signal.
+    internal func recordUnexpectedStreamTerminationForTest() {
+        guard let diagnostic = claimUnexpectedStreamTermination(nil, site: .streamDelegate) else { return }
+        handleClaimedRuntimeFailure(diagnostic)
+    }
+
+    /// Test-only read of the terminal runtime state. The production behavior
+    /// is the default handler's nonzero helper exit, not a polling surface.
+    internal func hasRuntimeFailureForTest() -> Bool {
+        currentRuntimeFailure() != nil
+    }
+
+    /// Generic failures from retired streams cannot poison their replacements.
+    /// An explicit OS user stop still wins a race with a window replacement.
+    /// A nil stream is an explicit internal failure, such as failed teardown.
+    private func claimUnexpectedStreamTermination(
+        _ stoppedStream: SCStream?, error: Error? = nil, site: CaptureRuntimeFailureSite
+    ) -> CaptureRuntimeDiagnostic? {
+        lock.lock(); defer { lock.unlock() }
+        let failure: CaptureRuntimeFailure
+        if let stoppedStream {
+            guard let classified = CaptureRuntimeFailure.forStreamStop(
+                error ?? CaptureRuntimeFailure.streamStoppedUnexpectedly,
+                sourceIsLive: streamFocusGenerations[ObjectIdentifier(stoppedStream)] != nil
+            ) else { return nil }
+            failure = classified
+        } else {
+            failure = .streamStoppedUnexpectedly
+        }
+        guard runtimeFailure == nil else { return nil }
+        runtimeFailure = failure
+        captureEpoch &+= 1
+        captureLifecycleActive = false
+        installedFocusGeneration = 0
+        priorDHash = nil
+        priorDHashGeneration = 0
+        priorDHashCaptureOrdinal = 0
+        retryOCRGeneration = nil
+        if let stoppedStream {
+            let identity = ObjectIdentifier(stoppedStream)
+            candidateStreams.removeValue(forKey: identity)
+            streamFocusGenerations.removeValue(forKey: identity)
+            if stream === stoppedStream {
+                stream = nil
+            }
+        }
+        return CaptureRuntimeDiagnostic(failure: failure, site: site, error: error)
+    }
+
+    /// Terminate immediately on a capture loss after readiness. Continuing
+    /// would leave the supervisor with a live helper that cannot capture, so
+    /// process death is the fail-closed truth signal. The claiming session
+    /// already emitted its bounded diagnostic before invoking this handler.
+    @usableFromInline
+    static func terminateHelper(for failure: CaptureRuntimeFailure) -> Never {
+        exit(failure.helperExitStatus)
     }
 
     // MARK: - In-callback OS extraction (UNVERIFIED)
@@ -1229,7 +1762,10 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// tested. On any extraction failure this returns `nil` and the
     /// frame is dropped — the safe direction (no capture beats a
     /// half-read capture).
-    static func extractSynchronously(from sampleBuffer: CMSampleBuffer) -> InCallbackSample? {
+    static func extractSynchronously(
+        from sampleBuffer: CMSampleBuffer,
+        activityReader: any UserActivityReading = SystemUserActivityReader()
+    ) -> InCallbackSample? {
         // Verified live on macOS 26 Tahoe, 2026-05-19, Step-1 PASS (PR #31 → a19211b, see docs/audit/2026-05-19-step1-live-scstream.md).
         let attachments = CMSampleBufferGetSampleAttachmentsArray(
             sampleBuffer, createIfNecessary: false
@@ -1238,7 +1774,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
 
         let statusRaw = info?[.status] as? Int
         let status = statusRaw.flatMap(SCFrameStatus.init(rawValue:))
-        let frameStatusComplete = (status == .complete)
+        let frameStatusComplete = (status == .complete || status == .started)
 
         var dirtyRects: [DirtyRect] = []
         if let rectDicts = info?[.dirtyRects] as? [[String: Any]] {
@@ -1259,6 +1795,16 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
             return nil
         }
+        let frameWidth = CVPixelBufferGetWidth(pixelBuffer)
+        let frameHeight = CVPixelBufferGetHeight(pixelBuffer)
+        if status == .started, dirtyRects.isEmpty {
+            dirtyRects = [DirtyRect(
+                x: 0,
+                y: 0,
+                width: UInt32(clamping: frameWidth),
+                height: UInt32(clamping: frameHeight)
+            )]
+        }
         guard let grid = grayscale9x8(from: pixelBuffer) else { return nil }
         let dhash = CapturedSampleExtractor.computeDHash9x8(grayscale: grid)
 
@@ -1274,9 +1820,15 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         // can update its verdict in the callback before the cascade
         // runs (single read, no second pixel scan).
         return InCallbackSample(
-            userIdle: false,
+            // Unknown input activity must not be treated as active capture.
+            // This gates work only; it does not measure time or attention.
+            userIdle: UserActivityState.classify(
+                secondsSinceLastInput: activityReader.secondsSinceLastInput()
+            ) != .active,
             frameStatusComplete: frameStatusComplete,
             dirtyRects: dirtyRects,
+            frameWidth: frameWidth,
+            frameHeight: frameHeight,
             dhash: dhash,
             appBundleId: nil,
             grayscale: grid
@@ -1321,27 +1873,6 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             }
         }
         return grid
-    }
-}
-
-// MARK: - Cycle 8.44 — screen-share detector observer conformance
-
-extension SCStreamCaptureSession: ScreenShareDetector.Observer {
-    /// Debounced transitions arrive here. `isSharingActive == true`
-    /// pauses; `false` resumes. Idempotent — the underlying
-    /// pause/resume methods no-op on repeated same-state calls.
-    public func screenShareDetectorDidTransition(
-        to sample: ScreenShareSample
-    ) async {
-        if sample.isSharingActive {
-            await pauseForScreenShare(actor: sample.sharingActor)
-        } else {
-            // Resume best-effort — a throw here leaves the session
-            // in the paused state and the next detector cycle can
-            // retry. Do NOT re-throw: the observer callback is
-            // fire-and-forget from the detector's side.
-            try? await resumeFromScreenShare()
-        }
     }
 }
 

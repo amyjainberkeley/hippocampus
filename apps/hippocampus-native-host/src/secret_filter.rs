@@ -1,15 +1,15 @@
 //! §6 secret-pattern filter — Rust port of
-//! `SuppressionCascade.containsSecretOrPII` from MCICaptureHelperKit.
+//! `SuppressionCascade.containsSecretOrPII` from `MCICaptureHelperKit`.
 //!
 //! Patterns covered (same set as the Swift helper):
-//!   1. password/secret/api_key/token/bearer/access_token + separator + value
+//!   1. `password/secret/api_key/token/bearer/access_token` + separator + value
 //!   2. GitHub PAT (ghp_/gho_/ghu_/ghs_/ghr_ + 36 alnum)
 //!   3. AWS access key (AKIA/ASIA + 16 alnum)
 //!   4. JWT (eyJ + base64url . base64url . base64url)
 //!
-//! CSO INVARIANT: this filter runs BEFORE any PageContentEvent reaches
+//! CSO INVARIANT: this filter runs BEFORE any `PageContentEvent` reaches
 //! the wire. Text that matches ANY pattern is dropped — the event is
-//! never emitted. Same cascade-twice discipline as OCREvent.
+//! never emitted. Same cascade-twice discipline as `OCREvent`.
 
 use regex::Regex;
 use std::sync::LazyLock;

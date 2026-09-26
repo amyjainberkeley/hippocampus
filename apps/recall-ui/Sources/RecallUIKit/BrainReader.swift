@@ -4,11 +4,10 @@
 // a `BrainReader`. Two impls exist:
 //
 //   - `StubBrainReader` (this file) — canned data for headless tests and
-//     the v1 demo. No FFI, no SQLCipher, no disk I/O.
+//     explicit previews. No FFI, no SQLCipher, no disk I/O.
 //   - `FFIBrainReader` (separate file) — calls the C ABI in
-//     `adapters/macos/mci-brain-ffi/` via `MciBrainFFI.swift`. Compiled
-//     in P3.9a but does not yet link a non-empty static lib; P3.9b
-//     finishes the binding.
+//     `adapters/macos/mci-brain-ffi/` and supports read-only lexical or
+//     Core ML-backed hybrid retrieval.
 //
 // Read-only by construction: the protocol has no `put`/`delete`/`mutate`
 // surface (ADR-0016 §4.3 + ADR-0017 §5 invariants). Adding one is an
@@ -27,10 +26,12 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
     public let url: String?
     /// Truncated OCR snippet (caps at ~280 chars at the FFI boundary).
     public let ocrTextSnippet: String
-    /// Where the row came from: "lexical" / "hybrid" / "timeline".
-    /// P3.9a: timeline = "timeline"; search results from the stub use
-    /// "lexical"; P3.9b adds "hybrid" when HybridRetriever lights up.
+    /// Where the row came from: lexical, verified hybrid, unverified related
+    /// context, conflict evidence, or timeline ordering.
     public let source: String
+    /// Acquisition provenance, independent of the retrieval method in `source`.
+    /// Nil and unrecognized wire values are displayed as Unknown source.
+    public let sourceKind: String?
     /// Fused score [0,1] for search; `nil` for plain timeline rows.
     public let score: Float?
 
@@ -63,11 +64,8 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
     /// before the P3.6.5 blob writer landed). Mirrors the FFI's
     /// `HitJson.thumbnail_path` (cycle 8.35 PR-4).
     ///
-    /// The path is opened by the `HitThumbnail` view in `HitRow`, which
-    /// applies a light blur + slight desaturation for defense-in-depth
-    /// against over-shoulder viewing. A missing file (stale hex,
-    /// user-deleted blob dir) falls back to the placeholder icon —
-    /// never a crash.
+    /// The path is authenticated and decrypted by `ThumbnailDataProvider`,
+    /// which returns only a bounded preview and fails closed for invalid data.
     ///
     /// **Privacy invariant.** A keyframe blob exists on disk ONLY for
     /// events that cleared cascade-twice (ADR-0016 §4.8). The brain-store
@@ -79,7 +77,7 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
     /// Convenience: file URL for the thumbnail, or `nil` when no path
     /// was populated. Purely a derivation from `thumbnailPath` — no I/O.
     public var thumbnailURL: URL? {
-        guard let p = thumbnailPath, !p.isEmpty else { return nil }
+        guard let p = thumbnailPath, !p.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return URL(fileURLWithPath: p)
     }
 
@@ -94,7 +92,8 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
         score: Float?,
         entities: [String] = [],
         linkedEventIds: [UInt64] = [],
-        thumbnailPath: String? = nil
+        thumbnailPath: String? = nil,
+        sourceKind: String? = nil
     ) {
         self.eventId = eventId
         self.tsUs = tsUs
@@ -103,6 +102,7 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
         self.url = url
         self.ocrTextSnippet = ocrTextSnippet
         self.source = source
+        self.sourceKind = sourceKind
         self.score = score
         self.entities = entities
         self.linkedEventIds = linkedEventIds
@@ -174,11 +174,25 @@ public struct PrivacyMoment: Sendable, Equatable, Identifiable, Codable {
 }
 
 /// Search query options.
+public enum SearchMode: String, Sendable, Codable, CaseIterable {
+    case text
+    case related
+}
+
 public struct SearchOptions: Sendable, Equatable {
     public let text: String
+    public let mode: SearchMode
+    /// Explicit chronological browse with empty text. Unflagged empty text returns no hits.
+    public let browse: Bool
     public let limit: Int
     public let appFilter: String?
+    /// Exact source-ID union applied before the result limit; intersects the legacy single app.
+    /// At most 32 nonempty UTF-8 IDs, each at most 255 bytes, without NUL or control characters.
+    /// Source IDs include MCP tags, not only application bundle identifiers.
+    public let appFilters: [String]
+    public let hasUrl: Bool
     public let timeFromUs: UInt64?
+    /// Inclusive FFI upper endpoint. SearchViewModel converts exclusive calendar windows.
     public let timeToUs: UInt64?
     /// Cycle 8.42 — user-defined entity aliases (`UserDictionary`). Keys
     /// are canonical names, values are the alias list. The recall pipeline
@@ -194,11 +208,19 @@ public struct SearchOptions: Sendable, Equatable {
         appFilter: String? = nil,
         timeFromUs: UInt64? = nil,
         timeToUs: UInt64? = nil,
-        userAliases: [String: [String]]? = nil
+        userAliases: [String: [String]]? = nil,
+        mode: SearchMode = .related,
+        browse: Bool = false,
+        appFilters: [String] = [],
+        hasUrl: Bool = false
     ) {
         self.text = text
+        self.mode = mode
+        self.browse = browse
         self.limit = limit
         self.appFilter = appFilter
+        self.appFilters = appFilters
+        self.hasUrl = hasUrl
         self.timeFromUs = timeFromUs
         self.timeToUs = timeToUs
         self.userAliases = userAliases
@@ -264,31 +286,34 @@ public struct TimelineEvent: Sendable, Equatable, Identifiable, Codable {
     /// Microseconds since UNIX epoch.
     public let tsUs: UInt64
     public let appBundleId: String?
-    /// Very short snippet (~80 chars) for the card's hover-preview.
+    /// Display body with the indexing header removed before truncation.
     public let snippet: String
     /// Absolute filesystem path to the encrypted keyframe blob, or nil
     /// for events without a keyframe. Same privacy invariant as
     /// `Hit.thumbnailPath`.
     public let thumbnailPath: String?
+    public let sourceKind: String?
 
     public init(
         eventId: UInt64,
         tsUs: UInt64,
         appBundleId: String?,
         snippet: String,
-        thumbnailPath: String? = nil
+        thumbnailPath: String? = nil,
+        sourceKind: String? = nil
     ) {
         self.eventId = eventId
         self.tsUs = tsUs
         self.appBundleId = appBundleId
         self.snippet = snippet
         self.thumbnailPath = thumbnailPath
+        self.sourceKind = sourceKind
     }
 
     /// Convenience: file URL for the thumbnail, or nil when no path was
     /// populated. No I/O.
     public var thumbnailURL: URL? {
-        guard let p = thumbnailPath, !p.isEmpty else { return nil }
+        guard let p = thumbnailPath, !p.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return URL(fileURLWithPath: p)
     }
 }
@@ -331,20 +356,56 @@ public enum BrainReaderError: Error, Equatable {
     case openFailed(String)
     case queryFailed(String)
     case decodeFailed(String)
+    /// A live or ambiguous ingestion writer prevented mutation before commit.
+    case mutationBlocked
 }
 
 /// Content-free result of a Privacy Dashboard destructive action.
 /// Mirrors the FFI's `DeleteResultJson`.
 public struct DeleteResult: Sendable, Equatable, Codable {
+    /// The database transaction committed. The FFI returns no result otherwise.
+    public let committed: Bool
     /// Rows removed from the `events` table (CASCADE children not counted).
     public let eventsDeleted: UInt64
     /// Whether the post-delete VACUUM succeeded. `false` here still means
     /// the DELETE landed — disk-space reclamation may be pending.
     public let vacuumOk: Bool
+    /// Whether encrypted keyframe artifacts were reconciled after commit.
+    public let blobCleanupOk: Bool
 
-    public init(eventsDeleted: UInt64, vacuumOk: Bool) {
+    public init(
+        committed: Bool = true,
+        eventsDeleted: UInt64,
+        vacuumOk: Bool,
+        blobCleanupOk: Bool = true
+    ) {
+        self.committed = committed
         self.eventsDeleted = eventsDeleted
         self.vacuumOk = vacuumOk
+        self.blobCleanupOk = blobCleanupOk
+    }
+
+    /// Whether any best-effort storage maintenance remains after commit.
+    public var cleanupPending: Bool { !vacuumOk || !blobCleanupOk }
+}
+
+/// Truthful, jargon-free presentation of destructive-action outcomes.
+public enum DeletionPresentation {
+    /// Banner for an outcome returned after a committed transaction.
+    public static func successBanner(for result: DeleteResult) -> String {
+        let noun = result.eventsDeleted == 1 ? "event" : "events"
+        let committed = "Removed \(result.eventsDeleted) \(noun)."
+        return result.cleanupPending
+            ? committed + " Storage cleanup is still pending."
+            : committed
+    }
+
+    /// Banner for a mutation that did not return a committed outcome.
+    public static func failureBanner(for error: Error) -> String {
+        if case BrainReaderError.mutationBlocked = error {
+            return UserFacingCopy.deleteBlockedBanner
+        }
+        return UserFacingCopy.deleteFailedBanner
     }
 }
 
@@ -407,6 +468,14 @@ public protocol BrainReader: Sendable {
     /// is truncated silently.
     func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit]
 
+    /// Fetch only the selected event's stored text (at most 128 KiB UTF-8).
+    /// The response's timestamp/app identity must match the selected Hit before use.
+    /// Nil means the event is absent or this reader does not support inspection.
+    func eventText(eventId: UInt64) async throws -> EventText?
+
+    /// Measured input/foreground records for [startUs, endUs), never screenshot durations.
+    func activityIntervals(startUs: UInt64, endUs: UInt64, limit: UInt32) async throws -> ActivityPage
+
     // Daily Brief read surface — backs the Brief tab
     // (`docs/design/brief-viewer-spec.md`).
 
@@ -420,11 +489,12 @@ public protocol BrainReader: Sendable {
     /// Powers the date selector's `<` / `>` arrows.
     func briefDates(limit: Int) async throws -> [String]
 
-    /// Content-free aggregate — event count, oldest/newest ts,
-    /// on-disk byte size. Powers the Privacy Dashboard's top summary
-    /// card ("MCI has captured X events across Y days, using Z MB of
-    /// encrypted storage"). No row content is exposed.
+    /// Content-free counts and cheap database-only metadata; no blob enumeration.
     func summaryStats() async throws -> SummaryStats
+
+    /// Explicit logical-storage measurement; never call from a polling loop.
+    /// Filesystem enumeration must run off the main actor. Nil means unsupported.
+    func storageUsage() async throws -> StorageUsage?
 
     /// **V2-P13 (Phase D scaffold).** Fetch lightweight event summaries
     /// for the Rewind-style timeline strip. Returns rows in ASCENDING
@@ -446,6 +516,14 @@ public protocol BrainReader: Sendable {
 /// modification; production `FFIBrainReader` overrides to route through
 /// the dedicated FFI entry point (with proper downsampling + hard cap).
 public extension BrainReader {
+    func eventText(eventId: UInt64) async throws -> EventText? { nil }
+
+    func activityIntervals(startUs: UInt64, endUs: UInt64, limit: UInt32) async throws -> ActivityPage {
+        throw ActivityReadError.unavailable
+    }
+
+    func storageUsage() async throws -> StorageUsage? { nil }
+
     func timelineEvents(
         startTsUs: UInt64,
         endTsUs: UInt64,
@@ -463,17 +541,15 @@ public extension BrainReader {
                     eventId: hit.eventId,
                     tsUs: hit.tsUs,
                     appBundleId: hit.appBundleId,
-                    snippet: String(hit.ocrTextSnippet.prefix(80)),
-                    thumbnailPath: hit.thumbnailPath
+                    snippet: String(Formatters.stripContextHeader(hit.ocrTextSnippet).prefix(80)),
+                    thumbnailPath: hit.thumbnailPath,
+                    sourceKind: hit.sourceKind
                 )
             }
     }
 }
 
-/// Content-free brain aggregate — mirrors the FFI's `SummaryStatsJson`.
-/// The Privacy Dashboard top card renders `"MCI has captured
-/// {totalEvents} events across {daysCovered} days, using
-/// {formattedDiskBytes} of encrypted storage."`
+/// Content-free counts and logical storage, mirroring `SummaryStatsJson`.
 public struct SummaryStats: Sendable, Equatable, Codable {
     /// Total rows in `events`. `0` on an empty store.
     public let totalEvents: UInt64
@@ -481,19 +557,23 @@ public struct SummaryStats: Sendable, Equatable, Codable {
     public let oldestTsUs: UInt64?
     /// Largest `events.ts_us`. `nil` on an empty store.
     public let newestTsUs: UInt64?
-    /// On-disk byte count of the SQLCipher brain file.
+    /// Legacy database-only bytes, zero when unavailable. Not total storage.
     public let diskBytes: UInt64
+    /// Nil for a legacy reader that cannot report a storage breakdown.
+    public let storage: StorageUsage?
 
     public init(
         totalEvents: UInt64,
         oldestTsUs: UInt64?,
         newestTsUs: UInt64?,
-        diskBytes: UInt64
+        diskBytes: UInt64,
+        storage: StorageUsage? = nil
     ) {
         self.totalEvents = totalEvents
         self.oldestTsUs = oldestTsUs
         self.newestTsUs = newestTsUs
         self.diskBytes = diskBytes
+        self.storage = storage
     }
 
     /// Days spanned by the capture window (`ceil((newest - oldest) /
@@ -514,10 +594,9 @@ public struct SummaryStats: Sendable, Equatable, Codable {
 }
 
 /// In-memory stub reader. Returns deterministic canned data so the
-/// SwiftUI scenes have something to render in v1 and the unit tests
-/// can assert against known rows. **Never** runs in a release build —
-/// the executable target's launch path wires `FFIBrainReader` once
-/// P3.9b lands.
+/// SwiftUI previews have something to render and unit tests can assert
+/// against known rows. **Never** runs in the release launch path; the
+/// executable wires `FFIBrainReader` against the local encrypted brain.
 public struct StubBrainReader: BrainReader {
     /// Canned demo corpus. Stable order so tests can assert on it.
     ///
@@ -686,9 +765,15 @@ public struct StubBrainReader: BrainReader {
     public func search(_ opts: SearchOptions) async throws -> [Hit] {
         let needle = opts.text.lowercased()
         let isWildcard = opts.text == "*"
-        guard !opts.text.isEmpty else { return [] }
+        if opts.browse && !opts.text.isEmpty {
+            throw BrainReaderError.queryFailed("browse requires empty text")
+        }
+        guard opts.browse || !opts.text.isEmpty else { return [] }
+        if !opts.browse && opts.mode == .related && (Set(opts.appFilters).count > 1 || opts.hasUrl) {
+            throw BrainReaderError.queryFailed("Related search does not support multiple-app or URL filters; choose Text")
+        }
         var matches = Self.demoHits
-        if !isWildcard {
+        if !opts.browse && !isWildcard {
             matches = matches.filter { h in
                 h.ocrTextSnippet.lowercased().contains(needle)
                     || (h.windowTitle?.lowercased().contains(needle) ?? false)
@@ -698,13 +783,22 @@ public struct StubBrainReader: BrainReader {
         if let app = opts.appFilter {
             matches = matches.filter { $0.appBundleId == app }
         }
+        if !opts.appFilters.isEmpty {
+            matches = matches.filter { hit in hit.appBundleId.map { opts.appFilters.contains($0) } ?? false }
+        }
+        if opts.hasUrl {
+            matches = matches.filter { $0.url?.isEmpty == false }
+        }
         if let from = opts.timeFromUs {
             matches = matches.filter { $0.tsUs >= from }
         }
         if let to = opts.timeToUs {
             matches = matches.filter { $0.tsUs <= to }
         }
-        return Array(matches.prefix(opts.limit))
+        if opts.browse {
+            matches.sort { $0.tsUs == $1.tsUs ? $0.id > $1.id : $0.tsUs > $1.tsUs }
+        }
+        return Array(matches.prefix(max(0, min(opts.limit, 10_000))))
     }
 
     public func recentEvents(limit: Int) async throws -> [Hit] {

@@ -14,7 +14,6 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use mci_brain::{
     stubs::{FixedDimEmbedder, InMemoryBrainStore},
     BrainStore, Embedder, Event, EventId, FusionWeights, HybridRetriever, RetrievalQuery,
-    Retriever,
 };
 
 const MICROS_PER_HOUR: u64 = 3_600_000_000;
@@ -53,6 +52,7 @@ fn build_corpus() -> Corpus {
             summary: None,
             entities: None,
             episode_id: None,
+            tab_id: None,
             cascade_reason: 0,
             keyframe_blob: None,
             embedding: Some(emb),
@@ -88,7 +88,7 @@ fn bench_hybrid_recall(c: &mut Criterion) {
                     time_filter: None,
                     app_filter: None,
                 };
-                black_box(r.retrieve(&query).unwrap());
+                black_box(r.retrieve_outcome(&query).unwrap());
             }
         });
     });
@@ -110,7 +110,7 @@ fn bench_hybrid_recall(c: &mut Criterion) {
                     time_filter: None,
                     app_filter: None,
                 };
-                black_box(r.retrieve(&query).unwrap());
+                black_box(r.retrieve_outcome(&query).unwrap());
             }
         });
     });
@@ -132,7 +132,7 @@ fn bench_hybrid_recall(c: &mut Criterion) {
                     time_filter: None,
                     app_filter: None,
                 };
-                black_box(r.retrieve(&query).unwrap());
+                black_box(r.retrieve_outcome(&query).unwrap());
             }
         });
     });

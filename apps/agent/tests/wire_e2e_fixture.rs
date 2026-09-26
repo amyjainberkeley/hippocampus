@@ -1,7 +1,7 @@
-//! Pin the **Swift↔Rust OCREvent wire contract** end-to-end with a
+//! Pin the **Swift↔Rust `OCREvent` wire contract** end-to-end with a
 //! byte-exact v0x06 fixture.
 //!
-//! AGENT_QUESTIONS.md 2026-05-23 option C follow-on. The §4 capture-
+//! `AGENT_QUESTIONS.md` 2026-05-23 option C follow-on. The §4 capture-
 //! to-brain spine is code-complete (5/5) and PR #174 already pins the
 //! Rust **consumer** side (`drain_to_log_with_brain` → `BrainPump` →
 //! `SqlCipherBrainStore` → `mci_recall`) using synthetic `OCREvent`
@@ -51,11 +51,11 @@ use std::sync::Arc;
 use mci_agent::brain_ingest::{BrainIngestor, BrainPump};
 use mci_agent::device_id::{load_or_generate, DeviceId};
 use mci_agent::health_log::{HealthLog, HealthLogConfig};
-use mci_agent::mcp::{BrainReader, LiveBrainReader};
+use mci_agent::mcp::{BrainReader, LiveBrainReader, McpRecallOutcome};
 use mci_agent::runner::{drain_to_log_with_brain, RunError};
 use mci_agent::wall_clock::SystemWallClock;
 use mci_brain::stubs::FixedDimEmbedder;
-use mci_brain::{BrainStore, Embedder, SqlCipherBrainStore};
+use mci_brain::{BrainStore, Embedder, RetrievalDegradation, SqlCipherBrainStore};
 use mci_core::crypto::DbKey;
 use mci_core::ipc::{DecodeError, ReadError};
 
@@ -227,17 +227,27 @@ async fn swift_v07_fixture_decodes_ingests_and_recalls_end_to_end() {
         row.text_snippet
     );
 
-    // `mci_recall` round-trip on the OCR body token — proves the FTS5
-    // trigger sync indexed the headered text the chunker emitted.
-    let hits = reader.recall(FIXTURE_OCR_TOKEN, 10).expect("recall");
+    // `mci_recall` round-trip on the OCR body token proves the FTS5 trigger
+    // indexed the headered text. This reader has no query embedder, so the
+    // row must remain typed non-authoritative related context.
+    let outcome = reader.recall(FIXTURE_OCR_TOKEN, 10).expect("recall");
+    let McpRecallOutcome::Degraded {
+        degradation: RetrievalDegradation::EmbeddingsUnavailable,
+        related_context,
+    } = outcome
+    else {
+        panic!("lexical-only fixture recall must remain typed degraded");
+    };
     assert!(
-        !hits.is_empty(),
-        "mci_recall(\"{FIXTURE_OCR_TOKEN}\") must return at least one hit \
-         for the v0x07 fixture"
+        !related_context.is_empty(),
+        "mci_recall(\"{FIXTURE_OCR_TOKEN}\") must return related context \
+         for the v0x07 fixture without promoting it to a hit"
     );
     assert!(
-        hits.iter().any(|h| h.record.ts_us == FIXTURE_TS_US),
-        "at least one hit must carry the fixture ts_us = {FIXTURE_TS_US}"
+        related_context
+            .iter()
+            .any(|hit| hit.record.ts_us == FIXTURE_TS_US),
+        "at least one related-context row must carry fixture ts_us = {FIXTURE_TS_US}"
     );
 }
 

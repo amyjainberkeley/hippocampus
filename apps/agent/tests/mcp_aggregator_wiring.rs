@@ -24,8 +24,8 @@
 //! 4. **Tool catalog persistence** — `tools/list` results are stashed
 //!    in-memory per server; no `tools/call` is emitted.
 //!
-//! 5. **Per-tick dedupe** — running two reconcile ticks against the
-//!    same server only materializes each resource once.
+//! 5. **Per-tick revision dedupe** — running two reconcile ticks against the
+//!    same unchanged server only materializes each resource once.
 //!
 //! 6. **Cross-server isolation** — registering two servers under
 //!    different names produces two distinct source tags.
@@ -55,16 +55,16 @@ mod stub_server;
 use stub_server::{StubMcpServer, StubResource};
 
 /// Best-effort sweep of every event the in-memory store holds. We do
-/// not have a typed "list_all" API on the trait; production stores
+/// not have a typed "`list_all`" API on the trait; production stores
 /// use FTS5 or vector search. For tests we pull events by sequential
-/// id from 1 upward; the InMemoryBrainStore assigns ids monotonically
+/// id from 1 upward; the `InMemoryBrainStore` assigns ids monotonically
 /// from 1.
 fn read_all(store: &InMemoryBrainStore) -> Vec<mci_brain::Event> {
     let mut out = Vec::new();
     for i in 1u64..1000 {
         match store.get_event(EventId(i)) {
             Ok(Some(ev)) => out.push(ev),
-            Ok(None) => continue,
+            Ok(None) => {}
             Err(_) => break,
         }
     }
@@ -223,7 +223,7 @@ async fn large_resource_yields_catalog_only_row() {
 
 #[tokio::test]
 async fn second_reconcile_does_not_re_materialize_seen_resources() {
-    // Per-tick dedupe via in-memory seen-set keyed by `(server, uri)`.
+    // Per-tick dedupe via in-memory revision map keyed by `(server, uri)`.
     let resources = vec![
         StubResource::new("g://r1", "r1", "first"),
         StubResource::new("g://r2", "r2", "second"),
@@ -465,7 +465,7 @@ async fn n_5_servers_with_idle_loop_holds_steady_state() {
         let url = format!("http://127.0.0.1:{}/sse", server.port());
         let host = LoopbackHost::parse(&url).await.unwrap();
         let _h = registry
-            .register(ServerRegistration::http(&format!("svc{i}"), host, None))
+            .register(ServerRegistration::http(format!("svc{i}"), host, None))
             .await;
         servers.push(server);
     }
@@ -540,5 +540,9 @@ fn construction_graph_wiring_at_integration_site() {
         AGENT_BIN.contains("mci_registry: Arc<mci_mcp_client::ServerRegistry>")
             || AGENT_BIN.contains("registry: Arc<mci_mcp_client::ServerRegistry>"),
         "spawn_mcp_aggregator should take an Arc<ServerRegistry>",
+    );
+    assert!(
+        AGENT_BIN.contains("seed_resource_revisions_from_store"),
+        "the app-owned aggregator must seed persisted revisions before its first reconcile",
     );
 }

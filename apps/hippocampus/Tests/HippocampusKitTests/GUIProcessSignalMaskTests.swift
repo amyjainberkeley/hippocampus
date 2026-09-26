@@ -79,8 +79,7 @@ final class GUIProcessSignalMaskTests: XCTestCase {
 
     /// The `SIG_IGN` install MUST live in `applicationDidFinishLaunching`,
     /// not elsewhere — it must run before any pipe / socket / Process
-    /// code path, otherwise an early `SIGPIPE` (e.g. during
-    /// QuarantineUnlocker's `xattr` `Process` lifecycle, or
+    /// code path, otherwise an early `SIGPIPE` (for example,
     /// SafariInboxReader's first drain after `supervisor.start()`) can
     /// still hit before the mask is installed.
     func test_SIGPIPE_mask_lives_in_applicationDidFinishLaunching() throws {

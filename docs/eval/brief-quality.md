@@ -197,6 +197,15 @@ stub is a development placeholder, not a shipping product.
 
 ## Relationship to ADR-0028
 
+ADR-0039 supersedes Qwen as the default release author. The real-model mode
+below remains an experimental comparison lane; the shipping baseline is the
+source-cited extractive author and must be evaluated without pretending the
+historical 4/8 Qwen result is launch qualification.
+
+Run the shipping author with `--backend extractive --require-real-model`. The
+accepted result and its limitations are recorded in
+`brief-extractive-baseline.md`.
+
 - ADR-0028 §"Negative / tradeoff" cites ADR-0010 as the eval gate for
   brief quality. ADR-0010 is the retrieval eval (event-as-unit, CC fusion);
   this framework is its brief-author counterpart.

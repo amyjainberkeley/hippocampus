@@ -7,7 +7,7 @@
 //! # CSO sign-off notes
 //!
 //! (a) Worker only UPDATEs `events.episode_id` on existing rows; never INSERTs
-//!     events. cascade_reason=0 wall preserved.
+//!     events. `cascade_reason=0` wall preserved.
 //! (b) Hermetic — every brain lives in a `tempfile::TempDir`, disposed on drop.
 //! (c) Zero new third-party crates.
 

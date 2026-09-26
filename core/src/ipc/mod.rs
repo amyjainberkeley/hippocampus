@@ -72,6 +72,21 @@ use std::time::Duration;
 /// Each variant maps to a `[MessageType]` discriminant on the wire.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Message {
+    /// Helper -> core. Dedicated measured-input sample, independent of OCR
+    /// and screenshots. Only permitted app identity may cross this boundary.
+    ActivityInterval {
+        /// Inclusive positive UNIX timestamp in microseconds.
+        start_us: u64,
+        /// Exclusive UNIX timestamp, at most five seconds after `start_us`.
+        end_us: u64,
+        /// One of `input_active`, `input_idle`, or `unknown`.
+        state: String,
+        /// Required for active/idle; absent for unknown or excluded activity.
+        app_bundle_id: Option<String>,
+        /// Bounded opaque sampler generation, never a title, URL, or path.
+        capture_generation: String,
+    },
+
     /// Core → helper. Start the underlying `SCStream` with these parameters.
     CaptureStart {
         /// Target capture interval in milliseconds. The helper translates
@@ -263,7 +278,7 @@ pub enum Message {
         /// timing bound — a bug indicator).
         frames_dropped_late_ack: u64,
         /// Cumulative count of cascade-`.allow` frames on which the
-        /// VideoToolbox HEVC encoder threw on `encodeAllowedFrame(...)`.
+        /// `VideoToolbox` HEVC encoder threw on `encodeAllowedFrame(...)`.
         /// Promoted to the wire by the `0x06 → 0x07` bump (ocr-emit-
         /// silence fix — `docs/research/ocr-emit-silence-2026-05-28.md`).
         /// Content-free observability counter — same discipline as
@@ -274,8 +289,8 @@ pub enum Message {
         frames_encode_failed: u64,
         /// Cumulative count of frames dropped by the ADR-0031 §5.3
         /// race-consistency gate — the `FocusedWindowStore.generation`
-        /// observed at SCStream callback time did NOT match the
-        /// `installedFocusGeneration` the live SCStream's filter was
+        /// observed at `SCStream` callback time did NOT match the
+        /// `installedFocusGeneration` the live `SCStream`'s filter was
         /// rebound under. Such frames emit a
         /// `PrivacyTombstone(reason=FocusRaceDropped)` instead of
         /// running the cascade-twice OCR emitter — fail-closed per
@@ -284,7 +299,7 @@ pub enum Message {
         /// observability counter; never widens `.allow`. A spike here
         /// indicates rapid focus changes (alt-tab cadence faster than
         /// the rebind task), Electron AX intermittency drifting the
-        /// FocusTracker, or a pathological focus-loop bug.
+        /// `FocusTracker`, or a pathological focus-loop bug.
         frames_focus_race_dropped: u64,
         /// Per-app failsafe counter map — bundle id → cumulative count
         /// of `.failsafeUnknown` tombstones emitted with that
@@ -304,8 +319,8 @@ pub enum Message {
         /// the bundle-id stream length. Resets on helper restart
         /// (cumulative-within-process).
         failsafe_by_app: Vec<(String, u64)>,
-        /// Instantaneous helper CPU % at HelperHealth flush, multiplied
-        /// by 1_000_000 (microfraction). `1_000_000` = 100% of one
+        /// Instantaneous helper CPU % at `HelperHealth` flush, multiplied
+        /// by `1_000_000` (microfraction). `1_000_000` = 100% of one
         /// core; `15_000` = 1.5% of one core. `0` = sampler did not
         /// take a sample this tick (first flush in a process — no
         /// prior `getrusage` snapshot to compute a delta against, or
@@ -313,19 +328,19 @@ pub enum Message {
         /// `0x08 → 0x09` bump (CTO Phase 6 PR 6, S4 acceptance gate:
         /// steady-state ≤10–15% of one CPU core / ≤2 GB RAM per
         /// G2 ratification 2026-05-31). Content-free. Pairs with the
-        /// MetricKit non-content footprint telemetry pipeline (also
+        /// `MetricKit` non-content footprint telemetry pipeline (also
         /// in this PR) for finer-than-daily-aggregate CPU
-        /// observability — MetricKit aggregates daily, this counter
-        /// samples per HelperHealth flush (default 30s cadence).
+        /// observability — `MetricKit` aggregates daily, this counter
+        /// samples per `HelperHealth` flush (default 30s cadence).
         cpu_pct_micro: u32,
-        /// Instantaneous helper resident set size at HelperHealth flush,
+        /// Instantaneous helper resident set size at `HelperHealth` flush,
         /// in bytes. Sampled via Mach
         /// `task_info(MACH_TASK_BASIC_INFO)`. `0` = sampler failed
         /// (extremely rare; would indicate a Mach kernel error).
         /// Promoted to the wire by the `0x08 → 0x09` bump (CTO Phase
         /// 6 PR 6, S4 acceptance gate ≤2 GB RAM). Content-free.
-        /// Pairs with MetricKit (MetricKit aggregates daily; this
-        /// counter samples per HelperHealth flush).
+        /// Pairs with `MetricKit` (`MetricKit` aggregates daily; this
+        /// counter samples per `HelperHealth` flush).
         rss_bytes: u64,
         /// RESERVED SLOT for V2-P1 PR 13 (§6.2 = A focused-window
         /// race-gate timeout). Reused under the §8 coordination
@@ -349,6 +364,7 @@ impl Message {
     #[must_use]
     pub const fn message_type(&self) -> MessageType {
         match self {
+            Self::ActivityInterval { .. } => MessageType::ActivityInterval,
             Self::CaptureStart { .. } => MessageType::CaptureStart,
             Self::CaptureStop => MessageType::CaptureStop,
             Self::StateTransitionEvent { .. } => MessageType::StateTransitionEvent,
@@ -408,7 +424,7 @@ pub enum RedactionReason {
     /// Cascade §7 — fail-safe default: helper could not positively classify
     /// the focused element with reasonable confidence.
     FailsafeUnknown,
-    /// ADR-0031 §5.3 — focus changed between SCStream filter install and
+    /// ADR-0031 §5.3 — focus changed between `SCStream` filter install and
     /// frame callback. The captured pixel buffer may correspond to a
     /// different focused window than the frame's attribution metadata,
     /// so the helper fails closed and emits this tombstone instead of

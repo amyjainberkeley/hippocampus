@@ -23,7 +23,14 @@ pub mod bench_longmemeval;
 pub mod brain_cli;
 pub mod brain_ingest;
 pub mod brief_worker;
+pub mod capture_status;
+/// Reusable environment scrubbing for agent-owned child processes.
+pub mod child_command_environment;
+/// Atomic, reference-only registration with supported local AI clients.
+pub mod client_registry;
 pub mod consolidator_worker;
+/// Deterministic, cited context packets for local agent handoff.
+pub mod context_packet;
 /// Cycle 8.44 audit — lock-file-based unclean-shutdown detection.
 /// On boot, [`crash_recovery::acquire_lock`] returns a
 /// [`crash_recovery::LockAcquireOutcome`] that tells the caller whether
@@ -42,6 +49,7 @@ pub mod health_pump;
 pub mod health_summary;
 pub mod idle_batch;
 pub mod import_sessions;
+pub mod key_resolver;
 #[cfg(target_os = "macos")]
 pub mod mail_ingest;
 pub mod mcp;
@@ -98,15 +106,6 @@ pub mod tier2_qwen_backend;
 pub mod tier2_worker;
 #[cfg(unix)]
 pub mod user_allowlist;
-/// V2-P1 M4-lift runtime gate (Phase 7 PR 14, this PR).
-///
-/// Reads `HIPPOCAMPUS_ENABLE_V2P1` at agent boot; when set to `"1"`
-/// the supervisor appends `--capture` to the helper argv AND the Swift
-/// helper's `MciV2P1Gate` flips `killOcrEmit` off. Env var unset or
-/// any other value ⇒ pre-M4-lift behavior preserved. Matched pair
-/// with `MCICaptureHelperKit/Capture/MciV2P1Gate.swift`. Removed by a
-/// follow-up PR once Amy's live-Mac §7-equivalent smoke test passes.
-pub mod v2p1_gate;
 pub mod wall_clock;
 
 pub use brain_ingest::{BrainIngestor, BrainPump, IngestError, IngestOutcome, NoopBrainIngestor};

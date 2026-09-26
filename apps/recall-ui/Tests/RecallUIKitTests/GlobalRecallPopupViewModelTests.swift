@@ -2,6 +2,7 @@
 // results wiring + selection state machine for the Spotlight-like
 // recall popup view model.
 
+import Combine
 import XCTest
 @testable import RecallUIKit
 
@@ -22,6 +23,47 @@ private struct ScriptedReader: BrainReader {
         if shouldThrow { throw BrainReaderError.queryFailed("boom") }
         return Array(scripted.prefix(opts.limit))
     }
+    func recentEvents(limit: Int) async throws -> [Hit] { [] }
+    func recentPrivacyMoments(limit: Int) async throws -> [PrivacyMoment] { [] }
+    func listObservedApps(limit: Int, timeFromUs: UInt64?) async throws -> [ObservedApp] { [] }
+    func listEpisodes(limit: Int) async throws -> [Episode] { [] }
+    func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] { [] }
+    func briefForDate(_ dateLocal: String) async throws -> Brief? { nil }
+    func latestBrief() async throws -> Brief? { nil }
+    func briefDates(limit: Int) async throws -> [String] { [] }
+    func summaryStats() async throws -> SummaryStats {
+        SummaryStats(totalEvents: 0, oldestTsUs: nil, newestTsUs: nil, diskBytes: 0)
+    }
+}
+
+/// Holds the older read until explicitly released, even after cancellation.
+private actor RacingReader: BrainReader {
+    let started: XCTestExpectation
+    private var pending: CheckedContinuation<[Hit], Never>?
+    private var released = false
+
+    init(started: XCTestExpectation) { self.started = started }
+
+    func search(_ opts: SearchOptions) async throws -> [Hit] {
+        if opts.text == "slow" {
+            return await withCheckedContinuation { continuation in
+                if released {
+                    continuation.resume(returning: [makeHit(id: 1)])
+                } else {
+                    pending = continuation
+                }
+                started.fulfill()
+            }
+        }
+        return [makeHit(id: 2)]
+    }
+
+    func finishSlow() {
+        released = true
+        pending?.resume(returning: [makeHit(id: 1)])
+        pending = nil
+    }
+
     func recentEvents(limit: Int) async throws -> [Hit] { [] }
     func recentPrivacyMoments(limit: Int) async throws -> [PrivacyMoment] { [] }
     func listObservedApps(limit: Int, timeFromUs: UInt64?) async throws -> [ObservedApp] { [] }
@@ -109,6 +151,42 @@ final class GlobalRecallPopupViewModelTests: XCTestCase {
         // the in-recall route — Spotlight semantics.
         let action = vm.invokeAction(preferExternal: true)
         XCTAssertEqual(action, .openInRecallUI(eventId: 7))
+    }
+
+    func testInvokeActionAtUsesTappedRowInsteadOfKeyboardSelection() async {
+        let hits = [makeHit(id: 7), makeHit(id: 8)]
+        let vm = GlobalRecallPopupViewModel(reader: ScriptedReader(scripted: hits))
+        await vm.perform(query: "x")
+
+        XCTAssertEqual(
+            vm.invokeAction(at: 1, preferExternal: false),
+            .openInRecallUI(eventId: 8)
+        )
+        XCTAssertEqual(vm.selectedIndex, 1)
+    }
+
+    func testOlderSearchCannotOverwriteNewerResults() async {
+        let started = expectation(description: "older read started")
+        let reader = RacingReader(started: started)
+        let vm = GlobalRecallPopupViewModel(reader: reader)
+        let initialEmptyQuery = expectation(description: "initial empty query delivered")
+        let subscription = vm.$results.dropFirst().first(where: { $0.isEmpty }).sink { _ in
+            initialEmptyQuery.fulfill()
+        }
+        defer { subscription.cancel() }
+        // Direct perform() calls bypass the bound query. Consume its initial
+        // empty debounce before testing only the two explicit search requests.
+        await fulfillment(of: [initialEmptyQuery], timeout: 2)
+        let slow = Task { await vm.perform(query: "slow") }
+        await fulfillment(of: [started], timeout: 2)
+
+        await vm.perform(query: "fast")
+        XCTAssertEqual(vm.results.map(\.eventId), [2])
+        await reader.finishSlow()
+        await slow.value
+
+        XCTAssertEqual(vm.results.map(\.eventId), [2])
+        XCTAssertFalse(vm.isSearching)
     }
 
     func testInvokeActionReturnsNilWhenNoResults() async {

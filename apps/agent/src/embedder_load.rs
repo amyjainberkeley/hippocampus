@@ -1,4 +1,4 @@
-//! Where the ArcticEmbedS Core ML model is looked for, and how the two
+//! Where the `ArcticEmbedS` Core ML model is looked for, and how the two
 //! embedder flavours are built.
 //!
 //! This lived inside the `mci-agent` binary, which meant anything else
@@ -35,11 +35,11 @@ pub fn arctic_embed_s_model_candidates() -> Vec<std::path::PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             // exe at Contents/MacOS/mci-agent → Contents/Resources/Models/
-            candidates.push(dir.join("../Resources/Models/ArcticEmbedS_INT8.mlmodelc"));
-            candidates.push(dir.join("../Resources/Models/ArcticEmbedS_INT8.mlpackage"));
+            candidates.push(dir.join("../Resources/Models/ArcticEmbedS_FP16.mlmodelc"));
+            candidates.push(dir.join("../Resources/Models/ArcticEmbedS_FP16.mlpackage"));
             // Dev/legacy paths (executable-relative)
-            candidates.push(dir.join("ArcticEmbedS_INT8.mlmodelc"));
-            candidates.push(dir.join("ArcticEmbedS_INT8.mlpackage"));
+            candidates.push(dir.join("ArcticEmbedS_FP16.mlmodelc"));
+            candidates.push(dir.join("ArcticEmbedS_FP16.mlpackage"));
             candidates.push(dir.join("arctic-embed-s.mlpackage"));
             candidates.push(dir.join("../Resources/arctic-embed-s.mlpackage"));
         }
@@ -51,13 +51,13 @@ pub fn arctic_embed_s_model_candidates() -> Vec<std::path::PathBuf> {
     // executable-relative probes above only resolve when the binary is
     // itself inside the bundle.
     candidates.push(std::path::PathBuf::from(
-        "/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_INT8.mlmodelc",
+        "/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc",
     ));
-    candidates.push(home.join("Library/Application Support/MCI/Models/ArcticEmbedS_INT8.mlmodelc"));
+    candidates.push(home.join("Library/Application Support/MCI/Models/ArcticEmbedS_FP16.mlmodelc"));
 
     // Repo-root dev paths (when running mci-agent from cargo target)
-    candidates.push(home.join("Documents/GitHub/mci/models/ArcticEmbedS_INT8.mlmodelc"));
-    candidates.push(home.join("Documents/GitHub/mci/models/ArcticEmbedS_INT8.mlpackage"));
+    candidates.push(home.join("Documents/GitHub/mci/models/ArcticEmbedS_FP16.mlmodelc"));
+    candidates.push(home.join("Documents/GitHub/mci/models/ArcticEmbedS_FP16.mlpackage"));
     // Old MCICaptureHelper.app path kept for legacy installs
     candidates.push(
         home.join("Applications/MCICaptureHelper.app/Contents/Resources/arctic-embed-s.mlpackage"),
@@ -71,17 +71,18 @@ pub fn arctic_embed_s_model_candidates() -> Vec<std::path::PathBuf> {
 /// paths; falls back to the zero-vector backend when the model isn't
 /// bundled (development builds). Returns `(Arc<dyn Embedder>, is_real)`.
 ///
-/// The ArcticEmbedSEmbedder wrapper applies the model-card prefix
+/// The `ArcticEmbedSEmbedder` wrapper applies the model-card prefix
 /// discipline + L2-norm (ADR-0011 §3). Document-side prefix (empty
 /// for arctic-embed-s) is used for idle-batch embedding.
 #[cfg(target_os = "macos")]
+#[must_use]
 pub fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
     use mci_brain::arctic_embed_s::ArcticEmbedSEmbedder;
     use mci_embed_coreml::load_backend_or_fallback;
     use std::path::Path;
 
     let candidates = arctic_embed_s_model_candidates();
-    let path_refs: Vec<&Path> = candidates.iter().map(|p| p.as_path()).collect();
+    let path_refs: Vec<&Path> = candidates.iter().map(std::path::PathBuf::as_path).collect();
     let (backend, is_real) = load_backend_or_fallback(&path_refs);
     let embedder = ArcticEmbedSEmbedder::new_document(backend);
 
@@ -101,7 +102,7 @@ pub fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
                 let healthy = v.len() == 384 && norm.is_finite() && (norm - 1.0).abs() < 1e-2;
                 if healthy {
                     eprintln!(
-                        "mci-agent: embedder smoke OK — CoreML (cpu_only pin), dim={} |v|={norm:.4}",
+                        "mci-agent: embedder smoke OK — CoreML (cpu_and_ne pin), dim={} |v|={norm:.4}",
                         v.len(),
                     );
                 } else {
@@ -151,7 +152,7 @@ pub fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
 ///
 /// Mirrors [`load_embedder_backend`] but constructs `new_query` so the
 /// `ArcticEmbedS` model-card query prefix (per ADR-0011 §3) is applied to
-/// every recall-time embed call. Same Core ML backend + `cpu_only` pin
+/// every recall-time embed call. Same Core ML backend + `cpu_and_ne` pin
 /// (per PR #310 lesson — the "all" compute-unit setting is the latency
 /// trap [[reference-coreml-computeunits-all-trap]]); a separate wrapper
 /// instance because the prefix is baked into the wrapper, not selectable
@@ -162,13 +163,14 @@ pub fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
 /// prefer FTS5-only recall in that case rather than feeding a zero
 /// vector into `HybridRetriever`.
 #[cfg(target_os = "macos")]
+#[must_use]
 pub fn load_query_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
     use mci_brain::arctic_embed_s::ArcticEmbedSEmbedder;
     use mci_embed_coreml::load_backend_or_fallback;
     use std::path::Path;
 
     let candidates = arctic_embed_s_model_candidates();
-    let path_refs: Vec<&Path> = candidates.iter().map(|p| p.as_path()).collect();
+    let path_refs: Vec<&Path> = candidates.iter().map(std::path::PathBuf::as_path).collect();
     let (backend, is_real) = load_backend_or_fallback(&path_refs);
     let embedder = ArcticEmbedSEmbedder::new_query(backend);
 
@@ -185,7 +187,7 @@ pub fn load_query_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
                 let healthy = v.len() == 384 && norm.is_finite() && (norm - 1.0).abs() < 1e-2;
                 if healthy {
                     eprintln!(
-                        "mci-agent: query embedder smoke OK — CoreML (cpu_only pin), dim={} |v|={norm:.4}",
+                        "mci-agent: query embedder smoke OK — CoreML (cpu_and_ne pin), dim={} |v|={norm:.4}",
                         v.len(),
                     );
                 } else {

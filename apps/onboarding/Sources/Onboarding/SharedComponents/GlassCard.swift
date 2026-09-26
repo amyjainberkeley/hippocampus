@@ -10,6 +10,7 @@ struct GlassCard<Content: View>: View {
     @ViewBuilder let content: Content
 
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     /// The border color, bumped to a visible weight when the viewer has
     /// asked for Increase Contrast (the default 0.10 hairline can vanish).
@@ -24,10 +25,15 @@ struct GlassCard<Content: View>: View {
         content
             .padding(padding)
             .background(
-                RoundedRectangle(cornerRadius: OnboardingDesign.Radius.card, style: .continuous)
-                    .fill(emphasized
-                          ? OnboardingDesign.Palette.accentSoft
-                          : OnboardingDesign.Palette.cardFill)
+                emphasized
+                    ? AnyShapeStyle(OnboardingDesign.Palette.accentSoft)
+                    : reduceTransparency
+                        ? AnyShapeStyle(Color(nsColor: .controlBackgroundColor))
+                        : AnyShapeStyle(.thinMaterial),
+                in: RoundedRectangle(
+                    cornerRadius: OnboardingDesign.Radius.card,
+                    style: .continuous
+                )
             )
             .overlay(
                 RoundedRectangle(cornerRadius: OnboardingDesign.Radius.card, style: .continuous)

@@ -26,8 +26,8 @@ final class MenuBarStatusTests: XCTestCase {
 
     // MARK: - Derivation
 
-    func testDerivation_running_isRecording() {
-        XCTAssertEqual(MenuBarStatus.derive(from: .running), .recording)
+    func testDerivation_runningAloneDoesNotProveSavedMemory() {
+        XCTAssertNotEqual(MenuBarStatus.derive(from: .running), .recording)
     }
 
     func testDerivation_paused_isPaused() {
@@ -36,7 +36,7 @@ final class MenuBarStatusTests: XCTestCase {
 
     func testDerivation_idleStarterStopped_areIdle() {
         XCTAssertEqual(MenuBarStatus.derive(from: .idle), .idle)
-        XCTAssertEqual(MenuBarStatus.derive(from: .starting), .idle)
+        XCTAssertEqual(MenuBarStatus.derive(from: .starting), .starting)
         XCTAssertEqual(MenuBarStatus.derive(from: .stopped), .idle)
     }
 
@@ -71,13 +71,13 @@ final class MenuBarStatusTests: XCTestCase {
     /// derivation reflects `.recording`.
     func testPauseToggle_recordingPausedRoundTrip() {
         var state: SupervisorState = .running
-        XCTAssertEqual(MenuBarStatus.derive(from: state), .recording)
+        XCTAssertNotEqual(MenuBarStatus.derive(from: state), .recording)
 
         state = .paused
         XCTAssertEqual(MenuBarStatus.derive(from: state), .paused)
 
         state = .running
-        XCTAssertEqual(MenuBarStatus.derive(from: state), .recording)
+        XCTAssertNotEqual(MenuBarStatus.derive(from: state), .recording)
     }
 
     // MARK: - Presentation properties
@@ -92,34 +92,13 @@ final class MenuBarStatusTests: XCTestCase {
         XCTAssertEqual(texts.count, 4, "each state must have a unique display label")
     }
 
-    func testShouldPulse_onlyRecording() {
-        XCTAssertTrue(MenuBarStatus.recording.shouldPulse)
-        XCTAssertFalse(MenuBarStatus.idle.shouldPulse)
-        XCTAssertFalse(MenuBarStatus.paused.shouldPulse)
-        XCTAssertFalse(MenuBarStatus.error(reason: "x").shouldPulse)
-    }
-
-    // MARK: - Pulse timing
-
-    /// The pulse alternates between full (1.0) and dim (0.7) on
-    /// `pulsePeriod` boundaries. This locks the pure function so any
-    /// future tweak (e.g. shorter pulse for accessibility mode) shows
-    /// up as a test change rather than a silent visual drift.
-    func testPulseOpacity_alternatesOnPeriodBoundary() {
-        let period = MenuBarStatusLabel.pulsePeriod
-        let base = Date(timeIntervalSinceReferenceDate: 0)
-
-        // t = 0.5·period → inside the first half → full opacity.
-        let first = MenuBarStatusLabel.pulseOpacity(
-            at: base.addingTimeInterval(period * 0.5)
-        )
-        XCTAssertEqual(first, 1.0, accuracy: 0.0001)
-
-        // t = 1.5·period → inside the second half → dim opacity.
-        let second = MenuBarStatusLabel.pulseOpacity(
-            at: base.addingTimeInterval(period * 1.5)
-        )
-        XCTAssertEqual(second, MenuBarStatusLabel.pulseMin, accuracy: 0.0001)
+    func testAllStatesAreStatic() {
+        let states: [MenuBarStatus] = [
+            .idle, .starting, .recording, .paused, .error(reason: "x"),
+            .needsPermission(.screenRecording), .blocked(reason: "x"),
+            .stale(reason: "x"), .noMemory, .unchanged,
+        ]
+        for state in states { XCTAssertFalse(state.shouldPulse) }
     }
 
     // MARK: - Icon snapshot distinctness
@@ -134,6 +113,7 @@ final class MenuBarStatusTests: XCTestCase {
     /// This runs headless in `swift test` — `NSImage.lockFocus` uses
     /// a bitmap graphics context that does not need a window server
     /// on macOS 14+.
+    @MainActor
     func testMenuBarStatusIcon_fourStatesAreDistinct() throws {
         let states: [MenuBarStatus] = [
             .idle,
@@ -154,6 +134,20 @@ final class MenuBarStatusTests: XCTestCase {
                 )
             }
         }
+    }
+
+    @MainActor
+    func testMenuBarStatusIcon_reusesImagesAcrossUpdatesAndReasons() {
+        let states: [MenuBarStatus] = [
+            .idle, .starting, .recording, .paused, .error(reason: "x"),
+            .needsPermission(.screenRecording), .blocked(reason: "x"),
+            .stale(reason: "x"), .noMemory, .unchanged,
+        ]
+        for state in states {
+            XCTAssertTrue(MenuBarStatusIcon.image(for: state) === MenuBarStatusIcon.image(for: state))
+        }
+        XCTAssertTrue(MenuBarStatusIcon.image(for: .error(reason: "x")) === MenuBarStatusIcon.image(for: .error(reason: "y")))
+        XCTAssertTrue(MenuBarStatusIcon.image(for: .blocked(reason: "x")) === MenuBarStatusIcon.image(for: .noMemory))
     }
     #endif
 }

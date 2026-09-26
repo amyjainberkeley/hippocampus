@@ -20,14 +20,19 @@
 
 use std::sync::{Arc, Mutex};
 
+use mci_agent::context_packet::{
+    compile_context_packet, ContextBudget, ContextEvidence, ContextPacket, ContextPacketOutcome,
+    ContextSources, EvidencePriority,
+};
 use mci_agent::mcp::{
     serve_stdio, BrainReader, BrainReaderError, JsonRpcId, JsonRpcRequest, JsonRpcResponse,
-    LiveBrainReader, McpHit, Server, ToolName, INVALID_PARAMS, METHOD_NOT_FOUND, PARSE_ERROR,
+    LiveBrainReader, McpHit, McpRecallOutcome, Server, ToolName, INVALID_PARAMS, METHOD_NOT_FOUND,
+    PARSE_ERROR,
 };
 use mci_brain::stubs::FixedDimEmbedder;
 use mci_brain::{
     BrainStats, BrainStore, Embedder, EpisodeRecord, Event, EventId, EventRecord,
-    SqlCipherBrainStore,
+    NothingMatchedReason, RetrievalDegradation, SqlCipherBrainStore,
 };
 use mci_core::crypto::DbKey;
 
@@ -43,14 +48,16 @@ struct Invocations {
     stats: usize,
     episodes: Vec<usize>,
     events_by_app: Vec<(String, usize)>,
+    context: Vec<(Option<String>, ContextBudget)>,
 }
 
 #[derive(Clone)]
 struct StubBrainReader {
-    hits: Vec<McpHit>,
+    recall_outcome: Arc<Mutex<McpRecallOutcome>>,
     events: Vec<EventRecord>,
     stats_value: BrainStats,
     episode_records: Vec<EpisodeRecord>,
+    context_packet: ContextPacket,
     fail_next_recall: Arc<Mutex<bool>>,
     invocations: Arc<Mutex<Invocations>>,
 }
@@ -58,12 +65,14 @@ struct StubBrainReader {
 impl StubBrainReader {
     fn new() -> Self {
         Self {
-            hits: vec![sample_hit(
-                101,
-                1_000_000,
-                "hello world",
-                Some("https://example.com"),
-            )],
+            recall_outcome: Arc::new(Mutex::new(McpRecallOutcome::Matched {
+                hits: vec![sample_hit(
+                    101,
+                    1_000_000,
+                    "hello world",
+                    Some("https://example.com"),
+                )],
+            })),
             events: vec![
                 sample_record(200, 2_000_000, "first"),
                 sample_record(201, 3_000_000, "second"),
@@ -84,6 +93,25 @@ impl StubBrainReader {
                 8_000_000,
                 3,
             )],
+            context_packet: compile_context_packet(
+                None,
+                9_000_000,
+                ContextBudget::new(200, 8),
+                ContextSources {
+                    claims: Vec::new(),
+                    evidence: vec![ContextEvidence {
+                        event_id: 101,
+                        ts_us: 1_000_000,
+                        app_bundle_id: Some("com.example.app".into()),
+                        window_title: Some("Window".into()),
+                        url: Some("https://example.com".into()),
+                        excerpt: "hello world".into(),
+                        priority: EvidencePriority::Recent,
+                        relevance_score: None,
+                        source_kind: "screen_ocr".into(),
+                    }],
+                },
+            ),
             fail_next_recall: Arc::new(Mutex::new(false)),
             invocations: Arc::new(Mutex::new(Invocations::default())),
         }
@@ -92,10 +120,14 @@ impl StubBrainReader {
     fn invocations(&self) -> Invocations {
         self.invocations.lock().unwrap().clone()
     }
+
+    fn set_recall_outcome(&self, outcome: McpRecallOutcome) {
+        *self.recall_outcome.lock().unwrap() = outcome;
+    }
 }
 
 impl BrainReader for StubBrainReader {
-    fn recall(&self, query: &str, limit: usize) -> Result<Vec<McpHit>, BrainReaderError> {
+    fn recall(&self, query: &str, limit: usize) -> Result<McpRecallOutcome, BrainReaderError> {
         self.invocations
             .lock()
             .unwrap()
@@ -104,7 +136,7 @@ impl BrainReader for StubBrainReader {
         if std::mem::replace(&mut *self.fail_next_recall.lock().unwrap(), false) {
             return Err(BrainReaderError::Backend("injected".into()));
         }
-        Ok(self.hits.clone())
+        Ok(self.recall_outcome.lock().unwrap().clone())
     }
 
     fn events_since(
@@ -153,6 +185,19 @@ impl BrainReader for StubBrainReader {
             .take(limit)
             .cloned()
             .collect())
+    }
+
+    fn context(
+        &self,
+        focus: Option<&str>,
+        budget: ContextBudget,
+    ) -> Result<ContextPacket, BrainReaderError> {
+        self.invocations
+            .lock()
+            .unwrap()
+            .context
+            .push((focus.map(str::to_owned), budget));
+        Ok(self.context_packet.clone())
     }
 }
 
@@ -220,7 +265,7 @@ fn server() -> (Server, StubBrainReader) {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn tools_list_returns_exactly_five_tools() {
+fn tools_list_returns_exactly_six_read_only_tools() {
     let (s, _) = server();
     let resp = s.dispatch(req("tools/list", None)).expect("response");
     let result = resp.result.expect("result");
@@ -228,7 +273,7 @@ fn tools_list_returns_exactly_five_tools() {
         .get("tools")
         .and_then(|v| v.as_array())
         .expect("tools array");
-    assert_eq!(tools.len(), 5, "exactly five tools advertised");
+    assert_eq!(tools.len(), 6, "exactly six tools advertised");
     let names: Vec<&str> = tools
         .iter()
         .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
@@ -238,6 +283,57 @@ fn tools_list_returns_exactly_five_tools() {
     assert!(names.contains(&"mci_stats"));
     assert!(names.contains(&"mci_episodes"));
     assert!(names.contains(&"mci_events_by_app"));
+    assert!(names.contains(&"mci_context"));
+}
+
+#[test]
+fn tools_call_mci_context_returns_typed_packet_and_clamps_budgets() {
+    let (server, stub) = server();
+    let response = server
+        .dispatch(req(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "mci_context",
+                "arguments": {
+                    "focus": "hippocampus launch",
+                    "max_tokens": 5,
+                    "max_evidence": 500
+                }
+            })),
+        ))
+        .expect("response");
+    let result = response.result.expect("context result");
+    assert_eq!(result["packet"]["outcome"], "observations_only");
+    assert_eq!(result["isError"], false);
+    assert_eq!(result["content"][0]["type"], "text");
+
+    let calls = stub.invocations().context;
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0.as_deref(), Some("hippocampus launch"));
+    assert_eq!(calls[0].1, ContextBudget::new(128, 64));
+    assert_eq!(
+        stub.context_packet.outcome,
+        ContextPacketOutcome::ObservationsOnly
+    );
+}
+
+#[test]
+fn tools_call_mci_context_accepts_project_as_a_focus_alias() {
+    let (server, stub) = server();
+    let response = server
+        .dispatch(req(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "mci_context",
+                "arguments": {"project": "hippocampus"}
+            })),
+        ))
+        .expect("response");
+
+    assert!(response.error.is_none());
+    let calls = stub.invocations().context;
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0.as_deref(), Some("hippocampus"));
 }
 
 #[test]
@@ -262,13 +358,14 @@ fn initialize_returns_server_info_and_protocol_version() {
             .and_then(|n| n.as_str()),
         Some("hippocampus")
     );
-    assert!(
-        result
-            .get("instructions")
-            .and_then(|v| v.as_str())
-            .is_some(),
-        "initialize must include instructions for Claude Code"
-    );
+    let instructions = result
+        .get("instructions")
+        .and_then(|v| v.as_str())
+        .expect("initialize must include instructions for Claude Code");
+    assert!(instructions.contains("after you opt in"));
+    assert!(instructions.contains("AI client you chose"));
+    assert!(!instructions.contains("continuously captures"));
+    assert!(!instructions.contains("nothing is sent to any server"));
 }
 
 #[test]
@@ -284,6 +381,10 @@ fn tools_call_mci_recall_returns_canned_hits() {
         ))
         .expect("response");
     let result = resp.result.expect("result");
+    assert_eq!(
+        result.get("outcome").and_then(|value| value.as_str()),
+        Some("matched")
+    );
     let hits = result
         .get("hits")
         .and_then(|v| v.as_array())
@@ -300,6 +401,107 @@ fn tools_call_mci_recall_returns_canned_hits() {
     // Reader saw the call exactly once with the right args.
     let invs = stub.invocations();
     assert_eq!(invs.recall, vec![("hello".to_owned(), 5)]);
+}
+
+#[test]
+fn tools_call_mci_recall_serializes_nothing_matched_without_hits() {
+    let (server, stub) = server();
+    stub.set_recall_outcome(McpRecallOutcome::NothingMatched {
+        reason: NothingMatchedReason::EvidenceFloor,
+    });
+    let response = server
+        .dispatch(req(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "mci_recall",
+                "arguments": {"query": "unsupported"}
+            })),
+        ))
+        .expect("response");
+    let result = response.result.expect("result");
+    assert_eq!(result["outcome"], "nothing_matched");
+    assert_eq!(result["reason"], "evidence_floor");
+    assert_eq!(result["hits"], serde_json::json!([]));
+    assert_eq!(result["related_context"], serde_json::json!([]));
+    let text: serde_json::Value =
+        serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(text["outcome"], "nothing_matched");
+}
+
+#[test]
+fn tools_call_mci_recall_serializes_source_attributed_contradiction() {
+    let (server, stub) = server();
+    stub.set_recall_outcome(McpRecallOutcome::Contradicted {
+        evidence: vec![sample_hit(101, 1_000_000, "the assertion is false", None)],
+    });
+    let response = server
+        .dispatch(req(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "mci_recall",
+                "arguments": {"query": "asserted fact"}
+            })),
+        ))
+        .expect("response");
+    let result = response.result.expect("result");
+    assert_eq!(result["outcome"], "contradicted");
+    assert_eq!(result["hits"], serde_json::json!([]));
+    assert_eq!(result["related_context"], serde_json::json!([]));
+    assert_eq!(result["contradicting_context"].as_array().unwrap().len(), 1);
+    let text: serde_json::Value =
+        serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(text["outcome"], "contradicted");
+    assert_eq!(text["contradicting_context"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn tools_call_mci_recall_serializes_every_degradation_as_related_context_never_hits() {
+    for (degradation, expected) in [
+        (
+            RetrievalDegradation::EmbeddingsUnavailable,
+            "embeddings_unavailable",
+        ),
+        (
+            RetrievalDegradation::LexicalUnavailable,
+            "lexical_unavailable",
+        ),
+        (
+            RetrievalDegradation::LexicalAndEmbeddingsUnavailable,
+            "lexical_and_embeddings_unavailable",
+        ),
+        (
+            RetrievalDegradation::EvidenceSufficiencyUnqualified,
+            "evidence_sufficiency_unqualified",
+        ),
+        (
+            RetrievalDegradation::EvidenceVerifierUnavailable,
+            "evidence_verifier_unavailable",
+        ),
+    ] {
+        let (server, stub) = server();
+        stub.set_recall_outcome(McpRecallOutcome::Degraded {
+            degradation,
+            related_context: vec![sample_hit(101, 1_000_000, "related only", None)],
+        });
+        let response = server
+            .dispatch(req(
+                "tools/call",
+                Some(serde_json::json!({
+                    "name": "mci_recall",
+                    "arguments": {"query": "degraded"}
+                })),
+            ))
+            .expect("response");
+        let result = response.result.expect("result");
+        assert_eq!(result["outcome"], "degraded");
+        assert_eq!(result["degradation"], expected);
+        assert_eq!(result["hits"], serde_json::json!([]));
+        assert_eq!(result["related_context"].as_array().unwrap().len(), 1);
+        let text: serde_json::Value =
+            serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(text["degradation"], expected);
+        assert_eq!(text["hits"], serde_json::json!([]));
+    }
 }
 
 #[test]
@@ -436,13 +638,14 @@ fn notification_returns_no_response() {
 }
 
 #[test]
-fn structural_read_only_check_only_five_tools_are_reachable() {
+fn structural_read_only_check_only_six_tools_are_reachable() {
     let read_only_names = [
         "mci_recall",
         "mci_events_since",
         "mci_stats",
         "mci_episodes",
         "mci_events_by_app",
+        "mci_context",
     ];
     for &n in &read_only_names {
         assert!(
@@ -510,7 +713,7 @@ fn counters_increment_per_tool_call() {
     assert_eq!(snap.0, 2, "recall_count");
     assert_eq!(snap.1, 1, "events_since_count");
     assert_eq!(snap.2, 3, "stats_count");
-    assert_eq!(snap.6, 1, "unknown_method_count from unknown tool");
+    assert_eq!(snap.7, 1, "unknown_method_count from unknown tool");
 }
 
 // ---------------------------------------------------------------------------
@@ -658,6 +861,25 @@ fn tools_call_mci_events_by_app_default_limit_is_fifty() {
     assert_eq!(invs.events_by_app, vec![("com.example.app".to_owned(), 50)]);
 }
 
+#[test]
+fn tools_call_mci_events_by_app_caps_at_one_thousand() {
+    let (s, stub) = server();
+    let _ = s
+        .dispatch(req(
+            "tools/call",
+            Some(serde_json::json!({
+                "name": "mci_events_by_app",
+                "arguments": {"app_bundle_id": "com.example.app", "limit": 10_000}
+            })),
+        ))
+        .expect("response");
+    let invs = stub.invocations();
+    assert_eq!(
+        invs.events_by_app,
+        vec![("com.example.app".to_owned(), 1_000)]
+    );
+}
+
 // ---------------------------------------------------------------------------
 // End-to-end stdio loop: drive the server through a tokio duplex pipe and
 // observe both responses + the parse-error path.
@@ -750,7 +972,7 @@ fn open_temp_store() -> (tempfile::TempDir, Arc<SqlCipherBrainStore>) {
 }
 
 #[test]
-fn mci_recall_with_no_embedder_falls_back_to_fts5() {
+fn mci_recall_with_no_embedder_returns_typed_lexical_context() {
     let (_dir, store) = open_temp_store();
 
     store
@@ -774,13 +996,32 @@ fn mci_recall_with_no_embedder_falls_back_to_fts5() {
         .expect("response");
 
     let result = resp.result.expect("result — FTS5 fallback must succeed");
+    assert_eq!(
+        result.get("outcome").and_then(|value| value.as_str()),
+        Some("degraded")
+    );
+    assert_eq!(
+        result.get("degradation").and_then(|value| value.as_str()),
+        Some("embeddings_unavailable")
+    );
     let hits = result
         .get("hits")
         .and_then(|v| v.as_array())
         .expect("hits array");
-    assert_eq!(hits.len(), 1, "FTS5 should find 'hello' in one event");
+    assert!(hits.is_empty(), "degraded context must not become hits");
+    let related_context = result
+        .get("related_context")
+        .and_then(|v| v.as_array())
+        .expect("related context array");
     assert_eq!(
-        hits[0].get("text_snippet").and_then(|v| v.as_str()),
+        related_context.len(),
+        1,
+        "FTS5 should find 'hello' in one event"
+    );
+    assert_eq!(
+        related_context[0]
+            .get("text_snippet")
+            .and_then(|v| v.as_str()),
         Some("hello world testing")
     );
 }
@@ -820,19 +1061,22 @@ fn mci_recall_with_embedder_calls_hybrid_retriever() {
         .expect("response");
 
     let result = resp.result.expect("result — hybrid recall must succeed");
+    assert_eq!(result["outcome"], "degraded");
+    assert_eq!(result["degradation"], "evidence_verifier_unavailable");
+    assert_eq!(result["hits"], serde_json::json!([]));
     let hits = result
-        .get("hits")
+        .get("related_context")
         .and_then(|v| v.as_array())
-        .expect("hits array");
+        .expect("degraded related context array");
     assert!(
         !hits.is_empty(),
         "hybrid retriever should return hits (lexical + semantic)"
     );
     for hit in hits {
-        let score = hit.get("score").and_then(|v| v.as_f64());
-        assert!(score.is_some(), "each hit should have a score");
+        let relevance_score = hit.get("score").and_then(serde_json::Value::as_f64);
+        assert!(relevance_score.is_some(), "each hit should have a score");
         assert!(
-            score.unwrap() > 0.0,
+            relevance_score.unwrap() > 0.0,
             "hybrid fused scores should be positive"
         );
     }
@@ -865,12 +1109,19 @@ fn mci_recall_handles_hyphen_in_query_gracefully() {
         .expect("response");
 
     let result = resp.result.expect("result — hyphen query must not error");
+    assert_eq!(result["outcome"], "degraded");
+    assert_eq!(result["degradation"], "embeddings_unavailable");
     let hits = result
         .get("hits")
         .and_then(|v| v.as_array())
         .expect("hits array");
+    assert!(hits.is_empty());
+    let related_context = result
+        .get("related_context")
+        .and_then(|v| v.as_array())
+        .expect("related context array");
     assert_eq!(
-        hits.len(),
+        related_context.len(),
         1,
         "sqlite-vec (sanitized) should match the event containing that text"
     );

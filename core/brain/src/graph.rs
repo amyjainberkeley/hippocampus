@@ -420,7 +420,7 @@ impl std::fmt::Display for EntityIdentityId {
 ///
 /// Stored in the `entity_identities` table per migration 0005. The
 /// natural key is `(identity_id, entity_id)`. The table is grow-only
-/// (`INSERT OR IGNORE`): the AliasResolver re-derives the same rows on
+/// (`INSERT OR IGNORE`): the `AliasResolver` re-derives the same rows on
 /// every idle pass without producing duplicates, and a member is never
 /// re-pointed (precision-over-recall — the resolver emits each entity
 /// into at most one identity).
@@ -459,7 +459,7 @@ impl EntityIdentity {
     /// `(identity_kind, normalized_anchor)`.
     ///
     /// `normalized_anchor` MUST already be normalized by the caller (the
-    /// AliasResolver lower-cases, strips punctuation, and collapses
+    /// `AliasResolver` lower-cases, strips punctuation, and collapses
     /// whitespace before calling) so two devices that normalize the same
     /// cluster the same way converge on the same id. This function does
     /// NOT normalize — it only hashes — to keep `graph.rs` free of the

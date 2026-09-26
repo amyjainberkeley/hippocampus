@@ -8,7 +8,7 @@
 use crate::error::CalendarReaderError;
 use crate::events::CalendarEvent;
 
-/// Emitted when EventKit reports a new/changed event in a watched
+/// Emitted when `EventKit` reports a new/changed event in a watched
 /// calendar (wire-up PR). Today the stream is empty.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewCalendarEvent {

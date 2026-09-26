@@ -1,10 +1,10 @@
 //! Qwen3 tokenizer for the brief-author Core ML backend.
 //!
-//! Backed by HuggingFace's `tokenizers` crate (Apache-2.0). Loads
-//! `tokenizer.json` directly from disk so Qwen3's ByteLevel BPE
+//! Backed by `HuggingFace`'s `tokenizers` crate (Apache-2.0). Loads
+//! `tokenizer.json` directly from disk so Qwen3's `ByteLevel` BPE
 //! pre-tokenizer (which remaps bytes 0-255 to printable Unicode chars
 //! before BPE-merging — GPT-2 convention) is handled correctly, and so
-//! the ChatML control tokens (`<|im_start|>`, `<|im_end|>`,
+//! the `ChatML` control tokens (`<|im_start|>`, `<|im_end|>`,
 //! `<|endoftext|>`, the tool-call / thinking tokens) are recognized as
 //! single special-token IDs instead of being shredded into byte pieces.
 //!
@@ -13,7 +13,7 @@
 //! The original hand-rolled byte BPE in this file:
 //!
 //! 1. Looked up the BPE merge table by RAW bytes from `merges.txt`.
-//!    Qwen3 (and every other ByteLevel BPE) writes merges in the
+//!    Qwen3 (and every other `ByteLevel` BPE) writes merges in the
 //!    REMAPPED character space, not raw bytes — every space, newline,
 //!    and non-ASCII character missed every merge.
 //! 2. Fell back to token 0 (`!`) on any vocab miss
@@ -29,7 +29,7 @@
 //!
 //! # Special tokens
 //!
-//! Qwen3 ChatML:
+//! Qwen3 `ChatML`:
 //! - `<|im_start|>` (ID 151644)
 //! - `<|im_end|>` (ID 151645)
 //! - `<|endoftext|>` (ID 151643)
@@ -60,7 +60,7 @@ impl BpeTokenizer {
     ///
     /// `tokenizer.json` is what `tokenizer.save_pretrained()` writes
     /// alongside the model and ships inside the model `.tar.gz`. It
-    /// carries the full tokenizer state: ByteLevel pre-tokenizer
+    /// carries the full tokenizer state: `ByteLevel` pre-tokenizer
     /// configuration, BPE merges (in remapped-char space), the base
     /// vocab, AND every added / special token with its ID. We never
     /// reach for `vocab.json` / `merges.txt` / `added_tokens.json`
@@ -87,7 +87,7 @@ impl BpeTokenizer {
     /// and encoded as single-token IDs by the loaded `tokenizer.json`'s
     /// added-tokens table. Regular text between them is ByteLevel-BPE
     /// encoded. We pass `add_special_tokens = false` because the brief
-    /// author already emits the full ChatML prompt structure as text.
+    /// author already emits the full `ChatML` prompt structure as text.
     pub fn encode(&self, text: &str) -> Vec<i32> {
         match self.inner.encode(text, false) {
             Ok(enc) => enc
@@ -133,7 +133,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires the external Qwen tokenizer artifact"]
     fn encodes_im_start_as_single_token() {
         let tok = BpeTokenizer::load(&qwen3_tokenizer_dir()).unwrap();
         let ids = tok.encode("<|im_start|>");
@@ -141,7 +141,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires the external Qwen tokenizer artifact"]
     fn encodes_im_end_as_single_token() {
         let tok = BpeTokenizer::load(&qwen3_tokenizer_dir()).unwrap();
         let ids = tok.encode("<|im_end|>");
@@ -149,7 +149,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires the external Qwen tokenizer artifact"]
     fn encodes_endoftext_as_single_token() {
         let tok = BpeTokenizer::load(&qwen3_tokenizer_dir()).unwrap();
         let ids = tok.encode("<|endoftext|>");
@@ -157,7 +157,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires the external Qwen tokenizer artifact"]
     fn round_trips_chatml_prompt() {
         let tok = BpeTokenizer::load(&qwen3_tokenizer_dir()).unwrap();
         let prompt =
@@ -170,14 +170,14 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires the external Qwen tokenizer artifact"]
     fn newline_is_not_token_zero() {
         // The cycle 8.10 silent-failure regression test: every prompt
         // must NOT collapse every `\n` to token 0 (`!`).
         let tok = BpeTokenizer::load(&qwen3_tokenizer_dir()).unwrap();
         let ids = tok.encode("hello\nworld");
         assert!(
-            !ids.iter().any(|&id| id == 0),
+            !ids.contains(&0),
             "token 0 (`!`) appeared in encoding of `hello\\nworld`: {ids:?} \
              — the ByteLevel remap is broken again."
         );

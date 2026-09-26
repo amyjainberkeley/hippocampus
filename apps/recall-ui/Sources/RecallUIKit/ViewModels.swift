@@ -7,13 +7,20 @@ import Foundation
 
 @MainActor
 public final class SearchViewModel: ObservableObject {
-    @Published public var query: String = ""
+    @Published public var query: String = "" {
+        didSet { if query != oldValue { searchInputChanged() } }
+    }
+    @Published public var mode: SearchMode = .text {
+        didSet { if mode != oldValue { searchInputChanged() } }
+    }
     @Published public private(set) var hits: [Hit] = []
     @Published public private(set) var isSearching: Bool = false
     @Published public private(set) var errorMessage: String?
     @Published public var selectedHitId: UInt64?
     @Published public var isDetailFocused: Bool = false
-    @Published public var filters: FilterState = FilterState()
+    @Published public var filters: FilterState = FilterState() {
+        didSet { if filters != oldValue { searchInputChanged() } }
+    }
     /// Top-N observed apps in the current window. The filter pills row
     /// reads this to render dynamic per-app pills + the overflow menu.
     @Published public private(set) var observedApps: [ObservedApp] = []
@@ -23,6 +30,9 @@ public final class SearchViewModel: ObservableObject {
     /// audit follow-up. Injectable so tests can pass an in-memory store.
     private let persistence: QueryPersistence
     private var persistCancellable: AnyCancellable?
+    private var pendingSearch: Task<Void, Never>?
+    private var searchGeneration: UInt64 = 0
+    private var focusedEventID: UInt64?
     /// Cycle 8.42 — snapshot of the user dictionary. Reloaded before every
     /// search so edits in the Settings tab take effect on the next query
     /// without a restart. Injectable for tests.
@@ -59,12 +69,27 @@ public final class SearchViewModel: ObservableObject {
     /// first appearance of the search tab and whenever the date-range
     /// changes (so the pills reflect the same window the search uses).
     public func reloadObservedApps() async {
-        let from = filters.timeWindowUs().fromUs
+        let requestedFilters = filters
+        let from = requestedFilters.timeWindowUs().fromUs
         do {
-            observedApps = try await reader.listObservedApps(limit: 50, timeFromUs: from)
+            let apps = try await reader.listObservedApps(limit: 50, timeFromUs: from)
+            guard requestedFilters == filters, !Task.isCancelled else { return }
+            observedApps = apps
         } catch {
+            guard requestedFilters == filters, !Task.isCancelled else { return }
             observedApps = []
         }
+    }
+
+    /// Re-run every read represented by the current search surface.
+    public func refresh() async {
+        guard !Task.isCancelled else { return }
+        if let focusedEventID {
+            await focusEvent(id: focusedEventID)
+        } else {
+            await runSearch()
+        }
+        await reloadObservedApps()
     }
 
     public var selectedHit: Hit? {
@@ -72,60 +97,113 @@ public final class SearchViewModel: ObservableObject {
         return hits.first { $0.id == id }
     }
 
+    /// Filter capability independent of selected mode.
+    public var hasUnsupportedRelatedFilters: Bool {
+        filters.appBundleIds.count > 1 || filters.hasUrl
+    }
+
+    public var filterLimitationMessage: String? {
+        guard mode == .related,
+              !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              filters.anyActive else { return nil }
+        if hasUnsupportedRelatedFilters {
+            return "Related search does not support multiple-app or URL filters. Choose Text to apply these filters."
+        }
+        return "Related search filters a limited candidate set and may omit matching memories. Use Text to filter before the result limit."
+    }
+
     public func runSearch() async {
+        let generation = beginSearchRequest()
+        focusedEventID = nil
+        let requestedFilters = filters
+        let requestedMode = mode
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty || filters.anyActive else {
+        guard !q.isEmpty else {
             hits = []
+            selectedHitId = nil
+            isDetailFocused = false
             errorMessage = nil
+            isSearching = false
             return
         }
         isSearching = true
         errorMessage = nil
-        defer { isSearching = false }
+        defer { if generation == searchGeneration { isSearching = false } }
+        if !q.isEmpty && requestedMode == .related && hasUnsupportedRelatedFilters {
+            hits = []
+            selectedHitId = nil
+            isDetailFocused = false
+            return
+        }
         do {
-            let window = filters.timeWindowUs()
-            let results: [Hit]
-            if q.isEmpty {
-                // Filter-only path. FTS5 rejects empty / `*` queries
-                // (core/brain `fts5_search_empty_query_rejected`), so we
-                // pull a recent-events pool and apply window + app + URL
-                // filters client-side. Pool of 500 is plenty for the
-                // dogfood window (Last 7 days at active capture rates).
-                results = try await applyClientFilters(
-                    to: reader.recentEvents(limit: 500),
-                    window: window
-                )
-            } else {
-                // Cycle 8.42 — pass the user dictionary through so the FFI
-                // OR-expands aliases at query time (see
-                // `expand_query_with_user_aliases` in `mci-brain-ffi`).
-                let dict = userDictionaryLoader()
-                let aliasMap = dict.entries.isEmpty ? nil : dict.toAliasMap()
-                let opts = SearchOptions(
-                    text: q,
-                    limit: 50,
-                    appFilter: filters.appFilter,
-                    timeFromUs: window.fromUs,
-                    timeToUs: window.toUs,
-                    userAliases: aliasMap
-                )
-                results = try await applyClientFilters(
-                    to: reader.search(opts),
-                    window: window
-                )
+            let window = requestedFilters.timeWindowUs()
+            // Calendar windows are half-open; the legacy FFI remains inclusive.
+            if let upper = window.toUs, upper == 0 || (window.fromUs ?? 0) >= upper {
+                hits = []
+                selectedHitId = nil
+                isDetailFocused = false
+                return
             }
+            let dict = q.isEmpty ? UserDictionary.empty : userDictionaryLoader()
+            let opts = SearchOptions(
+                text: q,
+                limit: 50,
+                appFilter: requestedFilters.appFilter,
+                timeFromUs: window.fromUs,
+                timeToUs: window.toUs.map { $0 - 1 },
+                userAliases: dict.entries.isEmpty ? nil : dict.toAliasMap(),
+                mode: requestedMode,
+                browse: false,
+                appFilters: requestedFilters.appBundleIds.sorted(),
+                hasUrl: requestedFilters.hasUrl
+            )
+            let results = try await applyClientFilters(
+                to: reader.search(opts),
+                filters: requestedFilters,
+                window: window
+            )
+            guard generation == searchGeneration, !Task.isCancelled else { return }
             hits = results
+            if let selectedHitId, !results.contains(where: { $0.id == selectedHitId }) {
+                self.selectedHitId = nil
+                isDetailFocused = false
+            }
         } catch {
+            guard generation == searchGeneration, !Task.isCancelled else { return }
             hits = []
             errorMessage = "\(error)"
         }
     }
 
-    /// Apply window + app + URL filters that the FFI does not enforce
-    /// on its own. Centralized so the filter-only path and the
-    /// text+filter path stay in sync.
+    /// Load one canonical event selected outside the main workspace (for
+    /// example from the global Recall popup) and reveal its detail directly.
+    public func focusEvent(id: UInt64) async {
+        guard id > 0 else { return }
+        let generation = beginSearchRequest()
+        focusedEventID = id
+        isSearching = true
+        errorMessage = nil
+        defer { if generation == searchGeneration { isSearching = false } }
+        do {
+            let focused = try await reader.fetchEventsByIds([id])
+            guard generation == searchGeneration, !Task.isCancelled else { return }
+            hits = Array(focused.prefix(1))
+            selectedHitId = hits.first?.eventId
+            isDetailFocused = selectedHitId != nil
+        } catch {
+            guard generation == searchGeneration, !Task.isCancelled else { return }
+            hits = []
+            selectedHitId = nil
+            isDetailFocused = false
+            errorMessage = "\(error)"
+        }
+    }
+
+    /// Defensive validation for alternate readers. Browse and Text apply these
+    /// predicates in SQL before LIMIT; this is not a candidate-pool search.
     private func applyClientFilters(
         to results: [Hit],
+        filters: FilterState,
         window: (fromUs: UInt64?, toUs: UInt64?)
     ) -> [Hit] {
         var out = results
@@ -133,9 +211,9 @@ public final class SearchViewModel: ObservableObject {
             out = out.filter { $0.tsUs >= from }
         }
         if let to = window.toUs {
-            out = out.filter { $0.tsUs <= to }
+            out = out.filter { $0.tsUs < to }
         }
-        if filters.requiresClientSideAppFilter || filters.appFilter != nil {
+        if !filters.appBundleIds.isEmpty {
             out = out.filter { filters.matchesApp($0.appBundleId) }
         }
         if filters.hasUrl {
@@ -146,13 +224,42 @@ public final class SearchViewModel: ObservableObject {
 
     public func clear() {
         query = ""
+        filters = FilterState()
+        _ = beginSearchRequest()
+        focusedEventID = nil
         hits = []
         errorMessage = nil
-        filters = FilterState()
+        selectedHitId = nil
+        isDetailFocused = false
+        isSearching = false
         // Eagerly wipe persistence too — the debounced sink would
         // eventually erase it (empty state ⇒ delete key) but the user
         // clicked "×" so make it immediate.
         persistence.clear()
+    }
+
+    private func beginSearchRequest() -> UInt64 {
+        pendingSearch?.cancel()
+        pendingSearch = nil
+        searchGeneration &+= 1
+        return searchGeneration
+    }
+
+    private func searchInputChanged() {
+        _ = beginSearchRequest()
+        focusedEventID = nil
+        hits = []
+        selectedHitId = nil
+        isDetailFocused = false
+        errorMessage = nil
+        isSearching = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard isSearching else { return }
+        pendingSearch = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            guard let self, !Task.isCancelled else { return }
+            self.pendingSearch = nil
+            await self.refresh()
+        }
     }
 
     public func moveSelectionUp() {

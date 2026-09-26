@@ -16,10 +16,35 @@ import CoreVideo
 
 private actor StubFrameSink: FrameSink {
     private(set) var writes: [Data] = []
+    private let onWrite: (@Sendable () -> Void)?
+    init(onWrite: (@Sendable () -> Void)? = nil) { self.onWrite = onWrite }
     func write(_ data: Data) async throws {
         writes.append(data)
+        onWrite?()
     }
     func snapshot() -> [Data] { writes }
+}
+
+private actor RegionSensitiveEngine: OCREngine {
+    private(set) var regions: [CGRect] = []
+    func recognize(input: OCREngineInput, timeoutMs: Int) async -> OCRResult {
+        regions.append(input.roi)
+        let outsideDirtyRegion = CGRect(x: 0.7, y: 0.7, width: 0.2, height: 0.1)
+        return OCRResult(recognizedLines: [OCRLine(
+            text: input.roi.contains(outsideDirtyRegion) ? "password: hunter2" : "Updated title",
+            boundingBox: outsideDirtyRegion, confidence: 1
+        )], durationMs: 0, timedOut: false)
+    }
+}
+
+private actor CountingKeyframeRetainer: KeyframeRetaining {
+    private(set) var attempts = 0
+    func retain(input: KeyframePixelInput, candidate: KeyframeEvidenceCandidate) async throws -> KeyframeRetention? {
+        attempts += 1
+        return nil
+    }
+    func confirm(_ retention: KeyframeRetention) async {}
+    func discard(_ retention: KeyframeRetention) async throws {}
 }
 
 // Reuses the cross-test `StubOCREngine` defined in
@@ -156,19 +181,72 @@ final class CascadeSection6RegexTests: XCTestCase {
 final class CascadeTwiceOCREmitterTests: XCTestCase {
     /// CSO escalation 2026-05-29 — the cascade-twice §6 mechanics
     /// (this file's purpose) require `killOcrEmit == false`. The
-    /// kill-switch is `true` in shipping builds; the new
-    /// `testKillSwitchEmitsTombstoneForAllowFrames` test below pins
-    /// the production posture. The three existing tests below scope
-    /// the kill-switch OFF so they continue to exercise the §6
-    /// regex bank + the over-cap fail-closed arm.
+    /// kill-switch is `false` after live qualification; the dedicated
+    /// `testKillSwitchEmitsTombstoneForAllowFrames` test below still pins
+    /// the emergency rollback branch. These tests restore the qualified
+    /// production default after every case.
     override func setUp() {
         super.setUp()
         CascadeTwiceOCREmitter.killOcrEmit = false
     }
 
     override func tearDown() {
-        CascadeTwiceOCREmitter.killOcrEmit = true
+        CascadeTwiceOCREmitter.killOcrEmit = false
         super.tearDown()
+    }
+
+    func testScreenshotScansSecretOutsideDirtyRegionBeforeRetention() async {
+        let engine = RegionSensitiveEngine()
+        let sink = StubFrameSink()
+        let retainer = CountingKeyframeRetainer()
+        let emitter = CascadeTwiceOCREmitter(
+            worker: VisionOCRWorker(engine: engine), cascade: passthroughCascade(),
+            sink: sink, sequence: FrameSequence(), counters: HelperHealthCounters(),
+            keyframeRetainer: retainer
+        )
+        let finished = expectation(description: "OCR privacy decision completed")
+        await emitter.worker.start()
+        await emitter.processAfterAllow(
+            captureOrdinal: 1, tsUs: 12_345,
+            context: WorkflowContext(appBundleId: "com.example.app"),
+            input: OCREngineInput(pixelBuffer: makePixelBuffer(), roi: CGRect(x: 0, y: 0, width: 0.1, height: 0.1)),
+            evidenceCandidate: KeyframeEvidenceCandidate(
+                captureOrdinal: 1, focusedWindowId: 10, dhash: DHash(bits: 0),
+                monotonicNanoseconds: 1
+            ),
+            disposition: { _ in finished.fulfill() }
+        )
+        await fulfillment(of: [finished], timeout: 3)
+        await emitter.worker.stopAndDrain()
+        let regions = await engine.regions
+        let attempts = await retainer.attempts
+        let frames = await sink.snapshot()
+        XCTAssertEqual(regions, [CGRect(x: 0, y: 0, width: 1, height: 1)])
+        XCTAssertEqual(attempts, 0, "A secret outside the dirty region must prevent image retention")
+        XCTAssertEqual(frames.count, 1)
+        XCTAssertEqual(frames.first?[2], 0x11, "Only a privacy tombstone may be emitted")
+        XCTAssertEqual(frames.first?.last, RedactionReason.ocrTimeSecret.rawValue)
+    }
+
+    func testTextOnlyOCRPreservesRequestedRegion() async {
+        let engine = RegionSensitiveEngine()
+        let emitter = CascadeTwiceOCREmitter(
+            worker: VisionOCRWorker(engine: engine), cascade: passthroughCascade(),
+            sink: StubFrameSink(), sequence: FrameSequence(), counters: HelperHealthCounters()
+        )
+        let finished = expectation(description: "Text-only OCR completed")
+        let roi = CGRect(x: 0, y: 0, width: 0.1, height: 0.1)
+        await emitter.worker.start()
+        await emitter.processAfterAllow(
+            captureOrdinal: 1, tsUs: 12_345,
+            context: WorkflowContext(appBundleId: "com.example.app"),
+            input: OCREngineInput(pixelBuffer: makePixelBuffer(), roi: roi),
+            evidenceCandidate: nil, disposition: { _ in finished.fulfill() }
+        )
+        await fulfillment(of: [finished], timeout: 3)
+        await emitter.worker.stopAndDrain()
+        let regions = await engine.regions
+        XCTAssertEqual(regions, [roi])
     }
 
     /// SecretBench-pattern OCR text ⇒ tombstone reason=ocrTimeSecret;
@@ -204,7 +282,7 @@ final class CascadeTwiceOCREmitterTests: XCTestCase {
         XCTAssertEqual(bytes[3], 0x00)
         XCTAssertEqual(bytes.last, RedactionReason.ocrTimeSecret.rawValue,
                        "tombstone reason must be ocrTimeSecret (=6)")
-        await emitter.worker.stop()
+        await emitter.stopAndDrain()
     }
 
     /// Clean OCR text ⇒ OCREvent emitted carrying the OCR text bytes.
@@ -244,14 +322,15 @@ final class CascadeTwiceOCREmitterTests: XCTestCase {
         // Confirm "Hello\nworld" is present in the variable trailer.
         XCTAssertTrue(bytes.range(of: "Hello\nworld".data(using: .utf8)!) != nil,
                       "OCREvent payload must carry the joined OCR text")
-        await emitter.worker.stop()
+        await emitter.stopAndDrain()
     }
 
     /// Over-cap OCR text ⇒ fail-closed tombstone with reason=
     /// failsafeUnknown; NO OCREvent emitted. ADR-0013 §7 / ADR-0016 §4.9.
     func testOverCapOCRTextFailsClosed() async {
         let oversized = String(repeating: "a", count: maxOCRTextBytes + 1)
-        let sink = StubFrameSink()
+        let written = expectation(description: "Over-cap OCR publishes its privacy tombstone")
+        let sink = StubFrameSink(onWrite: { written.fulfill() })
         let emitter = CascadeTwiceOCREmitter(
             worker: VisionOCRWorker(engine: StubOCREngine(mode: .canned(OCRResult(
                 recognizedLines: [
@@ -271,25 +350,25 @@ final class CascadeTwiceOCREmitterTests: XCTestCase {
             context: WorkflowContext(appBundleId: "com.example.app"),
             input: OCREngineInput(pixelBuffer: makePixelBuffer(), roi: .init(x: 0, y: 0, width: 1, height: 1))
         )
-        try? await Task.sleep(nanoseconds: 100_000_000)
+        await fulfillment(of: [written], timeout: 5)
+        await emitter.stopAndDrain()
         let frames = await sink.snapshot()
         XCTAssertEqual(frames.count, 1)
         guard let bytes = frames.first else { return XCTFail() }
         XCTAssertEqual(bytes[2], 0x11, "must be a PrivacyTombstone, not OCREvent")
         XCTAssertEqual(bytes.last, RedactionReason.failsafeUnknown.rawValue,
                        "fail-closed reason on over-cap")
-        await emitter.worker.stop()
     }
 
     /// CSO escalation 2026-05-29 — Phase A interim mitigation (option
     /// M4 in `docs/research/capture-scope-window-vs-display-2026-05-29.md`).
-    /// With the kill-switch ON (production posture), every cleared-
+    /// With the emergency kill-switch ON, every cleared-
     /// pixel-time `.allow` frame must emit a `PrivacyTombstone(
     /// failsafeUnknown)` instead of an OCREvent — proving no OCR
     /// text bytes from the whole-display SCStream sample can reach
     /// the wire while the architectural fix bakes.
     func testKillSwitchEmitsTombstoneForAllowFrames() async {
-        // Production posture — kill-switch ON.
+        // Emergency rollback posture — kill-switch ON.
         CascadeTwiceOCREmitter.killOcrEmit = true
         defer { CascadeTwiceOCREmitter.killOcrEmit = false }
         let sink = StubFrameSink()
@@ -331,7 +410,7 @@ final class CascadeTwiceOCREmitterTests: XCTestCase {
         XCTAssertEqual(bytes[3], 0x00)
         XCTAssertEqual(bytes.last, RedactionReason.failsafeUnknown.rawValue,
                        "kill-switch tombstone reason must be failsafeUnknown")
-        await emitter.worker.stop()
+        await emitter.stopAndDrain()
     }
 }
 

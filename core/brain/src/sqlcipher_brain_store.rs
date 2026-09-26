@@ -33,9 +33,11 @@
 //! sign-off block on PR P3.2 asserts the ADR-0008 + ADR-0016 §4
 //! invariants in source (see the PR body).
 
-use std::collections::HashMap;
-use std::path::Path;
+use std::collections::{BTreeSet, HashMap};
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{Duration, SystemTime};
 
 use crate::alias_resolver::{ResolverEntity, RESOLVABLE_KINDS};
 use crate::episode_segmenter::EpisodeId;
@@ -49,11 +51,13 @@ use mci_core::store::{
     StoreError as CoreStoreError,
 };
 use rusqlite::types::Value;
-use rusqlite::{params, params_from_iter};
+use rusqlite::{params, params_from_iter, OptionalExtension};
 
 use crate::{
-    BrainStats, ConsolidationWatermark, Event, EventId, EventRecord, IdentityMentionSite,
-    ResolutionWatermark, StoreError, TimeRange,
+    BlobReconciliationStats, BrainStats, CaptureStorageStats, ConsolidationWatermark, Event,
+    EventId, EventRecord, EventSource, ExpansionBudget, IdentityMentionSite, MemoryClaim,
+    MemoryClaimId, MemoryDelta, MemoryExpansion, MemoryRetraction, ResolutionWatermark, StoreError,
+    TimeRange,
 };
 
 /// Phase 3 production `BrainStore`.
@@ -71,26 +75,564 @@ use crate::{
 /// never reimplements `PRAGMA key` or the wrong-key probe; we inherit it.
 pub struct SqlCipherBrainStore {
     pub(crate) db: Mutex<Db>,
+    blob_dir: PathBuf,
+}
+
+/// One bounded text read and the source identity from the same row snapshot.
+#[derive(Debug)]
+pub struct StoredEventText {
+    /// Exact UTF-8 prefix of the stored text.
+    pub text: String,
+    /// Whether the byte cap omitted text.
+    pub truncated: bool,
+    /// Capture timestamp used to reject a reused event ID.
+    pub ts_us: u64,
+    /// Nullable source app identity, without normalization.
+    pub app_bundle_id: Option<String>,
+}
+
+/// A best-effort maintenance stage that runs only after deletion commits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeletionCleanupStage {
+    /// Reclaim free database pages with `VACUUM`.
+    Vacuum,
+    /// Remove encrypted keyframe blobs that no surviving event references.
+    KeyframeBlobs,
+}
+
+/// One non-fatal maintenance warning from a committed deletion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeletionCleanupWarning {
+    /// Maintenance stage that did not finish.
+    pub stage: DeletionCleanupStage,
+    /// Content-free diagnostic for local logs and engineering support.
+    pub diagnostic: String,
+}
+
+/// Durable outcome of a deletion transaction and its post-commit maintenance.
+///
+/// Returning this value means the SQL transaction committed. Cleanup warnings
+/// never change that fact and must not be presented as a rolled-back deletion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeletionOutcome {
+    /// Rows removed from the `events` table.
+    pub events_deleted: u64,
+    /// Independent best-effort maintenance failures observed after commit.
+    pub cleanup_warnings: Vec<DeletionCleanupWarning>,
+}
+
+impl DeletionOutcome {
+    /// Whether database free-page reclamation completed.
+    #[must_use]
+    pub fn vacuum_ok(&self) -> bool {
+        !self
+            .cleanup_warnings
+            .iter()
+            .any(|warning| warning.stage == DeletionCleanupStage::Vacuum)
+    }
+
+    /// Whether stale encrypted keyframe candidates were removed.
+    #[must_use]
+    pub fn blob_cleanup_ok(&self) -> bool {
+        !self
+            .cleanup_warnings
+            .iter()
+            .any(|warning| warning.stage == DeletionCleanupStage::KeyframeBlobs)
+    }
 }
 
 impl SqlCipherBrainStore {
+    /// Search literal keywords with inclusive time and exact app filters before top-k.
+    ///
+    /// # Errors
+    /// Returns an invalid-input error for an empty query, or a backend error if
+    /// the lexical index cannot be read.
+    pub fn fts5_search_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        time_filter: Option<TimeRange>,
+        app_filter: Option<&str>,
+    ) -> Result<Vec<(EventId, f32)>, StoreError> {
+        self.fts5_search_with_filters(query, limit, time_filter, app_filter, &[], false)
+    }
+
+    /// Literal search with an app union and a nonempty-URL requirement before top-k.
+    /// The legacy single app, when supplied, intersects the app union.
+    ///
+    /// # Errors
+    /// Rejects an empty query or invalid app list; reports index read failures.
+    pub fn fts5_search_with_filters(
+        &self,
+        query: &str,
+        limit: usize,
+        time_filter: Option<TimeRange>,
+        app_filter: Option<&str>,
+        app_filters: &[String],
+        has_url: bool,
+    ) -> Result<Vec<(EventId, f32)>, StoreError> {
+        Self::validate_search_app_filters(app_filters)?;
+        if query.is_empty() {
+            return Err(StoreError::InvalidInput("empty FTS5 query".into()));
+        }
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let sanitized = crate::fts_sanitizer::sanitize_fts5_query(query);
+        self.search_fts_expression(
+            &sanitized,
+            limit,
+            time_filter,
+            app_filter,
+            app_filters,
+            has_url,
+        )
+    }
+
+    /// Search bounded, literal alternatives without treating their text as FTS syntax.
+    ///
+    /// # Errors
+    /// Returns an invalid-input error above 1,024 branches or 128 KiB of input,
+    /// or a backend error if the lexical index cannot be read.
+    pub fn fts5_search_alternatives(
+        &self,
+        alternatives: &[crate::fts_sanitizer::LexicalAlternative<'_>],
+        limit: usize,
+    ) -> Result<Vec<(EventId, f32)>, StoreError> {
+        self.fts5_search_alternatives_filtered(alternatives, limit, None, None)
+    }
+
+    /// Search bounded literal alternatives with filters applied before top-k.
+    /// Time bounds are inclusive; app IDs match exactly, including an empty ID.
+    ///
+    /// # Errors
+    /// Returns an invalid-input error above 1,024 branches or 128 KiB of input,
+    /// or a backend error if the lexical index cannot be read.
+    pub fn fts5_search_alternatives_filtered(
+        &self,
+        alternatives: &[crate::fts_sanitizer::LexicalAlternative<'_>],
+        limit: usize,
+        time_filter: Option<TimeRange>,
+        app_filter: Option<&str>,
+    ) -> Result<Vec<(EventId, f32)>, StoreError> {
+        self.fts5_search_alternatives_with_filters(
+            alternatives,
+            limit,
+            time_filter,
+            app_filter,
+            &[],
+            false,
+        )
+    }
+
+    /// Bounded literal alternatives with all metadata constraints before top-k.
+    ///
+    /// # Errors
+    /// Rejects invalid app lists or excessive alternatives; reports index read failures.
+    pub fn fts5_search_alternatives_with_filters(
+        &self,
+        alternatives: &[crate::fts_sanitizer::LexicalAlternative<'_>],
+        limit: usize,
+        time_filter: Option<TimeRange>,
+        app_filter: Option<&str>,
+        app_filters: &[String],
+        has_url: bool,
+    ) -> Result<Vec<(EventId, f32)>, StoreError> {
+        use crate::fts_sanitizer::{
+            sanitize_fts5_query, LexicalAlternative, MAX_LEXICAL_ALTERNATIVES,
+            MAX_LEXICAL_ALTERNATIVE_BYTES,
+        };
+        Self::validate_search_app_filters(app_filters)?;
+        if alternatives.len() > MAX_LEXICAL_ALTERNATIVES {
+            return Err(StoreError::InvalidInput(
+                "too many lexical alternatives".into(),
+            ));
+        }
+        let mut bytes = 0usize;
+        let mut branches = Vec::new();
+        for alternative in alternatives {
+            let (LexicalAlternative::Keywords(text) | LexicalAlternative::Phrase(text)) =
+                alternative;
+            bytes = bytes.checked_add(text.len()).ok_or_else(|| {
+                StoreError::InvalidInput("lexical alternatives size overflow".into())
+            })?;
+            if bytes > MAX_LEXICAL_ALTERNATIVE_BYTES {
+                return Err(StoreError::InvalidInput(
+                    "lexical alternatives exceed byte budget".into(),
+                ));
+            }
+            if text.trim().is_empty() {
+                continue;
+            }
+            let encoded = match alternative {
+                LexicalAlternative::Keywords(text) => sanitize_fts5_query(text),
+                LexicalAlternative::Phrase(text) => format!("\"{}\"", text.replace('"', "\"\"")),
+            };
+            branches.push(format!("({encoded})"));
+        }
+        self.search_fts_expression(
+            &branches.join(" OR "),
+            limit,
+            time_filter,
+            app_filter,
+            app_filters,
+            has_url,
+        )
+    }
+
+    // Only encoded literal text reaches this helper. Keep it private so callers
+    // cannot accidentally send raw user text or a partially escaped expression.
+    fn search_fts_expression(
+        &self,
+        expression: &str,
+        limit: usize,
+        time_filter: Option<TimeRange>,
+        app_filter: Option<&str>,
+        app_filters: &[String],
+        has_url: bool,
+    ) -> Result<Vec<(EventId, f32)>, StoreError> {
+        if expression.trim().is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        if let Some(time) = time_filter {
+            // Stored timestamps are signed SQLite integers. Clamping an
+            // unrepresentable lower bound would incorrectly include i64::MAX.
+            if time.from_us > time.to_us || time.from_us > i64::MAX as u64 {
+                return Ok(Vec::new());
+            }
+        }
+        let mut sql = String::from("SELECT events_fts.rowid, events_fts.rank FROM events_fts");
+        if time_filter.is_some() || app_filter.is_some() || !app_filters.is_empty() || has_url {
+            sql.push_str(" INNER JOIN events e ON e.id = events_fts.rowid");
+        }
+        sql.push_str(" WHERE events_fts MATCH ?1");
+        let mut binds = vec![Value::Text(expression.to_owned())];
+        Self::append_search_filters(
+            &mut sql,
+            &mut binds,
+            time_filter,
+            app_filter,
+            app_filters,
+            has_url,
+        );
+        let _ = write!(
+            sql,
+            " ORDER BY events_fts.rank ASC, events_fts.rowid ASC LIMIT ?{}",
+            binds.len() + 1
+        );
+        binds.push(Value::Integer(i64::try_from(limit).unwrap_or(i64::MAX)));
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(&sql)
+            .map_err(|e| StoreError::Backend(format!("prepare fts5: {e}")))?;
+        let rows = stmt
+            .query_map(params_from_iter(binds.iter()), |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?))
+            })
+            .map_err(|e| StoreError::Backend(format!("query fts5: {e}")))?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, rank) = row.map_err(|e| StoreError::Backend(format!("row fts5: {e}")))?;
+            // SQLite BM25 is lower-is-better; the store contract is higher-is-better.
+            #[allow(clippy::cast_possible_truncation)]
+            let score = (-rank) as f32;
+            out.push((EventId(u64::try_from(id).unwrap_or(0)), score));
+        }
+        Ok(out)
+    }
+
+    /// Chronological browse with all constraints applied before the row limit.
+    /// Returns IDs so the caller materializes only the bounded result set.
+    ///
+    /// # Errors
+    /// Rejects invalid app lists and reports database read failures.
+    pub fn browse_event_ids_filtered(
+        &self,
+        limit: usize,
+        time_filter: Option<TimeRange>,
+        app_filter: Option<&str>,
+        app_filters: &[String],
+        has_url: bool,
+    ) -> Result<Vec<EventId>, StoreError> {
+        Self::validate_search_app_filters(app_filters)?;
+        if limit == 0
+            || time_filter
+                .is_some_and(|time| time.from_us > time.to_us || time.from_us > i64::MAX as u64)
+        {
+            return Ok(Vec::new());
+        }
+        let mut sql = String::from("SELECT e.id FROM events e WHERE e.cascade_reason = 0");
+        let mut binds = Vec::new();
+        Self::append_search_filters(
+            &mut sql,
+            &mut binds,
+            time_filter,
+            app_filter,
+            app_filters,
+            has_url,
+        );
+        let _ = write!(
+            sql,
+            " ORDER BY e.ts_us DESC, e.id DESC LIMIT ?{}",
+            binds.len() + 1
+        );
+        binds.push(Value::Integer(i64::try_from(limit).unwrap_or(i64::MAX)));
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(&sql)
+            .map_err(|e| StoreError::Backend(format!("prepare browse: {e}")))?;
+        let rows = stmt
+            .query_map(params_from_iter(binds.iter()), |row| row.get::<_, i64>(0))
+            .map_err(|e| StoreError::Backend(format!("query browse: {e}")))?;
+        rows.map(|row| {
+            let id = row.map_err(|e| StoreError::Backend(format!("row browse: {e}")))?;
+            u64::try_from(id)
+                .map(EventId)
+                .map_err(|e| StoreError::Backend(format!("browse ID: {e}")))
+        })
+        .collect()
+    }
+
+    /// Validate additive source IDs without normalizing identity. Legacy matching stays literal.
+    ///
+    /// # Errors
+    /// At most 32 nonempty UTF-8 IDs, each at most 255 bytes, without NUL or control characters.
+    pub fn validate_search_app_filters(app_filters: &[String]) -> Result<(), StoreError> {
+        if app_filters.len() > 32 {
+            return Err(StoreError::InvalidInput(
+                "app_filters exceeds 32 IDs".into(),
+            ));
+        }
+        if app_filters
+            .iter()
+            .any(|app| app.is_empty() || app.len() > 255 || app.chars().any(char::is_control))
+        {
+            return Err(StoreError::InvalidInput(
+                "app_filters contains an invalid ID".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    // All dynamic values are bound. Both browse and FTS use alias `e` for events.
+    fn append_search_filters(
+        sql: &mut String,
+        binds: &mut Vec<Value>,
+        time_filter: Option<TimeRange>,
+        app_filter: Option<&str>,
+        app_filters: &[String],
+        has_url: bool,
+    ) {
+        if let Some(time) = time_filter {
+            let _ = write!(
+                sql,
+                " AND e.ts_us >= ?{} AND e.ts_us <= ?{}",
+                binds.len() + 1,
+                binds.len() + 2
+            );
+            binds.push(Value::Integer(
+                i64::try_from(time.from_us).unwrap_or(i64::MAX),
+            ));
+            binds.push(Value::Integer(
+                i64::try_from(time.to_us).unwrap_or(i64::MAX),
+            ));
+        }
+        if let Some(app) = app_filter {
+            let _ = write!(sql, " AND e.app_bundle_id = ?{}", binds.len() + 1);
+            binds.push(Value::Text(app.to_owned()));
+        }
+        if !app_filters.is_empty() {
+            sql.push_str(" AND e.app_bundle_id IN (");
+            for (index, app) in app_filters.iter().enumerate() {
+                if index > 0 {
+                    sql.push(',');
+                }
+                let _ = write!(sql, "?{}", binds.len() + 1);
+                binds.push(Value::Text(app.clone()));
+            }
+            sql.push(')');
+        }
+        if has_url {
+            sql.push_str(" AND e.url IS NOT NULL AND e.url != ''");
+        }
+    }
+
+    /// Acquisition provenance. Old read-only stores and unattributed rows
+    /// return unknown; neither application names nor content prove origin.
+    pub fn event_source(&self, id: EventId) -> Result<EventSource, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let conn = guard.conn();
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_sources')",
+            [], |row| row.get(0),
+        ).map_err(|e| StoreError::Backend(format!("probe event sources: {e}")))?;
+        if !exists {
+            return Ok(EventSource::Unknown);
+        }
+        let source: Option<String> = conn
+            .query_row(
+                "SELECT source_kind FROM event_sources WHERE event_id=?1",
+                [i64::try_from(id.0).map_err(|e| StoreError::InvalidInput(e.to_string()))?],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| StoreError::Backend(format!("read event source: {e}")))?;
+        Ok(source
+            .as_deref()
+            .map_or(EventSource::Unknown, EventSource::from_stored))
+    }
+
+    /// Content-free retained counts. Unattributed legacy rows are not counted
+    /// as screen events. Screenshot count denotes database refs, not files.
+    pub fn capture_storage_stats(&self) -> Result<CaptureStorageStats, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        guard
+            .conn()
+            .query_row(
+                "SELECT COUNT(*), MAX(e.ts_us),
+                (SELECT COUNT(*) FROM events WHERE keyframe_blob IS NOT NULL)
+             FROM event_sources s JOIN events e ON e.id=s.event_id
+             WHERE s.source_kind IN ('screen_ocr','browser_page_with_ocr')",
+                [],
+                |row| {
+                    Ok(CaptureStorageStats {
+                        stored_frame_count: u64::try_from(row.get::<_, i64>(0)?).unwrap_or(0),
+                        last_stored_frame_ts_us: row
+                            .get::<_, Option<i64>>(1)?
+                            .and_then(|ts| u64::try_from(ts).ok()),
+                        stored_screenshot_count: u64::try_from(row.get::<_, i64>(2)?).unwrap_or(0),
+                    })
+                },
+            )
+            .map_err(|e| StoreError::Backend(format!("capture storage stats: {e}")))
+    }
+
+    pub(crate) fn remove_unreferenced_keyframe_candidates(
+        &self,
+        candidates: &[String],
+    ) -> Result<u64, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        remove_unreferenced_keyframe_blobs(guard.conn(), &self.blob_dir, candidates)
+    }
+
+    /// Reconcile the managed encrypted keyframe directory against live event references.
+    ///
+    /// Canonical unreferenced blobs and writer temporary files are removed only after
+    /// `minimum_orphan_age`. Unknown names, symlinks, and non-regular entries are never
+    /// removed. A non-zero grace period prevents racing the capture helper between its
+    /// durable blob publication and the corresponding event insert.
+    pub fn reconcile_keyframe_blobs(
+        &self,
+        minimum_orphan_age: Duration,
+    ) -> Result<BlobReconciliationStats, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        reconcile_keyframe_blob_directory(
+            guard.conn(),
+            &self.blob_dir,
+            minimum_orphan_age,
+            SystemTime::now(),
+        )
+    }
+
+    /// Apply one governed memory delta atomically.
+    pub fn project_memory_delta(&self, delta: &MemoryDelta) -> Result<(), StoreError> {
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin memory projection: {e}")))?;
+        crate::memory_projector::apply_delta(&tx, delta)?;
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit memory projection: {e}")))
+    }
+
+    /// Append retraction transitions for claims evidenced by one event.
+    pub fn retract_memory_event(&self, value: &MemoryRetraction) -> Result<(), StoreError> {
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin memory retraction: {e}")))?;
+        crate::memory_projector::apply_retraction(&tx, value)?;
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit memory retraction: {e}")))
+    }
+
+    /// Return active claims valid at `valid_at_us` and known by
+    /// `asserted_as_of_us`, in deterministic order.
+    pub fn memory_claims_as_of(
+        &self,
+        valid_at_us: u64,
+        asserted_as_of_us: u64,
+        limit: usize,
+    ) -> Result<Vec<MemoryClaim>, StoreError> {
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin memory read: {e}")))?;
+        let claims =
+            crate::memory_projector::read_claims_as_of(&tx, valid_at_us, asserted_as_of_us, limit)?;
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit memory read: {e}")))?;
+        Ok(claims)
+    }
+
+    /// Return one claim's append-only status history.
+    pub fn memory_claim_history(
+        &self,
+        claim_id: &MemoryClaimId,
+    ) -> Result<Vec<crate::ClaimStatusRecord>, StoreError> {
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin memory history read: {e}")))?;
+        let history = crate::memory_projector::read_claim_history(&tx, claim_id)?;
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit memory history read: {e}")))?;
+        Ok(history)
+    }
+
+    /// Expand seed claims across extant evidence, episodes, entities, and
+    /// identities under explicit deterministic budgets.
+    pub fn expand_memory(
+        &self,
+        seed_claim_ids: &[MemoryClaimId],
+        budget: ExpansionBudget,
+    ) -> Result<MemoryExpansion, StoreError> {
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin memory expansion: {e}")))?;
+        let expansion = crate::memory_projector::expand_memory(&tx, seed_claim_ids, budget)?;
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit memory expansion: {e}")))?;
+        Ok(expansion)
+    }
+
     /// Open (or create) the encrypted brain store at `path` with `key`.
     ///
     /// Wraps `mci_core::store::open` for the encryption + WAL +
     /// `foreign_keys` set-up; on a fresh DB also runs the Phase 3 brain
-    /// migration (ADR-0016 §1.4). On a previously-initialized DB the
-    /// migration is a no-op — every `CREATE TABLE` / `CREATE INDEX` /
-    /// `CREATE TRIGGER` carries `IF NOT EXISTS` so re-running is safe;
-    /// the `INSERT OR REPLACE INTO meta` stamps are idempotent by key.
+    /// migration (ADR-0016 §1.4). Existing activity privacy schema and
+    /// deletion barriers are validated before migration: missing or invalid
+    /// current-schema objects are rejected, never silently recreated.
     ///
     /// # Errors
     /// - [`StoreError::Backend`] for any `mci_core::store::open` failure
     ///   (wrapped to preserve the brain trait's error surface).
-    /// - [`StoreError::Backend`] if the migration DDL fails.
+    /// - [`StoreError::Backend`] if migration or activity validation fails.
     pub fn new(path: &Path, key: &DbKey) -> Result<Self, StoreError> {
         let mut db = mci_core_open(path, key).map_err(|e| map_core_err(&e))?;
         run_brain_migration(&mut db)?;
-        Ok(Self { db: Mutex::new(db) })
+        Ok(Self {
+            db: Mutex::new(db),
+            blob_dir: blob_dir_for_brain(path),
+        })
     }
 
     /// Open the brain store at `path` with `key` in **READ-ONLY** mode for
@@ -113,9 +655,94 @@ impl SqlCipherBrainStore {
     ///   file, EPERM, etc.) — wraps `mci_core::store::open_readonly`.
     /// - [`StoreError::Backend`] for wrong-key / not-an-MCI-database
     ///   (the inner error is intentionally indistinguishable per ADR-0008).
+    /// - [`StoreError::Backend`] for invalid existing activity privacy storage.
     pub fn open_readonly(path: &Path, key: &DbKey) -> Result<Self, StoreError> {
-        let db = mci_core_open_readonly(path, key).map_err(|e| map_core_err(&e))?;
-        Ok(Self { db: Mutex::new(db) })
+        let mut db = mci_core_open_readonly(path, key).map_err(|e| map_core_err(&e))?;
+        {
+            let tx = db
+                .conn_mut()
+                .transaction()
+                .map_err(|_| StoreError::Backend("begin activity open validation".into()))?;
+            let version: Option<String> = tx
+                .query_row(
+                    "SELECT value FROM meta WHERE key='brain_schema_version'",
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|_| StoreError::Backend("read activity schema version".into()))?;
+            crate::activity::validate_activity_schema(&tx, version.as_deref())?;
+        }
+        Ok(Self {
+            db: Mutex::new(db),
+            blob_dir: blob_dir_for_brain(path),
+        })
+    }
+
+    /// Maximum UTF-8 bytes exposed by a single selected-event text read.
+    pub const EVENT_TEXT_BYTE_CAP: usize = 128 * 1024;
+
+    /// Maximum app-identity bytes accompanying a selected-event text read.
+    pub const EVENT_TEXT_APP_BYTE_CAP: usize = 1024;
+
+    /// Read the exact text prefix of one admitted event, without fetching
+    /// vectors or blobs. Timestamp and app identity are read atomically with text.
+    /// Missing, deleted, suppressed and out-of-range ids return `None`, as do
+    /// rows whose app identity exceeds the bound. Callers must match identity
+    /// against their selected snapshot: row IDs alone can be reused.
+    ///
+    /// # Errors
+    /// Returns a content-free backend error on a database or UTF-8 failure.
+    pub fn event_text(&self, id: EventId) -> Result<Option<StoredEventText>, StoreError> {
+        let Ok(row_id) = i64::try_from(id.0) else {
+            return Ok(None);
+        };
+        if row_id <= 0 {
+            return Ok(None);
+        }
+        let guard = self
+            .db
+            .lock()
+            .map_err(|_| StoreError::Backend("event text store unavailable".into()))?;
+        // Read one sentinel byte past the cap to distinguish an exact fit.
+        // BLOB substr counts bytes and preserves embedded NULs in stored text.
+        let read_bytes = i64::try_from(Self::EVENT_TEXT_BYTE_CAP + 1)
+            .map_err(|_| StoreError::Backend("invalid event text cap".into()))?;
+        let app_bytes = i64::try_from(Self::EVENT_TEXT_APP_BYTE_CAP)
+            .map_err(|_| StoreError::Backend("invalid event identity cap".into()))?;
+        let row: Option<(Vec<u8>, i64, Option<String>)> = guard
+            .conn()
+            .query_row(
+                "SELECT coalesce(substr(CAST(text AS BLOB), 1, ?2), X''), ts_us, app_bundle_id
+                 FROM events WHERE id = ?1 AND cascade_reason = 0
+                 AND (app_bundle_id IS NULL OR length(CAST(app_bundle_id AS BLOB)) <= ?3)",
+                params![row_id, read_bytes, app_bytes],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(|_| StoreError::Backend("event text read failed".into()))?;
+        let Some((mut bytes, ts_us, app_bundle_id)) = row else {
+            return Ok(None);
+        };
+        let ts_us = u64::try_from(ts_us)
+            .map_err(|_| StoreError::Backend("invalid event identity".into()))?;
+        let truncated = bytes.len() > Self::EVENT_TEXT_BYTE_CAP;
+        bytes.truncate(Self::EVENT_TEXT_BYTE_CAP);
+        if let Err(error) = std::str::from_utf8(&bytes) {
+            if truncated && error.error_len().is_none() {
+                bytes.truncate(error.valid_up_to());
+            } else {
+                return Err(StoreError::Backend("event text is not valid UTF-8".into()));
+            }
+        }
+        let text = String::from_utf8(bytes)
+            .map_err(|_| StoreError::Backend("event text is not valid UTF-8".into()))?;
+        Ok(Some(StoredEventText {
+            text,
+            truncated,
+            ts_us,
+            app_bundle_id,
+        }))
     }
 
     /// Read the N most-recent events ordered by `ts_us` DESC.
@@ -128,7 +755,23 @@ impl SqlCipherBrainStore {
     /// # Errors
     /// [`StoreError::Backend`] for any underlying `SQLite` failure.
     pub fn recent_events(&self, limit: usize) -> Result<Vec<Event>, StoreError> {
-        if limit == 0 {
+        self.events_in_range(0, u64::MAX, limit)
+    }
+
+    /// Read events in an inclusive time range, newest first. The date predicate
+    /// runs before the limit so newer days cannot hide an older day's rows.
+    pub fn events_in_range(
+        &self,
+        start_ts_us: u64,
+        end_ts_us: u64,
+        limit: usize,
+    ) -> Result<Vec<Event>, StoreError> {
+        if start_ts_us > end_ts_us {
+            return Err(StoreError::InvalidInput(
+                "start timestamp exceeds end timestamp".into(),
+            ));
+        }
+        if limit == 0 || start_ts_us > i64::MAX as u64 {
             return Ok(Vec::new());
         }
         let guard = self.db.lock().expect("brain store mutex poisoned");
@@ -139,13 +782,21 @@ impl SqlCipherBrainStore {
                         text, summary, entities, episode_id,
                         cascade_reason, keyframe_blob, tab_id
                  FROM events
-                 ORDER BY ts_us DESC
-                 LIMIT ?1",
+                 WHERE ts_us >= ?1 AND ts_us <= ?2
+                 ORDER BY ts_us DESC, id DESC
+                 LIMIT ?3",
             )
             .map_err(|e| StoreError::Backend(format!("prepare recent_events: {e}")))?;
         let lim = i64::try_from(limit).unwrap_or(i64::MAX);
         let rows = stmt
-            .query_map(params![lim], row_to_event_tuple)
+            .query_map(
+                params![
+                    i64::try_from(start_ts_us).unwrap_or(i64::MAX),
+                    i64::try_from(end_ts_us).unwrap_or(i64::MAX),
+                    lim
+                ],
+                row_to_event_tuple,
+            )
             .map_err(|e| StoreError::Backend(format!("query recent_events: {e}")))?;
         let mut out: Vec<Event> = Vec::new();
         for r in rows {
@@ -242,6 +893,82 @@ impl SqlCipherBrainStore {
         Ok(out)
     }
 
+    /// Read a bounded, evenly distributed sample from a half-open time window.
+    ///
+    /// Unlike [`Self::events_since`], this does not bias a capped result toward
+    /// the beginning of the window. When the window contains more than `limit`
+    /// rows, the first and newest rows are retained and the remainder are spread
+    /// across the interval in timestamp order. This is the daily-brief read path:
+    /// a busy morning must not make the afternoon disappear from the summary.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any underlying `SQLite` failure.
+    pub fn sampled_events_between(
+        &self,
+        since_ts_us: u64,
+        until_ts_us: u64,
+        limit: usize,
+    ) -> Result<Vec<EventRecord>, StoreError> {
+        if limit == 0 || since_ts_us >= until_ts_us {
+            return Ok(Vec::new());
+        }
+        let since = i64::try_from(since_ts_us).unwrap_or(i64::MAX);
+        let until = i64::try_from(until_ts_us).unwrap_or(i64::MAX);
+        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "WITH ranked AS (
+                    SELECT id, ts_us, app_bundle_id, window_title, url, text,
+                           ROW_NUMBER() OVER (ORDER BY ts_us ASC, id ASC) AS rn,
+                           COUNT(*) OVER () AS total
+                    FROM events
+                    WHERE ts_us >= ?1 AND ts_us < ?2
+                 )
+                 SELECT id, ts_us, app_bundle_id, window_title, url, text
+                 FROM ranked
+                 WHERE total <= ?3
+                    OR (?3 = 1 AND rn = total)
+                    OR (
+                        ?3 > 1 AND (
+                            rn = 1 OR
+                            ((rn - 1) * (?3 - 1)) / NULLIF(total - 1, 0) >
+                            ((rn - 2) * (?3 - 1)) / NULLIF(total - 1, 0)
+                        )
+                    )
+                 ORDER BY ts_us ASC, id ASC",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare sampled_events_between: {e}")))?;
+        let rows = stmt
+            .query_map(params![since, until, lim], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            })
+            .map_err(|e| StoreError::Backend(format!("query sampled_events_between: {e}")))?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, ts_us, app, title, url, text) =
+                row.map_err(|e| StoreError::Backend(format!("row sampled_events_between: {e}")))?;
+            out.push(EventRecord {
+                event_id: EventId(u64::try_from(id).unwrap_or(0)),
+                ts_us: u64::try_from(ts_us).unwrap_or(0),
+                app_bundle_id: app,
+                window_title: title,
+                url,
+                text_snippet: EventRecord::truncate_snippet(&text),
+            });
+        }
+        Ok(out)
+    }
+
     /// Content-free aggregate counts. SELECT-only — no write side.
     ///
     /// Surface for the agent-API loopback (`mci_stats` MCP tool, P3.10b)
@@ -314,6 +1041,7 @@ impl SqlCipherBrainStore {
                  FROM events e
                  LEFT JOIN event_vectors ev ON ev.event_id = e.id
                  WHERE ev.event_id IS NULL
+                   AND length(trim(e.text, ' ' || char(9) || char(10) || char(11) || char(12) || char(13))) > 0
                  ORDER BY e.ts_us ASC
                  LIMIT ?1",
             )
@@ -364,7 +1092,7 @@ impl SqlCipherBrainStore {
     /// mention written by
     /// [`mark_event_tier2_processed`](crate::mark_event_tier2_processed).
     /// Same LEFT-JOIN anti-pattern as [`Self::unembedded_events`] for
-    /// SQLite query-planner friendliness on large `entity_mentions`
+    /// `SQLite` query-planner friendliness on large `entity_mentions`
     /// tables.
     ///
     /// The idle-batch worker (`apps/agent/src/tier2_worker.rs`) polls
@@ -707,7 +1435,7 @@ impl SqlCipherBrainStore {
     /// derived `event_count` per episode. SELECT-only — no write side.
     ///
     /// Surface for the `mci_episodes` MCP tool. The correlated subquery is
-    /// O(episodes × events_per_episode) which is fine inside Phase 3's
+    /// O(episodes × `events_per_episode`) which is fine inside Phase 3's
     /// corpus regime; the `events_episode` index covers it.
     ///
     /// # Errors
@@ -957,10 +1685,10 @@ impl SqlCipherBrainStore {
     ///
     /// Semantics: `INSERT OR REPLACE` on the UNIQUE(`date_local`) index.
     /// Regenerating the brief for the same local day overwrites the row.
-    /// The row id is stable across regenerates because SQLite reuses the
+    /// The row id is stable across regenerates because `SQLite` reuses the
     /// primary key on REPLACE only when the conflicting row was already
     /// the primary-key target — here the conflict is on a UNIQUE index,
-    /// not the PK, so SQLite deletes the conflicting row and inserts a
+    /// not the PK, so `SQLite` deletes the conflicting row and inserts a
     /// fresh one. Callers that hold a brief id across a regenerate should
     /// re-look-up by `date_local` after writing.
     ///
@@ -969,8 +1697,8 @@ impl SqlCipherBrainStore {
     pub fn put_brief(&self, brief: &crate::BriefRow) -> Result<u64, StoreError> {
         let guard = self.db.lock().expect("brain store mutex poisoned");
         let generated_i64 = i64::try_from(brief.generated_ts_us).unwrap_or(i64::MAX);
-        let word_count_i64 = i64::try_from(brief.word_count).unwrap_or(0);
-        let src_count_i64 = i64::try_from(brief.source_event_count).unwrap_or(0);
+        let word_count_i64 = i64::from(brief.word_count);
+        let src_count_i64 = i64::from(brief.source_event_count);
         guard
             .conn()
             .execute(
@@ -1150,33 +1878,65 @@ impl SqlCipherBrainStore {
     //
     // CASCADE cleanup (event_vectors, chunks, entity_mentions,
     // episode_edges) is handled by the ON DELETE CASCADE clauses in
-    // migrations 0001 + 0004 + 0005; the methods below do not restate
-    // the child DELETEs.
+    // migrations 0001 + 0004 + 0005. Governed-memory rows deliberately
+    // use RESTRICT FKs, so each path stages its event ids and removes the
+    // corresponding projection inside the same transaction first.
     // ---------------------------------------------------------------
 
-    /// Delete one event by id. Returns the number of `events` rows
-    /// deleted (0 or 1). `VACUUM`s after commit.
+    /// Delete one event by id. Returns the number of committed `events`
+    /// rows deleted (0 or 1).
     ///
     /// # Errors
     /// [`StoreError::Backend`] on any driver failure (missing row is
     /// NOT an error — it returns 0).
     pub fn delete_event(&self, id: EventId) -> Result<u64, StoreError> {
+        self.delete_event_with_outcome(id)
+            .map(|outcome| outcome.events_deleted)
+    }
+
+    /// Delete one event and report post-commit maintenance separately.
+    ///
+    /// An `Ok` value proves the deletion transaction committed. A failed
+    /// `VACUUM` or keyframe unlink is recorded in `cleanup_warnings` rather
+    /// than converted into an error that could falsely imply rollback.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] when work fails before or during commit.
+    pub fn delete_event_with_outcome(&self, id: EventId) -> Result<DeletionOutcome, StoreError> {
         let mut guard = self.db.lock().expect("brain store mutex poisoned");
         let tx = guard
             .conn_mut()
             .transaction()
             .map_err(|e| StoreError::Backend(format!("begin delete_event tx: {e}")))?;
         let id_i = i64::try_from(id.0).unwrap_or(i64::MAX);
+        let event = tx
+            .query_row(
+                "SELECT id, keyframe_blob FROM events WHERE id = ?1",
+                params![id_i],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .optional()
+            .map_err(|e| StoreError::Backend(format!("select delete event: {e}")))?;
+        let event_ids = event
+            .as_ref()
+            .map(|(event_id, _)| vec![*event_id])
+            .unwrap_or_default();
+        let blob_digests = event
+            .and_then(|(_, digest)| digest)
+            .into_iter()
+            .collect::<Vec<_>>();
+        delete_projected_memory_for_events(&tx, &event_ids)?;
         let n = tx
             .execute("DELETE FROM events WHERE id = ?1", params![id_i])
             .map_err(|e| StoreError::Backend(format!("DELETE events: {e}")))?;
         tx.commit()
             .map_err(|e| StoreError::Backend(format!("commit delete_event tx: {e}")))?;
-        guard
-            .conn()
-            .execute_batch("VACUUM")
-            .map_err(|e| StoreError::Backend(format!("VACUUM after delete_event: {e}")))?;
-        Ok(n as u64)
+        Ok(run_post_delete_cleanup(
+            guard.conn(),
+            &self.blob_dir,
+            &blob_digests,
+            n as u64,
+        ))
     }
 
     /// Delete every event whose `ts_us` falls in the inclusive range
@@ -1194,6 +1954,21 @@ impl SqlCipherBrainStore {
         start_ts_us: u64,
         end_ts_us: u64,
     ) -> Result<u64, StoreError> {
+        self.delete_events_in_range_with_outcome(start_ts_us, end_ts_us)
+            .map(|outcome| outcome.events_deleted)
+    }
+
+    /// Delete an inclusive event range and report post-commit maintenance.
+    /// Measured activity in the same inclusive range is removed; crossing
+    /// intervals are clipped or split in this transaction. Counts remain events.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on invalid bounds or failure before commit.
+    pub fn delete_events_in_range_with_outcome(
+        &self,
+        start_ts_us: u64,
+        end_ts_us: u64,
+    ) -> Result<DeletionOutcome, StoreError> {
         if start_ts_us > end_ts_us {
             return Err(StoreError::Backend(
                 "delete_events_in_range: start_ts_us > end_ts_us".into(),
@@ -1206,28 +1981,46 @@ impl SqlCipherBrainStore {
             .map_err(|e| StoreError::Backend(format!("begin delete_range tx: {e}")))?;
         let s_i = i64::try_from(start_ts_us).unwrap_or(i64::MAX);
         let e_i = i64::try_from(end_ts_us).unwrap_or(i64::MAX);
+        let blob_digests = keyframe_digests_matching(
+            &tx,
+            "SELECT keyframe_blob FROM events
+             WHERE ts_us >= ?1 AND ts_us <= ?2 AND keyframe_blob IS NOT NULL
+             ORDER BY keyframe_blob",
+            params![s_i, e_i],
+            "select delete range keyframe blobs",
+        )?;
+        let event_ids = event_ids_matching(
+            &tx,
+            "SELECT id FROM events WHERE ts_us >= ?1 AND ts_us <= ?2 ORDER BY id",
+            params![s_i, e_i],
+            "select delete range events",
+        )?;
+        delete_projected_memory_for_events(&tx, &event_ids)?;
         let n = tx
             .execute(
                 "DELETE FROM events WHERE ts_us >= ?1 AND ts_us <= ?2",
                 params![s_i, e_i],
             )
             .map_err(|e| StoreError::Backend(format!("DELETE events range: {e}")))?;
+        crate::activity::delete_activity_in_range(&tx, s_i, e_i.saturating_add(1))?;
         tx.commit()
             .map_err(|e| StoreError::Backend(format!("commit delete_range tx: {e}")))?;
-        guard
-            .conn()
-            .execute_batch("VACUUM")
-            .map_err(|e| StoreError::Backend(format!("VACUUM after delete_range: {e}")))?;
-        Ok(n as u64)
+        Ok(run_post_delete_cleanup(
+            guard.conn(),
+            &self.blob_dir,
+            &blob_digests,
+            n as u64,
+        ))
     }
 
     /// Wipe every user-content row from the brain. Returns the number of
     /// `events` rows deleted (the primary user-visible count).
     ///
     /// Drops all rows from: `events`, `episodes`, `briefs`, `entities`,
-    /// `entity_mentions`, `entity_identities`, `episode_edges`.
+    /// `entity_mentions`, `entity_identities`, `episode_edges`, `measured_activity`.
+    /// Preserves content-free activity deletion barriers to reject delayed samples.
     /// Leaves the `meta` schema-version stamps intact so the DB remains
-    /// a valid MCI store, just empty. `VACUUM`s after commit.
+    /// a valid MCI store without captured content. `VACUUM`s after commit.
     ///
     /// # Errors
     /// [`StoreError::Backend`] on any driver failure. The DELETEs are
@@ -1235,11 +2028,21 @@ impl SqlCipherBrainStore {
     /// atomically — the store is either fully wiped or unchanged, never
     /// partially wiped.
     pub fn wipe_all(&self) -> Result<u64, StoreError> {
+        self.wipe_all_with_outcome()
+            .map(|outcome| outcome.events_deleted)
+    }
+
+    /// Wipe user content and report post-commit maintenance separately.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] when any transactional wipe step fails.
+    pub fn wipe_all_with_outcome(&self) -> Result<DeletionOutcome, StoreError> {
         let mut guard = self.db.lock().expect("brain store mutex poisoned");
         let tx = guard
             .conn_mut()
-            .transaction()
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|e| StoreError::Backend(format!("begin wipe_all tx: {e}")))?;
+        crate::activity::wipe_activity(&tx)?;
         // Order: children with FK NOT ON DELETE CASCADE-safe first
         // (briefs is FK-free; entity_* is a parent-child chain). Then
         // events, then episodes. CASCADE covers event_vectors + chunks
@@ -1254,6 +2057,20 @@ impl SqlCipherBrainStore {
             .map_err(|e| StoreError::Backend(format!("DELETE entity_mentions: {e}")))?;
         tx.execute("DELETE FROM entities", [])
             .map_err(|e| StoreError::Backend(format!("DELETE entities: {e}")))?;
+        let blob_digests = keyframe_digests_matching(
+            &tx,
+            "SELECT keyframe_blob FROM events
+             WHERE keyframe_blob IS NOT NULL ORDER BY keyframe_blob",
+            [],
+            "select wipe keyframe blobs",
+        )?;
+        let event_ids = event_ids_matching(
+            &tx,
+            "SELECT id FROM events ORDER BY id",
+            [],
+            "select wipe events",
+        )?;
+        delete_projected_memory_for_events(&tx, &event_ids)?;
         let n = tx
             .execute("DELETE FROM events", [])
             .map_err(|e| StoreError::Backend(format!("DELETE events: {e}")))?;
@@ -1261,12 +2078,509 @@ impl SqlCipherBrainStore {
             .map_err(|e| StoreError::Backend(format!("DELETE episodes: {e}")))?;
         tx.commit()
             .map_err(|e| StoreError::Backend(format!("commit wipe_all tx: {e}")))?;
-        guard
-            .conn()
-            .execute_batch("VACUUM")
-            .map_err(|e| StoreError::Backend(format!("VACUUM after wipe_all: {e}")))?;
-        Ok(n as u64)
+        Ok(run_post_delete_cleanup(
+            guard.conn(),
+            &self.blob_dir,
+            &blob_digests,
+            n as u64,
+        ))
     }
+}
+
+fn run_post_delete_cleanup(
+    connection: &rusqlite::Connection,
+    blob_dir: &Path,
+    blob_digests: &[String],
+    events_deleted: u64,
+) -> DeletionOutcome {
+    let mut cleanup_warnings = Vec::new();
+    if let Err(error) = connection.execute_batch("VACUUM") {
+        cleanup_warnings.push(DeletionCleanupWarning {
+            stage: DeletionCleanupStage::Vacuum,
+            diagnostic: format!("VACUUM after committed deletion: {error}"),
+        });
+    }
+    if let Err(error) = remove_unreferenced_keyframe_blobs(connection, blob_dir, blob_digests) {
+        cleanup_warnings.push(DeletionCleanupWarning {
+            stage: DeletionCleanupStage::KeyframeBlobs,
+            diagnostic: format!("keyframe cleanup after committed deletion: {error}"),
+        });
+    }
+    DeletionOutcome {
+        events_deleted,
+        cleanup_warnings,
+    }
+}
+
+fn event_ids_matching<P: rusqlite::Params>(
+    tx: &rusqlite::Transaction<'_>,
+    sql: &str,
+    params: P,
+    operation: &str,
+) -> Result<Vec<i64>, StoreError> {
+    let mut statement = tx
+        .prepare(sql)
+        .map_err(|error| StoreError::Backend(format!("prepare {operation}: {error}")))?;
+    let rows = statement
+        .query_map(params, |row| row.get::<_, i64>(0))
+        .map_err(|error| StoreError::Backend(format!("query {operation}: {error}")))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| StoreError::Backend(format!("read {operation}: {error}")))
+}
+
+fn keyframe_digests_matching<P: rusqlite::Params>(
+    tx: &rusqlite::Transaction<'_>,
+    sql: &str,
+    params: P,
+    operation: &str,
+) -> Result<Vec<String>, StoreError> {
+    let mut statement = tx
+        .prepare(sql)
+        .map_err(|error| StoreError::Backend(format!("prepare {operation}: {error}")))?;
+    let rows = statement
+        .query_map(params, |row| row.get::<_, String>(0))
+        .map_err(|error| StoreError::Backend(format!("query {operation}: {error}")))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| StoreError::Backend(format!("read {operation}: {error}")))
+}
+
+fn blob_dir_for_brain(brain_path: &Path) -> PathBuf {
+    brain_path
+        .parent()
+        .map_or_else(|| PathBuf::from("blobs"), |parent| parent.join("blobs"))
+}
+
+fn is_keyframe_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn managed_blob_digest(file_name: &str) -> Option<&str> {
+    let digest = file_name.strip_suffix(".bin")?;
+    is_keyframe_digest(digest).then_some(digest)
+}
+
+fn is_managed_temporary_file(file_name: &str) -> bool {
+    let Some(body) = file_name.strip_prefix('.') else {
+        return false;
+    };
+    let Some(body) = body.strip_suffix(".tmp") else {
+        return false;
+    };
+    let Some((digest, nonce)) = body.split_once('.') else {
+        return false;
+    };
+    is_keyframe_digest(digest)
+        && nonce.len() == 36
+        && nonce.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+}
+
+fn entry_is_old_enough(metadata: &std::fs::Metadata, grace: Duration, now: SystemTime) -> bool {
+    if grace.is_zero() {
+        return true;
+    }
+    metadata
+        .modified()
+        .ok()
+        .and_then(|modified| now.duration_since(modified).ok())
+        .is_some_and(|age| age >= grace)
+}
+
+fn reconcile_keyframe_blob_directory(
+    connection: &rusqlite::Connection,
+    blob_dir: &Path,
+    minimum_orphan_age: Duration,
+    now: SystemTime,
+) -> Result<BlobReconciliationStats, StoreError> {
+    let mut referenced = {
+        let mut statement = connection
+            .prepare(
+                "SELECT DISTINCT keyframe_blob FROM events
+                 WHERE keyframe_blob IS NOT NULL ORDER BY keyframe_blob",
+            )
+            .map_err(|error| {
+                StoreError::Backend(format!("prepare keyframe blob references: {error}"))
+            })?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| {
+                StoreError::Backend(format!("query keyframe blob references: {error}"))
+            })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| {
+                StoreError::Backend(format!("read keyframe blob references: {error}"))
+            })?
+            .into_iter()
+            .filter(|digest| is_keyframe_digest(digest))
+            .collect::<BTreeSet<_>>()
+    };
+
+    let directory_metadata = match std::fs::symlink_metadata(blob_dir) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(BlobReconciliationStats {
+                referenced_blobs_missing: u64::try_from(referenced.len()).unwrap_or(u64::MAX),
+                ..BlobReconciliationStats::default()
+            })
+        }
+        Err(error) => {
+            return Err(StoreError::Backend(format!(
+                "inspect keyframe blob directory: {error}"
+            )))
+        }
+    };
+    if directory_metadata.file_type().is_symlink() || !directory_metadata.is_dir() {
+        return Err(StoreError::Backend(
+            "keyframe blob directory is not a regular directory".into(),
+        ));
+    }
+
+    let mut stats = BlobReconciliationStats::default();
+    let entries = std::fs::read_dir(blob_dir)
+        .map_err(|error| StoreError::Backend(format!("read keyframe blob directory: {error}")))?;
+    for entry in entries {
+        let Ok(entry) = entry else {
+            stats.cleanup_errors = stats.cleanup_errors.saturating_add(1);
+            continue;
+        };
+        let Some(file_name) = entry.file_name().to_str().map(str::to_owned) else {
+            stats.unmanaged_entries_skipped = stats.unmanaged_entries_skipped.saturating_add(1);
+            continue;
+        };
+        let managed_digest = managed_blob_digest(&file_name);
+        let managed_temporary = is_managed_temporary_file(&file_name);
+        if managed_digest.is_none() && !managed_temporary {
+            stats.unmanaged_entries_skipped = stats.unmanaged_entries_skipped.saturating_add(1);
+            continue;
+        }
+
+        let Ok(metadata) = std::fs::symlink_metadata(entry.path()) else {
+            stats.cleanup_errors = stats.cleanup_errors.saturating_add(1);
+            continue;
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            stats.unmanaged_entries_skipped = stats.unmanaged_entries_skipped.saturating_add(1);
+            continue;
+        }
+
+        if let Some(digest) = managed_digest {
+            stats.managed_blobs_seen = stats.managed_blobs_seen.saturating_add(1);
+            if referenced.remove(digest) {
+                continue;
+            }
+        }
+        if !entry_is_old_enough(&metadata, minimum_orphan_age, now) {
+            stats.recent_orphans_retained = stats.recent_orphans_retained.saturating_add(1);
+            continue;
+        }
+
+        match std::fs::remove_file(entry.path()) {
+            Ok(()) if managed_temporary => {
+                stats.stale_temporary_files_deleted =
+                    stats.stale_temporary_files_deleted.saturating_add(1);
+            }
+            Ok(()) => {
+                stats.orphaned_blobs_deleted = stats.orphaned_blobs_deleted.saturating_add(1);
+            }
+            Err(_) => {
+                stats.cleanup_errors = stats.cleanup_errors.saturating_add(1);
+            }
+        }
+    }
+    stats.referenced_blobs_missing = u64::try_from(referenced.len()).unwrap_or(u64::MAX);
+    Ok(stats)
+}
+
+fn remove_unreferenced_keyframe_blobs(
+    connection: &rusqlite::Connection,
+    blob_dir: &Path,
+    candidates: &[String],
+) -> Result<u64, StoreError> {
+    let unique = candidates
+        .iter()
+        .map(String::as_str)
+        .filter(|digest| is_keyframe_digest(digest))
+        .collect::<BTreeSet<_>>();
+    if unique.is_empty() {
+        return Ok(0);
+    }
+
+    let directory_metadata = match std::fs::symlink_metadata(blob_dir) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => {
+            return Err(StoreError::Backend(format!(
+                "inspect keyframe blob directory: {error}"
+            )))
+        }
+    };
+    if directory_metadata.file_type().is_symlink() || !directory_metadata.is_dir() {
+        return Err(StoreError::Backend(
+            "keyframe blob directory is not a regular directory".into(),
+        ));
+    }
+
+    let mut deleted = 0_u64;
+    for digest in unique {
+        let references: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE keyframe_blob = ?1",
+                params![digest],
+                |row| row.get(0),
+            )
+            .map_err(|error| {
+                StoreError::Backend(format!("count keyframe blob references: {error}"))
+            })?;
+        if references > 0 {
+            continue;
+        }
+
+        let path = blob_dir.join(format!("{digest}.bin"));
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(StoreError::Backend(format!(
+                    "inspect keyframe blob candidate: {error}"
+                )))
+            }
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(StoreError::Backend(
+                "keyframe blob candidate is not a regular file".into(),
+            ));
+        }
+        std::fs::remove_file(&path)
+            .map_err(|error| StoreError::Backend(format!("delete keyframe blob: {error}")))?;
+        deleted = deleted.saturating_add(1);
+    }
+
+    Ok(deleted)
+}
+
+pub(crate) fn delete_projected_memory_for_events(
+    tx: &rusqlite::Transaction<'_>,
+    event_ids: &[i64],
+) -> Result<(), StoreError> {
+    if event_ids.is_empty() {
+        return Ok(());
+    }
+    prepare_memory_deletion_staging(tx)?;
+    stage_deleted_event_ids(tx, event_ids)?;
+    stage_memory_deletion_closure(tx)?;
+    delete_staged_memory(tx)?;
+    clear_memory_deletion_staging(tx)
+}
+
+fn prepare_memory_deletion_staging(tx: &rusqlite::Transaction<'_>) -> Result<(), StoreError> {
+    tx.execute_batch(
+        "CREATE TEMP TABLE IF NOT EXISTS memory_events_pending_delete (
+             id INTEGER PRIMARY KEY
+         ) WITHOUT ROWID;
+         CREATE TEMP TABLE IF NOT EXISTS memory_deltas_pending_delete (
+             id TEXT PRIMARY KEY
+         ) WITHOUT ROWID;
+         CREATE TEMP TABLE IF NOT EXISTS memory_claims_pending_delete (
+             id TEXT PRIMARY KEY
+         ) WITHOUT ROWID;
+         CREATE TEMP TABLE IF NOT EXISTS memory_evidence_pending_delete (
+             id TEXT PRIMARY KEY
+         ) WITHOUT ROWID;
+         DELETE FROM memory_events_pending_delete;
+         DELETE FROM memory_deltas_pending_delete;
+         DELETE FROM memory_claims_pending_delete;
+         DELETE FROM memory_evidence_pending_delete;",
+    )
+    .map_err(|error| StoreError::Backend(format!("prepare memory deletion: {error}")))
+}
+
+fn stage_deleted_event_ids(
+    tx: &rusqlite::Transaction<'_>,
+    event_ids: &[i64],
+) -> Result<(), StoreError> {
+    let mut insert = tx
+        .prepare("INSERT INTO memory_events_pending_delete (id) VALUES (?1)")
+        .map_err(|error| StoreError::Backend(format!("prepare staged event deletion: {error}")))?;
+    for event_id in event_ids {
+        insert.execute(params![event_id]).map_err(|error| {
+            StoreError::Backend(format!("stage event {event_id} for deletion: {error}"))
+        })?;
+    }
+    Ok(())
+}
+
+fn stage_memory_deletion_closure(tx: &rusqlite::Transaction<'_>) -> Result<(), StoreError> {
+    tx.execute(
+        "INSERT OR IGNORE INTO memory_deltas_pending_delete (id)
+         SELECT id FROM memory_deltas
+         WHERE source_event_id IN (SELECT id FROM memory_events_pending_delete)",
+        [],
+    )
+    .map_err(|error| StoreError::Backend(format!("stage source memory deltas: {error}")))?;
+    tx.execute(
+        "INSERT OR IGNORE INTO memory_claims_pending_delete (id)
+         SELECT claim.id
+         FROM memory_claims claim
+         WHERE claim.source_event_id IN (SELECT id FROM memory_events_pending_delete)
+            OR EXISTS (
+                SELECT 1
+                FROM memory_claim_evidence link
+                JOIN memory_evidence evidence ON evidence.id = link.evidence_id
+                WHERE link.claim_id = claim.id
+                  AND evidence.event_id IN (SELECT id FROM memory_events_pending_delete)
+            )",
+        [],
+    )
+    .map_err(|error| StoreError::Backend(format!("stage directly affected claims: {error}")))?;
+
+    loop {
+        let deltas_added = tx
+            .execute(
+                "INSERT OR IGNORE INTO memory_deltas_pending_delete (id)
+                 SELECT delta_id FROM memory_claims
+                 WHERE delta_id IS NOT NULL
+                   AND id IN (SELECT id FROM memory_claims_pending_delete)
+                 UNION
+                 SELECT transition.delta_id
+                 FROM memory_claim_transitions transition
+                 WHERE transition.delta_id IS NOT NULL
+                   AND transition.claim_id IN (SELECT id FROM memory_claims_pending_delete)",
+                [],
+            )
+            .map_err(|error| StoreError::Backend(format!("close owned memory deltas: {error}")))?;
+        let claims_added = tx
+            .execute(
+                "INSERT OR IGNORE INTO memory_claims_pending_delete (id)
+                 SELECT id FROM memory_claims
+                 WHERE delta_id IN (SELECT id FROM memory_deltas_pending_delete)
+                 UNION
+                 SELECT child.id
+                 FROM memory_claims child
+                 WHERE child.supersedes_claim_id IN (
+                     SELECT id FROM memory_claims_pending_delete
+                 )",
+                [],
+            )
+            .map_err(|error| StoreError::Backend(format!("close owned memory claims: {error}")))?;
+        if deltas_added + claims_added == 0 {
+            break;
+        }
+    }
+
+    tx.execute(
+        "INSERT OR IGNORE INTO memory_evidence_pending_delete (id)
+         SELECT id FROM memory_evidence
+         WHERE event_id IN (SELECT id FROM memory_events_pending_delete)
+         UNION
+         SELECT link.evidence_id
+         FROM memory_claim_evidence link
+         WHERE link.claim_id IN (SELECT id FROM memory_claims_pending_delete)",
+        [],
+    )
+    .map_err(|error| StoreError::Backend(format!("stage affected memory evidence: {error}")))?;
+    Ok(())
+}
+
+fn delete_staged_memory(tx: &rusqlite::Transaction<'_>) -> Result<(), StoreError> {
+    tx.execute(
+        "DELETE FROM memory_claim_transitions
+         WHERE delta_id IN (SELECT id FROM memory_deltas_pending_delete)
+            OR claim_id IN (SELECT id FROM memory_claims_pending_delete)",
+        [],
+    )
+    .map_err(|error| StoreError::Backend(format!("delete memory transitions: {error}")))?;
+    tx.execute(
+        "DELETE FROM memory_claim_transitions
+         WHERE source_event_id IN (SELECT id FROM memory_events_pending_delete)",
+        [],
+    )
+    .map_err(|error| StoreError::Backend(format!("delete event-owned transitions: {error}")))?;
+    tx.execute(
+        "DELETE FROM memory_claim_evidence
+         WHERE claim_id IN (SELECT id FROM memory_claims_pending_delete)
+            OR evidence_id IN (SELECT id FROM memory_evidence_pending_delete)",
+        [],
+    )
+    .map_err(|error| StoreError::Backend(format!("delete memory evidence links: {error}")))?;
+
+    loop {
+        let remaining: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM memory_claims_pending_delete",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| StoreError::Backend(format!("count staged memory claims: {error}")))?;
+        if remaining == 0 {
+            break;
+        }
+        let deleted = tx
+            .execute(
+                "DELETE FROM memory_claims
+                 WHERE id IN (SELECT id FROM memory_claims_pending_delete)
+                   AND NOT EXISTS (
+                       SELECT 1 FROM memory_claims child
+                       WHERE child.supersedes_claim_id = memory_claims.id
+                   )",
+                [],
+            )
+            .map_err(|error| StoreError::Backend(format!("delete memory claims: {error}")))?;
+        if deleted == 0 {
+            return Err(StoreError::Backend(
+                "delete memory claims: dependent claim graph did not make progress".into(),
+            ));
+        }
+        tx.execute(
+            "DELETE FROM memory_claims_pending_delete
+             WHERE id NOT IN (SELECT id FROM memory_claims)",
+            [],
+        )
+        .map_err(|error| StoreError::Backend(format!("advance memory claim deletion: {error}")))?;
+    }
+
+    tx.execute(
+        "DELETE FROM memory_evidence
+         WHERE id IN (SELECT id FROM memory_evidence_pending_delete)
+           AND NOT EXISTS (
+                SELECT 1 FROM memory_claim_evidence link
+                WHERE link.evidence_id = memory_evidence.id
+            )",
+        [],
+    )
+    .map_err(|error| StoreError::Backend(format!("delete memory evidence: {error}")))?;
+    tx.execute(
+        "DELETE FROM memory_event_retractions
+         WHERE target_event_id IN (SELECT id FROM memory_events_pending_delete)
+            OR retraction_event_id IN (SELECT id FROM memory_events_pending_delete)",
+        [],
+    )
+    .map_err(|error| StoreError::Backend(format!("delete memory retractions: {error}")))?;
+    tx.execute(
+        "DELETE FROM memory_deltas
+         WHERE id IN (SELECT id FROM memory_deltas_pending_delete)",
+        [],
+    )
+    .map_err(|error| StoreError::Backend(format!("delete memory deltas: {error}")))?;
+    Ok(())
+}
+
+fn clear_memory_deletion_staging(tx: &rusqlite::Transaction<'_>) -> Result<(), StoreError> {
+    tx.execute_batch(
+        "DELETE FROM memory_claims_pending_delete;
+         DELETE FROM memory_deltas_pending_delete;
+         DELETE FROM memory_evidence_pending_delete;
+         DELETE FROM memory_events_pending_delete;
+        ",
+    )
+    .map_err(|error| StoreError::Backend(format!("clear memory deletion staging: {error}")))
 }
 
 /// Typed outcome of [`SqlCipherBrainStore::verify_integrity_on_boot`].
@@ -1290,25 +2604,44 @@ pub enum IntegrityError {
     Corrupted(Vec<String>),
 }
 
-/// Schema migration — ADR-0016 §1.4. Idempotent: every `CREATE` is
-/// `IF NOT EXISTS`, every meta stamp is `INSERT OR REPLACE`. Runs inside
+/// Schema migration — ADR-0016 §1.4. Activity privacy schema must pass
+/// validation before any idempotent DDL or meta stamps are applied. Runs inside
 /// one transaction so a partial migration cannot leave the store in a
 /// torn state (`SQLCipher` rolls back DDL on commit failure).
 fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
-    // Both migrations run inside a single transaction so a partial apply
-    // can never leave the store in a torn state. SQLCipher rolls back DDL
-    // on commit failure; every statement is `CREATE … IF NOT EXISTS` /
-    // `INSERT OR REPLACE` so a re-run on an already-migrated DB is a
-    // no-op.
+    // Every brain migration, including memory ownership rebuilds, runs
+    // inside one transaction so a partial apply cannot leave a mixed schema.
     let sql_0001 = include_str!("../migrations/0001_phase_3_brain_schema.sql");
     let sql_0002 = include_str!("../migrations/0002_briefs.sql");
     let sql_0003 = include_str!("../migrations/0003_events_tab_id.sql");
     let sql_0004 = include_str!("../migrations/0004_v2_graph_schema.sql");
     let sql_0005 = include_str!("../migrations/0005_entity_identities.sql");
+    let sql_0006 = include_str!("../migrations/0006_memory_claims.sql");
     let tx = db
         .conn_mut()
         .transaction()
         .map_err(|e| StoreError::Backend(format!("begin migration tx: {e}")))?;
+    let meta_exists = tx
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'
+             )",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|error| StoreError::Backend(format!("probe starting schema version: {error}")))?;
+    let starting_version = if meta_exists {
+        tx.query_row(
+            "SELECT value FROM meta WHERE key='brain_schema_version'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| StoreError::Backend(format!("read starting schema version: {error}")))?
+    } else {
+        None
+    };
+    let has_activity = crate::activity::validate_activity_schema(&tx, starting_version.as_deref())?;
     tx.execute_batch(sql_0001)
         .map_err(|e| StoreError::Backend(format!("apply migration 0001: {e}")))?;
     tx.execute_batch(sql_0002)
@@ -1337,8 +2670,772 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
     // on re-open with no separate probe (same discipline as 0004).
     tx.execute_batch(sql_0005)
         .map_err(|e| StoreError::Backend(format!("apply migration 0005: {e}")))?;
+    if matches!(starting_version.as_deref(), Some("6" | "7")) {
+        upgrade_memory_schema_to_v8(
+            &tx,
+            sql_0006,
+            starting_version.as_deref().expect("matched legacy version"),
+        )?;
+    } else {
+        tx.execute_batch(sql_0006)
+            .map_err(|e| StoreError::Backend(format!("apply migration 0006: {e}")))?;
+    }
+    validate_memory_schema(&tx)
+        .map_err(|error| StoreError::Backend(format!("validate migration 0008: {error}")))?;
+    tx.execute_batch(include_str!("../migrations/0009_event_sources.sql"))
+        .map_err(|error| StoreError::Backend(format!("apply migration 0009: {error}")))?;
+    if !has_activity {
+        tx.execute_batch(include_str!("../migrations/0010_measured_activity.sql"))
+            .map_err(|_| StoreError::Backend("apply migration 0010".into()))?;
+    }
+    tx.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('brain_schema_version', '10')",
+        [],
+    )
+    .map_err(|error| StoreError::Backend(format!("stamp migration 0010: {error}")))?;
     tx.commit()
         .map_err(|e| StoreError::Backend(format!("commit migration tx: {e}")))?;
+    Ok(())
+}
+
+fn upgrade_memory_schema_to_v8(
+    tx: &rusqlite::Transaction<'_>,
+    canonical_schema: &str,
+    starting_version: &str,
+) -> Result<(), StoreError> {
+    let has_event_retractions = backup_legacy_memory_rows(tx, starting_version)?;
+    clear_legacy_memory_rows(tx, has_event_retractions)?;
+    if has_event_retractions {
+        tx.execute_batch("DROP TABLE memory_event_retractions;")
+            .map_err(|error| {
+                StoreError::Backend(format!("replace legacy retraction ledger: {error}"))
+            })?;
+    }
+    tx.execute_batch(
+        "DROP TABLE memory_claim_transitions;
+         DROP TABLE memory_claim_evidence;
+         DROP TABLE memory_claims;
+         DROP TABLE memory_evidence;
+         DROP TABLE memory_deltas;",
+    )
+    .map_err(|error| StoreError::Backend(format!("replace migration 0007 tables: {error}")))?;
+    tx.execute_batch(canonical_schema)
+        .map_err(|error| StoreError::Backend(format!("create migration 0008 tables: {error}")))?;
+    restore_legacy_memory_rows(tx)
+}
+
+fn backup_legacy_memory_rows(
+    tx: &rusqlite::Transaction<'_>,
+    starting_version: &str,
+) -> Result<bool, StoreError> {
+    tx.execute_batch(
+        "CREATE TEMP TABLE memory_deltas_v7_backup AS
+             SELECT id, source_event_id, asserted_at_us, projector_version
+             FROM memory_deltas;
+         CREATE TEMP TABLE memory_evidence_v7_backup AS
+             SELECT id, event_id, source_kind, source_locator, source_scope,
+                    observed_at_us, content_hash
+             FROM memory_evidence;
+         CREATE TEMP TABLE memory_claims_v7_backup AS
+             SELECT id, source_event_id, subject, predicate, object, scope,
+                    attribution, confidence, asserted_at_us, valid_from_us,
+                    valid_to_us, projector_version, initial_status, supersedes_claim_id
+             FROM memory_claims;
+         CREATE TEMP TABLE memory_claim_evidence_v7_backup AS
+             SELECT claim_id, evidence_id FROM memory_claim_evidence;
+         CREATE TEMP TABLE memory_claim_transitions_v7_backup AS
+             SELECT id, claim_id, status, asserted_at_us, effective_at_us, reason,
+                    source_event_id, projector_version
+             FROM memory_claim_transitions;",
+    )
+    .map_err(|error| StoreError::Backend(format!("backup legacy memory rows: {error}")))?;
+
+    let has_event_retractions = table_exists(tx, "memory_event_retractions")?;
+    match (starting_version, has_event_retractions) {
+        ("6", false) => tx
+            .execute_batch(
+                "CREATE TEMP TABLE memory_event_retractions_v7_backup (
+                     id TEXT,
+                     target_event_id INTEGER,
+                     retraction_event_id INTEGER,
+                     asserted_at_us INTEGER,
+                     effective_at_us INTEGER,
+                     reason TEXT,
+                     projector_version TEXT
+                 );",
+            )
+            .map_err(|error| {
+                StoreError::Backend(format!("create empty v6 retraction backup: {error}"))
+            })?,
+        ("6" | "7", true) => tx
+            .execute_batch(
+                "CREATE TEMP TABLE memory_event_retractions_v7_backup AS
+                     SELECT id, target_event_id, retraction_event_id, asserted_at_us,
+                            effective_at_us, reason, projector_version
+                     FROM memory_event_retractions;",
+            )
+            .map_err(|error| {
+                StoreError::Backend(format!("backup legacy retraction rows: {error}"))
+            })?,
+        ("7", false) => {
+            return Err(StoreError::Backend(
+                "schema v7 is missing memory_event_retractions".into(),
+            ));
+        }
+        (version, _) => {
+            return Err(StoreError::Backend(format!(
+                "unsupported legacy memory schema version {version}"
+            )));
+        }
+    }
+    Ok(has_event_retractions)
+}
+
+fn table_exists(tx: &rusqlite::Transaction<'_>, table: &str) -> Result<bool, StoreError> {
+    tx.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1
+         )",
+        params![table],
+        |row| row.get(0),
+    )
+    .map_err(|error| StoreError::Backend(format!("probe legacy table {table}: {error}")))
+}
+
+fn restore_legacy_memory_rows(tx: &rusqlite::Transaction<'_>) -> Result<(), StoreError> {
+    tx.execute_batch(
+        "INSERT INTO memory_deltas (id, source_event_id, asserted_at_us, projector_version)
+             SELECT id, source_event_id, asserted_at_us, projector_version
+             FROM memory_deltas_v7_backup ORDER BY id;
+         INSERT INTO memory_evidence
+             (id, event_id, source_kind, source_locator, source_scope,
+              observed_at_us, content_hash)
+             SELECT id, event_id, source_kind, source_locator, source_scope,
+                    observed_at_us, content_hash
+             FROM memory_evidence_v7_backup ORDER BY id;
+         WITH RECURSIVE ordered_claims(id, depth) AS (
+             SELECT id, 0
+             FROM memory_claims_v7_backup
+             WHERE supersedes_claim_id IS NULL
+             UNION ALL
+             SELECT child.id, parent.depth + 1
+             FROM memory_claims_v7_backup child
+             JOIN ordered_claims parent
+               ON child.supersedes_claim_id = parent.id
+         )
+         INSERT INTO memory_claims
+             (id, delta_id, source_event_id, subject, predicate, object, scope,
+              attribution, confidence, asserted_at_us, valid_from_us, valid_to_us,
+              projector_version, initial_status, supersedes_claim_id)
+             SELECT claim.id,
+                    (SELECT CASE WHEN COUNT(*) = 1 THEN MIN(delta.id) END
+                     FROM memory_deltas_v7_backup delta
+                     WHERE delta.source_event_id = claim.source_event_id
+                       AND delta.asserted_at_us = claim.asserted_at_us),
+                    claim.source_event_id, claim.subject, claim.predicate, claim.object,
+                    claim.scope, claim.attribution, claim.confidence, claim.asserted_at_us,
+                    claim.valid_from_us, claim.valid_to_us, claim.projector_version,
+                    claim.initial_status, claim.supersedes_claim_id
+             FROM memory_claims_v7_backup claim
+             JOIN ordered_claims ordering ON ordering.id = claim.id
+             ORDER BY ordering.depth, claim.id;
+         INSERT INTO memory_claim_evidence
+             (claim_id, evidence_id)
+             SELECT claim_id, evidence_id
+             FROM memory_claim_evidence_v7_backup ORDER BY claim_id, evidence_id;
+         INSERT INTO memory_claim_transitions
+             (id, delta_id, claim_id, status, asserted_at_us, effective_at_us, reason,
+              source_event_id, projector_version)
+             SELECT transition.id,
+                    (SELECT CASE WHEN COUNT(*) = 1 THEN MIN(delta.id) END
+                     FROM memory_deltas_v7_backup delta
+                     WHERE delta.source_event_id = transition.source_event_id
+                       AND delta.asserted_at_us = transition.asserted_at_us),
+                    transition.claim_id, transition.status, transition.asserted_at_us,
+                    transition.effective_at_us, transition.reason,
+                    transition.source_event_id, transition.projector_version
+             FROM memory_claim_transitions_v7_backup transition
+             ORDER BY transition.id;
+         INSERT INTO memory_event_retractions
+             (id, target_event_id, retraction_event_id, asserted_at_us,
+              effective_at_us, reason, projector_version)
+             SELECT id, target_event_id, retraction_event_id, asserted_at_us,
+                    effective_at_us, reason, projector_version
+             FROM memory_event_retractions_v7_backup ORDER BY id;
+         DROP TABLE memory_claim_transitions_v7_backup;
+         DROP TABLE memory_claim_evidence_v7_backup;
+         DROP TABLE memory_event_retractions_v7_backup;
+         DROP TABLE memory_claims_v7_backup;
+         DROP TABLE memory_evidence_v7_backup;
+         DROP TABLE memory_deltas_v7_backup;",
+    )
+    .map_err(|error| StoreError::Backend(format!("restore migration 0008 rows: {error}")))
+}
+
+fn clear_legacy_memory_rows(
+    tx: &rusqlite::Transaction<'_>,
+    has_event_retractions: bool,
+) -> Result<(), StoreError> {
+    tx.execute_batch("DELETE FROM memory_claim_transitions; DELETE FROM memory_claim_evidence;")
+        .map_err(|error| StoreError::Backend(format!("clear migration 0007 children: {error}")))?;
+    if has_event_retractions {
+        tx.execute("DELETE FROM memory_event_retractions", [])
+            .map_err(|error| {
+                StoreError::Backend(format!("clear legacy event retractions: {error}"))
+            })?;
+    }
+    loop {
+        let remaining: i64 = tx
+            .query_row("SELECT COUNT(*) FROM memory_claims", [], |row| row.get(0))
+            .map_err(|error| StoreError::Backend(format!("count migration claims: {error}")))?;
+        if remaining == 0 {
+            break;
+        }
+        let deleted = tx
+            .execute(
+                "DELETE FROM memory_claims
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM memory_claims child
+                     WHERE child.supersedes_claim_id = memory_claims.id
+                 )",
+                [],
+            )
+            .map_err(|error| StoreError::Backend(format!("clear migration claims: {error}")))?;
+        if deleted == 0 {
+            return Err(StoreError::Backend(
+                "clear migration claims: correction graph contains a cycle".into(),
+            ));
+        }
+    }
+    tx.execute_batch(
+        "DELETE FROM memory_evidence;
+         DELETE FROM memory_deltas;",
+    )
+    .map_err(|error| StoreError::Backend(format!("clear migration 0007 roots: {error}")))
+}
+
+type ColumnShape = (&'static str, &'static str, bool, Option<&'static str>, i64);
+type TableShape = (&'static str, &'static [ColumnShape]);
+type ForeignKeyShape = (&'static str, &'static [&'static str]);
+type IndexShape = (&'static str, &'static [&'static str]);
+type TableIndexShape = (&'static str, &'static [IndexShape]);
+
+const MEMORY_TABLE_SHAPES: &[TableShape] = &[
+    (
+        "memory_deltas",
+        &[
+            ("id", "TEXT", true, None, 1),
+            ("source_event_id", "INTEGER", true, None, 0),
+            ("asserted_at_us", "INTEGER", true, None, 0),
+            ("projector_version", "TEXT", true, None, 0),
+        ],
+    ),
+    (
+        "memory_evidence",
+        &[
+            ("id", "TEXT", true, None, 1),
+            ("event_id", "INTEGER", true, None, 0),
+            ("source_kind", "TEXT", true, None, 0),
+            ("source_locator", "TEXT", true, None, 0),
+            ("source_scope", "TEXT", true, None, 0),
+            ("observed_at_us", "INTEGER", true, None, 0),
+            ("content_hash", "TEXT", true, None, 0),
+        ],
+    ),
+    (
+        "memory_claims",
+        &[
+            ("id", "TEXT", true, None, 1),
+            ("delta_id", "TEXT", false, None, 0),
+            ("source_event_id", "INTEGER", true, None, 0),
+            ("subject", "TEXT", true, None, 0),
+            ("predicate", "TEXT", true, None, 0),
+            ("object", "TEXT", true, None, 0),
+            ("scope", "TEXT", true, None, 0),
+            ("attribution", "TEXT", false, None, 0),
+            ("confidence", "REAL", true, None, 0),
+            ("asserted_at_us", "INTEGER", true, None, 0),
+            ("valid_from_us", "INTEGER", true, None, 0),
+            ("valid_to_us", "INTEGER", false, None, 0),
+            ("projector_version", "TEXT", true, None, 0),
+            ("initial_status", "TEXT", true, None, 0),
+            ("supersedes_claim_id", "TEXT", false, None, 0),
+        ],
+    ),
+    (
+        "memory_claim_evidence",
+        &[
+            ("claim_id", "TEXT", true, None, 1),
+            ("evidence_id", "TEXT", true, None, 2),
+        ],
+    ),
+    (
+        "memory_claim_transitions",
+        &[
+            ("id", "TEXT", true, None, 1),
+            ("delta_id", "TEXT", false, None, 0),
+            ("claim_id", "TEXT", true, None, 0),
+            ("status", "TEXT", true, None, 0),
+            ("asserted_at_us", "INTEGER", true, None, 0),
+            ("effective_at_us", "INTEGER", true, None, 0),
+            ("reason", "TEXT", true, None, 0),
+            ("source_event_id", "INTEGER", true, None, 0),
+            ("projector_version", "TEXT", true, None, 0),
+        ],
+    ),
+    (
+        "memory_event_retractions",
+        &[
+            ("id", "TEXT", true, None, 1),
+            ("target_event_id", "INTEGER", true, None, 0),
+            ("retraction_event_id", "INTEGER", true, None, 0),
+            ("asserted_at_us", "INTEGER", true, None, 0),
+            ("effective_at_us", "INTEGER", true, None, 0),
+            ("reason", "TEXT", true, None, 0),
+            ("projector_version", "TEXT", true, None, 0),
+        ],
+    ),
+];
+
+const MEMORY_FOREIGN_KEYS: &[ForeignKeyShape] = &[
+    (
+        "memory_deltas",
+        &["source_event_id:events:id:NO ACTION:RESTRICT:NONE"],
+    ),
+    (
+        "memory_evidence",
+        &["event_id:events:id:NO ACTION:RESTRICT:NONE"],
+    ),
+    (
+        "memory_claims",
+        &[
+            "delta_id:memory_deltas:id:NO ACTION:RESTRICT:NONE",
+            "source_event_id:events:id:NO ACTION:RESTRICT:NONE",
+            "supersedes_claim_id:memory_claims:id:NO ACTION:RESTRICT:NONE",
+        ],
+    ),
+    (
+        "memory_claim_evidence",
+        &[
+            "claim_id:memory_claims:id:NO ACTION:RESTRICT:NONE",
+            "evidence_id:memory_evidence:id:NO ACTION:RESTRICT:NONE",
+        ],
+    ),
+    (
+        "memory_claim_transitions",
+        &[
+            "claim_id:memory_claims:id:NO ACTION:RESTRICT:NONE",
+            "delta_id:memory_deltas:id:NO ACTION:RESTRICT:NONE",
+            "source_event_id:events:id:NO ACTION:RESTRICT:NONE",
+        ],
+    ),
+    (
+        "memory_event_retractions",
+        &[
+            "target_event_id:events:id:NO ACTION:RESTRICT:NONE",
+            "retraction_event_id:events:id:NO ACTION:RESTRICT:NONE",
+        ],
+    ),
+];
+
+const MEMORY_INDEX_SHAPES: &[TableIndexShape] = &[
+    ("memory_deltas", &[]),
+    (
+        "memory_evidence",
+        &[("memory_evidence_event", &["event_id", "id"])],
+    ),
+    (
+        "memory_claims",
+        &[
+            (
+                "memory_claims_fact",
+                &["subject", "predicate", "scope", "asserted_at_us", "id"],
+            ),
+            (
+                "memory_claims_validity",
+                &["valid_from_us", "valid_to_us", "asserted_at_us", "id"],
+            ),
+            (
+                "memory_claims_supersedes",
+                &["supersedes_claim_id", "asserted_at_us", "id"],
+            ),
+            ("memory_claims_delta", &["delta_id", "id"]),
+        ],
+    ),
+    (
+        "memory_claim_evidence",
+        &[(
+            "memory_claim_evidence_evidence",
+            &["evidence_id", "claim_id"],
+        )],
+    ),
+    (
+        "memory_claim_transitions",
+        &[
+            (
+                "memory_claim_transitions_latest",
+                &["claim_id", "asserted_at_us", "effective_at_us", "id"],
+            ),
+            ("memory_claim_transitions_delta", &["delta_id", "id"]),
+        ],
+    ),
+    (
+        "memory_event_retractions",
+        &[(
+            "memory_event_retractions_target",
+            &["target_event_id", "asserted_at_us", "effective_at_us", "id"],
+        )],
+    ),
+];
+
+fn validate_memory_schema(tx: &rusqlite::Transaction<'_>) -> Result<(), String> {
+    validate_memory_columns(tx)?;
+    validate_memory_foreign_keys(tx)?;
+    validate_memory_constraints(tx)?;
+    validate_memory_indexes(tx)
+}
+
+fn validate_memory_columns(tx: &rusqlite::Transaction<'_>) -> Result<(), String> {
+    for (table, expected) in MEMORY_TABLE_SHAPES {
+        let mut stmt = tx
+            .prepare(&format!("PRAGMA table_xinfo({table})"))
+            .map_err(|error| format!("prepare {table} columns: {error}"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)? != 0,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                ))
+            })
+            .map_err(|error| format!("query {table} columns: {error}"))?;
+        let columns = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("read {table} columns: {error}"))?;
+        let expected = expected
+            .iter()
+            .enumerate()
+            .map(|(cid, (name, kind, not_null, default, primary_key))| {
+                (
+                    i64::try_from(cid).expect("memory schema column count fits i64"),
+                    (*name).to_owned(),
+                    (*kind).to_owned(),
+                    *not_null,
+                    default.map(str::to_owned),
+                    *primary_key,
+                    0_i64,
+                )
+            })
+            .collect::<Vec<_>>();
+        if columns != expected {
+            return Err(format!("{table} columns are incompatible: {columns:?}"));
+        }
+        drop(stmt);
+        let column_names = expected
+            .iter()
+            .map(|(_, name, _, _, _, _, _)| name.as_str())
+            .collect::<Vec<_>>();
+        validate_column_collations(tx, table, &column_names)?;
+    }
+    Ok(())
+}
+
+fn validate_memory_foreign_keys(tx: &rusqlite::Transaction<'_>) -> Result<(), String> {
+    for (table, expected) in MEMORY_FOREIGN_KEYS {
+        let mut stmt = tx
+            .prepare(&format!("PRAGMA foreign_key_list({table})"))
+            .map_err(|error| format!("prepare {table} foreign keys: {error}"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(format!(
+                    "{}:{}:{}:{}:{}:{}",
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                ))
+            })
+            .map_err(|error| format!("query {table} foreign keys: {error}"))?;
+        let mut actual = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("read {table} foreign keys: {error}"))?;
+        actual.sort();
+        let mut expected = expected.iter().map(ToString::to_string).collect::<Vec<_>>();
+        expected.sort();
+        if actual != expected {
+            return Err(format!("{table} foreign keys are incompatible: {actual:?}"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_memory_constraints(tx: &rusqlite::Transaction<'_>) -> Result<(), String> {
+    tx.execute_batch("SAVEPOINT memory_constraint_validation")
+        .map_err(|error| format!("start memory constraint probes: {error}"))?;
+    let result = run_memory_constraint_probes(tx);
+    let rollback = tx
+        .execute_batch(
+            "ROLLBACK TO memory_constraint_validation;
+             RELEASE memory_constraint_validation;",
+        )
+        .map_err(|error| format!("roll back memory constraint probes: {error}"));
+    result.and(rollback)
+}
+
+fn run_memory_constraint_probes(tx: &rusqlite::Transaction<'_>) -> Result<(), String> {
+    let event_id = constraint_probe_event(tx)?;
+    let proposed_id = unused_memory_id(tx, "memory_claims", "proposed")?;
+    let active_id = unused_memory_id(tx, "memory_claims", "active")?;
+
+    insert_constraint_probe_claim(tx, &proposed_id, event_id, "", 0.0, "proposed")
+        .map_err(|error| format!("canonical proposed claim was rejected: {error}"))?;
+    insert_constraint_probe_claim(tx, &active_id, event_id, "subject", 1.0, "active")
+        .map_err(|error| format!("canonical active claim was rejected: {error}"))?;
+
+    for (label, confidence, status) in [
+        ("negative confidence", -0.01, "active"),
+        ("confidence above one", 1.01, "active"),
+        ("invalid initial status", 0.5, "invalid"),
+    ] {
+        let claim_id = unused_memory_id(tx, "memory_claims", label)?;
+        expect_check_rejection(
+            insert_constraint_probe_claim(tx, &claim_id, event_id, "subject", confidence, status),
+            label,
+        )?;
+    }
+
+    for status in ["superseded", "retracted", "contradicted"] {
+        let transition_id = unused_memory_id(tx, "memory_claim_transitions", status)?;
+        insert_constraint_probe_transition(tx, &transition_id, &active_id, event_id, status)
+            .map_err(|error| {
+                format!("canonical transition status {status} was rejected: {error}")
+            })?;
+    }
+    let transition_id = unused_memory_id(tx, "memory_claim_transitions", "invalid")?;
+    expect_check_rejection(
+        insert_constraint_probe_transition(tx, &transition_id, &active_id, event_id, "invalid"),
+        "invalid transition status",
+    )
+}
+
+fn constraint_probe_event(tx: &rusqlite::Transaction<'_>) -> Result<i64, String> {
+    if let Some(event_id) = tx
+        .query_row("SELECT id FROM events ORDER BY id LIMIT 1", [], |row| {
+            row.get(0)
+        })
+        .optional()
+        .map_err(|error| format!("read constraint probe event: {error}"))?
+    {
+        return Ok(event_id);
+    }
+    tx.execute(
+        "INSERT INTO events (id, ts_us, text, cascade_reason)
+         VALUES (0, 0, 'memory schema constraint probe', 0)",
+        [],
+    )
+    .map_err(|error| format!("insert constraint probe event: {error}"))?;
+    Ok(0)
+}
+
+fn unused_memory_id(
+    tx: &rusqlite::Transaction<'_>,
+    table: &str,
+    label: &str,
+) -> Result<String, String> {
+    for suffix in 0..1_000 {
+        let id = format!("__memory_schema_probe_{label}_{suffix}");
+        let exists = tx
+            .query_row(
+                &format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE id=?1)"),
+                params![&id],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|error| format!("probe {table} identity: {error}"))?;
+        if !exists {
+            return Ok(id);
+        }
+    }
+    Err(format!(
+        "could not allocate a constraint probe id in {table}"
+    ))
+}
+
+fn insert_constraint_probe_claim(
+    tx: &rusqlite::Transaction<'_>,
+    id: &str,
+    event_id: i64,
+    subject: &str,
+    confidence: f64,
+    status: &str,
+) -> rusqlite::Result<usize> {
+    tx.execute(
+        "INSERT INTO memory_claims
+         (id, delta_id, source_event_id, subject, predicate, object, scope,
+          attribution, confidence, asserted_at_us, valid_from_us, valid_to_us,
+          projector_version, initial_status, supersedes_claim_id)
+         VALUES (?1, NULL, ?2, ?3, 'predicate', 'object', 'scope', NULL, ?4,
+                 0, 0, NULL, 'schema-probe', ?5, NULL)",
+        params![id, event_id, subject, confidence, status],
+    )
+}
+
+fn insert_constraint_probe_transition(
+    tx: &rusqlite::Transaction<'_>,
+    id: &str,
+    claim_id: &str,
+    event_id: i64,
+    status: &str,
+) -> rusqlite::Result<usize> {
+    tx.execute(
+        "INSERT INTO memory_claim_transitions
+         (id, delta_id, claim_id, status, asserted_at_us, effective_at_us, reason,
+          source_event_id, projector_version)
+         VALUES (?1, NULL, ?2, ?3, 0, 0, 'schema probe', ?4, 'schema-probe')",
+        params![id, claim_id, status, event_id],
+    )
+}
+
+fn expect_check_rejection(result: rusqlite::Result<usize>, label: &str) -> Result<(), String> {
+    match result {
+        Err(rusqlite::Error::SqliteFailure(code, _))
+            if code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_CHECK =>
+        {
+            Ok(())
+        }
+        Err(error) => Err(format!("{label} hit a non-CHECK error: {error}")),
+        Ok(_) => Err(format!("{label} was accepted")),
+    }
+}
+
+fn validate_memory_indexes(tx: &rusqlite::Transaction<'_>) -> Result<(), String> {
+    for (table, expected_indexes) in MEMORY_INDEX_SHAPES {
+        let mut statement = tx
+            .prepare(&format!("PRAGMA index_list({table})"))
+            .map_err(|error| format!("prepare {table} indexes: {error}"))?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)? != 0,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)? != 0,
+                ))
+            })
+            .map_err(|error| format!("query {table} indexes: {error}"))?;
+        let indexes = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("read {table} indexes: {error}"))?;
+        let primary = indexes
+            .iter()
+            .filter(|(_, unique, origin, partial)| origin == "pk" && *unique && !*partial)
+            .count();
+        if primary != 1 {
+            return Err(format!("{table} must have exactly one primary-key index"));
+        }
+        let primary_index = indexes
+            .iter()
+            .find(|(_, unique, origin, partial)| origin == "pk" && *unique && !*partial)
+            .map(|(name, _, _, _)| name)
+            .ok_or_else(|| format!("{table} is missing its primary-key index"))?;
+        let mut primary_columns = MEMORY_TABLE_SHAPES
+            .iter()
+            .find(|(name, _)| name == table)
+            .expect("index table has a column shape")
+            .1
+            .iter()
+            .filter(|(_, _, _, _, primary_key)| *primary_key > 0)
+            .map(|(name, _, _, _, primary_key)| (*primary_key, *name))
+            .collect::<Vec<_>>();
+        primary_columns.sort_by_key(|(position, _)| *position);
+        let primary_columns = primary_columns
+            .iter()
+            .map(|(_, name)| *name)
+            .collect::<Vec<_>>();
+        validate_index_xinfo(tx, primary_index, &primary_columns)?;
+        let mut custom = indexes
+            .iter()
+            .filter(|(_, _, origin, _)| origin == "c")
+            .map(|(name, unique, _, partial)| (name.clone(), *unique, *partial))
+            .collect::<Vec<_>>();
+        custom.sort();
+        let mut expected_custom = expected_indexes
+            .iter()
+            .map(|(name, _)| ((*name).to_owned(), false, false))
+            .collect::<Vec<_>>();
+        expected_custom.sort();
+        if custom != expected_custom || indexes.iter().any(|(_, _, origin, _)| origin == "u") {
+            return Err(format!("{table} indexes are incompatible: {indexes:?}"));
+        }
+        for (index, expected_columns) in *expected_indexes {
+            validate_index_xinfo(tx, index, expected_columns)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_index_xinfo(
+    tx: &rusqlite::Transaction<'_>,
+    index: &str,
+    expected_columns: &[&str],
+) -> Result<(), String> {
+    type IndexTerm = (Option<String>, bool, Option<String>, bool);
+    let mut statement = tx
+        .prepare(&format!("PRAGMA index_xinfo({index})"))
+        .map_err(|error| format!("prepare {index}: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, i64>(3)? != 0,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, i64>(5)? != 0,
+            ))
+        })
+        .map_err(|error| format!("query {index}: {error}"))?;
+    let actual = rows
+        .collect::<Result<Vec<IndexTerm>, _>>()
+        .map_err(|error| format!("read {index}: {error}"))?;
+    let mut expected = expected_columns
+        .iter()
+        .map(|column| {
+            (
+                Some((*column).to_owned()),
+                false,
+                Some("BINARY".into()),
+                true,
+            )
+        })
+        .collect::<Vec<_>>();
+    expected.push((None, false, Some("BINARY".into()), false));
+    if actual != expected {
+        return Err(format!("{index} terms are incompatible: {actual:?}"));
+    }
+    Ok(())
+}
+
+fn validate_column_collations(
+    tx: &rusqlite::Transaction<'_>,
+    table: &str,
+    columns: &[&str],
+) -> Result<(), String> {
+    let probe = format!("mci_schema_collation_probe_{table}");
+    for column in columns {
+        tx.execute_batch(&format!(
+            "DROP INDEX IF EXISTS \"{probe}\";
+             CREATE INDEX \"{probe}\" ON \"{table}\"(\"{column}\");"
+        ))
+        .map_err(|error| format!("create {table}.{column} collation probe: {error}"))?;
+        let validation = validate_index_xinfo(tx, &probe, &[*column]);
+        tx.execute_batch(&format!("DROP INDEX \"{probe}\";"))
+            .map_err(|error| format!("drop {table}.{column} collation probe: {error}"))?;
+        validation?;
+    }
     Ok(())
 }
 
@@ -1489,6 +3586,14 @@ fn blob_to_embedding(blob: &[u8]) -> Option<Vec<f32>> {
 
 impl crate::BrainStore for SqlCipherBrainStore {
     fn put_event(&self, event: &Event) -> Result<EventId, StoreError> {
+        self.put_event_with_source(event, EventSource::Unknown)
+    }
+
+    fn put_event_with_source(
+        &self,
+        event: &Event,
+        source: EventSource,
+    ) -> Result<EventId, StoreError> {
         // ADR-0016 §4.3 defence-in-depth — `.suppress` events MUST NOT
         // reach the brain ingestor. The IPC seam enforces this
         // structurally upstream; this is the wall at the store boundary.
@@ -1546,6 +3651,12 @@ impl crate::BrainStore for SqlCipherBrainStore {
 
         let row_id = tx.last_insert_rowid();
         let id = EventId(u64::try_from(row_id).unwrap_or(0));
+
+        tx.execute(
+            "INSERT INTO event_sources(event_id, source_kind) VALUES (?1, ?2)",
+            params![row_id, source.as_str()],
+        )
+        .map_err(|e| StoreError::Backend(format!("INSERT event source: {e}")))?;
 
         if let Some(emb) = &event.embedding {
             let blob = embedding_to_blob(emb);
@@ -1639,64 +3750,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
     }
 
     fn fts5_search(&self, query: &str, limit: usize) -> Result<Vec<(EventId, f32)>, StoreError> {
-        if query.is_empty() {
-            return Err(StoreError::InvalidInput("empty FTS5 query".into()));
-        }
-        if limit == 0 {
-            return Ok(Vec::new());
-        }
-        // Pre-parse sanitization — see `fts_sanitizer` module docs.
-        // Without this, a raw user query containing `:` (URLs, emails,
-        // `key:value` shapes) triggers SQLite FTS5's `column:term`
-        // parser and bubbles a `row fts5: no such column: <token>`
-        // error up through the retriever (cycle 8.55 PR #111 panic).
-        // Clean keyword queries pass through byte-identical, so
-        // ranking / scoring for the common path is unaffected.
-        let sanitized = crate::fts_sanitizer::sanitize_fts5_query(query);
-        if sanitized.trim().is_empty() {
-            // All-whitespace or purely stripped input — nothing left
-            // to match. Treat as an empty pool (not an error) so a
-            // benign whitespace-only paste degrades to "zero hits"
-            // instead of the harsher `InvalidInput` panic on the
-            // raw-empty branch above.
-            return Ok(Vec::new());
-        }
-        let guard = self.db.lock().expect("brain store mutex poisoned");
-
-        // FTS5's `rank` virtual column is the auto-computed BM25 cost —
-        // *lower* (more-negative) is a better match; `ORDER BY rank ASC`
-        // sorts best-first. We negate at the boundary so the trait's
-        // "higher is better" contract holds (the retriever min-max-
-        // normalizes anyway, but flipping here keeps the per-hit f32
-        // monotone with relevance so test assertions read naturally).
-        let mut stmt = guard
-            .conn()
-            .prepare(
-                "SELECT rowid, rank
-                 FROM events_fts
-                 WHERE events_fts MATCH ?1
-                 ORDER BY rank ASC
-                 LIMIT ?2",
-            )
-            .map_err(|e| StoreError::Backend(format!("prepare fts5: {e}")))?;
-        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
-        let rows = stmt
-            .query_map(params![sanitized, lim], |r| {
-                let row_id: i64 = r.get(0)?;
-                let rank: f64 = r.get(1)?;
-                Ok((row_id, rank))
-            })
-            .map_err(|e| StoreError::Backend(format!("query fts5: {e}")))?;
-
-        let mut out: Vec<(EventId, f32)> = Vec::new();
-        for r in rows {
-            let (row_id, rank) = r.map_err(|e| StoreError::Backend(format!("row fts5: {e}")))?;
-            // Negate so larger-positive = better (monotone with relevance).
-            #[allow(clippy::cast_possible_truncation)]
-            let score = (-rank) as f32;
-            out.push((EventId(u64::try_from(row_id).unwrap_or(0)), score));
-        }
-        Ok(out)
+        self.fts5_search_filtered(query, limit, None, None)
     }
 
     fn vec_search(
@@ -1722,7 +3776,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
         let guard = self.db.lock().expect("brain store mutex poisoned");
         let mut stmt = guard
             .conn()
-            .prepare("SELECT event_id, embedding FROM event_vectors")
+            .prepare("SELECT event_id, embedding FROM event_vectors ORDER BY event_id ASC")
             .map_err(|e| StoreError::Backend(format!("prepare vec scan: {e}")))?;
 
         // Brute-force cosine. Vectors are L2-normalized at insert time
@@ -1758,7 +3812,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
                 .sum();
             hits.push((EventId(u64::try_from(event_id).unwrap_or(0)), dot));
         }
-        hits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        hits.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         hits.truncate(limit);
         Ok(hits)
     }
@@ -1769,7 +3823,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
     /// event perf harness (PR #111) the brute-force `vec_search` blows
     /// the cold-P50 budget (200ms → 607ms) because it dots against every
     /// `event_vectors` row; the two indexes `events_ts` and `events_app`
-    /// let SQLite narrow the pool to O(hundreds…thousands) rows in
+    /// let `SQLite` narrow the pool to O(hundreds…thousands) rows in
     /// microseconds, at which point the cosine loop fits inside budget.
     ///
     /// Correctness: the WHERE clause is a candidate-pool narrowing, NOT
@@ -1819,16 +3873,18 @@ impl crate::BrainStore for SqlCipherBrainStore {
         );
         let mut param_idx: usize = 0;
         if time_filter.is_some() {
-            sql.push_str(&format!(
+            let _ = write!(
+                sql,
                 " AND e.ts_us >= ?{} AND e.ts_us <= ?{}",
                 param_idx + 1,
                 param_idx + 2
-            ));
+            );
             param_idx += 2;
         }
         if app_filter.is_some() {
-            sql.push_str(&format!(" AND e.app_bundle_id = ?{}", param_idx + 1));
+            let _ = write!(sql, " AND e.app_bundle_id = ?{}", param_idx + 1);
         }
+        sql.push_str(" ORDER BY ev.event_id ASC");
 
         let mut stmt = guard
             .conn()
@@ -1875,7 +3931,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
                 .sum();
             hits.push((EventId(u64::try_from(event_id).unwrap_or(0)), dot));
         }
-        hits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        hits.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         hits.truncate(limit);
         Ok(hits)
     }

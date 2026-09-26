@@ -78,6 +78,22 @@ final class QueryPersistenceTests: XCTestCase {
         XCTAssertNil(p.load())
     }
 
+    func testEphemeralModeNeverReadsOrWritesSavedSearchState() {
+        let store = InMemoryStore()
+        let key = "test.recall.query"
+        let persisted = QueryPersistence(store: store, key: key)
+        persisted.save(PersistedQueryState(query: "private query", filters: FilterState()))
+
+        let ephemeral = QueryPersistence(
+            environment: ["MCI_EPHEMERAL_UI_STATE": "1"],
+            store: store,
+            key: key
+        )
+        XCTAssertNil(ephemeral.load())
+        ephemeral.save(PersistedQueryState(query: "replacement", filters: FilterState()))
+        XCTAssertEqual(persisted.load()?.query, "private query")
+    }
+
     func testClearRemovesPersistedState() {
         let (p, store) = makePersistence()
         p.save(PersistedQueryState(query: "hello", filters: FilterState()))

@@ -37,6 +37,8 @@
 //!   otherwise be parsed as an operator (`"` `(` `)` `*` `^`) →
 //!   phrase-wrap (and double-any internal `"` per the FTS5 phrase
 //!   escape convention).
+//! - Uppercase boolean keywords (`AND`, `OR`, `NOT`) → phrase-wrap
+//!   so pasted text cannot become a boolean expression.
 //!
 //! # OS-purity
 //!
@@ -46,6 +48,21 @@
 //! (they never appear inside stored event text). Ranking / scoring
 //! is untouched — this is a pre-parse fix, not a retrieval-shape
 //! change.
+
+/// A literal branch of an internally constructed alternative search.
+/// Neither variant accepts executable FTS syntax.
+#[derive(Debug, Clone, Copy)]
+pub enum LexicalAlternative<'a> {
+    /// Require the words in ordinary user text, using the normal sanitizer.
+    Keywords(&'a str),
+    /// Require adjacent words, for example a multi-word dictionary alias.
+    Phrase(&'a str),
+}
+
+/// Maximum number of literal branches in an alternative search.
+pub const MAX_LEXICAL_ALTERNATIVES: usize = 1024;
+/// Maximum combined UTF-8 input size before quoting or query construction.
+pub const MAX_LEXICAL_ALTERNATIVE_BYTES: usize = 128 * 1024;
 
 /// Sanitize a raw user query for safe substitution into an FTS5
 /// `MATCH` expression.
@@ -77,8 +94,8 @@
 /// ```
 #[must_use]
 pub fn sanitize_fts5_query(raw: &str) -> String {
-    // Fast path: if the input contains none of the trigger characters
-    // and none of the FTS5 operator characters, it is guaranteed a
+    // Fast path: without syntax characters or reserved boolean
+    // keywords, the input is guaranteed a
     // no-op sanitization. Keeps normal keyword queries byte-identical
     // to the pre-fix behavior (zero-copy semantics, one allocation
     // for the returned String).
@@ -107,7 +124,7 @@ pub fn sanitize_fts5_query(raw: &str) -> String {
     out
 }
 
-/// Cheap pre-scan: does the input contain any character that could
+/// Cheap pre-scan: does the input contain any character or keyword that could
 /// possibly need sanitization? If not, the fast-path return above
 /// keeps clean queries byte-identical.
 ///
@@ -120,6 +137,7 @@ pub fn sanitize_fts5_query(raw: &str) -> String {
 fn needs_sanitization(s: &str) -> bool {
     s.bytes()
         .any(|b| !is_bareword_byte(b) && !b.is_ascii_whitespace())
+        || s.split_whitespace().any(token_needs_wrap)
 }
 
 /// Bytes FTS5 will accept unquoted inside a bareword.
@@ -138,6 +156,10 @@ const fn is_bareword_byte(b: u8) -> bool {
 fn token_needs_wrap(tok: &str) -> bool {
     if tok.is_empty() {
         return false;
+    }
+    // Legal bareword bytes can still spell an FTS5 boolean operator.
+    if matches!(tok, "AND" | "OR" | "NOT") {
+        return true;
     }
     // URL: any occurrence of "://" — the panic-trigger case.
     if tok.contains("://") {

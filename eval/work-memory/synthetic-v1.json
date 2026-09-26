@@ -1,0 +1,531 @@
+{
+  "dataset_id": "synthetic-work-memory-v1",
+  "description": "Synthetic technical-work benchmark for Hippocampus v1. Covers exact recall, paraphrase, temporal questions, cross-session synthesis, changed facts, contradiction, source attribution, and unanswerable queries across GitHub, terminal, browser, Slack, Linear, and files.",
+  "instances": [
+    {
+      "question_id": "exact-github-partial-runs",
+      "question_type": "exact_recall",
+      "question": "partial runs complete false exit nonzero",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["github://hippocampus/pull/431"],
+      "haystack_dates": ["2026/08/31 (Mon) 09:10", "2026/08/31 (Mon) 10:42"],
+      "haystack_session_ids": ["github://hippocampus/pull/431", "terminal://zsh/work-memory-smoke"],
+      "haystack_app_ids": ["com.github.GitHubClient", "com.apple.Terminal"],
+      "haystack_window_titles": ["PR 431 benchmark honesty", "Terminal smoke run"],
+      "haystack_urls": ["github://hippocampus/pull/431", "terminal://zsh/work-memory-smoke"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "PR 431 sets complete false on partial runs and exits nonzero when any requested arm fails."}
+        ],
+        [
+          {"role": "assistant", "content": "cargo test -p mci-agent --test work_memory_bench finished green after the partial-run guard landed."}
+        ]
+      ],
+      "tags": ["github", "exact", "provenance"]
+    },
+    {
+      "question_id": "exact-terminal-test-command",
+      "question_type": "exact_recall",
+      "question": "cargo test p mci agent test work memory bench",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["terminal://zsh/work-memory-tests"],
+      "haystack_dates": ["2026/08/31 (Mon) 11:00", "2026/08/31 (Mon) 11:35"],
+      "haystack_session_ids": ["terminal://zsh/work-memory-tests", "github://hippocampus/pull/430"],
+      "haystack_app_ids": ["com.apple.Terminal", "com.github.GitHubClient"],
+      "haystack_window_titles": ["Focused benchmark tests", "PR 430 parser notes"],
+      "haystack_urls": ["terminal://zsh/work-memory-tests", "github://hippocampus/pull/430"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "Run cargo test -p mci-agent --test work_memory_bench to check the new parser and scoring metrics."}
+        ],
+        [
+          {"role": "assistant", "content": "PR 430 adds the dataset envelope parser and the complete field in the JSON report."}
+        ]
+      ],
+      "tags": ["terminal", "exact"]
+    },
+    {
+      "question_id": "exact-file-no-silent-downgrade",
+      "question_type": "exact_recall",
+      "question": "missing model partial run failure never silently downgraded",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["file:///docs/eval/work-memory-baseline.json"],
+      "haystack_dates": ["2026/08/31 (Mon) 13:20", "2026/08/31 (Mon) 14:10"],
+      "haystack_session_ids": ["file:///docs/eval/work-memory-baseline.json", "browser://adr/0010-fusion"],
+      "haystack_app_ids": ["com.microsoft.VSCode", "com.apple.Safari"],
+      "haystack_window_titles": ["work-memory-baseline.json", "ADR 0010 recall notes"],
+      "haystack_urls": ["file:///docs/eval/work-memory-baseline.json", "browser://adr/0010-fusion"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "The baseline report records that a missing model or partial run is a failure and never a silently downgraded result."}
+        ],
+        [
+          {"role": "assistant", "content": "ADR 0010 keeps vector similarity as a recall signal, not truth."}
+        ]
+      ],
+      "tags": ["files", "exact", "provenance"]
+    },
+    {
+      "question_id": "paraphrase-production-retriever",
+      "question_type": "paraphrase",
+      "question": "Which PR moved the benchmark onto the shipped retriever path",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["github://hippocampus/pull/440"],
+      "haystack_dates": ["2026/08/31 (Mon) 08:55", "2026/08/31 (Mon) 09:30"],
+      "haystack_session_ids": ["github://hippocampus/pull/440", "github://hippocampus/pull/421"],
+      "haystack_app_ids": ["com.github.GitHubClient", "com.github.GitHubClient"],
+      "haystack_window_titles": ["PR 440 retriever wiring", "PR 421 dataset draft"],
+      "haystack_urls": ["github://hippocampus/pull/440", "github://hippocampus/pull/421"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "PR 440 switched the benchmark onto the production hybrid retriever and the real SQLCipher store path."}
+        ],
+        [
+          {"role": "assistant", "content": "PR 421 drafted an earlier synthetic dataset but did not use the production retriever."}
+        ]
+      ],
+      "tags": ["github", "paraphrase"]
+    },
+    {
+      "question_id": "paraphrase-embeddings-not-facts",
+      "question_type": "paraphrase",
+      "question": "Where do we say embeddings are hints and not facts",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["browser://adr/0010-fusion"],
+      "haystack_dates": ["2026/08/30 (Sun) 15:10", "2026/08/30 (Sun) 15:40"],
+      "haystack_session_ids": ["browser://adr/0010-fusion", "file:///docs/eval/README.md"],
+      "haystack_app_ids": ["com.apple.Safari", "com.microsoft.VSCode"],
+      "haystack_window_titles": ["ADR 0010 fusion", "docs/eval README"],
+      "haystack_urls": ["browser://adr/0010-fusion", "file:///docs/eval/README.md"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "ADR 0010 says vector similarity is a recall signal and not truth."}
+        ],
+        [
+          {"role": "assistant", "content": "docs/eval/README.md lists the measurement surfaces but not the fusion caveat."}
+        ]
+      ],
+      "tags": ["browser", "paraphrase"]
+    },
+    {
+      "question_id": "paraphrase-env-var-model-path",
+      "question_type": "paraphrase",
+      "question": "Where did we agree to point the embedder env var",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["slack://bench/threads/model-path"],
+      "haystack_dates": ["2026/08/31 (Mon) 12:30", "2026/08/31 (Mon) 12:55"],
+      "haystack_session_ids": ["slack://bench/threads/model-path", "terminal://zsh/model-check"],
+      "haystack_app_ids": ["com.tinyspeck.slackmacgap", "com.apple.Terminal"],
+      "haystack_window_titles": ["bench-model-path", "Model check"],
+      "haystack_urls": ["slack://bench/threads/model-path", "terminal://zsh/model-check"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "Slack note says the runner should export MCI_ARCTIC_MODEL_PATH to the bundled ArcticEmbedS path when it is available."}
+        ],
+        [
+          {"role": "assistant", "content": "The model check command verified the app bundle path exists on disk."}
+        ]
+      ],
+      "tags": ["slack", "paraphrase", "provenance"]
+    },
+    {
+      "question_id": "temporal-right-before-rollback",
+      "question_type": "temporal",
+      "question": "right before rollback disabled hybrid empty report",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["terminal://zsh/right-before-rollback"],
+      "haystack_dates": ["2026/08/31 (Mon) 16:10", "2026/08/31 (Mon) 16:18", "2026/08/31 (Mon) 16:22"],
+      "haystack_session_ids": ["terminal://zsh/right-before-rollback", "slack://bench/threads/rollback", "github://hippocampus/pull/425"],
+      "haystack_app_ids": ["com.apple.Terminal", "com.tinyspeck.slackmacgap", "com.github.GitHubClient"],
+      "haystack_window_titles": ["Right before rollback", "rollback thread", "PR 425 parser cleanup"],
+      "haystack_urls": ["terminal://zsh/right-before-rollback", "slack://bench/threads/rollback", "github://hippocampus/pull/425"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "Right before the rollback we disabled hybrid on empty reports to stop fake green output."}
+        ],
+        [
+          {"role": "assistant", "content": "Slack rollback thread says the report still needs complete false on partial runs."}
+        ],
+        [
+          {"role": "assistant", "content": "PR 425 only touched parser cleanup and did not cause the rollback."}
+        ]
+      ],
+      "tags": ["terminal", "temporal"]
+    },
+    {
+      "question_id": "temporal-after-opening-linear",
+      "question_type": "temporal",
+      "question": "after opening HIPP 219 added provenance coverage",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["linear://HIPP-219/comment-2"],
+      "haystack_dates": ["2026/08/30 (Sun) 09:00", "2026/08/30 (Sun) 09:20", "2026/08/30 (Sun) 10:00"],
+      "haystack_session_ids": ["linear://HIPP-219", "linear://HIPP-219/comment-2", "github://hippocampus/pull/418"],
+      "haystack_app_ids": ["com.linear", "com.linear", "com.github.GitHubClient"],
+      "haystack_window_titles": ["HIPP-219", "HIPP-219 comment", "PR 418 benchmark notes"],
+      "haystack_urls": ["linear://HIPP-219", "linear://HIPP-219/comment-2", "github://hippocampus/pull/418"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "Opened HIPP 219 to track honest provenance coverage in the work-memory benchmark."}
+        ],
+        [
+          {"role": "assistant", "content": "After opening HIPP 219 we added provenance coverage and typed abstention to the scorecard."}
+        ],
+        [
+          {"role": "assistant", "content": "PR 418 still reported only hit rate recall and MRR."}
+        ]
+      ],
+      "tags": ["linear", "temporal", "provenance"]
+    },
+    {
+      "question_id": "temporal-before-app-bundle-model-path",
+      "question_type": "temporal",
+      "question": "before app bundle path model lived models ArcticEmbedS INT8 mlmodelc",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["file:///scripts/eval/work-memory/run.sh"],
+      "haystack_dates": ["2026/08/29 (Sat) 14:00", "2026/08/29 (Sat) 14:20"],
+      "haystack_session_ids": ["file:///scripts/eval/work-memory/run.sh", "browser://notes/model-history"],
+      "haystack_app_ids": ["com.microsoft.VSCode", "com.apple.Safari"],
+      "haystack_window_titles": ["run.sh", "model history"],
+      "haystack_urls": ["file:///scripts/eval/work-memory/run.sh", "browser://notes/model-history"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "Before we switched to the app bundle path the model lived at models ArcticEmbedS INT8 mlmodelc in the repo root."}
+        ],
+        [
+          {"role": "assistant", "content": "The model history note says the runner now prefers the installed app bundle model."}
+        ]
+      ],
+      "tags": ["files", "temporal"]
+    },
+    {
+      "question_id": "cross-session-slack-and-pr-honesty",
+      "question_type": "cross_session",
+      "question": "Which Slack decision and PR made the benchmark honest about partial runs",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["slack://bench/threads/honesty-call", "github://hippocampus/pull/431"],
+      "haystack_dates": ["2026/08/31 (Mon) 08:40", "2026/08/31 (Mon) 09:10", "2026/08/31 (Mon) 12:00"],
+      "haystack_session_ids": ["slack://bench/threads/honesty-call", "github://hippocampus/pull/431", "terminal://zsh/notes"],
+      "haystack_app_ids": ["com.tinyspeck.slackmacgap", "com.github.GitHubClient", "com.apple.Terminal"],
+      "haystack_window_titles": ["honesty-call", "PR 431 benchmark honesty", "Notes"],
+      "haystack_urls": ["slack://bench/threads/honesty-call", "github://hippocampus/pull/431", "terminal://zsh/notes"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "Slack decision says a partial benchmark run must be labeled incomplete and should never pass quietly."}
+        ],
+        [
+          {"role": "assistant", "content": "PR 431 implements complete false and exit nonzero for partial benchmark runs."}
+        ],
+        [
+          {"role": "assistant", "content": "Local notes mention follow-up thresholds work but not the honesty rule."}
+        ]
+      ],
+      "tags": ["slack", "github", "cross_session", "provenance"]
+    },
+    {
+      "question_id": "cross-session-file-and-terminal-rerun",
+      "question_type": "cross_session",
+      "question": "Which file and terminal command explain how to rerun the work memory benchmark",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["file:///eval/work-memory/README.md", "terminal://zsh/work-memory-tests"],
+      "haystack_dates": ["2026/08/31 (Mon) 11:00", "2026/08/31 (Mon) 13:00", "2026/08/31 (Mon) 13:15"],
+      "haystack_session_ids": ["terminal://zsh/work-memory-tests", "file:///eval/work-memory/README.md", "slack://bench/threads/misc"],
+      "haystack_app_ids": ["com.apple.Terminal", "com.microsoft.VSCode", "com.tinyspeck.slackmacgap"],
+      "haystack_window_titles": ["Focused benchmark tests", "eval/work-memory README", "misc bench"],
+      "haystack_urls": ["terminal://zsh/work-memory-tests", "file:///eval/work-memory/README.md", "slack://bench/threads/misc"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "Run cargo test -p mci-agent --test work_memory_bench to verify the focused benchmark suite."}
+        ],
+        [
+          {"role": "assistant", "content": "The work-memory README explains the synthetic corpus and the one-command runner."}
+        ],
+        [
+          {"role": "assistant", "content": "Slack misc thread contains a screenshot but no rerun steps."}
+        ]
+      ],
+      "tags": ["files", "terminal", "cross_session", "provenance"]
+    },
+    {
+      "question_id": "cross-session-browser-and-linear-nonzero",
+      "question_type": "cross_session",
+      "question": "Which browser note and Linear issue explain why partial runs stay nonzero",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["browser://notes/partial-runs", "linear://HIPP-219"],
+      "haystack_dates": ["2026/08/30 (Sun) 09:00", "2026/08/30 (Sun) 12:10", "2026/08/30 (Sun) 14:00"],
+      "haystack_session_ids": ["linear://HIPP-219", "browser://notes/partial-runs", "github://hippocampus/pull/426"],
+      "haystack_app_ids": ["com.linear", "com.apple.Safari", "com.github.GitHubClient"],
+      "haystack_window_titles": ["HIPP-219", "partial run note", "PR 426 baseline draft"],
+      "haystack_urls": ["linear://HIPP-219", "browser://notes/partial-runs", "github://hippocampus/pull/426"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "HIPP 219 tracks the requirement that incomplete benchmark arms must fail loudly."}
+        ],
+        [
+          {"role": "assistant", "content": "Browser note says keeping partial runs nonzero prevents fake green dashboards."}
+        ],
+        [
+          {"role": "assistant", "content": "PR 426 drafted baseline output without the final nonzero guard."}
+        ]
+      ],
+      "tags": ["browser", "linear", "cross_session"]
+    },
+    {
+      "question_id": "changed-fact-current-owner",
+      "question_type": "changed_fact",
+      "question": "Who owns HIPP 201 now",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["linear://HIPP-201/comment-priya"],
+      "haystack_dates": ["2026/08/29 (Sat) 09:00", "2026/08/30 (Sun) 11:25", "2026/08/30 (Sun) 16:00"],
+      "haystack_session_ids": ["linear://HIPP-201/comment-alice", "linear://HIPP-201/comment-priya", "slack://bench/threads/ownership"],
+      "haystack_app_ids": ["com.linear", "com.linear", "com.tinyspeck.slackmacgap"],
+      "haystack_window_titles": ["HIPP-201 old owner", "HIPP-201 new owner", "ownership thread"],
+      "haystack_urls": ["linear://HIPP-201/comment-alice", "linear://HIPP-201/comment-priya", "slack://bench/threads/ownership"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "Earlier note says Alice owns HIPP 201 while the benchmark schema is still in draft."}
+        ],
+        [
+          {"role": "assistant", "content": "Updated note says Priya owns HIPP 201 now that the benchmark is in implementation."}
+        ],
+        [
+          {"role": "assistant", "content": "Slack thread confirms the owner switch but not the issue number."}
+        ]
+      ],
+      "tags": ["linear", "changed_fact"]
+    },
+    {
+      "question_id": "changed-fact-current-model-path",
+      "question_type": "changed_fact",
+      "question": "current installed Arctic model path",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["browser://notes/model-history"],
+      "haystack_dates": ["2026/08/29 (Sat) 14:00", "2026/08/31 (Mon) 12:30"],
+      "haystack_session_ids": ["file:///scripts/eval/work-memory/run.sh", "browser://notes/model-history"],
+      "haystack_app_ids": ["com.microsoft.VSCode", "com.apple.Safari"],
+      "haystack_window_titles": ["run.sh", "model history"],
+      "haystack_urls": ["file:///scripts/eval/work-memory/run.sh", "browser://notes/model-history"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "Older note says use models ArcticEmbedS INT8 mlmodelc from the repo root."}
+        ],
+        [
+          {"role": "assistant", "content": "Current note says the installed Arctic model path is /Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc."}
+        ]
+      ],
+      "tags": ["browser", "files", "changed_fact", "provenance"]
+    },
+    {
+      "question_id": "changed-fact-case-count",
+      "question_type": "changed_fact",
+      "question": "How many synthetic cases are in v1 now",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["file:///eval/work-memory/README.md"],
+      "haystack_dates": ["2026/08/30 (Sun) 08:00", "2026/08/31 (Mon) 13:00"],
+      "haystack_session_ids": ["github://hippocampus/pull/421", "file:///eval/work-memory/README.md"],
+      "haystack_app_ids": ["com.github.GitHubClient", "com.microsoft.VSCode"],
+      "haystack_window_titles": ["PR 421 dataset draft", "eval/work-memory README"],
+      "haystack_urls": ["github://hippocampus/pull/421", "file:///eval/work-memory/README.md"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "Draft dataset note says the synthetic work-memory corpus has 18 cases."}
+        ],
+        [
+          {"role": "assistant", "content": "Current README says synthetic v1 ships 24 benchmark cases across eight categories."}
+        ]
+      ],
+      "tags": ["files", "changed_fact"]
+    },
+    {
+      "question_id": "contradiction-final-rule-partial-runs",
+      "question_type": "contradiction",
+      "question": "final rule partial runs incomplete exit nonzero",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["github://hippocampus/pull/431"],
+      "haystack_dates": ["2026/08/30 (Sun) 09:10", "2026/08/31 (Mon) 09:10"],
+      "haystack_session_ids": ["slack://bench/threads/old-partial-rule", "github://hippocampus/pull/431"],
+      "haystack_app_ids": ["com.tinyspeck.slackmacgap", "com.github.GitHubClient"],
+      "haystack_window_titles": ["old partial rule", "PR 431 benchmark honesty"],
+      "haystack_urls": ["slack://bench/threads/old-partial-rule", "github://hippocampus/pull/431"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "Old thread says a partial benchmark run can warn and still count as green."}
+        ],
+        [
+          {"role": "assistant", "content": "PR 431 replaces that rule: partial runs are incomplete and exit nonzero."}
+        ]
+      ],
+      "tags": ["github", "slack", "contradiction", "provenance"]
+    },
+    {
+      "question_id": "contradiction-provenance-required",
+      "question_type": "contradiction",
+      "question": "Do we report provenance coverage in the scorecard",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["linear://HIPP-219/comment-2"],
+      "haystack_dates": ["2026/08/30 (Sun) 09:20", "2026/08/31 (Mon) 12:10"],
+      "haystack_session_ids": ["github://hippocampus/pull/418", "linear://HIPP-219/comment-2"],
+      "haystack_app_ids": ["com.github.GitHubClient", "com.linear"],
+      "haystack_window_titles": ["PR 418 benchmark notes", "HIPP-219 comment"],
+      "haystack_urls": ["github://hippocampus/pull/418", "linear://HIPP-219/comment-2"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "Older PR note says provenance coverage is optional and can wait for later."}
+        ],
+        [
+          {"role": "assistant", "content": "HIPP 219 comment says provenance coverage is a required benchmark metric in v1."}
+        ]
+      ],
+      "tags": ["linear", "github", "contradiction", "provenance"]
+    },
+    {
+      "question_id": "contradiction-cutoffs-committed",
+      "question_type": "contradiction",
+      "question": "Which cutoffs are in the committed scorecard",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["file:///docs/eval/work-memory-baseline.json"],
+      "haystack_dates": ["2026/08/30 (Sun) 10:00", "2026/08/31 (Mon) 13:20"],
+      "haystack_session_ids": ["slack://bench/threads/threshold-draft", "file:///docs/eval/work-memory-baseline.json"],
+      "haystack_app_ids": ["com.tinyspeck.slackmacgap", "com.microsoft.VSCode"],
+      "haystack_window_titles": ["threshold draft", "work-memory-baseline.json"],
+      "haystack_urls": ["slack://bench/threads/threshold-draft", "file:///docs/eval/work-memory-baseline.json"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "Draft threshold thread says only hit at five matters."}
+        ],
+        [
+          {"role": "assistant", "content": "The committed scorecard records hit rate and recall at 1 3 5 and 10 plus MRR provenance false positive and latency checks."}
+        ]
+      ],
+      "tags": ["files", "slack", "contradiction", "provenance"]
+    },
+    {
+      "question_id": "source-which-slack-thread-rollback",
+      "question_type": "source_attribution",
+      "question": "Which Slack thread recorded the rollback note",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["slack://bench/threads/rollback"],
+      "haystack_dates": ["2026/08/31 (Mon) 16:18", "2026/08/31 (Mon) 16:30"],
+      "haystack_session_ids": ["slack://bench/threads/rollback", "slack://bench/threads/model-path"],
+      "haystack_app_ids": ["com.tinyspeck.slackmacgap", "com.tinyspeck.slackmacgap"],
+      "haystack_window_titles": ["rollback thread", "bench-model-path"],
+      "haystack_urls": ["slack://bench/threads/rollback", "slack://bench/threads/model-path"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "Slack rollback thread notes the incomplete benchmark run and links the fix PR."}
+        ],
+        [
+          {"role": "assistant", "content": "The model path thread is about MCI_ARCTIC_MODEL_PATH and not the rollback."}
+        ]
+      ],
+      "tags": ["slack", "source_attribution", "provenance"]
+    },
+    {
+      "question_id": "source-which-file-runner",
+      "question_type": "source_attribution",
+      "question": "Which file documents the benchmark runner",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["file:///eval/work-memory/README.md"],
+      "haystack_dates": ["2026/08/31 (Mon) 13:00", "2026/08/31 (Mon) 13:20"],
+      "haystack_session_ids": ["file:///eval/work-memory/README.md", "file:///docs/eval/README.md"],
+      "haystack_app_ids": ["com.microsoft.VSCode", "com.microsoft.VSCode"],
+      "haystack_window_titles": ["eval/work-memory README", "docs/eval README"],
+      "haystack_urls": ["file:///eval/work-memory/README.md", "file:///docs/eval/README.md"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "eval work memory README documents the synthetic corpus and the benchmark runner script."}
+        ],
+        [
+          {"role": "assistant", "content": "docs/eval README lists the methodology docs but not the runner details."}
+        ]
+      ],
+      "tags": ["files", "source_attribution", "provenance"]
+    },
+    {
+      "question_id": "source-which-pr-complete-false",
+      "question_type": "source_attribution",
+      "question": "Which PR introduced complete false",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": ["github://hippocampus/pull/431"],
+      "haystack_dates": ["2026/08/31 (Mon) 09:10", "2026/08/31 (Mon) 08:55"],
+      "haystack_session_ids": ["github://hippocampus/pull/431", "github://hippocampus/pull/440"],
+      "haystack_app_ids": ["com.github.GitHubClient", "com.github.GitHubClient"],
+      "haystack_window_titles": ["PR 431 benchmark honesty", "PR 440 retriever wiring"],
+      "haystack_urls": ["github://hippocampus/pull/431", "github://hippocampus/pull/440"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "PR 431 introduced complete false for partial benchmark runs."}
+        ],
+        [
+          {"role": "assistant", "content": "PR 440 moved the benchmark onto the production retriever path."}
+        ]
+      ],
+      "tags": ["github", "source_attribution", "provenance"]
+    },
+    {
+      "question_id": "unanswerable-pr-431-approver",
+      "question_type": "unanswerable",
+      "question": "Who approved PR 431 after the rollback discussion?",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": [],
+      "haystack_dates": ["2026/08/31 (Mon) 09:10", "2026/08/31 (Mon) 12:30"],
+      "haystack_session_ids": ["github://hippocampus/pull/431", "slack://bench/threads/model-path"],
+      "haystack_app_ids": ["com.github.GitHubClient", "com.tinyspeck.slackmacgap"],
+      "haystack_window_titles": ["PR 431 benchmark honesty", "bench-model-path"],
+      "haystack_urls": ["github://hippocampus/pull/431", "slack://bench/threads/model-path"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "PR 431 introduced complete false for partial benchmark runs."}
+        ],
+        [
+          {"role": "assistant", "content": "The model path thread is about exporting MCI_ARCTIC_MODEL_PATH."}
+        ]
+      ],
+      "tags": ["unanswerable", "github", "slack"],
+      "unanswerable": true
+    },
+    {
+      "question_id": "unanswerable-benchmark-test-duration",
+      "question_type": "unanswerable",
+      "question": "How long did the work_memory_bench test run take after the runner documentation changed?",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": [],
+      "haystack_dates": ["2026/08/31 (Mon) 10:30", "2026/08/31 (Mon) 13:00"],
+      "haystack_session_ids": ["terminal://zsh/session-14", "file:///eval/work-memory/README.md"],
+      "haystack_app_ids": ["com.apple.Terminal", "com.microsoft.VSCode"],
+      "haystack_window_titles": ["work-memory tests", "eval/work-memory README"],
+      "haystack_urls": ["terminal://zsh/session-14", "file:///eval/work-memory/README.md"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "Terminal ran cargo test -p mci-agent --test work_memory_bench and all focused tests passed."}
+        ],
+        [
+          {"role": "assistant", "content": "The work-memory README documents the synthetic corpus and runner command."}
+        ]
+      ],
+      "tags": ["unanswerable", "terminal", "files"],
+      "unanswerable": true
+    },
+    {
+      "question_id": "unanswerable-hipp-201-due-date",
+      "question_type": "unanswerable",
+      "question": "What due date did Priya set for HIPP 201 after taking ownership?",
+      "question_date": "2026/08/31 (Mon) 18:00",
+      "answer_session_ids": [],
+      "haystack_dates": ["2026/08/30 (Sun) 09:00", "2026/08/30 (Sun) 11:25"],
+      "haystack_session_ids": ["linear://HIPP-201/comment-alice", "linear://HIPP-201/comment-priya"],
+      "haystack_app_ids": ["com.linear", "com.linear"],
+      "haystack_window_titles": ["HIPP-201 old owner", "HIPP-201 new owner"],
+      "haystack_urls": ["linear://HIPP-201/comment-alice", "linear://HIPP-201/comment-priya"],
+      "haystack_sessions": [
+        [
+          {"role": "assistant", "content": "Earlier note says Alice owns HIPP 201 while the benchmark schema is still in draft."}
+        ],
+        [
+          {"role": "assistant", "content": "Updated note says Priya owns HIPP 201 now that the benchmark is in implementation."}
+        ]
+      ],
+      "tags": ["unanswerable", "linear"],
+      "unanswerable": true
+    }
+  ]
+}

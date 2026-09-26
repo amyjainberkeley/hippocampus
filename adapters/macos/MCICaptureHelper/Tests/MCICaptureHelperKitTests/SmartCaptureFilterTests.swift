@@ -147,6 +147,6 @@ final class StreamPolicyTests: XCTestCase {
 
     func testDefaultPolicyMatchesAppleRecommendations() {
         XCTAssertEqual(StreamPolicy.default.queueDepth, 3)
-        XCTAssertEqual(StreamPolicy.default.minimumFrameIntervalMs, 200)
+        XCTAssertEqual(StreamPolicy.default.minimumFrameIntervalMs, 500)
     }
 }

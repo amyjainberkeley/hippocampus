@@ -14,7 +14,9 @@
 // Sequence per cleared-once-on-pixels frame:
 //   1. Submit `(CVPixelBuffer, dirtyRectsBoundingROI)` to the OCR worker.
 //   2. Worker returns `OCRResult` (recognizedLines + durationMs + timedOut).
-//   3. Join `result.recognizedLines.text` into a single string.
+//   3. Join `result.recognizedLines.text` into a single string. Timeout,
+//      engine-error, empty, and whitespace-only results stop here: no event
+//      and no visual retention.
 //   4. Re-run cascade via `cascade.decideOcr(text:context:)`.
 //        - `.suppress(reason: .ocrTimeSecret)` ⇒ emit
 //          `PrivacyTombstone(reason: 6)`. NO OCR text bytes reach the
@@ -30,16 +32,22 @@
 // ingestor (`Routed::OCREvent` vs `Routed::Tombstone` enum dispatch
 // in `core/src/ipc/connection.rs`).
 //
-// P3.6.5: keyframe blob writes are now wired. When a
-// `KeyframeBlobWriter` is present, the emitter encodes the captured
-// CVPixelBuffer as a downscaled encrypted JPEG, puts the sha256 in
-// the OCREvent.keyframeHash field, and fire-and-forgets the file
-// write via the blob writer's drop-oldest queue.
+// Condensed keyframe retention is reachable only after both privacy
+// approvals and zero-hash wire validation. The retention coordinator
+// publishes an authenticated blob durably before this emitter places
+// its digest in the OCREvent.
 
 import CoreGraphics
 import CoreVideo
-import CryptoKit
 import Foundation
+
+/// Tells the capture baseline whether this exact visual should be considered
+/// handled. Empty/timed-out/dropped OCR is retryable; every emitted event or
+/// privacy tombstone is terminal for the visual.
+public enum OCRPostAllowDisposition: Sendable, Equatable {
+    case finalized
+    case retryableNoContent
+}
 
 /// Protocol indirection so headless tests can substitute a stub
 /// emitter. Production impl is `CascadeTwiceOCREmitter`.
@@ -47,24 +55,89 @@ public protocol OCRPostAllowEmitter: Sendable {
     /// Called from `SCStreamCaptureSession` after `pipeline.process`
     /// returns `.encoded` (the pixel-time cascade returned `.allow`).
     ///
-    /// Fire-and-forget shape: the emitter returns as soon as the OCR
-    /// submission is queued. The OCR completion callback drives the
-    /// §6 re-cascade + wire emission on a Task spawned from the OCR
-    /// worker's consumer queue.
+    /// The emitter returns after OCR submission. Completion work is handed to
+    /// an emitter-owned bounded serial coordinator; no free task may outlive
+    /// the capture session.
     ///
-    /// Drop-oldest queue overflow in the OCR worker means the
-    /// completion callback may never fire for this submission. That
-    /// is the documented fire-and-forget arm (`ocr_dropped_count`
-    /// telemetry surface; ADR-0016 §3); the emitter does NOT emit any
-    /// wire frame for a dropped submission. This is correct per the
-    /// privacy invariants — a frame the helper could not OCR is
-    /// indistinguishable from a frame whose OCR text was empty; either
-    /// way nothing usable flows downstream.
+    /// Drop-oldest overflow emits no wire frame. The disposition-aware
+    /// overload reports the drop as retryable so the exact capture baseline
+    /// can be reopened without weakening the privacy cascade.
     func processAfterAllow(
         tsUs: UInt64,
         context: WorkflowContext,
         input: OCREngineInput
     ) async
+
+    func processAfterAllow(
+        tsUs: UInt64,
+        context: WorkflowContext,
+        input: OCREngineInput,
+        evidenceCandidate: KeyframeEvidenceCandidate?
+    ) async
+
+    func processAfterAllow(
+        captureOrdinal: UInt64,
+        tsUs: UInt64,
+        context: WorkflowContext,
+        input: OCREngineInput,
+        evidenceCandidate: KeyframeEvidenceCandidate?
+    ) async
+
+    func processAfterAllow(
+        captureOrdinal: UInt64,
+        tsUs: UInt64,
+        context: WorkflowContext,
+        input: OCREngineInput,
+        evidenceCandidate: KeyframeEvidenceCandidate?,
+        disposition: @Sendable @escaping (OCRPostAllowDisposition) -> Void
+    ) async
+
+    func stopAndDrain() async
+}
+
+public extension OCRPostAllowEmitter {
+    func processAfterAllow(
+        tsUs: UInt64,
+        context: WorkflowContext,
+        input: OCREngineInput,
+        evidenceCandidate _: KeyframeEvidenceCandidate?
+    ) async {
+        await processAfterAllow(tsUs: tsUs, context: context, input: input)
+    }
+
+    func processAfterAllow(
+        captureOrdinal _: UInt64,
+        tsUs: UInt64,
+        context: WorkflowContext,
+        input: OCREngineInput,
+        evidenceCandidate: KeyframeEvidenceCandidate?
+    ) async {
+        await processAfterAllow(
+            tsUs: tsUs,
+            context: context,
+            input: input,
+            evidenceCandidate: evidenceCandidate
+        )
+    }
+
+    func processAfterAllow(
+        captureOrdinal: UInt64,
+        tsUs: UInt64,
+        context: WorkflowContext,
+        input: OCREngineInput,
+        evidenceCandidate: KeyframeEvidenceCandidate?,
+        disposition: @Sendable @escaping (OCRPostAllowDisposition) -> Void
+    ) async {
+        await processAfterAllow(
+            captureOrdinal: captureOrdinal,
+            tsUs: tsUs,
+            context: context,
+            input: input,
+            evidenceCandidate: evidenceCandidate
+        )
+        disposition(.finalized)
+    }
+
 }
 
 /// Production `OCRPostAllowEmitter` that wires `VisionOCRWorker` +
@@ -147,6 +220,14 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     ///     lift can succeed; tracked: follow-on memo
     ///     `v2-p1-redesign-includingwindows`. ADR-0031 §Status amended
     ///     in lockstep with this REVERT.
+    ///   - **2026-09-04 M4 THIRD LIFT — qualified production default.**
+    ///     The API-correct include-only filter, generation-bound rebind,
+    ///     and fail-closed race gate passed a Developer ID-signed live-Mac
+    ///     overlap proof and a 1,800-second focus-churn soak. The soak
+    ///     persisted the exact focused token, excluded the overlapping
+    ///     background token and every foreign-app event, delivered 3,612
+    ///     frames with zero encode/backpressure/late-ack failures, and
+    ///     dropped 30 focus-race frames (0.82%, below the 5% gate).
     ///
     /// PROTECTED-SET per AGENT_PROTOCOL §5.
     ///
@@ -161,20 +242,16 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     /// required by Swift 6 strict concurrency for a static `var`;
     /// safe here because writes are confined to test setup/teardown
     /// and reads in production are pure load.
-    nonisolated(unsafe) internal static var killOcrEmit: Bool = true
+    nonisolated(unsafe) internal static var killOcrEmit: Bool = false
 
-    /// M4-LIFT activator — the ONE production entry point that flips
-    /// `killOcrEmit` off at boot when the ADR-0031 §Status env-var
-    /// gate (`HIPPOCAMPUS_ENABLE_V2P1=1`) is set. Called exactly once
-    /// per helper process, from `main.swift`, immediately after
-    /// [`MciV2P1Gate.current`] resolves to `.enabled`.
+    /// Emergency/test activator for the source-controlled M4 switch.
     ///
     /// This method exists so the executable target (`MCICaptureHelper`)
-    /// can flip the internal `killOcrEmit` gate without loosening its
+    /// can exercise the internal `killOcrEmit` gate without loosening its
     /// `internal` scope (the field stays `internal` so tests keep the
     /// only other legitimate write path via `@testable import`). The
-    /// method name is verbose so a grep for the M4-lift runtime
-    /// activation lands here immediately.
+    /// method name is retained for fixture compatibility; shipping startup
+    /// does not call it.
     ///
     /// - Parameter enabled: `true` ⇒ flip `killOcrEmit = false` so the
     ///   cascade-twice OCR-emit path is armed. `false` ⇒ engage the
@@ -192,14 +269,8 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     private let sink: any FrameSink
     private let sequence: FrameSequence
     private let counters: HelperHealthCounters
-    /// P3.6.5: encrypted keyframe blob writer. `nil` when no DbKey
-    /// is available (MCI_DB_KEY_HEX not set) — OCREvents carry
-    /// `keyframeHash = [0; 32]` ("no blob"). CSO invariant: blob
-    /// writes happen ONLY on .allow paths (ADR-0016 §4.8).
-    private let blobWriter: KeyframeBlobWriter?
-    /// P3.6.5: 32-byte DbKey material for per-blob HKDF key derivation.
-    /// Read from `MCI_DB_KEY_HEX` at helper launch, never logged.
-    private let blobKeyMaterial: [UInt8]
+    private let keyframeRetainer: (any KeyframeRetaining)?
+    private let completionCoordinator: OrderedCaptureDispatcher
 
     public init(
         worker: VisionOCRWorker,
@@ -207,16 +278,17 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         sink: any FrameSink,
         sequence: FrameSequence,
         counters: HelperHealthCounters,
-        blobWriter: KeyframeBlobWriter? = nil,
-        blobKeyMaterial: [UInt8] = []
+        keyframeRetainer: (any KeyframeRetaining)? = nil
     ) {
         self.worker = worker
         self.cascade = cascade
         self.sink = sink
         self.sequence = sequence
         self.counters = counters
-        self.blobWriter = blobWriter
-        self.blobKeyMaterial = blobKeyMaterial
+        self.keyframeRetainer = keyframeRetainer
+        self.completionCoordinator = OrderedCaptureDispatcher(
+            capacity: VisionOCRWorker.defaultCapacity
+        )
     }
 
     public func processAfterAllow(
@@ -224,14 +296,61 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         context: WorkflowContext,
         input: OCREngineInput
     ) async {
+        await processAfterAllow(
+            captureOrdinal: tsUs,
+            tsUs: tsUs,
+            context: context,
+            input: input,
+            evidenceCandidate: nil
+        )
+    }
+
+    public func processAfterAllow(
+        tsUs: UInt64,
+        context: WorkflowContext,
+        input: OCREngineInput,
+        evidenceCandidate: KeyframeEvidenceCandidate?
+    ) async {
+        await processAfterAllow(
+            captureOrdinal: evidenceCandidate?.captureOrdinal ?? tsUs,
+            tsUs: tsUs,
+            context: context,
+            input: input,
+            evidenceCandidate: evidenceCandidate
+        )
+    }
+
+    public func processAfterAllow(
+        captureOrdinal: UInt64,
+        tsUs: UInt64,
+        context: WorkflowContext,
+        input: OCREngineInput,
+        evidenceCandidate: KeyframeEvidenceCandidate?
+    ) async {
+        await processAfterAllow(
+            captureOrdinal: captureOrdinal,
+            tsUs: tsUs,
+            context: context,
+            input: input,
+            evidenceCandidate: evidenceCandidate,
+            disposition: { _ in }
+        )
+    }
+
+    public func processAfterAllow(
+        captureOrdinal: UInt64,
+        tsUs: UInt64,
+        context: WorkflowContext,
+        input: OCREngineInput,
+        evidenceCandidate: KeyframeEvidenceCandidate?,
+        disposition: @Sendable @escaping (OCRPostAllowDisposition) -> Void
+    ) async {
         // PR #226 §5.1 (2) — MCI_OCR_TRACE=1 env-gated trace at the
-        // post-allow entry. Logs bundle id + kill-switch state so the
-        // operator can attribute the M4 short-circuit fork live.
-        // Content-free: bundle id + boolean. NO OCR text — there is
-        // no OCR text at this entry point anyway (OCR has not run).
+        // post-allow entry. Only the kill-switch state is emitted; bundle ID,
+        // title, URL, and OCR text stay out of diagnostics.
         OCRTrace.emit(
             "ocr-post-allow-entry",
-            "bundle=\(context.appBundleId ?? "nil") kill_ocr_emit=\(Self.killOcrEmit)"
+            "kill_ocr_emit=\(Self.killOcrEmit)"
         )
         // CSO escalation 2026-05-29 — capture-scope cross-window leak
         // (see `Self.killOcrEmit` + `docs/research/capture-scope-
@@ -254,6 +373,7 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                 sequence: sequence,
                 counters: counters
             )
+            disposition(.finalized)
             return
         }
 
@@ -261,31 +381,212 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         let sinkSnapshot = sink
         let sequenceSnapshot = sequence
         let countersSnapshot = counters
-        let blobWriterSnapshot = blobWriter
-        let blobKeySnapshot = blobKeyMaterial
+        let keyframeRetainerSnapshot = keyframeRetainer
         // P3.6.5: capture the pixel buffer reference for the blob
         // writer. OCREngineInput is @unchecked Sendable; the pixel
         // buffer stays alive until the job completes (held by the
         // worker's Job struct + this captured reference).
-        let inputSnapshot = input
-        await worker.submit(input: input) { result in
-            // Completion is `@Sendable`; spawn a Task to drive the
-            // §6 re-cascade + wire emission in an async context.
-            Task {
-                await CascadeTwiceOCREmitter.handleOCRResult(
+        // A retained image contains the whole focused window, not just its
+        // dirty rectangle. Scan that same surface before the secret gate.
+        let inputSnapshot = keyframeRetainerSnapshot != nil && evidenceCandidate != nil
+            ? OCREngineInput(
+                pixelBuffer: input.pixelBuffer,
+                roi: CGRect(x: 0, y: 0, width: 1, height: 1)
+            )
+            : input
+        await Self.submitOCRAttempt(
+            worker: worker,
+            completionCoordinator: completionCoordinator,
+            attemptsRemaining: 1,
+            captureOrdinal: captureOrdinal,
+            tsUs: tsUs,
+            context: context,
+            input: inputSnapshot,
+            evidenceCandidate: evidenceCandidate,
+            cascade: cascadeSnapshot,
+            sink: sinkSnapshot,
+            sequence: sequenceSnapshot,
+            counters: countersSnapshot,
+            keyframeRetainer: keyframeRetainerSnapshot,
+            disposition: disposition
+        )
+    }
+
+    /// Retry one OCR job against the same retained pixels. ScreenCaptureKit's
+    /// `.idle` status explicitly means no new frame was generated, so waiting
+    /// for a later callback cannot recover a static window. Keeping the retry
+    /// inside the owned worker/coordinator pair bounds work and preserves the
+    /// original privacy snapshot, context, evidence identity, and ROI.
+    private static func submitOCRAttempt(
+        worker: VisionOCRWorker,
+        completionCoordinator: OrderedCaptureDispatcher,
+        attemptsRemaining: Int,
+        captureOrdinal: UInt64,
+        tsUs: UInt64,
+        context: WorkflowContext,
+        input: OCREngineInput,
+        evidenceCandidate: KeyframeEvidenceCandidate?,
+        cascade: SuppressionCascade,
+        sink: any FrameSink,
+        sequence: FrameSequence,
+        counters: HelperHealthCounters,
+        keyframeRetainer: (any KeyframeRetaining)?,
+        disposition: @Sendable @escaping (OCRPostAllowDisposition) -> Void
+    ) async {
+        await worker.submit(
+            input: input,
+            onDrop: {
+                Self.scheduleRetryOrFinish(
+                    worker: worker,
+                    completionCoordinator: completionCoordinator,
+                    attemptsRemaining: attemptsRemaining,
+                    captureOrdinal: captureOrdinal,
                     tsUs: tsUs,
                     context: context,
-                    result: result,
-                    cascade: cascadeSnapshot,
-                    sink: sinkSnapshot,
-                    sequence: sequenceSnapshot,
-                    counters: countersSnapshot,
-                    pixelBuffer: inputSnapshot.pixelBuffer,
-                    blobWriter: blobWriterSnapshot,
-                    blobKeyMaterial: blobKeySnapshot
+                    input: input,
+                    evidenceCandidate: evidenceCandidate,
+                    cascade: cascade,
+                    sink: sink,
+                    sequence: sequence,
+                    counters: counters,
+                    keyframeRetainer: keyframeRetainer,
+                    disposition: disposition
                 )
             }
+        ) { result in
+            let resultDisposition = Self.disposition(for: result)
+            // VisionOCRWorker invokes completions serially in submission
+            // order. The owned coordinator preserves that order while
+            // bounding retry and post-OCR persistence/publication work.
+            completionCoordinator.submit(
+                captureOrdinal: captureOrdinal,
+                operation: {
+                    if resultDisposition == .retryableNoContent,
+                       attemptsRemaining > 0
+                    {
+                        OCRTrace.emit(
+                            "ocr-post-allow-retry",
+                            "reason=no_content attempts_remaining=\(attemptsRemaining - 1)"
+                        )
+                        await Self.submitOCRAttempt(
+                            worker: worker,
+                            completionCoordinator: completionCoordinator,
+                            attemptsRemaining: attemptsRemaining - 1,
+                            captureOrdinal: captureOrdinal,
+                            tsUs: tsUs,
+                            context: context,
+                            input: input,
+                            evidenceCandidate: evidenceCandidate,
+                            cascade: cascade,
+                            sink: sink,
+                            sequence: sequence,
+                            counters: counters,
+                            keyframeRetainer: keyframeRetainer,
+                            disposition: disposition
+                        )
+                        return
+                    }
+                    await Self.handleOCRResult(
+                        tsUs: tsUs,
+                        context: context,
+                        result: result,
+                        cascade: cascade,
+                        sink: sink,
+                        sequence: sequence,
+                        counters: counters,
+                        pixelBuffer: input.pixelBuffer,
+                        keyframeRetainer: keyframeRetainer,
+                        evidenceCandidate: evidenceCandidate
+                    )
+                    disposition(resultDisposition)
+                },
+                onDrop: {
+                    Self.scheduleRetryOrFinish(
+                        worker: worker,
+                        completionCoordinator: completionCoordinator,
+                        attemptsRemaining: attemptsRemaining,
+                        captureOrdinal: captureOrdinal,
+                        tsUs: tsUs,
+                        context: context,
+                        input: input,
+                        evidenceCandidate: evidenceCandidate,
+                        cascade: cascade,
+                        sink: sink,
+                        sequence: sequence,
+                        counters: counters,
+                        keyframeRetainer: keyframeRetainer,
+                        disposition: disposition
+                    )
+                }
+            )
         }
+    }
+
+    private static func scheduleRetryOrFinish(
+        worker: VisionOCRWorker,
+        completionCoordinator: OrderedCaptureDispatcher,
+        attemptsRemaining: Int,
+        captureOrdinal: UInt64,
+        tsUs: UInt64,
+        context: WorkflowContext,
+        input: OCREngineInput,
+        evidenceCandidate: KeyframeEvidenceCandidate?,
+        cascade: SuppressionCascade,
+        sink: any FrameSink,
+        sequence: FrameSequence,
+        counters: HelperHealthCounters,
+        keyframeRetainer: (any KeyframeRetaining)?,
+        disposition: @Sendable @escaping (OCRPostAllowDisposition) -> Void
+    ) {
+        guard attemptsRemaining > 0 else {
+            disposition(.retryableNoContent)
+            return
+        }
+        completionCoordinator.submit(
+            captureOrdinal: captureOrdinal,
+            operation: {
+                OCRTrace.emit(
+                    "ocr-post-allow-retry",
+                    "reason=queue_drop attempts_remaining=\(attemptsRemaining - 1)"
+                )
+                await Self.submitOCRAttempt(
+                    worker: worker,
+                    completionCoordinator: completionCoordinator,
+                    attemptsRemaining: attemptsRemaining - 1,
+                    captureOrdinal: captureOrdinal,
+                    tsUs: tsUs,
+                    context: context,
+                    input: input,
+                    evidenceCandidate: evidenceCandidate,
+                    cascade: cascade,
+                    sink: sink,
+                    sequence: sequence,
+                    counters: counters,
+                    keyframeRetainer: keyframeRetainer,
+                    disposition: disposition
+                )
+            },
+            onDrop: {
+                disposition(.retryableNoContent)
+            }
+        )
+    }
+
+    private static func disposition(for result: OCRResult) -> OCRPostAllowDisposition {
+        let text = result.recognizedLines.map(\.text).joined(separator: "\n")
+        if result.timedOut || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .retryableNoContent
+        }
+        return .finalized
+    }
+
+    /// Close result ingress first, then cancel/drain OCR. A late completion
+    /// from a cancellation-resistant engine observes a terminated coordinator
+    /// and cannot publish. After both awaits return, neither OCR nor post-OCR
+    /// persistence remains live.
+    public func stopAndDrain() async {
+        await completionCoordinator.cancelAndDrain()
+        await worker.stopAndDrain()
     }
 
     /// Pure (modulo actor I/O) emit logic. `internal` (not `private`)
@@ -311,22 +612,32 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         sequence: FrameSequence,
         counters: HelperHealthCounters,
         pixelBuffer: CVPixelBuffer? = nil,
-        blobWriter: KeyframeBlobWriter? = nil,
-        blobKeyMaterial: [UInt8] = []
+        keyframeRetainer: (any KeyframeRetaining)? = nil,
+        evidenceCandidate: KeyframeEvidenceCandidate? = nil
     ) async {
         let text = result.recognizedLines.map(\.text).joined(separator: "\n")
+        guard !result.timedOut,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            OCRTrace.emit(
+                "ocr-post-allow-result",
+                "decision=no_content "
+                    + "ocr_len=\(text.utf8.count) "
+                    + "ocr_lines=\(result.recognizedLines.count)"
+            )
+            return
+        }
         let decision = cascade.decideOcr(text: text, context: context)
         // PR #226 §5.1 (2) — MCI_OCR_TRACE=1 trace at the post-allow
-        // OCR completion. Logs bundle id + cascade-twice §6 decision
-        // + OCR text LENGTH (the spec explicitly permits the length
+        // OCR completion. Logs cascade-twice §6 decision + OCR text LENGTH
+        // (the spec explicitly permits the length
         // count as a non-content signal; recognized lines counted as
         // a coarse signal of how much text the OCR produced — useful
         // for diagnosing "OCR ran but produced nothing" silences
         // without leaking the actual content). NEVER the text itself.
         OCRTrace.emit(
             "ocr-post-allow-result",
-            "bundle=\(context.appBundleId ?? "nil") "
-                + "decision=\(decision.traceLabel) "
+            "decision=\(decision.traceLabel) "
                 + "ocr_len=\(text.utf8.count) "
                 + "ocr_lines=\(result.recognizedLines.count)"
         )
@@ -345,45 +656,44 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
             )
 
         case .allow:
-            // Both cascades cleared — emit OCREvent, subject to the
-            // 64 KB cap. Over-cap fails closed per ADR-0013 §7.
-
-            // P3.6.5: encode + encrypt the keyframe blob. Best-effort;
-            // failure → keyframeHash = [0; 32] (graceful degradation).
-            // The blob is written ONLY on .allow paths (ADR-0016 §4.8).
-            var keyframeHash = [UInt8](repeating: 0, count: 32)
-            if let pb = pixelBuffer,
-               let bw = blobWriter,
-               !blobKeyMaterial.isEmpty
-            {
-                if let blob = KeyframeBlobEncoder.encodeAndEncrypt(
-                    pixelBuffer: pb,
-                    blobKeyMaterial: blobKeyMaterial
-                ) {
-                    keyframeHash = blob.sha256
-                    // Fire-and-forget: queue the file write. Drop-oldest
-                    // protects against disk I/O backpressure.
-                    await bw.queueWrite(sha256: blob.sha256, ciphertext: blob.ciphertext)
-                }
+            // Keep the original byte limit before compaction. All complete
+            // passes above remain available to the privacy decision, in order.
+            guard text.utf8.count <= maxOCRTextBytes else {
+                await emitTombstone(
+                    tsUs: tsUs, context: context, reason: .failsafeUnknown,
+                    sink: sink, sequence: sequence, counters: counters
+                )
+                return
             }
-
+            let memoryText = OCRMemoryText.make(from: result.recognizedLines)
+            // Removing repeated lines can create new multiline adjacency. The
+            // exact text that leaves the helper must independently clear privacy.
+            if memoryText != text,
+               case .suppress(let reason) = cascade.decideOcr(text: memoryText, context: context) {
+                await emitTombstone(
+                    tsUs: tsUs, context: context, reason: reason,
+                    sink: sink, sequence: sequence, counters: counters
+                )
+                return
+            }
+            // Validate the complete event with the zero-hash sentinel before
+            // screenshot policy, encoding, or disk I/O becomes reachable.
             let seq = await sequence.allocate()
-            let evt = OCREvent(
+            let zeroHash = [UInt8](repeating: 0, count: ocrEventKeyframeHashLen)
+            let zeroEvent = OCREvent(
                 seq: seq,
                 tsUs: tsUs,
                 appBundleId: context.appBundleId ?? "",
                 windowTitle: context.windowTitle ?? "",
                 url: context.url ?? "",
-                ocrText: text,
-                keyframeHash: keyframeHash
+                ocrText: memoryText,
+                keyframeHash: zeroHash
             )
-            switch encodeOCREvent(seq: seq, event: evt) {
-            case .success(let bytes):
-                try? await sink.write(bytes)
+            let zeroBytes: Data
+            switch encodeOCREvent(seq: seq, event: zeroEvent) {
+            case .success(let validated):
+                zeroBytes = validated
             case .failure:
-                // Over-cap or field overflow ⇒ fail closed: tombstone
-                // with reason 7 (catchall). The same arm both ADR-0013
-                // §7 and ADR-0016 §4.9 mandate.
                 await emitTombstone(
                     tsUs: tsUs,
                     context: context,
@@ -392,8 +702,85 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                     sequence: sequence,
                     counters: counters
                 )
+                return
+            }
+
+            guard !Task.isCancelled,
+                  let pixelBuffer,
+                  let evidenceCandidate,
+                  let keyframeRetainer
+            else {
+                try? await sink.write(zeroBytes)
+                return
+            }
+            let retention: KeyframeRetention
+            do {
+                guard let retained = try await keyframeRetainer.retain(
+                    input: KeyframePixelInput(pixelBuffer: pixelBuffer),
+                    candidate: evidenceCandidate
+                ) else {
+                    try? await sink.write(zeroBytes)
+                    return
+                }
+                retention = retained
+            } catch {
+                reportKeyframeCleanupFailure()
+                try? await sink.write(zeroBytes)
+                return
+            }
+            guard retention.digest.count == ocrEventKeyframeHashLen,
+                  !retention.digest.allSatisfy({ $0 == 0 }),
+                  !Task.isCancelled
+            else {
+                do {
+                    try await keyframeRetainer.discard(retention)
+                } catch {
+                    reportKeyframeCleanupFailure()
+                }
+                try? await sink.write(zeroBytes)
+                return
+            }
+
+            let retainedEvent = OCREvent(
+                seq: seq,
+                tsUs: tsUs,
+                appBundleId: zeroEvent.appBundleId,
+                windowTitle: zeroEvent.windowTitle,
+                url: zeroEvent.url,
+                ocrText: zeroEvent.ocrText,
+                keyframeHash: retention.digest
+            )
+            guard case .success(let retainedBytes) = encodeOCREvent(
+                seq: seq,
+                event: retainedEvent
+            ) else {
+                do {
+                    try await keyframeRetainer.discard(retention)
+                } catch {
+                    reportKeyframeCleanupFailure()
+                }
+                try? await sink.write(zeroBytes)
+                return
+            }
+
+            do {
+                try await sink.write(retainedBytes)
+                await keyframeRetainer.confirm(retention)
+            } catch {
+                do {
+                    try await keyframeRetainer.discard(retention)
+                } catch {
+                    reportKeyframeCleanupFailure()
+                }
+                try? await sink.write(zeroBytes)
             }
         }
+    }
+
+    private static func reportKeyframeCleanupFailure() {
+        FileHandle.standardError.write(
+            Data("mci-capture-helper: keyframe cleanup failed after bounded retries\n".utf8)
+        )
     }
 
     private static func emitTombstone(

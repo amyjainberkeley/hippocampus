@@ -156,21 +156,9 @@ final class ModelDownloadManagerTests: XCTestCase {
 
     // MARK: - Bundled manifest regression
 
-    /// Pin the SHA + size of every downloadable entry in the bundled
-    /// `models.json` to the value the HF artifact actually has at the
-    /// time of the last successful install. Catches the cycle 8.14
-    /// failure mode where PR #220 updated a duplicate copy of
-    /// `models.json` at apps/hippocampus/Resources/ but not the
-    /// bundled source inside HippocampusKit/Resources/, so the
-    /// shipped DMG carried the old SHA and every Qwen install failed
-    /// with "Download integrity check failed". See
-    /// docs/research/onboarding-wiring-audit-2026-05-30.md §3.
-    ///
-    /// If HF re-uploads the tarball, this test fails first — update
-    /// the expected values here AND in
-    /// apps/hippocampus/Sources/HippocampusKit/Resources/models.json
-    /// in the same PR.
-    func testBundledManifestPinsQwen3SHA() throws {
+    /// The shipped manifest must not expose a model download until its public
+    /// artifact is reachable without private credentials.
+    func testBundledManifestContainsOnlyBundledModels() throws {
         // Load the manifest the way ModelDownloadManager loads it
         // in-app: Bundle.module first (test target sees the SwiftPM
         // resource bundle directly), falling back to absolute file
@@ -193,24 +181,8 @@ final class ModelDownloadManagerTests: XCTestCase {
             ModelDownloadManager.ModelManifest.self, from: data
         )
 
-        guard let qwen = manifest.models.first(where: { $0.modelID == "qwen3-1.7b-fp16" }) else {
-            XCTFail("bundled manifest missing qwen3-1.7b-fp16 entry")
-            return
-        }
-
-        XCTAssertEqual(
-            qwen.sha256,
-            "eb3e931ca74238bb7efb4432971da1a7887d89227936c0129ca8753879673d8f",
-            "Qwen3 sha256 drifted from the HF artifact. If HF was re-uploaded, update both this test and the bundled manifest in the same PR. See onboarding-wiring-audit-2026-05-30.md §3."
-        )
-        XCTAssertEqual(
-            qwen.sizeBytes,
-            2_658_309_463,
-            "Qwen3 sizeBytes drifted from the HF artifact — see sha256 message above."
-        )
-        XCTAssertEqual(
-            qwen.downloadURL,
-            "https://huggingface.co/amyjainberkeley/mci-coreml-models/resolve/main/Qwen3-1.7B-FP16.mlmodelc.tar.gz"
-        )
+        XCTAssertEqual(manifest.models.map(\.modelID), ["arctic-embed-s-fp16"])
+        XCTAssertTrue(manifest.models.allSatisfy(\.bundled))
+        XCTAssertTrue(manifest.models.allSatisfy { $0.downloadURL == nil })
     }
 }

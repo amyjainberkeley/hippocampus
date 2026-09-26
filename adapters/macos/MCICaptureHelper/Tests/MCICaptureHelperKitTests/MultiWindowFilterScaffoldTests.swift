@@ -243,22 +243,14 @@ final class MultiWindowFilterErrorTests: XCTestCase {
     }
 }
 
-// MARK: - Scope-fence guards — assert the scaffold did NOT flip defaults
+// MARK: - Qualified production default
 
 final class MultiWindowFilterScopeFenceTests: XCTestCase {
 
-    // The scaffold discipline: multi-window path exists as CODE READY
-    // TO BE FLIPPED. It must NOT be reachable from the shipping capture
-    // path until Phase 7 PR 13 wires it in. These tests are structural
-    // guards asserting the scope-fence held in this PR.
-
-    func test_killOcrEmit_default_is_still_true() {
-        // ADR-0031 §Status "M4 SECOND LIFT REVERTED" keeps the OCR-emit
-        // kill-switch RE-ENGAGED until the third-lift conditions all
-        // hold. This scaffold is one of those conditions (the
-        // implementing PR path); it must NOT flip the kill-switch. The
-        // M4 lift is a strictly separate standalone PR (Phase 7 PR 14).
-        XCTAssertTrue(CascadeTwiceOCREmitter.killOcrEmit,
-                      "V2-P1 third-lift scaffold MUST NOT flip killOcrEmit — that's Phase 7 PR 14.")
+    func test_killOcrEmit_default_is_false_after_live_qualification() {
+        XCTAssertFalse(
+            CascadeTwiceOCREmitter.killOcrEmit,
+            "The standalone Phase 7 lift must arm privacy-cleared OCR by default."
+        )
     }
 }

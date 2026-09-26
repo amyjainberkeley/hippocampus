@@ -3,16 +3,16 @@
 // AllowlistEditorViewModel — drives the V2-P10 onboarding slide.
 //
 // Surface contract:
-//   - Display the CSO baseline read-only (so users see what's already
-//     trusted and don't add duplicate entries).
+//   - Display the CSO baseline as immutable capture policy. Supported
+//     baseline apps may still store a user-owned deep-hook opt-in.
 //   - List currently-running apps with toggles: capture OFF / capture
 //     ON / capture + deep-hook ON. Deep-hook may only be ON when
 //     capture is ON.
 //   - Allow expert "add custom bundle id" entry for apps not in the
 //     running set.
 //   - Per ADR-0017 §3.2: refuse to add a bundle that's already on the
-//     CSO baseline (the user would gain nothing; the baseline already
-//     gates that bundle).
+//     CSO baseline. Its existing row is the only place to manage the
+//     optional user-owned deep-hook consent.
 //   - Persist via `UserAllowlistStore` (atomic write + 0600 perms).
 //   - Trigger `FullDiskAccessPermission.requestGrant()` when a deep-
 //     hook toggle flips ON for a known-deep-hookable bundle.
@@ -52,9 +52,8 @@ public struct EditorRow: Sendable, Equatable, Identifiable, Hashable {
     /// [`deepHookScaffoldTooltip`](AllowlistEditorViewModel/deepHookScaffoldTooltip)
     /// copy). Per ADR-0037 (Calendar / Notes / Reminders — Phase D).
     public let deepHookScaffoldOnly: Bool
-    /// True iff the bundle is in the CSO baseline (read-only — the
-    /// user-layer cannot remove a baseline entry; UI shows the row
-    /// as already-trusted).
+    /// True iff the bundle is in the CSO baseline. Its capture state is
+    /// immutable; the user-layer can only record optional deep-hook consent.
     public let isBaselineEntry: Bool
 
     public init(
@@ -77,8 +76,8 @@ public struct EditorRow: Sendable, Equatable, Identifiable, Hashable {
 public enum AllowlistEditorError: Error, Equatable {
     /// Bundle id is empty or whitespace-only.
     case emptyBundleId
-    /// Bundle id is already on the CSO baseline (adding to user-layer
-    /// is redundant + would confuse the audit trail).
+    /// Bundle id is already on the CSO baseline. Its existing row owns any
+    /// optional user-layer deep-hook consent.
     case duplicateOfBaseline(bundleId: String)
     /// Bundle id is already in the user-layer (use updatePosture).
     case duplicateOfUserLayer(bundleId: String)
@@ -153,7 +152,6 @@ public final class AllowlistEditorViewModel: ObservableObject {
         let baseline = await baselineStore.entries()
         let userEntries = await userStore.load()
         let detected = await detector.detect()
-        let baselineIds = Set(baseline.map { $0.bundleId })
         let userById = Dictionary(
             uniqueKeysWithValues: userEntries.map { ($0.bundleId, $0) }
         )
@@ -161,19 +159,23 @@ public final class AllowlistEditorViewModel: ObservableObject {
         var rows: [EditorRow] = []
         var seen: Set<String> = []
 
-        // 1. Baseline rows (read-only, always "captureOnly" since baseline
-        //    doesn't carry per-app deep-hook state — that's user-layer-only).
+        // 1. Baseline rows remain capture-enabled by signed policy. Their
+        //    deep-hook state is still user-owned, so Messages/Mail can read
+        //    the user-layer override without ever mutating baseline capture.
         //    Resolve a human-friendly display name (`com.apple.MobileSMS`
         //    → `Messages`) so the UI never shows a raw bundle id. See
         //    `BundleDisplayNameResolver` for the local-only NSWorkspace
         //    + static-table + prettify ladder.
         for entry in baseline {
+            let posture: AllowlistTogglePosture = userById[entry.bundleId]?.deepHookEnabled == true
+                ? .captureAndDeepHook
+                : .captureOnly
             rows.append(EditorRow(
                 bundleId: entry.bundleId,
                 displayName: BundleDisplayNameResolver.displayName(
                     for: entry.bundleId
                 ),
-                posture: .captureOnly,
+                posture: posture,
                 supportsDeepHook: Self.showsDeepHookToggle(bundleId: entry.bundleId),
                 deepHookScaffoldOnly: Self.deepHookScaffoldBundles.contains(entry.bundleId),
                 isBaselineEntry: true
@@ -247,15 +249,17 @@ public final class AllowlistEditorViewModel: ObservableObject {
     ) async {
         guard let idx = rows.firstIndex(where: { $0.bundleId == bundleId }) else { return }
         var row = rows[idx]
-        // Baseline rows are read-only.
-        guard !row.isBaselineEntry else { return }
-        // Deep-hook implies capture-on; refuse the contradictory state.
+        // Baseline capture is immutable. Its optional deep-hook consent is
+        // recorded in the user layer, and only deep-hookable rows can enter
+        // that posture.
         // Also refuse a scaffold-only deep-hook (per ADR-0037): the row is
         // rendered with the toggle disabled and the tooltip explains why,
         // but a stale call site could still try to flip it — clamp here
         // so the model layer honours the same invariant as the UI.
         let safeNext: AllowlistTogglePosture
-        if next == .captureAndDeepHook && !row.supportsDeepHook {
+        if row.isBaselineEntry && next == .off {
+            safeNext = .captureOnly
+        } else if next == .captureAndDeepHook && !row.supportsDeepHook {
             safeNext = .captureOnly
         } else if next == .captureAndDeepHook && row.deepHookScaffoldOnly {
             safeNext = .captureOnly
@@ -330,7 +334,11 @@ public final class AllowlistEditorViewModel: ObservableObject {
         )
 
         let entries: [UserAllowlistEntry] = rows
-            .filter { !$0.isBaselineEntry }
+            .filter { row in
+                !row.isBaselineEntry
+                    || existingByBundle[row.bundleId] != nil
+                    || row.posture == .captureAndDeepHook
+            }
             .map { row in
                 let prior = existingByBundle[row.bundleId]
                 let rationale = extraRationale[row.bundleId].flatMap { $0 }

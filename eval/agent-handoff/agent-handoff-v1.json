@@ -1,0 +1,2772 @@
+{
+  "dataset_id": "synthetic-agent-handoff-v1",
+  "description": "Synthetic acceptance corpus for evidence-backed local agent handoff. It measures retrieval and packet utility, not answer generation.",
+  "task_count": 36,
+  "capabilities": [
+    "semantic_relevance",
+    "temporal_supersession",
+    "contradiction",
+    "duplicate_ocr",
+    "exact_provenance",
+    "abstention",
+    "handoff_utility"
+  ],
+  "trusted_answer_qualified": false,
+  "instances": [
+    {
+      "question_id": "semantic-embeddings-advisory",
+      "question_type": "semantic_relevance",
+      "capability": "semantic_relevance",
+      "question": "Where did we decide that semantic similarity cannot establish a fact?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "browser://adr/0010"
+      ],
+      "haystack_dates": [
+        "2026/09/01 (Tue) 09:00",
+        "2026/09/02 (Wed) 11:00",
+        "2026/09/02 (Wed) 13:00"
+      ],
+      "haystack_session_ids": [
+        "slack://distractor/semantic-0",
+        "browser://adr/0010",
+        "linear://distractor/semantic-0"
+      ],
+      "haystack_app_ids": [
+        "com.tinyspeck.slackmacgap",
+        "com.apple.Safari",
+        "com.linear"
+      ],
+      "haystack_window_titles": [
+        "Unrelated planning thread 1",
+        "Agent memory decision 1",
+        "UI polish issue 1"
+      ],
+      "haystack_urls": [
+        "slack://distractor/semantic-0",
+        "browser://adr/0010",
+        "linear://distractor/semantic-0"
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "The design review moved to Friday and the notes need a final formatting pass."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "Embedding scores are retrieval hints only; a source-backed verifier must establish support."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The settings sidebar needs an alignment pass before screenshots are refreshed."
+          }
+        ]
+      ],
+      "tags": [
+        "semantic_relevance",
+        "agent_handoff",
+        "com.apple.Safari",
+        "com.linear",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "retrieval hints only"
+        ],
+        "required_session_ids": [
+          "browser://adr/0010"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "semantic-release-upload-blocker",
+      "question_type": "semantic_relevance",
+      "capability": "semantic_relevance",
+      "question": "What is preventing the Mac release from being uploaded?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "linear://HIP-311"
+      ],
+      "haystack_dates": [
+        "2026/09/01 (Tue) 09:00",
+        "2026/09/02 (Wed) 11:00",
+        "2026/09/02 (Wed) 13:00"
+      ],
+      "haystack_session_ids": [
+        "slack://distractor/semantic-1",
+        "linear://HIP-311",
+        "linear://distractor/semantic-1"
+      ],
+      "haystack_app_ids": [
+        "com.tinyspeck.slackmacgap",
+        "com.microsoft.VSCode",
+        "com.linear"
+      ],
+      "haystack_window_titles": [
+        "Unrelated planning thread 2",
+        "Agent memory decision 2",
+        "UI polish issue 2"
+      ],
+      "haystack_urls": [
+        "slack://distractor/semantic-1",
+        "linear://HIP-311",
+        "linear://distractor/semantic-1"
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "The design review moved to Friday and the notes need a final formatting pass."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "HIP-311 is blocked because the release machine has no Developer ID Application signing identity."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The settings sidebar needs an alignment pass before screenshots are refreshed."
+          }
+        ]
+      ],
+      "tags": [
+        "semantic_relevance",
+        "agent_handoff",
+        "com.linear",
+        "com.microsoft.VSCode",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "no Developer ID Application signing identity"
+        ],
+        "required_session_ids": [
+          "linear://HIP-311"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "semantic-global-recall-hotkey",
+      "question_type": "semantic_relevance",
+      "capability": "semantic_relevance",
+      "question": "Which change made memory search available before the Recall window existed?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "github://hippocampus/pull/517"
+      ],
+      "haystack_dates": [
+        "2026/09/01 (Tue) 09:00",
+        "2026/09/02 (Wed) 11:00",
+        "2026/09/02 (Wed) 13:00"
+      ],
+      "haystack_session_ids": [
+        "slack://distractor/semantic-2",
+        "github://hippocampus/pull/517",
+        "linear://distractor/semantic-2"
+      ],
+      "haystack_app_ids": [
+        "com.tinyspeck.slackmacgap",
+        "com.microsoft.VSCode",
+        "com.linear"
+      ],
+      "haystack_window_titles": [
+        "Unrelated planning thread 3",
+        "Agent memory decision 3",
+        "UI polish issue 3"
+      ],
+      "haystack_urls": [
+        "slack://distractor/semantic-2",
+        "github://hippocampus/pull/517",
+        "linear://distractor/semantic-2"
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "The design review moved to Friday and the notes need a final formatting pass."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "PR 517 moved the global Shift Command Space hotkey into the always-running menu-bar shell."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The settings sidebar needs an alignment pass before screenshots are refreshed."
+          }
+        ]
+      ],
+      "tags": [
+        "semantic_relevance",
+        "agent_handoff",
+        "com.linear",
+        "com.microsoft.VSCode",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "moved the global Shift Command Space hotkey"
+        ],
+        "required_session_ids": [
+          "github://hippocampus/pull/517"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "semantic-bounded-agent-context",
+      "question_type": "semantic_relevance",
+      "capability": "semantic_relevance",
+      "question": "How do we keep an AI handoff from swallowing the whole activity history?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "file:///docs/agent-context.md"
+      ],
+      "haystack_dates": [
+        "2026/09/01 (Tue) 09:00",
+        "2026/09/02 (Wed) 11:00",
+        "2026/09/02 (Wed) 13:00"
+      ],
+      "haystack_session_ids": [
+        "slack://distractor/semantic-3",
+        "file:///docs/agent-context.md",
+        "linear://distractor/semantic-3"
+      ],
+      "haystack_app_ids": [
+        "com.tinyspeck.slackmacgap",
+        "com.microsoft.VSCode",
+        "com.linear"
+      ],
+      "haystack_window_titles": [
+        "Unrelated planning thread 4",
+        "Agent memory decision 4",
+        "UI polish issue 4"
+      ],
+      "haystack_urls": [
+        "slack://distractor/semantic-3",
+        "file:///docs/agent-context.md",
+        "linear://distractor/semantic-3"
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "The design review moved to Friday and the notes need a final formatting pass."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The mci_context handoff compiles a bounded cited packet for the current focus instead of dumping history."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The settings sidebar needs an alignment pass before screenshots are refreshed."
+          }
+        ]
+      ],
+      "tags": [
+        "semantic_relevance",
+        "agent_handoff",
+        "com.linear",
+        "com.microsoft.VSCode",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "bounded cited packet"
+        ],
+        "required_session_ids": [
+          "file:///docs/agent-context.md"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "semantic-missing-embedder",
+      "question_type": "semantic_relevance",
+      "capability": "semantic_relevance",
+      "question": "What should an agent see when the local semantic model cannot load?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "terminal://zsh/embedder-health"
+      ],
+      "haystack_dates": [
+        "2026/09/01 (Tue) 09:00",
+        "2026/09/02 (Wed) 11:00",
+        "2026/09/02 (Wed) 13:00"
+      ],
+      "haystack_session_ids": [
+        "slack://distractor/semantic-4",
+        "terminal://zsh/embedder-health",
+        "linear://distractor/semantic-4"
+      ],
+      "haystack_app_ids": [
+        "com.tinyspeck.slackmacgap",
+        "com.microsoft.VSCode",
+        "com.linear"
+      ],
+      "haystack_window_titles": [
+        "Unrelated planning thread 5",
+        "Agent memory decision 5",
+        "UI polish issue 5"
+      ],
+      "haystack_urls": [
+        "slack://distractor/semantic-4",
+        "terminal://zsh/embedder-health",
+        "linear://distractor/semantic-4"
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "The design review moved to Friday and the notes need a final formatting pass."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "When Arctic Embed S is unavailable, recall reports embeddings_unavailable and exposes lexical related context as degraded."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The settings sidebar needs an alignment pass before screenshots are refreshed."
+          }
+        ]
+      ],
+      "tags": [
+        "semantic_relevance",
+        "agent_handoff",
+        "com.linear",
+        "com.microsoft.VSCode",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "embeddings_unavailable"
+        ],
+        "required_session_ids": [
+          "terminal://zsh/embedder-health"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "semantic-pre-pixel-privacy",
+      "question_type": "semantic_relevance",
+      "capability": "semantic_relevance",
+      "question": "What prevents a stale window identity from admitting sensitive pixels?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "file:///docs/privacy/focus-gate.md"
+      ],
+      "haystack_dates": [
+        "2026/09/01 (Tue) 09:00",
+        "2026/09/02 (Wed) 11:00",
+        "2026/09/02 (Wed) 13:00"
+      ],
+      "haystack_session_ids": [
+        "slack://distractor/semantic-5",
+        "file:///docs/privacy/focus-gate.md",
+        "linear://distractor/semantic-5"
+      ],
+      "haystack_app_ids": [
+        "com.tinyspeck.slackmacgap",
+        "com.microsoft.VSCode",
+        "com.linear"
+      ],
+      "haystack_window_titles": [
+        "Unrelated planning thread 6",
+        "Agent memory decision 6",
+        "UI polish issue 6"
+      ],
+      "haystack_urls": [
+        "slack://distractor/semantic-5",
+        "file:///docs/privacy/focus-gate.md",
+        "linear://distractor/semantic-5"
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "The design review moved to Friday and the notes need a final formatting pass."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The focus-generation gate binds each frame to the current Accessibility window snapshot before pixel admission."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The settings sidebar needs an alignment pass before screenshots are refreshed."
+          }
+        ]
+      ],
+      "tags": [
+        "semantic_relevance",
+        "agent_handoff",
+        "com.linear",
+        "com.microsoft.VSCode",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "focus-generation gate"
+        ],
+        "required_session_ids": [
+          "file:///docs/privacy/focus-gate.md"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "temporal-owner",
+      "question_type": "temporal_supersession",
+      "capability": "temporal_supersession",
+      "question": "Who owns HIP-204 now?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "linear://HIP-204/current"
+      ],
+      "haystack_dates": [
+        "2026/09/01 (Tue) 09:00",
+        "2026/09/02 (Wed) 14:00",
+        "2026/09/02 (Wed) 15:00"
+      ],
+      "haystack_session_ids": [
+        "linear://HIP-204/old",
+        "linear://HIP-204/current",
+        "terminal://distractor/temporal-0"
+      ],
+      "haystack_app_ids": [
+        "com.microsoft.VSCode",
+        "com.linear",
+        "com.apple.Terminal"
+      ],
+      "haystack_window_titles": [
+        "Previous state 1",
+        "Current state 1",
+        "Unrelated test run 1"
+      ],
+      "haystack_urls": [
+        "linear://HIP-204/old",
+        "linear://HIP-204/current",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "Previous plan: Martin."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "Current decision: Priya. This supersedes the previous plan."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The focused package tests completed without changing the decision."
+          }
+        ]
+      ],
+      "tags": [
+        "temporal_supersession",
+        "agent_handoff",
+        "com.apple.Terminal",
+        "com.linear",
+        "com.microsoft.VSCode"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "Priya"
+        ],
+        "required_session_ids": [
+          "linear://HIP-204/current"
+        ],
+        "forbidden_session_ids": [
+          "linear://HIP-204/old"
+        ],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "temporal-model-path",
+      "question_type": "temporal_supersession",
+      "capability": "temporal_supersession",
+      "question": "What is the current installed embedding model path?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "file:///current-model-path"
+      ],
+      "haystack_dates": [
+        "2026/09/01 (Tue) 09:00",
+        "2026/09/02 (Wed) 14:00",
+        "2026/09/02 (Wed) 15:00"
+      ],
+      "haystack_session_ids": [
+        "file:///old-model-path",
+        "file:///current-model-path",
+        "terminal://distractor/temporal-1"
+      ],
+      "haystack_app_ids": [
+        "com.microsoft.VSCode",
+        "com.linear",
+        "com.apple.Terminal"
+      ],
+      "haystack_window_titles": [
+        "Previous state 2",
+        "Current state 2",
+        "Unrelated test run 2"
+      ],
+      "haystack_urls": [
+        "file:///old-model-path",
+        "file:///current-model-path",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "Previous plan: ~/Models/ArcticEmbedS_INT8.mlmodelc."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "Current decision: /Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc. This supersedes the previous plan."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The focused package tests completed without changing the decision."
+          }
+        ]
+      ],
+      "tags": [
+        "temporal_supersession",
+        "agent_handoff",
+        "com.apple.Terminal",
+        "com.linear",
+        "com.microsoft.VSCode"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "/Applications/Hippocampus.app/Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc"
+        ],
+        "required_session_ids": [
+          "file:///current-model-path"
+        ],
+        "forbidden_session_ids": [
+          "file:///old-model-path"
+        ],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "temporal-launch-date",
+      "question_type": "temporal_supersession",
+      "capability": "temporal_supersession",
+      "question": "What is the current launch date for Atlas?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "linear://ATLAS-90/current"
+      ],
+      "haystack_dates": [
+        "2026/09/01 (Tue) 09:00",
+        "2026/09/02 (Wed) 14:00",
+        "2026/09/02 (Wed) 15:00"
+      ],
+      "haystack_session_ids": [
+        "slack://atlas/launch-old",
+        "linear://ATLAS-90/current",
+        "terminal://distractor/temporal-2"
+      ],
+      "haystack_app_ids": [
+        "com.microsoft.VSCode",
+        "com.linear",
+        "com.apple.Terminal"
+      ],
+      "haystack_window_titles": [
+        "Previous state 3",
+        "Current state 3",
+        "Unrelated test run 3"
+      ],
+      "haystack_urls": [
+        "slack://atlas/launch-old",
+        "linear://ATLAS-90/current",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "Previous plan: September 8."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "Current decision: September 15. This supersedes the previous plan."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The focused package tests completed without changing the decision."
+          }
+        ]
+      ],
+      "tags": [
+        "temporal_supersession",
+        "agent_handoff",
+        "com.apple.Terminal",
+        "com.linear",
+        "com.microsoft.VSCode"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "September 15"
+        ],
+        "required_session_ids": [
+          "linear://ATLAS-90/current"
+        ],
+        "forbidden_session_ids": [
+          "slack://atlas/launch-old"
+        ],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "temporal-benchmark-count",
+      "question_type": "temporal_supersession",
+      "capability": "temporal_supersession",
+      "question": "How many tasks are in agent-handoff-v1 now?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "file:///benchmark-count-current"
+      ],
+      "haystack_dates": [
+        "2026/09/01 (Tue) 09:00",
+        "2026/09/02 (Wed) 14:00",
+        "2026/09/02 (Wed) 15:00"
+      ],
+      "haystack_session_ids": [
+        "file:///benchmark-count-old",
+        "file:///benchmark-count-current",
+        "terminal://distractor/temporal-3"
+      ],
+      "haystack_app_ids": [
+        "com.microsoft.VSCode",
+        "com.linear",
+        "com.apple.Terminal"
+      ],
+      "haystack_window_titles": [
+        "Previous state 4",
+        "Current state 4",
+        "Unrelated test run 4"
+      ],
+      "haystack_urls": [
+        "file:///benchmark-count-old",
+        "file:///benchmark-count-current",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "Previous plan: 24 tasks."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "Current decision: 36 tasks. This supersedes the previous plan."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The focused package tests completed without changing the decision."
+          }
+        ]
+      ],
+      "tags": [
+        "temporal_supersession",
+        "agent_handoff",
+        "com.apple.Terminal",
+        "com.linear",
+        "com.microsoft.VSCode"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "36 tasks"
+        ],
+        "required_session_ids": [
+          "file:///benchmark-count-current"
+        ],
+        "forbidden_session_ids": [
+          "file:///benchmark-count-old"
+        ],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "temporal-signing-team",
+      "question_type": "temporal_supersession",
+      "capability": "temporal_supersession",
+      "question": "Which Apple team identifier should the release use now?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "file:///signing-team-current"
+      ],
+      "haystack_dates": [
+        "2026/09/01 (Tue) 09:00",
+        "2026/09/02 (Wed) 14:00",
+        "2026/09/02 (Wed) 15:00"
+      ],
+      "haystack_session_ids": [
+        "file:///signing-team-old",
+        "file:///signing-team-current",
+        "terminal://distractor/temporal-4"
+      ],
+      "haystack_app_ids": [
+        "com.microsoft.VSCode",
+        "com.linear",
+        "com.apple.Terminal"
+      ],
+      "haystack_window_titles": [
+        "Previous state 5",
+        "Current state 5",
+        "Unrelated test run 5"
+      ],
+      "haystack_urls": [
+        "file:///signing-team-old",
+        "file:///signing-team-current",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "Previous plan: OLDTEAM42."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "Current decision: NEWTEAM73. This supersedes the previous plan."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The focused package tests completed without changing the decision."
+          }
+        ]
+      ],
+      "tags": [
+        "temporal_supersession",
+        "agent_handoff",
+        "com.apple.Terminal",
+        "com.linear",
+        "com.microsoft.VSCode"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "NEWTEAM73"
+        ],
+        "required_session_ids": [
+          "file:///signing-team-current"
+        ],
+        "forbidden_session_ids": [
+          "file:///signing-team-old"
+        ],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "temporal-capture-state",
+      "question_type": "temporal_supersession",
+      "capability": "temporal_supersession",
+      "question": "What happens to capture after onboarding is completed now?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "github://capture/current"
+      ],
+      "haystack_dates": [
+        "2026/09/01 (Tue) 09:00",
+        "2026/09/02 (Wed) 14:00",
+        "2026/09/02 (Wed) 15:00"
+      ],
+      "haystack_session_ids": [
+        "github://capture/old",
+        "github://capture/current",
+        "terminal://distractor/temporal-5"
+      ],
+      "haystack_app_ids": [
+        "com.microsoft.VSCode",
+        "com.linear",
+        "com.apple.Terminal"
+      ],
+      "haystack_window_titles": [
+        "Previous state 6",
+        "Current state 6",
+        "Unrelated test run 6"
+      ],
+      "haystack_urls": [
+        "github://capture/old",
+        "github://capture/current",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "Previous plan: capture remains disabled."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "Current decision: capture is enabled and the verified helper topology starts. This supersedes the previous plan."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The focused package tests completed without changing the decision."
+          }
+        ]
+      ],
+      "tags": [
+        "temporal_supersession",
+        "agent_handoff",
+        "com.apple.Terminal",
+        "com.linear",
+        "com.microsoft.VSCode"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "capture is enabled and the verified helper topology starts"
+        ],
+        "required_session_ids": [
+          "github://capture/current"
+        ],
+        "forbidden_session_ids": [
+          "github://capture/old"
+        ],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "contradiction-retention",
+      "question_type": "contradiction",
+      "capability": "contradiction",
+      "question": "What conflict exists about screenshot retention?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "slack://conflict/0/left",
+        "github://conflict/0/right"
+      ],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 10:00",
+        "2026/09/02 (Wed) 10:05",
+        "2026/09/01 (Tue) 08:00"
+      ],
+      "haystack_session_ids": [
+        "slack://conflict/0/left",
+        "github://conflict/0/right",
+        "file:///conflict/0/background"
+      ],
+      "haystack_app_ids": [
+        "com.tinyspeck.slackmacgap",
+        "com.github.GitHubClient",
+        "com.apple.TextEdit"
+      ],
+      "haystack_window_titles": [
+        "Conflict note 1 A",
+        "Conflict note 1 B",
+        "Background 1"
+      ],
+      "haystack_urls": [
+        "slack://conflict/0/left",
+        "github://conflict/0/right",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "screenshots are retained for 30 days."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "screenshots are retained for 90 days."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The release checklist requires conflicts to remain visible until resolved."
+          }
+        ]
+      ],
+      "tags": [
+        "contradiction",
+        "agent_handoff",
+        "com.apple.TextEdit",
+        "com.github.GitHubClient",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "screenshots are retained for 30 days",
+          "screenshots are retained for 90 days"
+        ],
+        "required_session_ids": [
+          "slack://conflict/0/left",
+          "github://conflict/0/right"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [
+          "slack://conflict/0/left",
+          "github://conflict/0/right"
+        ],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "contradiction-cloud",
+      "question_type": "contradiction",
+      "capability": "contradiction",
+      "question": "What conflict exists about cloud uploads?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "slack://conflict/1/left",
+        "github://conflict/1/right"
+      ],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 10:00",
+        "2026/09/02 (Wed) 10:05",
+        "2026/09/01 (Tue) 08:00"
+      ],
+      "haystack_session_ids": [
+        "slack://conflict/1/left",
+        "github://conflict/1/right",
+        "file:///conflict/1/background"
+      ],
+      "haystack_app_ids": [
+        "com.tinyspeck.slackmacgap",
+        "com.github.GitHubClient",
+        "com.apple.TextEdit"
+      ],
+      "haystack_window_titles": [
+        "Conflict note 2 A",
+        "Conflict note 2 B",
+        "Background 2"
+      ],
+      "haystack_urls": [
+        "slack://conflict/1/left",
+        "github://conflict/1/right",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "raw captures never leave the Mac."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "raw captures are uploaded for remote indexing."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The release checklist requires conflicts to remain visible until resolved."
+          }
+        ]
+      ],
+      "tags": [
+        "contradiction",
+        "agent_handoff",
+        "com.apple.TextEdit",
+        "com.github.GitHubClient",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "raw captures never leave the Mac",
+          "raw captures are uploaded for remote indexing"
+        ],
+        "required_session_ids": [
+          "slack://conflict/1/left",
+          "github://conflict/1/right"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [
+          "slack://conflict/1/left",
+          "github://conflict/1/right"
+        ],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "contradiction-pr-state",
+      "question_type": "contradiction",
+      "capability": "contradiction",
+      "question": "What conflict exists about PR 522?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "slack://conflict/2/left",
+        "github://conflict/2/right"
+      ],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 10:00",
+        "2026/09/02 (Wed) 10:05",
+        "2026/09/01 (Tue) 08:00"
+      ],
+      "haystack_session_ids": [
+        "slack://conflict/2/left",
+        "github://conflict/2/right",
+        "file:///conflict/2/background"
+      ],
+      "haystack_app_ids": [
+        "com.tinyspeck.slackmacgap",
+        "com.github.GitHubClient",
+        "com.apple.TextEdit"
+      ],
+      "haystack_window_titles": [
+        "Conflict note 3 A",
+        "Conflict note 3 B",
+        "Background 3"
+      ],
+      "haystack_urls": [
+        "slack://conflict/2/left",
+        "github://conflict/2/right",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "PR 522 is merged."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "PR 522 is blocked on review."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The release checklist requires conflicts to remain visible until resolved."
+          }
+        ]
+      ],
+      "tags": [
+        "contradiction",
+        "agent_handoff",
+        "com.apple.TextEdit",
+        "com.github.GitHubClient",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "PR 522 is merged",
+          "PR 522 is blocked on review"
+        ],
+        "required_session_ids": [
+          "slack://conflict/2/left",
+          "github://conflict/2/right"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [
+          "slack://conflict/2/left",
+          "github://conflict/2/right"
+        ],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "contradiction-customer-date",
+      "question_type": "contradiction",
+      "capability": "contradiction",
+      "question": "What conflicting delivery promise was recorded for Meridian?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "slack://conflict/3/left",
+        "github://conflict/3/right"
+      ],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 10:00",
+        "2026/09/02 (Wed) 10:05",
+        "2026/09/01 (Tue) 08:00"
+      ],
+      "haystack_session_ids": [
+        "slack://conflict/3/left",
+        "github://conflict/3/right",
+        "file:///conflict/3/background"
+      ],
+      "haystack_app_ids": [
+        "com.tinyspeck.slackmacgap",
+        "com.github.GitHubClient",
+        "com.apple.TextEdit"
+      ],
+      "haystack_window_titles": [
+        "Conflict note 4 A",
+        "Conflict note 4 B",
+        "Background 4"
+      ],
+      "haystack_urls": [
+        "slack://conflict/3/left",
+        "github://conflict/3/right",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "SSO ships by the end of Q3."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "SSO ships in Q4."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The release checklist requires conflicts to remain visible until resolved."
+          }
+        ]
+      ],
+      "tags": [
+        "contradiction",
+        "agent_handoff",
+        "com.apple.TextEdit",
+        "com.github.GitHubClient",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "SSO ships by the end of Q3",
+          "SSO ships in Q4"
+        ],
+        "required_session_ids": [
+          "slack://conflict/3/left",
+          "github://conflict/3/right"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [
+          "slack://conflict/3/left",
+          "github://conflict/3/right"
+        ],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "contradiction-password-manager",
+      "question_type": "contradiction",
+      "capability": "contradiction",
+      "question": "What conflict exists about password-manager capture?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "slack://conflict/4/left",
+        "github://conflict/4/right"
+      ],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 10:00",
+        "2026/09/02 (Wed) 10:05",
+        "2026/09/01 (Tue) 08:00"
+      ],
+      "haystack_session_ids": [
+        "slack://conflict/4/left",
+        "github://conflict/4/right",
+        "file:///conflict/4/background"
+      ],
+      "haystack_app_ids": [
+        "com.tinyspeck.slackmacgap",
+        "com.github.GitHubClient",
+        "com.apple.TextEdit"
+      ],
+      "haystack_window_titles": [
+        "Conflict note 5 A",
+        "Conflict note 5 B",
+        "Background 5"
+      ],
+      "haystack_urls": [
+        "slack://conflict/4/left",
+        "github://conflict/4/right",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "password-manager windows are always blocked."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "password-manager windows may be captured when focused."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The release checklist requires conflicts to remain visible until resolved."
+          }
+        ]
+      ],
+      "tags": [
+        "contradiction",
+        "agent_handoff",
+        "com.apple.TextEdit",
+        "com.github.GitHubClient",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "password-manager windows are always blocked",
+          "password-manager windows may be captured when focused"
+        ],
+        "required_session_ids": [
+          "slack://conflict/4/left",
+          "github://conflict/4/right"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [
+          "slack://conflict/4/left",
+          "github://conflict/4/right"
+        ],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "duplicate-build-status",
+      "question_type": "duplicate_ocr",
+      "capability": "duplicate_ocr",
+      "question": "What happened to the release build?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "screen://duplicate/0/1",
+        "screen://duplicate/0/2",
+        "screen://duplicate/0/3"
+      ],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 12:01",
+        "2026/09/02 (Wed) 12:02",
+        "2026/09/02 (Wed) 12:03",
+        "2026/09/02 (Wed) 11:00"
+      ],
+      "haystack_session_ids": [
+        "screen://duplicate/0/1",
+        "screen://duplicate/0/2",
+        "screen://duplicate/0/3",
+        "slack://duplicate/0/distractor"
+      ],
+      "haystack_app_ids": [
+        "com.apple.Terminal",
+        "com.apple.Terminal",
+        "com.apple.Terminal",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "haystack_window_titles": [
+        "Repeated status 1",
+        "Repeated status 1",
+        "Repeated status 1",
+        "Unrelated status 1"
+      ],
+      "haystack_urls": [
+        "screen://duplicate/0",
+        "screen://duplicate/0",
+        "screen://duplicate/0",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "The notarized release build completed successfully."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The notarized release build completed successfully."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The notarized release build completed successfully."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The product review agenda has three unrelated design topics."
+          }
+        ]
+      ],
+      "tags": [
+        "duplicate_ocr",
+        "agent_handoff",
+        "com.apple.Terminal",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "The notarized release build completed successfully."
+        ],
+        "required_session_ids": [],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [
+          "screen://duplicate/0/1",
+          "screen://duplicate/0/2",
+          "screen://duplicate/0/3"
+        ],
+        "max_duplicate_citations": 1,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "duplicate-test-status",
+      "question_type": "duplicate_ocr",
+      "capability": "duplicate_ocr",
+      "question": "What happened in the capture privacy test?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "screen://duplicate/1/1",
+        "screen://duplicate/1/2",
+        "screen://duplicate/1/3"
+      ],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 12:01",
+        "2026/09/02 (Wed) 12:02",
+        "2026/09/02 (Wed) 12:03",
+        "2026/09/02 (Wed) 11:00"
+      ],
+      "haystack_session_ids": [
+        "screen://duplicate/1/1",
+        "screen://duplicate/1/2",
+        "screen://duplicate/1/3",
+        "slack://duplicate/1/distractor"
+      ],
+      "haystack_app_ids": [
+        "com.apple.Terminal",
+        "com.apple.Terminal",
+        "com.apple.Terminal",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "haystack_window_titles": [
+        "Repeated status 2",
+        "Repeated status 2",
+        "Repeated status 2",
+        "Unrelated status 2"
+      ],
+      "haystack_urls": [
+        "screen://duplicate/1",
+        "screen://duplicate/1",
+        "screen://duplicate/1",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "The capture privacy test blocked the password window."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The capture privacy test blocked the password window."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The capture privacy test blocked the password window."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The product review agenda has three unrelated design topics."
+          }
+        ]
+      ],
+      "tags": [
+        "duplicate_ocr",
+        "agent_handoff",
+        "com.apple.Terminal",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "The capture privacy test blocked the password window."
+        ],
+        "required_session_ids": [],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [
+          "screen://duplicate/1/1",
+          "screen://duplicate/1/2",
+          "screen://duplicate/1/3"
+        ],
+        "max_duplicate_citations": 1,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "duplicate-owner-status",
+      "question_type": "duplicate_ocr",
+      "capability": "duplicate_ocr",
+      "question": "Who accepted the memory benchmark follow-up?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "screen://duplicate/2/1",
+        "screen://duplicate/2/2",
+        "screen://duplicate/2/3"
+      ],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 12:01",
+        "2026/09/02 (Wed) 12:02",
+        "2026/09/02 (Wed) 12:03",
+        "2026/09/02 (Wed) 11:00"
+      ],
+      "haystack_session_ids": [
+        "screen://duplicate/2/1",
+        "screen://duplicate/2/2",
+        "screen://duplicate/2/3",
+        "slack://duplicate/2/distractor"
+      ],
+      "haystack_app_ids": [
+        "com.apple.Terminal",
+        "com.apple.Terminal",
+        "com.apple.Terminal",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "haystack_window_titles": [
+        "Repeated status 3",
+        "Repeated status 3",
+        "Repeated status 3",
+        "Unrelated status 3"
+      ],
+      "haystack_urls": [
+        "screen://duplicate/2",
+        "screen://duplicate/2",
+        "screen://duplicate/2",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "Priya accepted the memory benchmark follow-up."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "Priya accepted the memory benchmark follow-up."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "Priya accepted the memory benchmark follow-up."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The product review agenda has three unrelated design topics."
+          }
+        ]
+      ],
+      "tags": [
+        "duplicate_ocr",
+        "agent_handoff",
+        "com.apple.Terminal",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "Priya accepted the memory benchmark follow-up."
+        ],
+        "required_session_ids": [],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [
+          "screen://duplicate/2/1",
+          "screen://duplicate/2/2",
+          "screen://duplicate/2/3"
+        ],
+        "max_duplicate_citations": 1,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "duplicate-deploy-status",
+      "question_type": "duplicate_ocr",
+      "capability": "duplicate_ocr",
+      "question": "What happened to the documentation deploy?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "screen://duplicate/3/1",
+        "screen://duplicate/3/2",
+        "screen://duplicate/3/3"
+      ],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 12:01",
+        "2026/09/02 (Wed) 12:02",
+        "2026/09/02 (Wed) 12:03",
+        "2026/09/02 (Wed) 11:00"
+      ],
+      "haystack_session_ids": [
+        "screen://duplicate/3/1",
+        "screen://duplicate/3/2",
+        "screen://duplicate/3/3",
+        "slack://duplicate/3/distractor"
+      ],
+      "haystack_app_ids": [
+        "com.apple.Terminal",
+        "com.apple.Terminal",
+        "com.apple.Terminal",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "haystack_window_titles": [
+        "Repeated status 4",
+        "Repeated status 4",
+        "Repeated status 4",
+        "Unrelated status 4"
+      ],
+      "haystack_urls": [
+        "screen://duplicate/3",
+        "screen://duplicate/3",
+        "screen://duplicate/3",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "The documentation deploy reached production."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The documentation deploy reached production."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The documentation deploy reached production."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The product review agenda has three unrelated design topics."
+          }
+        ]
+      ],
+      "tags": [
+        "duplicate_ocr",
+        "agent_handoff",
+        "com.apple.Terminal",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "The documentation deploy reached production."
+        ],
+        "required_session_ids": [],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [
+          "screen://duplicate/3/1",
+          "screen://duplicate/3/2",
+          "screen://duplicate/3/3"
+        ],
+        "max_duplicate_citations": 1,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "duplicate-sync-status",
+      "question_type": "duplicate_ocr",
+      "capability": "duplicate_ocr",
+      "question": "What happened to the MCP synchronization?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "screen://duplicate/4/1",
+        "screen://duplicate/4/2",
+        "screen://duplicate/4/3"
+      ],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 12:01",
+        "2026/09/02 (Wed) 12:02",
+        "2026/09/02 (Wed) 12:03",
+        "2026/09/02 (Wed) 11:00"
+      ],
+      "haystack_session_ids": [
+        "screen://duplicate/4/1",
+        "screen://duplicate/4/2",
+        "screen://duplicate/4/3",
+        "slack://duplicate/4/distractor"
+      ],
+      "haystack_app_ids": [
+        "com.apple.Terminal",
+        "com.apple.Terminal",
+        "com.apple.Terminal",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "haystack_window_titles": [
+        "Repeated status 5",
+        "Repeated status 5",
+        "Repeated status 5",
+        "Unrelated status 5"
+      ],
+      "haystack_urls": [
+        "screen://duplicate/4",
+        "screen://duplicate/4",
+        "screen://duplicate/4",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "The MCP synchronization imported twelve approved resources."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The MCP synchronization imported twelve approved resources."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The MCP synchronization imported twelve approved resources."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The product review agenda has three unrelated design topics."
+          }
+        ]
+      ],
+      "tags": [
+        "duplicate_ocr",
+        "agent_handoff",
+        "com.apple.Terminal",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "The MCP synchronization imported twelve approved resources."
+        ],
+        "required_session_ids": [],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [
+          "screen://duplicate/4/1",
+          "screen://duplicate/4/2",
+          "screen://duplicate/4/3"
+        ],
+        "max_duplicate_citations": 1,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "provenance-pr",
+      "question_type": "exact_provenance",
+      "capability": "exact_provenance",
+      "question": "Which source says the context packet is bounded?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "github://hippocampus/pull/531"
+      ],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 09:30",
+        "2026/09/02 (Wed) 09:35"
+      ],
+      "haystack_session_ids": [
+        "github://hippocampus/pull/531",
+        "slack://provenance/0/distractor"
+      ],
+      "haystack_app_ids": [
+        "com.github.GitHubClient",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "haystack_window_titles": [
+        "PR 531 bounded agent handoff",
+        "Nearby source 1"
+      ],
+      "haystack_urls": [
+        "github://hippocampus/pull/531",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "PR 531 says mci_context emits a bounded packet with canonical citations."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "A nearby thread mentions the same project but does not contain the requested record."
+          }
+        ]
+      ],
+      "tags": [
+        "exact_provenance",
+        "agent_handoff",
+        "com.github.GitHubClient",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "PR 531 says mci_context emits a bounded packet with canonical citations."
+        ],
+        "required_session_ids": [
+          "github://hippocampus/pull/531"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "provenance-linear",
+      "question_type": "exact_provenance",
+      "capability": "exact_provenance",
+      "question": "Which source assigns the signing blocker?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "linear://HIP-311/comment-7"
+      ],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 09:30",
+        "2026/09/02 (Wed) 09:35"
+      ],
+      "haystack_session_ids": [
+        "linear://HIP-311/comment-7",
+        "slack://provenance/1/distractor"
+      ],
+      "haystack_app_ids": [
+        "com.linear",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "haystack_window_titles": [
+        "HIP-311 signing blocker",
+        "Nearby source 2"
+      ],
+      "haystack_urls": [
+        "linear://HIP-311/comment-7",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "HIP-311 comment 7 assigns the signing blocker to the release owner."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "A nearby thread mentions the same project but does not contain the requested record."
+          }
+        ]
+      ],
+      "tags": [
+        "exact_provenance",
+        "agent_handoff",
+        "com.linear",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "HIP-311 comment 7 assigns the signing blocker to the release owner."
+        ],
+        "required_session_ids": [
+          "linear://HIP-311/comment-7"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "provenance-browser",
+      "question_type": "exact_provenance",
+      "capability": "exact_provenance",
+      "question": "Which source describes the local-only storage promise?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "https://hippocampus.local/privacy"
+      ],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 09:30",
+        "2026/09/02 (Wed) 09:35"
+      ],
+      "haystack_session_ids": [
+        "https://hippocampus.local/privacy",
+        "slack://provenance/2/distractor"
+      ],
+      "haystack_app_ids": [
+        "com.apple.Safari",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "haystack_window_titles": [
+        "Hippocampus privacy architecture",
+        "Nearby source 3"
+      ],
+      "haystack_urls": [
+        "https://hippocampus.local/privacy",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "The privacy architecture says raw memory remains in the local encrypted brain."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "A nearby thread mentions the same project but does not contain the requested record."
+          }
+        ]
+      ],
+      "tags": [
+        "exact_provenance",
+        "agent_handoff",
+        "com.apple.Safari",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "The privacy architecture says raw memory remains in the local encrypted brain."
+        ],
+        "required_session_ids": [
+          "https://hippocampus.local/privacy"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "provenance-terminal",
+      "question_type": "exact_provenance",
+      "capability": "exact_provenance",
+      "question": "Which source records the benchmark command?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "terminal://zsh/agent-handoff-run"
+      ],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 09:30",
+        "2026/09/02 (Wed) 09:35"
+      ],
+      "haystack_session_ids": [
+        "terminal://zsh/agent-handoff-run",
+        "slack://provenance/3/distractor"
+      ],
+      "haystack_app_ids": [
+        "com.apple.Terminal",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "haystack_window_titles": [
+        "Terminal agent handoff benchmark",
+        "Nearby source 4"
+      ],
+      "haystack_urls": [
+        "terminal://zsh/agent-handoff-run",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "Command: scripts/eval/agent-handoff/run.sh --out result.json"
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "A nearby thread mentions the same project but does not contain the requested record."
+          }
+        ]
+      ],
+      "tags": [
+        "exact_provenance",
+        "agent_handoff",
+        "com.apple.Terminal",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "Command: scripts/eval/agent-handoff/run.sh --out result.json"
+        ],
+        "required_session_ids": [
+          "terminal://zsh/agent-handoff-run"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "provenance-file",
+      "question_type": "exact_provenance",
+      "capability": "exact_provenance",
+      "question": "Which source defines trusted answer qualification?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "file:///docs/eval/agent-handoff-v1.md"
+      ],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 09:30",
+        "2026/09/02 (Wed) 09:35"
+      ],
+      "haystack_session_ids": [
+        "file:///docs/eval/agent-handoff-v1.md",
+        "slack://provenance/4/distractor"
+      ],
+      "haystack_app_ids": [
+        "com.microsoft.VSCode",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "haystack_window_titles": [
+        "agent-handoff-v1.md",
+        "Nearby source 5"
+      ],
+      "haystack_urls": [
+        "file:///docs/eval/agent-handoff-v1.md",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "The benchmark document states trusted_answer_qualified remains false until a qualified verifier exists."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "A nearby thread mentions the same project but does not contain the requested record."
+          }
+        ]
+      ],
+      "tags": [
+        "exact_provenance",
+        "agent_handoff",
+        "com.microsoft.VSCode",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "The benchmark document states trusted_answer_qualified remains false until a qualified verifier exists."
+        ],
+        "required_session_ids": [
+          "file:///docs/eval/agent-handoff-v1.md"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 384,
+        "max_evidence": 6
+      }
+    },
+    {
+      "question_id": "abstain-approver",
+      "question_type": "abstention",
+      "capability": "abstention",
+      "question": "Who approved PR 531?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 10:00",
+        "2026/09/02 (Wed) 10:05"
+      ],
+      "haystack_session_ids": [
+        "github://abstain/0/topic",
+        "slack://abstain/0/nearby"
+      ],
+      "haystack_app_ids": [
+        "com.github.GitHubClient",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "haystack_window_titles": [
+        "Related but incomplete record 1",
+        "Nearby discussion 1"
+      ],
+      "haystack_urls": [
+        "github://abstain/0",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "PR 531 describes bounded context packets but does not name an approver."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The team discussed rollout details that do not answer the requested field."
+          }
+        ]
+      ],
+      "tags": [
+        "abstention",
+        "agent_handoff",
+        "com.github.GitHubClient",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [],
+        "required_session_ids": [],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": true,
+        "max_tokens": 384,
+        "max_evidence": 6
+      },
+      "unanswerable": true
+    },
+    {
+      "question_id": "abstain-due-date",
+      "question_type": "abstention",
+      "capability": "abstention",
+      "question": "What due date was assigned to HIP-311?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 10:00",
+        "2026/09/02 (Wed) 10:05"
+      ],
+      "haystack_session_ids": [
+        "github://abstain/1/topic",
+        "slack://abstain/1/nearby"
+      ],
+      "haystack_app_ids": [
+        "com.github.GitHubClient",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "haystack_window_titles": [
+        "Related but incomplete record 2",
+        "Nearby discussion 2"
+      ],
+      "haystack_urls": [
+        "github://abstain/1",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "HIP-311 records a signing blocker and an owner but no schedule."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The team discussed rollout details that do not answer the requested field."
+          }
+        ]
+      ],
+      "tags": [
+        "abstention",
+        "agent_handoff",
+        "com.github.GitHubClient",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [],
+        "required_session_ids": [],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": true,
+        "max_tokens": 384,
+        "max_evidence": 6
+      },
+      "unanswerable": true
+    },
+    {
+      "question_id": "abstain-duration",
+      "question_type": "abstention",
+      "capability": "abstention",
+      "question": "How long did the capture privacy test take?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 10:00",
+        "2026/09/02 (Wed) 10:05"
+      ],
+      "haystack_session_ids": [
+        "github://abstain/2/topic",
+        "slack://abstain/2/nearby"
+      ],
+      "haystack_app_ids": [
+        "com.github.GitHubClient",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "haystack_window_titles": [
+        "Related but incomplete record 3",
+        "Nearby discussion 3"
+      ],
+      "haystack_urls": [
+        "github://abstain/2",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "The capture privacy test passed after blocking the password window."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The team discussed rollout details that do not answer the requested field."
+          }
+        ]
+      ],
+      "tags": [
+        "abstention",
+        "agent_handoff",
+        "com.github.GitHubClient",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [],
+        "required_session_ids": [],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": true,
+        "max_tokens": 384,
+        "max_evidence": 6
+      },
+      "unanswerable": true
+    },
+    {
+      "question_id": "abstain-count",
+      "question_type": "abstention",
+      "capability": "abstention",
+      "question": "How many customers requested the MCP handoff?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 10:00",
+        "2026/09/02 (Wed) 10:05"
+      ],
+      "haystack_session_ids": [
+        "github://abstain/3/topic",
+        "slack://abstain/3/nearby"
+      ],
+      "haystack_app_ids": [
+        "com.github.GitHubClient",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "haystack_window_titles": [
+        "Related but incomplete record 4",
+        "Nearby discussion 4"
+      ],
+      "haystack_urls": [
+        "github://abstain/3",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "Customer interviews discussed the MCP handoff without recording a total."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The team discussed rollout details that do not answer the requested field."
+          }
+        ]
+      ],
+      "tags": [
+        "abstention",
+        "agent_handoff",
+        "com.github.GitHubClient",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [],
+        "required_session_ids": [],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": true,
+        "max_tokens": 384,
+        "max_evidence": 6
+      },
+      "unanswerable": true
+    },
+    {
+      "question_id": "abstain-owner",
+      "question_type": "abstention",
+      "capability": "abstention",
+      "question": "Who owns the documentation deployment?",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 10:00",
+        "2026/09/02 (Wed) 10:05"
+      ],
+      "haystack_session_ids": [
+        "github://abstain/4/topic",
+        "slack://abstain/4/nearby"
+      ],
+      "haystack_app_ids": [
+        "com.github.GitHubClient",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "haystack_window_titles": [
+        "Related but incomplete record 5",
+        "Nearby discussion 5"
+      ],
+      "haystack_urls": [
+        "github://abstain/4",
+        ""
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "The documentation deployment reached production without an owner field."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The team discussed rollout details that do not answer the requested field."
+          }
+        ]
+      ],
+      "tags": [
+        "abstention",
+        "agent_handoff",
+        "com.github.GitHubClient",
+        "com.tinyspeck.slackmacgap"
+      ],
+      "handoff_expectation": {
+        "required_facts": [],
+        "required_session_ids": [],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": true,
+        "max_tokens": 384,
+        "max_evidence": 6
+      },
+      "unanswerable": true
+    },
+    {
+      "question_id": "handoff-release-brief",
+      "question_type": "handoff_utility",
+      "capability": "handoff_utility",
+      "question": "Prepare context for finishing the Mac release",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "linear://release/blocker",
+        "github://release/hotkey",
+        "file:///release/checklist"
+      ],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 13:01",
+        "2026/09/02 (Wed) 13:02",
+        "2026/09/02 (Wed) 13:03"
+      ],
+      "haystack_session_ids": [
+        "linear://release/blocker",
+        "github://release/hotkey",
+        "file:///release/checklist"
+      ],
+      "haystack_app_ids": [
+        "com.microsoft.VSCode",
+        "com.microsoft.VSCode",
+        "com.microsoft.VSCode"
+      ],
+      "haystack_window_titles": [
+        "Handoff source 1.1",
+        "Handoff source 1.2",
+        "Handoff source 1.3"
+      ],
+      "haystack_urls": [
+        "linear://release/blocker",
+        "github://release/hotkey",
+        "file:///release/checklist"
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "The release is blocked by the missing Developer ID Application identity."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The menu-bar shell now owns the global recall hotkey."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The release checklist still requires notarization and a real capture soak."
+          }
+        ]
+      ],
+      "tags": [
+        "handoff_utility",
+        "agent_handoff",
+        "com.microsoft.VSCode"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "missing Developer ID Application identity",
+          "global recall hotkey",
+          "notarization and a real capture soak"
+        ],
+        "required_session_ids": [
+          "linear://release/blocker",
+          "github://release/hotkey",
+          "file:///release/checklist"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 256,
+        "max_evidence": 5
+      }
+    },
+    {
+      "question_id": "handoff-memory-quality",
+      "question_type": "handoff_utility",
+      "capability": "handoff_utility",
+      "question": "Prepare context for improving memory quality",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "file:///memory/retrieval",
+        "linear://memory/verifier",
+        "github://memory/provenance"
+      ],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 13:01",
+        "2026/09/02 (Wed) 13:02",
+        "2026/09/02 (Wed) 13:03"
+      ],
+      "haystack_session_ids": [
+        "file:///memory/retrieval",
+        "linear://memory/verifier",
+        "github://memory/provenance"
+      ],
+      "haystack_app_ids": [
+        "com.microsoft.VSCode",
+        "com.microsoft.VSCode",
+        "com.microsoft.VSCode"
+      ],
+      "haystack_window_titles": [
+        "Handoff source 2.1",
+        "Handoff source 2.2",
+        "Handoff source 2.3"
+      ],
+      "haystack_urls": [
+        "file:///memory/retrieval",
+        "linear://memory/verifier",
+        "github://memory/provenance"
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "Hybrid retrieval reaches all expected sources at rank three in the small work-memory fixture."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "Trusted semantic support remains blocked because no verifier model is validation-qualified."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "Every context item must retain its canonical event citation."
+          }
+        ]
+      ],
+      "tags": [
+        "handoff_utility",
+        "agent_handoff",
+        "com.microsoft.VSCode"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "rank three",
+          "no verifier model is validation-qualified",
+          "canonical event citation"
+        ],
+        "required_session_ids": [
+          "file:///memory/retrieval",
+          "linear://memory/verifier",
+          "github://memory/provenance"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 256,
+        "max_evidence": 5
+      }
+    },
+    {
+      "question_id": "handoff-privacy-review",
+      "question_type": "handoff_utility",
+      "capability": "handoff_utility",
+      "question": "Prepare context for the capture privacy review",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "file:///privacy/cascade",
+        "github://privacy/generation",
+        "linear://privacy/permission"
+      ],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 13:01",
+        "2026/09/02 (Wed) 13:02",
+        "2026/09/02 (Wed) 13:03"
+      ],
+      "haystack_session_ids": [
+        "file:///privacy/cascade",
+        "github://privacy/generation",
+        "linear://privacy/permission"
+      ],
+      "haystack_app_ids": [
+        "com.microsoft.VSCode",
+        "com.microsoft.VSCode",
+        "com.microsoft.VSCode"
+      ],
+      "haystack_window_titles": [
+        "Handoff source 3.1",
+        "Handoff source 3.2",
+        "Handoff source 3.3"
+      ],
+      "haystack_urls": [
+        "file:///privacy/cascade",
+        "github://privacy/generation",
+        "linear://privacy/permission"
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "The suppression cascade fails closed when Accessibility window identity is unavailable."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The focus generation race gate rejects frames captured against stale window state."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "Accessibility and Screen Recording are required onboarding permissions."
+          }
+        ]
+      ],
+      "tags": [
+        "handoff_utility",
+        "agent_handoff",
+        "com.microsoft.VSCode"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "fails closed",
+          "rejects frames captured against stale window state",
+          "required onboarding permissions"
+        ],
+        "required_session_ids": [
+          "file:///privacy/cascade",
+          "github://privacy/generation",
+          "linear://privacy/permission"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 256,
+        "max_evidence": 5
+      }
+    },
+    {
+      "question_id": "handoff-agent-integration",
+      "question_type": "handoff_utility",
+      "capability": "handoff_utility",
+      "question": "Prepare context for connecting Claude and Codex",
+      "question_date": "2026/09/02 (Wed) 18:00",
+      "answer_session_ids": [
+        "file:///agents/key-boundary",
+        "github://agents/mcp",
+        "terminal://agents/status"
+      ],
+      "haystack_dates": [
+        "2026/09/02 (Wed) 13:01",
+        "2026/09/02 (Wed) 13:02",
+        "2026/09/02 (Wed) 13:03"
+      ],
+      "haystack_session_ids": [
+        "file:///agents/key-boundary",
+        "github://agents/mcp",
+        "terminal://agents/status"
+      ],
+      "haystack_app_ids": [
+        "com.microsoft.VSCode",
+        "com.microsoft.VSCode",
+        "com.microsoft.VSCode"
+      ],
+      "haystack_window_titles": [
+        "Handoff source 4.1",
+        "Handoff source 4.2",
+        "Handoff source 4.3"
+      ],
+      "haystack_urls": [
+        "file:///agents/key-boundary",
+        "github://agents/mcp",
+        "terminal://agents/status"
+      ],
+      "haystack_sessions": [
+        [
+          {
+            "role": "assistant",
+            "content": "Client registration stores a Keychain reference and never writes database key bytes."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "The local MCP server exposes read-only recall and mci_context tools."
+          }
+        ],
+        [
+          {
+            "role": "assistant",
+            "content": "Connection status must distinguish installed clients from skipped clients."
+          }
+        ]
+      ],
+      "tags": [
+        "handoff_utility",
+        "agent_handoff",
+        "com.microsoft.VSCode"
+      ],
+      "handoff_expectation": {
+        "required_facts": [
+          "never writes database key bytes",
+          "read-only recall and mci_context tools",
+          "distinguish installed clients from skipped clients"
+        ],
+        "required_session_ids": [
+          "file:///agents/key-boundary",
+          "github://agents/mcp",
+          "terminal://agents/status"
+        ],
+        "forbidden_session_ids": [],
+        "contradiction_session_ids": [],
+        "duplicate_session_ids": [],
+        "max_duplicate_citations": 0,
+        "expect_abstention": false,
+        "max_tokens": 256,
+        "max_evidence": 5
+      }
+    }
+  ]
+}

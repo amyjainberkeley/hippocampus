@@ -1,6 +1,6 @@
 //! Reminder wire format + read stub (scaffold).
 //!
-//! Shape derived from EventKit's `EKReminder` surface (`EKReminder`
+//! Shape derived from `EventKit`'s `EKReminder` surface (`EKReminder`
 //! extends `EKCalendarItem`; same store as Calendar events, distinct
 //! entity type + distinct auth status).
 //!
@@ -9,7 +9,7 @@
 //! - **`reminder_id`** — `EKReminder.calendarItemIdentifier`. Stable
 //!   across launches; dedup key.
 //! - **`list_id` / `list_name`** — the containing `EKCalendar`
-//!   (Reminders lists are Calendars in EventKit). Per-list allow/deny.
+//!   (Reminders lists are Calendars in `EventKit`). Per-list allow/deny.
 //! - **`title` / `notes`** — the two free-text surfaces. `notes` is the
 //!   Tier2 target (users paste links, contact info, agenda there).
 //! - **`due_unix`** — unix-seconds of `dueDateComponents` if present.
@@ -51,7 +51,7 @@ pub struct Reminder {
 }
 
 /// Return every reminder whose most-recent change timestamp is at or
-/// after `since_unix`. EventKit does not expose a per-item change token;
+/// after `since_unix`. `EventKit` does not expose a per-item change token;
 /// the wire-up PR uses `dueDateComponents` + `completionDate` +
 /// `lastModifiedDate` (private API on macOS — wire-up will validate).
 ///

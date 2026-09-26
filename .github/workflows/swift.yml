@@ -1,4 +1,4 @@
-name: Swift — MCICaptureHelper + recall-ui + installer
+name: Swift — app packages and installer
 
 on:
   push:
@@ -13,7 +13,16 @@ on:
       - 'apps/hippocampus-native-host/**'
       - 'apps/onboarding/**'
       - 'scripts/build-installer.sh'
+      - 'scripts/installer-requirements.txt'
+      - 'scripts/test-installer*'
+      - 'scripts/lib/installer-runtime.sh'
+      - 'scripts/lib/atomic-bundle-swap.swift'
+      - 'scripts/lib/test_atomic_bundle_swap.py'
+      - 'assets/installer/**'
+      - 'assets/branding/**'
       - 'scripts/build-app.sh'
+      - 'scripts/swift-package.sh'
+      - 'scripts/stage-recall-ffi.sh'
       - '.github/workflows/swift.yml'
       - 'core/mci-brain-ffi/**'
       - '**.rs'
@@ -30,7 +39,16 @@ on:
       - 'apps/hippocampus-native-host/**'
       - 'apps/onboarding/**'
       - 'scripts/build-installer.sh'
+      - 'scripts/installer-requirements.txt'
+      - 'scripts/test-installer*'
+      - 'scripts/lib/installer-runtime.sh'
+      - 'scripts/lib/atomic-bundle-swap.swift'
+      - 'scripts/lib/test_atomic_bundle_swap.py'
+      - 'assets/installer/**'
+      - 'assets/branding/**'
       - 'scripts/build-app.sh'
+      - 'scripts/swift-package.sh'
+      - 'scripts/stage-recall-ffi.sh'
       - '.github/workflows/swift.yml'
       - 'core/mci-brain-ffi/**'
       - '**.rs'
@@ -49,10 +67,18 @@ jobs:
     name: MCICaptureHelper tests
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Record OCR test environment
+        run: |
+          xcodebuild -version
+          swift --version
+          sw_vers
+          uname -m
+          sysctl hw.model hw.physicalcpu hw.logicalcpu hw.memsize kern.hv_vmm_present
 
       - name: Cache SwiftPM .build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: adapters/macos/MCICaptureHelper/.build
           key: swift-helper-${{ runner.os }}-${{ hashFiles('adapters/macos/MCICaptureHelper/Package.resolved') }}
@@ -60,14 +86,27 @@ jobs:
 
       - run: swift test --package-path adapters/macos/MCICaptureHelper
 
+      # Preserve the failed gate above. A fresh process excludes background
+      # framework work from other suites and late, quarantined OCR requests.
+      - name: Diagnose isolated accurate OCR compute devices
+        if: failure()
+        timeout-minutes: 3
+        run: |
+          diagnostic_home="$(mktemp -d "$RUNNER_TEMP/ocr-diagnostic-home.XXXXXX")"
+          trap 'rm -rf -- "$diagnostic_home"' EXIT
+          env -i HOME="$diagnostic_home" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+            TMPDIR="$RUNNER_TEMP" DEVELOPER_DIR="$(xcode-select -p)" \
+            swift test --package-path adapters/macos/MCICaptureHelper --skip-build --jobs 2 \
+            --filter 'VisionOCRQualityTests/testSyntheticAccurateComputeDeviceComparison'
+
   recall-ui:
     name: recall-ui tests
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Cache cargo + SwiftPM .build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
@@ -77,22 +116,88 @@ jobs:
           key: swift-recall-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'apps/recall-ui/Package.resolved') }}
           restore-keys: swift-recall-${{ runner.os }}-
 
-      # FFI static lib precondition: apps/recall-ui links libmci_brain_ffi.a
-      # from target/debug. Build it first or the linker fails with
-      # "Could not find or use auto-linked library 'mci_brain_ffi'".
-      - name: cargo build mci-brain-ffi
-        run: cargo build -p mci-brain-ffi
+      # The wrapper builds and atomically stages the archive in SwiftPM's
+      # configured search path with the same macOS minimum deployment target.
+      - run: scripts/swift-package.sh test --package-path apps/recall-ui
 
-      - run: swift test --package-path apps/recall-ui
+  hippocampus:
+    name: Hippocampus app tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Cache SwiftPM .build
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: apps/hippocampus/.build
+          key: swift-hippocampus-${{ runner.os }}-${{ hashFiles('apps/hippocampus/Package.resolved') }}
+          restore-keys: swift-hippocampus-${{ runner.os }}-
+
+      - run: swift test --package-path apps/hippocampus
+
+  onboarding:
+    name: Onboarding tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Record onboarding test environment
+        run: |
+          xcodebuild -version
+          swift --version
+          sw_vers
+
+      - name: Cache SwiftPM .build
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: apps/onboarding/.build
+          key: swift-onboarding-${{ runner.os }}-${{ hashFiles('apps/onboarding/Package.resolved') }}
+          restore-keys: swift-onboarding-${{ runner.os }}-
+
+      - run: swift test --package-path apps/onboarding
+
+      - name: Diagnose onboarding test failure
+        if: failure()
+        timeout-minutes: 2
+        run: |
+          test_bundle="$(swift build --package-path apps/onboarding --show-bin-path)/onboardingPackageTests.xctest"
+          if [[ -d "$test_bundle" ]]; then
+            env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+              TMPDIR="$RUNNER_TEMP" DEVELOPER_DIR="$(xcode-select -p)" \
+              xcrun lldb --no-lldbinit --batch \
+              -o 'settings set target.process.stop-on-exec false' \
+              -o run -k 'process status' -k 'thread backtrace all' -- \
+              "$(xcrun --find xctest)" "$test_bundle"
+          fi
 
   installer-smoke:
     name: Installer script smoke test
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Provision isolated installer build dependencies
+        run: |
+          python3 -c 'import sys; assert sys.version_info >= (3, 10), "Installer requires Python >=3.10"'
+          python3 -m venv "$RUNNER_TEMP/installer-python"
+          env -i HOME="$HOME" PATH="$PATH" \
+            "$RUNNER_TEMP/installer-python/bin/python" -m pip --isolated install \
+            --disable-pip-version-check --index-url https://pypi.org/simple \
+            --require-hashes --only-binary=:all: -r scripts/installer-requirements.txt
+          echo "INSTALLER_PYTHON=$RUNNER_TEMP/installer-python/bin/python" >>"$GITHUB_ENV"
 
       - name: Syntax check build-installer.sh
         run: bash -n scripts/build-installer.sh
+
+      - name: Test headless installer layout and mount ownership
+        run: |
+          env -i HOME="$HOME" PATH="$PATH" "$INSTALLER_PYTHON" -B scripts/test-installer-layout.py
+          env -i HOME="$HOME" PATH="$PATH" bash scripts/test-installer-runtime.sh
+          env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin /bin/bash scripts/test-installer-brand-assets.sh
+          env -i HOME="$HOME" PATH="$PATH" scripts/build-installer.sh --verify-assets
+
+      - name: Test guarded bundle replacement with synthetic files
+        run: env -i HOME="$RUNNER_TEMP" PATH="$PATH" TMPDIR="$RUNNER_TEMP" python3 scripts/lib/test_atomic_bundle_swap.py
 
       - name: Verify prereq-missing exits non-zero
         run: |

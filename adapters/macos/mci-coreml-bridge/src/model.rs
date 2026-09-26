@@ -10,7 +10,7 @@
 //!
 //! - [`crate::qwen3`] — Qwen3-1.7B brief generation (autoregressive,
 //!   `input_ids` + `attention_mask` → last-position `logits`).
-//! - (V2-P5+) a GLiNER NER shim lands on top of this wrapper in a later
+//! - (V2-P5+) a `GLiNER` NER shim lands on top of this wrapper in a later
 //!   phase of the same spike: multi-tensor IO + a span-grid decoder.
 //!
 //! This is the generic core introduced by the Path-A refactor
@@ -33,6 +33,7 @@ use objc2::AllocAnyThread;
 use objc2_core_ml::{
     MLComputeUnits, MLDictionaryFeatureProvider, MLFeatureProvider, MLFeatureType, MLFeatureValue,
     MLModel, MLModelConfiguration, MLMultiArray, MLMultiArrayDataType,
+    MLMultiArrayShapeConstraintType,
 };
 use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString, NSURL};
 
@@ -105,6 +106,30 @@ pub enum ComputeUnits {
     /// Core ML schedules across ANE/GPU/CPU (`MLComputeUnitsAll`) — the
     /// [`CoreMLModel::load`] default.
     All,
+}
+
+/// Safe element-type view of a Core ML `MLMultiArray` constraint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MultiArrayElementType {
+    /// IEEE-754 half precision.
+    Float16,
+    /// IEEE-754 single precision.
+    Float32,
+    /// Signed 32-bit integer.
+    Int32,
+    /// A Core ML element type this bridge does not support.
+    Other(isize),
+}
+
+/// Fixed shape and element type declared by one model feature.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MultiArraySchema {
+    /// Declared dimensions in row-major order.
+    pub shape: Vec<usize>,
+    /// Declared scalar representation.
+    pub element_type: MultiArrayElementType,
+    /// Whether Core ML declares enumerated or ranged shape flexibility.
+    pub shape_is_flexible: bool,
 }
 
 impl ComputeUnits {
@@ -185,11 +210,53 @@ impl CoreMLModel {
         Some(ty == MLFeatureType::MultiArray)
     }
 
+    /// All declared input feature names.
+    #[must_use]
+    pub fn input_names(&self) -> Vec<String> {
+        let description = unsafe { self.model.modelDescription() };
+        let inputs = unsafe { description.inputDescriptionsByName() };
+        inputs
+            .allKeys()
+            .iter()
+            .map(|name| name.to_string())
+            .collect()
+    }
+
+    /// All declared output feature names.
+    #[must_use]
+    pub fn output_names(&self) -> Vec<String> {
+        let description = unsafe { self.model.modelDescription() };
+        let outputs = unsafe { description.outputDescriptionsByName() };
+        outputs
+            .allKeys()
+            .iter()
+            .map(|name| name.to_string())
+            .collect()
+    }
+
+    /// Read a named input's fixed `MLMultiArray` shape and element type.
+    #[must_use]
+    pub fn input_multi_array_schema(&self, name: &str) -> Option<MultiArraySchema> {
+        let description = unsafe { self.model.modelDescription() };
+        let inputs = unsafe { description.inputDescriptionsByName() };
+        let feature = inputs.objectForKey(&NSString::from_str(name))?;
+        multi_array_schema(&feature)
+    }
+
+    /// Read a named output's fixed `MLMultiArray` shape and element type.
+    #[must_use]
+    pub fn output_multi_array_schema(&self, name: &str) -> Option<MultiArraySchema> {
+        let description = unsafe { self.model.modelDescription() };
+        let outputs = unsafe { description.outputDescriptionsByName() };
+        let feature = outputs.objectForKey(&NSString::from_str(name))?;
+        multi_array_schema(&feature)
+    }
+
     /// Run a prediction with the given named `MLMultiArray` inputs.
     ///
     /// Returns a [`Prediction`] from which named output features can be
     /// read with [`Prediction::multi_array`]. Any number of inputs is
-    /// supported (Qwen3 passes two; GLiNER passes six), which is the
+    /// supported (Qwen3 passes two; `GLiNER` passes six), which is the
     /// whole point of the Path-A generic core.
     pub fn predict(&self, inputs: &[(&str, &MLMultiArray)]) -> Result<Prediction, CoreMLError> {
         let keys: Vec<Retained<NSString>> = inputs
@@ -239,6 +306,35 @@ impl CoreMLModel {
 
         Ok(Prediction { provider: output })
     }
+}
+
+fn multi_array_schema(feature: &objc2_core_ml::MLFeatureDescription) -> Option<MultiArraySchema> {
+    if unsafe { feature.r#type() } != MLFeatureType::MultiArray {
+        return None;
+    }
+    let constraint = unsafe { feature.multiArrayConstraint() }?;
+    let shape = unsafe { constraint.shape() }
+        .iter()
+        .map(|number| number.as_usize())
+        .collect();
+    let raw_type = unsafe { constraint.dataType() };
+    let shape_constraint = unsafe { constraint.shapeConstraint() };
+    let shape_is_flexible =
+        unsafe { shape_constraint.r#type() } != MLMultiArrayShapeConstraintType::Unspecified;
+    let element_type = if raw_type == MLMultiArrayDataType::Float16 {
+        MultiArrayElementType::Float16
+    } else if raw_type == MLMultiArrayDataType::Float32 {
+        MultiArrayElementType::Float32
+    } else if raw_type == MLMultiArrayDataType::Int32 {
+        MultiArrayElementType::Int32
+    } else {
+        MultiArrayElementType::Other(raw_type.0)
+    };
+    Some(MultiArraySchema {
+        shape,
+        element_type,
+        shape_is_flexible,
+    })
 }
 
 /// The output of a [`CoreMLModel::predict`] call. Holds the Core ML
@@ -402,7 +498,7 @@ mod tests {
 
     #[test]
     fn f16_to_f32_converts_common_values() {
-        assert_eq!(f16_to_f32(0x0000), 0.0);
+        assert_eq!(f16_to_f32(0x0000).to_bits(), 0.0_f32.to_bits());
         assert!((f16_to_f32(0x3C00) - 1.0).abs() < 1e-6);
         assert!((f16_to_f32(0xBC00) - (-1.0)).abs() < 1e-6);
         assert!((f16_to_f32(0x3800) - 0.5).abs() < 1e-6);

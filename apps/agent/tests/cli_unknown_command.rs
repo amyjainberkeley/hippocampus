@@ -61,6 +61,35 @@ fn help_and_version_still_exit_zero() {
     }
 }
 
+#[test]
+fn agent_version_matches_the_shipping_app_version() {
+    let output = Command::new(agent_bin())
+        .arg("--version")
+        .output()
+        .expect("spawn mci-agent");
+    assert!(output.status.success(), "--version must exit 0");
+
+    let plist_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../hippocampus/Resources/Info.plist");
+    let plist = std::fs::read_to_string(&plist_path).expect("read shipping Info.plist");
+    let marker = "<key>CFBundleShortVersionString</key>";
+    let version_tail = plist
+        .split_once(marker)
+        .expect("shipping Info.plist contains CFBundleShortVersionString")
+        .1;
+    let app_version = version_tail
+        .split_once("<string>")
+        .and_then(|(_, tail)| tail.split_once("</string>"))
+        .map(|(version, _)| version.trim())
+        .expect("shipping Info.plist contains a string app version");
+
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        format!("mci-agent {app_version}"),
+        "the helper shown in diagnostics must identify the same release as the app"
+    );
+}
+
 /// An unknown flag's *value* is a bare token too. Rejecting it would
 /// reintroduce exactly the ships-out-of-step outage the flag rule exists
 /// to prevent, so the bare-token decision waits until the whole argv has

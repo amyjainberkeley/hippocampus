@@ -12,7 +12,7 @@ struct PrepareBrainSlide: View {
 
                 keyGenerationSection
 
-                modelDownloadSection
+                briefReadinessSection
                     .glassCard(padding: OnboardingDesign.Space.lg)
                     .frame(maxWidth: 460)
             }
@@ -38,6 +38,12 @@ struct PrepareBrainSlide: View {
             }
             .glassCard(padding: OnboardingDesign.Space.md)
             .frame(maxWidth: 460)
+            if case .failed = prepareBrainVM.keyState {
+                Button("Retry encryption setup", systemImage: "arrow.clockwise") {
+                    Task { await prepareBrainVM.generateKey() }
+                }
+                .onboardingSecondary()
+            }
         }
     }
 
@@ -67,120 +73,26 @@ struct PrepareBrainSlide: View {
         }
     }
 
-    private var modelDownloadSection: some View {
+    private var briefReadinessSection: some View {
         VStack(spacing: 14) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.system(size: 24, weight: .regular))
+                .foregroundStyle(OnboardingDesign.Palette.accent)
+
             VStack(spacing: 4) {
-                Text("On-device AI Model")
+                Text("Daily brief ready")
                     .font(.system(size: 15, weight: .semibold))
-                Text("Download \(prepareBrainVM.modelDisplayName) for daily briefs. Runs entirely on your Mac — no data leaves your device.")
+                Text("Evidence-cited briefs are ready. No model download or account is required.")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 440)
+                    .frame(maxWidth: 400)
             }
 
-            modelStateView
-
-            if case .notStarted = prepareBrainVM.downloadState {
-                HStack(spacing: 8) {
-                    Label(prepareBrainVM.modelSizeDescription, systemImage: "arrow.down.circle")
-                    Label("On-device only", systemImage: "lock.shield")
-                }
-                .font(.system(size: 12))
-                .foregroundStyle(.tertiary)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var modelStateView: some View {
-        switch prepareBrainVM.downloadState {
-        case .notStarted:
-            // Qwen3 model is live (PR #192). Surface the install choice
-            // explicitly: primary CTA downloads now, secondary defers to
-            // the menu-bar Daily Briefs item. The Onboarding flow's
-            // `canAdvance` is always true on this step, so the user can
-            // either wait for the download to finish on this slide or
-            // advance and let it continue in the background (the
-            // `PrepareBrainViewModel.downloadTask` survives the slide
-            // swap; `StatusMenuView` reads the same
-            // `MCIBriefModelDownloaded` UserDefaults flag the download
-            // writes on `.ready`).
-            VStack(spacing: 12) {
-                HStack(spacing: 12) {
-                    Button {
-                        prepareBrainVM.startDownload()
-                    } label: {
-                        Label(
-                            "Download (\(prepareBrainVM.modelSizeDescription))",
-                            systemImage: "arrow.down.circle"
-                        )
-                    }
-                    .onboardingPrimary()
-
-                    Button("Skip — enable later") {
-                        prepareBrainVM.skipDownload()
-                    }
-                    .onboardingSecondary()
-                }
-
-                Text("You can also enable Daily Briefs anytime from the menu-bar Hippocampus icon.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 360)
-            }
-
-        case .downloading:
-            VStack(spacing: 6) {
-                ProgressView(value: prepareBrainVM.downloadProgress)
-                    .tint(OnboardingDesign.Palette.accent)
-                    .frame(maxWidth: 300)
-                HStack {
-                    Text("\(Int(prepareBrainVM.downloadProgress * 100))%")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Cancel") {
-                        prepareBrainVM.cancelDownload()
-                    }
-                    .onboardingText()
-                }
-                .frame(maxWidth: 300)
-            }
-
-        case .verifying:
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text("Verifying integrity...")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-            }
-
-        case .ready:
-            Label("Model ready", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-                .font(.system(size: 14, weight: .medium))
-
-        case .failed(let msg):
-            VStack(spacing: 8) {
-                Label(msg, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
+            if prepareBrainVM.modelDownloaded {
+                Label("Richer local wording is also installed", systemImage: "checkmark.circle.fill")
                     .font(.system(size: 12))
-                Button("Retry") {
-                    prepareBrainVM.startDownload()
-                }
-                .onboardingSecondary()
-            }
-
-        case .skipped:
-            VStack(spacing: 4) {
-                Label("Download skipped", systemImage: "arrow.right.circle")
-                    .foregroundStyle(.secondary)
-                    .font(.system(size: 13))
-                Text("Daily briefs disabled — enable in Settings.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(OnboardingDesign.Palette.success)
             }
         }
     }

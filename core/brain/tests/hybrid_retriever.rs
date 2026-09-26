@@ -17,8 +17,9 @@ use mci_brain::{
         DEFAULT_HALF_LIFE_HOURS, DEFAULT_K_LEX,
     },
     stubs::{FixedDimEmbedder, InMemoryBrainStore},
-    BrainStore, Embedder, Event, EventId, FusionWeights, HybridRetriever, RetrievalQuery,
-    RetrievalShape, RetrieveError, Retriever, TimeRange,
+    BrainStore, Embedder, Event, EventId, EvidenceSufficiencyPolicy, FusionWeights,
+    HybridRetriever, RetrievalQuery, RetrievalShape, RetrieveError, Retriever, TimeRange,
+    EVIDENCE_SUFFICIENCY_POLICY,
 };
 
 const MICROS_PER_HOUR: u64 = 3_600_000_000;
@@ -59,6 +60,22 @@ fn store_with(events: Vec<Event>) -> Arc<InMemoryBrainStore> {
 /// embedder, so query ≡ event-text gives a perfect self-match).
 fn embedder() -> Arc<FixedDimEmbedder> {
     Arc::new(FixedDimEmbedder::default())
+}
+
+fn permissive_test_policy() -> EvidenceSufficiencyPolicy {
+    EvidenceSufficiencyPolicy {
+        validation_qualified: true,
+        threshold: 0.0,
+        ..EVIDENCE_SUFFICIENCY_POLICY
+    }
+}
+
+fn test_retriever(
+    store: Arc<InMemoryBrainStore>,
+    embedder: Arc<FixedDimEmbedder>,
+    now_us: u64,
+) -> HybridRetriever<InMemoryBrainStore, FixedDimEmbedder> {
+    HybridRetriever::new(store, embedder, now_us).with_evidence_policy(permissive_test_policy())
 }
 
 // ---------------------------------------------------------------------------
@@ -119,7 +136,7 @@ fn pure_semantic_path_ranks_by_embedding_cosine() {
         .collect();
     let store = store_with(events);
 
-    let r = HybridRetriever::new(store, e, 0).with_weights(FusionWeights {
+    let r = test_retriever(store, e, 0).with_weights(FusionWeights {
         w_sem: 1.0,
         w_lex: 0.0,
         w_rec: 0.0,
@@ -170,7 +187,7 @@ fn pure_lexical_path_ranks_by_fts_match_density() {
     );
     let store = store_with(vec![short, long]);
 
-    let r = HybridRetriever::new(store.clone(), e, 0).with_weights(FusionWeights {
+    let r = test_retriever(store.clone(), e, 0).with_weights(FusionWeights {
         w_sem: 0.0,
         w_lex: 1.0,
         w_rec: 0.0,
@@ -234,21 +251,20 @@ fn hybrid_fusion_beats_lexical_only_when_lexical_misses_the_intent() {
     };
 
     // Pure-lexical ranks the dense match on top.
-    let lex_only = HybridRetriever::new(store.clone(), e.clone(), MICROS_PER_HOUR).with_weights(
-        FusionWeights {
+    let lex_only =
+        test_retriever(store.clone(), e.clone(), MICROS_PER_HOUR).with_weights(FusionWeights {
             w_sem: 0.0,
             w_lex: 1.0,
             w_rec: 0.0,
             w_entity: 0.0,
             w_src: 0.0,
-        },
-    );
+        });
     let lex_top = &lex_only.retrieve(&q).unwrap()[0];
     let lex_top_text = store.get_event(lex_top.event_id).unwrap().unwrap().text;
     assert_eq!(lex_top_text, "rust");
 
     // Hybrid with defaults puts the semantic answer on top.
-    let hybrid = HybridRetriever::new(store.clone(), e, MICROS_PER_HOUR);
+    let hybrid = test_retriever(store.clone(), e, MICROS_PER_HOUR);
     let hyb_top = &hybrid.retrieve(&q).unwrap()[0];
     let hyb_top_text = store.get_event(hyb_top.event_id).unwrap().unwrap().text;
     assert_eq!(
@@ -263,7 +279,7 @@ fn hybrid_fusion_beats_lexical_only_when_lexical_misses_the_intent() {
 
 #[test]
 fn router_classifies_anchor_then_window_for_right_before_phrase() {
-    let r = HybridRetriever::new(
+    let r = test_retriever(
         Arc::new(InMemoryBrainStore::new()),
         embedder(),
         10 * MICROS_PER_DAY,
@@ -292,7 +308,7 @@ fn router_classifies_anchor_then_window_for_right_before_phrase() {
 #[test]
 fn router_classifies_time_range_extraction_for_last_weekday_phrase() {
     let now_us = 30 * MICROS_PER_DAY;
-    let r = HybridRetriever::new(Arc::new(InMemoryBrainStore::new()), embedder(), now_us);
+    let r = test_retriever(Arc::new(InMemoryBrainStore::new()), embedder(), now_us);
     let q = RetrievalQuery {
         text: "show me last Tuesday afternoon".into(),
         limit: 5,
@@ -326,7 +342,7 @@ fn router_classifies_time_range_extraction_for_last_weekday_phrase() {
 
 #[test]
 fn router_falls_back_to_plain_for_non_temporal_queries() {
-    let r = HybridRetriever::new(Arc::new(InMemoryBrainStore::new()), embedder(), 0);
+    let r = test_retriever(Arc::new(InMemoryBrainStore::new()), embedder(), 0);
     let q = RetrievalQuery {
         text: "rust workspace cargo build".into(),
         limit: 5,
@@ -356,7 +372,7 @@ fn app_pre_filter_excludes_wrong_bundle_hits() {
         Some(e.embed_one("page about rust").unwrap()),
     );
     let store = store_with(vec![safari, terminal]);
-    let r = HybridRetriever::new(store.clone(), e, MICROS_PER_HOUR);
+    let r = test_retriever(store.clone(), e, MICROS_PER_HOUR);
 
     let q = RetrievalQuery {
         text: "page about rust".into(),
@@ -390,7 +406,7 @@ fn time_pre_filter_excludes_out_of_range_hits() {
         Some(e.embed_one("rust").unwrap()),
     );
     let store = store_with(vec![in_range, out_of_range]);
-    let r = HybridRetriever::new(store.clone(), e, 300 * MICROS_PER_HOUR);
+    let r = test_retriever(store.clone(), e, 300 * MICROS_PER_HOUR);
 
     let q = RetrievalQuery {
         text: "rust".into(),
@@ -424,7 +440,7 @@ fn recency_decay_tips_ties_in_combined_score() {
         Some(e.embed_one("rust").unwrap()),
     );
     let store = store_with(vec![old, recent]);
-    let r = HybridRetriever::new(store.clone(), e, 100 * MICROS_PER_HOUR);
+    let r = test_retriever(store.clone(), e, 100 * MICROS_PER_HOUR);
 
     let q = RetrievalQuery {
         text: "rust".into(),
@@ -472,7 +488,7 @@ fn anchor_then_window_keeps_events_within_five_minutes_of_anchor() {
         Some(e.embed_one("earlier session").unwrap()),
     );
     let store = store_with(vec![anchor, inside, outside]);
-    let r = HybridRetriever::new(store.clone(), e, anchor_ts);
+    let r = test_retriever(store.clone(), e, anchor_ts);
 
     let q = RetrievalQuery {
         text: "what was I looking at right before 1password vault opened".into(),
@@ -506,7 +522,7 @@ fn anchor_then_window_keeps_events_within_five_minutes_of_anchor() {
 
 #[test]
 fn empty_query_is_invalid_input() {
-    let r = HybridRetriever::new(Arc::new(InMemoryBrainStore::new()), embedder(), 0);
+    let r = test_retriever(Arc::new(InMemoryBrainStore::new()), embedder(), 0);
     let q = RetrievalQuery {
         text: String::new(),
         limit: 5,
@@ -523,7 +539,7 @@ fn empty_query_is_invalid_input() {
 
 #[test]
 fn zero_limit_returns_empty_result_set_without_calling_store() {
-    let r = HybridRetriever::new(Arc::new(InMemoryBrainStore::new()), embedder(), 0);
+    let r = test_retriever(Arc::new(InMemoryBrainStore::new()), embedder(), 0);
     let q = RetrievalQuery {
         text: "anything".into(),
         limit: 0,
@@ -540,7 +556,7 @@ fn zero_limit_returns_empty_result_set_without_calling_store() {
 
 #[test]
 fn default_fusion_weights_and_pool_sizes_match_adr_0010() {
-    let r = HybridRetriever::new(Arc::new(InMemoryBrainStore::new()), embedder(), 0);
+    let r = test_retriever(Arc::new(InMemoryBrainStore::new()), embedder(), 0);
     let w = r.weights();
     assert!((w.w_sem - 0.40).abs() < f32::EPSILON);
     assert!((w.w_lex - 0.30).abs() < f32::EPSILON);
@@ -563,7 +579,7 @@ fn recency_decay_exponential_with_default_half_life() {
     assert!((recency_decay(now, now, hl) - 1.0).abs() < 1e-6);
 
     // At exactly the half-life (24h) → 0.5.
-    let at_hl = now - (hl as u64) * MICROS_PER_HOUR;
+    let at_hl = now - 24 * MICROS_PER_HOUR;
     let r_hl = recency_decay(now, at_hl, hl);
     assert!(
         (r_hl - 0.5).abs() < 1e-4,
@@ -588,7 +604,7 @@ fn recency_decay_exponential_with_default_half_life() {
 
 #[test]
 fn inverted_time_filter_is_invalid_input() {
-    let r = HybridRetriever::new(Arc::new(InMemoryBrainStore::new()), embedder(), 0);
+    let r = test_retriever(Arc::new(InMemoryBrainStore::new()), embedder(), 0);
     let q = RetrievalQuery {
         text: "anything".into(),
         limit: 5,
@@ -613,11 +629,10 @@ fn with_recency_config_affects_score() {
     let old = event_at("rust", 0, None, Some(e.embed_one("rust").unwrap()));
     let store = store_with(vec![old]);
 
-    let fast_decay =
-        HybridRetriever::new(store.clone(), e.clone(), now).with_recency(RecencyConfig {
-            half_life_hours: 1.0,
-        });
-    let slow_decay = HybridRetriever::new(store, e, now).with_recency(RecencyConfig {
+    let fast_decay = test_retriever(store.clone(), e.clone(), now).with_recency(RecencyConfig {
+        half_life_hours: 1.0,
+    });
+    let slow_decay = test_retriever(store, e, now).with_recency(RecencyConfig {
         half_life_hours: 1000.0,
     });
 
@@ -656,7 +671,8 @@ fn xorshift64(state: &mut u64) -> u64 {
 }
 
 fn rand_f32_unit(state: &mut u64) -> f32 {
-    (xorshift64(state) % 10_001) as f32 / 10_000.0
+    let sample = u16::try_from(xorshift64(state) % 10_001).expect("sample fits u16");
+    f32::from(sample) / 10_000.0
 }
 
 // ---------------------------------------------------------------------------
@@ -669,17 +685,18 @@ fn property_fused_score_in_unit_interval_for_unit_weights() {
     let mut rng = 0xDEAD_BEEF_CAFE_BABEu64;
     for _ in 0..256 {
         // Split a unit budget across all FIVE convex arms.
-        let a = rand_f32_unit(&mut rng);
-        let b = rand_f32_unit(&mut rng) * (1.0 - a);
-        let c = rand_f32_unit(&mut rng) * (1.0 - a - b);
-        let en = rand_f32_unit(&mut rng) * (1.0 - a - b - c);
-        let d = 1.0 - a - b - c - en;
-        let w = FusionWeights {
-            w_sem: a,
-            w_lex: b,
-            w_rec: c,
-            w_entity: en,
-            w_src: d,
+        let semantic_weight = rand_f32_unit(&mut rng);
+        let lexical_weight = rand_f32_unit(&mut rng) * (1.0 - semantic_weight);
+        let recency_weight = rand_f32_unit(&mut rng) * (1.0 - semantic_weight - lexical_weight);
+        let entity_weight =
+            rand_f32_unit(&mut rng) * (1.0 - semantic_weight - lexical_weight - recency_weight);
+        let source_weight = 1.0 - semantic_weight - lexical_weight - recency_weight - entity_weight;
+        let weights = FusionWeights {
+            w_sem: semantic_weight,
+            w_lex: lexical_weight,
+            w_rec: recency_weight,
+            w_entity: entity_weight,
+            w_src: source_weight,
         };
 
         let sem = rand_f32_unit(&mut rng);
@@ -688,17 +705,18 @@ fn property_fused_score_in_unit_interval_for_unit_weights() {
         let entity = rand_f32_unit(&mut rng);
         let src = rand_f32_unit(&mut rng);
 
-        let fused = w.w_sem.mul_add(
+        let fused = weights.w_sem.mul_add(
             sem,
-            w.w_lex.mul_add(
+            weights.w_lex.mul_add(
                 lex,
-                w.w_rec
-                    .mul_add(rec, w.w_entity.mul_add(entity, w.w_src * src)),
+                weights
+                    .w_rec
+                    .mul_add(rec, weights.w_entity.mul_add(entity, weights.w_src * src)),
             ),
         );
         assert!(
-            fused >= -1e-6 && fused <= 1.0 + 1e-6,
-            "fused {fused} out of [0,1] for w={w:?} scores=({sem},{lex},{rec},{entity},{src})"
+            (-1e-6..=1.0 + 1e-6).contains(&fused),
+            "fused {fused} out of [0,1] for w={weights:?} scores=({sem},{lex},{rec},{entity},{src})"
         );
     }
 }

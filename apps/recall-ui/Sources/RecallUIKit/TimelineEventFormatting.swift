@@ -22,6 +22,6 @@ public enum TimelineEventFormatting {
 
     /// `com.apple.Safari` → `Safari`. Falls back to the raw string.
     public static func shortAppName(_ bundle: String) -> String {
-        bundle.split(separator: ".").last.map(String.init) ?? bundle
+        Formatters.appDisplayName(bundle)
     }
 }

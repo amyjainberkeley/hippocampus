@@ -49,12 +49,11 @@ public final class SparkleUpdaterService: NSObject, UpdaterService, @unchecked S
             userDriverDelegate: nil
         )
         super.init()
-        // Auto-check OFF by default — user must opt in via menu.
-        controller.updater.automaticallyChecksForUpdates = false
-        controller.updater.automaticallyDownloadsUpdates = false
+        // Info.plist supplies private defaults. Sparkle preserves the user's
+        // explicit preference across launches; initialization must not reset it.
         // No system profiling telemetry.
         controller.updater.sendsSystemProfile = false
-        logger.info("updater: initialized. auto-check=OFF, system-profiling=OFF")
+        logger.info("updater: initialized with saved preferences, system-profiling=OFF")
     }
 
     public func startUpdater() {

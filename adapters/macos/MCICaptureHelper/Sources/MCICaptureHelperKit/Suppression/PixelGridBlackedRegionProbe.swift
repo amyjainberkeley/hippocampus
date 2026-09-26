@@ -152,19 +152,17 @@
 //
 // ## Thread-safety
 //
-// `update(grayscale:)` is called from the `SCStreamOutput` callback
-// on `SCStreamCaptureSession.sampleQueue`. `hasBlackedRegion()` is
-// called from the cascade inside `SCStreamPipeline.process(...)` on
-// a detached `Task`. An `NSLock` guards the single mutable byte
-// (`lastResult`). The probe is `@unchecked Sendable` — the lock IS
-// the contract.
+// `update(grayscale:)` and the production `hasBlackedRegion()` read are
+// adjacent in the serial `SCStreamOutput` callback. That Bool is frozen into
+// `PixelPrivacySnapshot` before raw pixels are queued. The lock remains for
+// legacy direct-cascade callers and tests that may read on another task.
 
 import Foundation
 
 /// Production `BlackedRegionProbe`. Stateful: the
 /// `SCStreamOutput` callback pre-feeds it the synchronously-extracted
-/// 9×8 luminance grid before the cascade runs on the frame; the
-/// cascade then reads back the verdict via `hasBlackedRegion()`.
+/// 9×8 luminance grid and immediately freezes the verdict into the frame's
+/// immutable privacy snapshot.
 public final class PixelGridBlackedRegionProbe: BlackedRegionProbe, @unchecked Sendable {
     /// A pixel with luma ≤ this byte is treated as "black" for the
     /// purposes of §2. RGB(0,0,0) → 0; near-black UI chrome / dark
@@ -233,8 +231,8 @@ public final class PixelGridBlackedRegionProbe: BlackedRegionProbe, @unchecked S
 
     /// Pre-feed the probe from the 9×8 grayscale grid extracted in
     /// the `SCStreamOutput` callback. MUST be called before the
-    /// cascade runs on the same frame (the session does this in
-    /// `stream(_:didOutputSampleBuffer:of:)`).
+    /// privacy snapshot is created for the same frame (the session does this
+    /// in `stream(_:didOutputSampleBuffer:of:)`).
     ///
     /// Bounded O(`CapturedSampleExtractor.dhashGridCount`) — two
     /// linear passes (count + flood-fill) over the 72-byte grid.
@@ -242,6 +240,15 @@ public final class PixelGridBlackedRegionProbe: BlackedRegionProbe, @unchecked S
     /// most 72 indices onto a fixed-capacity stack. Combined cost
     /// stays well inside the ADR-0013 §2 100 µs/frame budget.
     public func update(grayscale grid: [UInt8]) {
+        let result = classify(grayscale: grid)
+        lock.lock()
+        lastResult = result
+        lock.unlock()
+    }
+
+    /// Classify one frame without reading or mutating shared probe state.
+    /// Production uses this return value directly in `PixelPrivacySnapshot`.
+    public func classify(grayscale grid: [UInt8]) -> Bool {
         precondition(
             grid.count == CapturedSampleExtractor.dhashGridCount,
             "BlackedRegionProbe expects the dHash 9×8 grid (\(CapturedSampleExtractor.dhashGridCount) samples), got \(grid.count)"
@@ -270,10 +277,7 @@ public final class PixelGridBlackedRegionProbe: BlackedRegionProbe, @unchecked S
         if !result {
             result = detectVideoLikeRectangle(grid: grid)
         }
-
-        lock.lock()
-        lastResult = result
-        lock.unlock()
+        return result
     }
 
     /// Flood-fill the 9×8 grid for connected-black components
@@ -388,10 +392,9 @@ public final class PixelGridBlackedRegionProbe: BlackedRegionProbe, @unchecked S
         lock.unlock()
     }
 
-    /// Single locked read of a `Bool`. The cascade calls this once
-    /// per state-transition decision. Returns the most-recent
-    /// `update(grayscale:)` verdict, or `false` (fail-safe) if no
-    /// update has happened yet.
+    /// Single locked read of the current classification. Production freezes
+    /// per-frame values through `classify`; legacy cascade callers may read
+    /// this state directly. Returns `false` if no update has happened yet.
     public func hasBlackedRegion() -> Bool {
         lock.lock()
         defer { lock.unlock() }

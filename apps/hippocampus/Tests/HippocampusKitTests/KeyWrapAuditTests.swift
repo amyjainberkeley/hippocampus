@@ -1,156 +1,86 @@
 // SPDX-License-Identifier: TBD-private
+import Security
 import XCTest
 @testable import HippocampusKit
 
 final class KeyWrapAuditTests: XCTestCase {
+    private final class FakeKeychainClient: KeychainClient, @unchecked Sendable {
+        var result: KeychainReadResult
+        private(set) var queries: [KeychainItemQuery] = []
 
-    private func makeTmpDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("keywrap-audit-test-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
+        init(result: KeychainReadResult) {
+            self.result = result
+        }
 
-    // MARK: - inspectFile
+        func readGenericPassword(query: KeychainItemQuery) -> KeychainReadResult {
+            queries.append(query)
+            return result
+        }
 
-    func test_inspectFile_when_file_missing_reports_unsealed() throws {
-        let dir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let path = dir.appendingPathComponent("missing.key")
-
-        let report = KeyWrapAuditor.inspectFile(at: path)
-
-        XCTAssertEqual(report.implementationName, "FileKeyStore (interim)")
-        XCTAssertEqual(report.severity, .interim)
-        XCTAssertFalse(report.sealed)
-        XCTAssertEqual(report.identifier, path.path)
-        XCTAssertTrue(report.notes.contains(where: { $0.contains("not found") }),
-                      "missing-file note should be present, got: \(report.notes)")
-    }
-
-    func test_inspectFile_when_present_with_0600_reports_sealed() throws {
-        let dir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let path = dir.appendingPathComponent("dev.key")
-
-        let store = FileKeyStore(path: path)
-        try store.writeKey(FileKeyStore.generateHexKey())
-
-        let report = KeyWrapAuditor.inspectFile(at: path)
-
-        XCTAssertTrue(report.sealed)
-        XCTAssertEqual(report.severity, .interim)
-        XCTAssertTrue(report.aclDescription.contains("0600"))
-        XCTAssertTrue(report.aclDescription.contains("verified"),
-                      "expected ACL string to confirm mode, got: \(report.aclDescription)")
-        switch report.reveal {
-        case .showInFinder(let url):
-            XCTAssertEqual(url.path, path.path)
-        default:
-            XCTFail("FileKeyStore audit should offer Show-in-Finder, got: \(report.reveal)")
+        func addGenericPassword(
+            query: KeychainItemQuery,
+            data: Data,
+            trustedApplicationPaths: [String]
+        ) -> OSStatus {
+            XCTFail("audit must never write Keychain state")
+            return errSecParam
         }
     }
 
-    func test_inspectFile_when_wrong_permissions_flags_unexpected() throws {
-        let dir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let path = dir.appendingPathComponent("badperm.key")
-        try Data("00".utf8).write(to: path)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o644],
-            ofItemAtPath: path.path
-        )
-
-        let report = KeyWrapAuditor.inspectFile(at: path)
-
-        XCTAssertTrue(report.sealed, "file exists, so wrap is technically reachable")
-        XCTAssertTrue(report.aclDescription.contains("UNEXPECTED"),
-                      "non-0600 should be flagged, got: \(report.aclDescription)")
+    private func store(client: FakeKeychainClient) -> KeychainKeyStore {
+        KeychainKeyStore(client: client, trustedApplicationPaths: { [] })
     }
 
-    // MARK: - keychainReport (forward-compat path)
+    func test_keychain_audit_uses_exact_file_domain_reference_and_reports_readable() async {
+        let key = String(repeating: "ab", count: 32)
+        let client = FakeKeychainClient(result: .success(Data(key.utf8)))
 
-    func test_keychainReport_carries_production_severity_and_acl() {
-        let report = KeyWrapAuditor.keychainReport(
-            itemName: "ai.hippocampus.brain.key.v1",
-            accessControlDescription: "kSecAttrAccessibleWhenUnlocked",
-            sealed: true
-        )
+        let report = await KeyWrapAuditor.inspectKeychain(store(client: client))
 
-        XCTAssertEqual(report.implementationName, "macOS Keychain")
+        XCTAssertTrue(report.keyReadable)
+        XCTAssertEqual(report.accessControlVerification, .unverified)
         XCTAssertEqual(report.severity, .production)
-        XCTAssertTrue(report.sealed)
-        XCTAssertEqual(report.identifier, "ai.hippocampus.brain.key.v1")
-        XCTAssertEqual(report.aclDescription, "kSecAttrAccessibleWhenUnlocked")
-        switch report.reveal {
-        case .showInKeychainAccess(let name):
-            XCTAssertEqual(name, "ai.hippocampus.brain.key.v1")
-        default:
-            XCTFail("Keychain report should offer Show-in-Keychain-Access")
+        XCTAssertEqual(report.implementationName, "macOS file-based Keychain")
+        XCTAssertEqual(client.queries, [KeychainItemQuery(
+            service: "ai.hippocampus.brain",
+            account: "database-key-v1",
+            useDataProtectionKeychain: false,
+            synchronizable: false
+        )])
+        XCTAssertTrue(report.identifier.contains("ai.hippocampus.brain"))
+        XCTAssertFalse(report.identifier.contains(key))
+    }
+
+    func test_keychain_audit_reports_missing_or_denied_without_claiming_readable() async {
+        for status in [errSecItemNotFound, errSecAuthFailed, errSecInteractionNotAllowed] {
+            let client = FakeKeychainClient(result: .failure(status))
+            let report = await KeyWrapAuditor.inspectKeychain(store(client: client))
+
+            XCTAssertFalse(report.keyReadable)
+            XCTAssertEqual(report.accessControlVerification, .unverified)
+            XCTAssertTrue(report.notes.contains(where: { $0.contains("unavailable") }))
         }
     }
 
-    // MARK: - inMemoryReport (dev-only label is loud)
+    func test_report_never_carries_key_bytes() async {
+        let key = "0123456789abcdef" + String(repeating: "a5", count: 24)
+        let client = FakeKeychainClient(result: .success(Data(key.utf8)))
+        let report = await KeyWrapAuditor.inspectKeychain(store(client: client))
+        let fields = [
+            report.implementationName,
+            report.accessControlDescription,
+            report.identifier,
+        ] + report.notes
 
-    func test_inMemoryReport_labels_dev_only_and_carries_warning_notes() {
+        XCTAssertFalse(fields.contains(where: { $0.contains(key) }))
+        XCTAssertFalse(fields.contains(where: { $0.contains(String(key.prefix(16))) }))
+    }
+
+    func test_in_memory_report_is_loudly_development_only() {
         let report = KeyWrapAuditor.inMemoryReport()
 
         XCTAssertEqual(report.severity, .devOnly)
-        XCTAssertTrue(report.implementationName.contains("DEV ONLY"),
-                      "implementation name must shout DEV ONLY for the panel banner, got: \(report.implementationName)")
-        XCTAssertTrue(report.aclDescription.contains("NONE") || report.aclDescription.contains("plaintext"),
-                      "dev wrap must call out its lack of confidentiality, got: \(report.aclDescription)")
+        XCTAssertTrue(report.implementationName.contains("DEV ONLY"))
         XCTAssertEqual(report.reveal, .none)
-        XCTAssertTrue(report.notes.contains(where: { $0.contains("NO at-rest confidentiality") }),
-                      "dev wrap notes must warn explicitly")
-        XCTAssertTrue(report.notes.contains(where: { $0.contains("critical bug") }),
-                      "dev wrap notes must flag the shipped-build case as a bug")
-    }
-
-    // MARK: - content-free invariant
-
-    func test_report_never_carries_key_bytes() throws {
-        let dir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let path = dir.appendingPathComponent("witness.key")
-        // Distinct, recognisable witness pattern. Both the full hex and a
-        // 16-char prefix must be absent from every audit field — the panel
-        // must never quote even a sliver of the key.
-        let knownHex = "0123456789abcdef" + String(repeating: "a5", count: 24)
-        let prefix16 = String(knownHex.prefix(16))
-        let store = FileKeyStore(path: path)
-        try store.writeKey(knownHex)
-
-        let report = KeyWrapAuditor.inspectFile(at: path)
-
-        let mirrorFields: [String] = [
-            report.implementationName,
-            report.aclDescription,
-            report.identifier,
-        ] + report.notes
-        for field in mirrorFields {
-            XCTAssertFalse(field.contains(knownHex),
-                           "audit field leaked the full key bytes: \(field)")
-            XCTAssertFalse(field.contains(prefix16),
-                           "audit field embedded a 16-hex-char fragment of the key: \(field)")
-        }
-    }
-
-    // MARK: - FileKeyStore.auditReport convenience
-
-    func test_fileKeyStore_auditReport_matches_inspectFile() throws {
-        let dir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let path = dir.appendingPathComponent("dev.key")
-        let store = FileKeyStore(path: path)
-        try store.writeKey(FileKeyStore.generateHexKey())
-
-        let viaExtension = store.auditReport()
-        let viaInspector = KeyWrapAuditor.inspectFile(at: path)
-
-        XCTAssertEqual(viaExtension.implementationName, viaInspector.implementationName)
-        XCTAssertEqual(viaExtension.severity, viaInspector.severity)
-        XCTAssertEqual(viaExtension.sealed, viaInspector.sealed)
-        XCTAssertEqual(viaExtension.identifier, viaInspector.identifier)
     }
 }

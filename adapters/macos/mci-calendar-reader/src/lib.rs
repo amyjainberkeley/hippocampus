@@ -12,15 +12,15 @@
 //!
 //! **SCAFFOLD ONLY.** This crate publishes the type shape and public API
 //! signatures the Phase D deep-hook Tier2 entity-extraction pipeline
-//! (FORK 8 = A: V2-P4 regex + V2-P5 Qwen NER + V2-P6 AliasResolver +
-//! `episode_edges`) will consume. It does NOT read EventKit today.
+//! (FORK 8 = A: V2-P4 regex + V2-P5 Qwen NER + V2-P6 `AliasResolver` +
+//! `episode_edges`) will consume. It does NOT read `EventKit` today.
 //!
 //! Wire-up sequencing:
 //!
 //! 1. **This PR (Phase D scaffold, cycle 8.5x).** Types + stubs + ADR-0037.
 //!    All reads return empty vecs. Onboarding UI shows a "Coming soon"
 //!    row with the deep-hook toggle disabled.
-//! 2. **CSO-gated wire-up PR (cycle 8.60+).** Real EventKit calls, the
+//! 2. **CSO-gated wire-up PR (cycle 8.60+).** Real `EventKit` calls, the
 //!    per-plugin cascade-equivalent per ADR-0032 §3(f) analogue, the
 //!    Automation TCC per-target grant flow (Calendar), and the brain-ingest
 //!    plumbing. That PR ships behind a `plugin_enabled = false` master
@@ -32,7 +32,7 @@
 //! Calendar.app deep-read requires **Automation TCC per-target for
 //! Calendar** on macOS (Sequoia onward; carries into macOS 26). This is
 //! separate from Full Disk Access — Automation TCC prompts per target the
-//! first time the process sends Apple Events (or, for EventKit, calls
+//! first time the process sends Apple Events (or, for `EventKit`, calls
 //! `EKEventStore.requestFullAccessToEvents`). The wire-up PR must add:
 //!
 //! - The `NSCalendarsFullAccessUsageDescription` Info.plist string in the
@@ -45,7 +45,7 @@
 //!
 //! ## What this crate does NOT do
 //!
-//! - Does not read EventKit. Does not touch `Calendar.sqlitedb` under
+//! - Does not read `EventKit`. Does not touch `Calendar.sqlitedb` under
 //!   `~/Library/Calendars/`. Does not write the brain. Does not emit
 //!   `CaptureEvent::CalendarEvent` on the wire.
 //! - Does not implement a cascade-equivalent (ADR-0037 §5 — deferred to

@@ -2,8 +2,9 @@ import SwiftUI
 import OnboardingKit
 
 /// V2-P10 — user-curated allowlist slide. Two-layer per ADR-0017 §3.2:
-/// the CSO baseline is shown read-only; the user-mutable layer below
-/// lets the user opt in detected running apps or hand-type bundle ids.
+/// the CSO baseline keeps capture immutable; supported baseline rows expose
+/// only a user-mutable deep-hook opt-in. The user-mutable layer below lets
+/// the user opt in detected running apps or hand-type bundle ids.
 /// Per-app deep-hook opt-in (Messages V2-P7 / Mail V2-P8b) triggers
 /// the Full Disk Access deep-link per ADR-0032 §3(b).
 struct AllowlistSlide: View {
@@ -41,11 +42,11 @@ struct AllowlistSlide: View {
         VStack(alignment: .leading, spacing: OnboardingDesign.Space.sm) {
             sectionHeader(
                 title: "Built-in trusted apps (\(baselineRows.count))",
-                subtitle: "These bundles ship in the signed app and have been reviewed by the security team. Read-only."
+                subtitle: "Capture policy ships in the signed app and is read-only. Messages and Mail can still receive your local deep-hook consent."
             )
             VStack(alignment: .leading, spacing: OnboardingDesign.Space.xs) {
                 ForEach(baselineRows) { row in
-                    rowSummaryView(row: row)
+                    baselineRowEditor(row: row)
                 }
             }
             .glassCard(padding: OnboardingDesign.Space.md)
@@ -143,6 +144,32 @@ struct AllowlistSlide: View {
             detail: row.bundleId,
             iconColor: OnboardingDesign.Palette.success
         )
+    }
+
+    @ViewBuilder
+    private func baselineRowEditor(row: EditorRow) -> some View {
+        if row.supportsDeepHook {
+            HStack(spacing: OnboardingDesign.Space.sm + 2) {
+                IconTextRow(
+                    icon: "checkmark.circle.fill",
+                    title: row.displayName,
+                    detail: row.bundleId,
+                    iconColor: OnboardingDesign.Palette.success
+                )
+                Spacer()
+                Picker("", selection: postureBinding(for: row)) {
+                    Text("Capture").tag(AllowlistTogglePosture.captureOnly)
+                    Text("Capture + Deep hook").tag(AllowlistTogglePosture.captureAndDeepHook)
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 230)
+                .labelsHidden()
+                .disabled(row.deepHookScaffoldOnly)
+                .accessibilityLabel("Deep-hook consent for \(row.displayName)")
+            }
+        } else {
+            rowSummaryView(row: row)
+        }
     }
 
     @ViewBuilder

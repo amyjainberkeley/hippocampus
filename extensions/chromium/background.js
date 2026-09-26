@@ -22,12 +22,17 @@ const NATIVE_HOST_NAME = "ai.hippocampus.native_messaging";
 
 let port = null;
 
+function isPersistableTab(tab) {
+  return Boolean(tab) && tab.incognito === false;
+}
+
 function connectNativeHost() {
   if (port) return port;
   try {
-    port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
-    port.onDisconnect.addListener(() => {
-      port = null;
+    const connectedPort = chrome.runtime.connectNative(NATIVE_HOST_NAME);
+    port = connectedPort;
+    connectedPort.onDisconnect.addListener(() => {
+      if (port === connectedPort) port = null;
     });
   } catch (_e) {
     port = null;
@@ -35,15 +40,34 @@ function connectNativeHost() {
   return port;
 }
 
-chrome.runtime.onMessage.addListener((message, sender, _sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "capture_authorization") {
+    if (!isPersistableTab(sender.tab)) {
+      sendResponse({ authorized: false });
+      return false;
+    }
+    try {
+      chrome.runtime.sendNativeMessage(
+        NATIVE_HOST_NAME,
+        { type: "capture_authorization", incognito: false },
+        (response) => {
+          const failed = Boolean(chrome.runtime.lastError);
+          sendResponse({
+            authorized: !failed && response && response.status === "authorized",
+          });
+        },
+      );
+      return true;
+    } catch (_e) {
+      sendResponse({ authorized: false });
+      return false;
+    }
+  }
   if (message.type !== "page_content") return;
-  if (!sender.tab) return;
 
-  // CSO invariant: drop the message here, AND forward an `incognito`
-  // flag to the native host so a JS regression cannot silently leak
-  // content. Both layers are defense-in-depth; the early-return is the
-  // primary block, the flag is the belt-and-suspenders fallback.
-  if (sender.tab.incognito) return;
+  // Missing is not evidence of an ordinary tab. Require Chromium's
+  // explicit false classification before opening the native host.
+  if (!isPersistableTab(sender.tab)) return;
 
   const nativePort = connectNativeHost();
   if (!nativePort) return;
@@ -86,10 +110,10 @@ chrome.runtime.onMessage.addListener((message, sender, _sendResponse) => {
       ts_us: message.payload.ts_us,
       tab_id: sender.tab.id || 0,
       source_browser: detectBrowser(),
-      incognito: sender.tab.incognito === true,
+      incognito: false,
     });
   } catch (_e) {
-    port = null;
+    if (port === nativePort) port = null;
   }
 });
 
@@ -100,4 +124,8 @@ function detectBrowser() {
   if (ua.includes("Arc")) return "arc";
   if (ua.includes("Chrome/")) return "chrome";
   return "chrome";
+}
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = { isPersistableTab };
 }

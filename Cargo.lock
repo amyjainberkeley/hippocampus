@@ -25,9 +25,9 @@ checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
 
 [[package]]
 name = "anyhow"
-version = "1.0.102"
+version = "1.0.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
+checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
 name = "async-trait"
@@ -216,6 +216,22 @@ name = "clap_lex"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
+
+[[package]]
+name = "core-foundation"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2a6cd9ae233e7f62ba4e9353e81a88df7fc8a5987b8d445b4d90c879bd156f6"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+]
+
+[[package]]
+name = "core-foundation-sys"
+version = "0.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cpufeatures"
@@ -1001,7 +1017,7 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "mci-agent"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "bytes",
  "getrandom 0.3.4",
@@ -1015,6 +1031,7 @@ dependencies = [
  "mci-core",
  "mci-coreml-bridge",
  "mci-embed-coreml",
+ "mci-keychain",
  "mci-mail-reader",
  "mci-mcp-client",
  "mci-messages-reader",
@@ -1022,9 +1039,11 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "toml_edit",
  "tracing",
 ]
 
@@ -1053,7 +1072,9 @@ dependencies = [
  "getrandom 0.3.4",
  "mci-brain",
  "mci-core",
+ "mci-embed-coreml",
  "rusqlite",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",
@@ -1074,9 +1095,12 @@ version = "0.0.1"
 dependencies = [
  "mci-brain",
  "mci-brief",
+ "mci-core",
  "mci-coreml-bridge",
  "serde",
  "serde_json",
+ "sha2",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 
@@ -1107,12 +1131,14 @@ dependencies = [
 name = "mci-coreml-bridge"
 version = "0.0.1"
 dependencies = [
+ "mci-brain",
  "mci-brief",
  "objc2",
  "objc2-core-ml",
  "objc2-foundation",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "tokenizers",
@@ -1128,6 +1154,15 @@ dependencies = [
  "objc2-foundation",
  "thiserror 1.0.69",
  "tokenizers",
+]
+
+[[package]]
+name = "mci-keychain"
+version = "0.0.1"
+dependencies = [
+ "core-foundation",
+ "core-foundation-sys",
+ "security-framework-sys",
 ]
 
 [[package]]
@@ -1743,6 +1778,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "security-framework-sys"
+version = "2.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc1f0cbffaac4852523ce30d8bd3c5cdc873501d96ff467ca09b6767bb8cd5c0"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
 ]
 
 [[package]]

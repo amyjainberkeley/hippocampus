@@ -2,6 +2,7 @@ import Foundation
 
 public enum RetentionPolicy: String, Sendable, Equatable, CaseIterable, Identifiable {
     case forever
+    case ninetyDays
     case thirtyDays
     case sevenDays
     case custom
@@ -11,6 +12,7 @@ public enum RetentionPolicy: String, Sendable, Equatable, CaseIterable, Identifi
     public var displayName: String {
         switch self {
         case .forever: return "Forever"
+        case .ninetyDays: return "90 days"
         case .thirtyDays: return "30 days"
         case .sevenDays: return "7 days"
         case .custom: return "Custom"
@@ -20,26 +22,51 @@ public enum RetentionPolicy: String, Sendable, Equatable, CaseIterable, Identifi
     public var days: Int? {
         switch self {
         case .forever: return nil
+        case .ninetyDays: return 90
         case .thirtyDays: return 30
         case .sevenDays: return 7
         case .custom: return nil
         }
     }
+
+    public static let customDaysRange = 1...365
+
+    public func validatedCustomDays(_ customDays: Int?) throws -> Int? {
+        guard self == .custom else { return nil }
+        guard let customDays, Self.customDaysRange.contains(customDays) else {
+            throw RetentionStoreError.invalidCustomDays
+        }
+        return customDays
+    }
 }
 
-// Real impl persists to ~/Library/Application Support/MCI/state.json.
-// This PR: protocol only. Saves nothing.
+public enum RetentionStoreError: LocalizedError, Equatable {
+    case invalidCustomDays
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidCustomDays:
+            return "Custom retention must be between 1 and 365 days."
+        }
+    }
+}
+
 public protocol RetentionStore: Sendable {
     func currentPolicy() async -> RetentionPolicy
     func currentCustomDays() async -> Int?
-    func setPolicy(_ policy: RetentionPolicy, customDays: Int?) async
+    func setPolicy(_ policy: RetentionPolicy, customDays: Int?) async throws
+    func needsReview() async -> Bool
+}
+
+extension RetentionStore {
+    public func needsReview() async -> Bool { false }
 }
 
 public actor StubRetentionStore: RetentionStore {
-    private var policy: RetentionPolicy = .forever
+    private var policy: RetentionPolicy = .ninetyDays
     private var customDays: Int?
 
-    public init(policy: RetentionPolicy = .forever, customDays: Int? = nil) {
+    public init(policy: RetentionPolicy = .ninetyDays, customDays: Int? = nil) {
         self.policy = policy
         self.customDays = customDays
     }
@@ -52,8 +79,9 @@ public actor StubRetentionStore: RetentionStore {
         customDays
     }
 
-    public func setPolicy(_ newPolicy: RetentionPolicy, customDays newDays: Int?) async {
+    public func setPolicy(_ newPolicy: RetentionPolicy, customDays newDays: Int?) async throws {
+        let validatedDays = try newPolicy.validatedCustomDays(newDays)
         policy = newPolicy
-        customDays = newDays
+        customDays = validatedDays
     }
 }

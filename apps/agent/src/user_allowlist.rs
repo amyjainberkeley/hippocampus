@@ -251,6 +251,7 @@ fn current_real_uid() -> u32 {
 /// the same line-by-line state machine, the same key allow-list, the
 /// same value shapes (`"quoted-string"` or `true|false`), the same
 /// per-table required-key set.
+#[allow(clippy::too_many_lines)]
 pub fn parse(source: &str) -> Result<Vec<UserAllowlistEntry>, UserAllowlistError> {
     let mut entries: Vec<UserAllowlistEntry> = Vec::new();
     let mut pending_bundle_id: Option<String> = None;

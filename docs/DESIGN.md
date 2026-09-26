@@ -3,11 +3,13 @@
 **Design Document v0.2**
 Status: Draft · Owner: @amyjainberkeley · Last updated: 2026-05-18 (Phase 0 ADRs landed — §8 retrieval shape, §12 schema, §13 embedder updated per ADRs 0009/0010/0011)
 
+This document is the target architecture, not the canonical shipped-status page. For current behavior and release gates, see [STATUS.md](STATUS.md).
+
 ---
 
 ## 1. Overview
 
-MCI is an always-on desktop agent that continuously records a person's screen **and**, in parallel, captures the structured context of their workflow — the frontmost app, the focused window, the active browser tab's URL, and the full text content of what they are looking at. It turns that stream into a private, searchable **brain**: a long-term memory of everything the person has seen and done, so context is never lost.
+MCI is designed as a desktop agent that captures a person's permitted screen context and, in parallel, the structured context of their workflow — the frontmost app, the focused window, the active browser tab's URL, and the full text content of what they are looking at. In the current shipping path, live capture still stays off by default until an explicit boot-time opt-in is supplied. The intended result is a private, searchable **brain**: a long-term memory of what the person has seen and done, so context is never lost.
 
 The core idea (as deployed internally at Meta): a knowledge worker's real context lives in transient state — the tab they had open, the doc they skimmed, the Slack thread three days ago, the error they saw and fixed. Today that evaporates. MCI persists it, indexes it, and lets the person (or an agent acting for them) recall it instantly: *"what was that pricing page I looked at last Tuesday?"*, *"summarize everything I read about X this week"*, *"what was I doing right before the build broke?"*
 
@@ -38,9 +40,9 @@ The single hardest engineering constraint: **it must be invisible.** It runs all
 
 ## 3. Product Behavior — A Day In The Life
 
-1. User installs MCI. First-run onboarding explains exactly what is captured and walks through the OS permission prompts (Screen Recording, Accessibility, Automation) with plain-language rationale.
+1. User installs MCI. First-run onboarding explains exactly what is captured and walks through the OS permission prompts (Screen Recording, Accessibility, Automation) with plain-language rationale. Shipping builds still keep live capture off until the user explicitly opts in at boot.
 2. MCI lives in the menu bar / system tray. A single glanceable state: **Recording / Paused / Off**. One click to pause (e.g., before entering a password vault or a private call). Configurable auto-pause rules (denylisted apps/URLs).
-3. User works normally. They open Chrome, read a pricing page, switch to VS Code, hit an error, Google it, read a Stack Overflow answer, switch to Slack. MCI silently records the screen at meaningful transitions and, for each, attaches: app = Chrome, window title, URL, the page's extracted text; then app = VS Code, file, the error text via OCR; etc.
+3. When capture is explicitly enabled, the user works normally. They open Chrome, read a pricing page, switch to VS Code, hit an error, Google it, read a Stack Overflow answer, switch to Slack. MCI records the screen at meaningful transitions and, for each, attaches: app = Chrome, window title, URL, the page's extracted text; then app = VS Code, file, the error text via OCR; etc.
 4. Nothing is felt. Fans stay quiet. Battery is normal.
 5. Later, the user opens MCI's recall view (or asks an agent): *"what was the Stack Overflow answer I used to fix the build error on Thursday afternoon?"* MCI returns the moment — a keyframe thumbnail, the extracted text, the URL, timestamp, surrounding context — and a one-line synthesized answer.
 6. On a second machine (also running MCI, same account), the encrypted memory has synced; recall works there too. The sync server only ever held ciphertext.
@@ -184,8 +186,8 @@ state-transition event
                   extraction for "last Tuesday"; plain hybrid otherwise.
 ```
 
-- **Embedding model:** quantized **`snowflake-arctic-embed-s`** (33M params, **384-d**, Apache-2.0, int8) via **Core ML** (ANE) on macOS / **ONNX Runtime + DirectML** on Windows. +23.9% relative MTEB-R vs `all-MiniLM-L6-v2` (51.98 vs 41.95 nDCG@10) at the same dimension, same size class, same runtime path. **Query and document prefixes are required by the model card** and applied in the embedder wrapper. `NLEmbedding` / a potion-retrieval-32M-class static embedder is kept only as a no-dependency floor. (ADR-0011.)
-- **Vector store:** **sqlite-vec** — pure C, zero deps, single file, co-located with relational + FTS5 data in **one SQLite file**. The only vector store preserving the single-encrypted-file / zero-knowledge invariant (ADR-0008). Brute-force ~124 ms per 1M binary-quantized vectors; scaling ladder past ~10⁶ vectors = binary quantization + recency/app pre-filter.
+- **Embedding model:** **`snowflake-arctic-embed-s` FP16** (33M params, **384-d**, Apache-2.0, ~66 MB) via **Core ML** on macOS and **ONNX Runtime + DirectML** on Windows. The macOS graph uses eager attention, a finite `-10000` attention-mask floor, and Core ML specification version 8 so the model honors the app's macOS 14 deployment target. The runtime explicitly permits CPU plus Neural Engine without claiming physical ANE residency. The 50-sentence parity gate covers both that policy and CPU-only execution. **Query and document prefixes are required by the model card** and applied in the embedder wrapper. INT8 is not a shipping claim: it failed the quality gate. `NLEmbedding` / a potion-retrieval-32M-class static embedder is kept only as a no-dependency floor. (ADR-0011.)
+- **Vector retrieval path:** the target vector-store design is **sqlite-vec**, but the current shipped implementation does a Rust-side brute-force cosine scan over vectors stored in SQLCipher. That keeps semantic recall local without claiming the sqlite-vec runtime path has landed yet.
 - **Hybrid retrieval:** FTS5 (lexical) + vector KNN (semantic) fused by **min-max Convex Combination** (Bruch et al., ACM TOIS 2023 — outperforms Reciprocal Rank Fusion in- and out-of-domain). Recall (not precision) is the dominant success metric on lifelog corpora.
 - **Recall interface:**
   - **Local UI** — timeline scrubber + natural-language search; each result = keyframe thumbnail, extracted text, app/URL, timestamp, neighboring events.
@@ -204,7 +206,7 @@ MCI captures the most sensitive possible data stream. Trust is the product; this
 - **Plaintext in an MCI same-user-accessible process while running** (per ADR-0012). MCI is an all-day daemon; any other process running as the same user is, by default, able to read its memory and IPC channels via standard OS APIs. This is exactly how Microsoft Recall's 2025/26 redesign failed (`AIXHost.exe` unprotected-process leak, TotalRecall Reloaded, CSO Online 2026-04-16). The at-rest model alone is insufficient — see §10 process-hardening.
 
 ### 9.2 Encryption
-- **At rest (device, ADR-0008):** the SQLite store + blob store encrypted with a device-held key (rusqlite + bundled SQLCipher; sqlite-vec as runtime extension). DB master key wrapped by a **Secure-Enclave-gated, biometric-access-controlled, non-exportable, `ThisDeviceOnly`** Keychain item on macOS (TPM + DPAPI-NG analog on Windows). Memory store is never plaintext on disk.
+- **At rest (device, ADR-0008):** the SQLite store + blob store are encrypted with SQLCipher. Current macOS custody uses a non-synchronizable generic-password item in the file-based Keychain: service `ai.hippocampus.brain`, account `database-key-v1`, with a `SecAccess` / `SecTrustedApplication` ACL for the four bundled consumers. This is not a Secure Enclave, biometric, access-group, or non-exportable-key claim. Durable releases require stable Developer ID designated requirements; clean-install and two-version owner verification remain release gates.
 - **Cloud (transport, ADR-0012):** **client-side encryption before upload** under a per-device Secure-Enclave-backed keypair + a shared user master key bootstrapped via **device-to-device authenticated enrollment** (existing device cross-signs new device's key; PAKE-style exchange over the sync transport; server never vouches). For single-device users, an opt-in **HSM-rate-limited recovery vault that self-destructs after N=10 failed attempts** (Apple ADP / WhatsApp Encrypted Backups envelope) provides catastrophic-loss recovery.
 - **Hash-chained delta log (ADR-0012).** The sync log is append-only and **hash-chained end-to-end** to defend against rollback, truncation, and key-substitution (Backendal et al., CRYPTO 2024 + ACM CCS 2024 companion). Clients verify the chain on every sync round.
 - **Searchable Symmetric Encryption is an explicit non-goal** (ADR-0012). Search runs on-device against a decrypted-in-memory index; SSE would add the known leakage-abuse exposure for zero functional gain.
@@ -214,7 +216,7 @@ MCI captures the most sensitive possible data stream. Trust is the product; this
 - **Incognito / private windows:** detected and excluded.
 - **One-click pause** + auto-pause rules (on screen-lock, on denylisted foreground, on call/meeting if configured).
 - **On-device redaction pass** (opportunistic, **defense-in-depth — never the guarantee**): detect and mask secrets/PII patterns (passwords, tokens, card numbers) in OCR text before it is indexed. The verified state of the art (Basak et al., arXiv:2307.00714) is best-tool recall ≈ 52–88%; the 12%–48% miss rate is why source-level capture suppression above carries the privacy load.
-- **Full user control:** browse, search, **delete** any memory or time range; "forget last hour"; export; full wipe. **Deletion = crypto-shredding of per-segment keys + tombstones in the delta log** (ADR-0012) — the only durable delete primitive. Server-side delete is not trusted.
+- **Full user control:** browse, search, **delete** any memory or time range; "forget last hour"; export; full wipe. The current shipped delete path is direct row deletion plus `VACUUM`; crypto-shredded range deletion with tombstones remains the target state described by ADR-0012.
 - **No telemetry of content.** Crash/usage telemetry (if any) is opt-in and content-free.
 
 ---
@@ -225,7 +227,13 @@ MCI captures the most sensitive possible data stream. Trust is the product; this
 - **Memory ceiling discipline:** bounded ring buffer for in-flight frames (fixed N surfaces, never an unbounded array); backpressure = **drop frames** if OCR/encode falls behind (a dropped near-duplicate is harmless — dedupe already assumed it); batched, throttled disk flush (SQLite WAL + periodic checkpoint; blobs to content-addressed store, not in the DB); release capture surfaces immediately; OCR/embed at low QoS, deferred on battery, throttled on thermal/low-power state.
 - **Realistic footprint (well-built native pipeline, Apple Silicon / modern x86; default tier post-2026-05-31 amendment):** static-screen steady state ≤10–15% of one core, ≤2 GB resident (flat, buffer+cache bound, with Qwen3-4B brief generator + Tier2 Qwen NER at ingest + per-event consolidation); per-event bursts ≤25% / ≤3 GB brief sub-second one-core spikes, smoothed by batching; energy "modest, noticeable only under sustained heavy editing." The Performance tier (opt-in via OnboardingTier per brain-v2 §5.7) holds the prior ~1–2% / ~250 MB envelope with reduced functionality (Qwen3-1.7B briefs, no Tier2 NER at ingest, smaller embedding batches). This is the entire reason the capture/encode/OCR layer is native and the runtime is not Electron.
 - **Process-hardening discipline (ADR-0012).** The agent shell, the recall UI, and the macOS Swift capture helper each ship with **hardened runtime enabled and library validation on**; **notarization is pinned** and a non-matching helper is refused at launch; the recall UI requires a **fresh Touch ID / passcode unlock** before the wrapping key is unwrapped (independent of system unlock state) with a configurable idle timeout (default 5 minutes); every place plaintext lives is a **zero-on-drop buffer** (`secrecy::SecretVec` or platform-locked memory); **bulk-decrypt-to-working-set is forbidden** — the brain decrypts only what is currently in the active recall window (top-k results plus immediate temporal neighbors). These mitigations close the same-user-process gap added to §9.1.
-- **DMG size discipline (cycle 8.42 amendment).** As of cycle 8.42, the shipped DMG bakes in ALL three Core ML models the runtime needs — Arctic Embed S INT8 (~64 MB, embedder), bert-base-NER INT8 (~108 MB, Tier-2 NER), and **Qwen3-1.7B FP16 (~3.4 GB extracted, brief-author)** — putting the DMG at roughly **~3.5–3.6 GB** vs. the pre-fix ~74 MB. The size delta is a **deliberate tradeoff** against the EnviousWispr-class launch-day outage: pre-fix, the Qwen3 model downloaded from HuggingFace on first-run with no fallback, and a HF CDN throttle / 5xx would hang MCI's "Prepare your brain" onboarding slide at 0% for 15+ minutes before users force-quit (see `docs/research/2026-07-13-enviouswispr-peer-study.md` §5). Baking the model into the DMG strengthens the zero-network invariant to first-run (§4) and eliminates the throttling-class of first-run failure entirely. The HF download path in `RealModelDownloader` is preserved as a fallback for any future "lite edition" DMG variant, but the shipping default is bundle-everything. Build-time completeness gates in `apps/hippocampus/Resources/build-app.sh` + `scripts/build-installer.sh` refuse to ship a DMG missing any of the three bundled models (fail-loud discipline codified after the cycle 8.24 embedder-omission regression).
+- **DMG size discipline (ADR-0039).** The standard release bundles only Arctic
+  Embed S for semantic retrieval. Tier-1 entity extraction and evidence-cited
+  extractive briefs remain useful without BERT NER or Qwen. Experimental custom
+  builds may include those models, but the public installer, onboarding, and
+  release contract do not require or advertise them. This keeps first launch
+  independent of a model host and several gigabytes smaller while preserving
+  exact event citations as the brief authority.
 
 ---
 
@@ -274,7 +282,7 @@ Retention/compaction policy (open, §15): age-out raw keyframes while keeping te
 | Windows context | UI Automation |
 | Page content | Optional per-browser extension (native messaging); OCR fallback |
 | Dedupe | dHash (64-bit), SSIM for borderline |
-| Embeddings | quantized `snowflake-arctic-embed-s` (33M, 384-d, Apache-2.0) — Core ML/ANE (mac) / ONNX Runtime+DirectML (win); query+doc prefixes required (ADR-0011) |
+| Embeddings | FP16 `snowflake-arctic-embed-s` (33M, 384-d, Apache-2.0) — Core ML (macOS 14+) / ONNX Runtime+DirectML (win); query+doc prefixes required (ADR-0011) |
 | Store / index | one SQLite file: FTS5 + sqlite-vec, SQLCipher-encrypted |
 | Crypto | OS keystore-backed device key; client-side E2E for cloud |
 | Sync | zero-knowledge encrypted delta log to object storage |
@@ -316,36 +324,24 @@ mci/
 - **Phase 8 — Windows adapter.** Implement `CaptureSource` on WGC/Media Foundation/Windows.Media.Ocr/UIA. Core unchanged.
 - **Phase 9 — Retention/compaction**, scale hardening, polish.
 
-### Phase status as of 2026-05-22 EOD (cycle 8.5)
+### Phase status for the 2026-09-01 v1 branch
 
 | Phase | Status | Notes |
 |---|---|---|
 | Phase 0 | ✅ COMPLETE | Foundations, ADRs 0001–0014 |
 | Phase 1 | ✅ COMPLETE | Capture spine + sensitive-surface suppression. G2.1 preliminary pass; G2.2 4h soak still owed |
 | Phase 2 | ✅ COMPLETE | Context join — all providers + wiring landed |
-| Phase 3 | ✅ CLOSED (cycle 7) | OCR + brain — 11/11 PRs + follow-ons. Real capture verified end-to-end |
-| Phase 4 | ~95% | Retention purger + onboarding scaffold + Keychain wired + dual-grant TCC pattern (cycle 8.5). Pending: real-capture verify with browser ext + Apple Dev ID for persistent grants |
-| Phase 5 | ~80% | **Real semantic search SHIPPING-GRADE** (cycle 8.5). Arctic Embed S Core ML pipeline rewritten end-to-end: external Rust tokenization via HuggingFace tokenizers crate, FP16 weights, CLS-pool + L2-norm in graph, quality regression test 50/50 cosine sim ≥0.999. Brief author (Qwen3-1.7B) Rust backend complete but `.mlpackage` conversion blocked by coremltools op-coverage gap. Workspace server skeleton + crypto + enrollment tests done |
-| Phase 6 | ~75% | Browser ext working (Chromium MV3 + native messaging + PageContentEvent). Safari `.appex` still scaffold-only |
-| Phase 7 | ~75% | Hippocampus.app shell + Sparkle + LoginItems + DMG + rpath fix (cycle 8.5) + MCP auto-registration + Troubleshoot menu. Icon designer pass + real screenshots + Apple Dev ID signing still owed |
-
-#### M4 kill-switch — env-var-gated lift status
-
-The M4 cascade-twice OCR-emit kill-switch (`CascadeTwiceOCREmitter.killOcrEmit = true`, ADR-0031 §Status) has been engaged in production for 6+ cycles since the 2026-05-30 second-lift revert. Phase 7 PR 14 (this PR) ships the M4-lift **code path** but gates activation on an environment variable:
-
-- `HIPPOCAMPUS_ENABLE_V2P1=1` at helper boot ⇒ gate returns `.enabled`; the boot path overrides `captureEnabled = true` AND `killOcrEmit = false`. The V2-P1 capture pipeline runs live.
-- Env var unset / any other value ⇒ pre-M4-lift behavior preserved. Users on the shipping DMG see NO change.
-
-Rationale: the ratified V2-P1 third-lift discipline (`docs/research/v2-p1-third-lift-scaffold.md` §3) requires a live-Mac §7-equivalent smoke test on Amy's physical Mac (redesign memo §3.2 harnesses H6′–H10′) BEFORE the lift is ratified for public users. That test cannot be run by the fleet — it needs interactive human input. The env var is the interim: it lets Amy set the flag + build a local DMG + run the smoke test whenever she gets to her Mac, without ratifying a smoke-untested runtime for the shipping DMG.
-
-**Follow-up PR (post-smoke):** removes the env-var gate + makes V2-P1 the shipping default. Tracks against the ADR-0031 §Status third-lift condition-2 sign-off in `docs/audit/<date>-v2-p1-live-corpus.md`.
-
-Matched-pair implementation:
-- Swift helper: `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/MciV2P1Gate.swift` (reads env, exposes `.current` + `stateFor(env:)`, `stderrBreadcrumb(_:)`)
-- Rust agent: `apps/agent/src/v2p1_gate.rs` (reads env, appends `--capture` to helper argv when enabled)
-- Boot breadcrumb: `helper_health v2p1_gate=enabled|disabled` on stderr — grep `helper.stderr.log` to confirm state.
+| Phase 3 | ✅ CLOSED (cycle 7) | OCR + brain landed. Current delete behavior is direct row deletion plus `VACUUM`, not crypto-shredded range deletion. |
+| Phase 4 | ~95% | Retention purger + onboarding scaffold landed. Task 2 implements validated `dev.key` migration into the file-Keychain ACL item and removes plaintext after successful revalidation. Signed clean-install and upgrade verification remain owner gates; live capture remains default-off. |
+| Phase 5 | ~80% | Semantic search works with the CPU+Neural Engine Core ML policy and Rust cosine scan over stored vectors. Task 3 committed a synthetic retrieval baseline at `docs/eval/work-memory-baseline.json`: lexical matched 7/21 answerable cases and abstained 3/3 times; hybrid matched 21/21 but produced 3/3 false positives. Generation is unmeasured, and Task 3 review is pending. |
+| Phase 6 | ~75% | Browser extension path works. Mail and Messages deep-hook ingest can persist allowed rows, but those paths are still gated behind explicit allowlists / FDA rather than the default demo flow. |
+| Phase 7 | ~75% | Hippocampus.app shell + Sparkle + LoginItems + DMG + rpath fix landed. Apple Developer ID signing and release verification are still owed. |
 | Phase 8 | Scaffolded | `adapters/windows/` crate (PR #124). Implementation post-v1.0 |
 | Phase 9 | Not started | iOS/Watch separate Xcode targets per ADR-0026. Post-v1.0 |
+
+#### Capture authority and readiness
+
+Live capture defaults off. The persisted `capture_enabled` preference is the only authority: the app supervisor translates it to explicit `--capture` argv, strips legacy gate and raw-key variables from child environments, and commits UI/config state only after a generation-bound readiness receipt. The helper publishes that receipt only after Keychain resolution and successful `SCStream.startCapture`; startup errors exit nonzero. A failed preference transition either restarts and verifies the prior topology or leaves a visible closed/error state.
 
 ### Phase D — deep-hook coverage extension (v1.5-eligible)
 

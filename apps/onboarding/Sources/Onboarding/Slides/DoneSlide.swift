@@ -9,11 +9,11 @@ struct DoneSlide: View {
         SlideContainer {
             VStack(spacing: OnboardingDesign.Space.xl) {
                 HeroHeader(
-                    title: "You're all set",
-                    subtitle: "Hippocampus is now watching for activity. Look for the menu-bar icon.",
+                    title: readyForCapture ? "You're all set" : "Finish preparing your memory",
+                    subtitle: readyForCapture ? "Capture begins when you click Get Started. You can pause it any time from the menu bar." : "Go back to finish the unchecked setup steps before starting capture.",
                     titleStyle: .display
                 ) {
-                    Image(systemName: "checkmark.circle.fill")
+                    Image(systemName: readyForCapture ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 60))
                         .foregroundStyle(OnboardingDesign.Palette.success)
                 }
@@ -23,6 +23,13 @@ struct DoneSlide: View {
                 menuBarHint
             }
         }
+        .task { await prepareBrainVM.generateKey(); flowVM.refreshPermissions() }
+    }
+
+    private var readyForCapture: Bool {
+        prepareBrainVM.canContinue
+            && flowVM.screenRecordingPermission.status == .granted
+            && flowVM.accessibilityPermission.status == .granted
     }
 
     private var summaryChecklist: some View {
@@ -31,7 +38,11 @@ struct DoneSlide: View {
                 granted: flowVM.screenRecordingPermission.status == .granted,
                 label: "Screen Recording"
             )
-            checkRow(granted: true, label: "Encrypted")
+            checkRow(
+                granted: flowVM.accessibilityPermission.status == .granted,
+                label: "Accessibility privacy checks"
+            )
+            checkRow(granted: prepareBrainVM.canContinue, label: "Encryption key ready")
             checkRow(granted: true, label: "Retention policy set")
             modelCheckRow
         }
@@ -52,15 +63,15 @@ struct DoneSlide: View {
     @ViewBuilder
     private var modelCheckRow: some View {
         if prepareBrainVM.modelDownloaded {
-            checkRow(granted: true, label: "On-device LLM")
+            checkRow(granted: true, label: "Richer brief wording ready")
         } else {
             HStack(spacing: OnboardingDesign.Space.md) {
-                Image(systemName: "circle")
-                    .foregroundStyle(.secondary)
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(OnboardingDesign.Palette.success)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("On-device LLM")
+                    Text("Evidence-cited briefs ready")
                         .font(.system(size: 14))
-                    Text("Daily briefs disabled — enable in Settings")
+                    Text("Optional richer wording can be added later")
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                 }

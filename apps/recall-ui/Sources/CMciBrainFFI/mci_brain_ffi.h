@@ -42,6 +42,15 @@ typedef struct McibrainHandle McibrainHandle;
  * for a diagnostic. The connection is READ-ONLY. */
 McibrainHandle *mci_brain_ffi_open(const char *path, const char *key_hex);
 
+/* Open the same READ-ONLY brain with an explicit Arctic Embed S Core ML
+ * model. A missing, incompatible, or non-predicting model returns NULL;
+ * callers may retry mci_brain_ffi_open for lexical-only recall. */
+McibrainHandle *mci_brain_ffi_open_with_model(
+    const char *path,
+    const char *key_hex,
+    const char *model_path
+);
+
 /* Close a handle. NULL is a no-op. Double-close is undefined. */
 void mci_brain_ffi_close(McibrainHandle *h);
 
@@ -55,6 +64,13 @@ char *mci_brain_ffi_search(McibrainHandle *h, const char *query_json);
 /* Fetch the `limit` most-recent events as a JSON array of HitJson. */
 char *mci_brain_ffi_recent_events(McibrainHandle *h, uint32_t limit);
 
+/* Half-open measured-activity window, max two days and 50,000 rows.
+ * JSON {intervals:[{start_us,end_us,state,app_bundle_id}],truncated:bool}.
+ * No run identity/content. NULL on invalid range or unavailable storage.
+ * Free with mci_brain_ffi_string_free. */
+char *mci_brain_activity_intervals(McibrainHandle *h, uint64_t start_us,
+                                  uint64_t end_us, uint32_t limit);
+
 /* Resolve a batch of event ids into full HitJson rows. Powers the recall
  * UI's related-hits flyout (cycle 8.37 PR-3): given a hit whose
  * `linked_event_ids` names its cross-app siblings, the Swift side calls
@@ -66,6 +82,19 @@ char *mci_brain_ffi_recent_events(McibrainHandle *h, uint32_t limit);
  * exist in the store are silently dropped. Input is capped at 32 ids
  * (excess is truncated) to bound the per-call get_event loop. */
 char *mci_brain_ffi_events_by_ids(McibrainHandle *h, const char *query_json);
+
+/* Read one selected admitted event through the existing read-only handle.
+ * Returns {"event_id":N,"ts_us":N,"app_bundle_id":<string|null>,
+ *          "text":"...","truncated":false}, or JSON null for
+ * a missing/deleted/suppressed/invalid id. Text is an exact UTF-8 prefix,
+ * capped at 128 KiB without splitting a scalar; truncated means text was
+ * omitted. Timestamp/app and text come from the same row snapshot. Callers
+ * MUST match timestamp and nullable app against the selected Hit: IDs can reuse.
+ * App identity is capped at 1 KiB; oversized identity returns JSON null.
+ * Escaped JSON is bounded by 6 * (128 KiB + 1 KiB) + 256 bytes (plus NUL).
+ * No arbitrary paths, vectors or blobs are read. NULL on error.
+ * Keep h alive during the call. Free non-NULL with mci_brain_ffi_string_free. */
+char *mci_brain_ffi_event_text(McibrainHandle *h, uint64_t event_id);
 
 /* V2-P13 (Phase D scaffold) — Return a lightweight event summary for a
  * time range, downsampled to at most ~1000 rows per call.
@@ -83,8 +112,8 @@ char *mci_brain_ffi_timeline_events(McibrainHandle *h, const char *query_json);
  * Each row carries ONLY {ts_us, app_bundle_id?, reason_code}.
  * NEVER OCR text / keyframe / windowTitle / url
  * (ADR-0017 §5.1 + ADR-0016 §4.5).
- * P3.9b returns an empty list — the tombstone source is a separate
- * file (`mci-tombstones.bin`) and surfacing it is P3.9c. */
+ * Returns an empty list until the separate append-only tombstone file
+ * (`mci-tombstones.bin`) is exposed through this read-only boundary. */
 char *mci_brain_ffi_recent_privacy_moments(McibrainHandle *h, uint32_t limit);
 
 /* List the most-observed app_bundle_id values + their event counts.
@@ -128,11 +157,24 @@ char *mci_brain_ffi_brief_dates(McibrainHandle *h, uint32_t limit);
 /* Content-free summary for the Privacy Dashboard's top card.
  * Returns a UTF-8 JSON object of shape
  *   {"total_events":N,"oldest_ts_us":<u64?>,"newest_ts_us":<u64?>,
- *    "disk_bytes":N}
+ *    "disk_bytes":N,"storage":null}
+ * disk_bytes is legacy database-only bytes, not total storage. This entrypoint
+ * never enumerates blobs. A breakdown requires an explicit storage_usage call.
  * — total event count, oldest/newest ts (nil on empty store), and the
  * on-disk byte size of the SQLCipher brain file. NO row content is
  * exposed. Same allocator discipline as the other returners. */
 char *mci_brain_ffi_summary_stats(McibrainHandle *h);
+
+/* Explicit metadata-only logical storage snapshot, called off the UI thread.
+ * Returns {"database":<measurement>,"wal":<measurement>,"shm":<measurement>,
+ * "managed_blobs":<measurement>,"reported_total_bytes":<u64?>,"complete":<bool>}.
+ * Measurements are {"logical_bytes":<u64?>,"status":<string>}.
+ * Missing, unreadable, skipped and scan-limited components are explicit.
+ * No symlink traversal, no recursion, no keys/data reads. At most 64 path
+ * components and 20,000 entries. The 200ms budget is best-effort between
+ * local metadata calls, not a hard latency bound on an OS call.
+ * Do not use for polling. Same allocation/free discipline as summary_stats. */
+char *mci_brain_ffi_storage_usage(McibrainHandle *h);
 
 /* Cycle 8.47 — Privacy Dashboard mutation surface (PR #76 follow-up).
  *
@@ -141,10 +183,11 @@ char *mci_brain_ffi_summary_stats(McibrainHandle *h);
  * typed-word ("DELETE" / "DELETE EVERYTHING") confirmation flow.
  * wipe_brain additionally requires a 60s-TTL token from prepare_wipe.
  *
- * Every mutation opens a transient writer connection, runs DELETE
- * (CASCADE-clean via migrations 0001/0004/0005) + VACUUM, then closes.
- * Returns a UTF-8 JSON DeleteResultJson: {"events_deleted": N,
- * "vacuum_ok": bool}. NULL on error; caller must free via string_free. */
+ * Every mutation opens a transient writer connection, commits DELETE,
+ * then attempts storage cleanup before closing. Returns UTF-8 JSON:
+ * {"committed": true, "events_deleted": N, "vacuum_ok": bool,
+ * "blob_cleanup_ok": bool}. Cleanup flags may be false after commit.
+ * NULL means no committed outcome; caller must free via string_free. */
 
 /* Delete a single event by id. `event_id_json` is
  * {"event_id": <u64>}. */

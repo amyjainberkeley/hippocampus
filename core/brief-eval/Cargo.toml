@@ -15,11 +15,14 @@ name = "brief-eval"
 path = "src/bin/brief_eval.rs"
 
 [dependencies]
+mci-core   = { path = ".." }
 mci-brain  = { path = "../brain", features = ["stubs"] }
 mci-brief  = { path = "../brief" }
 serde      = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror  = "1"
+tempfile   = "3.27.0"
+sha2       = "0.10"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mci-coreml-bridge = { path = "../../adapters/macos/mci-coreml-bridge", optional = true }

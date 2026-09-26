@@ -26,6 +26,8 @@ public final class PrepareBrainViewModel: ObservableObject {
         downloadState == .ready
     }
 
+    public var canContinue: Bool { keyState == .ready }
+
     public var modelDisplayName: String {
         modelDownloader.displayName
     }
@@ -35,6 +37,7 @@ public final class PrepareBrainViewModel: ObservableObject {
     }
 
     public func generateKey() async {
+        guard keyState != .generating else { return }
         keyState = .generating
         try? await Task.sleep(for: .milliseconds(600))
         do {

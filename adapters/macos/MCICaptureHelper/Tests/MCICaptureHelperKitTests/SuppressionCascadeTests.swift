@@ -47,14 +47,16 @@ private func cascade(
     denyApps: Set<String> = [],
     denyURLs: [String] = [],
     denyTitles: [String] = [],
-    knownSafe: Set<String> = []
+    knownSafe: Set<String> = [],
+    rawPixelExcludedApps: Set<String> = []
 ) -> SuppressionCascade {
     SuppressionCascade(
         secureEventInput: MockSecureEventInput(enabled: secureEventInput),
         axSecureSubrole: MockAX(result: ax),
         denylist: MockDenylist(apps: denyApps, urls: denyURLs, titles: denyTitles),
         blackedRegion: MockBlackedRegion(present: blackedRegion),
-        knownSafeAppBundles: knownSafe
+        knownSafeAppBundles: knownSafe,
+        rawPixelExcludedAppBundles: rawPixelExcludedApps
     )
 }
 
@@ -83,6 +85,30 @@ final class CascadeDenylistTests: XCTestCase {
             windowTitle: "Bitwarden — Unlock Vault"
         )
         XCTAssertEqual(c.decide(context: ctx), .suppress(reason: .denylistSource))
+    }
+}
+
+// MARK: - Browser pixels stay outside ambient OCR
+
+final class CascadeRawPixelExclusionTests: XCTestCase {
+    func testExcludedBrowserBundleSuppressesEvenWhenAllowlisted() {
+        let c = cascade(
+            knownSafe: ["com.apple.Safari"],
+            rawPixelExcludedApps: BrowserPixelCapturePolicy.excludedBundleIds
+        )
+        let ctx = WorkflowContext(appBundleId: "com.apple.Safari")
+
+        XCTAssertEqual(c.decide(context: ctx), .suppress(reason: .failsafeUnknown))
+    }
+
+    func testNonBrowserAllowlistedBundleStillPassesPixelGate() {
+        let c = cascade(
+            knownSafe: ["com.apple.Terminal"],
+            rawPixelExcludedApps: BrowserPixelCapturePolicy.excludedBundleIds
+        )
+        let ctx = WorkflowContext(appBundleId: "com.apple.Terminal")
+
+        XCTAssertEqual(c.decide(context: ctx), .allow)
     }
 }
 

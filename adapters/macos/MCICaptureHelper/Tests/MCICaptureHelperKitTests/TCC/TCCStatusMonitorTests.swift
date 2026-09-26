@@ -63,6 +63,22 @@ final class TCCStatusMonitorTests: XCTestCase {
         .screenRecording, .accessibility, .fullDiskAccess
     ]
 
+    func testDefaultMonitorTracksOnlyCaptureCriticalPermissions() {
+        let monitor = TCCStatusMonitor(probe: FixedProbe(statuses: [
+            .screenRecording: .granted,
+            .accessibility: .granted,
+            .fullDiskAccess: .denied,
+            .automation: .denied,
+        ]))
+
+        monitor.seedInitialSnapshot()
+
+        XCTAssertEqual(
+            Set(monitor.currentStatuses().keys),
+            Set([TCCSurface.screenRecording, .accessibility])
+        )
+    }
+
     // (a)
     func testSeedInitialSnapshotDoesNotFireObserver() async {
         let observer = RecordingObserver()

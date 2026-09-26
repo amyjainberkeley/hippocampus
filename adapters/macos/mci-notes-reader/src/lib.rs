@@ -8,14 +8,14 @@
 //! signatures the Phase D Tier2 entity-extraction pipeline (FORK 8 = A)
 //! will consume for Notes.app. It does NOT read Notes today.
 //!
-//! ## Why AppleScript, not a framework
+//! ## Why `AppleScript`, not a framework
 //!
 //! Notes.app has no public framework surface. Its bundle-internal
 //! database (`NoteStore.sqlite` under `~/Group Containers/
 //! group.com.apple.notes/`) is undocumented, cross-encrypted with a
 //! per-account key held in the user's Keychain, and Apple reserves the
 //! right to break the schema at any macOS point release. The only
-//! supported deep-hook path is AppleScript automation via the
+//! supported deep-hook path is `AppleScript` automation via the
 //! `com.apple.Notes` scripting suite:
 //!
 //! ```applescript
@@ -32,11 +32,11 @@
 //!
 //! ## TCC requirement (documented; not yet exercised)
 //!
-//! AppleScript against Notes.app requires **Automation TCC per-target for
+//! `AppleScript` against Notes.app requires **Automation TCC per-target for
 //! Notes**. First-time send prompts. The wire-up PR must add:
 //!
 //! - `NSAppleEventsUsageDescription` in the agent + Hippocampus.app
-//!   bundles (already present for browser AppleScript).
+//!   bundles (already present for browser `AppleScript`).
 //! - A permission-status probe (`AEDeterminePermissionToAutomateTarget`)
 //!   that surfaces [`NotesReaderError::AccessDenied`] on `errAEEventNotPermitted`.
 //! - The onboarding UI card that deep-links into System Settings →

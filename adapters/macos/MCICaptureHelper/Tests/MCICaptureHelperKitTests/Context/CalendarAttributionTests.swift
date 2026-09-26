@@ -133,20 +133,89 @@ final class CalendarAttributionTests: XCTestCase {
     }
 
     // ------------------------------------------------------------------
-    // Production-shape construction smoke test
+    // Lazy construction and authorization, using no EventKit store
     // ------------------------------------------------------------------
 
-    func testProductionConstructorBindsCleanly() {
-        // The production `CalendarAttribution` must construct
-        // without exceptions even in headless CI (no EventKit
-        // access prompt is triggered until start() is called, and
-        // the `#if canImport(EventKit)` guard collapses to a no-op
-        // when the framework is unavailable).
-        let attribution = CalendarAttribution()
-        // Until start() is called and the auth callback resolves,
-        // every read returns nil — the safe direction. Test the
-        // initial state ONLY (start() triggers an async callback we
-        // do NOT want to wait on in unit tests).
-        XCTAssertNil(attribution.eventNow(at: Date()))
+    func testConstructionAndUnauthorizedReadsNeverCreateStore() {
+        let factory = CalendarStoreFactorySpy()
+        let attribution = CalendarAttribution(storeFactory: factory.makeStore)
+        XCTAssertEqual(factory.calls, 0)
+        XCTAssertNil(attribution.eventNow(at: Date(timeIntervalSince1970: 100)))
+        XCTAssertNil(attribution.eventNow(at: Date(timeIntervalSince1970: 200)))
+        XCTAssertEqual(factory.calls, 0)
+        XCTAssertEqual(factory.store.requests, 0)
+        XCTAssertTrue(factory.store.readDates.isEmpty)
+    }
+
+    func testExplicitStartRequestsAccessAndPendingOrDeniedAccessCannotRead() {
+        let factory = CalendarStoreFactorySpy()
+        let attribution = CalendarAttribution(storeFactory: factory.makeStore)
+        attribution.start()
+        XCTAssertEqual(factory.calls, 1)
+        XCTAssertEqual(factory.store.requests, 1)
+        XCTAssertNil(attribution.eventNow(at: Date(timeIntervalSince1970: 100)))
+        XCTAssertTrue(factory.store.readDates.isEmpty)
+        factory.store.completeAccess(granted: false)
+        XCTAssertNil(attribution.eventNow(at: Date(timeIntervalSince1970: 100)))
+        XCTAssertTrue(factory.store.readDates.isEmpty)
+        XCTAssertEqual(factory.calls, 1)
+    }
+
+    func testGrantedAccessReadsExactDateAndPreservesCacheTTL() {
+        let factory = CalendarStoreFactorySpy()
+        let attribution = CalendarAttribution(cacheTtl: 30, storeFactory: factory.makeStore)
+        attribution.start()
+        factory.store.completeAccess(granted: true)
+        let now = Date(timeIntervalSince1970: 100)
+        XCTAssertEqual(attribution.eventNow(at: now), factory.store.event)
+        XCTAssertEqual(attribution.eventNow(at: now.addingTimeInterval(1)), factory.store.event)
+        XCTAssertEqual(factory.store.readDates, [now])
+        XCTAssertEqual(attribution.eventNow(at: now.addingTimeInterval(31)), factory.store.event)
+        XCTAssertEqual(factory.store.readDates, [now, now.addingTimeInterval(31)])
+        XCTAssertEqual(factory.calls, 1)
+    }
+
+    func testRepeatedExplicitStartsReuseOneStoreAndPreserveAccessRequests() {
+        let factory = CalendarStoreFactorySpy()
+        let attribution = CalendarAttribution(storeFactory: factory.makeStore)
+        DispatchQueue.concurrentPerform(iterations: 8) { _ in attribution.start() }
+        XCTAssertEqual(factory.calls, 1)
+        XCTAssertEqual(factory.store.requests, 8)
+        XCTAssertTrue(factory.store.readDates.isEmpty)
+    }
+}
+
+private final class CalendarStoreFactorySpy: @unchecked Sendable {
+    let store = FakeCalendarStore()
+    private let lock = NSLock()
+    private var creations = 0
+    var calls: Int { lock.withLock { creations } }
+
+    func makeStore() -> any CalendarAttributionStore {
+        lock.withLock { creations += 1 }
+        return store
+    }
+}
+
+private final class FakeCalendarStore: CalendarAttributionStore, @unchecked Sendable {
+    let event = CalendarEventRef(subject: "Synthetic meeting", startUnixSeconds: 90, endUnixSeconds: 200)
+    private let lock = NSLock()
+    private var callbacks: [@Sendable (Bool) -> Void] = []
+    private var observedDates: [Date] = []
+    var requests: Int { lock.withLock { callbacks.count } }
+    var readDates: [Date] { lock.withLock { observedDates } }
+
+    func requestAccess(completion: @escaping @Sendable (Bool) -> Void) {
+        lock.withLock { callbacks.append(completion) }
+    }
+
+    func completeAccess(granted: Bool) {
+        let callback = lock.withLock { callbacks.last }
+        callback?(granted)
+    }
+
+    func eventNow(at now: Date) -> CalendarEventRef? {
+        lock.withLock { observedDates.append(now) }
+        return event
     }
 }

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "releaseVersion": "0.1.0",
+  "archiveURL": "UNPROVISIONED",
+  "archiveSHA256": "UNPROVISIONED",
+  "models": [
+    {
+      "id": "arctic-embed-s-fp16",
+      "bundle": "ArcticEmbedS_FP16.mlmodelc"
+    }
+  ]
+}

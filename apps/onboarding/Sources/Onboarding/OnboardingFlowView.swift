@@ -8,8 +8,10 @@ struct OnboardingFlowView: View {
     @EnvironmentObject var flowVM: OnboardingFlowViewModel
     @EnvironmentObject var prepareBrainVM: PrepareBrainViewModel
     @EnvironmentObject var retentionVM: RetentionViewModel
+    @State private var completionError: String?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,18 +22,18 @@ struct OnboardingFlowView: View {
 
             navigationBar
         }
-        .background(
-            // Hero steps get a fuller glow; working steps a calm wash.
-            GradientBackdrop(intensity: backdropIntensity)
-        )
+        .background(OnboardingMaterialBackdrop(intensity: backdropIntensity))
         .animation(
             OnboardingDesign.Motion.resolve(OnboardingDesign.Motion.standard, reduceMotion: reduceMotion),
             value: flowVM.currentStep
         )
+        .alert("Setup could not finish", isPresented: Binding(get: { completionError != nil }, set: { if !$0 { completionError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(completionError ?? "") }
     }
 
-    /// Welcome, the hotkey moment, and the finish line read as "moments" and
-    /// earn a stronger backdrop; everything else stays quiet under content.
+    /// The material stays quiet on working steps and slightly more translucent
+    /// at the three bookends. There is no decorative color wash.
     private var backdropIntensity: Double {
         switch flowVM.currentStep {
         case .welcome, .primaryHotkey, .done: return 0.95
@@ -101,6 +103,7 @@ struct OnboardingFlowView: View {
                     Button("Get Started") { finish() }
                         .keyboardShortcut(.defaultAction)
                         .onboardingPrimary()
+                        .disabled(!canFinish)
                 } else {
                     navPrimaryButton
                 }
@@ -109,6 +112,14 @@ struct OnboardingFlowView: View {
         }
         .padding(.horizontal, OnboardingDesign.Space.xxl)
         .padding(.vertical, OnboardingDesign.Space.lg)
+        .background(
+            reduceTransparency
+                ? AnyShapeStyle(Color(nsColor: .windowBackgroundColor))
+                : AnyShapeStyle(.ultraThinMaterial)
+        )
+        .overlay(alignment: .top) {
+            Divider()
+        }
     }
 
     /// Steps whose in-content action is the screen's real filled CTA (e.g.
@@ -124,15 +135,27 @@ struct OnboardingFlowView: View {
             Button(primaryLabel) { advance() }
                 .keyboardShortcut(.defaultAction)
                 .onboardingSecondary()
-                .disabled(!flowVM.canAdvance)
-                .opacity(flowVM.canAdvance ? 1 : 0.5)
+                .disabled(!canUsePrimaryAction)
+                .opacity(canUsePrimaryAction ? 1 : 0.5)
         } else {
             Button(primaryLabel) { advance() }
                 .keyboardShortcut(.defaultAction)
                 .onboardingPrimary()
-                .disabled(!flowVM.canAdvance)
-                .opacity(flowVM.canAdvance ? 1 : 0.5)
+                .disabled(!canUsePrimaryAction)
+                .opacity(canUsePrimaryAction ? 1 : 0.5)
         }
+    }
+
+    private var canUsePrimaryAction: Bool {
+        flowVM.canAdvance && !(flowVM.currentStep == .retention && retentionVM.isSaving)
+            && (flowVM.currentStep != .prepareBrain || prepareBrainVM.canContinue)
+    }
+
+    private var canFinish: Bool {
+        prepareBrainVM.canContinue
+            && flowVM.screenRecordingPermission.status == .granted
+            && flowVM.accessibilityPermission.status == .granted
+            && !retentionVM.isSaving
     }
 
     /// Raycast labels its first step "Start Setup"; the rest are "Continue".
@@ -141,20 +164,31 @@ struct OnboardingFlowView: View {
     }
 
     private func advance() {
+        guard canUsePrimaryAction else { return }
         if flowVM.currentStep == .retention {
-            Task { await retentionVM.save() }
+            Task { @MainActor in
+                await retentionVM.saveThen { flowVM.advance() }
+            }
+            return
         }
         flowVM.advance()
     }
 
     private func finish() {
+        flowVM.refreshPermissions()
+        guard canFinish else { return }
+        do {
+            try writeOnboardingCompleteSentinel()
+        } catch {
+            completionError = "Setup could not be saved. Check available disk space and try again."
+            return
+        }
         UserDefaults.standard.set(true, forKey: "MCIOnboardingCompleted")
         // Cross-process sentinel so Hippocampus.app's auto-launch-onboarding
         // check at next start sees "completed at least once" and skips the
         // automatic spawn. See OnboardingSentinel in HippocampusKit — we
         // duplicate the file path here rather than depending on
         // HippocampusKit (per Package.swift's "Zero external dependencies").
-        writeOnboardingCompleteSentinel()
         // Clear the resume-state file so a future re-launch (e.g. dev-tool
         // wipe that touches the sentinel but not the state file) starts at
         // `.welcome` instead of stuck at `.done`.
@@ -168,18 +202,18 @@ struct OnboardingFlowView: View {
     /// so Hippocampus.app skips its auto-spawn on next launch. Mirror
     /// of `HippocampusKit.OnboardingSentinel.markComplete()` —
     /// duplicated to avoid an OnboardingKit→HippocampusKit dep.
-    private func writeOnboardingCompleteSentinel() {
+    private func writeOnboardingCompleteSentinel() throws {
         let url = FileManager.default
             .homeDirectoryForCurrentUser
             .appendingPathComponent(
                 "Library/Application Support/MCI/.onboarding-complete"
             )
         let dir = url.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(
+        try FileManager.default.createDirectory(
             at: dir, withIntermediateDirectories: true
         )
         let stamp = ISO8601DateFormatter().string(from: Date())
         let body = "onboarding-completed-at \(stamp)\n"
-        try? body.write(to: url, atomically: true, encoding: .utf8)
+        try body.write(to: url, atomically: true, encoding: .utf8)
     }
 }

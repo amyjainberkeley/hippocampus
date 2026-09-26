@@ -125,16 +125,12 @@ public struct TimelineEventCard: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
-            // Keyframe placeholder — real blur-decode lands in Phase D
-            // full impl.
-            ZStack {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(MCI.Color.surfaceElevated)
-                    .frame(height: 60)
-                Image(systemName: event.thumbnailPath == nil ? "doc.text" : "photo")
-                    .font(.system(size: 20))
-                    .foregroundStyle(MCI.Color.foregroundMuted)
-            }
+            EvidenceThumbnail(
+                url: event.thumbnailURL,
+                size: CGSize(width: 80, height: 60),
+                maxPixelSize: 192,
+                placeholderSymbol: event.thumbnailPath == nil ? "doc.text" : "photo"
+            )
             Text(Self.timeLabel(for: event.tsUs))
                 .font(MCI.Font.footnote)
                 .foregroundStyle(MCI.Color.foregroundSecondary)

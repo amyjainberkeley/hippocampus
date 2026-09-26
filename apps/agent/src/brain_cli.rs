@@ -1,38 +1,46 @@
 //! Output formatting and query sanitization for the `mci-brain` CLI.
 //!
 //! Kept as a library module so tests can exercise formatting without
-//! standing up a SQLCipher file. The bin entry-point (`mci_brain.rs`)
+//! standing up a `SQLCipher` file. The bin entry-point (`mci_brain.rs`)
 //! delegates all display logic here.
 
 use mci_brain::{BrainStats, Event, EventRecord};
+use std::fmt::Write as _;
 
 use crate::wall_clock::format_unix_ms;
 
 /// Convert µs-since-epoch to a human-readable UTC string.
+#[must_use]
 pub fn format_ts_us(ts_us: u64) -> String {
     format_unix_ms(u128::from(ts_us) / 1000)
 }
 
 /// Human-readable `BrainStats` block.
+#[must_use]
 pub fn format_stats_human(s: &BrainStats) -> String {
     let mut out = format!("Events: {}\n", s.event_count);
     match s.oldest_ts_us {
-        Some(ts) => out.push_str(&format!("Oldest: {} ({})\n", format_ts_us(ts), ts)),
+        Some(ts) => {
+            let _ = writeln!(out, "Oldest: {} ({})", format_ts_us(ts), ts);
+        }
         None => out.push_str("Oldest: (none)\n"),
     }
     match s.newest_ts_us {
-        Some(ts) => out.push_str(&format!("Newest: {} ({})\n", format_ts_us(ts), ts)),
+        Some(ts) => {
+            let _ = writeln!(out, "Newest: {} ({})", format_ts_us(ts), ts);
+        }
         None => out.push_str("Newest: (none)\n"),
     }
     // V2-P6 graph surface (Phase-6 close).
-    out.push_str(&format!("Entities: {}\n", s.entity_count));
-    out.push_str(&format!("Entity mentions: {}\n", s.entity_mention_count));
-    out.push_str(&format!("Identities: {}\n", s.entity_identity_count));
-    out.push_str(&format!("Episode links: {}\n", s.episode_edge_count));
+    let _ = writeln!(out, "Entities: {}", s.entity_count);
+    let _ = writeln!(out, "Entity mentions: {}", s.entity_mention_count);
+    let _ = writeln!(out, "Identities: {}", s.entity_identity_count);
+    let _ = writeln!(out, "Episode links: {}", s.episode_edge_count);
     out
 }
 
 /// Machine-readable JSON `BrainStats`.
+#[must_use]
 pub fn format_stats_json(s: &BrainStats) -> String {
     serde_json::json!({
         "event_count": s.event_count,
@@ -49,6 +57,7 @@ pub fn format_stats_json(s: &BrainStats) -> String {
 /// One-line human-readable event record (pipe-separated).
 ///
 /// Layout: `event:<ID> | <TIMESTAMP> | <APP> | <TITLE> | <URL> | <SNIPPET>`
+#[must_use]
 pub fn format_event_record_human(r: &EventRecord) -> String {
     let app = r.app_bundle_id.as_deref().unwrap_or("-");
     let title = r.window_title.as_deref().unwrap_or("-");
@@ -66,6 +75,7 @@ pub fn format_event_record_human(r: &EventRecord) -> String {
 }
 
 /// JSONL-formatted event record. Shape matches [`EventRecord`] fields.
+#[must_use]
 pub fn format_event_record_jsonl(r: &EventRecord) -> String {
     serde_json::json!({
         "event_id": r.event_id.0,
@@ -79,30 +89,27 @@ pub fn format_event_record_jsonl(r: &EventRecord) -> String {
 }
 
 /// Full human-readable event (for `show`).
+#[must_use]
 pub fn format_event_human(e: &Event) -> String {
     let mut out = format!("Event: event:{}\n", e.id.0);
-    out.push_str(&format!(
-        "Timestamp: {} ({})\n",
-        format_ts_us(e.ts_us),
-        e.ts_us
-    ));
-    out.push_str(&format!(
-        "App: {}\n",
+    let _ = writeln!(out, "Timestamp: {} ({})", format_ts_us(e.ts_us), e.ts_us);
+    let _ = writeln!(
+        out,
+        "App: {}",
         e.app_bundle_id.as_deref().unwrap_or("(none)")
-    ));
-    out.push_str(&format!(
-        "Window: {}\n",
+    );
+    let _ = writeln!(
+        out,
+        "Window: {}",
         e.window_title.as_deref().unwrap_or("(none)")
-    ));
-    out.push_str(&format!("URL: {}\n", e.url.as_deref().unwrap_or("(none)")));
-    out.push_str(&format!(
-        "Summary: {}\n",
-        e.summary.as_deref().unwrap_or("(none)")
-    ));
-    out.push_str(&format!(
-        "Entities: {}\n",
+    );
+    let _ = writeln!(out, "URL: {}", e.url.as_deref().unwrap_or("(none)"));
+    let _ = writeln!(out, "Summary: {}", e.summary.as_deref().unwrap_or("(none)"));
+    let _ = writeln!(
+        out,
+        "Entities: {}",
         e.entities.as_deref().unwrap_or("(none)")
-    ));
+    );
     out.push_str("Text:\n");
     out.push_str(&e.text);
     if !e.text.ends_with('\n') {
@@ -112,6 +119,7 @@ pub fn format_event_human(e: &Event) -> String {
 }
 
 /// JSONL-formatted full event (for `show --json` and `export --format jsonl`).
+#[must_use]
 pub fn format_event_jsonl(e: &Event) -> String {
     serde_json::json!({
         "event_id": e.id.0,
@@ -129,11 +137,13 @@ pub fn format_event_jsonl(e: &Event) -> String {
 }
 
 /// CSV header for event export.
+#[must_use]
 pub fn format_event_csv_header() -> &'static str {
     "event_id,ts_us,app_bundle_id,window_title,url,text,summary,entities"
 }
 
 /// CSV row for one event. Fields are escaped per RFC 4180.
+#[must_use]
 pub fn format_event_csv_row(e: &Event) -> String {
     fn esc(s: &str) -> String {
         if s.contains(',') || s.contains('\n') || s.contains('"') {
@@ -142,19 +152,19 @@ pub fn format_event_csv_row(e: &Event) -> String {
             s.to_owned()
         }
     }
-    fn opt(o: &Option<String>) -> String {
-        o.as_deref().map_or_else(String::new, esc)
+    fn opt(value: Option<&String>) -> String {
+        value.map_or_else(String::new, |text| esc(text))
     }
     format!(
         "{},{},{},{},{},{},{},{}",
         e.id.0,
         e.ts_us,
-        opt(&e.app_bundle_id),
-        opt(&e.window_title),
-        opt(&e.url),
+        opt(e.app_bundle_id.as_ref()),
+        opt(e.window_title.as_ref()),
+        opt(e.url.as_ref()),
         esc(&e.text),
-        opt(&e.summary),
-        opt(&e.entities),
+        opt(e.summary.as_ref()),
+        opt(e.entities.as_ref()),
     )
 }
 
@@ -163,6 +173,7 @@ pub fn format_event_csv_row(e: &Event) -> String {
 /// Wraps each whitespace-delimited token in double-quotes so hyphens
 /// are treated literally (avoids the FTS5 hyphen-as-NOT-operator trap).
 /// Strips pre-existing double-quotes to prevent FTS5 syntax injection.
+#[must_use]
 pub fn sanitize_fts5_query(raw: &str) -> String {
     let stripped = raw.replace('"', "");
     let tokens: Vec<&str> = stripped.split_whitespace().collect();

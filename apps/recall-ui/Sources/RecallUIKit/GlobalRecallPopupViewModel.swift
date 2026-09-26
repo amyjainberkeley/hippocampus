@@ -64,6 +64,10 @@ public final class GlobalRecallPopupViewModel: ObservableObject {
     // this property, so its Success type is immaterial to usage — but it must
     // match the task actually assigned (a Result-returning search) for Swift 6.
     private var inFlightTask: Task<Result<[Hit], any Error>, Never>?
+    /// Monotonic request identity. Cancelling a Task does not guarantee an
+    /// in-progress database/FFI read stops, so completion publication is also
+    /// guarded by this generation.
+    private var searchGeneration: UInt64 = 0
 
     public init(
         reader: BrainReader,
@@ -94,6 +98,7 @@ public final class GlobalRecallPopupViewModel: ObservableObject {
     /// Reset the popup back to first-open state. Called by the view
     /// layer on Esc / hotkey-toggle / after invoking a result.
     public func reset() {
+        searchGeneration &+= 1
         inFlightTask?.cancel()
         inFlightTask = nil
         query = ""
@@ -110,6 +115,8 @@ public final class GlobalRecallPopupViewModel: ObservableObject {
         // Cancel any prior in-flight search so we don't race two
         // FFI round trips against each other.
         inFlightTask?.cancel()
+        searchGeneration &+= 1
+        let generation = searchGeneration
 
         guard !q.isEmpty else {
             results = []
@@ -133,9 +140,10 @@ public final class GlobalRecallPopupViewModel: ObservableObject {
         }
         inFlightTask = task
         let outcome = await task.value
-        // The task could have been superseded while we were awaiting.
-        // Only publish if this is still the current in-flight search.
-        guard !Task.isCancelled else { return }
+        // The backend may finish after cancellation. Publish only when this
+        // request is still the latest one owned by the view model.
+        guard generation == searchGeneration else { return }
+        inFlightTask = nil
         isSearching = false
         switch outcome {
         case .success(let hits):
@@ -165,7 +173,19 @@ public final class GlobalRecallPopupViewModel: ObservableObject {
     /// the recall UI DetailPane.
     public func invokeAction(preferExternal: Bool) -> PopupHitAction? {
         guard results.indices.contains(selectedIndex) else { return nil }
-        let hit = results[selectedIndex]
+        return action(for: results[selectedIndex], preferExternal: preferExternal)
+    }
+
+    /// Compute the action for a directly clicked row and synchronize the
+    /// keyboard selection with it. This prevents a click on row N from
+    /// dispatching the previously highlighted row.
+    public func invokeAction(at index: Int, preferExternal: Bool) -> PopupHitAction? {
+        guard results.indices.contains(index) else { return nil }
+        selectedIndex = index
+        return action(for: results[index], preferExternal: preferExternal)
+    }
+
+    private func action(for hit: Hit, preferExternal: Bool) -> PopupHitAction {
         if preferExternal, let raw = hit.url, let url = URL(string: raw) {
             return .openExternal(url)
         }

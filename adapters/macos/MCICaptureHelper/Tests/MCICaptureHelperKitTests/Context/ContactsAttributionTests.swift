@@ -115,15 +115,87 @@ final class ContactsAttributionTests: XCTestCase {
     }
 
     // ------------------------------------------------------------------
-    // Production constructor — no exception in headless CI
+    // Lazy construction and authorization, using no Contacts framework store
     // ------------------------------------------------------------------
 
-    func testProductionConstructorBindsCleanly() {
-        let attribution = ContactsAttribution()
-        // Before start() / auth callback, resolve returns nil (the
-        // safe direction). The query path is internally guarded by
-        // authState != .granted; this test pins that contract
-        // without prompting the user.
+    func testConstructionAndUnauthorizedResolutionNeverCreateStore() {
+        let factory = ContactsStoreFactorySpy()
+        let attribution = ContactsAttribution(storeFactory: factory.makeStore)
+        XCTAssertEqual(factory.calls, 0)
         XCTAssertNil(attribution.resolve(participant: "alice@example.com"))
+        XCTAssertNil(attribution.resolve(participant: "tel:+1-415-555-1234"))
+        XCTAssertNil(attribution.resolve(participant: "not a participant"))
+        XCTAssertEqual(factory.calls, 0)
+        XCTAssertEqual(factory.store.requests, 0)
+        XCTAssertTrue(factory.store.participants.isEmpty)
+    }
+
+    func testExplicitStartRequestsAccessAndPendingOrDeniedAccessCannotRead() {
+        let factory = ContactsStoreFactorySpy()
+        let attribution = ContactsAttribution(storeFactory: factory.makeStore)
+        attribution.start()
+        XCTAssertEqual(factory.calls, 1)
+        XCTAssertEqual(factory.store.requests, 1)
+        XCTAssertNil(attribution.resolve(participant: "alice@example.com"))
+        XCTAssertTrue(factory.store.participants.isEmpty)
+        factory.store.completeAccess(granted: false)
+        XCTAssertNil(attribution.resolve(participant: "alice@example.com"))
+        XCTAssertTrue(factory.store.participants.isEmpty)
+        XCTAssertEqual(factory.calls, 1)
+    }
+
+    func testGrantedAccessNormalizesAndCachesOnlyTheOpaqueReference() {
+        let factory = ContactsStoreFactorySpy()
+        let attribution = ContactsAttribution(storeFactory: factory.makeStore)
+        attribution.start()
+        factory.store.completeAccess(granted: true)
+        let expected = ContactRef(identifier: "synthetic-contact")
+        XCTAssertEqual(attribution.resolve(participant: "mailto:Alice@Example.COM"), expected)
+        XCTAssertEqual(attribution.resolve(participant: "alice@example.com"), expected)
+        XCTAssertEqual(factory.store.participants, ["alice@example.com"])
+        XCTAssertEqual(factory.calls, 1)
+    }
+
+    func testRepeatedExplicitStartsReuseOneStoreAndPreserveAccessRequests() {
+        let factory = ContactsStoreFactorySpy()
+        let attribution = ContactsAttribution(storeFactory: factory.makeStore)
+        DispatchQueue.concurrentPerform(iterations: 8) { _ in attribution.start() }
+        XCTAssertEqual(factory.calls, 1)
+        XCTAssertEqual(factory.store.requests, 8)
+        XCTAssertTrue(factory.store.participants.isEmpty)
+    }
+}
+
+private final class ContactsStoreFactorySpy: @unchecked Sendable {
+    let store = FakeContactsStore()
+    private let lock = NSLock()
+    private var creations = 0
+    var calls: Int { lock.withLock { creations } }
+
+    func makeStore() -> any ContactsAttributionStore {
+        lock.withLock { creations += 1 }
+        return store
+    }
+}
+
+private final class FakeContactsStore: ContactsAttributionStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var callbacks: [@Sendable (Bool) -> Void] = []
+    private var observedParticipants: [String] = []
+    var requests: Int { lock.withLock { callbacks.count } }
+    var participants: [String] { lock.withLock { observedParticipants } }
+
+    func requestAccess(completion: @escaping @Sendable (Bool) -> Void) {
+        lock.withLock { callbacks.append(completion) }
+    }
+
+    func completeAccess(granted: Bool) {
+        let callback = lock.withLock { callbacks.last }
+        callback?(granted)
+    }
+
+    func resolve(participant: String) -> ContactRef? {
+        lock.withLock { observedParticipants.append(participant) }
+        return ContactRef(identifier: "synthetic-contact")
     }
 }

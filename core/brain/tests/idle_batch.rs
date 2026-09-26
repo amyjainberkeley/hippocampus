@@ -92,6 +92,23 @@ fn unembedded_events_returns_events_without_vectors() {
 }
 
 #[test]
+fn unembedded_events_excludes_text_that_cannot_be_embedded() {
+    let (_dir, path) = tmp("unembedded_blank.sqlite");
+    let key = test_key();
+    let store = SqlCipherBrainStore::new(&path, &key).unwrap();
+
+    store.put_event(&blank_event(1_000_000, "")).unwrap();
+    store.put_event(&blank_event(2_000_000, " \n\t ")).unwrap();
+    let useful = store
+        .put_event(&blank_event(3_000_000, "useful text"))
+        .unwrap();
+
+    let unembedded = store.unembedded_events(100).unwrap();
+    assert_eq!(unembedded.len(), 1);
+    assert_eq!(unembedded[0].id, useful);
+}
+
+#[test]
 fn unembedded_events_respects_limit() {
     let (_dir, path) = tmp("unembedded_limit.sqlite");
     let key = test_key();

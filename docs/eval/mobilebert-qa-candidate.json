@@ -1,0 +1,458 @@
+{
+  "candidate": "csarron-mobilebert-uncased-squad-v2-fp32-coreml",
+  "candidate_revision": "6d49c30d06c6042041039f6fe076b011f0c2053c",
+  "dataset_id": "hippocampus-evidence-sufficiency-calibration-v1",
+  "dataset_sha256": "e18aba01ab344da3a1ee4ab58003e28bb86c041e99107b223073bfa7830ead5d",
+  "model_artifact_sha256": "b14fc28b633f7b9e43bd1b247a72428065dd133b03dd9528287ca3682c82451f",
+  "threshold_policy": {
+    "target_calibration_positive_coverage": 0.9,
+    "selected_no_answer_margin": 8.024189352989197
+  },
+  "quality_targets": {
+    "minimum_validation_positive_coverage": 0.9,
+    "maximum_validation_false_positive_rate": 0.05
+  },
+  "by_split": {
+    "fit": {
+      "cases": 12,
+      "positive_coverage": 1.0,
+      "negative_false_positive_rate": 0.3333333333333333,
+      "positive_supported": 12,
+      "negative_false_positives": 4
+    },
+    "calibration": {
+      "cases": 9,
+      "positive_coverage": 1.0,
+      "negative_false_positive_rate": 0.2222222222222222,
+      "positive_supported": 9,
+      "negative_false_positives": 2
+    },
+    "validation": {
+      "cases": 6,
+      "positive_coverage": 1.0,
+      "negative_false_positive_rate": 0.16666666666666666,
+      "positive_supported": 6,
+      "negative_false_positives": 1
+    }
+  },
+  "latency_ms": {
+    "samples": 54,
+    "median": 23.49316700019699,
+    "p95": 25.165375000142376,
+    "maximum": 31.56883300107438
+  },
+  "validation_qualified": false,
+  "qualification_failures": [
+    "validation false-positive rate exceeded the target",
+    "v1 fixture has only six validation scenarios",
+    "v1 fixture does not cover contradiction, temporal change, synthesis, provenance, or order metamorphics",
+    "candidate has no release-owned immutable model archive"
+  ],
+  "results": [
+    {
+      "id": "fit-instrument",
+      "split": "fit",
+      "query": "Which instrument did Nila practice before supper?",
+      "supporting": {
+        "margin": 19.56888484954834,
+        "answer": "cello",
+        "latency_ms": 31.56883300107438
+      },
+      "insufficient": {
+        "margin": 16.63325262069702,
+        "answer": "music",
+        "latency_ms": 23.61837500029651
+      }
+    },
+    {
+      "id": "fit-fabric",
+      "split": "fit",
+      "query": "What fabric was used for the reading-room curtains?",
+      "supporting": {
+        "margin": 18.260865688323975,
+        "answer": "heavy linen",
+        "latency_ms": 23.391458998958115
+      },
+      "insufficient": {
+        "margin": 1.8852958679199219,
+        "answer": "fabric sample was left near the sewing machine",
+        "latency_ms": 23.972250000952045
+      }
+    },
+    {
+      "id": "fit-spice",
+      "split": "fit",
+      "query": "Which spice did Imani add to the pear compote?",
+      "supporting": {
+        "margin": 17.726999282836914,
+        "answer": "cardamom",
+        "latency_ms": 23.388708001220948
+      },
+      "insufficient": {
+        "margin": 5.5680131912231445,
+        "answer": "stirred a spice",
+        "latency_ms": 23.452790999726858
+      }
+    },
+    {
+      "id": "fit-hiding-place",
+      "split": "fit",
+      "query": "Where did the tortoise hide during the rain?",
+      "supporting": {
+        "margin": 19.203804969787598,
+        "answer": "beneath the rosemary planter",
+        "latency_ms": 23.48224999877857
+      },
+      "insufficient": {
+        "margin": 0.3526182174682617,
+        "answer": "the back step",
+        "latency_ms": 23.529584001153125
+      }
+    },
+    {
+      "id": "fit-cause",
+      "split": "fit",
+      "query": "What caused the hallway lamp to flicker?",
+      "supporting": {
+        "margin": 13.867244720458984,
+        "answer": "its bulb was loose in the socket",
+        "latency_ms": 23.97758300139685
+      },
+      "insufficient": {
+        "margin": 7.702725172042847,
+        "answer": "checked",
+        "latency_ms": 24.609375001091394
+      }
+    },
+    {
+      "id": "fit-transport",
+      "split": "fit",
+      "query": "How did Rowan cross the inlet?",
+      "supporting": {
+        "margin": 13.818686962127686,
+        "answer": "on the small passenger ferry",
+        "latency_ms": 28.636166998694534
+      },
+      "insufficient": {
+        "margin": 9.601443886756897,
+        "answer": "Rowan crossed the inlet before noon",
+        "latency_ms": 25.165375000142376
+      }
+    },
+    {
+      "id": "fit-paint-color",
+      "split": "fit",
+      "query": "Which color was selected for the studio door?",
+      "supporting": {
+        "margin": 13.24659776687622,
+        "answer": "Ultramarine",
+        "latency_ms": 23.95704099944851
+      },
+      "insufficient": {
+        "margin": 10.592908143997192,
+        "answer": "One",
+        "latency_ms": 23.500541999965208
+      }
+    },
+    {
+      "id": "fit-winter-room",
+      "split": "fit",
+      "query": "Which room held the citrus trees during winter?",
+      "supporting": {
+        "margin": 12.899769306182861,
+        "answer": "The conservatory",
+        "latency_ms": 23.588209000081406
+      },
+      "insufficient": {
+        "margin": 11.1748685836792,
+        "answer": "One room",
+        "latency_ms": 23.481209000237868
+      }
+    },
+    {
+      "id": "fit-river-bird",
+      "split": "fit",
+      "query": "Which bird nested beside the river path?",
+      "supporting": {
+        "margin": 16.689181327819824,
+        "answer": "kingfisher",
+        "latency_ms": 23.640083001737366
+      },
+      "insufficient": {
+        "margin": 5.508368968963623,
+        "answer": "A bird",
+        "latency_ms": 23.424917000738787
+      }
+    },
+    {
+      "id": "fit-repair-tool",
+      "split": "fit",
+      "query": "What tool tightened the loose bicycle pedal?",
+      "supporting": {
+        "margin": 16.110032558441162,
+        "answer": "torque wrench",
+        "latency_ms": 23.480624999137945
+      },
+      "insufficient": {
+        "margin": 7.3619465827941895,
+        "answer": "A tool",
+        "latency_ms": 23.31216700076766
+      }
+    },
+    {
+      "id": "fit-bowl-material",
+      "split": "fit",
+      "query": "What material is the blue serving bowl made from?",
+      "supporting": {
+        "margin": 13.071112632751465,
+        "answer": "porcelain",
+        "latency_ms": 23.658250000153203
+      },
+      "insufficient": {
+        "margin": 6.750466346740723,
+        "answer": "a material chosen for durability",
+        "latency_ms": 23.549999999886495
+      }
+    },
+    {
+      "id": "fit-blanket-pattern",
+      "split": "fit",
+      "query": "Which pattern was woven into the guest-room blanket?",
+      "supporting": {
+        "margin": 14.425821304321289,
+        "answer": "basketweave",
+        "latency_ms": 23.298165999221965
+      },
+      "insufficient": {
+        "margin": 3.1124649047851562,
+        "answer": "A pattern",
+        "latency_ms": 23.608333000083803
+      }
+    },
+    {
+      "id": "calibration-finish",
+      "split": "calibration",
+      "query": "Which finish was chosen for the pantry shelves?",
+      "supporting": {
+        "margin": 10.656216621398926,
+        "answer": "A matte",
+        "latency_ms": 23.73233300022548
+      },
+      "insufficient": {
+        "margin": 7.4127349853515625,
+        "answer": "A finish",
+        "latency_ms": 23.43762500095181
+      }
+    },
+    {
+      "id": "calibration-trail",
+      "split": "calibration",
+      "query": "Which trail did Sora take to the overlook?",
+      "supporting": {
+        "margin": 19.290889739990234,
+        "answer": "Juniper Loop trail",
+        "latency_ms": 23.587291998410365
+      },
+      "insufficient": {
+        "margin": 13.772082507610321,
+        "answer": "a marked trail",
+        "latency_ms": 23.485792000428773
+      }
+    },
+    {
+      "id": "calibration-room",
+      "split": "calibration",
+      "query": "In which room was the fern moved for winter?",
+      "supporting": {
+        "margin": 18.023841381072998,
+        "answer": "sunroom",
+        "latency_ms": 23.46587499960151
+      },
+      "insufficient": {
+        "margin": 4.211906433105469,
+        "answer": "indoors",
+        "latency_ms": 23.483749999286374
+      }
+    },
+    {
+      "id": "calibration-wood",
+      "split": "calibration",
+      "query": "What wood is the small writing desk made from?",
+      "supporting": {
+        "margin": 8.825042963027954,
+        "answer": "walnut",
+        "latency_ms": 23.60712500012596
+      },
+      "insufficient": {
+        "margin": 4.669364929199219,
+        "answer": "wooden",
+        "latency_ms": 23.556291998829693
+      }
+    },
+    {
+      "id": "calibration-language",
+      "split": "calibration",
+      "query": "Which language was the lullaby sung in?",
+      "supporting": {
+        "margin": 14.956348419189453,
+        "answer": "Icelandic",
+        "latency_ms": 23.477999999158783
+      },
+      "insufficient": {
+        "margin": 1.0263872146606445,
+        "answer": "softly from memory",
+        "latency_ms": 23.46433300044737
+      }
+    },
+    {
+      "id": "calibration-tea",
+      "split": "calibration",
+      "query": "Which tea did Keon order with lunch?",
+      "supporting": {
+        "margin": 17.587899208068848,
+        "answer": "oolong tea",
+        "latency_ms": 23.909292000098503
+      },
+      "insufficient": {
+        "margin": 7.287557125091553,
+        "answer": "tea",
+        "latency_ms": 23.51558299960743
+      }
+    },
+    {
+      "id": "calibration-route",
+      "split": "calibration",
+      "query": "Which route did Mara take to the harbor?",
+      "supporting": {
+        "margin": 17.425480842590332,
+        "answer": "coastal road",
+        "latency_ms": 23.391875000015716
+      },
+      "insufficient": {
+        "margin": 5.991554260253906,
+        "answer": "Mara reached the harbor before the market opened. Two roads",
+        "latency_ms": 23.448957999789855
+      }
+    },
+    {
+      "id": "calibration-container",
+      "split": "calibration",
+      "query": "What container holds the spare sewing needles?",
+      "supporting": {
+        "margin": 8.024189352989197,
+        "answer": "a blue tin. The tin sits inside the top drawer",
+        "latency_ms": 23.375709000902134
+      },
+      "insufficient": {
+        "margin": 4.47037935256958,
+        "answer": "top drawer",
+        "latency_ms": 23.330291000092984
+      }
+    },
+    {
+      "id": "calibration-cause",
+      "split": "calibration",
+      "query": "What caused the porch bell to stop ringing?",
+      "supporting": {
+        "margin": 15.423666000366211,
+        "answer": "its wire came loose",
+        "latency_ms": 23.29312499932712
+      },
+      "insufficient": {
+        "margin": 10.311938762664795,
+        "answer": "The button itself was undamaged",
+        "latency_ms": 23.760832998959813
+      }
+    },
+    {
+      "id": "validation-adhesive",
+      "split": "validation",
+      "query": "What adhesive repaired the cracked planter?",
+      "supporting": {
+        "margin": 10.140581130981445,
+        "answer": "Two-part epoxy",
+        "latency_ms": 23.558749999210704
+      },
+      "insufficient": {
+        "margin": -1.5397300720214844,
+        "answer": "indoors",
+        "latency_ms": 23.02849999978207
+      }
+    },
+    {
+      "id": "validation-entrance",
+      "split": "validation",
+      "query": "Which entrance leads directly to the sculpture garden?",
+      "supporting": {
+        "margin": 8.718508124351501,
+        "answer": "The north",
+        "latency_ms": 23.644292001335998
+      },
+      "insufficient": {
+        "margin": 4.647722244262695,
+        "answer": "One",
+        "latency_ms": 23.362249999991036
+      }
+    },
+    {
+      "id": "validation-flower",
+      "split": "validation",
+      "query": "Which flowers filled the copper vase?",
+      "supporting": {
+        "margin": 17.50776767730713,
+        "answer": "Orange dahlias",
+        "latency_ms": 23.757208000461105
+      },
+      "insufficient": {
+        "margin": 15.929587841033936,
+        "answer": "Fresh flowers",
+        "latency_ms": 23.188375000245287
+      }
+    },
+    {
+      "id": "validation-storage",
+      "split": "validation",
+      "query": "Where are the spare watercolor brushes stored?",
+      "supporting": {
+        "margin": 13.643575668334961,
+        "answer": "the blue cabinet",
+        "latency_ms": 23.654165999687393
+      },
+      "insufficient": {
+        "margin": 1.5402367115020752,
+        "answer": "A cabinet stands beside the studio sink",
+        "latency_ms": 23.379665999527788
+      }
+    },
+    {
+      "id": "validation-bird",
+      "split": "validation",
+      "query": "Which bird called from the chimney at dusk?",
+      "supporting": {
+        "margin": 17.13772487640381,
+        "answer": "tawny owl",
+        "latency_ms": 23.438208001607563
+      },
+      "insufficient": {
+        "margin": 6.237081527709961,
+        "answer": "bird",
+        "latency_ms": 23.578374999488005
+      }
+    },
+    {
+      "id": "validation-pattern",
+      "split": "validation",
+      "query": "What pattern was woven into the hallway runner?",
+      "supporting": {
+        "margin": 10.99849271774292,
+        "answer": "herringbone",
+        "latency_ms": 23.448500000085915
+      },
+      "insufficient": {
+        "margin": 3.8068437576293945,
+        "answer": "A pattern",
+        "latency_ms": 23.481750000428292
+      }
+    }
+  ]
+}

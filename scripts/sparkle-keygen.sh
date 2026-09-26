@@ -6,7 +6,8 @@ set -euo pipefail
 #
 # What it does:
 #   1. Locates Sparkle's generate_keys binary (same lookup as sparkle-publish.sh).
-#   2. Mints a fresh Ed25519 keypair via Sparkle's official tooling.
+#   2. Generates or reuses a named Sparkle Keychain account via the official
+#      tooling, then exports its private seed for owner backup and CI.
 #   3. Writes the PRIVATE key to ~/.hippocampus-sparkle-private.key with mode 0600
 #      and a sibling .README file containing the do-not-commit warning + storage
 #      procedure (the private key file itself stays pure base64 so sign_update
@@ -182,7 +183,7 @@ echo ""
 # --- Confirm before minting ---
 
 cat <<EOF
-About to mint a new Sparkle Ed25519 keypair.
+About to initialize the Hippocampus Sparkle Ed25519 keypair.
 
 Private key → $KEY_FILE         (mode 0600)
 Public key  → $PUB_FILE         (also printed to stdout)
@@ -210,29 +211,48 @@ esac
 
 # --- Mint the keypair ---
 #
-# Sparkle 2.x generate_keys supports:
-#   -f <file>   Export the private key to <file> (and do NOT touch the Keychain).
-#   -x <file>   Export the public key to <file>.
-#   -p          Print the public key (Keychain mode).
+# Sparkle 2.x generate_keys uses the login Keychain as the source of truth:
+#   no mode      generate a key if this account does not exist, else reuse it
+#   -x <file>    export the private seed from that Keychain account
+#   -p           print the matching public key
+#   -f <file>    IMPORT a private key; it is not an export flag
 #
-# We use -f + -x so the key never enters the macOS Keychain (we want full
-# control over backup/storage), and so the private key file is a pure base64
-# string that sign_update can consume directly via `cat key | sign_update`.
+# The old helper combined -f and -x, which the bundled CLI explicitly rejects.
+# Use one named account and the documented generate/export/lookup sequence.
 
 TMP_DIR=$(mktemp -d -t sparkle-keygen.XXXXXX)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 TMP_PRIV="$TMP_DIR/priv"
 TMP_PUB="$TMP_DIR/pub"
+SPARKLE_ACCOUNT="ai.hippocampus.release"
 
-if ! "$GENERATE_KEYS" -f "$TMP_PRIV" -x "$TMP_PUB"; then
-    echo "ERROR: generate_keys failed. The bundled tool may predate the -f/-x" >&2
-    echo "       flags (Sparkle <2.0). Upgrade Sparkle and retry." >&2
+if ! "$GENERATE_KEYS" --account "$SPARKLE_ACCOUNT"; then
+    echo "ERROR: generate_keys could not initialize the named Keychain account." >&2
+    exit 1
+fi
+if ! "$GENERATE_KEYS" --account "$SPARKLE_ACCOUNT" -x "$TMP_PRIV"; then
+    echo "ERROR: generate_keys could not export the private seed." >&2
+    exit 1
+fi
+if ! "$GENERATE_KEYS" --account "$SPARKLE_ACCOUNT" -p >"$TMP_PUB"; then
+    echo "ERROR: generate_keys could not read the public key." >&2
     exit 1
 fi
 
 if [[ ! -s "$TMP_PRIV" || ! -s "$TMP_PUB" ]]; then
     echo "ERROR: generate_keys produced empty key files." >&2
+    exit 1
+fi
+
+PRIVATE_BYTES=$(base64 --decode <"$TMP_PRIV" | wc -c | tr -d '[:space:]')
+PUBLIC_BYTES=$(base64 --decode <"$TMP_PUB" | wc -c | tr -d '[:space:]')
+if [[ "$PRIVATE_BYTES" != "32" && "$PRIVATE_BYTES" != "96" ]]; then
+    echo "ERROR: exported Sparkle private key has invalid decoded length: $PRIVATE_BYTES" >&2
+    exit 1
+fi
+if [[ "$PUBLIC_BYTES" != "32" ]]; then
+    echo "ERROR: exported Sparkle public key has invalid decoded length: $PUBLIC_BYTES" >&2
     exit 1
 fi
 

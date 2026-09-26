@@ -292,7 +292,7 @@ pub struct StateTransition {
 /// `current_calendar_event` / `current_listening_track` / `current_contact`
 /// mirror the Swift-side `CalendarEventRef` / `NowPlayingTrackRef` /
 /// `ContactRef` enrichers carried on `MCICaptureHelperKit.WorkflowContext`.
-/// They are populated by the EventKit / `MPNowPlayingInfoCenter` / Contacts
+/// They are populated by the `EventKit` / `MPNowPlayingInfoCenter` / Contacts
 /// providers (Swift adapter side) and arrive in the Rust core via IPC.
 /// `None` means absence (TCC denial, no current event / track, no contact
 /// resolved); never a crash. The cascade-equivalent in

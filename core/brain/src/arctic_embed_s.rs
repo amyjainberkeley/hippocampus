@@ -20,7 +20,7 @@
 //!    the L2-normalize *inside* the model graph, so this step is
 //!    idempotent on production paths — it stays in the wrapper as
 //!    defense-in-depth for alternate backends (test fakes, future
-//!    Windows ONNX, NLEmbedding fallback) that may not pre-normalize.
+//!    Windows ONNX, `NLEmbedding` fallback) that may not pre-normalize.
 //!    Dimension is 384 and the output is unit-normalized at the wrapper
 //!    boundary regardless of which backend produced the raw vector.
 //!

@@ -145,6 +145,14 @@ impl BriefAuthor for LlamaBriefAuthor {
             human_approver_id: None,
         })
     }
+
+    fn model_id(&self) -> &'static str {
+        "qwen3-1.7b-fp16"
+    }
+
+    fn model_version(&self) -> &'static str {
+        "1.0"
+    }
 }
 
 /// Parse the first non-empty line as title, rest (up to `###CITATIONS:`) as body.

@@ -1,40 +1,42 @@
-//! MCI macOS adapter — C-ABI FFI shim exposing a **READ-ONLY** view of the
-//! Phase-3 brain to the Swift recall-ui app (`apps/recall-ui/`).
+//! MCI macOS adapter — C-ABI FFI shim exposing read-only recall plus a narrow,
+//! user-gated privacy deletion surface to the Swift app (`apps/recall-ui/`).
 //!
-//! # Scope: P3.9b — real read-only store wired
+//! # Read-only Recall boundary
 //!
 //! Every entry point now holds a live read-only `SqlCipherBrainStore`
 //! handle. `mci_brain_ffi_open` decodes the hex `SQLCipher` key, opens the
 //! store via [`mci_brain::SqlCipherBrainStore::open_readonly`] (which goes
 //! through [`mci_core::store::open_readonly`] with `SQLITE_OPEN_READ_ONLY |
 //! SQLITE_OPEN_NO_MUTEX | SQLITE_OPEN_URI`), and stashes it in an opaque
-//! [`Handle`]. `mci_brain_ffi_search` runs FTS5 lexical search (the
-//! `HybridRetriever` from P3.7 needs an [`mci_brain::Embedder`] backed by
-//! the bundled arctic-embed-s `.mlpackage`; P3.3's Core ML runtime is the
-//! follow-on PR that wires that, at which point search swaps to the full
-//! hybrid path with a one-line ctor change). `mci_brain_ffi_recent_events`
+//! [`Handle`]. `mci_brain_ffi_open_with_model` additionally loads the bundled
+//! Arctic Embed S Core ML model and makes `mci_brain_ffi_search` use the same
+//! `HybridRetriever` as the MCP agent. The original open function remains a
+//! compatibility-safe lexical mode. `mci_brain_ffi_recent_events`
 //! issues `SELECT ... FROM events ORDER BY ts_us DESC LIMIT ?` via the
 //! store's `recent_events` helper. `mci_brain_ffi_recent_privacy_moments`
 //! returns an empty list — the tombstone log lives in a separate
 //! `mci-tombstones.bin` file and surfacing it in the recall UI is P3.9c
 //! (see the function-level deferral note).
 //!
-//! # READ-ONLY by construction (ADR-0017 §5 / ADR-0016 §4.3 invariant)
+//! # Read-only recall by construction (ADR-0017 §5 / ADR-0016 §4.3)
 //!
 //! [`mci_core::store::open_readonly`] sets `SQLITE_OPEN_READ_ONLY` on the
 //! underlying connection. Any `INSERT` / `UPDATE` / `DELETE` / `CREATE` /
 //! `DROP` issued through the resulting `rusqlite::Connection` fails at the
 //! driver level with `SQLITE_READONLY` (extended code 8). The recall-ui
-//! app is structurally a **consumer** of the brain; it cannot write to it.
-//! The FFI surface mirrors that discipline — there is no `put_event` /
-//! `delete_event` / `mutate_*` function exported. Adding one is an
-//! `AGENT_PROTOCOL` §5 protected-set violation.
+//! ordinary recall path is structurally a **consumer** of the brain. The only
+//! writes exposed by this crate are the enumerated Privacy Dashboard deletion
+//! and wipe functions. They require explicit confirmation, take the shared
+//! writer lease, and reopen a short-lived writable store; there is no general
+//! ingest or arbitrary mutation API. Adding another write entry point is an
+//! `AGENT_PROTOCOL` §5 protected-set change.
 //!
 //! The CSO read-only verification is load-bearing: it lives in
 //! `core/src/store/open.rs::tests::open_readonly_round_trips_then_refuses_writes`
 //! (driver-level proof of `SQLITE_READONLY`) and in
 //! `tests/readonly_invariant.rs` (this crate's integration test that opens
-//! via the FFI shim and confirms the brain is read-only end-to-end).
+//! via the FFI shim and confirms both the read-only query handle and the exact
+//! exported mutation allowlist end-to-end).
 //!
 //! # Allocator discipline
 //!
@@ -50,14 +52,42 @@
 #![allow(unsafe_code)]
 
 use std::ffi::{c_char, CStr, CString};
-use std::path::PathBuf;
+use std::fs::{File, OpenOptions};
+use std::io;
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use mci_brain::{BrainStore, EventId, SqlCipherBrainStore};
+#[cfg(target_os = "macos")]
+use std::time::{SystemTime, UNIX_EPOCH};
+
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
+#[cfg(target_os = "macos")]
+use mci_brain::arctic_embed_s::ArcticEmbedSEmbedder;
+use mci_brain::fts_sanitizer::{
+    LexicalAlternative, MAX_LEXICAL_ALTERNATIVES, MAX_LEXICAL_ALTERNATIVE_BYTES,
+};
+use mci_brain::{
+    BrainStore, DeletionOutcome, Embedder, EventId, HybridRetriever, RetrievalDegradation,
+    RetrievalMatch, RetrievalOutcome, RetrievalQuery, SqlCipherBrainStore, TimeRange,
+};
 use mci_core::crypto::DbKey;
+#[cfg(target_os = "macos")]
+use mci_embed_coreml::CoreMLBackend;
+#[cfg(unix)]
+use rustix::fs::{flock, FlockOperation, OFlags};
 use serde::{Deserialize, Serialize};
+
+pub mod storage_usage;
+
+mod search_snippet;
+use search_snippet::SearchSnippet;
+
+#[cfg(test)]
+mod search_snippet_tests;
 
 // ---------------------------------------------------------------------------
 // JSON value types — what the Swift side decodes with `Codable`
@@ -81,16 +111,20 @@ pub struct HitJson {
     pub window_title: Option<String>,
     /// `events.url` (nullable).
     pub url: Option<String>,
-    /// First N characters of `events.text` for snippet display. The
+    /// Query-centered body excerpt for search, or the stored text prefix for history. The
     /// FFI caps this at [`SNIPPET_CHAR_CAP`] characters at the Rust
     /// boundary so the Swift list cells never receive megabytes of OCR
     /// text per row.
     pub ocr_text_snippet: String,
-    /// Which retrieval source produced this hit. `"lexical"` for plain
-    /// FTS5 search (P3.9b); `"timeline"` for recent-events list;
-    /// `"hybrid"` once the `HybridRetriever` + Core ML embedder backend
-    /// (P3.3) is wired.
+    /// Which retrieval source produced this hit. `"lexical"` is plain
+    /// FTS5 search; `"timeline"` is the recent-events list. Model-backed
+    /// handles may return `"hybrid"`, `"hybrid-related"`,
+    /// `"hybrid-conflict"`, or `"semantic-related"` according to the
+    /// retriever's evidence and degradation state.
     pub source: String,
+    /// Acquisition provenance, independent of retrieval `source`.
+    #[serde(default = "unknown_source_kind")]
+    pub source_kind: String,
     /// Fused score in `[0.0, 1.0]` (P3.7 hybrid) or BM25-derived
     /// monotone-with-relevance lexical score. `None` for plain timeline
     /// rows where no query was issued.
@@ -162,11 +196,35 @@ pub struct PrivacyMomentJson {
     pub reason_code: u8,
 }
 
+/// Text search never needs an embedder; related search preserves legacy routing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchMode {
+    /// Literal indexed words, without semantic neighbors.
+    Text,
+    /// Hybrid retrieval when available, otherwise lexical fallback.
+    #[default]
+    Related,
+}
+
+#[cfg(any(target_os = "macos", test))]
+impl SearchMode {
+    const fn uses_hybrid(self, embedder_available: bool) -> bool {
+        matches!(self, Self::Related) && embedder_available
+    }
+}
+
 /// JSON payload format for [`mci_brain_ffi_search`] input.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryJson {
     /// Natural-language query.
     pub text: String,
+    /// Explicit literal text search, or legacy related-context retrieval.
+    #[serde(default)]
+    pub mode: SearchMode,
+    /// Explicit chronological browse. Requires empty text; legacy empty text stays empty.
+    #[serde(default)]
+    pub browse: bool,
     /// Maximum hits to return.
     pub limit: usize,
     /// Inclusive lower bound on `ts_us`, microseconds. `None` ⇒ no filter.
@@ -178,6 +236,14 @@ pub struct QueryJson {
     /// Restrict to one `appBundleId`. `None` ⇒ no filter.
     #[serde(default)]
     pub app_filter: Option<String>,
+    /// Union of at most 32 exact source IDs, intersected with `app_filter`.
+    /// Each ID is nonempty UTF-8, at most 255 bytes, without NUL or control characters.
+    /// Source IDs include MCP tags, not only application bundle identifiers.
+    #[serde(default)]
+    pub app_filters: Vec<String>,
+    /// Require a non-null, nonempty URL. Supported in Text and explicit browse.
+    #[serde(default)]
+    pub has_url: bool,
     /// **Additive (cycle 8.42).** User-defined entity aliases from the
     /// recall UI's `UserDictionary`. Keys are canonical names; values are
     /// the alias list. When the query text contains a token that appears
@@ -270,13 +336,16 @@ pub struct TimelineQueryJson {
 /// pulled via `mci_brain_ffi_events_by_ids` when the user clicks a card.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TimelineEventJson {
+    /// Acquisition provenance; old rows without producer evidence are unknown.
+    #[serde(default = "unknown_source_kind")]
+    pub source_kind: String,
     /// Brain `events.id` rowid.
     pub event_id: u64,
     /// `events.ts_us` — microseconds since UNIX epoch.
     pub ts_us: u64,
     /// `events.app_bundle_id`, nullable in schema.
     pub app_bundle_id: Option<String>,
-    /// Very short snippet (~80 chars) for the card's hover-preview.
+    /// Display body, stripped of the indexing header before the ~80-char cap.
     pub snippet: String,
     /// Absolute filesystem path to the encrypted keyframe blob, or
     /// `None` for events with no keyframe (Messages / Mail / text-only
@@ -289,7 +358,7 @@ pub struct TimelineEventJson {
 ///
 /// **Cycle 8.47 follow-up to PR #76.** The Privacy Dashboard's destructive
 /// actions (`Delete this event`, `Delete last 24 hours`, `Delete everything`)
-/// need a machine-readable success signal so the SwiftUI banner can render
+/// need a machine-readable success signal so the `SwiftUI` banner can render
 /// "3 events removed; 12 KB reclaimed" rather than a bare "OK". The shape
 /// is content-free: only counts + a boolean for whether the VACUUM
 /// succeeded (a VACUUM failure — disk full, permission — is surfaced as
@@ -297,23 +366,23 @@ pub struct TimelineEventJson {
 /// removed even if disk space wasn't yet reclaimed).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DeleteResultJson {
+    /// Always `true` for a returned payload. Pre-commit failures return null.
+    pub committed: bool,
     /// Rows removed from the `events` table. CASCADE-deleted child rows
-    /// (event_vectors, chunks, entity_mentions) are NOT counted here.
+    /// (`event_vectors`, `chunks`, `entity_mentions`) are NOT counted here.
     pub events_deleted: u64,
     /// Whether the post-delete `VACUUM` succeeded (freed disk space).
     /// `false` on VACUUM error — the DELETE itself may still have
     /// succeeded, so callers should treat `events_deleted > 0 &&
     /// !vacuum_ok` as "data gone, disk not yet reclaimed".
     pub vacuum_ok: bool,
+    /// Whether unreferenced encrypted keyframe cleanup succeeded.
+    pub blob_cleanup_ok: bool,
 }
 
 /// Content-free aggregate returned by [`mci_brain_ffi_summary_stats`].
-/// Mirrors [`mci_brain::BrainStats`] for the count + oldest/newest, plus
-/// the on-disk byte size of the brain SQLite file. Zero row content is
-/// exposed — this is the payload for the Privacy Dashboard's "MCI has
-/// captured X events across Y days, using Z MB of encrypted storage"
-/// summary card. Amy's directive (2026-07-13): "show the full control,
-/// no collection."
+/// Mirrors [`mci_brain::BrainStats`] for counts and timestamps. A storage
+/// breakdown can be attached by an explicit caller, never by summary polling.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SummaryStatsJson {
     /// Total rows in `events`. `0` on an empty store.
@@ -324,10 +393,12 @@ pub struct SummaryStatsJson {
     /// Largest `events.ts_us` in microseconds since epoch, or `None` on
     /// an empty store.
     pub newest_ts_us: Option<u64>,
-    /// On-disk byte count of the SQLCipher `.sqlite` file. `0` if the
-    /// file cannot be stat'd (should never happen since the FFI is
-    /// holding an open handle to it, but graceful fallback).
+    /// Legacy database-only logical bytes; zero when unavailable. This is
+    /// not total storage. New callers must use `storage` and its status.
     pub disk_bytes: u64,
+    /// Optional explicitly measured report. Summary polling leaves this absent.
+    #[serde(default)]
+    pub storage: Option<storage_usage::StorageUsage>,
 }
 
 // ---------------------------------------------------------------------------
@@ -339,19 +410,26 @@ pub struct SummaryStatsJson {
 /// duration the recall-ui keeps the brain open.
 pub struct Handle {
     store: Arc<SqlCipherBrainStore>,
+    /// Query-side Arctic embedder. Present only for the explicit model-backed
+    /// open path; the compatibility open remains lexical-only.
+    #[cfg(target_os = "macos")]
+    query_embedder: Option<Arc<ArcticEmbedSEmbedder>>,
     /// Directory that holds the encrypted keyframe blobs (`<brain_dir>/blobs/`).
     /// Populated at `open()` from the brain file's parent directory; used to
     /// derive [`HitJson::thumbnail_path`] (cycle 8.35 PR-4). Never used to
     /// open new files or write — the FFI is READ-ONLY by construction; the
     /// Swift caller is the one that stats + decodes the referenced blob.
     blob_dir: PathBuf,
-    /// Absolute path to the brain SQLite file. Used by
-    /// [`mci_brain_ffi_summary_stats`] to `fs::metadata(...)` the file and
+    /// Absolute path to the brain `SQLite` file. Used by
+    /// [`mci_brain_ffi_summary_stats`] to measure content-free storage and
     /// by the mutation entry points (delete / wipe) to briefly open a
     /// writer connection when the recall UI's Privacy Dashboard fires a
     /// destructive action.
     brain_path: PathBuf,
-    /// Retained SQLCipher key. Needed so the mutation entry points can
+    /// Agent run sentinel paired with this brain. Its stable `.writer.lock`
+    /// sibling is held exclusively across each complete mutation scope.
+    run_lock_path: PathBuf,
+    /// Retained `SQLCipher` key. Needed so the mutation entry points can
     /// briefly open a *writer* connection to run DELETE + VACUUM. The
     /// underlying `DbKey` type zeroizes on drop; the key material was
     /// already in-process via the read-only `store` handle, so retaining
@@ -362,10 +440,11 @@ pub struct Handle {
     /// mutate the brain. The cycle-8.46 Privacy Dashboard needs an
     /// explicit, user-gated escape hatch (typed-word "DELETE" confirmation
     /// + two-step token for wipe). This field is the plumbing that turns
-    /// the escape hatch on for the four enumerated methods and nothing
-    /// else — every other FFI still routes through `store` (read-only).
-    /// The read-only invariant test in `tests/readonly_invariant.rs` now
-    /// allow-lists the four mutation methods by name.
+    ///
+    /// The escape hatch is available only to the four enumerated methods;
+    /// every other FFI still routes through `store` (read-only). The
+    /// read-only invariant test in `tests/readonly_invariant.rs` allow-lists
+    /// the four mutation methods by name.
     db_key: DbKey,
     /// Pending wipe token — the two-step confirmation for
     /// [`mci_brain_ffi_wipe_brain`]. Filled by
@@ -373,6 +452,54 @@ pub struct Handle {
     /// wipe entry point checks (a) token matches, (b) not expired, then
     /// clears the slot regardless of outcome (single-use).
     pending_wipe: Mutex<Option<(Instant, String)>>,
+}
+
+fn open_handle(path: &str, key_hex: &str, model_path: Option<&Path>) -> Result<Handle, String> {
+    let key_bytes = decode_hex_key(key_hex)?;
+    let key = DbKey::from_bytes(key_bytes);
+    let brain_path = PathBuf::from(path);
+    let store =
+        SqlCipherBrainStore::open_readonly(&brain_path, &key).map_err(|error| error.to_string())?;
+
+    #[cfg(target_os = "macos")]
+    let query_embedder = model_path
+        .map(|path| {
+            let backend = CoreMLBackend::open(path)
+                .map_err(|error| format!("embedding model load failed: {error}"))?;
+            let embedder = ArcticEmbedSEmbedder::new_query(Arc::new(backend));
+            let smoke = embedder
+                .embed_one("hippocampus semantic recall smoke probe")
+                .map_err(|error| format!("embedding model prediction failed: {error}"))?;
+            let norm = smoke.iter().map(|value| value * value).sum::<f32>().sqrt();
+            if smoke.len() != 384 || !norm.is_finite() || (norm - 1.0).abs() >= 1e-2 {
+                return Err(format!(
+                    "embedding model smoke vector invalid: dim={} norm={norm:.4}",
+                    smoke.len()
+                ));
+            }
+            Ok(Arc::new(embedder))
+        })
+        .transpose()?;
+
+    #[cfg(not(target_os = "macos"))]
+    if model_path.is_some() {
+        return Err("model-backed recall is available only on macOS".into());
+    }
+
+    let blob_dir = brain_path
+        .parent()
+        .map_or_else(|| PathBuf::from("blobs"), |parent| parent.join("blobs"));
+    let run_lock_path = mutation_run_lock_path(&brain_path);
+    Ok(Handle {
+        store: Arc::new(store),
+        #[cfg(target_os = "macos")]
+        query_embedder,
+        blob_dir,
+        brain_path,
+        run_lock_path,
+        db_key: key.clone(),
+        pending_wipe: Mutex::new(None),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -416,48 +543,63 @@ pub unsafe extern "C" fn mci_brain_ffi_open(
         return ptr::null_mut();
     };
 
-    let key_bytes = match decode_hex_key(key_str) {
-        Ok(b) => b,
+    let handle = match open_handle(path_str, key_str, None) {
+        Ok(handle) => handle,
         Err(e) => {
             set_last_error(&format!("mci_brain_ffi_open: {e}"));
             return ptr::null_mut();
         }
     };
-    let key = DbKey::from_bytes(key_bytes);
-
-    let p = PathBuf::from(path_str);
-    let store = match SqlCipherBrainStore::open_readonly(&p, &key) {
-        Ok(s) => s,
-        Err(e) => {
-            set_last_error(&format!("mci_brain_ffi_open: {e}"));
-            return ptr::null_mut();
-        }
-    };
-
     clear_last_error();
-    // Blob dir convention (P3.6.5, KeyframeBlobWriter): sibling `blobs/`
-    // directory next to the brain file. `~/Library/Application Support/MCI/mci.sqlite`
-    // → `~/Library/Application Support/MCI/blobs/`. If the brain path has
-    // no parent (`/mci.sqlite`), fall back to `./blobs` — surfacing this
-    // as an error would gratuitously fail brain open for a corner case
-    // that never arises in production (the launch path always writes the
-    // brain into Application Support).
-    let blob_dir = p
-        .parent()
-        .map(|parent| parent.join("blobs"))
-        .unwrap_or_else(|| PathBuf::from("blobs"));
-    // Retain a clone of the DbKey so the mutation entry points can open
-    // a transient writer. `DbKey: Clone` copies the 32-byte buffer; both
-    // clones zeroize on drop.
-    let db_key = key.clone();
-    let h = Box::new(Handle {
-        store: Arc::new(store),
-        blob_dir,
-        brain_path: p,
-        db_key,
-        pending_wipe: Mutex::new(None),
-    });
-    Box::into_raw(h)
+    Box::into_raw(Box::new(handle))
+}
+
+/// Open a read-only brain and a query-side Core ML embedding model.
+///
+/// Unlike [`mci_brain_ffi_open`], this function is strict about the model:
+/// a missing, incompatible, or non-predicting model returns null with a useful
+/// diagnostic. Callers that want graceful lexical fallback can retry through
+/// the compatibility open without weakening access to the encrypted brain.
+///
+/// # Safety
+///
+/// All three pointers must be non-null, null-terminated UTF-8 C strings and
+/// remain valid for this call. The pointers are borrowed only until return.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_open_with_model(
+    path: *const c_char,
+    key_hex: *const c_char,
+    model_path: *const c_char,
+) -> *mut Handle {
+    if path.is_null() || key_hex.is_null() || model_path.is_null() {
+        set_last_error("mci_brain_ffi_open_with_model: null pointer argument");
+        return ptr::null_mut();
+    }
+    let Ok(path_str) = unsafe { CStr::from_ptr(path) }.to_str() else {
+        set_last_error("mci_brain_ffi_open_with_model: non-UTF8 path");
+        return ptr::null_mut();
+    };
+    let Ok(key_str) = unsafe { CStr::from_ptr(key_hex) }.to_str() else {
+        set_last_error("mci_brain_ffi_open_with_model: non-UTF8 key_hex");
+        return ptr::null_mut();
+    };
+    let Ok(model_str) = unsafe { CStr::from_ptr(model_path) }.to_str() else {
+        set_last_error("mci_brain_ffi_open_with_model: non-UTF8 model path");
+        return ptr::null_mut();
+    };
+    if model_str.is_empty() {
+        set_last_error("mci_brain_ffi_open_with_model: empty model path");
+        return ptr::null_mut();
+    }
+    let handle = match open_handle(path_str, key_str, Some(Path::new(model_str))) {
+        Ok(handle) => handle,
+        Err(error) => {
+            set_last_error(&format!("mci_brain_ffi_open_with_model: {error}"));
+            return ptr::null_mut();
+        }
+    };
+    clear_last_error();
+    Box::into_raw(Box::new(handle))
 }
 
 /// Close a handle previously returned by [`mci_brain_ffi_open`].
@@ -483,11 +625,12 @@ pub unsafe extern "C" fn mci_brain_ffi_close(h: *mut Handle) {
 /// rows. Allocated by Rust — caller MUST pass the returned pointer back
 /// to [`mci_brain_ffi_string_free`].
 ///
-/// P3.9b uses lexical FTS5 only (`source: "lexical"`); the full
-/// `HybridRetriever` (P3.7) needs an `Embedder` backed by the bundled
-/// arctic-embed-s `.mlpackage`, which is the P3.3 Core ML adapter's
-/// payload. When that lands, this function swaps to `HybridRetriever`
-/// with a one-line ctor change and the `source` tag flips to `"hybrid"`.
+/// Handles created by [`mci_brain_ffi_open_with_model`] use the same
+/// [`HybridRetriever`] as the MCP agent with a query-side Arctic Embed S
+/// Core ML embedder. Compatibility handles created by
+/// [`mci_brain_ffi_open`] use lexical FTS5 only. The `source` field reports
+/// the actual route and never upgrades unverified related context to a
+/// verified match.
 ///
 /// Returns null on input-parse failure or unexpected internal error;
 /// [`mci_brain_ffi_last_error_message`] carries the diagnostic.
@@ -525,69 +668,284 @@ pub unsafe extern "C" fn mci_brain_ffi_search(
             return ptr::null_mut();
         }
     };
-    if query.text.is_empty() {
-        // Empty query is a malformed search request, not an empty result —
-        // FTS5 rejects it too. Surface as an empty list with no error.
-        let empty: Vec<HitJson> = Vec::new();
-        return json_to_c_string(&empty);
-    }
     let limit = query.limit.min(MAX_LIMIT as usize).max(1);
+    match search_query(handle, query, limit) {
+        Ok(hits) => json_to_c_string(&hits),
+        Err(error) => {
+            set_last_error(&format!("mci_brain_ffi_search: {error}"));
+            ptr::null_mut()
+        }
+    }
+}
 
-    // Cycle 8.42: expand the FTS5 query with the user's dictionary aliases
-    // BEFORE handing it to `fts5_search`. Empty alias map = identity
-    // (`expanded == query.text`), which preserves the pre-8.42 recall
-    // trace byte-for-byte on stores that don't send the field. See
-    // `expand_query_with_user_aliases` for the expansion rules.
-    let expanded = expand_query_with_user_aliases(&query.text, &query.user_aliases);
+fn search_query(
+    handle: &Handle,
+    mut query: QueryJson,
+    limit: usize,
+) -> Result<Vec<HitJson>, String> {
+    SqlCipherBrainStore::validate_search_app_filters(&query.app_filters)
+        .map_err(|error| error.to_string())?;
+    query.app_filters.sort_unstable();
+    query.app_filters.dedup();
+    if query.browse {
+        if !query.text.is_empty() {
+            return Err("browse requires empty text".into());
+        }
+        return search_browse(handle, &query, limit);
+    }
+    if query.text.is_empty() {
+        // Preserve the pre-browse wire contract for existing callers.
+        return Ok(Vec::new());
+    }
+    if query.mode == SearchMode::Related {
+        if query.has_url || query.app_filters.len() > 1 {
+            return Err(
+                "Related search does not support multiple-app or URL filters; choose Text".into(),
+            );
+        }
+        if let Some(app) = query.app_filters.first() {
+            if query
+                .app_filter
+                .as_ref()
+                .is_some_and(|legacy| legacy != app)
+            {
+                return Ok(Vec::new());
+            }
+            query.app_filter = Some(app.clone());
+        }
+    }
+    #[cfg(target_os = "macos")]
+    if query.mode.uses_hybrid(handle.query_embedder.is_some()) {
+        return search_hybrid(handle, &query, limit);
+    }
+    search_lexical(handle, &query, limit)
+}
 
-    // P3.9b: FTS5-only lexical search. See module docs for the HybridRetriever
-    // swap point (P3.3 Core ML embedder needs to land first).
-    let hits_raw = match handle.store.fts5_search(&expanded, limit) {
-        Ok(v) => v,
-        Err(e) => {
-            set_last_error(&format!("mci_brain_ffi_search: fts5_search: {e}"));
-            return ptr::null_mut();
+fn search_browse(handle: &Handle, query: &QueryJson, limit: usize) -> Result<Vec<HitJson>, String> {
+    let time_filter = match (query.time_from_us, query.time_to_us) {
+        (None, None) => None,
+        (from, to) => Some(TimeRange {
+            from_us: from.unwrap_or(0),
+            to_us: to.unwrap_or(u64::MAX),
+        }),
+    };
+    let ids = handle
+        .store
+        .browse_event_ids_filtered(
+            limit,
+            time_filter,
+            query.app_filter.as_deref(),
+            &query.app_filters,
+            query.has_url,
+        )
+        .map_err(|error| format!("browse: {error}"))?;
+    let mut hits = Vec::with_capacity(ids.len());
+    for id in ids {
+        let Some(event) = handle
+            .store
+            .get_event(id)
+            .map_err(|error| format!("get_event: {error}"))?
+        else {
+            continue;
+        };
+        if query_matches_event(query, &event) {
+            hits.push(hit_json(handle, id, event, "recent", None, None));
+        }
+    }
+    Ok(hits)
+}
+
+fn query_matches_event(query: &QueryJson, event: &mci_brain::Event) -> bool {
+    passes_filters(
+        event.ts_us,
+        event.app_bundle_id.as_deref(),
+        query.time_from_us,
+        query.time_to_us,
+        query.app_filter.as_deref(),
+    ) && (query.app_filters.is_empty()
+        || event
+            .app_bundle_id
+            .as_ref()
+            .is_some_and(|app| query.app_filters.contains(app)))
+        && (!query.has_url || event.url.as_ref().is_some_and(|url| !url.is_empty()))
+}
+
+fn search_lexical(
+    handle: &Handle,
+    query: &QueryJson,
+    limit: usize,
+) -> Result<Vec<HitJson>, String> {
+    let alternatives = expand_query_with_user_aliases(&query.text, &query.user_aliases);
+    let time_filter = match (query.time_from_us, query.time_to_us) {
+        (None, None) => None,
+        (from, to) => Some(TimeRange {
+            from_us: from.unwrap_or(0),
+            to_us: to.unwrap_or(u64::MAX),
+        }),
+    };
+    let hits_raw = if alternatives.len() == 1 {
+        handle.store.fts5_search_with_filters(
+            &query.text,
+            limit,
+            time_filter,
+            query.app_filter.as_deref(),
+            &query.app_filters,
+            query.has_url,
+        )
+    } else {
+        handle.store.fts5_search_alternatives_with_filters(
+            &alternatives,
+            limit,
+            time_filter,
+            query.app_filter.as_deref(),
+            &query.app_filters,
+            query.has_url,
+        )
+    }
+    .map_err(|error| format!("fts5_search: {error}"))?;
+    let snippet_query = SearchSnippet::new(&alternatives);
+    let mut hits_json = Vec::with_capacity(hits_raw.len());
+    for (event_id, score) in hits_raw {
+        let Some(event) = handle
+            .store
+            .get_event(event_id)
+            .map_err(|error| format!("get_event: {error}"))?
+        else {
+            continue;
+        };
+        if !query_matches_event(query, &event) {
+            continue;
+        }
+        hits_json.push(hit_json(
+            handle,
+            event_id,
+            event,
+            "lexical",
+            Some(score),
+            Some(&snippet_query),
+        ));
+    }
+    Ok(hits_json)
+}
+
+#[cfg(target_os = "macos")]
+fn search_hybrid(handle: &Handle, query: &QueryJson, limit: usize) -> Result<Vec<HitJson>, String> {
+    let embedder = handle
+        .query_embedder
+        .as_ref()
+        .ok_or_else(|| "hybrid search requested without an embedding model".to_string())?;
+    #[allow(clippy::cast_possible_truncation)]
+    let now_us = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros() as u64;
+    let time_filter = match (query.time_from_us, query.time_to_us) {
+        (None, None) => None,
+        (from, to) => Some(TimeRange {
+            from_us: from.unwrap_or(0),
+            to_us: to.unwrap_or(u64::MAX),
+        }),
+    };
+    let retrieval_query = RetrievalQuery {
+        text: query.text.clone(),
+        limit,
+        time_filter,
+        app_filter: query.app_filter.clone(),
+    };
+    let retriever = HybridRetriever::new(Arc::clone(&handle.store), Arc::clone(embedder), now_us);
+    let outcome = retriever
+        .retrieve_outcome(&retrieval_query)
+        .map_err(|error| format!("hybrid retrieve: {error}"))?;
+    let (matches, source) = match outcome {
+        RetrievalOutcome::Matched { matches } => (matches, "hybrid"),
+        RetrievalOutcome::Contradicted { matches } => (matches, "hybrid-conflict"),
+        RetrievalOutcome::NothingMatched { .. } => return Ok(Vec::new()),
+        RetrievalOutcome::Degraded {
+            degradation,
+            fallback_matches,
+        } => {
+            let source = match degradation {
+                RetrievalDegradation::EmbeddingsUnavailable => "lexical",
+                RetrievalDegradation::LexicalUnavailable => "semantic-related",
+                RetrievalDegradation::LexicalAndEmbeddingsUnavailable => return Ok(Vec::new()),
+                RetrievalDegradation::EvidenceSufficiencyUnqualified
+                | RetrievalDegradation::EvidenceVerifierUnavailable => "hybrid-related",
+            };
+            (fallback_matches, source)
         }
     };
+    let snippet_query = SearchSnippet::new(&[LexicalAlternative::Keywords(&query.text)]);
+    materialize_retrieval_matches(handle, matches, source, limit, &snippet_query)
+}
 
-    let mut hits_json: Vec<HitJson> = Vec::with_capacity(hits_raw.len());
-    for (event_id, score) in hits_raw {
-        match handle.store.get_event(event_id) {
-            Ok(Some(ev)) => {
-                if !passes_filters(
-                    ev.ts_us,
-                    ev.app_bundle_id.as_deref(),
-                    query.time_from_us,
-                    query.time_to_us,
-                    query.app_filter.as_deref(),
-                ) {
-                    continue;
-                }
-                let (entities, linked_event_ids) = enrich_hit(&handle.store, event_id);
-                let thumbnail_path =
-                    thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
-                hits_json.push(HitJson {
-                    event_id: event_id.0,
-                    ts_us: ev.ts_us,
-                    app_bundle_id: ev.app_bundle_id,
-                    window_title: ev.window_title,
-                    url: ev.url,
-                    ocr_text_snippet: snippet(&ev.text),
-                    source: "lexical".into(),
-                    score: Some(score),
-                    entities,
-                    linked_event_ids,
-                    thumbnail_path,
-                });
-            }
-            Ok(None) => {}
-            Err(e) => {
-                set_last_error(&format!("mci_brain_ffi_search: get_event: {e}"));
-                return ptr::null_mut();
-            }
-        }
+#[cfg(target_os = "macos")]
+fn materialize_retrieval_matches(
+    handle: &Handle,
+    matches: Vec<RetrievalMatch>,
+    source: &str,
+    limit: usize,
+    snippet_query: &SearchSnippet,
+) -> Result<Vec<HitJson>, String> {
+    let mut hits = Vec::with_capacity(matches.len().min(limit));
+    for value in matches.into_iter().take(limit) {
+        let event_id = value.hit.event_id;
+        let Some(event) = handle
+            .store
+            .get_event(event_id)
+            .map_err(|error| format!("get_event: {error}"))?
+        else {
+            continue;
+        };
+        hits.push(hit_json(
+            handle,
+            event_id,
+            event,
+            source,
+            Some(value.hit.score_combined),
+            Some(snippet_query),
+        ));
     }
-    json_to_c_string(&hits_json)
+    Ok(hits)
+}
+
+fn unknown_source_kind() -> String {
+    "unknown".into()
+}
+
+fn acquisition_source(handle: &Handle, id: EventId) -> String {
+    handle
+        .store
+        .event_source(id)
+        .unwrap_or_default()
+        .as_str()
+        .into()
+}
+
+fn hit_json(
+    handle: &Handle,
+    event_id: EventId,
+    event: mci_brain::Event,
+    source: &str,
+    score: Option<f32>,
+    snippet_query: Option<&SearchSnippet>,
+) -> HitJson {
+    let (entities, linked_event_ids) = enrich_hit(&handle.store, event_id);
+    let thumbnail_path = thumbnail_path_for(&handle.blob_dir, event.keyframe_blob.as_deref());
+    HitJson {
+        source_kind: acquisition_source(handle, event_id),
+        event_id: event_id.0,
+        ts_us: event.ts_us,
+        app_bundle_id: event.app_bundle_id,
+        window_title: event.window_title,
+        url: event.url,
+        ocr_text_snippet: snippet_query
+            .map_or_else(|| snippet(&event.text), |query| query.excerpt(&event.text)),
+        source: source.into(),
+        score,
+        entities,
+        linked_event_ids,
+        thumbnail_path,
+    }
 }
 
 /// Fetch the N most recent events for the plain timeline view. Returns
@@ -622,6 +980,7 @@ pub unsafe extern "C" fn mci_brain_ffi_recent_events(h: *mut Handle, limit: u32)
             let (entities, linked_event_ids) = enrich_hit(&handle.store, ev.id);
             let thumbnail_path = thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
             HitJson {
+                source_kind: acquisition_source(handle, ev.id),
                 event_id: ev.id.0,
                 ts_us: ev.ts_us,
                 app_bundle_id: ev.app_bundle_id,
@@ -637,6 +996,49 @@ pub unsafe extern "C" fn mci_brain_ffi_recent_events(h: *mut Handle, limit: u32)
         })
         .collect();
     json_to_c_string(&hits)
+}
+
+/// Read a bounded half-open activity window. No event content or capture-run
+/// identity is exposed. At most two days (including DST) and 50,000 rows.
+///
+/// # Safety
+/// `h` must remain a live handle for the duration of this call.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_activity_intervals(
+    h: *mut Handle,
+    start_us: u64,
+    end_us: u64,
+    limit: u32,
+) -> *mut c_char {
+    if h.is_null()
+        || start_us >= end_us
+        || end_us > i64::MAX as u64
+        || end_us - start_us > 172_800_000_000
+    {
+        set_last_error("mci_brain_activity_intervals: invalid handle or range");
+        return ptr::null_mut();
+    }
+    let handle = unsafe { &*h };
+    let limit = limit.min(50_000) as usize;
+    let Ok(rows) = handle
+        .store
+        .activity_intervals_page(start_us, end_us, limit + 1)
+    else {
+        set_last_error("mci_brain_activity_intervals: activity unavailable");
+        return ptr::null_mut();
+    };
+    let truncated = rows.len() > limit;
+    let intervals: Vec<_> = rows
+        .into_iter()
+        .take(limit)
+        .map(|row| {
+            serde_json::json!({
+                "start_us": row.start_us, "end_us": row.end_us,
+                "state": row.state, "app_bundle_id": row.app_bundle_id,
+            })
+        })
+        .collect();
+    json_to_c_string(&serde_json::json!({"intervals": intervals, "truncated": truncated}))
 }
 
 /// Resolve a batch of event ids into full [`HitJson`] rows. Powers the
@@ -717,6 +1119,7 @@ pub unsafe extern "C" fn mci_brain_ffi_events_by_ids(
                 let thumbnail_path =
                     thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
                 out.push(HitJson {
+                    source_kind: acquisition_source(handle, EventId(id)),
                     event_id: id,
                     ts_us: ev.ts_us,
                     app_bundle_id: ev.app_bundle_id,
@@ -743,6 +1146,56 @@ pub unsafe extern "C" fn mci_brain_ffi_events_by_ids(
     json_to_c_string(&out)
 }
 
+/// Bounded stored text for a single selected event, independent of list snippets.
+#[derive(Debug, Serialize)]
+pub struct EventTextJson {
+    /// The requested, still-present admitted event id.
+    pub event_id: u64,
+    /// Capture timestamp from the same row snapshot as the text.
+    pub ts_us: u64,
+    /// Exact nullable source app, bounded to 1 KiB of UTF-8.
+    pub app_bundle_id: Option<String>,
+    /// Exact UTF-8 prefix, at most 128 KiB, without replacement characters.
+    pub text: String,
+    /// True only when the byte cap omits part of the stored text.
+    pub truncated: bool,
+}
+
+/// Read one admitted event's stored text through the existing read-only handle.
+/// No paths are accepted and no vectors or blobs are fetched. Timestamp and
+/// app identity accompany text atomically; callers must compare both against
+/// the selected hit, because deleted numeric IDs can be reused.
+/// Returns JSON `null` for a missing, deleted, suppressed or invalid id;
+/// otherwise an [`EventTextJson`] capped at 128 KiB of UTF-8 text. JSON
+/// escaping can expand the wire payload to at most 6 * (128 KiB + 1 KiB) + 256
+/// bytes. An app identity larger than 1 KiB fails closed as JSON `null`.
+/// Returns a null pointer on error, with a content-free last-error message.
+/// Caller must release any non-null pointer with [`mci_brain_ffi_string_free`].
+///
+/// # Safety
+/// `h` must be a live handle or null. Do not close it during the call.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_event_text(h: *mut Handle, event_id: u64) -> *mut c_char {
+    if h.is_null() {
+        set_last_error("mci_brain_ffi_event_text: null handle");
+        return ptr::null_mut();
+    }
+    // Safety: the caller keeps this read-only handle alive for the call.
+    let handle = unsafe { &*h };
+    if let Ok(value) = handle.store.event_text(EventId(event_id)) {
+        json_to_c_string(&value.map(|value| EventTextJson {
+            event_id,
+            ts_us: value.ts_us,
+            app_bundle_id: value.app_bundle_id,
+            text: value.text,
+            truncated: value.truncated,
+        }))
+    } else {
+        set_last_error("mci_brain_ffi_event_text: stored text unavailable");
+        ptr::null_mut()
+    }
+}
+
 /// **V2-P13 (Phase D scaffold)** — Return lightweight event summaries for
 /// a time range, downsampled if too many events fall in the window.
 ///
@@ -753,17 +1206,17 @@ pub unsafe extern "C" fn mci_brain_ffi_events_by_ids(
 /// 1. Rejects windows longer than [`TIMELINE_MAX_RANGE_US`] (90 days) so
 ///    a hostile caller cannot force a full-corpus scan.
 /// 2. Rejects `start_ts_us > end_ts_us`.
-/// 3. Fetches the most-recent events (up to [`TIMELINE_HARD_CAP`]) and
-///    filters to the `[start_ts_us, end_ts_us]` window.
+/// 3. Filters to the `[start_ts_us, end_ts_us]` window in SQL, then
+///    fetches the most-recent events up to [`TIMELINE_HARD_CAP`].
 /// 4. Downsamples: if the filtered count exceeds [`TIMELINE_MAX_EVENTS`],
 ///    the result is bucketized (one representative per bucket) — bucket
 ///    width is 1 minute when the range ≤ 24 h, otherwise the ceil-divide
 ///    of (range / max-events) rounded up to the next minute.
 /// 5. Returns rows sorted by `ts_us` ASCENDING (left-to-right timeline).
 ///
-/// Read-only by construction: uses `handle.store.recent_events` (the
-/// same read-only entry point powering the flat timeline list) then
-/// filters in Rust. No writer connection is opened.
+/// Read-only by construction: uses `handle.store.events_in_range` (the
+/// same read-only entry point powering the flat timeline list).
+/// No writer connection is opened.
 ///
 /// # Safety
 ///
@@ -807,30 +1260,28 @@ pub unsafe extern "C" fn mci_brain_ffi_timeline_events(
     let range = query.end_ts_us - query.start_ts_us;
     if range > TIMELINE_MAX_RANGE_US {
         set_last_error(&format!(
-            "mci_brain_ffi_timeline_events: range {} us exceeds cap {} us (~90 days)",
-            range, TIMELINE_MAX_RANGE_US
+            "mci_brain_ffi_timeline_events: range {range} us exceeds cap {TIMELINE_MAX_RANGE_US} us (~90 days)"
         ));
         return ptr::null_mut();
     }
 
-    // Fetch the most-recent slice up to the hard cap, then filter to the
-    // requested window. For a scaffold the O(N) filter is fine — the hard
-    // cap is 10_000 rows. A follow-on cycle may push the range predicate
-    // down to SQL via a store-side `events_in_range` (would require
-    // protected-set sign-off on `sqlcipher_brain_store.rs`).
-    let events = match handle.store.recent_events(TIMELINE_HARD_CAP) {
-        Ok(v) => v,
-        Err(e) => {
-            set_last_error(&format!("mci_brain_ffi_timeline_events: {e}"));
-            return ptr::null_mut();
-        }
-    };
+    let events =
+        match handle
+            .store
+            .events_in_range(query.start_ts_us, query.end_ts_us, TIMELINE_HARD_CAP)
+        {
+            Ok(v) => v,
+            Err(e) => {
+                set_last_error(&format!("mci_brain_ffi_timeline_events: {e}"));
+                return ptr::null_mut();
+            }
+        };
     let mut filtered: Vec<TimelineEventJson> = events
         .into_iter()
-        .filter(|ev| ev.ts_us >= query.start_ts_us && ev.ts_us <= query.end_ts_us)
         .map(|ev| {
             let thumbnail_path = thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
             TimelineEventJson {
+                source_kind: acquisition_source(handle, ev.id),
                 event_id: ev.id.0,
                 ts_us: ev.ts_us,
                 app_bundle_id: ev.app_bundle_id,
@@ -1000,7 +1451,7 @@ pub unsafe extern "C" fn mci_brain_ffi_list_episodes(h: *mut Handle, limit: u32)
 // ---------------------------------------------------------------------------
 
 /// JSON value type for one daily brief row. Mirrors [`mci_brain::BriefRow`]
-/// with snake_case keys for Swift `Codable` interop.
+/// with `snake_case` keys for Swift `Codable` interop.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BriefJson {
     /// Stable `briefs.id` rowid.
@@ -1128,15 +1579,9 @@ pub unsafe extern "C" fn mci_brain_ffi_brief_dates(h: *mut Handle, limit: u32) -
 
 /// Content-free aggregate summary for the Privacy Dashboard's top card.
 /// Returns a JSON object of [`SummaryStatsJson`] on success — total event
-/// count, oldest/newest ts, and the on-disk byte size of the SQLCipher
-/// brain file. NO event content, no bundle-id list, no window titles.
-///
-/// The `disk_bytes` field is the `fs::metadata(brain_path).len()` of the
-/// file the handle was opened against — the FFI already holds the path
-/// (`Handle::brain_path`) and stat'ing it is content-free (no read of
-/// row bytes). A stat failure degrades to `0` rather than propagating an
-/// error, because a failure to size the file must not block the
-/// dashboard from rendering the counts.
+/// count, oldest/newest ts, and database-only logical bytes. This polling
+/// entrypoint never enumerates blobs and leaves `storage` absent. Use
+/// [`mci_brain_ffi_storage_usage`] only for an explicit storage measurement.
 ///
 /// Same allocator discipline as the other returners; caller MUST pass
 /// the returned pointer back to [`mci_brain_ffi_string_free`].
@@ -1147,32 +1592,60 @@ pub unsafe extern "C" fn mci_brain_ffi_brief_dates(h: *mut Handle, limit: u32) -
 /// [`mci_brain_ffi_open`] and not yet closed.
 #[no_mangle]
 pub unsafe extern "C" fn mci_brain_ffi_summary_stats(h: *mut Handle) -> *mut c_char {
-    if h.is_null() {
-        set_last_error("mci_brain_ffi_summary_stats: null handle");
-        return ptr::null_mut();
-    }
-    // Safety: caller guarantees a valid live handle.
-    let handle = unsafe { &*h };
-    let stats = match handle.store.stats() {
-        Ok(s) => s,
-        Err(e) => {
-            set_last_error(&format!("mci_brain_ffi_summary_stats: {e}"));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if h.is_null() {
+            set_last_error("mci_brain_ffi_summary_stats: null handle");
             return ptr::null_mut();
         }
-    };
-    // Best-effort disk size. A missing/unreadable brain file falls back to
-    // 0 — the dashboard's summary card shows "0 MB" which is honest under
-    // that (impossible) failure mode rather than a full-screen error.
-    let disk_bytes = std::fs::metadata(&handle.brain_path)
-        .map(|m| m.len())
-        .unwrap_or(0);
-    let out = SummaryStatsJson {
-        total_events: stats.event_count,
-        oldest_ts_us: stats.oldest_ts_us,
-        newest_ts_us: stats.newest_ts_us,
-        disk_bytes,
-    };
-    json_to_c_string(&out)
+        // Safety: caller guarantees a valid live handle.
+        let handle = unsafe { &*h };
+        let stats = match handle.store.stats() {
+            Ok(s) => s,
+            Err(e) => {
+                set_last_error(&format!("mci_brain_ffi_summary_stats: {e}"));
+                return ptr::null_mut();
+            }
+        };
+        let disk_bytes = storage_usage::database_bytes(&handle.brain_path).unwrap_or(0);
+        let out = SummaryStatsJson {
+            total_events: stats.event_count,
+            oldest_ts_us: stats.oldest_ts_us,
+            newest_ts_us: stats.newest_ts_us,
+            disk_bytes,
+            storage: None,
+        };
+        json_to_c_string(&out)
+    }));
+    result.unwrap_or_else(|_| {
+        set_last_error("mci_brain_ffi_summary_stats: measurement failed");
+        ptr::null_mut()
+    })
+}
+
+/// Explicit content-free logical storage measurement for the Privacy Dashboard.
+/// Returns [`storage_usage::StorageUsage`] JSON without accessing keys or data.
+/// Walks at most 64 path components and 20,000 blob-directory entries without
+/// symlink traversal or recursion. The 200ms deadline is best-effort between
+/// local metadata calls, not a hard latency bound on individual OS calls.
+/// Call off the UI thread, on explicit refresh only; free via `string_free`.
+///
+/// # Safety
+/// `h` must be a live handle returned by [`mci_brain_ffi_open`], not yet closed.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_storage_usage(h: *mut Handle) -> *mut c_char {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if h.is_null() {
+            set_last_error("mci_brain_ffi_storage_usage: null handle");
+            return ptr::null_mut();
+        }
+        // Safety: the caller keeps this handle live for the entire call.
+        let handle = unsafe { &*h };
+        json_to_c_string(&storage_usage::measure(&handle.brain_path))
+    }));
+    result.unwrap_or_else(|_| {
+        set_last_error("mci_brain_ffi_storage_usage: measurement failed");
+        ptr::null_mut()
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1194,10 +1667,11 @@ pub unsafe extern "C" fn mci_brain_ffi_summary_stats(h: *mut Handle) -> *mut c_c
 // violation and the test will fail.
 // ---------------------------------------------------------------------------
 
-/// Delete a single event by id. CASCADE removes event_vectors, chunks,
-/// entity_mentions rows referencing this event id (per the migration-0001
-/// / migration-0004 ON DELETE CASCADE clauses). Also `VACUUM`s so the
-/// freed pages are returned to the OS immediately.
+/// Delete a single event by id. CASCADE removes `event_vectors`, `chunks`,
+/// `entity_mentions` rows referencing this event id (per the migration-0001
+/// / migration-0004 ON DELETE CASCADE clauses). The transient writer also
+/// removes the event's encrypted keyframe file when no surviving event shares
+/// its digest. Finally, it `VACUUM`s so freed database pages return to the OS.
 ///
 /// `event_id_json` is a UTF-8 JSON string of shape `{"event_id":<u64>}`.
 ///
@@ -1212,6 +1686,11 @@ pub unsafe extern "C" fn mci_brain_ffi_delete_event(
     h: *mut Handle,
     event_id_json: *const c_char,
 ) -> *mut c_char {
+    #[derive(Deserialize)]
+    struct Query {
+        event_id: u64,
+    }
+
     if h.is_null() {
         set_last_error("mci_brain_ffi_delete_event: null handle");
         return ptr::null_mut();
@@ -1228,26 +1707,17 @@ pub unsafe extern "C" fn mci_brain_ffi_delete_event(
         set_last_error("mci_brain_ffi_delete_event: non-UTF8 event_id_json");
         return ptr::null_mut();
     };
-    #[derive(Deserialize)]
-    struct Q {
-        event_id: u64,
-    }
-    let q: Q = match serde_json::from_str(q_str) {
+    let q: Query = match serde_json::from_str(q_str) {
         Ok(v) => v,
         Err(e) => {
             set_last_error(&format!("mci_brain_ffi_delete_event: bad query JSON: {e}"));
             return ptr::null_mut();
         }
     };
-    match with_writer(handle, |writer| writer.delete_event(EventId(q.event_id))) {
-        Ok(deleted) => json_to_c_string(&DeleteResultJson {
-            events_deleted: deleted,
-            // `SqlCipherBrainStore::delete_event` VACUUMs on the same
-            // writer connection; if that VACUUM had failed, `delete_event`
-            // would have returned an Err, so surfacing `vacuum_ok: true`
-            // here is accurate. (See docs on `delete_event`.)
-            vacuum_ok: true,
-        }),
+    match with_writer(handle, |writer| {
+        writer.delete_event_with_outcome(EventId(q.event_id))
+    }) {
+        Ok(outcome) => json_to_c_string(&delete_result_json(&outcome)),
         Err(e) => {
             set_last_error(&format!("mci_brain_ffi_delete_event: {e}"));
             ptr::null_mut()
@@ -1256,8 +1726,8 @@ pub unsafe extern "C" fn mci_brain_ffi_delete_event(
 }
 
 /// Delete all events whose `ts_us` falls in the inclusive range
-/// `[start_ts_us, end_ts_us]`. CASCADE + VACUUM per the single-event
-/// path. Powers the Privacy Dashboard's "Delete last 24 hours" +
+/// `[start_ts_us, end_ts_us]`. CASCADE + encrypted keyframe cleanup + VACUUM
+/// follow the single-event path. Powers the Privacy Dashboard's "Delete last 24 hours" +
 /// "Delete this hour / day" range actions.
 ///
 /// # Safety
@@ -1279,12 +1749,9 @@ pub unsafe extern "C" fn mci_brain_ffi_delete_events_in_range(
     // Safety: caller guarantees a live handle.
     let handle = unsafe { &*h };
     match with_writer(handle, |writer| {
-        writer.delete_events_in_range(start_ts_us, end_ts_us)
+        writer.delete_events_in_range_with_outcome(start_ts_us, end_ts_us)
     }) {
-        Ok(deleted) => json_to_c_string(&DeleteResultJson {
-            events_deleted: deleted,
-            vacuum_ok: true,
-        }),
+        Ok(outcome) => json_to_c_string(&delete_result_json(&outcome)),
         Err(e) => {
             set_last_error(&format!("mci_brain_ffi_delete_events_in_range: {e}"));
             ptr::null_mut()
@@ -1323,21 +1790,18 @@ pub unsafe extern "C" fn mci_brain_ffi_prepare_wipe(h: *mut Handle) -> *mut c_ch
             return ptr::null_mut();
         }
     };
-    match handle.pending_wipe.lock() {
-        Ok(mut slot) => {
-            *slot = Some((Instant::now(), token.clone()));
-        }
-        Err(_) => {
-            set_last_error("mci_brain_ffi_prepare_wipe: pending_wipe mutex poisoned");
-            return ptr::null_mut();
-        }
-    }
+    let Ok(mut slot) = handle.pending_wipe.lock() else {
+        set_last_error("mci_brain_ffi_prepare_wipe: pending_wipe mutex poisoned");
+        return ptr::null_mut();
+    };
+    *slot = Some((Instant::now(), token.clone()));
     // Emit the raw token as a JSON string literal so the Swift caller can
     // JSONDecoder-decode it just like the other returners.
     json_to_c_string(&token)
 }
 
-/// Wipe every user-content row from the brain and VACUUM.
+/// Wipe every user-content row and referenced encrypted keyframe blob from the
+/// brain, then VACUUM the database.
 ///
 /// Requires `token` to match the token most recently returned by
 /// [`mci_brain_ffi_prepare_wipe`], not yet expired (60s TTL). The token
@@ -1384,13 +1848,11 @@ pub unsafe extern "C" fn mci_brain_ffi_wipe_brain(
     // Consume the pending token unconditionally — any call to `wipe`
     // (success, wrong, or expired) invalidates it so a token cannot be
     // retried after a failure.
-    let pending = match handle.pending_wipe.lock() {
-        Ok(mut slot) => slot.take(),
-        Err(_) => {
-            set_last_error("mci_brain_ffi_wipe_brain: pending_wipe mutex poisoned");
-            return ptr::null_mut();
-        }
+    let Ok(mut slot) = handle.pending_wipe.lock() else {
+        set_last_error("mci_brain_ffi_wipe_brain: pending_wipe mutex poisoned");
+        return ptr::null_mut();
     };
+    let pending = slot.take();
     let Some((issued_at, expected)) = pending else {
         set_last_error("mci_brain_ffi_wipe_brain: no pending wipe — call prepare_wipe first");
         return ptr::null_mut();
@@ -1405,11 +1867,8 @@ pub unsafe extern "C" fn mci_brain_ffi_wipe_brain(
         set_last_error("mci_brain_ffi_wipe_brain: wipe token mismatch");
         return ptr::null_mut();
     }
-    match with_writer(handle, |writer| writer.wipe_all()) {
-        Ok(deleted) => json_to_c_string(&DeleteResultJson {
-            events_deleted: deleted,
-            vacuum_ok: true,
-        }),
+    match with_writer(handle, SqlCipherBrainStore::wipe_all_with_outcome) {
+        Ok(outcome) => json_to_c_string(&delete_result_json(&outcome)),
         Err(e) => {
             set_last_error(&format!("mci_brain_ffi_wipe_brain: {e}"));
             ptr::null_mut()
@@ -1500,9 +1959,9 @@ pub const EVENTS_BY_IDS_CAP: usize = 32;
 /// hostile / mis-scoped request and rejected at the FFI boundary.
 pub const TIMELINE_MAX_RANGE_US: u64 = 90 * 24 * 60 * 60 * 1_000_000;
 
-/// **V2-P13.** Hard cap on rows fetched from `recent_events` before
-/// filtering to the window. Bounds the per-call allocation regardless of
-/// how many events exist in the requested window. 10_000 events × ~200
+/// **V2-P13.** Hard cap on rows fetched from the requested date range before
+/// downsampling. Bounds the per-call allocation regardless of
+/// how many events exist in the requested window. `10_000` events × ~200
 /// bytes/row ≈ 2 MB — well inside the FFI's memory budget.
 pub const TIMELINE_HARD_CAP: usize = 10_000;
 
@@ -1510,7 +1969,7 @@ pub const TIMELINE_HARD_CAP: usize = 10_000;
 /// [`mci_brain_ffi_timeline_events`] call. Above this count the FFI
 /// downsamples: one representative event per time bucket, with bucket
 /// width picked so the total row count fits under the cap. The recall UI
-/// strip renders ~1 card per 40 px, so 1_000 rows suffices for a
+/// strip renders ~1 card per 40 px, so `1_000` rows suffices for a
 /// full-screen day view on a 4K display.
 pub const TIMELINE_MAX_EVENTS: usize = 1_000;
 
@@ -1609,10 +2068,32 @@ fn snippet(s: &str) -> String {
 /// **V2-P13.** Shorter snippet for timeline strip cards.
 /// [`TIMELINE_SNIPPET_CAP`] chars; multi-byte UTF-8 boundaries preserved.
 fn timeline_snippet(s: &str) -> String {
+    let s = display_body(s);
     if s.chars().count() <= TIMELINE_SNIPPET_CAP {
         return s.to_string();
     }
     s.chars().take(TIMELINE_SNIPPET_CAP).collect()
+}
+
+/// Remove only a complete leading ingestion header before budgeting UI text.
+/// The stored/indexed text and separate source metadata remain unchanged.
+fn display_body(s: &str) -> &str {
+    let Some((header, body)) = s.split_once('\n') else {
+        return s;
+    };
+    let fields = header
+        .strip_prefix("[app=")
+        .and_then(|v| v.strip_suffix(']'));
+    let complete = fields
+        .and_then(|v| v.split_once(" | title=").map(|(_, rest)| rest))
+        .and_then(|v| v.split_once(" | url=").map(|(_, rest)| rest))
+        .and_then(|v| v.split_once(" | ts=").map(|(_, rest)| rest))
+        .is_some();
+    if complete {
+        body
+    } else {
+        s
+    }
 }
 
 /// **V2-P13.** Downsample an ascending-order timeline slice to at most
@@ -1623,10 +2104,9 @@ fn timeline_snippet(s: &str) -> String {
 /// computed so the total bucket count ≤ [`TIMELINE_MAX_EVENTS`]; ranges
 /// ≤ 24 h floor to a 1-minute bucket for a stable "one card per minute"
 /// feel; longer ranges use `ceil(range_us / MAX_EVENTS)` rounded up to
-/// the next minute. Within each bucket the first event (chronologically
-/// earliest) is kept. This is intentionally simple — a follow-on cycle
-/// can pick a "densest event" or "middle-of-bucket keyframe" strategy;
-/// the wire shape is identical.
+/// the next minute. Within each bucket the first event carrying a keyframe
+/// is preferred; when none has one, the chronologically earliest event is
+/// kept. This makes the bounded timeline visual without changing its wire.
 ///
 /// Pure function so it is trivially testable.
 fn downsample_timeline(events: Vec<TimelineEventJson>, range_us: u64) -> Vec<TimelineEventJson> {
@@ -1647,8 +2127,15 @@ fn downsample_timeline(events: Vec<TimelineEventJson>, range_us: u64) -> Vec<Tim
         if Some(bucket) != current_bucket {
             current_bucket = Some(bucket);
             out.push(ev);
+        } else if ev.thumbnail_path.is_some()
+            && out
+                .last()
+                .is_some_and(|selected| selected.thumbnail_path.is_none())
+        {
+            if let Some(selected) = out.last_mut() {
+                *selected = ev;
+            }
         }
-        // Else: bucket already has a representative — drop this event.
     }
     out
 }
@@ -1683,8 +2170,8 @@ fn enrich_hit(store: &SqlCipherBrainStore, event_id: EventId) -> (Vec<String>, V
 }
 
 /// Resolve `Event.keyframe_blob` (sha256 hex, `None` when no keyframe was
-/// captured) into the absolute filesystem path the Swift `HitThumbnail`
-/// view opens. Convention: `<blob_dir>/<hex>.bin` per the P3.6.5
+/// captured) into the absolute filesystem path the Swift authenticated
+/// thumbnail provider validates. Convention: `<blob_dir>/<hex>.bin` per the P3.6.5
 /// `KeyframeBlobWriter` on-disk layout.
 ///
 /// Read-only: no file I/O — the FFI never stats or opens the referenced
@@ -1705,51 +2192,41 @@ fn thumbnail_path_for(blob_dir: &std::path::Path, keyframe_blob: Option<&str>) -
     // of the expected length. Prevents a hostile stored value (e.g. a
     // filesystem-escape like "../../etc/passwd") from being handed to
     // Swift as an "absolute path". SHA256 = 64 hex chars.
-    if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if hex.len() != 64
+        || !hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
         return None;
     }
     let file = format!("{hex}.bin");
     Some(blob_dir.join(file).to_string_lossy().into_owned())
 }
 
-/// Expand a raw user query with the caller's user-dictionary aliases
-/// (cycle 8.42). When the query text contains — as a case-insensitive
-/// substring — a canonical name or any of its aliases, the FTS5 query is
-/// rewritten as an OR-group over all the equivalent spellings so a
-/// search for `"AJ email"` also matches events that mention
-/// `"Amy Jain email"`. Multi-word spellings are quoted so FTS5 treats
-/// them as a single phrase.
+/// Keep the original keyword query and add literal phrase alternatives for
+/// dictionary groups touched by a case-insensitive substring match.
+/// The store owns encoding and joining these branches; no user text is syntax.
 ///
-/// **Match semantics.** Case-insensitive substring on the query text.
-/// This is intentionally loose so `"AJ"`, `"aj"`, `"aj@example.com"` all
-/// trigger the expansion for a canonical `"AJ"`. False positives are
-/// bounded: an expansion only *adds* an OR-branch to FTS5; it never
-/// removes candidate events, so worst-case a spurious expansion just
-/// widens the candidate pool.
-///
-/// **Bounds.** The map is capped at [`USER_ALIAS_GROUP_CAP`] groups; each
-/// group's aliases are capped at [`USER_ALIAS_PER_GROUP_CAP`] entries.
-/// A hostile caller cannot inflate the FTS5 query beyond
-/// `~cap * cap * avg_len` bytes.
-///
-/// **No-op paths.** Empty map, or a map whose keys/aliases don't appear
-/// in the query, returns the input unchanged — the recall trace is
-/// byte-identical to the pre-8.42 behavior. This is what preserves the
-/// "backward-compat by construction" contract.
-fn expand_query_with_user_aliases(
-    text: &str,
-    aliases: &std::collections::HashMap<String, Vec<String>>,
-) -> String {
+/// Canonical names are sorted before applying [`USER_ALIAS_GROUP_CAP`], and
+/// each alias list retains its order and [`USER_ALIAS_PER_GROUP_CAP`] limit.
+/// The original query reserves its budget first. Optional phrases that do not
+/// fit the store's remaining byte budget are skipped whole, and expansion
+/// stops at its alternative-count limit.
+/// No matching group leaves only the original keyword query, allowing the
+/// caller to preserve the ordinary lexical path and its ranking.
+fn expand_query_with_user_aliases<'a>(
+    text: &'a str,
+    aliases: &'a std::collections::HashMap<String, Vec<String>>,
+) -> Vec<LexicalAlternative<'a>> {
+    let mut alternatives = vec![LexicalAlternative::Keywords(text)];
     if aliases.is_empty() {
-        return text.to_string();
+        return alternatives;
     }
+    let mut remaining_bytes = MAX_LEXICAL_ALTERNATIVE_BYTES.saturating_sub(text.len());
     let text_lc = text.to_lowercase();
-    let mut expansions: Vec<String> = Vec::new();
-
-    // Iterate at most USER_ALIAS_GROUP_CAP groups. HashMap order is
-    // non-deterministic, but the resulting FTS5 query is order-independent
-    // (OR is commutative in FTS5's boolean layer).
-    for (canonical, alt_list) in aliases.iter().take(USER_ALIAS_GROUP_CAP) {
+    let mut groups: Vec<_> = aliases.iter().collect();
+    groups.sort_unstable_by_key(|(canonical, _)| *canonical);
+    for (canonical, alt_list) in groups.into_iter().take(USER_ALIAS_GROUP_CAP) {
         let all_terms: Vec<&str> = std::iter::once(canonical.as_str())
             .chain(
                 alt_list
@@ -1766,27 +2243,18 @@ fn expand_query_with_user_aliases(
         if !touched {
             continue;
         }
-        let quoted: Vec<String> = all_terms
-            .iter()
-            .filter(|t| !t.is_empty())
-            .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
-            .collect();
-        if quoted.is_empty() {
-            continue;
+        for term in all_terms.into_iter().filter(|term| !term.is_empty()) {
+            if alternatives.len() == MAX_LEXICAL_ALTERNATIVES {
+                return alternatives;
+            }
+            if term.len() > remaining_bytes {
+                continue;
+            }
+            remaining_bytes -= term.len();
+            alternatives.push(LexicalAlternative::Phrase(term));
         }
-        expansions.push(format!("({})", quoted.join(" OR ")));
     }
-    if expansions.is_empty() {
-        return text.to_string();
-    }
-    // Compose as `(<original>) OR <group1> OR <group2> ...`. Wrapping the
-    // original in parens preserves any user-authored FTS5 operators.
-    let mut out = format!("({text})");
-    for e in expansions {
-        out.push_str(" OR ");
-        out.push_str(&e);
-    }
-    out
+    alternatives
 }
 
 /// Post-fetch filter that matches the optional `time_filter` /
@@ -1835,22 +2303,21 @@ fn json_null_c_string() -> *mut c_char {
 /// The recall-ui's long-lived FFI handle is read-only by construction
 /// (ADR-0016 §4.3). The four cycle-8.47 mutation methods are the
 /// enumerated exceptions; they open a writer only for the duration of
-/// one DELETE + VACUUM, then drop it. This keeps the read-only invariant
+/// one DELETE + maintenance pass, then drop it. This keeps the read-only invariant
 /// intact for every other call and confines the writer's blast radius
 /// to a single stack frame.
 ///
 /// The `DbKey` retained on `Handle` (a clone of the same bytes already
 /// held by the read-only store) is the credential; we open a fresh
 /// `SqlCipherBrainStore::new` connection with it, run the mutation, and
-/// let RAII close the writer at end-of-scope. `VACUUM` runs inside the
-/// store's mutation method (after the transaction commits), so a VACUUM
-/// failure propagates through `body`'s `Err` — the DELETE tx and the
-/// VACUUM are transactionally decoupled but reported as a single
-/// unit here.
+/// let RAII close the writer at end-of-scope. Maintenance runs after the
+/// transaction commits, so its warnings remain part of a successful outcome.
 fn with_writer<F, T>(handle: &Handle, body: F) -> Result<T, String>
 where
     F: FnOnce(&SqlCipherBrainStore) -> Result<T, mci_brain::StoreError>,
 {
+    let mutation_lease = acquire_mutation_lease(&handle.run_lock_path)?;
+    verify_mutation_integrity(&mutation_lease, || handle.store.verify_integrity_on_boot())?;
     // Open a fresh writer. SqlCipherBrainStore::new does the migration
     // (idempotent — every DDL is IF NOT EXISTS) so a delete on an
     // already-migrated store is safe. On a first-run edge case where
@@ -1859,6 +2326,130 @@ where
     let writer = SqlCipherBrainStore::new(&handle.brain_path, &handle.db_key)
         .map_err(|e| format!("open writer: {e}"))?;
     body(&writer).map_err(|e| format!("{e}"))
+}
+
+fn mutation_run_lock_path(brain_path: &Path) -> PathBuf {
+    let Some(parent) = brain_path.parent() else {
+        return PathBuf::from(".running");
+    };
+    if parent.file_name().is_some_and(|name| name == "MCI") {
+        return parent.parent().map_or_else(
+            || parent.join(".running"),
+            |support| support.join("Hippocampus/.running"),
+        );
+    }
+    parent.join(".running")
+}
+
+#[derive(Debug)]
+struct MutationLease {
+    _file: File,
+    unclean_prior_shutdown: bool,
+}
+
+fn writer_lease_path(run_lock_path: &Path) -> PathBuf {
+    run_lock_path.with_file_name(".writer.lock")
+}
+
+#[cfg(unix)]
+fn acquire_mutation_lease(run_lock_path: &Path) -> Result<MutationLease, String> {
+    let lease_path = writer_lease_path(run_lock_path);
+    if let Some(parent) = lease_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            format!("MCI_MUTATION_BLOCKED: cannot prepare writer lease: {error}")
+        })?;
+    }
+    if lease_path
+        .symlink_metadata()
+        .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
+        return Err(
+            "MCI_MUTATION_BLOCKED: writer lease path is unsafe; refusing mutation".to_owned(),
+        );
+    }
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .custom_flags(
+            i32::try_from((OFlags::NOFOLLOW | OFlags::CLOEXEC).bits())
+                .expect("open flags fit platform c_int"),
+        )
+        .open(&lease_path)
+        .map_err(|error| format!("MCI_MUTATION_BLOCKED: cannot open writer lease: {error}"))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("MCI_MUTATION_BLOCKED: cannot inspect writer lease: {error}"))?;
+    if !metadata.is_file()
+        || metadata.uid() != rustix::process::getuid().as_raw()
+        || metadata.nlink() != 1
+        || metadata.mode() & 0o077 != 0
+    {
+        return Err(
+            "MCI_MUTATION_BLOCKED: writer lease is not a private current-user regular file"
+                .to_owned(),
+        );
+    }
+    match flock(&file, FlockOperation::NonBlockingLockExclusive) {
+        Ok(()) => {
+            let unclean_prior_shutdown = match std::fs::symlink_metadata(run_lock_path) {
+                Ok(_) => true,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+                Err(error) => {
+                    return Err(format!(
+                        "MCI_MUTATION_BLOCKED: cannot inspect crash marker: {error}"
+                    ));
+                }
+            };
+            Ok(MutationLease {
+                _file: file,
+                unclean_prior_shutdown,
+            })
+        }
+        Err(error) if error == rustix::io::Errno::WOULDBLOCK => Err(
+            "MCI_MUTATION_BLOCKED: writer lease is active; stop Hippocampus before deleting"
+                .to_owned(),
+        ),
+        Err(error) => Err(format!(
+            "MCI_MUTATION_BLOCKED: cannot acquire writer lease: {}",
+            io::Error::from_raw_os_error(error.raw_os_error())
+        )),
+    }
+}
+
+#[cfg(not(unix))]
+fn acquire_mutation_lease(_run_lock_path: &Path) -> Result<MutationLease, String> {
+    Err("MCI_MUTATION_BLOCKED: writer lease is unavailable on this platform".to_owned())
+}
+
+fn verify_mutation_integrity<E, F>(lease: &MutationLease, mut verify: F) -> Result<(), String>
+where
+    E: std::fmt::Display,
+    F: FnMut() -> Result<(), E>,
+{
+    let pass_count = if lease.unclean_prior_shutdown { 2 } else { 1 };
+    for pass in 1..=pass_count {
+        if let Err(error) = verify() {
+            return Err(format!(
+                "MCI_MUTATION_BLOCKED: integrity verification failed before mutation (pass {pass}/{pass_count}): {error}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn delete_result_json(outcome: &DeletionOutcome) -> DeleteResultJson {
+    for warning in &outcome.cleanup_warnings {
+        eprintln!("mci-brain-ffi: committed deletion cleanup warning: {warning:?}");
+    }
+    DeleteResultJson {
+        committed: true,
+        events_deleted: outcome.events_deleted,
+        vacuum_ok: outcome.vacuum_ok(),
+        blob_cleanup_ok: outcome.blob_cleanup_ok(),
+    }
 }
 
 /// Generate a fresh 32-byte random wipe-confirmation token, hex-encoded.
@@ -2077,6 +2668,7 @@ mod tests {
     #[test]
     fn hit_json_serde_round_trip() {
         let h = HitJson {
+            source_kind: "unknown".into(),
             event_id: 42,
             ts_us: 1_700_000_000_000_000,
             app_bundle_id: Some("com.apple.Safari".into()),
@@ -2103,6 +2695,7 @@ mod tests {
         // cleanly — this is the common case for the near-term corpus
         // where most hits are page-content ingest.
         let h = HitJson {
+            source_kind: "unknown".into(),
             event_id: 7,
             ts_us: 1_700_000_000_000_000,
             app_bundle_id: Some("com.apple.mail".into()),
@@ -2130,7 +2723,9 @@ mod tests {
         let dir = std::path::Path::new("/tmp/mci/blobs");
         let p = thumbnail_path_for(dir, Some(&hex)).expect("expected path");
         assert!(p.starts_with("/tmp/mci/blobs/"));
-        assert!(p.ends_with(".bin"));
+        assert!(std::path::Path::new(&p)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("bin")));
     }
 
     #[test]
@@ -2154,6 +2749,7 @@ mod tests {
         let dir = std::path::Path::new("/tmp/mci/blobs");
         assert_eq!(thumbnail_path_for(dir, Some(&"a".repeat(63))), None);
         assert_eq!(thumbnail_path_for(dir, Some("../etc/passwd")), None);
+        assert_eq!(thumbnail_path_for(dir, Some(&"A".repeat(64))), None);
         assert_eq!(
             thumbnail_path_for(dir, Some(&format!("{}../..", "a".repeat(58)))),
             None
@@ -2192,6 +2788,7 @@ mod tests {
         // the Swift `HitWire` decoder can rely on them being present when a
         // fresh Rust FFI writes the payload. This locks the wire shape.
         let h = HitJson {
+            source_kind: "unknown".into(),
             event_id: 1,
             ts_us: 0,
             app_bundle_id: None,
@@ -2240,6 +2837,23 @@ mod tests {
         assert_eq!(q2.time_from_us, Some(100));
         assert_eq!(q2.time_to_us, Some(200));
         assert_eq!(q2.app_filter.as_deref(), Some("com.apple.Safari"));
+    }
+
+    #[test]
+    fn query_json_preserves_explicit_text_search_and_legacy_default() {
+        let text: QueryJson =
+            serde_json::from_str(r#"{"text":"cache_key_123","limit":5,"mode":"text"}"#).unwrap();
+        assert_eq!(serde_json::to_value(text).unwrap()["mode"], "text");
+        let legacy: QueryJson = serde_json::from_str(r#"{"text":"notes","limit":5}"#).unwrap();
+        assert_eq!(serde_json::to_value(legacy).unwrap()["mode"], "related");
+        assert!(serde_json::from_str::<QueryJson>(
+            r#"{"text":"notes","limit":5,"mode":"unrecognized"}"#,
+        )
+        .is_err());
+        assert!(!SearchMode::Text.uses_hybrid(true));
+        assert!(!SearchMode::Text.uses_hybrid(false));
+        assert!(SearchMode::Related.uses_hybrid(true));
+        assert!(!SearchMode::Related.uses_hybrid(false));
     }
 
     #[test]
@@ -2356,7 +2970,10 @@ mod tests {
     #[test]
     fn expand_query_empty_map_is_identity() {
         let m = std::collections::HashMap::new();
-        assert_eq!(expand_query_with_user_aliases("hello", &m), "hello");
+        assert!(matches!(
+            expand_query_with_user_aliases("hello", &m).as_slice(),
+            [LexicalAlternative::Keywords("hello")]
+        ));
     }
 
     #[test]
@@ -2364,24 +2981,26 @@ mod tests {
         let mut m = std::collections::HashMap::new();
         m.insert("Amy Jain".to_string(), vec!["AJ".into()]);
         // Query has nothing to do with Amy — no expansion.
-        assert_eq!(
-            expand_query_with_user_aliases("vector database", &m),
-            "vector database"
-        );
+        assert!(matches!(
+            expand_query_with_user_aliases("vector database", &m).as_slice(),
+            [LexicalAlternative::Keywords("vector database")]
+        ));
     }
 
     #[test]
-    fn expand_query_touches_alias_and_ors_in_canonical_and_siblings() {
+    fn expand_query_touches_alias_and_adds_canonical_and_sibling_phrases() {
         let mut m = std::collections::HashMap::new();
         m.insert("Amy Jain".to_string(), vec!["AJ".into(), "Amy".into()]);
         let out = expand_query_with_user_aliases("AJ email", &m);
-        // Must preserve the original query in parens.
-        assert!(out.starts_with("(AJ email)"), "got: {out}");
-        // Must OR in the canonical + every alias, quoted.
-        assert!(out.contains("\"Amy Jain\""), "got: {out}");
-        assert!(out.contains("\"AJ\""), "got: {out}");
-        assert!(out.contains("\"Amy\""), "got: {out}");
-        assert!(out.contains(" OR "), "got: {out}");
+        assert!(matches!(
+            out.as_slice(),
+            [
+                LexicalAlternative::Keywords("AJ email"),
+                LexicalAlternative::Phrase("Amy Jain"),
+                LexicalAlternative::Phrase("AJ"),
+                LexicalAlternative::Phrase("Amy"),
+            ]
+        ));
     }
 
     #[test]
@@ -2391,8 +3010,14 @@ mod tests {
         // Lower-case in the query still triggers the group whose
         // canonical is capitalized.
         let out = expand_query_with_user_aliases("mci demo", &m);
-        assert!(out.contains("\"Hippocampus\""), "got: {out}");
-        assert!(out.contains("\"MCI\""), "got: {out}");
+        assert!(matches!(
+            out.as_slice(),
+            [
+                LexicalAlternative::Keywords("mci demo"),
+                LexicalAlternative::Phrase("Hippocampus"),
+                LexicalAlternative::Phrase("MCI"),
+            ]
+        ));
     }
 
     #[test]
@@ -2404,11 +3029,14 @@ mod tests {
         m.insert("Amy Jain".to_string(), vec!["AJ".into()]);
         m.insert("Hippocampus".to_string(), vec!["MCI".into()]);
         let out = expand_query_with_user_aliases("AJ email", &m);
-        assert!(out.contains("\"Amy Jain\""));
-        assert!(
-            !out.contains("Hippocampus"),
-            "leaked untouched group: {out}"
-        );
+        assert!(matches!(
+            out.as_slice(),
+            [
+                LexicalAlternative::Keywords("AJ email"),
+                LexicalAlternative::Phrase("Amy Jain"),
+                LexicalAlternative::Phrase("AJ"),
+            ]
+        ));
     }
 
     #[test]
@@ -2423,9 +3051,7 @@ mod tests {
             query.push(' ');
         }
         let out = expand_query_with_user_aliases(&query, &m);
-        // Count OR-group parens after the leading `(<query>)`.
-        let or_count = out.matches(" OR (").count();
-        assert!(or_count <= USER_ALIAS_GROUP_CAP, "got {or_count} OR-groups");
+        assert_eq!(out.len(), 1 + 2 * USER_ALIAS_GROUP_CAP);
     }
 
     // -----------------------------------------------------------------
@@ -2478,8 +3104,10 @@ mod tests {
     #[test]
     fn delete_result_json_serde_round_trip() {
         let r = DeleteResultJson {
+            committed: true,
             events_deleted: 42,
             vacuum_ok: true,
+            blob_cleanup_ok: false,
         };
         let s = serde_json::to_string(&r).unwrap();
         let back: DeleteResultJson = serde_json::from_str(&s).unwrap();
@@ -2487,6 +3115,86 @@ mod tests {
         // Wire is snake_case for Swift Codable interop.
         assert!(s.contains("\"events_deleted\""), "got: {s}");
         assert!(s.contains("\"vacuum_ok\""), "got: {s}");
+        assert!(s.contains("\"blob_cleanup_ok\""), "got: {s}");
+    }
+
+    #[test]
+    fn production_brain_uses_the_agents_existing_run_sentinel() {
+        let brain = Path::new("/Users/test/Library/Application Support/MCI/mci.sqlite");
+        assert_eq!(
+            mutation_run_lock_path(brain),
+            PathBuf::from("/Users/test/Library/Application Support/Hippocampus/.running")
+        );
+    }
+
+    #[test]
+    fn custom_brain_uses_a_sibling_run_sentinel() {
+        assert_eq!(
+            mutation_run_lock_path(Path::new("/tmp/fixture/brain.sqlite")),
+            PathBuf::from("/tmp/fixture/.running")
+        );
+    }
+
+    #[test]
+    fn mutation_lease_excludes_every_other_writer_for_its_scope() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let run_path = root.path().join(".running");
+        let first = acquire_mutation_lease(&run_path).expect("first mutation lease");
+
+        let error = acquire_mutation_lease(&run_path).expect_err("second writer must be blocked");
+        assert!(
+            error.contains("MCI_MUTATION_BLOCKED: writer lease is active"),
+            "got: {error}"
+        );
+
+        drop(first);
+        acquire_mutation_lease(&run_path).expect("lease released when guard drops");
+    }
+
+    #[test]
+    fn unclean_mutation_integrity_failure_stops_before_body() {
+        use std::cell::Cell;
+
+        let root = tempfile::tempdir().expect("tempdir");
+        let run_path = root.path().join(".running");
+        std::fs::write(&run_path, "999999999").expect("seed unclean marker");
+        let lease = acquire_mutation_lease(&run_path).expect("mutation lease");
+        let passes = Cell::new(0_u8);
+        let body_reached = Cell::new(false);
+
+        let result = (|| {
+            verify_mutation_integrity(&lease, || {
+                passes.set(passes.get() + 1);
+                Err("injected integrity failure")
+            })?;
+            body_reached.set(true);
+            Ok::<(), String>(())
+        })();
+
+        let error = result.expect_err("integrity failure must block mutation");
+        assert!(error.starts_with("MCI_MUTATION_BLOCKED: integrity verification failed"));
+        assert!(!error.contains("committed deletion cleanup warning"));
+        assert_eq!(passes.get(), 1);
+        assert!(!body_reached.get());
+    }
+
+    #[test]
+    fn unclean_mutation_requires_two_successful_integrity_passes() {
+        use std::cell::Cell;
+
+        let root = tempfile::tempdir().expect("tempdir");
+        let run_path = root.path().join(".running");
+        std::fs::write(&run_path, "999999999").expect("seed unclean marker");
+        let lease = acquire_mutation_lease(&run_path).expect("mutation lease");
+        let passes = Cell::new(0_u8);
+
+        verify_mutation_integrity(&lease, || {
+            passes.set(passes.get() + 1);
+            Ok::<(), &str>(())
+        })
+        .expect("two successful passes");
+
+        assert_eq!(passes.get(), 2);
     }
 
     #[test]
@@ -2512,6 +3220,7 @@ mod tests {
 
     fn mk_te(ts_us: u64, event_id: u64) -> TimelineEventJson {
         TimelineEventJson {
+            source_kind: "unknown".into(),
             event_id,
             ts_us,
             app_bundle_id: Some("com.apple.Safari".into()),
@@ -2557,12 +3266,59 @@ mod tests {
     }
 
     #[test]
+    fn display_snippet_removes_complete_search_header_before_truncating() {
+        let header = format!(
+            "[app=com.example.editor | title={} | url=? | ts=2026-09-05T12:00:00.000Z]\n",
+            "long document title ".repeat(50)
+        );
+        let text = format!("{header}The revised launch plan is ready.");
+        assert_eq!(timeline_snippet(&text), "The revised launch plan is ready.");
+        assert_eq!(
+            snippet(&text),
+            text.chars().take(SNIPPET_CHAR_CAP).collect::<String>()
+        );
+        assert!(
+            text.starts_with(&header),
+            "display must not mutate stored text"
+        );
+    }
+
+    #[test]
+    fn display_snippet_preserves_incomplete_or_non_header_text() {
+        for text in [
+            "[app=editor | title=incomplete\nVisible content",
+            "[app=editor | url=? | ts=now]\nVisible content",
+            "[app=editor | title=title | url=? | ts=now\nVisible content",
+            "Notes\n[app=editor | title=title | url=? | ts=now]\nVisible content",
+        ] {
+            assert_eq!(
+                timeline_snippet(text),
+                text.chars().take(TIMELINE_SNIPPET_CAP).collect::<String>()
+            );
+            assert_eq!(snippet(text), text);
+        }
+    }
+
+    #[test]
+    fn display_snippet_strips_only_one_header_and_preserves_unicode_boundaries() {
+        let header = "[app=editor | title=title | url=? | ts=now]\n";
+        assert_eq!(
+            timeline_snippet(&format!("{header}{header}body")),
+            format!("{header}body")
+        );
+        let body = "\u{1f9e0}".repeat(TIMELINE_SNIPPET_CAP + 1);
+        assert_eq!(
+            timeline_snippet(&format!("{header}{body}")),
+            "\u{1f9e0}".repeat(TIMELINE_SNIPPET_CAP)
+        );
+    }
+
+    #[test]
     fn downsample_below_cap_is_identity() {
         // Fewer events than the cap → return input unchanged, preserving
         // order.
-        let events: Vec<TimelineEventJson> = (0..10)
-            .map(|i| mk_te((i as u64) * TIMELINE_MINUTE_US, i))
-            .collect();
+        let events: Vec<TimelineEventJson> =
+            (0..10).map(|i| mk_te(i * TIMELINE_MINUTE_US, i)).collect();
         let out = downsample_timeline(events.clone(), 10 * TIMELINE_MINUTE_US);
         assert_eq!(out.len(), 10);
         assert_eq!(out.first().map(|e| e.event_id), Some(0));
@@ -2596,6 +3352,27 @@ mod tests {
         for w in out.windows(2) {
             assert!(w[0].ts_us <= w[1].ts_us, "downsample re-ordered rows");
         }
+    }
+
+    #[test]
+    fn downsample_prefers_first_keyframe_in_each_bucket() {
+        let mut events = vec![mk_te(0, 1)];
+        let mut keyframed = mk_te(1, 2);
+        keyframed.thumbnail_path = Some("/blobs/frame.bin".into());
+        events.push(keyframed);
+        events.extend(
+            (2..=(TIMELINE_MAX_EVENTS as u64 + 1)).map(|i| mk_te(i * TIMELINE_MINUTE_US, i + 1)),
+        );
+
+        let range = (TIMELINE_MAX_EVENTS as u64 + 2) * TIMELINE_MINUTE_US;
+        let out = downsample_timeline(events, range);
+
+        assert_eq!(out.first().map(|event| event.event_id), Some(2));
+        assert_eq!(
+            out.first()
+                .and_then(|event| event.thumbnail_path.as_deref()),
+            Some("/blobs/frame.bin")
+        );
     }
 
     #[test]

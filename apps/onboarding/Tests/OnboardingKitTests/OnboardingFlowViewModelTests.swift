@@ -21,6 +21,24 @@ final class OnboardingFlowViewModelTests: XCTestCase {
         XCTAssertEqual(vm.currentStep, .welcome)
     }
 
+    func testExplicitLaunchStepOverridesResumeState() {
+        let stateStore = InMemoryOnboardingStateStore(initial: .retention)
+        let vm = OnboardingFlowViewModel(
+            screenRecording: StubTCCPermission(kind: .screenRecording, status: .granted),
+            accessibility: StubTCCPermission(kind: .accessibility, status: .granted),
+            stateStore: stateStore,
+            initialStep: .allowlist
+        )
+
+        XCTAssertEqual(vm.currentStep, .allowlist)
+    }
+
+    func testLaunchRouteNamesOnlyKnownSteps() {
+        XCTAssertEqual(OnboardingStep(launchRoute: "allowlist"), .allowlist)
+        XCTAssertEqual(OnboardingStep(launchRoute: "trust"), .trust)
+        XCTAssertNil(OnboardingStep(launchRoute: "not-a-step"))
+    }
+
     func testAdvanceThroughAllSteps() {
         let vm = makeVM()
         // Cycle 8.48 inserted `.primaryHotkey` between `.permissions`

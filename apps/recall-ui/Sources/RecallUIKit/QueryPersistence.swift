@@ -77,13 +77,27 @@ public protocol KeyValueStore: AnyObject, Sendable {
     func removeObject(forKey key: String)
 }
 
-extension UserDefaults: KeyValueStore, @unchecked Sendable {
+public final class UserDefaultsKeyValueStore: KeyValueStore, @unchecked Sendable {
+    private let defaults: UserDefaults
+
+    public init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    public func data(forKey key: String) -> Data? {
+        defaults.data(forKey: key)
+    }
+
     public func set(_ data: Data?, forKey key: String) {
         if let data {
-            self.set(data as Any, forKey: key)
+            defaults.set(data as Any, forKey: key)
         } else {
-            self.removeObject(forKey: key)
+            defaults.removeObject(forKey: key)
         }
+    }
+
+    public func removeObject(forKey key: String) {
+        defaults.removeObject(forKey: key)
     }
 }
 
@@ -96,18 +110,22 @@ public struct QueryPersistence: Sendable {
 
     private let store: KeyValueStore
     private let key: String
+    private let isEnabled: Bool
 
     public init(
-        store: KeyValueStore = UserDefaults.standard,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        store: KeyValueStore = UserDefaultsKeyValueStore(),
         key: String = QueryPersistence.defaultKey
     ) {
         self.store = store
         self.key = key
+        self.isEnabled = environment["MCI_EPHEMERAL_UI_STATE"] != "1"
     }
 
     /// Save the state. Empty state (empty query + default filters)
     /// clears the key so the next `load` returns nil.
     public func save(_ state: PersistedQueryState) {
+        guard isEnabled else { return }
         guard !state.isEmpty else {
             store.removeObject(forKey: key)
             return
@@ -123,6 +141,7 @@ public struct QueryPersistence: Sendable {
     /// Load the state. Returns `nil` when nothing is stored OR the
     /// stored blob is corrupted / from an unknown schema version.
     public func load() -> PersistedQueryState? {
+        guard isEnabled else { return nil }
         guard let data = store.data(forKey: key) else { return nil }
         do {
             let decoded = try JSONDecoder().decode(PersistedQueryState.self, from: data)

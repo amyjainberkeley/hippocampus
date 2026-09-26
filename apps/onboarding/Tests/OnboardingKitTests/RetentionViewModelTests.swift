@@ -4,10 +4,10 @@ import XCTest
 @MainActor
 final class RetentionViewModelTests: XCTestCase {
 
-    func testDefaultPolicyIsForever() async {
+    func testDefaultPolicyIsNinetyDays() async {
         let vm = RetentionViewModel(store: StubRetentionStore())
         await vm.load()
-        XCTAssertEqual(vm.selectedPolicy, .forever)
+        XCTAssertEqual(vm.selectedPolicy, .ninetyDays)
         XCTAssertFalse(vm.isLoading)
     }
 
@@ -15,7 +15,8 @@ final class RetentionViewModelTests: XCTestCase {
         let store = StubRetentionStore()
         let vm = RetentionViewModel(store: store)
         vm.selectedPolicy = .thirtyDays
-        await vm.save()
+        let didSave = await vm.save()
+        XCTAssertTrue(didSave)
         let saved = await store.currentPolicy()
         XCTAssertEqual(saved, .thirtyDays)
     }
@@ -25,7 +26,8 @@ final class RetentionViewModelTests: XCTestCase {
         let vm = RetentionViewModel(store: store)
         vm.selectedPolicy = .custom
         vm.customDays = 42
-        await vm.save()
+        let didSave = await vm.save()
+        XCTAssertTrue(didSave)
         let days = await store.currentCustomDays()
         XCTAssertEqual(days, 42)
     }
@@ -34,7 +36,8 @@ final class RetentionViewModelTests: XCTestCase {
         let store = StubRetentionStore()
         let vm = RetentionViewModel(store: store)
         vm.selectedPolicy = .sevenDays
-        await vm.save()
+        let didSave = await vm.save()
+        XCTAssertTrue(didSave)
         let days = await store.currentCustomDays()
         XCTAssertNil(days)
     }
@@ -55,5 +58,27 @@ final class RetentionViewModelTests: XCTestCase {
 
     func testSevenDaysPolicyReturns7() {
         XCTAssertEqual(RetentionPolicy.sevenDays.days, 7)
+    }
+
+    func testSaveFailureIsVisibleAndBlocksAdvance() async {
+        let vm = RetentionViewModel(store: FailingRetentionStore())
+        vm.selectedPolicy = .thirtyDays
+        var advanced = false
+
+        let saved = await vm.saveThen { advanced = true }
+
+        XCTAssertFalse(saved)
+        XCTAssertFalse(advanced)
+        XCTAssertNotNil(vm.saveError)
+        XCTAssertFalse(vm.isSaving)
+    }
+}
+
+private actor FailingRetentionStore: RetentionStore {
+    func currentPolicy() -> RetentionPolicy { .forever }
+    func currentCustomDays() -> Int? { nil }
+    func setPolicy(_ policy: RetentionPolicy, customDays: Int?) throws {
+        _ = (policy, customDays)
+        throw CocoaError(.fileWriteNoPermission)
     }
 }

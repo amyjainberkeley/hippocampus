@@ -28,7 +28,7 @@
 //!
 //! — CSO, 2026-05-19
 //!
-//! ## Amendment 2026-06-01 (Phase 6 PR 6 — MetricKit + per-app failsafe)
+//! ## Amendment 2026-06-01 (Phase 6 PR 6 — `MetricKit` + per-app failsafe)
 //!
 //! Four new fields surfaced from wire 0x09 (PR #226 §5.1 + CTO §4
 //! Phase 6 PR 6, S13 acceptance gate):
@@ -114,7 +114,7 @@ pub struct HealthLogRecord {
     pub frames_dropped_backpressure: u64,
     /// Cumulative counters since helper start.
     pub frames_dropped_late_ack: u64,
-    /// Cumulative count of VideoToolbox HEVC encode throws on the
+    /// Cumulative count of `VideoToolbox` HEVC encode throws on the
     /// `.allow` branch. Promoted to the wire by the `0x06 → 0x07` bump
     /// (ocr-emit-silence fix —
     /// `docs/research/ocr-emit-silence-2026-05-28.md`). Mirrors the
@@ -124,13 +124,13 @@ pub struct HealthLogRecord {
     pub frames_encode_failed: u64,
     /// Cumulative count of frames dropped by the ADR-0031 §5.3 race-
     /// consistency gate (`FocusedWindowStore.generation` mismatched the
-    /// `installedFocusGeneration` at SCStream callback time). Promoted
+    /// `installedFocusGeneration` at `SCStream` callback time). Promoted
     /// to the wire by the `0x07 → 0x08` bump (V2-P1 / ADR-0031 —
     /// `docs/research/capture-scope-window-vs-display-2026-05-29.md`).
     /// Content-free observability counter; the Telemetry-Gap analyst
     /// uses it to detect rapid focus changes (alt-tab cadence faster
     /// than the rebind task) or Electron AX intermittency drifting the
-    /// FocusTracker. Cascade-twice OCR emitter is NOT consulted on
+    /// `FocusTracker`. Cascade-twice OCR emitter is NOT consulted on
     /// frames counted here — the gate fails closed before reaching it.
     pub frames_focus_race_dropped: u64,
     /// Per-app `.failsafeUnknown` tombstone counter map (cap 8 entries,
@@ -142,16 +142,16 @@ pub struct HealthLogRecord {
     /// specific bundles. Cap-8 LRU cardinality is the structural PII
     /// defence — see mod docstring Amendment 2026-06-01.
     pub failsafe_by_app: Vec<(String, u64)>,
-    /// Instantaneous helper CPU sample, microfraction (1_000_000 =
+    /// Instantaneous helper CPU sample, microfraction (`1_000_000` =
     /// 100% of one core). Promoted by the `0x08 → 0x09` bump. Pairs
-    /// with the MetricKit pipeline (Phase 6 PR 6 same dispatch) for
+    /// with the `MetricKit` pipeline (Phase 6 PR 6 same dispatch) for
     /// finer-than-daily CPU observability against the G2-ratified
     /// ≤10–15% SLO (S4 acceptance gate). `0` = sampler did not
     /// take a sample this tick.
     pub cpu_pct_micro: u32,
     /// Instantaneous helper resident set size in bytes, sampled via
     /// Mach `task_info(MACH_TASK_BASIC_INFO)`. Promoted by the
-    /// `0x08 → 0x09` bump. Pairs with MetricKit for finer-than-daily
+    /// `0x08 → 0x09` bump. Pairs with `MetricKit` for finer-than-daily
     /// memory observability against ≤2 GB SLO. `0` = sampler failed.
     pub rss_bytes: u64,
     /// Reserved slot for V2-P1 PR 13 focused-window race-gate timeout

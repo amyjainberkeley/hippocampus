@@ -59,7 +59,7 @@ public final class RealScreenRecordingPermission: TCCPermission, @unchecked Send
     public func resetAndRetry() async -> Bool {
         let bundleIDs = ["ai.hippocampus"]
         for bid in bundleIDs {
-            let proc = Process()
+            let proc = ChildProcessEnvironment.makeProcess()
             proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
             proc.arguments = ["reset", "ScreenCapture", bid]
             try? proc.run()
@@ -124,7 +124,7 @@ public final class RealAccessibilityPermission: TCCPermission, @unchecked Sendab
     }
 
     public func resetAndRetry() async -> Bool {
-        let proc = Process()
+        let proc = ChildProcessEnvironment.makeProcess()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
         proc.arguments = ["reset", "Accessibility"]
         try? proc.run()
@@ -192,7 +192,7 @@ public final class RealAutomationPermission: TCCPermission, @unchecked Sendable 
     }
 
     public func resetAndRetry() async -> Bool {
-        let proc = Process()
+        let proc = ChildProcessEnvironment.makeProcess()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
         proc.arguments = ["reset", "AppleEvents"]
         try? proc.run()

@@ -164,7 +164,7 @@ pub enum HttpSseError {
     #[error("HTTPS loopback support is deferred; use http://127.0.0.1 for v1.0")]
     HttpsNotSupported,
     /// A network dial was attempted against a non-loopback address.
-    /// This is the LoopbackOnlyConnector's last line of defense (Audit
+    /// This is the `LoopbackOnlyConnector`'s last line of defense (Audit
     /// row #2). Surfacing it indicates a bug in [`LoopbackHost`] —
     /// every URL that reaches the connector should already have been
     /// validated.
@@ -422,15 +422,12 @@ async fn sse_reader_loop(
 
     let mut body = body;
     loop {
-        let frame = match futures_util_poll_next_frame(&mut body).await {
-            Some(Ok(f)) => f,
-            Some(Err(_)) | None => {
-                // Stream ended — drop every pending waiter so the
-                // call sites see `McpError::Closed` through the
-                // sender-dropped path.
-                pending.lock().await.clear();
-                return;
-            }
+        let Some(Ok(frame)) = futures_util_poll_next_frame(&mut body).await else {
+            // Stream ended — drop every pending waiter so the
+            // call sites see `McpError::Closed` through the
+            // sender-dropped path.
+            pending.lock().await.clear();
+            return;
         };
         let Some(chunk) = frame.data_ref() else {
             continue;

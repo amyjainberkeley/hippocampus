@@ -59,7 +59,7 @@ pub enum BootStatus {
     InsecurePermissions,
     /// File parsed but had a structural issue (duplicate name, etc.)
     /// OR one of its rows failed the loopback gate. The error string
-    /// is content-free per ConfigError's discipline.
+    /// is content-free per `ConfigError`'s discipline.
     ConfigError(String),
 }
 

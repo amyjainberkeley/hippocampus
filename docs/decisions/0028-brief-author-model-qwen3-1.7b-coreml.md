@@ -1,6 +1,8 @@
 # ADR-0028 — Brief Author Model: Qwen3-1.7B via Core ML
 
 - Status: Accepted (2026-05-22; ratifies the brief-author model selection from CEO decision session 2026-05-21. CEO chose Qwen3-1.7B over CRS recommendation of Qwen2.5-1.5B, preferring the newer model generation).
+- Superseded for default authoring, onboarding, and release packaging by
+  ADR-0039 (2026-09-02). This document remains the historical Qwen experiment.
 - **Amended 2026-05-28** (cycle 8.14): quantization changed from INT4 palettization (~950 MB) to FP16 (~2.5 GB compressed, ~3.4 GB extracted). Tokenizer packaging clarified: `tokenizer.json` ships at the archive root of `Qwen3-1.7B-FP16.mlmodelc.tar.gz`, sibling to the `.mlmodelc` dir. v0.1 ships at 4/8 strict eval criteria — see "Amendment 2026-05-28" section at the bottom of this ADR for rationale.
 - Owners: **Director-Brain** (conversion script + `CoreMLBriefModel` impl) + **Director-Recording** (download manager UX in Hippocampus.app)
 - Reviewers: CSO (model download path — network fetch of binary must not exfiltrate data); CTO (sequencing); CEO (ratification)

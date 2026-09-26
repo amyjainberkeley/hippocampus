@@ -32,6 +32,8 @@ thiserror = "1"
 # the workspace lockfile via `mci-embed-coreml`; no net-new transitive
 # crate (no ADR-0008 dep-addition gate triggered).
 [target.'cfg(target_os = "macos")'.dependencies]
+mci-brain         = { path = "../../../core/brain" }
+sha2              = "0.10"
 serde_json        = "1"
 serde             = { version = "1", features = ["derive"] }
 tokenizers        = { version = "0.20", default-features = false, features = ["onig"] }
@@ -55,6 +57,9 @@ objc2-core-ml     = { version = "0.3", default-features = false, features = [
     "MLFeatureProvider",
     "MLFeatureValue",
     "MLFeatureType",
+    "MLMultiArrayConstraint",
+    "MLMultiArrayShapeConstraint",
+    "MLMultiArrayShapeConstraintType",
     "MLDictionaryFeatureProvider",
     "MLMultiArray",
     "MLModelConfiguration",

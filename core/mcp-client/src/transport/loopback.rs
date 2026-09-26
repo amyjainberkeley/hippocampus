@@ -265,8 +265,8 @@ fn parse_uri(raw: &str) -> Result<LoopbackHost, LoopbackError> {
                     scheme,
                     host_raw,
                     port,
-                    uri.path_and_query().map(|p| p.as_str()),
-                )?,
+                    uri.path_and_query().map(http::uri::PathAndQuery::as_str),
+                ),
                 scheme,
                 host: host_raw.to_owned(),
                 port,
@@ -277,14 +277,14 @@ fn parse_uri(raw: &str) -> Result<LoopbackHost, LoopbackError> {
         };
     }
     if let Ok(addr) = Ipv4Addr::from_str(host_raw) {
-        return if is_ipv4_loopback(&addr) {
+        return if is_ipv4_loopback(addr) {
             Ok(LoopbackHost {
                 url: rebuild_url(
                     scheme,
                     host_raw,
                     port,
-                    uri.path_and_query().map(|p| p.as_str()),
-                )?,
+                    uri.path_and_query().map(http::uri::PathAndQuery::as_str),
+                ),
                 scheme,
                 host: host_raw.to_owned(),
                 port,
@@ -309,8 +309,8 @@ fn parse_uri(raw: &str) -> Result<LoopbackHost, LoopbackError> {
             scheme,
             host_raw,
             port,
-            uri.path_and_query().map(|p| p.as_str()),
-        )?,
+            uri.path_and_query().map(http::uri::PathAndQuery::as_str),
+        ),
         scheme,
         host: host_raw.to_owned(),
         port,
@@ -318,12 +318,7 @@ fn parse_uri(raw: &str) -> Result<LoopbackHost, LoopbackError> {
     })
 }
 
-fn rebuild_url(
-    scheme: Scheme,
-    host: &str,
-    port: u16,
-    path_and_query: Option<&str>,
-) -> Result<String, LoopbackError> {
+fn rebuild_url(scheme: Scheme, host: &str, port: u16, path_and_query: Option<&str>) -> String {
     let host_display = if host.contains(':') {
         format!("[{host}]")
     } else {
@@ -335,23 +330,23 @@ fn rebuild_url(
     } else {
         format!(":{port}")
     };
-    Ok(format!(
+    format!(
         "{}://{}{}{}",
         scheme.as_str(),
         host_display,
         port_part,
         path
-    ))
+    )
 }
 
 fn is_loopback(addr: &IpAddr) -> bool {
     match addr {
-        IpAddr::V4(v4) => is_ipv4_loopback(v4),
+        IpAddr::V4(v4) => is_ipv4_loopback(*v4),
         IpAddr::V6(v6) => is_ipv6_loopback(v6),
     }
 }
 
-fn is_ipv4_loopback(addr: &Ipv4Addr) -> bool {
+fn is_ipv4_loopback(addr: Ipv4Addr) -> bool {
     // Standard library Ipv4Addr::is_loopback matches the 127.0.0.0/8
     // range. Restate the contract here to avoid surprise from any
     // future stdlib semantics shift.
