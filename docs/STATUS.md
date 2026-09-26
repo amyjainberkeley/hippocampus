@@ -1,14 +1,30 @@
 # Hippocampus Status
 
-_Updated on 2026-09-11; qualification scope is recorded per checkpoint._
+_Updated on 2026-09-25; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `3e71c11`
+Audited code baseline: `09950fa`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## September 25 Product Strategy (Proposal)
+
+The [current research and PRD](research/2026-09-25-product-strategy-prd.md)
+recommends personal local work memory with explicitly granted agent context,
+measured resource budgets, and an eventual OneKit/team integration surface.
+It incorporates the newly open-sourced Supermemory Company Brain and current
+Jev documentation. Competitor claims are sourced; proposed performance and
+release criteria are not current capabilities.
+
+This checkpoint changes documentation only. The installed app manifest was
+read again and remains `fe90a3d`; no install, private store modification/migration,
+new capture permission, website deployment or public release occurred. Existing
+capture qualification, total-byte limits, client-scope authorization and public
+model provisioning remain unfinished. The PRD is ready for owner review before
+implementation of the proposed changes.
 
 ## September 11 OCR Quality
 
