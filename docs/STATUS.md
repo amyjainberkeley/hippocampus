@@ -2,7 +2,7 @@
 
 _Updated on 2026-10-03; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `42c91ef`
+Audited code baseline: `4983f6c`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -16,11 +16,10 @@ The [Recall shortcut checkpoint](audits/2026-10-03-recall-shortcut.md) changes
 the source default to Control–Shift–Space, separate from Superapp Whisper's
 Command–Shift–Space. Onboarding, the popup and help show the same combination.
 All 365 parent, 245 onboarding and 541 optimized Recall XCTest cases plus four
-Swift Testing cases pass. This has not been installed or tested with live
-keyboard input. The preserved `2f4293c` candidate lacks this change and must
-not be described as containing it; installing this checkpoint requires a new
-complete candidate. Other-app conflicts and onboarding event ownership still
-require live qualification.
+Swift Testing cases pass. The new private `4983f6c` candidate contains this
+change; the preserved `2f4293c` candidate does not. Neither has been installed
+or tested with live keyboard input. Other-app conflicts and onboarding event
+ownership still require live qualification.
 
 The desktop transcript-consent checkpoint makes background daemon import
 default-off, forces it off for desktop launches, and separates MCP registration
@@ -57,14 +56,20 @@ blank strips within the same deadline. This same-Mac runtime probe does not
 replace cold-machine or whole-application qualification. See the
 [signed-worker audit](audits/2026-10-03-signed-ocr-qualification.md).
 
-A complete **private release candidate** from `2f4293c` has now been rebuilt and
-Developer ID-signed. Its six executable hashes, complete payload/source
+The [current complete private candidate](audits/2026-10-03-current-ocr-candidate.md)
+from `4983f6c` is Developer ID-signed and contains the OCR repairs, consent
+separation and new Recall shortcut. All five release-build commands covering
+six shipping executables pass. Its six hashes, complete payload/source
 provenance, nested signatures, App Group, embedded OCR and Arctic model checks
-pass. It survives the 20-second disposable-home launch check with onboarding
-attached. Its embedded worker reads the synthetic chat/code fixtures exactly.
-The saved notarization profile is currently unavailable, so this candidate is
-not notarized, installed or published. Structural launch checks do not replace
-the remaining live capture, onboarding, UI, upgrade and recovery qualification.
+pass. The unchanged 20-second disposable-home launch passes with onboarding
+attached and no candidate process left running. Its actual embedded worker
+reads 10/10 synthetic chat lines in 3.427 seconds, 8/8 code lines in 3.003 seconds,
+and four blank strips without text in 0.465–0.492 seconds. These are same-Mac
+checks, not cold-machine accuracy or latency guarantees. The earlier `2f4293c`
+candidate is preserved separately. The saved notarization profile was not
+retried before the pending owner unlock; the new candidate is not notarized,
+installed or published. Structural launch does not replace the remaining live
+capture, onboarding, UI, upgrade and recovery qualification.
 
 The [isolated engine qualification](audits/2026-10-03-clean-home-engine.md)
 also passes on source `a3e09ba`: a disposable development home exercises strict
