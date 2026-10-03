@@ -2,7 +2,7 @@
 
 _Updated on 2026-10-03; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `2f4293c`
+Audited code baseline: `a3e09ba`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -55,6 +55,14 @@ attached. Its embedded worker reads the synthetic chat/code fixtures exactly.
 The saved notarization profile is currently unavailable, so this candidate is
 not notarized, installed or published. Structural launch checks do not replace
 the remaining live capture, onboarding, UI, upgrade and recovery qualification.
+
+The [isolated engine qualification](audits/2026-10-03-clean-home-engine.md)
+also passes on source `a3e09ba`: a disposable development home exercises strict
+injected-frame ingest, storage, episode/brief derivation, all six MCP responses,
+canonical source citations, fake-client registration without reusable keys,
+deletion and fixture cleanup. It uses a debug engine, synthetic evidence and
+development custody with embeddings disabled. This is separate from real
+screen capture, native onboarding, Keychain migration and signed installation.
 
 Hippocampus is the standalone memory, recall, and MCI context product.
 Superapp is the separate OneKit-derived workspace. Keep their repositories,
