@@ -55,13 +55,19 @@ for this build-only follow-up.
 
 ## Remaining qualification
 
-The candidate is signed but **not notarized, installed or public**. The previous
-notarization-profile failure is still pending the owner's unlock; no new profile
-lookup or credential replacement was attempted. Live shortcut delivery and
-parent/onboarding event ownership, OCR result/copy/cancel UI, Screen Recording,
-clean-machine startup, controlled installation, store upgrade and rollback still
-need qualification. The known unbundled Apple Vision fallback failures remain
-open and are not hidden by packaged-worker success.
+At the initial build checkpoint the candidate was signed but not notarized.
+The [subsequent UI and notarization audit](2026-10-03-ocr-ui-notarization.md)
+records Apple acceptance and stapling of this original candidate, with all
+signature, policy and provenance checks passing. It also records isolated
+production-view result/copy/repeat checks using fabricated pixels. The installer
+remains unfinished after the desktop locked and the notary profile became
+unavailable during submission of a separate re-signed working copy.
+
+The original candidate is **not installed or public**. Live shortcut delivery
+and parent/onboarding event ownership, cancellation/zoom UI, Screen Recording,
+clean-machine startup, controlled installation, store upgrade and schema-aware
+recovery still need qualification. The known unbundled Apple Vision fallback
+failures remain open and are not hidden by packaged-worker success.
 
 The installed app manifest still identifies `f4f7bf1`, version 0.1.0. Owner
 settings, permissions and private memory were not changed. Existing screenshot
