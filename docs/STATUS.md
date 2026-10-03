@@ -2,7 +2,7 @@
 
 _Updated on 2026-10-03; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `a3e09ba`
+Audited code baseline: `40e0d9a`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -63,6 +63,14 @@ canonical source citations, fake-client registration without reusable keys,
 deletion and fixture cleanup. It uses a debug engine, synthetic evidence and
 development custody with embeddings disabled. This is separate from real
 screen capture, native onboarding, Keychain migration and signed installation.
+
+The [current storage regression run](audits/2026-10-03-storage-regressions.md)
+passes 723 `mci-brain` tests with zero failures and one existing ignored
+100,000-event performance harness. Workspace Rust formatting and all-target
+brain Clippy with warnings denied pass. Synthetic historical-schema, failed
+migration, deletion-barrier and handoff-ledger checks support the source upgrade
+path; they do not qualify installation, Keychain continuity or recovery of the
+owner's private store.
 
 Hippocampus is the standalone memory, recall, and MCI context product.
 Superapp is the separate OneKit-derived workspace. Keep their repositories,
