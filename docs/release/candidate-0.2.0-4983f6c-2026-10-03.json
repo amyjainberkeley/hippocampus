@@ -1,0 +1,108 @@
+{
+  "source": "4983f6cbeb376125b0df5b9125741047015c52d3",
+  "source_digest": "c52f87c4fb06c49a287a4f8cd70d8b842d82cb0f7a48acd292416a16a69e4d99",
+  "payload_digest": "125d94e78a4dca51fd8016ffe95c36e42ca506f9012fbb569cc5b60c0a3bfd64",
+  "bundle_id": "ai.hippocampus",
+  "version": "0.2.0",
+  "build": "2",
+  "binary_count": 6,
+  "qualification_date": "2026-10-03",
+  "state": "private_signed_candidate",
+  "installed": false,
+  "notarized": false,
+  "public_download": false,
+  "includes": [
+    "OCR quality and model-input bounds repairs",
+    "Desktop transcript consent separation",
+    "Control-Shift-Space Recall shortcut"
+  ],
+  "checks": {
+    "release_build_commands": 5,
+    "shipping_executables": 6,
+    "developer_id_signature": true,
+    "nested_signatures": true,
+    "source_and_payload_provenance": true,
+    "app_group": true,
+    "bundled_models": true,
+    "clean_home_launch_seconds": 20,
+    "onboarding_attached": true,
+    "candidate_processes_remaining": 0,
+    "embedded_worker": [
+      {
+        "case": "embedded-chat-12px",
+        "outcome": "pass",
+        "exit": 0,
+        "seconds": 3.427,
+        "exact_lines": 10,
+        "expected_lines": 10,
+        "line_character_errors": 0,
+        "expected_characters": 276,
+        "output_lines": 10
+      },
+      {
+        "case": "embedded-code-12px",
+        "outcome": "pass",
+        "exit": 0,
+        "seconds": 3.003,
+        "exact_lines": 8,
+        "expected_lines": 8,
+        "line_character_errors": 0,
+        "expected_characters": 322,
+        "output_lines": 8
+      },
+      {
+        "case": "embedded-blank-3840x1",
+        "outcome": "pass",
+        "exit": 0,
+        "seconds": 0.465,
+        "exact_lines": 0,
+        "expected_lines": 0,
+        "line_character_errors": 0,
+        "expected_characters": 0,
+        "output_lines": 0
+      },
+      {
+        "case": "embedded-blank-1x3840",
+        "outcome": "pass",
+        "exit": 0,
+        "seconds": 0.483,
+        "exact_lines": 0,
+        "expected_lines": 0,
+        "line_character_errors": 0,
+        "expected_characters": 0,
+        "output_lines": 0
+      },
+      {
+        "case": "embedded-blank-3000x20",
+        "outcome": "pass",
+        "exit": 0,
+        "seconds": 0.474,
+        "exact_lines": 0,
+        "expected_lines": 0,
+        "line_character_errors": 0,
+        "expected_characters": 0,
+        "output_lines": 0
+      },
+      {
+        "case": "embedded-blank-20x3000",
+        "outcome": "pass",
+        "exit": 0,
+        "seconds": 0.492,
+        "exact_lines": 0,
+        "expected_lines": 0,
+        "line_character_errors": 0,
+        "expected_characters": 0,
+        "output_lines": 0
+      }
+    ]
+  },
+  "limits": [
+    "Structural launch is not visual onboarding, physical shortcut delivery or live screen capture qualification.",
+    "Synthetic OCR probes used the actual embedded worker and unchanged 30-second deadline on the same previously exercised Mac; they do not qualify cold-machine performance or arbitrary screenshots.",
+    "An earlier frozen runtime first invocation timed out at 30 seconds. This candidate success does not erase that failure.",
+    "The previously unavailable notarization profile was not retried before the pending owner unlock; no credentials were replaced.",
+    "The installed f4f7bf1 app, historical OCR/search indexes, owner settings and preserved 2f4293c candidate remain unchanged.",
+    "Optional BERT NER and Qwen models are absent; Tier 1 extraction and evidence-cited extractive briefs remain the defaults.",
+    "Source tests are recorded in the referenced audits; no source suite was rerun for this build-only qualification."
+  ]
+}
