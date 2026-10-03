@@ -1,0 +1,39 @@
+{
+  "source": "2f4293c5e9b1a8170b54e53977e672b6b14914fc",
+  "source_digest": "4894b67cc41f03af88f0d9212da1c4a075905c1ff4bc0402477f9911e0065226",
+  "payload_digest": "5f2d72d52e757428b49fc0b753f6159a1593539c1add34497c40a89cf1a461f4",
+  "bundle_id": "ai.hippocampus",
+  "version": "0.2.0",
+  "build": "2",
+  "binary_count": 6,
+  "qualification_date": "2026-10-03",
+  "state": "private_signed_candidate",
+  "installed": false,
+  "notarized": false,
+  "public_download": false,
+  "checks": {
+    "developer_id_signature": true,
+    "nested_signatures": true,
+    "source_and_payload_provenance": true,
+    "app_group": true,
+    "bundled_models": true,
+    "clean_home_launch_seconds": 20,
+    "onboarding_attached": true,
+    "embedded_worker_chat": {
+      "exact": 10,
+      "expected": 10,
+      "seconds": 5.739
+    },
+    "embedded_worker_code": {
+      "exact": 8,
+      "expected": 8,
+      "seconds": 5.595
+    }
+  },
+  "limits": [
+    "Structural launch is not live capture or visual onboarding qualification.",
+    "The first preceding frozen runtime timed out at 30 seconds; a separate signed copy's first execution passed in 24.029 seconds on this same Mac. Cold-machine qualification remains open.",
+    "The existing notarization profile is currently unavailable (exit 69); no credential profile was replaced.",
+    "Installed app and historical OCR/search indexes remain unchanged."
+  ]
+}
