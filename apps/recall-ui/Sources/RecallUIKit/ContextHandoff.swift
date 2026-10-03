@@ -7,6 +7,7 @@ public enum ContextHandoffError: Error, Equatable, LocalizedError {
     case timedOut
     case commandFailed
     case emptyOutput
+    case invalidProject
 
     public var errorDescription: String? {
         switch self {
@@ -20,11 +21,14 @@ public enum ContextHandoffError: Error, Equatable, LocalizedError {
             "Hippocampus could not prepare context for this task."
         case .emptyOutput:
             "No context packet was returned."
+        case .invalidProject:
+            "Choose a project folder on this Mac."
         }
     }
 }
 
-/// A read-only invocation of the bundled agent's canonical context compiler.
+/// An invocation of the bundled agent's canonical context compiler.
+/// Project handoffs can record a content-free local delivery receipt.
 public struct ContextHandoffCommand: Equatable, Sendable {
     public let executableURL: URL
     public let arguments: [String]
@@ -32,6 +36,26 @@ public struct ContextHandoffCommand: Equatable, Sendable {
     public init(executableURL: URL, arguments: [String]) {
         self.executableURL = executableURL
         self.arguments = arguments
+    }
+
+    /// Explicit project scope. No import/refresh and no global-context fallback.
+    /// The local compiler may record a content-free delivery receipt.
+    public static func makeProject(
+        directory: URL,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        recallExecutableURL: URL? = Bundle.main.executableURL,
+        isExecutable: (URL) -> Bool = { FileManager.default.isExecutableFile(atPath: $0.path) }
+    ) throws -> Self {
+        guard directory.isFileURL, directory.path.hasPrefix("/"),
+              !directory.path.contains("\0") else { throw ContextHandoffError.invalidProject }
+        let agent = try make(focus: "", environment: environment,
+            recallExecutableURL: recallExecutableURL, isExecutable: isExecutable).executableURL
+        var arguments = ["handoff", "--cwd", directory.standardizedFileURL.path,
+            "--no-refresh", "--max-tokens", "600", "--format", "markdown"]
+        if let path = environment["MCI_DB_PATH"], !path.isEmpty {
+            arguments += ["--db-path", path]
+        }
+        return Self(executableURL: agent, arguments: arguments)
     }
 
     /// Resolve only an app-bundled sibling in production. An explicit path is
@@ -76,7 +100,7 @@ public struct ContextHandoffCommand: Equatable, Sendable {
     }
 }
 
-/// Runs the local read-only handoff command away from the main actor.
+/// Runs the local context command away from the main actor without importing sessions.
 public enum ContextHandoffExporter {
     public static let defaultTimeoutSeconds: TimeInterval = 15
 
@@ -103,13 +127,24 @@ public enum ContextHandoffExporter {
         guard timeoutSeconds.isFinite, timeoutSeconds > 0 else {
             throw ContextHandoffError.timedOut
         }
-        return try await Task.detached(priority: .userInitiated) {
+        let worker = Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
             let process = Process()
             let outputPipe = Pipe()
             process.executableURL = command.executableURL
             process.arguments = command.arguments
             process.standardOutput = outputPipe
             process.standardError = FileHandle.nullDevice
+            process.standardInput = FileHandle.nullDevice
+            let parent = ProcessInfo.processInfo.environment
+            let names = ["HOME", "TMPDIR", "LANG", "LC_ALL", "MCI_DB_PATH",
+                "MCI_DB_KEYCHAIN_SERVICE", "MCI_DB_KEYCHAIN_ACCOUNT", "MCI_DEVELOPMENT_FILE_KEY",
+                "MCI_DB_KEY_FILE", "MCI_EMBEDDER_DISABLED"]
+            process.environment = parent.filter { names.contains($0.key) }
+            process.environment?["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+            if parent["MCI_DEVELOPMENT_FILE_KEY"] == "1" {
+                process.environment?["MCI_DB_KEY_HEX"] = parent["MCI_DB_KEY_HEX"]
+            }
             do {
                 try process.run()
             } catch {
@@ -120,7 +155,7 @@ public enum ContextHandoffExporter {
                 outputPipe.fileHandleForReading.readDataToEndOfFile()
             }
             let deadline = Date().addingTimeInterval(timeoutSeconds)
-            while process.isRunning, Date() < deadline {
+            while process.isRunning, !Task.isCancelled, Date() < deadline {
                 try? await Task<Never, Never>.sleep(nanoseconds: 25_000_000)
             }
             if process.isRunning {
@@ -140,9 +175,11 @@ public enum ContextHandoffExporter {
                     outputPipe.fileHandleForReading.closeFile()
                 }
                 _ = await outputReader.value
+                try Task.checkCancellation()
                 throw ContextHandoffError.timedOut
             }
 
+            try Task.checkCancellation()
             let output = await outputReader.value
             guard process.terminationStatus == 0 else {
                 throw ContextHandoffError.commandFailed
@@ -153,6 +190,11 @@ public enum ContextHandoffExporter {
                 throw ContextHandoffError.emptyOutput
             }
             return value
-        }.value
+        }
+        return try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
     }
 }

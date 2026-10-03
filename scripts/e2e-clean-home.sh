@@ -194,7 +194,7 @@ if rg -qi 'brain open failed|panic|fatal' "$CLEAN_ROOT/mcp.stderr"; then
 fi
 
 step "Register Claude and Codex without serializing custody"
-"$AGENT" connect --all --db-path "$DB_PATH" > "$CLEAN_ROOT/connect.stdout" \
+"$AGENT" connect --all --no-refresh-agent --db-path "$DB_PATH" > "$CLEAN_ROOT/connect.stdout" \
     2> "$CLEAN_ROOT/connect.stderr"
 require_file "$CLEAN_HOME/.claude.json"
 require_file "$CODEX_HOME/config.toml"

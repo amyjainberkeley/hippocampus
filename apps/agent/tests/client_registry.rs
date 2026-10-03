@@ -1291,7 +1291,7 @@ fn connect_all_cli_registers_claude_and_codex_without_a_database_key() {
     let brain = home.join("brain.sqlite");
 
     let output = Command::new(agent_bin())
-        .args(["connect", "--all", "--db-path"])
+        .args(["connect", "--all", "--no-refresh-agent", "--db-path"])
         .arg(&brain)
         .env("HOME", home)
         .env("MCI_CODEX_BINARY", &fake_codex)

@@ -53,16 +53,37 @@ public struct CaptureHealthReceipt: Decodable, Equatable, Sendable {
     }
 
     public var stateLabel: String {
+        label(now: Date())
+    }
+
+    public func label(now: Date) -> String {
         if blockedReason != nil { return "Capture blocked" }
         if suppressionReason == "unchanged_screen" || suppressionReason == "deduplicated" {
             return "Screen unchanged"
         }
         if suppressionReason != nil { return "Capture withheld" }
+        if storedFrameCount > 0 && !hasRecentFrame(now: now) { return "No recent screen memory" }
         return storedFrameCount == 0 ? "No screen writes yet" : "Screen memory saved"
     }
 
+    public func needsAttention(now: Date = Date()) -> Bool {
+        isStale(now: now) || blockedReason != nil
+            || (suppressionReason == nil && !hasRecentFrame(now: now))
+    }
+
+    private func hasRecentFrame(now: Date) -> Bool {
+        guard let saved = lastStoredFrameAt else { return false }
+        let age = now.timeIntervalSince(saved)
+        return age >= -30 && age <= 300
+    }
+
     public func detailText(now: Date = Date()) -> String? {
-        guard let reason = blockedReason ?? suppressionReason else { return nil }
+        guard let reason = blockedReason ?? suppressionReason else {
+            if !isStale(now: now) && !hasRecentFrame(now: now) {
+                return "The service is responding, but no screen memory has been saved in the last 5 minutes. Check permissions and app access."
+            }
+            return nil
+        }
         let detail = Self.reasonDetail(reason)
         return isStale(now: now) ? "Last report: \(detail)" : detail
     }

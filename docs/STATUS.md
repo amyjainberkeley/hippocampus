@@ -1,14 +1,127 @@
 # Hippocampus Status
 
-_Updated on 2026-09-25; qualification scope is recorded per checkpoint._
+_Updated on 2026-10-03; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `09950fa`
+Audited code baseline: `fb02d62`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## October 3 Capture Recovery, Onboarding, And Project Handoff
+
+Hippocampus is the standalone memory, recall, and MCI context product.
+Superapp is the separate OneKit-derived workspace. Keep their repositories,
+identities, installations, data, releases, and websites independent. Website
+and signup-email work is deferred by the owner.
+
+The [checkpoint audit](audits/2026-10-03-onboarding-handoff.md) records source
+changes and qualification boundaries. Permission breadcrumbs appended to an
+existing helper log now reach the parent. Startup, rotation, ordered delivery,
+stop/restart, notification consent races, and multiple revoked permissions are
+covered. Recall distinguishes a responsive service from recent saved evidence.
+Onboarding no longer marks a skipped shortcut as tested or promises saved
+memory before it exists.
+
+The publication checkpoint includes the final September handoff source on top
+of the existing public branch. Earlier unpublished intermediate history stays
+local because it contained a real-memory README excerpt. Its current example
+and the new UI screenshot are synthetic.
+
+Recall adds a native **Continue a project** handoff preview, folder selection,
+refresh, recovery, and explicit copy. It invokes the existing local compiler
+with `--no-refresh`, discloses repository/worktree/session scope, and cancels
+the child when dismissed or when the selected project changes.
+
+**Verified source:** 363 parent tests, 243 onboarding tests, and 535 optimized
+Recall tests pass in minimal environments. Independent source review has no
+remaining blocking findings in this diff. Native computer-use checks cover the
+handoff's empty state, selected-folder rendering, refresh, failure clearing,
+disabled copy after failure, and retry using fabricated data and a stub agent.
+This is interface verification, not proof of real-memory retrieval.
+
+**Installed/live state:** The owner app remains the notarized `f4f7bf1` build;
+this source update has not been installed. Screen Recording is off in macOS;
+enabling it reached the owner Touch ID prompt. No fresh live capture, new
+onboarding, or real-memory handoff is claimed. A newer daemon's transcript
+import consent, the shortcut collision with Superapp, controlled upgrade and
+rollback, signed release qualification, and public download readiness remain
+open. No private memory is included in this checkpoint.
+
+## September 26 Handoff Layer
+
+The [handoff contract](handoff/CONTRACT.md) and the audit at
+`/Users/amy/hippocampus-audit-2026-09-26.md` (owner-private) define this
+checkpoint. Direction: transcripts and git first, screen second. Every
+Claude Code and Codex session opened in a project should start with a short,
+cited packet compiled from what the user's agents already did on this Mac.
+
+**Implemented and tested at source.**
+
+- `import-sessions` reads `~/.claude/projects` (top-level session files) and
+  `~/.codex/sessions` (recursive rollouts, subagent threads skipped)
+  incrementally through the `import_cursors` table (migration 0011). Events
+  carry the contract header (`session=`, `src=path:line`), roles `user`,
+  `assistant`, `tool`; system-injected user text is skipped; mutating tool
+  calls become one-line `tool` events. Real transcripts on this Mac: 6,229
+  Claude Code and 5,354 Codex events from 731 + 24 files in 29 s; a second run
+  reads nothing and writes nothing in 1.2 s.
+- `refresh` runs the incremental import plus Tier-1 extraction, episode
+  segmentation and embedding for new events within a time budget. The
+  capture writer (`--drain-stdin`) now runs it every 60 s on its own store
+  handle; the CLI and the hooks skip with a printed reason when the app holds
+  the writer lease.
+- `handoff --cwd DIR` compiles the packet for that project (root from
+  `git rev-parse --show-toplevel`, else the cwd): where you stopped, next
+  step, goal, decisions, avoid, open questions, files touched, git, sources.
+  Extractive, deterministic, every line cited `(agent, local time, event N)`,
+  600 whitespace tokens by default, whole lines only. Hook formats print a
+  Claude Code or Codex SessionStart envelope and always exit 0 within 8 s,
+  with a fallback envelope on any failure. Deliveries are recorded in
+  `handoff_deliveries` (migration 0012) when the writer lease is free.
+- `today [--date]` writes the day's standup across projects from transcripts,
+  git commits on the checked-out branch, and screen episodes when present.
+- `connect --all` installs the SessionStart hooks in `~/.claude/settings.json`
+  and `~/.codex/hooks.json` and a per-user LaunchAgent
+  (`ai.hippocampus.refresh`, every 300 s); `disconnect --all` removes only
+  those. The Swift `SessionContextInstaller` recognises and writes the same
+  group, so the app and the CLI cannot double-install.
+- `doctor` adds `transcripts` (files newer than their import cursor),
+  `delivery` (hook installed, last packet per client) and `refresh agent`.
+- `scripts/install.sh` downloads the signed CLI from a GitHub release,
+  verifies its SHA-256 and runs `init`. No screen permission is requested.
+
+Source checks at this checkpoint: `cargo test -p mci-agent` (452 library
+tests plus every integration file, including 13 transcript-import, 12
+handoff, 9 handoff CLI and 3 delivery CLI tests), `cargo test -p mci-brain`
+(327 library tests plus integration files), `cargo clippy --all-targets
+-- -D warnings` on both crates, `cargo fmt --check`, and
+`swift test --filter SessionContextInstaller` (13 tests). All pass.
+
+**Installed on the owner's Mac.** The Sep 11 notarized `f4f7bf1` app was
+installed at 02:35 (the prior `fe90a3d` bundle is retained beside it) after
+a verified ciphertext backup of the brain. `capture_enabled` was turned on in
+`~/.config/hippocampus/runtime.toml`. Capture delivers no frames because the
+helper reports `tcc_revoked=screenRecording`: macOS dropped the Screen
+Recording grant when the binary changed. Only the owner can re-grant it. The
+app also could not be quit through its own menu item or a quit Apple event;
+the parent was stopped with SIGTERM and its children exited through their
+lease pipes. That quit failure is an open product defect.
+
+**Verified end to end (isolated homes, scratch brain, this build).** A real
+Claude Code session and a real Codex session stated a decision and a next step
+in a throwaway repo; `import-sessions` imported both; `handoff` cited them; a
+fresh Codex session running our SessionStart hook answered the decision and the
+next step without reading files. Codex ignores a new hooks file until it is
+trusted once interactively.
+
+**Not verified at this checkpoint.** Screen capture with the new OCR on this
+Mac (blocked on the Screen Recording grant); the hosted Swift job still runs
+the Vision completeness class only on hardware with a Neural Engine (skipped
+on GitHub runners since `fb02d62`, an owner decision to review); packets that
+include screen citations were tested synthetically only.
 
 ## September 25 Product Strategy (Proposal)
 

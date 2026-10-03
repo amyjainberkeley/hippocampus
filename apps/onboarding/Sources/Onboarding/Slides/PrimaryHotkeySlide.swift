@@ -43,6 +43,9 @@ struct PrimaryHotkeySlide: View {
 
                 if flowVM.hotkeyPracticed {
                     successBadge
+                } else if flowVM.hotkeySkipped {
+                    Label("Skipped. You can open Recall from the menu bar.", systemImage: "menubar.arrow.up.rectangle")
+                        .font(.callout).foregroundStyle(.secondary)
                 } else {
                     Text("Press the combo while this window is focused. We'll unlock Continue as soon as we see it.")
                         .font(.system(size: 13))
@@ -51,11 +54,7 @@ struct PrimaryHotkeySlide: View {
                         .frame(maxWidth: 460)
 
                     Button("Skip — the combo is already taken on my Mac") {
-                        // Live-try wasn't possible (Alfred/SetApp
-                        // grabbed the combo, or user just wants to
-                        // move on). Still flip the flag so Continue
-                        // unlocks — accessibility is non-negotiable.
-                        flowVM.markHotkeyPracticed()
+                        flowVM.skipHotkeyPractice()
                     }
                     .onboardingText()
                     .padding(.top, 4)
@@ -121,7 +120,7 @@ struct PrimaryHotkeySlide: View {
             Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(OnboardingDesign.Palette.accent)
                 .font(.system(size: 18))
-            Text("Nice — you'll use this every day.")
+            Text("Shortcut detected here. Try it from another app after setup.")
                 .font(.system(size: 13, weight: .medium))
         }
         .padding(.horizontal, 14)

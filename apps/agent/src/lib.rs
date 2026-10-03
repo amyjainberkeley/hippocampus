@@ -26,6 +26,8 @@ pub mod brief_worker;
 pub mod capture_status;
 /// Reusable environment scrubbing for agent-owned child processes.
 pub mod child_command_environment;
+/// SessionStart hook installation for Claude Code and Codex.
+pub mod client_hooks;
 /// Atomic, reference-only registration with supported local AI clients.
 pub mod client_registry;
 pub mod consolidator_worker;
@@ -44,10 +46,17 @@ pub mod doctor;
 pub mod embedder_load;
 pub mod enrich;
 pub mod episode_worker;
+/// Per-project handoff packet compiler (docs/handoff/CONTRACT.md section 5).
+pub mod handoff;
+/// Read-only transcript freshness and hook delivery view for `doctor`.
+pub mod handoff_status;
 pub mod health_log;
 pub mod health_pump;
 pub mod health_summary;
 pub mod idle_batch;
+/// Codex rollout importer (`~/.codex/sessions`), the sibling of
+/// [`import_sessions`]; both write through [`transcript`].
+pub mod import_codex;
 pub mod import_sessions;
 pub mod key_resolver;
 #[cfg(target_os = "macos")]
@@ -80,6 +89,10 @@ pub mod panic_hook;
 pub mod panic_uploader;
 #[cfg(target_os = "macos")]
 pub mod pump_supervisor;
+/// Bounded incremental import plus enrich of new events, for the handoff hook.
+pub mod refresh;
+/// Background refresh through a per-user launchd agent.
+pub mod refresh_agent;
 pub mod retention_worker;
 pub mod runner;
 pub mod supervisor;
@@ -104,6 +117,11 @@ pub mod tier2_qwen_backend;
 /// `brief_worker.rs` patterns; single-flight by design so the ~500 MB
 /// Qwen working set stays predictable.
 pub mod tier2_worker;
+/// Daily packet across projects (docs/handoff/CONTRACT.md section 6).
+pub mod today;
+/// Header format, skip rules, mutating-call detection and per-file resume
+/// shared by the two transcript importers.
+pub mod transcript;
 #[cfg(unix)]
 pub mod user_allowlist;
 pub mod wall_clock;

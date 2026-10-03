@@ -132,7 +132,7 @@ pub use memory_delta::{
 pub use memory_projector::{project_event, retract_event};
 pub use retention_purger::{PurgeStats, RetentionConfig};
 pub use sqlcipher_brain_store::{
-    DeletionCleanupStage, DeletionCleanupWarning, DeletionOutcome, IntegrityError,
+    DeletionCleanupStage, DeletionCleanupWarning, DeletionOutcome, ImportCursor, IntegrityError,
     SqlCipherBrainStore,
 };
 
@@ -336,6 +336,26 @@ pub struct EpisodeRecord {
     pub ts_end: u64,
     /// Number of events assigned to this episode.
     pub event_count: u64,
+}
+
+/// One recorded handoff packet delivery (`handoff_deliveries`, migration
+/// 0012). Content-free: the packet text is never stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandoffDelivery {
+    /// Row id.
+    pub id: u64,
+    /// Delivery time in microseconds since UNIX epoch.
+    pub ts_us: u64,
+    /// `claude-code`, `codex`, `cli` or `mcp`.
+    pub client: String,
+    /// Project root the packet was compiled for.
+    pub project_root: String,
+    /// Lowercase SHA-256 hex digest of the delivered packet text.
+    pub packet_sha256: String,
+    /// Whitespace-token estimate of the delivered packet.
+    pub token_estimate: u64,
+    /// JSON array of the event ids the packet cited.
+    pub event_ids_json: String,
 }
 
 // ---------------------------------------------------------------------------

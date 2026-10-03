@@ -2,6 +2,32 @@ import XCTest
 @testable import RecallUIKit
 
 final class CaptureHealthReceiptTests: XCTestCase {
+    func testFreshHeartbeatWithOldEvidenceRequiresAttention() {
+        let now = Date()
+        let receipt = CaptureHealthReceipt(schemaVersion: 1, updatedAt: now,
+            lastStoredFrameAt: now.addingTimeInterval(-19 * 86400), storedFrameCount: 3126,
+            storedScreenshotCount: 1479, suppressionReason: nil, blockedReason: nil)
+        XCTAssertEqual(receipt.stateLabel, "No recent screen memory")
+        XCTAssertTrue(receipt.needsAttention(now: now))
+        XCTAssertEqual(receipt.detailText(now: now),
+            "The service is responding, but no screen memory has been saved in the last 5 minutes. Check permissions and app access.")
+    }
+
+    func testMissingSavedFrameAndFutureTimestampNeverLookHealthy() {
+        let now = Date()
+        for saved in [nil, now.addingTimeInterval(300)] as [Date?] {
+            let receipt = CaptureHealthReceipt(schemaVersion: 1, updatedAt: now,
+                lastStoredFrameAt: saved, storedFrameCount: 0, storedScreenshotCount: 0,
+                suppressionReason: nil, blockedReason: nil)
+            XCTAssertTrue(receipt.needsAttention(now: now))
+        }
+    }
+
+    func testKnownSuppressionExplainsMissingRecentCapture() throws {
+        let receipt = try receipt(suppression: "unchanged_screen")
+        XCTAssertEqual(receipt.label(now: receipt.updatedAt), "Screen unchanged")
+        XCTAssertFalse(receipt.needsAttention(now: receipt.updatedAt))
+    }
     func testSuppressionDetailsNameTheReportedCause() throws {
         let cases = [
             ("app_denied", "The source is excluded by a privacy rule."),
@@ -64,7 +90,7 @@ final class CaptureHealthReceiptTests: XCTestCase {
 
     func testReceiptWithoutReasonsDoesNotInventSuppression() throws {
         let receipt = try receipt()
-        XCTAssertEqual(receipt.stateLabel, "Screen memory saved")
+        XCTAssertEqual(receipt.label(now: receipt.updatedAt), "Screen memory saved")
         XCTAssertNil(receipt.detailText(now: receipt.updatedAt))
         XCTAssertNil(receipt.detailText(now: receipt.updatedAt.addingTimeInterval(120)))
     }
