@@ -5,6 +5,11 @@ commits are intentionally omitted from release notes.
 
 ## [Unreleased]
 
+- Change Recall's default shortcut to **Control–Shift–Space**, keeping it
+  separate from Superapp Whisper's Command–Shift–Space. Onboarding, popup and
+  shortcut help show the new combination. Recall also remains accessible from
+  the menu bar when another app owns the shortcut.
+
 ## [0.2.0] - 2026-09-27
 
 ### Handoff For Your Agents

@@ -2,7 +2,7 @@
 
 _Updated on 2026-10-03; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `40e0d9a`
+Audited code baseline: `42c91ef`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -11,6 +11,16 @@ release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
 
 ## October 3 Capture Recovery, Onboarding, And Project Handoff
+
+The [Recall shortcut checkpoint](audits/2026-10-03-recall-shortcut.md) changes
+the source default to Control–Shift–Space, separate from Superapp Whisper's
+Command–Shift–Space. Onboarding, the popup and help show the same combination.
+All 365 parent, 245 onboarding and 541 optimized Recall XCTest cases plus four
+Swift Testing cases pass. This has not been installed or tested with live
+keyboard input. The preserved `2f4293c` candidate lacks this change and must
+not be described as containing it; installing this checkpoint requires a new
+complete candidate. Other-app conflicts and onboarding event ownership still
+require live qualification.
 
 The desktop transcript-consent checkpoint makes background daemon import
 default-off, forces it off for desktop launches, and separates MCP registration

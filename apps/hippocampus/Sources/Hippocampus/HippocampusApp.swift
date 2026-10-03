@@ -486,7 +486,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Cycle 8.48 — the cycle 8.46 Action Panel "Show
                 // Onboarding" command now works end-to-end. Re-opens
                 // the Onboarding executable so users can revisit the
-                // flow (e.g. to re-run the ⇧⌘Space live-try after
+                // flow (e.g. to re-run the ⌃⇧Space live-try after
                 // configuring Alfred/SetApp, or to review the trust
                 // panel). No sentinel change — reopening is safe
                 // even after first-run has completed.

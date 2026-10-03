@@ -9,7 +9,7 @@ public enum OnboardingStep: Int, Sendable, Equatable, CaseIterable, Identifiable
     // "Progressive-disclosure onboarding with a single primary-hotkey
     // moment." Placed immediately after the TCC permissions slide so
     // Accessibility is already granted (an NSEvent monitor for
-    // ⇧⌘Space works reliably while onboarding is frontmost) and BEFORE
+    // ⌃⇧Space works reliably while onboarding is frontmost) and BEFORE
     // the allowlist / capture-setup work — the user learns the recall
     // gesture the moment they've said "yes" to permissions, so they
     // exit onboarding with muscle-memory for the flagship gesture.
