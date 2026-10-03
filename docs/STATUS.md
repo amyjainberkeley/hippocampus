@@ -2,7 +2,7 @@
 
 _Updated on 2026-10-03; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `ef765d6`
+Audited code baseline: `2f4293c`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -46,6 +46,15 @@ on its first execution in 24.029 seconds, followed by 8/8 code lines and four
 blank strips within the same deadline. This same-Mac runtime probe does not
 replace cold-machine or whole-application qualification. See the
 [signed-worker audit](audits/2026-10-03-signed-ocr-qualification.md).
+
+A complete **private release candidate** from `2f4293c` has now been rebuilt and
+Developer ID-signed. Its six executable hashes, complete payload/source
+provenance, nested signatures, App Group, embedded OCR and Arctic model checks
+pass. It survives the 20-second disposable-home launch check with onboarding
+attached. Its embedded worker reads the synthetic chat/code fixtures exactly.
+The saved notarization profile is currently unavailable, so this candidate is
+not notarized, installed or published. Structural launch checks do not replace
+the remaining live capture, onboarding, UI, upgrade and recovery qualification.
 
 Hippocampus is the standalone memory, recall, and MCI context product.
 Superapp is the separate OneKit-derived workspace. Keep their repositories,

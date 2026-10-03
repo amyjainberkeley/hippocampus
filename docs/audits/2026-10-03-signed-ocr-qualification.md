@@ -38,3 +38,35 @@ Private synthetic fixtures, signed runtime and diagnostics are retained outside
 the repository. No personal screenshot, memory, provider key or certificate
 private key is part of this source checkpoint. The installed owner app,
 historical index, permissions and public downloads are unchanged.
+
+## Complete private candidate
+
+All six shipping executables were freshly built in release configuration from
+the checkpoint recorded by `2f4293c5e9b1a8170b54e53977e672b6b14914fc` (the Rust
+build began on its code-identical predecessor). Rust used the macOS 14 deployment
+target and two build jobs. The production assembler created a new private
+Hippocampus 0.2.0 (build 2) app with Developer ID signing; no existing bundle was
+overwritten. Post-assembly checks verified the exact source/payload provenance,
+all six executable hashes, nested signatures, App Group and embedded model
+contracts.
+
+The app survived its unchanged 20-second first-launch check in a disposable
+home, with onboarding remaining attached. The test cleaned up only its own
+process tree and temporary home. This checks startup structure, not the final
+rendered UI or the owner's permission/capture flow. The actual worker inside
+this app then read 10/10 chat lines in 5.739 seconds and 8/8 code lines in 5.595
+seconds, with no measured errors or extra output.
+
+Notarization remains pending: a read-only check of the previously used
+`notarytool-profile` currently exits 69 and reports no available password item.
+The earlier successful profile is not replaced or recreated. Retry it after
+the pending owner unlock; no additional unchanged credential request was sent.
+The candidate is signed, but not notarized, installed or public.
+
+A bounded read-only inventory of the usual owner configuration locations found
+one canonical legacy Claude context hook, no Codex hooks file and no canonical
+refresh LaunchAgent file or loaded job. The legacy hook requests existing
+context rather than session import, and the candidate still supports its shape.
+No configuration was changed. This inventory does not rule out separately
+configured jobs or alternate client homes. The full private backup, writer
+shutdown, permission and migration/rollback steps still precede installation.
