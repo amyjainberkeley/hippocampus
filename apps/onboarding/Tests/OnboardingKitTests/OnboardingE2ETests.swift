@@ -60,7 +60,7 @@ final class OnboardingE2ETests: XCTestCase {
             } else {
                 if expected == .primaryHotkey {
                     // Cycle 8.48 — the PrimaryHotkeySlide gates advance
-                    // on either a live ⇧⌘Space press OR the Skip
+                    // on either a live ⌃⇧Space press OR the Skip
                     // fallback; both funnel through
                     // `markHotkeyPracticed()`. Simulate the Skip path.
                     XCTAssertFalse(vm.canAdvance,
@@ -119,7 +119,7 @@ final class OnboardingE2ETests: XCTestCase {
         vm.advance()
         // Cycle 8.48 — next step after Permissions is now
         // PrimaryHotkeySlide (was Allowlist). The user then either
-        // presses ⇧⌘Space or Skips before Allowlist becomes reachable.
+        // presses ⌃⇧Space or Skips before Allowlist becomes reachable.
         XCTAssertEqual(vm.currentStep, .primaryHotkey)
     }
 

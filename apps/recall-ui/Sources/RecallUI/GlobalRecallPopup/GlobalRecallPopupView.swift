@@ -119,7 +119,7 @@ struct GlobalRecallPopupView: View {
 
     private var emptyStateText: String {
         if viewModel.query.isEmpty {
-            return "Type to search everything you've seen. ⇧⌘Space to toggle."
+            return "Type to search everything you've seen. ⌃⇧Space to toggle."
         }
         if viewModel.isSearching {
             return "Searching…"

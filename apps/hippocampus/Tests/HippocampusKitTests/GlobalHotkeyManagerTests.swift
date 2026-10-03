@@ -36,10 +36,10 @@ final class MockHotkeyRegistrar: GlobalHotkeyRegistrar, @unchecked Sendable {
 
 @MainActor
 final class GlobalHotkeyManagerTests: XCTestCase {
-    func testDefaultSpecIsShiftCommandSpace() {
+    func testDefaultSpecDoesNotClaimWhisperCommandShiftSpace() {
         XCTAssertEqual(HotkeySpec.spotlightLikeDefault.keyCode, 49)
         XCTAssertTrue(
-            HotkeySpec.spotlightLikeDefault.modifiers.contains(.command)
+            HotkeySpec.spotlightLikeDefault.modifiers.contains(.control)
         )
         XCTAssertTrue(
             HotkeySpec.spotlightLikeDefault.modifiers.contains(.shift)
@@ -47,7 +47,8 @@ final class GlobalHotkeyManagerTests: XCTestCase {
         XCTAssertFalse(
             HotkeySpec.spotlightLikeDefault.modifiers.contains(.option)
         )
-        XCTAssertEqual(HotkeySpec.spotlightLikeDefault.displayLabel, "⇧⌘Space")
+        XCTAssertFalse(HotkeySpec.spotlightLikeDefault.modifiers.contains(.command))
+        XCTAssertEqual(HotkeySpec.spotlightLikeDefault.displayLabel, "⌃⇧Space")
     }
 
     func testRegisterDefaultRoutesThroughToRegistrar() {
@@ -57,7 +58,7 @@ final class GlobalHotkeyManagerTests: XCTestCase {
         XCTAssertEqual(result, .ok)
         XCTAssertEqual(mock.registeredSpec, .spotlightLikeDefault)
         XCTAssertEqual(mgr.currentSpec, .spotlightLikeDefault)
-        XCTAssertEqual(mgr.displayLabel, "⇧⌘Space")
+        XCTAssertEqual(mgr.displayLabel, "⌃⇧Space")
     }
 
     func testFireInvokesCallback() async {

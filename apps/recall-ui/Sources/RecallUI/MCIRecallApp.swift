@@ -333,7 +333,7 @@ struct RootView: View {
             .init(
                 id: "app.showGlobalRecallPopup",
                 title: "Show Global Recall Popup",
-                shortcut: "⇧⌘Space",
+                shortcut: "⌃⇧Space",
                 category: .app,
                 description: "Open the always-on Spotlight-style recall popup."
             ) {

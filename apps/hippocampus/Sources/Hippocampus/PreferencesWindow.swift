@@ -130,7 +130,7 @@ struct PreferencesRootView: View {
                 .foregroundStyle(.secondary)
 
             Toggle("Show menu-bar icon", isOn: $store.showMenuBarIcon)
-            Text("If off, only ⇧⌘Space (Recall popup) remains as an entry point. Restart to apply.")
+            Text("If off, only ⌃⇧Space (Recall popup) remains as an entry point. Restart to apply.")
                 .font(PreferencesStyle.captionFont)
                 .foregroundStyle(.secondary)
 
