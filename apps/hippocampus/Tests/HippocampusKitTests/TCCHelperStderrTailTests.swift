@@ -43,6 +43,88 @@ private final class RecordingSink: TCCRevokedEventSink {
     }
 }
 
+@MainActor
+final class TCCHelperFileDeliveryTests: XCTestCase {
+    private final class SlowSink: TCCRevokedEventSink {
+        var events: [String] = []
+        func handleRevoked(_ reason: TCCRevokedReason) async {
+            events.append("revoked:\(reason.rawValue)")
+            if events.count == 1 { try? await Task.sleep(for: .seconds(2)) }
+        }
+        func handleRestored(_ reason: TCCRevokedReason) async { events.append("restored:\(reason.rawValue)") }
+    }
+
+    func testDelayedSinkKeepsChunksInOrder() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("helper.stderr.log")
+        try Data().write(to: path)
+        let sink = SlowSink()
+        let tail = TCCHelperStderrTail(sink: sink, logPath: path)
+        tail.start()
+        defer { tail.stop() }
+        let handle = try FileHandle(forWritingTo: path)
+        defer { try? handle.close() }
+        try handle.write(contentsOf: Data("helper_health tcc_revoked=screenRecording\nhelper_health tcc_revoked=accessibility\n".utf8))
+        let deadline = Date().addingTimeInterval(8)
+        while sink.events.isEmpty && Date() < deadline { try await Task.sleep(for: .milliseconds(50)) }
+        try handle.write(contentsOf: Data("helper_health tcc_restored=accessibility\n".utf8))
+        while sink.events.count < 3 && Date() < deadline { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(sink.events, ["revoked:screenRecording", "revoked:accessibility", "restored:accessibility"])
+    }
+
+    func testExistingFileAppendReachesSinkWithoutDirectoryMutation() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("helper.stderr.log")
+        try Data("old log\n".utf8).write(to: path)
+        let sink = RecordingSink()
+        let tail = TCCHelperStderrTail(sink: sink, logPath: path)
+        tail.start()
+        defer { tail.stop() }
+        let handle = try FileHandle(forWritingTo: path)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("mci-capture-helper: helper_health tcc_revoked=screenRecording\n".utf8))
+        try handle.close()
+        let deadline = Date().addingTimeInterval(3)
+        while sink.revoked.isEmpty && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(sink.revoked, [.screenRecording])
+    }
+
+    func testReplacementPartialLineAndStopRestart() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("helper.stderr.log")
+        try Data("old\n".utf8).write(to: path)
+        let sink = RecordingSink()
+        let tail = TCCHelperStderrTail(sink: sink, logPath: path)
+        tail.start()
+        defer { tail.stop() }
+        try Data("mci-capture-helper: helper_health tcc_revoked=accessibility".utf8).write(to: path, options: .atomic)
+        try await Task.sleep(for: .milliseconds(1200))
+        XCTAssertTrue(sink.revoked.isEmpty)
+        let handle = try FileHandle(forWritingTo: path)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("\n".utf8))
+        try handle.close()
+        let deadline = Date().addingTimeInterval(3)
+        while sink.revoked.isEmpty && Date() < deadline { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(sink.revoked, [.accessibility])
+        tail.stop()
+        try Data("mci-capture-helper: helper_health tcc_revoked=screenRecording\n".utf8).write(to: path, options: .atomic)
+        try await Task.sleep(for: .milliseconds(1200))
+        XCTAssertEqual(sink.revoked, [.accessibility])
+        tail.start()
+        try await Task.sleep(for: .milliseconds(1200))
+        XCTAssertEqual(sink.revoked, [.accessibility], "Restart must not replay history")
+    }
+}
+
 /// Reused from `TCCRevokedRecoveryTests` — kept private per-file rather
 /// than cross-file-shared because the `@testable` module gives every
 /// XCTest file access to the same internals; a private duplicate here
@@ -167,6 +249,19 @@ final class TCCHelperStderrParserTests: XCTestCase {
 // MARK: - Integration tests
 
 final class TCCHelperStderrTailIntegrationTests: XCTestCase {
+
+    @MainActor
+    func testRestoringOneSurfaceKeepsOtherRevokedSurfaceVisible() async {
+        let notifier = TCCRevokedNotifier(center: FakeUNCenter())
+        let supervisor = ProcessSupervisor(locator: FakeBinaryLocator(), keyStore: FakeKeyStore())
+        let sink = TCCNotifierAndSupervisorSink(notifier: notifier, supervisor: supervisor)
+        await sink.handleRevoked(.screenRecording)
+        await sink.handleRevoked(.accessibility)
+        await sink.handleRestored(.accessibility)
+        XCTAssertEqual(supervisor.tccRevokedSurface, .screenRecording)
+        await sink.handleRestored(.screenRecording)
+        XCTAssertNil(supervisor.tccRevokedSurface)
+    }
 
     /// (2) End-to-end: a `helper_health tcc_revoked=screenRecording`
     /// breadcrumb routes to the sink, which drives the notifier +

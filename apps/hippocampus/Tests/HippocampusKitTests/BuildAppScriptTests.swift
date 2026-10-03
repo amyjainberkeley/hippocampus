@@ -2,6 +2,11 @@
 import XCTest
 
 final class BuildAppScriptTests: XCTestCase {
+    private func currentBundleVersion() throws -> String {
+        let url = try XCTUnwrap(infoPlistPath())
+        let plist = try PropertyListSerialization.propertyList(from: Data(contentsOf: url), format: nil)
+        return try XCTUnwrap((plist as? [String: Any])?["CFBundleShortVersionString"] as? String)
+    }
     private enum ChangelogFixture {
         case currentRelease
         case unreleasedOnly
@@ -191,7 +196,7 @@ final class BuildAppScriptTests: XCTestCase {
 
                 ## [Unreleased]
 
-                ## [0.1.0] - 2026-09-01
+                ## [\(try currentBundleVersion())] - 2026-09-01
 
                 ### Highlights
 
@@ -458,7 +463,7 @@ final class BuildAppScriptTests: XCTestCase {
             "an Unreleased-only changelog must fail the build, got: \(result.output)"
         )
         XCTAssertTrue(
-            result.output.contains("FATAL: CHANGELOG.md has no nonempty 0.1.0 release"),
+            result.output.contains("FATAL: CHANGELOG.md has no nonempty \(try currentBundleVersion()) release"),
             "expected current-version changelog failure, got: \(result.output)"
         )
     }

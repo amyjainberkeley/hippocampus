@@ -9,8 +9,8 @@ struct DoneSlide: View {
         SlideContainer {
             VStack(spacing: OnboardingDesign.Space.xl) {
                 HeroHeader(
-                    title: readyForCapture ? "You're all set" : "Finish preparing your memory",
-                    subtitle: readyForCapture ? "Capture begins when you click Get Started. You can pause it any time from the menu bar." : "Go back to finish the unchecked setup steps before starting capture.",
+                    title: readyForCapture ? "Ready for your first memory" : "Finish preparing your memory",
+                    subtitle: readyForCapture ? "Click Get Started, use an allowed app, then open Recall to check your first saved source. Capture can be paused from the menu bar." : "Go back to finish the unchecked setup steps before starting capture.",
                     titleStyle: .display
                 ) {
                     Image(systemName: readyForCapture ? "checkmark.circle.fill" : "circle")
@@ -43,7 +43,7 @@ struct DoneSlide: View {
                 label: "Accessibility privacy checks"
             )
             checkRow(granted: prepareBrainVM.canContinue, label: "Encryption key ready")
-            checkRow(granted: true, label: "Retention policy set")
+            checkRow(granted: flowVM.hotkeyPracticed, label: flowVM.hotkeyPracticed ? "Recall shortcut practiced here" : "Recall available from the menu bar")
             modelCheckRow
         }
         .frame(maxWidth: 380)
@@ -69,7 +69,7 @@ struct DoneSlide: View {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(OnboardingDesign.Palette.success)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Evidence-cited briefs ready")
+                    Text("Local briefs need no model download")
                         .font(.system(size: 14))
                     Text("Optional richer wording can be added later")
                         .font(.system(size: 11))

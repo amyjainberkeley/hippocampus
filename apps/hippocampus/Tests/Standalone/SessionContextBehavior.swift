@@ -45,8 +45,8 @@ check(!(String(data: installed, encoding: .utf8)!.contains("KEY_HEX")), "No seri
 let mode = try FileManager.default.attributesOfItem(atPath: settings.path)[.posixPermissions] as! NSNumber
 check(mode.intValue == 0o600, "Private settings remain private")
 try FileManager.default.createDirectory(at: executable.deletingLastPathComponent(), withIntermediateDirectories: true)
-try Data("#!/bin/sh\nprintf '%s\\n' \"$1\" \"$2\" \"$3\"\n".utf8).write(to: executable)
-try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+try Data("#!/bin/sh\nprintf '%s\\n' \"$1\" \"$2\" \"$3\" \"$4\" \"$5\"\n".utf8).write(to: installer.agentURL)
+try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: installer.agentURL.path)
 let commandCheck = Process()
 commandCheck.executableURL = URL(fileURLWithPath: "/bin/sh")
 commandCheck.arguments = ["-c", installer.claudeCommand]
@@ -56,11 +56,50 @@ commandCheck.standardOutput = commandOutput
 try commandCheck.run()
 commandCheck.waitUntilExit()
 let commandText = String(decoding: commandOutput.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-check(commandCheck.terminationStatus == 0 && commandText == "--claude-session-context\n--db-path\n\(installer.dbURL.path)\n", "Shell quoting preserves all fixed arguments")
+check(commandCheck.terminationStatus == 0 && commandText == "handoff\n--format\nclaude-hook\n--db-path\n\(installer.dbURL.path)\n", "Shell quoting preserves all fixed arguments")
 check(!FileManager.default.fileExists(atPath: sandbox.appendingPathComponent("bad").path), "Quoted app path cannot execute substitutions")
+check(installer.claudeCommand == "\(SessionContextInstaller.shellQuote(installer.agentURL.path)) handoff --format claude-hook --db-path \(SessionContextInstaller.shellQuote(installer.dbURL.path))", "Byte-compatible with mci-agent connect --all")
 try installer.setClaudeEnabled(false)
 let restored = try JSONSerialization.jsonObject(with: Data(contentsOf: settings)) as! NSDictionary
 check(restored == (try JSONSerialization.jsonObject(with: original) as! NSDictionary), "Remove only our hook")
+
+print("Testing legacy group replacement")
+fflush(nil)
+let legacyGroup: [String: Any] = ["matcher": "startup|resume|clear|compact", "hooks": [
+    ["type": "command", "command": installer.legacyClaudeCommand, "timeout": 10]
+]]
+let userHook: [String: Any] = ["matcher": "compact", "hooks": [["type": "command", "command": "echo after"]]]
+var legacyObject = try JSONSerialization.jsonObject(with: original) as! [String: Any]
+var legacyHooks = legacyObject["hooks"] as! [String: Any]
+legacyHooks["SessionStart"] = (legacyHooks["SessionStart"] as! [[String: Any]]) + [legacyGroup, userHook]
+legacyObject["hooks"] = legacyHooks
+try JSONSerialization.data(withJSONObject: legacyObject).write(to: settings)
+check(try installer.claudeStatus() == .configured, "Legacy marker still reads as configured")
+try installer.setClaudeEnabled(true)
+let replaced = try JSONSerialization.jsonObject(with: Data(contentsOf: settings)) as! [String: Any]
+let replacedStarts = (replaced["hooks"] as! [String: Any])["SessionStart"] as! [[String: Any]]
+check(replacedStarts.count == 3, "Replace in place, never append a second group")
+check(replacedStarts[0]["matcher"] as? String == "startup" && replacedStarts[2]["matcher"] as? String == "compact", "Neighbours keep their positions")
+check((replacedStarts[1]["hooks"] as! [[String: Any]])[0]["command"] as? String == installer.claudeCommand, "Legacy group becomes the handoff group at the same index")
+check(!(String(data: try Data(contentsOf: settings), encoding: .utf8)!.contains(SessionContextHook.flag)), "Legacy flag is gone")
+check(try installer.claudeStatus() == .configured, "New marker reads as configured")
+try installer.setClaudeEnabled(false)
+let afterDisable = try JSONSerialization.jsonObject(with: Data(contentsOf: settings)) as! [String: Any]
+let afterStarts = (afterDisable["hooks"] as! [String: Any])["SessionStart"] as! [[String: Any]]
+check(afterStarts.count == 2 && afterStarts[1]["matcher"] as? String == "compact", "Disable removes only the handoff group")
+try JSONSerialization.data(withJSONObject: legacyObject).write(to: settings)
+try installer.setClaudeEnabled(false)
+let legacyRemoved = (try JSONSerialization.jsonObject(with: Data(contentsOf: settings)) as! [String: Any])["hooks"] as! [String: Any]
+check((legacyRemoved["SessionStart"] as! [[String: Any]]).count == 2, "Disable removes the legacy group too")
+var edited = legacyGroup
+edited["hooks"] = [["type": "command", "command": installer.claudeCommand, "timeout": 20]]
+legacyHooks["SessionStart"] = [edited]
+legacyObject["hooks"] = legacyHooks
+try JSONSerialization.data(withJSONObject: legacyObject).write(to: settings)
+expectRefusal { _ = try installer.claudeStatus() }
+expectRefusal { try installer.setClaudeEnabled(true) }
+check(try JSONSerialization.jsonObject(with: Data(contentsOf: settings)) as! NSDictionary == (legacyObject as NSDictionary), "Edited group with our marker is a conflict, left untouched")
+try original.write(to: settings)
 try installer.setClaudeEnabled(true)
 var changed = try JSONSerialization.jsonObject(with: Data(contentsOf: settings)) as! [String: Any]
 changed["disableAllHooks"] = true

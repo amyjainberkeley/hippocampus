@@ -151,26 +151,30 @@ public protocol TCCRevokedEventSink: AnyObject {
 public final class TCCNotifierAndSupervisorSink: TCCRevokedEventSink {
     private let notifier: TCCRevokedNotifier
     private weak var supervisor: ProcessSupervisor?
+    private var revoked: Set<TCCRevokedReason> = []
 
     public init(notifier: TCCRevokedNotifier, supervisor: ProcessSupervisor) {
         self.notifier = notifier
         self.supervisor = supervisor
+        if let existing = supervisor.tccRevokedSurface { revoked.insert(existing) }
     }
 
     public func handleRevoked(_ reason: TCCRevokedReason) async {
-        supervisor?.tccRevokedSurface = reason
+        revoked.insert(reason)
+        updateVisibleReason()
         await notifier.notifyRevoked(reason)
     }
 
     public func handleRestored(_ reason: TCCRevokedReason) async {
-        // Only clear the supervisor's surface if it matches the
-        // currently-tracked one — a stray `tcc_restored=accessibility`
-        // while the tracked surface is `.screenRecording` must not
-        // clear the red pill.
-        if supervisor?.tccRevokedSurface == reason {
-            supervisor?.tccRevokedSurface = nil
-        }
+        revoked.remove(reason)
+        updateVisibleReason()
         await notifier.notifyRestored(reason)
+    }
+
+    private func updateVisibleReason() {
+        // Screen capture has priority; restoring another permission must not
+        // hide a permission that is still revoked.
+        supervisor?.tccRevokedSurface = TCCRevokedReason.allCases.first { revoked.contains($0) }
     }
 }
 
@@ -179,16 +183,9 @@ public final class TCCNotifierAndSupervisorSink: TCCRevokedEventSink {
 /// Tails the helper's stderr log file, parses TCC-breadcrumb lines,
 /// and dispatches parsed events to a `TCCRevokedEventSink`.
 ///
-/// Implementation: watches the parent directory with a
-/// `DispatchSource.makeFileSystemObjectSource` (same shape as
-/// `AppDelegate.armOnboardingSentinelWatcher`). On every write / extend
-/// / rename event we read from the current byte offset to EOF, feed the
-/// new bytes through the line splitter, and hand complete lines to
-/// `TCCHelperStderrParser.parseLine`.
-///
-/// State: single `Int64` byte-offset cursor. Log rotation resets the
-/// cursor (file shrank → we're behind → start over from 0). A missing
-/// file resets to 0 and reopens on the next event.
+/// Poll content-free log metadata once a second. Read at most 64 KiB per tick;
+/// rotation is detected by file identity as well as truncation. Only complete
+/// permission lines reach the sink, and stopped generations cannot deliver.
 ///
 /// Runs on the main actor because it drives `TCCRevokedEventSink`,
 /// which touches `@Published` state that SwiftUI reads.
@@ -206,10 +203,13 @@ public final class TCCHelperStderrTail {
     private let sink: TCCRevokedEventSink
     private let logger = Logger(subsystem: "ai.hippocampus", category: "tcc-stderr-tail")
 
-    private var source: DispatchSourceFileSystemObject?
-    private var watchedFd: Int32 = -1
+    private var source: DispatchSourceTimer?
+    private var generation: UInt64 = 0
+    private var fileIdentity: UInt64?
     private var cursor: UInt64 = 0
     private var pendingBuffer = ""
+    private var pendingEvents: [[TCCHelperHealthEvent]] = []
+    private var deliveryTask: Task<Void, Never>?
 
     public init(sink: TCCRevokedEventSink, logPath: URL = TCCHelperStderrTail.defaultLogPath) {
         self.logPath = logPath
@@ -231,46 +231,31 @@ public final class TCCHelperStderrTail {
         // Seed cursor at current EOF so we surface only NEW events.
         cursor = currentFileSize()
 
-        let fd = open(dir.path, O_EVTONLY)
-        guard fd >= 0 else {
-            logger.warning(
-                "tcc-stderr-tail: open(\(dir.path, privacy: .public)) failed (errno=\(errno))"
-            )
-            return
-        }
-        watchedFd = fd
-
-        let src = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: fd,
-            eventMask: [.write, .extend, .rename, .delete],
-            queue: .main
-        )
-        // The dispatch handler runs on the main queue, but Swift 6
-        // doesn't statically know that queue is @MainActor. Hop into
-        // an explicit MainActor Task so the isolation is compile-time
-        // sound.
-        src.setEventHandler { [weak self] in
+        fileIdentity = currentFileIdentity()
+        let activeGeneration = generation
+        // A directory vnode does not report appends to an existing child file.
+        // Poll metadata once a second so rotation and ordinary appends both work.
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + .seconds(1), repeating: .seconds(1), leeway: .milliseconds(100))
+        timer.setEventHandler { [weak self] in
             Task { @MainActor in
-                self?.drainNewBytes()
+                guard let self, self.generation == activeGeneration else { return }
+                self.drainNewBytes()
             }
         }
-        src.setCancelHandler { [weak self] in
-            Task { @MainActor in
-                if let fd = self?.watchedFd, fd >= 0 {
-                    close(fd)
-                    self?.watchedFd = -1
-                }
-            }
-        }
-        source = src
-        src.resume()
-        logger.info("tcc-stderr-tail: armed on \(self.logPath.path, privacy: .public), cursor=\(self.cursor)")
+        source = timer
+        timer.resume()
     }
 
-    /// Cancel the watch. Idempotent.
+    /// Cancel pending observation and discard partial lines from the old run.
     public func stop() {
+        generation &+= 1
         source?.cancel()
         source = nil
+        pendingBuffer = ""
+        pendingEvents.removeAll()
+        deliveryTask?.cancel()
+        deliveryTask = nil
     }
 
     /// TEST HOOK — feed a synthetic chunk as if the file had been
@@ -289,12 +274,18 @@ public final class TCCHelperStderrTail {
         return size
     }
 
-    /// Read from `cursor` to EOF, feed to parser, dispatch events.
+    private func currentFileIdentity() -> UInt64? {
+        (try? FileManager.default.attributesOfItem(atPath: logPath.path))?[.systemFileNumber] as? UInt64
+    }
+
+    /// Read a bounded chunk, feed complete lines to the parser, dispatch events.
     /// Handles rotation: if the file shrank (rotator moved the old
     /// file to `.1`), reset cursor to 0 and start over.
     private func drainNewBytes() {
         let size = currentFileSize()
-        if size < cursor {
+        let identity = currentFileIdentity()
+        if identity != fileIdentity || size < cursor {
+            fileIdentity = identity
             // Rotation happened, or file was recreated fresh.
             cursor = 0
             pendingBuffer = ""
@@ -312,28 +303,47 @@ public final class TCCHelperStderrTail {
             return
         }
 
-        let data = (try? handle.readToEnd()) ?? Data()
-        cursor = size
+        let data = (try? handle.read(upToCount: 65_536)) ?? Data()
+        cursor += UInt64(data.count)
         guard !data.isEmpty else { return }
-        guard let text = String(data: data, encoding: .utf8) else { return }
+        let text = String(decoding: data, as: UTF8.self)
 
         // Fold in any partial trailing line from last drain.
         let combined = pendingBuffer + text
         // Split on newlines; keep trailing partial for next drain.
         if let lastNewline = combined.lastIndex(of: "\n") {
             let complete = String(combined[..<lastNewline])
-            pendingBuffer = String(combined[combined.index(after: lastNewline)...])
-            Task { @MainActor in
-                await self.dispatch(chunk: complete)
-            }
+            pendingBuffer = String(combined[combined.index(after: lastNewline)...].suffix(4096))
+            enqueue(complete)
         } else {
-            pendingBuffer = combined
+            pendingBuffer = String(combined.suffix(4096))
         }
     }
 
-    private func dispatch(chunk: String) async {
+    private func enqueue(_ chunk: String) {
         let events = TCCHelperStderrParser.parseChunk(chunk)
+        guard !events.isEmpty else { return }
+        // Retain only parsed permission enums while notification consent waits.
+        pendingEvents.append(events)
+        guard deliveryTask == nil else { return }
+        let activeGeneration = generation
+        deliveryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { if self.generation == activeGeneration { self.deliveryTask = nil } }
+            while self.generation == activeGeneration, !Task.isCancelled, !self.pendingEvents.isEmpty {
+                let next = self.pendingEvents.removeFirst()
+                await self.dispatch(events: next, generation: activeGeneration)
+            }
+        }
+    }
+
+    private func dispatch(chunk: String, generation expectedGeneration: UInt64? = nil) async {
+        await dispatch(events: TCCHelperStderrParser.parseChunk(chunk), generation: expectedGeneration)
+    }
+
+    private func dispatch(events: [TCCHelperHealthEvent], generation expectedGeneration: UInt64? = nil) async {
         for event in events {
+            if let expectedGeneration, generation != expectedGeneration { return }
             switch event {
             case .revoked(let reason):
                 logger.info("tcc-stderr-tail: revoked \(reason.rawValue, privacy: .public)")

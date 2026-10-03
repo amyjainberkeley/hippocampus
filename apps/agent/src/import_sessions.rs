@@ -3,57 +3,49 @@
 //! # Why this exists
 //!
 //! Claude Code writes every session to `~/.claude/projects/<project>/<uuid>.jsonl`.
-//! On this machine that is 77 files and 76 MB of real working history, and
-//! there is no way to search across it. `/resume` lists sessions per project;
-//! `grep` returns raw wire records.
+//! On this machine that is hundreds of files and hundreds of megabytes of
+//! real working history, and there is no way to search across it. `/resume`
+//! lists sessions per project; `grep` returns raw wire records.
 //!
 //! Grep is bad here for a specific, measurable reason. In a sample of those
-//! files the content blocks were 161 `tool_use`, 160 `tool_result`, 123
-//! `thinking` and only 124 `text`. More than three quarters of what you match
-//! on is machinery, not conversation. Importing **only** the `text` blocks is
-//! the whole trick: it is why searching this beats grepping it.
+//! files the content blocks were 302 `tool_use`, 302 `tool_result`, 147
+//! `thinking` and only 85 `text`. More than three quarters of what you match
+//! on is machinery, not conversation. Importing the `text` blocks, plus one
+//! short line per call that changed something, is the whole trick.
+//!
+//! What lands, per `docs/handoff/CONTRACT.md` section 1:
+//!
+//! - `user` and `assistant` events: the human-visible `text` blocks.
+//! - `tool` events: one per assistant record holding a mutating call
+//!   (`Edit`, `Write`, `MultiEdit`, `NotebookEdit`, or a `Bash` command that
+//!   commits, pushes, checks out, merges, rebases, tags, stashes, opens a
+//!   PR, or publishes). One line per call, `{tool} {primary_arg}`, cut at
+//!   200 characters. Enough to say which files a session touched and which
+//!   commits it made, without storing the diff.
 //!
 //! Deliberately dropped:
 //!
-//! - `thinking` — reasoning the user never saw and did not choose to keep.
-//! - `tool_use` / `tool_result` — file dumps and command output. Enormous,
-//!   low signal, and the reason raw grep is useless here.
-//! - `image` — no text to index.
+//! - `thinking`: reasoning the user never saw and did not choose to keep.
+//! - `tool_result`, non-mutating `tool_use`: file dumps and command output.
+//! - `image`: no text to index.
+//! - Harness-injected "user" records (`<system-reminder>`, `<task-notification>`,
+//!   `# Files mentioned by the user`, `[Request interrupted`), `isSidechain`
+//!   and `isMeta` records: not something the person typed.
+//! - Nested `subagents/` transcripts: agent-to-agent traffic.
 //!
-//! Everything lands as an ordinary `Event`, so recall, entity extraction,
-//! episode segmentation and the MCP server all work on it unchanged.
+//! Every file is resumable through `import_cursors`, so the second run over
+//! an unchanged root reads nothing and writes nothing.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
-use mci_brain::{BrainStore, Event, EventId, SqlCipherBrainStore};
+use mci_brain::SqlCipherBrainStore;
 
-/// What an import pass did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct ImportStats {
-    /// Session files opened.
-    pub files_scanned: u64,
-    /// JSONL records parsed.
-    pub records_read: u64,
-    /// Events written to the brain.
-    pub events_written: u64,
-    /// Records with no usable text (pure tool traffic, thinking, images).
-    pub skipped_no_text: u64,
-    /// Lines that were not valid JSON. A truncated tail is normal for a
-    /// session still being written, so this is counted, not fatal.
-    pub malformed_lines: u64,
-}
-
-/// Errors an import can surface.
-#[derive(Debug, thiserror::Error)]
-pub enum ImportError {
-    /// The transcript root does not exist or cannot be listed.
-    #[error("import: cannot read {0}")]
-    Root(String),
-    /// A store write failed fatally.
-    #[error("import: store: {0}")]
-    Store(String),
-}
+use crate::transcript::{
+    self, import_file, import_files, is_injected_user_text, is_mutating_shell, parse_ts_us,
+    tool_line, write_event, Agent, EventContext, FileOutcome, Role,
+};
+pub use crate::transcript::{ImportError, ImportStats};
 
 /// Default transcript root.
 #[must_use]
@@ -67,46 +59,14 @@ pub fn default_transcript_root() -> PathBuf {
 /// Claude Code encodes the project directory by replacing `/` with `-`, which
 /// is lossy: the original path cannot be recovered, because a directory may
 /// legitimately contain a hyphen. The last segment is the useful label, so
-/// take it rather than guessing where the slashes were.
+/// take it rather than guessing where the slashes were. Only a fallback:
+/// every record carries `cwd`, whose last component is the real label.
 fn project_label(dir_name: &str) -> String {
     dir_name
         .rsplit('-')
         .find(|s| !s.is_empty())
         .unwrap_or(dir_name)
         .to_string()
-}
-
-/// RFC3339 to microseconds since epoch.
-///
-/// Hand-rolled to avoid taking a date dependency for one field. Returns
-/// `None` on anything unexpected, so a malformed record is skipped rather
-/// than silently stamped with the wrong time and sorted into the wrong day.
-#[allow(clippy::many_single_char_names)]
-fn parse_ts_us(ts: &str) -> Option<u64> {
-    // Expect YYYY-MM-DDTHH:MM:SS[.fff]Z
-    let b = ts.as_bytes();
-    if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' {
-        return None;
-    }
-    let num = |a: usize, z: usize| ts.get(a..z)?.parse::<i64>().ok();
-    let (y, mo, d) = (num(0, 4)?, num(5, 7)?, num(8, 10)?);
-    let (h, mi, s) = (num(11, 13)?, num(14, 16)?, num(17, 19)?);
-    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) {
-        return None;
-    }
-    if !(0..=23).contains(&h) || !(0..=59).contains(&mi) || !(0..=60).contains(&s) {
-        return None;
-    }
-    // Days from civil epoch (Howard Hinnant's algorithm).
-    let y2 = if mo <= 2 { y - 1 } else { y };
-    let era = if y2 >= 0 { y2 } else { y2 - 399 } / 400;
-    let yoe = y2 - era * 400;
-    let mp = (mo + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146_097 + doe - 719_468;
-    let secs = days * 86_400 + h * 3600 + mi * 60 + s;
-    u64::try_from(secs).ok()?.checked_mul(1_000_000)
 }
 
 /// Pull the human-readable text out of one message, dropping machinery.
@@ -133,30 +93,43 @@ fn text_of(message: &serde_json::Value) -> String {
     parts.join("\n")
 }
 
-/// Import every session transcript under `root`.
-///
-/// Only transcripts sitting directly in a project directory are imported.
-/// Claude Code also writes nested `subagents/` and `subagents/workflows/`
-/// transcripts, and those are deliberately skipped: they are machine-to-machine
-/// traffic, not conversations the user had. On this machine that is the
-/// difference between 50 session files and 77 total, and importing the other
-/// 27 would bury real answers under agent chatter.
-///
-/// # Errors
-/// [`ImportError::Root`] if the transcript directory cannot be read;
-/// [`ImportError::Store`] if a write fails.
-pub fn import_sessions(
-    store: &SqlCipherBrainStore,
-    root: &Path,
-    mut on_progress: impl FnMut(&ImportStats),
-) -> Result<ImportStats, ImportError> {
-    let mut stats = ImportStats::default();
+/// One body line per mutating `tool_use` block in a message, in order.
+fn mutating_tool_lines(message: &serde_json::Value) -> Vec<String> {
+    let Some(blocks) = message["content"].as_array() else {
+        return Vec::new();
+    };
+    let mut lines = Vec::new();
+    for b in blocks {
+        if b["type"] != "tool_use" {
+            continue;
+        }
+        let name = b["name"].as_str().unwrap_or("");
+        let input = &b["input"];
+        let primary = match name {
+            "Edit" | "Write" | "MultiEdit" => input["file_path"].as_str(),
+            "NotebookEdit" => input["notebook_path"].as_str(),
+            "Bash" => input["command"]
+                .as_str()
+                .filter(|cmd| is_mutating_shell(cmd)),
+            _ => None,
+        };
+        if let Some(arg) = primary {
+            lines.push(tool_line(name, arg));
+        }
+    }
+    lines
+}
 
+/// Session files sitting directly in each project directory, sorted.
+///
+/// Claude Code also writes nested `subagents/` and `subagents/workflows/`
+/// transcripts, and those are deliberately skipped: they are
+/// machine-to-machine traffic, not conversations the user had. Importing
+/// them would bury real answers under agent chatter.
+fn session_files(root: &Path) -> Result<Vec<(String, PathBuf)>, ImportError> {
     let projects = std::fs::read_dir(root)
         .map_err(|e| ImportError::Root(format!("{}: {e}", root.display())))?;
-
-    // Sorted so a run is reproducible and progress reads sensibly.
-    let mut files: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
+    let mut files: Vec<(String, PathBuf)> = Vec::new();
     for p in projects.flatten() {
         if !p.path().is_dir() {
             continue;
@@ -167,108 +140,152 @@ pub fn import_sessions(
         };
         for f in entries.flatten() {
             let path = f.path();
-            if path.extension().is_some_and(|e| e == "jsonl") {
-                files.entry(label.clone()).or_default().push(path);
+            if path.is_file() && path.extension().is_some_and(|e| e == "jsonl") {
+                files.push((label.clone(), path));
             }
         }
     }
+    // Sorted so a run is reproducible and progress reads sensibly.
+    files.sort_by(|a, b| a.1.cmp(&b.1));
+    Ok(files)
+}
 
-    for (label, paths) in &files {
-        for path in paths {
-            let Ok(content) = std::fs::read_to_string(path) else {
-                continue;
-            };
-            stats.files_scanned += 1;
+/// Import one Claude Code session file, resuming from its cursor.
+///
+/// # Errors
+/// [`ImportError::Store`] if a write fails.
+pub fn import_session_file(
+    store: &SqlCipherBrainStore,
+    path: &Path,
+    fallback_label: &str,
+    deadline: Option<Instant>,
+    stats: &mut ImportStats,
+) -> Result<FileOutcome, ImportError> {
+    let src_path = path.to_string_lossy().into_owned();
+    import_file(store, path, deadline, stats, |line_no, line, stats| {
+        let Ok(rec) = serde_json::from_str::<serde_json::Value>(line) else {
+            stats.malformed_lines += 1;
+            return Ok(true);
+        };
+        stats.records_read += 1;
 
-            for line in content.lines() {
-                if line.trim().is_empty() {
-                    continue;
-                }
-                let Ok(rec) = serde_json::from_str::<serde_json::Value>(line) else {
-                    stats.malformed_lines += 1;
-                    continue;
-                };
-                stats.records_read += 1;
-
-                let kind = rec["type"].as_str().unwrap_or("");
-                if kind != "user" && kind != "assistant" {
-                    continue;
-                }
-                let text = text_of(&rec["message"]);
-                if text.is_empty() {
-                    stats.skipped_no_text += 1;
-                    continue;
-                }
-                let Some(ts_us) = rec["timestamp"].as_str().and_then(parse_ts_us) else {
-                    stats.skipped_no_text += 1;
-                    continue;
-                };
-
-                let branch = rec["gitBranch"].as_str().unwrap_or("");
-                let cwd = rec["cwd"].as_str().unwrap_or("");
-                let title = format!("{label} · {kind}");
-
-                // The same context header the capture path prepends
-                // (ADR-0010 §1.3), so Tier-1 extraction and FTS5 see the
-                // project and branch, not only the prose.
-                let header = format!("[app=claude-code | title={title} | url={cwd}#{branch}]\n");
-
-                let event = Event {
-                    id: EventId(0),
-                    ts_us,
-                    app_bundle_id: Some("com.anthropic.claude-code".to_string()),
-                    window_title: Some(title),
-                    url: if cwd.is_empty() {
-                        None
-                    } else {
-                        Some(cwd.to_string())
-                    },
-                    text: format!("{header}{text}"),
-                    embedding: None,
-                    summary: None,
-                    entities: None,
-                    episode_id: None,
-                    cascade_reason: 0,
-                    keyframe_blob: None,
-                    tab_id: None,
-                };
-                store
-                    .put_event_with_source(&event, mci_brain::EventSource::TranscriptImport)
-                    .map_err(|e| ImportError::Store(e.to_string()))?;
-                stats.events_written += 1;
-            }
-            on_progress(&stats);
+        let kind = rec["type"].as_str().unwrap_or("");
+        let role = match kind {
+            "user" => Role::User,
+            "assistant" => Role::Assistant,
+            _ => return Ok(true),
+        };
+        if rec["isSidechain"].as_bool() == Some(true) {
+            stats.skipped_sidechain += 1;
+            return Ok(true);
         }
-    }
+        if rec["isMeta"].as_bool() == Some(true) {
+            stats.skipped_meta += 1;
+            return Ok(true);
+        }
 
+        let text = text_of(&rec["message"]);
+        let tool_lines = if role == Role::Assistant {
+            mutating_tool_lines(&rec["message"])
+        } else {
+            Vec::new()
+        };
+        if text.is_empty() && tool_lines.is_empty() {
+            stats.skipped_no_text += 1;
+            return Ok(true);
+        }
+        let Some(ts_us) = rec["timestamp"].as_str().and_then(parse_ts_us) else {
+            stats.skipped_no_text += 1;
+            return Ok(true);
+        };
+
+        let cwd = rec["cwd"].as_str().unwrap_or("");
+        let label = if cwd.is_empty() {
+            fallback_label
+        } else {
+            transcript::basename(cwd)
+        };
+        let ctx = EventContext {
+            agent: Agent::ClaudeCode,
+            label,
+            cwd,
+            branch: rec["gitBranch"].as_str().unwrap_or(""),
+            session: rec["sessionId"].as_str().unwrap_or(""),
+            src_path: &src_path,
+            line_no,
+        };
+
+        if !text.is_empty() {
+            if role == Role::User && is_injected_user_text(&text) {
+                stats.skipped_injected += 1;
+            } else {
+                write_event(store, &ctx.event(role, ts_us, &text), role, stats)?;
+            }
+        }
+        if !tool_lines.is_empty() {
+            let body = tool_lines.join("\n");
+            write_event(
+                store,
+                &ctx.event(Role::Tool, ts_us, &body),
+                Role::Tool,
+                stats,
+            )?;
+        }
+        Ok(true)
+    })
+}
+
+/// Import every session transcript under `root`, resuming each file from
+/// its stored cursor, stopping at `deadline` if one is given.
+///
+/// # Errors
+/// [`ImportError::Root`] if the transcript directory cannot be read;
+/// [`ImportError::Store`] if a write fails.
+pub fn import_sessions_incremental(
+    store: &SqlCipherBrainStore,
+    root: &Path,
+    deadline: Option<Instant>,
+    mut on_progress: impl FnMut(&ImportStats),
+) -> Result<ImportStats, ImportError> {
+    let mut stats = ImportStats::default();
+    let files = session_files(root)?;
+    let paths: Vec<PathBuf> = files.iter().map(|(_, p)| p.clone()).collect();
+    let labels: std::collections::HashMap<&Path, &str> = files
+        .iter()
+        .map(|(label, p)| (p.as_path(), label.as_str()))
+        .collect();
+    import_files(&paths, deadline, &mut stats, |path, stats| {
+        let label = labels.get(path).copied().unwrap_or("");
+        let outcome = import_session_file(store, path, label, deadline, stats)?;
+        on_progress(stats);
+        Ok(outcome)
+    })?;
     Ok(stats)
+}
+
+/// Import every session transcript under `root`.
+///
+/// Incremental: a file already imported to its end is not read again
+/// unless it changed. Call [`crate::transcript::ImportStats`]'s
+/// `files_unchanged` to see how many were skipped. To force a full
+/// re-import, clear the cursors first with
+/// `SqlCipherBrainStore::clear_import_cursors`.
+///
+/// # Errors
+/// [`ImportError::Root`] if the transcript directory cannot be read;
+/// [`ImportError::Store`] if a write fails.
+pub fn import_sessions(
+    store: &SqlCipherBrainStore,
+    root: &Path,
+    on_progress: impl FnMut(&ImportStats),
+) -> Result<ImportStats, ImportError> {
+    import_sessions_incremental(store, root, None, on_progress)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use mci_core::crypto::DbKey;
-
-    #[test]
-    fn timestamps_parse_to_microseconds() {
-        // 2024-01-01T00:00:00Z = 1_704_067_200 s
-        assert_eq!(
-            parse_ts_us("2024-01-01T00:00:00.000Z"),
-            Some(1_704_067_200_000_000)
-        );
-        assert_eq!(parse_ts_us("1970-01-01T00:00:00Z"), Some(0));
-    }
-
-    #[test]
-    fn malformed_timestamps_are_rejected_not_guessed() {
-        // A wrong timestamp is worse than a dropped record: it sorts the
-        // event into the wrong day and quietly corrupts any review of it.
-        assert_eq!(parse_ts_us(""), None);
-        assert_eq!(parse_ts_us("not-a-date"), None);
-        assert_eq!(parse_ts_us("2024-13-01T00:00:00Z"), None, "month 13");
-        assert_eq!(parse_ts_us("2024-01-32T00:00:00Z"), None, "day 32");
-        assert_eq!(parse_ts_us("2024-01-01T25:00:00Z"), None, "hour 25");
-    }
 
     #[test]
     fn only_text_blocks_survive() {
@@ -295,11 +312,38 @@ mod tests {
         // index would be the same noise that makes grep useless.
         let m = serde_json::json!({
             "content": [
-                {"type": "tool_use", "name": "Read"},
+                {"type": "tool_use", "name": "Read", "input": {"file_path": "/x"}},
                 {"type": "thinking", "thinking": "x"},
             ]
         });
         assert!(text_of(&m).is_empty(), "tool traffic must not be indexed");
+        assert!(
+            mutating_tool_lines(&m).is_empty(),
+            "a Read is not a mutation"
+        );
+    }
+
+    #[test]
+    fn mutating_calls_become_one_line_each() {
+        let m = serde_json::json!({
+            "content": [
+                {"type": "tool_use", "name": "Read", "input": {"file_path": "/r"}},
+                {"type": "tool_use", "name": "Edit", "input": {"file_path": "/a/b.rs", "old_string": "x", "new_string": "y"}},
+                {"type": "tool_use", "name": "Bash", "input": {"command": "git status"}},
+                {"type": "tool_use", "name": "Bash", "input": {"command": "git add -A && git commit -m \"feat: z\""}},
+                {"type": "tool_use", "name": "NotebookEdit", "input": {"notebook_path": "/n.ipynb"}},
+                {"type": "tool_use", "name": "Write", "input": {"file_path": "/w.md", "content": "..."}},
+            ]
+        });
+        assert_eq!(
+            mutating_tool_lines(&m),
+            vec![
+                "Edit /a/b.rs",
+                "Bash git add -A && git commit -m \"feat: z\"",
+                "NotebookEdit /n.ipynb",
+                "Write /w.md",
+            ]
+        );
     }
 
     #[test]
@@ -308,14 +352,15 @@ mod tests {
         // subagents/ and subagents/workflows/. They are not conversations
         // the user had, and importing them buries real answers under
         // machine chatter.
-        let dir = std::env::temp_dir().join("mci-import-nesting-test");
-        let _ = std::fs::remove_dir_all(&dir);
-        let proj = dir.join("-Users-someone");
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let proj = dir.path().join("-Users-someone");
         std::fs::create_dir_all(proj.join("subagents/workflows/wf_x")).expect("mkdir");
 
         let rec = |t: &str| {
             format!(
-                r#"{{"type":"user","timestamp":"2024-01-01T00:00:00Z","cwd":"/x","gitBranch":"main","message":{{"content":[{{"type":"text","text":"{t}"}}]}}}}"#
+                "{{\"type\":\"user\",\"timestamp\":\"2024-01-01T00:00:00Z\",\"cwd\":\"/x\",\
+                 \"gitBranch\":\"main\",\"sessionId\":\"s\",\
+                 \"message\":{{\"content\":[{{\"type\":\"text\",\"text\":\"{t}\"}}]}}}}\n"
             )
         };
         std::fs::write(proj.join("session.jsonl"), rec("real conversation")).expect("w1");
@@ -326,12 +371,17 @@ mod tests {
         .expect("w2");
 
         let key = DbKey::generate().expect("csprng");
-        let store = SqlCipherBrainStore::new(&dir.join("b.sqlite"), &key).expect("store");
-        let stats = import_sessions(&store, &dir, |_| {}).expect("import");
+        let store = SqlCipherBrainStore::new(&dir.path().join("b.sqlite"), &key).expect("store");
+        let stats = import_sessions(&store, dir.path(), |_| {}).expect("import");
 
         assert_eq!(stats.files_scanned, 1, "only the top-level session counts");
         assert_eq!(stats.events_written, 1);
-        let _ = std::fs::remove_dir_all(&dir);
+
+        // Second pass over the same root: nothing to read, nothing to write.
+        let again = import_sessions(&store, dir.path(), |_| {}).expect("import");
+        assert_eq!(again.files_scanned, 0);
+        assert_eq!(again.files_unchanged, 1);
+        assert_eq!(again.events_written, 0);
     }
 
     #[test]

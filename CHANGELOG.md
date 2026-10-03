@@ -5,6 +5,24 @@ commits are intentionally omitted from release notes.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-27
+
+### Handoff For Your Agents
+
+- Every Claude Code and Codex session now starts with a short, cited handoff
+  packet for the project it opened in: where you stopped, next step, goal,
+  decisions, what to avoid, files touched, git state. `mci-agent handoff`
+  compiles it from the transcripts already on this Mac; hooks deliver it.
+- Import Codex sessions as well as Claude Code sessions, incrementally, and
+  keep importing while the app runs (every 60 seconds). Tool calls that
+  changed files or committed are stored as compact evidence lines.
+- `mci-agent today` writes the day's standup across projects from
+  transcripts, git and screen time.
+- `mci-agent connect --all` installs the SessionStart hooks for both agents
+  and a background refresh job; `disconnect --all` removes only those.
+  `doctor` shows transcript freshness and when each agent last got a packet.
+- One-command install (`scripts/install.sh`) that needs no screen permission.
+
 ### Screenshot text
 
 - Improve small screenshot text with a bundled, offline open-source OCR model

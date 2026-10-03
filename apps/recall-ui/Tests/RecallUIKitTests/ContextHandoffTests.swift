@@ -4,6 +4,20 @@ import Testing
 
 @Suite("Context handoff")
 struct ContextHandoffTests {
+    @Test("cancelled context requests terminate their local child promptly")
+    func cancellationTerminatesChild() async throws {
+        let command = ContextHandoffCommand(executableURL: URL(fileURLWithPath: "/bin/sleep"), arguments: ["5"])
+        let task = Task { try await ContextHandoffExporter.run(command: command, timeoutSeconds: 10) }
+        try await Task.sleep(for: .milliseconds(100))
+        let cancelledAt = Date()
+        task.cancel()
+        do {
+            _ = try await task.value
+            Issue.record("Cancelled child returned successfully")
+        } catch is CancellationError {
+            #expect(Date().timeIntervalSince(cancelledAt) < 2)
+        }
+    }
     @Test("builds a bounded Markdown command for the bundled agent")
     func buildsBoundedMarkdownCommand() throws {
         let executable = URL(fileURLWithPath: "/Applications/Hippocampus.app/Contents/MacOS/recall-ui")
