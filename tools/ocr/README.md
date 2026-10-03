@@ -12,6 +12,15 @@ queue prevents accumulating workers. This intentionally trades additional CPU,
 memory and latency for small-text accuracy. Native capture retains up to 3840
 pixels per edge. Existing stored transcripts are not silently rewritten.
 
+The worker also bounds model preprocessing: a narrow capture region cannot
+expand either detector-input edge beyond 3840 pixels. Normal short-side
+upscaling is preserved when it fits that cap; boxes still refer to the original
+pixels. An oversized recognition batch fails the whole reading before its
+padded tensor is allocated, so candidates are never silently dropped before
+privacy review. These limits do not establish a total-process memory bound.
+The per-engine preprocessing adapters target the pinned RapidOCR version;
+dependency upgrades must rerun the real geometry and small-text regressions.
+
 ## Build on macOS
 
 Use Python 3.12 and an isolated environment. These commands download public
