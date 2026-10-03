@@ -4,8 +4,8 @@ import XCTest
 
 /// The Swift app and `mci-agent connect --all` (`apps/agent/src/client_hooks.rs`)
 /// edit the same `~/.claude/settings.json` group. These tests pin the shape the
-/// app writes to the shape the Rust side writes, and the two markers both sides
-/// recognise. Everything runs in a sandbox; the real home is never read.
+/// app's non-importing variant and the two markers both sides recognise.
+/// Everything runs in a sandbox; the real home is never read.
 final class SessionContextInstallerTests: XCTestCase {
 
     private var sandbox: URL!
@@ -90,7 +90,25 @@ final class SessionContextInstallerTests: XCTestCase {
 
     // MARK: - Enable
 
-    func testEnableWritesTheShapeTheRustInstallerWrites() throws {
+    func testPreviousImportingHookCanBeReviewedOrRemoved() throws {
+        let previous = ["hooks": ["SessionStart": [userHook, group(command: rustCommand)]]]
+        try write(previous)
+        XCTAssertEqual(try installer.claudeStatus(), .configured)
+        try installer.setClaudeEnabled(true)
+        let enabled = try sessionStarts()
+        XCTAssertEqual(enabled.count, 2)
+        XCTAssertEqual(enabled[0]["matcher"] as? String, "startup")
+        let handlers = try XCTUnwrap(enabled[1]["hooks"] as? [[String: Any]])
+        XCTAssertEqual(handlers[0]["command"] as? String, rustCommand + " --no-refresh")
+
+        try write(previous)
+        try installer.setClaudeEnabled(false)
+        let remaining = try sessionStarts()
+        XCTAssertEqual(remaining.count, 1)
+        XCTAssertEqual(remaining[0]["matcher"] as? String, "startup")
+    }
+
+    func testEnableSharesExistingMemoryWithoutImportingTranscripts() throws {
         try installer.setClaudeEnabled(true)
 
         let starts = try sessionStarts()
@@ -100,8 +118,8 @@ final class SessionContextInstallerTests: XCTestCase {
         XCTAssertEqual(handlers.count, 1)
         XCTAssertEqual(handlers[0]["type"] as? String, "command")
         XCTAssertEqual(handlers[0]["timeout"] as? Int, 10)
-        XCTAssertEqual(handlers[0]["command"] as? String, rustCommand)
-        XCTAssertEqual(installer.claudeCommand, rustCommand)
+        XCTAssertEqual(handlers[0]["command"] as? String, rustCommand + " --no-refresh")
+        XCTAssertEqual(installer.claudeCommand, rustCommand + " --no-refresh")
         XCTAssertEqual(handlers[0].count, 3, "no extra keys the Rust side would not write")
         XCTAssertTrue(rustCommand.contains(SessionContextInstaller.handoffMarker))
         XCTAssertFalse(rustCommand.contains(SessionContextHook.flag))
@@ -119,7 +137,7 @@ final class SessionContextInstallerTests: XCTestCase {
             .replacingOccurrences(of: "'", with: "'\"'\"'")
         let db = sandbox.appendingPathComponent("db's.sqlite").path
             .replacingOccurrences(of: "'", with: "'\"'\"'")
-        XCTAssertEqual(odd.claudeCommand, "'\(agent)' handoff --format claude-hook --db-path '\(db)'")
+        XCTAssertEqual(odd.claudeCommand, "'\(agent)' handoff --format claude-hook --db-path '\(db)' --no-refresh")
     }
 
     func testEnableOverTheLegacyGroupReplacesItInPlace() throws {

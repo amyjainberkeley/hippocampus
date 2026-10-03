@@ -52,10 +52,11 @@ public struct SessionContextInstaller: Sendable {
     /// `SessionContextHook.flag` identifies a SessionStart group as ours.
     public static let handoffMarker = "handoff --format claude-hook"
 
-    /// Byte-compatible with the command `mci-agent connect --all` writes:
-    /// only the two paths are quoted, the fixed words are bare.
+    /// Share stored memory without importing raw transcripts. The full CLI
+    /// setup uses the same marker but may explicitly enable its import path.
+    /// Only the two paths are quoted; the fixed words are bare.
     public var claudeCommand: String {
-        "\(Self.shellQuote(agentURL.path)) handoff --format claude-hook --db-path \(Self.shellQuote(dbURL.path))"
+        "\(Self.shellQuote(agentURL.path)) handoff --format claude-hook --db-path \(Self.shellQuote(dbURL.path)) --no-refresh"
     }
 
     /// The command installed before the handoff command existed. Recognised so
@@ -76,6 +77,12 @@ public struct SessionContextInstaller: Sendable {
 
     private var claudeGroup: [String: Any] { Self.group(command: claudeCommand) }
     private var legacyClaudeGroup: [String: Any] { Self.group(command: legacyClaudeCommand) }
+    /// Previously written by the desktop, and still written by full CLI setup.
+    /// Recognise it for status, explicit conversion, and removal without
+    /// automatically editing an existing user's configuration during upgrade.
+    private var importingClaudeGroup: [String: Any] {
+        Self.group(command: "\(Self.shellQuote(agentURL.path)) handoff --format claude-hook --db-path \(Self.shellQuote(dbURL.path))")
+    }
 
     private static func group(command: String) -> [String: Any] {
         ["matcher": SessionContextHook.sources.joined(separator: "|"), "hooks": [
@@ -140,7 +147,7 @@ public struct SessionContextInstaller: Sendable {
         return starts
     }
 
-    /// The one group that is ours, in either canonical shape. A group carrying
+    /// The one group that is ours, in a known canonical shape. A group carrying
     /// our marker in any other shape has been edited by hand and is a conflict,
     /// as is a second group of ours.
     private func ownGroupIndex(_ starts: [[String: Any]]) throws -> Int? {
@@ -149,7 +156,8 @@ public struct SessionContextInstaller: Sendable {
             let handlers = group["hooks"] as? [[String: Any]] ?? []
             guard handlers.contains(where: { Self.isOurs($0["command"] as? String) }) else { continue }
             let dictionary = NSDictionary(dictionary: group)
-            guard dictionary.isEqual(to: claudeGroup) || dictionary.isEqual(to: legacyClaudeGroup),
+            guard dictionary.isEqual(to: claudeGroup) || dictionary.isEqual(to: legacyClaudeGroup)
+                    || dictionary.isEqual(to: importingClaudeGroup),
                   found == nil else {
                 throw SessionContextInstallError.conflict
             }

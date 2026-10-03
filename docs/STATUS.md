@@ -2,7 +2,7 @@
 
 _Updated on 2026-10-03; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `fb210b4`
+Audited code baseline: `439d058`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -11,6 +11,14 @@ release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
 
 ## October 3 Capture Recovery, Onboarding, And Project Handoff
+
+The desktop transcript-consent checkpoint makes background daemon import
+default-off, forces it off for desktop launches, and separates MCP registration
+from CLI hook/importer setup. Desktop-created Claude hooks use existing memory
+with `--no-refresh`. Previously configured hooks/importers are preserved and
+still require owner-specific review before upgrade. There is no desktop
+automatic transcript-import preference yet. Qualification is recorded in
+[the consent audit](audits/2026-10-03-transcript-consent.md).
 
 The [OCR repair checkpoint](audits/2026-10-03-ocr-quality.md) adds sharper saved
 images, confidence filtering after the complete privacy scan, screenshot zoom,
@@ -55,8 +63,8 @@ This is interface verification, not proof of real-memory retrieval.
 **Installed/live state:** The owner app remains the notarized `f4f7bf1` build;
 this source update has not been installed. Screen Recording is off in macOS;
 enabling it reached the owner Touch ID prompt. No fresh live capture, new
-onboarding, or real-memory handoff is claimed. A newer daemon's transcript
-import consent, the shortcut collision with Superapp, controlled upgrade and
+onboarding, or real-memory handoff is claimed. Existing transcript importer
+configuration, the shortcut collision with Superapp, controlled upgrade and
 rollback, signed release qualification, and public download readiness remain
 open. No private memory is included in this checkpoint.
 
@@ -80,9 +88,10 @@ cited packet compiled from what the user's agents already did on this Mac.
   reads nothing and writes nothing in 1.2 s.
 - `refresh` runs the incremental import plus Tier-1 extraction, episode
   segmentation and embedding for new events within a time budget. The
-  capture writer (`--drain-stdin`) now runs it every 60 s on its own store
-  handle; the CLI and the hooks skip with a printed reason when the app holds
-  the writer lease.
+  capture writer (`--drain-stdin`) supports a 60 s refresh on its own store
+  handle, now gated behind explicit daemon opt-in and disabled by desktop
+  launches. The explicit CLI and full CLI hooks skip with a printed reason
+  when the app holds the writer lease.
 - `handoff --cwd DIR` compiles the packet for that project (root from
   `git rev-parse --show-toplevel`, else the cwd): where you stopped, next
   step, goal, decisions, avoid, open questions, files touched, git, sources.
@@ -96,8 +105,9 @@ cited packet compiled from what the user's agents already did on this Mac.
 - `connect --all` installs the SessionStart hooks in `~/.claude/settings.json`
   and `~/.codex/hooks.json` and a per-user LaunchAgent
   (`ai.hippocampus.refresh`, every 300 s); `disconnect --all` removes only
-  those. The Swift `SessionContextInstaller` recognises and writes the same
-  group, so the app and the CLI cannot double-install.
+  those. The Swift `SessionContextInstaller` recognises that group and the
+  earlier legacy shape. New desktop hooks add `--no-refresh`; explicit enable
+  converts the previous group in place, and removal accepts either shape.
 - `doctor` adds `transcripts` (files newer than their import cursor),
   `delivery` (hook installed, last packet per client) and `refresh agent`.
 - `scripts/install.sh` downloads the signed CLI from a GitHub release,
