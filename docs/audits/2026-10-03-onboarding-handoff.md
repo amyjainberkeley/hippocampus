@@ -114,3 +114,12 @@ test fixtures, fixed test key material, a published archive checksum, or the
 Chromium extension's public key. No newly introduced secret match was found.
 This is a scoped publication check, not a claim that the app has no security
 defects. The unrelated untracked `release-cli/` directory is excluded.
+
+Source checkpoint `75e5e38b17cbd3ca265c684dcdd6c1cc5d124042` was pushed to
+`codex/hippocampus-onboarding-handoff-20261003` and its exact remote SHA verified.
+[Draft PR #27](https://github.com/amyjainberkeley/hippocampus/pull/27) targets the
+existing public development branch. Neither `main` nor any release tag moved.
+The final publication keeps that public base's existing hosted-runner Vision
+test policy; the older handoff branch had omitted it. Local hardware capture
+qualification is still required. This reconciliation changes no production
+OCR code or timeout.

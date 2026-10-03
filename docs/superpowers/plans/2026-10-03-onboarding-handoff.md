@@ -30,4 +30,4 @@ Native keyboard-first controls, quiet system materials, one primary action per s
 - [x] Add project-scoped command construction and a native handoff preview using the existing compiler with `--no-refresh`; validate paths and failures.
 - [x] Run affected Swift suites/builds in an allowlisted environment and inspect synthetic native handoff UI. Keep real memory out of artifacts. Full first-run UI qualification remains separate.
 - [ ] Verify permitted live capture, retrieval and handoff separately. Record blockers rather than substituting mock proof.
-- [ ] Publish verified source checkpoint to canonical GitHub with exact remote SHA; keep signed installation/public release qualification separate.
+- [x] Publish verified source checkpoint to canonical GitHub with exact remote SHA; keep signed installation/public release qualification separate. Source `75e5e38b17cbd3ca265c684dcdd6c1cc5d124042` was verified on the remote; draft PR #27 targets the existing public development branch.
