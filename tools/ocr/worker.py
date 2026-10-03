@@ -43,16 +43,22 @@ def load_engine(model_dir):
         if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
             raise ValueError('missing or invalid bundled OCR model')
     from rapidocr import RapidOCR
+    from rapidocr.ch_ppocr_det.utils import DetPreProcess
     from rapidocr.utils.download_file import DownloadFile
     # An upstream missing-model fallback must never turn into a runtime download.
     def deny_download(*args, **kwargs):
         raise ValueError('runtime model download forbidden')
     DownloadFile.run = deny_download
-    return RapidOCR(params={
+    engine = RapidOCR(params={
         # Preserve every recognition candidate for the post-OCR privacy scan.
         'Global.text_score': 0.0,
         'Global.log_level': 'critical', 'Global.use_cls': False,
         'Global.max_side_len': MAX_EDGE,
+        # The pinned upstream minimum-side resize can exceed max_side_len
+        # afterwards on thin ROIs. Preserve originals for crops/box mapping;
+        # the bounded detector preprocessor below owns resizing instead.
+        'Global.use_preprocess_img': False,
+        'Global.use_vertical_padding': False,
         'Global.model_root_dir': str(model_dir),
         'Det.model_path': str(model_dir / 'PP-OCRv6_det_small.onnx'),
         'Rec.model_path': str(model_dir / 'PP-OCRv6_rec_small.onnx'),
@@ -62,6 +68,42 @@ def load_engine(model_dir):
         'EngineConfig.onnxruntime.intra_op_num_threads': 1,
         'EngineConfig.onnxruntime.inter_op_num_threads': 1,
     })
+
+    class BoundedDetectorPreProcess(DetPreProcess):
+        def resize(self, image):
+            import cv2
+            height, width = image.shape[:2]
+            if not (0 < width <= MAX_EDGE and 0 < height <= MAX_EDGE):
+                raise ValueError('invalid detector input dimensions')
+            # Match normal short-side upscaling, but never let a narrow region
+            # expand either edge past the capture cap. The model needs /32.
+            scale = min(max(1.0, self.limit_side_len / min(height, width)),
+                        MAX_EDGE / max(height, width))
+            size = tuple(max(32, min(MAX_EDGE, round(int(n * scale) / 32) * 32))
+                         for n in (width, height))
+            return cv2.resize(image, size)
+
+    detector = engine.text_det
+    detector.get_preprocess = lambda _max_wh: BoundedDetectorPreProcess(
+        detector.limit_side_len, detector.limit_type, detector.mean, detector.std)
+
+    recognizer = engine.text_rec
+    resize_recognition = recognizer.resize_norm_img
+
+    def bounded_recognition(image, max_wh_ratio):
+        # RapidOCR pads the whole recognition batch to this width. Refuse the
+        # whole reading before allocation rather than drop candidates that the
+        # privacy scan must see. ValueError propagates to the worker's failure
+        # response; it is not upstream's empty/partial-result exception.
+        model_height = recognizer.rec_image_shape[1]
+        if (not math.isfinite(max_wh_ratio) or max_wh_ratio <= 0
+                or not 0 < model_height <= MAX_EDGE
+                or not 0 < int(model_height * max_wh_ratio) <= MAX_EDGE):
+            raise ValueError('recognition input exceeds local OCR bounds')
+        return resize_recognition(image, max_wh_ratio)
+
+    recognizer.resize_norm_img = bounded_recognition
+    return engine
 
 
 def encode_lines(texts, scores, boxes, width, height):

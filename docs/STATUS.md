@@ -2,7 +2,7 @@
 
 _Updated on 2026-10-03; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `439d058`
+Audited code baseline: `d5ce2a3`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -29,6 +29,18 @@ pass. The full helper suite still has eight assertions in three Apple Vision
 fallback tests; an isolated public-baseline run reproduces all eight without
 changing budgets or skipping tests. This is a source checkpoint, not an
 installed update or a public-release qualification.
+
+The [OCR resize follow-up](audits/2026-10-03-ocr-resize-bounds.md) prevents valid
+narrow capture regions from expanding past the 3840-pixel detector-input cap.
+Oversized recognition batches fail the whole reading before allocation rather
+than publish incomplete candidates. All 15 worker/build tests pass, including
+the reproduced resize failures, narrow-text coordinates, complete privacy
+candidates and exact synthetic chat. This is a model-input bound, not a
+total-process memory guarantee or proof of arbitrary screenshot accuracy.
+The rebuilt frozen worker's first invocation hit the unchanged 30-second
+deadline. Subsequent warm checks passed all four blank strips, 10/10 chat lines
+and 8/8 code lines. Cold-start qualification in the signed app remains open;
+the warm successes are not reported as a clean first-launch result.
 
 Hippocampus is the standalone memory, recall, and MCI context product.
 Superapp is the separate OneKit-derived workspace. Keep their repositories,
