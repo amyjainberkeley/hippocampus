@@ -20,6 +20,9 @@ struct SessionContextPreferencesView: View {
             Text("Memory shared with an AI client may be sent to its model provider and retained in its session history. Hippocampus adds no network transmission.")
                 .font(PreferencesStyle.captionFont)
                 .foregroundStyle(.secondary)
+            Text("Registering MCP tools leaves session hooks and transcript importing unchanged. Choose session context separately below.")
+                .font(PreferencesStyle.captionFont)
+                .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 8) {
                 Text("Claude Code").font(.headline)
                 Text(claudeStatus).font(PreferencesStyle.captionFont)

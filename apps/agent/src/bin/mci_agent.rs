@@ -212,6 +212,10 @@ enum Mode {
     RegisterMcp {
         db_path: PathBuf,
     },
+    /// Register read-only tools without installing hooks or transcript refresh.
+    RegisterClients {
+        db_path: PathBuf,
+    },
     /// Register the read-only memory server with every detected local client,
     /// install the `SessionStart` handoff hooks, and load the refresh agent.
     ConnectAll {
@@ -359,6 +363,7 @@ fn parse_args(argv: &[String]) -> Args {
             }
             "--no-refresh" => handoff_no_refresh = true,
             "register-mcp" => mode_kind = ModeKind::RegisterMcp,
+            "register-clients" => mode_kind = ModeKind::RegisterClients,
             "connect" => mode_kind = ModeKind::ConnectAll,
             "disconnect" => mode_kind = ModeKind::DisconnectAll,
             "--no-refresh-agent" => refresh_agent = false,
@@ -550,6 +555,9 @@ fn parse_args(argv: &[String]) -> Args {
         ModeKind::RegisterMcp => Mode::RegisterMcp {
             db_path: resolved_db_path,
         },
+        ModeKind::RegisterClients => Mode::RegisterClients {
+            db_path: resolved_db_path,
+        },
         ModeKind::ConnectAll => Mode::ConnectAll {
             db_path: resolved_db_path,
             refresh_agent,
@@ -621,6 +629,7 @@ enum ModeKind {
     Handoff,
     Today,
     RegisterMcp,
+    RegisterClients,
     ConnectAll,
     DisconnectAll,
     Stats,
@@ -658,6 +667,8 @@ fn print_usage() {
         \x20 today                      print the daily packet: every project agents touched\n\
         \x20                            on a local day, with commits, files and screen time.\n\
         \x20 register-mcp               register Hippocampus in Claude Code's MCP settings\n\
+        \x20 register-clients           register read-only MCP tools; leave hooks and\n\
+        \x20                            transcript importing unchanged.\n\
         \x20 connect --all              register Hippocampus with detected Claude Code and\n\
         \x20                            Codex clients without serializing a database key,\n\
         \x20                            install the SessionStart handoff hooks in\n\
@@ -751,6 +762,9 @@ fn print_usage() {
         \x20                            w_sem=0.5, w_lex=0.3, w_rec=0.15, w_src=0.05.\n\
         \x20 MCI_BRIEFS_DISABLED        set to 1 to switch daily briefs off. The worker\n\
         \x20                            idles; `brief` refuses and says so.\n\
+        \x20 MCI_TRANSCRIPT_REFRESH_ENABLED set to 1 to opt a directly launched daemon\n\
+        \x20                            into local Claude/Codex transcript imports. Default OFF.\n\
+        \x20 MCI_TRANSCRIPT_REFRESH_DISABLED set to 1 to override that opt-in.\n\
         \x20 MCI_CRASH_REPORT_URL       HTTP endpoint for crash report uploads (e.g.\n\
         \x20                            http://127.0.0.1:3100/v1/crash-report).\n\
         \x20 MCI_CRASH_REPORT_OPTED_IN  set to 1 to enable crash report uploads.\n\
@@ -1467,6 +1481,10 @@ async fn run_agent(args: Args) -> ExitCode {
                 ExitCode::from(14)
             }
         },
+        Mode::RegisterClients { db_path } => match run_register_clients_cmd(&db_path) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
         Mode::ConnectAll {
             db_path,
             refresh_agent,
@@ -2059,6 +2077,24 @@ fn run_connect_all_cmd(db_path: &Path, refresh_agent: bool) -> Result<(), u8> {
     if claude_failed || codex_failed {
         Err(14)
     } else {
+        Ok(())
+    }
+}
+
+/// Desktop registration grants tool access only. Deliberately separate from
+/// `connect`: no hook resolution, transcript import, or launchd operation.
+fn run_register_clients_cmd(db_path: &Path) -> Result<(), u8> {
+    let registry = ClientRegistry::discover().map_err(|error| {
+        eprintln!("mci-agent register-clients: {error}");
+        14
+    })?;
+    let report = registry.connect_all(db_path);
+    let claude_failed = print_connect_receipt("claude-code", &report.claude, None);
+    let codex_failed = print_connect_receipt("codex", &report.codex, None);
+    if claude_failed || codex_failed {
+        Err(14)
+    } else {
+        println!("Session hooks and transcript refresh were not changed. Restart your clients to load the tools; context delivery has not been verified.");
         Ok(())
     }
 }
@@ -3750,16 +3786,14 @@ fn spawn_mcp_aggregator(
 /// blocking pool so frame ingest keeps turning. No embedder is handed in:
 /// the idle-batch worker embeds every new event within seconds anyway, and
 /// the Core ML embedder is meant to be single-flight. Never loads Qwen.
-/// `MCI_TRANSCRIPT_REFRESH_DISABLED=1` switches it off.
+/// Off by default. Requires `MCI_TRANSCRIPT_REFRESH_ENABLED=1`;
+/// `MCI_TRANSCRIPT_REFRESH_DISABLED=1` overrides that opt-in.
 fn spawn_transcript_refresh_worker(
     store: Arc<mci_brain::SqlCipherBrainStore>,
     shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
     if !mci_agent::refresh::transcript_refresh_enabled_from_env() {
-        eprintln!(
-            "mci-agent: transcript refresh disabled ({}=1)",
-            mci_agent::refresh::TRANSCRIPT_REFRESH_DISABLED_ENV
-        );
+        eprintln!("mci-agent: transcript refresh off (explicit opt-in required; disable switch takes precedence)");
         return;
     }
     let schedule = mci_agent::refresh::RefreshSchedule::default();

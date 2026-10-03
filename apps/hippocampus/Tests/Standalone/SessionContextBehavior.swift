@@ -45,20 +45,21 @@ check(!(String(data: installed, encoding: .utf8)!.contains("KEY_HEX")), "No seri
 let mode = try FileManager.default.attributesOfItem(atPath: settings.path)[.posixPermissions] as! NSNumber
 check(mode.intValue == 0o600, "Private settings remain private")
 try FileManager.default.createDirectory(at: executable.deletingLastPathComponent(), withIntermediateDirectories: true)
-try Data("#!/bin/sh\nprintf '%s\\n' \"$1\" \"$2\" \"$3\" \"$4\" \"$5\"\n".utf8).write(to: installer.agentURL)
+try Data("#!/bin/sh\nprintf '%s\\n' \"$@\"\n".utf8).write(to: installer.agentURL)
 try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: installer.agentURL.path)
 let commandCheck = Process()
 commandCheck.executableURL = URL(fileURLWithPath: "/bin/sh")
 commandCheck.arguments = ["-c", installer.claudeCommand]
+commandCheck.environment = ["HOME": sandbox.path, "PATH": "/usr/bin:/bin"]
 commandCheck.currentDirectoryURL = sandbox
 let commandOutput = Pipe()
 commandCheck.standardOutput = commandOutput
 try commandCheck.run()
 commandCheck.waitUntilExit()
 let commandText = String(decoding: commandOutput.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-check(commandCheck.terminationStatus == 0 && commandText == "handoff\n--format\nclaude-hook\n--db-path\n\(installer.dbURL.path)\n", "Shell quoting preserves all fixed arguments")
+check(commandCheck.terminationStatus == 0 && commandText == "handoff\n--format\nclaude-hook\n--db-path\n\(installer.dbURL.path)\n--no-refresh\n", "Shell quoting preserves all fixed arguments and prevents import")
 check(!FileManager.default.fileExists(atPath: sandbox.appendingPathComponent("bad").path), "Quoted app path cannot execute substitutions")
-check(installer.claudeCommand == "\(SessionContextInstaller.shellQuote(installer.agentURL.path)) handoff --format claude-hook --db-path \(SessionContextInstaller.shellQuote(installer.dbURL.path))", "Byte-compatible with mci-agent connect --all")
+check(installer.claudeCommand == "\(SessionContextInstaller.shellQuote(installer.agentURL.path)) handoff --format claude-hook --db-path \(SessionContextInstaller.shellQuote(installer.dbURL.path)) --no-refresh", "Desktop context sharing does not request transcript import")
 try installer.setClaudeEnabled(false)
 let restored = try JSONSerialization.jsonObject(with: Data(contentsOf: settings)) as! NSDictionary
 check(restored == (try JSONSerialization.jsonObject(with: original) as! NSDictionary), "Remove only our hook")

@@ -69,6 +69,7 @@ mci-agent init                    one-command setup: key, import, index, connect
 mci-agent handoff --cwd DIR       the packet for a project (markdown | json | claude-hook | codex-hook)
 mci-agent today [--date D]        the day's standup across projects
 mci-agent refresh                 import new transcript lines and index them (the hooks run this)
+mci-agent register-clients        register MCP tools without changing hooks or transcript import
 mci-agent connect --all           install the SessionStart hooks and MCP registration
 mci-agent disconnect --all        remove only what Hippocampus installed
 mci-agent doctor                  what is stored, what is connected, when each agent last got a packet
@@ -94,6 +95,15 @@ hook supplies context to Claude Code or Codex, that packet goes wherever the
 agent sends its context under its provider's terms. `mci-agent doctor` reports
 connection and delivery status; `disconnect --all` removes installed hooks.
 Use the app's data controls to manage retention and deletion.
+
+Desktop startup does not import local Claude/Codex transcripts. Desktop and
+onboarding tool registration leave any existing hooks and background importers
+untouched. Session context enabled in the app uses already stored memory
+(`--no-refresh`). The explicit CLI setup/import commands above retain their
+documented behavior. A directly launched daemon requires
+`MCI_TRANSCRIPT_REFRESH_ENABLED=1` to import transcripts periodically;
+`MCI_TRANSCRIPT_REFRESH_DISABLED=1` overrides that opt-in. The desktop has no
+automatic transcript-import preference yet and forces that daemon feature off.
 
 What it does not do: capture audio, log keystrokes, sync between machines, train on your data, or record apps you did not allow.
 

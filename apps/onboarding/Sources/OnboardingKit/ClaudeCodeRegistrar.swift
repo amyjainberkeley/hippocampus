@@ -2,13 +2,13 @@
 import Darwin
 import Foundation
 
-/// Protocol for the `mci-agent connect --all` invocation used by the
+/// Protocol for the `mci-agent register-clients` invocation used by the
 /// AI-tools onboarding slide. Behind a protocol so unit
 /// tests can swap a stub instead of spawning a real process.
 ///
 /// Production impl: `DefaultClaudeCodeRegistrar` finds `mci-agent` at
 /// the sibling path next to the onboarding executable and runs
-/// `mci-agent connect --all`, mirroring the wiring in
+/// `mci-agent register-clients`, mirroring the wiring in
 /// `StatusMenuView.connectAITools()` in HippocampusKit. We duplicate
 /// (not import) that logic because OnboardingKit deliberately has no
 /// dependency on HippocampusKit (each package builds in isolation per
@@ -48,7 +48,7 @@ public enum ClaudeCodeRegistrarError: Error, Equatable {
     }
 }
 
-/// Default registrar — spawns `mci-agent connect --all` as a child
+/// Default registrar — spawns `mci-agent register-clients` as a child
 /// process and captures stdout / stderr. The agent binary is expected
 /// to sit alongside the onboarding executable inside
 /// `Hippocampus.app/Contents/MacOS/`.
@@ -81,9 +81,9 @@ public struct DefaultClaudeCodeRegistrar: ClaudeCodeRegistrar {
     public var manualCommand: String {
         // Quote-stable across shells. The path embeds the user's home,
         // so we don't dare interpolate it into a `pbcopy`-friendly
-        // string; users can always type `mci-agent connect --all` once
+        // string; users can always type `mci-agent register-clients` once
         // it's on PATH.
-        "mci-agent connect --all"
+        "mci-agent register-clients"
     }
 
     public func register() async throws -> String {
@@ -96,7 +96,7 @@ public struct DefaultClaudeCodeRegistrar: ClaudeCodeRegistrar {
 
         let proc = ChildProcessEnvironment.makeProcess()
         proc.executableURL = agentURL
-        proc.arguments = ["connect", "--all"]
+        proc.arguments = ["register-clients"]
         let stdout = Pipe()
         let stderr = Pipe()
         proc.standardOutput = stdout
@@ -144,7 +144,7 @@ public struct DefaultClaudeCodeRegistrar: ClaudeCodeRegistrar {
 
         if proc.terminationStatus == 0 {
             if !out.isEmpty { return out }
-            return "Hippocampus connected the AI tools installed on this Mac."
+            return "The registration command returned no report. Client connection has not been verified."
         } else {
             throw ClaudeCodeRegistrarError.nonZeroExit(
                 code: proc.terminationStatus,

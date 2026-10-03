@@ -48,7 +48,9 @@ public struct AIToolConnector: Sendable {
         let stdout = Pipe()
         let stderr = Pipe()
         process.executableURL = agentURL
-        process.arguments = ["connect", "--all"]
+        // A distinct subcommand fails closed with older agents. A new flag on
+        // `connect` could be ignored, silently installing hooks and an importer.
+        process.arguments = ["register-clients"]
         process.standardOutput = stdout
         process.standardError = stderr
         do {

@@ -574,17 +574,25 @@ fn open_checked(db_path: &Path, key: &DbKey, passes: u32) -> Result<SqlCipherBra
 /// transcripts in the background.
 pub const TRANSCRIPT_REFRESH_DISABLED_ENV: &str = "MCI_TRANSCRIPT_REFRESH_DISABLED";
 
-/// Whether the daemon's periodic transcript refresh should run, given the
-/// kill switch's value. Unset or anything but `1` / `true` means yes.
+/// Explicit opt-in for a directly launched daemon. The desktop forces this
+/// off until it has a dedicated transcript importer consent/revocation UI.
+pub const TRANSCRIPT_REFRESH_ENABLED_ENV: &str = "MCI_TRANSCRIPT_REFRESH_ENABLED";
+
+/// Whether the daemon may import raw local AI transcripts. Missing/malformed
+/// consent is off; the existing disable switch always takes precedence.
 #[must_use]
-pub fn transcript_refresh_enabled(kill_switch: Option<&str>) -> bool {
-    !kill_switch.is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true"))
+pub fn transcript_refresh_enabled(consent: Option<&str>, kill_switch: Option<&str>) -> bool {
+    let enabled = |value: &str| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true");
+    consent.is_some_and(enabled) && !kill_switch.is_some_and(enabled)
 }
 
 /// [`transcript_refresh_enabled`] read from the process environment.
 #[must_use]
 pub fn transcript_refresh_enabled_from_env() -> bool {
     transcript_refresh_enabled(
+        std::env::var(TRANSCRIPT_REFRESH_ENABLED_ENV)
+            .ok()
+            .as_deref(),
         std::env::var(TRANSCRIPT_REFRESH_DISABLED_ENV)
             .ok()
             .as_deref(),
@@ -772,14 +780,31 @@ mod tests {
     }
 
     #[test]
+    fn daemon_refresh_requires_separate_explicit_consent() {
+        for consent in [
+            None,
+            Some(""),
+            Some("0"),
+            Some("false"),
+            Some("yes"),
+            Some("invalid"),
+        ] {
+            assert!(!transcript_refresh_enabled(consent, None));
+        }
+        for consent in ["1", "true", " TRUE "] {
+            assert!(transcript_refresh_enabled(Some(consent), None));
+        }
+    }
+
+    #[test]
     fn the_kill_switch_only_trips_on_one_or_true() {
-        assert!(transcript_refresh_enabled(None));
-        assert!(transcript_refresh_enabled(Some("")));
-        assert!(transcript_refresh_enabled(Some("0")));
-        assert!(transcript_refresh_enabled(Some("no")));
-        assert!(!transcript_refresh_enabled(Some("1")));
-        assert!(!transcript_refresh_enabled(Some("true")));
-        assert!(!transcript_refresh_enabled(Some(" TRUE ")));
+        for disabled in [None, Some(""), Some("0"), Some("no")] {
+            assert!(transcript_refresh_enabled(Some("1"), disabled));
+            assert!(!transcript_refresh_enabled(None, disabled));
+        }
+        for disabled in ["1", "true", " TRUE "] {
+            assert!(!transcript_refresh_enabled(Some("1"), Some(disabled)));
+        }
     }
 
     fn empty_roots(dir: &Path) -> RefreshRoots {

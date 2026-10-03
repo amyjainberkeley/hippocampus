@@ -60,6 +60,55 @@ fn json(path: &Path) -> serde_json::Value {
 }
 
 #[test]
+fn register_clients_preserves_hooks_and_refresh_configuration() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let codex_home = home.join("codex-home");
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    std::fs::create_dir_all(&codex_home).unwrap();
+    let launch_agents = home.join("Library/LaunchAgents");
+    std::fs::create_dir_all(&launch_agents).unwrap();
+    let fake = temp.path().join("fake-client");
+    fake_client(&fake);
+    let brain = home.join("brain.sqlite");
+    let protected = [
+        (home.join(".claude/settings.json"), "{\"theme\":\"dark\"}\n"),
+        (codex_home.join("hooks.json"), "{\"hooks\":{}}\n"),
+        (
+            launch_agents.join("ai.hippocampus.refresh.plist"),
+            "untouched existing fixture\n",
+        ),
+    ];
+    for (path, content) in &protected {
+        std::fs::write(path, content).unwrap();
+    }
+    let output = run(
+        &home,
+        &codex_home,
+        Some(&fake),
+        &[
+            "register-clients",
+            "--no-refresh-agent",
+            "--db-path",
+            brain.to_str().unwrap(),
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    for (path, content) in &protected {
+        assert_eq!(std::fs::read_to_string(path).unwrap(), *content);
+    }
+    assert!(json(&home.join(".claude.json"))["mcpServers"]["hippocampus"].is_object());
+    assert!(std::fs::read_to_string(codex_home.join("config.toml"))
+        .unwrap()
+        .contains("mcp_servers.hippocampus"));
+    assert!(
+        !brain.exists(),
+        "registration must not open/import the brain"
+    );
+    assert!(stdout(&output).contains("Session hooks and transcript refresh were not changed"));
+}
+
+#[test]
 #[allow(clippy::too_many_lines)] // One story: install, repeat, disconnect, repeat.
 fn connect_installs_both_hooks_and_disconnect_removes_only_ours() {
     let temp = tempfile::tempdir().unwrap();

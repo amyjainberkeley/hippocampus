@@ -18,7 +18,7 @@ struct ConnectClaudeCodeSlide: View {
                         .multilineTextAlignment(.center)
                 }
 
-                OnboardingDesign.TypeRamp.body("Hippocampus gives Claude Code and Codex six read-only memory tools. Agents can request a small, cited context packet for the work at hand instead of loading your whole history. Your brain stays on this Mac.")
+                OnboardingDesign.TypeRamp.body("Give Claude Code and Codex read-only tools to request cited context from memory stored on this Mac. Retrieved context may be sent to the client's model provider. Registration leaves session hooks and transcript importing unchanged.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .multilineTextAlignment(.leading)
@@ -83,7 +83,7 @@ struct ConnectClaudeCodeSlide: View {
                 HStack(spacing: OnboardingDesign.Space.sm) {
                     Image(systemName: "checkmark.seal.fill")
                         .foregroundStyle(OnboardingDesign.Palette.success)
-                    OnboardingDesign.TypeRamp.headline("Connected")
+                    OnboardingDesign.TypeRamp.headline("Registration complete")
                 }
                 OnboardingDesign.TypeRamp.caption(message)
                     .foregroundStyle(.secondary)
