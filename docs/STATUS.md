@@ -2,7 +2,7 @@
 
 _Updated on 2026-10-03; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `f461590`
+Audited code baseline: `ba1c491`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -83,9 +83,15 @@ the existing notary profile became unavailable while submitting its separately
 re-signed copy. No DMG was produced. The original accepted candidate is preserved
 and reverified; neither copy is installed or public. Structural launch and Apple
 acceptance do not replace live capture, onboarding, upgrade and recovery checks.
-The public-release prebuild check also still rejects the existing unprovisioned
-model archive URL/checksum; a verified local bundled model does not complete
-that separate release prerequisite.
+The [model provisioning checkpoint](audits/2026-10-03-release-model-provisioning.md)
+now supplies the immutable hosted Arctic archive and checksum in current source.
+Anonymous download, exact reconstruction, all seven file hashes, GitHub's signed
+release attestation and the actual 0.2.0 prebuild identity check pass. The model
+repository reports release immutability enabled. All 7 model-manifest, 8 archive
+preparation and 9 release-identity tests pass. This is a model-only dependency
+release, not an app installer or public app release. The original `4983f6c`
+candidate and its exact source remain unchanged; a future app from this newer
+manifest requires its own source provenance.
 
 The [isolated engine qualification](audits/2026-10-03-clean-home-engine.md)
 also passes on source `a3e09ba`: a disposable development home exercises strict
@@ -1530,9 +1536,11 @@ truthfully scoped evidence product.
   A local archive containing only that compiled Arctic bundle was created and
   reconstructed through `scripts/prepare-release-models.sh`; its SHA-256 is
   `31da35fffb853a9442cef582f3319206496a00808da1ab3cbeca711b11a766f3`.
-  It is not hosted, and `release-models.json` deliberately remains
-  `UNPROVISIONED`, so a public updater release cannot yet be reconstructed or
-  published from immutable model inputs.
+  That initial archive was not hosted. The October 3
+  [model provisioning checkpoint](audits/2026-10-03-release-model-provisioning.md)
+  supersedes this input blocker with a separately attributed, immutable 0.2.0
+  archive and verified anonymous reconstruction. The old archive and digest
+  remain historical evidence; current release qualification is recorded above.
 - Multi-device sync and Windows are outside the verified v1 path.
 
 ## Benchmark Status
