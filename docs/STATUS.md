@@ -2,7 +2,7 @@
 
 _Updated on 2026-10-03; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `d5ce2a3`
+Audited code baseline: `ef765d6`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -41,6 +41,11 @@ The rebuilt frozen worker's first invocation hit the unchanged 30-second
 deadline. Subsequent warm checks passed all four blank strips, 10/10 chat lines
 and 8/8 code lines. Cold-start qualification in the signed app remains open;
 the warm successes are not reported as a clean first-launch result.
+An independently Developer ID-signed copy then read 10/10 synthetic chat lines
+on its first execution in 24.029 seconds, followed by 8/8 code lines and four
+blank strips within the same deadline. This same-Mac runtime probe does not
+replace cold-machine or whole-application qualification. See the
+[signed-worker audit](audits/2026-10-03-signed-ocr-qualification.md).
 
 Hippocampus is the standalone memory, recall, and MCI context product.
 Superapp is the separate OneKit-derived workspace. Keep their repositories,

@@ -9,13 +9,13 @@ commits are intentionally omitted from release notes.
 
 ### Handoff For Your Agents
 
-- Every Claude Code and Codex session now starts with a short, cited handoff
-  packet for the project it opened in: where you stopped, next step, goal,
-  decisions, what to avoid, files touched, git state. `mci-agent handoff`
-  compiles it from the transcripts already on this Mac; hooks deliver it.
-- Import Codex sessions as well as Claude Code sessions, incrementally, and
-  keep importing while the app runs (every 60 seconds). Tool calls that
-  changed files or committed are stored as compact evidence lines.
+- Preview a short, cited project handoff in Recall: where you stopped, next
+  step, goal, decisions, what to avoid, files touched and git state. Choose a
+  folder, inspect its sources and explicitly copy the packet. Desktop previews
+  use existing memory without importing new session transcripts.
+- Optionally import Codex and Claude Code sessions through explicit CLI setup.
+  Desktop startup keeps background transcript imports off. Connecting an AI
+  client registers its memory tools without installing importers or hooks.
 - `mci-agent today` writes the day's standup across projects from
   transcripts, git and screen time.
 - `mci-agent connect --all` installs the SessionStart hooks for both agents
@@ -30,6 +30,12 @@ commits are intentionally omitted from release notes.
   key is needed. Recognition remains fallible; original images remain evidence.
 - Stop OCR subprocesses promptly when capture stops, and verify every bundled
   model and runtime dependency before assembling the app.
+- Preserve sharper retained screenshots and zoom into the authenticated
+  original. Re-read a saved screenshot locally, then inspect or copy the new
+  reading separately; old transcripts and search results are not overwritten.
+- Omit uncertain readings only after the complete raw text passes privacy
+  checks. Bound model resizing for narrow captures, and fail an oversized
+  recognition batch rather than publish an incomplete privacy review.
 
 ### Installation And Updates
 
