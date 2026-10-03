@@ -8,15 +8,22 @@ import UniformTypeIdentifiers
 
 public protocol ThumbnailDataProviding: Sendable {
     func thumbnailData(for url: URL, maxPixelSize: Int) async -> Data?
+    func screenshotData(for url: URL) async -> Data?
+}
+
+public extension ThumbnailDataProviding {
+    func screenshotData(for url: URL) async -> Data? { nil }
 }
 
 /// Authenticates encrypted keyframe blobs and returns only bounded image data.
 /// The provider owns one Keychain resolution per app session and never writes
-/// plaintext to disk or exposes full-resolution pixels to SwiftUI state.
+/// plaintext to disk. Detail views may request a bounded original image;
+/// result-list thumbnails keep their smaller decoding and memory budgets.
 public actor ThumbnailDataProvider: ThumbnailDataProviding {
     public static let maximumBlobBytes = 12 * 1024 * 1024
     public static let minimumBlobBytes = 16 + 12 + 16
     public static let maximumThumbnailPixels = 1_024
+    public static let maximumScreenshotPixels = 3_840
 
     public static let shared = ThumbnailDataProvider.production()
 
@@ -49,6 +56,14 @@ public actor ThumbnailDataProvider: ThumbnailDataProviding {
     }
 
     public func thumbnailData(for url: URL, maxPixelSize: Int) async -> Data? {
+        await imageData(for: url, thumbnailPixels: min(Self.maximumThumbnailPixels, max(1, maxPixelSize)))
+    }
+
+    public func screenshotData(for url: URL) async -> Data? {
+        await imageData(for: url, thumbnailPixels: nil)
+    }
+
+    private func imageData(for url: URL, thumbnailPixels: Int?) async -> Data? {
         guard !Task.isCancelled,
               let request = Self.validatedRequest(url: url, blobRoot: blobRoot),
               let key = await keyMaterial(),
@@ -57,10 +72,6 @@ public actor ThumbnailDataProvider: ThumbnailDataProviding {
             return nil
         }
 
-        let requestedPixels = min(
-            Self.maximumThumbnailPixels,
-            max(1, maxPixelSize)
-        )
         let worker = Task.detached(priority: .utility) {
             guard !Task.isCancelled,
                   let blob = Self.readBoundedRegularFile(at: request.url),
@@ -74,16 +85,30 @@ public actor ThumbnailDataProvider: ThumbnailDataProviding {
             else {
                 return nil as Data?
             }
-            return Self.makeBoundedThumbnail(
-                imageData: plaintext,
-                maxPixelSize: requestedPixels
-            )
+            if let thumbnailPixels {
+                return Self.makeBoundedThumbnail(imageData: plaintext, maxPixelSize: thumbnailPixels)
+            }
+            return Self.validatedScreenshot(plaintext)
         }
         return await withTaskCancellationHandler {
             await worker.value
         } onCancel: {
             worker.cancel()
         }
+    }
+
+    private static func validatedScreenshot(_ data: Data) -> Data? {
+        guard !Task.isCancelled, data.count <= maximumBlobBytes,
+              let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              CGImageSourceGetCount(source) == 1,
+              let type = CGImageSourceGetType(source) as String?,
+              [UTType.jpeg.identifier, UTType.png.identifier].contains(type),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int,
+              (1...maximumScreenshotPixels).contains(width), (1...maximumScreenshotPixels).contains(height)
+        else { return nil }
+        return data
     }
 
     private func keyMaterial() async -> Data? {

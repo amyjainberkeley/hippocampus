@@ -57,7 +57,9 @@ def load_engine(model_dir):
         'Det.model_path': str(model_dir / 'PP-OCRv6_det_small.onnx'),
         'Rec.model_path': str(model_dir / 'PP-OCRv6_rec_small.onnx'),
         'Cls.model_path': str(model_dir / 'ch_ppocr_mobile_v2.0_cls_mobile.onnx'),
-        'EngineConfig.onnxruntime.intra_op_num_threads': 2,
+        # One inference thread avoids competing pools on a busy desktop. The
+        # bounded child still owns all model work; no partial result is kept.
+        'EngineConfig.onnxruntime.intra_op_num_threads': 1,
         'EngineConfig.onnxruntime.inter_op_num_threads': 1,
     })
 

@@ -6,6 +6,37 @@ import XCTest
 @testable import MCICaptureHelperKit
 
 final class PostPrivacyEvidenceTests: XCTestCase {
+    func testUncertainReadingsDoNotBecomeSearchableWords() async throws {
+        let box = CGRect(x: 0.1, y: 0.8, width: 0.4, height: 0.04)
+        let lines = [
+            OCRLine(text: "Review notes", boundingBox: box, confidence: 0.98),
+            OCRLine(text: "0) /t", boundingBox: .zero, confidence: 0.2),
+            OCRLine(text: "OK", boundingBox: .zero, confidence: 0.9),
+            OCRLine(text: "你好", boundingBox: .zero, confidence: 0.95),
+            OCRLine(text: "{}", boundingBox: .zero, confidence: 0.8)
+        ]
+        try await assertPublishedText("Review notes\nOK\n你好\n{}", lines: lines)
+    }
+
+    func testLowConfidenceSecretStillBlocksTextAndImage() async {
+        let lines = [
+            OCRLine(text: "Review notes", boundingBox: .zero, confidence: 1),
+            OCRLine(text: "password: synthetic-example", boundingBox: .zero, confidence: 0.1)
+        ]
+        await Self.assertSecretSuppressed(result: OCRResult(recognizedLines: lines, durationMs: 1, timedOut: false))
+    }
+
+    func testRemovingUncertainTextCannotBypassNewSecretAdjacency() async {
+        let lines = [
+            OCRLine(text: "password", boundingBox: .zero, confidence: 1),
+            OCRLine(text: "garbled icon", boundingBox: .zero, confidence: 0.1),
+            OCRLine(text: ": synthetic-example", boundingBox: .zero, confidence: 1)
+        ]
+        XCTAssertEqual(Self.allowCascade().decideOcr(text: lines.map(\.text).joined(separator: "\n"),
+                                                    context: WorkflowContext(appBundleId: "com.example.app")), .allow)
+        await Self.assertSecretSuppressed(result: OCRResult(recognizedLines: lines, durationMs: 1, timedOut: false))
+    }
+
     func testOverlappingPassesPublishOneCopyOfTheSamePhysicalLine() async throws {
         let box = CGRect(x: 0.1, y: 0.8, width: 0.4, height: 0.04)
         let lines = [

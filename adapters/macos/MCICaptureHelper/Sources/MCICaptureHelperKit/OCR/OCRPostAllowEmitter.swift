@@ -666,6 +666,7 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                 return
             }
             let memoryText = OCRMemoryText.make(from: result.recognizedLines)
+            guard !memoryText.isEmpty else { return }
             // Removing repeated lines can create new multiline adjacency. The
             // exact text that leaves the helper must independently clear privacy.
             if memoryText != text,
