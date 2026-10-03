@@ -44,6 +44,7 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../../adapters/macos/MCIKeyframeCodec"),
+        .package(path: "../../adapters/macos/MCICaptureHelper"),
     ],
     targets: [
         // System-library wrapper around the Rust FFI's C header + static lib.
@@ -76,6 +77,7 @@ let package = Package(
             dependencies: [
                 "CMciBrainFFI",
                 .product(name: "MCIKeyframeCodec", package: "MCIKeyframeCodec"),
+                .product(name: "MCICaptureHelperKit", package: "MCICaptureHelper"),
             ],
             path: "Sources/RecallUIKit",
             swiftSettings: [

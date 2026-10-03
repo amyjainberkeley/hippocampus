@@ -10,6 +10,7 @@ struct EvidenceThumbnail: View {
     var placeholderSymbol = "photo"
     var contentMode: ContentMode = .fit
     var showsStatus = false
+    var fullResolution = false
     var provider: any ThumbnailDataProviding = ThumbnailDataProvider.shared
 
     @State private var image: NSImage?
@@ -59,7 +60,11 @@ struct EvidenceThumbnail: View {
             isLoading = url != nil
             defer { if !Task.isCancelled { isLoading = false } }
             guard let url else { return }
-            let data = await provider.thumbnailData(for: url, maxPixelSize: maxPixelSize)
+            let data = if fullResolution {
+                await provider.screenshotData(for: url)
+            } else {
+                await provider.thumbnailData(for: url, maxPixelSize: maxPixelSize)
+            }
             guard !Task.isCancelled, let data else { return }
             image = NSImage(data: data)
         }

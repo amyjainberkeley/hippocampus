@@ -6,17 +6,20 @@ import Foundation
 import MCIKeyframeCodec
 
 public enum KeyframeBlobEncoder {
+    public static let maximumLongEdge = 3840
+    public static let maximumJPEGBytes = 10 * 1024 * 1024
+
     public static func encodeAndEncrypt(
         pixelBuffer: CVPixelBuffer,
         blobKeyMaterial: Data,
-        maxLongEdge: Int = 1280,
-        jpegQuality: Double = 0.7
+        maxLongEdge: Int = maximumLongEdge,
+        jpegQuality: Double = 0.88
     ) -> KeyframeSealedBlob? {
         guard let jpeg = encodeJPEG(
             pixelBuffer: pixelBuffer,
             maxLongEdge: maxLongEdge,
             quality: jpegQuality
-        ) else {
+        ), jpeg.count <= maximumJPEGBytes else {
             return nil
         }
         return try? KeyframeBlobCodec.seal(plaintext: jpeg, keyMaterial: blobKeyMaterial)
@@ -27,7 +30,7 @@ public enum KeyframeBlobEncoder {
         maxLongEdge: Int,
         quality: Double
     ) -> Data? {
-        guard maxLongEdge > 0, (0...1).contains(quality) else { return nil }
+        guard (1...maximumLongEdge).contains(maxLongEdge), (0...1).contains(quality) else { return nil }
         let image = CIImage(cvPixelBuffer: pixelBuffer)
         guard image.extent.width > 0, image.extent.height > 0 else { return nil }
 

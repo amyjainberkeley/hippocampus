@@ -1,0 +1,23 @@
+# October 3 screenshot OCR repair
+
+## What changed
+
+- The complete raw OCR still passes the existing secret filter first. Readings below 0.5 confidence, invalid confidence values, and blank lines no longer become new searchable assertions. Confident short text, punctuation, and non-Latin text remain intact. The exact cleaned transcript is checked again before publication, including secrets newly adjacent after filtering.
+- Encrypted screenshot evidence preserves native pixels up to 3840 on the long edge, rather than shrinking to 1280. JPEG quality is 0.88; a 10 MiB encoded-image ceiling refuses oversize image retention. Text publication can still succeed without an image. Retention remains age based, so higher detail can increase disk usage; this is not a total storage quota.
+- The screenshot viewer reads the authenticated original image without another JPEG recompression or 1024-pixel cap. List thumbnails retain their smaller cap. Detail decoding permits only single-frame JPEG/PNG within 3840 pixels per edge and the existing encrypted blob byte limit. Digest, root, symlink, regular-file and decryption checks remain in place.
+- **Re-read screenshot** uses the bundled offline worker only after an explicit click. The new reading is separately labeled and copied. It does not overwrite historical OCR, search indexes, or derived memory. Missing evidence, timeouts, uncertain results and privacy blocks have explicit states. Selection changes, deletion, dismissal and Cancel invalidate results and cancel the child. Copy revalidates the saved event.
+- OCR inference uses one intra-op thread. The 30-second child deadline, reply limit, ROI bounds, model hashes and offline enforcement remain unchanged.
+
+## Evidence and limits
+
+The owner-provided screenshot and extracted readings stayed in a private local diagnostic directory, outside the repository. No screenshot or memory was sent to an AI provider. Older records predate the earlier OCR upgrade; upgrading recognition does not retroactively repair their stored transcripts. Lost pixels and covered text cannot be reconstructed reliably.
+
+Red/green regressions reproduce low-confidence noise in the published event, secrets made adjacent by filtering, and a 2560×1600 screenshot incorrectly retained at 1280×800. The corrected code passes all 32 focused capture/quality tests. Six new Recall tests cover detailed image reads, tampering/bounds, stale selection, deletion, copying and failure states. The full optimized Recall run passes 541 XCTest cases plus four Swift Testing cases. All 11 offline worker/build tests pass, including exact synthetic chat text at 10/12/16-pixel font sizes.
+
+The complete helper run is **not green**: 831 tests ran; a quiet rerun produced eight assertions in three real Apple Vision fallback tests. A separate extraction of public baseline `fb210b4`, built and tested in a minimal environment with no CI skips, reproduced all eight. Runner, worker and recognition fixtures are byte-identical. The baseline's dense single-pass measurements were 2703/2422/1846 ms against the unchanged 1000 ms budget on macOS 26.5 with Low Power Mode enabled. These failures are not suppressed or represented as passing. Packaged releases require the separate Paddle worker; the unbundled development fallback still needs performance/accuracy work.
+
+Fresh independent source review found no blocking issues in this diff and verified pixel row orientation using a synthetic image. Review is not installation or release qualification. The installed owner application, historical database and public downloads remain unchanged by this source checkpoint.
+
+The freshly frozen worker also passed its real subprocess check within the unchanged 30-second deadline: 2/2 exact lines from the native-review screenshot in 21.12 s, then 10/10 exact small-text lines in 6.02 s. These are individual local measurements, not a latency guarantee. Computer use verified the native re-read control and its loading/Cancel state with an encrypted synthetic screenshot; macOS locked before the final visual result could be inspected. Finishing that visual check requires the owner to unlock the Mac.
+
+A separate native executable then exercised the actual `LocalScreenshotRereader` with that encrypted synthetic blob, the production authenticated provider, the newly frozen worker and the raw/cleaned privacy review. It returned both expected sentences exactly, with zero omitted readings, in approximately three seconds. This proves the local processing path with fabricated data; it does not prove the locked window's final rendering or repair the owner's historical index.

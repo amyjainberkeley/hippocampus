@@ -2,7 +2,7 @@
 
 _Updated on 2026-10-03; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `fb02d62`
+Audited code baseline: `fb210b4`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -11,6 +11,16 @@ release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
 
 ## October 3 Capture Recovery, Onboarding, And Project Handoff
+
+The [OCR repair checkpoint](audits/2026-10-03-ocr-quality.md) adds sharper saved
+images, confidence filtering after the complete privacy scan, screenshot zoom,
+and an explicit local re-read preview for retained screenshots. Historical OCR
+and search indexes are not rewritten. All 541 optimized Recall XCTest cases,
+four Swift Testing cases, 32 focused capture tests and 11 worker/build tests
+pass. The full helper suite still has eight assertions in three Apple Vision
+fallback tests; an isolated public-baseline run reproduces all eight without
+changing budgets or skipping tests. This is a source checkpoint, not an
+installed update or a public-release qualification.
 
 Hippocampus is the standalone memory, recall, and MCI context product.
 Superapp is the separate OneKit-derived workspace. Keep their repositories,

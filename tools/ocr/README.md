@@ -40,7 +40,10 @@ env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin swift test --package-path
 
 `benchmark.py` generates synthetic desktop/chat screenshots, reports exact-line
 recall, per-line character errors and extra output count at native and old
-scaled resolutions. Optional `--vision` accepts an external native Vision probe
+scaled resolutions. The worker uses one inference thread; every raw candidate,
+including low-confidence readings, remains available to the privacy scan.
+After that scan, the capture transcript omits readings below 0.5 confidence
+and is checked again. Optional `--vision` accepts an external native Vision probe
 that returns `{"seconds":...,"lines":[{"text":...}]}` for an image path.
 Benchmarks are not a guarantee for arbitrary screenshots. Blurred or missing
 pixels cannot be restored with certainty, and text inside an image is data,

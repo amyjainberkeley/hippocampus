@@ -1,5 +1,6 @@
 import CoreVideo
 import Foundation
+import ImageIO
 import XCTest
 
 @testable import MCICaptureHelperKit
@@ -7,6 +8,16 @@ import XCTest
 
 final class KeyframeBlobWriterTests: XCTestCase {
     private let key = Data((0..<32).map(UInt8.init))
+
+    func testRetainedScreenshotKeepsNativeTextResolution() throws {
+        let pixels = Self.makePixelBuffer(width: 2560, height: 1600)
+        let sealed = try XCTUnwrap(KeyframeBlobEncoder.encodeAndEncrypt(pixelBuffer: pixels, blobKeyMaterial: key))
+        let jpeg = try KeyframeBlobCodec.open(blob: sealed.bytes, keyMaterial: key)
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(jpeg as CFData, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.width, 2560, "Retained pixels must not shrink small text for future re-reading")
+        XCTAssertEqual(image.height, 1600)
+    }
 
     func testEncoderUsesSharedV2Codec() throws {
         let pixels = Self.makePixelBuffer()
@@ -254,7 +265,7 @@ final class KeyframeBlobWriterTests: XCTestCase {
         return url
     }
 
-    private static func makePixelBuffer() -> CVPixelBuffer {
+    private static func makePixelBuffer(width: Int = 32, height: Int = 32) -> CVPixelBuffer {
         var output: CVPixelBuffer?
         let attributes: [CFString: Any] = [
             kCVPixelBufferCGImageCompatibilityKey: true,
@@ -263,8 +274,8 @@ final class KeyframeBlobWriterTests: XCTestCase {
         XCTAssertEqual(
             CVPixelBufferCreate(
                 kCFAllocatorDefault,
-                32,
-                32,
+                width,
+                height,
                 kCVPixelFormatType_32BGRA,
                 attributes as CFDictionary,
                 &output

@@ -27,6 +27,8 @@ struct ScreenshotViewer: View {
     @State private var refreshID = 0
     @State private var loadGeneration = UUID()
     @StateObject private var textModel = EventTextViewModel()
+    @StateObject private var rereadModel = ScreenshotRereadViewModel()
+    @State private var imageZoom: CGFloat = 1
 
     init(selection: ScreenshotSelection, reader: BrainReader) {
         self.selection = selection
@@ -79,10 +81,23 @@ struct ScreenshotViewer: View {
                 Button("Retry", systemImage: "arrow.clockwise") { refreshID += 1 }.padding()
             } else if let hit = selectedHit {
                 HSplitView {
-                    GeometryReader { geometry in
-                        EvidenceThumbnail(url: hit.thumbnailURL, size: geometry.size,
-                                          maxPixelSize: ThumbnailDataProvider.maximumThumbnailPixels,
-                                          showsStatus: true)
+                    VStack(spacing: 8) {
+                        HStack {
+                            Button("Zoom out", systemImage: "minus.magnifyingglass") { imageZoom = max(1, imageZoom - 0.5) }
+                                .disabled(imageZoom <= 1)
+                            Button("Fit") { imageZoom = 1 }
+                            Button("Zoom in", systemImage: "plus.magnifyingglass") { imageZoom = min(4, imageZoom + 0.5) }
+                                .disabled(imageZoom >= 4)
+                        }
+                        .buttonStyle(.borderless).font(.caption)
+                        GeometryReader { geometry in
+                            ScrollView([.horizontal, .vertical]) {
+                                EvidenceThumbnail(url: hit.thumbnailURL,
+                                    size: CGSize(width: geometry.size.width * imageZoom, height: geometry.size.height * imageZoom),
+                                    maxPixelSize: ThumbnailDataProvider.maximumScreenshotPixels,
+                                    showsStatus: true, fullResolution: true)
+                            }
+                        }
                     }
                     .padding(16)
                     .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
@@ -103,6 +118,12 @@ struct ScreenshotViewer: View {
                                 }
                             }
                             Divider()
+                            if hit.thumbnailURL != nil {
+                                ScreenshotRereadSection(hit: hit, reader: reader, model: rereadModel) { text in
+                                    copy(text, notification: "New reading copied")
+                                }
+                                Divider()
+                            }
                             storedTextSection(for: hit)
                             Divider()
                             Button("Copy context", systemImage: "doc.on.clipboard") {
@@ -163,7 +184,7 @@ struct ScreenshotViewer: View {
     private func storedTextSection(for hit: Hit) -> some View {
         let stored = textModel.text(for: hit)
         let body = Formatters.stripContextHeader(textModel.copyText(for: hit))
-        Text(stored == nil ? "Stored text snippet" : (hit.sourceKind == "screen_ocr" ? "OCR text" : "Stored text"))
+        Text(stored == nil ? "Stored text snippet" : (hit.sourceKind == "screen_ocr" ? "Saved OCR text" : "Stored text"))
             .font(.headline)
         switch textModel.state(for: hit) {
         case .idle, .loading:
@@ -190,6 +211,8 @@ struct ScreenshotViewer: View {
         loadGeneration = UUID()
         hit = nil
         textModel.clear()
+        rereadModel.clear()
+        imageZoom = 1
         errorMessage = nil
         exportError = nil
         isLoading = true
@@ -217,10 +240,10 @@ struct ScreenshotViewer: View {
         }
     }
 
-    private func copy(_ text: String) {
+    private func copy(_ text: String, notification: String = "Context copied") {
         NSPasteboard.general.clearContents()
         if NSPasteboard.general.setString(text, forType: .string) {
-            ToastNotifier.shared.notify("Context copied")
+            ToastNotifier.shared.notify(notification)
         } else { exportError = "The clipboard is unavailable. Try again." }
     }
 
