@@ -7,9 +7,9 @@
   "build": "2",
   "binary_count": 6,
   "qualification_date": "2026-10-03",
-  "state": "private_signed_candidate",
+  "state": "private_notarized_candidate",
   "installed": false,
-  "notarized": false,
+  "notarized": true,
   "public_download": false,
   "includes": [
     "OCR quality and model-input bounds repairs",
@@ -100,9 +100,48 @@
     "Structural launch is not visual onboarding, physical shortcut delivery or live screen capture qualification.",
     "Synthetic OCR probes used the actual embedded worker and unchanged 30-second deadline on the same previously exercised Mac; they do not qualify cold-machine performance or arbitrary screenshots.",
     "An earlier frozen runtime first invocation timed out at 30 seconds. This candidate success does not erase that failure.",
-    "The previously unavailable notarization profile was not retried before the pending owner unlock; no credentials were replaced.",
     "The installed f4f7bf1 app, historical OCR/search indexes, owner settings and preserved 2f4293c candidate remain unchanged.",
     "Optional BERT NER and Qwen models are absent; Tier 1 extraction and evidence-cited extractive briefs remain the defaults.",
-    "Source tests are recorded in the referenced audits; no source suite was rerun for this build-only qualification."
-  ]
+    "Apple acceptance applies to the preserved original candidate, not the separately re-signed installer copy whose submission failed. No DMG was completed.",
+    "The isolated UI check does not qualify the complete signed app, live capture, cancellation or zoom.",
+    "The existing notary profile worked while the desktop was available and later became unavailable after it locked again. No credentials or security settings were replaced.",
+    "Product source suites remain recorded in referenced audits; the verifier-only follow-up passed its focused contract, 16 release-safety tests and 230 release-contract checks."
+  ],
+  "notarization": {
+    "app_submission_id": "88e0b6e7-7ded-4a6d-ac34-393b28561b03",
+    "status": "Accepted",
+    "team_id": "BV6KGKFKP4",
+    "app_stapled": true,
+    "staple_validation": true,
+    "gatekeeper_execution": "Notarized Developer ID",
+    "distribution_policy": true,
+    "post_staple_provenance": true,
+    "original_preserved_and_reverified_after_installer_failure": true
+  },
+  "installer": {
+    "completed": false,
+    "dmg_produced": false,
+    "source": "4983f6cbeb376125b0df5b9125741047015c52d3",
+    "first_failure": "Literal onboarding executable path check rejected a /tmp versus /private/tmp alias; reproduced and fixed separately in verifier source.",
+    "second_attempt_launch_gate_passed": true,
+    "second_failure": "Existing notary profile unavailable after the desktop became locked, while submitting a separate re-signed working copy.",
+    "original_notarized_candidate_is_separate": true
+  },
+  "isolated_native_ui": {
+    "fabricated_pixels_only": true,
+    "production_reread_view_and_reader": true,
+    "actual_frozen_worker": true,
+    "exact_result_sentences": 2,
+    "exact_copy_to_new_TextEdit_document": true,
+    "completed_repeat_readings": 2,
+    "saved_original_text_unchanged": true,
+    "cancel_verified": false,
+    "zoom_verified": false,
+    "review_app_closed": true,
+    "installed_candidate_ui_qualification": false
+  },
+  "public_release_prebuild": {
+    "passed": false,
+    "reason": "Existing release-models.json archiveURL and archiveSHA256 are UNPROVISIONED; local bundled model qualification does not provision the immutable hosted archive."
+  }
 }

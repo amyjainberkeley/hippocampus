@@ -95,11 +95,19 @@ collect_descendants() {
 }
 
 onboarding_is_child() {
-    local child command
+    local child executable
     while IFS= read -r child; do
         [[ -n "$child" ]] || continue
-        command="$(ps -p "$child" -o command= 2>/dev/null || true)"
-        if [[ "$command" == *"$ONBOARDING_BIN"* ]]; then
+        # Foundation can launch the same executable through /tmp while the
+        # release checkout resolves to /private/tmp. Compare file identity,
+        # not argv text (which can also mention a binary that is not running).
+        executable="$(ps -p "$child" -o comm= 2>/dev/null || true)"
+        if [[ "$executable" == /* && "$executable" -ef "$ONBOARDING_BIN" ]]; then
+            return 0
+        fi
+        # Linux's ps comm contains only a basename. Keep the headless contract
+        # fixtures portable using its kernel-owned executable link.
+        if [[ "/proc/$child/exe" -ef "$ONBOARDING_BIN" ]]; then
             return 0
         fi
     done < <(pgrep -P "$APP_PID" 2>/dev/null || true)

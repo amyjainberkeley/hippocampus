@@ -2,7 +2,7 @@
 
 _Updated on 2026-10-03; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `4983f6c`
+Audited code baseline: `f461590`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -66,10 +66,26 @@ attached and no candidate process left running. Its actual embedded worker
 reads 10/10 synthetic chat lines in 3.427 seconds, 8/8 code lines in 3.003 seconds,
 and four blank strips without text in 0.465–0.492 seconds. These are same-Mac
 checks, not cold-machine accuracy or latency guarantees. The earlier `2f4293c`
-candidate is preserved separately. The saved notarization profile was not
-retried before the pending owner unlock; the new candidate is not notarized,
-installed or published. Structural launch does not replace the remaining live
-capture, onboarding, UI, upgrade and recovery qualification.
+candidate is preserved separately. The
+[UI and notarization follow-up](audits/2026-10-03-ocr-ui-notarization.md) verifies
+the isolated production re-read UI's completed result, exact copy into TextEdit
+and repeated reading using fabricated pixels. Saved OCR remained unchanged.
+Live cancellation and original-image zoom remain unverified.
+
+The original `4983f6c` candidate is now Apple-accepted and stapled; Gatekeeper,
+distribution policy, deep signatures and full provenance pass. The installer
+revealed and reproduced a path-alias bug in the launch verifier. Its file-identity
+fix passes the regression, rejection of another bundle, the real candidate,
+all 16 release-safety tests and all 230 release-contract checks. The unchanged
+exact-source installer also passed its original launch gate after moving the
+checkout to a canonical path. It then stopped because the Mac locked again and
+the existing notary profile became unavailable while submitting its separately
+re-signed copy. No DMG was produced. The original accepted candidate is preserved
+and reverified; neither copy is installed or public. Structural launch and Apple
+acceptance do not replace live capture, onboarding, upgrade and recovery checks.
+The public-release prebuild check also still rejects the existing unprovisioned
+model archive URL/checksum; a verified local bundled model does not complete
+that separate release prerequisite.
 
 The [isolated engine qualification](audits/2026-10-03-clean-home-engine.md)
 also passes on source `a3e09ba`: a disposable development home exercises strict
@@ -121,7 +137,7 @@ This is interface verification, not proof of real-memory retrieval.
 this source update has not been installed. Screen Recording is off in macOS;
 enabling it reached the owner Touch ID prompt. No fresh live capture, new
 onboarding, or real-memory handoff is claimed. Existing transcript importer
-configuration, the shortcut collision with Superapp, controlled upgrade and
+configuration, delivery of the now-distinct shortcuts, controlled upgrade and
 rollback, signed release qualification, and public download readiness remain
 open. No private memory is included in this checkpoint.
 
