@@ -22,7 +22,7 @@ final class AXIdentifierAttributeTests: XCTestCase {
                 return values[attribute as String] ?? (.attributeUnsupported, nil)
             },
             readChildren: { element, _ in
-                if childrenFail { return .errored }
+                if childrenFail { return .errored(.ax(.cannotComplete)) }
                 return CFEqual(element, root) && childLabels != nil && !focusedOnly ? .success([child]) : .empty
             },
             readFocusedChild: { element, _ in

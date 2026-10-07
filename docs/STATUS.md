@@ -2,13 +2,25 @@
 
 _Updated on 2026-10-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `3b68260`
+Audited code baseline: `e3db0cd`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## October 7 Capture Diagnostics
+
+The [AX traversal diagnostic checkpoint](audits/2026-10-07-ax-traversal-diagnostics.md)
+preserves the first descendant-probe failure as content-free categories and
+numbers in the existing rate-limited health line. All reads, traversal bounds,
+classification and fail-closed behavior remain unchanged. Eight new regressions
+demonstrated missing diagnostics before implementation. All 131 focused AX tests
+and the full **839-test helper suite pass**; independent review is clear.
+The earlier Apple Vision fallback failures remain historical evidence, not a
+bug claimed fixed by this change. These diagnostics are not yet in the installed
+`4983f6c` app. The actual live capture cause remains unconfirmed.
 
 ## October 7 OCR Owner Update
 

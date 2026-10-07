@@ -349,6 +349,7 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
         let valueHidden: AXBackstopOutcome
         let regexMatch: AXBackstopOutcome
         let descendantSecure: AXBackstopOutcome
+        var descendantFailure: AXTraversalFailure?
         if priorClassification == false, let element = focusedElement {
             valueHidden = Self.valueAttributeHiddenSignal(of: element)
             if valueHidden == .positive {
@@ -364,7 +365,10 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
                 if regexMatch == .positive {
                     descendantSecure = .negative
                 } else {
-                    descendantSecure = Self.descendantSecureSubroleSignal(of: element)
+                    descendantSecure = Self.descendantSecureSubroleSignal(
+                        of: element,
+                        onFailure: healthLog == nil ? nil : { descendantFailure = $0 }
+                    )
                 }
             }
         } else {
@@ -396,7 +400,8 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
                 valueHidden: evaluatedValue ? valueHidden : nil,
                 identifierMatch: evaluatedIdentifier ? regexMatch : nil,
                 descendantSecure: evaluatedDescendants ? descendantSecure : nil,
-                classification: classification
+                classification: classification,
+                descendantFailure: descendantFailure
             ))
         }
 
@@ -685,46 +690,83 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
         of root: AXUIElement,
         readString: (AXUIElement, CFString) -> (AXError, String?) = readStringObservation,
         readChildren: (AXUIElement, CFString) -> ArrayReadResult = { readElementArrayAttribute($0, $1) },
-        readFocusedChild: (AXUIElement, CFString) throws -> AXUIElement? = { try readElementAttribute($0, $1) }
+        readFocusedChild: (AXUIElement, CFString) throws -> AXUIElement? = { try readElementAttribute($0, $1) },
+        onFailure: ((AXTraversalFailure) -> Void)? = nil
     ) -> AXBackstopOutcome {
         var budget = backstopMaxNodes
         var anyTraversalError = false
+        var firstFailure: AXTraversalFailure?
+        var ancestors: [AXUIElement] = []
+        var ancestorLinkObserved = false
+        defer {
+            if let firstFailure { onFailure?(firstFailure) }
+        }
 
+        func record(_ reason: AXTraversalFailureReason, status: Int32?, depth: Int) {
+            anyTraversalError = true
+            guard onFailure != nil, firstFailure == nil else { return }
+            firstFailure = AXTraversalFailure(
+                reason: reason, status: status, depth: depth,
+                visitedDescendants: backstopMaxNodes - budget,
+                ancestorLinkObserved: ancestorLinkObserved
+            )
+        }
+        func observeLink(_ child: AXUIElement) {
+            // Identity comparison only, using references already returned by AX.
+            // Do not skip cycles or change the traversal/classification policy.
+            guard onFailure != nil, firstFailure == nil, !ancestorLinkObserved else { return }
+            ancestorLinkObserved = ancestors.contains { CFEqual($0, child) }
+        }
+        func recordArrayIssue(_ issue: ArrayReadIssue, depth: Int) {
+            switch issue {
+            case .ax(let status): record(.childrenRead, status: status.rawValue, depth: depth)
+            case .malformedValue: record(.childrenMalformed, status: 0, depth: depth)
+            case .incomplete: record(.childrenIncomplete, status: 0, depth: depth)
+            }
+        }
         func recurse(_ node: AXUIElement, depth: Int) -> Bool {
-            // Children of `node` — both the focused-descendant link
-            // (priority — the user's actual input target) and the
-            // structural child array.
+            if onFailure != nil { ancestors.append(node) }
+            defer { if onFailure != nil { ancestors.removeLast() } }
+            // Preserve focused-link-first order, including all existing reads
+            // at the depth/node boundary. Diagnostics never add AX queries.
             var queued: [AXUIElement] = []
             do {
                 if let focusedChild = try readFocusedChild(
                     node, kAXFocusedUIElementAttribute as CFString)
                 {
+                    observeLink(focusedChild)
                     queued.append(focusedChild)
                 }
             } catch {
-                anyTraversalError = true
+                switch error as? ElementReadError {
+                case .ax(let status): record(.focusedRead, status: status.rawValue, depth: depth)
+                case .malformedValue: record(.focusedMalformed, status: 0, depth: depth)
+                case nil: record(.focusedRead, status: nil, depth: depth)
+                }
             }
             switch readChildren(node, kAXChildrenAttribute as CFString) {
             case .success(let arr):
+                arr.forEach(observeLink)
                 queued.append(contentsOf: arr)
-            case .partial(let arr):
+            case .partial(let arr, let issue):
+                arr.forEach(observeLink)
                 queued.append(contentsOf: arr)
-                anyTraversalError = true
+                recordArrayIssue(issue, depth: depth)
             case .empty:
                 break
-            case .errored:
-                anyTraversalError = true
+            case .errored(let issue):
+                recordArrayIssue(issue, depth: depth)
             }
 
             // The boundary node is already visited. Check its links to distinguish
             // a known leaf from uninspected work without visiting beyond the bound.
             if !queued.isEmpty && (budget <= 0 || depth >= backstopMaxDepth) {
-                anyTraversalError = true
+                record(budget <= 0 ? .nodeLimit : .depthLimit, status: nil, depth: depth)
                 return false
             }
             for child in queued {
                 if budget <= 0 {
-                    anyTraversalError = true
+                    record(.nodeLimit, status: nil, depth: depth)
                     return false
                 }
                 budget -= 1
@@ -735,7 +777,9 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
                 ) {
                 case .some(true): return true
                 case .some(false): break
-                case .none: anyTraversalError = true
+                case .none:
+                    record(subroleStatus == .success ? .subroleMalformed : .subroleRead,
+                           status: subroleStatus.rawValue, depth: depth + 1)
                 }
                 if recurse(child, depth: depth + 1) { return true }
             }
@@ -872,7 +916,7 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
             switch readChildren(node, kAXChildrenAttribute as CFString) {
             case .success(let arr):
                 queued.append(contentsOf: arr)
-            case .partial(let arr):
+            case .partial(let arr, _):
                 queued.append(contentsOf: arr)
                 anyError = true
             case .empty:
@@ -974,19 +1018,26 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
         }
     }
 
+    /// Why an existing array read was incomplete. Never retains AX payloads.
+    enum ArrayReadIssue {
+        case ax(AXError)
+        case malformedValue
+        case incomplete
+    }
+
     /// Result of an AX array attribute read (e.g.
     /// `kAXChildrenAttribute`).
     enum ArrayReadResult {
         /// Read returned `.success` with a non-empty array.
         case success([AXUIElement])
         /// Bounded valid children from an array with malformed or uninspected entries.
-        case partial([AXUIElement])
+        case partial([AXUIElement], ArrayReadIssue)
         /// Read returned `.success` empty array, `.noValue`, or
         /// `.attributeUnsupported` — the node legitimately has no
         /// children.
         case empty
         /// Failed or malformed read with no usable children.
-        case errored
+        case errored(ArrayReadIssue)
     }
 
     static func readElementArrayAttribute(
@@ -996,36 +1047,36 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
         let (r, ref) = readAttribute(element, attribute)
         switch r {
         case .success:
-            guard let ref else { return .errored }
-            guard CFGetTypeID(ref) == CFArrayGetTypeID() else { return .errored }
+            guard let ref else { return .errored(.malformedValue) }
+            guard CFGetTypeID(ref) == CFArrayGetTypeID() else { return .errored(.malformedValue) }
             // swiftlint:disable:next force_cast
             let arr = ref as! CFArray
             let count = CFArrayGetCount(arr)
             if count == 0 { return .empty }
             let inspectedCount = min(count, backstopMaxNodes)
-            var incomplete = count > inspectedCount
+            var issue: ArrayReadIssue? = count > inspectedCount ? .incomplete : nil
             var out: [AXUIElement] = []
             out.reserveCapacity(inspectedCount)
             for i in 0..<inspectedCount {
                 let p = CFArrayGetValueAtIndex(arr, i)
                 guard let p else {
-                    incomplete = true
+                    issue = issue ?? .malformedValue
                     continue
                 }
                 let item = Unmanaged<CFTypeRef>.fromOpaque(p).takeUnretainedValue()
                 guard CFGetTypeID(item) == AXUIElementGetTypeID() else {
-                    incomplete = true
+                    issue = issue ?? .malformedValue
                     continue
                 }
                 // swiftlint:disable:next force_cast
                 out.append(item as! AXUIElement)
             }
-            if incomplete { return out.isEmpty ? .errored : .partial(out) }
+            if let issue { return out.isEmpty ? .errored(issue) : .partial(out, issue) }
             return .success(out)
         case .noValue, .attributeUnsupported:
             return .empty
         default:
-            return .errored
+            return .errored(.ax(r))
         }
     }
 

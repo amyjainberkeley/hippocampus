@@ -1,5 +1,28 @@
 import Foundation
 
+/// Closed categories only; no AX values, identifiers or element references.
+public enum AXTraversalFailureReason: String, Sendable, Equatable {
+    case focusedRead = "focused-read"
+    case focusedMalformed = "focused-malformed"
+    case childrenRead = "children-read"
+    case childrenMalformed = "children-malformed"
+    case childrenIncomplete = "children-incomplete"
+    case depthLimit = "depth-limit"
+    case nodeLimit = "node-limit"
+    case subroleRead = "subrole-read"
+    case subroleMalformed = "subrole-malformed"
+}
+
+/// State at the first traversal failure, not a summary of later traversal.
+public struct AXTraversalFailure: Sendable, Equatable {
+    public let reason: AXTraversalFailureReason
+    public let status: Int32?
+    public let depth: Int
+    /// Descendants visited; the root is excluded from the existing node budget.
+    public let visitedDescendants: Int
+    public let ancestorLinkObserved: Bool
+}
+
 /// No attributes or captured content can enter this health snapshot.
 public struct AXProbeHealthSnapshot: Sendable, Equatable {
     public let focusResult: Int32
@@ -9,6 +32,23 @@ public struct AXProbeHealthSnapshot: Sendable, Equatable {
     public let identifierMatch: AXBackstopOutcome?
     public let descendantSecure: AXBackstopOutcome?
     public let classification: Bool?
+    public let descendantFailure: AXTraversalFailure?
+
+    init(
+        focusResult: Int32, focusedElementMatched: Bool, subroleResult: Int32?,
+        valueHidden: AXBackstopOutcome?, identifierMatch: AXBackstopOutcome?,
+        descendantSecure: AXBackstopOutcome?, classification: Bool?,
+        descendantFailure: AXTraversalFailure? = nil
+    ) {
+        self.focusResult = focusResult
+        self.focusedElementMatched = focusedElementMatched
+        self.subroleResult = subroleResult
+        self.valueHidden = valueHidden
+        self.identifierMatch = identifierMatch
+        self.descendantSecure = descendantSecure
+        self.classification = classification
+        self.descendantFailure = descendantFailure
+    }
 }
 
 /// Bounds unclassified-probe diagnostics even when focus changes every frame.
@@ -34,12 +74,19 @@ public final class AXProbeHealthReporter: @unchecked Sendable {
             case nil: return "unobserved"
             }
         }
+        let traversal = snapshot.descendantFailure.map { failure in
+            " descendant_reason=\(failure.reason.rawValue)"
+                + " descendant_status=\(failure.status.map(String.init) ?? "unobserved")"
+                + " descendant_depth=\(failure.depth)"
+                + " descendant_visited=\(failure.visitedDescendants)"
+                + " descendant_ancestor_link=\(failure.ancestorLinkObserved)"
+        } ?? ""
         return "mci-capture-helper: helper_health ax_unclassified "
             + "focus_result=\(snapshot.focusResult) "
             + "focused=\(snapshot.focusedElementMatched ? "present" : "absent") "
             + "subrole_result=\(snapshot.subroleResult.map(String.init) ?? "unobserved") "
             + "value_hidden=\(label(snapshot.valueHidden)) "
             + "identifier=\(label(snapshot.identifierMatch)) "
-            + "descendant=\(label(snapshot.descendantSecure))\n"
+            + "descendant=\(label(snapshot.descendantSecure))" + traversal + "\n"
     }
 }
