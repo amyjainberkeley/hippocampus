@@ -1,7 +1,8 @@
 # Content-free diagnosis of unknown AX traversal
 
-The installed OCR update's live TextEdit check did not reach stored memory.
-Its health line identified an errored descendant privacy probe, but combined
+The installed OCR update's attempted TextEdit check did not yield stored memory.
+Foreground identity was not independently verified. A health line identified an
+errored descendant privacy probe without app attribution, but combined
 API failures, malformed replies and traversal limits into one outcome. The
 specific live cause remains unknown.
 
@@ -43,9 +44,10 @@ production sink wiring or the limiter. The diff check passes.
 Private logs are retained outside Git at
 `/Users/amy/Hippocampus-verification/ax-traversal-20261007`.
 
-This is a source checkpoint. The installed signed/notarized app remains exact
-`4983f6c` without these new diagnostic fields. A newly built and qualified
-candidate is required to observe the actual live failure. No owner store,
-settings, permission, public download, Superapp or website changed. Unknown
-still suppresses capture; no TextEdit exception or error-to-allowed fallback
-has been introduced.
+This source checkpoint was followed by the
+[private diagnostic candidate installation](2026-10-07-diagnostic-owner-install.md).
+That follow-up records the exact `8e82e03` build, Apple acceptance, installation
+and foreground-evidence limitation. It does not establish a production capture
+defect in TextEdit. No settings, permissions, public download, Superapp or website
+changed. Unknown still suppresses capture; no TextEdit exception or
+error-to-allowed fallback has been introduced.

@@ -2,7 +2,7 @@
 
 _Updated on 2026-10-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `e3db0cd`
+Audited code baseline: `8e82e03`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -19,26 +19,40 @@ classification and fail-closed behavior remain unchanged. Eight new regressions
 demonstrated missing diagnostics before implementation. All 131 focused AX tests
 and the full **839-test helper suite pass**; independent review is clear.
 The earlier Apple Vision fallback failures remain historical evidence, not a
-bug claimed fixed by this change. These diagnostics are not yet in the installed
-`4983f6c` app. The actual live capture cause remains unconfirmed.
+bug claimed fixed by this change. The exact `8e82e03` candidate is now built,
+signed, Apple-accepted, stapled and installed after another verified ciphertext
+backup and atomic bundle swap. All five release builds and the unchanged
+20-second disposable-home launch passed. See the
+[installation and foreground audit](audits/2026-10-07-diagnostic-owner-install.md)
+and [candidate receipt](release/candidate-0.2.0-8e82e03-2026-10-07.json).
+
+**The automated foreground check does not qualify live capture.** Its own
+AppKit window became active/key, but independent system foreground samples
+continued to identify the installed Recall process. No random proof phrase was
+generated. The prior TextEdit attempt lacked this identity evidence, so its
+missing capture and the unclassified AX health lines must not be presented as a
+diagnosed TextEdit failure. New diagnostics distinguish incomplete child arrays
+and depth limits, but have no app attribution. Recall is intentionally excluded
+from capture; no exclusion, traversal bound or permission was changed.
 
 ## October 7 OCR Owner Update
 
 **The OCR update is installed, but live capture is not yet qualified.** The
-exact `4983f6c` app is signed, Apple-accepted, stapled and accepted by Gatekeeper
-at `/Applications/Hippocampus.app`. A matching private notarized DMG now exists.
+exact `4983f6c` app was signed, Apple-accepted, stapled and accepted by Gatekeeper
+at `/Applications/Hippocampus.app`, before the diagnostics update above replaced
+it with `8e82e03`. A matching private `4983f6c` notarized DMG exists.
 A verified ciphertext backup and atomic whole-bundle swap preserved the owner
 store and existing MCP reader mappings. No public download or feed was enabled.
 See [the owner-install audit](audits/2026-10-07-ocr-owner-install.md) and
 [receipt](release/candidate-0.2.0-4983f6c-2026-10-07.json).
 
-System Settings shows Screen Recording and Accessibility already on; no grants
-were changed. A synthetic TextEdit capture did not reach stored memory or a
-matching MCP result. Content-free health includes `failsafe-unknown` and a
-descendant privacy-probe error. The specific traversal cause is not yet known;
-fail-closed suppression remains intact. The next diagnostic is narrowly scoped
-to content-free failure categories from existing reads. Native onboarding,
-shortcut delivery, cancellation/zoom and recovery remain open.
+System Settings showed Screen Recording and Accessibility already on; no grants
+were changed. The earlier synthetic TextEdit attempt did not yield stored memory
+or a matching MCP result. Its foreground identity was unverified, and the
+content-free `failsafe-unknown` / descendant error was not app-attributed.
+The diagnostic follow-up above supersedes any inference that this established
+a TextEdit capture defect. Native onboarding, shortcut delivery, genuine live
+capture, cancellation/zoom and recovery remain open.
 
 The October 3 temporary artifacts were absent on resumption. The surviving
 exact-source working app received new app/DMG Apple submissions and complete
