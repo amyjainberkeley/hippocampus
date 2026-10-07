@@ -2,13 +2,30 @@
 
 _Updated on 2026-10-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `8e82e03`
+Audited code baseline: `027f3ad`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## October 7 Screenshot Re-read Recovery
+
+The [screenshot key recovery checkpoint](audits/2026-10-07-screenshot-key-recovery.md)
+lets an explicit **Re-read screenshot** retry a previously failed Keychain
+resolution. Passive image loads still cache failures, concurrent reads share
+the same attempt, and successful keys remain cached. Path validation, encrypted
+image authentication and local OCR review are unchanged. Five new regressions
+pass; the full optimized Recall suite passes **546 XCTest cases and four Swift
+Testing cases**. Independent review found no blocking issue.
+
+This change is published source only; the installed app remains exact
+`8e82e03`. Tests use synthetic encrypted pixels and an injected recognizer,
+not the owner's Keychain or screenshots. Recovery from key unavailability is
+separate from OCR accuracy. An already-visible unavailable-image placeholder
+may still need reopening after recovery. Real Keychain recovery, cancellation
+during lookup and the outstanding live capture checks remain unqualified.
 
 ## October 7 Capture Diagnostics
 
