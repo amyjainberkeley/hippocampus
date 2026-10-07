@@ -1,0 +1,66 @@
+{
+  "date": "2026-10-07",
+  "source": "4983f6cbeb376125b0df5b9125741047015c52d3",
+  "source_digest": "c52f87c4fb06c49a287a4f8cd70d8b842d82cb0f7a48acd292416a16a69e4d99",
+  "payload_digest": "125d94e78a4dca51fd8016ffe95c36e42ca506f9012fbb569cc5b60c0a3bfd64",
+  "version": "0.2.0",
+  "build": "2",
+  "state": "private_installed_candidate",
+  "installed": true,
+  "public_download": false,
+  "team_id": "BV6KGKFKP4",
+  "app_notarization": {
+    "submission_id": "ff244e6b-fe7c-4d67-be68-4d1ccd686e12",
+    "status": "Accepted",
+    "stapled": true
+  },
+  "dmg": {
+    "file": "Hippocampus-0.2.0.dmg",
+    "bytes": 232374492,
+    "sha256": "14443edcdcb43c00455a86d9b454b2c19aeb990b250d99ecb435e7dc643fc823",
+    "submission_id": "45c130e6-5c89-48f3-94b9-e656d603c8e2",
+    "status": "Accepted",
+    "stapled": true
+  },
+  "checks": {
+    "unchanged_exact_source_installer": true,
+    "reuse_existing_payload_without_rebuild": true,
+    "clean_home_launch_seconds": 20,
+    "onboarding_attached": true,
+    "models_complete": true,
+    "source_and_payload_provenance": true,
+    "nested_signatures": true,
+    "app_group": true,
+    "gatekeeper_app_and_dmg": true,
+    "distribution_policy": true,
+    "verified_ciphertext_backup": true,
+    "writer_lease_held_through_backup_and_swap": true,
+    "atomic_whole_bundle_swap": true,
+    "installed_provenance_signature_staple_gatekeeper": true,
+    "retired_reader_mapping_preserved": true,
+    "installed_parent_recall_helper_agent_observed": true
+  },
+  "permissions_observed_in_system_settings": {
+    "screen_recording": "on",
+    "accessibility": "on",
+    "changed_by_this_run": false
+  },
+  "live_capture": {
+    "qualified": false,
+    "synthetic_screen_match_found": false,
+    "saved_frame_count_advanced_during_check": false,
+    "observed_suppression": "failsafe-unknown",
+    "descendant_backstop_observed": "error",
+    "specific_traversal_cause_identified": false,
+    "mcp_result": "degraded_without_matching_hit"
+  },
+  "limits": [
+    "No public release or feed publication.",
+    "Installer reuse preserves exact source4983f6c; current branch is newer documentation/tooling source.",
+    "Temporary October3 candidate and logs were absent on resumption; the surviving separately signed working copy was requalified and received new Apple submissions.",
+    "No historical OCR or search-index rewrite.",
+    "Physical shortcut delivery, complete native onboarding, live OCR/storage/recall, cancellation, zoom, clean-machine performance and recovery remain unqualified.",
+    "MCP readers retain their old executable mappings; the retired bundle must not be deleted or launched against the upgraded store.",
+    "No credential replacement, TCC reset, permission change, microphone capture or automatic rollback."
+  ]
+}
