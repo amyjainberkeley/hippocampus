@@ -1,14 +1,39 @@
 # Hippocampus Status
 
-_Updated on 2026-10-03; qualification scope is recorded per checkpoint._
+_Updated on 2026-10-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `ba1c491`
+Audited code baseline: `3b68260`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## October 7 OCR Owner Update
+
+**The OCR update is installed, but live capture is not yet qualified.** The
+exact `4983f6c` app is signed, Apple-accepted, stapled and accepted by Gatekeeper
+at `/Applications/Hippocampus.app`. A matching private notarized DMG now exists.
+A verified ciphertext backup and atomic whole-bundle swap preserved the owner
+store and existing MCP reader mappings. No public download or feed was enabled.
+See [the owner-install audit](audits/2026-10-07-ocr-owner-install.md) and
+[receipt](release/candidate-0.2.0-4983f6c-2026-10-07.json).
+
+System Settings shows Screen Recording and Accessibility already on; no grants
+were changed. A synthetic TextEdit capture did not reach stored memory or a
+matching MCP result. Content-free health includes `failsafe-unknown` and a
+descendant privacy-probe error. The specific traversal cause is not yet known;
+fail-closed suppression remains intact. The next diagnostic is narrowly scoped
+to content-free failure categories from existing reads. Native onboarding,
+shortcut delivery, cancellation/zoom and recovery remain open.
+
+The October 3 temporary artifacts were absent on resumption. The surviving
+exact-source working app received new app/DMG Apple submissions and complete
+installer qualification; it was not relabeled as the older accepted artifact.
+Persistent private copies now sit outside temporary storage. Earlier dated
+sections below preserve historical observations; the installation and permission
+state in this October 7 checkpoint supersedes their pending-install language.
 
 ## October 3 Capture Recovery, Onboarding, And Project Handoff
 
