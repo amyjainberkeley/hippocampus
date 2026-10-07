@@ -5,6 +5,29 @@ commits are intentionally omitted from release notes.
 
 ## [Unreleased]
 
+- Change Recall's default shortcut to **Control–Shift–Space**, keeping it
+  separate from Superapp Whisper's Command–Shift–Space. Onboarding, popup and
+  shortcut help show the new combination. Recall also remains accessible from
+  the menu bar when another app owns the shortcut.
+
+## [0.2.0] - 2026-09-27
+
+### Handoff For Your Agents
+
+- Preview a short, cited project handoff in Recall: where you stopped, next
+  step, goal, decisions, what to avoid, files touched and git state. Choose a
+  folder, inspect its sources and explicitly copy the packet. Desktop previews
+  use existing memory without importing new session transcripts.
+- Optionally import Codex and Claude Code sessions through explicit CLI setup.
+  Desktop startup keeps background transcript imports off. Connecting an AI
+  client registers its memory tools without installing importers or hooks.
+- `mci-agent today` writes the day's standup across projects from
+  transcripts, git and screen time.
+- `mci-agent connect --all` installs the SessionStart hooks for both agents
+  and a background refresh job; `disconnect --all` removes only those.
+  `doctor` shows transcript freshness and when each agent last got a packet.
+- One-command install (`scripts/install.sh`) that needs no screen permission.
+
 ### Screenshot text
 
 - Improve small screenshot text with a bundled, offline open-source OCR model
@@ -12,6 +35,12 @@ commits are intentionally omitted from release notes.
   key is needed. Recognition remains fallible; original images remain evidence.
 - Stop OCR subprocesses promptly when capture stops, and verify every bundled
   model and runtime dependency before assembling the app.
+- Preserve sharper retained screenshots and zoom into the authenticated
+  original. Re-read a saved screenshot locally, then inspect or copy the new
+  reading separately; old transcripts and search results are not overwritten.
+- Omit uncertain readings only after the complete raw text passes privacy
+  checks. Bound model resizing for narrow captures, and fail an oversized
+  recognition batch rather than publish an incomplete privacy review.
 
 ### Installation And Updates
 

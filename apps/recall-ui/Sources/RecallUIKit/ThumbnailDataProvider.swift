@@ -8,21 +8,32 @@ import UniformTypeIdentifiers
 
 public protocol ThumbnailDataProviding: Sendable {
     func thumbnailData(for url: URL, maxPixelSize: Int) async -> Data?
+    func screenshotData(for url: URL) async -> Data?
+    /// Explicit user retry; passive image loading must use the methods above.
+    func rereadScreenshotData(for url: URL) async -> Data?
+}
+
+public extension ThumbnailDataProviding {
+    func screenshotData(for url: URL) async -> Data? { nil }
+    func rereadScreenshotData(for url: URL) async -> Data? { await screenshotData(for: url) }
 }
 
 /// Authenticates encrypted keyframe blobs and returns only bounded image data.
-/// The provider owns one Keychain resolution per app session and never writes
-/// plaintext to disk or exposes full-resolution pixels to SwiftUI state.
+/// The provider caches successful Keychain resolution for the app session and
+/// retries a failed resolution only after an explicit re-read. It never writes
+/// plaintext to disk. Detail views may request a bounded original image;
+/// result-list thumbnails keep their smaller decoding and memory budgets.
 public actor ThumbnailDataProvider: ThumbnailDataProviding {
     public static let maximumBlobBytes = 12 * 1024 * 1024
     public static let minimumBlobBytes = 16 + 12 + 16
     public static let maximumThumbnailPixels = 1_024
+    public static let maximumScreenshotPixels = 3_840
 
     public static let shared = ThumbnailDataProvider.production()
 
     private let blobRoot: URL
     private let keyLoader: @Sendable () throws -> Data
-    private var keyResolution: Task<Data?, Never>?
+    private var keyResolution: (id: UUID, task: Task<Data?, Never>)?
     private var resolvedKey: Data?
     private var keyResolutionFinished = false
 
@@ -49,6 +60,22 @@ public actor ThumbnailDataProvider: ThumbnailDataProviding {
     }
 
     public func thumbnailData(for url: URL, maxPixelSize: Int) async -> Data? {
+        await imageData(for: url, thumbnailPixels: min(Self.maximumThumbnailPixels, max(1, maxPixelSize)))
+    }
+
+    public func screenshotData(for url: URL) async -> Data? {
+        await imageData(for: url, thumbnailPixels: nil)
+    }
+
+    public func rereadScreenshotData(for url: URL) async -> Data? {
+        guard !Task.isCancelled, Self.validatedRequest(url: url, blobRoot: blobRoot) != nil else { return nil }
+        if keyResolutionFinished, resolvedKey == nil {
+            keyResolutionFinished = false
+        }
+        return await imageData(for: url, thumbnailPixels: nil)
+    }
+
+    private func imageData(for url: URL, thumbnailPixels: Int?) async -> Data? {
         guard !Task.isCancelled,
               let request = Self.validatedRequest(url: url, blobRoot: blobRoot),
               let key = await keyMaterial(),
@@ -57,10 +84,6 @@ public actor ThumbnailDataProvider: ThumbnailDataProviding {
             return nil
         }
 
-        let requestedPixels = min(
-            Self.maximumThumbnailPixels,
-            max(1, maxPixelSize)
-        )
         let worker = Task.detached(priority: .utility) {
             guard !Task.isCancelled,
                   let blob = Self.readBoundedRegularFile(at: request.url),
@@ -74,10 +97,10 @@ public actor ThumbnailDataProvider: ThumbnailDataProviding {
             else {
                 return nil as Data?
             }
-            return Self.makeBoundedThumbnail(
-                imageData: plaintext,
-                maxPixelSize: requestedPixels
-            )
+            if let thumbnailPixels {
+                return Self.makeBoundedThumbnail(imageData: plaintext, maxPixelSize: thumbnailPixels)
+            }
+            return Self.validatedScreenshot(plaintext)
         }
         return await withTaskCancellationHandler {
             await worker.value
@@ -86,33 +109,46 @@ public actor ThumbnailDataProvider: ThumbnailDataProviding {
         }
     }
 
+    private static func validatedScreenshot(_ data: Data) -> Data? {
+        guard !Task.isCancelled, data.count <= maximumBlobBytes,
+              let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              CGImageSourceGetCount(source) == 1,
+              let type = CGImageSourceGetType(source) as String?,
+              [UTType.jpeg.identifier, UTType.png.identifier].contains(type),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int,
+              (1...maximumScreenshotPixels).contains(width), (1...maximumScreenshotPixels).contains(height)
+        else { return nil }
+        return data
+    }
+
     private func keyMaterial() async -> Data? {
         if keyResolutionFinished {
             return resolvedKey
         }
-        if let keyResolution {
-            let key = await keyResolution.value
+        if keyResolution == nil {
+            let loader = keyLoader
+            let task = Task.detached(priority: .utility) {
+                guard !Task.isCancelled,
+                      let key = try? loader(),
+                      key.count == 32
+                else {
+                    return nil as Data?
+                }
+                return key
+            }
+            keyResolution = (UUID(), task)
+        }
+        guard let request = keyResolution else { return nil }
+        let key = await request.task.value
+        // An older waiter may resume after a user has retried a failed read.
+        // It must not clear that new flight or replace its cached result.
+        if keyResolution?.id == request.id {
             resolvedKey = key
             keyResolutionFinished = true
-            self.keyResolution = nil
-            return key
+            keyResolution = nil
         }
-
-        let loader = keyLoader
-        let task = Task.detached(priority: .utility) {
-            guard !Task.isCancelled,
-                  let key = try? loader(),
-                  key.count == 32
-            else {
-                return nil as Data?
-            }
-            return key
-        }
-        keyResolution = task
-        let key = await task.value
-        resolvedKey = key
-        keyResolutionFinished = true
-        keyResolution = nil
         return key
     }
 

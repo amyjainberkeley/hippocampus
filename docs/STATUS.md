@@ -1,14 +1,311 @@
 # Hippocampus Status
 
-_Updated on 2026-09-25; qualification scope is recorded per checkpoint._
+_Updated on 2026-10-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `09950fa`
+Audited code baseline: `afed4a3`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## October 7 Retained Screenshot OCR Check
+
+A new [retained-image probe](audits/2026-10-07-retained-screenshot-ocr.md) runs
+fabricated chat pixels through the production JPEG encoder, encryption,
+authenticated image provider, local re-reader and the installed OCR worker.
+At native resolution, all ten lines match exactly and in order at 10-, 12- and
+16-pixel font sizes, with no extra or omitted lines. The three runs took
+2.282–3.763 seconds. Reducing the same pixels to the former 1280-pixel long-edge
+limit, with compression quality held constant, yields 0/10, 0/10 and 6/10 exact
+lines. This supports retaining image detail for future re-reading; it cannot
+restore detail already lost in older screenshots.
+
+This is synthetic, same-Mac processing evidence. It uses an injected key and a
+standalone source-linked probe with the installed signed worker. It does not
+qualify live capture, real Keychain access, cold start, native UI or arbitrary
+image accuracy. No product code, installed app, owner data or release changed.
+
+## October 7 Screenshot Re-read Recovery
+
+The [screenshot key recovery checkpoint](audits/2026-10-07-screenshot-key-recovery.md)
+lets an explicit **Re-read screenshot** retry a previously failed Keychain
+resolution. Passive image loads still cache failures, concurrent reads share
+the same attempt, and successful keys remain cached. Path validation, encrypted
+image authentication and local OCR review are unchanged. Five new regressions
+pass; the full optimized Recall suite passes **546 XCTest cases and four Swift
+Testing cases**. Independent review found no blocking issue.
+
+This change is published source only; the installed app remains exact
+`8e82e03`. Tests use synthetic encrypted pixels and an injected recognizer,
+not the owner's Keychain or screenshots. Recovery from key unavailability is
+separate from OCR accuracy. An already-visible unavailable-image placeholder
+may still need reopening after recovery. Real Keychain recovery, cancellation
+during lookup and the outstanding live capture checks remain unqualified.
+
+## October 7 Capture Diagnostics
+
+The [AX traversal diagnostic checkpoint](audits/2026-10-07-ax-traversal-diagnostics.md)
+preserves the first descendant-probe failure as content-free categories and
+numbers in the existing rate-limited health line. All reads, traversal bounds,
+classification and fail-closed behavior remain unchanged. Eight new regressions
+demonstrated missing diagnostics before implementation. All 131 focused AX tests
+and the full **839-test helper suite pass**; independent review is clear.
+The earlier Apple Vision fallback failures remain historical evidence, not a
+bug claimed fixed by this change. The exact `8e82e03` candidate is now built,
+signed, Apple-accepted, stapled and installed after another verified ciphertext
+backup and atomic bundle swap. All five release builds and the unchanged
+20-second disposable-home launch passed. See the
+[installation and foreground audit](audits/2026-10-07-diagnostic-owner-install.md)
+and [candidate receipt](release/candidate-0.2.0-8e82e03-2026-10-07.json).
+
+**The automated foreground check does not qualify live capture.** Its own
+AppKit window became active/key, but independent system foreground samples
+continued to identify the installed Recall process. No random proof phrase was
+generated. The prior TextEdit attempt lacked this identity evidence, so its
+missing capture and the unclassified AX health lines must not be presented as a
+diagnosed TextEdit failure. New diagnostics distinguish incomplete child arrays
+and depth limits, but have no app attribution. Recall is intentionally excluded
+from capture; no exclusion, traversal bound or permission was changed.
+
+## October 7 OCR Owner Update
+
+**The OCR update is installed, but live capture is not yet qualified.** The
+exact `4983f6c` app was signed, Apple-accepted, stapled and accepted by Gatekeeper
+at `/Applications/Hippocampus.app`, before the diagnostics update above replaced
+it with `8e82e03`. A matching private `4983f6c` notarized DMG exists.
+A verified ciphertext backup and atomic whole-bundle swap preserved the owner
+store and existing MCP reader mappings. No public download or feed was enabled.
+See [the owner-install audit](audits/2026-10-07-ocr-owner-install.md) and
+[receipt](release/candidate-0.2.0-4983f6c-2026-10-07.json).
+
+System Settings showed Screen Recording and Accessibility already on; no grants
+were changed. The earlier synthetic TextEdit attempt did not yield stored memory
+or a matching MCP result. Its foreground identity was unverified, and the
+content-free `failsafe-unknown` / descendant error was not app-attributed.
+The diagnostic follow-up above supersedes any inference that this established
+a TextEdit capture defect. Native onboarding, shortcut delivery, genuine live
+capture, cancellation/zoom and recovery remain open.
+
+The October 3 temporary artifacts were absent on resumption. The surviving
+exact-source working app received new app/DMG Apple submissions and complete
+installer qualification; it was not relabeled as the older accepted artifact.
+Persistent private copies now sit outside temporary storage. Earlier dated
+sections below preserve historical observations; the installation and permission
+state in this October 7 checkpoint supersedes their pending-install language.
+
+## October 3 Capture Recovery, Onboarding, And Project Handoff
+
+The [Recall shortcut checkpoint](audits/2026-10-03-recall-shortcut.md) changes
+the source default to Control–Shift–Space, separate from Superapp Whisper's
+Command–Shift–Space. Onboarding, the popup and help show the same combination.
+All 365 parent, 245 onboarding and 541 optimized Recall XCTest cases plus four
+Swift Testing cases pass. The new private `4983f6c` candidate contains this
+change; the preserved `2f4293c` candidate does not. Neither has been installed
+or tested with live keyboard input. Other-app conflicts and onboarding event
+ownership still require live qualification.
+
+The desktop transcript-consent checkpoint makes background daemon import
+default-off, forces it off for desktop launches, and separates MCP registration
+from CLI hook/importer setup. Desktop-created Claude hooks use existing memory
+with `--no-refresh`. Previously configured hooks/importers are preserved and
+still require owner-specific review before upgrade. There is no desktop
+automatic transcript-import preference yet. Qualification is recorded in
+[the consent audit](audits/2026-10-03-transcript-consent.md).
+
+The [OCR repair checkpoint](audits/2026-10-03-ocr-quality.md) adds sharper saved
+images, confidence filtering after the complete privacy scan, screenshot zoom,
+and an explicit local re-read preview for retained screenshots. Historical OCR
+and search indexes are not rewritten. All 541 optimized Recall XCTest cases,
+four Swift Testing cases, 32 focused capture tests and 11 worker/build tests
+pass. The full helper suite still has eight assertions in three Apple Vision
+fallback tests; an isolated public-baseline run reproduces all eight without
+changing budgets or skipping tests. This is a source checkpoint, not an
+installed update or a public-release qualification.
+
+The [OCR resize follow-up](audits/2026-10-03-ocr-resize-bounds.md) prevents valid
+narrow capture regions from expanding past the 3840-pixel detector-input cap.
+Oversized recognition batches fail the whole reading before allocation rather
+than publish incomplete candidates. All 15 worker/build tests pass, including
+the reproduced resize failures, narrow-text coordinates, complete privacy
+candidates and exact synthetic chat. This is a model-input bound, not a
+total-process memory guarantee or proof of arbitrary screenshot accuracy.
+The rebuilt frozen worker's first invocation hit the unchanged 30-second
+deadline. Subsequent warm checks passed all four blank strips, 10/10 chat lines
+and 8/8 code lines. Cold-start qualification in the signed app remains open;
+the warm successes are not reported as a clean first-launch result.
+An independently Developer ID-signed copy then read 10/10 synthetic chat lines
+on its first execution in 24.029 seconds, followed by 8/8 code lines and four
+blank strips within the same deadline. This same-Mac runtime probe does not
+replace cold-machine or whole-application qualification. See the
+[signed-worker audit](audits/2026-10-03-signed-ocr-qualification.md).
+
+The [current complete private candidate](audits/2026-10-03-current-ocr-candidate.md)
+from `4983f6c` is Developer ID-signed and contains the OCR repairs, consent
+separation and new Recall shortcut. All five release-build commands covering
+six shipping executables pass. Its six hashes, complete payload/source
+provenance, nested signatures, App Group, embedded OCR and Arctic model checks
+pass. The unchanged 20-second disposable-home launch passes with onboarding
+attached and no candidate process left running. Its actual embedded worker
+reads 10/10 synthetic chat lines in 3.427 seconds, 8/8 code lines in 3.003 seconds,
+and four blank strips without text in 0.465–0.492 seconds. These are same-Mac
+checks, not cold-machine accuracy or latency guarantees. The earlier `2f4293c`
+candidate is preserved separately. The
+[UI and notarization follow-up](audits/2026-10-03-ocr-ui-notarization.md) verifies
+the isolated production re-read UI's completed result, exact copy into TextEdit
+and repeated reading using fabricated pixels. Saved OCR remained unchanged.
+Live cancellation and original-image zoom remain unverified.
+
+The original `4983f6c` candidate is now Apple-accepted and stapled; Gatekeeper,
+distribution policy, deep signatures and full provenance pass. The installer
+revealed and reproduced a path-alias bug in the launch verifier. Its file-identity
+fix passes the regression, rejection of another bundle, the real candidate,
+all 16 release-safety tests and all 230 release-contract checks. The unchanged
+exact-source installer also passed its original launch gate after moving the
+checkout to a canonical path. It then stopped because the Mac locked again and
+the existing notary profile became unavailable while submitting its separately
+re-signed copy. No DMG was produced. The original accepted candidate is preserved
+and reverified; neither copy is installed or public. Structural launch and Apple
+acceptance do not replace live capture, onboarding, upgrade and recovery checks.
+The [model provisioning checkpoint](audits/2026-10-03-release-model-provisioning.md)
+now supplies the immutable hosted Arctic archive and checksum in current source.
+Anonymous download, exact reconstruction, all seven file hashes, GitHub's signed
+release attestation and the actual 0.2.0 prebuild identity check pass. The model
+repository reports release immutability enabled. All 7 model-manifest, 8 archive
+preparation and 9 release-identity tests pass. This is a model-only dependency
+release, not an app installer or public app release. The original `4983f6c`
+candidate and its exact source remain unchanged; a future app from this newer
+manifest requires its own source provenance.
+
+The [isolated engine qualification](audits/2026-10-03-clean-home-engine.md)
+also passes on source `a3e09ba`: a disposable development home exercises strict
+injected-frame ingest, storage, episode/brief derivation, all six MCP responses,
+canonical source citations, fake-client registration without reusable keys,
+deletion and fixture cleanup. It uses a debug engine, synthetic evidence and
+development custody with embeddings disabled. This is separate from real
+screen capture, native onboarding, Keychain migration and signed installation.
+
+The [current storage regression run](audits/2026-10-03-storage-regressions.md)
+passes 723 `mci-brain` tests with zero failures and one existing ignored
+100,000-event performance harness. Workspace Rust formatting and all-target
+brain Clippy with warnings denied pass. Synthetic historical-schema, failed
+migration, deletion-barrier and handoff-ledger checks support the source upgrade
+path; they do not qualify installation, Keychain continuity or recovery of the
+owner's private store.
+
+Hippocampus is the standalone memory, recall, and MCI context product.
+Superapp is the separate OneKit-derived workspace. Keep their repositories,
+identities, installations, data, releases, and websites independent. Website
+and signup-email work is deferred by the owner.
+
+The [checkpoint audit](audits/2026-10-03-onboarding-handoff.md) records source
+changes and qualification boundaries. Permission breadcrumbs appended to an
+existing helper log now reach the parent. Startup, rotation, ordered delivery,
+stop/restart, notification consent races, and multiple revoked permissions are
+covered. Recall distinguishes a responsive service from recent saved evidence.
+Onboarding no longer marks a skipped shortcut as tested or promises saved
+memory before it exists.
+
+The publication checkpoint includes the final September handoff source on top
+of the existing public branch. Earlier unpublished intermediate history stays
+local because it contained a real-memory README excerpt. Its current example
+and the new UI screenshot are synthetic.
+
+Recall adds a native **Continue a project** handoff preview, folder selection,
+refresh, recovery, and explicit copy. It invokes the existing local compiler
+with `--no-refresh`, discloses repository/worktree/session scope, and cancels
+the child when dismissed or when the selected project changes.
+
+**Verified source:** 363 parent tests, 243 onboarding tests, and 535 optimized
+Recall tests pass in minimal environments. Independent source review has no
+remaining blocking findings in this diff. Native computer-use checks cover the
+handoff's empty state, selected-folder rendering, refresh, failure clearing,
+disabled copy after failure, and retry using fabricated data and a stub agent.
+This is interface verification, not proof of real-memory retrieval.
+
+**Installed/live state:** The owner app remains the notarized `f4f7bf1` build;
+this source update has not been installed. Screen Recording is off in macOS;
+enabling it reached the owner Touch ID prompt. No fresh live capture, new
+onboarding, or real-memory handoff is claimed. Existing transcript importer
+configuration, delivery of the now-distinct shortcuts, controlled upgrade and
+rollback, signed release qualification, and public download readiness remain
+open. No private memory is included in this checkpoint.
+
+## September 26 Handoff Layer
+
+The [handoff contract](handoff/CONTRACT.md) and the audit at
+`/Users/amy/hippocampus-audit-2026-09-26.md` (owner-private) define this
+checkpoint. Direction: transcripts and git first, screen second. Every
+Claude Code and Codex session opened in a project should start with a short,
+cited packet compiled from what the user's agents already did on this Mac.
+
+**Implemented and tested at source.**
+
+- `import-sessions` reads `~/.claude/projects` (top-level session files) and
+  `~/.codex/sessions` (recursive rollouts, subagent threads skipped)
+  incrementally through the `import_cursors` table (migration 0011). Events
+  carry the contract header (`session=`, `src=path:line`), roles `user`,
+  `assistant`, `tool`; system-injected user text is skipped; mutating tool
+  calls become one-line `tool` events. Real transcripts on this Mac: 6,229
+  Claude Code and 5,354 Codex events from 731 + 24 files in 29 s; a second run
+  reads nothing and writes nothing in 1.2 s.
+- `refresh` runs the incremental import plus Tier-1 extraction, episode
+  segmentation and embedding for new events within a time budget. The
+  capture writer (`--drain-stdin`) supports a 60 s refresh on its own store
+  handle, now gated behind explicit daemon opt-in and disabled by desktop
+  launches. The explicit CLI and full CLI hooks skip with a printed reason
+  when the app holds the writer lease.
+- `handoff --cwd DIR` compiles the packet for that project (root from
+  `git rev-parse --show-toplevel`, else the cwd): where you stopped, next
+  step, goal, decisions, avoid, open questions, files touched, git, sources.
+  Extractive, deterministic, every line cited `(agent, local time, event N)`,
+  600 whitespace tokens by default, whole lines only. Hook formats print a
+  Claude Code or Codex SessionStart envelope and always exit 0 within 8 s,
+  with a fallback envelope on any failure. Deliveries are recorded in
+  `handoff_deliveries` (migration 0012) when the writer lease is free.
+- `today [--date]` writes the day's standup across projects from transcripts,
+  git commits on the checked-out branch, and screen episodes when present.
+- `connect --all` installs the SessionStart hooks in `~/.claude/settings.json`
+  and `~/.codex/hooks.json` and a per-user LaunchAgent
+  (`ai.hippocampus.refresh`, every 300 s); `disconnect --all` removes only
+  those. The Swift `SessionContextInstaller` recognises that group and the
+  earlier legacy shape. New desktop hooks add `--no-refresh`; explicit enable
+  converts the previous group in place, and removal accepts either shape.
+- `doctor` adds `transcripts` (files newer than their import cursor),
+  `delivery` (hook installed, last packet per client) and `refresh agent`.
+- `scripts/install.sh` downloads the signed CLI from a GitHub release,
+  verifies its SHA-256 and runs `init`. No screen permission is requested.
+
+Source checks at this checkpoint: `cargo test -p mci-agent` (452 library
+tests plus every integration file, including 13 transcript-import, 12
+handoff, 9 handoff CLI and 3 delivery CLI tests), `cargo test -p mci-brain`
+(327 library tests plus integration files), `cargo clippy --all-targets
+-- -D warnings` on both crates, `cargo fmt --check`, and
+`swift test --filter SessionContextInstaller` (13 tests). All pass.
+
+**Installed on the owner's Mac.** The Sep 11 notarized `f4f7bf1` app was
+installed at 02:35 (the prior `fe90a3d` bundle is retained beside it) after
+a verified ciphertext backup of the brain. `capture_enabled` was turned on in
+`~/.config/hippocampus/runtime.toml`. Capture delivers no frames because the
+helper reports `tcc_revoked=screenRecording`: macOS dropped the Screen
+Recording grant when the binary changed. Only the owner can re-grant it. The
+app also could not be quit through its own menu item or a quit Apple event;
+the parent was stopped with SIGTERM and its children exited through their
+lease pipes. That quit failure is an open product defect.
+
+**Verified end to end (isolated homes, scratch brain, this build).** A real
+Claude Code session and a real Codex session stated a decision and a next step
+in a throwaway repo; `import-sessions` imported both; `handoff` cited them; a
+fresh Codex session running our SessionStart hook answered the decision and the
+next step without reading files. Codex ignores a new hooks file until it is
+trusted once interactively.
+
+**Not verified at this checkpoint.** Screen capture with the new OCR on this
+Mac (blocked on the Screen Recording grant); the hosted Swift job still runs
+the Vision completeness class only on hardware with a Neural Engine (skipped
+on GitHub runners since `fb02d62`, an owner decision to review); packets that
+include screen citations were tested synthetically only.
 
 ## September 25 Product Strategy (Proposal)
 
@@ -1324,9 +1621,11 @@ truthfully scoped evidence product.
   A local archive containing only that compiled Arctic bundle was created and
   reconstructed through `scripts/prepare-release-models.sh`; its SHA-256 is
   `31da35fffb853a9442cef582f3319206496a00808da1ab3cbeca711b11a766f3`.
-  It is not hosted, and `release-models.json` deliberately remains
-  `UNPROVISIONED`, so a public updater release cannot yet be reconstructed or
-  published from immutable model inputs.
+  That initial archive was not hosted. The October 3
+  [model provisioning checkpoint](audits/2026-10-03-release-model-provisioning.md)
+  supersedes this input blocker with a separately attributed, immutable 0.2.0
+  archive and verified anonymous reconstruction. The old archive and digest
+  remain historical evidence; current release qualification is recorded above.
 - Multi-device sync and Windows are outside the verified v1 path.
 
 ## Benchmark Status

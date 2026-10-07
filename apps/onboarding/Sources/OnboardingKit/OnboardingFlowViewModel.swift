@@ -50,13 +50,9 @@ public final class OnboardingFlowViewModel: ObservableObject {
     /// normal cold-start. Currently only `.rewind` is honored — surfaces
     /// a WelcomeSlide sub-header re-using the `/rewind` landing lane copy.
     @Published public var migrationSource: MigrationSource?
-    /// Cycle 8.48 — Raycast peer-study P0 pattern #1. Flipped to `true`
-    /// when the user completes the ⇧⌘Space live-try on the
-    /// `PrimaryHotkeySlide` (either by pressing the hotkey while the
-    /// slide is frontmost, or by tapping "Skip" — the flag records "we
-    /// showed them the moment, they engaged with it" for downstream
-    /// telemetry-gap analysis, not "the hotkey actually works").
+    /// The chord was observed in onboarding; this does not prove global registration.
     @Published public private(set) var hotkeyPracticed: Bool = false
+    @Published public private(set) var hotkeySkipped: Bool = false
 
     // MARK: - Cotypist P0 #2 — deferred-permission choreography
 
@@ -185,23 +181,20 @@ public final class OnboardingFlowViewModel: ObservableObject {
                 && accessibilityPermission.status == .granted
         }
         if currentStep == .primaryHotkey {
-            // The slide's Continue button binds `.disabled(!canAdvance)`;
-            // `hotkeyPracticed` is flipped by either the live-try monitor
-            // or the Skip fallback. Either path unblocks — Skip is
-            // REQUIRED for accessibility (SetApp/Alfred can grab ⇧⌘Space).
-            return hotkeyPracticed
+            return hotkeyPracticed || hotkeySkipped
         }
         return true
     }
 
-    /// Called by `PrimaryHotkeySlide` when the user either presses
-    /// ⇧⌘Space while the slide is frontmost OR taps "Skip". Idempotent
-    /// — a second call is a no-op. Persists nothing beyond the flow
-    /// VM (the `.onboarding-state` file already records the step; a
-    /// user who quits mid-hotkey-slide re-lands here and re-tries).
+    /// Record a chord observed while onboarding is frontmost.
     public func markHotkeyPracticed() {
-        guard !hotkeyPracticed else { return }
         hotkeyPracticed = true
+        hotkeySkipped = false
+    }
+
+    public func skipHotkeyPractice() {
+        guard !hotkeyPracticed else { return }
+        hotkeySkipped = true
     }
 
     /// The surface currently being asked on `PermissionsSlide`, or `nil`

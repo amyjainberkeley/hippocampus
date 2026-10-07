@@ -3,6 +3,17 @@ import XCTest
 
 @MainActor
 final class OnboardingFlowViewModelTests: XCTestCase {
+    func testSkippingShortcutAllowsProgressWithoutClaimingItWasObserved() {
+        let vm = makeVM()
+        vm.goTo(.primaryHotkey)
+        vm.skipHotkeyPractice()
+        XCTAssertFalse(vm.hotkeyPracticed)
+        XCTAssertTrue(vm.hotkeySkipped)
+        XCTAssertTrue(vm.canAdvance)
+        vm.markHotkeyPracticed()
+        XCTAssertTrue(vm.hotkeyPracticed)
+        XCTAssertFalse(vm.hotkeySkipped)
+    }
 
     private func makeVM() -> OnboardingFlowViewModel {
         // Hermetic: use the in-memory store so tests don't read/write

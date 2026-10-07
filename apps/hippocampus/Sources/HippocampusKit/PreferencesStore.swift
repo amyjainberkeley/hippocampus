@@ -98,7 +98,7 @@ public enum RetentionPolicy: String, CaseIterable, Sendable, Codable {
 public final class PreferencesStore: ObservableObject {
     // MARK: General
 
-    /// Whether the menu-bar icon renders. If off, only ⇧⌘Space
+    /// Whether the menu-bar icon renders. If off, only ⌃⇧Space
     /// remains as an entry point. Currently informational — the
     /// MenuBarExtra scene reads this at launch (a future PR wires
     /// the live hide/show; today the value is persisted and the

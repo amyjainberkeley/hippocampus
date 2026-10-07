@@ -35,6 +35,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use mci_agent::alias_resolver_worker;
 use mci_agent::brain_ingest::{BrainIngestor, BrainPump};
 use mci_agent::brief_worker;
+use mci_agent::client_hooks::{self, CodexHooksFeature, HookChange, HookCommand, HookPaths};
 use mci_agent::client_registry::{
     ClientRegistration, ClientRegistry, RegistrationChange, RegistrationRepair, RegistrationStatus,
 };
@@ -46,6 +47,11 @@ use mci_agent::context_packet::{
 use mci_agent::crash_recovery::{acquire_lock, lock_path_for_brain, LockAcquireOutcome, LockError};
 use mci_agent::device_id::{load_or_generate, DeviceIdSource};
 use mci_agent::episode_worker;
+use mci_agent::handoff::{
+    compile_handoff, cwd_from_stdin, fallback_envelope, hook_envelope, HandoffFormat,
+    HandoffReport, HookWatchdog, RenderClock, DEFAULT_HANDOFF_TOKENS, HOOK_WATCHDOG_DEADLINE,
+    REFRESH_BUDGET,
+};
 use mci_agent::health_log::{HealthLog, HealthLogConfig};
 use mci_agent::health_summary::summarize_file;
 use mci_agent::idle_batch;
@@ -55,8 +61,11 @@ use mci_agent::page_content::PageContentListener;
 use mci_agent::panic_uploader::{self, PanicUploader};
 #[cfg(target_os = "macos")]
 use mci_agent::pump_supervisor::PumpSupervisor;
+use mci_agent::refresh::{refresh_or_skip, RefreshOutcome, RefreshRoots};
+use mci_agent::refresh_agent;
 use mci_agent::retention_worker;
 use mci_agent::runner::drain_with_capture_status;
+use mci_agent::today::{compile_today, render_today, TodayFormat};
 #[cfg(unix)]
 use mci_agent::user_allowlist::default_user_allowlist_path;
 use mci_agent::wall_clock::{format_unix_ms, SystemWallClock};
@@ -103,19 +112,45 @@ enum Mode {
         max_evidence: usize,
         format: ContextOutputFormat,
     },
+    /// Compile the per-project handoff packet (docs/handoff/CONTRACT.md
+    /// section 5). Hook formats print a `SessionStart` envelope and exit 0.
+    Handoff {
+        db_path: PathBuf,
+        cwd: Option<PathBuf>,
+        max_tokens: usize,
+        format: HandoffFormat,
+        client: Option<String>,
+        no_refresh: bool,
+    },
+    /// Compile the daily packet (docs/handoff/CONTRACT.md section 6).
+    Today {
+        db_path: PathBuf,
+        date: Option<String>,
+        format: TodayFormat,
+    },
     /// One-command setup: key, import, enrich, register.
     Init {
         db_path: PathBuf,
         root: PathBuf,
+        refresh_agent: bool,
     },
     /// Ensure the production Keychain item exists without importing data.
     EnsureKey {
         db_path: PathBuf,
     },
-    /// Import Claude Code session transcripts into the brain.
+    /// Import Claude Code and Codex transcripts into the brain,
+    /// incrementally over both roots.
     ImportSessions {
         db_path: PathBuf,
         root: PathBuf,
+        codex_root: PathBuf,
+        full: bool,
+    },
+    /// Bounded incremental import plus enrich of the new events. What the
+    /// handoff hook runs before compiling a packet.
+    Refresh {
+        db_path: PathBuf,
+        budget_ms: u64,
     },
     /// Explain why the brain is empty.
     Doctor {
@@ -177,9 +212,19 @@ enum Mode {
     RegisterMcp {
         db_path: PathBuf,
     },
-    /// Register the read-only memory server with every detected local client.
+    /// Register read-only tools without installing hooks or transcript refresh.
+    RegisterClients {
+        db_path: PathBuf,
+    },
+    /// Register the read-only memory server with every detected local client,
+    /// install the `SessionStart` handoff hooks, and load the refresh agent.
     ConnectAll {
         db_path: PathBuf,
+        refresh_agent: bool,
+    },
+    /// Remove the Hippocampus `SessionStart` hooks and the refresh agent.
+    DisconnectAll {
+        refresh_agent: bool,
     },
     /// Cycle 8.29 P0 #3 — empirical "is content reaching the brain
     /// from `source`?" probe. Used by
@@ -251,6 +296,10 @@ const DEFAULT_STATS_WINDOW_SECONDS: u64 = 30;
 /// per-call Core ML overhead.
 const DEFAULT_EMBED_BATCH_SIZE: usize = 32;
 
+/// Time budget for `refresh`, in milliseconds. The handoff hook has a few
+/// seconds in total, so the default leaves room for compiling the packet.
+const DEFAULT_REFRESH_BUDGET_MS: u64 = 3000;
+
 #[allow(clippy::too_many_lines)] // One two-pass parser keeps option precedence explicit.
 fn parse_args(argv: &[String]) -> Args {
     // Two-pass: first scan resolves the mode flag, second scan binds
@@ -268,12 +317,19 @@ fn parse_args(argv: &[String]) -> Args {
     let mut brief_date: Option<String> = None;
     let mut model_dir: Option<PathBuf> = None;
     let mut transcript_root: Option<PathBuf> = None;
+    let mut codex_root: Option<PathBuf> = None;
+    let mut import_full = false;
+    let mut refresh_budget_ms: u64 = DEFAULT_REFRESH_BUDGET_MS;
     let mut unknown_command: Option<String> = None;
     let mut context_focus: Option<String> = None;
-    let mut context_max_tokens = DEFAULT_CONTEXT_TOKENS;
+    let mut max_tokens_override: Option<usize> = None;
     let mut context_max_evidence = DEFAULT_CONTEXT_EVIDENCE;
-    let mut context_format = ContextOutputFormat::Markdown;
+    let mut format_value: Option<String> = None;
+    let mut handoff_cwd: Option<PathBuf> = None;
+    let mut handoff_client: Option<String> = None;
+    let mut handoff_no_refresh = false;
     let mut invalid_arguments: Option<String> = None;
+    let mut refresh_agent = true;
 
     let mut i = 1;
     while i < argv.len() {
@@ -295,8 +351,23 @@ fn parse_args(argv: &[String]) -> Args {
             "--health-summary" => mode_kind = ModeKind::HealthSummary,
             "mcp-serve" => mode_kind = ModeKind::McpServe,
             "context" => mode_kind = ModeKind::Context,
+            "handoff" => mode_kind = ModeKind::Handoff,
+            "today" => mode_kind = ModeKind::Today,
+            "--cwd" if i + 1 < argv.len() => {
+                handoff_cwd = Some(PathBuf::from(&argv[i + 1]));
+                i += 1;
+            }
+            "--client" if i + 1 < argv.len() => {
+                handoff_client = Some(argv[i + 1].clone());
+                i += 1;
+            }
+            "--no-refresh" => handoff_no_refresh = true,
             "register-mcp" => mode_kind = ModeKind::RegisterMcp,
+            "register-clients" => mode_kind = ModeKind::RegisterClients,
             "connect" => mode_kind = ModeKind::ConnectAll,
+            "disconnect" => mode_kind = ModeKind::DisconnectAll,
+            "--no-refresh-agent" => refresh_agent = false,
+            "--with-refresh-agent" => refresh_agent = true,
             "stats" => mode_kind = ModeKind::Stats,
             "embed-backfill" => mode_kind = ModeKind::EmbedBackfill,
             "enrich" => mode_kind = ModeKind::Enrich,
@@ -318,7 +389,8 @@ fn parse_args(argv: &[String]) -> Args {
             "--max-tokens" if i + 1 < argv.len() => {
                 match argv[i + 1].parse::<usize>() {
                     Ok(value) => {
-                        context_max_tokens = value.clamp(MIN_CONTEXT_TOKENS, MAX_CONTEXT_TOKENS);
+                        max_tokens_override =
+                            Some(value.clamp(MIN_CONTEXT_TOKENS, MAX_CONTEXT_TOKENS));
                     }
                     Err(_) => invalid_arguments = Some("--max-tokens must be an integer".into()),
                 }
@@ -332,25 +404,37 @@ fn parse_args(argv: &[String]) -> Args {
                 i += 1;
             }
             "--format" if i + 1 < argv.len() => {
-                match ContextOutputFormat::parse(&argv[i + 1]) {
-                    Some(value) => context_format = value,
-                    None => {
-                        invalid_arguments = Some("--format must be either markdown or json".into());
-                    }
-                }
+                // Validated per mode below: context and today accept
+                // markdown|json, handoff also accepts the hook envelopes.
+                format_value = Some(argv[i + 1].clone());
                 i += 1;
             }
-            "--focus" | "--max-tokens" | "--max-evidence" | "--format" => {
+            "--focus" | "--max-tokens" | "--max-evidence" | "--format" | "--cwd" | "--client" => {
                 invalid_arguments = Some(format!("{} requires a value", argv[i]));
             }
             "import-sessions" => mode_kind = ModeKind::ImportSessions,
+            "refresh" => mode_kind = ModeKind::Refresh,
             "init" => mode_kind = ModeKind::Init,
             "ensure-key" => mode_kind = ModeKind::EnsureKey,
-            "--transcript-root" => {
+            "--transcript-root" | "--root" => {
                 if let Some(v) = argv.get(i + 1) {
                     transcript_root = Some(PathBuf::from(v));
                     i += 1;
                 }
+            }
+            "--codex-root" => {
+                if let Some(v) = argv.get(i + 1) {
+                    codex_root = Some(PathBuf::from(v));
+                    i += 1;
+                }
+            }
+            "--full" => import_full = true,
+            "--budget-ms" if i + 1 < argv.len() => {
+                match argv[i + 1].parse::<u64>() {
+                    Ok(value) => refresh_budget_ms = value,
+                    Err(_) => invalid_arguments = Some("--budget-ms must be an integer".into()),
+                }
+                i += 1;
             }
             "--batch-size" => {
                 if let Some(v) = argv.get(i + 1).and_then(|s| s.parse::<usize>().ok()) {
@@ -421,12 +505,49 @@ fn parse_args(argv: &[String]) -> Args {
         ModeKind::McpServe => Mode::McpServe {
             db_path: resolved_db_path.clone(),
         },
-        ModeKind::Context => Mode::Context {
-            db_path: resolved_db_path.clone(),
-            focus: context_focus,
-            max_tokens: context_max_tokens,
-            max_evidence: context_max_evidence,
-            format: context_format,
+        ModeKind::Context => match format_value.as_deref().map_or(
+            Some(ContextOutputFormat::Markdown),
+            ContextOutputFormat::parse,
+        ) {
+            Some(format) => Mode::Context {
+                db_path: resolved_db_path.clone(),
+                focus: context_focus,
+                max_tokens: max_tokens_override.unwrap_or(DEFAULT_CONTEXT_TOKENS),
+                max_evidence: context_max_evidence,
+                format,
+            },
+            None => Mode::InvalidArguments {
+                message: "--format must be either markdown or json".into(),
+            },
+        },
+        ModeKind::Handoff => match format_value
+            .as_deref()
+            .map_or(Some(HandoffFormat::Markdown), HandoffFormat::parse)
+        {
+            Some(format) => Mode::Handoff {
+                db_path: resolved_db_path.clone(),
+                cwd: handoff_cwd,
+                max_tokens: max_tokens_override.unwrap_or(DEFAULT_HANDOFF_TOKENS),
+                format,
+                client: handoff_client,
+                no_refresh: handoff_no_refresh,
+            },
+            None => Mode::InvalidArguments {
+                message: "--format must be markdown, json, claude-hook or codex-hook".into(),
+            },
+        },
+        ModeKind::Today => match format_value
+            .as_deref()
+            .map_or(Some(TodayFormat::Markdown), TodayFormat::parse)
+        {
+            Some(format) => Mode::Today {
+                db_path: resolved_db_path.clone(),
+                date: brief_date.clone(),
+                format,
+            },
+            None => Mode::InvalidArguments {
+                message: "--format must be either markdown or json".into(),
+            },
         },
         ModeKind::UnknownCommand => Mode::UnknownCommand {
             name: unknown_command.unwrap_or_default(),
@@ -434,9 +555,14 @@ fn parse_args(argv: &[String]) -> Args {
         ModeKind::RegisterMcp => Mode::RegisterMcp {
             db_path: resolved_db_path,
         },
-        ModeKind::ConnectAll => Mode::ConnectAll {
+        ModeKind::RegisterClients => Mode::RegisterClients {
             db_path: resolved_db_path,
         },
+        ModeKind::ConnectAll => Mode::ConnectAll {
+            db_path: resolved_db_path,
+            refresh_agent,
+        },
+        ModeKind::DisconnectAll => Mode::DisconnectAll { refresh_agent },
         ModeKind::Stats => Mode::Stats {
             source: stats_source,
             since_seconds: stats_since_seconds,
@@ -466,6 +592,7 @@ fn parse_args(argv: &[String]) -> Args {
             root: transcript_root
                 .clone()
                 .unwrap_or_else(mci_agent::import_sessions::default_transcript_root),
+            refresh_agent,
         },
         ModeKind::EnsureKey => Mode::EnsureKey {
             db_path: resolved_db_path,
@@ -474,6 +601,12 @@ fn parse_args(argv: &[String]) -> Args {
             db_path: resolved_db_path,
             root: transcript_root
                 .unwrap_or_else(mci_agent::import_sessions::default_transcript_root),
+            codex_root: codex_root.unwrap_or_else(mci_agent::import_codex::default_codex_root),
+            full: import_full,
+        },
+        ModeKind::Refresh => Mode::Refresh {
+            db_path: resolved_db_path,
+            budget_ms: refresh_budget_ms,
         },
     };
     let mode =
@@ -493,8 +626,12 @@ enum ModeKind {
     HealthSummary,
     McpServe,
     Context,
+    Handoff,
+    Today,
     RegisterMcp,
+    RegisterClients,
     ConnectAll,
+    DisconnectAll,
     Stats,
     EmbedBackfill,
     Enrich,
@@ -502,11 +639,14 @@ enum ModeKind {
     Doctor,
     Brief,
     ImportSessions,
+    Refresh,
     Init,
     EnsureKey,
     UnknownCommand,
 }
 
+// The help text is one literal per command; splitting it would only hide it.
+#[allow(clippy::too_many_lines)]
 fn print_usage() {
     println!(
         "mci-agent {VERSION}\n\
@@ -519,16 +659,38 @@ fn print_usage() {
         \x20 mcp-serve                  run the localhost MCP server (stdio JSON-RPC 2.0)\n\
         \x20 context                    print a bounded, cited memory packet for the current\n\
         \x20                            task. Markdown by default; JSON for automation.\n\
+        \x20 handoff                    print the cited \"where you left off\" packet for the\n\
+        \x20                            project at --cwd (default: stdin hook JSON, else the\n\
+        \x20                            process cwd). Compiled from agent transcripts, git\n\
+        \x20                            and screen evidence; no model call. Hook formats\n\
+        \x20                            print a SessionStart envelope and always exit 0.\n\
+        \x20 today                      print the daily packet: every project agents touched\n\
+        \x20                            on a local day, with commits, files and screen time.\n\
         \x20 register-mcp               register Hippocampus in Claude Code's MCP settings\n\
+        \x20 register-clients           register read-only MCP tools; leave hooks and\n\
+        \x20                            transcript importing unchanged.\n\
         \x20 connect --all              register Hippocampus with detected Claude Code and\n\
-        \x20                            Codex clients without serializing a database key\n\
+        \x20                            Codex clients without serializing a database key,\n\
+        \x20                            install the SessionStart handoff hooks in\n\
+        \x20                            ~/.claude/settings.json and ~/.codex/hooks.json,\n\
+        \x20                            and load the ai.hippocampus.refresh LaunchAgent\n\
+        \x20 disconnect --all           remove the Hippocampus SessionStart hooks and the\n\
+        \x20                            refresh LaunchAgent. MCP registrations stay.\n\
         \x20 init                       one-command setup: make a key, import your\n\
         \x20                            Claude Code history, index it, and connect\n\
         \x20                            detected Claude Code and Codex clients\n\
         \x20 ensure-key                 initialize or validate the bundled macOS\n\
         \x20                            Keychain item without importing data\n\
-        \x20 import-sessions            import Claude Code transcripts from\n\
-        \x20                            ~/.claude/projects into the brain\n\
+        \x20 import-sessions            import Claude Code (~/.claude/projects) and Codex\n\
+        \x20                            (~/.codex/sessions) transcripts into the brain.\n\
+        \x20                            Incremental: a file already imported is read only\n\
+        \x20                            from where the last run stopped. --full re-imports.\n\
+        \x20 refresh                    import both roots incrementally, then extract\n\
+        \x20                            entities, segment episodes and embed the new events\n\
+        \x20                            only, stopping when --budget-ms (default 3000) is\n\
+        \x20                            spent. One summary line on stdout, details on\n\
+        \x20                            stderr, exit 0 unless the brain cannot be opened.\n\
+        \x20                            Never loads Qwen. What the handoff hook runs first.\n\
         \x20 doctor                     say why the brain is empty and what to fix\n\
         \x20 enrich                     run every understanding stage over an existing\n\
         \x20                            brain: extract entities, embed, segment episodes,\n\
@@ -548,7 +710,7 @@ fn print_usage() {
         \x20                            Needs the ArcticEmbedS model; refuses without it.\n\
         \x20 stats --source SRC         count PageContentEvents from SRC in the last window\n\
         \x20                            (SRC = safari | chromium-native-host). Cycle 8.29\n\
-        \x20                            P0 #3 — empirical onboarding probe.\n\
+        \x20                            P0 #3, empirical onboarding probe.\n\
         \x20 --version                  print version and exit\n\
         \x20 -h, --help                 print this and exit\n\
         \n\
@@ -560,15 +722,30 @@ fn print_usage() {
         \x20 --window-seconds N         (with --health-summary) aggregation window. Default 3600.\n\
         \x20 --since-seconds N          (with stats) lookback window. Default 30.\n\
         \x20 --batch-size N             (with embed-backfill) events per batch. Default 32.\n\
-        \x20 --date YYYY-MM-DD          (with brief) summarize that local day. Default is\n\
-        \x20                            the last 24 hours (explicit on-demand window).\n\
+        \x20 --root DIR                 (with import-sessions) Claude Code projects dir.\n\
+        \x20                            Default ~/.claude/projects. --transcript-root also works.\n\
+        \x20 --codex-root DIR           (with import-sessions) Codex sessions dir.\n\
+        \x20                            Default ~/.codex/sessions.\n\
+        \x20 --full                     (with import-sessions) forget the import cursors for\n\
+        \x20                            both roots first and read every file again.\n\
+        \x20 --budget-ms N              (with refresh) time budget. Default 3000.\n\
+        \x20 --date YYYY-MM-DD          (with brief, today) summarize that local day. brief\n\
+        \x20                            defaults to the last 24 hours, today to today.\n\
         \x20 --model-dir PATH           (with brief) where an optional Qwen3 .mlmodelc lives.\n\
         \x20                            Without it, the extractive author runs.\n\
         \x20                            Default ~/Library/Application Support/MCI/Models\n\
         \x20 --focus TEXT               (with context) retrieve memory related to this task.\n\
-        \x20 --max-tokens N             (with context) content budget, clamped to 128...4096.\n\
+        \x20 --max-tokens N             (with context, handoff) whitespace-token budget,\n\
+        \x20                            clamped to 128...4096. Default 1200 / 600.\n\
         \x20 --max-evidence N           (with context) citation budget, clamped to 1...64.\n\
-        \x20 --format markdown|json     (with context) output shape. Default markdown.\n\
+        \x20 --no-refresh-agent         (with connect, disconnect, init) skip the launchd\n\
+        \x20                            refresh agent. --with-refresh-agent is the default.\n\
+        \x20 --format FORMAT            (with context, today) markdown|json;\n\
+        \x20                            (with handoff) also claude-hook|codex-hook.\n\
+        \x20 --cwd DIR                  (with handoff) the directory the session opened in.\n\
+        \x20 --client NAME              (with handoff) client recorded in handoff_deliveries.\n\
+        \x20                            Default: inferred from --format, else cli.\n\
+        \x20 --no-refresh               (with handoff) skip the incremental transcript import.\n\
         \x20 --strict                   (with --drain-stdin) exit non-zero if brain cannot\n\
         \x20                            be opened, instead of falling back to health-only.\n\
         \n\
@@ -585,6 +762,9 @@ fn print_usage() {
         \x20                            w_sem=0.5, w_lex=0.3, w_rec=0.15, w_src=0.05.\n\
         \x20 MCI_BRIEFS_DISABLED        set to 1 to switch daily briefs off. The worker\n\
         \x20                            idles; `brief` refuses and says so.\n\
+        \x20 MCI_TRANSCRIPT_REFRESH_ENABLED set to 1 to opt a directly launched daemon\n\
+        \x20                            into local Claude/Codex transcript imports. Default OFF.\n\
+        \x20 MCI_TRANSCRIPT_REFRESH_DISABLED set to 1 to override that opt-in.\n\
         \x20 MCI_CRASH_REPORT_URL       HTTP endpoint for crash report uploads (e.g.\n\
         \x20                            http://127.0.0.1:3100/v1/crash-report).\n\
         \x20 MCI_CRASH_REPORT_OPTED_IN  set to 1 to enable crash report uploads.\n\
@@ -1035,6 +1215,14 @@ async fn run_agent(args: Args) -> ExitCode {
                                 spawn_today_brief_worker(Arc::clone(&store), shutdown_rx.clone());
                                 spawn_brief_worker(Arc::clone(&store), shutdown_rx.clone());
 
+                                // The daemon holds the writer lease for its
+                                // lifetime, so it is the only process that
+                                // can import transcripts while the app runs.
+                                spawn_transcript_refresh_worker(
+                                    Arc::clone(&store),
+                                    shutdown_rx.clone(),
+                                );
+
                                 // V2-P5 — Tier 2 Qwen NER idle-batch
                                 // worker (FORK 8 = A; CTO Phase 6 PR 9).
                                 // Reuses the brief author's Qwen3-1.7B
@@ -1293,11 +1481,26 @@ async fn run_agent(args: Args) -> ExitCode {
                 ExitCode::from(14)
             }
         },
-        Mode::ConnectAll { db_path } => match run_connect_all_cmd(&db_path) {
+        Mode::RegisterClients { db_path } => match run_register_clients_cmd(&db_path) {
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => ExitCode::from(code),
         },
-        Mode::Init { db_path, root } => match run_init_cmd(&db_path, &root) {
+        Mode::ConnectAll {
+            db_path,
+            refresh_agent,
+        } => match run_connect_all_cmd(&db_path, refresh_agent) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
+        Mode::DisconnectAll { refresh_agent } => match run_disconnect_all_cmd(refresh_agent) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
+        Mode::Init {
+            db_path,
+            root,
+            refresh_agent,
+        } => match run_init_cmd(&db_path, &root, refresh_agent) {
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => ExitCode::from(code),
         },
@@ -1305,7 +1508,16 @@ async fn run_agent(args: Args) -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => ExitCode::from(code),
         },
-        Mode::ImportSessions { db_path, root } => match run_import_sessions_cmd(&db_path, &root) {
+        Mode::ImportSessions {
+            db_path,
+            root,
+            codex_root,
+            full,
+        } => match run_import_sessions_cmd(&db_path, &root, &codex_root, full) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
+        Mode::Refresh { db_path, budget_ms } => match run_refresh_cmd(&db_path, budget_ms) {
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => ExitCode::from(code),
         },
@@ -1355,6 +1567,25 @@ async fn run_agent(args: Args) -> ExitCode {
             ContextBudget::new(max_tokens, max_evidence),
             format,
         ) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
+        Mode::Handoff {
+            db_path,
+            cwd,
+            max_tokens,
+            format,
+            client,
+            no_refresh,
+        } => match run_handoff_cmd(&db_path, cwd, max_tokens, format, client, no_refresh) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
+        Mode::Today {
+            db_path,
+            date,
+            format,
+        } => match run_today_cmd(&db_path, date.as_deref(), format) {
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => ExitCode::from(code),
         },
@@ -1558,17 +1789,19 @@ enum WriterCommand {
     Brief,
     McpSync,
     EmbedBackfill,
+    Handoff,
 }
 
 impl WriterCommand {
     #[cfg(test)]
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::Init,
         Self::ImportSessions,
         Self::Enrich,
         Self::Brief,
         Self::McpSync,
         Self::EmbedBackfill,
+        Self::Handoff,
     ];
 
     const fn label(self) -> &'static str {
@@ -1579,6 +1812,7 @@ impl WriterCommand {
             Self::Brief => "brief",
             Self::McpSync => "mcp-sync",
             Self::EmbedBackfill => "embed-backfill",
+            Self::Handoff => "handoff",
         }
     }
 }
@@ -1772,14 +2006,74 @@ fn repair_existing_client_registrations(db_path: &Path) {
     }
 }
 
-fn run_connect_all_cmd(db_path: &Path) -> Result<(), u8> {
+/// Where the client files live. `CODEX_HOME` overrides `~/.codex`, as it
+/// does for Codex itself and for the MCP registry.
+fn client_homes() -> (PathBuf, Option<PathBuf>) {
+    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let codex_home = std::env::var_os("CODEX_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    (home, codex_home)
+}
+
+/// Register MCP, install both `SessionStart` hooks, load the refresh agent.
+///
+/// Hooks are installed for a client when its MCP registration found it or
+/// its configuration directory exists; a Mac without Codex gets no
+/// `~/.codex`. The Codex `[features] hooks` switch and Claude Code's
+/// `disableAllHooks` are reported, never changed.
+fn run_connect_all_cmd(db_path: &Path, refresh_agent: bool) -> Result<(), u8> {
     let registry = ClientRegistry::discover().map_err(|error| {
         eprintln!("mci-agent connect --all: {error}");
         14
     })?;
     let report = registry.connect_all(db_path);
-    let claude_failed = print_client_registration("Claude Code", &report.claude);
-    let codex_failed = print_client_registration("Codex", &report.codex);
+    let (home, codex_home) = client_homes();
+    let paths = HookPaths::for_home(&home, codex_home.as_deref());
+    let command = HookCommand::resolve(db_path).map_err(|error| {
+        eprintln!("mci-agent connect --all: {error}");
+        14
+    })?;
+
+    let claude_present =
+        report.claude.status != RegistrationStatus::NotInstalled || home.join(".claude").is_dir();
+    let claude_hook = claude_present.then(|| {
+        client_hooks::install_claude_hook(&paths.claude_settings, &command).map(|change| {
+            let mut note = hook_change_label(change).to_owned();
+            if client_hooks::claude_hooks_disabled(&paths.claude_settings) == Ok(true) {
+                note.push_str(
+                    " (settings.json sets disableAllHooks, so it will not run until that is removed)",
+                );
+            }
+            note
+        })
+    });
+    let claude_failed = print_connect_receipt("claude-code", &report.claude, claude_hook.as_ref());
+
+    let codex_dir = codex_home.unwrap_or_else(|| home.join(".codex"));
+    let codex_present =
+        report.codex.status != RegistrationStatus::NotInstalled || codex_dir.is_dir();
+    let codex_hook = codex_present.then(|| {
+        client_hooks::install_codex_hook(&paths.codex_hooks, &command).map(|change| {
+            let mut note = hook_change_label(change).to_owned();
+            if client_hooks::codex_hooks_feature(&paths.codex_config)
+                == Ok(CodexHooksFeature::Disabled)
+            {
+                note.push_str(
+                    " (config.toml sets [features] hooks = false; left as is, packets arrive once you enable it)",
+                );
+            }
+            note
+        })
+    });
+    let codex_failed = print_connect_receipt("codex", &report.codex, codex_hook.as_ref());
+
+    if refresh_agent {
+        install_refresh_agent(&home, &command);
+    } else {
+        println!("  refresh: LaunchAgent skipped (--no-refresh-agent)");
+    }
+
     if claude_failed || codex_failed {
         Err(14)
     } else {
@@ -1787,30 +2081,170 @@ fn run_connect_all_cmd(db_path: &Path) -> Result<(), u8> {
     }
 }
 
-fn print_client_registration(name: &str, registration: &ClientRegistration) -> bool {
+/// Desktop registration grants tool access only. Deliberately separate from
+/// `connect`: no hook resolution, transcript import, or launchd operation.
+fn run_register_clients_cmd(db_path: &Path) -> Result<(), u8> {
+    let registry = ClientRegistry::discover().map_err(|error| {
+        eprintln!("mci-agent register-clients: {error}");
+        14
+    })?;
+    let report = registry.connect_all(db_path);
+    let claude_failed = print_connect_receipt("claude-code", &report.claude, None);
+    let codex_failed = print_connect_receipt("codex", &report.codex, None);
+    if claude_failed || codex_failed {
+        Err(14)
+    } else {
+        println!("Session hooks and transcript refresh were not changed. Restart your clients to load the tools; context delivery has not been verified.");
+        Ok(())
+    }
+}
+
+/// Remove only what Hippocampus installed: both `SessionStart` hooks (including
+/// the group the Hippocampus.app installer wrote) and the refresh agent.
+/// MCP registrations are left alone; the registry has no removal path.
+fn run_disconnect_all_cmd(refresh_agent: bool) -> Result<(), u8> {
+    let (home, codex_home) = client_homes();
+    let paths = HookPaths::for_home(&home, codex_home.as_deref());
+    let mut failed = false;
+    for (name, result) in [
+        (
+            "claude-code",
+            client_hooks::remove_claude_hook(&paths.claude_settings),
+        ),
+        ("codex", client_hooks::remove_codex_hook(&paths.codex_hooks)),
+    ] {
+        match result {
+            Ok(change) => println!(
+                "  {name}: {}, MCP registration left in place",
+                hook_change_label(change)
+            ),
+            Err(error) => {
+                failed = true;
+                eprintln!("  {name}: SessionStart hook removal failed: {error}");
+            }
+        }
+    }
+    if refresh_agent {
+        remove_refresh_agent(&home);
+    } else {
+        println!("  refresh: LaunchAgent skipped (--no-refresh-agent)");
+    }
+    println!(
+        "  To drop the MCP registrations too: `claude mcp remove hippocampus` and `codex mcp remove hippocampus`."
+    );
+    if failed {
+        Err(14)
+    } else {
+        Ok(())
+    }
+}
+
+const fn hook_change_label(change: HookChange) -> &'static str {
+    match change {
+        HookChange::Installed => "SessionStart hook installed",
+        HookChange::Replaced => "SessionStart hook updated",
+        HookChange::AlreadyInstalled => "SessionStart hook already installed",
+        HookChange::Removed => "SessionStart hook removed",
+        HookChange::NotInstalled => "SessionStart hook not installed",
+    }
+}
+
+/// One receipt line per client. Returns true when something failed.
+fn print_connect_receipt(
+    name: &str,
+    registration: &ClientRegistration,
+    hook: Option<&Result<String, client_hooks::HookError>>,
+) -> bool {
+    let mut failed = false;
+    let mut parts: Vec<String> = Vec::new();
     match registration.status {
-        RegistrationStatus::Registered => {
-            println!("  {name:<11} connected");
-            false
-        }
-        RegistrationStatus::Unchanged => {
-            println!("  {name:<11} already connected");
-            false
-        }
-        RegistrationStatus::NotInstalled => {
-            println!("  {name:<11} not installed, skipped");
-            false
-        }
+        RegistrationStatus::Registered => parts.push("MCP registered".into()),
+        RegistrationStatus::Unchanged => parts.push("MCP already registered".into()),
+        RegistrationStatus::NotInstalled => parts.push("not installed".into()),
         RegistrationStatus::BlockedMalformed
         | RegistrationStatus::NameConflict
         | RegistrationStatus::Failed => {
-            eprintln!(
-                "  {name:<11} failed: {}",
+            failed = true;
+            parts.push(format!(
+                "MCP failed: {}",
                 registration.detail.as_deref().unwrap_or("unknown error")
-            );
-            true
+            ));
         }
     }
+    match hook {
+        None => parts.push("skipped".into()),
+        Some(Ok(note)) => parts.push(note.clone()),
+        Some(Err(error)) => {
+            failed = true;
+            parts.push(format!("SessionStart hook failed: {error}"));
+        }
+    }
+    let line = format!("  {name}: {}", parts.join(", "));
+    if failed {
+        eprintln!("{line}");
+    } else {
+        println!("{line}");
+    }
+    failed
+}
+
+#[cfg(target_os = "macos")]
+fn install_refresh_agent(home: &Path, command: &HookCommand) {
+    let plist = refresh_agent::plist_path(home);
+    let log = refresh_agent::log_path(home);
+    if let Some(dir) = log.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let contents = refresh_agent::render_plist(command.executable(), command.db_path(), &log);
+    match refresh_agent::install(
+        &plist,
+        &contents,
+        refresh_agent::current_uid(),
+        &refresh_agent::system_launchctl,
+    ) {
+        Ok(refresh_agent::AgentChange::Installed) => println!(
+            "  refresh: LaunchAgent {} loaded, runs `mci-agent refresh` every 5 min",
+            refresh_agent::LABEL
+        ),
+        Ok(_) => println!(
+            "  refresh: LaunchAgent {} already installed, reloaded",
+            refresh_agent::LABEL
+        ),
+        Err(error) => eprintln!(
+            "  refresh: {error}; plist kept at {} and loads at next login",
+            plist.display()
+        ),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn install_refresh_agent(_home: &Path, _command: &HookCommand) {
+    eprintln!("  refresh: launchd is only available on macOS; background refresh skipped");
+}
+
+#[cfg(target_os = "macos")]
+fn remove_refresh_agent(home: &Path) {
+    let plist = refresh_agent::plist_path(home);
+    match refresh_agent::remove(
+        &plist,
+        refresh_agent::current_uid(),
+        &refresh_agent::system_launchctl,
+    ) {
+        Ok(refresh_agent::AgentChange::Removed) => println!(
+            "  refresh: LaunchAgent {} unloaded and removed",
+            refresh_agent::LABEL
+        ),
+        Ok(_) => println!(
+            "  refresh: LaunchAgent {} not installed",
+            refresh_agent::LABEL
+        ),
+        Err(error) => eprintln!("  refresh: {error}"),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn remove_refresh_agent(_home: &Path) {
+    eprintln!("  refresh: launchd is only available on macOS; nothing to remove");
 }
 
 fn load_read_query_embedder(command: &str) -> Option<Arc<dyn mci_brain::Embedder>> {
@@ -1874,6 +2308,194 @@ fn run_context_cmd(
                 13
             })?;
             println!("{output}");
+        }
+    }
+    Ok(())
+}
+
+/// Compile the per-project handoff packet (docs/handoff/CONTRACT.md
+/// section 5).
+///
+/// Hook formats never fail from the client's point of view: any error
+/// prints the fallback envelope and exits 0, and a watchdog thread prints
+/// it first if the deadline passes. The CLI formats report errors normally.
+fn run_handoff_cmd(
+    db_path: &Path,
+    cwd: Option<PathBuf>,
+    max_tokens: usize,
+    format: HandoffFormat,
+    client: Option<String>,
+    no_refresh: bool,
+) -> Result<(), u8> {
+    let watchdog = format
+        .is_hook()
+        .then(|| HookWatchdog::start(HOOK_WATCHDOG_DEADLINE));
+    let client = client.unwrap_or_else(|| format.inferred_client().to_owned());
+    // A panic anywhere in the compiler must still end in an envelope: the
+    // installed panic hook logs and unwinds, so without this guard the
+    // process would exit 101 with nothing on stdout.
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        compile_handoff_output(db_path, cwd, max_tokens, format, &client, no_refresh)
+    }))
+    .unwrap_or_else(|_| Err((13, "packet compiler panicked".to_owned())));
+    match (outcome, watchdog) {
+        (Ok(text), Some(watchdog)) => {
+            let _printed = watchdog.deliver(&text);
+            Ok(())
+        }
+        (Err((_, message)), Some(watchdog)) => {
+            eprintln!("mci-agent handoff: {message}");
+            let _printed = watchdog.deliver(&fallback_envelope());
+            Ok(())
+        }
+        (Ok(text), None) => {
+            print!("{text}");
+            Ok(())
+        }
+        (Err((code, message)), None) => {
+            eprintln!("mci-agent handoff: {message}");
+            Err(code)
+        }
+    }
+}
+
+/// Open the brain, compile the packet, record the delivery, and shape the
+/// output. Errors carry the exit code the CLI formats would use.
+fn compile_handoff_output(
+    db_path: &Path,
+    cwd: Option<PathBuf>,
+    max_tokens: usize,
+    format: HandoffFormat,
+    client: &str,
+    no_refresh: bool,
+) -> Result<String, (u8, String)> {
+    let cwd = cwd
+        .or_else(cwd_from_stdin)
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or((2, "cannot determine the working directory".to_owned()))?;
+    if !db_path.exists() {
+        return Err((12, format!("no brain at {}", db_path.display())));
+    }
+    let key_hex = resolve_key_for_command("handoff")
+        .map_err(|code| (code, "database key unavailable".to_owned()))?;
+    let Some(key_bytes) = decode_hex32(&key_hex) else {
+        return Err((11, "resolved database key is malformed".to_owned()));
+    };
+    let key = DbKey::from_bytes(key_bytes);
+
+    // Import anything new from the transcript roots first, bounded, so the
+    // packet reflects the session that just ended. This takes and releases
+    // the writer lease itself; when the running app holds it, the app's own
+    // 60 s refresh loop is already doing this work and we skip.
+    if !no_refresh {
+        match refresh_or_skip(db_path, &key, REFRESH_BUDGET, &RefreshRoots::default()) {
+            RefreshOutcome::Ran(stats) => eprintln!(
+                "mci-agent handoff: refresh ran, {} new events (claude-code {}, codex {})",
+                stats.new_events, stats.claude.events_written, stats.codex.events_written
+            ),
+            RefreshOutcome::Skipped { owner_pid } => eprintln!(
+                "mci-agent handoff: refresh skipped, writer lease held by pid {}; the app refreshes in the background",
+                owner_pid.map_or_else(|| "unknown".to_owned(), |pid| pid.to_string())
+            ),
+            RefreshOutcome::Failed(error) => {
+                eprintln!("mci-agent handoff: refresh failed: {error}; compiling from what is stored");
+            }
+        }
+    }
+
+    // Prefer a leased writer so the delivery can be recorded. When another
+    // writer (normally the running app) owns the lease, compile from a
+    // read-only handle and say so; the packet matters more than the ledger.
+    let lease = acquire_command_writer_lease(WriterCommand::Handoff, db_path).ok();
+    let (store, writable) = match &lease {
+        Some(lease) => (
+            open_command_writer(WriterCommand::Handoff, db_path, &key, lease)
+                .map_err(|code| (code, "cannot open the brain for writing".to_owned()))?,
+            true,
+        ),
+        None => (
+            SqlCipherBrainStore::open_readonly(db_path, &key)
+                .map_err(|error| (12, format!("open brain at {}: {error}", db_path.display())))?,
+            false,
+        ),
+    };
+    let clock = RenderClock::system();
+    let packet = compile_handoff(&store, &cwd, max_tokens, &clock).map_err(|m| (13, m))?;
+    if writable {
+        if let Err(error) = store.record_handoff_delivery(
+            clock.now_us,
+            client,
+            &packet.project_root,
+            &packet.sha256(),
+            u64::try_from(packet.token_estimate).unwrap_or(u64::MAX),
+            &packet.cited_ids_json(),
+        ) {
+            eprintln!("mci-agent handoff: delivery not recorded: {error}");
+        }
+    } else {
+        eprintln!("mci-agent handoff: writer lease unavailable; delivery not recorded");
+    }
+    eprintln!(
+        "mci-agent handoff: {} for {} ({} tokens, {} sessions)",
+        if packet.has_memory() {
+            "packet"
+        } else {
+            "no memory"
+        },
+        packet.project_root,
+        packet.token_estimate,
+        packet.state.sessions.len()
+    );
+
+    match format {
+        HandoffFormat::Markdown => Ok(packet.packet),
+        HandoffFormat::Json => {
+            let report = HandoffReport {
+                client: client.to_owned(),
+                generated_at_us: clock.now_us,
+                tz: clock.tz,
+                packet,
+            };
+            serde_json::to_string_pretty(&report)
+                .map(|json| format!("{json}\n"))
+                .map_err(|error| (13, format!("serialize packet: {error}")))
+        }
+        HandoffFormat::ClaudeHook | HandoffFormat::CodexHook => Ok(if packet.has_memory() {
+            hook_envelope(&packet.packet)
+        } else {
+            fallback_envelope()
+        }),
+    }
+}
+
+/// Print the daily packet (docs/handoff/CONTRACT.md section 6). Read-only.
+fn run_today_cmd(db_path: &Path, date: Option<&str>, format: TodayFormat) -> Result<(), u8> {
+    let key_hex = resolve_key_for_command("today")?;
+    let Some(key_bytes) = decode_hex32(&key_hex) else {
+        eprintln!("mci-agent today: resolved database key is malformed.");
+        return Err(11);
+    };
+    let key = DbKey::from_bytes(key_bytes);
+    let store = SqlCipherBrainStore::open_readonly(db_path, &key).map_err(|error| {
+        eprintln!(
+            "mci-agent today: open brain at {}: {error}",
+            db_path.display()
+        );
+        12
+    })?;
+    let clock = RenderClock::system();
+    let report = compile_today(&store, date, &clock).map_err(|error| {
+        eprintln!("mci-agent today: {error}");
+        13
+    })?;
+    match format {
+        TodayFormat::Markdown => print!("{}", render_today(&report)),
+        TodayFormat::Json => {
+            let json = serde_json::to_string_pretty(&report).map_err(|error| {
+                eprintln!("mci-agent today: serialize report: {error}");
+                13
+            })?;
+            println!("{json}");
         }
     }
     Ok(())
@@ -1948,16 +2570,65 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
 /// Import Claude Code session transcripts.
 ///
 /// Opened read-write: this writes events. It reads only transcripts the user
-/// already has on disk, and indexes only the conversation text, never tool
-/// output or model reasoning.
-fn run_import_sessions_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(), u8> {
+/// already has on disk, and indexes only the conversation text plus one
+/// line per call that changed something, never tool output or model
+/// reasoning.
+fn run_import_sessions_cmd(
+    db_path: &std::path::Path,
+    root: &std::path::Path,
+    codex_root: &std::path::Path,
+    full: bool,
+) -> Result<(), u8> {
     let lease = acquire_command_writer_lease(WriterCommand::ImportSessions, db_path)?;
-    run_import_sessions_with_lease(db_path, root, &lease)
+    run_import_sessions_with_lease(db_path, root, codex_root, full, &lease)
+}
+
+/// Progress line every ten files read. Skipped files do not advance
+/// `files_scanned`, so remember the last count reported.
+fn import_progress(label: &'static str) -> impl FnMut(&mci_agent::import_sessions::ImportStats) {
+    let mut last_reported = 0;
+    move |s| {
+        if s.files_scanned > 0 && s.files_scanned % 10 == 0 && s.files_scanned != last_reported {
+            last_reported = s.files_scanned;
+            eprintln!(
+                "mci-agent import-sessions: {label}: {} files, {} events",
+                s.files_scanned, s.events_written
+            );
+        }
+    }
+}
+
+fn report_import_root(label: &str, stats: &mci_agent::import_sessions::ImportStats) {
+    eprintln!(
+        "mci-agent import-sessions: {label}: {} events written ({} tool) from {} file(s) read, \
+         {} resumed, {} unchanged, {} rewound, {} subagent skipped; {} records, \
+         {} no text, {} injected, {} sidechain, {} meta, {} malformed{}",
+        stats.events_written,
+        stats.tool_events_written,
+        stats.files_scanned,
+        stats.files_resumed,
+        stats.files_unchanged,
+        stats.files_rewound,
+        stats.files_skipped_subagent,
+        stats.records_read,
+        stats.skipped_no_text,
+        stats.skipped_injected,
+        stats.skipped_sidechain,
+        stats.skipped_meta,
+        stats.malformed_lines,
+        if stats.deadline_hit {
+            " (stopped at deadline)"
+        } else {
+            ""
+        },
+    );
 }
 
 fn run_import_sessions_with_lease(
     db_path: &Path,
     root: &Path,
+    codex_root: &Path,
+    full: bool,
     lease: &CommandWriterLease,
 ) -> Result<(), u8> {
     let key_hex = resolve_key_for_command("import-sessions")?;
@@ -1969,32 +2640,165 @@ fn run_import_sessions_with_lease(
 
     let store = open_command_writer(WriterCommand::ImportSessions, db_path, &key, lease)?;
 
-    eprintln!("mci-agent import-sessions: reading {}", root.display());
-    let stats = match mci_agent::import_sessions::import_sessions(&store, root, |s| {
-        if s.files_scanned % 10 == 0 {
-            eprintln!(
-                "mci-agent import-sessions: {} files, {} events",
-                s.files_scanned, s.events_written
-            );
+    if full {
+        for dir in [root, codex_root] {
+            let prefix = dir.to_string_lossy();
+            match store.clear_import_cursors(&prefix) {
+                Ok(n) => eprintln!(
+                    "mci-agent import-sessions: --full: forgot {n} cursor(s) under {prefix}"
+                ),
+                Err(e) => {
+                    eprintln!("mci-agent import-sessions: --full: clear cursors: {e}");
+                    return Err(24);
+                }
+            }
         }
-    }) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("mci-agent import-sessions: {e}");
-            return Err(24);
+    }
+
+    let mut roots_read = 0;
+    if root.is_dir() {
+        eprintln!("mci-agent import-sessions: reading {}", root.display());
+        match mci_agent::import_sessions::import_sessions(
+            &store,
+            root,
+            import_progress("claude-code"),
+        ) {
+            Ok(s) => report_import_root("claude-code", &s),
+            Err(e) => {
+                eprintln!("mci-agent import-sessions: claude-code: {e}");
+                return Err(24);
+            }
+        }
+        roots_read += 1;
+    } else {
+        eprintln!(
+            "mci-agent import-sessions: claude-code: skipped, no transcripts at {}",
+            root.display()
+        );
+    }
+
+    if codex_root.is_dir() {
+        eprintln!(
+            "mci-agent import-sessions: reading {}",
+            codex_root.display()
+        );
+        match mci_agent::import_codex::import_codex(&store, codex_root, import_progress("codex")) {
+            Ok(s) => report_import_root("codex", &s),
+            Err(e) => {
+                eprintln!("mci-agent import-sessions: codex: {e}");
+                return Err(24);
+            }
+        }
+        roots_read += 1;
+    } else {
+        eprintln!(
+            "mci-agent import-sessions: codex: skipped, no rollouts at {}",
+            codex_root.display()
+        );
+    }
+
+    if roots_read == 0 {
+        eprintln!("mci-agent import-sessions: neither transcript root exists; nothing imported.");
+        return Err(24);
+    }
+    eprintln!("mci-agent import-sessions: next, run `mci-agent enrich` (or `mci-agent refresh`).");
+    Ok(())
+}
+
+/// Bounded incremental import plus enrich of the new events.
+///
+/// The handoff hook runs this before compiling a packet, so it must return
+/// within its budget and must not fail unless the brain cannot be opened:
+/// a stale packet is better than no packet. When the running app holds the
+/// writer lease it is already refreshing transcripts every minute, so the
+/// answer is a skip line and exit 0, not an error. Loads the `ArcticEmbedS`
+/// embedder when it is installed (same loader as `enrich`), never Qwen.
+fn run_refresh_cmd(db_path: &std::path::Path, budget_ms: u64) -> Result<(), u8> {
+    let key_hex = resolve_key_for_command("refresh")?;
+    let Some(key_bytes) = decode_hex32(&key_hex) else {
+        eprintln!("mci-agent refresh: resolved database key is malformed.");
+        return Err(11);
+    };
+    let key = DbKey::from_bytes(key_bytes);
+    let budget = std::time::Duration::from_millis(budget_ms);
+
+    // Import and the model-free stages get first claim on the budget. The
+    // embedder is loaded afterwards, and only if the import wrote something
+    // and time is left: loading ArcticEmbedS takes about 3.6 s on an M-series
+    // Mac, longer than the default budget, and a packet needs the new
+    // events far more than it needs their vectors. `enrich` and
+    // `embed-backfill` catch up on vectors later.
+    let mut embedder_note = "embedder not needed (nothing new)";
+    let outcome = mci_agent::refresh::refresh_or_skip_then(
+        db_path,
+        &key,
+        budget,
+        &mci_agent::refresh::RefreshRoots::default(),
+        |store, deadline, stats| {
+            if stats.new_events == 0 || stats.deadline_hit {
+                return;
+            }
+            if std::env::var("MCI_EMBEDDER_DISABLED").as_deref() == Ok("1") {
+                embedder_note = "embedder disabled (MCI_EMBEDDER_DISABLED=1)";
+                return;
+            }
+            let (embedder, is_real) = load_embedder_backend();
+            if !is_real {
+                embedder_note = "no embedder available; new events stay keyword-only";
+                return;
+            }
+            embedder_note = "embedder loaded";
+            match mci_agent::refresh::embed_events_after(
+                store,
+                embedder.as_ref(),
+                stats.last_event_id_before,
+                deadline,
+            ) {
+                Ok(outcome) => stats.absorb_embed(outcome),
+                Err(e) => stats.notes.push(format!("embed: {e}")),
+            }
+        },
+    );
+
+    let stats = match outcome {
+        mci_agent::refresh::RefreshOutcome::Ran(stats) => *stats,
+        mci_agent::refresh::RefreshOutcome::Skipped { owner_pid } => {
+            println!(
+                "refresh: skipped, the Hippocampus app is importing in the background \
+                 (writer lease held by pid {})",
+                owner_pid.map_or_else(|| "unknown".to_string(), |pid| pid.to_string())
+            );
+            return Ok(());
+        }
+        mci_agent::refresh::RefreshOutcome::Failed(message) => {
+            eprintln!(
+                "mci-agent refresh: open brain at {}: {message}",
+                db_path.display()
+            );
+            return Err(12);
         }
     };
 
+    for note in &stats.notes {
+        eprintln!("mci-agent refresh: note: {note}");
+    }
     eprintln!(
-        "mci-agent import-sessions: done. {} files, {} records, {} events written \
-         ({} had no conversation text, {} malformed lines).",
-        stats.files_scanned,
-        stats.records_read,
-        stats.events_written,
-        stats.skipped_no_text,
-        stats.malformed_lines,
+        "mci-agent refresh: claude-code {} events, {} files read, {} unchanged; codex {} events, \
+         {} files read, {} unchanged, {} subagent skipped; {embedder_note}; {}",
+        stats.claude.events_written,
+        stats.claude.files_scanned,
+        stats.claude.files_unchanged,
+        stats.codex.events_written,
+        stats.codex.files_scanned,
+        stats.codex.files_unchanged,
+        stats.codex.files_skipped_subagent,
+        if stats.deadline_hit {
+            "budget spent, the rest continues next run"
+        } else {
+            "finished within budget"
+        },
     );
-    eprintln!("mci-agent import-sessions: next, run `mci-agent enrich`.");
+    println!("{}", stats.summary_line());
     Ok(())
 }
 
@@ -2132,7 +2936,11 @@ fn run_ensure_key_cmd(db_path: &Path) -> Result<(), u8> {
 ///
 /// Safe to re-run. It never overwrites an existing key, because doing so
 /// would make an existing brain permanently unreadable.
-fn run_init_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(), u8> {
+fn run_init_cmd(
+    db_path: &std::path::Path,
+    root: &std::path::Path,
+    refresh_agent: bool,
+) -> Result<(), u8> {
     let lease = acquire_command_writer_lease(WriterCommand::Init, db_path)?;
 
     // 1. Key. This is the same migration/validation path the app runs before
@@ -2142,7 +2950,13 @@ fn run_init_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(),
     // 2. Import. Missing transcripts is not an error: plenty of people have
     // never run Claude Code, and they should still get a working install.
     if root.exists() {
-        match run_import_sessions_with_lease(db_path, root, &lease) {
+        match run_import_sessions_with_lease(
+            db_path,
+            root,
+            &mci_agent::import_codex::default_codex_root(),
+            false,
+            &lease,
+        ) {
             Ok(()) => {}
             Err(code) => return Err(code),
         }
@@ -2156,8 +2970,9 @@ fn run_init_cmd(db_path: &std::path::Path, root: &std::path::Path) -> Result<(),
     // 3. Index.
     run_enrich_with_lease(db_path, DEFAULT_EMBED_BATCH_SIZE, &lease)?;
 
-    // 4. Register every detected local client with reference-only custody.
-    run_connect_all_cmd(db_path)?;
+    // 4. Register every detected local client with reference-only custody,
+    // install the SessionStart hooks, and load the refresh agent.
+    run_connect_all_cmd(db_path, refresh_agent)?;
 
     println!("\nDone. Try it:\n");
     println!("  mci-brain search \"some phrase you remember\"");
@@ -2187,7 +3002,7 @@ fn run_doctor_cmd(db_path: &std::path::Path) -> Result<(), u8> {
         }
     };
 
-    println!("Hippocampus doctor — {}\n", db_path.display());
+    println!("Hippocampus doctor: {}\n", db_path.display());
     print!("{}", mci_agent::doctor::render(&checks));
 
     let blocked = checks
@@ -2966,6 +3781,39 @@ fn spawn_mcp_aggregator(
     });
 }
 
+/// Periodic transcript refresh on the store the daemon already owns:
+/// first run 5 s after start, then every 60 s, 10 s budget per run, on the
+/// blocking pool so frame ingest keeps turning. No embedder is handed in:
+/// the idle-batch worker embeds every new event within seconds anyway, and
+/// the Core ML embedder is meant to be single-flight. Never loads Qwen.
+/// Off by default. Requires `MCI_TRANSCRIPT_REFRESH_ENABLED=1`;
+/// `MCI_TRANSCRIPT_REFRESH_DISABLED=1` overrides that opt-in.
+fn spawn_transcript_refresh_worker(
+    store: Arc<mci_brain::SqlCipherBrainStore>,
+    shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    if !mci_agent::refresh::transcript_refresh_enabled_from_env() {
+        eprintln!("mci-agent: transcript refresh off (explicit opt-in required; disable switch takes precedence)");
+        return;
+    }
+    let schedule = mci_agent::refresh::RefreshSchedule::default();
+    eprintln!(
+        "mci-agent: transcript refresh started (first run in {}s, then every {}s, {}s budget)",
+        schedule.initial_delay.as_secs(),
+        schedule.interval.as_secs(),
+        schedule.budget.as_secs(),
+    );
+    tokio::spawn(async move {
+        let stats =
+            mci_agent::refresh::run_transcript_refresh_worker(store, None, schedule, shutdown)
+                .await;
+        eprintln!(
+            "mci-agent: transcript refresh exited. runs={} with_writes={} events={} over_budget={}",
+            stats.runs, stats.runs_with_writes, stats.events_written, stats.runs_over_budget,
+        );
+    });
+}
+
 /// Decode a 64-char hex string into a 32-byte key. Returns `None` on any
 /// non-hex character or length mismatch.
 fn decode_hex32(s: &str) -> Option<[u8; 32]> {
@@ -3351,6 +4199,7 @@ mod writer_command_lease_tests {
                 "brief",
                 "mcp-sync",
                 "embed-backfill",
+                "handoff",
             ]
         );
     }

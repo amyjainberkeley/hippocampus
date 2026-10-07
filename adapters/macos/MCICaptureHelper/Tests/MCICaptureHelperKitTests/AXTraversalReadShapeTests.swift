@@ -137,7 +137,7 @@ final class AXTraversalReadShapeTests: XCTestCase {
         let result = AXSubroleProbe.readElementArrayAttribute(
             elements[0], kAXChildrenAttribute as CFString,
             readAttribute: { _, _ in (.success, mixed as CFArray) })
-        guard case .partial(let children) = result else { return XCTFail("mixed array must retain its error") }
+        guard case .partial(let children, _) = result else { return XCTFail("mixed array must retain its error") }
         XCTAssertEqual(children.count, 2)
         XCTAssertTrue(CFEqual(children[0], elements[1]))
         XCTAssertTrue(CFEqual(children[1], elements[2]))
@@ -148,7 +148,7 @@ final class AXTraversalReadShapeTests: XCTestCase {
         let result = AXSubroleProbe.readElementArrayAttribute(
             elements[0], kAXChildrenAttribute as CFString,
             readAttribute: { _, _ in (.success, Array(elements.dropFirst()) as CFArray) })
-        guard case .partial(let children) = result else { return XCTFail("oversized array must stay incomplete") }
+        guard case .partial(let children, _) = result else { return XCTFail("oversized array must stay incomplete") }
         XCTAssertEqual(children.count, AXSubroleProbe.backstopMaxNodes)
     }
 

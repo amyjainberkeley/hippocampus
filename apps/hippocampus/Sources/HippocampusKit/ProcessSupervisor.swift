@@ -114,6 +114,12 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
         )
         var agentEnvironment = childEnvironment
         agentEnvironment["MCI_CAPTURE_ENABLED"] = captureEnabled ? "1" : "0"
+        // Screen capture and sharing existing memory do not grant permission
+        // to import every local AI transcript. Keep the desktop off until it
+        // has a dedicated importer consent and revocation surface.
+        agentEnvironment["MCI_TRANSCRIPT_REFRESH_ENABLED"] = "0"
+        // Pre-opt-in daemons only understand the legacy kill switch.
+        agentEnvironment["MCI_TRANSCRIPT_REFRESH_DISABLED"] = "1"
         if crashReportOptedIn {
             agentEnvironment["MCI_CRASH_REPORT_OPTED_IN"] = "1"
         } else {

@@ -6,8 +6,8 @@
 // Three paths exist for global hotkeys on macOS in 2026:
 //
 // 1. `NSEvent.addGlobalMonitorForEvents` — observes but cannot
-//    consume the event; the frontmost app still sees the ⇧⌘Space
-//    keystroke and may act on it (Safari intercepts it, for example).
+//    consume the event; the frontmost app still sees the ⌃⇧Space
+//    keystroke and may act on it.
 //    Unusable for a Spotlight-like binding.
 // 2. `CGEventTap` — can consume, but requires the Accessibility TCC
 //    grant (`NSAccessibilityUsageDescription`). Adding a second TCC
@@ -52,7 +52,7 @@ public struct HotkeyModifiers: OptionSet, Sendable, Hashable {
 }
 
 /// A single hotkey spec — a virtual-key code plus modifier mask. The
-/// default (⇧⌘Space) is `.spotlightLikeDefault`.
+/// default (⌃⇧Space) is `.spotlightLikeDefault`.
 public struct HotkeySpec: Sendable, Hashable {
     /// Carbon virtual-key code (`kVK_Space` = 49).
     public let keyCode: UInt32
@@ -66,12 +66,13 @@ public struct HotkeySpec: Sendable, Hashable {
         self.displayLabel = displayLabel
     }
 
-    /// ⇧⌘Space — differentiates from ⌘Space (Spotlight) + matches
-    /// Raycast's default (cycle 8.45 peer study §3).
+    /// ⌃⇧Space keeps Recall distinct from Spotlight's ⌘Space and
+    /// Superapp Whisper's ⇧⌘Space. Registration can still fail if another
+    /// application owns this chord; the menu-bar entry remains available.
     public static let spotlightLikeDefault = HotkeySpec(
         keyCode: 49,
-        modifiers: [.command, .shift],
-        displayLabel: "⇧⌘Space"
+        modifiers: [.control, .shift],
+        displayLabel: "⌃⇧Space"
     )
 }
 
@@ -114,7 +115,7 @@ public final class GlobalHotkeyManager {
         self.registrar = registrar
     }
 
-    /// Register the default ⇧⌘Space binding. Idempotent — calling
+    /// Register the default ⌃⇧Space binding. Idempotent — calling
     /// twice with the same spec is a no-op that returns
     /// `.alreadyRegistered`. `onFire` runs on the main actor.
     @discardableResult

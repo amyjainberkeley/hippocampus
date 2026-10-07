@@ -154,26 +154,37 @@ whose top-level `models/` directory contains the complete
 immutable URL and digest live in that tagged manifest; mutable GitHub variables
 are not release authority.
 
-Create the archive without AppleDouble metadata where possible and calculate
-the digest from the final bytes:
+The current 0.2.0 manifest pins the verified archive in
+[hippocampus-models](https://github.com/amyjainberkeley/hippocampus-models/releases/tag/v0.2.0).
+That model-only repository has immutable releases enabled. The archive includes
+five compiled-model/contract files plus the complete Apache-2.0 license and
+conversion notice. Its public download, signed release attestation and exact
+reconstruction are recorded in the
+[provisioning audit](../audits/2026-10-03-release-model-provisioning.md).
+
+To validate this input without overwriting local models:
 
 ```bash
-COPYFILE_DISABLE=1 tar -czf release-models-v1.tar.gz models
-shasum -a 256 release-models-v1.tar.gz
+curl -q --fail --location --proto '=https' --proto-redir '=https' \
+  https://github.com/amyjainberkeley/hippocampus-models/releases/download/v0.2.0/release-models-0.2.0.tar.gz \
+  --output release-models-0.2.0.tar.gz
 ./scripts/prepare-release-models.sh \
-  --archive release-models-v1.tar.gz \
-  --sha256 '<digest>' \
+  --archive release-models-0.2.0.tar.gz \
+  --sha256 e0d9a98ef6cb793aa539b1719a4546c2de16f9c445c60fe846829928daa5a718 \
   --output /tmp/hippocampus-release-models-check
 ./scripts/release_models_manifest.py \
   --manifest release-models.json \
-  --release-version 0.1.0
+  --release-version 0.2.0
 ```
 
-Upload the final bytes as
-`release-models-0.1.0.tar.gz` in a versioned GitHub release asset, then replace
-both `UNPROVISIONED` values in `release-models.json` with that exact URL and
-lowercase digest before creating the app tag. The prebuild identity gate blocks
-until this tag-owned manifest is valid.
+For a future version, stage only the required model and its attribution files;
+do not archive the entire development `models/` directory, which can contain
+optional experiments. Normalize metadata, inspect the inventory and reconstruct
+the archive before uploading. Publish the complete model asset set as a new
+immutable version, verify an unauthenticated download and its attestation, then
+pin that exact URL and digest in the corresponding application source. Never
+replace a published version's bytes. The prebuild identity gate blocks until
+this tag-owned manifest is valid; installer/live gates are separate.
 
 ## 7. Configure GitHub Pages Publication
 

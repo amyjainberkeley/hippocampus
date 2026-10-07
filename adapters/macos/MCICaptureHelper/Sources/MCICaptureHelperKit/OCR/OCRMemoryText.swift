@@ -4,10 +4,18 @@ import Foundation
 /// A readable transcript after the complete, ordered OCR passes clear privacy.
 /// Never use this in place of the original readings for secret detection.
 enum OCRMemoryText {
+    static func isReadable(_ line: OCRLine) -> Bool {
+        line.confidence.isFinite && (0.5...1).contains(line.confidence)
+            && !line.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     static func make(from lines: [OCRLine]) -> String {
         var retained: [String] = []
         var positions: [Data: [CGRect]] = [:]
         for line in lines {
+            // This is deliberately AFTER the complete raw privacy scan. Low
+            // confidence symbols should not become searchable assertions.
+            guard isReadable(line) else { continue }
             let box = line.boundingBox
             guard valid(box) else {
                 retained.append(line.text)

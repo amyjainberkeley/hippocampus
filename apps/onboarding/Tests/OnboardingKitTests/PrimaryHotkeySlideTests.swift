@@ -12,10 +12,9 @@
 //      when currentStep is `.primaryHotkey`.
 //   2. Live-try success — `markHotkeyPracticed()` flips the flag AND
 //      unlocks Continue.
-//   3. Skip fallback — same funnel; the slide's Skip button and its
-//      hotkey monitor both call `markHotkeyPracticed()`.
+//   3. Skip fallback — unlocks Continue without marking practice complete.
 //   4. Idempotency — a second call is a no-op (guards against a burst
-//      of ⇧⌘Space presses re-triggering side effects).
+//      of ⌃⇧Space presses re-triggering side effects).
 //   5. `.primaryHotkey` sits immediately after `.permissions` in the
 //      canonical step order (regression-guards the placement).
 
@@ -44,13 +43,13 @@ final class PrimaryHotkeySlideTests: XCTestCase {
         XCTAssertFalse(vm.hotkeyPracticed,
             "Fresh landing on PrimaryHotkey must start unpracticed")
         XCTAssertFalse(vm.canAdvance,
-            "Continue must stay disabled until the user presses ⇧⌘Space or Skip")
+            "Continue must stay disabled until the user presses ⌃⇧Space or Skip")
     }
 
     func testLiveTryPressUnlocksContinue() {
         let vm = makeVM()
         // Simulates the NSEvent local-monitor path — the SwiftUI slide
-        // funnels a real ⇧⌘Space press through `markHotkeyPracticed()`.
+        // funnels a real ⌃⇧Space press through `markHotkeyPracticed()`.
         vm.markHotkeyPracticed()
         XCTAssertTrue(vm.hotkeyPracticed)
         XCTAssertTrue(vm.canAdvance,
@@ -58,14 +57,14 @@ final class PrimaryHotkeySlideTests: XCTestCase {
     }
 
     func testSkipFallbackUnlocksContinueSameAsLiveTry() {
-        // Same code path as the live-try (Skip button in the SwiftUI
-        // slide just calls `markHotkeyPracticed()` directly). Modeled
-        // as a distinct test so a future change that splits the two
-        // paths must consciously break this and update it.
+        // A shortcut owned by another application must not trap onboarding
+        // or claim that local practice succeeded.
         let vm = makeVM()
-        vm.markHotkeyPracticed()
+        vm.skipHotkeyPractice()
+        XCTAssertFalse(vm.hotkeyPracticed)
+        XCTAssertTrue(vm.hotkeySkipped)
         XCTAssertTrue(vm.canAdvance,
-            "Skip fallback is REQUIRED for accessibility (SetApp/Alfred can grab ⇧⌘Space)")
+            "Skip fallback is REQUIRED for accessibility (SetApp/Alfred can grab ⌃⇧Space)")
     }
 
     func testMarkHotkeyPracticedIsIdempotent() {

@@ -136,10 +136,17 @@ public enum TCCRevokedNotifierRequestBuilder {
 /// outstanding, further calls to `notifyRevoked(_:)` for X are
 /// no-ops (the OS would suppress-and-replace anyway, but this saves
 /// the syscall). `notifyRestored(_:)` clears the notification for X.
+private final class TCCNotificationObservation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    var isCancelled: Bool { lock.withLock { cancelled } }
+    func cancel() { lock.withLock { cancelled = true } }
+}
+
 public actor TCCRevokedNotifier {
     private let center: UserNotificationCenter
-    private var outstanding: Set<TCCRevokedReason> = []
-    private var didRequestAuthorization = false
+    private var outstanding: [TCCRevokedReason: TCCNotificationObservation] = [:]
+    private var authorization: Task<Void, Never>?
 
     public init(center: UserNotificationCenter = SystemUserNotificationCenter()) {
         self.center = center
@@ -166,23 +173,47 @@ public actor TCCRevokedNotifier {
     /// belt to this suspenders, and the user chose the "no notifications"
     /// path deliberately.
     public func notifyRevoked(_ reason: TCCRevokedReason) async {
-        if outstanding.contains(reason) { return }
-        outstanding.insert(reason)
+        guard !Task.isCancelled else { return }
+        if let previous = outstanding[reason], !previous.isCancelled { return }
+        let observation = TCCNotificationObservation()
+        outstanding[reason] = observation
+        await withTaskCancellationHandler {
+            await deliver(reason, observation: observation)
+        } onCancel: {
+            // Synchronous cancellation lets a restarted watcher replace this
+            // request even while the old task awaits the system auth sheet.
+            observation.cancel()
+        }
+    }
 
-        if !didRequestAuthorization {
-            didRequestAuthorization = true
-            _ = try? await center.requestAuthorization(options: [.alert, .sound])
+    private func deliver(_ reason: TCCRevokedReason, observation: TCCNotificationObservation) async {
+        if authorization == nil {
+            let center = center
+            authorization = Task { _ = try? await center.requestAuthorization(options: [.alert, .sound]) }
+        }
+        await authorization?.value
+        guard outstanding[reason] === observation, !observation.isCancelled else {
+            if outstanding[reason] === observation { outstanding.removeValue(forKey: reason) }
+            return
         }
 
         let request = TCCRevokedNotifierRequestBuilder.makeRequest(for: reason)
         try? await center.add(request)
+        if observation.isCancelled, outstanding[reason] === observation {
+            outstanding.removeValue(forKey: reason)
+        }
+        // Never clear a newer observation of the same revoked surface.
+        if outstanding[reason] == nil {
+            let id = TCCRevokedNotifierRequestBuilder.identifier(for: reason)
+            center.removePendingNotificationRequests(withIdentifiers: [id])
+            center.removeDeliveredNotifications(withIdentifiers: [id])
+        }
     }
 
     /// Clear the notification for a surface that has been restored.
     /// Idempotent.
     public func notifyRestored(_ reason: TCCRevokedReason) {
-        guard outstanding.contains(reason) else { return }
-        outstanding.remove(reason)
+        guard outstanding.removeValue(forKey: reason) != nil else { return }
         let id = TCCRevokedNotifierRequestBuilder.identifier(for: reason)
         center.removePendingNotificationRequests(withIdentifiers: [id])
         center.removeDeliveredNotifications(withIdentifiers: [id])
@@ -190,7 +221,7 @@ public actor TCCRevokedNotifier {
 
     /// Test-only accessor. Not public API surface — package-internal.
     internal func outstandingForTest() -> Set<TCCRevokedReason> {
-        return outstanding
+        return Set(outstanding.filter { !$0.value.isCancelled }.keys)
     }
 }
 

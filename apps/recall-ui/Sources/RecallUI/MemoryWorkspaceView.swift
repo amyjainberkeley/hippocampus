@@ -65,6 +65,7 @@ struct MemoryWorkspaceView: View {
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var historyExpanded = true
+    @State private var showsProjectHandoff = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -75,6 +76,12 @@ struct MemoryWorkspaceView: View {
             workspaceDetail
         }
         .background(Color.brandBgPrimary)
+        .toolbar {
+            Button("Continue a project", systemImage: "arrow.turn.down.right") { showsProjectHandoff = true }
+                .keyboardShortcut("j", modifiers: .command)
+                .disabled(isSyntheticPreview)
+        }
+        .sheet(isPresented: $showsProjectHandoff) { ProjectHandoffView() }
         .onChange(of: selection) { _, destination in
             if destination == .episodes { historyExpanded = true }
         }

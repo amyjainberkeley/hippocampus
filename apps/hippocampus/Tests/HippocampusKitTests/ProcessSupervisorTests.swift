@@ -246,6 +246,8 @@ final class ProcessSupervisorTests: XCTestCase {
                 "MCI_DB_KEY_HEX": String(repeating: "ef", count: 32),
                 "MCI_DEVELOPMENT_FILE_KEY": "1",
                 "HIPPOCAMPUS_ENABLE_V2P1": "1",
+                "MCI_TRANSCRIPT_REFRESH_ENABLED": "1",
+                "MCI_TRANSCRIPT_REFRESH_DISABLED": "0",
             ]
         )
 
@@ -259,6 +261,10 @@ final class ProcessSupervisorTests: XCTestCase {
             XCTAssertNil(environment["HIPPOCAMPUS_ENABLE_V2P1"])
         }
         XCTAssertEqual(plan.agentEnvironment["MCI_CAPTURE_ENABLED"], "0")
+        XCTAssertEqual(plan.agentEnvironment["MCI_TRANSCRIPT_REFRESH_ENABLED"], "0",
+                       "the desktop must not infer transcript consent from its environment")
+        XCTAssertEqual(plan.agentEnvironment["MCI_TRANSCRIPT_REFRESH_DISABLED"], "1",
+                       "older daemons must also remain off through their existing kill switch")
     }
 
     func test_launch_plan_includes_capture_only_for_explicit_setting() {

@@ -254,8 +254,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
             self.installBrowserHostManifests()
-            self.startSupervisorOrDeferUntilOnboarded()
             self.armTCCStderrTail()
+            self.startSupervisorOrDeferUntilOnboarded()
             // Custom builds may include the optional Qwen model. Seed it on a
             // utility task without delaying the default extractive brief path.
             self.modelProvisioner.startIfNeeded()
@@ -287,11 +287,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Arm the helper-stderr TCC tail (cycle 8.47 PR #80 follow-up).
     ///
-    /// The tail is armed AFTER `startSupervisorOrDeferUntilOnboarded`
-    /// so the helper's stderr log file has (usually) been created;
-    /// however it also works if the file doesn't exist yet — the
-    /// dispatch source watches the parent directory and picks up the
-    /// file's first appearance.
+    /// Arm before the helper starts so its initial permission verdict cannot
+    /// be skipped. The tail also handles a log created after observation begins.
     ///
     /// Also registers the notification category so the "Open Settings"
     /// action button on the actionable TCC-revoke notification renders
@@ -489,7 +486,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Cycle 8.48 — the cycle 8.46 Action Panel "Show
                 // Onboarding" command now works end-to-end. Re-opens
                 // the Onboarding executable so users can revisit the
-                // flow (e.g. to re-run the ⇧⌘Space live-try after
+                // flow (e.g. to re-run the ⌃⇧Space live-try after
                 // configuring Alfred/SetApp, or to review the trust
                 // panel). No sentinel change — reopening is safe
                 // even after first-run has completed.

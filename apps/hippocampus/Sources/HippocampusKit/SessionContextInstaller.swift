@@ -42,7 +42,26 @@ public struct SessionContextInstaller: Sendable {
         codexOverrideURL = codex.appendingPathComponent("AGENTS.override.md")
     }
 
+    /// The bundled Rust agent, next to the app executable in Contents/MacOS.
+    public var agentURL: URL {
+        executableURL.deletingLastPathComponent().appendingPathComponent("mci-agent")
+    }
+
+    /// Marker of the current hook shape, shared with `mci-agent connect --all`
+    /// (`apps/agent/src/client_hooks.rs`). Either this or the legacy
+    /// `SessionContextHook.flag` identifies a SessionStart group as ours.
+    public static let handoffMarker = "handoff --format claude-hook"
+
+    /// Share stored memory without importing raw transcripts. The full CLI
+    /// setup uses the same marker but may explicitly enable its import path.
+    /// Only the two paths are quoted; the fixed words are bare.
     public var claudeCommand: String {
+        "\(Self.shellQuote(agentURL.path)) handoff --format claude-hook --db-path \(Self.shellQuote(dbURL.path)) --no-refresh"
+    }
+
+    /// The command installed before the handoff command existed. Recognised so
+    /// it can be replaced in place or removed; never written again.
+    public var legacyClaudeCommand: String {
         [executableURL.path, SessionContextHook.flag, "--db-path", dbURL.path]
             .map(Self.shellQuote).joined(separator: " ")
     }
@@ -51,10 +70,28 @@ public struct SessionContextInstaller: Sendable {
         "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
     }
 
-    private var claudeGroup: [String: Any] {
+    static func isOurs(_ command: String?) -> Bool {
+        guard let command else { return false }
+        return command.contains(SessionContextHook.flag) || command.contains(handoffMarker)
+    }
+
+    private var claudeGroup: [String: Any] { Self.group(command: claudeCommand) }
+    private var legacyClaudeGroup: [String: Any] { Self.group(command: legacyClaudeCommand) }
+    /// Previously written by the desktop, and still written by full CLI setup.
+    /// Recognise it for status, explicit conversion, and removal without
+    /// automatically editing an existing user's configuration during upgrade.
+    private var importingClaudeGroup: [String: Any] {
+        Self.group(command: "\(Self.shellQuote(agentURL.path)) handoff --format claude-hook --db-path \(Self.shellQuote(dbURL.path))")
+    }
+
+    private static func group(command: String) -> [String: Any] {
         ["matcher": SessionContextHook.sources.joined(separator: "|"), "hooks": [
-            ["type": "command", "command": claudeCommand, "timeout": 10]
+            ["type": "command", "command": command, "timeout": 10]
         ]]
+    }
+
+    private func isCurrent(_ group: [String: Any]) -> Bool {
+        NSDictionary(dictionary: group).isEqual(to: claudeGroup)
     }
 
     public func claudeStatus() throws -> SessionContextConfigurationStatus {
@@ -71,9 +108,13 @@ public struct SessionContextInstaller: Sendable {
             var starts = try Self.sessionStarts(object)
             let index = try ownGroupIndex(starts)
             if enabled && Self.hooksDisabled(object) { throw SessionContextInstallError.disabledByClient }
-            if enabled == (index != nil) { return data }
-            if enabled { starts.append(claudeGroup) }
-            else if let index { starts.remove(at: index) }
+            switch (enabled, index) {
+            case (true, let index?) where isCurrent(starts[index]): return data
+            case (true, let index?): starts[index] = claudeGroup // legacy shape: replace in place
+            case (true, nil): starts.append(claudeGroup)
+            case (false, let index?): starts.remove(at: index)
+            case (false, nil): return data
+            }
             var hooks = object["hooks"] as? [String: Any] ?? [:]
             if starts.isEmpty { hooks.removeValue(forKey: "SessionStart") }
             else { hooks["SessionStart"] = starts }
@@ -106,12 +147,18 @@ public struct SessionContextInstaller: Sendable {
         return starts
     }
 
+    /// The one group that is ours, in a known canonical shape. A group carrying
+    /// our marker in any other shape has been edited by hand and is a conflict,
+    /// as is a second group of ours.
     private func ownGroupIndex(_ starts: [[String: Any]]) throws -> Int? {
         var found: Int?
         for (index, group) in starts.enumerated() {
             let handlers = group["hooks"] as? [[String: Any]] ?? []
-            guard handlers.contains(where: { ($0["command"] as? String)?.contains(SessionContextHook.flag) == true }) else { continue }
-            guard NSDictionary(dictionary: group).isEqual(to: claudeGroup), found == nil else {
+            guard handlers.contains(where: { Self.isOurs($0["command"] as? String) }) else { continue }
+            let dictionary = NSDictionary(dictionary: group)
+            guard dictionary.isEqual(to: claudeGroup) || dictionary.isEqual(to: legacyClaudeGroup)
+                    || dictionary.isEqual(to: importingClaudeGroup),
+                  found == nil else {
                 throw SessionContextInstallError.conflict
             }
             found = index

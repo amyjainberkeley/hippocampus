@@ -129,7 +129,7 @@ struct KeyboardShortcutsSheet: View {
 
     private var footer: some View {
         HStack {
-            Text("Press ⇧⌘Space anywhere to open recall from any app.")
+            Text("Press ⌃⇧Space anywhere to open recall from any app.")
                 .mciFont(.caption)
                 .foregroundStyle(MCI.Color.foregroundMuted)
             Spacer()

@@ -1537,6 +1537,229 @@ impl SqlCipherBrainStore {
         Ok(out)
     }
 
+    /// Every event whose `url` equals `prefix` or lies under it as a path
+    /// (`prefix` + `/` + more), newest first.
+    ///
+    /// The handoff compiler uses this to gather one project's transcript
+    /// evidence: a session's `url` is its working directory, so a project
+    /// root matches sessions in the root and in nested worktrees, never a
+    /// sibling that merely shares characters (`/x/onekit` does not match
+    /// `/x/onekit-bench`). SELECT-only.
+    ///
+    /// # Errors
+    /// [`StoreError::InvalidInput`] for an empty prefix;
+    /// [`StoreError::Backend`] on any `SQLite` failure.
+    pub fn events_by_url_prefix(
+        &self,
+        prefix: &str,
+        limit: usize,
+    ) -> Result<Vec<Event>, StoreError> {
+        let root = prefix.trim_end_matches('/');
+        if root.is_empty() {
+            return Err(StoreError::InvalidInput("url prefix is empty".into()));
+        }
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let child_prefix = format!("{root}/");
+        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "SELECT id, ts_us, app_bundle_id, window_title, url,
+                        text, summary, entities, episode_id,
+                        cascade_reason, keyframe_blob, tab_id
+                 FROM events
+                 WHERE url = ?1 OR substr(url, 1, length(?2)) = ?2
+                 ORDER BY ts_us DESC, id DESC
+                 LIMIT ?3",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare events_by_url_prefix: {e}")))?;
+        let rows = stmt
+            .query_map(params![root, child_prefix, lim], row_to_event_tuple)
+            .map_err(|e| StoreError::Backend(format!("query events_by_url_prefix: {e}")))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(event_from_tuple(r.map_err(|e| {
+                StoreError::Backend(format!("row events_by_url_prefix: {e}"))
+            })?));
+        }
+        Ok(out)
+    }
+
+    /// Events of one acquisition source inside an inclusive time range,
+    /// newest first. Legacy rows without a recorded source never match.
+    /// A store whose schema predates `event_sources` yields nothing.
+    /// SELECT-only.
+    ///
+    /// # Errors
+    /// [`StoreError::InvalidInput`] when the range is inverted;
+    /// [`StoreError::Backend`] on any `SQLite` failure.
+    pub fn events_by_source_in_range(
+        &self,
+        source: EventSource,
+        start_ts_us: u64,
+        end_ts_us: u64,
+        limit: usize,
+    ) -> Result<Vec<Event>, StoreError> {
+        if start_ts_us > end_ts_us {
+            return Err(StoreError::InvalidInput(
+                "start timestamp exceeds end timestamp".into(),
+            ));
+        }
+        if limit == 0 || start_ts_us > i64::MAX as u64 {
+            return Ok(Vec::new());
+        }
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let conn = guard.conn();
+        let exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_sources')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| StoreError::Backend(format!("probe event sources: {e}")))?;
+        if !exists {
+            return Ok(Vec::new());
+        }
+        let mut stmt = conn
+            .prepare(
+                "SELECT e.id, e.ts_us, e.app_bundle_id, e.window_title, e.url,
+                        e.text, e.summary, e.entities, e.episode_id,
+                        e.cascade_reason, e.keyframe_blob, e.tab_id
+                 FROM events e
+                 JOIN event_sources s ON s.event_id = e.id
+                 WHERE s.source_kind = ?1 AND e.ts_us >= ?2 AND e.ts_us <= ?3
+                 ORDER BY e.ts_us DESC, e.id DESC
+                 LIMIT ?4",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare events_by_source_in_range: {e}")))?;
+        let rows = stmt
+            .query_map(
+                params![
+                    source.as_str(),
+                    i64::try_from(start_ts_us).unwrap_or(i64::MAX),
+                    i64::try_from(end_ts_us).unwrap_or(i64::MAX),
+                    i64::try_from(limit).unwrap_or(i64::MAX)
+                ],
+                row_to_event_tuple,
+            )
+            .map_err(|e| StoreError::Backend(format!("query events_by_source_in_range: {e}")))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(event_from_tuple(r.map_err(|e| {
+                StoreError::Backend(format!("row events_by_source_in_range: {e}"))
+            })?));
+        }
+        Ok(out)
+    }
+
+    /// Record that one handoff packet was delivered (migration 0012).
+    ///
+    /// The packet text is never stored: only its digest, whitespace-token
+    /// estimate and the JSON array of event ids it cited, so `doctor` can
+    /// say when the last packet went out without holding user content twice.
+    /// Returns the new row id.
+    ///
+    /// # Errors
+    /// [`StoreError::InvalidInput`] when `client` is empty or `event_ids_json`
+    /// is not a JSON array literal; [`StoreError::Backend`] on any `SQLite`
+    /// failure, including a read-only handle.
+    pub fn record_handoff_delivery(
+        &self,
+        ts_us: u64,
+        client: &str,
+        project_root: &str,
+        packet_sha256: &str,
+        token_estimate: u64,
+        event_ids_json: &str,
+    ) -> Result<u64, StoreError> {
+        if client.trim().is_empty() {
+            return Err(StoreError::InvalidInput("delivery client is empty".into()));
+        }
+        let ids = event_ids_json.trim();
+        if !(ids.starts_with('[') && ids.ends_with(']')) {
+            return Err(StoreError::InvalidInput(
+                "delivery event ids must be a JSON array".into(),
+            ));
+        }
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        guard
+            .conn()
+            .execute(
+                "INSERT INTO handoff_deliveries
+                    (ts_us, client, project_root, packet_sha256, token_estimate, event_ids)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    i64::try_from(ts_us).unwrap_or(i64::MAX),
+                    client,
+                    project_root,
+                    packet_sha256,
+                    i64::try_from(token_estimate).unwrap_or(i64::MAX),
+                    ids
+                ],
+            )
+            .map_err(|e| StoreError::Backend(format!("INSERT handoff_deliveries: {e}")))?;
+        Ok(u64::try_from(guard.conn().last_insert_rowid()).unwrap_or(0))
+    }
+
+    /// The most recent handoff deliveries, newest first. A store whose
+    /// schema predates migration 0012 (for example a read-only handle on a
+    /// brain no writer has opened since the upgrade) yields an empty list
+    /// rather than an error, so `doctor` can report "not available yet".
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any `SQLite` failure.
+    pub fn recent_handoff_deliveries(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<crate::HandoffDelivery>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let conn = guard.conn();
+        let exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='handoff_deliveries')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| StoreError::Backend(format!("probe handoff deliveries: {e}")))?;
+        if !exists {
+            return Ok(Vec::new());
+        }
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, ts_us, client, project_root, packet_sha256, token_estimate, event_ids
+                 FROM handoff_deliveries
+                 ORDER BY ts_us DESC, id DESC
+                 LIMIT ?1",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare recent_handoff_deliveries: {e}")))?;
+        let rows = stmt
+            .query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], |r| {
+                Ok(crate::HandoffDelivery {
+                    id: u64::try_from(r.get::<_, i64>(0)?).unwrap_or(0),
+                    ts_us: u64::try_from(r.get::<_, i64>(1)?).unwrap_or(0),
+                    client: r.get(2)?,
+                    project_root: r.get(3)?,
+                    packet_sha256: r.get(4)?,
+                    token_estimate: u64::try_from(r.get::<_, i64>(5)?).unwrap_or(0),
+                    event_ids_json: r.get(6)?,
+                })
+            })
+            .map_err(|e| StoreError::Backend(format!("query recent_handoff_deliveries: {e}")))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(
+                r.map_err(|e| StoreError::Backend(format!("row recent_handoff_deliveries: {e}")))?,
+            );
+        }
+        Ok(out)
+    }
+
     /// Return the most-observed `app_bundle_id` values with their event
     /// counts, optionally bounded by a time window. Sorted by count DESC.
     /// SELECT-only — no write side. Rows with `app_bundle_id IS NULL` are
@@ -2688,6 +2911,17 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
         tx.execute_batch(include_str!("../migrations/0010_measured_activity.sql"))
             .map_err(|_| StoreError::Backend("apply migration 0010".into()))?;
     }
+    // 0011: transcript import cursors. Fresh table only, `IF NOT EXISTS`,
+    // so the apply is idempotent on re-open with no separate probe (same
+    // discipline as 0004, 0005 and 0009). The schema version stays at 10:
+    // nothing that reads a v10 brain is affected by one extra table.
+    tx.execute_batch(include_str!("../migrations/0011_import_cursors.sql"))
+        .map_err(|error| StoreError::Backend(format!("apply migration 0011: {error}")))?;
+    // 0012 — handoff delivery ledger. Fresh table + index only, every
+    // statement `IF NOT EXISTS`, so the apply is idempotent on re-open
+    // (same discipline as 0009). The schema version stays at 10.
+    tx.execute_batch(include_str!("../migrations/0012_handoff_deliveries.sql"))
+        .map_err(|error| StoreError::Backend(format!("apply migration 0012: {error}")))?;
     tx.execute(
         "INSERT OR REPLACE INTO meta (key, value) VALUES ('brain_schema_version', '10')",
         [],
@@ -3514,9 +3748,334 @@ fn row_to_brief(r: &rusqlite::Row<'_>) -> rusqlite::Result<crate::BriefRow> {
     })
 }
 
+/// Where a transcript importer stopped in one file (migration 0011).
+///
+/// Content-free: a path and integers. `byte_offset` is the first byte not
+/// yet consumed and `line_no` the number of complete lines consumed, so a
+/// resumed pass can stamp 1-based source line numbers without re-reading
+/// the prefix. `file_size` and `mtime_us` describe the file as it was when
+/// the cursor was stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ImportCursor {
+    /// First byte not yet consumed.
+    pub byte_offset: u64,
+    /// File size when the cursor was stored.
+    pub file_size: u64,
+    /// File modification time when the cursor was stored, microseconds
+    /// since the UNIX epoch.
+    pub mtime_us: u64,
+    /// Complete lines consumed so far.
+    pub line_no: u64,
+    /// When the cursor row was written, microseconds since the UNIX epoch.
+    pub updated_at_us: u64,
+}
+
+/// Transcript import cursors and id-ordered event reads (migration 0011).
+///
+/// The importers resume per file; the `refresh` command enriches only the
+/// events one import pass just wrote. Both need event ids, not timestamps:
+/// a transcript imported today carries timestamps from weeks ago, so the
+/// `ts_us`-cursored readers above would never find "what is new".
+impl SqlCipherBrainStore {
+    /// Read the stored cursor for one transcript path, if any.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any underlying `SQLite` failure.
+    pub fn get_import_cursor(&self, path: &str) -> Result<Option<ImportCursor>, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        guard
+            .conn()
+            .query_row(
+                "SELECT byte_offset, file_size, mtime_us, line_no, updated_at_us
+                 FROM import_cursors WHERE path = ?1",
+                params![path],
+                |r| {
+                    Ok(ImportCursor {
+                        byte_offset: u64::try_from(r.get::<_, i64>(0)?).unwrap_or(0),
+                        file_size: u64::try_from(r.get::<_, i64>(1)?).unwrap_or(0),
+                        mtime_us: u64::try_from(r.get::<_, i64>(2)?).unwrap_or(0),
+                        line_no: u64::try_from(r.get::<_, i64>(3)?).unwrap_or(0),
+                        updated_at_us: u64::try_from(r.get::<_, i64>(4)?).unwrap_or(0),
+                    })
+                },
+            )
+            .optional()
+            .map_err(|e| StoreError::Backend(format!("query get_import_cursor: {e}")))
+    }
+
+    /// Insert or replace the cursor for one transcript path. `updated_at_us`
+    /// is stamped with the wall clock here, whatever the caller passed.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any underlying `SQLite` failure.
+    pub fn set_import_cursor(&self, path: &str, cursor: &ImportCursor) -> Result<(), StoreError> {
+        let now_us = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_or(0, |d| i64::try_from(d.as_micros()).unwrap_or(i64::MAX));
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        guard
+            .conn()
+            .execute(
+                "INSERT OR REPLACE INTO import_cursors
+                     (path, byte_offset, file_size, mtime_us, updated_at_us, line_no)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    path,
+                    i64::try_from(cursor.byte_offset).unwrap_or(i64::MAX),
+                    i64::try_from(cursor.file_size).unwrap_or(i64::MAX),
+                    i64::try_from(cursor.mtime_us).unwrap_or(i64::MAX),
+                    now_us,
+                    i64::try_from(cursor.line_no).unwrap_or(i64::MAX),
+                ],
+            )
+            .map_err(|e| StoreError::Backend(format!("execute set_import_cursor: {e}")))?;
+        Ok(())
+    }
+
+    /// Delete every cursor whose path starts with `prefix`. Returns the
+    /// number of rows removed. A plain prefix compare, not `LIKE`, so a
+    /// `%` or `_` in a directory name cannot widen the match.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any underlying `SQLite` failure.
+    pub fn clear_import_cursors(&self, prefix: &str) -> Result<u64, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let n = guard
+            .conn()
+            .execute(
+                "DELETE FROM import_cursors WHERE substr(path, 1, length(?1)) = ?1",
+                params![prefix],
+            )
+            .map_err(|e| StoreError::Backend(format!("execute clear_import_cursors: {e}")))?;
+        Ok(u64::try_from(n).unwrap_or(0))
+    }
+
+    /// Every stored cursor whose path starts with `prefix`, with its path,
+    /// ordered by path. Content-free; used by diagnostics.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any underlying `SQLite` failure.
+    pub fn list_import_cursors(
+        &self,
+        prefix: &str,
+    ) -> Result<Vec<(String, ImportCursor)>, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "SELECT path, byte_offset, file_size, mtime_us, line_no, updated_at_us
+                 FROM import_cursors
+                 WHERE substr(path, 1, length(?1)) = ?1
+                 ORDER BY path ASC",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare list_import_cursors: {e}")))?;
+        let rows = stmt
+            .query_map(params![prefix], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    ImportCursor {
+                        byte_offset: u64::try_from(r.get::<_, i64>(1)?).unwrap_or(0),
+                        file_size: u64::try_from(r.get::<_, i64>(2)?).unwrap_or(0),
+                        mtime_us: u64::try_from(r.get::<_, i64>(3)?).unwrap_or(0),
+                        line_no: u64::try_from(r.get::<_, i64>(4)?).unwrap_or(0),
+                        updated_at_us: u64::try_from(r.get::<_, i64>(5)?).unwrap_or(0),
+                    },
+                ))
+            })
+            .map_err(|e| StoreError::Backend(format!("query list_import_cursors: {e}")))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| StoreError::Backend(format!("row list_import_cursors: {e}")))
+    }
+
+    /// Largest `events.id`, or 0 for an empty store. Taken before an import
+    /// so the caller can later ask for "everything written since".
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any underlying `SQLite` failure.
+    pub fn max_event_id(&self) -> Result<u64, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let id: Option<i64> = guard
+            .conn()
+            .query_row("SELECT MAX(id) FROM events", [], |r| r.get(0))
+            .map_err(|e| StoreError::Backend(format!("query max_event_id: {e}")))?;
+        Ok(id.map_or(0, |v| u64::try_from(v).unwrap_or(0)))
+    }
+
+    /// Up to `limit` events with `id > after_id`, ascending by id.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any underlying `SQLite` failure.
+    pub fn events_after_id(&self, after_id: u64, limit: usize) -> Result<Vec<Event>, StoreError> {
+        self.events_after_id_where(after_id, limit, "1 = 1", "events_after_id")
+    }
+
+    /// Up to `limit` events with `id > after_id` and no row in
+    /// `event_vectors`, ascending by id. The `refresh` embed stage reads
+    /// this instead of [`Self::unembedded_events`] so a brain with an old,
+    /// never-embedded backlog does not eat the whole time budget.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any underlying `SQLite` failure.
+    pub fn unembedded_events_after(
+        &self,
+        after_id: u64,
+        limit: usize,
+    ) -> Result<Vec<Event>, StoreError> {
+        self.events_after_id_where(
+            after_id,
+            limit,
+            "e.id NOT IN (SELECT event_id FROM event_vectors)
+               AND length(trim(e.text, ' ' || char(9) || char(10) || char(11) || char(12) || char(13))) > 0",
+            "unembedded_events_after",
+        )
+    }
+
+    /// Up to `limit` events with `id > after_id` and no `episode_id`,
+    /// ascending by `ts_us` then id (the segmenter wants time order).
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] on any underlying `SQLite` failure.
+    pub fn unsegmented_events_after(
+        &self,
+        after_id: u64,
+        limit: usize,
+    ) -> Result<Vec<Event>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let mut stmt = guard
+            .conn()
+            .prepare(
+                "SELECT id, ts_us, app_bundle_id, window_title, url,
+                        text, summary, entities, episode_id,
+                        cascade_reason, keyframe_blob, tab_id
+                 FROM events
+                 WHERE id > ?1 AND episode_id IS NULL
+                 ORDER BY ts_us ASC, id ASC
+                 LIMIT ?2",
+            )
+            .map_err(|e| StoreError::Backend(format!("prepare unsegmented_events_after: {e}")))?;
+        let after = i64::try_from(after_id).unwrap_or(i64::MAX);
+        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
+        let rows = stmt
+            .query_map(params![after, lim], row_to_event_tuple)
+            .map_err(|e| StoreError::Backend(format!("query unsegmented_events_after: {e}")))?;
+        rows.map(|r| {
+            r.map(event_from_row_tuple)
+                .map_err(|e| StoreError::Backend(format!("row unsegmented_events_after: {e}")))
+        })
+        .collect()
+    }
+
+    fn events_after_id_where(
+        &self,
+        after_id: u64,
+        limit: usize,
+        extra_where: &str,
+        label: &str,
+    ) -> Result<Vec<Event>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let sql = format!(
+            "SELECT e.id, e.ts_us, e.app_bundle_id, e.window_title, e.url,
+                    e.text, e.summary, e.entities, e.episode_id,
+                    e.cascade_reason, e.keyframe_blob, e.tab_id
+             FROM events e
+             WHERE e.id > ?1 AND ({extra_where})
+             ORDER BY e.id ASC
+             LIMIT ?2"
+        );
+        let mut stmt = guard
+            .conn()
+            .prepare(&sql)
+            .map_err(|e| StoreError::Backend(format!("prepare {label}: {e}")))?;
+        let after = i64::try_from(after_id).unwrap_or(i64::MAX);
+        let lim = i64::try_from(limit).unwrap_or(i64::MAX);
+        let rows = stmt
+            .query_map(params![after, lim], row_to_event_tuple)
+            .map_err(|e| StoreError::Backend(format!("query {label}: {e}")))?;
+        rows.map(|r| {
+            r.map(event_from_row_tuple)
+                .map_err(|e| StoreError::Backend(format!("row {label}: {e}")))
+        })
+        .collect()
+    }
+}
+
+/// Build an [`Event`] from the 12-column tuple `row_to_event_tuple` yields.
+/// The embedding is left `None`: these readers never join `event_vectors`.
+fn event_from_row_tuple(row: EventRow) -> Event {
+    let (
+        ev_id,
+        ts_us,
+        app,
+        title,
+        url,
+        text,
+        summary,
+        entities,
+        episode_id,
+        cascade_reason,
+        keyframe_blob,
+        tab_id,
+    ) = row;
+    Event {
+        id: EventId(u64::try_from(ev_id).unwrap_or(0)),
+        ts_us: u64::try_from(ts_us).unwrap_or(0),
+        app_bundle_id: app,
+        window_title: title,
+        url,
+        text,
+        embedding: None,
+        summary,
+        entities,
+        episode_id: episode_id.map(|v| u64::try_from(v).unwrap_or(0)),
+        cascade_reason,
+        keyframe_blob,
+        tab_id: tab_id.and_then(|v| u32::try_from(v).ok()),
+    }
+}
+
 /// Row mapper for the 12-column `events` SELECT used by `recent_events`,
 /// `paged_events_since`, `unembedded_events`, and `get_event` (V2-P2
 /// added `tab_id` as the trailing column).
+/// Build an [`Event`] (no vector) from the 12-column tuple
+/// [`row_to_event_tuple`] reads. Shared by the newer SELECT surfaces.
+fn event_from_tuple(row: EventRow) -> Event {
+    let (
+        ev_id,
+        ts_us,
+        app,
+        title,
+        url,
+        text,
+        summary,
+        entities,
+        episode_id,
+        cascade_reason,
+        keyframe_blob,
+        tab_id,
+    ) = row;
+    Event {
+        id: EventId(u64::try_from(ev_id).unwrap_or(0)),
+        ts_us: u64::try_from(ts_us).unwrap_or(0),
+        app_bundle_id: app,
+        window_title: title,
+        url,
+        text,
+        summary,
+        entities,
+        episode_id: episode_id.map(|v| u64::try_from(v).unwrap_or(0)),
+        cascade_reason,
+        keyframe_blob,
+        tab_id: tab_id.and_then(|v| u32::try_from(v).ok()),
+        embedding: None,
+    }
+}
+
 fn row_to_event_tuple(r: &rusqlite::Row<'_>) -> rusqlite::Result<EventRow> {
     Ok((
         r.get::<_, i64>(0)?,

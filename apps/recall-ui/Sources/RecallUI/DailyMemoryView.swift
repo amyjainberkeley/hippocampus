@@ -111,9 +111,9 @@ struct DailyMemoryView: View {
     private var currentCaptureState: some View {
         if let receipt = model.captureHealth {
             Label((receipt.isStale() ? "Status out of date / " : "Now / ") + receipt.stateLabel,
-                  systemImage: receipt.isStale() || receipt.blockedReason != nil ? "exclamationmark.circle" : "display")
+                  systemImage: receipt.needsAttention() ? "exclamationmark.circle" : "display")
                 .font(.caption)
-                .foregroundStyle(receipt.isStale() || receipt.blockedReason != nil ? Color.brandWarning : Color.brandFgSecondary)
+                .foregroundStyle(receipt.needsAttention() ? Color.brandWarning : Color.brandFgSecondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .help(receipt.detailText() ?? "Current capture status, independent of the selected day")
         } else {

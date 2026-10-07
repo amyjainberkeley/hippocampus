@@ -4,20 +4,19 @@
 //
 // Placement: immediately after `PermissionsSlide`. Accessibility TCC
 // is already granted at this point, but we DON'T need it — the slide
-// listens for ⇧⌘Space via `NSEvent.addLocalMonitorForEvents`, which
+// listens for ⌃⇧Space via `NSEvent.addLocalMonitorForEvents`, which
 // only sees events routed to the onboarding app itself (i.e. while
 // the onboarding window is frontmost). That's the exact scope we
 // want for a live-try:
 //
-//   - We aren't competing with the real GlobalHotkeyManager (which
-//     lives in the Recall UI process, not this onboarding process).
+//   - This is local practice, not proof that the parent application's
+//     GlobalHotkeyManager successfully registered the chord.
 //   - No new TCC prompt fires.
 //   - No Carbon RegisterEventHotKey / process-wide side-effects to
 //     clean up if the user quits mid-slide.
 //
-// The Skip button is REQUIRED: some users have Alfred / SetApp /
-// Raycast already grabbing ⇧⌘Space at the OS level, and blocking
-// onboarding on a hotkey we can't guarantee would be a regression.
+// The Skip button is REQUIRED: another app can own the chord at the OS
+// level, so onboarding must not depend on successful registration.
 
 import SwiftUI
 import AppKit
@@ -34,7 +33,7 @@ struct PrimaryHotkeySlide: View {
                 VStack(spacing: OnboardingDesign.Space.sm) {
                     OnboardingDesign.TypeRamp.hero("Recall anything, from anywhere.")
                         .multilineTextAlignment(.center)
-                    OnboardingDesign.TypeRamp.body("Try it now — press ⇧⌘Space.")
+                    OnboardingDesign.TypeRamp.body("Try it now — press ⌃⇧Space.")
                         .font(.system(size: 16))
                         .foregroundStyle(.secondary)
                 }
@@ -43,6 +42,9 @@ struct PrimaryHotkeySlide: View {
 
                 if flowVM.hotkeyPracticed {
                     successBadge
+                } else if flowVM.hotkeySkipped {
+                    Label("Skipped. You can open Recall from the menu bar.", systemImage: "menubar.arrow.up.rectangle")
+                        .font(.callout).foregroundStyle(.secondary)
                 } else {
                     Text("Press the combo while this window is focused. We'll unlock Continue as soon as we see it.")
                         .font(.system(size: 13))
@@ -51,11 +53,7 @@ struct PrimaryHotkeySlide: View {
                         .frame(maxWidth: 460)
 
                     Button("Skip — the combo is already taken on my Mac") {
-                        // Live-try wasn't possible (Alfred/SetApp
-                        // grabbed the combo, or user just wants to
-                        // move on). Still flip the flag so Continue
-                        // unlocks — accessibility is non-negotiable.
-                        flowVM.markHotkeyPracticed()
+                        flowVM.skipHotkeyPractice()
                     }
                     .onboardingText()
                     .padding(.top, 4)
@@ -70,9 +68,9 @@ struct PrimaryHotkeySlide: View {
 
     private var keyboardVisual: some View {
         HStack(spacing: 8) {
-            keyCap("⇧", label: "Shift")
+            keyCap("⌃", label: "Control")
             plus
-            keyCap("⌘", label: "Command")
+            keyCap("⇧", label: "Shift")
             plus
             keyCap("Space", label: "Space", wide: true)
         }
@@ -121,7 +119,7 @@ struct PrimaryHotkeySlide: View {
             Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(OnboardingDesign.Palette.accent)
                 .font(.system(size: 18))
-            Text("Nice — you'll use this every day.")
+            Text("Shortcut detected here. Try it from another app after setup.")
                 .font(.system(size: 13, weight: .medium))
         }
         .padding(.horizontal, 14)
@@ -138,17 +136,18 @@ struct PrimaryHotkeySlide: View {
     // MARK: - Hotkey monitor
 
     /// Install an `NSEvent` local monitor scoped to this slide. Fires
-    /// when the user presses ⇧⌘Space while the onboarding window is
+    /// when the user presses ⌃⇧Space while the onboarding window is
     /// key. Returning `nil` from the handler swallows the event so
     /// the space char doesn't leak into any focused text field.
     private func installMonitor() {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            // keyCode 49 == kVK_Space. Match ⇧⌘Space exactly (ignore
-            // Option/Control so a chorded ⌥⇧⌘Space doesn't false-positive).
+            // keyCode 49 == kVK_Space. Match ⌃⇧Space exactly.
+            // Reject extra Command/Option modifiers so Whisper's chord
+            // cannot count as practicing Recall.
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            let wantsCmdShift: NSEvent.ModifierFlags = [.command, .shift]
-            if event.keyCode == 49 && flags == wantsCmdShift {
+            let wantsControlShift: NSEvent.ModifierFlags = [.control, .shift]
+            if event.keyCode == 49 && flags == wantsControlShift {
                 Task { @MainActor in flowVM.markHotkeyPracticed() }
                 return nil
             }

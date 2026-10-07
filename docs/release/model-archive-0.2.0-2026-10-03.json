@@ -1,0 +1,70 @@
+{
+  "version": "0.2.0",
+  "archive": "release-models-0.2.0.tar.gz",
+  "bytes": 61232508,
+  "sha256": "e0d9a98ef6cb793aa539b1719a4546c2de16f9c445c60fe846829928daa5a718",
+  "source_app_commit": "ba1c4918658926c3683d865a961bdd62f1b73591",
+  "qualified_candidate_commit": "4983f6cbeb376125b0df5b9125741047015c52d3",
+  "upstream_model": "Snowflake/snowflake-arctic-embed-s",
+  "upstream_revision": "e596f507467533e48a2e17c007f0e1dacc837b33",
+  "license": "Apache-2.0",
+  "license_source": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+  "files": {
+    "models/ArcticEmbedS_FP16.mlmodelc/analytics/coremldata.bin": {
+      "bytes": 243,
+      "sha256": "7e6acb66f462fee01e2499235d5e714d8587552f1730b5a4422260d9d432262c"
+    },
+    "models/ArcticEmbedS_FP16.mlmodelc/coremldata.bin": {
+      "bytes": 349,
+      "sha256": "6a2a40362b3553e04ba681d04b0c02ee29fc64257e019a6416d9c2991e20ca7f"
+    },
+    "models/ArcticEmbedS_FP16.mlmodelc/hippocampus-model.json": {
+      "bytes": 397,
+      "sha256": "c94629f13447f8e364164b41f3761e4a80611cf47496bcfaf9d2c35903e2d4a3"
+    },
+    "models/ArcticEmbedS_FP16.mlmodelc/model.mil": {
+      "bytes": 161510,
+      "sha256": "dffd19a0a241f000297aa4c3db7be88997f27f81631d90334c3e25e302c15819"
+    },
+    "models/ArcticEmbedS_FP16.mlmodelc/weights/weight.bin": {
+      "bytes": 66238848,
+      "sha256": "a356fd8ad0a2e5730d7a03df62f1acb33a0565a2e964fcf73d9fb2d2c89902d9"
+    },
+    "models/LICENSE-Arctic-Embed-S.txt": {
+      "bytes": 11358,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    "models/NOTICE-Arctic-Embed-S.txt": {
+      "bytes": 1302,
+      "sha256": "169228357b626dfbac345488d205333b44116e13385c0765f748106544f87a65"
+    }
+  },
+  "repository": "https://github.com/amyjainberkeley/hippocampus-models",
+  "release_url": "https://github.com/amyjainberkeley/hippocampus-models/releases/tag/v0.2.0",
+  "release_id": 402725696,
+  "release_immutable": true,
+  "model_repository_commit": "f81da3535577bbe272e51010172fb92f4b512f09",
+  "archive_url": "https://github.com/amyjainberkeley/hippocampus-models/releases/download/v0.2.0/release-models-0.2.0.tar.gz",
+  "qualification_date": "2026-10-03",
+  "checks": {
+    "archive_local_reconstruction": true,
+    "public_unauthenticated_download": true,
+    "public_archive_exact_hash": true,
+    "public_reconstruction": true,
+    "all_reconstructed_file_digests": true,
+    "github_signed_release_attestation": true,
+    "release_prebuild_identity": true,
+    "model_manifest_tests_passed": 7,
+    "archive_preparation_tests_passed": 8,
+    "release_identity_tests_passed": 9
+  },
+  "scope": {
+    "public_model_artifact": true,
+    "app_runtime_changed": false,
+    "app_installed": false,
+    "public_app_download": false,
+    "private_memory_included": false,
+    "credentials_included": false,
+    "original_4983f6c_candidate_modified": false
+  }
+}
