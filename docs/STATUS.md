@@ -2,13 +2,30 @@
 
 _Updated on 2026-10-07; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `027f3ad`
+Audited code baseline: `afed4a3`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## October 7 Retained Screenshot OCR Check
+
+A new [retained-image probe](audits/2026-10-07-retained-screenshot-ocr.md) runs
+fabricated chat pixels through the production JPEG encoder, encryption,
+authenticated image provider, local re-reader and the installed OCR worker.
+At native resolution, all ten lines match exactly and in order at 10-, 12- and
+16-pixel font sizes, with no extra or omitted lines. The three runs took
+2.282–3.763 seconds. Reducing the same pixels to the former 1280-pixel long-edge
+limit, with compression quality held constant, yields 0/10, 0/10 and 6/10 exact
+lines. This supports retaining image detail for future re-reading; it cannot
+restore detail already lost in older screenshots.
+
+This is synthetic, same-Mac processing evidence. It uses an injected key and a
+standalone source-linked probe with the installed signed worker. It does not
+qualify live capture, real Keychain access, cold start, native UI or arbitrary
+image accuracy. No product code, installed app, owner data or release changed.
 
 ## October 7 Screenshot Re-read Recovery
 
