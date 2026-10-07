@@ -1,5 +1,12 @@
 # OCR update installed; live capture still unqualified
 
+Later October 7 follow-up: the
+[diagnostic installation and foreground audit](2026-10-07-diagnostic-owner-install.md)
+supersedes this checkpoint's current-install and next-step descriptions. The
+installed candidate is now `8e82e03`. The TextEdit attempt below did not verify
+system foreground identity, and its AX health lines have no app attribution;
+it must not be read as proof of a TextEdit capture defect.
+
 Hippocampus 0.2.0/build 2 from exact source `4983f6c` is now installed at
 `/Applications/Hippocampus.app`. Its app and private DMG are Developer ID-signed,
 Apple-accepted and stapled. This installs the sharper saved screenshots,
@@ -65,7 +72,7 @@ The synthetic document was closed and saved with the private test evidence.
 
 Content-free capture health reported `failsafe-unknown`, descendant privacy
 backstop errors and some focus-race drops. These observations do not yet prove
-which AX traversal branch or foreground transition caused the failed capture.
+which AX traversal branch or foreground transition prevented a qualifying check.
 Source review confirms that absent focused subroles (`noValue` or
 `attributeUnsupported`) are already handled; a descendant error is the
 remaining unknown signal in the reported probe line. That error currently

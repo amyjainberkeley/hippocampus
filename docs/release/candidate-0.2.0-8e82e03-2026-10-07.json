@@ -1,0 +1,57 @@
+{
+  "date": "2026-10-07",
+  "source": "8e82e031eae81e06036e6451140aa723605ba90b",
+  "source_digest": "abc8773c5386e636adf2dab25e25925820dd3aacf0500c0a5d886ddbacee2ace",
+  "payload_digest": "125d94e78a4dca51fd8016ffe95c36e42ca506f9012fbb569cc5b60c0a3bfd64",
+  "version": "0.2.0",
+  "build": "2",
+  "state": "private_installed_candidate",
+  "installed": true,
+  "public_download": false,
+  "team_id": "BV6KGKFKP4",
+  "app_notarization": {
+    "submission_id": "65c5fc37-0472-485b-8896-c5316da2acec",
+    "status": "Accepted",
+    "stapled": true
+  },
+  "dmg_created_for_this_source": false,
+  "checks": {
+    "release_build_commands_passed": 5,
+    "shipping_executables": 6,
+    "clean_home_launch_seconds": 20,
+    "onboarding_attached": true,
+    "models_complete": true,
+    "source_and_payload_provenance": true,
+    "nested_signatures": true,
+    "app_group": true,
+    "gatekeeper_app": true,
+    "distribution_policy": true,
+    "verified_ciphertext_backup": true,
+    "writer_lease_held_through_backup_and_swap": true,
+    "atomic_whole_bundle_swap": true,
+    "installed_provenance_signature_staple_gatekeeper": true,
+    "retired_reader_mapping_preserved": true,
+    "installed_parent_recall_helper_agent_observed": true,
+    "writer_and_recall_expected_store_confirmed": true
+  },
+  "live_capture": {
+    "qualified": false,
+    "automated_exposure_qualified": false,
+    "proof_phrase_generated": false,
+    "appkit_focus_agreed_with_system_foreground": false,
+    "system_foreground_observed": "installed_recall_process",
+    "capture_receipt_observed": "denylist-source",
+    "diagnostic_first_failures_observed": ["children-incomplete", "depth-limit"],
+    "diagnostic_app_attribution_available": false,
+    "textedit_capture_defect_established": false
+  },
+  "limits": [
+    "No public release or feed publication.",
+    "No permission, exclusion or traversal-policy changes.",
+    "No historical OCR or search-index rewrite.",
+    "Automated local window focus did not establish actual system foreground exposure.",
+    "Physical shortcut delivery, native onboarding, live OCR/storage/recall, cancellation, zoom, cold-machine performance and recovery remain unqualified.",
+    "Retired bundles must not be launched against the upgraded owner store.",
+    "No microphone capture or automatic rollback."
+  ]
+}
