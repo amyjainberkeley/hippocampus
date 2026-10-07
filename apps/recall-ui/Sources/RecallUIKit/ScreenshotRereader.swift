@@ -30,7 +30,7 @@ public struct LocalScreenshotRereader: ScreenshotRereading {
 
     public func read(url: URL) async -> ScreenshotRereadOutcome {
         guard !Task.isCancelled, let executableURL,
-              let data = await provider.screenshotData(for: url), !Task.isCancelled else { return .unavailable }
+              let data = await provider.rereadScreenshotData(for: url), !Task.isCancelled else { return .unavailable }
         let decoder = Task.detached(priority: .userInitiated) { Self.input(data) }
         let input = await withTaskCancellationHandler { await decoder.value } onCancel: { decoder.cancel() }
         guard !Task.isCancelled, let input else { return .unavailable }
