@@ -1267,9 +1267,9 @@ fn resolve_key_hex() -> Option<String> {
 
 /// Register Hippocampus as an MCP server in Claude Code's MCP config
 /// (`~/.claude.json`). Merges the `hippocampus` entry under
-/// `mcpServers` without clobbering other servers. Includes an `env`
-/// block with `MCI_DB_KEY_HEX` when the dev.key file exists.
-/// Write the Hippocampus entry into Claude Code's `~/.claude.json`.
+/// `mcpServers` without clobbering other servers. The `env` block always
+/// carries `MCI_DB_PATH`, and carries `MCI_DB_KEY_HEX` only when `mcp-serve`
+/// could not find the right key in `dev.key` on its own.
 ///
 /// `db_path` is the brain this agent just resolved. It has to be recorded
 /// explicitly: `mcp-serve` otherwise falls back to the hardcoded default,
@@ -1302,6 +1302,16 @@ fn register_mcp(db_path: &Path) -> Result<(), String> {
     // silently dropped from the registration.
     let key_hex: Option<String> =
         resolve_key_hex().filter(|s| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit()));
+    // `mcp-serve` resolves the key itself and falls back to `dev.key`, so
+    // when `dev.key` already holds the right key there is nothing to record.
+    // Recording it anyway copied the brain key into `~/.claude.json`, a file
+    // that is usually world-readable and gets synced, backed up and shared
+    // with every other tool. Only a key that exists solely in this shell's
+    // environment has to travel with the registration, because Claude Code
+    // launches the server without that environment.
+    let key_to_record = key_hex
+        .as_ref()
+        .filter(|k| read_dev_key_hex().as_ref() != Some(*k));
 
     let mut hippocampus_entry = serde_json::json!({
         "type": "stdio",
@@ -1309,9 +1319,9 @@ fn register_mcp(db_path: &Path) -> Result<(), String> {
         "args": ["mcp-serve"]
     });
     hippocampus_entry["env"] = serde_json::json!({"MCI_DB_PATH": db_str});
-    if let Some(k) = &key_hex {
+    if let Some(k) = key_to_record {
         hippocampus_entry["env"]["MCI_DB_KEY_HEX"] = serde_json::json!(k);
-    } else {
+    } else if key_hex.is_none() {
         eprintln!(
             "Note: brain key not yet generated at {}. Launch Hippocampus.app once to initialize, then re-run `mci-agent register-mcp`.",
             key_path.display()
@@ -1351,12 +1361,19 @@ fn register_mcp(db_path: &Path) -> Result<(), String> {
     // the temp file was just created under the process umask (0644 by
     // default). Writing in place used to preserve whatever the user had
     // set, so without this a `chmod 600 ~/.claude.json` would be silently
-    // widened back to world-readable — on a file that holds the brain key.
+    // widened back to world-readable — on a file that may hold the brain key.
     // Carry the old mode across; a file we are creating starts at 0600,
-    // because we are putting a key in it.
-    let mode = std::fs::metadata(&settings_path)
+    // because it may get a key later.
+    // When a key is recorded, nobody but the owner may read the file, so
+    // group and other bits are dropped whatever the old mode was.
+    let old_mode = std::fs::metadata(&settings_path)
         .map(|m| m.permissions().mode() & 0o777)
         .unwrap_or(0o600);
+    let mode = if key_to_record.is_some() {
+        old_mode & 0o700
+    } else {
+        old_mode
+    };
     if let Err(e) = std::fs::set_permissions(&tmp_path, Permissions::from_mode(mode)) {
         let _ = std::fs::remove_file(&tmp_path);
         return Err(format!("set mode on {}: {e}", tmp_path.display()));
