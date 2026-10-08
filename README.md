@@ -1,314 +1,134 @@
 <h1 align="center">Hippocampus</h1>
 
-<p align="center"><strong>Your computer already sees everything you do. It just doesn't remember any of it.</strong></p>
+<p align="center"><strong>Computers should learn from the way people actually work.<br>First, they have to remember it.</strong></p>
 
 <p align="center">
-  <a href="#try-it-in-about-a-minute">Try it</a> ·
-  <a href="#see-it-work">See it work</a> ·
+  <a href="#why">Why</a> ·
+  <a href="#quickstart">Quickstart</a> ·
   <a href="#how-it-works">How it works</a> ·
-  <a href="#what-works-and-what-doesnt">Honest status</a> ·
-  <a href="#how-this-compares">Compared to mem0 and supermemory</a>
+  <a href="#stack">Stack</a> ·
+  <a href="#status">Status</a> ·
+  <a href="docs/GUIDE.md">Guide</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/amyjainberkeley/hippocampus/actions/workflows/cargo.yml"><img src="https://github.com/amyjainberkeley/hippocampus/actions/workflows/cargo.yml/badge.svg?branch=main" alt="Cargo: test, clippy, fmt"></a>
+  <a href="https://github.com/amyjainberkeley/hippocampus/actions/workflows/swift.yml"><img src="https://github.com/amyjainberkeley/hippocampus/actions/workflows/swift.yml/badge.svg?branch=main" alt="Swift: helper, recall UI, installer"></a>
+  <a href="https://github.com/amyjainberkeley/hippocampus/actions/workflows/cargo-audit.yml"><img src="https://github.com/amyjainberkeley/hippocampus/actions/workflows/cargo-audit.yml/badge.svg?branch=main" alt="RustSec audit"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache 2.0"></a>
 </p>
 
 ---
 
-Hippocampus is a Mac app that remembers what was on your screen, so you can ask for it later in plain language.
+Hippocampus is a memory for your Mac. It keeps a private record of what was on your screen (the text, the app, the window, the URL, the moment) and lets you, or an agent working for you, search it in plain language.
 
-Not "what file was that in." **"That pricing page I looked at last Tuesday, when I was annoyed."** You remember situations. Your computer remembers filenames. This closes that gap.
-
-It runs entirely on your machine. There is no server to trust, because there is no server.
-
-- **Local by construction, not by policy.** Screen text is parsed on-device, embedded on the Neural Engine, and written to one encrypted SQLite file. No API key is needed and nothing is sent anywhere.
-- **One file, one lock.** Everything (rows, full-text index, vectors) lives inside a single SQLCipher database. Deleting a memory crypto-shreds it.
-- **Search the way you remember.** Keyword search for exact things like an error code, vector search for vague things like "that pricing discussion," fused into one ranked list. (The engine does both; the CLI below exposes the keyword half. See [what works](#what-works-and-what-doesnt).)
-- **Blocked at the source.** Password prompts, private browsing, and DRM video are refused before a frame is ever encoded, not scrubbed afterwards.
-
----
-
-## Try it in about a minute
-
-You do not need to install the app, grant screen permissions, or trust me with anything. This builds the CLI, makes a throwaway encrypted brain in a sandbox folder, fills it with 20 fake events, and searches it.
-
-```bash
-git clone https://github.com/amyjainberkeley/hippocampus.git
-cd hippocampus
-./scripts/try-it.sh
-```
-
-Everything lands in `./hippocampus-demo/`. Your real brain is never touched, no capture runs, nothing reads your screen, and nothing goes over the network. When you are done:
-
-```bash
-rm -rf ./hippocampus-demo
-```
-
-That deletes the database and its only key, which makes the data unrecoverable. That is the same crypto-shred property the real store has.
-
----
-
-## See it work
-
-Real output from the script above, not a mockup.
-
-One thing to be straight about before you read it: `mci-brain search` is **keyword search only** (SQLite FTS5). The vector half and the fusion that ranks them together live in `core/brain/src/hybrid_retriever.rs` and are exercised by the test suite, but they need the embedder, which this read-only CLI does not load. So what you see below is the lexical half doing its job, not the full recall path.
-
-```console
-$ mci-brain stats
-Events: 20
-Oldest: 2026-08-02T20:32:59.612Z (1785702779612697)
-Newest: 2026-08-02T22:26:59.612Z (1785709619612697)
-Entities: 0
-```
-
-Ask for something by an exact term:
-
-```console
-$ mci-brain search "ScreenCaptureKit"
-event:6 | 2026-08-02T21:02:38.651Z | com.mci.demo.seed.safari
-  | ScreenCaptureKit | Apple Developer Documentation
-  | https://developer.apple.com/documentation/screencapturekit
-  | SCStream delivers frames via SCStreamOutput. The MCI helper uses the
-    SCStream path on macOS 14+; cascade runs synchronously in the callback.
-```
-
-Note what came back with it: the app, the window title, the URL, and the moment. That context is the point. A filename would not have helped you.
-
-Pull one moment up in full:
-
-```console
-$ mci-brain show 6
-Event: event:6
-Timestamp: 2026-08-02T21:01:34.593Z (1785704494593762)
-App: com.mci.demo.seed.safari
-Window: ScreenCaptureKit | Apple Developer Documentation
-URL: https://developer.apple.com/documentation/screencapturekit
-Text:
-SCStream delivers frames via SCStreamOutput. The MCI helper uses the SCStream
-path on macOS 14+; cascade runs synchronously in the callback.
-```
-
-Or take the whole thing with you. It is your file:
-
-```console
-$ mci-brain export --format jsonl | head -1
-{"app_bundle_id":"com.mci.demo.seed.safari","cascade_reason":0,"event_id":1, ...}
-```
-
----
-
-## Use it as your agent's memory
-
-This is the part that makes it a memory layer rather than a search box. Hippocampus speaks MCP over stdio, so Claude Code (or anything else that speaks MCP) can query what you saw.
-
-```bash
-mci-agent register-mcp     # writes the server into Claude Code's MCP settings
-```
-
-Or run it directly and talk JSON-RPC to it:
-
-```bash
-MCI_DB_KEY_HEX=$(cat hippocampus-demo/demo.key) \
-MCI_DB_PATH=$PWD/hippocampus-demo/demo.sqlite \
-  mci-agent mcp-serve
-```
-
-Five tools, described so a model knows when to reach for each:
-
-| Tool | What an agent uses it for |
-|---|---|
-| `mci_recall` | "That article about Rust I read yesterday." The main one. |
-| `mci_events_since` | "What happened in the last hour." Incremental polling. |
-| `mci_stats` | Counts and time range. Cheap way to check there is anything to search. |
-| `mci_episodes` | "What did I work on today," as stretches of focused activity. |
-| `mci_events_by_app` | "What sites did I visit," scoped to one app bundle id. |
-
-On startup it tells you which mode it is in, and this is the line to read:
-
-```
-mci-agent mcp-serve: ready on stdio. db=… recall=lexical-only (FTS5)
-```
-
-`lexical-only` means it found no embedder, so `mci_recall` is doing keyword matching. To get `hybrid (FTS5 + semantic)` you need the model and one backfill run, described next.
-
-### Turning on semantic recall
-
-Two commands. This whole path has been run end to end on a clean machine.
-
-**1. Build the model.** ArcticEmbedS as Core ML. About 66 MB, so it is not in the repo. Needs Python 3.11 or 3.12 (not 3.14, coremltools does not support it yet) and roughly 2 GB of disk for torch:
-
-```bash
-python3.11 -m venv .venv-ml && source .venv-ml/bin/activate
-pip install -r scripts/requirements-ml.txt
-python scripts/convert_embedder.py \
-  --output models/ArcticEmbedS_INT8.mlpackage --verify
-```
-
-That writes two things: a `.mlpackage` and a compiled `.mlmodelc` beside it. **The `.mlmodelc` is the one that matters.** A raw `.mlpackage` cannot be opened at runtime; Core ML rejects it with "Compile the model with Xcode." The script now compiles it for you, which it did not always do, and that gap was invisible because the loader treats a failed load and a missing file identically.
-
-**2. Fill in the vectors.** Events are stored without embeddings, so something has to go back over them:
-
-```bash
-mci-agent embed-backfill
-mci-agent embed-backfill --batch-size 64
-```
-
-Idempotent, so running it twice is a no-op rather than an error. It refuses to run without a working model instead of writing zero vectors, because a zero vector matches every query equally and would look like a ranking bug rather than a missing model.
-
-Then restart `mcp-serve`. It picks the mode once at startup, and the line should now read:
-
-```
-recall=hybrid (FTS5 + semantic, ADR-0010 min-max CC)
-```
-
-If the model lives somewhere else, point at it:
-
-```bash
-export MCI_ARCTIC_MODEL_PATH=models/ArcticEmbedS_INT8.mlmodelc
-```
-
-### Does it actually help?
-
-Here is the same query against the same 20-event demo brain, once with keyword search and once with hybrid. None of the words in the query appear anywhere in the corpus:
+Everything happens on your machine and lands in one encrypted SQLite file. There is no server to trust, because there is no server.
 
 ```console
 $ mci_recall "finding things by meaning rather than exact wording"
 
-# lexical-only
+# keyword search only
 0 hits
 
-# hybrid
+# keyword + semantic
 3 hits
   score=0.645  Notion — MCI / Recall UI Spec
   score=0.598  Snowflake Arctic Embed S — Hugging Face
   score=0.594  sqlite-vec — A vector search SQLite extension
 ```
 
-Keyword search cannot answer that question, because you did not use any of the words. That difference is the entire reason this project exists.
+That is real output from the 20-event demo brain. None of the words in the question appear in the results. You remember what something was about, not what it was called, and search should work the same way.
 
-### On the Neural Engine message
+---
 
-You will see this during conversion, and it is not a problem:
+## Why
 
+There are two reasons this should exist. Once you notice them, it is hard to understand why it doesn't already.
+
+### 1. Your computer sees everything you do and remembers none of it
+
+Everyone has a computer, and it is the most context-rich thing they own. It saw the paper you skimmed, the number in the dashboard, the error you fixed in March, the tab you closed by accident. Then it forgot all of it.
+
+So you do the remembering. You scroll through history. You search your files for a word you aren't sure you used. You re-explain your project to an AI assistant every morning, pasting in the same error and the same doc, because it starts from zero every time.
+
+You remember situations: *"that pricing page I looked at last Tuesday, when I was annoyed."* Your computer remembers filenames. The context you need already went across your screen. Nothing kept it.
+
+### 2. How people work is the most valuable record nobody keeps
+
+Software learns from what we tell it: the prompt, the document, the fact we decide to write down. Almost none of it learns from how we actually work, and that is where most of what we know lives. The order we open things in. What we skim and abandon. The tab we keep coming back to. How a real task moves across five apps over a week.
+
+That record mostly doesn't exist. There are plenty of recordings of people doing a task they were handed, in one sitting. There is very little of people doing their own work over weeks, and almost none that stays in the hands of the person it describes.
+
+This gets more important every month, because agents now do a growing share of the work. An agent acting for you is only as good as what it knows about how you work. Today it knows what you typed into its chat box.
+
+### Why now
+
+Both of these have been true for years. Two things changed.
+
+A laptop can now do the whole job itself. Text recognition, embedding models and an encrypted database all run on the machine, so the record never has to leave it. And there is finally something on the other end that can use it: agents that speak MCP (the Model Context Protocol) can query your memory the same way they call any other tool.
+
+Put those together and this stops looking like an idea and starts looking like the next layer of the computer. The hard part was never recording the screen. It is recording it in a way the person can trust, and that is what most of this codebase is about.
+
+---
+
+## Quickstart
+
+Two ways in. Neither needs screen-recording permission.
+
+**See it work in about a minute.** This builds the CLI, makes a throwaway encrypted brain in `./hippocampus-demo/`, fills it with 20 synthetic events, and searches it. Your real data is never touched and nothing goes over the network.
+
+```bash
+git clone https://github.com/amyjainberkeley/hippocampus.git
+cd hippocampus
+./scripts/try-it.sh
+rm -rf ./hippocampus-demo     # deletes the data and its only key
 ```
-MILCompilerForANE error: failed to compile ANE model using ANEF.
-Error=_ANECompiler : ANECCompile() FAILED.
+
+**Give Claude Code a memory.** `init` makes a key, imports your Claude Code history from `~/.claude/projects`, indexes it, and registers Hippocampus as an MCP server.
+
+```bash
+cargo build --release -p mci-agent --bins
+./target/release/mci-agent init
+./target/release/mci-brain search "some phrase you remember"
 ```
 
-There is no Neural Engine residency for this BERT graph. It cannot run on the ANE, so Core ML tries, fails, and moves on. The Rust loader never goes down that path anyway: it pins compute units to CPU on purpose, which is a measured decision rather than a default. The rationale is written up in `adapters/macos/mci-embed-coreml/src/lib.rs` under the E5RT story, and it is worth reading if you are tempted to change it.
+Then restart Claude Code and ask it what you were working on last week. If anything looks wrong, `mci-agent doctor` says why. `init` keeps the key in `~/Library/Application Support/MCI/dev.key` (mode 0600); lose that file and the brain cannot be opened, which is the point. Without the embedding model, recall is keyword-only and says so at startup. [The guide](docs/GUIDE.md#turning-on-semantic-recall) turns on semantic search in two commands.
 
-Measured here, Apple Silicon, CPU-only pin:
+### What an agent can ask
 
-| | |
+| Tool | What it is for |
 |---|---|
-| Model load | ~340 ms, once at startup |
-| Per embed | ~18 ms |
+| `mci_recall` | "That article about Rust I read yesterday." Hybrid search, and the main one. |
+| `mci_events_since` | "What happened in the last hour." |
+| `mci_episodes` | "What did I work on today," as stretches of focused work. |
+| `mci_events_by_app` | "What sites did I visit," scoped to one app. |
+| `mci_stats` | Counts and time range. A cheap check that there is anything to search. |
 
-Embedding happens on an idle loop, not in front of your query, so 18 ms is not a number anyone will feel. CPU+GPU benchmarks faster (~1.9 ms in the notes in that file) and would be the thing to reach for if the embedder ever moved onto a hot path. It has not, so it stays on CPU.
-
-### How I know the vectors are right
-
-Loading is not the same as working. `adapters/macos/mci-embed-coreml/tests/quality.rs` embeds 50 fixture sentences through the Core ML model and compares each one against a Python FP32 reference generated from the original Hugging Face weights. The bar is cosine `>= 0.999` on every sentence.
-
-```bash
-python scripts/convert_embedder.py \
-  --output models/ArcticEmbedS_INT8.mlpackage --verify --fixtures
-cargo test -p mci-embed-coreml --test quality
-```
-
-```
-test cosine_similarity_matches_python_reference ... ok
-test output_is_l2_normalized ... ok
-test output_dimension_is_384 ... ok
-test empty_string_returns_valid_vector ... ok
-test truncation_long_input_does_not_crash ... ok
-```
-
-That test used to skip silently, because it needs a fixture file that was never committed. It runs now.
-
-### Pulling in your other MCP servers
-
-The other direction. Above, an agent asks Hippocampus what you saw. Here, Hippocampus asks your other MCP servers what they have and keeps it, so a search covers your screen and your connectors at once.
-
-```bash
-mci-agent mcp-sync
-```
-
-One pass over every server you registered, then it exits. Nothing runs in the background.
-
-Servers are registered in a file, one block each:
-
-```
-~/Library/Application Support/MCI/mcp-servers.toml
-```
-
-```toml
-[[server]]
-name = "my-server"                       # required, unique, [a-zA-Z0-9_-]
-url  = "http://127.0.0.1:7890/mcp"       # required, must be loopback
-# auth_header = "Bearer sk-..."          # optional, sent as Authorization
-# enabled = true                         # optional, defaults to true
-```
-
-The file has to be mode 0600 and owned by you, or it is refused rather than read, because `auth_header` can hold a real token:
-
-```bash
-mkdir -p ~/Library/Application\ Support/MCI
-touch ~/Library/Application\ Support/MCI/mcp-servers.toml
-chmod 600 ~/Library/Application\ Support/MCI/mcp-servers.toml
-```
-
-If the file does not exist, `mcp-sync` says so, prints the block above, and exits zero. Having no MCP servers is a normal state, not an error.
-
-Four things worth knowing about what it stores:
-
-- **The url must be loopback**, 127.0.0.1 or localhost. This project has no outbound network path and is not getting one to fetch your Notion pages. Run the server on your own machine.
-- **Every event it writes is tagged `mcp:<name>`** in `app_bundle_id`, so you can always tell a memory came from a connector rather than from your screen. `mci_events_by_app` scopes to it.
-- **Small resources are stored whole; large ones are stored as a pointer.** Anything over 512 KB becomes a `[CATALOG_ONLY ...]` row carrying the URI and metadata and none of the body. A 100 MB page should not quietly become 100 MB of brain.
-- **Re-running is a no-op.** A resource already ingested is not fetched or written a second time, so this is safe in a cron.
-
-The report is counts, not prose:
-
-```
-mci-agent mcp-sync: done. 1 server(s) contacted, 0 failed to connect,
-2 resource(s) discovered, 2 materialized, 0 cataloged, 2 event(s) written.
-```
-
-`event(s) written` is measured against the store before and after, so a second run says `0` rather than repeating the first run's number.
-
-**What I have and have not run.** The whole path is exercised end to end in `apps/agent/tests/mcp_sync.rs` against a local MCP server: registration, connect, read, write, tagging, the size split, and a re-run writing nothing. I have not pointed it at a third-party MCP server, so I cannot tell you how any particular one behaves.
+All five are read-only. The server speaks JSON-RPC 2.0 over stdio, so nothing listens on a port.
 
 ---
 
 ## How it works
 
-Five steps. The interesting one is step 1.
-
 ```mermaid
 flowchart LR
-    A["Screen<br/>+ app, window, URL"] --> B["Watch<br/>drop 99% of frames"]
+    A["Screen<br/>+ app, window, URL"] --> B["Watch<br/>drop near-duplicate frames"]
     B --> C["Read<br/>on-device OCR"]
-    C --> D["Understand<br/>group + embed<br/>(idle time only)"]
+    C --> D["Understand<br/>episodes, entities, vectors<br/>(idle time only)"]
     D --> E[("One encrypted<br/>SQLite file")]
     E --> F["Recall<br/>keyword + vector<br/>fused"]
     F --> G["You, or an agent<br/>acting for you"]
 ```
 
-**1. Watch.** A small Swift helper grabs the screen only when something meaningful changes, never on a timer. An idle detector stops it when you walk away, and a perceptual hash throws away frames that are near-copies of the last one.
+1. **Watch.** A Swift helper captures the screen only when something meaningful changes, never on a timer. The filters run cheapest first: an idle gate (no input, no capture), the system's own "did anything change" signal, dirty-rect triage, and a 64-bit perceptual hash that drops near-duplicates. This is where most of the engineering lives. An eight-hour day is millions of frames, and the goal is to keep a few thousand moments.
+2. **Read.** Surviving frames go through Apple's on-device text recognition, scoped to the regions that changed, and are joined to the app, window title and URL.
+3. **Understand.** In idle time, never while you are working, events are grouped into episodes, entities are extracted, and text is embedded by a small on-device model.
+4. **Store.** Rows, the full-text index and the vectors all go into one SQLCipher-encrypted SQLite file.
+5. **Recall.** A query runs keyword search and vector search together and fuses the results: `0.5 × semantic + 0.3 × keyword + 0.15 × recency + 0.05 × source`, each min-max normalized ([ADR-0010](docs/decisions/0010-event-episode-retrieval-unit-cc-fusion.md)). Keyword search finds the exact error code. Vector search finds "that pricing discussion."
 
-This step is most of the engineering. A day of screen recording is millions of frames and almost none of them matter. The filter chain is what turns eight hours into a few thousand moments instead of a few million images. Get it wrong and you have a hot laptop and a useless database.
+### One seam
 
-**2. Read.** Surviving frames go through on-device OCR and get joined to what you were doing: which app, which window, which URL.
-
-**3. Understand.** Moments get grouped into episodes and turned into vectors by a small embedding model on the Neural Engine. This happens when your machine is idle, never while you are using it.
-
-**4. Store.** Everything goes into one encrypted SQLite file. The key is wrapped by the Secure Enclave and cannot be exported.
-
-**5. Recall.** Your question runs two searches at once, keyword and vector, and the results are merged and weighted by how recent and how relevant each hit is.
-
-### The one decision that shapes everything else
-
-Screen capture has to be written per operating system. Encryption, search, and ranking do not.
-
-So there is exactly one seam: a Rust trait called `CaptureSource`. Below it, a thin native adapter that talks to macOS. Above it, everything else in Rust, with no OS-specific code allowed.
+Screen capture has to be written once per operating system. Search, ranking and encryption do not. So the system splits along one Rust trait, `CaptureSource`.
 
 ```
 ┌─────────────────────────┐
@@ -321,165 +141,126 @@ So there is exactly one seam: a Rust trait called `CaptureSource`. Below it, a t
 └─────────────────────────┘
 ```
 
-Adding Windows later means writing one adapter, not writing the brain a second time. The other rule: pixels never cross that seam as a copy. The adapter hands over a borrowed handle to memory the GPU already owns. Copying every frame is the difference between a program you forget is running and a fan that never stops.
-
-Longer version in [ARCHITECTURE.md](ARCHITECTURE.md), and the arguments I had with myself are in the 37 records under [docs/decisions/](docs/decisions/).
+Nothing above the seam may contain OS-specific code, so Windows means one new adapter, not a second brain. Pixels never cross the seam as a copy: the adapter lends the core a handle to memory the GPU already owns. Copying every frame is the difference between a program you forget is running and a fan that never stops.
 
 ---
 
-## What works and what doesn't
+## Stack
 
-Most projects bury this. It should be near the top, because it decides whether the rest of the README is worth your time.
+| Layer | Choice | Why |
+|---|---|---|
+| Capture | Swift 6 helper on ScreenCaptureKit (macOS 14+) | Event-driven frames, zero-copy `IOSurface` handles |
+| Text | Apple Vision OCR, on-device | No network, scoped to changed regions |
+| Core | Rust (stable), Tokio | Written once, OS-free above the seam |
+| Storage | SQLite + SQLCipher via `rusqlite` (bundled, vendored OpenSSL) | One file, one encryption boundary |
+| Keyword search | SQLite FTS5 | Exact tokens: error codes, filenames, names |
+| Semantic search | `snowflake-arctic-embed-s` (33M parameters, 384 dimensions) on Core ML. Vectors are rows in the same file, cosine-scanned in Rust | No second store to secure. A full scan is comfortable below about a million events |
+| Agent interface | MCP, JSON-RPC 2.0 over stdio | Any MCP client can use it, and there is no open port |
+| Understanding | Regex and optional NER entities, episode segmentation, identity linking. Optional Qwen3-1.7B on Core ML for daily briefs | Runs in idle time. Briefs are drafts a human approves |
+| Browser context | Chromium MV3 extension + native-messaging host | Clean page text where a browser can provide it |
+| App | SwiftUI menu-bar app, Sparkle updates | Native, small, and out of the way |
+
+---
+
+## Principles
+
+These are the rules the code is built around. Breaking any of them breaks the product.
+
+- **Nothing leaves the machine by default.** Capture, OCR, embedding and understanding all run on-device. There is no telemetry.
+- **One encrypted file.** No store lives outside the SQLCipher boundary, including the vector index. A second store would be a second boundary, and the weaker one would be the real one.
+- **Block at the source, don't scrub afterwards.** Password fields, private browsing, DRM video and denylisted apps are refused before a frame is encoded. Scrubbing later means the data existed.
+- **One seam.** Nothing above `CaptureSource` knows which OS it is running on.
+- **Fail loudly.** Without the embedding model, recall announces that it is keyword-only. `embed-backfill` refuses to write zero vectors, because a zero vector matches every query equally and would look like a ranking bug instead of a missing model.
+- **Write down why.** Every load-bearing decision is a record in [docs/decisions/](docs/decisions/), 37 so far.
+
+---
+
+## Status
+
+Most projects bury this. It belongs near the top, because it decides whether the rest is worth your time.
 
 | Piece | State |
 |---|---|
-| **Encrypted store + keyword search** | **Works, tested.** This is what `try-it.sh` exercises end to end. |
-| **MCP server** | **Works.** Five tools over stdio JSON-RPC, so an agent can query your memory. See below. |
-| **Pulling from other MCP servers** | **Works against a local server.** `mci-agent mcp-sync` reads what your registered servers offer and files it in the brain, tagged so you can tell it apart. Tested end to end against a loopback MCP server; not tested against any third-party one. |
-| **Semantic search + fusion ranking** | **Works, and I have run the whole path.** Build the model, run `mci-agent embed-backfill`, restart. Verified end to end on a clean machine: a query sharing no words with the corpus goes from 0 hits to 3 correct ones. The model is ~66 MB so you build it yourself; until you do, everything degrades to keyword-only and says so on startup. |
-| **On-device embeddings** | **Works.** Runs through Core ML with a regression test asserting the vectors still match a known-good reference. |
-| **Pulling text apart** | **Works.** Names, dates, URLs, and the things that should never be stored at all, like a one-time code. |
-| **Reading Mail and Messages** | **Read-only.** Nothing is written to the brain until the per-source redaction path is finished. |
-| **Live screen capture** | **Built, unproven, ships OFF.** All the code exists. I have not watched it run all day on a real machine and measured it, so I am not going to tell you it works. |
-| **Sync between machines** | **Skeleton.** The crypto is there. Proof that two devices converge is not. |
-| **Windows** | **Not started.** An empty crate with the right shape. |
+| Encrypted store, keyword search | **Works, tested.** `try-it.sh` runs it end to end. |
+| Semantic search and fusion | **Works** once you build the ~66 MB model. Verified on a clean machine: a query sharing no words with the corpus goes from 0 hits to 3 correct ones. |
+| MCP server | **Works.** Five read-only tools. |
+| Claude Code import (`init`) | **Works.** Message text only; tool calls, tool output, reasoning and images are skipped. |
+| Entities, episodes, identity links (`enrich`) | **Works.** Deterministic, no language model. |
+| Pulling from other MCP servers (`mcp-sync`) | **Works against a local server.** Loopback addresses only. Untested against third-party servers. |
+| Daily brief | **Opt-in.** Needs the Qwen3 model. Every brief is a draft until a human approves it. |
+| Mail and Messages | **Read-only.** Nothing is written to the brain until per-source redaction is finished. |
+| Live screen capture | **Built, unproven, ships off.** I have not watched it run all day and measured it, so I am not going to tell you it works. |
+| Key custody | **Partial.** The CLI keeps the key in a mode-0600 file. Keychain storage is on the v1 branch. Secure Enclave wrapping is designed ([ADR-0008](docs/decisions/0008-encrypted-store-sqlcipher-sqlite-vec-keychain.md)) and not built. |
+| Sync between machines | **Skeleton.** The crypto exists. Proof that two devices converge does not. |
+| Windows | **Not started.** An empty adapter with the right shape. |
 
-The test suite is 535 tests on the core (`cargo test -p mci-brain`). The build is not signed or notarized under my own Apple Developer ID yet, so a build you make yourself needs to be allowed through Gatekeeper by hand.
+The core has 545 tests (`cargo test -p mci-brain`), and the workspace has 1,581.
 
-If you only take one thing from this table: **capture is off by default and unverified.** Everything you can try today is the recall half.
+If you take one thing from this table: **capture is off by default and unverified.** Everything you can run today is the memory half.
 
----
+**The full app.** A menu-bar app with live capture, offline OCR and a Today / Search / History window is being built on the [`codex/hippocampus-v1`](https://github.com/amyjainberkeley/hippocampus/tree/codex/hippocampus-v1) branch ([draft PR #25](https://github.com/amyjainberkeley/hippocampus/pull/25)). It runs on my machine, but its CI is not green yet, so it is not on `main` and this README does not claim it.
 
-## How this compares
+### Where this is going
 
-The obvious question is how this differs from [mem0](https://github.com/mem0ai/mem0) (62k stars) and [supermemory](https://github.com/supermemoryai/supermemory) (29k stars). They are good and they are more mature. They also solve a different problem.
+Remembering is the first layer. After it, in order:
 
-**They remember what you tell them. This remembers what you saw.**
-
-mem0 and supermemory are memory layers for agents. You hand them a conversation, a document, or a fact, and they store and retrieve it. The input is text you deliberately give them.
-
-Hippocampus has no input step. The source is your screen, which means it reaches the context you would never think to write down: the paper you skimmed, the tab you closed, the number in a dashboard you glanced at once.
-
-| | mem0 | supermemory | Hippocampus |
-|---|---|---|---|
-| What goes in | Conversations, facts you pass it | Documents, files, connectors | Your screen, automatically |
-| Runs offline | Yes, library mode | Yes, local binary | Yes, and there is no cloud mode |
-| Retrieval | Vector, plus a graph store | Embedded graph engine | Keyword + vector fused, inside SQLite |
-| Where memories live | Your DB or their cloud | Your machine or their cloud | One encrypted file, only your machine |
-| Maturity | Production, 62k stars | Production, 29k stars | Recall works; capture unproven |
-
-**On benchmarks, plainly: I have not run any.** mem0 publishes LoCoMo and LongMemEval numbers, supermemory publishes theirs. Those are conversational-memory benchmarks, and Hippocampus has no conversational input, so the numbers would not be comparable even if I ran them. I would rather say that than put a table of favorable numbers next to theirs. If you want a memory layer for an agent today, use one of theirs. Use this if you want your own machine to remember what you saw.
+1. **Prove capture.** A full-day trace of CPU, memory and energy, and OCR accuracy on real screens, before capture is on by default.
+2. **Learn from what it remembers.** Statements about how you work, each linked to the moments that support it, proposed by the system and confirmed or corrected by you. Never a conclusion without its evidence.
+3. **Share on your terms.** Hand a slice of your record to a teammate or a study, after reviewing exactly what leaves.
 
 ---
 
-## Prerequisites
+## Privacy
 
-| Requirement | Minimum | Check | Install |
-|---|---|---|---|
-| macOS | 14 (Sonoma) | `sw_vers -productVersion` | Apple Silicon. The macOS-only crates are `cfg`-gated so the CLI should build elsewhere, but I have only run this on macOS |
-| Rust | 1.83 | `rustc --version` | [rustup.rs](https://rustup.rs) |
-| Xcode | 15+ | `xcodebuild -version` | Only needed for the Swift app, not the CLI |
-| openssl | any | `openssl version` | Ships with macOS |
+The promise is that nothing you captured leaves your machine. Here is what enforces it, rather than my word for it.
 
-The one-minute demo needs only Rust and openssl. Xcode is for building the menu-bar app.
-
----
-
-## Commands
-
-Every command reads the brain at `$MCI_DB_PATH` using the key in `$MCI_DB_KEY_HEX`. The CLI opens the database read-only at the SQLite driver level, so it cannot corrupt or modify your brain no matter what you type.
-
-```bash
-mci-brain stats                          # counts and time range
-mci-brain stats --json                   # same, machine-readable
-
-mci-brain search "sqlite-vec"            # find events by text
-mci-brain search "vector" --limit 20
-mci-brain search "..." --json
-
-mci-brain show 6                         # one event in full
-mci-brain recent --limit 5               # newest first
-
-mci-brain export --format jsonl          # take everything with you
-mci-brain export --format csv --out brain.csv
-mci-brain export --since 1785702779612697
-```
-
-The agent-facing side lives on `mci-agent`:
-
-```bash
-mci-agent mcp-serve                      # MCP server over stdio
-mci-agent register-mcp                   # add it to Claude Code
-mci-agent mcp-sync                       # pull from your registered MCP servers
-mci-agent embed-backfill                 # fill in missing vectors
-mci-agent embed-backfill --batch-size 64
-mci-agent stats --source safari
-```
-
-`mcp-sync` is the one command here that writes to the brain rather than reading it. It takes `--db-path` like the others, and falls back to `$MCI_DB_PATH`.
-
-| Variable | What it does | Required |
-|---|---|---|
-| `MCI_DB_KEY_HEX` | 64-character hex SQLCipher key | Yes |
-| `MCI_DB_PATH` | Path to the brain file | No, defaults to `~/Library/Application Support/MCI/mci.sqlite` |
-| `HIPPOCAMPUS_ENABLE_V2P1` | Turns live capture on | No, and leave it off until capture is verified |
-
----
-
-## Privacy, concretely
-
-The promise is "nothing leaves your machine," so here is what enforces it rather than my word for it.
-
-- **One encrypted SQLite file** via SQLCipher. The key is wrapped by a Keychain item gated on the Secure Enclave and cannot be exported.
-- **No vector database outside that file.** This is why search uses sqlite-vec, which lives inside the same file, rather than something faster and separate. A second store would mean a second encryption boundary, and the weaker one would be the real one.
-- **Blocked at the source, not scrubbed after.** Password prompts, private browsing, and DRM surfaces are refused before a frame is encoded. Scrubbing afterwards means the data existed.
-- **A second layer for text.** Extracted text is checked for one-time codes, bank alerts, and API keys and refused. Tested against a synthetic corpus of 133 message shapes built from public security writeups, NIST guidance, and OWASP fixtures, in [core/brain/fixtures/](core/brain/fixtures/). Those fixtures contain no real messages.
-- **Delete means delete.** Removing a memory crypto-shreds it rather than hiding a row.
+- **A second layer for text.** Extracted text is checked for one-time codes, bank alerts and API keys, and refused. The check is tested against 133 synthetic message shapes built from public security writeups, NIST guidance and OWASP fixtures, in [core/brain/fixtures/](core/brain/fixtures/). None are real messages.
+- **Deleting.** Deleting a memory removes it along with its vectors, entities and links, then rewrites the file (`VACUUM`) so the old pages are gone. Deleting the database and its key makes everything unrecoverable.
+- **Network.** The MCP server talks over stdio. `mcp-sync` refuses any address that is not loopback. Crash reports stay off unless you set two environment variables. [PRIVACY.md](PRIVACY.md) lists every network request that exists, and none of them carries memory content.
 - **No telemetry.** No analytics, no usage tracking, no crash reporting to me.
 
 Found something wrong? [SECURITY.md](SECURITY.md) says what I most want to hear about and how to report it privately.
 
 ---
 
-## Layout
+## Repository layout
 
 | Where | What |
 |---|---|
-| `core/brain/` | The interesting part. Search, ranking, episode grouping, embeddings, entity extraction, redaction. |
-| `core/` | The portable core. The capture seam, encryption, the SQLite store, IPC. |
-| `adapters/macos/` | Swift. Screen capture, OCR, hardware encode, Mail and Messages readers. |
-| `apps/` | The menu-bar app, the recall window, onboarding, the agent bridge. |
+| `core/brain/` | The interesting part. Search, ranking, episodes, embeddings, entity extraction, redaction. |
+| `core/` | The portable core: the capture seam, encryption, the SQLite store, IPC. |
+| `adapters/macos/` | Swift and macOS-only Rust: screen capture, OCR, Core ML, Mail and Messages readers. |
+| `apps/` | The agent CLI and MCP server, the menu-bar app, the recall window, onboarding, the browser bridge. |
 | `docs/decisions/` | 37 records of why things are the way they are. |
 | `scripts/try-it.sh` | The one-minute demo. |
 
+## Building from source
+
+You need macOS 14 or later on Apple Silicon and stable Rust (1.83 or later). Xcode 15 or later is only needed for the Swift app, not the CLI.
+
 ```bash
-cargo test -p mci-brain      # the core: 535 tests
-cargo test --workspace       # everything
+cargo build --workspace
+cargo test -p mci-brain       # the core: 545 tests
+cargo test --workspace        # everything: 1,581 tests
 ```
 
----
+The build is not yet notarized under my own Apple Developer ID, so an app you build yourself has to be allowed through Gatekeeper by hand.
 
-## Troubleshooting
+## Documentation
 
-**`cargo: command not found`**. Install Rust from [rustup.rs](https://rustup.rs), then open a new terminal so `~/.cargo/bin` is on your PATH.
-
-**`try-it.sh` fails on the build step**. The first build compiles the whole workspace and needs a few minutes. If it fails outright, run `cargo build -p mci-agent --bins` on its own to see the real error.
-
-**`MCI_DB_KEY_HEX` errors**. The key must be exactly 64 hex characters (32 bytes). Generate one with `openssl rand -hex 32`. A wrong key does not produce a helpful error, it produces a file that will not open, because that is what encryption means.
-
-**Search returns nothing**. Check `mci-brain stats` first. If it says `Events: 0`, the brain is empty and the seeder did not run. If there are events, your term is probably not in them; the demo corpus is about screen-capture and SQLite topics, so try `sqlite`, `embedding`, or `ScreenCaptureKit`.
-
-**I want my demo brain gone**. `rm -rf ./hippocampus-demo`. The key lives only in that folder, so deleting it makes the data unrecoverable.
-
-**The app will not open**. It is not notarized under my own Apple Developer ID yet. Right-click the app and choose Open, or allow it in System Settings under Privacy and Security.
-
----
+- [Guide](docs/GUIDE.md): inspecting a brain, turning on semantic recall, connecting other MCP servers, every command, troubleshooting.
+- [ARCHITECTURE.md](ARCHITECTURE.md): the system map, written for an engineer reading the code cold.
+- [docs/DESIGN.md](docs/DESIGN.md): the full design rationale.
+- [docs/decisions/](docs/decisions/): the decision records.
+- [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
 The most useful thing right now is not a pull request. It is telling me where this README lost you, or where a command did something other than what it said. Open an issue.
 
-If you want to write code, `core/brain/` is the part with the most surface area and the best test coverage to work against. Read [ARCHITECTURE.md](ARCHITECTURE.md) first, especially the invariants at the bottom. There are four and breaking any of them breaks the product.
+If you want to write code, `core/brain/` has the most surface area and the best tests to work against. Read [ARCHITECTURE.md](ARCHITECTURE.md) first.
+
+If you study how people work on computers, I would like to hear what a private, on-device record of that work would need to be useful to you.
 
 ## License
 
