@@ -90,7 +90,10 @@ pub fn tool_definitions() -> serde_json::Value {
                              Use this tool to recall anything you've seen or done. Query \
                              with natural language: 'that article about Rust I read \
                              yesterday', 'what was I working on this morning', 'the URL \
-                             with pricing info'.",
+                             with pricing info'. `hits` are ranked best first. When \
+                             `outcome` is 'degraded', the hits are ranked but not \
+                             independently verified; `degradation` says what was \
+                             unavailable.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
