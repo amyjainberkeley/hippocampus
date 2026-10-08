@@ -1,0 +1,17 @@
+name: Feature request
+description: Something the product should do that it does not.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What were you trying to do, and where did it stop you?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would want instead
+    validations:
+      required: false

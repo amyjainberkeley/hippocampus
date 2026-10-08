@@ -320,12 +320,11 @@ struct PreferencesRootView: View {
     /// tuple array so the URL set is reviewable in one place; a
     /// future policy-page rename is a single-line edit.
     private static let aboutLinks: [(label: String, url: String)] = [
-        ("Privacy policy", "https://hippocampus-swart.vercel.app/privacy"),
-        ("Terms of service", "https://hippocampus-swart.vercel.app/terms"),
-        ("Third-party licenses", "https://hippocampus-swart.vercel.app/licenses"),
+        ("Privacy", "https://github.com/amyjainberkeley/hippocampus/blob/main/PRIVACY.md"),
+        ("License (Apache 2.0)", "https://github.com/amyjainberkeley/hippocampus/blob/main/LICENSE"),
+        ("Third-party licenses", "https://github.com/amyjainberkeley/hippocampus/blob/main/NOTICE"),
         ("Report an issue on GitHub", "https://github.com/amyjainberkeley/hippocampus/issues"),
-        ("Send feedback (email)",
-         "mailto:hippocampus@amyjainberkeley.com?subject=Hippocampus%20feedback"),
+        ("Send feedback", "https://github.com/amyjainberkeley/hippocampus/issues/new?title=Feedback"),
     ]
 
     // MARK: Helpers

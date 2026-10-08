@@ -40,21 +40,21 @@ final class TroubleshootMenuTests: XCTestCase {
         XCTAssertTrue(content.contains("MCICaptureHelper"), "Should mention MCICaptureHelper grant instructions")
     }
 
-    func test_feedback_mailto_url_is_valid() {
+    func test_feedback_issue_url_is_valid() {
         let version = "0.1.0"
-        let subject = "Hippocampus feedback v\(version)"
+        let title = "Feedback v\(version)"
             .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let urlString = "mailto:hippocampus@amyjainberkeley.com?subject=\(subject)"
-        XCTAssertNotNil(URL(string: urlString), "Feedback mailto URL should be valid")
+        let urlString = "https://github.com/amyjainberkeley/hippocampus/issues/new?title=\(title)"
+        XCTAssertNotNil(URL(string: urlString), "Feedback issue URL should be valid")
     }
 
-    func test_feedback_mailto_url_with_special_version() {
+    func test_feedback_issue_url_with_special_version() {
         let version = "1.2.3-beta+build.42"
-        let subject = "Hippocampus feedback v\(version)"
+        let title = "Feedback v\(version)"
             .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let urlString = "mailto:hippocampus@amyjainberkeley.com?subject=\(subject)"
+        let urlString = "https://github.com/amyjainberkeley/hippocampus/issues/new?title=\(title)"
         let url = URL(string: urlString)
-        XCTAssertNotNil(url, "Feedback mailto URL should handle semver prerelease versions")
+        XCTAssertNotNil(url, "Feedback issue URL should handle semver prerelease versions")
     }
 
     func test_settings_pane_urls_are_valid() {
