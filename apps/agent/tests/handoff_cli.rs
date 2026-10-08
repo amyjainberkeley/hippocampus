@@ -30,6 +30,9 @@ fn agent(home: &Path, key_hex: &str) -> Command {
     command
         .env_clear()
         .env("PATH", "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin")
+        // The fixture's day boundaries are Pacific; without this the
+        // rendered day follows the host zone (UTC on CI).
+        .env("TZ", "America/Los_Angeles")
         .env("HOME", home)
         .env("MCI_DEVELOPMENT_FILE_KEY", "1")
         .env("MCI_DB_KEY_HEX", key_hex)

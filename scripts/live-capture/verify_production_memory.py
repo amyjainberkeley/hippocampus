@@ -153,7 +153,7 @@ def validate(results, since_us):
                     continue
                 background |= contains_background(row)
                 eligible = ((outcome == "matched" and group == "hits") or
-                            (outcome == "degraded" and group == "related_context"))
+                            (outcome == "degraded" and group in ("hits", "related_context")))
                 if (response_id == 3 and eligible and event_id in focused
                         and fresh[event_id] == timestamp
                         and FOCUSED_TOKEN in text_field(row, "text_snippet")):

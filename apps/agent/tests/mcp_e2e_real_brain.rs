@@ -139,11 +139,11 @@ fn degraded_context<'a>(
 ) -> &'a [serde_json::Value] {
     assert_eq!(result["outcome"], "degraded");
     assert_eq!(result["degradation"], expected_degradation);
-    assert_eq!(result["hits"], serde_json::json!([]));
+    assert_eq!(result["related_context"], serde_json::json!([]));
     result
-        .get("related_context")
+        .get("hits")
         .and_then(serde_json::Value::as_array)
-        .expect("degraded related_context array")
+        .expect("degraded hits array")
 }
 
 // ---------------------------------------------------------------------------
