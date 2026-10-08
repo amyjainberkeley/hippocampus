@@ -207,6 +207,31 @@ fn needs_fts5_quoting(token: &str) -> bool {
         || token.contains('"')
         || token.contains('+')
         || token.contains('~')
+        // FTS5 reads these, in uppercase only, as operators. Left bare,
+        // `checkout OR` and `NOT checkout` are syntax errors that reach the
+        // agent as a failed tool call instead of results.
+        || matches!(token, "AND" | "OR" | "NOT" | "NEAR")
+}
+
+/// The words of `query` joined with `OR`, for the second pass of
+/// [`LiveBrainReader::recall_fts5_only`]. `None` when there are fewer than
+/// two distinct words, because the strict pass already asked that question.
+///
+/// Only letters and digits survive, lowercased, so every term is a plain
+/// FTS5 bareword: the store's own sanitizer passes it through untouched, and
+/// lowercase `or`/`and`/`not` are ordinary terms rather than operators.
+pub(crate) fn any_word_fts5_query(query: &str) -> Option<String> {
+    let mut words: Vec<String> = Vec::new();
+    for word in query.split(|c: char| !c.is_alphanumeric()) {
+        if word.is_empty() {
+            continue;
+        }
+        let word = word.to_lowercase();
+        if !words.contains(&word) {
+            words.push(word);
+        }
+    }
+    (words.len() >= 2).then(|| words.join(" OR "))
 }
 
 // ---------------------------------------------------------------------------
@@ -300,10 +325,23 @@ impl LiveBrainReader {
         if sanitized.is_empty() {
             return Ok(Vec::new());
         }
-        let raw = self
+        let mut raw = self
             .store
             .fts5_search(&sanitized, limit)
             .map_err(|e| BrainReaderError::Backend(format!("fts5_search: {e}")))?;
+        // The strict pass requires every word, so one word the text never
+        // used ("twice", "bug", "what") empties the result, and agents ask
+        // whole questions. When it finds nothing, ask for any of the words
+        // and let BM25 rank events that match more, and rarer, words first.
+        // A query that already matched is answered exactly as before.
+        if raw.is_empty() {
+            if let Some(any_word) = any_word_fts5_query(query) {
+                raw = self
+                    .store
+                    .fts5_search(&any_word, limit)
+                    .map_err(|e| BrainReaderError::Backend(format!("fts5_search: {e}")))?;
+            }
+        }
 
         let mut out: Vec<McpHit> = Vec::with_capacity(raw.len());
         for (event_id, score) in raw {
@@ -535,6 +573,86 @@ mod tests {
     #[test]
     fn sanitize_plain_words_unchanged() {
         assert_eq!(sanitize_fts5_query("hello world"), "hello world");
+    }
+
+    #[test]
+    fn sanitize_quotes_uppercase_operator_words() {
+        assert_eq!(
+            sanitize_fts5_query("checkout OR billing"),
+            "checkout \"OR\" billing"
+        );
+        assert_eq!(sanitize_fts5_query("NOT checkout"), "\"NOT\" checkout");
+        // Lowercase is an ordinary term to FTS5 and stays bare.
+        assert_eq!(sanitize_fts5_query("this or that"), "this or that");
+    }
+
+    #[test]
+    fn any_word_query_keeps_only_lowercase_barewords() {
+        assert_eq!(
+            any_word_fts5_query("what's the Stripe checkout bug?").as_deref(),
+            Some("what OR s OR the OR stripe OR checkout OR bug")
+        );
+        assert_eq!(
+            any_word_fts5_query("NOT checkout").as_deref(),
+            Some("not OR checkout")
+        );
+        assert_eq!(
+            any_word_fts5_query("checkout checkout CHECKOUT").as_deref(),
+            None,
+            "one distinct word is the strict query again"
+        );
+        assert_eq!(any_word_fts5_query("?!").as_deref(), None);
+    }
+
+    fn put_text(path: &std::path::Path, key: &DbKey, text: &str) {
+        let writer = SqlCipherBrainStore::new(path, key).unwrap();
+        writer
+            .put_event(&Event {
+                id: EventId(0),
+                ts_us: 1_000_000,
+                app_bundle_id: Some("com.anthropic.claude-code".into()),
+                window_title: Some("pricing-site · user".into()),
+                url: None,
+                text: text.into(),
+                summary: None,
+                entities: None,
+                episode_id: None,
+                cascade_reason: 0,
+                keyframe_blob: None,
+                tab_id: None,
+                embedding: None,
+            })
+            .unwrap();
+    }
+
+    /// Keyword-only recall is what every install without the embedding model
+    /// gets, and agents ask whole questions in it.
+    #[test]
+    fn keyword_recall_answers_a_question_with_words_the_text_never_used() {
+        let (_dir, path, key) = make_test_db();
+        put_text(
+            &path,
+            &key,
+            "The Stripe checkout on the pricing page double-charges when the annual toggle flips.",
+        );
+        let reader = LiveBrainReader::open_with_embedder(&path, &key, None).unwrap();
+
+        for q in [
+            "stripe checkout",
+            "stripe checkout charged twice",
+            "what did I do about the stripe checkout bug?",
+            "checkout OR billing",
+            "NOT checkout",
+        ] {
+            let hits = reader
+                .recall(q, 10)
+                .unwrap_or_else(|e| panic!("{q:?}: {e}"));
+            assert_eq!(hits.len(), 1, "{q:?} should find the checkout event");
+        }
+        assert!(
+            reader.recall("zebra quantum", 10).unwrap().is_empty(),
+            "words that appear nowhere must still find nothing"
+        );
     }
 
     #[test]

@@ -118,7 +118,28 @@ fn helper_supports_gate(path: &Path) -> Option<bool> {
 /// existed.
 fn check_gate() -> Check {
     let installed = installed_helper_path();
-    if helper_supports_gate(&installed) == Some(false) {
+    let on = std::env::var("HIPPOCAMPUS_ENABLE_V2P1").as_deref() == Ok("1");
+    gate_check(helper_supports_gate(&installed), on, &installed)
+}
+
+/// The decision behind [`check_gate`], kept free of the filesystem and the
+/// environment so it can be tested.
+///
+/// No installed helper is not a fault. Capture ships off, and someone who
+/// only ran `init` fills their brain from imports; reporting that as
+/// "Blocking" (and exiting non-zero) told every CLI user the product was
+/// broken when it was working as intended.
+fn gate_check(supports_gate: Option<bool>, on: bool, installed: &Path) -> Check {
+    if supports_gate.is_none() && !on {
+        return Check::new(
+            "capture gate",
+            Status::Warn,
+            "no capture helper installed, so this brain only holds what you import",
+            "Optional. Live capture ships off. Imports (`init`, `import-sessions`, \
+             `mcp-sync`) work without it.",
+        );
+    }
+    if supports_gate == Some(false) {
         return Check::new(
             "capture gate",
             Status::Fail,
@@ -133,7 +154,6 @@ fn check_gate() -> Check {
         );
     }
 
-    let on = std::env::var("HIPPOCAMPUS_ENABLE_V2P1").as_deref() == Ok("1");
     if on {
         Check::new(
             "capture gate",
@@ -392,6 +412,37 @@ mod tests {
     #[test]
     fn frames_received_passes() {
         let c = check_screen_recording(Some("SCStream callback alive: first sample received."));
+        assert_eq!(c.status, Status::Pass);
+    }
+
+    #[test]
+    fn no_installed_helper_is_not_a_blocker() {
+        // The README's `init` path never installs a helper. Its users must not
+        // be told something is blocking.
+        let c = gate_check(None, false, Path::new("/nope/MCICaptureHelper"));
+        assert_eq!(c.status, Status::Warn);
+        assert!(
+            !render(&[c]).contains("Blocking:"),
+            "a CLI-only install has nothing blocking"
+        );
+    }
+
+    #[test]
+    fn installed_helper_with_the_gate_off_still_blocks() {
+        let c = gate_check(Some(true), false, Path::new("/x/MCICaptureHelper"));
+        assert_eq!(c.status, Status::Fail);
+    }
+
+    #[test]
+    fn stale_helper_blocks_and_says_to_rebuild() {
+        let c = gate_check(Some(false), true, Path::new("/x/MCICaptureHelper"));
+        assert_eq!(c.status, Status::Fail);
+        assert!(c.fix.contains("swift build"), "should say how: {}", c.fix);
+    }
+
+    #[test]
+    fn gate_on_with_a_current_helper_passes() {
+        let c = gate_check(Some(true), true, Path::new("/x/MCICaptureHelper"));
         assert_eq!(c.status, Status::Pass);
     }
 
