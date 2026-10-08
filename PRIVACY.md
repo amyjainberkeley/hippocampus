@@ -6,11 +6,11 @@ Hippocampus runs on your Mac and nowhere else. This page says what that means in
 
 - Text recognised from your screen, with the app, window title and URL it came from, and the time.
 - Episodes (moments grouped by time and topic) and embedding vectors derived from that text.
-- All of it in one SQLCipher-encrypted SQLite file under `~/Library/Application Support/MCI/`. The key is wrapped by a Keychain item gated on the Secure Enclave and cannot be exported.
+- All of it in one SQLCipher-encrypted SQLite file under `~/Library/Application Support/MCI/`. The key never lives inside the database. The command-line tools keep it in a file only your user can read (`dev.key`, mode 0600); the app on the v1 branch keeps it in the macOS Keychain, not synced. Wrapping it with the Secure Enclave is designed ([ADR-0008](docs/decisions/0008-encrypted-store-sqlcipher-sqlite-vec-keychain.md)) but not built yet.
 
 ## What leaves the machine
 
-Nothing you captured. There is no server, no account and no sync service in this build, and there is no telemetry or crash reporting ([ADR-0025](docs/decisions/0025-analytics-telemetry-policy.md)).
+Nothing you captured. There is no server, no account and no sync service in this build, and there is no telemetry ([ADR-0025](docs/decisions/0025-analytics-telemetry-policy.md)). Crash reports stay off unless you set both `MCI_CRASH_REPORT_URL` and `MCI_CRASH_REPORT_OPTED_IN=1`.
 
 Three network requests exist, and none carries memory content:
 
@@ -25,7 +25,7 @@ Three network requests exist, and none carries memory content:
 
 ## Deleting
 
-Deleting a memory crypto-shreds it. Deleting the database file and its key makes the data unrecoverable, and there is no copy anywhere else.
+Deleting a memory removes it along with its vectors, entities and links, then rewrites the file (`VACUUM`) so the old pages are gone. Deleting the database file and its key makes the data unrecoverable, and there is no copy anywhere else.
 
 ## Where this is decided
 
