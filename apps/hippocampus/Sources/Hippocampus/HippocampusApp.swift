@@ -165,6 +165,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// strictly BEFORE the user can interact with anything, including
     /// opening the menu bar.
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // A Quit from outside the menu (a script, the installer, Homebrew,
+        // logout) arrives as kAEQuitApplication. Under SwiftUI it is not
+        // visible as `currentAppleEvent` inside `applicationShouldTerminate`,
+        // so it read as lifecycle noise and was silently cancelled. Route it
+        // into the deliberate quit instead.
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleQuitAppleEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kCoreEventClass),
+            andEventID: AEEventID(kAEQuitApplication)
+        )
         for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification,
                      NSWorkspace.sessionDidBecomeActiveNotification] {
             NSWorkspace.shared.notificationCenter.addObserver(
@@ -345,6 +356,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func requestQuit() {
         requestTermination(.quit)
+    }
+
+    @objc private func handleQuitAppleEvent(
+        _ event: NSAppleEventDescriptor,
+        withReplyEvent reply: NSAppleEventDescriptor
+    ) {
+        requestQuit()
     }
 
     func requestRestart() {
