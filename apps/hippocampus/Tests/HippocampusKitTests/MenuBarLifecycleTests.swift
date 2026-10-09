@@ -73,6 +73,10 @@ final class MenuBarLifecycleTests: XCTestCase {
         let coordinator = try String(contentsOfFile: coordinatorPath, encoding: .utf8)
 
         XCTAssertTrue(content.contains("func applicationShouldTerminate("))
+        // External quits (installer, Homebrew, scripts) must reach the
+        // deliberate quit path rather than being cancelled as noise.
+        XCTAssertTrue(content.contains("andEventID: AEEventID(kAEQuitApplication)"))
+        XCTAssertTrue(content.contains("@objc private func handleQuitAppleEvent("))
         XCTAssertTrue(content.contains("return .terminateLater"))
         XCTAssertTrue(content.contains("await self.terminationCoordinator.terminate("))
         XCTAssertTrue(coordinator.contains("try await supervisor.shutdownAndWait("))
