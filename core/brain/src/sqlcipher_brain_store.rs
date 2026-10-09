@@ -494,7 +494,7 @@ impl SqlCipherBrainStore {
                 "SELECT COUNT(*), MAX(e.ts_us),
                 (SELECT COUNT(*) FROM events WHERE keyframe_blob IS NOT NULL)
              FROM event_sources s JOIN events e ON e.id=s.event_id
-             WHERE s.source_kind IN ('screen_ocr','browser_page_with_ocr')",
+             WHERE s.source_kind IN ('screen_ocr','screen_context','browser_page_with_ocr')",
                 [],
                 |row| {
                     Ok(CaptureStorageStats {

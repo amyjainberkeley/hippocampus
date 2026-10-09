@@ -186,7 +186,8 @@ where
             Message::StateTransitionEvent { .. } => Routed::StateTransition(frame),
             Message::HelperHealth { .. } => Routed::Health(frame),
             Message::SurfaceReleased { .. } => Routed::ProtocolMisuse(frame),
-            Message::OCREvent { .. } => Routed::OCREvent(frame),
+            // Both carry screen text; the ingest tells them apart by variant.
+            Message::OCREvent { .. } | Message::ContextOCREvent { .. } => Routed::OCREvent(frame),
             Message::PageContentEvent { .. } => Routed::PageContent(frame),
             Message::CaptureStart { .. } | Message::CaptureStop => Routed::EchoedControl(frame),
         }

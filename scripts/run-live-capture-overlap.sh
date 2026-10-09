@@ -534,6 +534,10 @@ unset MCI_DB_KEY_HEX
 unset MCI_CRASH_REPORT_URL
 unset MCI_CRASH_REPORT_OPTED_IN
 export MCI_CAPTURE_ENABLED=1
+# This run qualifies the focused-window stream: its background token must not
+# appear at all. Whole-screen capture (ADR-0040) files background text under
+# its own window and is covered by BackgroundCapturePolicyTests instead.
+export MCI_WHOLE_SCREEN=0
 export MCI_EMBEDDER_DISABLED=1
 export MCI_BRIEFS_DISABLED=1
 export MCI_OCR_TRACE=1

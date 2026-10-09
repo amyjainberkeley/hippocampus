@@ -59,6 +59,8 @@ struct CaptureRuntime {
     let calendarAttribution: CalendarAttribution
     let nowPlayingAttribution: NowPlayingAttribution
     let contactsAttribution: ContactsAttribution
+    /// Whole-screen capture of the windows the focused stream does not read.
+    let background: BackgroundCaptureSession?
 }
 
 func defaultDenylistPath() -> String {
@@ -527,7 +529,7 @@ if captureOptions.captureEnabled {
         exit(78)
     }
 
-    let ocrEmitter: any OCRPostAllowEmitter = CascadeTwiceOCREmitter(
+    let cascadeEmitter = CascadeTwiceOCREmitter(
         worker: ocrWorker,
         cascade: cascade,
         sink: sharedSink,
@@ -535,6 +537,7 @@ if captureOptions.captureEnabled {
         counters: loop.counters,
         keyframeRetainer: keyframeRetainer
     )
+    let ocrEmitter: any OCRPostAllowEmitter = cascadeEmitter
     // Start OCR worker consumer loop BEFORE the SCStream session so
     // submissions from the first `.allow` frame drain immediately.
     // Retained by emitter → session → top-level `captureSession`
@@ -600,6 +603,17 @@ if captureOptions.captureEnabled {
         tccStatusMonitor: tccStatusMonitor,
         measuresActivity: true
     )
+    // On by default; `defaults write ai.hippocampus WholeScreenCapture -bool NO`
+    // or MCI_WHOLE_SCREEN=0 keeps capture to the focused window.
+    let wholeScreen = (UserDefaults.standard.object(forKey: "WholeScreenCapture") as? Bool ?? true)
+        && ProcessInfo.processInfo.environment["MCI_WHOLE_SCREEN"] != "0"
+    let background = wholeScreen
+        ? BackgroundCaptureSession(
+            emitter: cascadeEmitter,
+            userDenylist: denylistEntries,
+            focusedWindowId: { focusedWindowStore.currentSync().focused?.windowId }
+        )
+        : nil
     captureRuntime = CaptureRuntime(
         session: captureSession,
         contextSnapshot: contextSnapshot,
@@ -607,7 +621,8 @@ if captureOptions.captureEnabled {
         contextProvider: nsWorkspaceContextProvider,
         calendarAttribution: calendarAttribution,
         nowPlayingAttribution: nowPlayingAttribution,
-        contactsAttribution: contactsAttribution
+        contactsAttribution: contactsAttribution,
+        background: background
     )
 } else {
     captureRuntime = nil
@@ -650,6 +665,7 @@ if let captureRuntime {
         )
         exit(79)
     }
+    captureRuntime.background?.start()
 }
 
 do {
@@ -681,6 +697,7 @@ do {
 }
 
 if let captureRuntime {
+    await captureRuntime.background?.stop()
     do {
         try await captureRuntime.session.stop()
     } catch {

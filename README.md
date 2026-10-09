@@ -13,6 +13,11 @@
 
 ---
 
+<p align="center">
+  <a href="docs/media/hippocampus-30s.mp4"><img src="docs/media/hippocampus-30s.jpg" width="720" alt="Two windows, a launch-plan note and a pricing chat, appear in Hippocampus's encrypted memory as you work."></a><br>
+  <sub><a href="docs/media/hippocampus-30s.mp4">Watch the 30-second clip</a></sub>
+</p>
+
 Hippocampus is a private memory for your Mac. It reads what is on your screen as you work (the text, the app, the window, the page, the moment), keeps it in one encrypted file on your machine, and lets you, or an agent working for you, find it again in plain language.
 
 Hippocampus itself has no cloud service. There is no account, no server and no telemetry; the reading, the understanding and the search all happen on your Mac.

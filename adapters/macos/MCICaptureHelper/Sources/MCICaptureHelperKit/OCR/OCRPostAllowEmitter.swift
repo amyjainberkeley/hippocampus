@@ -412,6 +412,44 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         )
     }
 
+    /// Whole-screen capture: read one display frame, then emit each visible,
+    /// unfocused window's lines as its own context event, attributed to that
+    /// window. `split` runs after recognition and decides which windows may be
+    /// emitted at all; every emitted window passes the same raw and compacted
+    /// secret checks as focused text. No screenshot is retained.
+    public func processBackground(
+        tsUs: UInt64,
+        input: OCREngineInput,
+        split: @escaping @Sendable ([OCRLine]) -> [(context: WorkflowContext, lines: [OCRLine])]
+    ) async {
+        if Self.killOcrEmit { return }
+        let cascade = cascade, sink = sink, sequence = sequence, counters = counters
+        let coordinator = completionCoordinator
+        await worker.submit(input: input, onDrop: {}) { result in
+            coordinator.submit(
+                captureOrdinal: 0,
+                operation: {
+                    guard !result.timedOut else { return }
+                    for group in split(result.recognizedLines) where !group.lines.isEmpty {
+                        await Self.handleOCRResult(
+                            tsUs: tsUs,
+                            context: group.context,
+                            result: OCRResult(recognizedLines: group.lines,
+                                              durationMs: result.durationMs, timedOut: false),
+                            cascade: cascade,
+                            sink: sink,
+                            sequence: sequence,
+                            counters: counters,
+                            pixelBuffer: input.pixelBuffer,
+                            background: true
+                        )
+                    }
+                },
+                onDrop: {}
+            )
+        }
+    }
+
     /// Retry one OCR job against the same retained pixels. ScreenCaptureKit's
     /// `.idle` status explicitly means no new frame was generated, so waiting
     /// for a later callback cannot recover a static window. Keeping the retry
@@ -613,7 +651,8 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         counters: HelperHealthCounters,
         pixelBuffer: CVPixelBuffer? = nil,
         keyframeRetainer: (any KeyframeRetaining)? = nil,
-        evidenceCandidate: KeyframeEvidenceCandidate? = nil
+        evidenceCandidate: KeyframeEvidenceCandidate? = nil,
+        background: Bool = false
     ) async {
         let text = result.recognizedLines.map(\.text).joined(separator: "\n")
         guard !result.timedOut,
@@ -696,7 +735,7 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                 keyframeHash: zeroHash
             )
             let zeroBytes: Data
-            switch encodeOCREvent(seq: seq, event: zeroEvent) {
+            switch encodeOCREvent(seq: seq, event: zeroEvent, background: background) {
             case .success(let validated):
                 zeroBytes = validated
             case .failure:
@@ -758,7 +797,8 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
             )
             guard case .success(let retainedBytes) = encodeOCREvent(
                 seq: seq,
-                event: retainedEvent
+                event: retainedEvent,
+                background: background
             ) else {
                 do {
                     try await keyframeRetainer.discard(retention)

@@ -243,7 +243,9 @@ where
                     }
                 }
             }
-            Message::OCREvent { .. } | Message::PageContentEvent { .. } => {
+            Message::OCREvent { .. }
+            | Message::ContextOCREvent { .. }
+            | Message::PageContentEvent { .. } => {
                 let Some(brain) = brain else {
                     stats.frames_non_health += 1;
                     continue;
@@ -256,7 +258,10 @@ where
                 match outcome {
                     IngestOutcome::Stored { .. } => {
                         stats.frames_to_brain += 1;
-                        if matches!(&frame.message, Message::OCREvent { .. }) {
+                        if matches!(
+                            &frame.message,
+                            Message::OCREvent { .. } | Message::ContextOCREvent { .. }
+                        ) {
                             if let Some(capture_receipt) = capture_receipt {
                                 capture_receipt.stored_frame(clock);
                             }
