@@ -63,7 +63,7 @@ flowchart LR
     F --> G["You, or an agent<br/>acting for you"]
 ```
 
-1. **Watch.** A Swift helper looks at the screen through ScreenCaptureKit and does work only when something meaningful changed: an idle gate, the system's own change signal, a coarse image hash, and a finer check that notices new words without waking up for a blinking cursor.
+1. **Watch.** A Swift helper looks at the screen through ScreenCaptureKit and does work only when something meaningful changed: an idle gate, the system's own change signal, a coarse image hash, and a finer check that notices new words without waking up for a blinking cursor. The window you are working in is read closely; the rest of the screen, including other displays, is read every few seconds when its text changes, and each line is filed under the window it came from.
 2. **Read.** Frames are transcribed on the Mac by a bundled PaddleOCR model kept warm between frames, then reassembled the way the screen reads: columns stay columns, tables read row by row, code keeps its indentation. On the [screen benchmark](tools/ocr/screens/) (chat, editor, terminal, mail, tables, small labels), 96.7% of lines come out exactly right with 0.1% character error, in about 1.3 seconds a frame.
 3. **Understand.** In idle time, events are grouped into episodes, entities are extracted, and text is embedded by a small on-device model.
 4. **Store.** Rows, the full-text index and the vectors all live in one SQLCipher-encrypted file under `~/Library/Application Support/MCI`, with its key in your login Keychain.
@@ -91,7 +91,7 @@ This is a beta. [docs/STATUS.md](docs/STATUS.md) is the ledger of what has been 
 | --- | --- |
 | Encrypted store, keyword and semantic search | Works, tested. |
 | On-device transcription | Works. Measured on synthetic screens; real-screen accuracy is being measured. |
-| Live screen capture | Being qualified on real use. See the ledger. |
+| Live screen capture | Being qualified on real use. Whole-screen capture is new in 0.2.1. See the ledger. |
 | Agent access over MCP | Works. Read-only. |
 | Understanding layer (claims you confirm) | Schema built; not yet written by the product. |
 | Sync between machines, Windows | Not started. |
