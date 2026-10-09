@@ -56,7 +56,7 @@
 //   success with a non-empty string → return the URL. On any error
 //   (permission denial, browser not running, no front window /
 //   active tab, AppleScript syntax / runtime error) → `nil`. On
-//   execution exceeding 250 ms → `nil` (the AppleScript may still
+//   execution exceeding `timeoutMs` → `nil` (the AppleScript may still
 //   complete on its dispatch queue; its result is discarded). Never
 //   retry within the same call.
 // - Cache the last result (success-string or `nil`) for ≤100 ms.
@@ -113,7 +113,9 @@ public final class ChromiumURLProvider: URLProvider, @unchecked Sendable {
     /// Bounded AppleScript execution. NSAppleScript blocks the
     /// dispatching thread; a stuck call should not stall the
     /// snapshot poll forever.
-    internal static let timeoutMs: Int = 250
+    /// A busy Chrome takes 130-400 ms to answer; at 250 ms most lookups
+    /// timed out and the frame, lacking a URL, was refused.
+    internal static let timeoutMs: Int = 1000
 
     private let runner: AppleScriptRunner
     private let clock: @Sendable () -> Date

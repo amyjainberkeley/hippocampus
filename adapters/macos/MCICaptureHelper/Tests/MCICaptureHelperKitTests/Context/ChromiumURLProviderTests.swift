@@ -410,8 +410,11 @@ final class ChromiumURLProviderTests: XCTestCase {
         XCTAssertEqual(runner.invocationCount, 1)
     }
 
-    /// Timeout bound matches the ADR-0015 P2.4 acceptance brief.
-    func testTimeoutIs250ms() {
-        XCTAssertEqual(ChromiumURLProvider.timeoutMs, 250)
+    /// ADR-0015 P2.4 set 250 ms; measured on 2026-10-09 a busy Chrome took
+    /// 130-400 ms, so most lookups timed out and Chrome frames were refused.
+    /// The bound is still finite, and the 100 ms cache keeps attribution tight.
+    func testTimeoutAllowsABusyBrowserButStaysBounded() {
+        XCTAssertEqual(ChromiumURLProvider.timeoutMs, 1000)
+        XCTAssertLessThanOrEqual(ChromiumURLProvider.cacheTTL, 0.1)
     }
 }

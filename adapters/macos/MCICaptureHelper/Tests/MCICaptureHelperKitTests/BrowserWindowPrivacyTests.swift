@@ -75,6 +75,75 @@ final class BrowserWindowPrivacyTests: XCTestCase {
             focusedWindow: { focus.read() })
         XCTAssertFalse(probe.permitsPixels(for: WorkflowContext(appBundleId: "com.google.Chrome", url: url), capturedWindow: captured))
     }
+    func testListingScriptsUseARealTabSeparator() {
+        // Inside `tell application "Google Chrome"`, `tab` is the browser's
+        // tab class and coerces to the text "tab": every row failed to parse
+        // and every Chrome frame was refused.
+        for (bundle, script) in BrowserWindowPrivacyProbe.scripts {
+            XCTAssertFalse(script.contains("& tab &"), bundle)
+            XCTAssertTrue(script.contains("character id 9"), bundle)
+        }
+    }
+
+    private final class Listing: AppleScriptRunner, @unchecked Sendable {
+        private let lock = NSLock()
+        private var outputs: [String]
+        private(set) var runs = 0
+        init(_ outputs: [String]) { self.outputs = outputs }
+        func run(_ source: String, timeoutMs: Int) -> AppleScriptOutcome {
+            lock.lock(); defer { lock.unlock() }
+            XCTAssertEqual(timeoutMs, BrowserWindowPrivacyProbe.timeoutMs)
+            runs += 1
+            return .success(outputs.count > 1 ? outputs.removeFirst() : outputs[0])
+        }
+    }
+
+    private final class Clock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = Date(timeIntervalSince1970: 1_000)
+        func read() -> Date { lock.lock(); defer { lock.unlock() }; return value }
+        func advance(_ seconds: TimeInterval) { lock.lock(); value += seconds; lock.unlock() }
+    }
+
+    func testFreshListingIsReusedWithoutAnotherQuery() {
+        let runner = Listing(["normal\t0\t25\t1200\t800\t\(url)\n"])
+        let clock = Clock()
+        let window = captured
+        let probe = BrowserWindowPrivacyProbe(runner: runner, focusedWindow: { window }, now: { clock.read() })
+        let context = WorkflowContext(appBundleId: "com.google.Chrome", url: url)
+        XCTAssertTrue(probe.permitsPixels(for: context, capturedWindow: window))
+        clock.advance(0.5)
+        XCTAssertTrue(probe.permitsPixels(for: context, capturedWindow: window))
+        XCTAssertEqual(runner.runs, 1)
+        clock.advance(0.6)
+        XCTAssertTrue(probe.permitsPixels(for: context, capturedWindow: window))
+        XCTAssertEqual(runner.runs, 2, "an expired listing is taken again")
+    }
+
+    func testCachedListingNeverAuthorizesAWindowItHasNotSeen() {
+        let newRect = CGRect(x: 300, y: 125, width: 900, height: 675)
+        let newWindow = FocusedWindow(bundleId: "com.google.Chrome", windowId: 77, axRect: newRect)
+        let before = "normal\t0\t25\t1200\t800\t\(url)\n"
+        let after = before + "incognito\t300\t125\t1200\t800\t\(url)\n"
+        let runner = Listing([before, after])
+        let clock = Clock()
+        final class Focus: @unchecked Sendable {
+            var window: FocusedWindow?
+        }
+        let focus = Focus()
+        focus.window = captured
+        let probe = BrowserWindowPrivacyProbe(runner: runner, focusedWindow: { focus.window }, now: { clock.read() })
+        let context = WorkflowContext(appBundleId: "com.google.Chrome", url: url)
+        XCTAssertTrue(probe.permitsPixels(for: context, capturedWindow: captured))
+        // A private window opens: the cached listing does not contain it.
+        focus.window = newWindow
+        XCTAssertFalse(probe.permitsPixels(for: context, capturedWindow: newWindow))
+        XCTAssertEqual(runner.runs, 1, "a denial from a very fresh listing is not retried")
+        clock.advance(0.3)
+        XCTAssertFalse(probe.permitsPixels(for: context, capturedWindow: newWindow))
+        XCTAssertEqual(runner.runs, 2, "a stale denial is retried, and the private window is still refused")
+    }
+
     func testUnsupportedBrowserVariantsStayExcluded() {
         for bundle in ["org.mozilla.firefoxdeveloperedition", "org.mozilla.nightly", "com.apple.SafariTechnologyPreview"] {
             XCTAssertTrue(BrowserPixelCapturePolicy.excludedBundleIds.contains(bundle))
