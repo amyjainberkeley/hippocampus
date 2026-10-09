@@ -1,0 +1,9 @@
+Q3 pipeline.xlsx
+
+Account Stage Owner ARR (USD) Close date
+Acme Robotics Negotiation M. Chen $184,000 2026-10-21
+Blue Harbor Proposal R. Patel $92,500 2026-11-03
+Cedar & Pine Discovery J. Weber $47,250 2026-12-15
+Delta Freight Closed won M. Chen $310,800 2026-09-30
+Evergreen Labs Negotiation D. Okafor $128,000 2026-10-28
+Total $762,550

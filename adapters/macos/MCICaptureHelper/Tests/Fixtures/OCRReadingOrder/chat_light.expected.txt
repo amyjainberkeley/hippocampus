@@ -1,0 +1,26 @@
+Northwind Studio
+Channels
+# general
+# design-review
+# launch-plan
+# eng-oncall
+Direct messages
+Maya Chen
+Ravi Patel
+Jonas Weber
+
+# design-review
+
+Maya Chen 10:42 AM
+Pushed the new onboarding flow to staging. The permissions step is now one screen.
+Can someone check the copy on the screen recording prompt before 3 PM?
+Ravi Patel 10:47 AM
+Looks good. One nit: "Allow capture" should say "Turn on memory" to match the menu.
+Also the retention picker defaults to 90 days, which matches the spec (DOC-2291).
+Jonas Weber 11:05 AM
+Benchmarks from last night: recall p95 is 41 ms on the 100k-event brain.
+Embedding backfill finished in 6m 12s; 0 events skipped, 3 retried.
+Maya Chen 11:09 AM
+Great. Shipping 0.2.1 to the beta group after lunch unless anyone objects.
+
+Message #design-review

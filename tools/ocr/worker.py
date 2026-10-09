@@ -19,8 +19,13 @@ MODELS = {
 }
 
 
-def read_image(stream):
+def read_image(stream, *, framed=False):
+    """One BMP from `stream`. One-shot mode also requires end of input after
+    the pixels; framed (serve) mode reads exactly one image and returns None
+    on a clean end of input between images."""
     header = stream.read(54)
+    if framed and not header:
+        return None
     if len(header) != 54:
         raise ValueError('invalid image header')
     magic, size, r1, r2, offset = struct.unpack('<2sIHHI', header[:14])
@@ -30,14 +35,14 @@ def read_image(stream):
             or not 0 < w <= MAX_EDGE or not -MAX_EDGE <= h < 0
             or length != w * -h * 4 or size != 54 + length):
         raise ValueError('invalid image dimensions or format')
-    data = stream.read(length + 1)
+    data = stream.read(length if framed else length + 1)
     if len(data) != length:
         raise ValueError('invalid image length')
     import numpy as np
     return np.frombuffer(data, dtype=np.uint8).reshape(-h, w, 4)[:, :, :3].copy()
 
 
-def load_engine(model_dir):
+def load_engine(model_dir, *, threads=1, half_res_detection=False):
     for name, digest in MODELS.items():
         path = model_dir / name
         if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
@@ -65,7 +70,7 @@ def load_engine(model_dir):
         'Cls.model_path': str(model_dir / 'ch_ppocr_mobile_v2.0_cls_mobile.onnx'),
         # One inference thread avoids competing pools on a busy desktop. The
         # bounded child still owns all model work; no partial result is kept.
-        'EngineConfig.onnxruntime.intra_op_num_threads': 1,
+        'EngineConfig.onnxruntime.intra_op_num_threads': threads,
         'EngineConfig.onnxruntime.inter_op_num_threads': 1,
     })
 
@@ -77,7 +82,12 @@ def load_engine(model_dir):
                 raise ValueError('invalid detector input dimensions')
             # Match normal short-side upscaling, but never let a narrow region
             # expand either edge past the capture cap. The model needs /32.
-            scale = min(max(1.0, self.limit_side_len / min(height, width)),
+            # A Retina-sized frame is detected at half scale, which is the
+            # resolution its UI text was designed for; recognition still
+            # reads the original pixels. 4.6x faster with no accuracy loss
+            # on the screen benchmark.
+            floor = 0.5 if half_res_detection and max(height, width) >= 2560 else 1.0
+            scale = min(max(floor, self.limit_side_len / min(height, width)),
                         MAX_EDGE / max(height, width))
             size = tuple(max(32, min(MAX_EDGE, round(int(n * scale) / 32) * 32))
                          for n in (width, height))
@@ -129,16 +139,55 @@ def deny_network(event, args):
         raise PermissionError('OCR worker is offline')
 
 
+def recognize(engine, image):
+    result = engine(image)
+    lines = [] if result.txts is None else encode_lines(result.txts, result.scores, result.boxes, image.shape[1], image.shape[0])
+    reply = json.dumps({'version': 1, 'lines': lines}, ensure_ascii=False, allow_nan=False).encode('utf-8')
+    if len(reply) > MAX_REPLY:
+        raise ValueError('OCR reply too large')
+    return reply
+
+
+def serve():
+    """Persistent mode: load the models once, then answer images until stdin
+    closes. Each image gets exactly one JSON line. A frame the engine refuses
+    is answered with `failed` so the parent keeps the warm process; a
+    malformed frame ends the process, because the stream can no longer be
+    framed. The first line announces readiness after the models load."""
+    engine = load_engine(Path(__file__).resolve().parent / 'models', **SERVE_ENGINE)
+    out = sys.stdout.buffer
+    out.write(b'{"version":1,"ready":true}\n')
+    out.flush()
+    while True:
+        image = read_image(sys.stdin.buffer, framed=True)
+        if image is None:
+            return 0
+        try:
+            reply = recognize(engine, image)
+        except Exception:
+            reply = b'{"version":1,"failed":true}'
+        out.write(reply + b'\n')
+        out.flush()
+
+
+# The persistent worker runs one frame at a time; four threads and half-scale
+# detection on Retina frames cut a 2880x1800 reading from 6.3 s to 1.4 s under
+# load. See docs/audits/2026-10-08-ocr-transcription.md.
+SERVE_ENGINE = {'threads': 4, 'half_res_detection': True}
+
+
 def main():
     sys.addaudithook(deny_network)
+    if sys.argv[1:] == ['--serve']:
+        try:
+            return serve()
+        except Exception:
+            sys.stderr.write('Local OCR worker failed\n')
+            return 1
     try:
         image = read_image(sys.stdin.buffer)
         engine = load_engine(Path(__file__).resolve().parent / 'models')
-        result = engine(image)
-        lines = [] if result.txts is None else encode_lines(result.txts, result.scores, result.boxes, image.shape[1], image.shape[0])
-        reply = json.dumps({'version': 1, 'lines': lines}, ensure_ascii=False, allow_nan=False).encode('utf-8')
-        if len(reply) > MAX_REPLY:
-            raise ValueError('OCR reply too large')
+        reply = recognize(engine, image)
         sys.stdout.buffer.write(reply)
         sys.stdout.buffer.flush()
     except Exception:

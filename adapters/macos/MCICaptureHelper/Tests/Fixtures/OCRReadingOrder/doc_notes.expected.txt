@@ -1,0 +1,17 @@
+Workspace
+Product notes
+Meeting notes
+Roadmap
+Reading list
+
+Launch checklist
+
+Owner: Maya Chen Due: Oct 21 Status: In progress
+Before the beta
+1. Notarize the DMG and staple the ticket.
+2. Publish the Homebrew cask and the install script.
+3. Record a 30-second demo with synthetic data only.
+Open questions
+- Should retention default to 30 or 90 days?
+- Which apps are excluded on first run?
+- Do we show a capture indicator in the menu bar?

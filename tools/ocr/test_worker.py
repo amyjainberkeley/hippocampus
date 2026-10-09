@@ -142,3 +142,48 @@ class WorkerTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ServeModeTests(unittest.TestCase):
+    """The persistent worker the capture helper keeps warm between frames."""
+
+    def serve(self, payload):
+        return subprocess.run([sys.executable, 'worker.py', '--serve'], cwd=Path(__file__).parent,
+                              input=payload, capture_output=True, env={'PATH': '/usr/bin:/bin'},
+                              timeout=180)
+
+    def test_announces_ready_then_answers_each_frame_in_order(self):
+        result = self.serve(bitmap(64, 32) + bitmap(32, 32))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        replies = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual(replies[0], {'version': 1, 'ready': True})
+        self.assertEqual(len(replies), 3)
+        for reply in replies[1:]:
+            self.assertEqual(reply, {'version': 1, 'lines': []})
+
+    def test_refused_frame_is_answered_without_ending_the_process(self):
+        with patch.object(worker, 'recognize', side_effect=[ValueError('bounds'), b'{"version":1,"lines":[]}']), \
+                patch.object(worker, 'load_engine', return_value=object()), \
+                patch.object(sys, 'stdin', io.TextIOWrapper(io.BytesIO(bitmap() + bitmap()))), \
+                patch.object(sys, 'stdout', io.TextIOWrapper(io.BytesIO())) as out:
+            self.assertEqual(worker.serve(), 0)
+            out.flush()
+            lines = out.buffer.getvalue().splitlines()
+        self.assertEqual([json.loads(l) for l in lines],
+                         [{'version': 1, 'ready': True}, {'version': 1, 'failed': True},
+                          {'version': 1, 'lines': []}])
+
+    def test_malformed_frame_ends_the_process(self):
+        result = self.serve(bitmap() + b'X' * 54)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, b'Local OCR worker failed\n')
+        replies = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual(len(replies), 2)
+
+    def test_framed_reader_returns_none_only_at_a_clean_boundary(self):
+        stream = io.BytesIO(bitmap() + bitmap())
+        self.assertIsNotNone(worker.read_image(stream, framed=True))
+        self.assertIsNotNone(worker.read_image(stream, framed=True))
+        self.assertIsNone(worker.read_image(stream, framed=True))
+        with self.assertRaises(ValueError):
+            worker.read_image(io.BytesIO(bitmap()[:30]), framed=True)

@@ -1,0 +1,236 @@
+{
+"width": 2880,
+"height": 1800,
+"lines": [
+{
+"text": "# design-review",
+"confidence": 0.9957,
+"box": [
+0.192708,
+0.957778,
+0.088194,
+0.020556
+]
+},
+{
+"text": "Northwind Studio",
+"confidence": 1.0,
+"box": [
+0.0125,
+0.954444,
+0.084028,
+0.018333
+]
+},
+{
+"text": "Channels",
+"confidence": 1.0,
+"box": [
+0.012153,
+0.93,
+0.046875,
+0.019444
+]
+},
+{
+"text": "# general",
+"confidence": 0.9841,
+"box": [
+0.011806,
+0.905,
+0.046181,
+0.018889
+]
+},
+{
+"text": "Maya Chen 10:42 AM",
+"confidence": 0.9772,
+"box": [
+0.193403,
+0.889444,
+0.103472,
+0.018333
+]
+},
+{
+"text": "# design-review",
+"confidence": 0.9859,
+"box": [
+0.011806,
+0.881111,
+0.075347,
+0.02
+]
+},
+{
+"text": "Pushed the new onboarding flow to staging. The permissions step is now one screen.",
+"confidence": 0.9994,
+"box": [
+0.192708,
+0.865,
+0.384028,
+0.019444
+]
+},
+{
+"text": "# launch-plan",
+"confidence": 0.9839,
+"box": [
+0.011806,
+0.857222,
+0.065278,
+0.018333
+]
+},
+{
+"text": "Can someone check the copy on the screen recording prompt before 3 PM?",
+"confidence": 0.9915,
+"box": [
+0.193056,
+0.84,
+0.342014,
+0.02
+]
+},
+{
+"text": "# eng-oncall",
+"confidence": 0.9969,
+"box": [
+0.012153,
+0.833333,
+0.060069,
+0.018333
+]
+},
+{
+"text": "Ravi Patel 10:47 AM",
+"confidence": 0.9764,
+"box": [
+0.194097,
+0.819444,
+0.096181,
+0.015
+]
+},
+{
+"text": "Direct messages",
+"confidence": 1.0,
+"box": [
+0.0125,
+0.808333,
+0.080556,
+0.02
+]
+},
+{
+"text": "Looks good. One nit: \"Allow capture\" should say \"Turn on memory\" to match the menu.",
+"confidence": 0.9903,
+"box": [
+0.192361,
+0.791667,
+0.392708,
+0.021111
+]
+},
+{
+"text": "Maya Chen",
+"confidence": 0.9994,
+"box": [
+0.012153,
+0.783333,
+0.053472,
+0.020556
+]
+},
+{
+"text": "Also the retention picker defaults to 90 days, which matches the spec (DOC-2291).",
+"confidence": 0.9863,
+"box": [
+0.193056,
+0.768333,
+0.374306,
+0.019444
+]
+},
+{
+"text": "Ravi Patel",
+"confidence": 0.9999,
+"box": [
+0.0125,
+0.761111,
+0.046875,
+0.018889
+]
+},
+{
+"text": "Jonas Weber 11:05 AM",
+"confidence": 0.9668,
+"box": [
+0.193403,
+0.746111,
+0.111111,
+0.016667
+]
+},
+{
+"text": "Jonas Weber",
+"confidence": 0.9995,
+"box": [
+0.012153,
+0.736667,
+0.062153,
+0.018333
+]
+},
+{
+"text": "Benchmarks from last night: recall p95 is 41 ms on the 100k-event brain.",
+"confidence": 0.9932,
+"box": [
+0.193056,
+0.720556,
+0.326042,
+0.018333
+]
+},
+{
+"text": "Embedding backfill finished in 6m 12s; 0 events skipped, 3 retried.",
+"confidence": 0.9961,
+"box": [
+0.193403,
+0.696667,
+0.298958,
+0.018333
+]
+},
+{
+"text": "Maya Chen 11:09 AM",
+"confidence": 0.9698,
+"box": [
+0.193403,
+0.671667,
+0.102431,
+0.018889
+]
+},
+{
+"text": "Great. Shipping 0.2.1 to the beta group after lunch unless anyone objects.",
+"confidence": 0.989,
+"box": [
+0.193403,
+0.648333,
+0.330208,
+0.018333
+]
+},
+{
+"text": "Message #design-review",
+"confidence": 0.9872,
+"box": [
+0.193403,
+0.044444,
+0.114583,
+0.018889
+]
+}
+]
+}

@@ -118,4 +118,142 @@ final class PaddleOCRRunnerTests: XCTestCase {
         XCTAssertFalse(result.timedOut)
         XCTAssertTrue(result.recognizedLines.isEmpty)
     }
+
+    // MARK: - Persistent worker
+
+    private static let serveLoop = """
+    import sys,struct,json,os
+    def frame():
+        header=sys.stdin.buffer.read(54)
+        if not header: return None
+        length=struct.unpack('<I',header[34:38])[0]
+        return header+sys.stdin.buffer.read(length)
+
+    """
+
+    func testPersistentWorkerStartsOnceAndAnswersEveryFrame() async throws {
+        let marker = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: marker) }
+        let executable = try fixture(Self.serveLoop + """
+        assert sys.argv[1:]==['--serve']
+        open('\(marker.path)','a').write('start\\n')
+        print(json.dumps({'version':1,'ready':True}),flush=True)
+        n=0
+        while frame():
+            n+=1
+            print(json.dumps({'version':1,'lines':[{'text':'frame %d'%n,'confidence':0.9,'box':[0.1,0.2,0.8,0.25]}]}),flush=True)
+        """)
+        let runner = PaddleOCRRunner(executableURL: executable, persistent: true)
+        addTeardownBlock { runner.stop() }
+        for expected in ["frame 1", "frame 2", "frame 3"] {
+            let result = await runner.recognize(input: try input(), timeoutMs: 4000)
+            XCTAssertFalse(result.timedOut)
+            XCTAssertEqual(result.recognizedLines.map(\.text), [expected])
+            XCTAssertEqual(try XCTUnwrap(result.recognizedLines.first).boundingBox.minX, 0.3, accuracy: 0.00001)
+        }
+        XCTAssertEqual(try String(contentsOf: marker, encoding: .utf8), "start\n")
+    }
+
+    func testSlowStartTimesOutWithoutRestartingThenServes() async throws {
+        let marker = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: marker) }
+        let executable = try fixture(Self.serveLoop + """
+        import time
+        open('\(marker.path)','a').write('start\\n')
+        time.sleep(0.6)
+        print(json.dumps({'version':1,'ready':True}),flush=True)
+        while frame():
+            print(json.dumps({'version':1,'lines':[{'text':'warm','confidence':0.9,'box':[0,0,1,1]}]}),flush=True)
+        """)
+        let runner = PaddleOCRRunner(executableURL: executable, persistent: true)
+        addTeardownBlock { runner.stop() }
+        let first = await runner.recognize(input: try input(), timeoutMs: 150)
+        XCTAssertTrue(first.timedOut, "a cold worker misses the first deadline")
+        try await Task.sleep(for: .milliseconds(700))
+        let second = await runner.recognize(input: try input(), timeoutMs: 4000)
+        XCTAssertEqual(second.recognizedLines.map(\.text), ["warm"])
+        XCTAssertEqual(try String(contentsOf: marker, encoding: .utf8), "start\n",
+                       "the warming worker must not be killed and restarted")
+    }
+
+    func testLateReplyIsDrainedNotAttributedToTheNextFrame() async throws {
+        let executable = try fixture(Self.serveLoop + """
+        import time
+        print(json.dumps({'version':1,'ready':True}),flush=True)
+        n=0
+        while frame():
+            n+=1
+            if n==2: time.sleep(0.5)
+            print(json.dumps({'version':1,'lines':[{'text':'frame %d'%n,'confidence':0.9,'box':[0,0,1,1]}]}),flush=True)
+        """)
+        let runner = PaddleOCRRunner(executableURL: executable, persistent: true)
+        addTeardownBlock { runner.stop() }
+        let warm = await runner.recognize(input: try input(), timeoutMs: 4000)
+        XCTAssertEqual(warm.recognizedLines.map(\.text), ["frame 1"])
+        let slow = await runner.recognize(input: try input(), timeoutMs: 200)
+        XCTAssertTrue(slow.timedOut)
+        let next = await runner.recognize(input: try input(), timeoutMs: 4000)
+        XCTAssertEqual(next.recognizedLines.map(\.text), ["frame 3"], "frame 2's late reply is drained, not reused")
+    }
+
+    func testRefusedFrameKeepsWorkerAndCrashedWorkerIsReplaced() async throws {
+        let marker = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: marker) }
+        let executable = try fixture(Self.serveLoop + """
+        open('\(marker.path)','a').write('start\\n')
+        print(json.dumps({'version':1,'ready':True}),flush=True)
+        n=0
+        while frame():
+            n+=1
+            if n==1: print(json.dumps({'version':1,'failed':True}),flush=True)
+            elif n==2: print(json.dumps({'version':1,'lines':[{'text':'ok','confidence':0.9,'box':[0,0,1,1]}]}),flush=True)
+            else: sys.exit(3)
+        """)
+        let runner = PaddleOCRRunner(executableURL: executable, persistent: true)
+        addTeardownBlock { runner.stop() }
+        let refused = await runner.recognize(input: try input(), timeoutMs: 4000)
+        XCTAssertFalse(refused.timedOut)
+        XCTAssertTrue(refused.recognizedLines.isEmpty)
+        let ok = await runner.recognize(input: try input(), timeoutMs: 4000)
+        XCTAssertEqual(ok.recognizedLines.map(\.text), ["ok"])
+        let crashed = await runner.recognize(input: try input(), timeoutMs: 4000)
+        XCTAssertTrue(crashed.recognizedLines.isEmpty)
+        let replaced = await runner.recognize(input: try input(), timeoutMs: 4000)
+        XCTAssertTrue(replaced.recognizedLines.isEmpty, "the replacement refuses its first frame")
+        XCTAssertEqual(try String(contentsOf: marker, encoding: .utf8), "start\nstart\n")
+    }
+
+    func testPersistentOversizedReplyAndMalformedReadyAreRejected() async throws {
+        for body in [
+            "print(json.dumps({'version':1,'ready':True}),flush=True)\nframe()\nsys.stdout.write('x'*1100000)\nsys.stdout.flush()\nframe()",
+            "print('{\"version\":2}',flush=True)\nframe()",
+        ] {
+            let runner = PaddleOCRRunner(executableURL: try fixture(Self.serveLoop + body), persistent: true)
+            let result = await runner.recognize(input: try input(), timeoutMs: 3000)
+            XCTAssertTrue(result.recognizedLines.isEmpty)
+            runner.stop()
+        }
+    }
+
+    func testStopEndsPersistentWorker() async throws {
+        let marker = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: marker) }
+        let executable = try fixture(Self.serveLoop + """
+        print(json.dumps({'version':1,'ready':True}),flush=True)
+        open('\(marker.path)','w').write(str(os.getpid()))
+        while frame():
+            print(json.dumps({'version':1,'lines':[]}),flush=True)
+        """)
+        let runner = PaddleOCRRunner(executableURL: executable, persistent: true)
+        _ = await runner.recognize(input: try input(), timeoutMs: 4000)
+        let pid = try XCTUnwrap(Int32(String(contentsOf: marker, encoding: .utf8)))
+        runner.stop()
+        let gone = ContinuousClock.now.advanced(by: .seconds(3))
+        while kill(pid, 0) == 0, ContinuousClock.now < gone {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertNotEqual(kill(pid, 0), 0, "the worker must be killed and reaped after stop")
+        let after = await runner.recognize(input: try input(), timeoutMs: 1000)
+        XCTAssertTrue(after.recognizedLines.isEmpty)
+    }
 }

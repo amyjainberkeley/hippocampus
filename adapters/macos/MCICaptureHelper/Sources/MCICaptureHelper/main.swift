@@ -478,7 +478,10 @@ if captureOptions.captureEnabled {
     let ocrEngine: OCREngine
     let ocrTimeoutMs: Int
     if let executable = PaddleOCRRunner.bundledExecutableURL {
-        ocrEngine = PaddleOCRRunner(executableURL: executable)
+        // One warm worker for every frame; its models load during startup.
+        let paddle = PaddleOCRRunner(executableURL: executable, persistent: true)
+        paddle.prewarm()
+        ocrEngine = paddle
         ocrTimeoutMs = PaddleOCRRunner.timeoutMs
     } else {
         // Unbundled development helpers retain the native engine. Release
