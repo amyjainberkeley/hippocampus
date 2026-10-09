@@ -2,13 +2,27 @@
 
 _Updated on 2026-10-08; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `c325854`
+Audited code baseline: `a7c9e42`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## October 9: Live Findings On The Owner Mac
+
+Installing 0.2.1 on the owner Mac exposed four faults the synthetic suites
+could not: a quit that never completed while capture was recovering (now
+bounded, and a quit always ends the app); OCR returning nothing on large,
+sparse windows and refusing whole frames over one wide line (now a coverage
+pass and word-gap splitting); and every Chrome frame refused because the
+window listing's `tab` separator named Chrome's tab class and the listing
+and URL lookups exceeded 250 ms (now a real separator, longer bounded
+budgets and a short fail-closed cache). An orphaned headless Chrome from an
+earlier automation session also captured AppleScript's "Google Chrome"
+target; it was stopped. Live storage, recall and the release remain to be
+verified at this baseline.
 
 ## October 8: Capture Unblocked, Transcription Rebuilt, 0.2.1
 
