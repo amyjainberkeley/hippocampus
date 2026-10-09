@@ -77,6 +77,7 @@ final class MenuBarLifecycleTests: XCTestCase {
         // deliberate quit path rather than being cancelled as noise.
         XCTAssertTrue(content.contains("andEventID: AEEventID(kAEQuitApplication)"))
         XCTAssertTrue(content.contains("@objc private func handleQuitAppleEvent("))
+        XCTAssertTrue(content.contains("DispatchSource.makeSignalSource(signal: SIGTERM"))
         XCTAssertTrue(content.contains("return .terminateLater"))
         XCTAssertTrue(content.contains("await self.terminationCoordinator.terminate("))
         XCTAssertTrue(coordinator.contains("try await supervisor.shutdownAndWait("))
