@@ -264,7 +264,9 @@ final class AXTraversalReadShapeTests: XCTestCase {
                 0: [kAXChildrenAttribute: (.success, Array(elements.dropFirst()) as CFArray)],
                 limit + 1: secureAttributes,
             ])
-            XCTAssertEqual(result.outcome, .errored)
+            // The search is bounded: a field past the node budget is outside
+            // this backstop (Secure Event Input and the focused subrole cover it).
+            XCTAssertEqual(result.outcome, .negative)
             XCTAssertEqual(Set(result.reads.map(\.node)), Set(0...limit))
         }
     }
@@ -280,19 +282,21 @@ final class AXTraversalReadShapeTests: XCTestCase {
                 }
                 responses[secureDepth, default: [:]].merge(secureAttributes) { _, new in new }
                 let result = probe(signal, nodes: elements, responses: responses)
-                XCTAssertEqual(result.outcome, secureDepth == limit ? .positive : .errored)
+                // The boundary node is still checked; anything deeper is outside the search.
+                XCTAssertEqual(result.outcome, secureDepth == limit ? .positive : .negative)
                 XCTAssertTrue(result.reads.allSatisfy { $0.node <= limit })
             }
         }
     }
 
-    func testCycleRemainsBounded() {
+    func testSelfReferenceIsSkippedAndBounded() {
         let elements = nodes(1)
         for signal in Signal.allCases {
             let result = probe(signal, nodes: elements, responses: [0: [
                 kAXFocusedUIElementAttribute: (.success, elements[0]),
             ]])
-            XCTAssertEqual(result.outcome, .errored)
+            // An element that names itself as its focused descendant hides nothing.
+            XCTAssertEqual(result.outcome, .negative)
             XCTAssertLessThanOrEqual(result.reads.count, (AXSubroleProbe.backstopMaxDepth + 1) * 5 + 1)
         }
     }

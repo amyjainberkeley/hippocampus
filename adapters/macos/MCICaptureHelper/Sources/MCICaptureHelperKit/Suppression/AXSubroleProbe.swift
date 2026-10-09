@@ -686,6 +686,18 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
     /// Walk includes both `kAXChildrenAttribute` AND the focused
     /// descendant chain (`kAXFocusedUIElementAttribute`). Depth ≤ 3
     /// and total visited nodes ≤ 32; aborts on first match.
+    ///
+    /// The bound is the search, not a failure. Nodes past the depth,
+    /// node or per-node child limit are outside it, so reaching the
+    /// bound yields `.negative` when nothing inside it was secure.
+    /// Only a failed or malformed AX read yields `.errored`. A node
+    /// already visited is skipped: AX commonly reports an element as
+    /// its own focused descendant, and walking that link again can
+    /// only re-read a subrole that was already checked. Treating
+    /// either case as unknown suppressed every frame from apps with
+    /// deep or self-referencing trees (Electron, web views), so live
+    /// capture stored nothing from 2026-09-14 (owner-approved change,
+    /// 2026-10-08; docs/audits/2026-10-08-capture-ax-bounds.md).
     static func descendantSecureSubroleSignal(
         of root: AXUIElement,
         readString: (AXUIElement, CFString) -> (AXError, String?) = readStringObservation,
@@ -698,6 +710,7 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
         var firstFailure: AXTraversalFailure?
         var ancestors: [AXUIElement] = []
         var ancestorLinkObserved = false
+        var visited: [AXUIElement] = [root]
         defer {
             if let firstFailure { onFailure?(firstFailure) }
         }
@@ -713,7 +726,6 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
         }
         func observeLink(_ child: AXUIElement) {
             // Identity comparison only, using references already returned by AX.
-            // Do not skip cycles or change the traversal/classification policy.
             guard onFailure != nil, firstFailure == nil, !ancestorLinkObserved else { return }
             ancestorLinkObserved = ancestors.contains { CFEqual($0, child) }
         }
@@ -721,14 +733,17 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
             switch issue {
             case .ax(let status): record(.childrenRead, status: status.rawValue, depth: depth)
             case .malformedValue: record(.childrenMalformed, status: 0, depth: depth)
-            case .incomplete: record(.childrenIncomplete, status: 0, depth: depth)
+            // More children than the per-node limit: the rest are outside the bound.
+            case .incomplete: break
             }
         }
         func recurse(_ node: AXUIElement, depth: Int) -> Bool {
+            // A node at the depth bound has had its own subrole checked; its
+            // descendants are outside the search.
+            guard depth < backstopMaxDepth, budget > 0 else { return false }
             if onFailure != nil { ancestors.append(node) }
             defer { if onFailure != nil { ancestors.removeLast() } }
-            // Preserve focused-link-first order, including all existing reads
-            // at the depth/node boundary. Diagnostics never add AX queries.
+            // Focused link first, then children. Diagnostics never add AX queries.
             var queued: [AXUIElement] = []
             do {
                 if let focusedChild = try readFocusedChild(
@@ -758,18 +773,11 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
                 recordArrayIssue(issue, depth: depth)
             }
 
-            // The boundary node is already visited. Check its links to distinguish
-            // a known leaf from uninspected work without visiting beyond the bound.
-            if !queued.isEmpty && (budget <= 0 || depth >= backstopMaxDepth) {
-                record(budget <= 0 ? .nodeLimit : .depthLimit, status: nil, depth: depth)
-                return false
-            }
             for child in queued {
-                if budget <= 0 {
-                    record(.nodeLimit, status: nil, depth: depth)
-                    return false
-                }
+                if visited.contains(where: { CFEqual($0, child) }) { continue }
+                guard budget > 0 else { return false }
                 budget -= 1
+                visited.append(child)
                 let (subroleStatus, subroleValue) = readString(child, kAXSubroleAttribute as CFString)
                 switch priorClassify(
                     focusResult: .success, focusedRefMatched: true,
@@ -899,9 +907,13 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
 
         var budget = backstopMaxNodes
         var found = false
+        var visited: [AXUIElement] = [element]
 
+        // Same bound semantics as signal 1: reaching the bound or revisiting
+        // a node is not an error; a failed or malformed read is.
         func recurse(_ node: AXUIElement, depth: Int) {
             if found { return }
+            guard depth < backstopMaxDepth, budget > 0 else { return }
 
             var queued: [AXUIElement] = []
             do {
@@ -916,25 +928,20 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
             switch readChildren(node, kAXChildrenAttribute as CFString) {
             case .success(let arr):
                 queued.append(contentsOf: arr)
-            case .partial(let arr, _):
+            case .partial(let arr, let issue):
                 queued.append(contentsOf: arr)
-                anyError = true
+                if case .incomplete = issue {} else { anyError = true }
             case .empty:
                 break
             case .errored:
                 anyError = true
             }
-            if !queued.isEmpty && (budget <= 0 || depth >= backstopMaxDepth) {
-                anyError = true
-                return
-            }
             for child in queued {
                 if found { return }
-                if budget <= 0 {
-                    anyError = true
-                    return
-                }
+                if visited.contains(where: { CFEqual($0, child) }) { continue }
+                guard budget > 0 else { return }
                 budget -= 1
+                visited.append(child)
                 switch checkOne(child) {
                 case .positive: found = true; return
                 case .negative: break
@@ -1060,12 +1067,12 @@ public struct AXSubroleProbe: AXSecureSubroleProbe {
             for i in 0..<inspectedCount {
                 let p = CFArrayGetValueAtIndex(arr, i)
                 guard let p else {
-                    issue = issue ?? .malformedValue
+                    issue = .malformedValue  // outranks .incomplete, which is benign
                     continue
                 }
                 let item = Unmanaged<CFTypeRef>.fromOpaque(p).takeUnretainedValue()
                 guard CFGetTypeID(item) == AXUIElementGetTypeID() else {
-                    issue = issue ?? .malformedValue
+                    issue = .malformedValue  // outranks .incomplete, which is benign
                     continue
                 }
                 // swiftlint:disable:next force_cast

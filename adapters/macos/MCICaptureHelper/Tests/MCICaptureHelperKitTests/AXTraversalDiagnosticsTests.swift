@@ -72,7 +72,8 @@ final class AXTraversalDiagnosticsTests: XCTestCase {
             ((.success, "SYNTHETIC_PRIVATE_LABEL" as CFString), .childrenMalformed, 0),
             ((.success, [NSNull()] as CFArray), .childrenMalformed, 0),
             ((.success, [elements[1], NSNull()] as CFArray), .childrenMalformed, 0),
-            ((.success, Array(repeating: elements[1], count: 33) as CFArray), .childrenIncomplete, 0),
+            // A malformed entry still fails closed when the array is also over-long.
+            ((.success, ([NSNull()] + Array(repeating: elements[1], count: 33)) as CFArray), .childrenMalformed, 0),
         ]
         for (response, reason, status) in cases {
             let result = probe(elements, [0: [kAXChildrenAttribute: response]])
@@ -82,6 +83,15 @@ final class AXTraversalDiagnosticsTests: XCTestCase {
             XCTAssertEqual(failure.status, status)
             XCTAssertEqual(failure.depth, 0)
         }
+    }
+
+    func testChildrenPastThePerNodeLimitAreOutsideTheSearch() {
+        let elements = nodes(2)
+        let result = probe(elements, [0: [
+            kAXChildrenAttribute: (.success, Array(repeating: elements[1], count: 33) as CFArray),
+        ]])
+        XCTAssertEqual(result.outcome, .negative)
+        XCTAssertTrue(result.failures.isEmpty)
     }
 
     func testDescendantSubroleFailureRecordsTheVisitedChild() throws {
@@ -102,38 +112,33 @@ final class AXTraversalDiagnosticsTests: XCTestCase {
         }
     }
 
-    func testCycleRemainsUnknownAndReportsDepthExhaustionWithoutExtraReads() throws {
+    /// The live failure behind 2026-09-14 onward: the focused element names
+    /// itself as its own focused descendant. Walking that link re-read the same
+    /// subrole to the depth bound and reported unknown, so every frame was
+    /// suppressed. The link is now skipped and the element's children read.
+    func testSelfReferenceIsSkippedWithoutExtraReads() {
         let elements = nodes(1)
         let responses: [Int: [String: Response]] = [0: [
             kAXFocusedUIElementAttribute: (.success, elements[0]),
         ]]
         let result = probe(elements, responses)
         let without = probe(elements, responses, diagnostics: false)
-        XCTAssertEqual(result.outcome, .errored)
+        XCTAssertEqual(result.outcome, .negative)
         XCTAssertEqual(result.outcome, without.outcome)
         XCTAssertEqual(result.reads, without.reads)
-        XCTAssertEqual(result.reads.count, 11)
-        let failure = try XCTUnwrap(result.failures.first)
-        XCTAssertEqual(failure.reason, .depthLimit)
-        XCTAssertNil(failure.status)
-        XCTAssertEqual(failure.depth, 3)
-        XCTAssertEqual(failure.visitedDescendants, 3)
-        XCTAssertTrue(failure.ancestorLinkObserved)
+        XCTAssertEqual(result.reads, ["0:\(kAXFocusedUIElementAttribute)", "0:\(kAXChildrenAttribute)"])
+        XCTAssertTrue(result.failures.isEmpty)
     }
 
-    func testSharedBudgetExhaustionIsNotMisreportedAsDepthExhaustion() throws {
+    func testExhaustingTheNodeBudgetIsTheEndOfTheSearchNotAFailure() {
         let elements = nodes(34)
         let result = probe(elements, [0: [
             kAXFocusedUIElementAttribute: (.success, elements[1]),
             kAXChildrenAttribute: (.success, Array(elements[2...33]) as CFArray),
         ]])
-        XCTAssertEqual(result.outcome, .errored)
-        let failure = try XCTUnwrap(result.failures.first)
-        XCTAssertEqual(failure.reason, .nodeLimit)
-        XCTAssertNil(failure.status)
-        XCTAssertEqual(failure.depth, 0)
-        XCTAssertEqual(failure.visitedDescendants, 32)
-        XCTAssertFalse(failure.ancestorLinkObserved)
+        XCTAssertEqual(result.outcome, .negative)
+        XCTAssertTrue(result.failures.isEmpty)
+        XCTAssertFalse(result.reads.contains { $0.hasPrefix("33:") }, "the 33rd descendant is past the budget")
     }
 
     func testSecurePositiveStillWinsAnEarlierErrorAndKnownLeavesHaveNoFailure() {
