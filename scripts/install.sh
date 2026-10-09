@@ -94,15 +94,19 @@ if [ ! -w "$APPDIR" ]; then
 fi
 DEST="$APPDIR/Hippocampus.app"
 
-if pgrep -f "$DEST/Contents/MacOS/" >/dev/null 2>&1; then
+# Quit the running app. Its helpers share the bundle identifier, so address
+# the main process directly; SIGTERM is a graceful quit from 0.2.1 on, and
+# older versions' helpers stop with it.
+if pgrep -f "$DEST/Contents/MacOS/Hippocampus$" >/dev/null 2>&1; then
   say "  quitting the running copy"
-  osascript -e 'tell application id "ai.hippocampus" to quit' >/dev/null 2>&1 || true
+  pkill -TERM -f "$DEST/Contents/MacOS/Hippocampus$" || true
   i=0
-  while pgrep -f "$DEST/Contents/MacOS/" >/dev/null 2>&1 && [ "$i" -lt 20 ]; do
+  while pgrep -f "$DEST/Contents/MacOS/(Hippocampus|MCICaptureHelper|recall-ui|onboarding)" >/dev/null 2>&1 \
+      && [ "$i" -lt 40 ]; do
     sleep 0.5
     i=$((i + 1))
   done
-  pgrep -f "$DEST/Contents/MacOS/" >/dev/null 2>&1 \
+  pgrep -f "$DEST/Contents/MacOS/(Hippocampus|MCICaptureHelper|recall-ui|onboarding)" >/dev/null 2>&1 \
     && die "Hippocampus is still running; quit it from the menu bar and run this again"
 fi
 

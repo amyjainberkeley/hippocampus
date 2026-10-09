@@ -102,6 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var tccStderrTail: TCCHelperStderrTail?
     private let terminationRequests = ApplicationTerminationRequestGate()
     private var terminationTask: Task<Void, Never>?
+    private var terminateSignalSource: DispatchSourceSignal?
     private var didCleanUpLifecycle = false
     private lazy var terminationCoordinator = ApplicationTerminationCoordinator(
         supervisor: supervisor,
@@ -176,6 +177,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             forEventClass: AEEventClass(kCoreEventClass),
             andEventID: AEEventID(kAEQuitApplication)
         )
+        // The capture helper and Recall share this bundle identifier, so a
+        // Quit addressed by bundle ID can land on them instead. SIGTERM to
+        // this process (the installer, `brew uninstall`) is a deliberate
+        // quit too, through the same bounded path.
+        signal(SIGTERM, SIG_IGN)
+        let terminateSignal = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        terminateSignal.setEventHandler { [weak self] in self?.requestQuit() }
+        terminateSignal.resume()
+        terminateSignalSource = terminateSignal
         for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification,
                      NSWorkspace.sessionDidBecomeActiveNotification] {
             NSWorkspace.shared.notificationCenter.addObserver(
