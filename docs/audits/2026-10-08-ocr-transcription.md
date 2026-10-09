@@ -75,6 +75,30 @@ The privacy order is unchanged: the complete raw OCR text is checked for
 secrets first, then the compacted, reordered text is checked again before
 anything is stored.
 
+## Found on the owner Mac: two ways real windows read as empty
+
+With capture unblocked, the live trace showed 150 frames allowed by the
+privacy cascade but 8 of 9 transcriptions empty. Two worker behaviours the
+synthetic benchmark never exercised:
+
+- **Large, sparse frames detect nothing.** Two lines of 24 px text on a
+  3420x2214 (or even 2880x1800) canvas returned no boxes at full or half
+  scale, while the same text on a 1710x1000 canvas was found. Dense screens
+  were unaffected. Every short document or quiet chat window read as empty.
+- **One wide line refused the whole frame.** A bookmarks bar or long log line
+  wider than 80 times its height exceeded the recognition bound, and the worker
+  failed the entire reading, losing every other line.
+
+The worker now wraps detection in a coverage pass: after the whole-frame pass,
+patches of high-contrast pixels that no box covers are detected again at full
+resolution (at most 16 per frame; dense screens almost never have any). A
+second-pass box overlapping a first-pass box is a duplicate and is dropped.
+Lines wider than 40 times their height are split at the widest blank column
+run (a word space) and every piece is recognized, so the privacy scan still
+sees all of the text. Sparse frames now read completely, the wide-line frame
+reads all of its lines, and the benchmark is unchanged (0.967 exact at
+2880x1800, 0.950 at 3420x2138).
+
 ## Verification
 
 - Swift helper suite: 854 tests. The three real-Vision timing tests fail when
