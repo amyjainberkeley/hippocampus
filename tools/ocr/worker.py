@@ -113,7 +113,198 @@ def load_engine(model_dir, *, threads=1, half_res_detection=False):
         return resize_recognition(image, max_wh_ratio)
 
     recognizer.resize_norm_img = bounded_recognition
+    engine.text_det = CoverageDetector(engine.text_det)
     return engine
+
+
+# Screen text is axis-aligned, so boxes are handled as rectangles below.
+MAX_LINE_RATIO = 40      # widest crop sent to recognition, as width / height
+MAX_EXTRA_REGIONS = 16   # bound on second-pass detector runs per frame
+INK_CELL = 4             # ink map resolution, in pixels per cell
+INK_CONTRAST = 40        # local contrast that counts as ink
+
+
+def _rect(quad):
+    xs = [float(p[0]) for p in quad]
+    ys = [float(p[1]) for p in quad]
+    return [min(xs), min(ys), max(xs), max(ys)]
+
+
+def _overlap_share(rect, other):
+    """Share of `rect`'s area that `other` covers."""
+    w = min(rect[2], other[2]) - max(rect[0], other[0])
+    h = min(rect[3], other[3]) - max(rect[1], other[1])
+    area = (rect[2] - rect[0]) * (rect[3] - rect[1])
+    return (w * h) / area if w > 0 and h > 0 and area > 0 else 0.0
+
+
+def _merge_across_sources(items):
+    """Union boxes from different detector runs that overlap on one text row.
+
+    `items` are (quad, rect, score, source). A line cut by a region edge is
+    found twice, once per run; within one run the detector never overlaps
+    itself. A box merged with nothing keeps the detector's own quad, so its
+    crop is exactly what the detector chose.
+    """
+    parent = list(range(len(items)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(len(items)):
+        _, a, _, source_a = items[i]
+        for j in range(i + 1, len(items)):
+            _, b, _, source_b = items[j]
+            if source_a == source_b:
+                continue
+            overlap_x = min(a[2], b[2]) - max(a[0], b[0])
+            overlap_y = min(a[3], b[3]) - max(a[1], b[1])
+            if overlap_x > 0 and overlap_y >= 0.5 * min(a[3] - a[1], b[3] - b[1]):
+                parent[find(i)] = find(j)
+    groups = {}
+    for i, item in enumerate(items):
+        groups.setdefault(find(i), []).append(item)
+    merged = []
+    for group in groups.values():
+        if len(group) == 1:
+            quad, rect, score, _ = group[0]
+            merged.append((quad, rect, score))
+            continue
+        rect = [min(r[0] for _, r, _, _ in group), min(r[1] for _, r, _, _ in group),
+                max(r[2] for _, r, _, _ in group), max(r[3] for _, r, _, _ in group)]
+        merged.append((None, rect, max(s for _, _, s, _ in group)))
+    return merged
+
+
+def _split_wide(image, rect):
+    """Split a line too wide for recognition at its emptiest columns.
+
+    Refusing the whole frame for one long line (a bookmarks bar, a log line)
+    lost every other line on screen. Every piece is still recognized, so the
+    privacy scan still sees all of the text.
+    """
+    import numpy as np
+    x0, y0, x1, y1 = rect
+    height = y1 - y0
+    if height <= 0 or (x1 - x0) / height <= MAX_LINE_RATIO:
+        return [rect]
+    crop = image[int(y0):max(int(y0) + 1, math.ceil(y1)), int(x0):max(int(x0) + 1, math.ceil(x1))]
+    gray = crop.mean(axis=2)
+    ink = (np.abs(gray - np.median(gray)) > INK_CONTRAST).sum(axis=0)
+    width = crop.shape[1]
+    target = max(1, int(MAX_LINE_RATIO * height * 0.8))
+    pieces, start = [], 0
+    while width - start > MAX_LINE_RATIO * height:
+        low = start + max(1, int(target * 0.6))
+        high = min(width - 1, start + target)
+        pieces.append([x0 + start, y0, x0 + _widest_gap(ink, low, high), y1])
+        start = int(pieces[-1][2] - x0)
+    pieces.append([x0 + start, y0, x1, y1])
+    return pieces
+
+
+def _widest_gap(ink, low, high):
+    """Middle of the widest blank column run in [low, high]: a word space
+    rather than the gap between two letters. The emptiest column if none."""
+    best_start, best_length, run_start = None, 0, None
+    for column in range(low, high + 2):
+        blank = column <= high and ink[column] == 0
+        if blank and run_start is None:
+            run_start = column
+        elif not blank and run_start is not None:
+            if column - run_start > best_length:
+                best_start, best_length = run_start, column - run_start
+            run_start = None
+    if best_start is None:
+        return low + int(ink[low:high + 1].argmin())
+    return best_start + best_length // 2
+
+
+def _uncovered_ink(image, covered):
+    """Regions with text-like contrast that no detected box covers."""
+    import cv2
+    import numpy as np
+    height, width = image.shape[:2]
+    small = cv2.resize(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY),
+                       (max(1, width // INK_CELL), max(1, height // INK_CELL)),
+                       interpolation=cv2.INTER_AREA)
+    gradient = cv2.morphologyEx(small, cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
+    ink = (gradient > INK_CONTRAST).astype(np.uint8)
+    for x0, y0, x1, y1 in covered:
+        ink[max(0, int(y0 / INK_CELL) - 2):int(y1 / INK_CELL) + 3,
+            max(0, int(x0 / INK_CELL) - 2):int(x1 / INK_CELL) + 3] = 0
+    ink = cv2.dilate(ink, np.ones((5, 15), np.uint8))
+    count, _, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
+    regions = []
+    for i in range(1, count):
+        x, y, w, h, area = (int(v) for v in stats[i])
+        if area < 12:
+            continue
+        margin = 12
+        regions.append((area, [max(0, (x - margin) * INK_CELL), max(0, (y - margin) * INK_CELL),
+                               min(width, (x + w + margin) * INK_CELL),
+                               min(height, (y + h + margin) * INK_CELL)]))
+    regions.sort(key=lambda r: -r[0])
+    return [r for _, r in regions[:MAX_EXTRA_REGIONS]]
+
+
+class CoverageDetector:
+    """Whole-frame detection, then a second look where text went unseen.
+
+    The detection model misses text on large, mostly empty frames (a short
+    document in a big window found nothing at 2880x1800), while the same
+    text in a smaller frame is found. A second pass runs the detector on
+    each uncovered patch of high-contrast pixels; dense screens rarely have
+    any, so the cost lands only where it is needed.
+    """
+
+    def __init__(self, detector):
+        self.detector = detector
+
+    def __getattr__(self, name):
+        return getattr(self.detector, name)
+
+    def __call__(self, image):
+        import time
+        import numpy as np
+        from rapidocr.ch_ppocr_det.utils import TextDetOutput
+        started = time.perf_counter()
+        first = self.detector(image)
+        items = [] if first.boxes is None else [
+            (np.asarray(b, dtype=np.float32), _rect(b), float(s), 0)
+            for b, s in zip(first.boxes, first.scores)]
+        seen = [r for _, r, _, _ in items]
+        for source, (x0, y0, x1, y1) in enumerate(_uncovered_ink(image, seen), 1):
+            found = self.detector(np.ascontiguousarray(image[y0:y1, x0:x1]))
+            if found.boxes is None:
+                continue
+            for box, score in zip(found.boxes, found.scores):
+                quad = np.asarray(box, dtype=np.float32) + np.array([x0, y0], dtype=np.float32)
+                rect = _rect(quad)
+                # The whole-frame box stays authoritative; a second look at
+                # the same text is a duplicate, not a better crop.
+                if any(_overlap_share(rect, other) > 0.3 for other in seen):
+                    continue
+                items.append((quad, rect, float(score), source))
+        boxes, scores = [], []
+        for quad, rect, score in _merge_across_sources(items):
+            pieces = _split_wide(image, rect)
+            if quad is not None and len(pieces) == 1:
+                boxes.append(quad.tolist())
+                scores.append(score)
+                continue
+            for x0, y0, x1, y1 in pieces:
+                boxes.append([[x0, y0], [x1, y0], [x1, y1], [x0, y1]])
+                scores.append(score)
+        elapsed = time.perf_counter() - started
+        if not boxes:
+            return TextDetOutput(img=image, elapse=elapsed)
+        order = sorted(range(len(boxes)), key=lambda i: (boxes[i][0][1], boxes[i][0][0]))
+        return TextDetOutput(img=image, boxes=np.array([boxes[i] for i in order], dtype=np.float32),
+                             scores=[scores[i] for i in order], elapse=elapsed)
 
 
 def encode_lines(texts, scores, boxes, width, height):
