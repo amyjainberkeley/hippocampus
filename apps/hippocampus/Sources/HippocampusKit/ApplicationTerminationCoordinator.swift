@@ -85,9 +85,13 @@ package final class ApplicationTerminationCoordinator {
         self.onFailure = onFailure
     }
 
-    /// Owns the awaited AppKit termination boundary. A positive reply is sent
-    /// only after the supervisor publishes `.stopped`; restart scheduling is
-    /// downstream of that same proof.
+    /// Owns the awaited AppKit termination boundary. Restart scheduling is
+    /// downstream of a verified `.stopped`: relaunching beside a surviving
+    /// writer is never allowed. A quit always completes. When the verified
+    /// stop hangs or fails within its bound, the supervisor is forced to a
+    /// stop that can never relaunch and the app exits; its children follow
+    /// the parent lease. On 2026-09-26 and 2026-10-08 a quit during capture
+    /// recovery waited forever instead.
     @discardableResult
     package func terminate(
         intent: ApplicationTerminationIntent,
@@ -98,10 +102,16 @@ package final class ApplicationTerminationCoordinator {
             return true
         }
 
+        let outcome = await boundedShutdown()
         do {
-            try await supervisor.shutdownAndWait(timeout: shutdownTimeout)
-            guard supervisor.state == .stopped else {
-                throw ApplicationTerminationError.supervisorDidNotStop
+            var verified = false
+            if case .stopped = outcome { verified = supervisor.state == .stopped }
+            if !verified {
+                guard intent == .quit else {
+                    if case .failed(let error) = outcome { throw error }
+                    throw ApplicationTerminationError.supervisorDidNotStop
+                }
+                await supervisor.forceStopForQuit(timeout: shutdownTimeout)
             }
             if intent == .restart {
                 try restartLauncher.scheduleRestart()
@@ -114,6 +124,39 @@ package final class ApplicationTerminationCoordinator {
             onFailure(error)
             reply(false)
             return false
+        }
+    }
+
+    private enum ShutdownOutcome {
+        case stopped
+        case failed(Error)
+        case timedOut
+    }
+
+    /// The verified stop, bounded. Its own steps are bounded too, but a quit
+    /// must not depend on every one of them keeping that promise.
+    private func boundedShutdown() async -> ShutdownOutcome {
+        let supervisor = supervisor
+        let limit = shutdownTimeout * 2 + 1
+        return await withCheckedContinuation { continuation in
+            var resumed = false
+            func finish(_ outcome: ShutdownOutcome) {
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume(returning: outcome)
+            }
+            Task { @MainActor in
+                do {
+                    try await supervisor.shutdownAndWait(timeout: self.shutdownTimeout)
+                    finish(.stopped)
+                } catch {
+                    finish(.failed(error))
+                }
+            }
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(limit))
+                finish(.timedOut)
+            }
         }
     }
 }

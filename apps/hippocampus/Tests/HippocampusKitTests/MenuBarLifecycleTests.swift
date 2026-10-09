@@ -76,7 +76,10 @@ final class MenuBarLifecycleTests: XCTestCase {
         XCTAssertTrue(content.contains("return .terminateLater"))
         XCTAssertTrue(content.contains("await self.terminationCoordinator.terminate("))
         XCTAssertTrue(coordinator.contains("try await supervisor.shutdownAndWait("))
-        XCTAssertTrue(coordinator.contains("guard supervisor.state == .stopped"))
+        XCTAssertTrue(coordinator.contains("verified = supervisor.state == .stopped"))
+        // Only a quit may proceed past an unverified stop; a restart may not.
+        XCTAssertTrue(coordinator.contains("guard intent == .quit else"))
+        XCTAssertTrue(coordinator.contains("await supervisor.forceStopForQuit("))
         XCTAssertTrue(coordinator.contains("try restartLauncher.scheduleRestart()"))
         XCTAssertTrue(coordinator.contains("reply(true)"))
         XCTAssertFalse(content.contains("applicationWillTerminate(_ notification: Notification) {\n        supervisor.stop()"))
