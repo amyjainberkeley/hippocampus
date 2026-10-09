@@ -5,6 +5,35 @@ commits are intentionally omitted from release notes.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-08
+
+### Remembering Again
+
+- Screen memory records again. A safety check meant to catch hidden password
+  fields was treating complex app windows (editors, chat apps, web pages) as
+  unknowable and skipping every frame. Password managers, secure text entry,
+  major sign-in and banking sites and private windows are still never recorded.
+- New text is noticed: typing, new chat messages and edits are now read even
+  when the rest of the window looks the same.
+
+### Screen Text You Can Read
+
+- Saved screen text now reads the way the screen does. Sidebars, chat panes
+  and editor columns stay separate instead of being interleaved line by line,
+  tables read row by row, and code keeps its indentation.
+- Reading a screen takes about a second instead of six or more, so busy
+  moments are no longer dropped while the reader catches up.
+
+### Search And Install
+
+- Searches from connected AI assistants return their results instead of an
+  empty list labelled "degraded".
+- Install with one line, `curl -fsSL https://github.com/amyjainberkeley/hippocampus/releases/latest/download/install.sh | sh`,
+  or with Homebrew. The installer checks Apple's notarization and the
+  developer signature before copying the app.
+
+### Recall
+
 - Change Recall's default shortcut to **Control–Shift–Space**, keeping it
   separate from Superapp Whisper's Command–Shift–Space. Onboarding, popup and
   shortcut help show the new combination. Recall also remains accessible from

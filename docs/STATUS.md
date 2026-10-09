@@ -1,14 +1,48 @@
 # Hippocampus Status
 
-_Updated on 2026-10-07; qualification scope is recorded per checkpoint._
+_Updated on 2026-10-08; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `afed4a3`
+Audited code baseline: `c325854`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## October 8: Capture Unblocked, Transcription Rebuilt, 0.2.1
+
+**Live capture had stored nothing since 2026-09-14.** The accessibility
+backstop for nested password fields followed a focused element's link to
+itself (or a deep tree) to its bound, reported an error, and the cascade
+suppressed the frame as `failsafe-unknown` (997 of 1,411 frames in ten minutes
+on the owner Mac). With the owner's approval, reaching the bound or revisiting
+a node now ends the search as "nothing secure found"; failed or malformed reads
+still fail closed. The other protections are unchanged; see the
+[audit](audits/2026-10-08-capture-ax-bounds.md).
+
+**Stored text now follows the screen.** A new benchmark of eight synthetic app
+screens (`tools/ocr/screens/`) measured the shipped pipeline at 0.857 exact
+lines and 0.269 character error, almost all of it columns interleaved by
+engine-order joining, and 6.78 s per frame from a cold worker per frame. With
+reading-order assembly, a warm persistent worker, four threads and half-scale
+detection on Retina frames: 0.967 exact lines, 0.001 character error, 1.27 s
+per frame. A thumbnail check now reads typed text that the 72-pixel hash
+missed. See the [transcription audit](audits/2026-10-08-ocr-transcription.md).
+
+**Recall** returns ranked results as `hits` (still labelled `degraded` with the
+missing capability) instead of an empty list. **Install** is one line: a
+script that verifies checksum, team, notarization and Gatekeeper before
+installing the app; tested in a sandbox against the 0.2.0 notarized DMG.
+
+Verification: 854 helper tests (the three real-Vision timing tests can exceed
+their 1 s budget under heavy load; they are not on the shipped OCR path), 16
+OCR worker tests, MCP server and real-brain suites (65), `handoff_cli` (9, now
+zone-independent), live-capture verifier and product-truth contracts.
+
+Not yet qualified at this baseline: live capture and recall on the owner Mac
+with this build, real-screen OCR accuracy, whole-screen capture (approved,
+not built), a full-day resource trace, and a public release.
 
 ## October 7 Retained Screenshot OCR Check
 
