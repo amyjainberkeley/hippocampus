@@ -78,6 +78,9 @@ final class MenuBarLifecycleTests: XCTestCase {
         XCTAssertTrue(content.contains("andEventID: AEEventID(kAEQuitApplication)"))
         XCTAssertTrue(content.contains("@objc private func handleQuitAppleEvent("))
         XCTAssertTrue(content.contains("DispatchSource.makeSignalSource(signal: SIGTERM"))
+        // A quit requested from a GCD main-queue block deadlocks under
+        // .terminateLater; the signal handler must hop to a run-loop callout.
+        XCTAssertTrue(content.contains("RunLoop.main.perform { self?.requestQuit() }"))
         XCTAssertTrue(content.contains("return .terminateLater"))
         XCTAssertTrue(content.contains("await self.terminationCoordinator.terminate("))
         XCTAssertTrue(coordinator.contains("try await supervisor.shutdownAndWait("))

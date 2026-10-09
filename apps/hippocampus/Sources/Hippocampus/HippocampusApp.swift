@@ -183,7 +183,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // quit too, through the same bounded path.
         signal(SIGTERM, SIG_IGN)
         let terminateSignal = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-        terminateSignal.setEventHandler { [weak self] in self?.requestQuit() }
+        terminateSignal.setEventHandler { [weak self] in
+            // Not from inside this GCD block: a pending terminate spins a
+            // nested run loop that cannot drain the main queue the
+            // termination coordinator needs, so the quit would deadlock.
+            RunLoop.main.perform { self?.requestQuit() }
+        }
         terminateSignal.resume()
         terminateSignalSource = terminateSignal
         for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification,
