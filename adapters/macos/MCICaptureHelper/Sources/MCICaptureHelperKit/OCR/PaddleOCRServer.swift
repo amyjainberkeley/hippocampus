@@ -113,6 +113,10 @@ final class PaddleOCRServer: @unchecked Sendable {
             let process = Process()
             process.executableURL = executableURL
             process.arguments = ["--serve"]
+            // A child inherits the launching queue's QoS. From the OCR lane
+            // (.utility) the worker ran throttled on efficiency cores: 23-30 s
+            // for a frame it reads in about one second at this QoS.
+            process.qualityOfService = .userInitiated
             // Never inherit provider credentials, Python paths, or user model overrides.
             process.environment = ["PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1",
                                    "OMP_NUM_THREADS": "4", "OPENBLAS_NUM_THREADS": "1"]
