@@ -251,6 +251,11 @@ jobs:
             --dmg "dist/Hippocampus-${GITHUB_REF_NAME#v}.dmg" \
             --appcast dist/appcast.xml
 
+      - name: Stage the one-line installer
+        # README's install line fetches releases/latest/download/install.sh;
+        # the script itself verifies the DMG's checksum, team and notarization.
+        run: install -m 0755 scripts/install.sh dist/install.sh
+
       - name: Hand verified artifacts to the credential-free draft job
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -260,6 +265,7 @@ jobs:
           path: |
             dist/Hippocampus-*.dmg
             dist/Hippocampus-*.dmg.sha256
+            dist/install.sh
             dist/appcast.xml
             dist/notary-*.json
 
@@ -286,5 +292,6 @@ jobs:
           files: |
             dist/Hippocampus-*.dmg
             dist/Hippocampus-*.dmg.sha256
+            dist/install.sh
             dist/appcast.xml
             dist/notary-*.json
