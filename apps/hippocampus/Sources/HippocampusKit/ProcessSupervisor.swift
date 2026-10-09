@@ -358,6 +358,41 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
     }
 
+    /// Quit could not verify a clean stop in time. The app is exiting and its
+    /// children follow the parent lease, so make certain nothing relaunches,
+    /// revoke capture consent, try one more bounded stop, and publish
+    /// `.stopped`. Only `ApplicationTerminationCoordinator` calls this, and
+    /// only for a quit; a restart still requires the verified stop.
+    public func forceStopForQuit(timeout: TimeInterval) async {
+        shutdownRequested = true
+        cancelPendingRetry()
+        transitionGate.reset()
+        do {
+            try captureConsentAuthority.disable()
+        } catch {
+            logger.error("supervisor: capture consent revocation failed on forced quit: \(error.localizedDescription)")
+        }
+        stopAncillaryServices(revokeCaptureConsent: false)
+        let topology = topology
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            var resumed = false
+            func finish() {
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume()
+            }
+            Task { @MainActor in
+                try? await topology.stop(timeout: timeout)
+                finish()
+            }
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(timeout * 2 + 1))
+                finish()
+            }
+        }
+        state = .stopped
+    }
+
     public func setPaused(_ paused: Bool) {
         requestedPauseState = paused
         guard !shutdownRequested, shutdownTask == nil else { return }
