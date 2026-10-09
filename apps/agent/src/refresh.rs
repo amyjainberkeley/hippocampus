@@ -378,7 +378,12 @@ fn segment_new(
         // the previous one to decide whether it continues that episode.
         let last = store.last_segmented_event().map_err(|e| e.to_string())?;
         let result = segmenter
-            .segment(&batch, last.as_ref(), store as &dyn EpisodeWriter)
+            .segment_with_context(
+                &batch,
+                last.as_ref(),
+                store as &dyn EpisodeWriter,
+                &|id| crate::episode_worker::is_screen_context(store, id),
+            )
             .map_err(|e| e.to_string())?;
         if result.events_assigned == 0 {
             // Nothing assigned means the same rows come back next read.

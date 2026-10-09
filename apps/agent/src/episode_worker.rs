@@ -73,7 +73,12 @@ pub fn segment_until_drained(
             .map_err(|e| EpisodeWorkerError::Store(e.to_string()))?;
 
         let result = segmenter
-            .segment(&batch, last.as_ref(), store as &dyn EpisodeWriter)
+            .segment_with_context(
+                &batch,
+                last.as_ref(),
+                store as &dyn EpisodeWriter,
+                &|id| is_screen_context(store, id),
+            )
             .map_err(|e| EpisodeWorkerError::Store(e.to_string()))?;
 
         // A batch that assigns nothing would otherwise spin forever: the
@@ -136,10 +141,11 @@ pub async fn run_episode_worker(
         let store_c = Arc::clone(&store);
         let seg = Arc::clone(&segmenter);
         let result = tokio::task::spawn_blocking(move || {
-            seg.segment(
+            seg.segment_with_context(
                 &batch,
                 last.as_ref(),
                 store_c.as_ref() as &dyn EpisodeWriter,
+                &|id| is_screen_context(store_c.as_ref(), id),
             )
         })
         .await
@@ -167,4 +173,11 @@ mod tests {
         };
         assert_eq!(s.events_assigned, 0);
     }
+}
+
+
+/// Text read from a visible window the user was not focused on: context for
+/// search, never a switch of focused work. A failed lookup reads as focused.
+pub(crate) fn is_screen_context(store: &SqlCipherBrainStore, id: mci_brain::EventId) -> bool {
+    matches!(store.event_source(id), Ok(mci_brain::EventSource::ScreenContext))
 }

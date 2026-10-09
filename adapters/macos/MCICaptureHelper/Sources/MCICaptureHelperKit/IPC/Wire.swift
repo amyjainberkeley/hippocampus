@@ -113,6 +113,9 @@ public enum MessageType: UInt16, Sendable {
     /// claimed by `surfaceReleased`; the ADR owes a follow-up doc PR
     /// to reflect the actual assigned slot).
     case ocrEvent = 0x0040
+    /// Whole-screen capture: text from a visible window that is not the
+    /// focused one, attributed to that window. Same payload as `ocrEvent`.
+    case contextOcrEvent = 0x0041
     /// Phase 7 — browser extension full page content event.
     case pageContentEvent = 0x0050
     /// Additive v9 message; paired helper/agent release required.
@@ -244,7 +247,8 @@ public struct OCREvent: Sendable, Equatable {
 ///   · window_title bytes · url bytes · ocr_text bytes
 public func encodeOCREvent(
     seq: UInt64,
-    event: OCREvent
+    event: OCREvent,
+    background: Bool = false
 ) -> Result<Data, OCREventEncodeError> {
     let titleBytes = Array(event.windowTitle.utf8)
     let urlBytes = Array(event.url.utf8)
@@ -279,7 +283,8 @@ public func encodeOCREvent(
     payload.append(contentsOf: urlBytes)
     payload.append(contentsOf: textBytes)
 
-    return .success(assembleFrame(msgType: .ocrEvent, seq: seq, payload: payload))
+    return .success(assembleFrame(
+        msgType: background ? .contextOcrEvent : .ocrEvent, seq: seq, payload: payload))
 }
 
 /// Per-event page content text cap (200 KB). Mirrors

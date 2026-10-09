@@ -8,6 +8,9 @@ pub enum EventSource {
     Unknown,
     /// Text recognized from screen pixels.
     ScreenOcr,
+    /// Text recognized from a visible window the user was not focused on
+    /// (whole-screen capture). Context, not a switch of focused work.
+    ScreenContext,
     /// Browser extension page content.
     BrowserPage,
     /// Browser content merged with a visible screen OCR excerpt.
@@ -27,6 +30,7 @@ impl EventSource {
         match self {
             Self::Unknown => "unknown",
             Self::ScreenOcr => "screen_ocr",
+            Self::ScreenContext => "screen_context",
             Self::BrowserPage => "browser_page",
             Self::BrowserPageWithOcr => "browser_page_with_ocr",
             Self::TranscriptImport => "transcript_import",
@@ -38,6 +42,7 @@ impl EventSource {
     pub(crate) fn from_stored(value: &str) -> Self {
         match value {
             "screen_ocr" => Self::ScreenOcr,
+            "screen_context" => Self::ScreenContext,
             "browser_page" => Self::BrowserPage,
             "browser_page_with_ocr" => Self::BrowserPageWithOcr,
             "transcript_import" => Self::TranscriptImport,

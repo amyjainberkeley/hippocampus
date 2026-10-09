@@ -279,6 +279,9 @@ pub enum MessageType {
     /// Helper → core twice-cleared OCR event with user content
     /// (see [`super::Message::OCREvent`]). ADR-0016 P3.6.
     OCREvent = 0x0040,
+    /// Helper -> core text from a visible, unfocused window
+    /// (see [`super::Message::ContextOCREvent`]). Same payload as `OCREvent`.
+    ContextOCREvent = 0x0041,
     /// Browser extension → agent full page content
     /// (see [`super::Message::PageContentEvent`]). Phase 7 pull-forward.
     PageContentEvent = 0x0050,
@@ -298,6 +301,7 @@ impl MessageType {
             0x0020 => Self::SurfaceReleased,
             0x0030 => Self::HelperHealth,
             0x0040 => Self::OCREvent,
+            0x0041 => Self::ContextOCREvent,
             0x0050 => Self::PageContentEvent,
             0x0060 => Self::ActivityInterval,
             other => {
@@ -582,6 +586,15 @@ fn encode_payload(msg: &Message, out: &mut Vec<u8>) {
             out.extend_from_slice(&tracker_alive_at_us.to_le_bytes());
         }
         Message::OCREvent {
+            seq,
+            ts_us,
+            app_bundle_id,
+            window_title,
+            url,
+            ocr_text,
+            keyframe_hash,
+        }
+        | Message::ContextOCREvent {
             seq,
             ts_us,
             app_bundle_id,
@@ -906,7 +919,7 @@ fn decode_payload(
                 tracker_alive_at_us,
             }
         }
-        MessageType::OCREvent => {
+        MessageType::OCREvent | MessageType::ContextOCREvent => {
             let seq = p.u64_le()?;
             let ts_us = p.u64_le()?;
             let app_bundle_id = p.fixed_64()?;
@@ -923,14 +936,26 @@ fn decode_payload(
             let window_title = p.string_bytes(window_title_len)?;
             let url = p.string_bytes(url_len)?;
             let ocr_text = p.string_bytes(ocr_text_len)?;
-            Message::OCREvent {
-                seq,
-                ts_us,
-                app_bundle_id,
-                window_title,
-                url,
-                ocr_text,
-                keyframe_hash,
+            if msg_type == MessageType::ContextOCREvent {
+                Message::ContextOCREvent {
+                    seq,
+                    ts_us,
+                    app_bundle_id,
+                    window_title,
+                    url,
+                    ocr_text,
+                    keyframe_hash,
+                }
+            } else {
+                Message::OCREvent {
+                    seq,
+                    ts_us,
+                    app_bundle_id,
+                    window_title,
+                    url,
+                    ocr_text,
+                    keyframe_hash,
+                }
             }
         }
         MessageType::PageContentEvent => {
@@ -1959,6 +1984,37 @@ mod tests {
             }
         ));
         assert_eq!(f3.seq, 3);
+    }
+
+    #[test]
+    fn context_ocr_event_roundtrips_with_the_ocr_event_payload() {
+        let mut app = [0u8; 64];
+        app[..18].copy_from_slice(b"com.apple.TextEdit");
+        let fields = (7_u64, 1_700_000_000_000_000_u64, String::from("Notes"), String::from("line one\nline two"));
+        let context = Message::ContextOCREvent {
+            seq: fields.0,
+            ts_us: fields.1,
+            app_bundle_id: app,
+            window_title: fields.2.clone(),
+            url: String::new(),
+            ocr_text: fields.3.clone(),
+            keyframe_hash: [0u8; 32],
+        };
+        roundtrip(&context);
+        let focused = Message::OCREvent {
+            seq: fields.0,
+            ts_us: fields.1,
+            app_bundle_id: app,
+            window_title: fields.2,
+            url: String::new(),
+            ocr_text: fields.3,
+            keyframe_hash: [0u8; 32],
+        };
+        let (a, b) = (encode(1, &context), encode(1, &focused));
+        assert_eq!(a.len(), b.len());
+        let differing: Vec<usize> = (0..a.len()).filter(|&i| a[i] != b[i]).collect();
+        assert_eq!(differing.len(), 1, "only the message type differs");
+        assert_eq!(MessageType::from_u16(0x0041).unwrap(), MessageType::ContextOCREvent);
     }
 
     #[test]

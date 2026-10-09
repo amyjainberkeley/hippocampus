@@ -15,6 +15,12 @@ commits are intentionally omitted from release notes.
   major sign-in and banking sites and private windows are still never recorded.
 - New text is noticed: typing, new chat messages and edits are now read even
   when the rest of the window looks the same.
+- The whole screen is remembered, not only the window in front. Other visible
+  windows, including ones on a second display, are read every few seconds when
+  their text changes and filed under their own app and title. Browsers,
+  password managers, System Settings, notification banners and apps you deny
+  stay out of those reads entirely. Turn it off with
+  `defaults write ai.hippocampus WholeScreenCapture -bool NO`.
 
 ### Screen Text You Can Read
 

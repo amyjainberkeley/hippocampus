@@ -2,13 +2,34 @@
 
 _Updated on 2026-10-08; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `12c102e`
+Audited code baseline: `03537a8`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## October 9: Whole-Screen Capture
+
+With the owner's decision, capture now covers the whole screen, not only the
+focused window ([ADR-0040](decisions/0040-whole-screen-background-capture.md),
+amending ADR-0031). The focused stream is unchanged. A second, low-rate
+stream per display reads visible windows at most every 15 seconds, only when
+their text changed and the user is active, and files each line under the
+topmost window at its position. Sensitive apps, every browser, notification
+banners, Hippocampus and denied apps are excluded from the display filter, so
+their pixels are never produced; an excluded app that launches later pauses
+reads until the filter is rebuilt. Lines from the focused, private-titled,
+denied or non-ordinary windows are dropped. Background text travels as
+`ContextOCREvent` (0x0041), is stored with source `screen_context`, keeps no
+screenshot, and does not split episodes of focused work. The overlap
+qualification runs with `MCI_WHOLE_SCREEN=0` because it qualifies the focused
+stream.
+
+Verification: `BackgroundCapturePolicyTests` (8), wire round trip, segmenter
+(13) and `brain_ingest_context`. Live background capture on the owner Mac is
+not yet verified.
 
 ## October 9: Live Findings On The Owner Mac
 
