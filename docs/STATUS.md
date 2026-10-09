@@ -2,7 +2,7 @@
 
 _Updated on 2026-10-08; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `a7c9e42`
+Audited code baseline: `12c102e`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -21,8 +21,14 @@ window listing's `tab` separator named Chrome's tab class and the listing
 and URL lookups exceeded 250 ms (now a real separator, longer bounded
 budgets and a short fail-closed cache). An orphaned headless Chrome from an
 earlier automation session also captured AppleScript's "Google Chrome"
-target; it was stopped. Live storage, recall and the release remain to be
-verified at this baseline.
+target; it was stopped. Two more were found by driving the production
+runner with the real worker: the worker inherited the OCR lane's utility QoS
+(23-30 s a frame on efficiency cores; now user-initiated), and the lane woke
+its caller before freeing itself, failing every following job as an instant
+timeout (now freed first). External quits also reached Recall instead of the
+app, which shares its bundle identifier; the app now handles the Quit event
+and SIGTERM, and the installer signals the app process. Live storage, recall
+and the release remain to be verified at this baseline.
 
 ## October 8: Capture Unblocked, Transcription Rebuilt, 0.2.1
 
