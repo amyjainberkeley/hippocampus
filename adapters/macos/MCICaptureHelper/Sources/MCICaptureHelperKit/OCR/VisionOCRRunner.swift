@@ -315,8 +315,12 @@ final class VisionOCRExecutionLane: @unchecked Sendable {
 
                 let rawResult = synchronousPerform(input, languages, deadline)
                 let result = Self.result(rawResult, started: started)
-                attempt.resolve(with: result)
+                // Free the lane before waking the caller. Resolving first let
+                // the caller's next job find the lane still occupied and fail
+                // as an instant timeout; on this utility-QoS thread the gap was
+                // long enough to lose nearly every frame after the first.
                 releaseClaim()
+                attempt.resolve(with: result)
             }
 
             deadlineQueue.asyncAfter(

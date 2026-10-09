@@ -83,6 +83,9 @@ public struct PaddleOCRRunner: OCREngine {
         guard let image = PaddleOCRImage(input: input), DispatchTime.now() < deadline else { return empty }
         let process = Process()
         process.executableURL = executableURL
+        // Not the lane's .utility QoS: inherited, it throttled the worker to
+        // efficiency cores (see PaddleOCRServer).
+        process.qualityOfService = .userInitiated
         // Never inherit provider credentials, Python paths, or user model overrides.
         process.environment = ["PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1",
                                "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"]
