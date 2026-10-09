@@ -1,0 +1,16 @@
+amy@studio hippocampus % cargo test -p mci-agent --test handoff_cli
+   Compiling mci-agent v0.2.1 (/Users/amy/hippo-work/usable/apps/agent)
+    Finished `test profile [unoptimized + debuginfo] target(s) in 41.07s
+     Running tests/handoff_cli.rs (target/debug/deps/handoff_cli-73790ef006b0f461)
+test today_prints_the_daily_packet ... FAILED
+thread 'today_prints_the_daily_packet'panicked at apps/agent/tests/handoff_cli.rs:266:5:
+assertion failed: text.contains("## hippocampus (")
+error[E0308]: mismatched types: expected `u64`, found `i64
+test result: FAILED. 8 passed; 1 failed; 0 ignored; finished in 1.91s
+amy@studio hippocampus % git log --oneline -3
+539ece6 fix(recall): return degraded rankings as labelled hits
+328afb9 Qualify retained JPEG screenshots through local OCR
+afed4a3 Allow explicit screenshot re-read to recover key access
+amy@studio hippocampus % shasum -a 256 dist/Hippocampus-0.2.1.dmg
+14443edcdcb43c00455a86d9b454b2c19aeb990b250d99ecb435e7dc643fc823
+amy@studio hippocampus % curl -I https://example.com/v1/status?id=42&mode=full

@@ -44,7 +44,8 @@ final class PostPrivacyEvidenceTests: XCTestCase {
             OCRLine(text: "Next action", boundingBox: CGRect(x: 0.1, y: 0.7, width: 0.3, height: 0.04), confidence: 1),
             OCRLine(text: "Review notes", boundingBox: box.offsetBy(dx: 0.001, dy: -0.001), confidence: 1)
         ]
-        try await assertPublishedText("Review notes\nNext action", lines: lines)
+        // Separate regions are stored with a blank line between them.
+        try await assertPublishedText("Review notes\n\nNext action", lines: lines)
     }
 
     func testRepeatedLabelsInDifferentPositionsAndAlternativeReadingsSurvive() async throws {
@@ -56,7 +57,8 @@ final class PostPrivacyEvidenceTests: XCTestCase {
             OCRLine(text: "cache key", boundingBox: top, confidence: 1),
             OCRLine(text: "cache_key", boundingBox: top, confidence: 1)
         ]
-        try await assertPublishedText("cache_key\ncache_key\ncache key", lines: lines)
+        // Reading order: the top label, its alternative reading, then the bottom label.
+        try await assertPublishedText("cache_key\ncache key\n\ncache_key", lines: lines)
     }
 
     func testUncertainGeometryCannotRemoveText() async throws {
@@ -88,7 +90,7 @@ final class PostPrivacyEvidenceTests: XCTestCase {
             OCRLine(text: "Label", boundingBox: CGRect(x: 0.1, y: Double($0) / 1000,
                                                        width: 0.1, height: 0.0005), confidence: 1)
         }
-        try await assertPublishedText(Array(repeating: "Label", count: 1000).joined(separator: "\n"), lines: lines)
+        try await assertPublishedText(Array(repeating: "Label", count: 1000).joined(separator: "\n\n"), lines: lines)
     }
 
     func testCompactedTextIsCheckedAgainBeforePublicationAndRetention() async {

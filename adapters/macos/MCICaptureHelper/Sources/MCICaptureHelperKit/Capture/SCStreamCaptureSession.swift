@@ -80,6 +80,9 @@ public struct InCallbackSample: Sendable, Equatable {
     /// (`hasBlackedRegion()`). 72 bytes, value-typed — no surface
     /// borrow, no additional pixel read.
     public let grayscale: [UInt8]
+    /// Quarter-scale luminance for the text catch-up check; nil when the
+    /// buffer could not be sampled, which only disables the catch-up.
+    public let thumbnail: TextChangeThumbnail?
 
     public init(
         userIdle: Bool,
@@ -89,7 +92,8 @@ public struct InCallbackSample: Sendable, Equatable {
         frameHeight: Int,
         dhash: DHash,
         appBundleId: String?,
-        grayscale: [UInt8]
+        grayscale: [UInt8],
+        thumbnail: TextChangeThumbnail? = nil
     ) {
         self.userIdle = userIdle
         self.frameStatusComplete = frameStatusComplete
@@ -99,6 +103,7 @@ public struct InCallbackSample: Sendable, Equatable {
         self.dhash = dhash
         self.appBundleId = appBundleId
         self.grayscale = grayscale
+        self.thumbnail = thumbnail
     }
 }
 
@@ -255,6 +260,10 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
 
     private let lock = NSLock()
     private var priorDHash: DHash?
+    /// Written with every baseline commit; read only while `priorDHash` is
+    /// set, so a baseline reset never leaves a stale thumbnail in use.
+    private var priorThumbnail: TextChangeThumbnail?
+    private var priorThumbnailUs: UInt64 = 0
     private var priorDHashGeneration: UInt64 = 0
     private var priorDHashCaptureOrdinal: UInt64 = 0
     private var retryOCRGeneration: UInt64?
@@ -693,14 +702,32 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         return priorDHash
     }
 
+    /// Whether this frame's text moved on enough since the last read frame to
+    /// be read even though its dHash calls it a near-duplicate.
+    private func textChangedSinceBaseline(
+        _ thumbnail: TextChangeThumbnail?, generation: UInt64, nowUs: UInt64
+    ) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard priorDHashGeneration == generation, priorDHash != nil,
+              let thumbnail, let baseline = priorThumbnail else { return false }
+        return TextCatchUpPolicy.shouldRead(
+            changedPixels: thumbnail.changedPixels(since: baseline),
+            sinceBaselineUs: nowUs >= priorThumbnailUs ? nowUs - priorThumbnailUs : 0
+        )
+    }
+
     private func commitPriorDHash(
         _ next: DHash,
+        thumbnail: TextChangeThumbnail?,
+        nowUs: UInt64,
         generation: UInt64,
         captureOrdinal: UInt64
     ) {
         lock.lock(); defer { lock.unlock() }
         guard installedFocusGeneration == generation else { return }
         priorDHash = next
+        priorThumbnail = thumbnail
+        priorThumbnailUs = nowUs
         priorDHashGeneration = generation
         priorDHashCaptureOrdinal = captureOrdinal
         if retryOCRGeneration == generation {
@@ -1460,6 +1487,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         // Read without mutating. The baseline is committed only after the
         // pixel-time privacy snapshot permits raw pixels.
         let prior = currentPriorDHash(for: baselineGeneration)
+        let catchUp = textChangedSinceBaseline(
+            sample.thumbnail, generation: baselineGeneration,
+            nowUs: UInt64(max(0, Date().timeIntervalSince1970 * 1_000_000)))
         let frame = CapturedSampleExtractor.makeCandidateFrame(
             // Quiet-input cadence was applied above. Still admit meaningful
             // changes while reading or watching a meeting without typing.
@@ -1467,7 +1497,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             frameStatusComplete: sample.frameStatusComplete,
             dirtyRects: effectiveDirtyRects,
             dhash: sample.dhash,
-            priorDhash: prior
+            // Text that moved on is read as new content even when the coarse
+            // hash calls the frame a near-duplicate.
+            priorDhash: catchUp ? nil : prior
         )
 
         // ADR-0015 §6 P2.5 — context join. Delegates to the pure
@@ -1615,6 +1647,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
                 if CaptureBaselinePolicy.shouldCommit(outcome: outcome) {
                     self.commitPriorDHash(
                         sample.dhash,
+                        thumbnail: sample.thumbnail,
+                        nowUs: nowUs,
                         generation: baselineGeneration,
                         captureOrdinal: callbackOrdinal
                     )
@@ -1831,7 +1865,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             frameHeight: frameHeight,
             dhash: dhash,
             appBundleId: nil,
-            grayscale: grid
+            grayscale: grid,
+            thumbnail: TextChangeThumbnail.make(from: pixelBuffer)
         )
     }
 

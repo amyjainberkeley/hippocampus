@@ -9,8 +9,11 @@ enum OCRMemoryText {
             && !line.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    static func make(from lines: [OCRLine]) -> String {
-        var retained: [String] = []
+    /// Readable lines in reading order (see `OCRReadingOrder`). `pixelSize` is
+    /// the frame the normalized boxes belong to; it only sets their aspect.
+    static func make(from lines: [OCRLine], pixelSize: CGSize = defaultPixelSize) -> String {
+        var placed: [(text: String, box: CGRect)] = []
+        var unplaced: [String] = []
         var positions: [Data: [CGRect]] = [:]
         for line in lines {
             // This is deliberately AFTER the complete raw privacy scan. Low
@@ -18,19 +21,23 @@ enum OCRMemoryText {
             guard isReadable(line) else { continue }
             let box = line.boundingBox
             guard valid(box) else {
-                retained.append(line.text)
+                unplaced.append(line.text)
                 continue
             }
             let literal = Data(line.text.utf8)
             let previous = positions[literal, default: []]
             if previous.contains(where: { samePosition($0, box) }) { continue }
-            retained.append(line.text)
+            placed.append((line.text, box))
             // Bound comparison work even on a screen with thousands of identical
             // labels. Beyond this cache, keep text instead of guessing it repeats.
             if previous.count < 64 { positions[literal, default: []].append(box) }
         }
-        return retained.joined(separator: "\n")
+        let page = OCRReadingOrder.assemble(placed, pixelSize: pixelSize)
+        return ([page].filter { !$0.isEmpty } + unplaced).joined(separator: "\n")
     }
+
+    /// A 16:10 frame, for callers that do not know the capture size.
+    static let defaultPixelSize = CGSize(width: 1600, height: 1000)
 
     private static func valid(_ box: CGRect) -> Bool {
         box.origin.x.isFinite && box.origin.y.isFinite

@@ -1,0 +1,17 @@
+General
+Capture
+Privacy
+Storage
+Shortcuts
+About
+
+Capture
+
+Remember what is on screen
+Text is read on this Mac and stored encrypted. Nothing is uploaded.
+Excluded apps
+1Password, Keychain Access, System Settings, Hippocampus
+Keep memories for
+90 days (about 2.4 GB on this Mac)
+Last capture: 2 minutes ago · 3,288 memories · index healthy
+Version 0.2.1 (build 8e82e03) · macOS 26.5 · Apple M3

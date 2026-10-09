@@ -1,0 +1,216 @@
+{
+"width": 2880,
+"height": 1800,
+"lines": [
+{
+"text": "The Field Notes",
+"confidence": 1.0,
+"box": [
+0.026736,
+0.959444,
+0.072569,
+0.018333
+]
+},
+{
+"text": "Research Essays Archive Subscribe",
+"confidence": 0.9818,
+"box": [
+0.122569,
+0.957778,
+0.194097,
+0.02
+]
+},
+{
+"text": "Why your computer",
+"confidence": 0.9803,
+"box": [
+0.026042,
+0.855556,
+0.195139,
+0.040556
+]
+},
+{
+"text": "forgets everything",
+"confidence": 1.0,
+"box": [
+0.023958,
+0.812778,
+0.184375,
+0.042778
+]
+},
+{
+"text": "Every day a laptop sees the paper you",
+"confidence": 0.9989,
+"box": [
+0.026389,
+0.763333,
+0.19375,
+0.021111
+]
+},
+{
+"text": "People remember situations, not names.",
+"confidence": 0.9995,
+"box": [
+0.345833,
+0.763889,
+0.204861,
+0.021111
+]
+},
+{
+"text": "Related",
+"confidence": 1.0,
+"box": [
+0.692708,
+0.768333,
+0.037153,
+0.018889
+]
+},
+{
+"text": "On-device OCR, measured",
+"confidence": 0.9993,
+"box": [
+0.69375,
+0.746667,
+0.113889,
+0.016667
+]
+},
+{
+"text": "skimmed, the number in the dashboard and",
+"confidence": 0.9985,
+"box": [
+0.026736,
+0.736111,
+0.221181,
+0.02
+]
+},
+{
+"text": "The pricing page from last Tuesday, read",
+"confidence": 0.9886,
+"box": [
+0.345486,
+0.733889,
+0.207986,
+0.023333
+]
+},
+{
+"text": "A year of local search",
+"confidence": 0.9752,
+"box": [
+0.693403,
+0.723889,
+0.092361,
+0.016667
+]
+},
+{
+"text": "the error you fixed in March. Then it",
+"confidence": 0.9983,
+"box": [
+0.026042,
+0.707778,
+0.182639,
+0.021111
+]
+},
+{
+"text": "while annoyed, is easy to recall and hard",
+"confidence": 0.9954,
+"box": [
+0.345833,
+0.706667,
+0.205556,
+0.021667
+]
+},
+{
+"text": "Encryption at rest, explained",
+"confidence": 0.9986,
+"box": [
+0.693056,
+0.7,
+0.122222,
+0.019444
+]
+},
+{
+"text": "forgets all of it, and you do the",
+"confidence": 0.9977,
+"box": [
+0.026042,
+0.677222,
+0.15625,
+0.023333
+]
+},
+{
+"text": "to search for. A memory that keeps what",
+"confidence": 0.9996,
+"box": [
+0.345486,
+0.678333,
+0.206597,
+0.020556
+]
+},
+{
+"text": "Most read this week",
+"confidence": 0.9992,
+"box": [
+0.693403,
+0.679444,
+0.090278,
+0.017222
+]
+},
+{
+"text": "remembering: scrolling history, searching",
+"confidence": 0.9975,
+"box": [
+0.026042,
+0.648889,
+0.210069,
+0.021667
+]
+},
+{
+"text": "was on screen, and when, can answer the",
+"confidence": 0.9902,
+"box": [
+0.345486,
+0.649444,
+0.211806,
+0.021111
+]
+},
+{
+"text": "files for a word you are not sure you used.",
+"confidence": 0.9976,
+"box": [
+0.026042,
+0.621667,
+0.212153,
+0.021111
+]
+},
+{
+"text": "question the way it was actually asked.",
+"confidence": 0.9962,
+"box": [
+0.346181,
+0.621667,
+0.196875,
+0.02
+]
+}
+]
+}

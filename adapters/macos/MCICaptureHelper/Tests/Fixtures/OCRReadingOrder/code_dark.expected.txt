@@ -1,0 +1,33 @@
+EXPLORER
+HIPPOCAMPUS
+apps
+agent
+src
+brain_ingest.rs
+retention_worker.rs
+today.rs
+core
+scripts
+install.sh
+README.md
+
+retention_worker.rs
+
+use std::time::Duration;
+
+/// Delete events older than the configured window, oldest first.
+pub fn sweep(store: &Store, config: RetentionConfig) -> Result<u64, SweepError> {
+    let Some(cutoff_us) = config.cutoff_us(now_us()) else {
+        return Ok(0);
+    };
+    let mut deleted = 0_u64;
+    for batch in store.events_before(cutoff_us).chunks(512) {
+        deleted += store.delete_batch(batch)?;
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    if deleted > 0 {
+        store.vacuum()?; // reclaim pages so deleted text is gone
+    }
+    0k(deleted)
+
+main 0 errors, 2 warnings Ln 14, Col 37 UTF-8 Rust
