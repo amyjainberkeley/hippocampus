@@ -1,14 +1,115 @@
 # Hippocampus Status
 
-_Updated on 2026-10-07; qualification scope is recorded per checkpoint._
+_Updated on 2026-10-09; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `afed4a3`
+Audited code baseline: `e15ef64`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## October 9, Evening: Capture Stores Again, Verified Live
+
+**Every live frame had been refused before OCR.** ScreenCaptureKit's default
+pixel format on current macOS is `420v` (biplanar YUV), not BGRA as the
+capture code assumed. The PaddleOCR runner reads BGRA only, so with
+`MCI_OCR_TRACE=1` every frame that passed the privacy cascade traced
+`outcome=image_refused` (12 of 12) and nothing was stored. The 9×8 change
+grid and the text-change thumbnail read the same buffers as BGRA. Apple
+Vision accepted YUV, which hid the fault until the switch to PaddleOCR; the
+October 9 finding of OCR "returning nothing on large, sparse windows" was at
+least partly this. The stream configuration factory now requests BGRA.
+
+**Verified live on the owner Mac** (installed candidates `f0eec33` and
+`e8454cb`, a synthetic note in TextEdit): the first frame since 2026-09-14 was
+stored at 22:54 PDT, its text matched the screen exactly, and `mci_recall`
+returned it as the top result.
+
+**Whole-screen capture filed nothing until the Dock was excluded.** The Dock
+lists a display-sized layer-20 window in front of every app window; it owned
+every point, so full-display reads of 128-152 lines kept none. With the Dock
+excluded from the display filter, a read of 151 lines filed 54 under four
+windows, and the synthetic note, behind a focused Calculator, was stored
+under TextEdit with its window title and recalled. Unchanged background
+windows were re-sent on every read (four a minute while the focused window
+changed); each window's text is now sent only when it changes (live check
+pending).
+
+## October 9: Whole-Screen Capture
+
+With the owner's decision, capture now covers the whole screen, not only the
+focused window ([ADR-0040](decisions/0040-whole-screen-background-capture.md),
+amending ADR-0031). The focused stream is unchanged. A second, low-rate
+stream per display reads visible windows at most every 15 seconds, only when
+their text changed and the user is active, and files each line under the
+topmost window at its position. Sensitive apps, every browser, notification
+banners, Hippocampus, the Dock and denied apps are excluded from the display filter, so
+their pixels are never produced; an excluded app that launches later pauses
+reads until the filter is rebuilt. Lines from the focused, private-titled,
+denied or non-ordinary windows are dropped. Background text travels as
+`ContextOCREvent` (0x0041), is stored with source `screen_context`, keeps no
+screenshot, and does not split episodes of focused work. The overlap
+qualification runs with `MCI_WHOLE_SCREEN=0` because it qualifies the focused
+stream.
+
+Verification: `BackgroundCapturePolicyTests` (9), wire round trip, segmenter
+(13) and `brain_ingest_context`; live on the owner Mac as recorded above.
+
+## October 9: Live Findings On The Owner Mac
+
+Installing 0.2.1 on the owner Mac exposed four faults the synthetic suites
+could not: a quit that never completed while capture was recovering (now
+bounded, and a quit always ends the app); OCR returning nothing on large,
+sparse windows and refusing whole frames over one wide line (now a coverage
+pass and word-gap splitting); and every Chrome frame refused because the
+window listing's `tab` separator named Chrome's tab class and the listing
+and URL lookups exceeded 250 ms (now a real separator, longer bounded
+budgets and a short fail-closed cache). An orphaned headless Chrome from an
+earlier automation session also captured AppleScript's "Google Chrome"
+target; it was stopped. Two more were found by driving the production
+runner with the real worker: the worker inherited the OCR lane's utility QoS
+(23-30 s a frame on efficiency cores; now user-initiated), and the lane woke
+its caller before freeing itself, failing every following job as an instant
+timeout (now freed first). External quits also reached Recall instead of the
+app, which shares its bundle identifier; the app now handles the Quit event
+and SIGTERM, and the installer signals the app process. Live storage, recall
+and the release remain to be verified at this baseline.
+
+## October 8: Capture Unblocked, Transcription Rebuilt, 0.2.1
+
+**Live capture had stored nothing since 2026-09-14.** The accessibility
+backstop for nested password fields followed a focused element's link to
+itself (or a deep tree) to its bound, reported an error, and the cascade
+suppressed the frame as `failsafe-unknown` (997 of 1,411 frames in ten minutes
+on the owner Mac). With the owner's approval, reaching the bound or revisiting
+a node now ends the search as "nothing secure found"; failed or malformed reads
+still fail closed. The other protections are unchanged; see the
+[audit](audits/2026-10-08-capture-ax-bounds.md).
+
+**Stored text now follows the screen.** A new benchmark of eight synthetic app
+screens (`tools/ocr/screens/`) measured the shipped pipeline at 0.857 exact
+lines and 0.269 character error, almost all of it columns interleaved by
+engine-order joining, and 6.78 s per frame from a cold worker per frame. With
+reading-order assembly, a warm persistent worker, four threads and half-scale
+detection on Retina frames: 0.967 exact lines, 0.001 character error, 1.27 s
+per frame. A thumbnail check now reads typed text that the 72-pixel hash
+missed. See the [transcription audit](audits/2026-10-08-ocr-transcription.md).
+
+**Recall** returns ranked results as `hits` (still labelled `degraded` with the
+missing capability) instead of an empty list. **Install** is one line: a
+script that verifies checksum, team, notarization and Gatekeeper before
+installing the app; tested in a sandbox against the 0.2.0 notarized DMG.
+
+Verification: 854 helper tests (the three real-Vision timing tests can exceed
+their 1 s budget under heavy load; they are not on the shipped OCR path), 16
+OCR worker tests, MCP server and real-brain suites (65), `handoff_cli` (9, now
+zone-independent), live-capture verifier and product-truth contracts.
+
+Not yet qualified at this baseline: live capture and recall on the owner Mac
+with this build, real-screen OCR accuracy, whole-screen capture (approved,
+not built), a full-day resource trace, and a public release.
 
 ## October 7 Retained Screenshot OCR Check
 

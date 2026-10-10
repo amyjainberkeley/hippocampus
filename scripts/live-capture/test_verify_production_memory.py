@@ -103,6 +103,14 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(report["recall_outcome"], "degraded")
         self.assertIn("recall_degraded_observations_only", report["limitations"])
 
+    def test_degraded_recall_hits_are_labeled_observed_not_matched(self):
+        data = fixture()
+        data[3]["outcome"] = "degraded"
+        report = proof.validate(data, SINCE)
+        self.assertTrue(report["checks"]["recall_evidence"])
+        self.assertEqual(report["recall_outcome"], "degraded")
+        self.assertIn("recall_degraded_observations_only", report["limitations"])
+
     def test_cap_never_claims_exhaustive_absence(self):
         data = fixture()
         data[2]["events"] = [{"event_id": i + 1, "ts_us": 1001 + i,

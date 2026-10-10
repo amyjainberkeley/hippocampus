@@ -73,10 +73,21 @@ final class MenuBarLifecycleTests: XCTestCase {
         let coordinator = try String(contentsOfFile: coordinatorPath, encoding: .utf8)
 
         XCTAssertTrue(content.contains("func applicationShouldTerminate("))
+        // External quits (installer, Homebrew, scripts) must reach the
+        // deliberate quit path rather than being cancelled as noise.
+        XCTAssertTrue(content.contains("andEventID: AEEventID(kAEQuitApplication)"))
+        XCTAssertTrue(content.contains("@objc private func handleQuitAppleEvent("))
+        XCTAssertTrue(content.contains("DispatchSource.makeSignalSource(signal: SIGTERM"))
+        // A quit requested from a GCD main-queue block deadlocks under
+        // .terminateLater; the signal handler must hop to a run-loop callout.
+        XCTAssertTrue(content.contains("RunLoop.main.perform { self?.requestQuit() }"))
         XCTAssertTrue(content.contains("return .terminateLater"))
         XCTAssertTrue(content.contains("await self.terminationCoordinator.terminate("))
         XCTAssertTrue(coordinator.contains("try await supervisor.shutdownAndWait("))
-        XCTAssertTrue(coordinator.contains("guard supervisor.state == .stopped"))
+        XCTAssertTrue(coordinator.contains("verified = supervisor.state == .stopped"))
+        // Only a quit may proceed past an unverified stop; a restart may not.
+        XCTAssertTrue(coordinator.contains("guard intent == .quit else"))
+        XCTAssertTrue(coordinator.contains("await supervisor.forceStopForQuit("))
         XCTAssertTrue(coordinator.contains("try restartLauncher.scheduleRestart()"))
         XCTAssertTrue(coordinator.contains("reply(true)"))
         XCTAssertFalse(content.contains("applicationWillTerminate(_ notification: Notification) {\n        supervisor.stop()"))

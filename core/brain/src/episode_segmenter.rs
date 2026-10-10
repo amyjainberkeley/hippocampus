@@ -62,6 +62,21 @@ pub trait EpisodeSegmenter: Send + Sync {
         last_segmented: Option<&Event>,
         writer: &dyn EpisodeWriter,
     ) -> Result<SegmentStats, StoreError>;
+
+    /// Like [`Self::segment`], but `is_context` marks events read from a
+    /// visible window the user was not focused on. Such an event joins the
+    /// current episode without counting as a switch of focused work. The
+    /// default ignores the distinction.
+    fn segment_with_context(
+        &self,
+        unsegmented: &[Event],
+        last_segmented: Option<&Event>,
+        writer: &dyn EpisodeWriter,
+        is_context: &dyn Fn(EventId) -> bool,
+    ) -> Result<SegmentStats, StoreError> {
+        let _ = is_context;
+        self.segment(unsegmented, last_segmented, writer)
+    }
 }
 
 /// Write surface the segmenter uses. Implemented by `SqlCipherBrainStore`.
@@ -135,6 +150,16 @@ impl EpisodeSegmenter for HeuristicEpisodeSegmenter {
         last_segmented: Option<&Event>,
         writer: &dyn EpisodeWriter,
     ) -> Result<SegmentStats, StoreError> {
+        self.segment_with_context(unsegmented, last_segmented, writer, &|_| false)
+    }
+
+    fn segment_with_context(
+        &self,
+        unsegmented: &[Event],
+        last_segmented: Option<&Event>,
+        writer: &dyn EpisodeWriter,
+        is_context: &dyn Fn(EventId) -> bool,
+    ) -> Result<SegmentStats, StoreError> {
         if unsegmented.is_empty() {
             return Ok(SegmentStats {
                 events_assigned: 0,
@@ -150,10 +175,32 @@ impl EpisodeSegmenter for HeuristicEpisodeSegmenter {
         // Carry forward from last segmented event.
         let mut current_episode: Option<EpisodeId> =
             last_segmented.and_then(|e| e.episode_id).map(EpisodeId);
-        let mut prev_app: Option<String> = last_segmented.and_then(|e| e.app_bundle_id.clone());
+        // A context event at the tail says nothing about focused work.
+        let mut prev_app: Option<String> = last_segmented
+            .filter(|e| !is_context(e.id))
+            .and_then(|e| e.app_bundle_id.clone());
         let mut prev_ts: u64 = last_segmented.map_or(0, |e| e.ts_us);
 
         for event in unsegmented {
+            if is_context(event.id) {
+                let ep_id = if let Some(ep_id) = current_episode {
+                    ep_id
+                } else {
+                    let ep_id = writer.create_episode(
+                        event.ts_us,
+                        event.ts_us,
+                        event.app_bundle_id.as_deref(),
+                    )?;
+                    stats.episodes_created += 1;
+                    current_episode = Some(ep_id);
+                    ep_id
+                };
+                writer.set_event_episode(event.id, ep_id)?;
+                stats.events_assigned += 1;
+                // Neither the focused app nor the gap clock moves.
+                continue;
+            }
+
             let need_new =
                 current_episode.is_none() || self.should_break(prev_app.as_deref(), prev_ts, event);
 
@@ -241,6 +288,51 @@ mod tests {
                 .push((episode_id, ts_end));
             Ok(())
         }
+    }
+
+    #[test]
+    fn context_events_join_the_episode_without_breaking_it() {
+        let seg = HeuristicEpisodeSegmenter::new();
+        let w = MockWriter::new();
+        let events = [
+            make_event(1, 1_000, Some("com.microsoft.VSCode")),
+            make_event(2, 2_000, Some("com.apple.TextEdit")), // visible, not focused
+            make_event(3, 3_000, Some("com.microsoft.VSCode")),
+            make_event(4, 4_000, Some("com.tinyspeck.slackmacgap")), // visible, not focused
+            make_event(5, 5_000, Some("com.microsoft.VSCode")),
+        ];
+        let stats = seg
+            .segment_with_context(&events, None, &w, &|id| id == EventId(2) || id == EventId(4))
+            .unwrap();
+        assert_eq!(stats.events_assigned, 5);
+        assert_eq!(stats.episodes_created, 1, "background text is not a switch of focused work");
+        let assigned = w.event_episodes.lock().unwrap();
+        assert!(assigned.iter().all(|(_, ep)| *ep == assigned[0].1));
+    }
+
+    #[test]
+    fn a_context_tail_does_not_stand_in_for_the_focused_app() {
+        let seg = HeuristicEpisodeSegmenter::new();
+        let w = MockWriter::new();
+        let mut tail = make_event(9, 900, Some("com.apple.TextEdit"));
+        tail.episode_id = Some(77);
+        let next = [make_event(10, 1_000, Some("com.apple.TextEdit"))];
+        let stats = seg
+            .segment_with_context(&next, Some(&tail), &w, &|id| id == EventId(9))
+            .unwrap();
+        assert_eq!(stats.episodes_created, 1, "focused TextEdit after background TextEdit is a new episode");
+    }
+
+    #[test]
+    fn plain_segment_is_unchanged() {
+        let seg = HeuristicEpisodeSegmenter::new();
+        let w = MockWriter::new();
+        let events = [
+            make_event(1, 1_000, Some("a")),
+            make_event(2, 2_000, Some("b")),
+            make_event(3, 3_000, Some("a")),
+        ];
+        assert_eq!(seg.segment(&events, None, &w).unwrap().episodes_created, 3);
     }
 
     fn make_event(id: u64, ts_us: u64, app: Option<&str>) -> Event {

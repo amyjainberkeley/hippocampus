@@ -10,21 +10,35 @@ public struct PaddleOCRRunner: OCREngine {
     public static let timeoutMs = 30_000
     private let lane: VisionOCRExecutionLane
     private let control: PaddleOCRProcessControl
+    private let server: PaddleOCRServer?
 
     public static var bundledExecutableURL: URL? {
         let url = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/HippocampusOCR/hippocampus-ocr")
         return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
     }
 
-    public init(executableURL: URL) {
+    /// `persistent` keeps one warm worker for every frame (`--serve`); the
+    /// one-shot default starts a worker per reading.
+    public init(executableURL: URL, persistent: Bool = false) {
         let control = PaddleOCRProcessControl()
+        let server = persistent ? PaddleOCRServer(executableURL: executableURL) : nil
         self.control = control
+        self.server = server
         lane = VisionOCRExecutionLane(label: "com.hippocampus.capture.paddle-ocr") { input, _, deadline in
-            Self.perform(input: input, executableURL: executableURL, deadline: deadline, control: control)
+            if let server {
+                return Self.performPersistent(input: input, server: server, deadline: deadline)
+            }
+            return Self.perform(input: input, executableURL: executableURL, deadline: deadline, control: control)
         }
     }
 
-    public func stop() { control.stop() }
+    /// Load the persistent worker's models before the first frame arrives.
+    public func prewarm() { server?.prewarm() }
+
+    public func stop() {
+        control.stop()
+        server?.stop()
+    }
 
     public func recognize(input: OCREngineInput, timeoutMs: Int) async -> OCRResult {
         await lane.recognize(input: input, languages: [], timeoutMs: timeoutMs)
@@ -34,11 +48,56 @@ public struct PaddleOCRRunner: OCREngine {
         await lane.waitUntilIdle(timeoutMs: timeoutMs)
     }
 
+    private static func performPersistent(input: OCREngineInput, server: PaddleOCRServer, deadline: DispatchTime) -> OCRResult {
+        let empty = OCRResult(recognizedLines: [], durationMs: 0, timedOut: false)
+        let fullW = CVPixelBufferGetWidth(input.pixelBuffer), fullH = CVPixelBufferGetHeight(input.pixelBuffer)
+        let roi = input.roi
+        // Content-free: sizes, outcome and a line count only.
+        func trace(_ outcome: String, lines: Int = 0) {
+            OCRTrace.emit("paddle-ocr", "outcome=\(outcome) frame=\(fullW)x\(fullH) "
+                + "roi=\(Int(roi.width * CGFloat(fullW)))x\(Int(roi.height * CGFloat(fullH))) lines=\(lines)")
+        }
+        guard let image = PaddleOCRImage(input: input) else { trace("image_refused"); return empty }
+        guard DispatchTime.now() < deadline else { trace("deadline_passed"); return empty }
+        switch server.recognize(bitmap: image.bitmap, deadline: deadline) {
+        case .reply(let reply):
+            guard let result = decode(reply, region: image.region) else { trace("reply_rejected"); return empty }
+            trace("reply", lines: result.recognizedLines.count)
+            return result
+        case .timedOut:
+            trace("timed_out")
+            return OCRResult(recognizedLines: [], durationMs: 0, timedOut: true)
+        case .failed:
+            trace("worker_failed")
+            return empty
+        }
+    }
+
+    /// Any malformed geometry or confidence rejects the whole reading.
+    private static func decode(_ reply: Data, region r: CGRect) -> OCRResult? {
+        guard let decoded = try? JSONDecoder().decode(Reply.self, from: reply), decoded.version == 1,
+              decoded.lines.count <= 4096 else { return nil }
+        var lines: [OCRLine] = []
+        for line in decoded.lines {
+            guard line.box.count == 4, line.box.allSatisfy(\.isFinite), line.confidence.isFinite,
+                  (0...1).contains(line.confidence) else { return nil }
+            let b = CGRect(x: line.box[0], y: line.box[1], width: line.box[2], height: line.box[3])
+            guard b.width > 0, b.height > 0, CGRect(x: 0,y: 0,width: 1,height: 1).contains(b) else { return nil }
+            lines.append(OCRLine(text: line.text, boundingBox: CGRect(
+                x: r.minX + b.minX*r.width, y: r.minY + b.minY*r.height,
+                width: b.width*r.width, height: b.height*r.height), confidence: line.confidence))
+        }
+        return OCRResult(recognizedLines: lines, durationMs: 0, timedOut: false)
+    }
+
     private static func perform(input: OCREngineInput, executableURL: URL, deadline: DispatchTime, control: PaddleOCRProcessControl) -> OCRResult {
         let empty = OCRResult(recognizedLines: [], durationMs: 0, timedOut: false)
         guard let image = PaddleOCRImage(input: input), DispatchTime.now() < deadline else { return empty }
         let process = Process()
         process.executableURL = executableURL
+        // Not the lane's .utility QoS: inherited, it throttled the worker to
+        // efficiency cores (see PaddleOCRServer).
+        process.qualityOfService = .userInitiated
         // Never inherit provider credentials, Python paths, or user model overrides.
         process.environment = ["PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1",
                                "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"]
@@ -82,21 +141,8 @@ public struct PaddleOCRRunner: OCREngine {
             guard DispatchTime.now() < deadline else {
                 return OCRResult(recognizedLines: [], durationMs: 0, timedOut: true)
             }
-            guard process.terminationStatus == 0,
-                  let decoded = try? JSONDecoder().decode(Reply.self, from: reply), decoded.version == 1,
-                  decoded.lines.count <= 4096 else { return empty }
-            var lines: [OCRLine] = []
-            for line in decoded.lines {
-                guard line.box.count == 4, line.box.allSatisfy(\.isFinite), line.confidence.isFinite,
-                      (0...1).contains(line.confidence) else { return empty }
-                let b = CGRect(x: line.box[0], y: line.box[1], width: line.box[2], height: line.box[3])
-                guard b.width > 0, b.height > 0, CGRect(x: 0,y: 0,width: 1,height: 1).contains(b) else { return empty }
-                let r = image.region
-                lines.append(OCRLine(text: line.text, boundingBox: CGRect(
-                    x: r.minX + b.minX*r.width, y: r.minY + b.minY*r.height,
-                    width: b.width*r.width, height: b.height*r.height), confidence: line.confidence))
-            }
-            return OCRResult(recognizedLines: lines, durationMs: 0, timedOut: false)
+            guard process.terminationStatus == 0 else { return empty }
+            return decode(reply, region: image.region) ?? empty
         } catch {
             if process.isRunning { _ = Darwin.kill(process.processIdentifier, SIGKILL); process.waitUntilExit() }
             return empty

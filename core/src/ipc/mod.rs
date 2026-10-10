@@ -202,6 +202,29 @@ pub enum Message {
         keyframe_hash: [u8; 32],
     },
 
+    /// Helper → core text read from a visible window that is NOT the
+    /// focused one (whole-screen capture). Same layout and the same
+    /// cascade-twice discipline as [`OCREvent`]; `app_bundle_id` and
+    /// `window_title` are that window's own, never the focused app's. The
+    /// core stores it as `screen_context` so it adds searchable context
+    /// without being read as a switch of the user's focused work.
+    ContextOCREvent {
+        /// See [`OCREvent`].
+        seq: u64,
+        /// See [`OCREvent`].
+        ts_us: u64,
+        /// Bundle identifier of the window the text was read from.
+        app_bundle_id: [u8; 64],
+        /// That window's title.
+        window_title: String,
+        /// Always empty: browsers are excluded from whole-screen capture.
+        url: String,
+        /// Text read from that window, after both privacy passes.
+        ocr_text: String,
+        /// Always zero: no screenshot is kept for background windows.
+        keyframe_hash: [u8; 32],
+    },
+
     /// Browser extension → agent (via native messaging host). Full page
     /// content extracted from the browser DOM — lossless text that
     /// pixel-OCR cannot match. ADR-0015 §6 Phase 7 pull-forward.
@@ -371,6 +394,7 @@ impl Message {
             Self::PrivacyTombstone { .. } => MessageType::PrivacyTombstone,
             Self::SurfaceReleased { .. } => MessageType::SurfaceReleased,
             Self::OCREvent { .. } => MessageType::OCREvent,
+            Self::ContextOCREvent { .. } => MessageType::ContextOCREvent,
             Self::PageContentEvent { .. } => MessageType::PageContentEvent,
             Self::HelperHealth { .. } => MessageType::HelperHealth,
         }

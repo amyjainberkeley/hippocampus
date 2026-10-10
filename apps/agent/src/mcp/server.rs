@@ -616,8 +616,11 @@ fn recall_wire_result(outcome: McpRecallOutcome, reader: &dyn BrainReader) -> se
                 mci_brain::RetrievalDegradation::EvidenceSufficiencyUnqualified => "evidence_sufficiency_unqualified",
                 mci_brain::RetrievalDegradation::EvidenceVerifierUnavailable => "evidence_verifier_unavailable",
             },
-            "hits": [],
-            "related_context": related_context.iter().map(|hit| hit_json(hit, reader)).collect::<Vec<_>>(),
+            // Ranked but not verified. The outcome and degradation say so;
+            // returning an empty `hits` instead made every answer look like
+            // "nothing found", because production configures no verifier.
+            "hits": related_context.iter().map(|hit| hit_json(hit, reader)).collect::<Vec<_>>(),
+            "related_context": [],
             "contradicting_context": [],
         }),
     };

@@ -515,6 +515,34 @@ impl BrainIngestor for BrainPump {
                 // does not observe browser-internal tab state.
                 (ts_us, app, title, u, merged, kb, None, source)
             }
+            Message::ContextOCREvent {
+                seq: _,
+                ts_us,
+                app_bundle_id,
+                window_title,
+                url: _,
+                ocr_text,
+                keyframe_hash: _,
+            } => {
+                // A visible window that was not focused: its own app and
+                // title, no URL (browsers are excluded) and no screenshot.
+                let app = bundle_id_from_padded_bytes(app_bundle_id);
+                let title = if window_title.is_empty() {
+                    None
+                } else {
+                    Some(window_title.clone())
+                };
+                (
+                    ts_us,
+                    app,
+                    title,
+                    None,
+                    ocr_text.clone(),
+                    None,
+                    None,
+                    mci_brain::EventSource::ScreenContext,
+                )
+            }
             Message::PageContentEvent {
                 seq: _,
                 ts_us,

@@ -102,6 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var tccStderrTail: TCCHelperStderrTail?
     private let terminationRequests = ApplicationTerminationRequestGate()
     private var terminationTask: Task<Void, Never>?
+    private var terminateSignalSource: DispatchSourceSignal?
     private var didCleanUpLifecycle = false
     private lazy var terminationCoordinator = ApplicationTerminationCoordinator(
         supervisor: supervisor,
@@ -165,6 +166,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// strictly BEFORE the user can interact with anything, including
     /// opening the menu bar.
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // A Quit from outside the menu (a script, the installer, Homebrew,
+        // logout) arrives as kAEQuitApplication. Under SwiftUI it is not
+        // visible as `currentAppleEvent` inside `applicationShouldTerminate`,
+        // so it read as lifecycle noise and was silently cancelled. Route it
+        // into the deliberate quit instead.
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleQuitAppleEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kCoreEventClass),
+            andEventID: AEEventID(kAEQuitApplication)
+        )
+        // The capture helper and Recall share this bundle identifier, so a
+        // Quit addressed by bundle ID can land on them instead. SIGTERM to
+        // this process (the installer, `brew uninstall`) is a deliberate
+        // quit too, through the same bounded path.
+        signal(SIGTERM, SIG_IGN)
+        let terminateSignal = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        terminateSignal.setEventHandler { [weak self] in
+            // Not from inside this GCD block: a pending terminate spins a
+            // nested run loop that cannot drain the main queue the
+            // termination coordinator needs, so the quit would deadlock.
+            RunLoop.main.perform { self?.requestQuit() }
+        }
+        terminateSignal.resume()
+        terminateSignalSource = terminateSignal
         for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification,
                      NSWorkspace.sessionDidBecomeActiveNotification] {
             NSWorkspace.shared.notificationCenter.addObserver(
@@ -345,6 +371,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func requestQuit() {
         requestTermination(.quit)
+    }
+
+    @objc private func handleQuitAppleEvent(
+        _ event: NSAppleEventDescriptor,
+        withReplyEvent reply: NSAppleEventDescriptor
+    ) {
+        requestQuit()
     }
 
     func requestRestart() {

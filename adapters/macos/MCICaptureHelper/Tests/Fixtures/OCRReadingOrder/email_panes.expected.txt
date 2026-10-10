@@ -1,0 +1,26 @@
+Inbox
+Flagged
+Drafts
+Sent
+Archive
+Receipts
+Travel
+
+Priya Natarajan 9:14 AM
+Offsite agenda, final
+Room is booked for Thursday, 10 to 4.
+Linear 8:02 AM
+HIP-412 moved to In Review
+Persistent OCR worker: ready for review.
+Daniel Okafor Yesterday
+Contract redlines (v3)
+Two changes in section 4.2, both minor.
+
+Offsite agenda, final
+From: Priya Natarajan To: Team
+Hi all,
+The room is booked for Thursday from 10:00 to 16:00 at 410 Townsend.
+Morning: roadmap review and the Q4 hiring plan.
+Afternoon: customer interviews readout, then the launch checklist.
+Please send slides by Wednesday at noon so we can print handouts.
+Thanks, Priya

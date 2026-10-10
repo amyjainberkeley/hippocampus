@@ -142,3 +142,106 @@ class WorkerTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ServeModeTests(unittest.TestCase):
+    """The persistent worker the capture helper keeps warm between frames."""
+
+    def serve(self, payload):
+        return subprocess.run([sys.executable, 'worker.py', '--serve'], cwd=Path(__file__).parent,
+                              input=payload, capture_output=True, env={'PATH': '/usr/bin:/bin'},
+                              timeout=180)
+
+    def test_announces_ready_then_answers_each_frame_in_order(self):
+        result = self.serve(bitmap(64, 32) + bitmap(32, 32))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        replies = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual(replies[0], {'version': 1, 'ready': True})
+        self.assertEqual(len(replies), 3)
+        for reply in replies[1:]:
+            self.assertEqual(reply, {'version': 1, 'lines': []})
+
+    def test_refused_frame_is_answered_without_ending_the_process(self):
+        with patch.object(worker, 'recognize', side_effect=[ValueError('bounds'), b'{"version":1,"lines":[]}']), \
+                patch.object(worker, 'load_engine', return_value=object()), \
+                patch.object(sys, 'stdin', io.TextIOWrapper(io.BytesIO(bitmap() + bitmap()))), \
+                patch.object(sys, 'stdout', io.TextIOWrapper(io.BytesIO())) as out:
+            self.assertEqual(worker.serve(), 0)
+            out.flush()
+            lines = out.buffer.getvalue().splitlines()
+        self.assertEqual([json.loads(l) for l in lines],
+                         [{'version': 1, 'ready': True}, {'version': 1, 'failed': True},
+                          {'version': 1, 'lines': []}])
+
+    def test_malformed_frame_ends_the_process(self):
+        result = self.serve(bitmap() + b'X' * 54)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, b'Local OCR worker failed\n')
+        replies = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual(len(replies), 2)
+
+    def test_framed_reader_returns_none_only_at_a_clean_boundary(self):
+        stream = io.BytesIO(bitmap() + bitmap())
+        self.assertIsNotNone(worker.read_image(stream, framed=True))
+        self.assertIsNotNone(worker.read_image(stream, framed=True))
+        self.assertIsNone(worker.read_image(stream, framed=True))
+        with self.assertRaises(ValueError):
+            worker.read_image(io.BytesIO(bitmap()[:30]), framed=True)
+
+
+class CoverageDetectorTests(unittest.TestCase):
+    """Real screens that the whole-frame detector alone lost."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.engine = worker.load_engine(Path(__file__).parent/'models', threads=2)
+
+    def page(self, width, height, wide=False):
+        import numpy as np
+        from PIL import Image, ImageDraw, ImageFont
+        font = ImageFont.truetype('/System/Library/Fonts/Supplemental/Arial.ttf', 24)
+        image = Image.new('RGB', (width, height), 'white')
+        draw = ImageDraw.Draw(image)
+        draw.text((40, 40), 'Normal paragraph line one for the check', fill='black', font=font)
+        draw.text((40, 88), 'Normal paragraph line two for the check', fill='black', font=font)
+        if wide:
+            draw.text((10, 600), '  '.join('Bookmark item %d' % i for i in range(16)), fill='black', font=font)
+        return np.array(image)[:, :, ::-1].copy()
+
+    def test_sparse_retina_frame_is_read(self):
+        # A short document in a large window: the first pass finds nothing.
+        result = self.engine(self.page(3420, 2214))
+        self.assertEqual(list(result.txts), ['Normal paragraph line one for the check',
+                                             'Normal paragraph line two for the check'])
+
+    def test_one_wide_line_no_longer_refuses_the_frame(self):
+        result = self.engine(self.page(3420, 2214, wide=True))
+        text = ' '.join(result.txts)
+        self.assertIn('Normal paragraph line two for the check', text)
+        for i in range(16):
+            self.assertIn('Bookmark item %d' % i, text)
+
+    def test_wide_lines_split_at_gaps_within_the_recognition_bound(self):
+        import numpy as np
+        image = np.full((40, 4000, 3), 255, dtype=np.uint8)
+        for start in range(0, 4000, 200):
+            image[10:30, start + 20:start + 160] = 0  # words with blank gaps
+        pieces = worker._split_wide(image, [0, 0, 4000, 40])
+        self.assertGreater(len(pieces), 1)
+        self.assertEqual(pieces[0][0], 0)
+        self.assertEqual(pieces[-1][2], 4000)
+        for (x0, _, x1, _), nxt in zip(pieces, pieces[1:] + [None]):
+            self.assertLessEqual((x1 - x0) / 40, worker.MAX_LINE_RATIO)
+            if nxt:
+                self.assertEqual(x1, nxt[0])
+                self.assertEqual(image[10:30, int(x1)].min(), 255, 'cut through ink')
+
+    def test_only_boxes_from_different_runs_merge(self):
+        import numpy as np
+        quad = np.zeros((4, 2), dtype=np.float32)
+        same = worker._merge_across_sources([(quad, [0, 0, 100, 20], 0.9, 0), (quad, [90, 0, 200, 20], 0.8, 0)])
+        self.assertEqual(len(same), 2)
+        across = worker._merge_across_sources([(quad, [0, 0, 100, 20], 0.9, 0), (quad, [90, 0, 200, 20], 0.8, 1)])
+        self.assertEqual(len(across), 1)
+        self.assertIsNone(across[0][0])
+        self.assertEqual(across[0][1], [0, 0, 200, 20])

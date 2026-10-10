@@ -1,0 +1,306 @@
+{
+"width": 2880,
+"height": 1800,
+"lines": [
+{
+"text": "EXPLORER",
+"confidence": 0.9999,
+"box": [
+0.009722,
+0.966111,
+0.045486,
+0.016667
+]
+},
+{
+"text": "retention_worker.rs",
+"confidence": 1.0,
+"box": [
+0.193403,
+0.966667,
+0.082986,
+0.016667
+]
+},
+{
+"text": "HIPPOCAMPUS",
+"confidence": 0.9999,
+"box": [
+0.009028,
+0.945,
+0.064236,
+0.018333
+]
+},
+{
+"text": "apps",
+"confidence": 0.9999,
+"box": [
+0.009028,
+0.922778,
+0.023264,
+0.018333
+]
+},
+{
+"text": "use std::time::Duration;",
+"confidence": 0.9898,
+"box": [
+0.192708,
+0.917222,
+0.131944,
+0.02
+]
+},
+{
+"text": "agent",
+"confidence": 0.9999,
+"box": [
+0.008681,
+0.901667,
+0.026736,
+0.019444
+]
+},
+{
+"text": "src",
+"confidence": 0.9967,
+"box": [
+0.009028,
+0.882222,
+0.016319,
+0.016667
+]
+},
+{
+"text": "/// Delete events older than the configured window, oldest first.",
+"confidence": 0.9916,
+"box": [
+0.193403,
+0.871667,
+0.353819,
+0.018333
+]
+},
+{
+"text": "brain_ingest.rs",
+"confidence": 1.0,
+"box": [
+0.009722,
+0.862222,
+0.061458,
+0.016667
+]
+},
+{
+"text": "pub fn sweep(store: &Store, config: RetentionConfig) -> Result<u64, SweepError> {",
+"confidence": 0.9873,
+"box": [
+0.192708,
+0.847222,
+0.44375,
+0.02
+]
+},
+{
+"text": "retention_worker.rs",
+"confidence": 0.9875,
+"box": [
+0.009722,
+0.842778,
+0.077778,
+0.015
+]
+},
+{
+"text": "let Some(cutoff_us) = config.cutoff_us(now_us()) else {",
+"confidence": 0.9939,
+"box": [
+0.214931,
+0.825,
+0.302431,
+0.02
+]
+},
+{
+"text": "today.rs",
+"confidence": 1.0,
+"box": [
+0.008681,
+0.82,
+0.035417,
+0.018889
+]
+},
+{
+"text": "return Ok(0);",
+"confidence": 0.9956,
+"box": [
+0.236111,
+0.800556,
+0.072569,
+0.022222
+]
+},
+{
+"text": "core",
+"confidence": 0.9999,
+"box": [
+0.008681,
+0.798889,
+0.021875,
+0.018333
+]
+},
+{
+"text": "scripts",
+"confidence": 0.9999,
+"box": [
+0.009375,
+0.778333,
+0.030208,
+0.017778
+]
+},
+{
+"text": "};",
+"confidence": 0.8571,
+"box": [
+0.213542,
+0.776667,
+0.014583,
+0.021667
+]
+},
+{
+"text": "install.sh",
+"confidence": 0.9999,
+"box": [
+0.009375,
+0.759444,
+0.037847,
+0.017222
+]
+},
+{
+"text": "let mut deleted = 0_u64;",
+"confidence": 0.9982,
+"box": [
+0.214931,
+0.755556,
+0.131597,
+0.02
+]
+},
+{
+"text": "README.md",
+"confidence": 0.9999,
+"box": [
+0.009375,
+0.738889,
+0.052431,
+0.016667
+]
+},
+{
+"text": "for batch in store.events_before(cutoff_us).chunks(512) {",
+"confidence": 0.9983,
+"box": [
+0.214236,
+0.732222,
+0.313889,
+0.020556
+]
+},
+{
+"text": "deleted += store.delete_batch(batch)?;",
+"confidence": 0.9996,
+"box": [
+0.236458,
+0.71,
+0.207639,
+0.018333
+]
+},
+{
+"text": "std::thread::sleep(Duration::from_millis(25));",
+"confidence": 0.9997,
+"box": [
+0.236458,
+0.686667,
+0.250694,
+0.018889
+]
+},
+{
+"text": "}",
+"confidence": 0.9943,
+"box": [
+0.215278,
+0.665,
+0.006597,
+0.015556
+]
+},
+{
+"text": "if deleted > 0 {",
+"confidence": 0.9959,
+"box": [
+0.214583,
+0.638889,
+0.090972,
+0.022222
+]
+},
+{
+"text": "store.vacuum()?; // reclaim pages so deleted text is gone",
+"confidence": 0.9707,
+"box": [
+0.236111,
+0.616111,
+0.313542,
+0.020556
+]
+},
+{
+"text": "}",
+"confidence": 0.9964,
+"box": [
+0.214583,
+0.595,
+0.007986,
+0.018333
+]
+},
+{
+"text": "0k(deleted)",
+"confidence": 0.9599,
+"box": [
+0.214583,
+0.571111,
+0.061458,
+0.018889
+]
+},
+{
+"text": "1",
+"confidence": 0.2981,
+"box": [
+0.19375,
+0.548333,
+0.006597,
+0.017778
+]
+},
+{
+"text": "main 0 errors, 2 warnings Ln 14, Col 37 UTF-8 Rust",
+"confidence": 0.9846,
+"box": [
+0.006944,
+0.008333,
+0.213542,
+0.016111
+]
+}
+]
+}

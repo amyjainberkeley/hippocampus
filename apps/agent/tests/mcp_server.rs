@@ -455,7 +455,7 @@ fn tools_call_mci_recall_serializes_source_attributed_contradiction() {
 }
 
 #[test]
-fn tools_call_mci_recall_serializes_every_degradation_as_related_context_never_hits() {
+fn tools_call_mci_recall_returns_degraded_rankings_as_labelled_hits() {
     for (degradation, expected) in [
         (
             RetrievalDegradation::EmbeddingsUnavailable,
@@ -495,12 +495,14 @@ fn tools_call_mci_recall_serializes_every_degradation_as_related_context_never_h
         let result = response.result.expect("result");
         assert_eq!(result["outcome"], "degraded");
         assert_eq!(result["degradation"], expected);
-        assert_eq!(result["hits"], serde_json::json!([]));
-        assert_eq!(result["related_context"].as_array().unwrap().len(), 1);
+        assert_eq!(result["hits"].as_array().unwrap().len(), 1);
+        assert_eq!(result["hits"][0]["event_id"], 101);
+        assert_eq!(result["related_context"], serde_json::json!([]));
         let text: serde_json::Value =
             serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(text["outcome"], "degraded");
         assert_eq!(text["degradation"], expected);
-        assert_eq!(text["hits"], serde_json::json!([]));
+        assert_eq!(text["hits"].as_array().unwrap().len(), 1);
     }
 }
 
@@ -1004,22 +1006,14 @@ fn mci_recall_with_no_embedder_returns_typed_lexical_context() {
         result.get("degradation").and_then(|value| value.as_str()),
         Some("embeddings_unavailable")
     );
+    assert_eq!(result["related_context"], serde_json::json!([]));
     let hits = result
         .get("hits")
         .and_then(|v| v.as_array())
         .expect("hits array");
-    assert!(hits.is_empty(), "degraded context must not become hits");
-    let related_context = result
-        .get("related_context")
-        .and_then(|v| v.as_array())
-        .expect("related context array");
+    assert_eq!(hits.len(), 1, "FTS5 should find 'hello' in one event");
     assert_eq!(
-        related_context.len(),
-        1,
-        "FTS5 should find 'hello' in one event"
-    );
-    assert_eq!(
-        related_context[0]
+        hits[0]
             .get("text_snippet")
             .and_then(|v| v.as_str()),
         Some("hello world testing")
@@ -1063,11 +1057,11 @@ fn mci_recall_with_embedder_calls_hybrid_retriever() {
     let result = resp.result.expect("result — hybrid recall must succeed");
     assert_eq!(result["outcome"], "degraded");
     assert_eq!(result["degradation"], "evidence_verifier_unavailable");
-    assert_eq!(result["hits"], serde_json::json!([]));
+    assert_eq!(result["related_context"], serde_json::json!([]));
     let hits = result
-        .get("related_context")
+        .get("hits")
         .and_then(|v| v.as_array())
-        .expect("degraded related context array");
+        .expect("degraded hits array");
     assert!(
         !hits.is_empty(),
         "hybrid retriever should return hits (lexical + semantic)"
@@ -1111,17 +1105,13 @@ fn mci_recall_handles_hyphen_in_query_gracefully() {
     let result = resp.result.expect("result — hyphen query must not error");
     assert_eq!(result["outcome"], "degraded");
     assert_eq!(result["degradation"], "embeddings_unavailable");
+    assert_eq!(result["related_context"], serde_json::json!([]));
     let hits = result
         .get("hits")
         .and_then(|v| v.as_array())
         .expect("hits array");
-    assert!(hits.is_empty());
-    let related_context = result
-        .get("related_context")
-        .and_then(|v| v.as_array())
-        .expect("related context array");
     assert_eq!(
-        related_context.len(),
+        hits.len(),
         1,
         "sqlite-vec (sanitized) should match the event containing that text"
     );

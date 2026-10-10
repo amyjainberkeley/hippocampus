@@ -187,7 +187,7 @@ fn imports_retain_provenance_through_live_context() {
         (
             "mci_recall",
             serde_json::json!({"query": "release checklist"}),
-            "related_context",
+            "hits",
         ),
     ] {
         let request = serde_json::from_value(serde_json::json!({
