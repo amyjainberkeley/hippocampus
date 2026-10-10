@@ -50,13 +50,25 @@ public struct PaddleOCRRunner: OCREngine {
 
     private static func performPersistent(input: OCREngineInput, server: PaddleOCRServer, deadline: DispatchTime) -> OCRResult {
         let empty = OCRResult(recognizedLines: [], durationMs: 0, timedOut: false)
-        guard let image = PaddleOCRImage(input: input), DispatchTime.now() < deadline else { return empty }
+        let fullW = CVPixelBufferGetWidth(input.pixelBuffer), fullH = CVPixelBufferGetHeight(input.pixelBuffer)
+        let roi = input.roi
+        // Content-free: sizes, outcome and a line count only.
+        func trace(_ outcome: String, lines: Int = 0) {
+            OCRTrace.emit("paddle-ocr", "outcome=\(outcome) frame=\(fullW)x\(fullH) "
+                + "roi=\(Int(roi.width * CGFloat(fullW)))x\(Int(roi.height * CGFloat(fullH))) lines=\(lines)")
+        }
+        guard let image = PaddleOCRImage(input: input) else { trace("image_refused"); return empty }
+        guard DispatchTime.now() < deadline else { trace("deadline_passed"); return empty }
         switch server.recognize(bitmap: image.bitmap, deadline: deadline) {
         case .reply(let reply):
-            return decode(reply, region: image.region) ?? empty
+            guard let result = decode(reply, region: image.region) else { trace("reply_rejected"); return empty }
+            trace("reply", lines: result.recognizedLines.count)
+            return result
         case .timedOut:
+            trace("timed_out")
             return OCRResult(recognizedLines: [], durationMs: 0, timedOut: true)
         case .failed:
+            trace("worker_failed")
             return empty
         }
     }
