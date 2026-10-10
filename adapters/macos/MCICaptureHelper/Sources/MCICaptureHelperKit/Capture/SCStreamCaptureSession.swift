@@ -1872,7 +1872,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
 
     /// Nearest-neighbour 9×8 luminance downscale of a borrowed
     /// `CVPixelBuffer`. Verified live on macOS 26 Tahoe, 2026-05-19, Step-1 PASS (PR #31 → a19211b, see docs/audit/2026-05-19-step1-live-scstream.md).
-    /// Assumes 32-BGRA (the `SCStreamConfiguration` default).
+    /// Assumes 32-BGRA, which `SCStreamConfigFactory` requests explicitly.
     /// Locked read-only; unlocked before returning; the buffer is never
     /// retained.
     private static func grayscale9x8(from pixelBuffer: CVPixelBuffer) -> [UInt8]? {

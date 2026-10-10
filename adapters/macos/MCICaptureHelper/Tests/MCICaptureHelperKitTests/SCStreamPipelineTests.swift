@@ -136,6 +136,15 @@ final class SCStreamPipelineTests: XCTestCase {
         XCTAssertEqual(cfg.queueDepth, StreamPolicy.default.queueDepth)
     }
 
+    /// The OCR runner, change grid and text-change thumbnail read BGRA only;
+    /// ScreenCaptureKit's own default is biplanar YUV (420v).
+    func test_frames_are_requested_as_bgra() throws {
+        XCTAssertEqual(SCStreamConfigFactory.makeConfiguration().pixelFormat, kCVPixelFormatType_32BGRA)
+        let focused = try SCStreamConfigFactory.makeFocusedWindowConfiguration(
+            contentRect: CGRect(x: 0, y: 0, width: 800, height: 600), pointPixelScale: 2)
+        XCTAssertEqual(focused.pixelFormat, kCVPixelFormatType_32BGRA)
+    }
+
     func test_excludedBundleIDs_selects_only_denylisted_running_apps() {
         let dl = Denylist(entries: [
             DenylistEntry(kind: .appBundle, pattern: "com.evil.app"),
