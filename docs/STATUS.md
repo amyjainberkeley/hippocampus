@@ -1,14 +1,25 @@
 # Hippocampus Status
 
-_Updated on 2026-10-09; qualification scope is recorded per checkpoint._
+_Updated on 2026-10-10; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `e15ef64`
+Audited code baseline: `c8b923e`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## October 10: Integrated For The First Public Release
+
+`main` (repository preparation for public release: community files, PRIVACY,
+the user guide, dead links pointed at the repository) is merged into the
+0.2.1 branch. PRIVACY now describes whole-screen capture, Keychain key
+custody and the Sparkle update feed. Of PR #28, the brain key no longer
+reaching `~/.claude.json` and whole-question recall are already true here
+(client registration writes a Keychain reference; on the owner brain a
+natural-language question recalls the synthetic note through hybrid
+retrieval); its doctor change targets code this branch replaced.
 
 ## October 9, Evening: Capture Stores Again, Verified Live
 

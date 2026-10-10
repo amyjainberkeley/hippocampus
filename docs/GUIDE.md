@@ -13,7 +13,7 @@ The [README](../README.md) says what Hippocampus is and why it exists. This is t
 
 ## Inspecting a brain
 
-Real output from `./scripts/try-it.sh` (see the [quickstart](../README.md#quickstart)), not a mockup.
+Real output from `./scripts/try-it.sh` (see the [quickstart](../README.md#build-from-source)), not a mockup.
 
 One thing to be straight about before you read it: `mci-brain search` is **keyword search only** (SQLite FTS5). The vector half and the fusion that ranks them together live in `core/brain/src/hybrid_retriever.rs` and are exercised by the test suite, but they need the embedder, which this read-only CLI does not load. So what you see below is the lexical half doing its job, not the full recall path.
 

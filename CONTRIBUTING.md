@@ -4,7 +4,7 @@ This is a solo project, so the most useful contributions are precise ones: an is
 
 ## Set up
 
-Prerequisites are in the [README](README.md#prerequisites): macOS 14 or later, Rust 1.83 or later, and Xcode 15 or later for the Swift packages.
+Prerequisites are in the [README](README.md#build-from-source): macOS 14 or later on Apple silicon, Xcode 16 or later, and stable Rust.
 
 ```bash
 git clone https://github.com/amyjainberkeley/hippocampus.git
