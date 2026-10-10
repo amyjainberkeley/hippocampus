@@ -52,6 +52,12 @@ public enum SCStreamConfigFactory {
     public static func makeConfiguration(policy: StreamPolicy = .default) -> SCStreamConfiguration {
         let cfg = SCStreamConfiguration()
         cfg.showsCursor = policy.showsCursor // MUST be false (SLO).
+        // Every reader of these frames (change grid, text-change thumbnail,
+        // OCR) reads 32-bit BGRA. The default is not BGRA on current macOS
+        // (it is 420v, biplanar YUV), and against that format the OCR
+        // runner refused every frame and the change grid read plane
+        // metadata instead of pixels.
+        cfg.pixelFormat = kCVPixelFormatType_32BGRA
         cfg.queueDepth = policy.queueDepth
         // 2 fps default -> minimumFrameInterval = 1/2 s. CMTime with a
         // 1000-tick timescale keeps the ms policy exact.
