@@ -1,14 +1,41 @@
 # Hippocampus Status
 
-_Updated on 2026-10-08; qualification scope is recorded per checkpoint._
+_Updated on 2026-10-09; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `619af8b`
+Audited code baseline: `e15ef64`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## October 9, Evening: Capture Stores Again, Verified Live
+
+**Every live frame had been refused before OCR.** ScreenCaptureKit's default
+pixel format on current macOS is `420v` (biplanar YUV), not BGRA as the
+capture code assumed. The PaddleOCR runner reads BGRA only, so with
+`MCI_OCR_TRACE=1` every frame that passed the privacy cascade traced
+`outcome=image_refused` (12 of 12) and nothing was stored. The 9×8 change
+grid and the text-change thumbnail read the same buffers as BGRA. Apple
+Vision accepted YUV, which hid the fault until the switch to PaddleOCR; the
+October 9 finding of OCR "returning nothing on large, sparse windows" was at
+least partly this. The stream configuration factory now requests BGRA.
+
+**Verified live on the owner Mac** (installed candidates `f0eec33` and
+`e8454cb`, a synthetic note in TextEdit): the first frame since 2026-09-14 was
+stored at 22:54 PDT, its text matched the screen exactly, and `mci_recall`
+returned it as the top result.
+
+**Whole-screen capture filed nothing until the Dock was excluded.** The Dock
+lists a display-sized layer-20 window in front of every app window; it owned
+every point, so full-display reads of 128-152 lines kept none. With the Dock
+excluded from the display filter, a read of 151 lines filed 54 under four
+windows, and the synthetic note, behind a focused Calculator, was stored
+under TextEdit with its window title and recalled. Unchanged background
+windows were re-sent on every read (four a minute while the focused window
+changed); each window's text is now sent only when it changes (live check
+pending).
 
 ## October 9: Whole-Screen Capture
 
@@ -18,7 +45,7 @@ amending ADR-0031). The focused stream is unchanged. A second, low-rate
 stream per display reads visible windows at most every 15 seconds, only when
 their text changed and the user is active, and files each line under the
 topmost window at its position. Sensitive apps, every browser, notification
-banners, Hippocampus and denied apps are excluded from the display filter, so
+banners, Hippocampus, the Dock and denied apps are excluded from the display filter, so
 their pixels are never produced; an excluded app that launches later pauses
 reads until the filter is rebuilt. Lines from the focused, private-titled,
 denied or non-ordinary windows are dropped. Background text travels as
@@ -27,9 +54,8 @@ screenshot, and does not split episodes of focused work. The overlap
 qualification runs with `MCI_WHOLE_SCREEN=0` because it qualifies the focused
 stream.
 
-Verification: `BackgroundCapturePolicyTests` (8), wire round trip, segmenter
-(13) and `brain_ingest_context`. Live background capture on the owner Mac is
-not yet verified.
+Verification: `BackgroundCapturePolicyTests` (9), wire round trip, segmenter
+(13) and `brain_ingest_context`; live on the owner Mac as recorded above.
 
 ## October 9: Live Findings On The Owner Mac
 
