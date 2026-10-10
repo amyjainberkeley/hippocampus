@@ -2,7 +2,7 @@
 
 _Updated on 2026-10-08; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `03537a8`
+Audited code baseline: `619af8b`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
