@@ -44,6 +44,10 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
     private var streams: [CGDirectDisplayID: SCStream] = [:]
     private var entries: [ObjectIdentifier: Entry] = [:]
     private var lastRead: [CGDirectDisplayID: (at: Date, thumbnail: TextChangeThumbnail)] = [:]
+    /// The text last sent for each visible window. A display read is due when
+    /// anything on it changed, often only the focused window; windows whose
+    /// text is unchanged are not sent again.
+    private var lastSentText: [CGWindowID: Int] = [:]
     private var watcher: Task<Void, Never>?
     private var stopped = false
 
@@ -211,14 +215,32 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
                     lines: lines, displayBounds: bounds, windows: windows,
                     excludedBundleIds: excluded, focusedWindowId: focused, denylist: denylist
                 )
+                let changed = self.unsentGroups(groups, visible: windows)
                 // Content-free: counts only.
                 OCRTrace.emit("background-attribute", "lines=\(lines.count) windows=\(groups.count) "
-                    + "kept=\(groups.reduce(0) { $0 + $1.lines.count })")
-                return groups.map { group in
+                    + "kept=\(groups.reduce(0) { $0 + $1.lines.count }) changed_windows=\(changed.count)")
+                return changed.map { group in
                     (WorkflowContext(appBundleId: group.window.bundleId, windowTitle: group.window.title,
                                      url: nil, pageText: nil),
                      group.lines)
                 }
+            }
+        }
+    }
+
+    /// Groups whose text differs from what was last sent for that window.
+    /// Forgets windows that are no longer on screen.
+    private func unsentGroups(
+        _ groups: [(window: VisibleWindow, lines: [OCRLine])], visible: [VisibleWindow]
+    ) -> [(window: VisibleWindow, lines: [OCRLine])] {
+        let onScreen = Set(visible.map(\.windowId))
+        return lock.withLock {
+            lastSentText = lastSentText.filter { onScreen.contains($0.key) }
+            return groups.filter { group in
+                let digest = group.lines.map(\.text).joined(separator: "\n").hashValue
+                guard lastSentText[group.window.windowId] != digest else { return false }
+                lastSentText[group.window.windowId] = digest
+                return true
             }
         }
     }
