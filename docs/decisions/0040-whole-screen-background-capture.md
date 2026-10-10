@@ -27,7 +27,9 @@ separate, low-rate stream per display for everything else:
    be confirmed non-private, so browsers stay with the focused path, which
    confirms the window first), notification banners
    (`com.apple.notificationcenterui`, which show one-time codes), Hippocampus
-   itself, and every app on the owner's denylist. The filter names running
+   itself, the Dock (its display-sized window sits above every app window and
+   draws Launchpad and Mission Control), and every app on the owner's
+   denylist. The filter names running
    processes, so before each read the helper checks every visible window of
    an excluded app against the processes the filter removes. An app that
    launched or relaunched since is in the pixels: the read is skipped, the

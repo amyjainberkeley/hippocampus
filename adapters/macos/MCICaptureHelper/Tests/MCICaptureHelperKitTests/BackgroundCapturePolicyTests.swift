@@ -63,6 +63,19 @@ final class BackgroundCapturePolicyTests: XCTestCase {
         XCTAssertEqual(result.map(\.0), ["com.apple.TextEdit"])
     }
 
+    func testTheDocksDisplaySizedOverlayDoesNotHideTheWindowsBeneathIt() {
+        // As listed live on macOS 26: the Dock's layer-20 window spans the
+        // display, in front of every app window. It is excluded from the
+        // pixels, so the window beneath owns the point.
+        let windows = [
+            window(1, "com.apple.dock", nil, display, layer: 20),
+            window(2, "com.apple.TextEdit", "Notes", CGRect(x: 100, y: 80, width: 600, height: 400)),
+        ]
+        let excluded = BackgroundCapturePolicy.excludedBundleIds(userEntries: [])
+        XCTAssertEqual(attribute([line("note", at: CGPoint(x: 300, y: 200))], windows, excluded: excluded).map(\.0),
+                       ["com.apple.TextEdit"])
+    }
+
     func testMenuBarDesktopPrivateAndDeniedWindowsAreDropped() {
         let windows = [
             window(1, "com.apple.controlcenter", "Menubar", CGRect(x: 0, y: 0, width: 1000, height: 24), layer: 24),
@@ -103,7 +116,7 @@ final class BackgroundCapturePolicyTests: XCTestCase {
         let excluded = BackgroundCapturePolicy.excludedBundleIds(
             userEntries: [DenylistEntry(kind: .appBundle, pattern: "com.example.secret")])
         for bundle in ["com.1password.1password", "com.google.Chrome", "com.apple.Safari",
-                       "com.apple.notificationcenterui", "ai.hippocampus", "com.apple.systempreferences",
+                       "com.apple.notificationcenterui", "ai.hippocampus", "com.apple.systempreferences", "com.apple.dock",
                        "com.example.secret"] {
             XCTAssertTrue(excluded.contains(bundle), bundle)
         }

@@ -207,10 +207,14 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
         let emitter = emitter
         Task {
             await emitter.processBackground(tsUs: tsUs, input: input) { lines in
-                BackgroundCapturePolicy.attribute(
+                let groups = BackgroundCapturePolicy.attribute(
                     lines: lines, displayBounds: bounds, windows: windows,
                     excludedBundleIds: excluded, focusedWindowId: focused, denylist: denylist
-                ).map { group in
+                )
+                // Content-free: counts only.
+                OCRTrace.emit("background-attribute", "lines=\(lines.count) windows=\(groups.count) "
+                    + "kept=\(groups.reduce(0) { $0 + $1.lines.count })")
+                return groups.map { group in
                     (WorkflowContext(appBundleId: group.window.bundleId, windowTitle: group.window.title,
                                      url: nil, pageText: nil),
                      group.lines)
