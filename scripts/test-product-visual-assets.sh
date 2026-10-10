@@ -19,8 +19,8 @@ fail() {
 }
 
 for source in "$BRAND/AppIcon.svg" "$BRAND/AppIcon-template.svg"; do
-    rg -qi 'Hippocampus brain mark' "$source" \
-        || fail "$(basename "$source") is not the canonical brain mark"
+    rg -qi 'Hippocampus curl mark' "$source" \
+        || fail "$(basename "$source") is not the canonical curl mark"
     if rg -qi '#7AFFC1|#3AFDC8|rotate\(|squiggle' "$source"; then
         fail "$(basename "$source") contains retired mint or rotated artwork"
     fi
@@ -36,12 +36,14 @@ ns = {"svg": "http://www.w3.org/2000/svg"}
 geometry = None
 for name in ("AppIcon.svg", "AppIcon-template.svg", "hippocampus-icon.svg"):
     root = ET.parse(brand / name).getroot()
-    paths = sorted(path.attrib["d"] for path in root.findall(".//svg:path", ns))
-    assert len(paths) == 4, f"{name}: expected two lobes and two folds"
-    assert geometry is None or paths == geometry, f"{name}: inconsistent brain geometry"
-    geometry = paths
-    maximum_frames = 1 if name == "AppIcon.svg" else 0
-    assert len(root.findall(".//svg:rect", ns)) <= maximum_frames, f"{name}: nested icon frames"
+    by_id = {el.attrib["id"]: el for el in root.iter() if "id" in el.attrib}
+    assert "curl" in by_id and "now" in by_id, f"{name}: expected the curl and its dot"
+    shape = (by_id["curl"].attrib["d"],
+             tuple(by_id["now"].attrib[k] for k in ("cx", "cy", "r")))
+    assert geometry is None or shape == geometry, f"{name}: inconsistent curl geometry"
+    geometry = shape
+    tiles = 1 if name == "AppIcon.svg" else 0
+    assert ("tile" in by_id) == bool(tiles), f"{name}: the tile belongs to the app icon only"
 PY
 
 rg -q '\.fill\(\.ultraThinMaterial\)' \
@@ -144,4 +146,4 @@ for size in 16 19 32 38 48 72 96 128; do
 done
 
 "$SCRIPT_DIR/test-screenshot-assets.sh"
-printf 'PASS: product visual assets use the light brain mark system\n'
+printf 'PASS: product visual assets use the curl mark system\n'

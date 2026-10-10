@@ -1,8 +1,7 @@
 # Website Assets
 
-`icon.png` is a generated, flat monochrome H mark with a single connecting
-bridge, created September 7, 2026. It replaces the earlier curved anatomical
-mark. The native transparent PNG is used without redrawing it in CSS or SVG.
+`icon.png` is the 1024 px app icon (`assets/branding/AppIcon.iconset/icon_512x512@2x.png`):
+the curl mark on its graphite tile. It is regenerated from `assets/branding/AppIcon.svg`.
 
 `product-recall.jpeg` is an unedited native app capture from September 7, 2026,
 12:08 PM Pacific. It shows the optimized Recall executable from `c5a8774`, run

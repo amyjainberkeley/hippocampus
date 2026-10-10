@@ -1,15 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Hippocampus brain mark template">
-  <defs>
-    <mask id="folds">
-      <circle cx="32" cy="32" r="46" fill="#FFF"/>
-      <g fill="none" stroke="#000" stroke-width="3.5" stroke-linecap="round">
-        <path d="M12 17C18 17 21 21 21 26M12 38C18 38 22 34 22 30"/>
-        <path d="M52 17C46 17 43 21 43 26M52 38C46 38 42 34 42 30"/>
-      </g>
-    </mask>
-  </defs>
-  <g transform="translate(0 2.5)" mask="url(#folds)" fill="#000">
-    <path d="M30 14C30 9 27 6 22 6C16 6 12 10 12 16C7 18 5 22 5 27C5 32 8 36 12 38C11 46 16 53 23 53C27 53 30 50 30 46Z"/>
-    <path d="M34 14C34 9 37 6 42 6C48 6 52 10 52 16C57 18 59 22 59 27C59 32 56 36 52 38C53 46 48 53 41 53C37 53 34 50 34 46Z"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="176.6 176.6 670.7 670.7" role="img" aria-label="Hippocampus curl mark: a golden-ratio curl with a dot for now">
+<title>Hippocampus curl mark: a golden-ratio curl with a dot for now</title>
+<defs><mask id="gap" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024"><rect width="1024" height="1024" fill="#FFFFFF"/><circle cx="452.9" cy="581.5" r="79.2" fill="#000000"/></mask></defs>
+<g><path id="curl" d="M727.4 418.4 A270.0 270.0 0 0 0 345.5 418.4 A166.9 166.9 0 0 0 345.5 654.4 A103.1 103.1 0 0 0 491.4 654.4 A63.7 63.7 0 0 0 491.4 564.3 A39.4 39.4 0 0 0 435.7 564.3" fill="none" stroke="#000000" stroke-width="88" stroke-linecap="round" mask="url(#gap)"/><circle id="now" cx="452.9" cy="581.5" r="52.8" fill="#000000"/></g>
 </svg>

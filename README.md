@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/branding/AppIcon.iconset/icon_256x256.png" width="128" height="128" alt="Hippocampus icon: a blue curl closing on a white dot, on a graphite tile"></p>
+
 <h1 align="center">Hippocampus</h1>
 
 <p align="center"><strong>Computers should learn from the way you work.<br>First, they have to remember it.</strong></p>

@@ -111,7 +111,7 @@ final class MCIDesignSystemTests: XCTestCase {
 
     // MARK: - Icon source
 
-    func testBrainIconUsesLightSurfaceWithoutRetiredDecoration() throws {
+    func testCurlIconSharesOneGeometryWithoutRetiredDecoration() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -129,10 +129,23 @@ final class MCIDesignSystemTests: XCTestCase {
             XCTAssertFalse(icon.localizedCaseInsensitiveContains(forbidden))
             XCTAssertFalse(template.localizedCaseInsensitiveContains(forbidden))
         }
-        XCTAssertTrue(icon.localizedCaseInsensitiveContains("Hippocampus brain mark"))
-        XCTAssertTrue(template.localizedCaseInsensitiveContains("Hippocampus brain mark"))
-        XCTAssertEqual(icon.components(separatedBy: "<rect ").count - 1, 1)
-        XCTAssertFalse(template.contains("<rect "))
+        XCTAssertTrue(icon.localizedCaseInsensitiveContains("Hippocampus curl mark"))
+        XCTAssertTrue(template.localizedCaseInsensitiveContains("Hippocampus curl mark"))
+        // One tile in the app icon, none in the menu-bar template.
+        XCTAssertTrue(icon.contains("id=\"tile\""))
+        XCTAssertFalse(template.contains("id=\"tile\""))
+        // The curl and its dot are the same geometry in both.
+        func element(_ id: String, in svg: String) -> String? {
+            guard let start = svg.range(of: "id=\"\(id)\"") else { return nil }
+            let tail = svg[start.lowerBound...]
+            guard let end = tail.range(of: "/>") else { return nil }
+            return tail[..<end.lowerBound]
+                .replacingOccurrences(of: #" (stroke|fill|mask|filter)="[^"]*""#, with: "", options: .regularExpression)
+        }
+        for id in ["curl", "now"] {
+            let fromIcon = try XCTUnwrap(element(id, in: icon))
+            XCTAssertEqual(fromIcon, element(id, in: template), id)
+        }
     }
 
     // MARK: - Shadow presets

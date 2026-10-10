@@ -1,11 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Hippocampus brain mark">
-  <rect x="16" y="16" width="992" height="992" rx="220" fill="#F7F8FA" stroke="#DDE1E7" stroke-width="8"/>
-  <g transform="translate(128 158) scale(12)">
-    <path d="M30 14C30 9 27 6 22 6C16 6 12 10 12 16C7 18 5 22 5 27C5 32 8 36 12 38C11 46 16 53 23 53C27 53 30 50 30 46Z" fill="#2864C7"/>
-    <path d="M34 14C34 9 37 6 42 6C48 6 52 10 52 16C57 18 59 22 59 27C59 32 56 36 52 38C53 46 48 53 41 53C37 53 34 50 34 46Z" fill="#2864C7"/>
-    <g fill="none" stroke="#F7F8FA" stroke-width="3.5" stroke-linecap="round">
-      <path d="M12 17C18 17 21 21 21 26M12 38C18 38 22 34 22 30"/>
-      <path d="M52 17C46 17 43 21 43 26M52 38C46 38 42 34 42 30"/>
-    </g>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Hippocampus curl mark: a golden-ratio curl with a dot for now">
+<title>Hippocampus curl mark: a golden-ratio curl with a dot for now</title>
+<defs>
+<linearGradient id="graphite" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2A2D35"/><stop offset="1" stop-color="#0B0C10"/></linearGradient>
+<linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0.16"/><stop offset="0.45" stop-color="#FFFFFF" stop-opacity="0"/></linearGradient>
+<linearGradient id="ink" x1="0.15" y1="0" x2="0.85" y2="1"><stop offset="0" stop-color="#9CC3FF"/><stop offset="1" stop-color="#2E6BFF"/></linearGradient>
+<filter id="lift" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.30"/></filter>
+<filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#2E6BFF" flood-opacity="0.45"/></filter>
+</defs>
+<path id="tile" d="M284.3 100H739.7C866.9 100 924 157.1 924 284.3V739.7C924 866.9 866.9 924 739.7 924H284.3C157.1 924 100 866.9 100 739.7V284.3C100 157.1 157.1 100 284.3 100Z" fill="url(#graphite)" filter="url(#lift)"/>
+<path id="tile-sheen" d="M284.3 100H739.7C866.9 100 924 157.1 924 284.3V739.7C924 866.9 866.9 924 739.7 924H284.3C157.1 924 100 866.9 100 739.7V284.3C100 157.1 157.1 100 284.3 100Z" fill="url(#sheen)"/>
+<path id="tile-edge" d="M284.3 100H739.7C866.9 100 924 157.1 924 284.3V739.7C924 866.9 866.9 924 739.7 924H284.3C157.1 924 100 866.9 100 739.7V284.3C100 157.1 157.1 100 284.3 100Z" fill="none" stroke="#FFFFFF" stroke-opacity="0.10" stroke-width="3"/>
+<g filter="url(#glow)"><path id="curl" d="M727.4 418.4 A270.0 270.0 0 0 0 345.5 418.4 A166.9 166.9 0 0 0 345.5 654.4 A103.1 103.1 0 0 0 491.4 654.4 A63.7 63.7 0 0 0 491.4 564.3 A39.4 39.4 0 0 0 435.7 564.3" fill="none" stroke="url(#ink)" stroke-width="88" stroke-linecap="round"/><circle id="now" cx="452.9" cy="581.5" r="52.8" fill="#FFFFFF"/></g>
 </svg>

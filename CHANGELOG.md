@@ -5,6 +5,12 @@ commits are intentionally omitted from release notes.
 
 ## [Unreleased]
 
+### A New Mark
+
+- A new icon: a golden-ratio curl, the seahorse shape the hippocampus is
+  named for, closing on a dot for *now*. Blue on a graphite tile in the Dock;
+  a single-colour glyph in the menu bar that macOS tints with the system.
+
 ## [0.2.1] - 2026-10-08
 
 ### Remembering Again
