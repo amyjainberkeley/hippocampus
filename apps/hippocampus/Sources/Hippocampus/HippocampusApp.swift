@@ -362,7 +362,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             bundled local models and native components currently support \
             Apple Silicon only. Intel Macs are not supported.
 
-            Learn more at https://hippocampus-swart.vercel.app
+            Learn more at https://github.com/amyjainberkeley/hippocampus
             """
         alert.alertStyle = .critical
         alert.addButton(withTitle: "Quit")

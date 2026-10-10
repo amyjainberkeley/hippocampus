@@ -293,10 +293,9 @@ struct StatusMenuView: View {
 
     private func sendFeedback() {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
-        // TODO: swap to hippocampus.ai/feedback once domain (#21) lands
-        let subject = "Hippocampus feedback v\(version)"
+        let title = "Feedback (v\(version))"
             .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        guard let url = URL(string: "mailto:hippocampus@amyjainberkeley.com?subject=\(subject)") else { return }
+        guard let url = URL(string: "https://github.com/amyjainberkeley/hippocampus/issues/new?title=\(title)") else { return }
         NSWorkspace.shared.open(url)
     }
 
