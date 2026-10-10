@@ -119,6 +119,7 @@ pub use consolidator::{ConsolidatorConfig, DerivedEdge, EpisodeConsolidator, Ide
 pub mod fts_sanitizer;
 
 pub mod activity;
+pub mod understanding;
 pub use activity::{ActivityInterval, ActivityState};
 pub mod memory_delta;
 pub mod memory_projector;

@@ -123,6 +123,7 @@ pub fn purge_once(
     };
     delete_projected_memory_for_events(&tx, &event_ids)?;
     crate::activity::delete_activity_in_range(&tx, 0, cutoff_i64)?;
+    crate::understanding::delete_interactions_in_range(&tx, 0, cutoff_i64)?;
 
     // DELETE events. ON DELETE CASCADE auto-removes event_vectors + chunks.
     // FTS5 trigger (events_ad) auto-removes from events_fts.

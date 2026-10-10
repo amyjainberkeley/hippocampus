@@ -2226,6 +2226,7 @@ impl SqlCipherBrainStore {
             )
             .map_err(|e| StoreError::Backend(format!("DELETE events range: {e}")))?;
         crate::activity::delete_activity_in_range(&tx, s_i, e_i.saturating_add(1))?;
+        crate::understanding::delete_interactions_in_range(&tx, s_i, e_i.saturating_add(1))?;
         tx.commit()
             .map_err(|e| StoreError::Backend(format!("commit delete_range tx: {e}")))?;
         Ok(run_post_delete_cleanup(
@@ -2266,6 +2267,7 @@ impl SqlCipherBrainStore {
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|e| StoreError::Backend(format!("begin wipe_all tx: {e}")))?;
         crate::activity::wipe_activity(&tx)?;
+        crate::understanding::wipe(&tx)?;
         // Order: children with FK NOT ON DELETE CASCADE-safe first
         // (briefs is FK-free; entity_* is a parent-child chain). Then
         // events, then episodes. CASCADE covers event_vectors + chunks
@@ -2596,6 +2598,8 @@ pub(crate) fn delete_projected_memory_for_events(
     if event_ids.is_empty() {
         return Ok(());
     }
+    // Inferences built on these events go with them, not only their links.
+    crate::understanding::delete_for_events(tx, event_ids)?;
     prepare_memory_deletion_staging(tx)?;
     stage_deleted_event_ids(tx, event_ids)?;
     stage_memory_deletion_closure(tx)?;
@@ -2922,6 +2926,13 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
     // (same discipline as 0009). The schema version stays at 10.
     tx.execute_batch(include_str!("../migrations/0012_handoff_deliveries.sql"))
         .map_err(|error| StoreError::Backend(format!("apply migration 0012: {error}")))?;
+    // 0013 — the understanding layer (interaction counts, searches, user-model
+    // propositions, episode notes, day reports). Fresh tables, triggers and
+    // indexes only, every statement `IF NOT EXISTS`, so the apply is idempotent
+    // on re-open. The schema version stays at 10: readers of a v10 brain that
+    // do not know these tables are unaffected.
+    tx.execute_batch(include_str!("../migrations/0013_understanding.sql"))
+        .map_err(|error| StoreError::Backend(format!("apply migration 0013: {error}")))?;
     tx.execute(
         "INSERT OR REPLACE INTO meta (key, value) VALUES ('brain_schema_version', '10')",
         [],
