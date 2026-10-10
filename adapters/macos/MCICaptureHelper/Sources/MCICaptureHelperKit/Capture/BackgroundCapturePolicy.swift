@@ -33,11 +33,13 @@ public enum BackgroundCapturePolicy {
     /// Not in the pixels at all. Browsers stay with the focused path, where a
     /// window is confirmed non-private before any pixel is read; background
     /// browser windows cannot be confirmed. Notification banners carry
-    /// one-time codes. Hippocampus never records itself.
+    /// one-time codes. Hippocampus never records itself. The Dock keeps a
+    /// display-sized window above every app window (it draws Launchpad and
+    /// Mission Control there); left in the pixels it would own every point.
     public static func excludedBundleIds(userEntries: [DenylistEntry]) -> Set<String> {
         var out = SensitiveCaptureDenylist.appBundles
         out.formUnion(BrowserPixelCapturePolicy.excludedBundleIds)
-        out.formUnion(["com.apple.notificationcenterui", "ai.hippocampus"])
+        out.formUnion(["com.apple.notificationcenterui", "ai.hippocampus", "com.apple.dock"])
         out.formUnion(userEntries.filter { $0.kind == .appBundle }.map(\.pattern))
         return out
     }
