@@ -11,8 +11,10 @@ commits are intentionally omitted from release notes.
 
 - Screen memory records again. A safety check meant to catch hidden password
   fields was treating complex app windows (editors, chat apps, web pages) as
-  unknowable and skipping every frame. Password managers, secure text entry,
-  major sign-in and banking sites and private windows are still never recorded.
+  unknowable and skipping every frame, and the on-device text reader was
+  being handed screen images in a format it refused. Password managers,
+  secure text entry, major sign-in and banking sites and private windows are
+  still never recorded.
 - New text is noticed: typing, new chat messages and edits are now read even
   when the rest of the window looks the same.
 - The whole screen is remembered, not only the window in front. Other visible
