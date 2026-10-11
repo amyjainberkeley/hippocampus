@@ -1631,3 +1631,34 @@ fn understanding_tools_read_a_real_brain() {
     ));
     assert!(bad.expect("response").error.is_some(), "a malformed date is an error, not a guess");
 }
+
+#[test]
+fn ask_and_suggest_exist_only_in_an_assistant_session() {
+    use mci_agent::understanding::{mind::MindClient, query::Assistant};
+    let (_dir, store) = open_temp_store();
+    store.put_event(&make_event("Ravi: Let's land Team at $18 a seat, billed annually.", 1_000_000)).unwrap();
+    let plain = server_fts_only(Arc::clone(&store));
+    let denied = plain.dispatch(req(
+        "tools/call",
+        Some(serde_json::json!({ "name": "mci_ask", "arguments": { "question": "team price?" } })),
+    ));
+    assert!(denied.expect("response").error.is_some(), "external clients never get mci_ask");
+
+    let assistant = server_fts_only(Arc::clone(&store))
+        .with_assistant(Arc::new(Assistant::new(Arc::clone(&store), MindClient::new(None))));
+    let listed = extract_result(assistant.dispatch(req("tools/list", None)));
+    assert_eq!(listed["tools"].as_array().unwrap().len(), 12);
+    let asked = extract_result(assistant.dispatch(req(
+        "tools/call",
+        Some(serde_json::json!({ "name": "mci_ask", "arguments": { "question": "team seat price" } })),
+    )));
+    // No model here: no answer, but the memories that would have been cited.
+    assert!(asked["result"]["answer"].is_null());
+    assert_eq!(asked["result"]["unavailable"], "not_installed");
+    assert!(asked["result"]["sources"][0]["text"].as_str().unwrap().contains("$18"));
+    let suggested = extract_result(assistant.dispatch(req(
+        "tools/call",
+        Some(serde_json::json!({ "name": "mci_suggest", "arguments": {} })),
+    )));
+    assert!(suggested["result"]["suggestions"].as_array().unwrap().iter().any(|s| s["kind"] == "day"));
+}

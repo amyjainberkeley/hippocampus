@@ -350,6 +350,8 @@ fn parse_args(argv: &[String]) -> Args {
             "--strict" => strict = true,
             "--health-summary" => mode_kind = ModeKind::HealthSummary,
             "mcp-serve" => mode_kind = ModeKind::McpServe,
+            // Read by run_mcp_serve: the command bar's assistant session.
+            "--assist" => {}
             "context" => mode_kind = ModeKind::Context,
             "handoff" => mode_kind = ModeKind::Handoff,
             "today" => mode_kind = ModeKind::Today,
@@ -2558,7 +2560,17 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
             return Err(12);
         }
     };
-    let server = Arc::new(Server::new(Arc::new(reader)));
+    let store = reader.store();
+    let mut server = Server::new(Arc::new(reader));
+    // The command bar starts its own session with --assist: answers and
+    // suggestions with a warm on-device model. External clients never pass it.
+    if std::env::args().any(|arg| arg == "--assist") {
+        server = server.with_assistant(Arc::new(mci_agent::understanding::query::Assistant::new(
+            store,
+            mci_agent::understanding::mind::MindClient::locate(),
+        )));
+    }
+    let server = Arc::new(server);
     eprintln!(
         "mci-agent mcp-serve: ready on stdio. db={} recall={recall_mode}",
         db_path.display()
@@ -2648,28 +2660,13 @@ fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
             let embedder = load_read_query_embedder("ask");
             let reader = LiveBrainReader::from_store_with_embedder(Arc::clone(&store), embedder);
             let hits = match reader.recall(&question, 10) {
-                Ok(mci_agent::mcp::McpRecallOutcome::Matched { hits }) => hits,
-                Ok(mci_agent::mcp::McpRecallOutcome::Degraded { related_context, .. }) => related_context,
-                Ok(mci_agent::mcp::McpRecallOutcome::Contradicted { evidence }) => evidence,
-                Ok(_) => Vec::new(),
+                Ok(outcome) => query::hits_of(outcome),
                 Err(error) => {
                     eprintln!("mci-agent ask: recall failed: {error}");
                     return Some(ExitCode::from(13));
                 }
             };
-            let memories: Vec<Source> = hits
-                .into_iter()
-                .enumerate()
-                .map(|(index, hit)| Source {
-                    n: index + 1,
-                    event_id: i64::try_from(hit.record.event_id.0).unwrap_or(0),
-                    ts_us: hit.record.ts_us,
-                    app: mci_agent::understanding::apps::name(hit.record.app_bundle_id.as_deref().unwrap_or("")),
-                    title: hit.record.window_title.clone(),
-                    url: hit.record.url.clone(),
-                    text: hit.record.text_snippet.clone(),
-                })
-                .collect();
+            let memories: Vec<Source> = query::sources_from_hits(hits);
             let mind = MindClient::locate();
             let name = mci_agent::understanding::Understanding::account_first_name();
             query::answer(&store, &mind, &name, tz, now_us, &question, flags.get("--now").map(String::as_str), memories)

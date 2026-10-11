@@ -271,8 +271,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         Task { @MainActor in
-            let hotkeyResult = GlobalHotkeyManager.shared.registerDefault { [weak self] in
-                self?.supervisor.openRecallUI(openPopup: true)
+            let supervisor = self.supervisor
+            CommandBarController.shared.configure(
+                model: CommandBarModel(launch: { assist in supervisor.memorySessionLaunch(assist: assist) }),
+                openEvent: { eventId in supervisor.openRecallUI(initialTab: "search", focusEventId: eventId) }
+            )
+            let hotkeyResult = GlobalHotkeyManager.shared.registerDefault {
+                CommandBarController.shared.toggle()
             }
             if case .osError(let status) = hotkeyResult {
                 self.firstLaunchLogger.error(

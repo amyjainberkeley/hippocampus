@@ -145,6 +145,78 @@ fn session_json(n: &SessionNote, tz: i32) -> serde_json::Value {
 // Answers
 // ---------------------------------------------------------------------------
 
+/// Number recalled hits as citable memories.
+#[must_use]
+pub fn sources_from_hits(hits: Vec<crate::mcp::McpHit>) -> Vec<Source> {
+    hits.into_iter()
+        .enumerate()
+        .map(|(index, hit)| Source {
+            n: index + 1,
+            event_id: i64::try_from(hit.record.event_id.0).unwrap_or(0),
+            ts_us: hit.record.ts_us,
+            app: apps::name(hit.record.app_bundle_id.as_deref().unwrap_or("")),
+            title: hit.record.window_title.clone(),
+            url: hit.record.url.clone(),
+            text: hit.record.text_snippet,
+        })
+        .collect()
+}
+
+/// Recalled hits from any outcome.
+#[must_use]
+pub fn hits_of(outcome: crate::mcp::McpRecallOutcome) -> Vec<crate::mcp::McpHit> {
+    match outcome {
+        crate::mcp::McpRecallOutcome::Matched { hits } => hits,
+        crate::mcp::McpRecallOutcome::Degraded { related_context, .. } => related_context,
+        crate::mcp::McpRecallOutcome::Contradicted { evidence } => evidence,
+        crate::mcp::McpRecallOutcome::NothingMatched { .. } => Vec::new(),
+    }
+}
+
+/// The command bar's assistant: answers and suggestions with a warm model.
+pub struct Assistant {
+    store: Arc<SqlCipherBrainStore>,
+    mind: MindClient,
+    tz: i32,
+    user_name: String,
+}
+
+impl Assistant {
+    /// Build over a store with the bundled model.
+    #[must_use]
+    pub fn new(store: Arc<SqlCipherBrainStore>, mind: MindClient) -> Self {
+        Self {
+            store,
+            mind,
+            tz: crate::brief_worker::current_tz_offset_secs(),
+            user_name: super::Understanding::account_first_name(),
+        }
+    }
+
+    fn now_us() -> u64 {
+        u64::try_from(
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_micros(),
+        )
+        .unwrap_or(u64::MAX)
+    }
+
+    /// Answer a question from recalled memories.
+    ///
+    /// # Errors
+    /// Store failures.
+    pub fn ask(&self, question: &str, now: Option<&str>, memories: Vec<Source>) -> Result<Answer, StoreError> {
+        answer(&self.store, &self.mind, &self.user_name, self.tz, Self::now_us(), question, now, memories)
+    }
+
+    /// Suggestions for the current moment.
+    ///
+    /// # Errors
+    /// Store failures.
+    pub fn suggest(&self, now: &NowContext, use_model: bool) -> Result<Vec<Suggestion>, StoreError> {
+        suggest(&self.store, use_model.then_some(&self.mind), &self.user_name, self.tz, Self::now_us(), now)
+    }
+}
+
 /// A memory offered to the answerer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Source {
@@ -321,8 +393,10 @@ pub fn suggest(
             score: 6,
         });
     }
-    // Related to the current window: what else you saw about it.
-    if let Some(title) = current.and_then(|e| e.window_title.clone()).or_else(|| now.title.clone()) {
+    // Related to the current window: what else you saw about it. Only a
+    // window Hippocampus itself captured counts; a title from an app it
+    // never records (a password manager, a private window) is not used.
+    if let Some(title) = current.and_then(|e| e.window_title.clone()) {
         let topic = title.split([' ', '—', '-', '|']).filter(|w| w.len() > 2).take(6).collect::<Vec<_>>().join(" ");
         if !topic.is_empty() {
             out.push(Suggestion {
@@ -348,7 +422,7 @@ pub fn suggest(
             .map(|p| p.text)
             .collect();
         let now_text = current.map_or_else(
-            || now.title.clone().unwrap_or_default(),
+            || now.app.as_deref().map(apps::name).unwrap_or_default(),
             |e| format!("{} — {}\n{}", apps::name(e.app_bundle_id.as_deref().unwrap_or("")), e.window_title.clone().unwrap_or_default(), clip(&e.text, 1_000)),
         );
         let recent_lines: Vec<String> = notes.iter().rev().take(6).map(|n| format!("{} {}: {}", observe::clock(n.start_us, tz), n.title, n.beneath)).collect();

@@ -43,6 +43,10 @@ pub enum ToolName {
     UserModel,
     /// `mci_sessions` — a day's work sessions, surface and beneath.
     Sessions,
+    /// `mci_ask` — answer from memory (assistant sessions only).
+    Ask,
+    /// `mci_suggest` — suggestions for now (assistant sessions only).
+    Suggest,
 }
 
 impl ToolName {
@@ -60,6 +64,8 @@ impl ToolName {
             Self::Searches => "mci_searches",
             Self::UserModel => "mci_user_model",
             Self::Sessions => "mci_sessions",
+            Self::Ask => "mci_ask",
+            Self::Suggest => "mci_suggest",
         }
     }
 
@@ -78,6 +84,8 @@ impl ToolName {
             "mci_searches" => Some(Self::Searches),
             "mci_user_model" => Some(Self::UserModel),
             "mci_sessions" => Some(Self::Sessions),
+            "mci_ask" => Some(Self::Ask),
+            "mci_suggest" => Some(Self::Suggest),
             _ => None,
         }
     }
@@ -284,6 +292,38 @@ pub fn tool_definitions() -> serde_json::Value {
                 "type": "object",
                 "properties": {
                     "date": { "type": "string", "description": "Local date YYYY-MM-DD. Defaults to today." }
+                }
+            }
+        }
+    ])
+}
+
+/// Tools offered only by an assistant session (`mcp-serve --assist`), which
+/// the command bar starts. They read the brain and run the on-device model.
+#[must_use]
+pub fn assistant_tool_definitions() -> serde_json::Value {
+    serde_json::json!([
+        {
+            "name": ToolName::Ask.as_str(),
+            "description": "Answer a question from the user's own memories with the on-device model, citing them.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "question": { "type": "string" },
+                    "now": { "type": "string", "description": "What is on screen now, if known." }
+                },
+                "required": ["question"]
+            }
+        },
+        {
+            "name": ToolName::Suggest.as_str(),
+            "description": "What the user likely wants right now: resume, recent searches, related memories, their day.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "app": { "type": "string" },
+                    "title": { "type": "string" },
+                    "model": { "type": "boolean", "description": "Add on-device predictions (slower)." }
                 }
             }
         }

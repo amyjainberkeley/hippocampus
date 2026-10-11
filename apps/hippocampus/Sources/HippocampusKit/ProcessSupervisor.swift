@@ -1034,6 +1034,25 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
     }
 
+    /// How the command bar starts its memory sessions: the bundled agent in
+    /// `mcp-serve` mode (`--assist` adds answers and suggestions with the
+    /// on-device model), with a sanitized environment that carries only the
+    /// brain path and the Keychain reference. Nil before the app is set up.
+    public func memorySessionLaunch(assist: Bool) -> MemorySessionLaunch? {
+        guard let agent = locator.agentPath() else { return nil }
+        let environment = ProcessSupervisorLaunchPlan.sanitizedEnvironment(
+            baseEnvironment: ProcessInfo.processInfo.environment,
+            dbPath: dbPath,
+            keyReference: currentKeyReference,
+            developmentKeyMode: developmentKeyMode
+        )
+        return MemorySessionLaunch(
+            executable: agent,
+            arguments: assist ? ["mcp-serve", "--assist"] : ["mcp-serve"],
+            environment: environment
+        )
+    }
+
     /// Retire the commanded Recall child when the owning menu-bar process exits.
     /// Capture restarts intentionally do not call this; Recall remains useful
     /// while capture is paused or a helper generation is being replaced.

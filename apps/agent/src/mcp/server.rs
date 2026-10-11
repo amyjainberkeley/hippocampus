@@ -110,6 +110,7 @@ impl ServerCounters {
 pub struct Server {
     reader: Arc<dyn BrainReader>,
     counters: Arc<ServerCounters>,
+    assistant: Option<Arc<crate::understanding::query::Assistant>>,
 }
 
 impl Server {
@@ -119,14 +120,23 @@ impl Server {
         Self {
             reader,
             counters: Arc::new(ServerCounters::default()),
+            assistant: None,
         }
+    }
+
+    /// Offer `mci_ask` and `mci_suggest` too. Only the command bar's own
+    /// session does this; external clients see the read-only tools.
+    #[must_use]
+    pub fn with_assistant(mut self, assistant: Arc<crate::understanding::query::Assistant>) -> Self {
+        self.assistant = Some(assistant);
+        self
     }
 
     /// Construct with explicit counters (useful for tests that want to
     /// observe the increment behavior).
     #[must_use]
     pub fn new_with_counters(reader: Arc<dyn BrainReader>, counters: Arc<ServerCounters>) -> Self {
-        Self { reader, counters }
+        Self { reader, counters, assistant: None }
     }
 
     /// Borrow the counters (for tests + the supervisor's wire frame).
@@ -165,10 +175,18 @@ impl Server {
 
         match req.method.as_str() {
             "initialize" => Some(Self::handle_initialize(id)),
-            "tools/list" => Some(JsonRpcResponse::ok(
-                id,
-                serde_json::json!({ "tools": tool_definitions() }),
-            )),
+            "tools/list" => {
+                let mut tools = tool_definitions();
+                if self.assistant.is_some() {
+                    if let (Some(all), Some(extra)) = (
+                        tools.as_array_mut(),
+                        crate::mcp::tools::assistant_tool_definitions().as_array(),
+                    ) {
+                        all.extend(extra.iter().cloned());
+                    }
+                }
+                Some(JsonRpcResponse::ok(id, serde_json::json!({ "tools": tools })))
+            }
             "tools/call" => Some(self.handle_tools_call(id, req.params)),
             "ping" => Some(JsonRpcResponse::ok(id, serde_json::json!({}))),
             _ => {
@@ -280,6 +298,70 @@ impl Server {
             ToolName::Day | ToolName::Searches | ToolName::UserModel | ToolName::Sessions => {
                 self.handle_understanding(id, tool, args)
             }
+            ToolName::Ask | ToolName::Suggest => match &self.assistant {
+                Some(assistant) => self.handle_assistant(id, tool, args, assistant),
+                None => JsonRpcResponse::err(id, METHOD_NOT_FOUND, format!("unknown tool: {tool}")),
+            },
+        }
+    }
+
+    fn handle_assistant(
+        &self,
+        id: JsonRpcId,
+        tool: ToolName,
+        args: serde_json::Value,
+        assistant: &crate::understanding::query::Assistant,
+    ) -> JsonRpcResponse {
+        use crate::understanding::query::{hits_of, sources_from_hits, NowContext};
+        #[derive(Deserialize)]
+        struct AskArgs {
+            question: String,
+            #[serde(default)]
+            now: Option<String>,
+        }
+        #[derive(Deserialize)]
+        struct SuggestArgs {
+            #[serde(default)]
+            app: Option<String>,
+            #[serde(default)]
+            title: Option<String>,
+            #[serde(default)]
+            model: bool,
+        }
+        let payload = if tool == ToolName::Ask {
+            let parsed: AskArgs = match serde_json::from_value(args) {
+                Ok(v) => v,
+                Err(e) => return JsonRpcResponse::err(id, INVALID_PARAMS, format!("mci_ask args: {e}")),
+            };
+            if parsed.question.trim().is_empty() {
+                return JsonRpcResponse::err(id, INVALID_PARAMS, "mci_ask: question must be non-empty");
+            }
+            let hits = match self.reader.recall(&parsed.question, 10) {
+                Ok(outcome) => hits_of(outcome),
+                Err(e) => return brain_err_to_response(id, &e),
+            };
+            assistant
+                .ask(&parsed.question, parsed.now.as_deref(), sources_from_hits(hits))
+                .map(|answer| serde_json::to_value(answer).unwrap_or_default())
+        } else {
+            let parsed: SuggestArgs = match serde_json::from_value(args) {
+                Ok(v) => v,
+                Err(e) => return JsonRpcResponse::err(id, INVALID_PARAMS, format!("mci_suggest args: {e}")),
+            };
+            assistant
+                .suggest(&NowContext { app: parsed.app, title: parsed.title }, parsed.model)
+                .map(|suggestions| serde_json::json!({ "suggestions": suggestions }))
+        };
+        match payload {
+            Ok(payload) => JsonRpcResponse::ok(
+                id,
+                serde_json::json!({
+                    "content": [{ "type": "text", "text": serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_owned()) }],
+                    "result": payload,
+                    "isError": false,
+                }),
+            ),
+            Err(e) => JsonRpcResponse::err(id, SERVER_ERROR_GENERIC, format!("{tool}: {e}")),
         }
     }
 

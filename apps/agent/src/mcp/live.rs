@@ -251,6 +251,12 @@ impl LiveBrainReader {
         })
     }
 
+    /// The store this reader reads.
+    #[must_use]
+    pub fn store(&self) -> Arc<SqlCipherBrainStore> {
+        Arc::clone(&self.store)
+    }
+
     /// Construct from an already-opened store, no embedder (FTS5-only).
     #[must_use]
     pub fn from_store(store: Arc<SqlCipherBrainStore>) -> Self {

@@ -129,6 +129,10 @@ struct StatusMenuView: View {
         let paused = (supervisor.state == .paused)
             || UserPauseController.shared.isPaused
 
+        Button("Ask Hippocampus…  ⌃⇧Space") {
+            CommandBarController.shared.show()
+        }
+
         Button("Open Recall") {
             supervisor.openRecallUI()
         }
