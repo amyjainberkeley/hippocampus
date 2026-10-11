@@ -37,7 +37,7 @@ const SESSIONS_CURSOR: &str = "sessions_through_us";
 const PIPELINE_KEY: &str = "pipeline_version";
 /// Bump when prompts or rules change enough that earlier inferences should
 /// be redone; the next cycle clears them and starts again.
-const PIPELINE_VERSION: &str = "2";
+const PIPELINE_VERSION: &str = "3";
 const SEARCH_CURSOR: &str = "searches_through_event_id";
 /// How far back the first cycle looks.
 const FIRST_LOOKBACK_US: u64 = 24 * 3_600_000_000;
@@ -211,7 +211,11 @@ impl Understanding {
         let mut searches = self.store.search_queries_in_range(span.start_us, span.end_us + 1, 50)?;
         searches.reverse();
         let signals = observe::signals(slice, &segments, &searches);
-        let observation = observe::render(&segments, &signals, self.tz_offset_secs, OBSERVATION_CHARS);
+        let observation = format!(
+            "{}\n{}",
+            weekday_and_date(span.start_us, self.tz_offset_secs),
+            observe::render(&segments, &signals, self.tz_offset_secs, OBSERVATION_CHARS)
+        );
         let duration = span.end_us.saturating_sub(span.start_us);
         let signals_json = serde_json::json!({
             "signals": &signals,
@@ -231,9 +235,9 @@ impl Understanding {
                 Duration::from_secs(60),
             ) {
                 Ok(out) => {
-                    note.title = out.title;
-                    note.surface = out.surface;
-                    note.beneath = out.beneath;
+                    note.title = gum::ungender(&out.title, &self.user_name);
+                    note.surface = gum::ungender(&out.surface, &self.user_name);
+                    note.beneath = gum::ungender(&out.beneath, &self.user_name);
                     note.model = MODEL_LABEL.into();
                     stats.sessions_by_model += 1;
                 }
@@ -417,6 +421,15 @@ fn measured_note(
     }
 }
 
+/// "Saturday, 2026-10-11", so the model knows a weekend from a workday.
+fn weekday_and_date(ts_us: u64, tz_offset_secs: i32) -> String {
+    const DAYS: [&str; 7] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    let local = i64::try_from(ts_us / 1_000_000).unwrap_or(0) + i64::from(tz_offset_secs);
+    // 1970-01-01 was a Thursday.
+    let weekday = DAYS[usize::try_from((local.div_euclid(86_400) + 4).rem_euclid(7)).unwrap_or(0)];
+    format!("{weekday}, {}", local_date_string(local - i64::from(tz_offset_secs), tz_offset_secs))
+}
+
 fn capitalize(text: &str) -> String {
     let mut chars = text.chars();
     chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
@@ -476,6 +489,14 @@ mod tests {
             tab_id: None,
             embedding: None,
         }
+    }
+
+    #[test]
+    fn observations_name_the_weekday() {
+        // 2026-10-11 00:30 UTC is Saturday evening in Los Angeles (UTC-7).
+        let ts = 1_791_678_600_000_000;
+        assert_eq!(weekday_and_date(ts, -7 * 3600), "Saturday, 2026-10-10");
+        assert_eq!(weekday_and_date(ts, 0), "Sunday, 2026-10-11");
     }
 
     #[test]

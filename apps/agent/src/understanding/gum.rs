@@ -177,6 +177,53 @@ pub fn specific(drafts: Vec<Draft>, observation: &str, user_name: &str) -> Vec<D
         .collect()
 }
 
+/// Ceilings for a claim seen once. A habit, preference or skill is a
+/// pattern, and one session cannot show a pattern; only a revision that
+/// confirms the claim can raise it further. The small on-device model is
+/// otherwise confident about everything.
+fn first_sighting_ceiling(kind: &str) -> i64 {
+    match kind {
+        "habit" | "preference" | "skill" => 6,
+        _ => 8,
+    }
+}
+
+/// Refer to the user by name, never by a gendered pronoun the model chose.
+#[must_use]
+pub fn ungender(text: &str, user_name: &str) -> String {
+    let name = if user_name.trim().is_empty() { "They" } else { user_name.trim() };
+    let mut out = Vec::new();
+    for word in text.split(' ') {
+        let trimmed = word.trim_end_matches(|c: char| !c.is_alphanumeric());
+        let tail = &word[trimmed.len()..];
+        let replacement = match trimmed {
+            "she" | "he" => Some(name.to_owned()),
+            "She" | "He" => Some(name.to_owned()),
+            "her" | "his" => Some("their".to_owned()),
+            "Her" | "His" => Some("Their".to_owned()),
+            "him" => Some("them".to_owned()),
+            "herself" | "himself" => Some("themself".to_owned()),
+            _ => None,
+        };
+        match replacement {
+            Some(r) => out.push(format!("{r}{tail}")),
+            None => out.push(word.to_owned()),
+        }
+    }
+    out.join(" ")
+}
+
+/// Calibrate and clean a draft before it is stored.
+#[must_use]
+pub fn prepare(mut draft: Draft, user_name: &str, first_sighting: bool) -> Draft {
+    draft.text = ungender(&draft.text, user_name);
+    draft.reasoning = ungender(&draft.reasoning, user_name);
+    if first_sighting {
+        draft.confidence = draft.confidence.min(first_sighting_ceiling(&draft.kind));
+    }
+    draft
+}
+
 /// Retrieve stored, active propositions that might restate `text`.
 ///
 /// # Errors
@@ -265,6 +312,7 @@ pub fn integrate(
             }
         };
         if related.is_empty() {
+            let draft = prepare(draft.clone(), user_name, true);
             store.insert_proposition(&draft.to_new(), evidence, now_us)?;
             outcome.added += 1;
             continue;
@@ -290,6 +338,7 @@ pub fn integrate(
             all_evidence.extend(old.evidence.iter().copied());
             store.set_proposition_status(old.id, PropositionStatus::Retired, now_us)?;
         }
+        let revised = prepare(revised, user_name, false);
         store.revise_proposition(related[0].id, &revised.to_new(), &all_evidence, now_us)?;
         outcome.revised += 1;
     }
@@ -336,6 +385,24 @@ mod tests {
         ];
         let picked: Vec<i64> = mmr(&candidates, 2).into_iter().map(|p| p.id).collect();
         assert_eq!(picked, vec![1, 3], "the near-duplicate gives way to a different claim");
+    }
+
+    #[test]
+    fn a_first_sighting_cannot_be_a_confident_habit_and_pronouns_become_the_name() {
+        let draft = Draft {
+            text: "Amy watches YouTube often, so she takes breaks.".into(),
+            reasoning: "her typing pauses".into(),
+            kind: "habit".into(),
+            confidence: 9,
+            decay: 3,
+        };
+        let prepared = prepare(draft, "Amy", true);
+        assert_eq!(prepared.confidence, 6);
+        assert_eq!(prepared.text, "Amy watches YouTube often, so Amy takes breaks.");
+        assert_eq!(prepared.reasoning, "their typing pauses");
+        let project = Draft { text: "Sam is pricing Team".into(), reasoning: String::new(), kind: "project".into(), confidence: 10, decay: 4 };
+        assert_eq!(prepare(project.clone(), "Amy", true).confidence, 8);
+        assert_eq!(prepare(project, "Amy", false).confidence, 10, "confirmed claims may rise");
     }
 
     #[test]
