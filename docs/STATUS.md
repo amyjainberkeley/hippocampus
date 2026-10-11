@@ -1,14 +1,39 @@
 # Hippocampus Status
 
-_Updated on 2026-10-10; qualification scope is recorded per checkpoint._
+_Updated on 2026-10-11; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `c8b923e`
+Audited code baseline: `361b1b7`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
 three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
+
+## October 11: Understanding, A New Mark, The Command Bar
+
+Built against the owner's success criteria ([plan](plans/2026-10-10-hippocampus-0.3.md)):
+
+- **Beneath the surface.** Capture adds input counts (keys, clicks, scrolls,
+  pointer moves; counts only) to every activity interval the privacy gates
+  admit. Work sessions are split at idle gaps; each gets a note of what was
+  on screen and what lay beneath it (typing vs reading, pauses with no input,
+  back-and-forth between windows, reworded searches, error text).
+- **A user model.** GUM-style propositions with reasoning, confidence and
+  decay, proposed by Apple's on-device Foundation Models (`hippocampus-mind`,
+  macOS 26), retrieved by BM25 with recency decay and MMR, related and
+  revised by the model; rejected ones never return; deleting any evidence
+  deletes every proposition that cites it.
+- **Your day.** Measured time by hour, app and kind of work, focus blocks,
+  switching, searches (read from URLs), sessions, and a written account.
+- **MCP:** `mci_day`, `mci_searches`, `mci_user_model`, `mci_sessions`.
+- **Command bar** on ⌃⇧Space in the menu-bar app: suggestions before typing,
+  memory search, cited answers, the day.
+- **Mark:** a golden-ratio curl with a dot for now replaces the brain icon.
+
+Verified by tests (Rust 1733+, HippocampusKitTests 372, MindKit 5 with a live
+Foundation Models probe on the owner Mac). Live end-to-end use on the owner
+Mac is recorded below once run.
 
 ## October 10: Integrated For The First Public Release
 
