@@ -26,7 +26,7 @@ Object.defineProperty(globalThis, "navigator", {
   configurable: true,
 });
 
-const { isPersistableTab } = await import("../background.js");
+const { isPersistableTab, captureOpenTabs } = await import("../background.js");
 
 function pageContentMessage() {
   return {
@@ -155,5 +155,34 @@ describe("Chromium private-context relay", () => {
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 
     expect(manifest.incognito).toBe("not_allowed");
+  });
+});
+
+describe("tabs open before the extension started", () => {
+  it("injects the content script once into ordinary tabs that lack it", async () => {
+    const injected = [];
+    globalThis.chrome.tabs = {
+      query: vi.fn(async () => [
+        { id: 1, incognito: false },
+        { id: 2, incognito: false },
+        { id: 3, incognito: true },
+        { id: 4 },
+      ]),
+    };
+    globalThis.chrome.scripting = {
+      executeScript: vi.fn(async ({ target, func, files }) => {
+        if (func) return [{ result: target.tabId === 2 }];
+        injected.push({ tabId: target.tabId, allFrames: target.allFrames, files });
+        return [];
+      }),
+    };
+    await captureOpenTabs();
+    expect(injected).toEqual([{ tabId: 1, allFrames: true, files: ["content.js"] }]);
+    delete globalThis.chrome.tabs;
+    delete globalThis.chrome.scripting;
+  });
+
+  it("does nothing without the scripting API", async () => {
+    await expect(captureOpenTabs()).resolves.toBeUndefined();
   });
 });

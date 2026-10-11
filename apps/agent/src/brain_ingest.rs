@@ -840,6 +840,9 @@ fn browser_bundle_id(source: &str) -> String {
         "edge" => "com.microsoft.edgemac",
         "brave" => "com.brave.Browser",
         "firefox" => "org.mozilla.firefox",
+        "dia" => "company.thebrowser.dia",
+        "vivaldi" => "com.vivaldi.Vivaldi",
+        "chromium" => "org.chromium.Chromium",
         _ => return source.to_owned(),
     };
     id.to_owned()

@@ -266,13 +266,42 @@ fn process_message(msg: &BrowserMessage, socket: &mut UnixStream) -> io::Result<
         url: wire_url,
         title: wire_title,
         full_text: text.to_string(),
-        source_browser: msg.source_browser.clone(),
+        source_browser: launching_browser().unwrap_or(&msg.source_browser).to_owned(),
         tab_id: msg.tab_id,
     };
     let frame = wire::encode(seq, &wire_msg);
     socket.write_all(&frame)?;
     socket.flush()?;
     Ok(())
+}
+
+/// The browser that launched this host, from its parent process's path.
+/// Arc, Brave and Dia report Chrome's user agent, so the extension cannot
+/// tell them apart; the executable path can. Read once per host process.
+fn launching_browser() -> Option<&'static str> {
+    static BROWSER: std::sync::OnceLock<Option<&'static str>> = std::sync::OnceLock::new();
+    *BROWSER.get_or_init(|| {
+        let parent = std::os::unix::process::parent_id();
+        let output = std::process::Command::new("/bin/ps")
+            .args(["-o", "comm=", "-p", &parent.to_string()])
+            .env_clear()
+            .output()
+            .ok()?;
+        browser_from_path(&String::from_utf8_lossy(&output.stdout))
+    })
+}
+
+fn browser_from_path(path: &str) -> Option<&'static str> {
+    const BROWSERS: &[(&str, &str)] = &[
+        ("/Arc.app/", "arc"),
+        ("/Dia.app/", "dia"),
+        ("/Brave Browser", "brave"),
+        ("/Microsoft Edge", "edge"),
+        ("/Vivaldi.app/", "vivaldi"),
+        ("/Chromium.app/", "chromium"),
+        ("/Google Chrome", "chrome"),
+    ];
+    BROWSERS.iter().find(|(needle, _)| path.contains(needle)).map(|(_, name)| *name)
 }
 
 fn main() {
@@ -319,6 +348,14 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_launching_browser_is_named_from_its_path() {
+        assert_eq!(super::browser_from_path("/Applications/Arc.app/Contents/MacOS/Arc"), Some("arc"));
+        assert_eq!(super::browser_from_path("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"), Some("brave"));
+        assert_eq!(super::browser_from_path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"), Some("chrome"));
+        assert_eq!(super::browser_from_path("/usr/bin/somethingelse"), None);
+    }
+
     use super::*;
 
     #[test]

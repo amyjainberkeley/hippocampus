@@ -65,6 +65,16 @@ public final class BrowserHostInstaller: Sendable {
                 supportRelativePath: "BraveSoftware/Brave-Browser"),
         Browser(displayName: "Edge",
                 supportRelativePath: "Microsoft Edge"),
+        Browser(displayName: "Dia",
+                supportRelativePath: "Dia/User Data"),
+        Browser(displayName: "Vivaldi",
+                supportRelativePath: "Vivaldi"),
+        Browser(displayName: "Chromium",
+                supportRelativePath: "Chromium"),
+        Browser(displayName: "Chrome Beta",
+                supportRelativePath: "Google/Chrome Beta"),
+        Browser(displayName: "Chrome Canary",
+                supportRelativePath: "Google/Chrome Canary"),
     ]
 
     public struct Outcome: Sendable, Equatable {

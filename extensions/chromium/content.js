@@ -126,6 +126,10 @@ async function sendContent() {
   });
 }
 
+// Lets the extension skip tabs where this script already runs when it reads
+// the tabs that were open before it started.
+window.__hippocampusContentLoaded = true;
+
 let lastURL = window.location.href;
 let debounceTimer = null;
 
@@ -166,6 +170,38 @@ window.addEventListener("popstate", () => {
 });
 
 debouncedSend();
+
+// Pages that keep loading after the first read (chat apps, feeds, docs that
+// render late) are read again once their text settles: only the visible top
+// frame, only after a real change, at most every 30 seconds.
+const LATE_CHANGE_QUIET_MS = 2500;
+const LATE_CHANGE_MIN_INTERVAL_MS = 30000;
+let lastSentLength = 0;
+let lastLateSendAt = Date.now();
+let lateTimer = null;
+
+function textLength() {
+  return (document.body && document.body.innerText || "").length;
+}
+
+function considerLateChange() {
+  if (!isTopFrame() || document.visibilityState !== "visible") return;
+  const length = textLength();
+  const changed = Math.abs(length - lastSentLength);
+  if (changed < 400 && changed < lastSentLength * 0.15) return;
+  if (Date.now() - lastLateSendAt < LATE_CHANGE_MIN_INTERVAL_MS) return;
+  lastLateSendAt = Date.now();
+  lastSentLength = length;
+  sendContent();
+}
+
+if (typeof MutationObserver !== "undefined" && document.body && isTopFrame()) {
+  lastSentLength = textLength();
+  new MutationObserver(() => {
+    if (lateTimer) clearTimeout(lateTimer);
+    lateTimer = setTimeout(considerLateChange, LATE_CHANGE_QUIET_MS);
+  }).observe(document.body, { childList: true, subtree: true, characterData: true });
+}
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {

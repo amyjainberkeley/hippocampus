@@ -117,6 +117,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+// Tabs that were already open when the extension started never ran the
+// content script (Chromium injects it only on load). Inject it once into
+// each ordinary http(s) tab so they are remembered too. Incognito tabs are
+// never touched (the extension is not allowed there).
+async function captureOpenTabs() {
+  if (!chrome.scripting || !chrome.tabs) return;
+  let tabs = [];
+  try {
+    tabs = await chrome.tabs.query({});
+  } catch (_e) {
+    return;
+  }
+  for (const tab of tabs) {
+    if (!isPersistableTab(tab) || typeof tab.id !== "number") continue;
+    try {
+      const [probe] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => Boolean(window.__hippocampusContentLoaded),
+      });
+      if (probe && probe.result) continue;
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id, allFrames: true },
+        files: ["content.js"],
+      });
+    } catch (_e) {
+      // Restricted pages (the Web Store, chrome://) refuse injection.
+    }
+  }
+}
+
+if (chrome.runtime.onInstalled) chrome.runtime.onInstalled.addListener(() => { captureOpenTabs(); });
+if (chrome.runtime.onStartup) chrome.runtime.onStartup.addListener(() => { captureOpenTabs(); });
+
 function detectBrowser() {
   const ua = navigator.userAgent || "";
   if (ua.includes("Edg/")) return "edge";
@@ -127,5 +160,5 @@ function detectBrowser() {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { isPersistableTab };
+  module.exports = { isPersistableTab, captureOpenTabs };
 }
