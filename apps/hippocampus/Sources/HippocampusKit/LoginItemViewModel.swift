@@ -49,4 +49,23 @@ public final class LoginItemViewModel: ObservableObject, Sendable {
     public var shouldPrompt: Bool {
         !hasPromptedOnce && !isEnabled
     }
+
+    private let defaultAppliedKey = "ai.hippocampus.loginItem.defaultApplied"
+
+    /// Start at login by default, once. A memory only works if it is running;
+    /// macOS tells the person a login item was added, and turning it off in
+    /// Preferences sticks (this never runs again).
+    public func enableByDefaultOnce(defaults: UserDefaults = .standard) {
+        guard !defaults.bool(forKey: defaultAppliedKey) else { return }
+        defaults.set(true, forKey: defaultAppliedKey)
+        markPrompted()
+        guard !isEnabled else { return }
+        do {
+            try service.register()
+            isEnabled = true
+            logger.info("login-item-vm: enabled by default")
+        } catch {
+            logger.error("login-item-vm: default register failed: \(error.localizedDescription)")
+        }
+    }
 }

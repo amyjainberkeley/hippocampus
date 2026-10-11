@@ -161,9 +161,9 @@ public final class CalendarAttribution: CalendarEventSource, @unchecked Sendable
         if shouldLog {
             FileHandle.standardError.write(
                 ("mci-capture-helper: NSCalendarsUsageDescription "
-                 + "denied — current-calendar-event attribution "
-                 + "disabled. Re-grant in System Settings → Privacy "
-                 + "& Security → Calendars.\n").data(using: .utf8) ?? Data()
+                 + "not granted — current-calendar-event attribution "
+                 + "off (optional; grant in System Settings → Privacy "
+                 + "& Security → Calendars).\n").data(using: .utf8) ?? Data()
             )
         }
     }
@@ -213,9 +213,11 @@ private final class SystemCalendarAttributionStore: CalendarAttributionStore, @u
     private let store = EKEventStore()
     #endif
 
+    /// Uses access the person already granted; never prompts. A background
+    /// helper asking for Calendars, unannounced, is not how a Mac app asks.
     func requestAccess(completion: @escaping @Sendable (Bool) -> Void) {
         #if canImport(EventKit)
-        store.requestFullAccessToEvents { granted, _ in completion(granted) }
+        completion(EKEventStore.authorizationStatus(for: .event) == .fullAccess)
         #endif
     }
 

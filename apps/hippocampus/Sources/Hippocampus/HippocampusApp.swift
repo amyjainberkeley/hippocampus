@@ -565,6 +565,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startSupervisorOrDeferUntilOnboarded() {
         if OnboardingSentinel.isComplete {
             firstLaunchLogger.info("first-launch: sentinel present → start supervisor immediately")
+            loginItemVM.enableByDefaultOnce()
             if initialPreferencesRequest == nil { supervisor.openRecallWhenReady(initialLaunch: true) }
             supervisor.start()
             return
@@ -643,12 +644,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
 
-        // Belt + suspenders. 2 s poll lasting up to 10 min — long
-        // enough for any plausible onboarding completion, finite so
-        // it doesn't leak forever if the user abandons the flow.
+        // Belt + suspenders: every 2 s for 10 minutes, then every 15 s, so
+        // finishing onboarding later (after a break, or a restart for a
+        // permission) still starts capture. Cancelled once it does.
         sentinelPollTask = Task { @MainActor [weak self] in
-            for _ in 0..<300 {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            for attempt in 0... {
+                try? await Task.sleep(nanoseconds: attempt < 300 ? 2_000_000_000 : 15_000_000_000)
                 if Task.isCancelled { return }
                 if OnboardingSentinel.isComplete {
                     self?.sentinelLogger.info(
@@ -675,6 +676,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the Done screen cannot lead to an inert capture-disabled process tree.
     @MainActor
     private func startCaptureAfterOnboarding() {
+        loginItemVM.enableByDefaultOnce()
         supervisor.openRecallWhenReady(initialLaunch: true)
         if supervisor.captureEnabled {
             supervisor.start()

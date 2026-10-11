@@ -147,9 +147,9 @@ public final class ContactsAttribution: ContactsAttributionSource, @unchecked Se
         if shouldLog {
             FileHandle.standardError.write(
                 ("mci-capture-helper: NSContactsUsageDescription "
-                 + "denied — person-entity-anchor attribution "
-                 + "disabled. Re-grant in System Settings → Privacy "
-                 + "& Security → Contacts.\n").data(using: .utf8) ?? Data()
+                 + "not granted — person-entity-anchor attribution "
+                 + "off (optional; grant in System Settings → Privacy "
+                 + "& Security → Contacts).\n").data(using: .utf8) ?? Data()
             )
         }
     }
@@ -231,9 +231,10 @@ private final class SystemContactsAttributionStore: ContactsAttributionStore, @u
     private let store = CNContactStore()
     #endif
 
+    /// Uses access the person already granted; never prompts.
     func requestAccess(completion: @escaping @Sendable (Bool) -> Void) {
         #if canImport(Contacts)
-        store.requestAccess(for: .contacts) { granted, _ in completion(granted) }
+        completion(CNContactStore.authorizationStatus(for: .contacts) == .authorized)
         #endif
     }
 

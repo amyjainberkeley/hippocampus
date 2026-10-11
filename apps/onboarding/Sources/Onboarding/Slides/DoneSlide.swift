@@ -1,16 +1,18 @@
+import AppKit
 import SwiftUI
 import OnboardingKit
 
 struct DoneSlide: View {
     @EnvironmentObject var flowVM: OnboardingFlowViewModel
     @EnvironmentObject var prepareBrainVM: PrepareBrainViewModel
+    @State private var understanding: UnderstandingAvailability?
 
     var body: some View {
         SlideContainer {
             VStack(spacing: OnboardingDesign.Space.xl) {
                 HeroHeader(
                     title: readyForCapture ? "Ready for your first memory" : "Finish preparing your memory",
-                    subtitle: readyForCapture ? "Click Get Started, use an allowed app, then open Recall to check your first saved source. Capture can be paused from the menu bar." : "Go back to finish the unchecked setup steps before starting capture.",
+                    subtitle: readyForCapture ? "Click Get Started and work as usual. Press ⌃⇧Space anytime to ask Hippocampus what you saw, what you decided, or how your day went. Capture can be paused from the menu bar." : "Go back to finish the unchecked setup steps before starting capture.",
                     titleStyle: .display
                 ) {
                     Image(systemName: readyForCapture ? "checkmark.circle.fill" : "circle")
@@ -62,21 +64,42 @@ struct DoneSlide: View {
 
     @ViewBuilder
     private var modelCheckRow: some View {
-        if prepareBrainVM.modelDownloaded {
-            checkRow(granted: true, label: "Richer brief wording ready")
-        } else {
-            HStack(spacing: OnboardingDesign.Space.md) {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(OnboardingDesign.Palette.success)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Local briefs need no model download")
-                        .font(.system(size: 14))
-                    Text("Optional richer wording can be added later")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer()
+        HStack(spacing: OnboardingDesign.Space.md) {
+            Image(systemName: understanding == .available ? "checkmark.circle.fill" : (understanding == nil ? "circle.dotted" : "sparkles"))
+                .foregroundStyle(understanding == .available ? OnboardingDesign.Palette.success : Color.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(understandingTitle).font(.system(size: 14))
+                Text(understandingDetail).font(.system(size: 11)).foregroundStyle(.tertiary)
             }
+            Spacer()
+            if understanding == .turnedOff {
+                Button("Open Settings") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.Siri-Settings.extension") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .controlSize(.small)
+            }
+        }
+        .task { understanding = await UnderstandingProbe.check() }
+    }
+
+    private var understandingTitle: String {
+        switch understanding {
+        case .available: "On-device understanding ready"
+        case .turnedOff: "Turn on Apple Intelligence for answers"
+        case .preparing: "Apple Intelligence is getting ready"
+        case .unsupported: "Search ready; answers need Apple Intelligence"
+        case nil: "Checking on-device understanding…"
+        }
+    }
+
+    private var understandingDetail: String {
+        switch understanding {
+        case .available: "Answers, your day and what it learns stay on this Mac"
+        case .turnedOff, .preparing: "Capture and search work without it"
+        case .unsupported: "Answers and day summaries need macOS 26 with Apple Intelligence"
+        case nil: "Apple Intelligence runs on this Mac, not in the cloud"
         }
     }
 

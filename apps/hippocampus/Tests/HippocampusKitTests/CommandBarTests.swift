@@ -75,3 +75,27 @@ final class CommandBarTests: XCTestCase {
         XCTAssertFalse(model.back(), "Esc on the home screen closes the bar")
     }
 }
+
+private final class RecordingLoginItems: LoginItemService, @unchecked Sendable {
+    var registered = 0
+    var enabled = false
+    func status() -> LoginItemStatus { enabled ? .enabled : .notRegistered }
+    func register() throws { registered += 1; enabled = true }
+    func unregister() throws { enabled = false }
+}
+
+final class LoginItemDefaultTests: XCTestCase {
+    @MainActor
+    func testStartAtLoginIsTurnedOnOnceAndAChoiceSticks() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "login-default-\(UUID().uuidString)"))
+        let service = RecordingLoginItems()
+        let model = LoginItemViewModel(service: service)
+        model.enableByDefaultOnce(defaults: defaults)
+        XCTAssertEqual(service.registered, 1)
+        XCTAssertTrue(model.isEnabled)
+        model.toggle() // the person turns it off
+        model.enableByDefaultOnce(defaults: defaults)
+        XCTAssertEqual(service.registered, 1, "never re-enabled after the default was applied")
+        XCTAssertFalse(model.isEnabled)
+    }
+}

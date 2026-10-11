@@ -126,7 +126,9 @@ public final class RealAccessibilityPermission: TCCPermission, @unchecked Sendab
     public func resetAndRetry() async -> Bool {
         let proc = ChildProcessEnvironment.makeProcess()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
-        proc.arguments = ["reset", "Accessibility"]
+        // Scoped to Hippocampus. Without a bundle id, tccutil resets the
+        // service for every app on the Mac.
+        proc.arguments = ["reset", "Accessibility", "ai.hippocampus"]
         try? proc.run()
         proc.waitUntilExit()
 
@@ -194,7 +196,8 @@ public final class RealAutomationPermission: TCCPermission, @unchecked Sendable 
     public func resetAndRetry() async -> Bool {
         let proc = ChildProcessEnvironment.makeProcess()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
-        proc.arguments = ["reset", "AppleEvents"]
+        // Scoped to Hippocampus, never every app's Automation grants.
+        proc.arguments = ["reset", "AppleEvents", "ai.hippocampus"]
         try? proc.run()
         proc.waitUntilExit()
         status = .notRequested
