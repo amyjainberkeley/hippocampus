@@ -161,7 +161,7 @@ struct CommandBarView: View {
             if hasBody {
                 Divider().opacity(0.6)
                 content
-                    .frame(maxHeight: 440)
+                    .frame(maxHeight: 520)
                 Divider().opacity(0.6)
                 footer
             }
@@ -224,8 +224,7 @@ struct CommandBarView: View {
     }
 
     private var placeholder: String {
-        if let name = model.context?.appName { return "Ask or search your memory — you’re in \(name)" }
-        return "Ask or search your memory"
+        "Ask or search your memory"
     }
 
     // Content
@@ -341,28 +340,48 @@ private struct VisualEffect: NSViewRepresentable {
 /// The curl mark, drawn from the same golden-ratio arcs as the app icon.
 struct CurlGlyph: View {
     var body: some View {
-        Canvas { context, size in
-            let scale = min(size.width, size.height) / 518
-            var path = Path()
-            // Quarter arcs, radii shrinking by the golden ratio, centred in a 518-unit box.
-            var center = CGPoint(x: 259 - 18, y: 259 + 24)
-            var radius: CGFloat = 200
-            var angle: CGFloat = -.pi / 4
-            path.move(to: CGPoint(x: center.x + radius * cos(angle), y: center.y + radius * sin(angle)))
-            for _ in 0..<5 {
-                let next = angle - .pi / 2
-                path.addArc(center: center, radius: radius, startAngle: .radians(angle), endAngle: .radians(next), clockwise: true)
-                let end = CGPoint(x: center.x + radius * cos(next), y: center.y + radius * sin(next))
-                let smaller = radius / 1.618
-                center = CGPoint(x: end.x + (center.x - end.x) * smaller / radius, y: end.y + (center.y - end.y) * smaller / radius)
-                radius = smaller
-                angle = next
+        GeometryReader { proxy in
+            let side = min(proxy.size.width, proxy.size.height)
+            ZStack {
+                CurlShape().stroke(style: StrokeStyle(lineWidth: side * 0.125, lineCap: .round))
+                CurlDot()
             }
-            let transform = CGAffineTransform(scaleX: scale, y: scale)
-            context.stroke(path.applying(transform), with: .foreground, style: StrokeStyle(lineWidth: 64 * scale, lineCap: .round))
-            let dot = CGRect(x: (center.x - 38) * scale, y: (center.y - 38) * scale, width: 76 * scale, height: 76 * scale)
-            context.fill(Path(ellipseIn: dot), with: .foreground)
         }
+        .aspectRatio(1, contentMode: .fit)
+    }
+}
+
+/// Quarter arcs whose radii shrink by the golden ratio, in a unit box.
+struct CurlShape: Shape {
+    static func geometry() -> (path: Path, end: CGPoint, radius: CGFloat) {
+        var path = Path()
+        var center = CGPoint(x: 0.465, y: 0.545)
+        var radius: CGFloat = 0.385
+        var angle: CGFloat = -.pi / 4
+        path.move(to: CGPoint(x: center.x + radius * cos(angle), y: center.y + radius * sin(angle)))
+        for _ in 0..<5 {
+            let next = angle - .pi / 2
+            path.addArc(center: center, radius: radius, startAngle: .radians(angle), endAngle: .radians(next), clockwise: true)
+            let end = CGPoint(x: center.x + radius * cos(next), y: center.y + radius * sin(next))
+            let smaller = radius / 1.618
+            center = CGPoint(x: end.x + (center.x - end.x) * smaller / radius, y: end.y + (center.y - end.y) * smaller / radius)
+            radius = smaller
+            angle = next
+        }
+        return (path, center, radius)
+    }
+
+    func path(in rect: CGRect) -> Path {
+        Self.geometry().path.applying(CGAffineTransform(scaleX: rect.width, y: rect.height))
+    }
+}
+
+private struct CurlDot: Shape {
+    func path(in rect: CGRect) -> Path {
+        let center = CurlShape.geometry().end
+        let r: CGFloat = 0.075
+        return Path(ellipseIn: CGRect(x: (center.x - r) * rect.width, y: (center.y - r) * rect.height,
+                                      width: 2 * r * rect.width, height: 2 * r * rect.height))
     }
 }
 
@@ -518,7 +537,6 @@ private struct AnswerCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(question).font(.callout).foregroundStyle(.secondary)
             if let text = answer?.answer {
                 Text(text)
                     .font(.system(size: 15))
@@ -680,7 +698,7 @@ private struct KindBar: View {
             HStack(spacing: 12) {
                 ForEach(kinds.prefix(5), id: \.kind) { kind in
                     HStack(spacing: 4) {
-                        Circle().fill(Self.color(kind.kind)).frame(width: 7, height: 7)
+                        Circle().foregroundStyle(Self.color(kind.kind)).frame(width: 7, height: 7)
                         Text("\(kind.label) \(DayCard.hours(kind.activeUs))").font(.caption).foregroundStyle(.secondary)
                     }
                 }

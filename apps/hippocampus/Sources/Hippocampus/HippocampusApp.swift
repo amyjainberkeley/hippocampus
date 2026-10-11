@@ -166,6 +166,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// strictly BEFORE the user can interact with anything, including
     /// opening the menu bar.
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        CommandBarPreviewRenderer.renderIfRequested()
+        #endif
         // Mask SIGPIPE before any pipe, socket, or child-process work.
         //
         // CEO-reported (cycle 8.23, 2026-05-29): even after PR #254 shipped

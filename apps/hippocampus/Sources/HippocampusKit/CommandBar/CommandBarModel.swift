@@ -198,6 +198,7 @@ public final class CommandBarModel: ObservableObject {
     private var searchTask: Task<Void, Never>?
     private var queryObserver: AnyCancellable?
     private var openGeneration = 0
+    private var previewing = false
 
     public init(launch: @escaping @MainActor (_ assist: Bool) -> MemorySessionLaunch?) {
         self.launch = launch
@@ -283,6 +284,7 @@ public final class CommandBarModel: ObservableObject {
     // MARK: Typing and search
 
     private func queryChanged(_ text: String) {
+        if previewing { return }
         searchTask?.cancel()
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
@@ -456,3 +458,33 @@ public final class CommandBarModel: ObservableObject {
         await assistant.stop()
     }
 }
+
+#if DEBUG
+extension CommandBarModel {
+    /// Fixture state for rendering the bar without a brain.
+    public func preview(
+        mode: Mode,
+        query: String = "",
+        context: FrontmostContext? = nil,
+        suggestions: [BarSuggestion] = [],
+        hits: [BarHit] = [],
+        answer: BarAnswer? = nil,
+        question: String? = nil,
+        day: BarDay? = nil,
+        working: Bool = false
+    ) {
+        previewing = true
+        queryObserver = nil
+        self.query = query
+        self.mode = mode
+        self.context = context
+        self.suggestions = suggestions
+        self.hits = hits
+        self.answer = answer
+        self.askedQuestion = question
+        self.day = day
+        self.isWorking = working
+        self.selection = mode == .results ? 1 : 0
+    }
+}
+#endif
