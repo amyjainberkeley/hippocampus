@@ -15,6 +15,8 @@
 //   - `hippocampus://recall?popup=1`             → reveal global Recall
 //   - `hippocampus://recall?tab=search&focus=42` → inspect event 42
 //   - `hippocampus://preferences/sources`       → open a preferences pane
+//   - `hippocampus://ask`                        → open the command bar
+//   - `hippocampus://ask?q=what+did+I+decide`    → …and ask right away
 //   - `hippocampus://onboarding/show`            → .showOnboarding
 //   - `hippocampus://onboarding?show=1`          → .showOnboarding
 //     (both forms honored — the cycle 8.46 Action Panel command
@@ -43,6 +45,8 @@ public enum HippocampusURLRoute: Equatable, Sendable {
     case openPreferences(section: PreferencesSection)
     /// Re-open the Onboarding executable (safe to call post-first-run).
     case showOnboarding
+    /// Open the command bar, optionally asking `question` right away.
+    case ask(question: String?)
     /// URL scheme matched, but the host / path combination is unknown.
     /// Callers should log-and-ignore rather than throw.
     case unknown
@@ -77,6 +81,10 @@ public enum HippocampusURLRoute: Equatable, Sendable {
                 url.absoluteString == "hippocampus://preferences/\($0.rawValue.lowercased())"
             }) else { return .unknown }
             return .openPreferences(section: section)
+        case "ask":
+            let question = queryItems.first(where: { $0.name == "q" })?.value?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return .ask(question: question?.isEmpty == false ? question : nil)
         case "onboarding":
             let showQuery = queryItems.first(where: { $0.name == "show" })?.value
             if url.path == "/show" || showQuery == "1" {

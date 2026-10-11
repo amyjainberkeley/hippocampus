@@ -25,9 +25,13 @@ final class CommandBarController: NSObject, NSWindowDelegate {
         if panel?.isVisible == true { hide() } else { show() }
     }
 
-    func show() {
+    func show(asking question: String? = nil) {
         guard let model else { return }
         model.opened(context: Self.frontmostContext())
+        if let question {
+            model.query = question
+            model.ask(question)
+        }
         let panel = self.panel ?? makePanel(model: model)
         self.panel = panel
         place(panel)

@@ -139,4 +139,11 @@ final class HippocampusURLRouteTests: XCTestCase {
         let url = URL(string: "hippocampus://banana")!
         XCTAssertEqual(HippocampusURLRoute.parse(url), .unknown)
     }
+
+    func testAskOpensTheCommandBarWithAnOptionalQuestion() throws {
+        XCTAssertEqual(HippocampusURLRoute.parse(try XCTUnwrap(URL(string: "hippocampus://ask"))), .ask(question: nil))
+        XCTAssertEqual(HippocampusURLRoute.parse(try XCTUnwrap(URL(string: "hippocampus://ask?q=what%20did%20I%20decide"))),
+                       .ask(question: "what did I decide"))
+        XCTAssertEqual(HippocampusURLRoute.parse(try XCTUnwrap(URL(string: "hippocampus://ask?q=%20"))), .ask(question: nil))
+    }
 }

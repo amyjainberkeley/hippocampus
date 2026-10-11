@@ -534,6 +534,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Task { @MainActor in
                     _ = supervisor.openOnboarding()
                 }
+            case .ask(let question):
+                CommandBarController.shared.show(asking: question)
             case .unknown:
                 continue
             }
