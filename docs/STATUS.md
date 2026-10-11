@@ -2,7 +2,7 @@
 
 _Updated on 2026-10-11; qualification scope is recorded per checkpoint._
 
-Audited code baseline: `361b1b7`
+Audited code baseline: `660bf70`
 
 This SHA is the immediate committed baseline before this status refresh. The
 release assembler requires it to be an ancestor of `HEAD` and no more than
@@ -10,7 +10,7 @@ three commits behind. This file is the repository's canonical product and
 release truth; README, design docs, release notes, and UI copy must not claim
 more than this page.
 
-## October 11: Understanding, A New Mark, The Command Bar
+## October 11: Hippocampus 0.3 — Understanding, A New Mark, The Command Bar
 
 Built against the owner's success criteria ([plan](plans/2026-10-10-hippocampus-0.3.md)):
 
@@ -31,9 +31,31 @@ Built against the owner's success criteria ([plan](plans/2026-10-10-hippocampus-
   memory search, cited answers, the day.
 - **Mark:** a golden-ratio curl with a dot for now replaces the brain icon.
 
-Verified by tests (Rust 1733+, HippocampusKitTests 372, MindKit 5 with a live
-Foundation Models probe on the owner Mac). Live end-to-end use on the owner
-Mac is recorded below once run.
+**Verified live on the owner Mac** (installed candidates `1f5530b` through
+`660bf70`):
+
+- `hippocampus-mind` signed with the hardened runtime reaches Apple's
+  on-device model. A first build printed its ready line and never answered
+  (top-level Swift code on the main actor deadlocked behind a semaphore);
+  fixed, with a process-level test.
+- The daemon's understanding worker ran on real activity: sessions noted
+  by the model, propositions proposed and revised, day accounts written,
+  searches read from URLs; input counts recorded per admitted interval.
+- `mci_ask` over an assistant session answered "what was the phrase for the
+  live check" correctly from captured memory (9.0 s cold, 5.9 s warm);
+  measured suggestions return in 0.1 s, model predictions in 12.6 s.
+- The first live run exposed and fixed: the lock screen captured while
+  locked (now denied at capture), an example in an output guide leaking
+  into notes, generic claims ("working on a project"), over-merging of
+  "similar" claims, single-session habits at 90% (now capped at 60% until
+  confirmed), gendered pronouns, and a Saturday read as a workday.
+- Command bar layout verified from fixture renders (debug renderer, never
+  real memories). The hotkey path itself was not driven live.
+
+Also in this release: onboarding no longer resets other apps' permissions,
+no unannounced Calendars/Contacts prompts, start at login by default, the
+browser extension reads tabs already open and pages that load late, and Arc,
+Brave and Dia pages are attributed to the right browser.
 
 ## October 10: Integrated For The First Public Release
 

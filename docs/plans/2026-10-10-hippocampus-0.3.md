@@ -70,3 +70,11 @@ nothing leaves the Mac either way.
    that is as close to one click as each browser allows, a final check that
    proves capture is storing.
 9. **Ship.** Every step verified live on the owner Mac, notarized release.
+
+## Progress (2026-10-11)
+
+Steps 1–8 are built and on `claude/hippocampus-0.3`; each verified as recorded
+in [STATUS](../STATUS.md). Still open: confirming or rejecting propositions in
+the app (the store supports it; MCP and the command bar read it), the Safari
+extension's late-page reading, a richer day view in Recall, and step 9
+(publishing).

@@ -6,6 +6,8 @@ Hippocampus runs on your Mac and nowhere else. This page says what that means in
 
 - Text recognised from your screen, with the app, window title and URL it came from, and the time. The window you are working in is read when it changes; the other visible windows, on every display, are read every few seconds when their text changes and each line is filed under the window it came from ([ADR-0040](docs/decisions/0040-whole-screen-background-capture.md)). No screenshot is kept for those other windows.
 - Episodes (moments grouped by time and topic) and embedding vectors derived from that text.
+- Input counts per few seconds: how many keys, clicks, scrolls and pointer moves (never which keys), only for moments the privacy checks allowed.
+- What Hippocampus understands: session notes, statements about how you work (with the moments they rest on), day accounts, and searches read from page addresses. They are written on your Mac by Apple's on-device model and deleted with any moment they rest on.
 - All of it in one SQLCipher-encrypted SQLite file under `~/Library/Application Support/MCI/`. The key never lives inside the database: the app keeps it in your login Keychain, not synced, and AI clients you connect are given a Keychain reference, never the key. A development build can use a file key (`dev.key`, mode 0600) only when `MCI_DEVELOPMENT_FILE_KEY=1` is set. Wrapping it with the Secure Enclave is designed ([ADR-0008](docs/decisions/0008-encrypted-store-sqlcipher-sqlite-vec-keychain.md)) but not built yet.
 
 ## What leaves the machine

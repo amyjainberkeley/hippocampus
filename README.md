@@ -48,9 +48,9 @@ Research on [general user models](https://arxiv.org/abs/2505.10831) shows where 
 
 Hippocampus is that evidence layer, built to be trusted. The name is the design. In the brain, the hippocampus records episodes (this happened, here, then) and, over time, hands them to the neocortex, which distills them into lasting knowledge. Hippocampus records the episodes of your work faithfully and privately; the understanding built on top of it cites the moments it came from, and you confirm or correct it.
 
-1. **Remember.** A complete, private, searchable record of what was on your screen. *This release.*
-2. **Understand.** Statements about how you work, each linked to the moments that support it, proposed by the system and confirmed or corrected by you.
-3. **Act.** Agents that start from your context instead of a blank page.
+1. **Remember.** A complete, private, searchable record of what was on your screen.
+2. **Understand.** Statements about how you work, each linked to the moments that support it, proposed by the system and confirmed or corrected by you. *Begun in 0.3: sessions with what lay beneath them, a user model, and your day, written on your Mac by Apple's on-device model.*
+3. **Act.** Agents that start from your context instead of a blank page. *Begun: ⌃⇧Space answers from your memory; assistants read your user model over MCP.*
 4. **Share on your terms.** Hand a reviewed slice of your record to a teammate or a study, and nothing more.
 
 ## How it works
@@ -59,7 +59,7 @@ Hippocampus is that evidence layer, built to be trusted. The name is the design.
 flowchart LR
     A["Screen<br/>+ app, window, URL"] --> B["Watch<br/>only when text changes"]
     B --> C["Read<br/>on-device OCR,<br/>reading order kept"]
-    C --> D["Understand<br/>episodes, entities, vectors"]
+    C --> D["Understand<br/>sessions, signals,<br/>a user model"]
     D --> E[("One encrypted<br/>SQLite file")]
     E --> F["Recall<br/>keyword + meaning"]
     F --> G["You, or an agent<br/>acting for you"]
@@ -67,11 +67,13 @@ flowchart LR
 
 1. **Watch.** A Swift helper looks at the screen through ScreenCaptureKit and does work only when something meaningful changed: an idle gate, the system's own change signal, a coarse image hash, and a finer check that notices new words without waking up for a blinking cursor. The window you are working in is read closely; the rest of the screen, including other displays, is read every few seconds when its text changes, and each line is filed under the window it came from.
 2. **Read.** Frames are transcribed on the Mac by a bundled PaddleOCR model kept warm between frames, then reassembled the way the screen reads: columns stay columns, tables read row by row, code keeps its indentation. On the [screen benchmark](tools/ocr/screens/) (chat, editor, terminal, mail, tables, small labels), 96.7% of lines come out exactly right with 0.1% character error, in about 1.3 seconds a frame.
-3. **Understand.** In idle time, events are grouped into episodes, entities are extracted, and text is embedded by a small on-device model.
+3. **Understand.** Activity is split into work sessions. Measured signals (typing, reading, pauses with no input, switching back and forth, reworded searches, errors on screen) say what lay beneath each one. Apple's on-device Foundation Models write each session's note and propose statements about you in the style of [GUM](https://arxiv.org/abs/2505.10831): reasoning first, a calibrated confidence, a decay rate, and the moments it rests on. New statements are matched against what is already believed (BM25 with recency decay and MMR) and merged only when they say the same thing. Text is also embedded for semantic search.
 4. **Store.** Rows, the full-text index and the vectors all live in one SQLCipher-encrypted file under `~/Library/Application Support/MCI`, with its key in your login Keychain.
 5. **Recall.** Search runs keyword and semantic retrieval together, so you can find the exact error code or "that pricing discussion last week."
 
-Agents reach the same memory over MCP (`mci-agent mcp-serve`), with read-only tools for search, recent activity, episodes and a cited context packet. The `mci-agent` command is installed alongside the app.
+Press **⌃⇧Space** anywhere for the command bar: suggestions for right now, search as you type, answers to questions with their sources, and your day.
+
+Agents reach the same memory over MCP (`mci-agent mcp-serve`), with read-only tools for search, recent activity, your day, your searches, your sessions, the user model and a cited context packet. The `mci-agent` command is installed alongside the app; `mci-agent day`, `mci-agent model` and `mci-agent ask "…"` work in a terminal.
 
 ## Privacy
 
@@ -93,9 +95,10 @@ This is a beta. [docs/STATUS.md](docs/STATUS.md) is the ledger of what has been 
 | --- | --- |
 | Encrypted store, keyword and semantic search | Works, tested. |
 | On-device transcription | Works. Measured on synthetic screens; real-screen accuracy is being measured. |
-| Live screen capture | Being qualified on real use. Whole-screen capture is new in 0.2.1. See the ledger. |
+| Live screen capture | Works on the owner Mac, focused window and whole screen; being qualified on more Macs. See the ledger. |
 | Agent access over MCP | Works. Read-only. |
-| Understanding layer (claims you confirm) | Schema built; not yet written by the product. |
+| Understanding: sessions, user model, your day | New in 0.3. Needs macOS 26 with Apple Intelligence; without it, sessions and days are written from measurements alone. Confirming or rejecting claims in the app is next. |
+| Command bar (⌃⇧Space) | New in 0.3: suggestions, search, cited answers, your day. |
 | Sync between machines, Windows | Not started. |
 
 ## Build from source

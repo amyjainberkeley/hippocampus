@@ -5,11 +5,62 @@ commits are intentionally omitted from release notes.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-11
+
+### Understanding, Not Just Memory
+
+- Hippocampus now notices what lies beneath the screen: how much you typed,
+  clicked and scrolled (counts only, never which keys), where you paused,
+  when you went back and forth between windows, when you reworded a search,
+  and when an error was on screen.
+- Your work is split into sessions. Each gets a short title, what was on
+  the surface, and what lay beneath it, written by Apple's on-device model.
+- A user model, after General User Models (GUM): Hippocampus learns what
+  you work on, how you work, what you prefer, who you work with and where
+  you get stuck, each with a confidence and the moments it rests on. Claims
+  seen once stay tentative; deleting a moment deletes everything learned
+  from it; a claim you reject never comes back.
+- Your day: active time by hour, app and kind of work, focus blocks,
+  switching, what you looked up, your sessions, and a written account.
+- Searches you run on Google, YouTube, GitHub, Stack Overflow, Wikipedia,
+  Amazon and more are remembered as searches.
+- AI assistants connected over MCP can read your day, your searches, your
+  sessions and the user model (`mci_day`, `mci_searches`, `mci_sessions`,
+  `mci_user_model`), so you don't have to re-explain yourself.
+
+### Ask Hippocampus
+
+- ⌃⇧Space opens a command bar over whatever you're doing. Before you type
+  it suggests what you likely want right now; as you type it searches your
+  memory; ask a question and it answers from what you've seen, with
+  sources, on your Mac. ⌘D shows your day; ⇧⌘C copies context for any AI.
+- Answers and summaries need macOS 26 with Apple Intelligence; capture and
+  search work without it.
+
+### Everywhere On Your Screen
+
+- The whole screen is remembered, not only the window you're in: other
+  visible windows, on every display, are read when their text changes and
+  filed under the window they came from. Password managers, browsers'
+  background windows, notification banners and apps you exclude are never
+  read. Turn it off with `defaults write ai.hippocampus WholeScreenCapture
+  -bool NO`.
+
 ### A New Mark
 
 - A new icon: a golden-ratio curl, the seahorse shape the hippocampus is
-  named for, closing on a dot for *now*. Blue on a graphite tile in the Dock;
-  a single-colour glyph in the menu bar that macOS tints with the system.
+  named for, closing on a dot for now.
+
+### Setup
+
+- Hippocampus starts at login by default (turn it off in Preferences).
+- No surprise permission prompts: Calendars and Contacts are used only if
+  you already allowed them.
+- "Reset and retry" in setup no longer resets other apps' permissions.
+- Tabs already open when the browser extension starts are remembered, and
+  so are pages whose text arrives after they load. Arc, Brave and Dia
+  pages are filed under the right browser.
+- The lock screen and screen saver are never recorded.
 
 ## [0.2.1] - 2026-10-08
 
