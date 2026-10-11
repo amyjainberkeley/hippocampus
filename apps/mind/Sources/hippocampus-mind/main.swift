@@ -7,8 +7,6 @@ import MindKit
 // stdout, in order. The first line written is the ready line. Exits when stdin
 // closes. Nothing is logged except content-free failures to stderr.
 
-setvbuf(stdout, nil, _IOFBF, 1 << 16)
-
 guard CommandLine.arguments.dropFirst().first == "--serve" else {
     FileHandle.standardError.write(Data("usage: hippocampus-mind --serve\n".utf8))
     exit(64)
@@ -24,16 +22,13 @@ func emit(_ data: Data) {
 
 emit(server.readyLine())
 
-let done = DispatchSemaphore(value: 0)
-Task {
-    do {
-        for try await line in FileHandle.standardInput.bytes.lines {
-            guard !line.isEmpty else { continue }
-            emit(await server.handle(Data(line.utf8)))
-        }
-    } catch {
-        FileHandle.standardError.write(Data("hippocampus-mind: input closed with an error\n".utf8))
+// Top-level code runs on the main actor; awaiting here (rather than blocking
+// the main thread while a Task reads) keeps the loop free to run.
+do {
+    for try await line in FileHandle.standardInput.bytes.lines {
+        guard !line.isEmpty else { continue }
+        emit(await server.handle(Data(line.utf8)))
     }
-    done.signal()
+} catch {
+    FileHandle.standardError.write(Data("hippocampus-mind: input closed with an error\n".utf8))
 }
-done.wait()
