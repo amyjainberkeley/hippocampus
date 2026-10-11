@@ -117,8 +117,9 @@ final class BackgroundCapturePolicyTests: XCTestCase {
             userEntries: [DenylistEntry(kind: .appBundle, pattern: "com.example.secret")])
         for bundle in ["com.1password.1password", "com.google.Chrome", "com.apple.Safari",
                        "com.apple.notificationcenterui", "ai.hippocampus", "com.apple.systempreferences", "com.apple.dock",
+                       "com.apple.loginwindow", "com.apple.ScreenSaver.Engine",
                        "com.example.secret"] {
-            XCTAssertTrue(excluded.contains(bundle), bundle)
+            XCTAssertTrue(BackgroundCapturePolicy.isExcluded(bundle, from: excluded), bundle)
         }
     }
 }

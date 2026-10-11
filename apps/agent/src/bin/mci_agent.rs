@@ -2796,7 +2796,7 @@ fn spawn_understanding_worker(
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_micros(),
             )
             .unwrap_or(u64::MAX);
-            match tokio::task::spawn_blocking(move || worker.run_cycle(now_us, 4)).await {
+            match tokio::task::spawn_blocking(move || worker.run_cycle(now_us, 6)).await {
                 Ok(Ok(stats)) => {
                     if stats.sessions > 0 || stats.days > 0 || stats.searches > 0 {
                         eprintln!(

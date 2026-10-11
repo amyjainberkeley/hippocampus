@@ -149,6 +149,34 @@ pub fn mmr(candidates: &[(Proposition, f64)], n: usize) -> Vec<Proposition> {
     chosen
 }
 
+const GENERIC: &[&str] = &[
+    "user", "users", "project", "projects", "work", "working", "works", "task", "tasks", "computer",
+    "screen", "app", "apps", "application", "window", "windows", "document", "documents", "file",
+    "files", "something", "things", "thing", "information", "content", "various", "different",
+    "multiple", "several", "some", "their", "they", "this", "that", "with", "about", "using",
+    "used", "uses", "related", "currently", "actively", "trying", "likely", "seems", "appears",
+    "interested", "interest", "involved", "engaged", "activity", "activities", "time", "while",
+];
+
+/// Keep only propositions specific enough to help: each must share at least
+/// two meaningful words with the observation (names, products, topics),
+/// beyond the user's name and generic words like "project" or "work".
+#[must_use]
+pub fn specific(drafts: Vec<Draft>, observation: &str, user_name: &str) -> Vec<Draft> {
+    let seen = words(observation);
+    let name = user_name.to_lowercase();
+    drafts
+        .into_iter()
+        .filter(|draft| {
+            words(&draft.text)
+                .into_iter()
+                .filter(|w| w.len() >= 4 && *w != name && !GENERIC.contains(&w.as_str()) && seen.contains(w))
+                .count()
+                >= 2
+        })
+        .collect()
+}
+
 /// Retrieve stored, active propositions that might restate `text`.
 ///
 /// # Errors
@@ -216,13 +244,18 @@ pub fn integrate(
             });
             match mind.call::<_, RelateOut>("relate", &input, CALL_TIMEOUT) {
                 Ok(out) => {
+                    // Merge only the same claim. A small model calls too much
+                    // "similar", and merging different claims blurs both.
                     let ids: Vec<i64> = out
                         .relations
                         .into_iter()
-                        .filter(|r| r.relation == "identical" || r.relation == "similar")
+                        .filter(|r| r.relation == "identical")
                         .map(|r| r.id)
                         .collect();
-                    candidates.into_iter().filter(|c| ids.contains(&c.id)).collect()
+                    candidates
+                        .into_iter()
+                        .filter(|c| ids.contains(&c.id) && similarity(&c.text, text) >= 0.3)
+                        .collect()
                 }
                 Err(MindCallError::Unavailable(reason)) => return Err(MindCallError::Unavailable(reason).into()),
                 Err(_) => {
@@ -303,6 +336,23 @@ mod tests {
         ];
         let picked: Vec<i64> = mmr(&candidates, 2).into_iter().map(|p| p.id).collect();
         assert_eq!(picked, vec![1, 3], "the near-duplicate gives way to a different claim");
+    }
+
+    #[test]
+    fn generic_propositions_are_dropped() {
+        let draft = |text: &str| Draft { text: text.into(), reasoning: String::new(), kind: "project".into(), confidence: 7, decay: 4 };
+        let observation = "Chrome — Pricing | Stripe: per-seat pricing. Notes — Launch plan: Team: $18/seat annual. Slack — #pricing Ravi";
+        let kept = specific(
+            vec![
+                draft("Sam is working on a project."),
+                draft("Sam is setting per-seat pricing for the Team plan with Ravi."),
+                draft("Sam is interested in various things."),
+            ],
+            observation,
+            "Amy",
+        );
+        assert_eq!(kept.len(), 1);
+        assert!(kept[0].text.contains("per-seat"));
     }
 
     #[test]

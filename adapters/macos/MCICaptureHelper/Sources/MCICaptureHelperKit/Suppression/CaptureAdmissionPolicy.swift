@@ -35,6 +35,9 @@ public struct SensitiveCaptureDenylist: DenylistProbe {
         "com.apple.passwords", "com.apple.systempreferences",
         // System consent and authentication dialogs are not work context.
         "com.apple.usernotificationcenter", "com.apple.securityagent",
+        // The lock screen and screen saver: the Mac is not in use, and the
+        // login window shows the account name and password field.
+        "com.apple.loginwindow", "com.apple.screensaver.engine", "com.apple.screensaver",
     ]
 
     public static let sensitiveDomains: Set<String> = [

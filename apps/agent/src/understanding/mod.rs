@@ -34,9 +34,13 @@ use mind::{MindCallError, MindClient};
 use observe::SessionSpan;
 
 const SESSIONS_CURSOR: &str = "sessions_through_us";
+const PIPELINE_KEY: &str = "pipeline_version";
+/// Bump when prompts or rules change enough that earlier inferences should
+/// be redone; the next cycle clears them and starts again.
+const PIPELINE_VERSION: &str = "2";
 const SEARCH_CURSOR: &str = "searches_through_event_id";
 /// How far back the first cycle looks.
-const FIRST_LOOKBACK_US: u64 = 48 * 3_600_000_000;
+const FIRST_LOOKBACK_US: u64 = 24 * 3_600_000_000;
 /// A session shorter than this gets a note from measurements only.
 const MIN_MODEL_SESSION_US: u64 = 2 * 60 * 1_000_000;
 /// Today's account is refreshed at most this often.
@@ -132,6 +136,10 @@ impl Understanding {
     /// Store failures.
     pub fn run_cycle(&self, now_us: u64, max_sessions: usize) -> Result<CycleStats, StoreError> {
         let mut stats = CycleStats::default();
+        if self.store.understanding_state(PIPELINE_KEY)?.as_deref() != Some(PIPELINE_VERSION) {
+            self.store.reset_understanding()?;
+            self.store.set_understanding_state(PIPELINE_KEY, PIPELINE_VERSION)?;
+        }
         let after: i64 = self.store.understanding_state(SEARCH_CURSOR)?.and_then(|v| v.parse().ok()).unwrap_or(0);
         let (added, last) = self.store.backfill_search_queries(after.max(0), 5_000)?;
         stats.searches = added;
@@ -147,7 +155,8 @@ impl Understanding {
             .understanding_state(SESSIONS_CURSOR)?
             .and_then(|v| v.parse().ok())
             .unwrap_or_else(|| now_us.saturating_sub(FIRST_LOOKBACK_US));
-        let events = self.store.observed_events_in_range(from, now_us, 20_000)?;
+        let mut events = self.store.observed_events_in_range(from, now_us, 20_000)?;
+        events.retain(|e| !e.app_bundle_id.as_deref().is_some_and(apps::is_noise));
         let spans = observe::split_sessions(&events);
         let mut processed = 0;
         for (index, span) in spans.iter().enumerate() {
@@ -240,6 +249,7 @@ impl Understanding {
                     .collect();
                 match gum::propose(&self.mind, &self.user_name, &observation, &known) {
                     Ok(drafts) => {
+                        let drafts = gum::specific(drafts, &observation, &self.user_name);
                         let evidence = observe::evidence(&segments, 8);
                         match gum::integrate(&self.store, &self.mind, &self.user_name, &drafts, &evidence, now_us) {
                             Ok(done) => {
@@ -272,9 +282,11 @@ impl Understanding {
             .ok_or_else(|| StoreError::InvalidInput("date must be YYYY-MM-DD".into()))?;
         let start_us = u64::try_from(start_secs).unwrap_or(0).saturating_mul(1_000_000);
         let end_us = start_us + 86_400_000_000;
-        let activity = self.store.activity_intervals_in_range(start_us, end_us)?;
+        let mut activity = self.store.activity_intervals_in_range(start_us, end_us)?;
+        activity.retain(|a| !a.app_bundle_id.as_deref().is_some_and(apps::is_noise));
         let counts = self.store.interaction_counts_in_range(start_us, end_us)?;
-        let events = self.store.observed_events_in_range(start_us, end_us, 50_000)?;
+        let mut events = self.store.observed_events_in_range(start_us, end_us, 50_000)?;
+        events.retain(|e| !e.app_bundle_id.as_deref().is_some_and(apps::is_noise));
         let searches = self.store.search_queries_in_range(start_us, end_us, 200)?;
         let notes = self.store.session_notes_in_range(start_us, end_us)?;
         let breakdown = day::breakdown(

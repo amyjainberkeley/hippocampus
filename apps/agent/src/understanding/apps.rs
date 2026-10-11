@@ -108,6 +108,28 @@ const CATALOG: &[(&str, &str, WorkKind)] = &[
     ("com.apple.finder", "Finder", WorkKind::Other),
 ];
 
+/// System surfaces that are not work: the lock screen, screen saver, Dock,
+/// Control Center, notifications, Spotlight and Hippocampus itself.
+#[must_use]
+pub fn is_noise(bundle_id: &str) -> bool {
+    const NOISE: &[&str] = &[
+        "com.apple.loginwindow",
+        "com.apple.screensaver.engine",
+        "com.apple.screensaver",
+        "com.apple.dock",
+        "com.apple.controlcenter",
+        "com.apple.notificationcenterui",
+        "com.apple.usernotificationcenter",
+        "com.apple.spotlight",
+        "com.apple.systemuiserver",
+        "com.apple.securityagent",
+        "com.apple.windowmanager",
+        "ai.hippocampus",
+    ];
+    let lowered = bundle_id.to_ascii_lowercase();
+    NOISE.contains(&lowered.as_str())
+}
+
 /// Readable app name.
 #[must_use]
 pub fn name(bundle_id: &str) -> String {

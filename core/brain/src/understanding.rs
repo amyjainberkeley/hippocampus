@@ -1028,6 +1028,29 @@ impl SqlCipherBrainStore {
             .map_err(|e| backend("read day report", e))
     }
 
+    /// Clear every inference (propositions, session notes, day reports and
+    /// progress markers) so they are made again. Measurements (searches and
+    /// interaction counts) are kept.
+    ///
+    /// # Errors
+    /// Database failures.
+    pub fn reset_understanding(&self) -> Result<(), StoreError> {
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| backend("begin understanding reset", e))?;
+        tx.execute_batch(
+            "DELETE FROM proposition_evidence;
+             DELETE FROM propositions;
+             DELETE FROM session_notes;
+             DELETE FROM day_reports;
+             DELETE FROM understanding_state WHERE key <> 'searches_through_event_id';",
+        )
+        .map_err(|e| backend("reset understanding", e))?;
+        tx.commit().map_err(|e| backend("commit understanding reset", e))
+    }
+
     /// Read a progress marker.
     ///
     /// # Errors

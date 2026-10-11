@@ -20,7 +20,8 @@ public enum Prompts {
         Refer to the user by name or as "they"; never assume anyone's gender.
         Write plainly and specifically, using the names that appear on screen \
         (projects, products, documents, people) instead of generic words.
-        Only state what the observations support.
+        Only state what the observations support. Never judge the user or their \
+        day as productive, unproductive, good or bad.
         Never record passwords, codes, account or card numbers, or health, legal \
         or financial details about anyone; leave them out entirely.
         """
@@ -120,10 +121,12 @@ public enum Prompts {
         let user = name(input.userName)
         return """
         Write \(user)'s account of their day on the computer, addressed to them \
-        as "you"; refer to anyone else by name. Use only the facts below. Say what work got done, where focus \
-        held and where it broke, what they looked up, and where they seemed to \
-        hesitate. Be specific (name the work, the times, the durations). No \
-        praise, no filler.
+        as "you"; refer to anyone else by name. Use only the facts below. Name the \
+        work using the titles of the stretches of work. Say where focus held \
+        (focus blocks) and where it broke (switching, the most fragmented hour), \
+        what they looked up, and where a stretch of work shows hesitation. Be \
+        specific: times, durations, apps, searches. No praise, no filler, and \
+        do not repeat the headline in the narrative.
 
         Measured:
         \(clip(input.facts, 2_500))

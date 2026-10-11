@@ -46,7 +46,7 @@ struct GRelations {
 
 @Generable
 struct GEpisode {
-    @Guide(description: "Three to seven words naming the activity, such as 'Pricing the team plan'")
+    @Guide(description: "Three to seven words naming the activity, using names from the observations")
     var title: String
     @Guide(description: "Two sentences, to the user as 'you', on what was on screen and what you did")
     var surface: String
@@ -56,13 +56,13 @@ struct GEpisode {
 
 @Generable
 struct GDay {
-    @Guide(description: "One sentence capturing the day")
+    @Guide(description: "One sentence naming the day's main work and the active time; no judgement")
     var headline: String
-    @Guide(description: "One paragraph, addressed to the user as 'you'")
+    @Guide(description: "Three to five sentences to the user as 'you', adding detail the headline does not have")
     var narrative: String
-    @Guide(description: "Specific observations about how the user worked today", .count(3...5))
+    @Guide(description: "Specific observations, each citing a time, a duration, an app or a search", .count(3...5))
     var insights: [String]
-    @Guide(description: "One concrete suggestion for tomorrow, grounded in today")
+    @Guide(description: "One concrete change for tomorrow tied to a measured pattern from today")
     var suggestion: String
 }
 
@@ -76,7 +76,7 @@ struct GAnswer {
 
 @Generable
 struct GSuggestion {
-    @Guide(description: "Short title, under eight words, like 'Resume the pricing doc'")
+    @Guide(description: "Short title under eight words, naming the thing from the observations")
     var title: String
     @Guide(description: "One sentence on why, citing what the user was doing")
     var why: String
