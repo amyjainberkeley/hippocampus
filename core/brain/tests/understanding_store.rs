@@ -1,6 +1,5 @@
-use mci_brain::episode_segmenter::EpisodeWriter;
 use mci_brain::understanding::{
-    DayReport, EpisodeNote, InteractionCounts, NewProposition, PropositionKind, PropositionStatus,
+    DayReport, InteractionCounts, NewProposition, PropositionKind, PropositionStatus, SessionNote,
 };
 use mci_brain::{BrainStore, Event, EventId, EventSource, SqlCipherBrainStore};
 use mci_core::crypto::DbKey;
@@ -47,8 +46,10 @@ fn searches_are_read_from_urls_and_listed_without_repeats() {
     let a = store.put_event_with_source(&event(1_000_000, "results", Some(url)), EventSource::BrowserPage).unwrap();
     let b = store.put_event_with_source(&event(2_000_000, "results again", Some(url)), EventSource::ScreenOcr).unwrap();
     store.put_event_with_source(&event(3_000_000, "docs", Some("https://stripe.com/docs")), EventSource::BrowserPage).unwrap();
-    assert_eq!(store.backfill_search_queries().unwrap(), 2);
-    assert_eq!(store.backfill_search_queries().unwrap(), 0, "backfill is repeat-safe");
+    let (added, last) = store.backfill_search_queries(0, 100).unwrap();
+    assert_eq!(added, 2);
+    assert_eq!(store.backfill_search_queries(last, 100).unwrap(), (0, last), "the cursor moves past what was read");
+    assert_eq!(store.backfill_search_queries(0, 100).unwrap().0, 2, "re-reading is harmless");
     let searches = store.search_queries_in_range(0, 10_000_000, 10).unwrap();
     assert_eq!(searches.len(), 1, "the same query a second later collapses");
     assert_eq!(searches[0].query, "team plan pricing");
@@ -110,38 +111,40 @@ fn rejected_propositions_stay_rejected_and_can_be_forgotten() {
 }
 
 #[test]
-fn episode_notes_and_day_reports_go_with_their_events() {
+fn session_notes_and_day_reports_go_with_their_events() {
     let (_dir, store) = store();
-    let e1 = store.put_event_with_source(&event(5_000_000, "a", None), EventSource::ScreenOcr).unwrap();
+    let _e1 = store.put_event_with_source(&event(5_000_000, "a", None), EventSource::ScreenOcr).unwrap();
     let e2 = store.put_event_with_source(&event(9_000_000, "b", None), EventSource::ScreenOcr).unwrap();
-    let episode = store.create_episode(5_000_000, 9_000_000, Some("com.google.Chrome")).unwrap();
-    store.set_event_episode(e1, episode).unwrap();
-    store.set_event_episode(e2, episode).unwrap();
-    store
-        .put_episode_note(&EpisodeNote {
-            episode_id: episode.0 as i64,
-            title: "Pricing research".into(),
-            summary: "Read the pricing docs.".into(),
-            signals: "{}".into(),
-            through_event_id: e2.0 as i64,
-            generated_us: 10,
-            model: "test".into(),
-        })
-        .unwrap();
+    let _late = store.put_event_with_source(&event(50_000_000, "c", None), EventSource::ScreenOcr).unwrap();
+    let note = |start_us, end_us, title: &str| SessionNote {
+        start_us,
+        end_us,
+        title: title.into(),
+        surface: "You read the pricing docs.".into(),
+        beneath: "Nothing notable.".into(),
+        signals: "{}".into(),
+        event_count: 2,
+        generated_us: 10,
+        model: "test".into(),
+    };
+    store.put_session_note(&note(5_000_000, 9_000_000, "Pricing research")).unwrap();
+    store.put_session_note(&note(50_000_000, 50_000_000, "Later")).unwrap();
     store
         .put_day_report(&DayReport {
             date_local: "2026-10-10".into(),
             start_us: 0,
-            end_us: 86_400_000_000,
+            end_us: 20_000_000,
             generated_us: 11,
             model: "test".into(),
             body: "{}".into(),
         })
         .unwrap();
-    assert_eq!(store.episode_notes_in_range(0, 20_000_000).unwrap().len(), 1);
+    assert_eq!(store.session_notes_in_range(0, 100_000_000).unwrap().len(), 2);
     store.delete_event(e2).unwrap();
-    assert!(store.episode_note(episode.0 as i64).unwrap().is_none());
+    let left: Vec<String> = store.session_notes_in_range(0, 100_000_000).unwrap().into_iter().map(|n| n.title).collect();
+    assert_eq!(left, vec!["Later".to_owned()], "only the note containing the deleted event goes");
     assert!(store.day_report("2026-10-10").unwrap().is_none());
+    assert_eq!(store.delete_session_notes_in_range(40_000_000, 60_000_000).unwrap(), 1);
 }
 
 #[test]

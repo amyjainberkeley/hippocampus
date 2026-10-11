@@ -260,6 +260,8 @@ pub const OCR_EVENT_FIXED_HEADER_BYTES: usize =
 pub enum MessageType {
     /// Helper -> core measured-input interval; additive v9 payload.
     ActivityInterval = 0x0060,
+    /// Helper -> core input counts for an admitted interval; additive v9 payload.
+    InteractionCounts = 0x0061,
     /// Core → helper start signal (see [`super::Message::CaptureStart`]).
     CaptureStart = 0x0001,
     /// Core → helper stop signal (see [`super::Message::CaptureStop`]).
@@ -304,6 +306,7 @@ impl MessageType {
             0x0041 => Self::ContextOCREvent,
             0x0050 => Self::PageContentEvent,
             0x0060 => Self::ActivityInterval,
+            0x0061 => Self::InteractionCounts,
             other => {
                 return Err(DecodeError::InvalidEnum {
                     field: "MessageType",
@@ -458,6 +461,20 @@ fn encode_payload(msg: &Message, out: &mut Vec<u8>) {
                 .filter(|_| matches!(state.as_str(), "input_active" | "input_idle"));
             encode_string(app.unwrap_or_default(), out);
             encode_string(capture_generation, out);
+        }
+        Message::InteractionCounts {
+            start_us,
+            end_us,
+            keys,
+            clicks,
+            scrolls,
+            moves,
+        } => {
+            out.extend_from_slice(&start_us.to_le_bytes());
+            out.extend_from_slice(&end_us.to_le_bytes());
+            for value in [keys, clicks, scrolls, moves] {
+                out.extend_from_slice(&value.to_le_bytes());
+            }
         }
         Message::CaptureStart {
             interval_ms,
@@ -786,6 +803,28 @@ fn decode_payload(
                 state,
                 app_bundle_id,
                 capture_generation,
+            }
+        }
+        MessageType::InteractionCounts => {
+            if version != 0x09 {
+                return Err(DecodeError::UnsupportedVersion { got: version });
+            }
+            let start_us = p.u64_le()?;
+            let end_us = p.u64_le()?;
+            let keys = p.u32_le()?;
+            let clicks = p.u32_le()?;
+            let scrolls = p.u32_le()?;
+            let moves = p.u32_le()?;
+            if start_us == 0 || start_us >= end_us || end_us > i64::MAX as u64 || end_us - start_us > 60_000_000 {
+                return Err(DecodeError::InvalidActivityInterval);
+            }
+            Message::InteractionCounts {
+                start_us,
+                end_us,
+                keys,
+                clicks,
+                scrolls,
+                moves,
             }
         }
         MessageType::CaptureStart => {
@@ -1138,6 +1177,30 @@ mod tests {
             assert_eq!(frame.seq, 42);
             assert_eq!(frame.message.message_type() as u16, 0x0060);
             assert_eq!(encode(frame.seq, &frame.message), bytes);
+        }
+    }
+
+    #[test]
+    fn interaction_counts_round_trip_and_reject_bad_intervals() {
+        let message = Message::InteractionCounts {
+            start_us: 1_000_000,
+            end_us: 5_000_000,
+            keys: 12,
+            clicks: 1,
+            scrolls: 3,
+            moves: 40,
+        };
+        let bytes = encode(7, &message);
+        let (frame, used) = decode(&bytes).expect("counts decode");
+        assert_eq!(used, bytes.len());
+        assert_eq!(frame.message, message);
+        assert_eq!(frame.message.message_type() as u16, 0x0061);
+        for (start_us, end_us) in [(0, 5), (5_000_000, 5_000_000), (1, 70_000_000)] {
+            let bad = encode(
+                8,
+                &Message::InteractionCounts { start_us, end_us, keys: 0, clicks: 0, scrolls: 0, moves: 0 },
+            );
+            assert!(decode(&bad).is_err(), "{start_us}..{end_us}");
         }
     }
 

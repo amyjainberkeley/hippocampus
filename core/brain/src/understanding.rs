@@ -6,8 +6,8 @@
 //! - **Propositions**: a general user model (GUM, Shaikh et al. 2025). Each is
 //!   a natural-language statement about the user with the model's reasoning,
 //!   a confidence, a decay rate and the events it rests on.
-//! - **Episode notes** and **day reports**: titles, summaries and written
-//!   accounts of a stretch of work.
+//! - **Session notes** and **day reports**: titles, summaries and written
+//!   accounts of stretches of work.
 //!
 //! Everything here is derived from events and goes with them:
 //! [`delete_for_events`] runs inside every deletion transaction before the
@@ -372,6 +372,20 @@ impl NewProposition {
 const PROPOSITION_COLUMNS: &str =
     "id, text, reasoning, kind, confidence, decay, status, created_us, updated_us, revised_from, model";
 
+fn row_to_session_note(row: &Row<'_>) -> rusqlite::Result<SessionNote> {
+    Ok(SessionNote {
+        start_us: u64::try_from(row.get::<_, i64>(0)?).unwrap_or(0),
+        end_us: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(0),
+        title: row.get(2)?,
+        surface: row.get(3)?,
+        beneath: row.get(4)?,
+        signals: row.get(5)?,
+        event_count: row.get(6)?,
+        generated_us: u64::try_from(row.get::<_, i64>(7)?).unwrap_or(0),
+        model: row.get(8)?,
+    })
+}
+
 fn row_to_proposition(row: &Row<'_>) -> rusqlite::Result<Proposition> {
     let kind: String = row.get(3)?;
     let status: String = row.get(6)?;
@@ -395,19 +409,23 @@ fn row_to_proposition(row: &Row<'_>) -> rusqlite::Result<Proposition> {
 // Episode notes and day reports
 // ---------------------------------------------------------------------------
 
-/// What an episode was.
+/// A work session: a stretch of activity across apps.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EpisodeNote {
-    /// The episode.
-    pub episode_id: i64,
+pub struct SessionNote {
+    /// First event in the session.
+    pub start_us: u64,
+    /// Last event in the session.
+    pub end_us: u64,
     /// A short title.
     pub title: String,
-    /// What happened, on the surface and beneath it.
-    pub summary: String,
-    /// JSON describing the interaction signals.
+    /// What was on screen and what the user did.
+    pub surface: String,
+    /// What lay beneath: intent, attention, hesitation.
+    pub beneath: String,
+    /// JSON describing the measured signals.
     pub signals: String,
-    /// The last event the note covers.
-    pub through_event_id: i64,
+    /// Events the note covers.
+    pub event_count: u32,
     /// When it was written.
     pub generated_us: u64,
     /// The model that wrote it.
@@ -431,11 +449,76 @@ pub struct DayReport {
     pub body: String,
 }
 
+/// An event with where it came from, for building observations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObservedEvent {
+    /// Event id.
+    pub id: i64,
+    /// Capture time.
+    pub ts_us: u64,
+    /// App it was seen in.
+    pub app_bundle_id: Option<String>,
+    /// Window or page title.
+    pub window_title: Option<String>,
+    /// Page URL, if any.
+    pub url: Option<String>,
+    /// Stored text.
+    pub text: String,
+    /// `screen_ocr`, `screen_context`, `browser_page`, … (see `EventSource`).
+    pub source: String,
+}
+
 // ---------------------------------------------------------------------------
 // Store methods
 // ---------------------------------------------------------------------------
 
 impl SqlCipherBrainStore {
+    /// Events in `[start_us, end_us)`, oldest first, with their source, at
+    /// most `limit`.
+    ///
+    /// # Errors
+    /// Database failures.
+    pub fn observed_events_in_range(
+        &self,
+        start_us: u64,
+        end_us: u64,
+        limit: usize,
+    ) -> Result<Vec<ObservedEvent>, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let has_sources = table_exists(guard.conn(), "event_sources")?;
+        let sql = if has_sources {
+            "SELECT e.id, e.ts_us, e.app_bundle_id, e.window_title, e.url, e.text,
+                    COALESCE(s.source_kind, 'unknown')
+             FROM events e LEFT JOIN event_sources s ON s.event_id = e.id
+             WHERE e.ts_us >= ?1 AND e.ts_us < ?2 ORDER BY e.ts_us, e.id LIMIT ?3"
+        } else {
+            "SELECT id, ts_us, app_bundle_id, window_title, url, text, 'unknown'
+             FROM events WHERE ts_us >= ?1 AND ts_us < ?2 ORDER BY ts_us, id LIMIT ?3"
+        };
+        let mut statement = guard
+            .conn()
+            .prepare(sql)
+            .map_err(|e| backend("prepare observed events", e))?;
+        let rows = statement
+            .query_map(
+                params![sql_i64(start_us), sql_i64(end_us), i64::try_from(limit).unwrap_or(i64::MAX)],
+                |row| {
+                    Ok(ObservedEvent {
+                        id: row.get(0)?,
+                        ts_us: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(0),
+                        app_bundle_id: row.get(2)?,
+                        window_title: row.get(3)?,
+                        url: row.get(4)?,
+                        text: row.get(5)?,
+                        source: row.get(6)?,
+                    })
+                },
+            )
+            .map_err(|e| backend("query observed events", e))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| backend("read observed events", e))
+    }
+
     /// Record one interval's input counts. Returns false when an interval
     /// starting at the same time is already stored.
     ///
@@ -518,35 +601,38 @@ impl SqlCipherBrainStore {
         Ok(true)
     }
 
-    /// Extract searches from every stored event URL not yet examined. Safe to
-    /// repeat; returns how many searches were added.
+    /// Extract searches from up to `limit` events after `after_id` (by id).
+    /// Returns how many searches were added and the last id examined, which
+    /// the caller passes back next time.
     ///
     /// # Errors
     /// Database failures.
-    pub fn backfill_search_queries(&self) -> Result<usize, StoreError> {
-        let candidates: Vec<(i64, i64, String)> = {
+    pub fn backfill_search_queries(&self, after_id: i64, limit: usize) -> Result<(usize, i64), StoreError> {
+        let candidates: Vec<(i64, i64, Option<String>)> = {
             let guard = self.db.lock().expect("brain store mutex poisoned");
             let mut statement = guard
                 .conn()
-                .prepare(
-                    "SELECT e.id, e.ts_us, e.url FROM events e
-                     LEFT JOIN search_queries s ON s.event_id = e.id
-                     WHERE e.url LIKE 'http%' AND s.event_id IS NULL",
-                )
+                .prepare("SELECT id, ts_us, url FROM events WHERE id > ?1 ORDER BY id LIMIT ?2")
                 .map_err(|e| backend("prepare search backfill", e))?;
             let rows = statement
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .query_map(params![after_id, i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })
                 .map_err(|e| backend("query search backfill", e))?;
             rows.collect::<Result<Vec<_>, _>>()
                 .map_err(|e| backend("read search backfill", e))?
         };
         let mut added = 0;
+        let mut last = after_id;
         for (id, ts, url) in candidates {
-            if self.record_search_query(id, u64::try_from(ts).unwrap_or(0), &url)? {
-                added += 1;
+            last = id;
+            if let Some(url) = url.filter(|u| u.starts_with("http")) {
+                if self.record_search_query(id, u64::try_from(ts).unwrap_or(0), &url)? {
+                    added += 1;
+                }
             }
         }
-        Ok(added)
+        Ok((added, last))
     }
 
     /// Searches in `[start_us, end_us)`, newest first. Repeats of the same
@@ -819,108 +905,73 @@ impl SqlCipherBrainStore {
         Ok(props.into_iter().zip(scores).collect())
     }
 
-    /// Store or replace an episode's note.
+    /// Store or replace a session's note (keyed by its start).
     ///
     /// # Errors
-    /// Database failures, or an episode that no longer exists.
-    pub fn put_episode_note(&self, note: &EpisodeNote) -> Result<(), StoreError> {
+    /// Database failures.
+    pub fn put_session_note(&self, note: &SessionNote) -> Result<(), StoreError> {
+        if note.end_us < note.start_us || note.start_us == 0 {
+            return Err(StoreError::InvalidInput("invalid session bounds".into()));
+        }
         let guard = self.db.lock().expect("brain store mutex poisoned");
-        let changed = guard
+        guard
             .conn()
             .execute(
-                "INSERT OR REPLACE INTO episode_notes
-                     (episode_id, title, summary, signals, through_event_id, generated_us, model)
-                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7 WHERE EXISTS (SELECT 1 FROM episodes WHERE id = ?1)",
+                "INSERT OR REPLACE INTO session_notes
+                     (start_us, end_us, title, surface, beneath, signals, event_count, generated_us, model)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
-                    note.episode_id,
+                    sql_i64(note.start_us),
+                    sql_i64(note.end_us),
                     note.title.chars().take(200).collect::<String>(),
-                    note.summary.chars().take(4000).collect::<String>(),
+                    note.surface.chars().take(4000).collect::<String>(),
+                    note.beneath.chars().take(4000).collect::<String>(),
                     note.signals,
-                    note.through_event_id,
+                    note.event_count,
                     sql_i64(note.generated_us),
                     note.model
                 ],
             )
-            .map_err(|e| backend("write episode note", e))?;
-        if changed == 0 {
-            return Err(StoreError::InvalidInput("episode no longer exists".into()));
-        }
+            .map_err(|e| backend("write session note", e))?;
         Ok(())
     }
 
-    /// Notes for episodes overlapping `[start_us, end_us)`, oldest first.
+    /// Notes for sessions overlapping `[start_us, end_us)`, oldest first.
     ///
     /// # Errors
     /// Database failures.
-    pub fn episode_notes_in_range(
-        &self,
-        start_us: u64,
-        end_us: u64,
-    ) -> Result<Vec<(EpisodeNote, u64, u64, Option<String>)>, StoreError> {
+    pub fn session_notes_in_range(&self, start_us: u64, end_us: u64) -> Result<Vec<SessionNote>, StoreError> {
         let guard = self.db.lock().expect("brain store mutex poisoned");
-        if !table_exists(guard.conn(), "episode_notes")? {
+        if !table_exists(guard.conn(), "session_notes")? {
             return Ok(Vec::new());
         }
         let mut statement = guard
             .conn()
             .prepare(
-                "SELECT n.episode_id, n.title, n.summary, n.signals, n.through_event_id, n.generated_us, n.model,
-                        e.ts_start, e.ts_end, e.app_bundle_id
-                 FROM episode_notes n JOIN episodes e ON e.id = n.episode_id
-                 WHERE e.ts_end >= ?1 AND e.ts_start < ?2 ORDER BY e.ts_start",
+                "SELECT start_us, end_us, title, surface, beneath, signals, event_count, generated_us, model
+                 FROM session_notes WHERE end_us >= ?1 AND start_us < ?2 ORDER BY start_us",
             )
-            .map_err(|e| backend("prepare episode notes", e))?;
+            .map_err(|e| backend("prepare session notes", e))?;
         let rows = statement
-            .query_map(params![sql_i64(start_us), sql_i64(end_us)], |row| {
-                Ok((
-                    EpisodeNote {
-                        episode_id: row.get(0)?,
-                        title: row.get(1)?,
-                        summary: row.get(2)?,
-                        signals: row.get(3)?,
-                        through_event_id: row.get(4)?,
-                        generated_us: u64::try_from(row.get::<_, i64>(5)?).unwrap_or(0),
-                        model: row.get(6)?,
-                    },
-                    u64::try_from(row.get::<_, i64>(7)?).unwrap_or(0),
-                    u64::try_from(row.get::<_, i64>(8)?).unwrap_or(0),
-                    row.get(9)?,
-                ))
-            })
-            .map_err(|e| backend("query episode notes", e))?;
+            .query_map(params![sql_i64(start_us), sql_i64(end_us)], row_to_session_note)
+            .map_err(|e| backend("query session notes", e))?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|e| backend("read episode notes", e))
+            .map_err(|e| backend("read session notes", e))
     }
 
-    /// The note for one episode, if written.
+    /// Delete session notes overlapping `[start_us, end_us)` (to rewrite them).
     ///
     /// # Errors
     /// Database failures.
-    pub fn episode_note(&self, episode_id: i64) -> Result<Option<EpisodeNote>, StoreError> {
+    pub fn delete_session_notes_in_range(&self, start_us: u64, end_us: u64) -> Result<usize, StoreError> {
         let guard = self.db.lock().expect("brain store mutex poisoned");
-        if !table_exists(guard.conn(), "episode_notes")? {
-            return Ok(None);
-        }
         guard
             .conn()
-            .query_row(
-                "SELECT episode_id, title, summary, signals, through_event_id, generated_us, model
-                 FROM episode_notes WHERE episode_id = ?1",
-                params![episode_id],
-                |row| {
-                    Ok(EpisodeNote {
-                        episode_id: row.get(0)?,
-                        title: row.get(1)?,
-                        summary: row.get(2)?,
-                        signals: row.get(3)?,
-                        through_event_id: row.get(4)?,
-                        generated_us: u64::try_from(row.get::<_, i64>(5)?).unwrap_or(0),
-                        model: row.get(6)?,
-                    })
-                },
+            .execute(
+                "DELETE FROM session_notes WHERE end_us >= ?1 AND start_us < ?2",
+                params![sql_i64(start_us), sql_i64(end_us)],
             )
-            .optional()
-            .map_err(|e| backend("read episode note", e))
+            .map_err(|e| backend("delete session notes", e))
     }
 
     /// Store or replace a day's report.
@@ -1054,7 +1105,7 @@ fn attach_evidence(conn: &rusqlite::Connection, props: &mut [Proposition]) -> Re
 
 /// Delete everything derived from `event_ids`, inside the caller's deletion
 /// transaction and before the events go: every proposition that cites one of
-/// them (not only the link), the notes of episodes containing them, and the
+/// them (not only the link), the notes of sessions containing them, and the
 /// reports of days they fall on. Searches cascade from their event.
 pub(crate) fn delete_for_events(tx: &Transaction<'_>, event_ids: &[i64]) -> Result<(), StoreError> {
     if event_ids.is_empty() || !table_exists(tx, "propositions")? {
@@ -1081,9 +1132,10 @@ pub(crate) fn delete_for_events(tx: &Transaction<'_>, event_ids: &[i64]) -> Resu
         "DELETE FROM propositions WHERE id IN (
              SELECT proposition_id FROM proposition_evidence
              WHERE event_id IN (SELECT id FROM understanding_events_pending_delete));
-         DELETE FROM episode_notes WHERE episode_id IN (
-             SELECT episode_id FROM events
-             WHERE id IN (SELECT id FROM understanding_events_pending_delete) AND episode_id IS NOT NULL);
+         DELETE FROM session_notes WHERE EXISTS (
+             SELECT 1 FROM events e
+             WHERE e.id IN (SELECT id FROM understanding_events_pending_delete)
+               AND e.ts_us >= session_notes.start_us AND e.ts_us <= session_notes.end_us);
          DELETE FROM day_reports WHERE EXISTS (
              SELECT 1 FROM events e
              WHERE e.id IN (SELECT id FROM understanding_events_pending_delete)
@@ -1120,7 +1172,7 @@ pub(crate) fn wipe(tx: &Transaction<'_>) -> Result<(), StoreError> {
     tx.execute_batch(
         "DELETE FROM proposition_evidence;
          DELETE FROM propositions;
-         DELETE FROM episode_notes;
+         DELETE FROM session_notes;
          DELETE FROM day_reports;
          DELETE FROM search_queries;
          DELETE FROM interaction_counts;

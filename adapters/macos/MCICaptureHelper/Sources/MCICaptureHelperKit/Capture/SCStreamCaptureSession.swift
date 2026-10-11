@@ -148,6 +148,7 @@ internal struct MeasuredActivityDependencies: Sendable {
     let sleep: @Sendable (UInt64) async throws -> Void
     let sessionEligible: @Sendable () -> Bool
     let secondsSinceLastInput: @Sendable () -> TimeInterval?
+    var interactionTotals: @Sendable () -> InteractionTotals? = { InteractionTotals.current() }
 
     static let live = MeasuredActivityDependencies(
         now: {
@@ -862,6 +863,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             guard measuredActivityTask == nil else { return }
             measuredActivityTask = Task { [weak self] in
                 var sampler = ActivityIntervalSampler(captureGeneration: UUID().uuidString)
+                var priorTotals: InteractionTotals?
                 while !Task.isCancelled {
                     guard let self, self.currentActiveCaptureEpoch() == epoch else { break }
                     let sessionEligible = dependencies.sessionEligible()
@@ -878,6 +880,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
                     let after = store.currentSync()
                     guard !Task.isCancelled, self.currentActiveCaptureEpoch() == epoch else { break }
                     let now = dependencies.now()
+                    let totals = dependencies.interactionTotals()
+                    defer { priorTotals = totals }
                     let observation = ActivityObservation(
                         tsUs: now.tsUs,
                         uptimeNs: now.uptimeNs,
@@ -891,6 +895,15 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
                         do {
                             try await self.pipeline.emitActivityInterval(interval) { [weak self] in
                                 self?.currentActiveCaptureEpoch() == epoch
+                            }
+                            // Counts travel only for an interval every privacy gate admitted
+                            // and attributed; an unknown interval carries none.
+                            if interval.state != .unknown, let totals, let priorTotals {
+                                let counts = MeasuredInteractionCounts(
+                                    startUs: interval.startUs, endUs: interval.endUs, totals: totals.since(priorTotals))
+                                try await self.pipeline.emitInteractionCounts(counts) { [weak self] in
+                                    self?.currentActiveCaptureEpoch() == epoch
+                                }
                             }
                         } catch {
                             self.invalidateCaptureLifecycle(shutdown: true)

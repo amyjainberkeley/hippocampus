@@ -31,7 +31,8 @@ use tokio::io::{AsyncRead, AsyncWrite};
 /// trust-boundary logic at this layer auditable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Routed {
-    /// Dedicated measured-input interval. Never an OCR event or health record.
+    /// Dedicated measured-input interval or its input counts. Never an OCR
+    /// event or health record.
     ActivityInterval(Frame),
     /// Helper emitted a privacy tombstone. The caller writes the
     /// materialized [`EventRow`] to the store layer.
@@ -174,7 +175,9 @@ where
     /// Classify an inbound frame into a [`Routed`] outcome.
     fn route(&self, frame: Frame) -> Routed {
         match &frame.message {
-            Message::ActivityInterval { .. } => Routed::ActivityInterval(frame),
+            Message::ActivityInterval { .. } | Message::InteractionCounts { .. } => {
+                Routed::ActivityInterval(frame)
+            }
             Message::PrivacyTombstone { .. } => {
                 // The materializer cannot return None here because we
                 // just matched on PrivacyTombstone. The assert

@@ -26,7 +26,7 @@ HARDENING_EXCEPTIONS = (
     "com.apple.security.cs.disable-library-validation",
     "com.apple.security.cs.disable-executable-page-protection",
 )
-OTHER_EXECUTABLES = ("mci-agent", "recall-ui", "onboarding", "hippocampus-native-host")
+OTHER_EXECUTABLES = ("mci-agent", "recall-ui", "onboarding", "hippocampus-native-host", "hippocampus-mind")
 EXECUTABLES = ("MCICaptureHelper", *OTHER_EXECUTABLES, "Hippocampus")
 
 

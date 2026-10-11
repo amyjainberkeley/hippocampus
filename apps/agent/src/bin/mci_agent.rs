@@ -775,6 +775,9 @@ fn print_usage() {
 fn main() -> ExitCode {
     mci_agent::panic_hook::install();
     let raw_argv: Vec<String> = std::env::args().collect();
+    if let Some(code) = run_understanding_cli(&raw_argv) {
+        return code;
+    }
     let args = parse_args(&raw_argv);
     let shutdown_timeout =
         matches!(&args.mode, Mode::DrainStdin { .. }).then_some(DAEMON_RUNTIME_SHUTDOWN_TIMEOUT);
@@ -1214,6 +1217,7 @@ async fn run_agent(args: Args) -> ExitCode {
                                 // worker owns the previous calendar day's row.
                                 spawn_today_brief_worker(Arc::clone(&store), shutdown_rx.clone());
                                 spawn_brief_worker(Arc::clone(&store), shutdown_rx.clone());
+                                spawn_understanding_worker(Arc::clone(&store), shutdown_rx.clone());
 
                                 // The daemon holds the writer lease for its
                                 // lifetime, so it is the only process that
@@ -2565,6 +2569,257 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
         return Err(13);
     }
     Ok(())
+}
+
+/// Read-only understanding commands: `day`, `model`, `searches`, `sessions`,
+/// `ask` and `suggest`. JSON with `--json`, plain text otherwise. `None` when
+/// argv names some other command.
+fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
+    use mci_agent::understanding::mind::MindClient;
+    use mci_agent::understanding::query::{self, NowContext, Source, UnderstandingQuery};
+    let command = argv.get(1)?.as_str();
+    if !matches!(command, "day" | "model" | "searches" | "sessions" | "ask" | "suggest") {
+        return None;
+    }
+    let mut flags: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
+    let mut json = false;
+    let mut use_model = false;
+    let mut positional: Vec<String> = Vec::new();
+    let mut i = 2;
+    while i < argv.len() {
+        match argv[i].as_str() {
+            "--json" => json = true,
+            "--model" => use_model = true,
+            flag @ ("--date" | "--hours" | "--limit" | "--query" | "--app" | "--title" | "--now" | "--db-path") => {
+                let Some(value) = argv.get(i + 1) else {
+                    eprintln!("mci-agent {command}: {flag} requires a value");
+                    return Some(ExitCode::from(2));
+                };
+                flags.insert(flag, value.clone());
+                i += 1;
+            }
+            other => positional.push(other.to_owned()),
+        }
+        i += 1;
+    }
+    let db_path = flags
+        .get("--db-path")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("MCI_DB_PATH").map(PathBuf::from))
+        .unwrap_or_else(default_db_path);
+    let key_hex = match resolve_key_for_command(command) {
+        Ok(key) => key,
+        Err(code) => return Some(ExitCode::from(code)),
+    };
+    let Some(key_bytes) = decode_hex32(&key_hex) else {
+        eprintln!("mci-agent {command}: resolved database key is malformed.");
+        return Some(ExitCode::from(11));
+    };
+    let key = DbKey::from_bytes(key_bytes);
+    let store = match SqlCipherBrainStore::open_readonly(&db_path, &key) {
+        Ok(store) => Arc::new(store),
+        Err(error) => {
+            eprintln!("mci-agent {command}: open brain at {}: {error}", db_path.display());
+            return Some(ExitCode::from(12));
+        }
+    };
+    let tz = brief_worker::current_tz_offset_secs();
+    let now_us = u64::try_from(
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_micros(),
+    )
+    .unwrap_or(u64::MAX);
+    let limit = flags.get("--limit").and_then(|v| v.parse().ok());
+    let result: Result<serde_json::Value, String> = match command {
+        "day" | "model" | "searches" | "sessions" => {
+            let q = match command {
+                "day" => UnderstandingQuery::Day { date: flags.get("--date").cloned() },
+                "sessions" => UnderstandingQuery::Sessions { date: flags.get("--date").cloned() },
+                "searches" => UnderstandingQuery::Searches { hours: flags.get("--hours").and_then(|v| v.parse().ok()), limit },
+                _ => UnderstandingQuery::UserModel { query: flags.get("--query").cloned(), limit },
+            };
+            query::run(&store, tz, now_us, &q).map_err(|e| e.to_string())
+        }
+        "ask" => {
+            let question = positional.join(" ");
+            if question.trim().is_empty() {
+                eprintln!("mci-agent ask: usage: mci-agent ask \"question\" [--now TEXT] [--json]");
+                return Some(ExitCode::from(2));
+            }
+            let embedder = load_read_query_embedder("ask");
+            let reader = LiveBrainReader::from_store_with_embedder(Arc::clone(&store), embedder);
+            let hits = match reader.recall(&question, 10) {
+                Ok(mci_agent::mcp::McpRecallOutcome::Matched { hits }) => hits,
+                Ok(mci_agent::mcp::McpRecallOutcome::Degraded { related_context, .. }) => related_context,
+                Ok(mci_agent::mcp::McpRecallOutcome::Contradicted { evidence }) => evidence,
+                Ok(_) => Vec::new(),
+                Err(error) => {
+                    eprintln!("mci-agent ask: recall failed: {error}");
+                    return Some(ExitCode::from(13));
+                }
+            };
+            let memories: Vec<Source> = hits
+                .into_iter()
+                .enumerate()
+                .map(|(index, hit)| Source {
+                    n: index + 1,
+                    event_id: i64::try_from(hit.record.event_id.0).unwrap_or(0),
+                    ts_us: hit.record.ts_us,
+                    app: mci_agent::understanding::apps::name(hit.record.app_bundle_id.as_deref().unwrap_or("")),
+                    title: hit.record.window_title.clone(),
+                    url: hit.record.url.clone(),
+                    text: hit.record.text_snippet.clone(),
+                })
+                .collect();
+            let mind = MindClient::locate();
+            let name = mci_agent::understanding::Understanding::account_first_name();
+            query::answer(&store, &mind, &name, tz, now_us, &question, flags.get("--now").map(String::as_str), memories)
+                .map(|a| serde_json::to_value(a).unwrap_or_default())
+                .map_err(|e| e.to_string())
+        }
+        _ => {
+            let mind = use_model.then(MindClient::locate);
+            let name = mci_agent::understanding::Understanding::account_first_name();
+            let now = NowContext { app: flags.get("--app").cloned(), title: flags.get("--title").cloned() };
+            query::suggest(&store, mind.as_ref(), &name, tz, now_us, &now)
+                .map(|s| serde_json::json!({ "suggestions": s }))
+                .map_err(|e| e.to_string())
+        }
+    };
+    match result {
+        Ok(value) => {
+            if json {
+                println!("{}", serde_json::to_string(&value).unwrap_or_else(|_| "{}".into()));
+            } else {
+                println!("{}", render_understanding_text(command, &value));
+            }
+            Some(ExitCode::SUCCESS)
+        }
+        Err(error) => {
+            eprintln!("mci-agent {command}: {error}");
+            Some(ExitCode::from(13))
+        }
+    }
+}
+
+fn render_understanding_text(command: &str, value: &serde_json::Value) -> String {
+    let mut out = Vec::new();
+    match command {
+        "day" => {
+            if let Some(n) = value["day"]["narrative"].as_object() {
+                out.push(n.get("headline").and_then(|v| v.as_str()).unwrap_or_default().to_owned());
+                out.push(String::new());
+                out.push(n.get("narrative").and_then(|v| v.as_str()).unwrap_or_default().to_owned());
+                for insight in n.get("insights").and_then(|v| v.as_array()).into_iter().flatten() {
+                    out.push(format!("- {}", insight.as_str().unwrap_or_default()));
+                }
+                if let Some(s) = n.get("suggestion").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                    out.push(format!("Tomorrow: {s}"));
+                }
+                out.push(String::new());
+            }
+            out.push(value["facts"].as_str().unwrap_or_default().to_owned());
+        }
+        "model" => {
+            for p in value["propositions"].as_array().into_iter().flatten() {
+                out.push(format!(
+                    "[{:.0}%] ({}) {}",
+                    p["confidence"].as_f64().unwrap_or(0.0) * 100.0,
+                    p["kind"].as_str().unwrap_or(""),
+                    p["text"].as_str().unwrap_or("")
+                ));
+            }
+        }
+        "searches" => {
+            for s in value["searches"].as_array().into_iter().flatten() {
+                out.push(format!("{} {:<12} {}", s["time"].as_str().unwrap_or(""), s["engine"].as_str().unwrap_or(""), s["query"].as_str().unwrap_or("")));
+            }
+        }
+        "sessions" => {
+            for s in value["sessions"].as_array().into_iter().flatten() {
+                out.push(format!("{}  {}", s["time"].as_str().unwrap_or(""), s["title"].as_str().unwrap_or("")));
+                out.push(format!("    {}", s["surface"].as_str().unwrap_or("")));
+                out.push(format!("    Beneath: {}", s["beneath"].as_str().unwrap_or("")));
+            }
+        }
+        "ask" => {
+            match value["answer"].as_str() {
+                Some(answer) => out.push(answer.to_owned()),
+                None => out.push(format!("(no answer: {})", value["unavailable"].as_str().unwrap_or("unavailable"))),
+            }
+            for s in value["sources"].as_array().into_iter().flatten() {
+                out.push(format!("  [{}] {} — {}", s["n"], s["app"].as_str().unwrap_or(""), s["title"].as_str().unwrap_or("")));
+            }
+        }
+        _ => {
+            for s in value["suggestions"].as_array().into_iter().flatten() {
+                out.push(format!("{}  ({})", s["title"].as_str().unwrap_or(""), s["why"].as_str().unwrap_or("")));
+            }
+        }
+    }
+    out.join("\n")
+}
+
+/// Run the understanding layer in the daemon: every two minutes, note
+/// finished sessions, fold them into the user model and keep today's account
+/// current. `MCI_UNDERSTANDING=0` turns it off.
+fn spawn_understanding_worker(
+    store: Arc<mci_brain::SqlCipherBrainStore>,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    use mci_agent::understanding::{mind::MindClient, Understanding};
+    if std::env::var("MCI_UNDERSTANDING").as_deref() == Ok("0") {
+        eprintln!("mci-agent: understanding worker disabled (MCI_UNDERSTANDING=0)");
+        return;
+    }
+    let mind = Arc::new(MindClient::locate());
+    eprintln!(
+        "mci-agent: understanding worker started (on-device model: {})",
+        if mind.path().is_some() { "found" } else { "not installed" }
+    );
+    tokio::spawn(async move {
+        let tz = brief_worker::current_tz_offset_secs();
+        let name = Understanding::account_first_name();
+        let understanding = Arc::new(Understanding::new(store, mind, tz, name));
+        let mut delay = std::time::Duration::from_secs(30);
+        loop {
+            tokio::select! {
+                () = tokio::time::sleep(delay) => {}
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() {
+                        break;
+                    }
+                    continue;
+                }
+            }
+            if *shutdown.borrow() {
+                break;
+            }
+            let worker = Arc::clone(&understanding);
+            let now_us = u64::try_from(
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_micros(),
+            )
+            .unwrap_or(u64::MAX);
+            match tokio::task::spawn_blocking(move || worker.run_cycle(now_us, 4)).await {
+                Ok(Ok(stats)) => {
+                    if stats.sessions > 0 || stats.days > 0 || stats.searches > 0 {
+                        eprintln!(
+                            "mci-agent: understanding: sessions={} by_model={} propositions +{} ~{} days={} searches={} model={}",
+                            stats.sessions,
+                            stats.sessions_by_model,
+                            stats.propositions_added,
+                            stats.propositions_revised,
+                            stats.days,
+                            stats.searches,
+                            stats.model_unavailable.as_deref().unwrap_or("available"),
+                        );
+                    }
+                }
+                Ok(Err(error)) => eprintln!("mci-agent: understanding cycle failed: {error}"),
+                Err(_) => eprintln!("mci-agent: understanding cycle stopped unexpectedly"),
+            }
+            delay = std::time::Duration::from_secs(120);
+        }
+    });
 }
 
 /// Import Claude Code session transcripts.

@@ -120,6 +120,19 @@ public enum MessageType: UInt16, Sendable {
     case pageContentEvent = 0x0050
     /// Additive v9 message; paired helper/agent release required.
     case activityInterval = 0x0060
+    /// Input counts (keys, clicks, scrolls, pointer moves) for an admitted
+    /// activity interval. Counts only; never which keys.
+    case interactionCounts = 0x0061
+}
+
+public func encodeInteractionCounts(seq: UInt64, counts: MeasuredInteractionCounts) -> Data {
+    var payload = Data()
+    payload.appendUInt64LE(counts.startUs)
+    payload.appendUInt64LE(counts.endUs)
+    for value in [counts.totals.keys, counts.totals.clicks, counts.totals.scrolls, counts.totals.moves] {
+        withUnsafeBytes(of: value.littleEndian) { payload.append(contentsOf: $0) }
+    }
+    return assembleFrame(msgType: .interactionCounts, seq: seq, payload: payload)
 }
 
 public func encodeActivityInterval(seq: UInt64, interval: MeasuredActivityInterval) -> Data {

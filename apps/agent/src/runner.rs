@@ -30,6 +30,10 @@ use crate::wall_clock::WallClock;
 pub struct RunStats {
     /// New measured intervals committed, separate from content events/screenshots.
     pub activity_intervals_stored: u64,
+    /// Interaction-count samples stored.
+    pub interaction_counts_stored: u64,
+    /// Interaction-count samples that could not be stored.
+    pub interaction_counts_dropped: u64,
     /// Valid samples rejected for overlap, excluding replays and privacy drops.
     pub activity_intervals_rejected: u64,
     /// Frames decoded off the input transport.
@@ -117,6 +121,9 @@ where
         stats.frames_seen += 1;
         if matches!(frame.message, Message::ActivityInterval { .. }) {
             return Err(IngestError::ActivityUnavailable.into());
+        }
+        if matches!(frame.message, Message::InteractionCounts { .. }) {
+            continue;
         }
         if matches!(frame.message, Message::HelperHealth { .. }) {
             let routed = Routed::Health(frame);
@@ -208,6 +215,14 @@ where
     while let Some(frame) = reader.read_frame(rx).await? {
         stats.frames_seen += 1;
         match &frame.message {
+            Message::InteractionCounts { .. } => {
+                // Best effort: counts enrich understanding; losing one never
+                // stops capture.
+                match brain.map(|brain| brain.ingest_interaction_counts(&frame.message)) {
+                    Some(Ok(inserted)) => stats.interaction_counts_stored += u64::from(inserted),
+                    Some(Err(_)) | None => stats.interaction_counts_dropped += 1,
+                }
+            }
             Message::ActivityInterval { .. } => {
                 let result = brain
                     .ok_or(IngestError::ActivityUnavailable)

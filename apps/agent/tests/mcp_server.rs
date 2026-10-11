@@ -265,7 +265,7 @@ fn server() -> (Server, StubBrainReader) {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn tools_list_returns_exactly_six_read_only_tools() {
+fn tools_list_returns_exactly_ten_read_only_tools() {
     let (s, _) = server();
     let resp = s.dispatch(req("tools/list", None)).expect("response");
     let result = resp.result.expect("result");
@@ -273,7 +273,7 @@ fn tools_list_returns_exactly_six_read_only_tools() {
         .get("tools")
         .and_then(|v| v.as_array())
         .expect("tools array");
-    assert_eq!(tools.len(), 6, "exactly six tools advertised");
+    assert_eq!(tools.len(), 10, "exactly ten read-only tools advertised");
     let names: Vec<&str> = tools
         .iter()
         .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
@@ -284,6 +284,9 @@ fn tools_list_returns_exactly_six_read_only_tools() {
     assert!(names.contains(&"mci_episodes"));
     assert!(names.contains(&"mci_events_by_app"));
     assert!(names.contains(&"mci_context"));
+    for name in ["mci_day", "mci_searches", "mci_user_model", "mci_sessions"] {
+        assert!(names.contains(&name), "{name}");
+    }
 }
 
 #[test]

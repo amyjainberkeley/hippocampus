@@ -122,6 +122,7 @@ pub mod today;
 /// Header format, skip rules, mutating-call detection and per-file resume
 /// shared by the two transcript importers.
 pub mod transcript;
+pub mod understanding;
 #[cfg(unix)]
 pub mod user_allowlist;
 pub mod wall_clock;

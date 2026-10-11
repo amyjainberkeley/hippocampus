@@ -35,6 +35,14 @@ pub enum ToolName {
     EventsByApp,
     /// `mci_context` — bounded, cited context for local agent handoff.
     Context,
+    /// `mci_day` — a day's measured breakdown and written account.
+    Day,
+    /// `mci_searches` — searches read from captured pages.
+    Searches,
+    /// `mci_user_model` — what Hippocampus understands about the user.
+    UserModel,
+    /// `mci_sessions` — a day's work sessions, surface and beneath.
+    Sessions,
 }
 
 impl ToolName {
@@ -48,6 +56,10 @@ impl ToolName {
             Self::Episodes => "mci_episodes",
             Self::EventsByApp => "mci_events_by_app",
             Self::Context => "mci_context",
+            Self::Day => "mci_day",
+            Self::Searches => "mci_searches",
+            Self::UserModel => "mci_user_model",
+            Self::Sessions => "mci_sessions",
         }
     }
 
@@ -62,6 +74,10 @@ impl ToolName {
             "mci_episodes" => Some(Self::Episodes),
             "mci_events_by_app" => Some(Self::EventsByApp),
             "mci_context" => Some(Self::Context),
+            "mci_day" => Some(Self::Day),
+            "mci_searches" => Some(Self::Searches),
+            "mci_user_model" => Some(Self::UserModel),
+            "mci_sessions" => Some(Self::Sessions),
             _ => None,
         }
     }
@@ -219,6 +235,57 @@ pub fn tool_definitions() -> serde_json::Value {
                     }
                 }
             }
+        },
+        {
+            "name": ToolName::Day.as_str(),
+            "description": "How a day on the computer went: measured active time by hour, app and kind \
+                             of work, focus blocks, app switching, searches, the day's work sessions, \
+                             and a written account. Use for 'what did I do today', 'where did my time \
+                             go', or a daily summary.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "date": { "type": "string", "description": "Local date YYYY-MM-DD. Defaults to today." }
+                }
+            }
+        },
+        {
+            "name": ToolName::Searches.as_str(),
+            "description": "What the user searched for (Google, YouTube, GitHub, Stack Overflow, \
+                             Wikipedia, Amazon and more), newest first, read from captured pages.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "hours": { "type": "integer", "description": "Hours back. Defaults to 24.", "minimum": 1, "maximum": 744 },
+                    "limit": { "type": "integer", "description": "Maximum searches. Defaults to 50.", "minimum": 1, "maximum": 500 }
+                }
+            }
+        },
+        {
+            "name": ToolName::UserModel.as_str(),
+            "description": "What Hippocampus understands about the user: projects, goals, habits, \
+                             preferences, skills, collaborators and where they get stuck, each with \
+                             a confidence and the evidence it rests on. Read this first to avoid \
+                             asking the user to re-explain themselves.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Optional topic to focus on." },
+                    "limit": { "type": "integer", "description": "Maximum propositions. Defaults to 20.", "minimum": 1, "maximum": 200 }
+                }
+            }
+        },
+        {
+            "name": ToolName::Sessions.as_str(),
+            "description": "A day's work sessions: for each, what was on screen (the surface) and \
+                             what lay beneath it (intent, attention, pauses, hesitation), with the \
+                             windows and searches involved.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "date": { "type": "string", "description": "Local date YYYY-MM-DD. Defaults to today." }
+                }
+            }
         }
     ])
 }
@@ -236,6 +303,10 @@ mod tests {
             ToolName::Episodes,
             ToolName::EventsByApp,
             ToolName::Context,
+            ToolName::Day,
+            ToolName::Searches,
+            ToolName::UserModel,
+            ToolName::Sessions,
         ] {
             assert_eq!(ToolName::from_wire(t.as_str()), Some(t));
         }
@@ -249,10 +320,10 @@ mod tests {
     }
 
     #[test]
-    fn tool_definitions_has_six_entries() {
+    fn tool_definitions_has_ten_entries() {
         let defs = tool_definitions();
         let arr = defs.as_array().expect("tools is an array");
-        assert_eq!(arr.len(), 6);
+        assert_eq!(arr.len(), 10);
         let names: Vec<&str> = arr
             .iter()
             .map(|t| t.get("name").and_then(|n| n.as_str()).unwrap_or(""))

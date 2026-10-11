@@ -87,6 +87,24 @@ pub enum Message {
         capture_generation: String,
     },
 
+    /// Helper -> core. Input counts for an admitted activity interval: key
+    /// presses, clicks, scroll events and pointer moves. Counts only; never
+    /// which keys, and never for an interval a privacy gate did not admit.
+    InteractionCounts {
+        /// Inclusive positive UNIX timestamp in microseconds.
+        start_us: u64,
+        /// Exclusive UNIX timestamp, at most 60 seconds after `start_us`.
+        end_us: u64,
+        /// Key presses.
+        keys: u32,
+        /// Mouse and trackpad clicks.
+        clicks: u32,
+        /// Scroll events.
+        scrolls: u32,
+        /// Pointer moves and drags.
+        moves: u32,
+    },
+
     /// Core → helper. Start the underlying `SCStream` with these parameters.
     CaptureStart {
         /// Target capture interval in milliseconds. The helper translates
@@ -388,6 +406,7 @@ impl Message {
     pub const fn message_type(&self) -> MessageType {
         match self {
             Self::ActivityInterval { .. } => MessageType::ActivityInterval,
+            Self::InteractionCounts { .. } => MessageType::InteractionCounts,
             Self::CaptureStart { .. } => MessageType::CaptureStart,
             Self::CaptureStop => MessageType::CaptureStop,
             Self::StateTransitionEvent { .. } => MessageType::StateTransitionEvent,

@@ -130,4 +130,13 @@ pub trait BrainReader: Send + Sync {
         focus: Option<&str>,
         budget: ContextBudget,
     ) -> Result<ContextPacket, BrainReaderError>;
+
+    /// Read the understanding layer: a day, searches, the user model or
+    /// sessions. Readers without one report it unavailable.
+    fn understanding(
+        &self,
+        _query: &crate::understanding::query::UnderstandingQuery,
+    ) -> Result<serde_json::Value, BrainReaderError> {
+        Err(BrainReaderError::Backend("understanding is not available from this reader".into()))
+    }
 }

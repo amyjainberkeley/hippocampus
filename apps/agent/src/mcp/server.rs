@@ -201,7 +201,11 @@ impl Server {
                     this Mac. You can search it with mci_recall, browse recent activity with \
                     mci_events_since, check capture status with mci_stats, see work sessions \
                     with mci_episodes, filter by app with mci_events_by_app, or request a \
-                    bounded cited handoff with mci_context. Hippocampus keeps no cloud copy; \
+                    bounded cited handoff with mci_context. It also understands the user: \
+                    mci_user_model says what they work on, how they work and where they get \
+                    stuck (read it before asking them to re-explain), mci_day and \
+                    mci_sessions describe their day, and mci_searches lists what they \
+                    looked up. Hippocampus keeps no cloud copy; \
                     content returned through MCP is handled by the AI client you chose.",
             }),
         )
@@ -273,6 +277,40 @@ impl Server {
                 self.counters.context_count.fetch_add(1, Ordering::SeqCst);
                 self.handle_context(id, args)
             }
+            ToolName::Day | ToolName::Searches | ToolName::UserModel | ToolName::Sessions => {
+                self.handle_understanding(id, tool, args)
+            }
+        }
+    }
+
+    fn handle_understanding(&self, id: JsonRpcId, tool: ToolName, args: serde_json::Value) -> JsonRpcResponse {
+        use crate::understanding::query::UnderstandingQuery;
+        let view = match tool {
+            ToolName::Day => "day",
+            ToolName::Searches => "searches",
+            ToolName::UserModel => "user_model",
+            _ => "sessions",
+        };
+        let mut object = match args {
+            serde_json::Value::Object(map) => map,
+            serde_json::Value::Null => serde_json::Map::new(),
+            _ => return JsonRpcResponse::err(id, INVALID_PARAMS, format!("{tool} args must be an object")),
+        };
+        object.insert("view".into(), serde_json::Value::String(view.into()));
+        let query: UnderstandingQuery = match serde_json::from_value(serde_json::Value::Object(object)) {
+            Ok(query) => query,
+            Err(e) => return JsonRpcResponse::err(id, INVALID_PARAMS, format!("{tool} args: {e}")),
+        };
+        match self.reader.understanding(&query) {
+            Ok(payload) => JsonRpcResponse::ok(
+                id,
+                serde_json::json!({
+                    "content": [{ "type": "text", "text": serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_owned()) }],
+                    "result": payload,
+                    "isError": false,
+                }),
+            ),
+            Err(e) => brain_err_to_response(id, &e),
         }
     }
 

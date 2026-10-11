@@ -147,11 +147,11 @@ fn degraded_context<'a>(
 }
 
 // ---------------------------------------------------------------------------
-// tools/list — exactly 6 read-only tools
+// tools/list — exactly 10 read-only tools
 // ---------------------------------------------------------------------------
 
 #[test]
-fn tools_list_returns_exactly_six_tools_real_brain() {
+fn tools_list_returns_exactly_ten_tools_real_brain() {
     let (_dir, store) = open_temp_store();
     let srv = server_fts_only(store);
 
@@ -160,7 +160,7 @@ fn tools_list_returns_exactly_six_tools_real_brain() {
         .get("tools")
         .and_then(|v| v.as_array())
         .expect("tools array");
-    assert_eq!(tools.len(), 6, "MCP server must advertise exactly 6 tools");
+    assert_eq!(tools.len(), 10, "exactly ten read-only tools advertised");
 
     let names: Vec<&str> = tools
         .iter()
@@ -172,6 +172,9 @@ fn tools_list_returns_exactly_six_tools_real_brain() {
     assert!(names.contains(&"mci_episodes"));
     assert!(names.contains(&"mci_events_by_app"));
     assert!(names.contains(&"mci_context"));
+    for name in ["mci_day", "mci_searches", "mci_user_model", "mci_sessions"] {
+        assert!(names.contains(&name), "{name}");
+    }
 }
 
 #[test]
@@ -1603,4 +1606,28 @@ fn w_entity_arm_fires_through_fts_sanitizing_store_in_production_recall() {
         "cross-app dot-connect: e_alice's episode must link to e_linked via the \
          shared_identity edge; got {linked:?}"
     );
+}
+
+#[test]
+fn understanding_tools_read_a_real_brain() {
+    let (_dir, store) = open_temp_store();
+    let srv = server_fts_only(store);
+    for (name, args) in [
+        ("mci_day", serde_json::json!({})),
+        ("mci_searches", serde_json::json!({ "hours": 48 })),
+        ("mci_user_model", serde_json::json!({ "query": "pricing" })),
+        ("mci_sessions", serde_json::json!({ "date": "2026-10-10" })),
+    ] {
+        let result = extract_result(srv.dispatch(req(
+            "tools/call",
+            Some(serde_json::json!({ "name": name, "arguments": args })),
+        )));
+        assert_eq!(result["isError"], false, "{name}: {result}");
+        assert!(result["result"].is_object(), "{name}: {result}");
+    }
+    let bad = srv.dispatch(req(
+        "tools/call",
+        Some(serde_json::json!({ "name": "mci_day", "arguments": { "date": "yesterday" } })),
+    ));
+    assert!(bad.expect("response").error.is_some(), "a malformed date is an error, not a guess");
 }

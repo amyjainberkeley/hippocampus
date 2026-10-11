@@ -6,7 +6,7 @@
 --
 -- Everything below is derived from captured events and must disappear with
 -- them: rows that name an event cascade from it, and the store deletes any
--- proposition, episode note or day report built on a deleted event before the
+-- proposition, session note or day report built on a deleted event before the
 -- event itself goes (see `understanding::delete_for_events`).
 
 -- Input counts per sampling interval: how many key presses, clicks, scroll
@@ -72,18 +72,21 @@ CREATE TRIGGER IF NOT EXISTS propositions_au AFTER UPDATE OF text, reasoning ON 
     INSERT INTO propositions_fts(rowid, text, reasoning) VALUES (new.id, new.text, new.reasoning);
 END;
 
--- What an episode was: a short title, a summary of the surface, and what
--- the interaction signals say beneath it (JSON). Rewritten when the episode
--- grows past `through_event_id`.
-CREATE TABLE IF NOT EXISTS episode_notes (
-    episode_id       INTEGER PRIMARY KEY NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
-    title            TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 200),
-    summary          TEXT NOT NULL CHECK (length(summary) <= 4000),
-    signals          TEXT NOT NULL DEFAULT '{}',
-    through_event_id INTEGER NOT NULL,
-    generated_us     INTEGER NOT NULL,
-    model            TEXT NOT NULL CHECK (length(model) BETWEEN 1 AND 128)
+-- A work session: a stretch of activity across apps, bounded by idle gaps.
+-- What was on the surface, what lay beneath it, and the measured signals
+-- (JSON). Rewritten if more events arrive inside it.
+CREATE TABLE IF NOT EXISTS session_notes (
+    start_us     INTEGER PRIMARY KEY NOT NULL CHECK (start_us > 0),
+    end_us       INTEGER NOT NULL CHECK (end_us >= start_us),
+    title        TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 200),
+    surface      TEXT NOT NULL CHECK (length(surface) <= 4000),
+    beneath      TEXT NOT NULL CHECK (length(beneath) <= 4000),
+    signals      TEXT NOT NULL DEFAULT '{}',
+    event_count  INTEGER NOT NULL CHECK (event_count >= 0),
+    generated_us INTEGER NOT NULL,
+    model        TEXT NOT NULL CHECK (length(model) BETWEEN 1 AND 128)
 );
+CREATE INDEX IF NOT EXISTS session_notes_end ON session_notes(end_us);
 
 -- One written account of a local day: the measured breakdown plus what the
 -- user model reads beneath it (JSON).

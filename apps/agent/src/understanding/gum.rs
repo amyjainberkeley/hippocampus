@@ -1,0 +1,321 @@
+//! A general user model, after GUM (Shaikh et al., 2025, arXiv 2505.10831).
+//!
+//! **Propose** writes candidate propositions from an observation. **Retrieve**
+//! finds stored propositions that might be the same claim: BM25 over text and
+//! reasoning, adjusted for staleness (`exp(-decay · k · age_days)`, k = 2) and
+//! diversified with maximal marginal relevance (λ = 0.5). **Revise** asks the
+//! model whether each candidate is identical, similar or unrelated; identical
+//! and similar ones are merged into one revised proposition carrying all the
+//! evidence, and the originals are retired. A proposition the user rejected
+//! is never proposed again.
+
+use std::collections::BTreeSet;
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+
+use mci_brain::understanding::{NewProposition, Proposition, PropositionKind, PropositionStatus};
+use mci_brain::{SqlCipherBrainStore, StoreError};
+
+use super::mind::{MindCallError, MindClient};
+
+const RECENCY_K: f64 = 2.0;
+const MMR_LAMBDA: f64 = 0.5;
+const CANDIDATES: usize = 5;
+const CALL_TIMEOUT: Duration = Duration::from_secs(60);
+/// Model label stored with each proposition.
+pub const MODEL: &str = "apple-foundation-models";
+
+/// A proposition as the mind writes it (scores 1–10).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Draft {
+    /// The statement.
+    pub text: String,
+    /// Why.
+    pub reasoning: String,
+    /// Kind name.
+    pub kind: String,
+    /// 1–10.
+    pub confidence: i64,
+    /// 1–10.
+    pub decay: i64,
+}
+
+impl Draft {
+    fn to_new(&self) -> NewProposition {
+        NewProposition {
+            text: self.text.trim().to_owned(),
+            reasoning: self.reasoning.trim().to_owned(),
+            kind: PropositionKind::parse(&self.kind).unwrap_or(PropositionKind::State),
+            confidence: (self.confidence.clamp(1, 10) as f64) / 10.0,
+            decay: (self.decay.clamp(1, 10) as f64) / 10.0,
+            model: MODEL.into(),
+        }
+    }
+
+    fn from_stored(p: &Proposition) -> Self {
+        Self {
+            text: p.text.clone(),
+            reasoning: p.reasoning.clone(),
+            kind: p.kind.as_str().into(),
+            confidence: (p.confidence * 10.0).round() as i64,
+            decay: (p.decay * 10.0).round() as i64,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct ProposeOut {
+    propositions: Vec<Draft>,
+}
+
+#[derive(Deserialize)]
+struct Relation {
+    id: i64,
+    relation: String,
+}
+
+#[derive(Deserialize)]
+struct RelateOut {
+    relations: Vec<Relation>,
+}
+
+/// What one integration did.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
+pub struct Integration {
+    /// New propositions stored.
+    pub added: u32,
+    /// Existing ones revised.
+    pub revised: u32,
+    /// Drafts dropped (rejected before, trivial, or a model failure).
+    pub skipped: u32,
+}
+
+/// Errors that stop an integration.
+#[derive(Debug, thiserror::Error)]
+pub enum GumError {
+    /// The store failed.
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    /// The model failed.
+    #[error(transparent)]
+    Mind(#[from] MindCallError),
+}
+
+fn words(text: &str) -> BTreeSet<String> {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() >= 3)
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Jaccard similarity of word sets, 0..=1.
+#[must_use]
+pub fn similarity(a: &str, b: &str) -> f64 {
+    let (a, b) = (words(a), words(b));
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    a.intersection(&b).count() as f64 / a.union(&b).count() as f64
+}
+
+/// Recency-adjusted relevance: BM25 (`SQLite` ranks lower-is-better, so the
+/// relevance is its negation) scaled by `exp(-decay · k · age_days)`.
+#[must_use]
+pub fn adjusted_relevance(bm25: f64, decay: f64, age_us: u64) -> f64 {
+    let age_days = age_us as f64 / 86_400_000_000.0;
+    (-bm25).max(0.0) * (-decay * RECENCY_K * age_days).exp()
+}
+
+/// Pick up to `n` candidates by maximal marginal relevance.
+#[must_use]
+pub fn mmr(candidates: &[(Proposition, f64)], n: usize) -> Vec<Proposition> {
+    let mut chosen: Vec<Proposition> = Vec::new();
+    let mut pool: Vec<&(Proposition, f64)> = candidates.iter().collect();
+    let top = pool.iter().map(|(_, r)| *r).fold(0.0_f64, f64::max).max(f64::EPSILON);
+    while chosen.len() < n && !pool.is_empty() {
+        let (index, _) = pool
+            .iter()
+            .enumerate()
+            .map(|(i, (p, relevance))| {
+                let redundancy = chosen.iter().map(|c| similarity(&c.text, &p.text)).fold(0.0, f64::max);
+                (i, MMR_LAMBDA * (relevance / top) - (1.0 - MMR_LAMBDA) * redundancy)
+            })
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .expect("pool is not empty");
+        chosen.push(pool.remove(index).0.clone());
+    }
+    chosen
+}
+
+/// Retrieve stored, active propositions that might restate `text`.
+///
+/// # Errors
+/// Store failures.
+pub fn retrieve(store: &SqlCipherBrainStore, text: &str, now_us: u64) -> Result<Vec<Proposition>, StoreError> {
+    let scored: Vec<(Proposition, f64)> = store
+        .search_propositions(text, 24)?
+        .into_iter()
+        .filter(|(p, _)| p.status == PropositionStatus::Active)
+        .map(|(p, bm25)| {
+            let relevance = adjusted_relevance(bm25, p.decay, now_us.saturating_sub(p.updated_us));
+            (p, relevance)
+        })
+        .collect();
+    Ok(mmr(&scored, CANDIDATES))
+}
+
+/// Ask the mind for propositions about an observation.
+///
+/// # Errors
+/// Model failures.
+pub fn propose(
+    mind: &MindClient,
+    user_name: &str,
+    observation: &str,
+    known: &[String],
+) -> Result<Vec<Draft>, MindCallError> {
+    let out: ProposeOut = mind.call(
+        "propose",
+        &serde_json::json!({ "user_name": user_name, "observation": observation, "known": known }),
+        CALL_TIMEOUT,
+    )?;
+    Ok(out.propositions)
+}
+
+/// Fold drafts into the stored model.
+///
+/// # Errors
+/// Store failures. Model failures on one draft skip that draft.
+pub fn integrate(
+    store: &SqlCipherBrainStore,
+    mind: &MindClient,
+    user_name: &str,
+    drafts: &[Draft],
+    evidence: &[i64],
+    now_us: u64,
+) -> Result<Integration, GumError> {
+    let rejected = store.propositions_with_status(PropositionStatus::Rejected, 500)?;
+    let mut outcome = Integration::default();
+    for draft in drafts {
+        let text = draft.text.trim();
+        if text.split_whitespace().count() < 4
+            || rejected.iter().any(|r| similarity(&r.text, text) >= 0.6)
+        {
+            outcome.skipped += 1;
+            continue;
+        }
+        let candidates = retrieve(store, text, now_us)?;
+        let related: Vec<Proposition> = if candidates.is_empty() {
+            Vec::new()
+        } else {
+            let input = serde_json::json!({
+                "proposition": text,
+                "candidates": candidates.iter().map(|c| serde_json::json!({"id": c.id, "text": c.text})).collect::<Vec<_>>(),
+            });
+            match mind.call::<_, RelateOut>("relate", &input, CALL_TIMEOUT) {
+                Ok(out) => {
+                    let ids: Vec<i64> = out
+                        .relations
+                        .into_iter()
+                        .filter(|r| r.relation == "identical" || r.relation == "similar")
+                        .map(|r| r.id)
+                        .collect();
+                    candidates.into_iter().filter(|c| ids.contains(&c.id)).collect()
+                }
+                Err(MindCallError::Unavailable(reason)) => return Err(MindCallError::Unavailable(reason).into()),
+                Err(_) => {
+                    // Without a judgement, fall back to near-identical wording.
+                    candidates.into_iter().filter(|c| similarity(&c.text, text) >= 0.7).collect()
+                }
+            }
+        };
+        if related.is_empty() {
+            store.insert_proposition(&draft.to_new(), evidence, now_us)?;
+            outcome.added += 1;
+            continue;
+        }
+        let revised = match mind.call::<_, Draft>(
+            "revise",
+            &serde_json::json!({
+                "user_name": user_name,
+                "new": draft,
+                "old": related.iter().map(Draft::from_stored).collect::<Vec<_>>(),
+            }),
+            CALL_TIMEOUT,
+        ) {
+            Ok(revised) => revised,
+            Err(MindCallError::Unavailable(reason)) => return Err(MindCallError::Unavailable(reason).into()),
+            Err(_) => {
+                outcome.skipped += 1;
+                continue;
+            }
+        };
+        let mut all_evidence: Vec<i64> = evidence.to_vec();
+        for old in &related[1..] {
+            all_evidence.extend(old.evidence.iter().copied());
+            store.set_proposition_status(old.id, PropositionStatus::Retired, now_us)?;
+        }
+        store.revise_proposition(related[0].id, &revised.to_new(), &all_evidence, now_us)?;
+        outcome.revised += 1;
+    }
+    Ok(outcome)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prop(id: i64, text: &str) -> Proposition {
+        Proposition {
+            id,
+            text: text.into(),
+            reasoning: String::new(),
+            kind: PropositionKind::Project,
+            confidence: 0.5,
+            decay: 0.5,
+            status: PropositionStatus::Active,
+            created_us: 0,
+            updated_us: 0,
+            revised_from: None,
+            model: "t".into(),
+            evidence: vec![],
+        }
+    }
+
+    #[test]
+    fn staleness_discounts_relevance_by_decay() {
+        let day = 86_400_000_000;
+        let fresh = adjusted_relevance(-3.0, 0.9, 0);
+        let lasting = adjusted_relevance(-3.0, 0.1, 2 * day);
+        let fleeting = adjusted_relevance(-3.0, 0.9, 2 * day);
+        assert!((fresh - 3.0).abs() < 1e-9);
+        assert!(lasting > fleeting, "a fast-decaying proposition loses relevance sooner");
+    }
+
+    #[test]
+    fn mmr_prefers_diverse_candidates() {
+        let candidates = vec![
+            (prop(1, "Sam is pricing the team plan"), 3.0),
+            (prop(2, "Sam is pricing the team plan for beta"), 2.9),
+            (prop(3, "Amy works with Ravi on launches"), 2.0),
+        ];
+        let picked: Vec<i64> = mmr(&candidates, 2).into_iter().map(|p| p.id).collect();
+        assert_eq!(picked, vec![1, 3], "the near-duplicate gives way to a different claim");
+    }
+
+    #[test]
+    fn similarity_is_word_overlap() {
+        assert!(similarity("Sam is pricing the team plan", "amy pricing team plan") > 0.6);
+        assert!(similarity("Amy writes Rust", "Amy cooks pasta") < 0.3);
+    }
+
+    #[test]
+    fn drafts_map_scores_to_unit_range() {
+        let d = Draft { text: "Amy ships".into(), reasoning: "r".into(), kind: "goal".into(), confidence: 14, decay: 0 };
+        let n = d.to_new();
+        assert!((n.confidence - 1.0).abs() < 1e-9 && (n.decay - 0.1).abs() < 1e-9);
+        assert_eq!(n.kind, PropositionKind::Goal);
+    }
+}

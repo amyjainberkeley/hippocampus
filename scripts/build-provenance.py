@@ -26,6 +26,8 @@ BINARY_NAMES = (
     "onboarding",
     "hippocampus-native-host",
 )
+# Shipped when built (it needs the macOS 26 SDK); hashed whenever present.
+OPTIONAL_BINARY_NAMES = ("hippocampus-mind",)
 MACHO_MAGICS = {
     b"\xca\xfe\xba\xbe",
     b"\xbe\xba\xfe\xca",
@@ -88,14 +90,15 @@ def binary_hashes(app: Path) -> dict[str, str]:
         raise ProvenanceError(f"assembled app has no MacOS directory: {binary_root}")
     actual_names = {path.name for path in binary_root.iterdir()}
     expected_names = set(BINARY_NAMES)
-    if actual_names != expected_names:
+    optional_names = set(OPTIONAL_BINARY_NAMES)
+    if not expected_names <= actual_names or not actual_names <= expected_names | optional_names:
         missing = sorted(expected_names - actual_names)
-        unexpected = sorted(actual_names - expected_names)
+        unexpected = sorted(actual_names - expected_names - optional_names)
         raise ProvenanceError(
             f"assembled MacOS inventory mismatch; missing={missing}, unexpected={unexpected}"
         )
     hashes: dict[str, str] = {}
-    for name in BINARY_NAMES:
+    for name in [*BINARY_NAMES, *sorted(actual_names & optional_names)]:
         path = binary_root / name
         if not path.is_file() or path.is_symlink():
             raise ProvenanceError(f"required assembled binary is missing: {path}")

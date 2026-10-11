@@ -543,6 +543,26 @@ impl BrainReader for LiveBrainReader {
             .map_err(|e| BrainReaderError::Backend(format!("events_by_app: {e}")))
     }
 
+    fn understanding(
+        &self,
+        query: &crate::understanding::query::UnderstandingQuery,
+    ) -> Result<serde_json::Value, BrainReaderError> {
+        let now_us = u64::try_from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_micros(),
+        )
+        .unwrap_or(u64::MAX);
+        crate::understanding::query::run(
+            &self.store,
+            crate::brief_worker::current_tz_offset_secs(),
+            now_us,
+            query,
+        )
+        .map_err(|error| BrainReaderError::Backend(format!("understanding: {error}")))
+    }
+
     fn context(
         &self,
         focus: Option<&str>,

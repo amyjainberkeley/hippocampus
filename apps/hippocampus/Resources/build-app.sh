@@ -211,6 +211,9 @@ AGENT_BIN="$REPO_ROOT/target/$PROFILE/mci-agent"
 RECALL_UI_BIN="$REPO_ROOT/apps/recall-ui/.build/$PROFILE/recall-ui"
 ONBOARDING_BIN="$REPO_ROOT/apps/onboarding/.build/$PROFILE/onboarding"
 NATIVE_HOST_BIN="$REPO_ROOT/target/$PROFILE/hippocampus-native-host"
+# Optional: the on-device model process (Apple Foundation Models, macOS 26).
+# Without it the app still works and understanding uses measurements only.
+MIND_BIN="$REPO_ROOT/apps/mind/.build/$PROFILE/hippocampus-mind"
 KNOWN_SAFE="$REPO_ROOT/adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Resources/known-safe-apps.toml"
 APP_ICON="$REPO_ROOT/assets/branding/AppIcon.icns"
 INFO_PLIST="$SCRIPT_DIR/Info.plist"
@@ -334,6 +337,8 @@ if [[ "$CURRENT_SOURCE_QUALIFICATION" -eq 1 ]]; then
         --package-path "$REPO_ROOT/apps/recall-ui"
     "$REPO_ROOT/scripts/swift-package.sh" build \
         --package-path "$REPO_ROOT/apps/onboarding"
+    "$REPO_ROOT/scripts/swift-package.sh" build \
+        --package-path "$REPO_ROOT/apps/mind" || echo "WARN: hippocampus-mind not built (needs the macOS 26 SDK)"
     cargo build --manifest-path "$REPO_ROOT/Cargo.toml" \
         -p mci-agent --bins -p hippocampus-native-host
 fi
@@ -396,6 +401,11 @@ cp "$AGENT_BIN" "$MACOS/mci-agent"
 cp "$RECALL_UI_BIN" "$MACOS/recall-ui"
 cp "$ONBOARDING_BIN" "$MACOS/onboarding"
 cp "$NATIVE_HOST_BIN" "$MACOS/hippocampus-native-host"
+if [[ -f "$MIND_BIN" ]]; then
+    cp "$MIND_BIN" "$MACOS/hippocampus-mind"
+else
+    echo "WARN: $MIND_BIN missing; understanding will use measurements only"
+fi
 
 # Embed verified offline OCR before sealing app provenance. Release and debug
 # app bundles must be self-contained; only an unbundled helper uses Vision.
@@ -829,6 +839,12 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
             "$MACOS/hippocampus-native-host"
     fi
 
+    if [[ -f "$MACOS/hippocampus-mind" ]]; then
+        codesign --force --options=runtime --timestamp \
+            --sign "$DEVELOPER_ID" \
+            "$MACOS/hippocampus-mind"
+    fi
+
     # Sign Sparkle.framework inside-out per the Sparkle official
     # sandboxing/code-signing doc:
     #   <https://sparkle-project.org/documentation/sandboxing/>
@@ -909,6 +925,7 @@ else
     [[ -f "$MACOS/recall-ui" ]] && codesign --force --sign - "$MACOS/recall-ui"
     [[ -f "$MACOS/onboarding" ]] && codesign --force --sign - "$MACOS/onboarding"
     [[ -f "$MACOS/hippocampus-native-host" ]] && codesign --force --sign - "$MACOS/hippocampus-native-host"
+    [[ -f "$MACOS/hippocampus-mind" ]] && codesign --force --sign - "$MACOS/hippocampus-mind"
     codesign --force --sign - --entitlements "$ENTITLEMENTS" "$MACOS/Hippocampus"
     write_build_provenance
     codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP"

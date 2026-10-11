@@ -138,6 +138,14 @@ pub trait BrainIngestor: Send + Sync {
         Err(IngestError::ActivityUnavailable)
     }
 
+    /// Persist input counts for an admitted interval. True means a new row.
+    ///
+    /// # Errors
+    /// The store is unavailable or rejected the counts.
+    fn ingest_interaction_counts(&self, _msg: &Message) -> Result<bool, IngestError> {
+        Err(IngestError::ActivityUnavailable)
+    }
+
     /// Dispatch one frame. Returns [`IngestOutcome::Stored`] for an
     /// `OCREvent` that successfully reached the store, or
     /// [`IngestOutcome::NotOcrEvent`] for any other variant (no store
@@ -447,6 +455,32 @@ impl BrainPump {
 }
 
 impl BrainIngestor for BrainPump {
+    fn ingest_interaction_counts(&self, msg: &Message) -> Result<bool, IngestError> {
+        let Message::InteractionCounts {
+            start_us,
+            end_us,
+            keys,
+            clicks,
+            scrolls,
+            moves,
+        } = msg
+        else {
+            return Err(IngestError::InvalidActivity);
+        };
+        let store = self
+            .activity_store
+            .as_ref()
+            .ok_or(IngestError::ActivityUnavailable)?;
+        Ok(store.append_interaction_counts(&mci_brain::understanding::InteractionCounts {
+            start_us: *start_us,
+            end_us: *end_us,
+            keys: *keys,
+            clicks: *clicks,
+            scrolls: *scrolls,
+            moves: *moves,
+        })?)
+    }
+
     fn ingest_activity_interval(&self, msg: &Message) -> Result<bool, IngestError> {
         let Message::ActivityInterval {
             start_us,
