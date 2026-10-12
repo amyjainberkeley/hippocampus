@@ -27,6 +27,10 @@ commits are intentionally omitted from release notes.
 - AI assistants connected over MCP can read your day, your searches, your
   sessions and the user model (`mci_day`, `mci_searches`, `mci_sessions`,
   `mci_user_model`), so you don't have to re-explain yourself.
+- Claude Code starts each session already knowing your last few work
+  sessions and the surest things learned about your projects, goals,
+  habits, preferences and skills, marked as inferred. Who you work with,
+  where you get stuck and how you are right now are not sent unasked.
 
 ### Ask Hippocampus
 
@@ -34,6 +38,12 @@ commits are intentionally omitted from release notes.
   it suggests what you likely want right now; as you type it searches your
   memory; ask a question and it answers from what you've seen, with
   sources, on your Mac. ⌘D shows your day; ⇧⌘C copies context for any AI.
+- One key opens it too: tap right ⌘ by itself. Shortcuts that use the key
+  never trigger it. Choose right ⌥, Shift twice, or off in Preferences.
+- Ask about what is in front of you. "What's on this screen?" is the first
+  suggestion, and an answer cites the window you are looking at as its
+  first source. It reads that window from Hippocampus's own latest capture,
+  so an app it never records still contributes nothing.
 - Answers and summaries need macOS 26 with Apple Intelligence; capture and
   search work without it.
 
@@ -56,10 +66,11 @@ commits are intentionally omitted from release notes.
   Mode. The window you're in is read half as often on battery. A playing
   video, or text that keeps streaming, is read every 15 seconds (30 on
   battery) until it settles, not every few seconds.
-- On battery the text reader rests after every read for eight times as long
-  as the read took (sixteen in Low Power Mode), so it is busy at most a
-  ninth of the time whatever is on screen. A window you switch to is read
-  when the rest ends. Plugged in, nothing waits.
+- The text reader rests after every read in proportion to what the read
+  cost: three times as long plugged in, eight on battery, sixteen in Low
+  Power Mode. Whatever is on screen, it is busy at most a quarter of the
+  time plugged in and a ninth on battery. A window you switch to is read
+  when the rest ends.
 - Closing the window you were in no longer restarts capture. It used to,
   several times an hour, reloading the text reader each time.
 - Reading a window takes a fraction of the work. Text is found at the size

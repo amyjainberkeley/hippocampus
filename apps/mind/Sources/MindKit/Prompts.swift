@@ -143,25 +143,32 @@ public enum Prompts {
 
     public static func answer(_ input: AnswerInput) -> String {
         let user = name(input.userName)
+        // The agent numbers a capture of the window in front as source 1.
+        // Its text takes room the model's small window would otherwise give
+        // to memories, so fewer and shorter memories follow it.
+        let screen = input.now.map { clip($0, 2_600) } ?? ""
+        let showsScreen = screen.hasPrefix("[1] ")
         var prompt = """
         \(user) asks: \(clip(input.question, 500))
 
-        Answer from \(user)'s own memories below. Be direct; one to four \
+        Answer from \(user)'s own memories below\(showsScreen ? " and from what is on their screen now" : ""). Be direct; one to four \
         sentences. Use their words for things. If the memories do not contain \
         the answer, say what you did find instead. List the numbers of the \
-        memories you used.
+        memories you used\(showsScreen ? "; the screen is number 1" : "").
 
         Today is \(input.today).
 
         """
-        if let now = input.now, !now.isEmpty {
-            prompt += "On screen right now:\n\(clip(now, 1_200))\n\n"
+        if !screen.isEmpty {
+            prompt += "On screen right now:\n\(screen)\n\n"
         }
         if !input.propositions.isEmpty {
             prompt += "About \(user):\n\(input.propositions.prefix(6).map { "- \(clip($0, 200))" }.joined(separator: "\n"))\n\n"
         }
         prompt += "Memories:\n"
-        prompt += input.memories.prefix(10).map { "[\($0.n)] \($0.when), \($0.source): \(clip($0.text, 500))" }.joined(separator: "\n")
+        prompt += input.memories.prefix(showsScreen ? 7 : 10)
+            .map { "[\($0.n)] \($0.when), \($0.source): \(clip($0.text, showsScreen ? 400 : 500))" }
+            .joined(separator: "\n")
         return prompt
     }
 

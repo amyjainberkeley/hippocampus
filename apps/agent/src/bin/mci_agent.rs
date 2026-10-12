@@ -2654,7 +2654,7 @@ fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
         "ask" => {
             let question = positional.join(" ");
             if question.trim().is_empty() {
-                eprintln!("mci-agent ask: usage: mci-agent ask \"question\" [--now TEXT] [--json]");
+                eprintln!("mci-agent ask: usage: mci-agent ask \"question\" [--app BUNDLE_ID] [--title TITLE] [--now TEXT] [--json]");
                 return Some(ExitCode::from(2));
             }
             let embedder = load_read_query_embedder("ask");
@@ -2669,7 +2669,17 @@ fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
             let memories: Vec<Source> = query::sources_from_hits(hits);
             let mind = MindClient::locate();
             let name = mci_agent::understanding::Understanding::account_first_name();
-            query::answer(&store, &mind, &name, tz, now_us, &question, flags.get("--now").map(String::as_str), memories)
+            // `--app` (and `--title`) name the window in front; its latest
+            // capture is offered as source 1, as in the command bar.
+            let looking_at = NowContext { app: flags.get("--app").cloned(), title: flags.get("--title").cloned() };
+            let screen = match query::on_screen(&store, now_us, &looking_at) {
+                Ok(screen) => screen,
+                Err(error) => {
+                    eprintln!("mci-agent ask: reading the screen failed: {error}");
+                    return Some(ExitCode::from(13));
+                }
+            };
+            query::answer(&store, &mind, &name, tz, now_us, &question, flags.get("--now").map(String::as_str), screen, memories)
                 .map(|a| serde_json::to_value(a).unwrap_or_default())
                 .map_err(|e| e.to_string())
         }

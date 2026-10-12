@@ -529,6 +529,7 @@ private struct BarRowView: View {
 
     static func symbol(for kind: String) -> String {
         switch kind {
+        case "screen": "eye"
         case "resume": "arrow.uturn.backward.circle"
         case "searched": "magnifyingglass"
         case "related": "link"

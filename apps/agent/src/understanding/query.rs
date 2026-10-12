@@ -6,7 +6,9 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use mci_brain::understanding::{Proposition, PropositionStatus, SearchRecord, SessionNote};
+use mci_brain::understanding::{
+    ObservedEvent, Proposition, PropositionKind, PropositionStatus, SearchRecord, SessionNote,
+};
 use mci_brain::{SqlCipherBrainStore, StoreError};
 
 use super::mind::{MindCallError, MindClient};
@@ -204,8 +206,16 @@ impl Assistant {
     ///
     /// # Errors
     /// Store failures.
-    pub fn ask(&self, question: &str, now: Option<&str>, memories: Vec<Source>) -> Result<Answer, StoreError> {
-        answer(&self.store, &self.mind, &self.user_name, self.tz, Self::now_us(), question, now, memories)
+    pub fn ask(
+        &self,
+        question: &str,
+        now: Option<&str>,
+        looking_at: &NowContext,
+        memories: Vec<Source>,
+    ) -> Result<Answer, StoreError> {
+        let now_us = Self::now_us();
+        let screen = on_screen(&self.store, now_us, looking_at)?;
+        answer(&self.store, &self.mind, &self.user_name, self.tz, now_us, question, now, screen, memories)
     }
 
     /// Suggestions for the current moment.
@@ -253,11 +263,85 @@ struct AnswerOut {
     sources: Vec<usize>,
 }
 
-/// Answer `question` from retrieved memories, the user model and what is on
-/// screen now (`now`).
+/// How recent a capture of the frontmost window must be to count as what is
+/// on screen now.
+const ON_SCREEN_WINDOW_US: u64 = 10 * 60 * 1_000_000;
+/// With no matching title, only a capture this recent is taken for the
+/// frontmost window.
+const ON_SCREEN_UNTITLED_US: u64 = 2 * 60 * 1_000_000;
+/// How much of the screen's text the on-device model is shown.
+const ON_SCREEN_CHARS: usize = 2_400;
+
+/// The newest capture of the window the user is looking at, if Hippocampus
+/// read it recently. Only what capture already stored is used: an app it
+/// never records has no capture, so nothing of it reaches an answer.
 ///
 /// # Errors
 /// Store failures.
+pub fn on_screen(
+    store: &SqlCipherBrainStore,
+    now_us: u64,
+    looking_at: &NowContext,
+) -> Result<Option<ObservedEvent>, StoreError> {
+    if looking_at.app.is_none() {
+        return Ok(None);
+    }
+    let recent = store.observed_events_in_range(now_us.saturating_sub(ON_SCREEN_WINDOW_US), now_us + 1, 2_000)?;
+    Ok(pick_on_screen(&recent, looking_at, now_us).cloned())
+}
+
+/// Of `recent` (oldest first), the capture that shows `looking_at`: the
+/// newest with the same app and title, else the newest of that app within
+/// two minutes (a title changes as a page loads or a file is edited).
+#[must_use]
+pub fn pick_on_screen<'a>(
+    recent: &'a [ObservedEvent],
+    looking_at: &NowContext,
+    now_us: u64,
+) -> Option<&'a ObservedEvent> {
+    let app = looking_at.app.as_deref()?;
+    let of_app = || recent.iter().rev().filter(move |e| e.app_bundle_id.as_deref() == Some(app) && !e.text.trim().is_empty());
+    looking_at
+        .title
+        .as_deref()
+        .and_then(|title| of_app().find(|e| e.window_title.as_deref() == Some(title)))
+        .or_else(|| of_app().find(|e| now_us.saturating_sub(e.ts_us) <= ON_SCREEN_UNTITLED_US))
+}
+
+/// The start and the end of a long text: a window's heading and its newest
+/// lines both matter, and the model cannot be shown everything.
+#[must_use]
+pub fn excerpt(text: &str, limit: usize) -> String {
+    let count = text.chars().count();
+    if count <= limit {
+        return text.to_owned();
+    }
+    let head = limit * 5 / 8;
+    let tail = limit - head;
+    let start: String = text.chars().take(head).collect();
+    let end: String = text.chars().skip(count - tail).collect();
+    format!("{start}\n…\n{end}")
+}
+
+fn screen_source(event: &ObservedEvent) -> Source {
+    Source {
+        n: 1,
+        event_id: event.id,
+        ts_us: event.ts_us,
+        app: apps::name(event.app_bundle_id.as_deref().unwrap_or("")),
+        title: event.window_title.clone(),
+        url: event.url.clone(),
+        text: clip(&event.text, 512),
+    }
+}
+
+/// Answer `question` from what is on screen now (`screen`, cited as 1),
+/// retrieved memories and the user model. `now` names the frontmost app when
+/// there is no capture of its window.
+///
+/// # Errors
+/// Store failures.
+#[allow(clippy::too_many_arguments)]
 pub fn answer(
     store: &SqlCipherBrainStore,
     mind: &MindClient,
@@ -266,8 +350,30 @@ pub fn answer(
     now_us: u64,
     question: &str,
     now: Option<&str>,
+    screen: Option<ObservedEvent>,
     memories: Vec<Source>,
 ) -> Result<Answer, StoreError> {
+    // The screen is source 1; recalled memories follow it, without the same
+    // event twice.
+    let on_screen = screen.as_ref().map(screen_source);
+    let memories: Vec<Source> = match &on_screen {
+        Some(screen) => memories
+            .into_iter()
+            .filter(|m| m.event_id != screen.event_id)
+            .enumerate()
+            .map(|(index, m)| Source { n: index + 2, ..m })
+            .collect(),
+        None => memories,
+    };
+    let now_text = match (&screen, &on_screen) {
+        (Some(event), Some(source)) => Some(format!(
+            "[1] {}\n{}",
+            match &source.title { Some(t) => format!("{} — {t}", source.app), None => source.app.clone() },
+            excerpt(&event.text, ON_SCREEN_CHARS)
+        )),
+        _ => now.map(str::to_owned),
+    };
+    let now = now_text.as_deref();
     let propositions: Vec<String> = store
         .search_propositions(question, 6)?
         .into_iter()
@@ -287,24 +393,108 @@ pub fn answer(
         "propositions": propositions,
         "today": today(tz, now_us),
     });
+    let offered: Vec<Source> = on_screen.into_iter().chain(memories).collect();
     match mind.call::<_, AnswerOut>("answer", &input, Duration::from_secs(60)) {
         Ok(out) => {
-            let cited: Vec<Source> = memories.iter().filter(|m| out.sources.contains(&m.n)).cloned().collect();
+            let cited: Vec<Source> = offered.iter().filter(|m| out.sources.contains(&m.n)).cloned().collect();
             Ok(Answer {
                 answer: Some(out.answer),
-                sources: if cited.is_empty() { memories.into_iter().take(3).collect() } else { cited },
+                sources: if cited.is_empty() { offered.into_iter().take(3).collect() } else { cited },
                 unavailable: None,
             })
         }
         Err(error) => Ok(Answer {
             answer: None,
-            sources: memories,
+            sources: offered,
             unavailable: Some(match error {
                 MindCallError::Unavailable(reason) => reason,
                 other => other.to_string(),
             }),
         }),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Context for an AI client
+// ---------------------------------------------------------------------------
+
+/// The kinds of thing about the user that go into context sent without being
+/// asked for. People they work with, where they get stuck and how they are
+/// right now stay behind `mci_user_model`, which a client has to call.
+const SHARED_UNASKED: [PropositionKind; 5] = [
+    PropositionKind::Project,
+    PropositionKind::Goal,
+    PropositionKind::Habit,
+    PropositionKind::Preference,
+    PropositionKind::Skill,
+];
+
+/// What an AI client is told about the user's work when a session starts:
+/// the last few work sessions and the surest things in the user model,
+/// those matching `focus` first. `None` when nothing has been learned yet.
+/// Best effort: a store failure yields no block, never a failed packet.
+#[must_use]
+pub fn context_understanding(
+    store: &SqlCipherBrainStore,
+    tz: i32,
+    now_us: u64,
+    focus: Option<&str>,
+) -> Option<crate::context_packet::ContextUnderstanding> {
+    use crate::context_packet::{ContextUnderstanding, ContextUnderstandingClaim};
+    let half_day = 12 * 3_600_000_000u64;
+    let sessions = store
+        .session_notes_in_range(now_us.saturating_sub(half_day), now_us + 1)
+        .unwrap_or_default()
+        .iter()
+        .rev()
+        .take(4)
+        .map(|note| session_line(note, tz))
+        .collect();
+    let focused = focus
+        .map(str::trim)
+        .filter(|f| !f.is_empty())
+        .and_then(|f| store.search_propositions(f, 4).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(p, _)| p);
+    let recent = store.propositions_with_status(PropositionStatus::Active, 60).unwrap_or_default();
+    let about = shared_claims(focused.collect(), recent)
+        .into_iter()
+        .map(|p| ContextUnderstandingClaim { text: clip(&p.text, 220), confidence: p.confidence, event_ids: p.evidence })
+        .collect();
+    let understanding = ContextUnderstanding { sessions, about };
+    (!understanding.is_empty()).then_some(understanding)
+}
+
+fn session_line(note: &SessionNote, tz: i32) -> String {
+    let detail = if note.beneath.trim().is_empty() { &note.surface } else { &note.beneath };
+    format!(
+        "{}–{} · {}: {}",
+        observe::clock(note.start_us, tz),
+        observe::clock(note.end_us, tz),
+        clip(note.title.trim(), 80),
+        clip(detail.trim(), 180)
+    )
+}
+
+/// Up to six active propositions of the kinds shared unasked: those matching
+/// the focus first, then the surest of the rest.
+fn shared_claims(focused: Vec<Proposition>, mut recent: Vec<Proposition>) -> Vec<Proposition> {
+    recent.sort_by(|a, b| b.confidence.total_cmp(&a.confidence).then(b.updated_us.cmp(&a.updated_us)));
+    let mut out: Vec<Proposition> = Vec::new();
+    for p in focused.into_iter().chain(recent) {
+        if out.len() == 6 {
+            break;
+        }
+        if p.status == PropositionStatus::Active
+            && p.confidence >= 0.5
+            && SHARED_UNASKED.contains(&p.kind)
+            && !out.iter().any(|kept| kept.id == p.id)
+        {
+            out.push(p);
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -365,13 +555,22 @@ pub fn suggest(
     let mut out = Vec::new();
     let hour = 3_600_000_000u64;
     // What is on screen now, from the latest capture of the frontmost window.
-    let recent = store.observed_events_in_range(now_us.saturating_sub(hour), now_us + 1, 2_000)?;
-    let current = now.app.as_deref().and_then(|app| {
-        recent.iter().rev().find(|e| {
-            e.app_bundle_id.as_deref() == Some(app)
-                && now.title.as_deref().map_or(true, |t| e.window_title.as_deref() == Some(t))
-        })
-    });
+    let recent = store.observed_events_in_range(now_us.saturating_sub(ON_SCREEN_WINDOW_US), now_us + 1, 2_000)?;
+    let current = pick_on_screen(&recent, now, now_us);
+    // Ask about what is in front of them: the one thing every screen offers.
+    if let Some(event) = current {
+        let app = apps::name(event.app_bundle_id.as_deref().unwrap_or(""));
+        out.push(Suggestion {
+            kind: "screen".into(),
+            title: "What’s on this screen?".into(),
+            why: match &event.window_title {
+                Some(title) if !title.is_empty() => format!("{app} — {}", clip(title, 60)),
+                _ => app,
+            },
+            action: serde_json::json!({ "ask": "What is on my screen right now, and what matters in it?" }),
+            score: 8,
+        });
+    }
     // Resume: the last session that was not in the current window.
     let notes = store.session_notes_in_range(now_us.saturating_sub(12 * hour), now_us + 1)?;
     if let Some(last) = notes.iter().rev().find(|n| !now.title.as_deref().is_some_and(|t| n.title.contains(t))) {
@@ -453,7 +652,7 @@ pub fn suggest(
         }
     }
     out.sort_by(|a, b| b.score.cmp(&a.score));
-    out.truncate(6);
+    out.truncate(7);
     Ok(out)
 }
 
@@ -466,5 +665,119 @@ fn clip(text: &str, limit: usize) -> String {
         text.to_owned()
     } else {
         text.chars().take(limit).collect::<String>() + "…"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seen(id: i64, ts_us: u64, app: &str, title: Option<&str>, text: &str) -> ObservedEvent {
+        ObservedEvent {
+            id,
+            ts_us,
+            app_bundle_id: Some(app.to_owned()),
+            window_title: title.map(str::to_owned),
+            url: None,
+            text: text.to_owned(),
+            source: "screen_ocr".to_owned(),
+        }
+    }
+
+    fn looking_at(app: &str, title: Option<&str>) -> NowContext {
+        NowContext { app: Some(app.to_owned()), title: title.map(str::to_owned) }
+    }
+
+    const MINUTE: u64 = 60 * 1_000_000;
+
+    #[test]
+    fn the_screen_is_the_newest_capture_of_the_window_in_front() {
+        let recent = vec![
+            seen(1, 10 * MINUTE, "com.apple.Safari", Some("Pricing"), "old pricing text"),
+            seen(2, 11 * MINUTE, "com.apple.Notes", Some("Launch plan"), "notes text"),
+            seen(3, 12 * MINUTE, "com.apple.Safari", Some("Pricing"), "new pricing text"),
+            seen(4, 13 * MINUTE, "com.apple.Safari", Some("Another tab"), "another tab"),
+        ];
+        let picked = pick_on_screen(&recent, &looking_at("com.apple.Safari", Some("Pricing")), 14 * MINUTE);
+        assert_eq!(picked.map(|e| e.id), Some(3));
+    }
+
+    #[test]
+    fn a_changed_title_falls_back_to_a_capture_of_that_app_from_the_last_two_minutes() {
+        let recent = vec![
+            seen(1, 5 * MINUTE, "com.microsoft.VSCode", Some("query.rs"), "old file"),
+            seen(2, 13 * MINUTE, "com.microsoft.VSCode", Some("● query.rs"), "edited file"),
+        ];
+        let now = 14 * MINUTE;
+        assert_eq!(pick_on_screen(&recent, &looking_at("com.microsoft.VSCode", Some("server.rs")), now).map(|e| e.id), Some(2));
+        assert_eq!(pick_on_screen(&recent, &looking_at("com.microsoft.VSCode", None), now).map(|e| e.id), Some(2));
+        // Nothing recent enough: an old window is not passed off as the screen.
+        assert_eq!(pick_on_screen(&recent[..1], &looking_at("com.microsoft.VSCode", Some("server.rs")), now), None);
+    }
+
+    #[test]
+    fn an_app_that_was_never_captured_has_no_screen() {
+        let recent = vec![seen(1, 13 * MINUTE, "com.apple.Notes", Some("Launch plan"), "notes text")];
+        assert_eq!(pick_on_screen(&recent, &looking_at("com.1password.1password", Some("Vault")), 14 * MINUTE), None);
+        assert_eq!(pick_on_screen(&recent, &NowContext::default(), 14 * MINUTE), None);
+        // A capture with no text is not a screen to answer from.
+        let blank = vec![seen(2, 13 * MINUTE, "com.apple.Safari", Some("Pricing"), "  ")];
+        assert_eq!(pick_on_screen(&blank, &looking_at("com.apple.Safari", Some("Pricing")), 14 * MINUTE), None);
+    }
+
+    fn held(id: i64, kind: PropositionKind, confidence: f64, status: PropositionStatus) -> Proposition {
+        Proposition {
+            id,
+            text: format!("claim {id}"),
+            reasoning: String::new(),
+            kind,
+            confidence,
+            decay: 0.1,
+            status,
+            created_us: 0,
+            updated_us: u64::try_from(id).unwrap_or(0),
+            revised_from: None,
+            model: "test".into(),
+            evidence: vec![id],
+        }
+    }
+
+    #[test]
+    fn context_sent_unasked_leaves_out_people_struggles_and_guesses() {
+        use PropositionKind::{Goal, Habit, Project, Relationship, State, Struggle};
+        let recent = vec![
+            held(1, Project, 0.9, PropositionStatus::Active),
+            held(2, Relationship, 0.95, PropositionStatus::Active),
+            held(3, Struggle, 0.9, PropositionStatus::Active),
+            held(4, State, 0.9, PropositionStatus::Active),
+            held(5, Habit, 0.4, PropositionStatus::Active),
+            held(6, Goal, 0.7, PropositionStatus::Active),
+        ];
+        let shared: Vec<i64> = shared_claims(Vec::new(), recent).into_iter().map(|p| p.id).collect();
+        assert_eq!(shared, vec![1, 6]);
+    }
+
+    #[test]
+    fn what_matches_the_project_comes_first_and_nothing_is_listed_twice() {
+        use PropositionKind::{Habit, Project};
+        let focused = vec![held(7, Project, 0.6, PropositionStatus::Active)];
+        let recent: Vec<Proposition> = (1..=9)
+            .map(|id| held(id, if id == 7 { Project } else { Habit }, if id == 7 { 0.6 } else { 0.9 }, PropositionStatus::Active))
+            .collect();
+        let shared: Vec<i64> = shared_claims(focused, recent).into_iter().map(|p| p.id).collect();
+        assert_eq!(shared.len(), 6);
+        assert_eq!(shared[0], 7);
+        assert_eq!(shared.iter().filter(|id| **id == 7).count(), 1);
+    }
+
+    #[test]
+    fn a_long_screen_keeps_its_start_and_its_newest_lines() {
+        let text: String = (0..500).map(|i| format!("line {i}\n")).collect();
+        let shown = excerpt(&text, 400);
+        assert!(shown.starts_with("line 0\n"));
+        assert!(shown.ends_with("line 499\n"));
+        assert!(shown.contains("\n…\n"));
+        assert!(shown.chars().count() <= 400 + 3);
+        assert_eq!(excerpt("short", 400), "short");
     }
 }

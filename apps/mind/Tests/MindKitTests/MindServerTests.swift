@@ -90,6 +90,23 @@ final class MindServerTests: XCTestCase {
         XCTAssertEqual(long["id"] as? Int, 5)
     }
 
+    func testWhatIsOnScreenIsSourceOneAndLeavesRoomForFewerMemories() {
+        let memories = (2...12).map { Memory(n: $0, when: "Tue 3:12 PM", source: "Slack", text: String(repeating: "m", count: 480)) }
+        let screen = "[1] Preview — invoice-4471.pdf\nAmount due 2,300 dollars by October 30."
+        let asked = Prompts.answer(AnswerInput(userName: "Amy", question: "what am I looking at?", now: screen,
+                                              memories: memories, propositions: [], today: "Monday"))
+        XCTAssertTrue(asked.contains("On screen right now:\n[1] Preview — invoice-4471.pdf"))
+        XCTAssertTrue(asked.contains("the screen is number 1"))
+        XCTAssertTrue(asked.contains("[8] ") && !asked.contains("[9] "), "seven memories follow the screen")
+        XCTAssertFalse(asked.contains(String(repeating: "m", count: 401)), "and each is shorter")
+
+        // Only the app's name is known: nothing is called the screen, and all ten memories fit.
+        let plain = Prompts.answer(AnswerInput(userName: "Amy", question: "team price?", now: "Using Slack",
+                                              memories: memories, propositions: [], today: "Monday"))
+        XCTAssertFalse(plain.contains("the screen is number 1"))
+        XCTAssertTrue(plain.contains("[11] ") && !plain.contains("[12] "))
+    }
+
     func testPromptsFrameTheUserAndBoundInput() {
         let prompt = Prompts.propose(ProposeInput(userName: "Amy", observation: String(repeating: "x", count: 20_000), known: ["Amy writes Rust"]))
         XCTAssertTrue(prompt.contains("Start each with \"Amy\""))

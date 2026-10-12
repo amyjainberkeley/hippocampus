@@ -318,6 +318,11 @@ impl Server {
             question: String,
             #[serde(default)]
             now: Option<String>,
+            /// Bundle id and window title of what the user is looking at.
+            #[serde(default)]
+            app: Option<String>,
+            #[serde(default)]
+            title: Option<String>,
         }
         #[derive(Deserialize)]
         struct SuggestArgs {
@@ -340,8 +345,9 @@ impl Server {
                 Ok(outcome) => hits_of(outcome),
                 Err(e) => return brain_err_to_response(id, &e),
             };
+            let looking_at = NowContext { app: parsed.app, title: parsed.title };
             assistant
-                .ask(&parsed.question, parsed.now.as_deref(), sources_from_hits(hits))
+                .ask(&parsed.question, parsed.now.as_deref(), &looking_at, sources_from_hits(hits))
                 .map(|answer| serde_json::to_value(answer).unwrap_or_default())
         } else {
             let parsed: SuggestArgs = match serde_json::from_value(args) {

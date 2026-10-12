@@ -646,6 +646,12 @@ impl BrainReader for LiveBrainReader {
         let mut packet =
             compile_context_packet(focus, now_us, budget, ContextSources { claims, evidence });
         packet.focus_retrieval = focus_retrieval;
+        packet.understanding = crate::understanding::query::context_understanding(
+            &self.store,
+            crate::brief_worker::current_tz_offset_secs(),
+            now_us,
+            focus,
+        );
         Ok(packet)
     }
 }

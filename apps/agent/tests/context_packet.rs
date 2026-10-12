@@ -489,6 +489,48 @@ fn markdown_handoff_preserves_truth_status_and_exact_event_citations() {
 }
 
 #[test]
+fn what_is_understood_of_the_users_work_leads_the_handoff_and_says_it_is_inferred() {
+    use mci_agent::context_packet::{ContextUnderstanding, ContextUnderstandingClaim};
+    let source = event(92, 1_900_000, "Current decision: ship the bounded context command.");
+    let mut packet = compile_context_packet(
+        None,
+        NOW_US,
+        ContextBudget::new(200, 6),
+        ContextSources {
+            claims: Vec::new(),
+            evidence: vec![ContextEvidence::from_event(&source, EvidencePriority::Recent, None)],
+        },
+    );
+    assert!(packet.understanding.is_none(), "the compiler alone never invents understanding");
+    packet.understanding = Some(ContextUnderstanding {
+        sessions: vec!["2:35 PM–3:30 PM · Pricing the Team plan: paused before typing the price".into()],
+        about: vec![ContextUnderstandingClaim {
+            text: "Is pricing the Team plan before the beta".into(),
+            confidence: 0.8,
+            event_ids: vec![92, 93, 94, 95],
+        }],
+    });
+
+    let markdown = render_context_packet_markdown(&packet);
+
+    assert!(markdown.starts_with("# Hippocampus context\n"), "the session hook requires this first line");
+    let recent = markdown.find("## Recent work").expect("recent work");
+    let about = markdown.find("## About the user (inferred on this Mac, may be wrong)").expect("about");
+    let evidence = markdown.find("## Evidence").expect("evidence");
+    assert!(recent < about && about < evidence, "understanding comes before raw evidence");
+    assert!(markdown.contains("- 2:35 PM–3:30 PM · Pricing the Team plan: paused before typing the price"));
+    assert!(markdown.contains("- Is pricing the Team plan before the beta [event 92, event 93, event 94]"));
+    assert!(markdown.contains("mci_user_model"));
+
+    // With nothing else to show, understanding alone is not "no memory".
+    let mut only = compile_context_packet(None, NOW_US, ContextBudget::new(200, 6), ContextSources::default());
+    only.understanding = packet.understanding.clone();
+    assert!(!render_context_packet_markdown(&only).contains("No relevant local memory"));
+    only.understanding = Some(ContextUnderstanding::default());
+    assert!(render_context_packet_markdown(&only).contains("No relevant local memory"));
+}
+
+#[test]
 fn empty_sources_return_a_typed_empty_packet() {
     let packet = compile_context_packet(
         None,

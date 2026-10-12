@@ -305,12 +305,14 @@ pub fn assistant_tool_definitions() -> serde_json::Value {
     serde_json::json!([
         {
             "name": ToolName::Ask.as_str(),
-            "description": "Answer a question from the user's own memories with the on-device model, citing them.",
+            "description": "Answer a question from what is on the user's screen now and their own memories with the on-device model, citing them.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "question": { "type": "string" },
-                    "now": { "type": "string", "description": "What is on screen now, if known." }
+                    "now": { "type": "string", "description": "The frontmost app's name, used when its window has no capture." },
+                    "app": { "type": "string", "description": "Bundle id of the frontmost app; its latest captured window is source 1." },
+                    "title": { "type": "string", "description": "That window's title." }
                 },
                 "required": ["question"]
             }

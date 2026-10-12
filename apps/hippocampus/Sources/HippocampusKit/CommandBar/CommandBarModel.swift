@@ -349,10 +349,17 @@ public final class CommandBarModel: ObservableObject {
         selection = 0
         isWorking = true
         var arguments: [String: Any] = ["question": trimmed]
-        // Only the app's name: what is in its window reaches the answer only
-        // through memories Hippocampus was allowed to capture.
+        // Which window is in front, not what is in it: the agent answers from
+        // its own latest capture of that window, so an app Hippocampus never
+        // records still contributes nothing but its name.
         if let app = context?.appName {
             arguments["now"] = "Using \(app)"
+        }
+        if let bundleId = context?.bundleId {
+            arguments["app"] = bundleId
+        }
+        if let title = context?.windowTitle {
+            arguments["title"] = title
         }
         guard let body = try? JSONSerialization.data(withJSONObject: arguments) else { return }
         Task {
