@@ -38,7 +38,7 @@ const SESSIONS_CURSOR: &str = "sessions_through_us";
 const PIPELINE_KEY: &str = "pipeline_version";
 /// Bump when prompts or rules change enough that earlier inferences should
 /// be redone; the next cycle clears them and starts again.
-const PIPELINE_VERSION: &str = "3";
+const PIPELINE_VERSION: &str = "4";
 const SEARCH_CURSOR: &str = "searches_through_event_id";
 /// How far back the first cycle looks.
 const FIRST_LOOKBACK_US: u64 = 24 * 3_600_000_000;

@@ -165,7 +165,14 @@ const GENERIC: &[&str] = &[
 pub fn specific(drafts: Vec<Draft>, observation: &str, user_name: &str) -> Vec<Draft> {
     let seen = words(observation);
     let name = user_name.to_lowercase();
-    drafts
+    // One claim per batch: a draft that mostly repeats an earlier one adds nothing.
+    let mut distinct: Vec<Draft> = Vec::new();
+    for draft in drafts {
+        if !distinct.iter().any(|kept| similarity(&kept.text, &draft.text) >= 0.45) {
+            distinct.push(draft);
+        }
+    }
+    distinct
         .into_iter()
         .filter(|draft| {
             words(&draft.text)
@@ -403,6 +410,22 @@ mod tests {
         let project = Draft { text: "Sam is pricing Team".into(), reasoning: String::new(), kind: "project".into(), confidence: 10, decay: 4 };
         assert_eq!(prepare(project.clone(), "Amy", true).confidence, 8);
         assert_eq!(prepare(project, "Amy", false).confidence, 10, "confirmed claims may rise");
+    }
+
+    #[test]
+    fn a_batch_keeps_one_version_of_each_claim() {
+        let draft = |text: &str| Draft { text: text.into(), reasoning: String::new(), kind: "state".into(), confidence: 5, decay: 5 };
+        let observation = "YouTube search: sourdough starter for beginners. Notes: Launch plan for Team pricing.";
+        let kept = specific(
+            vec![
+                draft("Sam is looking for the movie sourdough on YouTube."),
+                draft("Sam is searching YouTube for the movie sourdough."),
+                draft("Sam is drafting the Team pricing launch plan in Notes."),
+            ],
+            observation,
+            "Amy",
+        );
+        assert_eq!(kept.len(), 2, "{:?}", kept.iter().map(|d| &d.text).collect::<Vec<_>>());
     }
 
     #[test]

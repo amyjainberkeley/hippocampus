@@ -39,7 +39,9 @@ public enum Prompts {
         they are working on, what they are trying to achieve, how they tend to \
         work, what they prefer, what they know or are learning, who they work \
         with, or where they got stuck. Infer; do not summarize the screen, and \
-        skip anything trivial. Start each with "\(user)".
+        skip anything trivial. Not everything is work: watching, \
+        shopping, personal errands and browsing for fun are interests or \
+        states, never projects. Start each with "\(user)".
 
         Kinds: project (named work in progress), goal (an outcome they want), \
         state (true of them right now), habit (a repeated way of working), \
