@@ -34,6 +34,34 @@ final class FocusedReadPacingTests: XCTestCase {
         XCTAssertTrue(pacing.admit(generation: 2, nowUs: 2, textCatchUp: false), "switching windows reads now")
     }
 
+    func testTextThatKeepsStreamingSlowsToTheMotionIntervalAndRecoversWhenItSettles() {
+        // (interval scale, seconds between catch-up candidates, reads allowed in two minutes)
+        for (scale, gap, limit) in [(UInt64(1), UInt64(3), 12), (2, 6, 8)] {
+            var pacing = FocusedReadPacing()
+            var reads: [UInt64] = []
+            for now in stride(from: UInt64(0), through: 120, by: Int(gap)) {
+                if pacing.admit(generation: 3, nowUs: (1_000 + now) * second, textCatchUp: true, scale: scale) {
+                    reads.append(now)
+                }
+            }
+            XCTAssertTrue(pacing.isInMotion, "scale \(scale)")
+            XCTAssertEqual(reads.count, limit, "scale \(scale): read at \(reads)")
+            XCTAssertEqual(Array(reads.prefix(5)), [0, gap, 2 * gap, 3 * gap, 4 * gap], "the first reads are not delayed")
+            // The answer finished. The next edit, minutes later, is read at once.
+            XCTAssertTrue(pacing.admit(generation: 3, nowUs: (1_000 + 400) * second, textCatchUp: true, scale: scale))
+            XCTAssertFalse(pacing.isInMotion)
+        }
+    }
+
+    func testOccasionalTypingNeverCountsAsStreaming() {
+        var pacing = FocusedReadPacing()
+        XCTAssertTrue(pacing.admit(generation: 1, nowUs: 0, textCatchUp: false))
+        for burst in 1...20 {
+            XCTAssertTrue(pacing.admit(generation: 1, nowUs: UInt64(burst) * 10 * second, textCatchUp: true))
+            XCTAssertFalse(pacing.isInMotion)
+        }
+    }
+
     func testChangeInsideTheFocusedWindowDoesNotWakeTheDisplayRead() {
         let width = 10, height = 10
         let before = TextChangeThumbnail(width: width, height: height, luma: [UInt8](repeating: 0, count: 100))

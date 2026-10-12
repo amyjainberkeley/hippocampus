@@ -5,9 +5,10 @@ import Foundation
 /// A playing video or an animation changes every frame, and every changed
 /// frame used to be read: the OCR worker ran without pause. Text catch-up
 /// reads (typing, new messages) keep their own three-second floor. Frames
-/// that changed visually are read at most every two seconds, and once
-/// changes have kept arriving for ten seconds (motion), at most every fifteen
-/// seconds until the picture settles. A new focused window is always read.
+/// that changed visually are read at most every three seconds. Once changes
+/// of either kind have kept arriving back to back for four reads (a video, a
+/// streamed answer, a scrolling log), the window is read at most every
+/// fifteen seconds until it settles. A new focused window is always read.
 public struct FocusedReadPacing: Sendable, Equatable {
     public static let minimumIntervalUs: UInt64 = 3_000_000
     public static let motionIntervalUs: UInt64 = 15_000_000
@@ -40,6 +41,13 @@ public struct FocusedReadPacing: Sendable, Equatable {
         // the scaled interval too.
         let catchUpFloor = scale > 1 ? Self.minimumIntervalUs * scale : 0
         if textCatchUp && !isInMotion && sinceRead >= catchUpFloor {
+            // Text that changes again as soon as it may be read is still being
+            // written: a streamed answer, a build log, steady typing. Four
+            // such reads in a row and it is read at the motion interval,
+            // then normally again once it has settled.
+            let dense = sinceRead <= max(catchUpFloor, Self.minimumIntervalUs) + Self.denseSlackUs
+            denseReads = dense ? denseReads + 1 : 0
+            waitedSinceRead = false
             lastReadUs = nowUs
             return true
         }
