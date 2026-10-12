@@ -39,11 +39,21 @@ final class CommandBarController: NSObject, NSWindowDelegate {
     }
 
     func hide() {
+        guard panel?.isVisible == true else { return }
         panel?.orderOut(nil)
+        // Opened from a link, the app was activated; give focus back to the
+        // app the person was in, unless a Hippocampus window is in use.
+        if NSApp.isActive,
+           !NSApp.windows.contains(where: { $0.isVisible && !($0 is CommandBarPanel) && $0.canBecomeMain }) {
+            NSApp.hide(nil)
+        }
     }
 
     private func makePanel(model: CommandBarModel) -> CommandBarPanel {
         let panel = CommandBarPanel()
+        panel.onCancel = { [weak self, weak model] in
+            if model?.back() != true { self?.hide() }
+        }
         let view = CommandBarView(
             model: model,
             perform: { [weak self] action in self?.perform(action) },
@@ -139,6 +149,13 @@ final class CommandBarPanel: NSPanel {
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    /// Esc anywhere in the panel, even when the field has lost focus.
+    var onCancel: (() -> Void)?
+
+    override func cancelOperation(_ sender: Any?) {
+        onCancel?()
+    }
 }
 
 // MARK: Views
@@ -176,6 +193,10 @@ struct CommandBarView: View {
         .onPreferenceChange(HeightKey.self) { height in heightChanged(height) }
         .onAppear { focused = true }
         .onChange(of: model.mode) { _, _ in focused = true }
+        .onChange(of: model.focusRequest) { _, _ in
+            // After the panel becomes key; a focus set before that is lost.
+            DispatchQueue.main.async { focused = true }
+        }
     }
 
     private var hasBody: Bool {

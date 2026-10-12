@@ -201,6 +201,9 @@ public final class CommandBarModel: ObservableObject {
     @Published public private(set) var propositions: [BarProposition] = []
     @Published public private(set) var selection = 0
     @Published public private(set) var notice: String?
+    /// Bumped on every open so the view moves keyboard focus to the field
+    /// once the panel is key.
+    @Published public private(set) var focusRequest = 0
 
     private let reads = MemorySession()
     private let assistant = MemorySession()
@@ -259,6 +262,7 @@ public final class CommandBarModel: ObservableObject {
         day = nil
         selection = 0
         notice = nil
+        focusRequest += 1
         Task { await loadSuggestions(generation: generation, model: false) }
         Task { await loadSuggestions(generation: generation, model: true) }
     }

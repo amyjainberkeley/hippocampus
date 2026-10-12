@@ -180,10 +180,22 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
         if let idle = activity.secondsSinceLastInput(), idle > Self.idleAfterSeconds { return }
         if secureInput.isSecureEventInputEnabled() { return }
         guard let thumbnail = TextChangeThumbnail.make(from: pixelBuffer) else { return }
+        // Change inside the focused window (a playing video, typing) is that
+        // window's own stream's business; only change elsewhere is a reason
+        // to read the whole display.
+        let focusedRect = focusedWindowId().flatMap { id in
+            Self.visibleWindows().first { $0.windowId == id }?.bounds
+        }.map { bounds in
+            CGRect(x: (bounds.minX - display.bounds.minX) / display.bounds.width,
+                   y: (bounds.minY - display.bounds.minY) / display.bounds.height,
+                   width: bounds.width / display.bounds.width,
+                   height: bounds.height / display.bounds.height)
+        }
         let due: Bool = lock.withLock {
             guard let last = lastRead[display.id] else { return true }
             guard now.timeIntervalSince(last.at) >= Self.minimumReadInterval else { return false }
-            return (thumbnail.changedPixels(since: last.thumbnail) ?? Int.max) >= TextCatchUpPolicy.changedPixelThreshold
+            return (thumbnail.changedPixels(since: last.thumbnail, excluding: focusedRect) ?? Int.max)
+                >= TextCatchUpPolicy.changedPixelThreshold
         }
         guard due else { return }
 

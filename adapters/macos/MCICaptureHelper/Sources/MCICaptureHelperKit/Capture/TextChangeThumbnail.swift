@@ -1,3 +1,4 @@
+import CoreGraphics
 import CoreVideo
 import Foundation
 
@@ -54,6 +55,24 @@ public struct TextChangeThumbnail: Sendable, Equatable {
 
     /// Thumbnail pixels whose luma moved past `lumaDelta`; nil when the frames
     /// differ in size, which a window resize already reports as new content.
+    /// Changed cells outside `excluding` (unit rect, top-left origin), e.g.
+    /// the focused window, whose own stream reads it.
+    public func changedPixels(since other: TextChangeThumbnail, excluding unit: CGRect?) -> Int? {
+        guard let unit, unit.width > 0, unit.height > 0 else { return changedPixels(since: other) }
+        guard width == other.width, height == other.height else { return nil }
+        let x0 = Int((unit.minX * CGFloat(width)).rounded(.down)), x1 = Int((unit.maxX * CGFloat(width)).rounded(.up))
+        let y0 = Int((unit.minY * CGFloat(height)).rounded(.down)), y1 = Int((unit.maxY * CGFloat(height)).rounded(.up))
+        var changed = 0
+        for y in 0..<height {
+            let insideRows = y >= y0 && y < y1
+            for x in 0..<width where !(insideRows && x >= x0 && x < x1) {
+                let i = y * width + x
+                if abs(Int(luma[i]) - Int(other.luma[i])) > Self.lumaDelta { changed += 1 }
+            }
+        }
+        return changed
+    }
+
     public func changedPixels(since other: TextChangeThumbnail) -> Int? {
         guard width == other.width, height == other.height else { return nil }
         var changed = 0

@@ -9,42 +9,51 @@ import Foundation
 /// changes have kept arriving for ten seconds (motion), at most every fifteen
 /// seconds until the picture settles. A new focused window is always read.
 public struct FocusedReadPacing: Sendable, Equatable {
-    public static let minimumIntervalUs: UInt64 = 2_000_000
+    public static let minimumIntervalUs: UInt64 = 3_000_000
     public static let motionIntervalUs: UInt64 = 15_000_000
-    public static let motionAfterUs: UInt64 = 10_000_000
-    /// Changes closer together than this count as one continuous stretch.
-    public static let continuityUs: UInt64 = 1_500_000
+    /// Reads that keep landing as soon as the interval allows, this many in
+    /// a row, mean the picture never settles (video, animation).
+    public static let motionAfterDenseReads = 4
+    /// A read within this much of the interval counts as back to back.
+    public static let denseSlackUs: UInt64 = 2_000_000
 
     private var generation: UInt64?
     private var lastReadUs: UInt64 = 0
-    private var lastCandidateUs: UInt64 = 0
-    private var continuousSinceUs: UInt64 = 0
+    private var denseReads = 0
+    private var waitedSinceRead = false
 
     public init() {}
 
     /// Whether to read a frame the change gate admitted.
     public mutating func admit(generation: UInt64, nowUs: UInt64, textCatchUp: Bool) -> Bool {
-        defer { lastCandidateUs = nowUs }
         if generation != self.generation {
             self.generation = generation
             lastReadUs = nowUs
-            continuousSinceUs = nowUs
+            denseReads = 0
+            waitedSinceRead = false
             return true
         }
-        if nowUs.saturatingSub(lastCandidateUs) > Self.continuityUs {
-            continuousSinceUs = nowUs
+        let interval = isInMotion ? Self.motionIntervalUs : Self.minimumIntervalUs
+        let sinceRead = nowUs >= lastReadUs ? nowUs - lastReadUs : 0
+        if textCatchUp && !isInMotion {
+            lastReadUs = nowUs
+            return true
         }
-        let sinceRead = nowUs.saturatingSub(lastReadUs)
-        let inMotion = nowUs.saturatingSub(continuousSinceUs) >= Self.motionAfterUs
-        let interval = textCatchUp ? 0 : (inMotion ? Self.motionIntervalUs : Self.minimumIntervalUs)
-        guard sinceRead >= interval else { return false }
+        guard sinceRead >= interval else {
+            waitedSinceRead = true
+            return false
+        }
+        // Changes that were already waiting when the interval ran out, read
+        // right away, mean the picture is still moving.
+        if waitedSinceRead && sinceRead <= interval + Self.denseSlackUs {
+            denseReads += 1
+        } else {
+            denseReads = 0
+        }
+        waitedSinceRead = false
         lastReadUs = nowUs
         return true
     }
 
-    public var isInMotion: Bool { lastCandidateUs.saturatingSub(continuousSinceUs) >= Self.motionAfterUs }
-}
-
-private extension UInt64 {
-    func saturatingSub(_ other: UInt64) -> UInt64 { self >= other ? self - other : 0 }
+    public var isInMotion: Bool { denseReads >= Self.motionAfterDenseReads }
 }
