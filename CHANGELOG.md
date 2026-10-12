@@ -56,6 +56,10 @@ commits are intentionally omitted from release notes.
   Mode. The window you're in is read half as often on battery. A playing
   video, or text that keeps streaming, is read every 15 seconds (30 on
   battery) until it settles, not every few seconds.
+- On battery the text reader rests after every read for eight times as long
+  as the read took (sixteen in Low Power Mode), so it is busy at most a
+  ninth of the time whatever is on screen. A window you switch to is read
+  when the rest ends. Plugged in, nothing waits.
 - Closing the window you were in no longer restarts capture. It used to,
   several times an hour, reloading the text reader each time.
 - Reading a window takes a fraction of the work. Text is found at the size

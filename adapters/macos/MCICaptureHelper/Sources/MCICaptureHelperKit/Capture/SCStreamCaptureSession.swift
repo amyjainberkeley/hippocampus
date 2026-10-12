@@ -711,6 +711,11 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
 
     private func admitFocusedRead(generation: UInt64, nowUs: UInt64, textCatchUp: Bool) -> Bool {
         lock.lock(); defer { lock.unlock() }
+        // A new window's first frame is always read: binding to it already
+        // waited for the budget, and a still window sends no second frame.
+        if !focusedReadPacing.isNewWindow(generation: generation), !CaptureReadBudget.shared.admitsRead() {
+            return false
+        }
         return focusedReadPacing.admit(generation: generation, nowUs: nowUs, textCatchUp: textCatchUp,
                                        scale: CapturePower.current().intervalScale)
     }
@@ -868,6 +873,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     private static func uptimeUs() -> UInt64 { DispatchTime.now().uptimeNanoseconds / 1_000 }
 
     private func admitRebindAttempt(generation: UInt64) -> Bool {
+        // Off mains power a newly focused window is bound, and so read, once
+        // the reader has rested from its last read.
+        guard CaptureReadBudget.shared.admitsRead() else { return false }
         lock.lock(); defer { lock.unlock() }
         return rebindRetryPacing.admit(generation: generation, nowUs: Self.uptimeUs())
     }

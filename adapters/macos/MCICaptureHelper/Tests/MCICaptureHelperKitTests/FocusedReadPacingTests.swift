@@ -62,6 +62,53 @@ final class FocusedReadPacingTests: XCTestCase {
         }
     }
 
+    func testOnBatteryTheReaderRestsEightTimesAsLongAsARead() {
+        var budget = ReadBudget()
+        XCTAssertTrue(budget.admits(nowUs: 0, scale: 2))
+        // A four-second read that ended at t = 10 s.
+        budget.record(endedUs: 10 * second, tookUs: 4 * second, scale: 2)
+        XCTAssertFalse(budget.admits(nowUs: 20 * second, scale: 2))
+        XCTAssertFalse(budget.admits(nowUs: 41 * second, scale: 2))
+        XCTAssertTrue(budget.admits(nowUs: 42 * second, scale: 2))
+        // A quick re-read barely rests at all.
+        budget.record(endedUs: 50 * second, tookUs: second / 2, scale: 2)
+        XCTAssertTrue(budget.admits(nowUs: 54 * second, scale: 2))
+    }
+
+    func testTheReaderIsBusyAtMostANinthOfTheTimeOnBattery() {
+        var budget = ReadBudget()
+        var now: UInt64 = 0, busy: UInt64 = 0
+        let horizon = 600 * second
+        while now < horizon {
+            if budget.admits(nowUs: now, scale: 2) {
+                let took = 3 * second
+                now += took; busy += took
+                budget.record(endedUs: now, tookUs: took, scale: 2)
+            } else {
+                now += second / 4
+            }
+        }
+        XCTAssertLessThanOrEqual(Double(busy) / Double(now), 1.0 / 9.0 + 0.01)
+    }
+
+    func testPluggedInThereIsNoRestAndPluggingInEndsOne() {
+        var budget = ReadBudget()
+        budget.record(endedUs: 10 * second, tookUs: 5 * second, scale: 1)
+        XCTAssertTrue(budget.admits(nowUs: 10 * second, scale: 1))
+        budget.record(endedUs: 20 * second, tookUs: 5 * second, scale: 2)
+        XCTAssertFalse(budget.admits(nowUs: 30 * second, scale: 2))
+        XCTAssertTrue(budget.admits(nowUs: 30 * second, scale: 1), "plugged in mid-rest")
+    }
+
+    func testLowPowerModeRestsLongerAndATimedOutReadCannotSilenceTheReaderForLong() {
+        var budget = ReadBudget()
+        budget.record(endedUs: 0, tookUs: 2 * second, scale: 4)
+        XCTAssertFalse(budget.admits(nowUs: 31 * second, scale: 4))
+        XCTAssertTrue(budget.admits(nowUs: 32 * second, scale: 4))
+        budget.record(endedUs: 100 * second, tookUs: 30 * second, scale: 2)
+        XCTAssertTrue(budget.admits(nowUs: 220 * second, scale: 2))
+    }
+
     func testChangeInsideTheFocusedWindowDoesNotWakeTheDisplayRead() {
         let width = 10, height = 10
         let before = TextChangeThumbnail(width: width, height: height, luma: [UInt8](repeating: 0, count: 100))

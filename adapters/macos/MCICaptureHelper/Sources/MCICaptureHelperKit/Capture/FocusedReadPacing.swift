@@ -68,4 +68,7 @@ public struct FocusedReadPacing: Sendable, Equatable {
     }
 
     public var isInMotion: Bool { denseReads >= Self.motionAfterDenseReads }
+
+    /// Whether `generation` is a window this pacing has not read yet.
+    public func isNewWindow(generation: UInt64) -> Bool { generation != self.generation }
 }

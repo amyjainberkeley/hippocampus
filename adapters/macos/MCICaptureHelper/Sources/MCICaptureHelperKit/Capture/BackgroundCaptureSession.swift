@@ -202,7 +202,8 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
         }
         // Whole-screen reads are the costliest work Hippocampus does: slower
         // on battery, none in Low Power Mode.
-        guard let interval = CapturePower.current().displayReadInterval else { return }
+        guard let interval = CapturePower.current().displayReadInterval,
+              CaptureReadBudget.shared.admitsRead() else { return }
         // Read only the windows that changed, not the whole display.
         let region: CGRect? = lock.withLock {
             guard let last = lastRead[display.id] else { return CGRect(x: 0, y: 0, width: 1, height: 1) }
