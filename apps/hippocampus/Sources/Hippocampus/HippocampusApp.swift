@@ -580,14 +580,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if OnboardingSentinel.isComplete {
             firstLaunchLogger.info("first-launch: sentinel present → start supervisor immediately")
             loginItemVM.enableByDefaultOnce()
-            if initialPreferencesRequest == nil { supervisor.openRecallWhenReady(initialLaunch: true) }
+            if initialPreferencesRequest == nil, !Self.isQuietLaunch { supervisor.openRecallWhenReady(initialLaunch: true) }
             supervisor.start()
             return
         }
 
         guard supervisor.hasOnboarding else {
             firstLaunchLogger.warning("first-launch: no Onboarding binary bundled → start supervisor as fallback")
-            if initialPreferencesRequest == nil { supervisor.openRecallWhenReady(initialLaunch: true) }
+            if initialPreferencesRequest == nil, !Self.isQuietLaunch { supervisor.openRecallWhenReady(initialLaunch: true) }
             supervisor.start()
             return
         }
@@ -683,6 +683,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sentinelWatcher = nil
         sentinelPollTask?.cancel()
         sentinelPollTask = nil
+    }
+
+    /// A relaunch after an update asks to stay in the menu bar
+    /// (`open -g --env HIPPOCAMPUS_QUIET_LAUNCH=1`), so it does not put a
+    /// window in front of whatever the person is doing.
+    static var isQuietLaunch: Bool {
+        ProcessInfo.processInfo.environment["HIPPOCAMPUS_QUIET_LAUNCH"] == "1"
     }
 
     /// Completing the first-run flow is the user's explicit capture opt-in.

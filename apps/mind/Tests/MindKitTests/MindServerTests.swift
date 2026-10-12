@@ -95,15 +95,17 @@ final class MindServerTests: XCTestCase {
         let screen = "[1] Preview — invoice-4471.pdf\nAmount due 2,300 dollars by October 30."
         let asked = Prompts.answer(AnswerInput(userName: "Amy", question: "what am I looking at?", now: screen,
                                               memories: memories, propositions: [], today: "Monday"))
-        XCTAssertTrue(asked.contains("On screen right now:\n[1] Preview — invoice-4471.pdf"))
-        XCTAssertTrue(asked.contains("the screen is number 1"))
+        XCTAssertTrue(asked.contains("[1] On screen right now, Preview — invoice-4471.pdf:\nAmount due 2,300 dollars by October 30."))
+        XCTAssertTrue(asked.contains("Source 1 is what is on Amy's screen right now."))
+        XCTAssertTrue(asked.contains("write \"you\" and \"your\""))
         XCTAssertTrue(asked.contains("[8] ") && !asked.contains("[9] "), "seven memories follow the screen")
         XCTAssertFalse(asked.contains(String(repeating: "m", count: 401)), "and each is shorter")
 
         // Only the app's name is known: nothing is called the screen, and all ten memories fit.
         let plain = Prompts.answer(AnswerInput(userName: "Amy", question: "team price?", now: "Using Slack",
                                               memories: memories, propositions: [], today: "Monday"))
-        XCTAssertFalse(plain.contains("the screen is number 1"))
+        XCTAssertFalse(plain.contains("Source 1 is what is on"))
+        XCTAssertTrue(plain.contains("On screen right now:\nUsing Slack"))
         XCTAssertTrue(plain.contains("[11] ") && !plain.contains("[12] "))
     }
 

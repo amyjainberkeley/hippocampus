@@ -144,31 +144,62 @@ public enum Prompts {
     public static func answer(_ input: AnswerInput) -> String {
         let user = name(input.userName)
         // The agent numbers a capture of the window in front as source 1.
-        // Its text takes room the model's small window would otherwise give
-        // to memories, so fewer and shorter memories follow it.
         let screen = input.now.map { clip($0, 2_600) } ?? ""
-        let showsScreen = screen.hasPrefix("[1] ")
+        guard screen.hasPrefix("[1] ") else {
+            var prompt = """
+            \(user) asks: \(clip(input.question, 500))
+
+            Answer from \(user)'s own memories below. You are speaking to \
+            \(user): write "you" and "your", never "\(user)" or "they". Be \
+            direct; one to four sentences. Use their words for things. If the \
+            memories do not contain the answer, say what you did find instead. \
+            List the numbers of the memories you used.
+
+            Today is \(input.today).
+
+            """
+            if let now = input.now, !now.isEmpty {
+                prompt += "On screen right now:\n\(clip(now, 1_200))\n\n"
+            }
+            if !input.propositions.isEmpty {
+                prompt += "About \(user):\n\(input.propositions.prefix(6).map { "- \(clip($0, 200))" }.joined(separator: "\n"))\n\n"
+            }
+            prompt += "Memories:\n"
+            prompt += input.memories.prefix(10).map { "[\($0.n)] \($0.when), \($0.source): \(clip($0.text, 500))" }.joined(separator: "\n")
+            return prompt
+        }
+        // With the screen shown: it is the first source, it takes room the
+        // model's small window would otherwise give to memories, and what is
+        // known about the person goes last so the answer starts from what is
+        // in front of them, not from their profile.
+        let header = screen.dropFirst(4).prefix { $0 != "\n" }
+        let text = screen.drop { $0 != "\n" }.dropFirst()
         var prompt = """
         \(user) asks: \(clip(input.question, 500))
 
-        Answer from \(user)'s own memories below\(showsScreen ? " and from what is on their screen now" : ""). Be direct; one to four \
-        sentences. Use their words for things. If the memories do not contain \
-        the answer, say what you did find instead. List the numbers of the \
-        memories you used\(showsScreen ? "; the screen is number 1" : "").
+        Source 1 is what is on \(user)'s screen right now. The others are \
+        things they saw earlier. You are speaking to \(user): write "you" and \
+        "your", never "\(user)" or "they". Answer in one to four sentences, \
+        using their words for things. When they ask about the screen or \
+        "this", answer from source 1 first. Use an earlier source only when it \
+        adds to the answer. Say only what the sources say; do not guess who \
+        people are. If no source holds the answer, say what you did find. \
+        List the numbers of the sources you used.
 
         Today is \(input.today).
 
+        [1] On screen right now, \(header):
+        \(text)
+
         """
-        if !screen.isEmpty {
-            prompt += "On screen right now:\n\(screen)\n\n"
+        if !input.memories.isEmpty {
+            prompt += "\nSeen earlier:\n"
+            prompt += input.memories.prefix(7).map { "[\($0.n)] \($0.when), \($0.source): \(clip($0.text, 400))" }.joined(separator: "\n")
+            prompt += "\n"
         }
         if !input.propositions.isEmpty {
-            prompt += "About \(user):\n\(input.propositions.prefix(6).map { "- \(clip($0, 200))" }.joined(separator: "\n"))\n\n"
+            prompt += "\nBackground on \(user), only if it helps:\n\(input.propositions.prefix(4).map { "- \(clip($0, 200))" }.joined(separator: "\n"))\n"
         }
-        prompt += "Memories:\n"
-        prompt += input.memories.prefix(showsScreen ? 7 : 10)
-            .map { "[\($0.n)] \($0.when), \($0.source): \(clip($0.text, showsScreen ? 400 : 500))" }
-            .joined(separator: "\n")
         return prompt
     }
 

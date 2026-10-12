@@ -215,6 +215,10 @@ impl Assistant {
     ) -> Result<Answer, StoreError> {
         let now_us = Self::now_us();
         let screen = on_screen(&self.store, now_us, looking_at)?;
+        // A window was named but Hippocampus has not read it: say so, or the
+        // model answers a question about the screen with the app's name.
+        let unread = (screen.is_none() && looking_at.app.is_some()).then(|| unread_window_note(now));
+        let now = unread.as_deref().or(now);
         answer(&self.store, &self.mind, &self.user_name, self.tz, now_us, question, now, screen, memories)
     }
 
@@ -323,6 +327,27 @@ pub fn excerpt(text: &str, limit: usize) -> String {
     format!("{start}\n…\n{end}")
 }
 
+fn unread_window_note(now: Option<&str>) -> String {
+    let unknown = "Hippocampus has not read the window in front, so what is in it is not known.";
+    match now.map(str::trim).filter(|n| !n.is_empty()) {
+        Some(now) => format!("{now}. {unknown}"),
+        None => unknown.to_owned(),
+    }
+}
+
+/// What an answer shows as its sources. The screen, when the model was shown
+/// it, is always first: the person should see what was looked at whether or
+/// not the model said it used it. Then the memories it cited; with no screen
+/// and nothing cited, the three best matches.
+fn answer_sources(screen: Option<Source>, memories: Vec<Source>, cited: &[usize]) -> Vec<Source> {
+    let cited_memories: Vec<Source> = memories.iter().filter(|m| cited.contains(&m.n)).cloned().collect();
+    match screen {
+        Some(screen) => std::iter::once(screen).chain(cited_memories).collect(),
+        None if cited_memories.is_empty() => memories.into_iter().take(3).collect(),
+        None => cited_memories,
+    }
+}
+
 fn screen_source(event: &ObservedEvent) -> Source {
     Source {
         n: 1,
@@ -393,19 +418,15 @@ pub fn answer(
         "propositions": propositions,
         "today": today(tz, now_us),
     });
-    let offered: Vec<Source> = on_screen.into_iter().chain(memories).collect();
     match mind.call::<_, AnswerOut>("answer", &input, Duration::from_secs(60)) {
-        Ok(out) => {
-            let cited: Vec<Source> = offered.iter().filter(|m| out.sources.contains(&m.n)).cloned().collect();
-            Ok(Answer {
-                answer: Some(out.answer),
-                sources: if cited.is_empty() { offered.into_iter().take(3).collect() } else { cited },
-                unavailable: None,
-            })
-        }
+        Ok(out) => Ok(Answer {
+            answer: Some(out.answer),
+            sources: answer_sources(on_screen, memories, &out.sources),
+            unavailable: None,
+        }),
         Err(error) => Ok(Answer {
             answer: None,
-            sources: offered,
+            sources: on_screen.into_iter().chain(memories).collect(),
             unavailable: Some(match error {
                 MindCallError::Unavailable(reason) => reason,
                 other => other.to_string(),
@@ -768,6 +789,31 @@ mod tests {
         assert_eq!(shared.len(), 6);
         assert_eq!(shared[0], 7);
         assert_eq!(shared.iter().filter(|id| **id == 7).count(), 1);
+    }
+
+    fn source(n: usize) -> Source {
+        Source { n, event_id: i64::try_from(n).unwrap_or(0), ts_us: 0, app: "App".into(), title: None, url: None, text: String::new() }
+    }
+
+    #[test]
+    fn the_screen_is_always_shown_as_a_source_when_the_model_saw_it() {
+        let memories = vec![source(2), source(3), source(4), source(5)];
+        let n = |sources: Vec<Source>| sources.into_iter().map(|s| s.n).collect::<Vec<_>>();
+        // The model rarely cites the screen itself; it is listed regardless.
+        assert_eq!(n(answer_sources(Some(source(1)), memories.clone(), &[3])), vec![1, 3]);
+        assert_eq!(n(answer_sources(Some(source(1)), memories.clone(), &[])), vec![1]);
+        // Without a screen: what was cited, or the best three when nothing was.
+        assert_eq!(n(answer_sources(None, memories.clone(), &[4])), vec![4]);
+        assert_eq!(n(answer_sources(None, memories, &[])), vec![2, 3, 4]);
+    }
+
+    #[test]
+    fn a_window_that_was_never_read_is_said_to_be_unknown() {
+        assert_eq!(
+            unread_window_note(Some("Using Preview")),
+            "Using Preview. Hippocampus has not read the window in front, so what is in it is not known."
+        );
+        assert!(unread_window_note(None).starts_with("Hippocampus has not read"));
     }
 
     #[test]
