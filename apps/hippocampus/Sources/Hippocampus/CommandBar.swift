@@ -188,8 +188,13 @@ struct CommandBarView: View {
             }
         }
         .frame(width: Self.width)
+        // Measure the content's ideal height, not the window's current one:
+        // a scroll view takes whatever height it is given, so measuring the
+        // laid-out height would keep the panel at its first size.
+        .fixedSize(horizontal: false, vertical: true)
         .background(GeometryReader { proxy in Color.clear.preference(key: HeightKey.self, value: proxy.size.height) })
         .modifier(GlassBackground(corner: Self.corner))
+        .frame(maxHeight: .infinity, alignment: .top)
         .onPreferenceChange(HeightKey.self) { height in heightChanged(height) }
         .onAppear { focused = true }
         .onChange(of: model.mode) { _, _ in focused = true }
