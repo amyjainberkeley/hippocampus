@@ -63,7 +63,7 @@ public struct PaddleOCRRunner: OCREngine {
         }
         guard let image = PaddleOCRImage(input: input) else { trace("image_refused"); return empty }
         guard DispatchTime.now() < deadline else { trace("deadline_passed"); return empty }
-        // Off mains power the reader rests in proportion to what each read cost.
+        // The reader rests in proportion to what each read cost.
         defer { CaptureReadBudget.shared.recordRead(tookUs: tookUs()) }
         switch server.recognize(bitmap: image.bitmap, deadline: deadline) {
         case .reply(let reply):

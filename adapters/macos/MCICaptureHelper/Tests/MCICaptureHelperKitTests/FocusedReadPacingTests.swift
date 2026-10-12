@@ -66,46 +66,47 @@ final class FocusedReadPacingTests: XCTestCase {
         var budget = ReadBudget()
         XCTAssertTrue(budget.admits(nowUs: 0, scale: 2))
         // A four-second read that ended at t = 10 s.
-        budget.record(endedUs: 10 * second, tookUs: 4 * second, scale: 2)
+        budget.record(endedUs: 10 * second, tookUs: 4 * second)
         XCTAssertFalse(budget.admits(nowUs: 20 * second, scale: 2))
         XCTAssertFalse(budget.admits(nowUs: 41 * second, scale: 2))
         XCTAssertTrue(budget.admits(nowUs: 42 * second, scale: 2))
         // A quick re-read barely rests at all.
-        budget.record(endedUs: 50 * second, tookUs: second / 2, scale: 2)
+        budget.record(endedUs: 50 * second, tookUs: second / 2)
         XCTAssertTrue(budget.admits(nowUs: 54 * second, scale: 2))
     }
 
-    func testTheReaderIsBusyAtMostANinthOfTheTimeOnBattery() {
-        var budget = ReadBudget()
-        var now: UInt64 = 0, busy: UInt64 = 0
-        let horizon = 600 * second
-        while now < horizon {
-            if budget.admits(nowUs: now, scale: 2) {
-                let took = 3 * second
-                now += took; busy += took
-                budget.record(endedUs: now, tookUs: took, scale: 2)
-            } else {
-                now += second / 4
+    func testTheReaderIsBusyAtMostAQuarterOfTheTimePluggedInAndANinthOnBattery() {
+        for (scale, share) in [(UInt64(1), 1.0 / 4.0), (2, 1.0 / 9.0), (4, 1.0 / 17.0)] {
+            var budget = ReadBudget()
+            var now: UInt64 = 0, busy: UInt64 = 0
+            while now < 600 * second {
+                if budget.admits(nowUs: now, scale: scale) {
+                    let took = 3 * second
+                    now += took; busy += took
+                    budget.record(endedUs: now, tookUs: took)
+                } else {
+                    now += second / 4
+                }
             }
+            XCTAssertLessThanOrEqual(Double(busy) / Double(now), share + 0.01, "scale \(scale)")
         }
-        XCTAssertLessThanOrEqual(Double(busy) / Double(now), 1.0 / 9.0 + 0.01)
     }
 
-    func testPluggedInThereIsNoRestAndPluggingInEndsOne() {
+    func testPluggingInShortensARestThatBeganOnBattery() {
         var budget = ReadBudget()
-        budget.record(endedUs: 10 * second, tookUs: 5 * second, scale: 1)
-        XCTAssertTrue(budget.admits(nowUs: 10 * second, scale: 1))
-        budget.record(endedUs: 20 * second, tookUs: 5 * second, scale: 2)
-        XCTAssertFalse(budget.admits(nowUs: 30 * second, scale: 2))
-        XCTAssertTrue(budget.admits(nowUs: 30 * second, scale: 1), "plugged in mid-rest")
+        budget.record(endedUs: 20 * second, tookUs: 5 * second)
+        XCTAssertFalse(budget.admits(nowUs: 30 * second, scale: 2), "on battery it rests until 60 s")
+        XCTAssertFalse(budget.admits(nowUs: 30 * second, scale: 1), "plugged in, until 35 s")
+        XCTAssertTrue(budget.admits(nowUs: 35 * second, scale: 1))
+        XCTAssertFalse(budget.admits(nowUs: 35 * second, scale: 2))
     }
 
     func testLowPowerModeRestsLongerAndATimedOutReadCannotSilenceTheReaderForLong() {
         var budget = ReadBudget()
-        budget.record(endedUs: 0, tookUs: 2 * second, scale: 4)
+        budget.record(endedUs: 0, tookUs: 2 * second)
         XCTAssertFalse(budget.admits(nowUs: 31 * second, scale: 4))
         XCTAssertTrue(budget.admits(nowUs: 32 * second, scale: 4))
-        budget.record(endedUs: 100 * second, tookUs: 30 * second, scale: 2)
+        budget.record(endedUs: 100 * second, tookUs: 30 * second)
         XCTAssertTrue(budget.admits(nowUs: 220 * second, scale: 2))
     }
 

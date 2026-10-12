@@ -873,8 +873,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     private static func uptimeUs() -> UInt64 { DispatchTime.now().uptimeNanoseconds / 1_000 }
 
     private func admitRebindAttempt(generation: UInt64) -> Bool {
-        // Off mains power a newly focused window is bound, and so read, once
-        // the reader has rested from its last read.
+        // A newly focused window is bound, and so read, once the reader has
+        // rested from its last read.
         guard CaptureReadBudget.shared.admitsRead() else { return false }
         lock.lock(); defer { lock.unlock() }
         return rebindRetryPacing.admit(generation: generation, nowUs: Self.uptimeUs())
