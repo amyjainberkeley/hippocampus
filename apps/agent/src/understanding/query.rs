@@ -408,6 +408,16 @@ pub fn suggest(
             });
         }
     }
+    let learned = store.propositions_with_status(PropositionStatus::Active, 500)?.len();
+    if learned > 0 {
+        out.push(Suggestion {
+            kind: "model".into(),
+            title: "What Hippocampus has learned about you".into(),
+            why: format!("{learned} things from your work; correct anything wrong"),
+            action: serde_json::json!({ "view": "model" }),
+            score: 3,
+        });
+    }
     out.push(Suggestion {
         kind: "day".into(),
         title: "Your day so far".into(),

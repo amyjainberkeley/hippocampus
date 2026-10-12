@@ -148,7 +148,8 @@ internal struct MeasuredActivityDependencies: Sendable {
     let sleep: @Sendable (UInt64) async throws -> Void
     let sessionEligible: @Sendable () -> Bool
     let secondsSinceLastInput: @Sendable () -> TimeInterval?
-    var interactionTotals: @Sendable () -> InteractionTotals? = { InteractionTotals.current() }
+    /// Real input counters only in `.live`; synthetic dependencies read none.
+    var interactionTotals: @Sendable () -> InteractionTotals? = { nil }
 
     static let live = MeasuredActivityDependencies(
         now: {
@@ -157,7 +158,8 @@ internal struct MeasuredActivityDependencies: Sendable {
         },
         sleep: { try await Task.sleep(nanoseconds: $0) },
         sessionEligible: { ActivitySessionReader().permitsMeasurement() },
-        secondsSinceLastInput: { SystemUserActivityReader().secondsSinceLastInput() }
+        secondsSinceLastInput: { SystemUserActivityReader().secondsSinceLastInput() },
+        interactionTotals: { InteractionTotals.current() }
     )
 }
 
@@ -265,6 +267,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// set, so a baseline reset never leaves a stale thumbnail in use.
     private var priorThumbnail: TextChangeThumbnail?
     private var priorThumbnailUs: UInt64 = 0
+    private var focusedReadPacing = FocusedReadPacing()
     private var priorDHashGeneration: UInt64 = 0
     private var priorDHashCaptureOrdinal: UInt64 = 0
     private var retryOCRGeneration: UInt64?
@@ -695,6 +698,11 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     private func isShutdownRequested() -> Bool {
         lock.lock(); defer { lock.unlock() }
         return shutdownRequested
+    }
+
+    private func admitFocusedRead(generation: UInt64, nowUs: UInt64, textCatchUp: Bool) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return focusedReadPacing.admit(generation: generation, nowUs: nowUs, textCatchUp: textCatchUp)
     }
 
     private func currentPriorDHash(for generation: UInt64) -> DHash? {
@@ -1654,6 +1662,14 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
                     encoderInput: encoderInput,
                     privacySnapshot: privacySnapshot
                 )
+                // Pace frames whose picture never stops changing (video,
+                // animation). A frame not read now keeps the old baseline, so
+                // the next change after the interval is read.
+                if case .encoded = outcome,
+                   !self.admitFocusedRead(generation: baselineGeneration, nowUs: nowUs, textCatchUp: catchUp) {
+                    // `process` already released the surface lease.
+                    return
+                }
                 // Commit only a successfully processed, cascade-allowed frame.
                 // The generation check prevents an old queued operation from
                 // poisoning a replacement stream's baseline.

@@ -2798,15 +2798,16 @@ fn spawn_understanding_worker(
             .unwrap_or(u64::MAX);
             match tokio::task::spawn_blocking(move || worker.run_cycle(now_us, 6)).await {
                 Ok(Ok(stats)) => {
-                    if stats.sessions > 0 || stats.days > 0 || stats.searches > 0 {
+                    if stats.sessions > 0 || stats.days > 0 || stats.searches > 0 || stats.verdicts > 0 {
                         eprintln!(
-                            "mci-agent: understanding: sessions={} by_model={} propositions +{} ~{} days={} searches={} model={}",
+                            "mci-agent: understanding: sessions={} by_model={} propositions +{} ~{} days={} searches={} verdicts={} model={}",
                             stats.sessions,
                             stats.sessions_by_model,
                             stats.propositions_added,
                             stats.propositions_revised,
                             stats.days,
                             stats.searches,
+                            stats.verdicts,
                             stats.model_unavailable.as_deref().unwrap_or("available"),
                         );
                     }

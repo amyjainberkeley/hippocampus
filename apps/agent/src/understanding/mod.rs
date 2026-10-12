@@ -16,6 +16,7 @@
 
 pub mod apps;
 pub mod day;
+pub mod feedback;
 pub mod gum;
 pub mod mind;
 pub mod observe;
@@ -66,6 +67,8 @@ pub struct CycleStats {
     pub days: u32,
     /// Why the model was not used, if it was not.
     pub model_unavailable: Option<String>,
+    /// The user's confirmations and rejections applied.
+    pub verdicts: usize,
 }
 
 /// The written account of a day.
@@ -139,6 +142,9 @@ impl Understanding {
         if self.store.understanding_state(PIPELINE_KEY)?.as_deref() != Some(PIPELINE_VERSION) {
             self.store.reset_understanding()?;
             self.store.set_understanding_state(PIPELINE_KEY, PIPELINE_VERSION)?;
+        }
+        if let Some(inbox) = feedback::inbox_dir() {
+            stats.verdicts = feedback::apply_inbox(&self.store, &inbox, now_us)?;
         }
         let after: i64 = self.store.understanding_state(SEARCH_CURSOR)?.and_then(|v| v.parse().ok()).unwrap_or(0);
         let (added, last) = self.store.backfill_search_queries(after.max(0), 5_000)?;

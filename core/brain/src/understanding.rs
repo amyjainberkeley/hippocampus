@@ -811,6 +811,24 @@ impl SqlCipherBrainStore {
         Ok(changed == 1)
     }
 
+    /// The user said a proposition is right: it becomes certain and slow to
+    /// go stale. Returns whether it existed.
+    ///
+    /// # Errors
+    /// Database failures.
+    pub fn confirm_proposition(&self, id: i64, now_us: u64) -> Result<bool, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let changed = guard
+            .conn()
+            .execute(
+                "UPDATE propositions SET confidence = 1.0, decay = MIN(decay, 0.3), status = 'active', updated_us = ?2
+                 WHERE id = ?1",
+                params![id, sql_i64(now_us)],
+            )
+            .map_err(|e| backend("confirm proposition", e))?;
+        Ok(changed == 1)
+    }
+
     /// Permanently delete a proposition (the user asked to forget it).
     ///
     /// # Errors

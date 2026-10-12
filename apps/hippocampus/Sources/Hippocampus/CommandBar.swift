@@ -179,7 +179,7 @@ struct CommandBarView: View {
     }
 
     private var hasBody: Bool {
-        !model.rows.isEmpty || model.mode == .answer || model.mode == .day || model.notice != nil
+        !model.rows.isEmpty || model.mode == .answer || model.mode == .day || model.mode == .model || model.notice != nil
     }
 
     // Search row
@@ -203,9 +203,13 @@ struct CommandBarView: View {
                     if let action = model.activate(preferAsk: press.modifiers.contains(.command)) { perform(action) }
                     return .handled
                 }
-                .onKeyPress(characters: ["d", "c"], phases: .down) { press in
+                .onKeyPress(characters: ["d", "c", "u"], phases: .down) { press in
                     if press.modifiers.contains(.command), press.characters == "d" {
                         model.showDay()
+                        return .handled
+                    }
+                    if press.modifiers.contains(.command), press.characters == "u" {
+                        model.showModel()
                         return .handled
                     }
                     if press.modifiers.contains([.command, .shift]), press.characters.lowercased() == "c" {
@@ -238,6 +242,12 @@ struct CommandBarView: View {
         switch model.mode {
         case .day:
             ScrollView { DayCard(day: model.day) }
+        case .model:
+            ScrollView {
+                ModelCard(propositions: model.propositions, working: model.isWorking) { id, right in
+                    model.judge(id, right: right)
+                }
+            }
         case .answer:
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -298,11 +308,12 @@ struct CommandBarView: View {
             case .home:
                 KeyHint(keys: "↩", label: "Open")
                 KeyHint(keys: "⌘D", label: "Your day")
+                KeyHint(keys: "⌘U", label: "About you")
             case .results:
                 KeyHint(keys: "↩", label: "Open")
                 KeyHint(keys: "⌘↩", label: "Ask")
                 KeyHint(keys: "⇧⌘C", label: "Copy context")
-            case .answer, .day:
+            case .answer, .day, .model:
                 KeyHint(keys: "esc", label: "Back")
                 KeyHint(keys: "⇧⌘C", label: "Copy context")
             }
@@ -496,6 +507,7 @@ private struct BarRowView: View {
         case "searched": "magnifyingglass"
         case "related": "link"
         case "day": "chart.bar.xaxis"
+        case "model": "person.crop.circle"
         default: "sparkles"
         }
     }
@@ -645,6 +657,64 @@ private struct DayCard: View {
 
     static func clock(_ us: UInt64) -> String {
         Date(timeIntervalSince1970: TimeInterval(us) / 1_000_000).formatted(date: .omitted, time: .shortened)
+    }
+}
+
+/// What Hippocampus has learned about you, each claim with a confidence and
+/// a way to say it is right or wrong.
+private struct ModelCard: View {
+    let propositions: [BarProposition]
+    let working: Bool
+    let judge: (Int64, Bool) -> Void
+    @State private var confirmed: Set<Int64> = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("What Hippocampus has learned about you")
+                .font(.system(size: 15, weight: .semibold))
+            Text("Learned on this Mac from what you did. Mark what’s wrong and it won’t come back.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if propositions.isEmpty {
+                if working {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text("Nothing yet. Hippocampus learns from finished stretches of work.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            ForEach(propositions) { proposition in
+                HStack(alignment: .top, spacing: 10) {
+                    Text(proposition.kind.capitalized)
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.quaternary.opacity(0.7), in: Capsule())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 76, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(proposition.text).font(.callout).fixedSize(horizontal: false, vertical: true)
+                        Text(confirmed.contains(proposition.id) ? "You confirmed this" : "\(Int((proposition.confidence * 100).rounded()))% sure · \(proposition.evidence.count) \(proposition.evidence.count == 1 ? "moment" : "moments")")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Spacer(minLength: 8)
+                    Button {
+                        confirmed.insert(proposition.id)
+                        judge(proposition.id, true)
+                    } label: { Image(systemName: "checkmark") }
+                        .buttonStyle(.borderless)
+                        .help("That’s right")
+                        .disabled(confirmed.contains(proposition.id))
+                    Button { judge(proposition.id, false) } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.borderless)
+                        .help("That’s wrong: forget it")
+                }
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

@@ -46,7 +46,14 @@ enum CommandBarPreviewRenderer {
             "insights":["Longest focus: 9:40–11:10, code in VS Code.","Most switching around 15:00 (64 app switches).","You searched pricing models twice before deciding."],
             "suggestion":"Batch Slack around 3 PM so the afternoon has one long block."}}}
         """)
+        let propositions = decode([BarProposition].self, """
+        [{"id":1,"text":"Sam is setting per-seat pricing for the Team plan with Ravi and Maya.","reasoning":"","kind":"project","confidence":0.8,"evidence":[1,2,3]},
+         {"id":2,"text":"Amy writes in the morning and handles messages after 3 PM.","reasoning":"","kind":"habit","confidence":0.6,"evidence":[4,5]},
+         {"id":3,"text":"Amy hesitates before committing a price, switching between notes and chat.","reasoning":"","kind":"struggle","confidence":0.5,"evidence":[6]},
+         {"id":4,"text":"Sam is learning SwiftUI layout and Liquid Glass.","reasoning":"","kind":"skill","confidence":0.6,"evidence":[7,8]}]
+        """)
         let states: [(String, (CommandBarModel) -> Void)] = [
+            ("model", { $0.preview(mode: .model, context: context, propositions: propositions) }),
             ("home", { $0.preview(mode: .home, context: context, suggestions: suggestions) }),
             ("results", { $0.preview(mode: .results, query: "team pricing", context: context, hits: hits) }),
             ("answer", { $0.preview(mode: .answer, query: "what did we decide on team pricing?", context: context, answer: answer, question: "what did we decide on team pricing?") }),

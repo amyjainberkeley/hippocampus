@@ -147,6 +147,15 @@ public struct BarDay: Decodable, Sendable, Equatable {
     public let facts: String
 }
 
+public struct BarProposition: Decodable, Sendable, Equatable, Identifiable {
+    public let id: Int64
+    public let text: String
+    public let reasoning: String
+    public let kind: String
+    public let confidence: Double
+    public let evidence: [Int64]
+}
+
 /// One selectable row in the bar.
 public enum BarRow: Sendable, Equatable, Identifiable {
     case suggestion(BarSuggestion)
@@ -178,7 +187,7 @@ public enum BarAction: Sendable, Equatable {
 /// your day.
 @MainActor
 public final class CommandBarModel: ObservableObject {
-    public enum Mode: Equatable, Sendable { case home, results, answer, day }
+    public enum Mode: Equatable, Sendable { case home, results, answer, day, model }
 
     @Published public var query: String = ""
     @Published public private(set) var mode: Mode = .home
@@ -189,6 +198,7 @@ public final class CommandBarModel: ObservableObject {
     @Published public private(set) var askedQuestion: String?
     @Published public private(set) var isWorking = false
     @Published public private(set) var day: BarDay?
+    @Published public private(set) var propositions: [BarProposition] = []
     @Published public private(set) var selection = 0
     @Published public private(set) var notice: String?
 
@@ -220,7 +230,7 @@ public final class CommandBarModel: ObservableObject {
             return [.ask(trimmed)] + hits.map(BarRow.hit)
         case .answer:
             return (answer?.sources ?? []).map(BarRow.source)
-        case .day:
+        case .day, .model:
             return []
         }
     }
@@ -373,6 +383,43 @@ public final class CommandBarModel: ObservableObject {
         }
     }
 
+    // MARK: What Hippocampus has learned
+
+    public func showModel() {
+        guard let launch = launch(false) else { return }
+        mode = .model
+        selection = 0
+        isWorking = propositions.isEmpty
+        Task {
+            defer { isWorking = false }
+            do {
+                let body = Data(#"{"limit":40}"#.utf8)
+                let data = try await reads.call("mci_user_model", arguments: body, launch: launch, timeout: .seconds(10))
+                struct Reply: Decodable { let propositions: [BarProposition] }
+                propositions = try JSONDecoder().decode(Reply.self, from: data).propositions
+            } catch {
+                notice = "Nothing learned yet."
+            }
+        }
+    }
+
+    /// Record the person's verdict for the daemon to apply. Only the id and
+    /// the verdict are written.
+    public func judge(_ id: Int64, right: Bool, inbox: URL? = CommandBarModel.feedbackInbox()) {
+        propositions.removeAll { $0.id == id && !right }
+        guard let inbox else { return }
+        try? FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true,
+                                                 attributes: [.posixPermissions: 0o700])
+        let body = #"{"id":\#(id),"verdict":"\#(right ? "confirm" : "reject")"}"#
+        let file = inbox.appendingPathComponent("\(Int(Date().timeIntervalSince1970 * 1000))-\(id).json")
+        try? Data(body.utf8).write(to: file, options: .atomic)
+    }
+
+    nonisolated public static func feedbackInbox() -> URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("Hippocampus/understanding-feedback", isDirectory: true)
+    }
+
     /// Context for any AI: a cited packet for the current query or screen.
     public func copyContext() async -> String? {
         guard let launch = launch(false) else { return nil }
@@ -425,7 +472,9 @@ public final class CommandBarModel: ObservableObject {
             }
             return .openEvent(UInt64(max(source.eventId, 0)))
         case .suggestion(let suggestion):
-            if suggestion.action.view == "day" || suggestion.action.openSession != nil {
+            if suggestion.action.view == "model" {
+                showModel()
+            } else if suggestion.action.view == "day" || suggestion.action.openSession != nil {
                 showDay()
             } else if let question = suggestion.action.ask {
                 query = question
@@ -440,7 +489,7 @@ public final class CommandBarModel: ObservableObject {
     /// Esc: step back (answer or day → results or home), or close.
     public func back() -> Bool {
         switch mode {
-        case .answer, .day:
+        case .answer, .day, .model:
             mode = query.isEmpty ? .home : .results
             selection = 0
             return true
@@ -471,6 +520,7 @@ extension CommandBarModel {
         answer: BarAnswer? = nil,
         question: String? = nil,
         day: BarDay? = nil,
+        propositions: [BarProposition] = [],
         working: Bool = false
     ) {
         previewing = true
@@ -483,6 +533,7 @@ extension CommandBarModel {
         self.answer = answer
         self.askedQuestion = question
         self.day = day
+        self.propositions = propositions
         self.isWorking = working
         self.selection = mode == .results ? 1 : 0
     }
