@@ -194,6 +194,7 @@ final class PreferencesStoreTests: XCTestCase {
         let allKeys = [
             PreferencesStore.Keys.showMenuBarIcon,
             PreferencesStore.Keys.defaultRecallTab,
+            PreferencesStore.Keys.askKey,
             PreferencesStore.Keys.retentionPolicy,
             PreferencesStore.Keys.customDatabasePath,
         ]

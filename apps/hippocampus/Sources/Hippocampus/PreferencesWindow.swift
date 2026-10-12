@@ -129,6 +129,16 @@ struct PreferencesRootView: View {
                 .font(PreferencesStyle.captionFont)
                 .foregroundStyle(.secondary)
 
+            Picker("Open Ask with", selection: $store.askKey) {
+                ForEach(SoloKey.allCases) { key in
+                    Text(key.label).tag(key)
+                }
+            }
+            .pickerStyle(.menu)
+            Text("Tap the key by itself. Shortcuts that use it, like ⌘C, never open Ask. ⌃⇧Space always works.")
+                .font(PreferencesStyle.captionFont)
+                .foregroundStyle(.secondary)
+
             Toggle("Show menu-bar icon", isOn: $store.showMenuBarIcon)
             Text("If off, only ⌃⇧Space (Recall popup) remains as an entry point. Restart to apply.")
                 .font(PreferencesStyle.captionFont)

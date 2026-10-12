@@ -115,6 +115,11 @@ public final class PreferencesStore: ObservableObject {
         didSet { defaults.set(defaultRecallTab.rawValue, forKey: Keys.defaultRecallTab) }
     }
 
+    /// The key that opens Ask when tapped by itself. ⌃⇧Space always works.
+    @Published public var askKey: SoloKey {
+        didSet { defaults.set(askKey.rawValue, forKey: Keys.askKey) }
+    }
+
     // MARK: Privacy
 
     /// Finite legacy selections require review before the agent deletes data.
@@ -183,6 +188,7 @@ public final class PreferencesStore: ObservableObject {
 
         let rawTab = defaults.string(forKey: Keys.defaultRecallTab) ?? PreferredRecallTab.search.rawValue
         self.defaultRecallTab = PreferredRecallTab(rawValue: rawTab) ?? .search
+        self.askKey = defaults.string(forKey: Keys.askKey).flatMap(SoloKey.init(rawValue:)) ?? .rightCommand
 
         self.retentionPolicy = .forever
         self.retentionCustomDays = nil
@@ -342,6 +348,7 @@ public final class PreferencesStore: ObservableObject {
     enum Keys {
         static let showMenuBarIcon = "ai.hippocampus.prefs.showMenuBarIcon"
         static let defaultRecallTab = "ai.hippocampus.prefs.defaultRecallTab"
+        static let askKey = "ai.hippocampus.prefs.askKey"
         static let retentionPolicy = "ai.hippocampus.prefs.retentionPolicy"
         static let customDatabasePath = "ai.hippocampus.prefs.customDatabasePath"
     }

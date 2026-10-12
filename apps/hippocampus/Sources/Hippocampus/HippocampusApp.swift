@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: TBD-private
+import Combine
 import SwiftUI
 import HippocampusKit
 import os
@@ -75,6 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let modelProvisioner = BriefModelProvisioner()
     let loginItemVM = LoginItemViewModel(service: SMLoginItemService())
     let preferencesStore = PreferencesStore()
+    private var askKeyObservation: AnyCancellable?
     let updater = SparkleUpdaterService()
     private var preferencesControllerConfigured = false
     private let initialPreferencesRequest = PreferencesOpenRequest(arguments: Array(CommandLine.arguments.dropFirst()))
@@ -287,6 +289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     "global Recall hotkey registration failed: \(status)"
                 )
             }
+            self.watchAskKey()
             self.installBrowserHostManifests()
             self.armTCCStderrTail()
             self.startSupervisorOrDeferUntilOnboarded()
@@ -444,7 +447,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tccStderrTail?.stop()
         tccStderrTail = nil
         GlobalHotkeyManager.shared.unregister()
+        SoloKeyMonitor.shared.stop()
+        askKeyObservation = nil
         supervisor.closeRecallUI()
+    }
+
+    /// Open Ask on a tap of the chosen key, and follow the preference.
+    private func watchAskKey() {
+        askKeyObservation = preferencesStore.$askKey.removeDuplicates().sink { key in
+            SoloKeyMonitor.shared.start(key: key) { CommandBarController.shared.toggle() }
+        }
     }
 
     private func presentShutdownFailure(_ error: Error) {
