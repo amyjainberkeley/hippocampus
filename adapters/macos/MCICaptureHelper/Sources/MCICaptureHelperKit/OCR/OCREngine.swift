@@ -35,10 +35,15 @@ public struct OCREngineInput: @unchecked Sendable {
     /// rect per ADR-0016 §1.1. The caller normalizes; the engine
     /// passes it through to `VNRecognizeTextRequest.regionOfInterest`.
     public let roi: CGRect
+    /// Pixels per point of the capture: 2 on a Retina display, 1 when not
+    /// known. The reader detects a Retina frame at half scale, the size its
+    /// text was designed for, and recognizes it at full size.
+    public let pixelsPerPoint: CGFloat
 
-    public init(pixelBuffer: CVPixelBuffer, roi: CGRect) {
+    public init(pixelBuffer: CVPixelBuffer, roi: CGRect, pixelsPerPoint: CGFloat = 1) {
         self.pixelBuffer = pixelBuffer
         self.roi = roi
+        self.pixelsPerPoint = pixelsPerPoint
     }
 }
 

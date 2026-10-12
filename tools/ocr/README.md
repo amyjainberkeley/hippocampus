@@ -21,6 +21,18 @@ privacy review. These limits do not establish a total-process memory bound.
 The per-engine preprocessing adapters target the pinned RapidOCR version;
 dependency upgrades must rerun the real geometry and small-text regressions.
 
+The app keeps one worker running (`--serve`, two inference threads). Two
+things keep a reading cheap there. A capture that declares itself Retina, with
+a BMP resolution of 144 dpi or more, is detected at half scale whatever its
+size, and a second look at a patch the first pass left unread stays at the
+patch's native size. And a line whose pixels have not changed since it was last
+read keeps that reading: flat margin around the line is ignored, anything else,
+including faint text, is not. A window read again costs detection plus its new
+lines. Readings are remembered in the worker's memory only, at most 8192
+lines, and go when it exits. Recognition pads each batch to its widest line, so
+a remembered reading can differ from a fresh one by a space or a trailing
+mark; neither is the more accurate.
+
 ## Build on macOS
 
 Use Python 3.12 and an isolated environment. These commands download public

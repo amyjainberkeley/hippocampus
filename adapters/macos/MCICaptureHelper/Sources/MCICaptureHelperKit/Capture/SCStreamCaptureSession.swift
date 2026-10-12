@@ -83,6 +83,9 @@ public struct InCallbackSample: Sendable, Equatable {
     /// Quarter-scale luminance for the text catch-up check; nil when the
     /// buffer could not be sampled, which only disables the catch-up.
     public let thumbnail: TextChangeThumbnail?
+    /// Pixels per point of this frame, from its ScreenCaptureKit attachments;
+    /// 1 when the frame does not say.
+    public let pixelsPerPoint: CGFloat
 
     public init(
         userIdle: Bool,
@@ -93,8 +96,10 @@ public struct InCallbackSample: Sendable, Equatable {
         dhash: DHash,
         appBundleId: String?,
         grayscale: [UInt8],
-        thumbnail: TextChangeThumbnail? = nil
+        thumbnail: TextChangeThumbnail? = nil,
+        pixelsPerPoint: CGFloat = 1
     ) {
+        self.pixelsPerPoint = pixelsPerPoint
         self.userIdle = userIdle
         self.frameStatusComplete = frameStatusComplete
         self.dirtyRects = dirtyRects
@@ -1657,7 +1662,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
                 heightPx: CVPixelBufferGetHeight(pb),
                 dirtyRects: effectiveDirtyRects
             )
-            ocrInput = OCREngineInput(pixelBuffer: pb, roi: roi)
+            ocrInput = OCREngineInput(pixelBuffer: pb, roi: roi, pixelsPerPoint: sample.pixelsPerPoint)
             encoderInput = EncoderInput(pixelBuffer: pb)
         } else {
             releaser = BorrowedNoRetainReleaser()
@@ -1951,7 +1956,11 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             dhash: dhash,
             appBundleId: nil,
             grayscale: grid,
-            thumbnail: TextChangeThumbnail.make(from: pixelBuffer)
+            thumbnail: TextChangeThumbnail.make(from: pixelBuffer),
+            pixelsPerPoint: CapturedSampleExtractor.pixelsPerPoint(
+                scaleFactor: info?[.scaleFactor] as? CGFloat,
+                contentScale: info?[.contentScale] as? CGFloat
+            )
         )
     }
 

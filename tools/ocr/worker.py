@@ -3,6 +3,7 @@
 Images are never written to disk. Model downloads belong to prepare.py, never
 this process. The parent enforces a wall-clock deadline and reaps this child.
 """
+import collections
 import hashlib
 import json
 import math
@@ -12,6 +13,8 @@ import sys
 
 MAX_EDGE = 3840
 MAX_REPLY = 1024 * 1024
+# A BMP resolution of 144 dpi or more marks a Retina (2x) capture.
+RETINA_PIXELS_PER_METER = 5669
 MODELS = {
     'PP-OCRv6_det_small.onnx': '090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f',
     'PP-OCRv6_rec_small.onnx': '6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884',
@@ -23,13 +26,19 @@ def read_image(stream, *, framed=False):
     """One BMP from `stream`. One-shot mode also requires end of input after
     the pixels; framed (serve) mode reads exactly one image and returns None
     on a clean end of input between images."""
+    frame = read_frame(stream, framed=framed)
+    return None if frame is None else frame[0]
+
+
+def read_frame(stream, *, framed=False):
+    """`read_image`, plus whether the BMP declares a Retina (2x) capture."""
     header = stream.read(54)
     if framed and not header:
         return None
     if len(header) != 54:
         raise ValueError('invalid image header')
     magic, size, r1, r2, offset = struct.unpack('<2sIHHI', header[:14])
-    dib, w, h, planes, depth, compression, length, _, _, colors, important = struct.unpack('<IiiHHIIiiII', header[14:])
+    dib, w, h, planes, depth, compression, length, x_density, y_density, colors, important = struct.unpack('<IiiHHIIiiII', header[14:])
     if (magic != b'BM' or offset != 54 or dib != 40 or planes != 1 or depth != 32
             or compression != 0 or r1 or r2 or colors or important
             or not 0 < w <= MAX_EDGE or not -MAX_EDGE <= h < 0
@@ -39,7 +48,8 @@ def read_image(stream, *, framed=False):
     if len(data) != length:
         raise ValueError('invalid image length')
     import numpy as np
-    return np.frombuffer(data, dtype=np.uint8).reshape(-h, w, 4)[:, :, :3].copy()
+    image = np.frombuffer(data, dtype=np.uint8).reshape(-h, w, 4)[:, :, :3].copy()
+    return image, min(x_density, y_density) >= RETINA_PIXELS_PER_METER
 
 
 def load_engine(model_dir, *, threads=1, half_res_detection=False):
@@ -74,6 +84,8 @@ def load_engine(model_dir, *, threads=1, half_res_detection=False):
         'EngineConfig.onnxruntime.inter_op_num_threads': 1,
     })
 
+    frame = FrameState()
+
     class BoundedDetectorPreProcess(DetPreProcess):
         def resize(self, image):
             import cv2
@@ -82,13 +94,22 @@ def load_engine(model_dir, *, threads=1, half_res_detection=False):
                 raise ValueError('invalid detector input dimensions')
             # Match normal short-side upscaling, but never let a narrow region
             # expand either edge past the capture cap. The model needs /32.
-            # A Retina-sized frame is detected at half scale, which is the
+            # A Retina frame is detected at half scale, which is the
             # resolution its UI text was designed for; recognition still
             # reads the original pixels. 4.6x faster with no accuracy loss
-            # on the screen benchmark.
-            floor = 0.5 if half_res_detection and max(height, width) >= 2560 else 1.0
-            scale = min(max(floor, self.limit_side_len / min(height, width)),
-                        MAX_EDGE / max(height, width))
+            # on the screen benchmark. The capture says when it is Retina; a
+            # frame that does not say is taken for one from 2560 pixels up.
+            retina = half_res_detection and (
+                frame.retina or max(frame.height, frame.width, height, width) >= 2560)
+            if retina and frame.second_look:
+                # A patch the first pass left unread is looked at again at its
+                # native size, twice what the first pass saw. Upscaling it to
+                # the usual short side made each patch cost more than the
+                # whole frame.
+                wanted = 1.0
+            else:
+                wanted = max(0.5 if retina else 1.0, self.limit_side_len / min(height, width))
+            scale = min(wanted, MAX_EDGE / max(height, width))
             size = tuple(max(32, min(MAX_EDGE, round(int(n * scale) / 32) * 32))
                          for n in (width, height))
             return cv2.resize(image, size)
@@ -113,8 +134,82 @@ def load_engine(model_dir, *, threads=1, half_res_detection=False):
         return resize_recognition(image, max_wh_ratio)
 
     recognizer.resize_norm_img = bounded_recognition
-    engine.text_det = CoverageDetector(engine.text_det)
+    engine.text_rec = RememberedRecognizer(recognizer)
+    engine.text_det = CoverageDetector(engine.text_det, frame)
+    engine.frame = frame
     return engine
+
+
+def _line_key(crop):
+    """Identifies a line by its pixels, without the flat margin around them.
+
+    The detector frames the same line a pixel or two differently once the
+    window has scrolled. Rows and columns that are nothing but the crop's
+    background colour carry no text, so they are left out of the key and the
+    line is recognized as the one already read. Anything else, including
+    faint text, stays in.
+    """
+    import numpy as np
+    background = np.median(crop.reshape(-1, crop.shape[2]), axis=0)
+    marked = (np.abs(crop.astype(np.int16) - background) > 2).any(axis=2)
+    rows, columns = np.flatnonzero(marked.any(axis=1)), np.flatnonzero(marked.any(axis=0))
+    if rows.size:
+        crop = crop[rows[0]:rows[-1] + 1, columns[0]:columns[-1] + 1]
+    return hashlib.blake2b(repr(crop.shape).encode() + np.ascontiguousarray(crop).tobytes(),
+                           digest_size=16).digest()
+
+
+class RememberedRecognizer:
+    """Reuses the reading of a line whose pixels have not changed.
+
+    A window is read again whenever part of it changes, and most of its lines
+    are the same pixels as the last time. Recognition is most of a reading's
+    CPU, so a line crop identical to one already read gets that reading and
+    only new or changed lines reach the model. A crop that cannot be read
+    still fails the whole reading. Readings are kept in this process's memory
+    only, up to `MAX_LINES`, and go when it exits.
+    """
+
+    MAX_LINES = 8192
+
+    def __init__(self, recognizer):
+        self.recognizer = recognizer
+        self.readings = collections.OrderedDict()
+
+    def __getattr__(self, name):
+        return getattr(self.recognizer, name)
+
+    def __call__(self, args):
+        import time
+        from rapidocr.ch_ppocr_rec import TextRecInput, TextRecOutput
+        if args.return_word_box or not isinstance(args.img, list):
+            return self.recognizer(args)
+        started = time.perf_counter()
+        keys = [_line_key(crop) for crop in args.img]
+        unread = [i for i, key in enumerate(keys) if key not in self.readings]
+        if unread:
+            fresh = self.recognizer(TextRecInput(img=[args.img[i] for i in unread]))
+            if len(fresh.txts) != len(unread) or len(fresh.scores) != len(unread):
+                raise ValueError('invalid OCR result count')
+            for i, text, score in zip(unread, fresh.txts, fresh.scores):
+                self.readings[keys[i]] = (text, score)
+        for key in keys:
+            self.readings.move_to_end(key)
+        found = [self.readings[key] for key in keys]
+        while len(self.readings) > self.MAX_LINES:
+            self.readings.popitem(last=False)
+        return TextRecOutput(args.img, tuple(text for text, _ in found), tuple(score for _, score in found),
+                             tuple(None for _ in found), time.perf_counter() - started)
+
+
+class FrameState:
+    """What the detector knows about the frame it is reading."""
+
+    def __init__(self):
+        self.retina = False       # the capture declared a 2x frame
+        self.width = 0
+        self.height = 0
+        self.second_look = False  # reading a patch the first pass left unread
 
 
 # Screen text is axis-aligned, so boxes are handled as rectangles below.
@@ -261,8 +356,9 @@ class CoverageDetector:
     any, so the cost lands only where it is needed.
     """
 
-    def __init__(self, detector):
+    def __init__(self, detector, frame=None):
         self.detector = detector
+        self.frame = frame or FrameState()
 
     def __getattr__(self, name):
         return getattr(self.detector, name)
@@ -272,7 +368,10 @@ class CoverageDetector:
         import numpy as np
         from rapidocr.ch_ppocr_det.utils import TextDetOutput
         started = time.perf_counter()
+        self.frame.height, self.frame.width = image.shape[:2]
+        self.frame.second_look = False
         first = self.detector(image)
+        self.frame.second_look = True
         items = [] if first.boxes is None else [
             (np.asarray(b, dtype=np.float32), _rect(b), float(s), 0)
             for b, s in zip(first.boxes, first.scores)]
@@ -330,7 +429,8 @@ def deny_network(event, args):
         raise PermissionError('OCR worker is offline')
 
 
-def recognize(engine, image):
+def recognize(engine, image, retina=False):
+    engine.frame.retina = retina
     result = engine(image)
     lines = [] if result.txts is None else encode_lines(result.txts, result.scores, result.boxes, image.shape[1], image.shape[0])
     reply = json.dumps({'version': 1, 'lines': lines}, ensure_ascii=False, allow_nan=False).encode('utf-8')
@@ -350,21 +450,22 @@ def serve():
     out.write(b'{"version":1,"ready":true}\n')
     out.flush()
     while True:
-        image = read_image(sys.stdin.buffer, framed=True)
-        if image is None:
+        frame = read_frame(sys.stdin.buffer, framed=True)
+        if frame is None:
             return 0
         try:
-            reply = recognize(engine, image)
+            reply = recognize(engine, *frame)
         except Exception:
             reply = b'{"version":1,"failed":true}'
         out.write(reply + b'\n')
         out.flush()
 
 
-# The persistent worker runs one frame at a time; four threads and half-scale
-# detection on Retina frames cut a 2880x1800 reading from 6.3 s to 1.4 s under
-# load. See docs/audits/2026-10-08-ocr-transcription.md.
-SERVE_ENGINE = {'threads': 4, 'half_res_detection': True}
+# The persistent worker runs one frame at a time. Half-scale detection on
+# Retina frames cut a 2880x1800 reading from 6.3 s to 1.4 s under load; see
+# docs/audits/2026-10-08-ocr-transcription.md. Two threads read a full window
+# in under two seconds for three quarters of the CPU four threads spend.
+SERVE_ENGINE = {'threads': 2, 'half_res_detection': True}
 
 
 def main():
@@ -376,9 +477,9 @@ def main():
             sys.stderr.write('Local OCR worker failed\n')
             return 1
     try:
-        image = read_image(sys.stdin.buffer)
+        image, retina = read_frame(sys.stdin.buffer)
         engine = load_engine(Path(__file__).resolve().parent / 'models')
-        reply = recognize(engine, image)
+        reply = recognize(engine, image, retina)
         sys.stdout.buffer.write(reply)
         sys.stdout.buffer.flush()
     except Exception:

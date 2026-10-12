@@ -180,6 +180,14 @@ class ServeModeTests(unittest.TestCase):
         replies = [json.loads(line) for line in result.stdout.splitlines()]
         self.assertEqual(len(replies), 2)
 
+    def test_bitmap_density_declares_a_retina_capture(self):
+        def with_density(value):
+            data = bytearray(bitmap())
+            data[38:46] = struct.pack('<ii', value, value)
+            return bytes(data)
+        self.assertEqual([worker.read_frame(io.BytesIO(with_density(v)))[1] for v in (0, 2835, 5668, 5669, 8504)],
+                         [False, False, False, True, True])
+
     def test_framed_reader_returns_none_only_at_a_clean_boundary(self):
         stream = io.BytesIO(bitmap() + bitmap())
         self.assertIsNotNone(worker.read_image(stream, framed=True))
@@ -194,7 +202,8 @@ class CoverageDetectorTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.engine = worker.load_engine(Path(__file__).parent/'models', threads=2)
+        # The engine as the app runs it.
+        cls.engine = worker.load_engine(Path(__file__).parent/'models', **worker.SERVE_ENGINE)
 
     def page(self, width, height, wide=False):
         import numpy as np
@@ -213,6 +222,89 @@ class CoverageDetectorTests(unittest.TestCase):
         result = self.engine(self.page(3420, 2214))
         self.assertEqual(list(result.txts), ['Normal paragraph line one for the check',
                                              'Normal paragraph line two for the check'])
+
+    def test_sparse_retina_window_is_read_whatever_its_size(self):
+        # Most windows are narrower than 2560 pixels; the capture declares 2x.
+        self.engine.frame.retina = True
+        try:
+            result = self.engine(self.page(2400, 1600))
+        finally:
+            self.engine.frame.retina = False
+        self.assertEqual(list(result.txts), ['Normal paragraph line one for the check',
+                                             'Normal paragraph line two for the check'])
+
+    def test_declared_retina_frame_is_detected_at_half_scale(self):
+        import numpy as np
+        image = np.full((1600, 2400, 3), 255, dtype=np.uint8)
+        frame = self.engine.frame
+        frame.width, frame.height, frame.second_look = 2400, 1600, False
+        try:
+            frame.retina = False
+            self.assertEqual(self.engine.text_det.get_preprocess(2400)(image).shape[2:], (1600, 2400))
+            frame.retina = True
+            self.assertEqual(self.engine.text_det.get_preprocess(2400)(image).shape[2:], (800, 1216))
+            # A second look at a small patch stays at its native size.
+            frame.second_look = True
+            patch_image = np.full((128, 608, 3), 255, dtype=np.uint8)
+            self.assertEqual(self.engine.text_det.get_preprocess(608)(patch_image).shape[2:], (128, 608))
+        finally:
+            frame.retina, frame.second_look = False, False
+
+    def test_lines_already_read_are_not_recognized_again(self):
+        from PIL import Image, ImageDraw, ImageFont
+        import numpy as np
+        sent = []
+        inner = self.engine.text_rec.recognizer
+        recognize = type(inner).__call__
+
+        def counting(recognizer, args):
+            sent.append(len(args.img))
+            return recognize(recognizer, args)
+
+        page = self.page(1400, 400)
+        with patch.object(type(inner), '__call__', counting):
+            first = self.engine(page)
+            again = self.engine(page)
+            typed = Image.fromarray(page[:, :, ::-1].copy())
+            ImageDraw.Draw(typed).text((40, 200), 'One more line typed just now', fill='black',
+                                       font=ImageFont.truetype('/System/Library/Fonts/Supplemental/Arial.ttf', 24))
+            third = self.engine(np.array(typed)[:, :, ::-1].copy())
+        self.assertEqual(list(again.txts), list(first.txts))
+        self.assertEqual(list(again.scores), list(first.scores))
+        self.assertEqual(list(third.txts), list(first.txts) + ['One more line typed just now'])
+        # Only the first reading, then only the new line, reached the model.
+        self.assertEqual(sent, [2, 1])
+
+    def test_a_line_is_known_by_its_ink_not_its_margin(self):
+        import numpy as np
+        line = np.full((40, 300, 3), 250, dtype=np.uint8)
+        line[12:28, 20:200] = 30
+        wider = np.full((48, 330, 3), 250, dtype=np.uint8)
+        wider[18:34, 40:220] = 30
+        self.assertEqual(worker._line_key(line), worker._line_key(wider))
+        other = line.copy()
+        other[12:28, 60:70] = 250
+        self.assertNotEqual(worker._line_key(line), worker._line_key(other))
+        # Faint text beside the line is still part of it.
+        faint = line.copy()
+        faint[12:28, 230:280] = 244
+        self.assertNotEqual(worker._line_key(line), worker._line_key(faint))
+
+    def test_remembered_lines_stay_within_their_bound(self):
+        import numpy as np
+        from rapidocr.ch_ppocr_rec import TextRecInput, TextRecOutput
+
+        class Reader:
+            def __call__(self, args):
+                return TextRecOutput(args.img, tuple('x' for _ in args.img), tuple(0.9 for _ in args.img))
+
+        remembered = worker.RememberedRecognizer(Reader())
+        remembered.MAX_LINES = 4
+        for value in range(10):
+            crop = np.full((8, 8, 3), 255, dtype=np.uint8)
+            crop[2:6, 2:6] = value
+            remembered(TextRecInput(img=[crop]))
+        self.assertEqual(len(remembered.readings), 4)
 
     def test_one_wide_line_no_longer_refuses_the_frame(self):
         result = self.engine(self.page(3420, 2214, wide=True))

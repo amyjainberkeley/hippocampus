@@ -55,7 +55,8 @@ public struct PaddleOCRRunner: OCREngine {
         // Content-free: sizes, outcome and a line count only.
         func trace(_ outcome: String, lines: Int = 0) {
             OCRTrace.emit("paddle-ocr", "outcome=\(outcome) frame=\(fullW)x\(fullH) "
-                + "roi=\(Int(roi.width * CGFloat(fullW)))x\(Int(roi.height * CGFloat(fullH))) lines=\(lines)")
+                + "roi=\(Int(roi.width * CGFloat(fullW)))x\(Int(roi.height * CGFloat(fullH))) "
+                + "density=\(PaddleOCRImage.pixelsPerMeter(pixelsPerPoint: input.pixelsPerPoint)) lines=\(lines)")
         }
         guard let image = PaddleOCRImage(input: input) else { trace("image_refused"); return empty }
         guard DispatchTime.now() < deadline else { trace("deadline_passed"); return empty }
@@ -162,9 +163,17 @@ public struct PaddleOCRRunner: OCREngine {
 
 /// Encode only whole pixels contained in the authorized ROI. Using an inward
 /// crop prevents rounding from including neighboring, unapproved pixels.
-private struct PaddleOCRImage {
+struct PaddleOCRImage {
     let bitmap: Data
     let region: CGRect
+
+    /// The BMP resolution that tells the reader how dense the capture is:
+    /// 72 points per inch times the capture's pixels per point. 5669 (144 dpi)
+    /// and above is a Retina frame. Zero when the scale is not usable.
+    static func pixelsPerMeter(pixelsPerPoint: CGFloat) -> Int32 {
+        guard pixelsPerPoint.isFinite, pixelsPerPoint > 0, pixelsPerPoint <= 8 else { return 0 }
+        return Int32((pixelsPerPoint * 72 / 0.0254).rounded())
+    }
 
     init?(input: OCREngineInput) {
         let roi = input.roi
@@ -190,7 +199,8 @@ private struct PaddleOCRImage {
         append(UInt32(54+w*h*4)); append(UInt32(0)); append(UInt32(54))
         append(UInt32(40)); append(Int32(w)); append(Int32(-h))
         append(UInt16(1)); append(UInt16(32)); append(UInt32(0)); append(UInt32(w*h*4))
-        for _ in 0..<4 { append(UInt32(0)) }
+        let density = Self.pixelsPerMeter(pixelsPerPoint: input.pixelsPerPoint)
+        append(density); append(density); append(UInt32(0)); append(UInt32(0))
         data.reserveCapacity(54+w*h*4)
         for row in y0..<y1 {
             data.append(base.advanced(by: row*stride+x0*4).assumingMemoryBound(to: UInt8.self), count: w*4)

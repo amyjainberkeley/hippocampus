@@ -391,7 +391,8 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         let inputSnapshot = keyframeRetainerSnapshot != nil && evidenceCandidate != nil
             ? OCREngineInput(
                 pixelBuffer: input.pixelBuffer,
-                roi: CGRect(x: 0, y: 0, width: 1, height: 1)
+                roi: CGRect(x: 0, y: 0, width: 1, height: 1),
+                pixelsPerPoint: input.pixelsPerPoint
             )
             : input
         await Self.submitOCRAttempt(

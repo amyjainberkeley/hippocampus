@@ -119,7 +119,7 @@ final class PaddleOCRServer: @unchecked Sendable {
             process.qualityOfService = .userInitiated
             // Never inherit provider credentials, Python paths, or user model overrides.
             process.environment = ["PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1",
-                                   "OMP_NUM_THREADS": "4", "OPENBLAS_NUM_THREADS": "1"]
+                                   "OMP_NUM_THREADS": "2", "OPENBLAS_NUM_THREADS": "1"]
             let inputPipe = Pipe(), outputPipe = Pipe()
             process.standardInput = inputPipe
             process.standardOutput = outputPipe

@@ -57,6 +57,11 @@ commits are intentionally omitted from release notes.
   playing video every 15 seconds, not every frame.
 - Closing the window you were in no longer restarts capture. It used to,
   several times an hour, reloading the text reader each time.
+- Reading a window takes a fraction of the work. Text is found at the size
+  it was drawn for on a Retina display, whatever the window's size, and a
+  line that has not changed is not read again. On the test screens the same
+  text is read for about a quarter of the processor time, and a window
+  read again after a small change for about a tenth.
 
 ### A New Mark
 

@@ -53,6 +53,43 @@ final class PaddleOCRRunnerTests: XCTestCase {
         XCTAssertEqual(line.boundingBox.height, 0.125, accuracy: 0.00001)
     }
 
+    func testRetinaCaptureIsDeclaredInTheBitmapSoTheReaderDetectsAtHalfScale() async throws {
+        let executable = try fixture("""
+        import sys,struct,json
+        data=sys.stdin.buffer.read()
+        assert struct.unpack('<ii',data[38:46])==(5669,5669)
+        print(json.dumps({'version':1,'lines':[{'text':'Retina','confidence':0.95,'box':[0.1,0.2,0.8,0.25]}]}))
+        """)
+        let plain = try input()
+        let retina = OCREngineInput(pixelBuffer: plain.pixelBuffer, roi: plain.roi, pixelsPerPoint: 2)
+        let runner = PaddleOCRRunner(executableURL: executable)
+        let read = await runner.recognize(input: retina, timeoutMs: 4000)
+        XCTAssertEqual(read.recognizedLines.first?.text, "Retina")
+        // A frame that does not say is not declared Retina: the reader's assert fails.
+        let undeclared = await runner.recognize(input: plain, timeoutMs: 4000)
+        XCTAssertTrue(undeclared.recognizedLines.isEmpty)
+    }
+
+    func testBitmapDensityFollowsTheCaptureScale() {
+        XCTAssertEqual(PaddleOCRImage.pixelsPerMeter(pixelsPerPoint: 1), 2835)
+        XCTAssertEqual(PaddleOCRImage.pixelsPerMeter(pixelsPerPoint: 2), 5669)
+        XCTAssertEqual(PaddleOCRImage.pixelsPerMeter(pixelsPerPoint: 1.8), 5102)
+        for unusable in [CGFloat.nan, .infinity, 0, -2, 64] {
+            XCTAssertEqual(PaddleOCRImage.pixelsPerMeter(pixelsPerPoint: unusable), 0)
+        }
+    }
+
+    func testFrameScaleComesFromItsAttachments() {
+        XCTAssertEqual(CapturedSampleExtractor.pixelsPerPoint(scaleFactor: 2, contentScale: 1), 2)
+        XCTAssertEqual(CapturedSampleExtractor.pixelsPerPoint(scaleFactor: 2, contentScale: nil), 2)
+        // A window larger than the capture cap is shrunk to fit.
+        XCTAssertEqual(CapturedSampleExtractor.pixelsPerPoint(scaleFactor: 2, contentScale: 0.9), 1.8, accuracy: 0.0001)
+        XCTAssertEqual(CapturedSampleExtractor.pixelsPerPoint(scaleFactor: 2, contentScale: 2), 2)
+        XCTAssertEqual(CapturedSampleExtractor.pixelsPerPoint(scaleFactor: 1, contentScale: 1), 1)
+        XCTAssertEqual(CapturedSampleExtractor.pixelsPerPoint(scaleFactor: nil, contentScale: 1), 1)
+        XCTAssertEqual(CapturedSampleExtractor.pixelsPerPoint(scaleFactor: .nan, contentScale: 1), 1)
+    }
+
     func testMalformedGeometryAndProcessFailurePublishNoText() async throws {
         for reply in [
             "{'version':1,'lines':[{'text':'bad','confidence':0.9,'box':[-1,0,1,1]}]}",

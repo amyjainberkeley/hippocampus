@@ -31,6 +31,7 @@
 // │ CANNOT store a frame (Amendment 1 §3(c)/(d)).                    │
 // └──────────────────────────────────────────────────────────────────┘
 
+import CoreGraphics
 import Foundation
 
 /// Pure, OS-free extraction helpers. No `ScreenCaptureKit`, no
@@ -73,6 +74,16 @@ public enum CapturedSampleExtractor {
             }
         }
         return DHash(bits: bits)
+    }
+
+    /// Pixels per point of a captured frame, from its ScreenCaptureKit
+    /// attachments. `scaleFactor` is the display's backing scale;
+    /// `contentScale` is below 1 when the content was shrunk to fit the
+    /// buffer. 1 when the frame does not say.
+    public static func pixelsPerPoint(scaleFactor: CGFloat?, contentScale: CGFloat?) -> CGFloat {
+        guard let scaleFactor, scaleFactor.isFinite, scaleFactor > 0 else { return 1 }
+        guard let contentScale, contentScale.isFinite, contentScale > 0 else { return scaleFactor }
+        return scaleFactor * min(contentScale, 1)
     }
 
     /// Assemble the `Sendable` `CandidateFrame` that crosses into the

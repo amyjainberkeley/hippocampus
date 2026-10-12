@@ -236,7 +236,9 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
         let tsUs = UInt64(max(0, now.timeIntervalSince1970 * 1_000_000))
         let readRegion = BackgroundCapturePolicy.readRegion(changed: changed, displayBounds: bounds, windows: windows,
                                                             excludedBundleIds: excluded, focusedWindowId: focused)
-        let input = OCREngineInput(pixelBuffer: pixelBuffer, roi: BackgroundCapturePolicy.ocrRegion(readRegion))
+        let input = OCREngineInput(
+            pixelBuffer: pixelBuffer, roi: BackgroundCapturePolicy.ocrRegion(readRegion),
+            pixelsPerPoint: bounds.width > 0 ? CGFloat(CVPixelBufferGetWidth(pixelBuffer)) / bounds.width : 1)
         let emitter = emitter
         Task {
             await emitter.processBackground(tsUs: tsUs, input: input) { lines in
