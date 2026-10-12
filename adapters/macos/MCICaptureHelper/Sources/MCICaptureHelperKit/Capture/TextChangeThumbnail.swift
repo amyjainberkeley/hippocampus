@@ -73,6 +73,29 @@ public struct TextChangeThumbnail: Sendable, Equatable {
         return changed
     }
 
+    /// The bounding box (unit rect, top-left origin) of cells that changed
+    /// outside `excluding`, or nil when nothing did.
+    public func changedBounds(since other: TextChangeThumbnail, excluding unit: CGRect?) -> CGRect? {
+        guard width == other.width, height == other.height else { return CGRect(x: 0, y: 0, width: 1, height: 1) }
+        var ex = (x0: 0, x1: 0, y0: 0, y1: 0)
+        if let unit, unit.width > 0, unit.height > 0 {
+            ex = (Int((unit.minX * CGFloat(width)).rounded(.down)), Int((unit.maxX * CGFloat(width)).rounded(.up)),
+                  Int((unit.minY * CGFloat(height)).rounded(.down)), Int((unit.maxY * CGFloat(height)).rounded(.up)))
+        }
+        var minX = width, minY = height, maxX = -1, maxY = -1
+        for y in 0..<height {
+            for x in 0..<width {
+                if x >= ex.x0 && x < ex.x1 && y >= ex.y0 && y < ex.y1 { continue }
+                let i = y * width + x
+                guard abs(Int(luma[i]) - Int(other.luma[i])) > Self.lumaDelta else { continue }
+                minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= 0 else { return nil }
+        return CGRect(x: CGFloat(minX) / CGFloat(width), y: CGFloat(minY) / CGFloat(height),
+                      width: CGFloat(maxX - minX + 1) / CGFloat(width), height: CGFloat(maxY - minY + 1) / CGFloat(height))
+    }
+
     public func changedPixels(since other: TextChangeThumbnail) -> Int? {
         guard width == other.width, height == other.height else { return nil }
         var changed = 0

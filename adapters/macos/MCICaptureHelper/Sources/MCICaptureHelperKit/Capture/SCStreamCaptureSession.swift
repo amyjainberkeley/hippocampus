@@ -702,7 +702,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
 
     private func admitFocusedRead(generation: UInt64, nowUs: UInt64, textCatchUp: Bool) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        return focusedReadPacing.admit(generation: generation, nowUs: nowUs, textCatchUp: textCatchUp)
+        return focusedReadPacing.admit(generation: generation, nowUs: nowUs, textCatchUp: textCatchUp,
+                                       scale: CapturePower.current().intervalScale)
     }
 
     private func currentPriorDHash(for generation: UInt64) -> DHash? {

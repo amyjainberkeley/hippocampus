@@ -27,6 +27,10 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
     private let focusedWindowId: @Sendable () -> CGWindowID?
     private let secureInput: any SecureEventInputProbe
     private let activity: any UserActivityReading
+    /// Called when the person stops one of these streams from the menu bar's
+    /// screen-sharing indicator. That means "stop recording", so the whole
+    /// helper stops (exit 82), and the app turns capture off.
+    private let onUserStopped: @Sendable () -> Void
     private let queue = DispatchQueue(label: "com.hippocampus.capture.background", qos: .utility)
 
     /// A running display stream: its display, and the processes its content
@@ -56,7 +60,11 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
         userDenylist: [DenylistEntry],
         focusedWindowId: @escaping @Sendable () -> CGWindowID?,
         secureInput: any SecureEventInputProbe = CarbonSecureEventInputProbe(),
-        activity: any UserActivityReading = SystemUserActivityReader()
+        activity: any UserActivityReading = SystemUserActivityReader(),
+        onUserStopped: @escaping @Sendable () -> Void = {
+            FileHandle.standardError.write(Data("mci-capture-helper: whole-screen stream stopped by the user; stopping capture\n".utf8))
+            SCStreamCaptureSession.terminateHelper(for: .userStoppedCapture)
+        }
     ) {
         self.emitter = emitter
         self.excludedBundleIds = BackgroundCapturePolicy.excludedBundleIds(userEntries: userDenylist)
@@ -64,6 +72,7 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
         self.focusedWindowId = focusedWindowId
         self.secureInput = secureInput
         self.activity = activity
+        self.onUserStopped = onUserStopped
     }
 
     /// Starts a stream per display and keeps the set current as displays come
@@ -191,13 +200,19 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
                    width: bounds.width / display.bounds.width,
                    height: bounds.height / display.bounds.height)
         }
-        let due: Bool = lock.withLock {
-            guard let last = lastRead[display.id] else { return true }
-            guard now.timeIntervalSince(last.at) >= Self.minimumReadInterval else { return false }
-            return (thumbnail.changedPixels(since: last.thumbnail, excluding: focusedRect) ?? Int.max)
-                >= TextCatchUpPolicy.changedPixelThreshold
+        // Whole-screen reads are the costliest work Hippocampus does: slower
+        // on battery, none in Low Power Mode.
+        guard let interval = CapturePower.current().displayReadInterval else { return }
+        // Read only the windows that changed, not the whole display.
+        let region: CGRect? = lock.withLock {
+            guard let last = lastRead[display.id] else { return CGRect(x: 0, y: 0, width: 1, height: 1) }
+            guard now.timeIntervalSince(last.at) >= max(interval, Self.minimumReadInterval),
+                  (thumbnail.changedPixels(since: last.thumbnail, excluding: focusedRect) ?? Int.max)
+                    >= TextCatchUpPolicy.changedPixelThreshold
+            else { return nil }
+            return thumbnail.changedBounds(since: last.thumbnail, excluding: focusedRect)
         }
-        guard due else { return }
+        guard let changed = region else { return }
 
         // The window list is taken with the frame, so attribution uses the
         // geometry the pixels were drawn with.
@@ -219,7 +234,9 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
         let denylist = denylist
         let bounds = display.bounds
         let tsUs = UInt64(max(0, now.timeIntervalSince1970 * 1_000_000))
-        let input = OCREngineInput(pixelBuffer: pixelBuffer, roi: CGRect(x: 0, y: 0, width: 1, height: 1))
+        let readRegion = BackgroundCapturePolicy.readRegion(changed: changed, displayBounds: bounds, windows: windows,
+                                                            excludedBundleIds: excluded, focusedWindowId: focused)
+        let input = OCREngineInput(pixelBuffer: pixelBuffer, roi: BackgroundCapturePolicy.ocrRegion(readRegion))
         let emitter = emitter
         Task {
             await emitter.processBackground(tsUs: tsUs, input: input) { lines in
@@ -258,6 +275,11 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
     }
 
     public func stream(_ stream: SCStream, didStopWithError error: Error) {
+        if CaptureRuntimeFailure.forStreamStop(error, sourceIsLive: true) == .userStoppedCapture {
+            lock.withLock { stopped = true }
+            onUserStopped()
+            return
+        }
         let id: CGDirectDisplayID? = lock.withLock {
             guard let entry = entries.removeValue(forKey: ObjectIdentifier(stream)) else { return nil }
             streams.removeValue(forKey: entry.id)

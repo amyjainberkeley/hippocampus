@@ -61,6 +61,40 @@ public enum BackgroundCapturePolicy {
         }
     }
 
+    /// The part of a display to read: every eligible window that overlaps the
+    /// changed area, whole (so no line is cut), as a unit rect with a
+    /// top-left origin. Falls back to the changed area itself.
+    public static func readRegion(
+        changed: CGRect,
+        displayBounds: CGRect,
+        windows: [VisibleWindow],
+        excludedBundleIds: Set<String>,
+        focusedWindowId: CGWindowID?
+    ) -> CGRect {
+        let full = CGRect(x: 0, y: 0, width: 1, height: 1)
+        guard displayBounds.width > 0, displayBounds.height > 0 else { return full }
+        var region: CGRect?
+        for window in windows where window.layer == 0 && window.windowId != focusedWindowId {
+            if let bundle = window.bundleId, isExcluded(bundle, from: excludedBundleIds) { continue }
+            let unit = CGRect(x: (window.bounds.minX - displayBounds.minX) / displayBounds.width,
+                              y: (window.bounds.minY - displayBounds.minY) / displayBounds.height,
+                              width: window.bounds.width / displayBounds.width,
+                              height: window.bounds.height / displayBounds.height).intersection(full)
+            guard !unit.isNull, unit.intersects(changed) else { continue }
+            region = region.map { $0.union(unit) } ?? unit
+        }
+        return (region ?? changed).intersection(full)
+    }
+
+    /// A top-left unit rect as an OCR region (bottom-left origin), clamped
+    /// inside the frame so rounding can never put it outside.
+    public static func ocrRegion(_ unit: CGRect) -> CGRect {
+        let x0 = min(max(unit.minX, 0), 1), x1 = min(max(unit.maxX, 0), 1)
+        let y0 = min(max(1 - unit.maxY, 0), 1), y1 = min(max(1 - unit.minY, 0), 1)
+        guard x1 > x0, y1 > y0 else { return CGRect(x: 0, y: 0, width: 1, height: 1) }
+        return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+    }
+
     /// The minimum on-screen size worth reading as a window of its own.
     static let minimumWindowSide: CGFloat = 80
 

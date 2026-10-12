@@ -25,7 +25,8 @@ public struct FocusedReadPacing: Sendable, Equatable {
     public init() {}
 
     /// Whether to read a frame the change gate admitted.
-    public mutating func admit(generation: UInt64, nowUs: UInt64, textCatchUp: Bool) -> Bool {
+    /// `scale` stretches every interval (2 on battery, 4 in Low Power Mode).
+    public mutating func admit(generation: UInt64, nowUs: UInt64, textCatchUp: Bool, scale: UInt64 = 1) -> Bool {
         if generation != self.generation {
             self.generation = generation
             lastReadUs = nowUs
@@ -33,9 +34,12 @@ public struct FocusedReadPacing: Sendable, Equatable {
             waitedSinceRead = false
             return true
         }
-        let interval = isInMotion ? Self.motionIntervalUs : Self.minimumIntervalUs
+        let interval = (isInMotion ? Self.motionIntervalUs : Self.minimumIntervalUs) * max(scale, 1)
         let sinceRead = nowUs >= lastReadUs ? nowUs - lastReadUs : 0
-        if textCatchUp && !isInMotion {
+        // Typing has its own three-second floor upstream; on battery it waits
+        // the scaled interval too.
+        let catchUpFloor = scale > 1 ? Self.minimumIntervalUs * scale : 0
+        if textCatchUp && !isInMotion && sinceRead >= catchUpFloor {
             lastReadUs = nowUs
             return true
         }

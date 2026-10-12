@@ -122,4 +122,22 @@ final class BackgroundCapturePolicyTests: XCTestCase {
             XCTAssertTrue(BackgroundCapturePolicy.isExcluded(bundle, from: excluded), bundle)
         }
     }
+
+    func testOnlyTheWindowsThatChangedAreRead() {
+        let windows = [
+            window(1, "com.apple.TextEdit", "Notes", CGRect(x: 0, y: 30, width: 500, height: 570)),
+            window(2, "com.tinyspeck.slackmacgap", "general", CGRect(x: 500, y: 30, width: 500, height: 570)),
+        ]
+        // A change in Slack's half of the display.
+        let changed = CGRect(x: 0.7, y: 0.4, width: 0.1, height: 0.1)
+        let region = BackgroundCapturePolicy.readRegion(changed: changed, displayBounds: display, windows: windows,
+                                                        excludedBundleIds: [], focusedWindowId: nil)
+        XCTAssertEqual(region.minX, 0.5, accuracy: 0.001, "the whole Slack window, not the whole display")
+        XCTAssertEqual(region.width, 0.5, accuracy: 0.001)
+        let ocr = BackgroundCapturePolicy.ocrRegion(region)
+        XCTAssertTrue(CGRect(x: 0, y: 0, width: 1, height: 1).contains(ocr))
+        XCTAssertEqual(ocr.minY, 0, accuracy: 0.001, "bottom-left origin")
+        XCTAssertEqual(BackgroundCapturePolicy.ocrRegion(CGRect(x: -0.0000001, y: 0, width: 1.0000002, height: 1)),
+                       CGRect(x: 0, y: 0, width: 1, height: 1))
+    }
 }
