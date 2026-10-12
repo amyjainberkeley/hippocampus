@@ -46,6 +46,18 @@ commits are intentionally omitted from release notes.
   read. Turn it off with `defaults write ai.hippocampus WholeScreenCapture
   -bool NO`.
 
+### Lighter, And Yours To Stop
+
+- "Stop Sharing" in the menu bar's screen-recording indicator stops
+  Hippocampus, whichever of its streams you stop. It stays off until you
+  turn it back on.
+- Much less energy. Other windows are read only when their text changed:
+  every 30 seconds plugged in, every minute on battery, never in Low Power
+  Mode. The window you're in is read half as often on battery, and a
+  playing video every 15 seconds, not every frame.
+- Closing the window you were in no longer restarts capture. It used to,
+  several times an hour, reloading the text reader each time.
+
 ### A New Mark
 
 - A new icon: a golden-ratio curl, the seahorse shape the hippocampus is

@@ -268,6 +268,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     private var priorThumbnail: TextChangeThumbnail?
     private var priorThumbnailUs: UInt64 = 0
     private var focusedReadPacing = FocusedReadPacing()
+    private var closedWindowBudget = ClosedWindowBudget()
+    private var rebindRetryPacing = RebindRetryPacing()
     private var priorDHashGeneration: UInt64 = 0
     private var priorDHashCaptureOrdinal: UInt64 = 0
     private var retryOCRGeneration: UInt64?
@@ -680,6 +682,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             try await stream.stopCapture()
             return true
         } catch {
+            // Its window closed first: the stream is no longer running.
+            if ClosedWindowBudget.isAlreadyStopped(error) { return true }
             reportTerminalCaptureFailure(error: error, site: failureSite)
             return false
         }
@@ -840,18 +844,36 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
                 let snap = store.currentSync()
                 let installed = self?.currentInstalledFocusGeneration() ?? 0
                 if snap.generation != installed,
-                   let focused = snap.focused
+                   let focused = snap.focused,
+                   self?.admitRebindAttempt(generation: snap.generation) == true
                 {
                     try? await self?.rebindFocusedWindow(
                         focusedWindow: focused,
                         snapshotGeneration: snap.generation
                     )
+                    self?.recordRebindAttempt(generation: snap.generation)
                 }
                 try? await Task.sleep(nanoseconds: 200_000_000)
             }
         }
         rebindTask = task
         lock.unlock()
+    }
+
+    private static func uptimeUs() -> UInt64 { DispatchTime.now().uptimeNanoseconds / 1_000 }
+
+    private func admitRebindAttempt(generation: UInt64) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return rebindRetryPacing.admit(generation: generation, nowUs: Self.uptimeUs())
+    }
+
+    private func recordRebindAttempt(generation: UInt64) {
+        lock.lock(); defer { lock.unlock() }
+        rebindRetryPacing.record(
+            generation: generation,
+            installed: installedFocusGeneration == generation,
+            nowUs: Self.uptimeUs()
+        )
     }
 
     /// Cancel the rebind task (idempotent).
@@ -1726,10 +1748,43 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// `// UNVERIFIED — needs live macOS; do not claim working`.
     public func stream(_ stream: SCStream, didStopWithError error: Error) {
         // UNVERIFIED — needs live macOS; do not claim working.
+        if retireClosedWindowStream(stream, error: error) {
+            FileHandle.standardError.write(Data(
+                "mci-capture-helper: helper_health: captured window closed; rebinding to the focused window\n".utf8
+            ))
+            return
+        }
         guard let diagnostic = claimUnexpectedStreamTermination(
             stream, error: error, site: .streamDelegate
         ) else { return }
         handleClaimedRuntimeFailure(diagnostic)
+    }
+
+    /// The captured window closed, which ends its stream but not capture: the
+    /// rebind task installs a stream for whatever is focused next. False for
+    /// any other stop, for a stream already retired, and once closed-window
+    /// stops arrive back to back, so the caller treats those as before.
+    private func retireClosedWindowStream(_ stopped: SCStream, error: Error) -> Bool {
+        guard ClosedWindowBudget.isClosedWindow(error) else { return false }
+        lock.lock(); defer { lock.unlock() }
+        let identity = ObjectIdentifier(stopped)
+        guard runtimeFailure == nil,
+              streamFocusGenerations[identity] != nil,
+              closedWindowBudget.absorb(nowUs: Self.uptimeUs())
+        else {
+            return false
+        }
+        candidateStreams.removeValue(forKey: identity)
+        streamFocusGenerations.removeValue(forKey: identity)
+        if stream === stopped {
+            stream = nil
+            installedFocusGeneration = 0
+            priorDHash = nil
+            priorDHashGeneration = 0
+            priorDHashCaptureOrdinal = 0
+            retryOCRGeneration = nil
+        }
+        return true
     }
 
     private func handleClaimedRuntimeFailure(_ diagnostic: CaptureRuntimeDiagnostic) {
