@@ -11,6 +11,8 @@ public struct OverviewPreviewUnderstanding: UnderstandingReader {
         case today
         /// Today, nothing saved yet.
         case todayEmpty
+        /// Today, nothing saved yet, and no AI tool connected: a first day.
+        case firstDay
         /// Another day, with work.
         case pastDay
         /// Another day, nothing saved.
@@ -41,6 +43,15 @@ public struct OverviewPreviewUnderstanding: UnderstandingReader {
         case .todayEmpty, .nothingLearned, .nothingLearnedModelOff:
             return try Self.edited(PreviewUnderstandingFixtures.overview) { json in
                 Self.empty(&json)
+            }
+        case .firstDay:
+            return try Self.edited(PreviewUnderstandingFixtures.overview) { json in
+                Self.empty(&json)
+                if var knows = json["ai_knows"] as? [String: Any] {
+                    knows["about_you"] = []
+                    knows["hook_installed"] = false
+                    json["ai_knows"] = knows
+                }
             }
         case .pastDayEmpty:
             return try Self.edited(PreviewUnderstandingFixtures.overview) { json in
@@ -84,7 +95,7 @@ public struct OverviewPreviewUnderstanding: UnderstandingReader {
         switch state {
         case .unavailable:
             throw UnderstandingError.unavailable
-        case .nothingLearned, .todayEmpty, .pastDayEmpty:
+        case .nothingLearned, .todayEmpty, .firstDay, .pastDayEmpty:
             return try Self.edited(PreviewUnderstandingFixtures.modelPage, as: ModelPage.self) { json in
                 json["shared"] = []
                 json["kept_back"] = []

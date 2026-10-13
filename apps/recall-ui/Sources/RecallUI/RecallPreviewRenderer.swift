@@ -113,6 +113,7 @@ enum RecallPreviewRenderer {
                            hover: .session(taxRounding))
         try await overview("overview-today-searches", .today, select: taxRounding, showSearches: true)
         try await overview("overview-today-empty", .todayEmpty, height: firstScreen)
+        try await overview("overview-first-day", .firstDay, height: firstScreen)
         try await overview("overview-past-day", .pastDay, today: false)
         try await overview("overview-past-day-empty", .pastDayEmpty, height: firstScreen, today: false)
         try await overview("overview-model-off", .modelOff)
@@ -165,7 +166,9 @@ enum RecallPreviewRenderer {
         hosting.frame = NSRect(origin: .zero, size: size)
         hosting.appearance = appearance
         // Hosted in a window so SwiftUI runs its tasks; the window is never
-        // ordered on screen.
+        // ordered on screen. The app never becomes active here, so AppKit
+        // draws a prominent button grey, as in a window in the background;
+        // in the app it is the accent.
         let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: size.width, height: size.height),
                               styleMask: [.borderless], backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false

@@ -14,7 +14,6 @@ struct RightNowCardView: View {
     @State private var showsAllLines = false
     @Environment(\.locale) private var locale
     @Environment(\.timeZone) private var timeZone
-    @Environment(\.isSyntheticPreview) private var isSyntheticPreview
 
     var body: some View {
         OverviewCard {
@@ -95,15 +94,25 @@ struct RightNowCardView: View {
                 }
             }
         case .connect:
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(UserFacingCopy.Overview.connectLine)
-                    .font(MCI.Font.body)
-                    .foregroundStyle(MCI.Color.foregroundSecondary)
-                Spacer(minLength: 8)
-                Button(UserFacingCopy.connectAction) { openAITools() }
-                    .buttonStyle(.bordered)
-                    .disabled(isSyntheticPreview)
-            }
+            ConnectAIToolsRow()
+        }
+    }
+}
+
+/// One line and "Connect", shown instead of "Your AI already knows" while no
+/// AI tool starts its sessions with Hippocampus (RULINGS W5).
+struct ConnectAIToolsRow: View {
+    @Environment(\.isSyntheticPreview) private var isSyntheticPreview
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(UserFacingCopy.Overview.connectLine)
+                .font(MCI.Font.body)
+                .foregroundStyle(MCI.Color.foregroundSecondary)
+            Spacer(minLength: 8)
+            Button(UserFacingCopy.connectAction) { openAITools() }
+                .buttonStyle(.bordered)
+                .disabled(isSyntheticPreview)
         }
     }
 }

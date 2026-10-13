@@ -152,6 +152,13 @@ struct OverviewPlace: View {
                 .font(MCI.Font.body)
                 .foregroundStyle(MCI.Color.foregroundSecondary)
             modelLine(overview)
+            // A first day has no Right now card to offer "Connect" yet.
+            if model.offersConnectOnEmptyDay {
+                OverviewCard {
+                    ConnectAIToolsRow()
+                }
+                .padding(.top, 12)
+            }
         }
         .padding(.vertical, 24)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -163,7 +170,8 @@ struct OverviewPlace: View {
                 .padding(.top, 4)
             if let block = model.selectedBlock {
                 SessionDetailView(detail: SessionDetail(block: block, locale: locale, timeZone: timeZone),
-                                  reader: reader, open: open, search: search, noticedOpen: $noticedOpen)
+                                  reader: reader, open: open, search: search, noticedOpen: $noticedOpen,
+                                  showsCardActions: !model.selectedIsRightNow)
             }
             facts(overview)
             if let account = overview.account {

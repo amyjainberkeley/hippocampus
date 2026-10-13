@@ -77,7 +77,8 @@ public extension UserFacingCopy {
         public static let rememberedRow = "What\u{2019}s remembered, and deleting it"
         /// What a delete also takes (contract model-page.md section 5).
         public static let rememberedCaption = "Deleting a moment also forgets what was learned from it."
-        public static let namesRow = "Names and nicknames"
+        /// The same name the page it opens carries.
+        public static let namesRow = "Names you use"
         public static let aiToolsRow = "AI Tools"
 
         /// A session an item was learned in: "Oct 12, 2:02 – 2:31 PM".

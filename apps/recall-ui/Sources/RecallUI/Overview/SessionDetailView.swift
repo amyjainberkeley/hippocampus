@@ -1,6 +1,7 @@
 import AppKit
 import RecallUIKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The selected session (contract overview.md section 17): title, time and
 /// length, kind, apps with their minutes, up to two sentences, what
@@ -13,6 +14,9 @@ struct SessionDetailView: View {
     let open: (RecallRoute) -> Void
     let search: (String) -> Void
     @Binding var noticedOpen: Bool
+    /// False for the session the Right now card already shows: its "Copy
+    /// for your AI" and "Open …" are on the card, so they are not repeated.
+    var showsCardActions = true
 
     var body: some View {
         OverviewCard {
@@ -97,9 +101,11 @@ struct SessionDetailView: View {
         HStack(spacing: 8) {
             Button(UserFacingCopy.showInHistory) { open(detail.history) }
                 .buttonStyle(.bordered)
-            CopyForYourAIButton(title: detail.title, range: detail.copyRange, reader: reader)
-            if let reopen = detail.reopen {
-                ReopenButton(action: reopen, prominent: true)
+            if showsCardActions {
+                CopyForYourAIButton(title: detail.title, range: detail.copyRange, reader: reader)
+                if let reopen = detail.reopen {
+                    ReopenButton(action: reopen, prominent: true)
+                }
             }
         }
         .padding(.top, 2)
@@ -121,20 +127,22 @@ struct AppTimeLabel: View {
     }
 }
 
-/// The app's own icon when it is on this Mac, else nothing.
+/// The app's own icon when it is on this Mac, else the plain app icon Finder
+/// shows for an app it cannot find.
 struct AppIcon: View {
     let bundleId: String
 
     var body: some View {
+        Image(nsImage: icon)
+            .resizable()
+            .accessibilityHidden(true)
+    }
+
+    private var icon: NSImage {
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
-                .resizable()
-                .accessibilityHidden(true)
-        } else {
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(MCI.Color.border)
-                .accessibilityHidden(true)
+            return NSWorkspace.shared.icon(forFile: url.path)
         }
+        return NSWorkspace.shared.icon(for: .applicationBundle)
     }
 }
 

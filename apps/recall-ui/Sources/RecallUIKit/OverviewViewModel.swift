@@ -223,4 +223,18 @@ public final class OverviewViewModel: ObservableObject {
         guard isToday, let overview else { return nil }
         return RightNowCard(overview: overview, receipt: captureHealth, now: now())
     }
+
+    /// The selected session is the one the Right now card shows, so its
+    /// detail leaves out the card's buttons rather than repeat them.
+    public var selectedIsRightNow: Bool {
+        guard let id = rightNow?.blockId, let selected = selectedBlock else { return false }
+        return selected.id == id
+    }
+
+    /// Today with nothing saved and no AI tool connected: the empty day
+    /// offers "Connect", since there is no Right now card to carry it.
+    public var offersConnectOnEmptyDay: Bool {
+        guard isToday, let overview, overview.blocks.isEmpty, rightNow == nil else { return false }
+        return !overview.aiKnows.hookInstalled
+    }
 }

@@ -98,10 +98,12 @@ struct DayStripView: View {
                     }
                 }
                 .overlay {
+                    // Selection is the accent, as everywhere in the window
+                    // (RULINGS B4), set off from the block by a gap.
                     if isSelected {
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .strokeBorder(MCI.Color.foreground, lineWidth: 2)
-                            .padding(-3)
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(DayStripPalette.color(DayStripPalette.accent), lineWidth: 2)
+                            .padding(-4)
                     }
                 }
                 .frame(width: blockWidth, height: Self.stripHeight)

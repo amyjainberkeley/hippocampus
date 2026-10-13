@@ -247,6 +247,34 @@ final class OverviewViewModelTests: XCTestCase {
         XCTAssertEqual(card.aiKnows, .connect)
     }
 
+    func testTheCardsOwnSessionIsKnownSoItsDetailDoesNotRepeatTheCard() async throws {
+        let (model, _) = try await loaded(receipt: SampleDay.receipt())
+        XCTAssertEqual(model.rightNow?.blockId, 1_791_839_523_000_000)
+        XCTAssertEqual(model.selectedBlock?.id, 1_791_839_523_000_000)
+        XCTAssertTrue(model.selectedIsRightNow)
+        model.select(model.blocks[1])
+        XCTAssertFalse(model.selectedIsRightNow)
+        model.moveSelection(by: 99)
+        XCTAssertTrue(model.selectedIsRightNow)
+        model.moveDay(-1)
+        XCTAssertFalse(model.selectedIsRightNow, "another day has no card")
+    }
+
+    func testAnEmptyTodayOffersConnectOnlyWhileNoAIToolIsConnected() async throws {
+        let empty = try UnderstandingFixture.overview().with(blocks: [])
+        for (hooked, offers) in [(false, true), (true, false)] {
+            let understanding = ScriptedUnderstanding()
+            await understanding.setOverview(
+                empty.with(now: .nothing, aiKnows: AIKnows(recentWork: [], aboutYou: [], hookInstalled: hooked)))
+            let model = model(understanding)
+            await model.reload()
+            XCTAssertNil(model.rightNow)
+            XCTAssertEqual(model.offersConnectOnEmptyDay, offers)
+        }
+        let (working, _) = try await loaded()
+        XCTAssertFalse(working.offersConnectOnEmptyDay, "a day with sessions has its card")
+    }
+
     func testThereIsNoCardOnAnotherDayOrWhenNothingWasSaved() throws {
         let overview = try UnderstandingFixture.overview()
         XCTAssertNil(RightNowCard(overview: overview.with(now: overview.now, isToday: false), receipt: nil, now: SampleDay.now))
