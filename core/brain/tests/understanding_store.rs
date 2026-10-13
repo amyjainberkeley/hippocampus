@@ -319,14 +319,19 @@ fn the_newest_revision_is_found_through_revised_from() {
     let three = store
         .revise_proposition(two, &prop("The user plans a beta launch on October 21", 0.8), &[e], 3)
         .unwrap();
-    assert_eq!(store.newest_revision(one).unwrap(), Some(three));
-    assert_eq!(store.newest_revision(two).unwrap(), Some(three));
-    assert_eq!(store.newest_revision(three).unwrap(), Some(three));
+    let active = PropositionStatus::Active;
+    assert_eq!(store.newest_revision(one).unwrap(), Some((three, active)));
+    assert_eq!(store.newest_revision(two).unwrap(), Some((three, active)));
+    assert_eq!(store.newest_revision(three).unwrap(), Some((three, active)));
 
     let lone = store.insert_proposition(&prop("The user writes Rust", 0.6), &[e], 4).unwrap();
-    assert_eq!(store.newest_revision(lone).unwrap(), Some(lone));
+    assert_eq!(store.newest_revision(lone).unwrap(), Some((lone, active)));
     store.set_proposition_status(lone, PropositionStatus::Retired, 5).unwrap();
-    assert_eq!(store.newest_revision(lone).unwrap(), Some(lone), "merged away, nothing revised it");
+    assert_eq!(
+        store.newest_revision(lone).unwrap(),
+        Some((lone, PropositionStatus::Retired)),
+        "merged away: nothing revised it, and it is not in use"
+    );
     assert_eq!(store.newest_revision(4242).unwrap(), None);
 
     // A row revised twice (an older brain could hold one): the newest revision
@@ -336,9 +341,9 @@ fn the_newest_revision_is_found_through_revised_from() {
     let dropped = store
         .revise_proposition(base, &prop("The user reviews pull requests at night", 0.7), &[e], 8)
         .unwrap();
-    assert_eq!(store.newest_revision(base).unwrap(), Some(dropped));
+    assert_eq!(store.newest_revision(base).unwrap(), Some((dropped, active)));
     store.set_proposition_status(dropped, PropositionStatus::Rejected, 9).unwrap();
-    assert_eq!(store.newest_revision(base).unwrap(), Some(kept));
+    assert_eq!(store.newest_revision(base).unwrap(), Some((kept, active)));
 }
 
 #[test]
@@ -461,7 +466,7 @@ fn a_reader_of_an_older_brain_sees_no_understanding_rather_than_an_error() {
     let reader = SqlCipherBrainStore::open_readonly(&path, &key).unwrap();
     assert!(reader.confirmed_proposition_ids().unwrap().is_empty());
     assert_eq!(ids_with_status(&reader, PropositionStatus::Active), vec![p]);
-    assert_eq!(reader.newest_revision(p).unwrap(), Some(p));
+    assert_eq!(reader.newest_revision(p).unwrap(), Some((p, PropositionStatus::Active)));
     drop(reader);
 
     // Written before the understanding layer and event sources (0013, 0009).

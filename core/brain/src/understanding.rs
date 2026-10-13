@@ -284,7 +284,7 @@ impl PropositionKind {
 pub enum PropositionStatus {
     /// In use.
     Active,
-    /// Superseded by a revision.
+    /// Superseded by a revision, or merged into another proposition.
     Retired,
     /// The user said it is wrong. Kept so it is not proposed again.
     Rejected,
@@ -1051,14 +1051,16 @@ impl SqlCipherBrainStore {
             .map_err(|e| backend("read confirmed propositions", e))
     }
 
-    /// Where an id the user saw now lives: the newest proposition that
-    /// revised it, through `revised_from` any number of times, preferring one
-    /// still in use; or the id itself when nothing revised it. `None` when
+    /// Where an id the user saw now lives, with its status: the newest
+    /// proposition that revised it, through `revised_from` any number of
+    /// times, preferring one still in use; or the id itself when nothing
+    /// revised it. `Retired` means the line ends on a row that was merged
+    /// into another, and nothing records which one absorbed it. `None` when
     /// neither it nor any revision of it exists.
     ///
     /// # Errors
     /// Database failures.
-    pub fn newest_revision(&self, id: i64) -> Result<Option<i64>, StoreError> {
+    pub fn newest_revision(&self, id: i64) -> Result<Option<(i64, PropositionStatus)>, StoreError> {
         let guard = self.db.lock().expect("brain store mutex poisoned");
         if !table_exists(guard.conn(), "propositions")? {
             return Ok(None);
@@ -1071,11 +1073,11 @@ impl SqlCipherBrainStore {
                      UNION
                      SELECT p.id FROM propositions p JOIN line ON p.revised_from = line.id
                  )
-                 SELECT p.id FROM propositions p JOIN line ON line.id = p.id
+                 SELECT p.id, p.status FROM propositions p JOIN line ON line.id = p.id
                  ORDER BY p.status = 'active' DESC, p.id DESC
                  LIMIT 1",
                 params![id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, PropositionStatus::parse(&row.get::<_, String>(1)?))),
             )
             .optional()
             .map_err(|e| backend("resolve proposition revision", e))

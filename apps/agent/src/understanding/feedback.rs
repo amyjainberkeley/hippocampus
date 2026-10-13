@@ -9,9 +9,17 @@
 //!
 //! The id the person saw may have been revised since: a verdict lands on the
 //! newest revision of it, and a confirmation never brings back a row that was
-//! retired. The inbox is handed to the worker through `Understanding::new`;
-//! readers and tests pass a folder of their own or none, so only the daemon
-//! over the owner's memory ever empties the owner's inbox.
+//! retired. An item merged into another is the exception: nothing records
+//! which item absorbed it, so a verdict on it is removed without effect. The
+//! inbox is handed to the worker through `Understanding::new`; readers and
+//! tests pass a folder of their own or none, so only the daemon over the
+//! owner's memory ever empties the owner's inbox.
+//!
+//! A verdict is `{milliseconds}-{id}.json` while the window can withdraw it
+//! (its Undo removes that file). A cycle takes each file, renaming it to
+//! `{milliseconds}-{id}.taken`, before it reads it. A rename is atomic, so
+//! either the Undo wins and the verdict is never applied, or the Undo finds
+//! the file gone and the verdict is being applied.
 
 use std::path::{Path, PathBuf};
 
@@ -46,6 +54,11 @@ struct Verdict {
     verdict: String,
 }
 
+/// A verdict the window can still withdraw.
+const GIVEN: &str = "json";
+/// A verdict a cycle has taken.
+const TAKEN: &str = "taken";
+
 /// What applying an inbox did.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct InboxOutcome {
@@ -53,28 +66,49 @@ pub struct InboxOutcome {
     pub applied: usize,
     /// Files naming an item that no longer exists, removed without effect.
     pub unknown: usize,
+    /// Verdicts on an item that was merged into another, removed without
+    /// effect: nothing records which item absorbed it.
+    pub merged_away: usize,
 }
 
-/// Apply and remove every verdict in `dir`. Malformed files are removed
-/// without effect, and so are files naming an item that no longer exists
-/// (with a log line that says nothing about the item).
+/// Apply and remove every verdict in `dir`, in the order they were given.
+/// Each file is taken before it is read; one the window withdrew first is
+/// left alone, and so is one that cannot be taken now (the next cycle tries
+/// again). Removed without effect: malformed files, files naming an item
+/// that no longer exists, and verdicts on an item that was merged into
+/// another. Each of the last two writes a log line that names nothing.
 ///
 /// # Errors
-/// Store failures (the file is kept for the next cycle).
+/// Store failures (the taken file stays, and the next cycle applies it).
 pub fn apply_inbox(store: &SqlCipherBrainStore, dir: &Path, now_us: u64) -> Result<InboxOutcome, StoreError> {
+    apply_files(store, &verdict_files(dir), now_us)
+}
+
+/// The verdict files in `dir`, given or taken, in the order they were given:
+/// by name (`{milliseconds}-{id}`), a taken file before a given one of the
+/// same name.
+fn verdict_files(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(dir) else {
-        return Ok(InboxOutcome::default());
+        return Vec::new();
     };
     let mut files: Vec<PathBuf> = entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .filter(|path| path.extension().is_some_and(|ext| ext == GIVEN || ext == TAKEN))
         .collect();
-    // Named `{milliseconds}-{id}.json`, so this is the order they were given.
-    files.sort();
+    files.sort_by_cached_key(|path| {
+        (path.file_stem().map(ToOwned::to_owned), path.extension().is_some_and(|ext| ext == GIVEN))
+    });
+    files
+}
+
+fn apply_files(store: &SqlCipherBrainStore, files: &[PathBuf], now_us: u64) -> Result<InboxOutcome, StoreError> {
     let mut outcome = InboxOutcome::default();
     for file in files {
-        let verdict: Option<Verdict> = std::fs::read(&file)
+        let Some(taken) = take(file) else {
+            continue;
+        };
+        let verdict: Option<Verdict> = std::fs::read(&taken)
             .ok()
             .filter(|bytes| bytes.len() < 1024)
             .and_then(|bytes| serde_json::from_slice(&bytes).ok());
@@ -84,23 +118,42 @@ pub fn apply_inbox(store: &SqlCipherBrainStore, dir: &Path, now_us: u64) -> Resu
             _ => None,
         };
         if let (Some(verdict), Some(reject)) = (verdict, reject) {
-            if let Some(id) = store.newest_revision(verdict.id)? {
-                let done = if reject {
-                    store.set_proposition_status(id, PropositionStatus::Rejected, now_us)?
-                } else {
-                    store.confirm_proposition(id, now_us)?
-                };
-                if done {
-                    outcome.applied += 1;
+            match store.newest_revision(verdict.id)? {
+                Some((_, PropositionStatus::Retired)) => {
+                    outcome.merged_away += 1;
+                    eprintln!("mci-agent: understanding: removed a verdict on an item that was merged into another");
                 }
-            } else {
-                outcome.unknown += 1;
-                eprintln!("mci-agent: understanding: removed a verdict on an item that no longer exists");
+                Some((id, _)) => {
+                    let done = if reject {
+                        store.set_proposition_status(id, PropositionStatus::Rejected, now_us)?
+                    } else {
+                        store.confirm_proposition(id, now_us)?
+                    };
+                    if done {
+                        outcome.applied += 1;
+                    }
+                }
+                None => {
+                    outcome.unknown += 1;
+                    eprintln!("mci-agent: understanding: removed a verdict on an item that no longer exists");
+                }
             }
         }
-        let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_file(&taken);
     }
     Ok(outcome)
+}
+
+/// Take a verdict before reading it, so the window can no longer withdraw
+/// it. `None` when the window withdrew it first, or when it cannot be taken
+/// now. A file already taken (by a cycle that was interrupted, or that met a
+/// store failure) is returned as it is.
+fn take(file: &Path) -> Option<PathBuf> {
+    if file.extension().is_some_and(|ext| ext == TAKEN) {
+        return Some(file.to_path_buf());
+    }
+    let taken = file.with_extension(TAKEN);
+    std::fs::rename(file, &taken).ok().map(|()| taken)
 }
 
 #[cfg(test)]
@@ -143,6 +196,10 @@ mod tests {
         store.propositions_with_status(status, 10).unwrap().into_iter().map(|p| p.id).collect()
     }
 
+    fn applied(applied: usize) -> InboxOutcome {
+        InboxOutcome { applied, ..InboxOutcome::default() }
+    }
+
     #[test]
     fn verdicts_are_applied_once_and_removed() {
         let dir = tempfile::tempdir().unwrap();
@@ -153,7 +210,7 @@ mod tests {
         give(&inbox, "1", wrong, "reject");
         give(&inbox, "2", right, "confirm");
         std::fs::write(inbox.join("3.json"), "not json").unwrap();
-        assert_eq!(apply_inbox(&store, &inbox, 5).unwrap(), InboxOutcome { applied: 2, unknown: 0 });
+        assert_eq!(apply_inbox(&store, &inbox, 5).unwrap(), applied(2));
         assert_eq!(std::fs::read_dir(&inbox).unwrap().count(), 0);
         let active = store.propositions_with_status(PropositionStatus::Active, 10).unwrap();
         assert_eq!(active.len(), 1);
@@ -176,7 +233,7 @@ mod tests {
         give(&inbox, "1", first, "confirm");
         give(&inbox, "2", shown, "reject");
 
-        assert_eq!(apply_inbox(&store, &inbox, 6).unwrap(), InboxOutcome { applied: 2, unknown: 0 });
+        assert_eq!(apply_inbox(&store, &inbox, 6).unwrap(), applied(2));
         assert_eq!(store.confirmed_proposition_ids().unwrap(), std::collections::HashSet::from([newest]));
         assert_eq!(ids(&store, PropositionStatus::Active), vec![newest], "the newest revision is the one confirmed");
         assert_eq!(ids(&store, PropositionStatus::Rejected), vec![live], "a reject does not leave the live revision showing");
@@ -195,10 +252,31 @@ mod tests {
         let inbox = inbox(dir.path());
         give(&inbox, "1", merged, "confirm");
 
-        assert_eq!(apply_inbox(&store, &inbox, 3).unwrap(), InboxOutcome { applied: 0, unknown: 0 });
+        assert_eq!(apply_inbox(&store, &inbox, 3).unwrap(), InboxOutcome { merged_away: 1, ..InboxOutcome::default() });
         assert_eq!(ids(&store, PropositionStatus::Retired), vec![merged]);
         assert!(ids(&store, PropositionStatus::Active).is_empty());
         assert!(store.confirmed_proposition_ids().unwrap().is_empty());
+        assert_eq!(std::fs::read_dir(&inbox).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_verdict_on_an_item_merged_into_another_is_counted_and_has_no_effect() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, e) = memory(dir.path());
+        // What a merge leaves: `kept` revised into `merged`, and `absorbed`
+        // retired with no link to `merged`.
+        let kept = store.insert_proposition(&new("Amy dislikes meetings on Fridays"), &[e], 1).unwrap();
+        let absorbed = store.insert_proposition(&new("Amy avoids meetings on Friday afternoons"), &[e], 1).unwrap();
+        store.set_proposition_status(absorbed, PropositionStatus::Retired, 2).unwrap();
+        let merged = store.revise_proposition(kept, &new("Amy avoids meetings on Fridays"), &[e], 2).unwrap();
+        let inbox = inbox(dir.path());
+        give(&inbox, "1", absorbed, "reject");
+        give(&inbox, "2", absorbed, "confirm");
+
+        assert_eq!(apply_inbox(&store, &inbox, 3).unwrap(), InboxOutcome { merged_away: 2, ..InboxOutcome::default() });
+        assert!(ids(&store, PropositionStatus::Rejected).is_empty(), "no row is marked on a guess");
+        assert!(store.confirmed_proposition_ids().unwrap().is_empty());
+        assert_eq!(ids(&store, PropositionStatus::Active), vec![merged]);
         assert_eq!(std::fs::read_dir(&inbox).unwrap().count(), 0);
     }
 
@@ -213,7 +291,7 @@ mod tests {
         assert_eq!(store.confirmed_proposition_ids().unwrap(), std::collections::HashSet::from([id]));
 
         give(&inbox, "2", id, "reject");
-        assert_eq!(apply_inbox(&store, &inbox, 3).unwrap(), InboxOutcome { applied: 1, unknown: 0 });
+        assert_eq!(apply_inbox(&store, &inbox, 3).unwrap(), applied(1));
         assert!(store.confirmed_proposition_ids().unwrap().is_empty());
         assert_eq!(ids(&store, PropositionStatus::Rejected), vec![id]);
     }
@@ -226,9 +304,74 @@ mod tests {
         give(&inbox, "1", 4242, "confirm");
         give(&inbox, "2", 4243, "maybe");
 
-        assert_eq!(apply_inbox(&store, &inbox, 1).unwrap(), InboxOutcome { applied: 0, unknown: 1 });
+        assert_eq!(apply_inbox(&store, &inbox, 1).unwrap(), InboxOutcome { unknown: 1, ..InboxOutcome::default() });
         assert_eq!(std::fs::read_dir(&inbox).unwrap().count(), 0);
         assert_eq!(apply_inbox(&store, &dir.path().join("missing"), 1).unwrap(), InboxOutcome::default());
+    }
+
+    #[test]
+    fn a_verdict_withdrawn_before_it_is_taken_has_no_effect() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, e) = memory(dir.path());
+        let kept = store.insert_proposition(&new("Amy writes Rust in the mornings"), &[e], 1).unwrap();
+        let forgotten = store.insert_proposition(&new("Amy dislikes meetings on Fridays"), &[e], 1).unwrap();
+        let inbox = inbox(dir.path());
+        give(&inbox, "1", kept, "reject");
+        give(&inbox, "2", forgotten, "reject");
+        let listed = verdict_files(&inbox);
+        // The window's Undo, after the cycle listed the inbox.
+        std::fs::remove_file(inbox.join("1.json")).unwrap();
+
+        assert_eq!(apply_files(&store, &listed, 2).unwrap(), applied(1));
+        assert_eq!(ids(&store, PropositionStatus::Active), vec![kept]);
+        assert_eq!(ids(&store, PropositionStatus::Rejected), vec![forgotten]);
+        assert_eq!(std::fs::read_dir(&inbox).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_taken_verdict_cannot_be_withdrawn_and_the_next_cycle_applies_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, e) = memory(dir.path());
+        let id = store.insert_proposition(&new("Amy writes Rust in the mornings"), &[e], 1).unwrap();
+        let inbox = inbox(dir.path());
+        give(&inbox, "1000-1", id, "confirm");
+        give(&inbox, "2000-1", id, "reject");
+        // A cycle took the first verdict and stopped before applying it.
+        assert_eq!(take(&inbox.join("1000-1.json")), Some(inbox.join("1000-1.taken")));
+        // The window's Undo finds nothing to remove, so the verdict is the cycle's.
+        let undo = std::fs::remove_file(inbox.join("1000-1.json")).unwrap_err();
+        assert_eq!(undo.kind(), std::io::ErrorKind::NotFound);
+
+        assert_eq!(apply_inbox(&store, &inbox, 2).unwrap(), applied(2));
+        assert_eq!(ids(&store, PropositionStatus::Rejected), vec![id], "in the order given, the later verdict wins");
+        assert!(store.confirmed_proposition_ids().unwrap().is_empty());
+        assert_eq!(std::fs::read_dir(&inbox).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_verdict_that_cannot_be_taken_waits_for_the_next_cycle() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (store, e) = memory(dir.path());
+        let id = store.insert_proposition(&new("Amy writes Rust in the mornings"), &[e], 1).unwrap();
+        let inbox = inbox(dir.path());
+        give(&inbox, "1", id, "reject");
+        let lock = |mode| std::fs::set_permissions(&inbox, std::fs::Permissions::from_mode(mode)).unwrap();
+        lock(0o500);
+        if std::fs::write(inbox.join("probe"), "").is_ok() {
+            // Permissions are not enforced here (run as root): nothing to check.
+            lock(0o700);
+            return;
+        }
+        let outcome = apply_inbox(&store, &inbox, 2);
+        lock(0o700);
+
+        // Applying it untaken would let the window withdraw a verdict already applied.
+        assert_eq!(outcome.unwrap(), InboxOutcome::default());
+        assert!(ids(&store, PropositionStatus::Rejected).is_empty());
+        assert!(inbox.join("1.json").exists(), "still the window's to withdraw");
+        assert_eq!(apply_inbox(&store, &inbox, 3).unwrap(), applied(1));
+        assert_eq!(ids(&store, PropositionStatus::Rejected), vec![id]);
     }
 
     #[test]
