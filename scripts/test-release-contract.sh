@@ -223,8 +223,8 @@ require_literal "$PREPARE_BRAIN" 'Evidence-cited briefs are ready. No model down
     'onboarding confirms the zero-download brief path'
 reject_pattern "$PREPARE_BRAIN" 'Daily briefs disabled|enable Daily Briefs|startDownload\(\)|Download \(' \
     'onboarding has no unavailable model-download action'
-require_literal "$DONE_SLIDE" 'Local briefs need no model download' \
-    'onboarding completion confirms the zero-download brief path'
+reject_pattern "$DONE_SLIDE" 'startDownload\(|Download \(' \
+    'onboarding completion offers no model download'
 require_literal "$HOW_IT_WORKS" 'Daily briefs are local and source-cited.' \
     'onboarding explains the default brief path truthfully'
 reject_pattern "$PREFERENCES" 'Ollama endpoint \(optional\)|ollamaEndpoint' \
