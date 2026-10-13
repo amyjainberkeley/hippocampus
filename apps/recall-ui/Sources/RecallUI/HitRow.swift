@@ -8,7 +8,9 @@
 //
 // Keyframes use the shared authenticated `EvidenceThumbnail` renderer.
 // Invalid, missing, escaped, oversized, or tampered blobs fail closed to
-// a neutral placeholder rather than being opened directly by AppKit.
+// a neutral placeholder rather than being opened directly by AppKit. A
+// moment saved without a screenshot (most are) shows its app's icon, so
+// a list of them never looks like a list of missing pictures.
 
 import RecallUIKit
 import SwiftUI
@@ -60,11 +62,17 @@ struct HitRow: View {
         // Spacing tokens (cycle 8.48 MCIDesignSystem): row internal
         // rhythm is on the 8pt grid.
         HStack(alignment: .top, spacing: MCI.Spacing.m - 2) {
-            EvidenceThumbnail(
-                url: hit.thumbnailURL,
-                size: CGSize(width: 64, height: 40),
-                maxPixelSize: 160
-            )
+            if hit.thumbnailURL == nil {
+                AppIcon(bundleId: hit.appBundleId ?? "")
+                    .frame(width: 32, height: 32)
+                    .frame(width: 64, height: 40)
+            } else {
+                EvidenceThumbnail(
+                    url: hit.thumbnailURL,
+                    size: CGSize(width: 64, height: 40),
+                    maxPixelSize: 160
+                )
+            }
             VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
                 HStack(alignment: .firstTextBaseline, spacing: MCI.Spacing.s) {
                     Text(verbatim: title)
