@@ -70,7 +70,9 @@ rg -U -q 'case overview\n\s*case ask\n\s*case you' "$MEMORY_WORKSPACE" \
     || fail "the window must have three places: Overview, Ask and You"
 rg -q 'case \.ask:\s*$' "$MEMORY_WORKSPACE" && rg -q 'AskPlace\(' "$MEMORY_WORKSPACE" \
     || fail "Ask must show its own place"
-if rg -q 'DailyMemoryView\(|EpisodesView\(|SourcesWorkspaceView|MeasuredInputView\(' "$MEMORY_WORKSPACE"; then
+rg -q 'OverviewPlace\(model: overview' "$MEMORY_WORKSPACE" && rg -q 'YouPlace\(model: you' "$MEMORY_WORKSPACE" \
+    || fail "Overview and You must show their own places"
+if rg -q 'PendingPlace|DailyMemoryView\(|EpisodesView\(|SourcesWorkspaceView|MeasuredInputView\(' "$MEMORY_WORKSPACE"; then
     fail "the window must not show Today, Sessions, Connections or the input chart"
 fi
 rg -q '\.defaultSize\(width: 1100, height: 720\)' "$RECALL_APP" \

@@ -83,6 +83,12 @@ struct MemoryWorkspaceView: View {
     var now: @Sendable () -> Date = { Date() }
 
     @StateObject private var ask: AskViewModel
+    @StateObject private var overview: OverviewViewModel
+    @StateObject private var you: UserModelViewModel
+    /// Pages pushed inside You: what is remembered, the names you use. The
+    /// shell owns the path so a route can open them (critique-recall-engineering
+    /// finding 5).
+    @State private var youPath: [RecallYouPage] = []
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var status = SidebarStatus(receipt: nil)
     @Environment(\.scenePhase) private var scenePhase
@@ -101,6 +107,8 @@ struct MemoryWorkspaceView: View {
         calendar: Calendar = .current,
         now: @escaping @Sendable () -> Date = { Date() },
         ask: AskViewModel? = nil,
+        overview: OverviewViewModel? = nil,
+        you: UserModelViewModel? = nil,
         status: SidebarStatus? = nil
     ) {
         self.reader = reader
@@ -115,6 +123,13 @@ struct MemoryWorkspaceView: View {
         self.now = now
         _ask = StateObject(wrappedValue: ask ?? Self.makeAsk(
             reader: reader, understanding: understanding, calendar: calendar, now: now))
+        _overview = StateObject(wrappedValue: overview ?? OverviewViewModel(
+            understanding: understanding, calendar: calendar, healthLoader: healthLoader, now: now))
+        // The preview's verdicts go nowhere: "Right" and "Forget" there must
+        // never reach the folder the agent applies to the person's memory.
+        _you = StateObject(wrappedValue: you ?? UserModelViewModel(
+            understanding: understanding,
+            verdicts: isSyntheticPreview ? VerdictInbox(directory: nil) : .shared))
         if let status { _status = State(initialValue: status) }
     }
 
@@ -174,8 +189,9 @@ struct MemoryWorkspaceView: View {
         status = SidebarStatus(receipt: receipt, now: now())
     }
 
-    /// A route from a link, the app or a command: the place, then what Ask
-    /// shows (a memory, History on a day or a session's own time).
+    /// A route from a link, the app, a command or a place: the place, then
+    /// what it shows (a memory or History's range in Ask, a day and session
+    /// on Overview, a page inside You).
     private func apply(_ route: RecallRoute) async {
         let place = route.place(keeping: selection.place)
         selection = MemoryWorkspaceSelection(place: place)
@@ -183,9 +199,32 @@ struct MemoryWorkspaceView: View {
             // The window has no panel of its own: the menu bar opens Ask.
             NSWorkspace.shared.open(RecallRoute.askPanelURL)
         }
-        if place == .ask {
+        switch place {
+        case .ask:
             await ask.open(route)
+        case .overview:
+            overview.open(route)
+        case .you:
+            // Only a route that names You moves its pages; one that keeps the
+            // place on screen leaves them. The preview opens neither page:
+            // both read the person's own files.
+            if route.place == .you {
+                youPath = isSyntheticPreview ? [] : route.youPath
+            }
         }
+    }
+
+    /// What a place asks of the window: "Show in History", a session row on
+    /// You, a page inside You.
+    private func open(_ route: RecallRoute) {
+        Task { await apply(route) }
+    }
+
+    /// A search chip on Overview: its words in Ask's field, searched.
+    private func searchInAsk(_ text: String) {
+        selection = .ask
+        ask.query = text
+        Task { await ask.search.runSearch() }
     }
 
     private var sidebar: some View {
@@ -232,7 +271,7 @@ struct MemoryWorkspaceView: View {
         Group {
             switch selection {
             case .overview:
-                PendingPlace(title: selection.descriptor.title, systemImage: selection.descriptor.systemImage)
+                OverviewPlace(model: overview, reader: reader, open: open, search: searchInAsk)
             case .ask:
                 AskPlace(
                     model: ask,
@@ -243,12 +282,28 @@ struct MemoryWorkspaceView: View {
                     now: now
                 )
             case .you:
-                PendingPlace(title: selection.descriptor.title, systemImage: selection.descriptor.systemImage)
+                NavigationStack(path: $youPath) {
+                    YouPlace(model: you, open: open)
+                        .navigationDestination(for: RecallYouPage.self) { page in
+                            youPage(page)
+                        }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.brandBgPrimary)
         .navigationTitle(UserFacingCopy.windowTitle)
+    }
+
+    /// A page pushed inside You. Neither is reached in the preview (`apply`).
+    @ViewBuilder
+    private func youPage(_ page: RecallYouPage) -> some View {
+        switch page {
+        case .privacy:
+            PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator)
+        case .names:
+            UserDictionaryEditor()
+        }
     }
 }
 

@@ -10,8 +10,14 @@ import SwiftUI
 /// window on screen, no menu-bar item and no activation is ever created: the
 /// app is set to `.prohibited` first, each view is laid out in a borderless
 /// window that is never ordered in, and drawn into a bitmap of its own size.
-/// It reads fixtures only (`NativePreviewReader`, `PreviewUnderstandingReader`
-/// and the moments below), never the person's memory.
+/// It reads fixtures only (`NativePreviewReader`, `PreviewUnderstandingReader`,
+/// `OverviewPreviewBrainReader` and the moments below), never the person's
+/// memory, and verdicts go nowhere (`VerdictInbox(directory: nil)`).
+///
+/// A picture cannot be clicked, so controls are drawn as the app shows them
+/// (`isSyntheticPreview` false, as `RecallPreviewRenderer` draws the places):
+/// nothing here is ever clicked, no route is applied, and every reader and
+/// model the window is given is a fixture.
 @MainActor
 enum WindowRenderer {
     static let flag = "--render-window="
@@ -133,7 +139,9 @@ enum WindowRenderer {
         let base = NativePreviewReader(date: PreviewUnderstandingReader.sampleNow,
                                        now: PreviewUnderstandingReader.sampleNow,
                                        calendar: PreviewUnderstandingReader.sampleCalendar)
-        let reader = RenderFixtureReader(base: base)
+        let overviewMoments = OverviewPreviewBrainReader()
+        let reader = RenderFixtureReader(base: base, overviewMoments: overviewMoments)
+        let thumbnails = OverviewPreviewThumbnails(windows: overviewMoments.windows)
         let understanding = PreviewUnderstandingReader(scenario: scene.understanding)
         let now = base.now
         let calendar = base.calendar
@@ -155,17 +163,31 @@ enum WindowRenderer {
              "stored_frame_count": 10, "stored_screenshot_count": 2}
             """.utf8))
         let remembering = SidebarStatus(receipt: receipt, now: now)
+        // Overview and You, read before drawing. Their deletion signals are
+        // their own, so nothing from the app reaches them.
+        let overview = OverviewViewModel(understanding: understanding, selectedDate: now, calendar: calendar,
+                                         healthLoader: { receipt }, now: { now },
+                                         deletions: MemoryDeletionSignal(center: NotificationCenter()))
+        await overview.reload()
+        let you = UserModelViewModel(understanding: understanding, verdicts: VerdictInbox(directory: nil),
+                                     deletions: MemoryDeletionSignal(center: NotificationCenter()))
+        await you.reload()
         let view = MemoryWorkspaceView(
             reader: reader, understanding: understanding,
             selection: .constant(scene.place),
-            isSyntheticPreview: true,
+            isSyntheticPreview: false,
             healthLoader: { receipt },
             contextExporter: { _ in "" },
             calendar: calendar,
             now: { now },
             ask: model,
+            overview: overview,
+            you: you,
             status: remembering
         )
+        .environment(\.controlActiveState, .key)
+        .environment(\.overviewThumbnails, thumbnails)
+        .environment(\.locale, Locale(identifier: "en_US"))
         .environment(\.colorScheme, scene.dark ? .dark : .light)
         .environment(\.timeZone, calendar.timeZone)
         .frame(width: scene.size.width, height: scene.size.height)
@@ -179,9 +201,21 @@ enum WindowRenderer {
         window.appearance = NSAppearance(named: scene.dark ? .darkAqua : .aqua)
         hosting.appearance = window.appearance
         window.contentView = hosting
-        for _ in 0..<12 {
+        // Ready when the screenshots have stopped arriving (a screenshot is
+        // read in two steps, its moment then its image), and never before
+        // the views have had time to read their models.
+        let started = Date()
+        var drawn = -1
+        var stableSince = started
+        while Date().timeIntervalSince(started) < 8 {
             hosting.layoutSubtreeIfNeeded()
             try? await Task.sleep(for: .milliseconds(50))
+            if thumbnails.count != drawn {
+                drawn = thumbnails.count
+                stableSince = Date()
+            } else if Date().timeIntervalSince(started) >= 1, Date().timeIntervalSince(stableSince) >= 0.5 {
+                break
+            }
         }
         hosting.layoutSubtreeIfNeeded()
         let scale = scene.scale
@@ -238,10 +272,13 @@ struct RenderFixtureReader: BrainReader {
     static let pageId: UInt64 = 90_175
 
     let base: NativePreviewReader
+    /// The moments behind Overview's sessions, with their screenshots.
+    let overviewMoments: OverviewPreviewBrainReader
     private let extra: [Hit]
 
-    init(base: NativePreviewReader) {
+    init(base: NativePreviewReader, overviewMoments: OverviewPreviewBrainReader = OverviewPreviewBrainReader()) {
         self.base = base
+        self.overviewMoments = overviewMoments
         let nowUs = UInt64(base.now.timeIntervalSince1970 * 1_000_000)
         let separator = ReadableText.chromeSeparator
         let code = """
@@ -321,7 +358,9 @@ struct RenderFixtureReader: BrainReader {
 
     func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] {
         let rows = try await all()
-        return ids.prefix(32).compactMap { id in rows.first { $0.id == id } }
+        return ids.prefix(32).compactMap { id in
+            rows.first { $0.id == id } ?? overviewMoments.moments.first { $0.id == id }
+        }
     }
 
     func eventText(eventId: UInt64) async throws -> EventText? {

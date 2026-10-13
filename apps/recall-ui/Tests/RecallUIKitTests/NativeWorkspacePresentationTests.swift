@@ -20,18 +20,26 @@ final class NativeWorkspacePresentationTests: XCTestCase {
 
     func testEachPlaceShowsItsOwnViewWithoutASharedRecentFeed() throws {
         let source = try source("MemoryWorkspaceView.swift")
-        for (place, view) in [("overview", "PendingPlace"), ("ask", "AskPlace"), ("you", "PendingPlace")] {
+        for (place, view) in [("overview", "OverviewPlace"), ("ask", "AskPlace"),
+                              ("you", "NavigationStack\\(path: \\$youPath\\)\\s*\\{\\s*YouPlace")] {
             XCTAssertNotNil(source.range(
                 of: "case \\.\(place):\\s*\(view)\\(",
                 options: .regularExpression
             ), "Place \(place) must show \(view)")
         }
-        for gone in ["DisclosureGroup(", "Picker(\"History view\"", "reader.recentEvents(",
+        for gone in ["DisclosureGroup(", "Picker(\"History view\"", "reader.recentEvents(", "PendingPlace",
                      "DailyMemoryView(", "EpisodesView(", "SourcesWorkspaceView", "WorkspaceSettingsView"] {
             XCTAssertFalse(source.contains(gone), gone)
         }
-        XCTAssertTrue(source.contains("@StateObject private var ask: AskViewModel"),
-                      "The shell owns Ask's model, so it survives a change of place")
+        for model in ["ask: AskViewModel", "overview: OverviewViewModel", "you: UserModelViewModel"] {
+            XCTAssertTrue(source.contains("@StateObject private var \(model)"),
+                          "The shell owns every place's model, so each survives a change of place")
+        }
+        XCTAssertTrue(source.contains("PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator)"),
+                      "What's remembered is pushed inside You")
+        XCTAssertTrue(source.contains("UserDictionaryEditor()"), "The names page is pushed inside You")
+        XCTAssertTrue(source.contains("isSyntheticPreview ? VerdictInbox(directory: nil) : .shared"),
+                      "The preview's verdicts never reach the folder the agent applies")
         XCTAssertTrue(source.contains("WindowHiMarkView("))
         XCTAssertTrue(source.contains("SidebarStatus("))
     }

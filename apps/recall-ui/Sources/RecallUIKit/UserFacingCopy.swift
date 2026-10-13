@@ -213,8 +213,6 @@ public enum UserFacingCopy {
     /// The footer when there is no saved status at all.
     public static let footerNoStatus = "Not remembering right now."
     public static let footerHelp = "Open Preferences"
-    /// Where Overview and You go until they are wired in.
-    public static let pendingPlaceTitle = "Coming next"
 
     // Ask (spec-recall S3, RULINGS S1, T17).
 
