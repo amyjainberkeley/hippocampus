@@ -13,6 +13,9 @@ struct DayStripView: View {
     let reader: BrainReader
     /// Scrubbing previews: the session or empty time under the pointer.
     @Binding var hover: StripHover?
+    /// The strip takes the keyboard when a session is clicked, so the
+    /// arrows move from there.
+    @FocusState private var isFocused: Bool
     @Environment(\.locale) private var locale
     @Environment(\.timeZone) private var timeZone
 
@@ -33,6 +36,7 @@ struct DayStripView: View {
             legend
         }
         .focusable()
+        .focused($isFocused)
         .focusEffectDisabled()
         .onKeyPress(.leftArrow) {
             model.moveSelection(by: -1)
@@ -88,6 +92,7 @@ struct DayStripView: View {
         let time = SessionDetail.timeRange(startUs: block.startUs, endUs: block.endUs, locale: locale, timeZone: timeZone)
         return Button {
             model.select(block)
+            isFocused = true
         } label: {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .fill(color.opacity(placed.inProgress ? 0.55 : 1))

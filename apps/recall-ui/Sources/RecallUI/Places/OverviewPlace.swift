@@ -203,6 +203,7 @@ struct OverviewPlace: View {
                         Text(text)
                             .font(MCI.Font.body)
                             .foregroundStyle(MCI.Color.foreground)
+                            .help(fact.kind == .active ? UserFacingCopy.Overview.activeHelp : "")
                     }
                 }
                 if model.showsSearches, !overview.searches.isEmpty {

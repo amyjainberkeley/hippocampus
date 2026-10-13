@@ -28,6 +28,7 @@ final class OverviewCopyTests: XCTestCase {
             ("timeAndLength", Overview.timeAndLength("9:05 – 9:34 AM", "29m")),
             ("noticedTitle", Overview.noticedTitle), ("lookedUp", Overview.lookedUp), ("copied", Overview.copied),
             ("couldNotCopy", Overview.couldNotCopy), ("hide", Overview.hide), ("summaryTitle", Overview.summaryTitle),
+            ("activeHelp", Overview.activeHelp),
             ("stripLabel", Overview.stripLabel), ("legendHint", Overview.legendHint),
             ("recentWorkTitle", You.recentWorkTitle), ("recentWorkCaption", You.recentWorkCaption),
             ("recentWorkEmpty", You.recentWorkEmpty), ("sharedTitle", You.sharedTitle),

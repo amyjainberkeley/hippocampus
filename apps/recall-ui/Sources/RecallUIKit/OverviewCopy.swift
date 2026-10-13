@@ -62,6 +62,9 @@ public extension UserFacingCopy {
         public static let hide = "Hide"
         /// The day's account, behind one disclosure (RULINGS I11, V).
         public static let summaryTitle = "Summary"
+        /// Help on the "Active …" fact: what the word measures (overview
+        /// contract section 9, insights product critique 2).
+        public static let activeHelp = "Active means you typed, clicked or scrolled in the last minute."
 
         /// One line under the day when the model cannot write: everything
         /// else on Overview works without it.

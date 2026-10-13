@@ -68,7 +68,8 @@ enum RecallPreviewRenderer {
 
         func overview(_ name: String, _ state: OverviewPreviewUnderstanding.State, height: CGFloat = 1_250,
                       today: Bool = true, dark: Bool = false, select: Int64? = nil,
-                      hover: StripHover? = nil, noticedOpen: Bool = false, showSearches: Bool = false) async throws {
+                      hover: StripHover? = nil, noticedOpen: Bool = false, showSearches: Bool = false,
+                      fact: DayFact.Kind? = nil, legend: WorkKind? = nil) async throws {
             let now = today ? PreviewUnderstandingReader.sampleNow
                 : PreviewUnderstandingReader.sampleNow.addingTimeInterval(86_400)
             let model = OverviewViewModel(understanding: OverviewPreviewUnderstanding(state),
@@ -81,6 +82,12 @@ enum RecallPreviewRenderer {
             }
             if showSearches, let fact = model.overview?.facts.first(where: { $0.kind == .searched }) {
                 model.perform(fact)
+            }
+            if let fact, let picked = model.overview?.facts.first(where: { $0.kind == fact }) {
+                model.perform(picked)
+            }
+            if let legend {
+                model.toggleHighlight(legend)
             }
             let view = OverviewPlace(model: model, reader: brain, open: { _ in }, search: { _ in },
                                      hover: hover, noticedOpen: noticedOpen)
@@ -112,6 +119,8 @@ enum RecallPreviewRenderer {
         try await overview("overview-today-hover", .today, height: firstScreen, select: competitorPricing,
                            hover: .session(taxRounding))
         try await overview("overview-today-searches", .today, select: taxRounding, showSearches: true)
+        try await overview("overview-today-fact", .today, height: firstScreen, fact: .returned)
+        try await overview("overview-today-legend", .today, height: firstScreen, legend: .code)
         try await overview("overview-today-empty", .todayEmpty, height: firstScreen)
         try await overview("overview-first-day", .firstDay, height: firstScreen)
         try await overview("overview-past-day", .pastDay, today: false)
