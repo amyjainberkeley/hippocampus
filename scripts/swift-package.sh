@@ -41,6 +41,15 @@ stage_recall_archive_if_needed() {
             return 64
             ;;
     esac
+    # Work on Recall while someone else edits the Rust crates: reuse the
+    # archive already staged instead of building it from the working tree.
+    if [[ "${MCI_RECALL_FFI_PRESTAGED:-0}" == "1" ]]; then
+        if [[ -f "$package_path/.build/mci-brain-ffi/$configuration/libmci_brain_ffi.a" ]]; then
+            return 0
+        fi
+        printf 'swift-package.sh: MCI_RECALL_FFI_PRESTAGED=1 but no %s archive is staged\n' "$configuration" >&2
+        return 1
+    fi
     "$SCRIPT_DIR/stage-recall-ffi.sh" "$configuration"
 }
 
