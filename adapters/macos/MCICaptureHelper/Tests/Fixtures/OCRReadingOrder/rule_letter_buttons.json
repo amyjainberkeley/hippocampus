@@ -1,0 +1,101 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "Paragraph line 0 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.816667,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 1 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.79,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 2 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.763333,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 3 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.736667,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "BIS",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.083333,
+    0.041667,
+    0.022222
+   ]
+  },
+  {
+   "text": "e",
+   "confidence": 0.95,
+   "box": [
+    0.288194,
+    0.085,
+    0.011111,
+    0.017778
+   ]
+  },
+  {
+   "text": "Message #launch-plan",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.038889,
+    0.104167,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [
+  [
+   0.0,
+   0.111111,
+   1.0,
+   0.0
+  ],
+  [
+   0.0,
+   0.072222,
+   1.0,
+   0.0
+  ]
+ ],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Weekly review",
+  "bundle_id": "com.example.notes"
+ }
+}

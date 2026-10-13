@@ -12,14 +12,21 @@ row into fragments. This rebuilds the page:
    90% of a region cuts it before anything else, the way the window divides
    itself: horizontal ones (bars) first, top to bottom, then vertical ones
    (sidebars, panels), left to right. A vertical separator between two sides
-   that read as one table is not a cut (gridlines).
+   that pair row for row, as a table's columns do, is a gridline, not a cut;
+   two lists side by side (a file browser's columns) are panes. A pane that
+   holds one row between rules, lining up item for item with the one-row pane
+   above or below it, is a row of a ruled table (a receipt, a spreadsheet):
+   it is read whole, and it is never a bar.
 3. Recursive XY-cut inside each pane: split at the widest whitespace band no
    box crosses, horizontally or vertically, until no band is wide enough.
    Side-by-side regions that are all short, row-aligned cells form a table
    and are read row by row; the cells must line up from both sides (B1). A
-   table beside other text keeps its columns together. A vertical band whose
-   two sides share no row (alternating chat bubbles) is not a cut: the region
-   is read as one block, top to bottom (B2). B3, the tolerant cut across a
+   table beside other text keeps its columns together, and the text beside it
+   (a form beside an order summary) is read on its own: it runs on below the
+   table's last row, or stands twice as far off as the table's columns do. A
+   vertical band whose two sides share no row (alternating chat bubbles) is
+   not a cut: the region is read as one block, top to bottom (B2). Rows that
+   overlap by a fifth of a line are shared. B3, the tolerant cut across a
    bridging box, is left out: pane separators cut the bars that bridge panes.
 4. Inside a block, boxes that share a visual row are joined left to right,
    and leading indentation is kept relative to the block's left edge. A box
@@ -30,43 +37,52 @@ With the window's geometry (`window`), the reading is also sorted into
 content and chrome, and stored as content blocks, then CHROME_SEPARATOR, then
 chrome blocks, each in reading order; the separator is there whenever this
 classification ran, even with no chrome. Nothing is dropped: chrome is moved,
-never deleted. When unsure, it is content. Before the cut:
+never deleted. When unsure, it is content. A terminal's text is all content:
+none of the rules below apply to it. Otherwise, before the cut:
 
 - Gutter: an editor's line numbers, the longest ascending chain of integers
   down one column, alone or glued to the start of a line, that sits close to
   the lines it numbers or numbers lines of code. They come out of the code,
-  and the code's left edge is measured without them. A table's column of
+  and the code's left edge is measured without them. A glued line is placed
+  by the width of the numbered lines' own characters. A table's column of
   numbers, far from cells that are not code, is not a gutter.
-- Glyphs: a box of one or two characters, about square, half a line height
-  clear of any text on its row, is an icon read as a letter (a file icon as
-  "D", a star as a CJK lookalike). Icons side by side stand together. Code
-  punctuation, two letters or two digits ("Ok", "12"), and numbers in place
-  (in a column or row of numbers, or the value of a label) are not glyphs.
+- Glyphs (RULINGS T3): a box of one or two characters, about square, half a
+  line height clear of any text on its row, is an icon read as characters (a
+  file icon as "D", a star as a CJK lookalike, a logo as "TR"). Icons side by
+  side stand together. Code punctuation is not a glyph, and neither is data:
+  a number in a column or row of numbers or the value of a label, or a pair
+  of letters in a column or row of letter pairs (state codes).
 
 Then, pane by pane, after the cut:
 
-- Navigation: a column of short items at the window's left edge beside
-  something wider (a whole pane, or one region), never on the right, never a
-  table, never code; a column of previews whose lines are cut short ("…")
-  beside a wider reading pane; and, in a pane that is mostly navigation, the
-  short lines left over (a Compose button, a count).
+- Navigation: a column of four or more short items at the window's left edge
+  beside something wider (a whole pane, or one region), never on the right,
+  never a table, never code; a column of previews whose lines are cut short
+  ("…") beside a wider reading pane; and, in a pane that is mostly
+  navigation, the short lines left over in the navigation's column (a
+  Compose button, a count).
 - Bars: rows of the pane come off its top, one at a time, while they read
   as interface: three or more short items, a truncated tab, a breadcrumb, a
   web address, the window's title (only at the window's top edge), marks
   only, a panel's title in capitals, letter-buttons alone in their pane, or,
-  for a one-row pane in the top band, a header with items at both ends or a
-  search field. A pane with no separator above it has bars only in the
-  window's top band. A row that lines up with the row below it is a table's
-  header, not a bar.
+  for a one-row pane in the window's top band, a header with items at both
+  ends or a search field. Above code only a strip comes off (a short line of
+  code such as "};" or "SELECT *" is code). A pane with no separator above it
+  has bars only in the window's top band. A row that lines up with the row
+  below it is a table's header, not a bar, except in a pane that lies wholly
+  in the top band (icons over their labels).
 - Foot: a composer's placeholder ("Message #general", "iMessage", "Ask about
-  your code…") against the bottom edge of its pane, or the window's status
-  bar.
-- Dates: a line centred in its pane made only of date and time words
-  ("Today", "Oct 12 at 2:31 PM") divides messages; it is not said.
+  your code…") alone in its region against the bottom edge of its pane, or
+  the window's status bar. A message that ends a run of messages, or a
+  sentence, is not a placeholder.
+- Dates: in a chat app, a line centred in its pane made only of date and time
+  words ("Today", "Oct 12 at 2:31 PM") divides messages; it is not said.
+  Elsewhere a date is content (an invitation's date).
 
 In content, code keeps its indentation (code blocks stacked in one pane share
-a left edge); anything else is indented by none or four spaces, which keeps
-who said what in a two-sided chat. A row's stacked lines read top first.
+a left edge); anything else is indented by none or four spaces, four only for
+an offset of four characters or more, which keeps who said what in a
+two-sided chat. A row's stacked lines read top first.
 
 Digits are ASCII 0 to 9. Whitespace is the set WHITESPACE (Unicode
 White_Space, which is what Swift's Character.isWhitespace and
@@ -74,6 +90,12 @@ CharacterSet.whitespacesAndNewlines use); Python's own str.split() and strip()
 also treat U+001C to U+001F as space, so they are not used on text here. A
 letter is any character of Unicode general category L*. Lengths count Unicode
 scalars.
+
+Cost: every rule works on sorted sweeps, bisect or lookups by value, except
+`readings`, kept from the shipping assembler: it is quadratic in boxes that
+overlap on one visual row, which real readings never stack more than a few
+deep (4,096 boxes stacked on one row take 1.3 s of CPU here, and the shipping
+assembler 1.8 s).
 
 Boxes are normalized [x, y, w, h] with a bottom-left origin, as Vision and the
 Paddle worker report them. The Swift port in OCRReadingOrder.swift must keep
@@ -87,9 +109,12 @@ import unicodedata
 H_CUT = 0.8      # horizontal band, in median line heights
 V_CUT = 1.5      # vertical band, in median line heights
 ROW_OVERLAP = 0.5
+PARALLEL_OVERLAP = 0.2       # B2: two sides share a row when rows overlap by this share of the smaller height
 TABLE_MAX_WORDS = 3
 TABLE_ALIGNED = 0.7
 TABLE_ANCHOR_ALIGNED = 0.7   # B1: share of the first column's rows matched in another column
+TABLE_ROW_ALIGN = 0.3        # rows of two columns are level when their centres are this share of a row height apart
+TABLE_APART = 2.0            # text beside a table stands this many times further off than its columns do
 MAX_INDENT = 40
 DUPLICATE_POSITIONS = 64     # earlier boxes of the same text compared, as the helper does
 
@@ -116,7 +141,7 @@ TOP_BAND = (110, 0.20)       # points, share of height: where bars sit without s
 BOTTOM_BAND = (24, 0.05)
 NAV_MAX_WIDTH = 0.30         # of the window's width
 NAV_EDGE = 0.06              # a navigation column starts this close to the window's left edge
-NAV_MIN_ROWS = 3
+NAV_MIN_ROWS = 4
 NAV_MAX_WORDS = 3            # median words per row
 NAV_MAX_CODE = 0.2           # share of rows that look like code
 NAV_WIDER = 1.5              # what sits beside navigation is at least this much wider
@@ -136,6 +161,7 @@ DATE_WORDS = frozenset(
     'jan feb mar apr jun jul aug sep sept oct nov dec'.split())
 PREVIEW_SHARE = 0.2          # and their share of its lines
 CODE_SHARE = 0.4             # share of rows that look like code for a block to be code
+CODE_AHEAD = 6               # rows read from a pane's top row down to tell whether it sits above code
 CHAT_INDENT = 4
 
 CHROME_SEPARATOR = '\n\n\x1e\n'
@@ -147,13 +173,24 @@ DIGITS = frozenset('0123456789')
 TERMINALS = frozenset({'com.apple.Terminal', 'com.googlecode.iterm2', 'com.mitchellh.ghostty',
                        'dev.warp.Warp-Stable', 'net.kovidgoyal.kitty', 'com.github.wez.wezterm',
                        'org.alacritty'})
+# The Rust reader's CHAT_APPS (core/brain/src/reading.rs): apps whose windows
+# are conversations, where a centred date divides messages.
+CHAT_APPS = frozenset({'com.tinyspeck.slackmacgap', 'com.apple.MobileSMS', 'com.hnc.Discord',
+                       'net.whatsapp.WhatsApp', 'desktop.WhatsApp', 'ru.keepcoder.Telegram',
+                       'org.telegram.desktop', 'org.whispersystems.signal-desktop', 'com.microsoft.teams2',
+                       'com.facebook.archon', 'com.openai.chat', 'com.anthropic.claudefordesktop'})
 ELLIPSES = ('\u2026', '...')
 BREADCRUMB = (' > ', ' \u203a ', ' / ', ' \u3009 ', ' \u276f ')
 CODE_MARKS = frozenset('{}();=<>[]')
 CODE_ENDINGS = frozenset('{}();,=[]<>:')
 PROMPTS = ('$ ', '% ', '\u276f ')
-COMPOSERS = ('message ', 'type a message', 'write a message', 'imessage', 'text message',
-             'leave a comment', 'add a comment', 'write a comment', 'reply', 'search')
+# A composer's prompt is one of these as its whole text, or starts with one
+# of the starts ("Message #general", "Message Maya Chen").
+COMPOSER_WORDS = frozenset({'message', 'imessage', 'text message', 'reply', 'type a message',
+                            'write a message', 'leave a comment', 'add a comment', 'write a comment'})
+COMPOSER_STARTS = ('message ', 'type a message', 'write a message', 'leave a comment', 'add a comment',
+                   'write a comment')
+SENTENCE_ENDS = frozenset('.!?')
 
 
 # ----------------------------------------------------------------- text, explicitly
@@ -306,11 +343,15 @@ def render_rows(boxes, left, flat=False, stacked=False):
             text = ' '.join(trim(b.text) for b in layer)
             indent = 0
             if char_w:
-                # Less than a character of offset is recognition jitter.
                 columns = (layer[0].x0 - left) / char_w
-                indent = 0 if columns < 1 else min(MAX_INDENT, round(columns))
-            if flat and indent:
-                indent = CHAT_INDENT
+                if flat:
+                    # Outside code an indent is none or four spaces, and an
+                    # offset shorter than that (a box that starts after a
+                    # checkbox) is not one.
+                    indent = CHAT_INDENT if columns >= CHAT_INDENT else 0
+                else:
+                    # Less than a character of offset is recognition jitter.
+                    indent = 0 if columns < 1 else min(MAX_INDENT, round(columns))
             lines.append(' ' * max(0, indent) + text)
     return lines
 
@@ -329,11 +370,12 @@ def is_table(columns):
     anchor = rows(columns[0])
     centers = [sum(b.cy for b in row) / len(row) for row in anchor]
     heights = [max(b.y1 for b in row) - min(b.y0 for b in row) for row in anchor]
-    # A row aligns with an anchor row when their centres are within 0.3 of
-    # the anchor row's height; search the anchor rows by centre.
+    # A row aligns with an anchor row when their centres are within
+    # TABLE_ROW_ALIGN of the anchor row's height; search the anchor rows by
+    # centre.
     order = sorted(range(len(anchor)), key=lambda i: centers[i])
     ordered = [centers[i] for i in order]
-    reach = 0.3 * max(heights)
+    reach = TABLE_ROW_ALIGN * max(heights)
     aligned = total = 0
     matched = set()
     for column in columns[1:]:
@@ -342,7 +384,7 @@ def is_table(columns):
             total += 1
             hits = [order[k] for k in range(bisect.bisect_left(ordered, cy - reach),
                                             bisect.bisect_right(ordered, cy + reach))
-                    if abs(cy - centers[order[k]]) <= 0.3 * heights[order[k]]]
+                    if abs(cy - centers[order[k]]) <= TABLE_ROW_ALIGN * heights[order[k]]]
             if hits:
                 aligned += 1
                 matched.update(hits)
@@ -355,10 +397,12 @@ def is_table(columns):
 
 def parallel(left, right):
     """B2: whether two sides share a row, as columns of text do. Alternating
-    chat bubbles never do. Columns with different line pitches share rows
-    only now and then (a sidebar beside a page can share one row in six), and
-    reading real columns as one block interleaves them, so one shared row is
-    enough. A sorted sweep, so a long column costs n log n."""
+    chat bubbles never do: one sits below the other. Columns with different
+    line pitches share rows only now and then (a sidebar beside a page can
+    share one row in six), and columns offset by half a line overlap only a
+    little; reading real columns as one block interleaves them, so one row
+    overlapping by PARALLEL_OVERLAP is enough. A sorted sweep, so a long
+    column costs n log n."""
     a, b = rows(left), rows(right)
     fewer, more = (a, b) if len(a) <= len(b) else (b, a)
     if not fewer:
@@ -374,10 +418,27 @@ def parallel(left, right):
         # earlier than the tallest of them could reach.
         for other_top, other_bottom in spans[bisect.bisect_left(tops, top - tallest):bisect.bisect_left(tops, bottom)]:
             overlap = min(bottom, other_bottom) - max(top, other_top)
-            if overlap >= ROW_OVERLAP * min(height, other_bottom - other_top):
+            if overlap >= PARALLEL_OVERLAP * min(height, other_bottom - other_top):
                 shared += 1
                 break
     return shared >= 1
+
+
+def stands_apart(columns):
+    """Whether the first of three or more columns is text beside a table,
+    not the table's first column (a form beside an order summary): the other
+    columns form a table without it, and it runs on below that table's last
+    row, or it stands TABLE_APART times further off than the table's columns
+    stand from each other. A title above a table, or a cell that wraps onto
+    a second line, has no partner either, and is the table's own."""
+    if len(columns) < 3 or not is_table(columns[1:]):
+        return False
+    table_rows = rows([b for column in columns[1:] for b in column])
+    last = max(row_span(row)[1] for row in table_rows)
+    if any(row_span(row)[0] >= last for row in rows(columns[0])):
+        return True
+    gaps = [min(b.x0 for b in columns[i + 1]) - max(b.x1 for b in columns[i]) for i in range(len(columns) - 1)]
+    return gaps[0] >= TABLE_APART * max(gaps[1:])
 
 
 def cut(boxes, line_h, tables=None):
@@ -412,13 +473,14 @@ def cut(boxes, line_h, tables=None):
                 break
             columns[-1:] = [[b for b in last if (b.x0 + b.x1) / 2 < more[1]],
                             [b for b in last if (b.x0 + b.x1) / 2 >= more[1]]]
-        if is_table(columns):
+        if is_table(columns) and not stands_apart(columns):
             out.append(region)
             if tables is not None:
                 tables.add(id(region))
             continue
         # A table can sit beside other text (an order summary beside a
-        # form): keep the columns that form one together.
+        # form): keep the columns that form one together, and read the text
+        # beside it on its own.
         for i in range(1, len(columns) - 1):
             if is_table(columns[i:]):
                 columns = columns[:i] + [[b for column in columns[i:] for b in column]]
@@ -449,6 +511,19 @@ def to_separators(normalized, width, height):
         elif h == 0 and w > 0:
             out.append(Separator(False, (1 - y) * height, x * width, (x + w) * width))
     return out
+
+
+def paired_rows(left, right):
+    """Whether two sides pair one to one, row for row, as a table's columns
+    do: the same number of rows, each level with its partner."""
+    a, b = rows(left), rows(right)
+    if len(a) != len(b):
+        return False
+    for row_a, row_b in zip(a, b):
+        height = min(row_span(row_a)[1] - row_span(row_a)[0], row_span(row_b)[1] - row_span(row_b)[0])
+        if abs(centre_y(row_a) - centre_y(row_b)) > TABLE_ROW_ALIGN * height:
+            return False
+    return True
 
 
 def crossed(separator, boxes):
@@ -484,8 +559,10 @@ def panes(boxes, separators, rect, line_h):
             for s in down:
                 left = [b for b in members if b.cx < s.at]
                 right = [b for b in members if b.cx >= s.at]
-                # Gridlines between a table's columns are not pane edges.
-                if left and right and is_table([left, right]):
+                # A gridline between a table's columns is not a pane edge:
+                # the two sides pair row for row. Two lists side by side (a
+                # file browser's columns, a file tree beside code) are panes.
+                if left and right and paired_rows(left, right) and is_table([left, right]):
                     continue
                 chosen = [((x0, y0, s.at, y1), left), ((s.at, y0, x1, y1), right)]
                 break
@@ -496,26 +573,80 @@ def panes(boxes, separators, rect, line_h):
     return out
 
 
+def ruled_rows(window_panes, line_h):
+    """Indexes of the panes (from panes()) that are rows of a ruled table: a
+    receipt, a spreadsheet's gridlines, a list with alternating backgrounds.
+    Each such pane holds one row between rules, the pane above or below it
+    spans the same columns, and the two rows line up item for item. A row of
+    a table is read whole: its label is not cut from its amount, and it is
+    never a bar. A pane with no text between two (a double rule) does not
+    break the run."""
+    found = set()
+    previous = None  # (index, rect, row) of the last pane with text, when it held one row
+    for i, (rect, boxes) in enumerate(window_panes):
+        if not boxes:
+            continue
+        lines = rows(boxes)
+        current = (i, rect, lines[0]) if len(lines) == 1 else None
+        if (current is not None and previous is not None and abs(previous[1][0] - rect[0]) < 1
+                and abs(previous[1][2] - rect[2]) < 1 and grid(previous[2], current[2], line_h)):
+            found.update((previous[0], i))
+        previous = current
+    return found
+
+
 # ----------------------------------------------------------------- box rules
 
-def gutter(boxes, line_h):
-    """An editor's line numbers: {id(box): (number, rest)} for the boxes in
-    the longest ascending chain of integers down one column, each alone in
-    its box or glued to the start of a line, close to the left edge of the
-    lines they number. Empty when there is no such chain. A table's column of
-    numbers is not a gutter: its numbers stand far from the next cell."""
+def gutter_chain(boxes, line_h):
+    """The longest ascending chain of integers down one column: [(box,
+    number, rest)], each number alone in its box (rest '') or glued to the
+    start of a line (rest is the line). Shorter than GUTTER_MIN when there is
+    none.
+
+    A chain grows greedily from its first number: the next is the first box,
+    top to bottom then left to right, that is 1 to GUTTER_MAX_STEP more, at
+    least half a line lower and at most GUTTER_GAP lines lower than the last,
+    and lines up with the first number. The first chain of the greatest
+    length wins, and a number already in a chain found earlier starts none.
+    Boxes are looked up by their number, so a chain never scans the boxes it
+    cannot use."""
     candidates = []
     for box in boxes:
         parsed = leading_number(trim(box.text))
         if parsed is not None:
             candidates.append((box, int(parsed[0]), parsed[1]))
     if len(candidates) < GUTTER_MIN:
-        return {}
+        return []
     candidates.sort(key=lambda t: (t[0].cy, t[0].x0))
-    following = {}
-    for row in rows(boxes):
-        for i, box in enumerate(row):
-            following[id(box)] = row[i + 1] if i + 1 < len(row) else None
+    # Positions in that order, by number, and their centres, for bisect.
+    by_number = {}
+    for i, (box, number, _) in enumerate(candidates):
+        by_number.setdefault(number, ([], []))
+        by_number[number][0].append(i)
+        by_number[number][1].append(box.cy)
+
+    def aligned(box, anchor):
+        # Lone numbers are right-aligned; numbers glued to a line start
+        # where the column starts.
+        return (abs(box.x1 - anchor.x1) <= GUTTER_ALIGN * line_h
+                or abs(box.x0 - anchor.x0) <= GUTTER_ALIGN * line_h)
+
+    def after(last, anchor):
+        """The position of the chain's next number, or None."""
+        box, number, _ = candidates[last]
+        found = None
+        for step in range(1, GUTTER_MAX_STEP + 1):
+            entry = by_number.get(number + step)
+            if entry is None:
+                continue
+            positions, centres = entry
+            for k in range(bisect.bisect_left(centres, box.cy + 0.5 * line_h), len(positions)):
+                if centres[k] > box.cy + GUTTER_GAP * line_h or (found is not None and positions[k] > found):
+                    break  # a gutter numbers every line; past this, it has stopped
+                if aligned(candidates[positions[k]][0], anchor):
+                    found = positions[k]
+                    break
+        return found
 
     best = []
     chained = set()
@@ -524,43 +655,50 @@ def gutter(boxes, line_h):
             break  # no later start can make a longer chain
         if id(anchor) in chained:
             continue  # a chain from inside a chain found already is part of it
-        chain = []
-        for entry in candidates[start:]:
-            box, number, rest = entry
-            if chain and box.cy - chain[-1][0].cy > GUTTER_GAP * line_h:
-                break  # a gutter numbers every line; this one has stopped
-            # Lone numbers are right-aligned; numbers glued to a line start
-            # where the column starts.
-            if abs(box.x1 - anchor.x1) > GUTTER_ALIGN * line_h and abs(box.x0 - anchor.x0) > GUTTER_ALIGN * line_h:
-                continue
-            if chain and (box.cy - chain[-1][0].cy < 0.5 * line_h or not 0 < number - chain[-1][1] <= GUTTER_MAX_STEP):
-                continue
-            chain.append(entry)
-        chained.update(id(box) for box, _, _ in chain)
+        chain = [start]
+        while True:
+            following = after(chain[-1], anchor)
+            if following is None:
+                break
+            chain.append(following)
+        chained.update(id(candidates[i][0]) for i in chain)
         if len(chain) > len(best):
             best = chain
+    return [candidates[i] for i in best]
+
+
+def gutter(boxes, line_h):
+    """An editor's line numbers: ({id(box): (number, rest)}, numbered) for
+    the boxes of gutter_chain, when they sit close to the left edge of the
+    lines they number or number lines of code. `numbered` holds those lines:
+    a glued box itself, or the box after a lone number on its row. Empty
+    when there is no such chain. A table's column of numbers is not a
+    gutter: its numbers stand far from the next cell."""
+    best = gutter_chain(boxes, line_h)
     if len(best) < GUTTER_MIN:
-        return {}
+        return {}, []
+    neighbour = {}
+    for row in rows(boxes):
+        for i, box in enumerate(row):
+            neighbour[id(box)] = row[i + 1] if i + 1 < len(row) else None
     # Line numbers sit close to the lines they number (a number glued to its
     # line is as close as can be), or number lines of code, however deeply
     # indented. A table's numbers stand far from cells that are not code.
-    gaps, numbered = [], []
+    gaps, texts, numbered = [], [], []
     for box, _, rest in best:
         if rest:
             gaps.append(0.0)
-            numbered.append(rest)
-        elif following.get(id(box)) is not None:
-            gaps.append(following[id(box)].x0 - box.x1)
-            numbered.append(trim(following[id(box)].text))
+            texts.append(rest)
+            numbered.append(box)
+        elif neighbour.get(id(box)) is not None:
+            gaps.append(neighbour[id(box)].x0 - box.x1)
+            texts.append(trim(neighbour[id(box)].text))
+            numbered.append(neighbour[id(box)])
     close = not gaps or statistics.median(gaps) <= GUTTER_REACH * line_h
-    code = bool(numbered) and sum(looks_like_code(t) for t in numbered) >= CODE_SHARE * len(numbered)
+    code = bool(texts) and sum(looks_like_code(t) for t in texts) >= CODE_SHARE * len(texts)
     if not (close or code):
-        return {}
-    return {id(box): (number, rest) for box, number, rest in best}
-
-
-def is_alnum_ascii(ch):
-    return ch in DIGITS or 'a' <= ch <= 'z' or 'A' <= ch <= 'Z'
+        return {}, []
+    return {id(box): (number, rest) for box, number, rest in best}, numbered
 
 
 def has_letter(text):
@@ -568,11 +706,17 @@ def has_letter(text):
     return any(unicodedata.category(ch).startswith('L') for ch in text)
 
 
-class Numbers:
-    """The boxes that are numbers, by height on the screen."""
+def is_letter_pair(text):
+    """Two letters of any script ("OR", "EN", "kg", "TR")."""
+    return len(text) == 2 and all(unicodedata.category(ch).startswith('L') for ch in text)
 
-    def __init__(self, boxes):
-        self.boxes = sorted((b for b in boxes if is_number(''.join(words(b.text)))), key=lambda b: b.cy)
+
+class Cells:
+    """The boxes whose text (whitespace removed) is of one kind, numbers or
+    letter pairs, by height on the screen."""
+
+    def __init__(self, boxes, kind):
+        self.boxes = sorted((b for b in boxes if kind(''.join(words(b.text)))), key=lambda b: b.cy)
         self.centres = [b.cy for b in self.boxes]
         self.tallest = max((b.h for b in self.boxes), default=0.0)
 
@@ -581,6 +725,20 @@ class Numbers:
         hi = bisect.bisect_right(self.centres, box.cy + reach)
         return self.boxes[lo:hi]
 
+    def line_up(self, box, line_h):
+        """Whether another of these cells stands in the box's column or on its
+        row, near it."""
+        for other in self.near(box, max(GLYPH_CHAIN_REACH * line_h, self.tallest)):
+            if other is box:
+                continue
+            same_column = (min(box.x1, other.x1) - max(box.x0, other.x0) > 0
+                           and abs(other.cy - box.cy) <= GLYPH_CHAIN_REACH * line_h)
+            same_row = (min(box.y1, other.y1) - max(box.y0, other.y0) >= ROW_OVERLAP * min(box.h, other.h)
+                        and abs(other.cx - box.cx) <= 2 * GLYPH_CHAIN_REACH * line_h)
+            if same_column or same_row:
+                return True
+        return False
+
 
 def number_in_place(box, row, index, numbers, line_h):
     """Whether a box of digits is data: in a column or row of other numbers
@@ -588,28 +746,26 @@ def number_in_place(box, row, index, numbers, line_h):
     of a label on its own row ("Estimate  3")."""
     if not is_number(''.join(words(box.text))):
         return False
-    for other in numbers.near(box, max(GLYPH_CHAIN_REACH * line_h, numbers.tallest)):
-        if other is box:
-            continue
-        same_column = (min(box.x1, other.x1) - max(box.x0, other.x0) > 0
-                       and abs(other.cy - box.cy) <= GLYPH_CHAIN_REACH * line_h)
-        same_row = (min(box.y1, other.y1) - max(box.y0, other.y0) >= ROW_OVERLAP * min(box.h, other.h)
-                    and abs(other.cx - box.cx) <= 2 * GLYPH_CHAIN_REACH * line_h)
-        if same_column or same_row:
-            return True
+    if numbers.line_up(box, line_h):
+        return True
     return any(has_letter(other.text) and box.x0 - other.x1 <= GLYPH_LABEL_REACH * line_h
                for other in row[:index])
 
 
+def pair_in_place(box, pairs, line_h):
+    """Whether two letters are data: in a column or row of other letter
+    pairs (a table's column of state or language codes). An icon read as
+    letters ("TR") stands alone."""
+    return is_letter_pair(''.join(words(box.text))) and pairs.line_up(box, line_h)
+
+
 def glyph_shaped(box):
-    """One or two characters, about square. Code punctuation is code, and two
-    letters or two digits are a word or a number ("Ok", "No", "12")."""
+    """One or two characters, about square (RULINGS T3). Code punctuation
+    is code."""
     text = ''.join(words(box.text))
     if not text or len(text) > GLYPH_MAX_CHARS or box.h <= 0:
         return False
     if all(ch in CODE_PUNCTUATION for ch in text):
-        return False
-    if len(text) == 2 and all(is_alnum_ascii(ch) for ch in text):
         return False
     return GLYPH_ASPECT[0] <= box.w / box.h <= GLYPH_ASPECT[1]
 
@@ -618,8 +774,8 @@ def glyphs(boxes, line_h):
     """Boxes that are icons read as characters: glyph-shaped, and at least
     GLYPH_CLEAR line heights from any text on their row. Icons side by side
     (attach and send) stand together, so only text counts as a neighbour.
-    Numbers in place are data."""
-    numbers = Numbers(boxes)
+    Numbers and letter pairs in place are data."""
+    numbers, pairs = Cells(boxes, is_number), Cells(boxes, is_letter_pair)
     out = []
     for row in rows(boxes):
         shaped = [glyph_shaped(box) for box in row]
@@ -632,7 +788,7 @@ def glyphs(boxes, line_h):
                 continue
             if after is not None and after.x0 - box.x1 < GLYPH_CLEAR * line_h:
                 continue
-            if number_in_place(box, row, i, numbers, line_h):
+            if number_in_place(box, row, i, numbers, line_h) or pair_in_place(box, pairs, line_h):
                 continue
             out.append(box)
     return out
@@ -685,10 +841,12 @@ def truncated(text):
 
 def icon_row(row):
     """A row of nothing but marks: every token one or two characters, at
-    least one of them a symbol."""
+    least one of them a symbol. Code punctuation ("}", "};") is code, not a
+    mark."""
     tokens = [token for b in row for token in words(b.text)]
     return bool(tokens) and all(len(t) <= GLYPH_MAX_CHARS for t in tokens) and any(
-        not any(unicodedata.category(ch)[0] in 'LN' for ch in t) for t in tokens)
+        not any(unicodedata.category(ch)[0] in 'LN' for ch in t) and not all(ch in CODE_PUNCTUATION for ch in t)
+        for t in tokens)
 
 
 def marks_row(row):
@@ -725,16 +883,37 @@ def names_window(text, title):
     return (line in name and len(line) >= 0.5 * len(name)) or (name in line and len(name) >= 0.5 * len(line))
 
 
-def is_placeholder(row):
-    """A composer's or search field's prompt: short, and worded like one.
-    Icons read beside it (a magnifier as "Q") are left out of the wording."""
+def prompt_words(row):
+    """A field's text, short enough for a prompt, with icons read beside it
+    (a magnifier as "Q") left out; '' when the row is longer than a prompt."""
     joined = ' '.join(trim(b.text) for b in row if len(''.join(words(b.text))) > GLYPH_MAX_CHARS)
-    if not joined or len(words(joined)) > PLACEHOLDER_MAX_WORDS:
+    return joined if joined and len(words(joined)) <= PLACEHOLDER_MAX_WORDS else ''
+
+
+def is_placeholder(row):
+    """A composer's prompt: worded like one ("Message #general", "iMessage",
+    "Reply"), or trailing off ("Ask about your code…"). A sentence ("Reply to
+    Dana about the invoice.") and a message that starts like a prompt ("Reply
+    when you can") are not prompts."""
+    joined = prompt_words(row)
+    if not joined:
         return False
     if joined.endswith(ELLIPSES):
         return True
-    lowered = joined.lower()
-    return any(lowered == p.strip() or lowered.startswith(p) for p in COMPOSERS)
+    if joined[-1] in SENTENCE_ENDS:
+        return False
+    lowered = normalized(joined)
+    return lowered in COMPOSER_WORDS or lowered.startswith(COMPOSER_STARTS)
+
+
+def is_search(row):
+    """A search field: "Search", or "Search" and what it searches ("Search
+    mail")."""
+    joined = prompt_words(row)
+    if not joined or joined[-1] in SENTENCE_ENDS:
+        return False
+    lowered = normalized(joined)
+    return lowered == 'search' or lowered.startswith('search ')
 
 
 class Block:
@@ -762,11 +941,12 @@ class Reading:
 
 
 class Pane:
-    """A rectangle of the window between separators, and its regions."""
-    __slots__ = ('rect', 'regions')
+    """A rectangle of the window between separators, and its regions.
+    `ruled`: the pane is one row of a ruled table (ruled_rows)."""
+    __slots__ = ('rect', 'regions', 'ruled')
 
-    def __init__(self, rect, regions):
-        self.rect, self.regions = rect, regions
+    def __init__(self, rect, regions, ruled=False):
+        self.rect, self.regions, self.ruled = rect, regions, ruled
 
 
 class Window:
@@ -775,6 +955,7 @@ class Window:
     def __init__(self, window, width, height, line_h):
         self.title = window.get('title') or ''
         self.terminal = window.get('bundle_id') in TERMINALS
+        self.chat = window.get('bundle_id') in CHAT_APPS
         self.scale = window.get('pixels_per_point') or 1.0
         self.x0, self.y0, self.x1, self.y1 = window_rect(window, width, height)
         self.width, self.height = self.x1 - self.x0, self.y1 - self.y0
@@ -923,20 +1104,28 @@ def date_line(row, pane):
     return abs(box.cx - (px0 + px1) / 2) <= DATE_CENTRE * (px1 - px0) and box.w <= 0.5 * (px1 - px0)
 
 
-def is_bar(row, below, win, pane_top, panel, single):
+def is_bar(row, below, win, pane_top, panel, single, code=False, band_pane=False):
     """Whether a pane's top row is a bar: interface in a strip, marks only, a
-    panel's title in capitals, or, for a pane of one row near the top of the
-    window, a header (items at both ends) or a search field."""
-    if below is not None and grid(row, below, win.line_h):
+    panel's title in capitals, or, for a pane of one row in the window's top
+    band, a header (items at both ends) or a search field. Above code (`code`:
+    the rows from this one down read as code) only a strip comes off: a short
+    line of code ("};", "x = 1", "SELECT *") is not a bar. A row that lines
+    up with the row below it is a table's header, not a bar, except in a pane
+    that lies wholly in the window's top band (`band_pane`), where icons stand
+    over their labels."""
+    if below is not None and not band_pane and grid(row, below, win.line_h):
         return False  # a table's header lines up with the row below it
-    if not (pane_top or centre_y(row) <= win.top_band):
+    top_band = centre_y(row) <= win.top_band
+    if not (pane_top or top_band):
         return False
     # Only a row at the window's top edge can be its title bar.
     title = win.title if row_span(row)[0] <= win.y0 + TITLE_REACH * win.line_h else ''
+    if code:
+        return strip_shaped(row, title)
     alone = below is None and pane_top  # the only row of a pane between separators
     return (strip_shaped(row, title) or icon_row(row) or (panel and caps_label(row))
             or (alone and marks_row(row))
-            or (single and (spread(row, win.line_h) or is_placeholder(row))))
+            or (single and top_band and (spread(row, win.line_h) or is_search(row) or is_placeholder(row))))
 
 
 def classify(window_panes, tables, win):
@@ -962,11 +1151,14 @@ def classify(window_panes, tables, win):
             continue
         navigation = preview_lists(mine, everything, win)
         navigation.update(id(region) for region in mine if is_navigation(region, everything, {id(region)}, win))
-        # In a pane that is mostly navigation, a short line left over (a
-        # Compose button, a count, a page counter) belongs with it.
+        # In a pane that is mostly navigation, a short line left over in the
+        # navigation's column (a Compose button, a count, a page counter)
+        # belongs with it. Short lines beside it (a note's heading) do not.
         nav_rows = sum(len(region.rows) for region in mine if id(region) in navigation)
         if navigation and nav_rows >= NAV_PANE_SHARE * sum(len(region.rows) for region in mine):
+            nav_x1 = max(region.x1 for region in mine if id(region) in navigation)
             navigation.update(id(region) for region in mine if not region.table and len(region.rows) <= 2
+                              and region.x0 < nav_x1
                               and all(len(words(' '.join(b.text for b in row))) <= 4 for row in region.rows))
         rest = [region for region in mine if id(region) not in navigation]
         home = {id(b): region for region in rest for b in region.boxes}
@@ -978,20 +1170,27 @@ def classify(window_panes, tables, win):
         panel = pane_top and px1 - px0 < win.width - 1
         # Bars come off the top of a pane, one row at a time, until a row
         # reads as something else. A pane with no separator above it can only
-        # have bars in the window's top band. A table's rows are never bars.
+        # have bars in the window's top band. A table's rows are never bars,
+        # nor are rows between rules that line up as a table's do, except in
+        # a pane that lies wholly in the top band (a title bar, a toolbar),
+        # where icons over their labels line up the way a table's cells do.
         top = 0
-        while top < len(lines) and not any(home[id(b)].table for b in lines[top]) and is_bar(
-                lines[top], lines[top + 1] if top + 1 < len(lines) else None, win, pane_top, panel,
-                len(lines) == 1):
+        band_pane = py1 <= win.top_band
+        while (not pane.ruled and top < len(lines)
+               and (band_pane or not any(home[id(b)].table for b in lines[top]))
+               and is_bar(lines[top], lines[top + 1] if top + 1 < len(lines) else None, win, pane_top, panel,
+                          len(lines) == 1, top + 1 < len(lines) and is_code(lines[top:top + CODE_AHEAD], False),
+                          band_pane)):
             top += 1
-        # At the foot of a pane: a composer's placeholder, or the window's
-        # status bar.
+        # At the foot of a pane: a composer's placeholder, alone in its
+        # region (a message that ends a run of messages is not one), or the
+        # window's status bar.
         foot = None
-        if top < len(lines) and not any(home[id(b)].table for b in lines[-1]):
+        if not pane.ruled and top < len(lines) and not any(home[id(b)].table for b in lines[-1]):
             last = lines[-1]
             alone = all(len(home[id(b)].rows) == 1 for b in last)
             at_foot = py1 - row_span(last)[1] <= PLACEHOLDER_REACH * win.line_h
-            if at_foot and is_placeholder(last) and (alone or not truncated(' '.join(trim(b.text) for b in last))):
+            if at_foot and alone and is_placeholder(last):
                 foot = (CHROME, 'placeholder', last, pane)
             elif centre_y(last) >= win.bottom_band and strip_shaped(last, ''):
                 foot = (CHROME, 'status', last, pane)
@@ -1009,7 +1208,7 @@ def classify(window_panes, tables, win):
                 row = [b for b in row if id(b) not in moved]
                 if not row:
                     continue
-                if not region.table and date_line(row, pane):
+                if win.chat and not region.table and date_line(row, pane):
                     if run:
                         out.append((CONTENT, 'content', [b for r in run for b in r], pane))
                         run = []
@@ -1064,10 +1263,26 @@ def render(boxes, left=None, flat=False, stacked=False):
     return '\n'.join(render_rows(boxes, left, flat, stacked))
 
 
+def pane_regions(boxes, seps, rect, line_h, tables=None):
+    """[Pane] in reading order: the frame cut at its separators, each pane
+    cut into regions; a ruled table's row stays whole."""
+    window_panes = panes(boxes, seps, rect, line_h)
+    ruled = ruled_rows(window_panes, line_h)
+    out = []
+    for i, (pane_rect, pane_boxes) in enumerate(window_panes):
+        if not pane_boxes:
+            out.append(Pane(pane_rect, []))
+        elif i in ruled:
+            out.append(Pane(pane_rect, [pane_boxes], ruled=True))
+        else:
+            out.append(Pane(pane_rect, cut(pane_boxes, line_h, tables)))
+    return out
+
+
 def unclassified(boxes, unplaced, seps, width, height, line_h):
     blocks = []
-    for _, pane_boxes in panes(boxes, seps, (0.0, 0.0, float(width), float(height)), line_h):
-        for region in cut(pane_boxes, line_h) if pane_boxes else []:
+    for pane in pane_regions(boxes, seps, (0.0, 0.0, float(width), float(height)), line_h):
+        for region in pane.regions:
             blocks.append(Block(CONTENT, 'content', region, render(region)))
     page = '\n\n'.join(block.text for block in blocks)
     stored = '\n'.join(([page] if page else []) + unplaced)
@@ -1076,13 +1291,25 @@ def unclassified(boxes, unplaced, seps, width, height, line_h):
     return Reading(blocks, stored, False)
 
 
+def code_char_width(numbers, numbered, boxes):
+    """The width of a character in the lines a gutter numbers: measured on
+    the lines beside lone numbers, else on the lines numbers are glued to,
+    else on every other box of four characters or more. The sidebar beside
+    an editor is often set in a narrower face than its code."""
+    for pool in ([b for b in numbered if id(b) not in numbers], [b for b in numbered if id(b) in numbers],
+                 [b for b in boxes if id(b) not in numbers]):
+        widths = [(b.x1 - b.x0) / len(trim(b.text)) for b in pool if len(trim(b.text)) >= 4]
+        if widths:
+            return statistics.median(widths)
+    return 0.0
+
+
 def without_gutter(boxes, line_h):
     """(boxes with line numbers taken out, the line numbers)."""
-    numbers = gutter(boxes, line_h)
+    numbers, numbered = gutter(boxes, line_h)
     if not numbers:
         return boxes, []
-    widths = [(b.x1 - b.x0) / len(b.text) for b in boxes if len(b.text) >= 4 and id(b) not in numbers]
-    char_w = statistics.median(widths) if widths else 0.0
+    char_w = code_char_width(numbers, numbered, boxes)
     kept, taken = [], []
     for box in boxes:
         entry = numbers.get(id(box))
@@ -1134,15 +1361,18 @@ def read(lines, *, min_confidence=0.5, width=2880, height=1800, separators=(), w
         return unclassified(boxes, unplaced, seps, width, height, line_h)
 
     win = Window(window, width, height, line_h)
-    kept, numbers = without_gutter(boxes, line_h)
-    marks = glyphs(kept, line_h)
-    taken = {id(b) for b in marks}
-    kept = [b for b in kept if id(b) not in taken]
+    if win.terminal:
+        # A terminal's text is its output: numbers counting down a column
+        # (`history`) and a lone "y" are what it printed.
+        kept, numbers, marks = boxes, [], []
+    else:
+        kept, numbers = without_gutter(boxes, line_h)
+        marks = glyphs(kept, line_h)
+        taken = {id(b) for b in marks}
+        kept = [b for b in kept if id(b) not in taken]
 
     tables = set()
-    window_panes = []
-    for rect, pane_boxes in panes(kept, seps, (win.x0, win.y0, win.x1, win.y1), line_h):
-        window_panes.append(Pane(rect, cut(pane_boxes, line_h, tables) if pane_boxes else []))
+    window_panes = pane_regions(kept, seps, (win.x0, win.y0, win.x1, win.y1), line_h, tables)
     roles = classify(window_panes, tables, win) if any(p.regions for p in window_panes) else []
     edges = code_left_edges(roles, win)
     blocks = []

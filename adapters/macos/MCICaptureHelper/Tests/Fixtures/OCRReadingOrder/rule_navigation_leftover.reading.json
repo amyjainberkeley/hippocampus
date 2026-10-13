@@ -1,0 +1,22 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "Compose"
+  },
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "All iCloud\nNotes\nLaunch\nPersonal\nWork\nTravel\nRecipes\nReading\nIdeas\nArchive\nShared\nRecently Deleted"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "The page says something long enough to be read 0.\nThe page says something long enough to be read 1.\nThe page says something long enough to be read 2."
+  }
+ ],
+ "stored": "The page says something long enough to be read 0.\nThe page says something long enough to be read 1.\nThe page says something long enough to be read 2.\n\n\u001e\nCompose\n\nAll iCloud\nNotes\nLaunch\nPersonal\nWork\nTravel\nRecipes\nReading\nIdeas\nArchive\nShared\nRecently Deleted",
+ "plain": "Compose\n\nAll iCloud\nNotes\nLaunch\nPersonal\nWork\nTravel\nRecipes\nReading\nIdeas\nArchive\nShared\nRecently Deleted\n\nThe page says something long enough to be read 0.\nThe page says something long enough to be read 1.\nThe page says something long enough to be read 2."
+}

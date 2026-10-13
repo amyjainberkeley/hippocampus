@@ -4,9 +4,14 @@
   {
    "role": "content",
    "rule": "content",
-   "text": "Shipping address Order summary\nSam Rivera Notebook $18.00\n41 Harbor Street Pens $28.00\nPortland, OR 97209 Total $46.00\nVisa ending in 4242"
+   "text": "Shipping address\nSam Rivera\n41 Harbor Street\nPortland, OR 97209\nVisa ending in 4242"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Order summary\nNotebook $18.00\nPens $28.00\nTotal $46.00"
   }
  ],
- "stored": "Shipping address Order summary\nSam Rivera Notebook $18.00\n41 Harbor Street Pens $28.00\nPortland, OR 97209 Total $46.00\nVisa ending in 4242\n\n\u001e\n",
- "plain": "Shipping address Order summary\nSam Rivera Notebook $18.00\n41 Harbor Street Pens $28.00\nPortland, OR 97209 Total $46.00\nVisa ending in 4242"
+ "stored": "Shipping address\nSam Rivera\n41 Harbor Street\nPortland, OR 97209\nVisa ending in 4242\n\nOrder summary\nNotebook $18.00\nPens $28.00\nTotal $46.00\n\n\u001e\n",
+ "plain": "Shipping address\nSam Rivera\n41 Harbor Street\nPortland, OR 97209\nVisa ending in 4242\n\nOrder summary\nNotebook $18.00\nPens $28.00\nTotal $46.00"
 }

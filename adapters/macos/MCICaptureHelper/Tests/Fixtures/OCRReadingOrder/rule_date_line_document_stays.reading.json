@@ -1,0 +1,17 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "You are invited to the launch party\n    Saturday, October 21 at 7 PM\n    41 Harbor Street, Portland"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Bring a friend. Dinner and drinks are on us.\n    Reply to Maya by October 18."
+  }
+ ],
+ "stored": "You are invited to the launch party\n    Saturday, October 21 at 7 PM\n    41 Harbor Street, Portland\n\nBring a friend. Dinner and drinks are on us.\n    Reply to Maya by October 18.\n\n\u001e\n",
+ "plain": "You are invited to the launch party\n                Saturday, October 21 at 7 PM\n                  41 Harbor Street, Portland\n\nBring a friend. Dinner and drinks are on us.\n       Reply to Maya by October 18."
+}

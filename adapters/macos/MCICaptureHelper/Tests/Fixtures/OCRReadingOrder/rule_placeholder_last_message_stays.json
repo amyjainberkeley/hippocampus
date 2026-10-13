@@ -1,0 +1,75 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "Maya Chen 10:42 AM",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.261111,
+    0.09375,
+    0.016667
+   ]
+  },
+  {
+   "text": "Pushed the new onboarding flow to staging.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.238889,
+    0.21875,
+    0.016667
+   ]
+  },
+  {
+   "text": "Ravi Patel 10:47 AM",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.183333,
+    0.098958,
+    0.016667
+   ]
+  },
+  {
+   "text": "Reply when you can, no rush",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.161111,
+    0.140625,
+    0.016667
+   ]
+  },
+  {
+   "text": "Message #launch-plan",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.038889,
+    0.104167,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [
+  [
+   0.0,
+   0.111111,
+   1.0,
+   0.0
+  ]
+ ],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "launch-plan",
+  "bundle_id": "com.tinyspeck.slackmacgap"
+ }
+}

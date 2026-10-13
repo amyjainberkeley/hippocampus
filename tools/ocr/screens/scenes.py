@@ -8,7 +8,9 @@ wraps, so each truth line is exactly one visual row of one block.
 
 Every block also carries a role, as the windows in windows.py do: content
 (what the screen is showing), navigation (lists of other places) or chrome (the
-interface). The transcript bench scores the reading against those roles.
+interface). The transcript bench scores the reading against those roles. Each
+scene has a plain `label` for the side-by-side page, and the terminal names its
+app, so the bench reads it as a terminal.
 
 The text is fabricated. No real person, message or credential appears.
 """
@@ -30,6 +32,7 @@ def block(x, y, lines, *, size=13, color='#1d1d1f', font=SANS, weight=400,
 SCENES = {}
 
 SCENES['chat_light'] = {
+    'label': 'Chat',
     'background': '#ffffff',
     'panels': [(0, 0, 250, 900, '#f4f4f6'), (250, 0, 1190, 52, '#ffffff')],
     'blocks': [
@@ -56,6 +59,7 @@ SCENES['chat_light'] = {
 }
 
 SCENES['code_dark'] = {
+    'label': 'Code',
     'background': '#1e1e1e',
     'panels': [(0, 0, 260, 900, '#252526'), (0, 870, 1440, 30, '#007acc')],
     'blocks': [
@@ -88,6 +92,7 @@ SCENES['code_dark'] = {
 }
 
 SCENES['article_columns'] = {
+    'label': 'Article in columns',
     'background': '#ffffff',
     'panels': [(0, 0, 1440, 56, '#fafafa')],
     'blocks': [
@@ -118,6 +123,8 @@ SCENES['article_columns'] = {
 }
 
 SCENES['terminal_dark'] = {
+    'label': 'Terminal',
+    'app': 'com.apple.Terminal',
     'background': '#0c0c0c',
     'panels': [],
     'blocks': [
@@ -143,6 +150,7 @@ SCENES['terminal_dark'] = {
 }
 
 SCENES['email_panes'] = {
+    'label': 'Mail in panes',
     'background': '#ffffff',
     'panels': [(0, 0, 200, 900, '#f2f2f7'), (200, 0, 420, 900, '#fbfbfd')],
     'blocks': [
@@ -173,6 +181,7 @@ SCENES['email_panes'] = {
 }
 
 SCENES['table_light'] = {
+    'label': 'Table',
     'background': '#ffffff',
     'panels': [(0, 0, 1440, 40, '#f5f5f7')],
     'blocks': [
@@ -190,6 +199,7 @@ SCENES['table_light'] = {
 }
 
 SCENES['small_labels'] = {
+    'label': 'Small labels',
     'background': '#ececec',
     'panels': [(0, 0, 220, 900, '#e3e3e3')],
     'blocks': [
@@ -210,6 +220,7 @@ SCENES['small_labels'] = {
 }
 
 SCENES['doc_notes'] = {
+    'label': 'Document',
     'background': '#ffffff',
     'panels': [(0, 0, 240, 900, '#f7f6f3')],
     'blocks': [

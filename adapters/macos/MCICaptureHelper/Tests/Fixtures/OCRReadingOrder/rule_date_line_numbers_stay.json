@@ -82,7 +82,7 @@
    1.0
   ],
   "pixels_per_point": 2.0,
-  "title": "Weekly review",
-  "bundle_id": "com.example.notes"
+  "title": "launch-plan",
+  "bundle_id": "com.tinyspeck.slackmacgap"
  }
 }

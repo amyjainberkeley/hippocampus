@@ -1,0 +1,17 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "store.rs main.rs lib.rs"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "    };\n    let mut deleted = 0_u64;\n    for batch in store.batches() {\n        deleted += store.delete(batch)?;\n    }\n    Ok(deleted)\n}"
+  }
+ ],
+ "stored": "    };\n    let mut deleted = 0_u64;\n    for batch in store.batches() {\n        deleted += store.delete(batch)?;\n    }\n    Ok(deleted)\n}\n\n\u001e\nstore.rs main.rs lib.rs",
+ "plain": "store.rs main.rs lib.rs\n\n    };\n    let mut deleted = 0_u64;\n    for batch in store.batches() {\n        deleted += store.delete(batch)?;\n    }\n    Ok(deleted)\n}"
+}

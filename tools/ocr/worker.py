@@ -409,8 +409,9 @@ class CoverageDetector:
 # Pane separators: app windows divide their panes with a hairline or a change
 # of background, and either is a long straight edge. Text never makes an edge
 # longer than a line is tall, and text never crosses a pane boundary, so the
-# long edges that no text box crosses are where the window divides. The
-# capture helper cuts the reading there before it looks for gaps between boxes.
+# long edges that no text box crosses are where the window divides.
+# screens/layout.py cuts the reading there before it looks for gaps between
+# boxes.
 SEPARATOR_STEP = 5           # grey levels between neighbouring pixels that make an edge
 SEPARATOR_BREAK = 3          # pixels of interruption an edge survives, at the analysed scale
 SEPARATOR_MIN_VERTICAL = 0.22    # a vertical separator runs this share of the frame's height

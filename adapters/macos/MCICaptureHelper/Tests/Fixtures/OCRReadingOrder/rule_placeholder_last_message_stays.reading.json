@@ -1,0 +1,22 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Maya Chen 10:42 AM\nPushed the new onboarding flow to staging."
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Ravi Patel 10:47 AM\nReply when you can, no rush"
+  },
+  {
+   "role": "chrome",
+   "rule": "placeholder",
+   "text": "Message #launch-plan"
+  }
+ ],
+ "stored": "Maya Chen 10:42 AM\nPushed the new onboarding flow to staging.\n\nRavi Patel 10:47 AM\nReply when you can, no rush\n\n\u001e\nMessage #launch-plan",
+ "plain": "Maya Chen 10:42 AM\nPushed the new onboarding flow to staging.\n\nRavi Patel 10:47 AM\nReply when you can, no rush\n\nMessage #launch-plan"
+}

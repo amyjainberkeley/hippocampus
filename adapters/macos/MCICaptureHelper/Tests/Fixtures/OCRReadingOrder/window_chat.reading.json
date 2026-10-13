@@ -14,7 +14,7 @@
   {
    "role": "chrome",
    "rule": "navigation",
-   "text": "Channels\n    general\n# design-review\n# launch-plan\n    eng-oncall\n# random\nDirect messages\n\u25cf Maya Chen\n\u25cf Ravi Patel\n\u2022 Jonas Weber"
+   "text": "Channels\ngeneral\n# design-review\n# launch-plan\neng-oncall\n# random\nDirect messages\n\u25cf Maya Chen\n\u25cf Ravi Patel\n\u2022 Jonas Weber"
   },
   {
    "role": "chrome",
@@ -44,7 +44,7 @@
   {
    "role": "content",
    "rule": "content",
-   "text": "Maya Chen 11:09 AM\nGreat. Shipping 0.3 to the beta group after lunch unless anyone objects.\nRavi Patel 11:12 AM\nLet's land Team at $18 a seat, billed annually. I still need an answer on seat minimums.\n    3 1"
+   "text": "Maya Chen 11:09 AM\nGreat. Shipping 0.3 to the beta group after lunch unless anyone objects.\nRavi Patel 11:12 AM\nLet's land Team at $18 a seat, billed annually. I still need an answer on seat minimums.\n3 1"
   },
   {
    "role": "chrome",
@@ -53,7 +53,7 @@
   },
   {
    "role": "chrome",
-   "rule": "bar",
+   "rule": "placeholder",
    "text": "Message #launch-plan"
   },
   {
@@ -62,6 +62,6 @@
    "text": "\u304f D 0 \u2606 \u4e09 \u5341"
   }
  ],
- "stored": "Maya Chen 10:42 AM\nPushed the new onboarding flow to staging. The permissions step is now one screen.\nCan someone check the copy on the screen recording prompt before 3 PM?\nRavi Patel 10:47 AM\nLooks good. One nit: \"Allow capture\" should say \"Turn on memory\" to match the menu.\n\nJonas Weber 11:05 AM\nBenchmarks from last night: recall p95 is 41 ms on the 100k-event store.\nEmbedding backfill finished in 6m 12s; 0 events skipped, 3 retried.\n\nMaya Chen 11:09 AM\nGreat. Shipping 0.3 to the beta group after lunch unless anyone objects.\nRavi Patel 11:12 AM\nLet's land Team at $18 a seat, billed annually. I still need an answer on seat minimums.\n    3 1\n\n\u001e\nNorthwind Studio >\n\nThreads\n4 Drafts & sent\n\nChannels\n    general\n# design-review\n# launch-plan\n    eng-oncall\n# random\nDirect messages\n\u25cf Maya Chen\n\u25cf Ravi Patel\n\u2022 Jonas Weber\n\nQ Search Northwind Studio\n\n# launch-plan\u2606 14 members \u25a1\n\nToday\n\nB\uff29S e\n\nMessage #launch-plan\n\n\u304f D 0 \u2606 \u4e09 \u5341",
+ "stored": "Maya Chen 10:42 AM\nPushed the new onboarding flow to staging. The permissions step is now one screen.\nCan someone check the copy on the screen recording prompt before 3 PM?\nRavi Patel 10:47 AM\nLooks good. One nit: \"Allow capture\" should say \"Turn on memory\" to match the menu.\n\nJonas Weber 11:05 AM\nBenchmarks from last night: recall p95 is 41 ms on the 100k-event store.\nEmbedding backfill finished in 6m 12s; 0 events skipped, 3 retried.\n\nMaya Chen 11:09 AM\nGreat. Shipping 0.3 to the beta group after lunch unless anyone objects.\nRavi Patel 11:12 AM\nLet's land Team at $18 a seat, billed annually. I still need an answer on seat minimums.\n3 1\n\n\u001e\nNorthwind Studio >\n\nThreads\n4 Drafts & sent\n\nChannels\ngeneral\n# design-review\n# launch-plan\neng-oncall\n# random\nDirect messages\n\u25cf Maya Chen\n\u25cf Ravi Patel\n\u2022 Jonas Weber\n\nQ Search Northwind Studio\n\n# launch-plan\u2606 14 members \u25a1\n\nToday\n\nB\uff29S e\n\nMessage #launch-plan\n\n\u304f D 0 \u2606 \u4e09 \u5341",
  "plain": "0\n\n\u2606\n\n\u5341\n\nNorthwind Studio >\n\nThreads\n4 Drafts & sent\n\nChannels\n  general\n# design-review\n# launch-plan\n  eng-oncall\n# random\nDirect messages\n\u25cf Maya Chen\n\u25cf Ravi Patel\n\u2022 Jonas Weber\n\n\u304f Q Search Northwind Studio D\n\n# launch-plan\u2606 14 members \u25a1\n\n                                        Today\nMaya Chen 10:42 AM\nPushed the new onboarding flow to staging. The permissions step is now one screen.\nCan someone check the copy on the screen recording prompt before 3 PM?\nRavi Patel 10:47 AM\nLooks good. One nit: \"Allow capture\" should say \"Turn on memory\" to match the menu.\n\nJonas Weber 11:05 AM\nBenchmarks from last night: recall p95 is 41 ms on the 100k-event store.\nEmbedding backfill finished in 6m 12s; 0 events skipped, 3 retried.\n\nMaya Chen 11:09 AM\nGreat. Shipping 0.3 to the beta group after lunch unless anyone objects.\nRavi Patel 11:12 AM\nLet's land Team at $18 a seat, billed annually. I still need an answer on seat minimums.\n  3 1\n\nB\uff29S e \u4e09\n\nMessage #launch-plan"
 }

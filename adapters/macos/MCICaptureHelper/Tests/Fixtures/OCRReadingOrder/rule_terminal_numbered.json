@@ -1,0 +1,108 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "$ history",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.972222,
+    0.046875,
+    0.016667
+   ]
+  },
+  {
+   "text": "501  cargo build",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.95,
+    0.083333,
+    0.016667
+   ]
+  },
+  {
+   "text": "502  cargo test -p mci-brain",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.927778,
+    0.145833,
+    0.016667
+   ]
+  },
+  {
+   "text": "503  git status",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.905556,
+    0.078125,
+    0.016667
+   ]
+  },
+  {
+   "text": "504  git diff --stat",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.883333,
+    0.104167,
+    0.016667
+   ]
+  },
+  {
+   "text": "505  ls -la",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.861111,
+    0.057292,
+    0.016667
+   ]
+  },
+  {
+   "text": "$ cargo clean",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.838889,
+    0.067708,
+    0.016667
+   ]
+  },
+  {
+   "text": "Remove the build folder? [y/N]",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.816667,
+    0.15625,
+    0.016667
+   ]
+  },
+  {
+   "text": "y",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.794444,
+    0.010417,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "zsh",
+  "bundle_id": "com.apple.Terminal"
+ }
+}

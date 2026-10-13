@@ -1,0 +1,48 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "x = 1",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.95,
+    0.026042,
+    0.016667
+   ]
+  },
+  {
+   "text": "y = compute(x)",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.927778,
+    0.072917,
+    0.016667
+   ]
+  },
+  {
+   "text": "print(y)",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.905556,
+    0.041667,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "store.rs - project",
+  "bundle_id": "com.microsoft.VSCode"
+ }
+}

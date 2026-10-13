@@ -48,7 +48,7 @@
   },
   {
    "role": "chrome",
-   "rule": "bar",
+   "rule": "placeholder",
    "text": "iMessage"
   },
   {

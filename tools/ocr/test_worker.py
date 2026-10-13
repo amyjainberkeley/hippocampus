@@ -438,6 +438,35 @@ class PaneSeparatorTests(unittest.TestCase):
         self.assertAlmostEqual(vertical[0][0], 640 / 2400, delta=2 / 2400)
         self.assertAlmostEqual(horizontal[0][1], 1480 / 1600, delta=2 / 1600)
 
+    def test_a_reply_over_the_size_limit_drops_the_separators_and_keeps_every_line(self):
+        import numpy as np
+        from types import SimpleNamespace
+        image = self.frame(600, 400)
+        image[:, :200] = 236             # a sidebar beside the page: one vertical separator
+        quads = [[[220.0, 20.0 + 18 * i], [580.0, 20.0 + 18 * i], [580.0, 32.0 + 18 * i], [220.0, 32.0 + 18 * i]]
+                 for i in range(20)]
+        result = SimpleNamespace(txts=tuple(f'Line {i} of the page' for i in range(20)),
+                                 scores=tuple(0.9 for _ in range(20)), boxes=np.array(quads))
+
+        class Engine:
+            frame = worker.FrameState()
+
+            def __call__(self, image):
+                return result
+
+        full = json.loads(worker.recognize(Engine(), image))
+        self.assertTrue(full['separators'])
+        lines_only = json.dumps({'version': 1, 'lines': full['lines']}, ensure_ascii=False,
+                                allow_nan=False).encode('utf-8')
+        # Lines and separators exceed the limit; lines alone fit exactly.
+        with patch.object(worker, 'MAX_REPLY', len(lines_only)):
+            reply = json.loads(worker.recognize(Engine(), image))
+        self.assertEqual(reply, {'version': 1, 'lines': full['lines']})
+        self.assertEqual(len(reply['lines']), 20)
+        # Lines alone over the limit refuse the reading, never cut it short.
+        with patch.object(worker, 'MAX_REPLY', len(lines_only) - 1), self.assertRaisesRegex(ValueError, 'too large'):
+            worker.recognize(Engine(), image)
+
     def test_separators_cost_little_beside_a_reading(self):
         # A Retina window with panes and text-like noise. The reading itself
         # takes well over a second; separators must stay a small part of it.

@@ -19,7 +19,7 @@ def scene_named(name):
 class SceneTests(unittest.TestCase):
     def test_every_scene_has_committed_boxes_and_content(self):
         scenes = bench.all_scenes()
-        self.assertEqual(len(scenes), 19)
+        self.assertEqual(len(scenes), 21)
         for scene in scenes:
             with self.subTest(scene=scene['name']):
                 boxes = bench.load_boxes(scene['name'])
@@ -36,6 +36,15 @@ class SceneTests(unittest.TestCase):
         self.assertEqual(role('todo_beside_notes', 'Email the caterer'), 'content')
         self.assertEqual(role('fullscreen_doc', 'which is why the pilot ran for four weeks instead of two.'), 'content')
         self.assertEqual({item['role'] for item in scene_named('fullscreen_doc')['items']}, {'content'})
+        self.assertEqual(role('receipt', 'Brass pen × 2'), 'content')
+        self.assertEqual(role('receipt', '$55.14'), 'content')
+        self.assertEqual(role('invitation', 'Saturday, October 21 at 7 PM'), 'content')
+        self.assertEqual(role('invitation', 'Reply to Maya by October 18.'), 'content')
+
+    def test_the_terminal_scene_is_read_as_a_terminal(self):
+        self.assertEqual(scene_named('terminal_dark')['app'], 'com.apple.Terminal')
+        self.assertEqual(bench.geometry(scene_named('terminal_dark'), bench.load_boxes('terminal_dark'))['bundle_id'],
+                         'com.apple.Terminal')
 
     def test_render_draws_every_scene_at_its_own_size(self):
         pages = list(render.pages())
@@ -71,6 +80,12 @@ class MeasureTests(unittest.TestCase):
     def test_junk_is_tokens_in_no_truth_string_but_not_bullets(self):
         self.assertEqual(bench.junk_tokens('\u53e3 Pay the invoice by Friday \u2606\u2261\n\u2022 Pay', self.items),
                          ['\u53e3', '\u2606\u2261'])
+
+    def test_short_chrome_in_the_main_text_is_junk(self):
+        # Too short to score as a leak ("3" of a reaction count), so it
+        # counts here, against the content's own words only.
+        items = self.items + [{'role': 'chrome', 'text': '3'}, {'role': 'chrome', 'text': 'KB'}]
+        self.assertEqual(bench.junk_tokens('Pay the invoice by Friday\n3 1\n84 KB', items), ['3', '1', '84', 'KB'])
 
     def test_content_recall_and_reading_order(self):
         scene = {'items': [{'role': 'content', 'text': 'first line here'},
@@ -140,6 +155,11 @@ class BenchTests(unittest.TestCase):
         self.assertLess(text.index('<img src="editor.png"'), text.index('<img src="chat_light.png"'))
         self.assertIn('Also in this window', text)
         self.assertIn('<pre>', text)
+        # Plain labels, never the scene ids, name each window.
+        self.assertIn('<img src="todo_beside_notes.png" alt="To-do list beside notes">', text)
+        self.assertIn('<h2>Code editor</h2>', text)
+        self.assertNotIn('<h2>fullscreen_doc</h2>', text)
+        self.assertNotIn(';', text.split('<h1>Screen and text</h1>', 1)[1].split('</p>', 1)[0])
 
 
 class ReaderTests(unittest.TestCase):
@@ -166,10 +186,30 @@ class ReaderTests(unittest.TestCase):
             finally:
                 reader.close()
             request = json.loads(log.read_text(encoding='utf-8').splitlines()[0])
-        self.assertTrue(texts['new']['main'].startswith('LAUNCH PLAN'))
+        self.assertEqual(texts['new']['main'], bench.split_stored(texts['new']['stored'])[0].upper())
+        self.assertIn('LAUNCH PLAN', texts['new']['main'])
         self.assertEqual(set(request), {'stored', 'source', 'app', 'title'})
         self.assertEqual(request['source'], 'screen_ocr')
         self.assertTrue(request['stored'].startswith('[app=com.apple.Notes | title=Launch plan | url=? | ts='))
+
+    def test_a_line_the_reader_cannot_read_stops_the_bench_with_the_scene_and_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = Path(tmp) / 'reading-probe'
+            # The probe answers a line it cannot read with {"error": ...}.
+            probe.write_text(
+                f'#!{sys.executable}\n'
+                'import json, sys\n'
+                'for line in sys.stdin:\n'
+                '    print(json.dumps({"error": "not a reading request"}), flush=True)\n',
+                encoding='utf-8')
+            probe.chmod(0o755)
+            reader = bench.Reader(probe)
+            try:
+                with self.assertRaises(SystemExit) as stopped:
+                    bench.transcripts(scene_named('mail'), bench.load_boxes('mail'), reader)
+            finally:
+                reader.close()
+        self.assertEqual(str(stopped.exception), 'reading-probe could not read mail: not a reading request')
 
 
 if __name__ == '__main__':

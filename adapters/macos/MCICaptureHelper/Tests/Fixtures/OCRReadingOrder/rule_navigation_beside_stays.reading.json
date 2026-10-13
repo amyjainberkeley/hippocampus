@@ -1,0 +1,27 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "All iCloud\nNotes\nLaunch\nPersonal\nWork\nTravel\nRecipes\nReading\nIdeas\nArchive\nShared\nRecently Deleted"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Dentist on Friday"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Bring the insurance card and the forms from last year,\nand leave by 8:15 so there is time to park."
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Call Ravi"
+  }
+ ],
+ "stored": "Dentist on Friday\n\nBring the insurance card and the forms from last year,\nand leave by 8:15 so there is time to park.\n\nCall Ravi\n\n\u001e\nAll iCloud\nNotes\nLaunch\nPersonal\nWork\nTravel\nRecipes\nReading\nIdeas\nArchive\nShared\nRecently Deleted",
+ "plain": "All iCloud\nNotes\nLaunch\nPersonal\nWork\nTravel\nRecipes\nReading\nIdeas\nArchive\nShared\nRecently Deleted\n\nDentist on Friday\n\nBring the insurance card and the forms from last year,\nand leave by 8:15 so there is time to park.\n\nCall Ravi"
+}

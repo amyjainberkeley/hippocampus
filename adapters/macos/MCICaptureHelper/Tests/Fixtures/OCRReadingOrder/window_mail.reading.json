@@ -14,7 +14,7 @@
   {
    "role": "chrome",
    "rule": "navigation",
-   "text": "    Inbox\n\u2606 Starred\n\u53e3 Snoozed\n\u53e3 Sent\n\u53e3 Drafts\n\u53e3 Invoices\n\u53e3 Travel"
+   "text": "Inbox\n\u2606 Starred\n\u53e3 Snoozed\n\u53e3 Sent\n\u53e3 Drafts\n\u53e3 Invoices\n\u53e3 Travel"
   },
   {
    "role": "chrome",
@@ -74,7 +74,7 @@
   {
    "role": "content",
    "rule": "content",
-   "text": "D invoice-4471.pdf\n    84 KB"
+   "text": "D invoice-4471.pdf\n84 KB"
   },
   {
    "role": "content",
@@ -87,6 +87,6 @@
    "text": "0 0 C \u4e09 \u304f > \u304f \u53e3 \u53e3 \u4e09"
   }
  ],
- "stored": "Invoice 4471 for phase two\n\n    Dana Whitfield <dana@northwind.example>\n    to me 11:02 AM\u2606\u2261\nHi Sam,\nPhase two of the brand refresh is wrapped up, and the final files are in the shared folder. The\ninvoice for this phase is attached: 2,000.00 for the refresh and 300.00 for the icon set, 2,300.00 in\ntotal.\nPayment is due October 30 by bank transfer. If the purchase order number has changed since\nphase one, let me know and I will reissue it.\nIt has been a pleasure working on this. I would love to hear how the launch goes.\nBest,\nDana\n\nD invoice-4471.pdf\n    84 KB\n\nReply Forward\n\n\u001e\n\u4e09 Mail Q Search mail\n\n+ Compose\n\n    Inbox\n\u2606 Starred\n\u53e3 Snoozed\n\u53e3 Sent\n\u53e3 Drafts\n\u53e3 Invoices\n\u53e3 Travel\n\n1\u201350 of 1,284\n\n12\n\nDana Whitfield 11:02 AM\nInvoice 4471 for phase two\nHi Sam, phase two is wrapped up. The invoice is attached..\n\nRavi Patel 10:20 AM\nRe: Team plan pricing\nSeat minimums: I'd say three. Anything lower and support...\n\nCalendar 9:00 AM\nReminder: beta review at 2 PM\nYou have a meeting with Maya Chen and Jonas Weber...\n\nNorthwind Billing\nYour receipt from Northwind\nThanks for your payment of $300.00 for the icon set...\n\nOct 9\n\nJonas Weber\nBenchmarks, round three\nRecall p95 is down to 41 ms. Details in the doc...\n\nOct 9\n\n0 0 C \u4e09 \u304f > \u304f \u53e3 \u53e3 \u4e09",
+ "stored": "Invoice 4471 for phase two\n\n    Dana Whitfield <dana@northwind.example>\n    to me 11:02 AM\u2606\u2261\nHi Sam,\nPhase two of the brand refresh is wrapped up, and the final files are in the shared folder. The\ninvoice for this phase is attached: 2,000.00 for the refresh and 300.00 for the icon set, 2,300.00 in\ntotal.\nPayment is due October 30 by bank transfer. If the purchase order number has changed since\nphase one, let me know and I will reissue it.\nIt has been a pleasure working on this. I would love to hear how the launch goes.\nBest,\nDana\n\nD invoice-4471.pdf\n84 KB\n\nReply Forward\n\n\u001e\n\u4e09 Mail Q Search mail\n\n+ Compose\n\nInbox\n\u2606 Starred\n\u53e3 Snoozed\n\u53e3 Sent\n\u53e3 Drafts\n\u53e3 Invoices\n\u53e3 Travel\n\n1\u201350 of 1,284\n\n12\n\nDana Whitfield 11:02 AM\nInvoice 4471 for phase two\nHi Sam, phase two is wrapped up. The invoice is attached..\n\nRavi Patel 10:20 AM\nRe: Team plan pricing\nSeat minimums: I'd say three. Anything lower and support...\n\nCalendar 9:00 AM\nReminder: beta review at 2 PM\nYou have a meeting with Maya Chen and Jonas Weber...\n\nNorthwind Billing\nYour receipt from Northwind\nThanks for your payment of $300.00 for the icon set...\n\nOct 9\n\nJonas Weber\nBenchmarks, round three\nRecall p95 is down to 41 ms. Details in the doc...\n\nOct 9\n\n0 0 C \u4e09 \u304f > \u304f \u53e3 \u53e3 \u4e09",
  "plain": "\u4e09 Mail Q Search mail\n\n+ Compose\n\n    Inbox\n\u2606 Starred\n\u53e3 Snoozed\n\u53e3 Sent\n\u53e3 Drafts\n\u53e3 Invoices\n\u53e3 Travel\n\n0 C \u4e09 1\u201350 of 1,284 \u304f >\n\n12\n\nDana Whitfield 11:02 AM\nInvoice 4471 for phase two\nHi Sam, phase two is wrapped up. The invoice is attached..\n\nRavi Patel 10:20 AM\nRe: Team plan pricing\nSeat minimums: I'd say three. Anything lower and support...\n\nCalendar 9:00 AM\nReminder: beta review at 2 PM\nYou have a meeting with Maya Chen and Jonas Weber...\n\nNorthwind Billing\nYour receipt from Northwind\nThanks for your payment of $300.00 for the icon set...\n\nOct 9\n\nJonas Weber\nBenchmarks, round three\nRecall p95 is down to 41 ms. Details in the doc...\n\nOct 9\n\n0\n\n\u304f \u53e3 \u53e3 \u4e09\n\nInvoice 4471 for phase two\n\n        to me 11:02 AM\u2606\u2261\n        Dana Whitfield <dana@northwind.example>\nHi Sam,\nPhase two of the brand refresh is wrapped up, and the final files are in the shared folder. The\ninvoice for this phase is attached: 2,000.00 for the refresh and 300.00 for the icon set, 2,300.00 in\ntotal.\nPayment is due October 30 by bank transfer. If the purchase order number has changed since\nphase one, let me know and I will reissue it.\nIt has been a pleasure working on this. I would love to hear how the launch goes.\nBest,\nDana\n\nD invoice-4471.pdf\n   84 KB\n\nReply Forward"
 }

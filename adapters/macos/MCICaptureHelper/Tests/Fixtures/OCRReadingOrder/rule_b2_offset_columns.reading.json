@@ -1,0 +1,17 @@
+{
+ "classified": false,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Inbox\nDrafts\nSent\nTrash\nSpam"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "The page says something long enough to be read 0.\nThe page says something long enough to be read 1.\nThe page says something long enough to be read 2.\nThe page says something long enough to be read 3.\nThe page says something long enough to be read 4."
+  }
+ ],
+ "stored": "Inbox\nDrafts\nSent\nTrash\nSpam\n\nThe page says something long enough to be read 0.\nThe page says something long enough to be read 1.\nThe page says something long enough to be read 2.\nThe page says something long enough to be read 3.\nThe page says something long enough to be read 4.",
+ "plain": "Inbox\nDrafts\nSent\nTrash\nSpam\n\nThe page says something long enough to be read 0.\nThe page says something long enough to be read 1.\nThe page says something long enough to be read 2.\nThe page says something long enough to be read 3.\nThe page says something long enough to be read 4."
+}

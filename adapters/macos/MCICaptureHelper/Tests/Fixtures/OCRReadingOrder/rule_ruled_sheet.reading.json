@@ -1,0 +1,62 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "Q3 pipeline"
+  },
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "File Edit View Insert Format Data"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Acme Robotics"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "1 Account Stage Owner ARR"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "2 Acme Robotics Negotiation M. Chen 184000"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "3 Blue Harbor Proposal R. Patel 92500"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "4 Cedar Labs Closed won J. Weber 40000"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "5 Delta Foods Discovery M. Chen 12000"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "6 Elm Street Cafe Negotiation R. Patel 8000"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Sheet1"
+  },
+  {
+   "role": "chrome",
+   "rule": "glyph",
+   "text": "A B C D"
+  }
+ ],
+ "stored": "Acme Robotics\n\n1 Account Stage Owner ARR\n\n2 Acme Robotics Negotiation M. Chen 184000\n\n3 Blue Harbor Proposal R. Patel 92500\n\n4 Cedar Labs Closed won J. Weber 40000\n\n5 Delta Foods Discovery M. Chen 12000\n\n6 Elm Street Cafe Negotiation R. Patel 8000\n\nSheet1\n\n\u001e\nQ3 pipeline\n\nFile Edit View Insert Format Data\n\nA B C D",
+ "plain": "Q3 pipeline\n\nFile Edit View Insert Format Data\n\nAcme Robotics\n\nA B C D\n\n1 Account Stage Owner ARR\n\n2 Acme Robotics Negotiation M. Chen 184000\n\n3 Blue Harbor Proposal R. Patel 92500\n\n4 Cedar Labs Closed won J. Weber 40000\n\n5 Delta Foods Discovery M. Chen 12000\n\n6 Elm Street Cafe Negotiation R. Patel 8000\n\nSheet1"
+}

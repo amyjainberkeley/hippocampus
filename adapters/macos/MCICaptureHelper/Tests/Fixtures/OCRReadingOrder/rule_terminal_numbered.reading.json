@@ -1,0 +1,12 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "$ history\n501  cargo build\n502  cargo test -p mci-brain\n503  git status\n504  git diff --stat\n505  ls -la\n$ cargo clean\nRemove the build folder? [y/N]\ny"
+  }
+ ],
+ "stored": "$ history\n501  cargo build\n502  cargo test -p mci-brain\n503  git status\n504  git diff --stat\n505  ls -la\n$ cargo clean\nRemove the build folder? [y/N]\ny\n\n\u001e\n",
+ "plain": "$ history\n501  cargo build\n502  cargo test -p mci-brain\n503  git status\n504  git diff --stat\n505  ls -la\n$ cargo clean\nRemove the build folder? [y/N]\ny"
+}

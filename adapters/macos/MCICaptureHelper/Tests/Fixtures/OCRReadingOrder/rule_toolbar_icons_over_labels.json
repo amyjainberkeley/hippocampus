@@ -1,0 +1,215 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "Launch party",
+   "confidence": 0.95,
+   "box": [
+    0.465278,
+    0.973333,
+    0.0625,
+    0.022222
+   ]
+  },
+  {
+   "text": "0",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.938889,
+    0.015972,
+    0.024444
+   ]
+  },
+  {
+   "text": "0",
+   "confidence": 0.95,
+   "box": [
+    0.083333,
+    0.938889,
+    0.015972,
+    0.024444
+   ]
+  },
+  {
+   "text": "0",
+   "confidence": 0.95,
+   "box": [
+    0.152778,
+    0.938889,
+    0.015972,
+    0.024444
+   ]
+  },
+  {
+   "text": "0",
+   "confidence": 0.95,
+   "box": [
+    0.222222,
+    0.938889,
+    0.015972,
+    0.024444
+   ]
+  },
+  {
+   "text": "0",
+   "confidence": 0.95,
+   "box": [
+    0.291667,
+    0.938889,
+    0.015972,
+    0.024444
+   ]
+  },
+  {
+   "text": "0",
+   "confidence": 0.95,
+   "box": [
+    0.361111,
+    0.938889,
+    0.015972,
+    0.024444
+   ]
+  },
+  {
+   "text": "0",
+   "confidence": 0.95,
+   "box": [
+    0.430556,
+    0.938889,
+    0.015972,
+    0.024444
+   ]
+  },
+  {
+   "text": "View",
+   "confidence": 0.95,
+   "box": [
+    0.010417,
+    0.920556,
+    0.020833,
+    0.020556
+   ]
+  },
+  {
+   "text": "Zoom",
+   "confidence": 0.95,
+   "box": [
+    0.079861,
+    0.920556,
+    0.020833,
+    0.020556
+   ]
+  },
+  {
+   "text": "Insert",
+   "confidence": 0.95,
+   "box": [
+    0.149306,
+    0.920556,
+    0.03125,
+    0.020556
+   ]
+  },
+  {
+   "text": "Table",
+   "confidence": 0.95,
+   "box": [
+    0.21875,
+    0.920556,
+    0.026042,
+    0.020556
+   ]
+  },
+  {
+   "text": "Chart",
+   "confidence": 0.95,
+   "box": [
+    0.288194,
+    0.920556,
+    0.026042,
+    0.020556
+   ]
+  },
+  {
+   "text": "Text",
+   "confidence": 0.95,
+   "box": [
+    0.357639,
+    0.920556,
+    0.020833,
+    0.020556
+   ]
+  },
+  {
+   "text": "Shape",
+   "confidence": 0.95,
+   "box": [
+    0.427083,
+    0.920556,
+    0.026042,
+    0.020556
+   ]
+  },
+  {
+   "text": "Paragraph line 0 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.3125,
+    0.65,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 1 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.3125,
+    0.623333,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 2 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.3125,
+    0.596667,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 3 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.3125,
+    0.57,
+    0.520833,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [
+  [
+   0.0,
+   0.911111,
+   1.0,
+   0.0
+  ]
+ ],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Launch party",
+  "bundle_id": "com.example.notes"
+ }
+}

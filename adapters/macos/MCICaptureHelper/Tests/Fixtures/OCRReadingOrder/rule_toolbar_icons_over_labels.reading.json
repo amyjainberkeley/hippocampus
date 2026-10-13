@@ -1,0 +1,27 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "Launch party"
+  },
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "0 0 0 0 0 0 0"
+  },
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "View Zoom Insert Table Chart Text Shape"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose."
+  }
+ ],
+ "stored": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\n\n\u001e\nLaunch party\n\n0 0 0 0 0 0 0\n\nView Zoom Insert Table Chart Text Shape",
+ "plain": "                                        Launch party\n0 0 0 0 0 0 0\nView Zoom Insert Table Chart Text Shape\n\nParagraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose."
+}

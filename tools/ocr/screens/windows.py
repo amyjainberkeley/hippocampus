@@ -19,10 +19,11 @@ Three kinds of window:
   the transcript work was measured on;
 - `messages`, a two-sided bubble chat, where who said what lives in the
   indentation;
-- four decoys whose look invites a chrome rule but whose text is content: a
-  ticket's properties panel, an order summary, a to-do list beside notes and a
-  full-screen document whose first and last rows are text. A rule that moves
-  any of that out of the reading is wrong.
+- six decoys whose look invites a chrome rule but whose text is content: a
+  ticket's properties panel, an order summary, a to-do list beside notes, a
+  full-screen document whose first and last rows are text, a receipt whose
+  rows sit between rules that span it, and an invitation whose date sits alone
+  on a centred line. A rule that moves any of that out of the reading is wrong.
 
 The text is fabricated. No real person, message or credential appears.
 """
@@ -665,29 +666,88 @@ def _fullscreen_doc():
 </div>''')
 
 
+def _receipt():
+    """A receipt opened in its own mail window. Each row sits between rules
+    that span the message, so the window divides into one pane per row, the
+    look of a stack of bars, and every row is content."""
+    rows = [('Linen notebook', '$18.00'), ('Brass pen × 2', '$28.00'), ('Shipping', '$5.00'),
+            ('Tax', '$4.14'), ('Total paid', '$55.14')]
+    row_html = ''.join(
+        f'<div class="row" style="padding:12px 0;border-top:1px solid #d2d2d7;'
+        f'{"font-weight:700" if label == "Total paid" else ""}">{c(label)}<div style="flex:1"></div>{c(amount)}</div>'
+        for label, amount in rows)
+    return _page(f'''
+<div class="col" style="height:760px;background:#fff;color:#1d1d1f;font-size:15px">
+  <div class="row" style="height:52px;background:#f3f3f5;border-bottom:1px solid #d2d2d7;padding:0 14px;gap:18px;color:#6e6e73"><div class="dots" style="padding:0"><i></i><i></i><i></i></div><div style="flex:1;text-align:center;font-size:13px;font-weight:600;color:#1d1d1f">{x('Your receipt from Northwind')}</div>{I['trash']}{I['folder']}{I['back']}{I['send']}</div>
+  <div class="col" style="padding:24px 28px 0;gap:6px">
+    <div style="font:600 22px/1.3 -apple-system">{c('Your receipt from Northwind')}</div>
+    <div class="row" style="color:#6e6e73;font-size:13px">{c('Northwind Supply <orders@northwind.example>')}<div style="flex:1"></div>{c('October 9, 2026 at 4:12 PM')}</div>
+  </div>
+  <div class="col" style="padding:22px 28px">
+    <div style="padding-bottom:14px">{c('Thanks for your order, Sam. Here is what you paid for.')}</div>
+    {row_html}
+    <div style="border-top:1px solid #d2d2d7"></div>
+    <div style="padding-top:16px">{c('Questions? Write to us at any time and we will help.')}</div>
+  </div>
+</div>''', size=(1100, 760))
+
+
+def _invitation():
+    """An invitation in a word processor. Its date sits alone on a centred
+    line, the look of a divider between messages, and it is content; so is
+    its last line, which starts the way a reply box does."""
+    tools = ['View', 'Zoom', 'Insert', 'Table', 'Chart', 'Text', 'Shape', 'Media', 'Comment', 'Share', 'Format',
+             'Document']
+    tool_html = ''.join(f'<div class="col" style="align-items:center;gap:2px;font-size:11px;color:#555">'
+                        f'{I["box"]}{x(t)}</div>' for t in tools)
+    body = [('font:700 30px/1.25 Georgia,serif;margin-bottom:10px', 'You are invited to the launch party'),
+            ('', 'Saturday, October 21 at 7 PM'), ('', '41 Harbor Street, Portland'),
+            ('margin-top:28px', 'Bring a friend. Dinner and drinks are on us.'),
+            ('', 'Reply to Maya by October 18.')]
+    body_html = ''.join(f'<div style="{style}">{c(text)}</div>' for style, text in body)
+    return _page(f'''
+<div class="col" style="height:900px;background:#e5e5e8;color:#1d1d1f">
+  <div class="col" style="background:#f6f6f6;border-bottom:1px solid #cfcfd4">
+    <div class="row" style="height:28px"><div class="dots"><i></i><i></i><i></i></div><div style="flex:1;text-align:center;font-size:13px;font-weight:600">{x('Launch party')}</div><div style="width:84px"></div></div>
+    <div class="row" style="height:52px;padding:0 18px;gap:24px">{tool_html}</div>
+  </div>
+  <div class="row" style="flex:1;min-height:0;justify-content:center;padding-top:30px">
+    <div class="col" style="width:720px;background:#fff;padding:110px 80px;gap:10px;align-items:center;text-align:center;font:19px/1.5 Georgia,serif">{body_html}</div>
+  </div>
+</div>''')
+
+
 # Every window: its page, the app that shows it, the title the window reports,
-# its size in points and, for an editor, the code lines in the order shown.
+# its size in points, a plain label for the side-by-side page and, for an
+# editor, the code lines in the order shown.
 WINDOWS = {
-    'editor': {'page': _editor(), 'app': 'com.microsoft.VSCode',
+    'editor': {'page': _editor(), 'app': 'com.microsoft.VSCode', 'label': 'Code editor',
                'title': 'retention_worker.rs — hippocampus', 'size': (1440, 900), 'code': EDITOR_CODE},
-    'chat': {'page': _chat(), 'app': 'com.tinyspeck.slackmacgap',
+    'chat': {'page': _chat(), 'app': 'com.tinyspeck.slackmacgap', 'label': 'Team chat',
              'title': 'launch-plan (Channel) - Northwind Studio - Slack', 'size': (1440, 900)},
-    'mail': {'page': _mail(), 'app': 'com.mimestream.Mimestream', 'title': 'Inbox', 'size': (1440, 900)},
-    'article': {'page': _article(), 'app': 'com.google.Chrome',
+    'mail': {'page': _mail(), 'app': 'com.mimestream.Mimestream', 'label': 'Mail', 'title': 'Inbox',
+             'size': (1440, 900)},
+    'article': {'page': _article(), 'app': 'com.google.Chrome', 'label': 'Web article',
                 'title': 'Per-seat or tiered? How to price a team plan', 'size': (1440, 900)},
-    'video': {'page': _video(), 'app': 'com.google.Chrome',
+    'video': {'page': _video(), 'app': 'com.google.Chrome', 'label': 'Video page',
               'title': 'General user models, explained - VidTube', 'size': (1440, 900)},
-    'notes': {'page': _notes(), 'app': 'com.apple.Notes', 'title': 'Launch plan', 'size': (1440, 900)},
-    'messages': {'page': _messages(), 'app': 'com.apple.MobileSMS', 'title': 'Maya Chen', 'size': (1100, 760)},
-    'issue_properties': {'page': _issue_properties(), 'app': 'com.linear',
+    'notes': {'page': _notes(), 'app': 'com.apple.Notes', 'label': 'Notes', 'title': 'Launch plan',
+              'size': (1440, 900)},
+    'messages': {'page': _messages(), 'app': 'com.apple.MobileSMS', 'label': 'Messages', 'title': 'Maya Chen',
+                 'size': (1100, 760)},
+    'issue_properties': {'page': _issue_properties(), 'app': 'com.linear', 'label': 'Ticket',
                          'title': 'ENG-412 The OCR worker drops the first frame after wake', 'size': (1440, 900),
                          'decoy': True},
-    'order_summary': {'page': _order_summary(), 'app': 'com.google.Chrome',
+    'order_summary': {'page': _order_summary(), 'app': 'com.google.Chrome', 'label': 'Checkout',
                       'title': 'Checkout · Northwind Supply', 'size': (1200, 800), 'decoy': True},
-    'todo_beside_notes': {'page': _todo_beside_notes(), 'app': 'notion.id', 'title': 'Weekly review',
-                          'size': (1280, 800), 'decoy': True},
-    'fullscreen_doc': {'page': _fullscreen_doc(), 'app': 'com.apple.iWork.Pages', 'title': 'Pilot report',
-                       'size': (1440, 900), 'decoy': True},
+    'todo_beside_notes': {'page': _todo_beside_notes(), 'app': 'notion.id', 'label': 'To-do list beside notes',
+                          'title': 'Weekly review', 'size': (1280, 800), 'decoy': True},
+    'fullscreen_doc': {'page': _fullscreen_doc(), 'app': 'com.apple.iWork.Pages', 'label': 'Full-screen document',
+                       'title': 'Pilot report', 'size': (1440, 900), 'decoy': True},
+    'receipt': {'page': _receipt(), 'app': 'com.apple.mail', 'label': 'Receipt',
+                'title': 'Your receipt from Northwind', 'size': (1100, 760), 'decoy': True},
+    'invitation': {'page': _invitation(), 'app': 'com.apple.iWork.Pages', 'label': 'Invitation',
+                   'title': 'Launch party', 'size': (1440, 900), 'decoy': True},
 }
 
 

@@ -1,0 +1,68 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "You are invited to the launch party",
+   "confidence": 0.95,
+   "box": [
+    0.310417,
+    0.521111,
+    0.377083,
+    0.049444
+   ]
+  },
+  {
+   "text": "Saturday, October 21 at 7 PM",
+   "confidence": 0.95,
+   "box": [
+    0.4125,
+    0.471111,
+    0.175,
+    0.028889
+   ]
+  },
+  {
+   "text": "41 Harbor Street, Portland",
+   "confidence": 0.95,
+   "box": [
+    0.420139,
+    0.429444,
+    0.159028,
+    0.026111
+   ]
+  },
+  {
+   "text": "Bring a friend. Dinner and drinks are on us.",
+   "confidence": 0.95,
+   "box": [
+    0.370833,
+    0.355,
+    0.258333,
+    0.028889
+   ]
+  },
+  {
+   "text": "Reply to Maya by October 18.",
+   "confidence": 0.95,
+   "box": [
+    0.4125,
+    0.311111,
+    0.175,
+    0.029444
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Launch party",
+  "bundle_id": "com.apple.iWork.Pages"
+ }
+}

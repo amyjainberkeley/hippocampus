@@ -1,0 +1,178 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "All iCloud",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.816667,
+    0.052083,
+    0.016667
+   ]
+  },
+  {
+   "text": "Notes",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.788889,
+    0.026042,
+    0.016667
+   ]
+  },
+  {
+   "text": "Launch",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.761111,
+    0.03125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Personal",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.733333,
+    0.041667,
+    0.016667
+   ]
+  },
+  {
+   "text": "Work",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.705556,
+    0.020833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Travel",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.677778,
+    0.03125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Recipes",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.65,
+    0.036458,
+    0.016667
+   ]
+  },
+  {
+   "text": "Reading",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.622222,
+    0.036458,
+    0.016667
+   ]
+  },
+  {
+   "text": "Ideas",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.594444,
+    0.026042,
+    0.016667
+   ]
+  },
+  {
+   "text": "Archive",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.566667,
+    0.036458,
+    0.016667
+   ]
+  },
+  {
+   "text": "Shared",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.538889,
+    0.03125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Recently Deleted",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.511111,
+    0.083333,
+    0.016667
+   ]
+  },
+  {
+   "text": "Dentist on Friday",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.808889,
+    0.138889,
+    0.024444
+   ]
+  },
+  {
+   "text": "Bring the insurance card and the forms from last year,",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.75,
+    0.28125,
+    0.016667
+   ]
+  },
+  {
+   "text": "and leave by 8:15 so there is time to park.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.727778,
+    0.229167,
+    0.016667
+   ]
+  },
+  {
+   "text": "Call Ravi",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.672222,
+    0.046875,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Notes",
+  "bundle_id": "com.example.notes"
+ }
+}

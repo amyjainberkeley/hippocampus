@@ -1,0 +1,12 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "x = 1\ny = compute(x)\nprint(y)"
+  }
+ ],
+ "stored": "x = 1\ny = compute(x)\nprint(y)\n\n\u001e\n",
+ "plain": "x = 1\ny = compute(x)\nprint(y)"
+}

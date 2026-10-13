@@ -1,0 +1,58 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "Open loops",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.205556,
+    0.052083,
+    0.016667
+   ]
+  },
+  {
+   "text": "Send Jonas the benchmark doc.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.181111,
+    0.151042,
+    0.016667
+   ]
+  },
+  {
+   "text": "Book the venue for the launch.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.156667,
+    0.15625,
+    0.016667
+   ]
+  },
+  {
+   "text": "Search for a bigger venue.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.027778,
+    0.135417,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Weekly review",
+  "bundle_id": "com.example.notes"
+ }
+}

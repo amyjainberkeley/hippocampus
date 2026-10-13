@@ -1,0 +1,27 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "Inbox\nStarred\nSnoozed\nSent\nDrafts"
+  },
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "12\n3"
+  },
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "1"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose."
+  }
+ ],
+ "stored": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\n\n\u001e\nInbox\nStarred\nSnoozed\nSent\nDrafts\n\n12\n3\n\n1",
+ "plain": "Inbox\nStarred\nSnoozed\nSent\nDrafts\n\n12\n3\n\n1\n\nParagraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose."
+}

@@ -1,0 +1,17 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "let v7 = 7;\nlet v8 = 8;\nlet v9 = 9;\nlet v10 = 10;"
+  },
+  {
+   "role": "chrome",
+   "rule": "gutter",
+   "text": "007 008 009 010"
+  }
+ ],
+ "stored": "let v7 = 7;\nlet v8 = 8;\nlet v9 = 9;\nlet v10 = 10;\n\n\u001e\n007 008 009 010",
+ "plain": "007 let v7 = 7;\n008 let v8 = 8;\n009 let v9 = 9;\n010 let v10 = 10;"
+}

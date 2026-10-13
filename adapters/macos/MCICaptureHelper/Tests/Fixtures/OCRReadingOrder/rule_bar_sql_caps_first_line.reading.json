@@ -1,0 +1,27 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "EXPLORER"
+  },
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "query.sql\nschema.sql\nnotes.md"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "query.sql schema.sql"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "SELECT *\nFROM events\nWHERE ts > now() - 86400\nORDER BY ts DESC;"
+  }
+ ],
+ "stored": "query.sql schema.sql\n\nSELECT *\nFROM events\nWHERE ts > now() - 86400\nORDER BY ts DESC;\n\n\u001e\nEXPLORER\n\nquery.sql\nschema.sql\nnotes.md",
+ "plain": "EXPLORER\n\nquery.sql\nschema.sql\nnotes.md\n\nquery.sql schema.sql\n\nSELECT *\nFROM events\nWHERE ts > now() - 86400\nORDER BY ts DESC;"
+}

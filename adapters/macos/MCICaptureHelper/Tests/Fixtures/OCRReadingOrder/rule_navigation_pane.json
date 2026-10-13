@@ -1,0 +1,145 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "Inbox",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.872222,
+    0.026042,
+    0.016667
+   ]
+  },
+  {
+   "text": "Starred",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.847778,
+    0.036458,
+    0.016667
+   ]
+  },
+  {
+   "text": "Snoozed",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.823333,
+    0.036458,
+    0.016667
+   ]
+  },
+  {
+   "text": "Sent",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.798889,
+    0.020833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Drafts",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.774444,
+    0.03125,
+    0.016667
+   ]
+  },
+  {
+   "text": "12",
+   "confidence": 0.95,
+   "box": [
+    0.114583,
+    0.872222,
+    0.010417,
+    0.016667
+   ]
+  },
+  {
+   "text": "3",
+   "confidence": 0.95,
+   "box": [
+    0.114583,
+    0.847778,
+    0.005208,
+    0.016667
+   ]
+  },
+  {
+   "text": "1",
+   "confidence": 0.95,
+   "box": [
+    0.114583,
+    0.774444,
+    0.005208,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 0 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.872222,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 1 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.845556,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 2 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.818889,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 3 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.792222,
+    0.520833,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [
+  [
+   0.138889,
+   0.0,
+   0.0,
+   1.0
+  ]
+ ],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Inbox",
+  "bundle_id": "com.example.notes"
+ }
+}

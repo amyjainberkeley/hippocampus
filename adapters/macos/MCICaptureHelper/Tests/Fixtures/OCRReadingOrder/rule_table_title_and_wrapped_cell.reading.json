@@ -1,0 +1,17 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Q3 pipeline\nAccount Stage Owner\nAcme Robotics, Won Chen\nwest region\nBlue Harbor Lost Patel\nCedar Labs Open Weber\nDelta Foods Won Chen"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose."
+  }
+ ],
+ "stored": "Q3 pipeline\nAccount Stage Owner\nAcme Robotics, Won Chen\nwest region\nBlue Harbor Lost Patel\nCedar Labs Open Weber\nDelta Foods Won Chen\n\nParagraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\n\n\u001e\n",
+ "plain": "Q3 pipeline\nAccount Stage Owner\nAcme Robotics, Won Chen\nwest region\nBlue Harbor Lost Patel\nCedar Labs Open Weber\nDelta Foods Won Chen\n\nParagraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose."
+}

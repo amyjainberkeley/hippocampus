@@ -1,0 +1,17 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "brain_ingest.rs\nretention_worker.rs\ntoday.rs\nunderstanding.rs\ninstall.sh\nCargo.toml\nREADME.md"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "fn main() {\n    let x = 1;\n    if x > 0 {\n        run(x);\n    }\n}"
+  }
+ ],
+ "stored": "brain_ingest.rs\nretention_worker.rs\ntoday.rs\nunderstanding.rs\ninstall.sh\nCargo.toml\nREADME.md\n\nfn main() {\n    let x = 1;\n    if x > 0 {\n        run(x);\n    }\n}\n\n\u001e\n",
+ "plain": "brain_ingest.rs\nretention_worker.rs\ntoday.rs\nunderstanding.rs\ninstall.sh\nCargo.toml\nREADME.md\n\nfn main() {\n    let x = 1;\n    if x > 0 {\n        run(x);\n    }\n}"
+}

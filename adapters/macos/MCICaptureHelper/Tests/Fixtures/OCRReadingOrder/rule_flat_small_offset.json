@@ -1,0 +1,108 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "To do",
+   "confidence": 0.95,
+   "box": [
+    0.222222,
+    0.816667,
+    0.026042,
+    0.016667
+   ]
+  },
+  {
+   "text": "Book the venue",
+   "confidence": 0.95,
+   "box": [
+    0.235417,
+    0.792222,
+    0.072917,
+    0.016667
+   ]
+  },
+  {
+   "text": "Email the caterer",
+   "confidence": 0.95,
+   "box": [
+    0.235417,
+    0.767778,
+    0.088542,
+    0.016667
+   ]
+  },
+  {
+   "text": "Print the badges",
+   "confidence": 0.95,
+   "box": [
+    0.222222,
+    0.743333,
+    0.083333,
+    0.016667
+   ]
+  },
+  {
+   "text": "Call Ravi about pricing",
+   "confidence": 0.95,
+   "box": [
+    0.222222,
+    0.718889,
+    0.119792,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 0 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.451389,
+    0.816667,
+    0.451389,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 1 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.451389,
+    0.79,
+    0.451389,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 2 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.451389,
+    0.763333,
+    0.451389,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 3 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.451389,
+    0.736667,
+    0.451389,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Weekly review",
+  "bundle_id": "com.example.notes"
+ }
+}

@@ -1,0 +1,17 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Open loops\nSend Jonas the benchmark doc.\nBook the venue for the launch."
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Search for a bigger venue."
+  }
+ ],
+ "stored": "Open loops\nSend Jonas the benchmark doc.\nBook the venue for the launch.\n\nSearch for a bigger venue.\n\n\u001e\n",
+ "plain": "Open loops\nSend Jonas the benchmark doc.\nBook the venue for the launch.\n\nSearch for a bigger venue."
+}

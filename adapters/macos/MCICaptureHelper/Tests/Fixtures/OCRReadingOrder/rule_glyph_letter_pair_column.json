@@ -1,0 +1,138 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "Portland",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.816667,
+    0.041667,
+    0.016667
+   ]
+  },
+  {
+   "text": "OR",
+   "confidence": 0.95,
+   "box": [
+    0.416667,
+    0.816667,
+    0.011111,
+    0.016667
+   ]
+  },
+  {
+   "text": "Seattle",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.792222,
+    0.036458,
+    0.016667
+   ]
+  },
+  {
+   "text": "WA",
+   "confidence": 0.95,
+   "box": [
+    0.416667,
+    0.792222,
+    0.011111,
+    0.016667
+   ]
+  },
+  {
+   "text": "Austin",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.767778,
+    0.03125,
+    0.016667
+   ]
+  },
+  {
+   "text": "TX",
+   "confidence": 0.95,
+   "box": [
+    0.416667,
+    0.767778,
+    0.011111,
+    0.016667
+   ]
+  },
+  {
+   "text": "Denver",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.743333,
+    0.03125,
+    0.016667
+   ]
+  },
+  {
+   "text": "CO",
+   "confidence": 0.95,
+   "box": [
+    0.416667,
+    0.743333,
+    0.011111,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 0 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.65,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 1 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.623333,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 2 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.596667,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 3 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.57,
+    0.520833,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Weekly review",
+  "bundle_id": "com.example.notes"
+ }
+}

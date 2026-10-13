@@ -1,0 +1,17 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "store.rs main.rs lib.rs"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "{\n  \"name\": \"hippocampus\",\n  \"private\": true\n}"
+  }
+ ],
+ "stored": "{\n  \"name\": \"hippocampus\",\n  \"private\": true\n}\n\n\u001e\nstore.rs main.rs lib.rs",
+ "plain": "store.rs main.rs lib.rs\n\n{\n  \"name\": \"hippocampus\",\n  \"private\": true\n}"
+}

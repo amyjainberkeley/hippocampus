@@ -1,0 +1,37 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Thanks for your order. Here is your receipt."
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Linen notebook $18.00"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Brass pen x 2 $28.00"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Shipping $5.00"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Total $51.00"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Questions? Write to us any time and we will help."
+  }
+ ],
+ "stored": "Thanks for your order. Here is your receipt.\n\nLinen notebook $18.00\n\nBrass pen x 2 $28.00\n\nShipping $5.00\n\nTotal $51.00\n\nQuestions? Write to us any time and we will help.\n\n\u001e\n",
+ "plain": "Thanks for your order. Here is your receipt.\n\nLinen notebook $18.00\n\nBrass pen x 2 $28.00\n\nShipping $5.00\n\nTotal $51.00\n\nQuestions? Write to us any time and we will help."
+}

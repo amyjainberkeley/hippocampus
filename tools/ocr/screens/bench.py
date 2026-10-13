@@ -9,7 +9,7 @@
                                                         read every screen again into boxes/
 
 Scenes are the eight flat screens in scenes.py and the mock windows in
-windows.py: six realistic windows, a bubble chat and four decoys whose look
+windows.py: six realistic windows, a bubble chat and six decoys whose look
 invites a chrome rule but whose text is content. The OCR worker's lines and
 pane separators for each are committed in boxes/<scene>.json, read at the
 production density (a 2x frame that declares 144 dpi), so scoring needs no
@@ -29,9 +29,10 @@ Measures, per scene, on the main text:
   chrome_l  share of chrome strings that are a whole line of the text
   nav_w     the same two for navigation strings
   nav_l
-  junk      tokens in no truth string that are at most two characters long or
-            have no letter or digit: icon misreads and stray symbols (a list
-            bullet that starts a line is formatting and does not count)
+  junk      tokens in no content string that are at most two characters long
+            or have no letter or digit: icon misreads, stray symbols and short
+            chrome such as counts (a list bullet that starts a line is
+            formatting and does not count)
 Strings shorter than three characters, and chrome or navigation strings that
 also appear in the content, cannot be told apart by text and are not scored as
 leaks. On an editor, the code is checked line by line: every line found, in
@@ -73,13 +74,13 @@ STAMP = '2026-10-12T14:31:00.000Z'
 # ----------------------------------------------------------------- the scenes
 
 def all_scenes():
-    """Every scene as {name, kind, items, app, title, size, code}."""
+    """Every scene as {name, label, kind, items, app, title, size, code}."""
     out = []
     for name, scene in scenes.SCENES.items():
-        out.append({'name': name, 'kind': 'scene', 'items': scenes.truth_items(scene), 'app': None,
-                     'title': None, 'size': (1440, 900), 'code': None})
+        out.append({'name': name, 'label': scene['label'], 'kind': 'scene', 'items': scenes.truth_items(scene),
+                    'app': scene.get('app'), 'title': None, 'size': (1440, 900), 'code': None})
     for name, window in windows.WINDOWS.items():
-        out.append({'name': name, 'kind': 'decoy' if window.get('decoy') else 'window',
+        out.append({'name': name, 'label': window['label'], 'kind': 'decoy' if window.get('decoy') else 'window',
                     'items': windows.truth_items(window['page']), 'app': window['app'],
                     'title': window['title'], 'size': window['size'], 'code': window.get('code')})
     return out
@@ -115,11 +116,18 @@ class Reader:
         self.proc = subprocess.Popen([str(path)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.DEVNULL, env={'PATH': '/usr/bin:/bin'})
 
-    def read(self, stored, app, title):
+    def read(self, stored, app, title, name):
+        """`name` is the scene's, for the message when the probe cannot read it."""
         request = {'stored': stored, 'source': 'screen_ocr', 'app': app or '', 'title': title or ''}
         self.proc.stdin.write((json.dumps(request, ensure_ascii=False) + '\n').encode('utf-8'))
         self.proc.stdin.flush()
-        reply = json.loads(self.proc.stdout.readline())
+        line = self.proc.stdout.readline()
+        if not line:
+            sys.exit(f'{self.path.name} stopped while reading {name}')
+        reply = json.loads(line)
+        if 'error' in reply:
+            # The probe answers a line it cannot read with {"error": ...}.
+            sys.exit(f'{self.path.name} could not read {name}: {reply["error"]}')
         return reply['main'], reply['rest']
 
     def close(self):
@@ -150,7 +158,7 @@ def transcripts(scene, boxes, reader=None):
     out = {}
     for how, stored in (('old', old), ('new', new)):
         if reader is not None:
-            main, rest = reader.read(header(scene) + stored, scene['app'], scene['title'])
+            main, rest = reader.read(header(scene) + stored, scene['app'], scene['title'], scene['name'])
         else:
             main, rest = split_stored(stored)
         out[how] = {'stored': stored, 'main': main, 'rest': rest}
@@ -199,9 +207,11 @@ BULLETS = frozenset('\u2022\u00b7\u2023\u25e6\u25aa\u2013-*')
 
 
 def junk_tokens(main, items):
-    """Tokens in no truth string that are short or have no letter or digit.
-    A list bullet at the start of a line is formatting, not junk."""
-    truth = {token for item in items for token in item['text'].split()}
+    """Tokens in no content string that are short or have no letter or digit.
+    A short chrome string in the main text ("3" of a reaction count) is junk
+    there: it is too short to score as a leak. A list bullet at the start of
+    a line is formatting, not junk."""
+    truth = {token for item in items if item['role'] == windows.CONTENT for token in item['text'].split()}
     out = []
     for line in main.split('\n'):
         tokens = line.split()
@@ -305,9 +315,12 @@ def bench(reader=None):
 KEYS = ['content', 'order', 'chrome_w', 'chrome_l', 'nav_w', 'nav_l', 'junk']
 
 
-def report(rows, failures, reader):
-    print('reader:', reader.path if reader else
-          'none (reading-probe is not built; scoring the assembler\'s own main text)')
+def report(rows, failures, reader, skipped=False):
+    if reader:
+        print('reader:', reader.path)
+    else:
+        print('reader: none,', 'as asked' if skipped else 'reading-probe is not built',
+              '(scoring the assembler\'s own main text)')
     print(f'{"scene":<18}{"":<4}' + ''.join(f'{k:>9}' for k in KEYS) + '   code')
     groups = collections.defaultdict(list)
     for row in rows:
@@ -442,8 +455,8 @@ def show_page(rows, page, screens):
     parts = ['<!doctype html><html lang="en"><head><meta charset="utf-8">',
              '<meta name="viewport" content="width=device-width, initial-scale=1">',
              f'<title>Screen and text</title><style>{PAGE_STYLE}</style></head><body><main>',
-             '<h1>Screen and text</h1><p>Each window as the screen showed it, beside the text Hippocampus '
-             'keeps for it. Made-up windows; no real person or message.</p>']
+             '<h1>Screen and text</h1><p>Each window beside the text Hippocampus keeps for it. '
+             'The windows are made up.</p>']
     first = {'window': 0, 'decoy': 1, 'scene': 2}
     for row in sorted(rows, key=lambda row: first[row['scene']['kind']]):
         scene = row['scene']
@@ -455,8 +468,9 @@ def show_page(rows, page, screens):
         except ValueError:
             source = image.resolve().as_uri()
         rest_lines = [line for line in new['rest'].split('\n') if line.strip()]
-        parts.append(f'<section><div><img src="{html.escape(source)}" alt="{html.escape(name)}"></div><div>'
-                     f'<h2>{html.escape(name)}</h2><pre>{html.escape(new["main"])}</pre>')
+        label = html.escape(scene['label'])
+        parts.append(f'<section><div><img src="{html.escape(source)}" alt="{label}"></div><div>'
+                     f'<h2>{label}</h2><pre>{html.escape(new["main"])}</pre>')
         if rest_lines:
             count = f'{len(rest_lines)} line' + ('' if len(rest_lines) == 1 else 's')
             parts.append(f'<details><summary>Also in this window ({count})</summary>'
@@ -604,7 +618,7 @@ def main():
         show_page(rows, args.show, args.screens_dir)
         print('wrote', args.show)
         return 0
-    report(rows, failures, reader)
+    report(rows, failures, reader, skipped=args.no_reader)
     return 1 if failures else 0
 
 

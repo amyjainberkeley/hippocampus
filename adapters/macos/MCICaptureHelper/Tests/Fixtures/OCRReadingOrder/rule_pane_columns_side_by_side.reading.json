@@ -1,0 +1,17 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Applications\nDesktop\nDocuments\nDownloads\nMovies\nMusic"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Invoice 4471.pdf\nContract v3.docx\nPricing notes.pages\nReceipt.pdf\nBudget.numbers"
+  }
+ ],
+ "stored": "Applications\nDesktop\nDocuments\nDownloads\nMovies\nMusic\n\nInvoice 4471.pdf\nContract v3.docx\nPricing notes.pages\nReceipt.pdf\nBudget.numbers\n\n\u001e\n",
+ "plain": "Applications\nDesktop\nDocuments\nDownloads\nMovies\nMusic\n\nInvoice 4471.pdf\nContract v3.docx\nPricing notes.pages\nReceipt.pdf\nBudget.numbers"
+}

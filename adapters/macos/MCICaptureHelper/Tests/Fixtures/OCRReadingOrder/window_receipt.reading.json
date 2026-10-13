@@ -1,0 +1,57 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "Your receipt from Northwind"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Your receipt from Northwind\nNorthwind Supply <orders@northwind.example>\nThanks for your order, Sam. Here is what you paid for."
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "October 9, 2026 at 4:12 PM"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Linen notebook $18.00"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Brass pen \u00d7 2 $28.00"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Shipping $5.00"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Tax $4.14"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Total paid $55.14"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Questions? Write to us at any time and we will help."
+  },
+  {
+   "role": "chrome",
+   "rule": "glyph",
+   "text": "\u53e3 \u53e3 \u304f A"
+  }
+ ],
+ "stored": "Your receipt from Northwind\nNorthwind Supply <orders@northwind.example>\nThanks for your order, Sam. Here is what you paid for.\n\nOctober 9, 2026 at 4:12 PM\n\nLinen notebook $18.00\n\nBrass pen \u00d7 2 $28.00\n\nShipping $5.00\n\nTax $4.14\n\nTotal paid $55.14\n\nQuestions? Write to us at any time and we will help.\n\n\u001e\nYour receipt from Northwind\n\n\u53e3 \u53e3 \u304f A",
+ "plain": "Your receipt from Northwind\n\n\u53e3 \u53e3 \u304f A\n\nYour receipt from Northwind\nNorthwind Supply <orders@northwind.example>\nThanks for your order, Sam. Here is what you paid for.\n\nOctober 9, 2026 at 4:12 PM\n\nLinen notebook $18.00\n\nBrass pen \u00d7 2 $28.00\n\nShipping $5.00\n\nTax $4.14\n\nTotal paid $55.14\n\nQuestions? Write to us at any time and we will help."
+}
