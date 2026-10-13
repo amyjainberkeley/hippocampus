@@ -79,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         restartLauncher: DelayedApplicationRestartLauncher(
             bundlePath: Bundle.main.bundlePath
         ),
+        stopExtras: { [weak self] in await self?.stopExtrasForQuit() },
         cleanup: { [weak self] in self?.cleanUpLifecycle() },
         onFailure: { [weak self] error in self?.presentShutdownFailure(error) }
     )
@@ -457,6 +458,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         cleanUpLifecycle()
     }
 
+    /// What the supervisor does not own, stopped while it stops: Ask's two
+    /// sessions and the windows, each waited for (spec-shell S6.2, S6.3).
+    private func stopExtrasForQuit() async {
+        let supervisor = self.supervisor
+        let ask = Task { @MainActor in await CommandBarController.shared.shutdown() }
+        let windows = Task { @MainActor in await supervisor.stopWindowsForQuit(timeout: 1) }
+        await ask.value
+        await windows.value
+    }
+
     private func cleanUpLifecycle() {
         guard !didCleanUpLifecycle else { return }
         didCleanUpLifecycle = true
@@ -469,6 +480,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SoloKeyMonitor.shared.stop()
         askKeyObservation = nil
         supervisor.closeRecallUI()
+        supervisor.closeOnboarding()
     }
 
     /// Open Ask on a tap of the chosen key, and follow the preference.

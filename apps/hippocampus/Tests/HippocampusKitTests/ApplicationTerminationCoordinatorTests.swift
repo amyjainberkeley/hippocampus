@@ -72,11 +72,137 @@ final class ApplicationTerminationCoordinatorTests: XCTestCase {
         backoff.resume()
     }
 
+    // MARK: - What the supervisor does not own (spec-shell S6.7)
+
+    func test_quit_stops_ask_and_the_windows_alongside_and_sweeps_once_stopped() async throws {
+        let (supervisor, topology, backoff) = try await makeSupervisor()
+        let heldStop = TestSuspension()
+        topology.stopSuspensionOnCall = topology.stopCalls + 1
+        topology.stopSuspension = heldStop
+        let record = QuitRecord()
+        let coordinator = ApplicationTerminationCoordinator(
+            supervisor: supervisor,
+            restartLauncher: FakeApplicationRestartLauncher(),
+            shutdownTimeout: 5,
+            stopExtras: { record.events.append("extras") },
+            afterStop: { record.events.append(supervisor.state == .stopped ? "sweep after stop" : "sweep early") },
+            cleanup: { record.events.append("cleanup") }
+        )
+        let probe = TerminationProbe()
+        let quit = Task { @MainActor in
+            probe.outcome = await coordinator.terminate(intent: .quit) { probe.replies.append($0) }
+        }
+
+        await heldStop.waitUntilEntered()
+        for _ in 0..<200 where record.events.isEmpty {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(record.events, ["extras"], "Ask and the windows stop while the supervisor is still stopping")
+        XCTAssertEqual(probe.replies, [])
+
+        heldStop.resume()
+        await quit.value
+        XCTAssertEqual(record.events, ["extras", "sweep after stop", "cleanup"])
+        XCTAssertEqual(probe.replies, [true])
+        backoff.resume()
+    }
+
+    func test_a_forced_quit_still_stops_the_extras_and_sweeps_before_replying() async throws {
+        let (supervisor, topology, backoff) = try await makeRecoveringSupervisor()
+        topology.stopResults = [.failure(TestError.partialStop)]
+        let record = QuitRecord()
+        let coordinator = ApplicationTerminationCoordinator(
+            supervisor: supervisor,
+            restartLauncher: FakeApplicationRestartLauncher(),
+            shutdownTimeout: 0.05,
+            stopExtras: { record.events.append("extras") },
+            afterStop: { record.events.append(supervisor.state == .stopped ? "sweep after stop" : "sweep early") },
+            cleanup: { record.events.append("cleanup") }
+        )
+
+        let probe = await runQuit(coordinator, intent: .quit)
+
+        XCTAssertEqual(probe.replies, [true])
+        XCTAssertEqual(Set(record.events.dropLast()), ["extras", "sweep after stop"])
+        XCTAssertEqual(record.events.last, "cleanup", "both finish before cleanup and the reply")
+        backoff.resume()
+    }
+
+    func test_a_failed_restart_leaves_ask_and_the_windows_alone() async throws {
+        let (supervisor, topology, backoff) = try await makeSupervisor()
+        topology.stopResults = [.failure(TestError.partialStop)]
+        let record = QuitRecord()
+        let launcher = FakeApplicationRestartLauncher()
+        let coordinator = ApplicationTerminationCoordinator(
+            supervisor: supervisor,
+            restartLauncher: launcher,
+            shutdownTimeout: 0.05,
+            stopExtras: { record.events.append("extras") },
+            afterStop: { record.events.append("sweep") },
+            cleanup: { record.events.append("cleanup") },
+            onFailure: { _ in record.events.append("failure") }
+        )
+
+        let probe = await runQuit(coordinator, intent: .restart)
+
+        XCTAssertEqual(probe.outcome, false)
+        XCTAssertEqual(probe.replies, [false])
+        XCTAssertEqual(record.events, ["failure"], "Hippocampus stays open, so Ask and the windows keep working")
+        XCTAssertEqual(launcher.scheduleCount, 0)
+        backoff.resume()
+    }
+
+    func test_a_restart_stops_the_extras_after_a_verified_stop_and_before_relaunching() async throws {
+        let (supervisor, _, backoff) = try await makeSupervisor()
+        let record = QuitRecord()
+        let launcher = FakeApplicationRestartLauncher()
+        launcher.onSchedule = { record.events.append("relaunch") }
+        let coordinator = ApplicationTerminationCoordinator(
+            supervisor: supervisor,
+            restartLauncher: launcher,
+            shutdownTimeout: 0.05,
+            stopExtras: { record.events.append(supervisor.state == .stopped ? "extras after stop" : "extras early") },
+            afterStop: { record.events.append("sweep") },
+            cleanup: { record.events.append("cleanup") }
+        )
+
+        let probe = await runQuit(coordinator, intent: .restart)
+
+        XCTAssertEqual(probe.replies, [true])
+        XCTAssertEqual(Set(record.events.prefix(2)), ["extras after stop", "sweep"])
+        XCTAssertEqual(Array(record.events.suffix(2)), ["relaunch", "cleanup"])
+        backoff.resume()
+    }
+
+    func test_quit_does_not_wait_past_its_deadline_for_a_step_that_hangs() async throws {
+        let (supervisor, _, backoff) = try await makeSupervisor()
+        let hung = TestSuspension()
+        let coordinator = ApplicationTerminationCoordinator(
+            supervisor: supervisor,
+            restartLauncher: FakeApplicationRestartLauncher(),
+            shutdownTimeout: 0.05,
+            extrasTimeout: 0.1,
+            stopExtras: { await hung.suspend() },
+            cleanup: {}
+        )
+
+        let probe = await runQuit(coordinator, intent: .quit, within: 2)
+
+        XCTAssertEqual(probe.replies, [true])
+        XCTAssertTrue(coordinator.hasVerifiedShutdown)
+        hung.resume()
+        backoff.resume()
+    }
+
     // MARK: - Helpers
 
-    /// A supervisor whose capture crashed and whose recovery loop is parked in
-    /// backoff: the state the owner's Mac was in when Quit stopped working.
-    private func makeRecoveringSupervisor() async throws -> (
+    @MainActor
+    private final class QuitRecord {
+        var events: [String] = []
+    }
+
+    /// A supervisor whose capture is running, with its recovery backoff held.
+    private func makeSupervisor() async throws -> (
         ProcessSupervisor, FakeSupervisorTopology, TestSuspension
     ) {
         let locator = FakeBinaryLocator()
@@ -100,6 +226,15 @@ final class ApplicationTerminationCoordinatorTests: XCTestCase {
             captureStatusReader: { (nil, nil) }
         )
         try await supervisor.startAndWaitForReadiness()
+        return (supervisor, topology, backoff)
+    }
+
+    /// A supervisor whose capture crashed and whose recovery loop is parked in
+    /// backoff: the state the owner's Mac was in when Quit stopped working.
+    private func makeRecoveringSupervisor() async throws -> (
+        ProcessSupervisor, FakeSupervisorTopology, TestSuspension
+    ) {
+        let (supervisor, topology, backoff) = try await makeSupervisor()
         topology.isRunning = false
         topology.fireUnexpectedExit(forLaunchAt: 0, label: "helper", status: 81)
         await backoff.waitUntilEntered()

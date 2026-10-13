@@ -793,7 +793,7 @@ public final class CommandBarModel: ObservableObject {
         }
     }
 
-    /// Stop the sessions (on quit).
+    /// Stop the sessions and wait until they have exited (on quit).
     public func shutdown() async {
         await memory.stop()
     }

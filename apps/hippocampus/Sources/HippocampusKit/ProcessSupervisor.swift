@@ -220,8 +220,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// competing window and duplicate database reader.
     private var recallProcess: Process?
     private var recallPresentationGate = RecallPresentationGate()
-    /// The onboarding last started, so Ask can tell it when it opens.
-    private var onboardingProcess: Process?
+    /// Every onboarding this app started that is still running: Ask tells
+    /// them when it opens, and Quit stops them (spec-shell S6.3).
+    private var onboardingProcesses: [Process] = []
 
     private static let maxRetries = 10
     private static let maxBackoff: TimeInterval = 60
@@ -1226,14 +1227,56 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             )
         )
         task.executableURL = path
-        try? task.run()
-        onboardingProcess = task
+        do {
+            try task.run()
+        } catch {
+            logger.error("supervisor: onboarding launch failed: \(error.localizedDescription)")
+            return false
+        }
+        onboardingProcesses = onboardingProcesses.filter(\.isRunning) + [task]
         return true
     }
 
-    /// Whether the onboarding this app started is still open. Ask posts
+    /// Whether an onboarding this app started is still open. Ask posts
     /// `ai.hippocampus.ask.didShow` only then (RULINGS X1).
-    public var onboardingIsRunning: Bool { onboardingProcess?.isRunning == true }
+    public var onboardingIsRunning: Bool { onboardingProcesses.contains(where: \.isRunning) }
+
+    /// Ask every onboarding this app started to quit, without waiting.
+    public func closeOnboarding() {
+        for process in onboardingProcesses where process.isRunning {
+            Self.askToQuit(process)
+        }
+        onboardingProcesses = []
+    }
+
+    /// On quit: ask the window and setup to quit, wait up to `timeout`, then
+    /// end whatever is left with SIGTERM and SIGKILL (spec-shell S6.3).
+    public func stopWindowsForQuit(timeout: TimeInterval = 1) async {
+        let windows = ([recallProcess] + onboardingProcesses).compactMap { $0 }.filter(\.isRunning)
+        recallProcess = nil
+        onboardingProcesses = []
+        guard !windows.isEmpty else { return }
+        windows.forEach(Self.askToQuit)
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline, windows.contains(where: \.isRunning) {
+            if (try? await Task.sleep(for: .milliseconds(25))) == nil { break }
+        }
+        let survivors = windows.filter(\.isRunning)
+        guard !survivors.isEmpty else { return }
+        do {
+            try await SupervisorProcessShutdown.stop(processes: survivors, termTimeout: 0.5, killTimeout: 0.5)
+        } catch {
+            logger.error("supervisor: a window did not stop at quit: \(error.localizedDescription)")
+        }
+    }
+
+    /// A window quits the way a person quits it; a process that is not a
+    /// registered app gets SIGTERM instead.
+    private static func askToQuit(_ process: Process) {
+        if NSRunningApplication(processIdentifier: process.processIdentifier)?.terminate() != true {
+            process.terminate()
+        }
+    }
 
     public var hasOnboarding: Bool { locator.onboardingPath() != nil }
     public var agentBinaryPath: URL? { locator.agentPath() }

@@ -53,10 +53,15 @@ public final class WarmMemorySessions: AskMemory {
         return try await target.call(tool, arguments: arguments, launch: launch, timeout: timeout)
     }
 
+    /// Stop both children together and wait until they have exited (on
+    /// quit): about one second at most, even mid-answer (spec-shell S6.2).
     public func stop() async {
         idleTask?.cancel()
-        await reads.stop()
-        await assistant.stop()
+        let reads = reads
+        let assistant = assistant
+        async let readsStopped: Void = reads.stopAndWait()
+        async let assistantStopped: Void = assistant.stopAndWait()
+        _ = await (readsStopped, assistantStopped)
     }
 
     private func stopWhenIdle() {

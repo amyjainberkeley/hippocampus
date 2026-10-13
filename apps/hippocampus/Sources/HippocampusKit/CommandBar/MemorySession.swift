@@ -74,6 +74,12 @@ public actor MemorySession {
     /// Whether a child is running now.
     public var isRunning: Bool { process?.isRunning == true }
 
+    /// The running child's pid, for tests.
+    var runningProcessIdentifier: pid_t? {
+        guard let process, process.isRunning else { return nil }
+        return process.processIdentifier
+    }
+
     /// Stop the child. Pending calls fail.
     public func stop() {
         process?.terminate()
@@ -84,6 +90,26 @@ public actor MemorySession {
         pending.removeAll()
         for continuation in waiting.values {
             continuation.resume(throwing: MemorySessionError.exited)
+        }
+    }
+
+    /// Stop the child and wait until it has exited: SIGTERM, then SIGKILL
+    /// once `timeout` has passed (spec-shell S6.2). An answer being written
+    /// does not keep it running after Quit. Pending calls fail.
+    public func stopAndWait(timeout: Duration = .seconds(1)) async {
+        let child = process
+        stop()
+        guard let child, child.isRunning else { return }
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while child.isRunning, clock.now < deadline {
+            if (try? await Task.sleep(for: .milliseconds(20))) == nil { break }
+        }
+        guard child.isRunning else { return }
+        kill(child.processIdentifier, SIGKILL)
+        let killDeadline = clock.now.advanced(by: .milliseconds(500))
+        while child.isRunning, clock.now < killDeadline {
+            if (try? await Task.sleep(for: .milliseconds(20))) == nil { break }
         }
     }
 

@@ -66,21 +66,35 @@ package final class ApplicationTerminationCoordinator {
     private let supervisor: ProcessSupervisor
     private let restartLauncher: any ApplicationRestartLaunching
     private let shutdownTimeout: TimeInterval
+    private let extrasTimeout: TimeInterval
+    private let stopExtras: @MainActor () async -> Void
+    private let afterStop: @MainActor () async -> Void
     private let cleanup: @MainActor () -> Void
     private let onFailure: @MainActor (Error) -> Void
 
     package private(set) var hasVerifiedShutdown = false
 
+    /// `stopExtras` ends what the supervisor does not own: Ask's sessions and
+    /// the windows. `afterStop` ends any capture process still alive once the
+    /// supervisor has stopped (the orphan sweep). Both are raced against one
+    /// deadline, `extrasTimeout` after the supervisor stop (spec-shell S6.7,
+    /// critique-shell-engineering 1).
     package init(
         supervisor: ProcessSupervisor,
         restartLauncher: any ApplicationRestartLaunching,
         shutdownTimeout: TimeInterval = 2,
+        extrasTimeout: TimeInterval = 2,
+        stopExtras: @escaping @MainActor () async -> Void = {},
+        afterStop: @escaping @MainActor () async -> Void = {},
         cleanup: @escaping @MainActor () -> Void,
         onFailure: @escaping @MainActor (Error) -> Void = { _ in }
     ) {
         self.supervisor = supervisor
         self.restartLauncher = restartLauncher
         self.shutdownTimeout = shutdownTimeout
+        self.extrasTimeout = extrasTimeout
+        self.stopExtras = stopExtras
+        self.afterStop = afterStop
         self.cleanup = cleanup
         self.onFailure = onFailure
     }
@@ -92,6 +106,10 @@ package final class ApplicationTerminationCoordinator {
     /// stop that can never relaunch and the app exits; its children follow
     /// the parent lease. On 2026-09-26 and 2026-10-08 a quit during capture
     /// recovery waited forever instead.
+    ///
+    /// A quit stops Ask and the windows alongside the supervisor, so the
+    /// whole quit takes about as long as the supervisor stop. A restart stops
+    /// them only after a verified stop: a failed restart leaves them open.
     @discardableResult
     package func terminate(
         intent: ApplicationTerminationIntent,
@@ -102,6 +120,8 @@ package final class ApplicationTerminationCoordinator {
             return true
         }
 
+        let stopExtras = stopExtras
+        let extrasAlongside = intent == .quit ? Task { @MainActor in await stopExtras() } : nil
         let outcome = await boundedShutdown()
         do {
             var verified = false
@@ -113,6 +133,7 @@ package final class ApplicationTerminationCoordinator {
                 }
                 await supervisor.forceStopForQuit(timeout: shutdownTimeout)
             }
+            await boundedExtras(extrasAlongside ?? Task { @MainActor in await stopExtras() })
             if intent == .restart {
                 try restartLauncher.scheduleRestart()
             }
@@ -156,6 +177,32 @@ package final class ApplicationTerminationCoordinator {
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(limit))
                 finish(.timedOut)
+            }
+        }
+    }
+
+    /// The extra steps, and the sweep that starts once the supervisor has
+    /// stopped, bounded like `boundedShutdown`. Each step has its own bound,
+    /// but Quit must not depend on every one of them keeping it.
+    private func boundedExtras(_ extras: Task<Void, Never>) async {
+        let afterStop = afterStop
+        let limit = extrasTimeout
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            var resumed = false
+            func finish() {
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume()
+            }
+            Task { @MainActor in
+                let sweep = Task { @MainActor in await afterStop() }
+                await extras.value
+                await sweep.value
+                finish()
+            }
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(limit))
+                finish()
             }
         }
     }

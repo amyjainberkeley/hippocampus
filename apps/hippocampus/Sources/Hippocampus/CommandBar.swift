@@ -86,6 +86,13 @@ final class CommandBarController: NSObject, NSWindowDelegate {
         if let question { model.ask(question) }
     }
 
+    /// On quit: close Ask and stop its sessions, waiting until they have
+    /// exited (spec-shell S6.2).
+    func shutdown() async {
+        hide()
+        await model?.shutdown()
+    }
+
     func hide() {
         guard let panel, panel.isVisible else { return }
         panel.orderOut(nil)

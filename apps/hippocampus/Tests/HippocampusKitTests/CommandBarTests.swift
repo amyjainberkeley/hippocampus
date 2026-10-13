@@ -90,6 +90,39 @@ final class CommandBarTests: XCTestCase {
         }
     }
 
+    /// Quit ends Ask's session even when its child ignores SIGTERM in the
+    /// middle of an answer (spec-shell S6.2).
+    func testStopAndWaitEndsASilentChildWithinASecondAndAHalf() async throws {
+        let ready = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: ready) }
+        let silent = try fakeAgent("trap '' TERM\ntouch '\(ready.path)'\nwhile :; do sleep 0.05; done")
+        let session = MemorySession()
+        let answer = Task {
+            try await session.call("mci_ask", arguments: Data("{}".utf8), launch: silent, timeout: .seconds(30))
+        }
+        for _ in 0..<300 where !FileManager.default.fileExists(atPath: ready.path) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let pid = await session.runningProcessIdentifier
+        let child = try XCTUnwrap(pid, "the session started its child, which now ignores SIGTERM")
+
+        let started = ContinuousClock.now
+        await session.stopAndWait(timeout: .seconds(1))
+        let took = started.duration(to: .now)
+
+        XCTAssertGreaterThanOrEqual(took, .milliseconds(900), "SIGTERM was ignored, so SIGKILL ended it")
+        XCTAssertLessThan(took, .milliseconds(1500))
+        XCTAssertNotEqual(kill(child, 0), 0, "the child is gone, not just let go")
+        let running = await session.isRunning
+        XCTAssertFalse(running)
+        do {
+            _ = try await answer.value
+            XCTFail("the answer in flight must fail")
+        } catch let error as MemorySessionError {
+            XCTAssertEqual(error, .exited)
+        }
+    }
+
     @MainActor
     func testActivatingAHitOpensItsPageOrTheEvent() throws {
         let model = CommandBarModel(launch: { _ in nil })
