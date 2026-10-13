@@ -379,6 +379,35 @@ final class SupervisorStopAndPauseTests: XCTestCase {
         XCTAssertNil(tab)
     }
 
+    // MARK: Off only once stopped (RULINGS B1 and S7)
+
+    /// Remember my screen, turned off: the setting flips at once, but the
+    /// screen may be read until the stop is done, so the icon keeps the
+    /// solid dot until then and reaches Off by itself.
+    func test_turning_off_keeps_the_solid_dot_until_the_stop_is_done() async throws {
+        let receipts = ReceiptSource(clock: clock, saved: clock.now, reason: nil)
+        let (supervisor, _, topology) = make(config: FakeRuntimeConfig(captureEnabled: true), receipts: receipts)
+        try await supervisor.startAndWaitForReadiness()
+        supervisor.refreshCaptureStatus()
+        XCTAssertEqual(supervisor.menuBarStatus.markState, .remembering)
+
+        let hung = TestSuspension()
+        topology.stopSuspensionOnCall = topology.stopCalls + 1
+        topology.stopSuspension = hung
+        let turningOff = Task { try await supervisor.applyCaptureEnabled(false) }
+        await hung.waitUntilEntered()
+        XCTAssertFalse(supervisor.captureEnabled, "the setting is off at once")
+        XCTAssertEqual(supervisor.menuBarStatus.markState, .remembering, "the stop is not done")
+        XCTAssertNotEqual(supervisor.statusRow(setupFinished: true, now: clock.now).title, "Off")
+
+        hung.resume()
+        try await turningOff.value
+        XCTAssertEqual(supervisor.state, .stopped)
+        XCTAssertEqual(supervisor.menuBarStatus, .idle)
+        XCTAssertEqual(supervisor.menuBarStatus.markState, .off)
+        try await supervisor.shutdownAndWait()
+    }
+
     // MARK: Couldn't stop (product critique 3, RULINGS S10)
 
     func test_a_failed_turn_off_says_couldnt_stop_until_the_next_commit() async throws {

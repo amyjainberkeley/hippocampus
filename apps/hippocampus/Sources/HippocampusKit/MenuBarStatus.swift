@@ -87,6 +87,8 @@ public enum MenuBarStatus: Equatable, Sendable {
 
     /// A failed stop and an explicit off or pause come first; permission and
     /// storage failures then take precedence over evidence of earlier saves.
+    /// `stopping` is a turn-off still under way: the setting is already off,
+    /// but the screen may be read until the stop is done.
     public static func derive(
         from state: SupervisorState,
         captureEnabled: Bool = true,
@@ -96,6 +98,7 @@ public enum MenuBarStatus: Equatable, Sendable {
         helperHealth: HealthSnapshot? = nil,
         captureStartedAt: Date? = nil,
         stopFailed: Bool = false,
+        stopping: Bool = false,
         skipSeenSince: Date? = nil,
         now: Date = Date()
     ) -> MenuBarStatus {
@@ -108,7 +111,9 @@ public enum MenuBarStatus: Equatable, Sendable {
             if captureEnabled, let surface = tccRevokedSurface { return .needsPermission(surface) }
             return .error(reason: reason)
         }
-        guard captureEnabled else { return .idle }
+        // Off shows once the stop is done, never before: the icon may
+        // overstate, never understate (RULINGS B1 and S7).
+        guard captureEnabled || stopping else { return .idle }
         if state == .paused { return .paused }
         if let reason = tccRevokedSurface {
             return .needsPermission(reason)

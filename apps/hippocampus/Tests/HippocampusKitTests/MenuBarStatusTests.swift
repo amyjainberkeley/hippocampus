@@ -252,6 +252,23 @@ final class MenuBarStatusTests: XCTestCase {
         XCTAssertEqual(MenuBarStatus.derive(from: .crashed(reason: "x")), .error(reason: "x"))
     }
 
+    /// Turning off flips the setting first; until the stop is done the
+    /// screen may be read, so it is not Off yet and keeps the solid dot
+    /// (RULINGS B1 and S7). Once stopped, it is Off.
+    func testATurnOffStillUnderWayIsNotOffYet() throws {
+        let stopping = MenuBarStatus.derive(
+            from: .running, captureEnabled: false, receipt: try receipt(),
+            captureStartedAt: now.addingTimeInterval(-60), stopping: true, now: now
+        )
+        XCTAssertEqual(stopping, .recording)
+        XCTAssertEqual(stopping.markState, .remembering)
+        XCTAssertEqual(MenuBarStatus.derive(from: .starting, captureEnabled: false, stopping: true, now: now), .starting)
+        XCTAssertEqual(MenuBarStatus.derive(from: .stopped, captureEnabled: false, stopping: true, now: now), .idle)
+        XCTAssertEqual(MenuBarStatus.derive(from: .running, captureEnabled: false, receipt: try receipt(),
+                                            captureStartedAt: now.addingTimeInterval(-60), now: now), .idle,
+                       "remembering off, with nothing left to stop")
+    }
+
     /// A failed stop, pause or turn-off says "Couldn’t stop" while the
     /// failure stands (product critique 3), ahead of every other reading.
     func testAFailedStopWinsWhileItStands() {

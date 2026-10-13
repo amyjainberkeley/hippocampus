@@ -162,7 +162,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             from: state, captureEnabled: captureEnabled,
             tccRevokedSurface: tccRevokedSurface, receipt: captureReceipt,
             helperHealth: health, captureStartedAt: captureStartedAt,
-            stopFailed: stopFailed, skipSeenSince: skipWatch.since, now: clock()
+            stopFailed: stopFailed, stopping: captureStopTask != nil,
+            skipSeenSince: skipWatch.since, now: clock()
         )
     }
 

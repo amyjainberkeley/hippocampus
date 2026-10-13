@@ -70,6 +70,8 @@ enum StatusPreviewRenderer {
             state("starting", .starting),
             state("nothing-saved", .noMemory),
             state("skipping-private", .skipping(reason: "private_browsing")),
+            // The Oct 13 receipt, once its skip has held: still the solid dot.
+            state("skipping-never-read", .skipping(reason: "denylist-source")),
             state("skipping-password", .skipping(reason: "secure-event-input")),
             state("skipping-password-dark", .skipping(reason: "secure-event-input"), dark: true),
             state("paused", .paused, paused: sixMinutesAgo),
@@ -148,6 +150,9 @@ enum StatusPreviewRenderer {
                  receipt: nil, stoppedSharingAt: Date().addingTimeInterval(-6 * 60)),
             pane("remembering-couldnt-stop", .capture, state: .crashed(reason: "fixture"), captureEnabled: false,
                  receipt: nil, stopFailed: true),
+            pane("remembering-needs-permission", .capture, receipt: PreviewFixtures.receipt(
+                savedAt: saved, blocked: "screen_recording_permission"
+            )),
             pane("ai-tools", .sources),
             pane("privacy", .privacy),
             pane("advanced", .advanced),
@@ -259,13 +264,14 @@ private struct MenuFacsimile: View {
 // MARK: Fixtures
 
 private enum PreviewFixtures {
-    static func receipt(savedAt: Date) -> CaptureStatusReceipt? {
+    static func receipt(savedAt: Date, blocked: String? = nil) -> CaptureStatusReceipt? {
         let formatter = ISO8601DateFormatter()
-        let json: [String: Any] = [
+        var json: [String: Any] = [
             "schema_version": 1, "updated_at": formatter.string(from: Date()),
             "stored_frame_count": 120, "stored_screenshot_count": 40,
             "last_stored_frame_at": formatter.string(from: savedAt),
         ]
+        json["blocked_reason"] = blocked
         return try? CaptureStatusReceipt.decode(JSONSerialization.data(withJSONObject: json))
     }
 }
