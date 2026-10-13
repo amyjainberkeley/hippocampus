@@ -7,7 +7,8 @@
 //! model whether each candidate is identical, similar or unrelated; identical
 //! and similar ones are merged into one revised proposition carrying all the
 //! evidence, and the originals are retired. A proposition the user rejected
-//! is never proposed again.
+//! is never proposed again, and one the user confirmed keeps the words they
+//! agreed to: a draft that restates it only adds its evidence.
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -87,7 +88,8 @@ pub struct Integration {
     pub added: u32,
     /// Existing ones revised.
     pub revised: u32,
-    /// Drafts dropped (rejected before, trivial, or a model failure).
+    /// Drafts dropped (rejected before, trivial, a model failure, or a
+    /// restatement of a confirmed claim, which gains the draft's evidence).
     pub skipped: u32,
 }
 
@@ -266,7 +268,9 @@ pub fn propose(
     Ok(out.propositions)
 }
 
-/// Fold drafts into the stored model.
+/// Fold drafts into the stored model. A confirmed proposition is never
+/// revised or retired: when a draft restates one, the draft's evidence is
+/// attached to it, nothing else changes, and the draft counts as skipped.
 ///
 /// # Errors
 /// Store failures. Model failures on one draft skip that draft.
@@ -279,6 +283,7 @@ pub fn integrate(
     now_us: u64,
 ) -> Result<Integration, GumError> {
     let rejected = store.propositions_with_status(PropositionStatus::Rejected, 500)?;
+    let confirmed = store.confirmed_proposition_ids()?;
     let mut outcome = Integration::default();
     for draft in drafts {
         let text = draft.text.trim();
@@ -322,6 +327,13 @@ pub fn integrate(
             let draft = prepare(draft.clone(), user_name, true);
             store.insert_proposition(&draft.to_new(), evidence, now_us)?;
             outcome.added += 1;
+            continue;
+        }
+        if let Some(kept) = related.iter().find(|p| confirmed.contains(&p.id)) {
+            // Seen again: more evidence, the same words. The other related
+            // claims are left as they are too.
+            store.add_proposition_evidence(kept.id, evidence, now_us)?;
+            outcome.skipped += 1;
             continue;
         }
         let revised = match mind.call::<_, Draft>(
@@ -457,5 +469,104 @@ mod tests {
         let n = d.to_new();
         assert!((n.confidence - 1.0).abs() < 1e-9 && (n.decay - 0.1).abs() < 1e-9);
         assert_eq!(n.kind, PropositionKind::Goal);
+    }
+
+    /// A model that judges both stored claims identical to the draft and
+    /// then, if asked, writes one merged revision of them.
+    fn merging_mind(dir: &std::path::Path, a: i64, b: i64) -> MindClient {
+        use std::os::unix::fs::PermissionsExt;
+        let relate = serde_json::json!({"id": 1, "ok": true, "output": {"relations": [
+            {"id": a, "relation": "identical"}, {"id": b, "relation": "identical"},
+        ]}});
+        let revise = serde_json::json!({"id": 2, "ok": true, "output": {
+            "text": "Sam is pricing the Team plan", "reasoning": "merged", "kind": "project", "confidence": 7, "decay": 3,
+        }});
+        let path = dir.join("fake-mind");
+        std::fs::write(
+            &path,
+            format!(
+                "#!/bin/sh\necho '{{\"ready\":true,\"available\":true}}'\nread line; echo '{relate}'\nread line; echo '{revise}'\ncat >/dev/null\n"
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        MindClient::new(Some(path))
+    }
+
+    struct Merge {
+        dir: tempfile::TempDir,
+        store: SqlCipherBrainStore,
+        a: i64,
+        b: i64,
+        old: i64,
+        new: i64,
+    }
+
+    /// Two stored claims (`a`, `b`) resting on `old`, and a session (`new`).
+    fn two_claims() -> Merge {
+        use mci_brain::{BrainStore, Event, EventId, EventSource};
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqlCipherBrainStore::new(&dir.path().join("b.sqlite"), &mci_core::crypto::DbKey::from_bytes([9; 32])).unwrap();
+        let put = |ts_us| {
+            let event = Event {
+                id: EventId(0), ts_us, app_bundle_id: Some("com.apple.Notes".into()), window_title: Some("Launch plan".into()),
+                url: None, text: "Team: $18 a seat".into(), summary: None, entities: None, episode_id: None,
+                cascade_reason: 0, keyframe_blob: None, tab_id: None, embedding: None,
+            };
+            i64::try_from(store.put_event_with_source(&event, EventSource::ScreenOcr).unwrap().0).unwrap()
+        };
+        let (old, new) = (put(1), put(2));
+        let claim = |text: &str| NewProposition {
+            text: text.into(), reasoning: "seen".into(), kind: PropositionKind::Project, confidence: 0.6, decay: 0.3, model: "t".into(),
+        };
+        let a = store.insert_proposition(&claim("Sam is pricing the Team plan for the beta launch"), &[old], 10).unwrap();
+        let b = store.insert_proposition(&claim("Sam is pricing the Team plan for the launch in Notes"), &[old], 10).unwrap();
+        Merge { dir, store, a, b, old, new }
+    }
+
+    fn restatement() -> Draft {
+        Draft {
+            text: "Sam is pricing the Team plan for the beta launch in Notes".into(),
+            reasoning: "seen again".into(),
+            kind: "project".into(),
+            confidence: 7,
+            decay: 3,
+        }
+    }
+
+    #[test]
+    fn a_confirmed_claim_is_never_rewritten_or_retired_by_a_merge() {
+        let m = two_claims();
+        assert!(m.store.confirm_proposition(m.a, 20).unwrap());
+        let mind = merging_mind(m.dir.path(), m.a, m.b);
+
+        let outcome = integrate(&m.store, &mind, "Amy", &[restatement()], &[m.new], 30).unwrap();
+
+        assert_eq!(outcome, Integration { added: 0, revised: 0, skipped: 1 });
+        let active = m.store.propositions_with_status(PropositionStatus::Active, 10).unwrap();
+        assert_eq!(active.len(), 2, "nothing retired, nothing new");
+        let a = active.iter().find(|p| p.id == m.a).expect("the confirmed claim stays in use");
+        assert_eq!(a.text, "Sam is pricing the Team plan for the beta launch", "in the words that were confirmed");
+        assert_eq!(a.evidence, vec![m.old, m.new], "it gains the session as evidence");
+        assert_eq!(a.updated_us, 30, "and is marked seen");
+        let b = active.iter().find(|p| p.id == m.b).expect("the other related claim is untouched");
+        assert_eq!((b.evidence.clone(), b.updated_us), (vec![m.old], 10));
+        assert!(m.store.propositions_with_status(PropositionStatus::Retired, 10).unwrap().is_empty());
+        assert!(m.store.confirmed_proposition_ids().unwrap().contains(&m.a));
+    }
+
+    #[test]
+    fn unconfirmed_restatements_are_still_merged() {
+        let m = two_claims();
+        let mind = merging_mind(m.dir.path(), m.a, m.b);
+
+        let outcome = integrate(&m.store, &mind, "Amy", &[restatement()], &[m.new], 30).unwrap();
+
+        assert_eq!(outcome, Integration { added: 0, revised: 1, skipped: 0 });
+        let active = m.store.propositions_with_status(PropositionStatus::Active, 10).unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].text, "Sam is pricing the Team plan");
+        assert_eq!(active[0].evidence, vec![m.old, m.new]);
+        assert_eq!(m.store.propositions_with_status(PropositionStatus::Retired, 10).unwrap().len(), 2);
     }
 }

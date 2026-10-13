@@ -22,6 +22,7 @@ pub mod mind;
 pub mod observe;
 pub mod query;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -110,13 +111,23 @@ pub struct Understanding {
     mind: Arc<MindClient>,
     tz_offset_secs: i32,
     user_name: String,
+    inbox: Option<PathBuf>,
 }
 
 impl Understanding {
-    /// Build over a store and a mind client.
+    /// Build over a store and a mind client. `inbox` is the folder of verdict
+    /// files each cycle applies ([`feedback`]): the daemon passes
+    /// [`feedback::inbox_for_memory`]; readers pass `None`, and tests a folder
+    /// of their own.
     #[must_use]
-    pub fn new(store: Arc<SqlCipherBrainStore>, mind: Arc<MindClient>, tz_offset_secs: i32, user_name: String) -> Self {
-        Self { store, mind, tz_offset_secs, user_name }
+    pub fn new(
+        store: Arc<SqlCipherBrainStore>,
+        mind: Arc<MindClient>,
+        tz_offset_secs: i32,
+        user_name: String,
+        inbox: Option<PathBuf>,
+    ) -> Self {
+        Self { store, mind, tz_offset_secs, user_name, inbox }
     }
 
     /// The user's first name from the account's full name, or empty.
@@ -139,12 +150,14 @@ impl Understanding {
     /// Store failures.
     pub fn run_cycle(&self, now_us: u64, max_sessions: usize) -> Result<CycleStats, StoreError> {
         let mut stats = CycleStats::default();
+        // Verdicts first: what the person confirmed or rejected survives the
+        // rebuild below, including verdicts given since the last cycle.
+        if let Some(inbox) = &self.inbox {
+            stats.verdicts = feedback::apply_inbox(&self.store, inbox, now_us)?.applied;
+        }
         if self.store.understanding_state(PIPELINE_KEY)?.as_deref() != Some(PIPELINE_VERSION) {
             self.store.reset_understanding()?;
             self.store.set_understanding_state(PIPELINE_KEY, PIPELINE_VERSION)?;
-        }
-        if let Some(inbox) = feedback::inbox_dir() {
-            stats.verdicts = feedback::apply_inbox(&self.store, &inbox, now_us)?;
         }
         let after: i64 = self.store.understanding_state(SEARCH_CURSOR)?.and_then(|v| v.parse().ok()).unwrap_or(0);
         let (added, last) = self.store.backfill_search_queries(after.max(0), 5_000)?;
@@ -525,7 +538,13 @@ mod tests {
         store
             .put_event_with_source(&event(now - min, "com.apple.Notes", "Launch plan", None, "more"), EventSource::ScreenOcr)
             .unwrap();
-        let understanding = Understanding::new(Arc::clone(&store), Arc::new(MindClient::new(None)), 0, "Amy".into());
+        let understanding = Understanding::new(
+            Arc::clone(&store),
+            Arc::new(MindClient::new(None)),
+            0,
+            "Amy".into(),
+            Some(dir.path().join("inbox")),
+        );
         let stats = understanding.run_cycle(now, 8).unwrap();
         assert_eq!(stats.searches, 1);
         assert_eq!(stats.sessions, 1);
@@ -543,5 +562,59 @@ mod tests {
         assert_eq!(day.written_by.as_deref(), Some("measured"));
         assert!(day.narrative.unwrap().headline.contains("hours at the computer"));
         assert_eq!(day.breakdown.searches[0].query, "stripe per seat");
+    }
+
+    fn claim(text: &str) -> mci_brain::understanding::NewProposition {
+        mci_brain::understanding::NewProposition {
+            text: text.into(),
+            reasoning: String::new(),
+            kind: mci_brain::understanding::PropositionKind::Project,
+            confidence: 0.6,
+            decay: 0.3,
+            model: "t".into(),
+        }
+    }
+
+    #[test]
+    fn a_cycle_applies_only_the_inbox_it_was_given() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqlCipherBrainStore::new(&dir.path().join("b.sqlite"), &DbKey::from_bytes([3; 32])).unwrap());
+        store.set_understanding_state(PIPELINE_KEY, PIPELINE_VERSION).unwrap();
+        let e = store.put_event_with_source(&event(1, "com.apple.Notes", "Launch plan", None, "Team: $18/seat"), EventSource::ScreenOcr).unwrap();
+        let id = store.insert_proposition(&claim("Sam is pricing the Team plan"), &[i64::try_from(e.0).unwrap()], 1).unwrap();
+        let inbox = dir.path().join("inbox");
+        std::fs::create_dir(&inbox).unwrap();
+        let file = inbox.join("1-1.json");
+        std::fs::write(&file, format!(r#"{{"id":{id},"verdict":"confirm"}}"#)).unwrap();
+        let now = 1_800_000_000_000_000u64;
+
+        let reader = Understanding::new(Arc::clone(&store), Arc::new(MindClient::new(None)), 0, "Amy".into(), None);
+        assert_eq!(reader.run_cycle(now, 1).unwrap().verdicts, 0);
+        assert!(file.exists(), "without an inbox, no verdict file is touched");
+
+        let worker = Understanding::new(Arc::clone(&store), Arc::new(MindClient::new(None)), 0, "Amy".into(), Some(inbox));
+        assert_eq!(worker.run_cycle(now, 1).unwrap().verdicts, 1);
+        assert!(!file.exists());
+        assert!(store.confirmed_proposition_ids().unwrap().contains(&id));
+    }
+
+    #[test]
+    fn a_confirmation_given_before_a_rebuild_survives_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqlCipherBrainStore::new(&dir.path().join("b.sqlite"), &DbKey::from_bytes([3; 32])).unwrap());
+        store.set_understanding_state(PIPELINE_KEY, "an older pipeline").unwrap();
+        let e = store.put_event_with_source(&event(1, "com.apple.Notes", "Launch plan", None, "Team: $18/seat"), EventSource::ScreenOcr).unwrap();
+        let confirmed = store.insert_proposition(&claim("Sam is pricing the Team plan"), &[i64::try_from(e.0).unwrap()], 1).unwrap();
+        let unjudged = store.insert_proposition(&claim("Sam is writing a launch plan"), &[i64::try_from(e.0).unwrap()], 1).unwrap();
+        let inbox = dir.path().join("inbox");
+        std::fs::create_dir(&inbox).unwrap();
+        std::fs::write(inbox.join("1-1.json"), format!(r#"{{"id":{confirmed},"verdict":"confirm"}}"#)).unwrap();
+
+        let worker = Understanding::new(Arc::clone(&store), Arc::new(MindClient::new(None)), 0, "Amy".into(), Some(inbox));
+        assert_eq!(worker.run_cycle(1_800_000_000_000_000, 1).unwrap().verdicts, 1);
+
+        let left: Vec<i64> = store.propositions_with_status(PropositionStatus::Active, 10).unwrap().into_iter().map(|p| p.id).collect();
+        assert_eq!(left, vec![confirmed], "the rebuild clears the unjudged claim (id {unjudged}) and keeps the confirmed one");
+        assert_eq!(store.understanding_state(PIPELINE_KEY).unwrap().as_deref(), Some(PIPELINE_VERSION));
     }
 }

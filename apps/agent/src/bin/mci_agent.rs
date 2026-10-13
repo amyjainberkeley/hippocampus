@@ -2773,7 +2773,7 @@ fn spawn_understanding_worker(
     store: Arc<mci_brain::SqlCipherBrainStore>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
-    use mci_agent::understanding::{mind::MindClient, Understanding};
+    use mci_agent::understanding::{feedback, mind::MindClient, Understanding};
     if std::env::var("MCI_UNDERSTANDING").as_deref() == Ok("0") {
         eprintln!("mci-agent: understanding worker disabled (MCI_UNDERSTANDING=0)");
         return;
@@ -2783,10 +2783,16 @@ fn spawn_understanding_worker(
         "mci-agent: understanding worker started (on-device model: {})",
         if mind.path().is_some() { "found" } else { "not installed" }
     );
+    // The app's verdict files name items in the owner's memory; a memory
+    // opened with the development file key never applies them.
+    let inbox = feedback::inbox_for_memory(read_dev_key_hex().is_some());
+    if inbox.is_none() {
+        eprintln!("mci-agent: understanding: verdicts from the app are not applied to this memory");
+    }
     tokio::spawn(async move {
         let tz = brief_worker::current_tz_offset_secs();
         let name = Understanding::account_first_name();
-        let understanding = Arc::new(Understanding::new(store, mind, tz, name));
+        let understanding = Arc::new(Understanding::new(store, mind, tz, name, inbox));
         let mut delay = std::time::Duration::from_secs(30);
         loop {
             tokio::select! {

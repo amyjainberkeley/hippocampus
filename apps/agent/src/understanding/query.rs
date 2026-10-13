@@ -87,7 +87,7 @@ impl From<Proposition> for ModelItem {
 /// # Errors
 /// Store failures and malformed dates.
 pub fn run(store: &Arc<SqlCipherBrainStore>, tz: i32, now_us: u64, query: &UnderstandingQuery) -> Result<serde_json::Value, StoreError> {
-    let reader = Understanding::new(Arc::clone(store), Arc::new(MindClient::new(None)), tz, String::new());
+    let reader = Understanding::new(Arc::clone(store), Arc::new(MindClient::new(None)), tz, String::new(), None);
     Ok(match query {
         UnderstandingQuery::Day { date } => {
             let date = date.clone().unwrap_or_else(|| today(tz, now_us));
