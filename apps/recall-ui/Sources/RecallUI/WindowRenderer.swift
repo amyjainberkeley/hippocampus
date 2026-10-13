@@ -99,6 +99,14 @@ enum WindowRenderer {
                 await until { ask.answerState != .thinking(question: "what changed in tax.rs") }
                 select(RenderFixtureReader.codeId, in: ask)
             },
+            // The same, at the window's own size, for the website.
+            Scene(name: "product-ask") { ask in
+                ask.query = "what changed in tax.rs"
+                await ask.search.runSearch()
+                ask.ask("what changed in tax.rs")
+                await until { ask.answerState != .thinking(question: "what changed in tax.rs") }
+                select(RenderFixtureReader.codeId, in: ask)
+            },
             Scene(name: "full-overview-light", place: .overview),
             Scene(name: "full-ask-light") { await $0.history.reload() },
             Scene(name: "full-you-light", place: .you),
@@ -186,10 +194,31 @@ enum WindowRenderer {
         rep.size = size
         hosting.cacheDisplay(in: hosting.bounds, to: rep)
         if let png = rep.representation(using: .png, properties: [:]) {
-            try? png.write(to: directory.appendingPathComponent("\(scene.name).png"))
+            try? withoutMetadata(png).write(to: directory.appendingPathComponent("\(scene.name).png"))
         }
         window.contentView = nil
     }
+}
+
+/// The PNG without its metadata chunks (EXIF and text), so a picture that
+/// is published says nothing but its pixels.
+private func withoutMetadata(_ png: Data) -> Data {
+    let bytes = [UInt8](png)
+    guard bytes.count > 8 else { return png }
+    var out = Array(bytes[0..<8])
+    var offset = 8
+    while offset + 12 <= bytes.count {
+        let length = Int(bytes[offset]) << 24 | Int(bytes[offset + 1]) << 16
+            | Int(bytes[offset + 2]) << 8 | Int(bytes[offset + 3])
+        let end = offset + 12 + length
+        guard end <= bytes.count else { return png }
+        let type = String(decoding: bytes[(offset + 4)..<(offset + 8)], as: UTF8.self)
+        if !["eXIf", "tEXt", "iTXt", "zTXt"].contains(type) {
+            out.append(contentsOf: bytes[offset..<end])
+        }
+        offset = end
+    }
+    return Data(out)
 }
 
 private final class NothingKept: KeyValueStore, Sendable {
@@ -202,9 +231,11 @@ private final class NothingKept: KeyValueStore, Sendable {
 /// way a classified window is (content, the separator, then the window's
 /// chrome): a code editor, a chat and a web page. Nothing here is real.
 struct RenderFixtureReader: BrainReader {
-    static let codeId: UInt64 = 90_301
+    // The code and the page are the two sources of the fixture answer
+    // (`PreviewUnderstandingFixtures.answer`): same ids, times and titles.
+    static let codeId: UInt64 = 90_188
     static let chatId: UInt64 = 90_302
-    static let pageId: UInt64 = 90_303
+    static let pageId: UInt64 = 90_175
 
     let base: NativePreviewReader
     private let extra: [Hit]
@@ -246,11 +277,11 @@ struct RenderFixtureReader: BrainReader {
             Subscribe
             """
         extra = [
-            Hit(eventId: Self.pageId, tsUs: nowUs - 70 * 60_000_000, appBundleId: "com.apple.Safari",
+            Hit(eventId: Self.pageId, tsUs: 1_791_828_960_000_000, appBundleId: "com.apple.Safari",
                 windowTitle: "Rounding half to even \u{00B7} Dev Notes", url: "https://devnotes.example/rounding",
                 ocrTextSnippet: page, source: "lexical", score: nil, sourceKind: "browser_page"),
-            Hit(eventId: Self.codeId, tsUs: nowUs - 40 * 60_000_000, appBundleId: "com.microsoft.VSCode",
-                windowTitle: "tax.rs \u{00B7} trailhead-shop", url: nil,
+            Hit(eventId: Self.codeId, tsUs: 1_791_829_940_000_000, appBundleId: "com.microsoft.VSCode",
+                windowTitle: "tax.rs \u{2014} trailhead-shop", url: nil,
                 ocrTextSnippet: code, source: "lexical", score: nil, sourceKind: "screen_ocr"),
             Hit(eventId: Self.chatId, tsUs: nowUs - 25 * 60_000_000, appBundleId: "com.apple.MobileSMS",
                 windowTitle: "Sam Lee", url: nil,

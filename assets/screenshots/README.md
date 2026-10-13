@@ -7,7 +7,7 @@ are never confused with illustrative marketing art.
 | --- | --- | --- |
 | `hero-onboarding-welcome.png` | Exact product capture | Current `onboarding` SwiftUI executable at the Welcome step. Captured with macOS dark appearance requested to verify the V1 light-window authority. Contains no runtime data. |
 | `hero-onboarding-trust-panel.png` | Exact product capture | Current `onboarding` SwiftUI executable at the Trust step. Captured with macOS dark appearance requested to verify the V1 light-window authority. Contains no runtime data. |
-| `hero-recall-ui.png` | Exact product capture with synthetic data | Current `recall-ui` SwiftUI executable on the Now surface. It reads a disposable, locally seeded SQLCipher brain containing 20 synthetic work events and one synthetic daily brief. No personal data is present. |
+| `hero-recall-ui.png` | Product render with made-up data | The current `recall-ui` views on the Ask place, drawn off screen by the window's own debug renderer (`recall-ui --synthetic-preview --render-window=<dir>`) from its built-in fixtures: a question answered with its sources, and the moment it came from read as the window showed it. Nothing is read from a memory on this Mac. Window materials are drawn as solid fills. |
 | `hero-cli.png` | Illustrative render | Programmatic terminal render produced by `scripts/render-cli-screenshot.py` from the committed synthetic benchmark scorecard. It is not a live terminal screenshot and does not read a personal brain. |
 
 `hero-hippocampus-menu.png` was retired because it did not show the current
