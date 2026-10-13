@@ -61,8 +61,8 @@ class EvidencePresentationTests(unittest.TestCase):
         self.assertGreaterEqual(source.count("await Task.yield()"), 2)
         self.assertGreaterEqual(source.count("!Task.isCancelled"), 2)
 
-    def test_timeline_and_episode_statuses_use_the_same_bounded_viewport(self):
-        for name in ("TimelineView.swift", "EpisodesView.swift"):
+    def test_timeline_statuses_use_the_bounded_viewport(self):
+        for name in ("TimelineView.swift",):
             with self.subTest(destination=name):
                 source = (SOURCE / name).read_text()
                 self.assertEqual(source.count("EvidenceStateViewport {"), 3,
@@ -75,7 +75,7 @@ class EvidencePresentationTests(unittest.TestCase):
         self.assertIn("Formatters.matchReason(hit.source)", row)
 
     def test_destinations_use_adaptive_panes_without_competing_minimum_widths(self):
-        for name in ("SearchView.swift", "TimelineView.swift", "EpisodesView.swift"):
+        for name in ("SearchView.swift", "TimelineView.swift"):
             with self.subTest(destination=name):
                 source = (SOURCE / name).read_text()
                 self.assertIn("AdaptiveEvidencePanes(", source)

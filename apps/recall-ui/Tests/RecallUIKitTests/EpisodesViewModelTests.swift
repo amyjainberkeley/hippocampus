@@ -84,26 +84,6 @@ final class EpisodesViewModelTests: XCTestCase {
         ]
     }
 
-    func testReloadPopulatesEpisodesFromReader() async {
-        let reader = FixedEpisodesReader(
-            episodes: makeEpisodes(),
-            apps: []
-        )
-        let vm = EpisodesViewModel(reader: reader)
-        await vm.reload()
-        XCTAssertEqual(vm.episodes.count, 3)
-        XCTAssertEqual(vm.episodes.first?.episodeId, 1)
-        XCTAssertFalse(vm.isLoading)
-        XCTAssertNil(vm.errorMessage)
-    }
-
-    func testReloadErrorClearsEpisodes() async {
-        let vm = EpisodesViewModel(reader: FailingReader())
-        await vm.reload()
-        XCTAssertTrue(vm.episodes.isEmpty)
-        XCTAssertNotNil(vm.errorMessage)
-    }
-
     func testDurationSecondsComputesFromTimestamps() {
         let ep = Episode(
             episodeId: 1, appBundleId: nil,
@@ -120,13 +100,6 @@ final class EpisodesViewModelTests: XCTestCase {
         XCTAssertEqual(ep.durationSeconds, 0.0, accuracy: 1e-6)
     }
 
-    func testSelectedEpisodeReturnsCorrectRow() async {
-        let reader = FixedEpisodesReader(episodes: makeEpisodes(), apps: [])
-        let vm = EpisodesViewModel(reader: reader)
-        await vm.reload()
-        vm.selectedEpisodeId = vm.episodes[1].id
-        XCTAssertEqual(vm.selectedEpisode?.episodeId, 2)
-    }
 }
 
 @MainActor

@@ -24,6 +24,16 @@ final class MomentBasicsTests: XCTestCase {
         XCTAssertEqual(MemorySourceKind.label("browser_page_with_ocr"), "Web page")
     }
 
+    func testActivityWireUsesSnakeCaseAndRoundTrips() throws {
+        let data = Data("""
+        {"intervals":[{"start_us":10,"end_us":20,"state":"future_state","app_bundle_id":"private.app"}],"truncated":false}
+        """.utf8)
+        let page = try JSONDecoder().decode(ActivityPage.self, from: data)
+        XCTAssertEqual(page.intervals.first?.startUs, 10)
+        XCTAssertEqual(page.intervals.first?.state, "future_state")
+        XCTAssertEqual(try JSONDecoder().decode(ActivityPage.self, from: JSONEncoder().encode(page)), page)
+    }
+
     func testLocalDayUsesCalendarBoundariesAcrossDaylightSaving() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!

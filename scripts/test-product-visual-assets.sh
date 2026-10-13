@@ -75,6 +75,10 @@ rg -q 'OverviewPlace\(model: overview' "$MEMORY_WORKSPACE" && rg -q 'YouPlace\(m
 if rg -q 'PendingPlace|DailyMemoryView\(|EpisodesView\(|SourcesWorkspaceView|MeasuredInputView\(' "$MEMORY_WORKSPACE"; then
     fail "the window must not show Today, Sessions, Connections or the input chart"
 fi
+if rg -q 'SectorMark\(|GlobalRecallPopup|\b(DailyMemoryView|MeasuredInputView|EpisodesView|BriefEvidenceView|BriefView|TimelineStripView|PrivacyMomentsView|WorkspaceSettingsView|PendingPlace)\b' \
+    "$REPO_ROOT/apps/recall-ui/Sources"; then
+    fail "the window's retired views, its input chart and its popup must stay gone"
+fi
 rg -q '\.defaultSize\(width: 1100, height: 720\)' "$RECALL_APP" \
     || fail "the window must open at 1100 by 720, wide enough for a list beside its detail"
 

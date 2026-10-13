@@ -1,5 +1,5 @@
-// ViewModelsTests.swift — state-machine tests for SearchViewModel,
-// TimelineViewModel, and PrivacyMomentsViewModel. The view models are
+// ViewModelsTests.swift — state-machine tests for SearchViewModel
+// and TimelineViewModel. The view models are
 // the binding contract between the SwiftUI views and the BrainReader
 // surface; SwiftUI snapshot rendering is out of scope per the PR scope.
 
@@ -280,24 +280,5 @@ final class SearchSelectionTests: XCTestCase {
         vm.clear()
         XCTAssertFalse(vm.filters.anyActive)
         XCTAssertEqual(vm.query, "")
-    }
-}
-
-@MainActor
-final class PrivacyMomentsViewModelTests: XCTestCase {
-    func testReloadPopulatesMomentsMostRecentFirst() async {
-        let vm = PrivacyMomentsViewModel(reader: StubBrainReader())
-        await vm.reload()
-        XCTAssertEqual(vm.moments.count, 3)
-        XCTAssertEqual(vm.moments.first?.reasonCode, 7)
-        XCTAssertFalse(vm.isLoading)
-        XCTAssertNil(vm.errorMessage)
-    }
-
-    func testReloadErrorClearsMoments() async {
-        let vm = PrivacyMomentsViewModel(reader: FailingReader())
-        await vm.reload()
-        XCTAssertTrue(vm.moments.isEmpty)
-        XCTAssertNotNil(vm.errorMessage)
     }
 }

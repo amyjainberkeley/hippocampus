@@ -15,16 +15,14 @@ final class NativePreviewTests: XCTestCase {
         XCTAssertEqual(NativePreviewConfiguration(arguments: ["--synthetic-preview", "--preview-tab=overview"])?.tab, .now)
     }
 
-    func testSyntheticNativeReaderSupportsReviewSearchHistoryAndCanonicalText() async throws {
+    func testSyntheticNativeReaderSupportsSearchHistoryAndCanonicalText() async throws {
         let reader = NativePreviewReader()
-        let model = DailyMemoryViewModel(reader: reader, selectedDate: reader.date,
-                                        healthLoader: { nil }, now: { reader.now })
-        await model.reload()
+        let recent = try await reader.recentEvents(limit: 50)
         // Three apps, and the recent moment the Right now card needs
         // (critique-recall-engineering finding 13).
-        XCTAssertEqual(model.review.resumePoints.count, 4)
-        XCTAssertNotNil(model.activitySummary)
-        XCTAssertTrue(model.review.events.allSatisfy { !$0.hasScreenshot })
+        XCTAssertEqual(Set(recent.compactMap(\.appBundleId)).count, 3)
+        XCTAssertEqual(recent.first?.id, NativePreviewReader.recentEventId)
+        XCTAssertTrue(recent.allSatisfy { ($0.thumbnailPath ?? "").isEmpty }, "the preview has no screenshots")
         let hits = try await reader.search(SearchOptions(text: "launch", mode: .text))
         XCTAssertFalse(hits.isEmpty)
         for hit in hits {
@@ -33,21 +31,16 @@ final class NativePreviewTests: XCTestCase {
         }
         let sessions = try await reader.listEpisodes(limit: 20)
         XCTAssertFalse(sessions.isEmpty)
-        let packet = try await model.exportSummary()
-        XCTAssertTrue(packet.contains("focus="))
-        XCTAssertFalse(packet.contains("measured hours"))
     }
 
-    func testSyntheticEmptyAndUnavailableHaveNoChart() async {
-        for scenario in [NativePreviewConfiguration.Scenario.empty, .unavailable] {
-            let reader = NativePreviewReader(scenario: scenario)
-            let model = DailyMemoryViewModel(reader: reader, selectedDate: reader.date,
-                                            healthLoader: { nil }, now: { reader.now })
-            await model.reload()
-            XCTAssertTrue(model.events.isEmpty)
-            XCTAssertNil(model.activitySummary)
-            XCTAssertEqual(model.errorMessage != nil, scenario == .unavailable)
-        }
+    func testSyntheticEmptyAndUnavailableReadNothing() async {
+        let empty = NativePreviewReader(scenario: .empty)
+        let none = try? await empty.recentEvents(limit: 50)
+        XCTAssertEqual(none?.isEmpty, true)
+        do {
+            _ = try await NativePreviewReader(scenario: .unavailable).recentEvents(limit: 50)
+            XCTFail("the unavailable preview must fail like an unreachable memory")
+        } catch {}
     }
 }
 #endif

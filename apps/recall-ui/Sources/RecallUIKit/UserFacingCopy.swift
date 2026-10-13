@@ -21,9 +21,8 @@ import Foundation
 /// a next action.
 public enum UserFacingCopy {
 
-    // Memory (brain) unreachable — used by SearchView, EpisodesView,
-    // TimelineView, PrivacyMomentsView. Prior copy was
-    // "Couldn't open your brain".
+    // Memory (brain) unreachable — used by SearchView and TimelineView.
+    // Prior copy was "Couldn't open your brain".
     public static let memoryUnreachableTitle =
         "Hippocampus couldn\u{2019}t open your memory"
     public static let memoryUnreachableBody =

@@ -86,48 +86,6 @@ final class TimelineStripTests: XCTestCase {
         XCTAssertTrue(out.isEmpty)
     }
 
-    // View-model state machine.
-
-    @MainActor
-    func testViewModelReloadPopulatesEventsWithinDefaultWindow() async throws {
-        // Anchor to the newest demo hit so the default 24 h window
-        // includes at least one row.
-        let newest = StubBrainReader.demoHits.map(\.tsUs).max()!
-        let vm = TimelineStripViewModel(
-            reader: StubBrainReader(),
-            anchorTsUs: newest
-        )
-        await vm.reload()
-        // Only rows whose ts is within the last 24 h of `newest` should
-        // land in the view — for the canned corpus that's just the
-        // anchor row itself (the others are >24 h older).
-        XCTAssertGreaterThanOrEqual(vm.events.count, 1)
-        XCTAssertNil(vm.errorMessage)
-    }
-
-    @MainActor
-    func testViewModelZoomInAndOutCycleThroughResolutions() {
-        let vm = TimelineStripViewModel(
-            reader: StubBrainReader(),
-            anchorTsUs: 0
-        )
-        XCTAssertEqual(vm.resolution, .minute)
-        vm.zoomOut()
-        XCTAssertEqual(vm.resolution, .hour)
-        vm.zoomOut()
-        XCTAssertEqual(vm.resolution, .day)
-        // Coarsest step is idempotent.
-        vm.zoomOut()
-        XCTAssertEqual(vm.resolution, .day)
-        vm.zoomIn()
-        XCTAssertEqual(vm.resolution, .hour)
-        vm.zoomIn()
-        XCTAssertEqual(vm.resolution, .minute)
-        // Finest step is idempotent.
-        vm.zoomIn()
-        XCTAssertEqual(vm.resolution, .minute)
-    }
-
     @MainActor
     func testTimelineEventCardTimeLabelIsHhmm() {
         // 2025-05-31 00:00:00 UTC = 1748649600 seconds.

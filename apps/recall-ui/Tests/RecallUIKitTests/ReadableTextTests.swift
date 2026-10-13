@@ -116,14 +116,6 @@ final class ReadableTextTests: XCTestCase {
                                encoding: .utf8)
         XCTAssertTrue(model.contains("reader.eventReading(eventId: hit.id, query: query)"))
         XCTAssertFalse(model.contains("reader.eventText("), "a person reads the reading, never the stored text")
-        // The Today screen too, until it goes: its handoff and its last-context line.
-        let today = try String(contentsOf: package.appendingPathComponent("Sources/RecallUIKit/DailyMemory.swift"),
-                               encoding: .utf8)
-        XCTAssertEqual(today.components(separatedBy: "reader.eventReading(eventId:").count - 1, 2)
-        XCTAssertFalse(today.contains("reader.eventText("))
-        let review = try String(contentsOf: package.appendingPathComponent("Sources/RecallUIKit/DailyReview.swift"),
-                                encoding: .utf8)
-        XCTAssertFalse(review.contains("ReadableText.parts("), "the reading is cut and cleaned by the FFI")
     }
 
     func testTheDetailReadsTheWindowNotTheStoredText() async throws {
