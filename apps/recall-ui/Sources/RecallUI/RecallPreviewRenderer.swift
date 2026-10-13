@@ -124,6 +124,8 @@ enum RecallPreviewRenderer {
         try await overview("overview-today-empty", .todayEmpty, height: firstScreen)
         try await overview("overview-first-day", .firstDay, height: firstScreen)
         try await overview("overview-past-day", .pastDay, today: false)
+        try await overview("overview-past-day-hover", .pastDay, height: firstScreen, today: false,
+                           hover: .session(taxRounding))
         try await overview("overview-past-day-empty", .pastDayEmpty, height: firstScreen, today: false)
         try await overview("overview-model-off", .modelOff)
         try await overview("overview-no-ai-tool", .noAITool, height: firstScreen)

@@ -22,6 +22,9 @@ struct DayStripView: View {
     static let stripHeight: CGFloat = 40
     private static let tickHeight: CGFloat = 18
     private static let previewSize = CGSize(width: 208, height: 130)
+    /// Previews open under the hour labels: above the strip they would be
+    /// cut off when the strip is near the top of the page (a past day).
+    private static let previewTop = stripHeight + tickHeight + 6
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -162,7 +165,7 @@ struct DayStripView: View {
                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(MCI.Color.surfaceElevated))
                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(MCI.Color.border, lineWidth: 1))
                 .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
-                .offset(x: x, y: -(Self.previewSize.height + 64))
+                .offset(x: x, y: Self.previewTop)
                 .allowsHitTesting(false)
             }
         case let .nothingSaved(span):
@@ -181,7 +184,7 @@ struct DayStripView: View {
             .frame(width: cardWidth, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(MCI.Color.surfaceElevated))
             .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(MCI.Color.border, lineWidth: 1))
-            .offset(x: x, y: -56)
+            .offset(x: x, y: Self.previewTop)
             .allowsHitTesting(false)
         }
     }

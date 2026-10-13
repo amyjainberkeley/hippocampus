@@ -166,8 +166,11 @@ struct OverviewPlace: View {
 
     private func day(_ overview: DayOverview) -> some View {
         VStack(alignment: .leading, spacing: 24) {
+            // Above the detail, so a hover preview opening downwards is not
+            // drawn under it.
             DayStripView(overview: overview, model: model, reader: reader, hover: $hover)
                 .padding(.top, 4)
+                .zIndex(1)
             if let block = model.selectedBlock {
                 SessionDetailView(detail: SessionDetail(block: block, locale: locale, timeZone: timeZone),
                                   reader: reader, open: open, search: search, noticedOpen: $noticedOpen,
