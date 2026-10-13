@@ -17,10 +17,11 @@
 // next to the existing `.onboarding-complete` sentinel so the wipe
 // procedure (rm -rf the MCI dir) clears it for free.
 //
-// The file used to hold the step's number. Numbers name different
-// screens in the thirteen-step and four-screen flows (an old "3" was
-// Permissions, and would have resumed at Try it), so a file holding only
-// digits loads as nothing and the flow starts where a fresh one would.
+// The file used to hold the step's number. Numbers named different
+// screens in the old thirteen-step flow (an old "3" was Permissions, and
+// would resume at Try it), so a file holding only digits loads as nothing
+// and the flow starts where a fresh one would. So does the route of a
+// step that is gone ("retention").
 
 import Foundation
 
@@ -42,16 +43,7 @@ public protocol OnboardingStateStore: Sendable {
 }
 
 extension OnboardingStateStore {
-    /// The thirteen-step flow's view of the saved route.
-    public func load() -> OnboardingStep? {
-        loadRoute().flatMap(OnboardingStep.init(launchRoute:))
-    }
-
-    public func save(_ step: OnboardingStep) {
-        saveRoute(step.routeName)
-    }
-
-    /// The four-screen flow's view of the saved route.
+    /// The saved screen, or nil when the file names none.
     public func loadScreen() -> OnboardingScreen? {
         loadRoute().flatMap(OnboardingScreen.init(launchRoute:))
     }
@@ -113,11 +105,7 @@ public struct InMemoryOnboardingStateStore: OnboardingStateStore {
     }
     private let box = Box()
 
-    public init(initial: OnboardingStep? = nil) {
-        box.route = initial?.routeName
-    }
-
-    public init(route: String?) {
+    public init(route: String? = nil) {
         box.route = route
     }
 

@@ -1,193 +1,131 @@
 import XCTest
 @testable import OnboardingKit
 
+/// The four screens: their order, the moves between them, and what the
+/// resume file keeps. Consent itself is `ConsentGateTests`; the permission
+/// rows are `PermissionRowStateTests`.
 @MainActor
 final class OnboardingFlowViewModelTests: XCTestCase {
-    func testSkippingShortcutAllowsProgressWithoutClaimingItWasObserved() {
-        let vm = makeVM()
-        vm.goTo(.primaryHotkey)
-        vm.skipHotkeyPractice()
-        XCTAssertFalse(vm.hotkeyPracticed)
-        XCTAssertTrue(vm.hotkeySkipped)
-        XCTAssertTrue(vm.canAdvance)
-        vm.markHotkeyPracticed()
-        XCTAssertTrue(vm.hotkeyPracticed)
-        XCTAssertFalse(vm.hotkeySkipped)
-    }
-
-    private func makeVM() -> OnboardingFlowViewModel {
-        // Hermetic: use the in-memory store so tests don't read/write
-        // the real `~/Library/Application Support/MCI/.onboarding-state`
-        // file (which would leak state between parallel test runs and
-        // between this suite and a developer's actual machine).
+    private func makeVM(
+        screenRecording: TCCStatus = .granted,
+        accessibility: TCCStatus = .granted,
+        consent: InMemoryOnboardingConsentStore = InMemoryOnboardingConsentStore(),
+        stateStore: InMemoryOnboardingStateStore = InMemoryOnboardingStateStore(),
+        at screen: OnboardingScreen? = nil
+    ) -> OnboardingFlowViewModel {
         OnboardingFlowViewModel(
-            screenRecording: StubTCCPermission(kind: .screenRecording, status: .granted),
-            accessibility: StubTCCPermission(kind: .accessibility, status: .granted),
-            stateStore: InMemoryOnboardingStateStore()
-        )
-    }
-
-    func testInitialStepIsWelcome() {
-        let vm = makeVM()
-        XCTAssertEqual(vm.currentStep, .welcome)
-    }
-
-    func testExplicitLaunchStepOverridesResumeState() {
-        let stateStore = InMemoryOnboardingStateStore(initial: .retention)
-        let vm = OnboardingFlowViewModel(
-            screenRecording: StubTCCPermission(kind: .screenRecording, status: .granted),
-            accessibility: StubTCCPermission(kind: .accessibility, status: .granted),
+            screenRecording: StubTCCPermission(kind: .screenRecording, status: screenRecording),
+            accessibility: StubTCCPermission(kind: .accessibility, status: accessibility),
             stateStore: stateStore,
-            initialStep: .allowlist
+            consentStore: consent,
+            initialScreen: screen
         )
-
-        XCTAssertEqual(vm.currentStep, .allowlist)
     }
 
-    func testLaunchRouteNamesOnlyKnownSteps() {
-        XCTAssertEqual(OnboardingStep(launchRoute: "allowlist"), .allowlist)
-        XCTAssertEqual(OnboardingStep(launchRoute: "trust"), .trust)
-        XCTAssertNil(OnboardingStep(launchRoute: "not-a-step"))
+    func testThereAreFourScreensInThisOrder() {
+        XCTAssertEqual(OnboardingScreen.allCases, [.welcome, .permissions, .promise, .tryIt])
+        XCTAssertEqual(OnboardingScreen.allCases.count, 4)
+        XCTAssertEqual(OnboardingScreen.allCases.map(\.rawValue), [0, 1, 2, 3])
     }
 
-    func testAdvanceThroughAllSteps() {
-        let vm = makeVM()
-        // Cycle 8.48 inserted `.primaryHotkey` between `.permissions`
-        // and `.allowlist`; the step count is now 13.
-        let expected: [OnboardingStep] = [
-            .welcome, .howItWorks, .trust, .permissions, .primaryHotkey,
-            .allowlist, .browserExtension, .livePreview, .retention,
-            .prepareBrain, .connectClaudeCode, .mcpServers, .done,
-        ]
-        for (i, step) in expected.enumerated() {
-            XCTAssertEqual(vm.currentStep, step, "Step \(i)")
-            // PrimaryHotkeySlide gates advance on the live-try/skip
-            // funnel; simulate the Skip path so the walk continues.
-            if step == .primaryHotkey { vm.markHotkeyPracticed() }
-            if i < expected.count - 1 { vm.advance() }
-        }
+    func testAFreshRunStartsAtWelcome() {
+        XCTAssertEqual(makeVM().screen, .welcome)
     }
 
-    func testAdvancePastDoneIsNoop() {
-        let vm = makeVM()
-        // 13 steps total ⇒ advance 12 times reaches `.done` (with a
-        // Skip through the PrimaryHotkey gate at step 4).
-        for i in 0..<12 {
-            if i == 4 { vm.markHotkeyPracticed() }
-            vm.advance()
-        }
-        XCTAssertEqual(vm.currentStep, .done)
+    func testAFirstRunTakesThreeStepsAndTheThirdIsConsent() async {
+        let consent = InMemoryOnboardingConsentStore()
+        let vm = makeVM(consent: consent)
         vm.advance()
-        XCTAssertEqual(vm.currentStep, .done)
+        XCTAssertEqual(vm.screen, .permissions)
+        vm.advance()
+        XCTAssertEqual(vm.screen, .promise)
+        vm.advance()
+        XCTAssertEqual(vm.screen, .promise, "Continue does not pass Promise on a first run")
+        await vm.startRemembering(keyReady: true)
+        XCTAssertEqual(vm.screen, .tryIt)
+        XCTAssertEqual(consent.writeCount, 1)
     }
 
-    func testBackMovesToPriorStep() {
-        let vm = makeVM()
-        vm.advance() // howItWorks
-        vm.advance() // trust
-        vm.back()
-        XCTAssertEqual(vm.currentStep, .howItWorks)
-    }
-
-    func testBackFromWelcomeIsNoop() {
-        let vm = makeVM()
-        vm.back()
-        XCTAssertEqual(vm.currentStep, .welcome)
-    }
-
-    func testGoToJumpsDirectly() {
-        let vm = makeVM()
-        vm.goTo(.done)
-        XCTAssertEqual(vm.currentStep, .done)
-    }
-
-    func testCanAdvanceIsFalseAtDone() {
-        let vm = makeVM()
-        for i in 0..<12 {
-            if i == 4 { vm.markHotkeyPracticed() }
+    func testWelcomeAlwaysContinuesAndPermissionsOnlyWithBoth() {
+        XCTAssertTrue(makeVM(screenRecording: .notRequested, accessibility: .denied).canAdvance)
+        for (sr, ax) in [(TCCStatus.notRequested, TCCStatus.granted), (.granted, .denied), (.denied, .notRequested)] {
+            let vm = makeVM(screenRecording: sr, accessibility: ax, at: .permissions)
+            XCTAssertFalse(vm.canAdvance)
             vm.advance()
+            XCTAssertEqual(vm.screen, .permissions)
         }
+        XCTAssertTrue(makeVM(at: .permissions).canAdvance)
+    }
+
+    func testTryItIsTheEnd() {
+        let vm = makeVM(consent: InMemoryOnboardingConsentStore(given: true), at: .tryIt)
+        XCTAssertEqual(vm.screen, .tryIt)
         XCTAssertFalse(vm.canAdvance)
+        vm.advance()
+        XCTAssertEqual(vm.screen, .tryIt)
     }
 
-    func testCanGoBackIsFalseAtWelcome() {
-        let vm = makeVM()
-        XCTAssertFalse(vm.canGoBack)
+    func testBackIsOnPermissionsAndPromiseOnly() {
+        let consent = InMemoryOnboardingConsentStore(given: true)
+        XCTAssertFalse(makeVM(at: .welcome).canGoBack)
+        XCTAssertFalse(makeVM(consent: consent, at: .tryIt).canGoBack)
+
+        let vm = makeVM(at: .promise)
+        XCTAssertTrue(vm.canGoBack)
+        vm.back()
+        XCTAssertEqual(vm.screen, .permissions)
+        XCTAssertTrue(vm.canGoBack)
+        vm.back()
+        XCTAssertEqual(vm.screen, .welcome)
+        vm.back()
+        XCTAssertEqual(vm.screen, .welcome)
+
+        let done = makeVM(consent: consent, at: .tryIt)
+        done.back()
+        XCTAssertEqual(done.screen, .tryIt, "Try it has no Back")
     }
 
-    func testStepCountMatchesOnboardingStepEnum() {
-        // Cycle 8.48 added `.primaryHotkey` ⇒ 13 cases.
-        XCTAssertEqual(OnboardingStep.allCases.count, 13)
+    func testEveryMoveIsSavedByRouteName() {
+        let store = InMemoryOnboardingStateStore()
+        let vm = makeVM(stateStore: store)
+        vm.advance()
+        XCTAssertEqual(store.loadRoute(), "permissions")
+        vm.advance()
+        XCTAssertEqual(store.loadRoute(), "promise")
+        vm.back()
+        XCTAssertEqual(store.loadRoute(), "permissions")
+        vm.clearResumeState()
+        XCTAssertNil(store.loadRoute())
     }
 
-    func testStepLabelsAreNonEmpty() {
-        for step in OnboardingStep.allCases {
-            XCTAssertFalse(step.title.isEmpty)
-            XCTAssertFalse(step.stepLabel.isEmpty)
+    func testSetupResumesAtTheSavedScreenWithinTheClamp() {
+        for screen in OnboardingScreen.allCases {
+            let consent = InMemoryOnboardingConsentStore(given: true)
+            let vm = makeVM(consent: consent, stateStore: InMemoryOnboardingStateStore(route: screen.routeName))
+            XCTAssertEqual(vm.screen, screen, screen.routeName)
         }
+        let firstRun = makeVM(screenRecording: .denied, stateStore: InMemoryOnboardingStateStore(route: "try-it"))
+        XCTAssertEqual(firstRun.screen, .permissions, "Try it needs consent, Promise both permissions")
     }
 
-    func testProgressAtWelcomeIsZero() {
-        let vm = makeVM()
-        XCTAssertEqual(vm.progress, 0, accuracy: 0.001)
+    func testALaunchScreenWinsOverTheResumeFileAndIsClampedTheSameWay() {
+        let store = InMemoryOnboardingStateStore(route: "promise")
+        XCTAssertEqual(makeVM(stateStore: store, at: .welcome).screen, .welcome)
+        XCTAssertEqual(makeVM(stateStore: store, at: .tryIt).screen, .promise)
     }
 
-    func testProgressAtDoneIsOne() {
-        let vm = makeVM()
-        for i in 0..<12 {
-            if i == 4 { vm.markHotkeyPracticed() }
-            vm.advance()
-        }
-        XCTAssertEqual(vm.progress, 1.0, accuracy: 0.001)
+    func testReviewIsKnownFromTheConsentFileAtStart() {
+        XCTAssertFalse(makeVM().isReview)
+        XCTAssertTrue(makeVM(consent: InMemoryOnboardingConsentStore(given: true)).isReview)
     }
 
-    func testProgressAtMidpoint() {
-        let vm = makeVM()
-        // Cycle 8.48: `.browserExtension` is now raw 6 out of
-        // allCases.count - 1 = 12 (was 5/11 before the insertion).
-        vm.goTo(.browserExtension)
-        XCTAssertEqual(vm.progress, 6.0 / 12.0, accuracy: 0.001)
-    }
-
-    // MARK: - Migration source (cycle 8.38 audit F4 / PR-2)
-
-    func testMigrationSourceDefaultsToNil() {
-        let vm = makeVM()
-        XCTAssertNil(vm.migrationSource,
-            "Cold-start install must not surface migration-specific copy.")
-    }
-
-    func testApplyLaunchURLWithRewindMigration() {
-        let vm = makeVM()
-        let ok = vm.applyLaunchURL(URL(string: "onboarding://start?migration=rewind")!)
-        XCTAssertTrue(ok)
-        XCTAssertEqual(vm.migrationSource, .rewind)
-    }
-
-    func testApplyLaunchURLWithUnknownMigrationIsIgnored() {
-        let vm = makeVM()
-        let ok = vm.applyLaunchURL(URL(string: "onboarding://start?migration=notion")!)
-        XCTAssertFalse(ok)
-        XCTAssertNil(vm.migrationSource,
-            "Stale/unknown migration deep-links must not surprise a non-migrator user.")
-    }
-
-    func testApplyLaunchURLWithoutMigrationQueryIsIgnored() {
-        let vm = makeVM()
-        let ok = vm.applyLaunchURL(URL(string: "onboarding://start")!)
-        XCTAssertFalse(ok)
-        XCTAssertNil(vm.migrationSource)
-    }
-
-    func testMigrationSourceInjectableViaInit() {
-        // Test-side injection path — bypasses the URL parse so a slide
-        // test can hold a "user came from Rewind" fixture directly.
-        let vm = OnboardingFlowViewModel(
-            screenRecording: StubTCCPermission(kind: .screenRecording, status: .granted),
-            accessibility: StubTCCPermission(kind: .accessibility, status: .granted),
-            stateStore: InMemoryOnboardingStateStore(),
-            migrationSource: .rewind
-        )
-        XCTAssertEqual(vm.migrationSource, .rewind)
+    func testAllowAsksMacOSAndNothingElse() {
+        let sr = StubTCCPermission(kind: .screenRecording)
+        let ax = StubTCCPermission(kind: .accessibility)
+        let vm = OnboardingFlowViewModel(screenRecording: sr, accessibility: ax, initialScreen: .permissions)
+        vm.requestPermission(.accessibility)
+        XCTAssertEqual(ax.promptCallCount, 1)
+        XCTAssertEqual(ax.openSettingsCallCount, 0)
+        XCTAssertEqual(sr.promptCallCount, 0)
     }
 }

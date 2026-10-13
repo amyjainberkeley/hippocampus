@@ -144,7 +144,7 @@ public struct DefaultClaudeCodeRegistrar: ClaudeCodeRegistrar {
 
         if proc.terminationStatus == 0 {
             if !out.isEmpty { return out }
-            return "The registration command returned no report. Client connection has not been verified."
+            return "Done, but Hippocampus couldn’t confirm it. Restart your AI tool and check."
         } else {
             throw ClaudeCodeRegistrarError.nonZeroExit(
                 code: proc.terminationStatus,

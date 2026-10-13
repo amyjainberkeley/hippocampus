@@ -1,16 +1,18 @@
 # apps/onboarding/
 
-The onboarding SwiftUI app — a 5-step TCC walkthrough + "What MCI
-Sees" trust panel + retention-policy UI scaffold. Phase 4 P4.2
-(ADR-0017 §2).
+The setup app the menu-bar app starts on first launch: four screens
+(Welcome, Permissions, Promise, Try it) in one 760 by 560 window, and
+the panels the app opens by route after consent
+(`hippocampus://setup/<panel>`).
 
 ## Contents
 
 - `Package.swift` — Swift-PM manifest. Two products:
-  - `Onboarding` (executable) — the `@main` `App` with a
-    `NavigationStack` flow.
-  - `OnboardingKit` (library) — view models + TCC-probe protocol
-    stubs, split for testability.
+  - `Onboarding` (executable) — the `@main` entry point, the window
+    and the screens (`Slides/`), plus a debug-only off-screen
+    preview renderer.
+  - `OnboardingKit` (library) — view models, copy, the consent and
+    resume stores and the permission checks, split for testability.
 - `Sources/` — the two targets above.
 - `Tests/` — XCTest suites (flow state machine, TCC-probe fakes).
 
@@ -24,8 +26,7 @@ Sees" trust panel + retention-policy UI scaffold. Phase 4 P4.2
 
 ## When to edit here
 
-Onboarding-flow screens, TCC-prompt copy, the "What MCI Sees" trust
-panel, and the retention-policy scaffold. Real TCC probing wiring
-lives in the Hippocampus supervisor — do NOT add live TCC calls
-here (this app is designed to be exercisable without granting real
-permissions). Retention policy semantics belong in `../../core/`.
+The setup screens, their copy (`OnboardingKit/OnboardingCopy.swift`)
+and the panels. Every permission check goes through an injectable
+`TCCPermission`, so tests never touch the real permission database.
+Retention policy semantics belong in `../../core/`.

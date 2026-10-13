@@ -22,9 +22,7 @@ BRIEF_PRESENCE="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/BriefModelPre
 STATUS_MENU="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift"
 HIPPOCAMPUS_APP="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/HippocampusApp.swift"
 APP_MODELS="$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/Resources/models.json"
-PREPARE_BRAIN="$REPO_ROOT/apps/onboarding/Sources/Onboarding/Slides/PrepareBrainSlide.swift"
-DONE_SLIDE="$REPO_ROOT/apps/onboarding/Sources/Onboarding/Slides/DoneSlide.swift"
-HOW_IT_WORKS="$REPO_ROOT/apps/onboarding/Sources/Onboarding/Slides/HowItWorksSlide.swift"
+ONBOARDING_SCREENS="$REPO_ROOT/apps/onboarding/Sources/Onboarding"
 CONVERT_EMBEDDER="$REPO_ROOT/scripts/convert_embedder.py"
 CONVERT_NER="$REPO_ROOT/scripts/convert_ner.py"
 CONVERT_BRIEF="$REPO_ROOT/scripts/convert_brief_model.py"
@@ -219,14 +217,8 @@ reject_pattern "$HIPPOCAMPUS_APP" 'Download AI Model|model-download|ModelDownloa
     'app has no dead model-download window'
 reject_pattern "$APP_MODELS" 'qwen3-1\.7b|huggingface\.co' \
     'shipped model manifest advertises only reachable model assets'
-require_literal "$PREPARE_BRAIN" 'Evidence-cited briefs are ready. No model download or account is required.' \
-    'onboarding confirms the zero-download brief path'
-reject_pattern "$PREPARE_BRAIN" 'Daily briefs disabled|enable Daily Briefs|startDownload\(\)|Download \(' \
-    'onboarding has no unavailable model-download action'
-reject_pattern "$DONE_SLIDE" 'startDownload\(|Download \(' \
-    'onboarding completion offers no model download'
-require_literal "$HOW_IT_WORKS" 'Daily briefs are local and source-cited.' \
-    'onboarding explains the default brief path truthfully'
+reject_pattern "$ONBOARDING_SCREENS" 'startDownload\(|Download \(|Daily briefs disabled|enable Daily Briefs' \
+    'no onboarding screen offers a model download'
 reject_pattern "$PREFERENCES" 'Ollama endpoint \(optional\)|ollamaEndpoint' \
     'preferences do not expose the unwired Ollama endpoint'
 require_literal "$CONVERT_EMBEDDER" 'MODEL_REVISION = "e596f507467533e48a2e17c007f0e1dacc837b33"' \
@@ -285,6 +277,8 @@ for script in test-release-contract.sh test-app-group-contract.sh test-release-i
 done
 require_literal "$RELEASE_CI" 'scripts/test-task-2-product-truth.sh' \
     'release CI runs the legal drift and product-truth contract'
+require_literal "$RELEASE_CI" 'scripts/test-onboarding-product-truth.sh' \
+    'release CI runs the onboarding consent-claims contract'
 require_literal "$RELEASE_CI" 'scripts/test-retention-policy-contract.sh' \
     'release CI runs the picker-to-worker retention contract'
 require_literal "$RELEASE_CI" 'scripts/test-e2e-clean-home-contract.sh' \
@@ -334,8 +328,10 @@ for release_input in .github/workflows/publish-release.yml scripts/build-install
     apps/onboarding/Sources/Onboarding/OnboardingFlowView.swift \
     apps/onboarding/Sources/Onboarding/OnboardingApp.swift \
     apps/onboarding/Sources/OnboardingKit/OnboardingFlowViewModel.swift \
-    apps/onboarding/Sources/OnboardingKit/OnboardingStep.swift \
-    apps/onboarding/Sources/Onboarding/Slides/RetentionSlide.swift \
+    apps/onboarding/Sources/OnboardingKit/OnboardingScreen.swift \
+    apps/onboarding/Sources/OnboardingKit/OnboardingCopy.swift \
+    apps/onboarding/Sources/OnboardingKit/OnboardingConsentStore.swift \
+    scripts/test-onboarding-product-truth.sh \
     apps/onboarding/Tests/Fixtures/RetentionPersistenceBehavior/main.swift \
     apps/onboarding/Tests/OnboardingKitTests/DiskRetentionStoreTests.swift \
     apps/onboarding/Tests/OnboardingKitTests/RetentionViewModelTests.swift \

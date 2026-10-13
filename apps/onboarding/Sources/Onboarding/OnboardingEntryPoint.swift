@@ -4,13 +4,18 @@ import CoreGraphics
 import Foundation
 import OnboardingKit
 
-/// Runs before any window. The Screen Recording commands
-/// (`--tcc-probe`, `--tcc-request`) answer from a fresh process and exit;
-/// otherwise setup starts and exits when the app that started it exits.
+/// Runs before any window. A debug build asked to render previews draws
+/// them and returns; the Screen Recording commands (`--tcc-probe`,
+/// `--tcc-request`) answer from a fresh process and exit; otherwise setup
+/// starts and exits when the app that started it exits.
 @main
 enum OnboardingEntryPoint {
     @MainActor
     static func main() {
+        #if DEBUG
+        // Before the parent watch and the app: nothing on screen.
+        if OnboardingPreviewRenderer.renderIfRequested() { return }
+        #endif
         if let code = TCCProbeCommand.exitCode(
             arguments: ProcessInfo.processInfo.arguments,
             preflight: { CGPreflightScreenCaptureAccess() },

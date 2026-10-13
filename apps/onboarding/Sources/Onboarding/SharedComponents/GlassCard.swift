@@ -11,6 +11,7 @@ struct GlassCard<Content: View>: View {
 
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.onboardingSolidFills) private var solidFills
 
     /// The border color, bumped to a visible weight when the viewer has
     /// asked for Increase Contrast (the default 0.10 hairline can vanish).
@@ -27,7 +28,7 @@ struct GlassCard<Content: View>: View {
             .background(
                 emphasized
                     ? AnyShapeStyle(OnboardingDesign.Palette.accentSoft)
-                    : reduceTransparency
+                    : reduceTransparency || solidFills
                         ? AnyShapeStyle(Color(nsColor: .controlBackgroundColor))
                         : AnyShapeStyle(.thinMaterial),
                 in: RoundedRectangle(

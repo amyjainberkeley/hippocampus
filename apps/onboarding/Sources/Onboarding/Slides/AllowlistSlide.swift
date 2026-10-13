@@ -19,7 +19,9 @@ struct AllowlistSlide: View {
 
                 OnboardingDesign.TypeRamp.title("Which apps should Hippocampus remember?")
 
-                OnboardingDesign.TypeRamp.body("Hippocampus only captures from apps you explicitly trust. The first set below is the always-on baseline that ships with the app; you can opt in additional apps yourself.")
+                // The capture helper admits every ordinary app
+                // (`admissionPolicy: .ordinaryApplications`).
+                OnboardingDesign.TypeRamp.body("Hippocampus remembers every app except the ones it never reads.")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: 520, alignment: .leading)
 

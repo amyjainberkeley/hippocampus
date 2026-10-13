@@ -62,6 +62,10 @@ enum OnboardingDesign {
         static let cardFill = Color.primary.opacity(0.025)
         static let cardFillHover = Color.primary.opacity(0.05)
 
+        /// What the light window material looks like, for drawing off
+        /// screen (`onboardingSolidFills`).
+        static let windowSolid = Color(red: 0.965, green: 0.965, blue: 0.972)
+
         /// Semantic status hues (kept sparse — success/attention/danger).
         static let success = Color.green
         static let attention = Color.orange
@@ -83,22 +87,11 @@ enum OnboardingDesign {
     }
 
     enum TypeRamp {
-        /// The celebratory bookend display (Welcome / Done) — bigger than
-        /// `hero`, à la Raycast's "Your Mac. But Better."
+        /// Welcome's title, the largest type in setup.
         static func display(_ text: String) -> Text {
             Text(text)
                 .font(.system(size: 40, weight: .semibold))
                 .tracking(OnboardingDesign.tracking(forSize: 52))
-                .foregroundStyle(Palette.ink)
-        }
-
-        /// The oversized first-run hero — "Your memory, on your machine."
-        /// Bold display with the tight tracking that keeps large type from
-        /// feeling loose. Used on sub-hero surfaces (Permissions, hotkey).
-        static func hero(_ text: String) -> Text {
-            Text(text)
-                .font(.system(size: 36, weight: .semibold))
-                .tracking(OnboardingDesign.tracking(forSize: 44))
                 .foregroundStyle(Palette.ink)
         }
 
@@ -127,14 +120,6 @@ enum OnboardingDesign {
         static func caption(_ text: String) -> Text {
             Text(text)
                 .font(.system(size: 12, weight: .regular))
-        }
-
-        /// The calm assurance sentence — the one bolded reassurance line in
-        /// a `ReassuranceBanner` (Cotypist "neither stored nor sent").
-        static func reassurance(_ text: String) -> Text {
-            Text(text)
-                .font(.system(size: 16, weight: .semibold))
-                .tracking(OnboardingDesign.tracking(forSize: 16))
         }
 
         /// Tertiary / legal footnotes (retention warnings, "N of 13" a11y).
@@ -176,10 +161,8 @@ enum OnboardingDesign {
 
     // MARK: - Layout width clamps
 
-    /// Content-width clamps. `prose` matches the historical
-    /// `OnboardingTheme.contentMaxWidth` (600) so standard slides keep their
-    /// line length; `hero` and `wide` open up for centered heroes and
-    /// two-column layouts on the 1280-pt window.
+    /// Content-width clamps, from the 1280-pt window the panels were
+    /// drawn for. The four screens use `OnboardingTheme.contentMaxWidth`.
     enum Width {
         static let prose: CGFloat = 600
         static let hero: CGFloat = 720

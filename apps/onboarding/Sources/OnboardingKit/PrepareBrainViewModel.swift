@@ -28,6 +28,12 @@ public final class PrepareBrainViewModel: ObservableObject {
 
     public var canContinue: Bool { keyState == .ready }
 
+    /// Key setup failed; running `generateKey()` again tries once more.
+    public var keyFailed: Bool {
+        if case .failed = keyState { return true }
+        return false
+    }
+
     public var modelDisplayName: String {
         modelDownloader.displayName
     }

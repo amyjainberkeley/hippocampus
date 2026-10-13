@@ -47,20 +47,13 @@ final class OnboardingLaunchTests: XCTestCase {
         XCTAssertEqual(OnboardingLaunch.flow(.promise).resolved(consentGiven: false), .flow(.promise))
     }
 
-    func testEveryOldStepHasARouteThatOpensIt() {
-        for step in OnboardingStep.allCases {
-            XCTAssertEqual(OnboardingStep(launchRoute: step.routeName), step, step.routeName)
+    func testOnlyTheFlowKeepsItsPlaceInTheResumeFile() {
+        XCTAssertTrue(OnboardingLaunch.flow(nil).usesResumeFile)
+        for screen in OnboardingScreen.allCases {
+            XCTAssertTrue(OnboardingLaunch.flow(screen).usesResumeFile)
         }
-    }
-
-    func testTheShippingFlowOpensEveryPanelRouteTheAppMayPass() {
-        // Until the four screens ship, the thirteen-step flow takes the
-        // app's setup routes (contract section 3a).
-        XCTAssertEqual(OnboardingStep(launchRoute: "app-access"), .allowlist)
-        XCTAssertEqual(OnboardingStep(launchRoute: "browser-extension"), .browserExtension)
-        XCTAssertEqual(OnboardingStep(launchRoute: "mcp-servers"), .mcpServers)
-        for route in ["never-read", "trust", "denylist", "privacy"] {
-            XCTAssertEqual(OnboardingStep(launchRoute: route), .trust, route)
+        for panel in OnboardingPanel.allCases {
+            XCTAssertFalse(OnboardingLaunch.panel(panel).usesResumeFile, panel.routeName)
         }
     }
 
@@ -73,9 +66,9 @@ final class OnboardingLaunchTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "permissions\n")
         XCTAssertEqual(store.loadScreen(), .permissions)
 
-        store.save(OnboardingStep.retention)
-        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "retention\n")
-        XCTAssertEqual(store.load(), .retention)
+        // What the thirteen-step flow wrote for a step that is gone.
+        try "retention\n".write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertEqual(store.loadRoute(), "retention")
         XCTAssertNil(store.loadScreen(), "a retired step is not a screen")
     }
 
@@ -87,7 +80,6 @@ final class OnboardingLaunchTests: XCTestCase {
             try legacy.write(to: file, atomically: true, encoding: .utf8)
             XCTAssertNil(store.loadRoute(), legacy)
             XCTAssertNil(store.loadScreen(), legacy)
-            XCTAssertNil(store.load(), legacy)
         }
     }
 
@@ -102,12 +94,13 @@ final class OnboardingLaunchTests: XCTestCase {
         XCTAssertNil(store.loadRoute())
     }
 
-    func testTheInMemoryStoreKeepsRoutesForBothFlows() {
-        let store = InMemoryOnboardingStateStore(initial: .retention)
+    func testTheInMemoryStoreKeepsRoutes() {
+        let store = InMemoryOnboardingStateStore(route: "retention")
         XCTAssertEqual(store.loadRoute(), "retention")
+        XCTAssertNil(store.loadScreen())
         store.save(OnboardingScreen.tryIt)
         XCTAssertEqual(store.loadScreen(), .tryIt)
-        XCTAssertNil(store.load())
+        XCTAssertNil(InMemoryOnboardingStateStore().loadRoute())
         XCTAssertEqual(InMemoryOnboardingStateStore(route: "promise").loadScreen(), .promise)
     }
 }

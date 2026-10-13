@@ -26,6 +26,10 @@ public protocol TCCPermission: AnyObject, Sendable {
     /// turn the permission on.
     func checkCurrentAsync(outOfProcess: Bool) async -> TCCStatus
     func requestOrOpenSettings()
+    /// "Allow": macOS's own prompt and nothing else. The prompt's Open
+    /// System Settings button leads on from there; the row's own "Open
+    /// System Settings" is the way when no prompt shows.
+    func requestPrompt()
     func resetAndRetry() async -> Bool
     /// Clear this permission for Hippocampus and ask macOS again, then
     /// return at once. The caller's refresh does the waiting.
@@ -42,7 +46,11 @@ extension TCCPermission {
         await checkCurrentAsync(outOfProcess: false)
     }
 
-    public func askAgain() async {
+    public func requestPrompt() {
         requestOrOpenSettings()
+    }
+
+    public func askAgain() async {
+        requestPrompt()
     }
 }

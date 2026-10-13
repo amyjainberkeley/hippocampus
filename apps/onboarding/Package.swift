@@ -1,15 +1,14 @@
 // swift-tools-version: 6.0
 //
-// MCI onboarding — SwiftUI macOS app, Phase 4 P4.2 (ADR-0017 §2).
-//
-// 5-step TCC walkthrough + "What MCI Sees" trust panel + retention
-// policy UI scaffold. Protocol stubs for TCC probing — real wiring
-// lands in a follow-on PR.
+// Hippocampus setup — SwiftUI macOS app: four screens (Welcome,
+// Permissions, Promise, Try it) and the panels the app opens by route.
 //
 // Targets:
-//   - `Onboarding` (executable) — the @main App with NavigationStack flow.
-//   - `OnboardingKit` (library) — view models, protocols (TCCPermission,
-//     AllowlistStore, RetentionStore), cascade diagram model. Headless-testable.
+//   - `Onboarding` (executable) — the @main entry point, the window and
+//     the screens.
+//   - `OnboardingKit` (library) — view models, copy, stores and the
+//     permission protocols (TCCPermission, AllowlistStore, RetentionStore).
+//     Headless-testable.
 //   - `OnboardingKitTests` (test) — unit tests on view models + protocol stubs.
 //
 // macOS 14+ deployment target matches the rest of the MCI app set.

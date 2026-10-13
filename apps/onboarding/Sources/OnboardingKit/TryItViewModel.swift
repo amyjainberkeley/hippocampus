@@ -136,7 +136,7 @@ public final class TryItViewModel: ObservableObject {
     /// Where reading starts: consent on a first run, otherwise 30 s ago.
     public static func cursor(consentGivenAtUs: UInt64?, now: Date) -> UInt64 {
         consentGivenAtUs
-            ?? FourScreenFlowViewModel.microseconds(now.addingTimeInterval(-reviewLookBack))
+            ?? OnboardingFlowViewModel.microseconds(now.addingTimeInterval(-reviewLookBack))
     }
 
     @Published public private(set) var card: Card = .starting

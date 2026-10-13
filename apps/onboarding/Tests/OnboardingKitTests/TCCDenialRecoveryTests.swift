@@ -10,9 +10,8 @@ final class TCCDenialRecoveryTests: XCTestCase {
     ) -> (OnboardingFlowViewModel, StubTCCPermission, StubTCCPermission) {
         let sr = StubTCCPermission(kind: .screenRecording, status: srStatus)
         let ax = StubTCCPermission(kind: .accessibility, status: axStatus)
-        // Never the person's own resume file.
-        let vm = OnboardingFlowViewModel(screenRecording: sr, accessibility: ax,
-                                        stateStore: InMemoryOnboardingStateStore())
+        // Never the person's own resume or consent file.
+        let vm = OnboardingFlowViewModel(screenRecording: sr, accessibility: ax, initialScreen: .permissions)
         return (vm, sr, ax)
     }
 
@@ -20,39 +19,33 @@ final class TCCDenialRecoveryTests: XCTestCase {
 
     func testNeverAskedBlocksAdvance() {
         let (vm, _, _) = makeVM(srStatus: .notRequested)
-        vm.goTo(.permissions)
         XCTAssertFalse(vm.canAdvance, "Must verify grant before advancing past permissions")
     }
 
     func testGrantedAllowsAdvance() {
         let (vm, _, _) = makeVM(srStatus: .granted)
-        vm.goTo(.permissions)
         XCTAssertTrue(vm.canAdvance)
     }
 
     func testDeniedBlocksAdvance() {
         let (vm, _, _) = makeVM(srStatus: .denied)
-        vm.goTo(.permissions)
         XCTAssertFalse(vm.canAdvance)
     }
 
     func testAdvanceFromNotRequestedPermissionsIsNoop() {
         let (vm, _, _) = makeVM(srStatus: .notRequested)
-        vm.goTo(.permissions)
         vm.advance()
-        XCTAssertEqual(vm.currentStep, .permissions)
+        XCTAssertEqual(vm.screen, .permissions)
     }
 
     func testAdvanceFromDeniedPermissionsIsNoop() {
         let (vm, _, _) = makeVM(srStatus: .denied)
-        vm.goTo(.permissions)
         vm.advance()
-        XCTAssertEqual(vm.currentStep, .permissions)
+        XCTAssertEqual(vm.screen, .permissions)
     }
 
     func testDeniedThenGrantedAllowsAdvance() {
         let (vm, sr, _) = makeVM(srStatus: .denied)
-        vm.goTo(.permissions)
         XCTAssertFalse(vm.canAdvance)
         sr.simulateGrant()
         XCTAssertTrue(vm.canAdvance)
@@ -81,27 +74,22 @@ final class TCCDenialRecoveryTests: XCTestCase {
         XCTAssertEqual(sr.status, .denied)
     }
 
-    func testResetAndRetryUnblocksAdvance() async {
+    func testAGrantAfterADenialOpensPromise() async {
         let (vm, sr, _) = makeVM(srStatus: .denied)
         sr.resetShouldSucceed = true
-        vm.goTo(.permissions)
         XCTAssertFalse(vm.canAdvance)
 
         _ = await sr.resetAndRetry()
 
         XCTAssertTrue(vm.canAdvance)
         vm.advance()
-        XCTAssertEqual(vm.currentStep, .primaryHotkey)
-        vm.markHotkeyPracticed()
-        vm.advance()
-        XCTAssertEqual(vm.currentStep, .allowlist)
+        XCTAssertEqual(vm.screen, .promise)
     }
 
     // MARK: - Accessibility denial (capture-critical)
 
     func testAccessibilityDeniedBlocksAdvance() {
         let (vm, _, _) = makeVM(srStatus: .granted, axStatus: .denied)
-        vm.goTo(.permissions)
         XCTAssertFalse(vm.canAdvance)
     }
 
@@ -134,21 +122,21 @@ final class TCCDenialRecoveryTests: XCTestCase {
 
     func testRefreshPermissionsUpdatesCanAdvance() {
         let (vm, sr, _) = makeVM(srStatus: .notRequested)
-        vm.goTo(.permissions)
         XCTAssertFalse(vm.canAdvance)
         sr.simulateGrant()
         vm.refreshPermissions()
         XCTAssertTrue(vm.canAdvance)
     }
 
-    // MARK: - Non-permission slides unaffected
+    // MARK: - The other screens
 
-    func testCanAdvanceOnOtherSlides() {
+    func testOnlyPermissionsWaitsForThePermissionsAndTheClampKeepsTheRestBehindIt() {
         let (vm, _, _) = makeVM(srStatus: .denied)
-        for step in OnboardingStep.allCases
-            where step != .permissions && step != .primaryHotkey && step != .done {
-            vm.goTo(step)
-            XCTAssertTrue(vm.canAdvance, "Should be able to advance from \(step)")
+        vm.goTo(.welcome)
+        XCTAssertTrue(vm.canAdvance, "Welcome always continues")
+        for screen in [OnboardingScreen.promise, .tryIt] {
+            vm.goTo(screen)
+            XCTAssertEqual(vm.screen, .permissions, "\(screen) needs both permissions first")
         }
     }
 }

@@ -1,86 +1,64 @@
 import SwiftUI
-import AppKit
 import OnboardingKit
 
+/// Screen 1. The title names the product, so there is no icon. The one
+/// sentence teaches the key that opens Ask, with its keycaps in the line;
+/// they pulse twice for Shift twice and once for any other key, and stay
+/// still under Reduce Motion. The clip of the real Ask panel comes later
+/// (RULINGS O7); without it the screen is the title and that sentence.
 struct WelcomeSlide: View {
-    @EnvironmentObject var flowVM: OnboardingFlowViewModel
+    /// The key the person chose, read at render time (RULINGS X2).
+    var key: AskKeyHint = .current()
+    /// The renderer draws the keycaps still.
+    var animates = true
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pressed = false
 
     var body: some View {
-        SlideContainer {
+        SlideContainer(alignment: .center) {
             VStack(spacing: OnboardingDesign.Space.xl) {
-                // Rewind-migrator sub-header — renders ONLY when the app
-                // was launched via `onboarding://start?migration=rewind`
-                // (cycle 8.37 `/rewind` landing lane, PR #30). Copy is
-                // held verbatim from the audit doc so a stale deep-link
-                // never surprises a non-Rewind user.
-                if flowVM.migrationSource == .rewind {
-                    rewindSubheader
-                }
+                OnboardingDesign.TypeRamp.display(OnboardingCopy.welcomeTitle)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    // Two even lines, "Hippocampus remembers / what you
+                    // see.", rather than one word left over.
+                    .frame(maxWidth: 500)
+                    .accessibilityAddTraits(.isHeader)
 
-                // The "moment" — oversized display title over the brand
-                // glyph, with the calm fade-and-rise entrance.
-                //
-                // CSO note (cycle 8.12 / PR #214): the glyph MUST be the
-                // commissioned AppIcon, NOT SF Symbol `brain.head.profile`
-                // — Apple SF Symbols License §2(b) prohibits SF Symbol use
-                // as a logo / app identifier on a notarized public DMG.
-                HeroHeader(
-                    title: "Hippocampus",
-                    subtitle: "Your memory, on your Mac.",
-                    titleStyle: .display
-                ) {
-                    Image(nsImage: Self.heroIcon)
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: 88, height: 88)
-                }
-
-                VStack(alignment: .leading, spacing: OnboardingDesign.Space.md) {
-                    IconTextRow(
-                        icon: "lock.fill",
-                        title: "Your memory database stays on this Mac, fully encrypted."
-                    )
-                    IconTextRow(
-                        icon: "eye.slash.fill",
-                        title: "Passwords, secure fields, and DRM content are blocked at capture — not after."
-                    )
-                    // Cycle 8.54 copy audit — "brain" → "memory".
-                    IconTextRow(
-                        icon: "key.fill",
-                        title: OnboardingCopy.welcomeAIHandoff
-                    )
-                }
-                .frame(maxWidth: 500)
-                .glassCard(padding: OnboardingDesign.Space.xl)
-                .padding(.top, OnboardingDesign.Space.xs)
+                sentence
             }
+            // Sit a little above the middle, where the eye expects it.
+            .padding(.bottom, OnboardingDesign.Space.xxl)
         }
+        .task(id: key) { await pulse() }
     }
 
-    private var rewindSubheader: some View {
-        HStack(alignment: .top, spacing: OnboardingDesign.Space.sm) {
-            Image(systemName: "arrow.triangle.branch")
-                .foregroundStyle(OnboardingDesign.Palette.accent)
-                .frame(width: 20)
-            Text(OnboardingCopy.welcomeRewindSubheader)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.leading)
+    private var sentence: some View {
+        HStack(spacing: OnboardingDesign.Space.sm) {
+            Text(key.verb)
+            KeycapRow(keycaps: key.keycaps, pressed: pressed)
+            Text(OnboardingCopy.welcomeBodyAfterKeys)
         }
-        .padding(OnboardingDesign.Space.md)
-        .frame(maxWidth: 420)
-        .glassCard(padding: OnboardingDesign.Space.md, emphasized: true)
+        .font(.system(size: 17))
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(OnboardingCopy.welcomeBodySpoken(key))
     }
 
-    /// Loaded once. Resolves `AppIcon.icns` from `Hippocampus.app/Contents/Resources/`
-    /// via `NSImage(named:)` — for an executable Mach-O inside an .app bundle,
-    /// `Bundle.main` is the containing .app, so this lookup finds the shipped asset.
-    /// Falls back to a 76×76 transparent image if the resource is missing (e.g. the
-    /// onboarding binary was launched outside Hippocampus.app for debugging).
-    private static let heroIcon: NSImage = {
-        if let icon = NSImage(named: "AppIcon") {
-            return icon
+    /// Press the keycaps the way the key is pressed, then rest, on a loop.
+    private func pulse() async {
+        guard animates, !reduceMotion else { return }
+        while !Task.isCancelled {
+            var elapsed: TimeInterval = 0
+            for time in key.pulseTimes {
+                try? await Task.sleep(for: .seconds(time - elapsed))
+                withAnimation(.easeOut(duration: 0.08)) { pressed = true }
+                try? await Task.sleep(for: .seconds(0.12))
+                withAnimation(.easeOut(duration: 0.16)) { pressed = false }
+                elapsed = time + 0.12
+            }
+            try? await Task.sleep(for: .seconds(AskKeyHint.pulseCycle - elapsed))
         }
-        return NSImage(size: NSSize(width: 76, height: 76))
-    }()
+    }
 }

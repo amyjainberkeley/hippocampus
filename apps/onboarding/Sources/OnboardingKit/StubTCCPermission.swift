@@ -5,6 +5,8 @@ public final class StubTCCPermission: TCCPermission, @unchecked Sendable {
     public let kind: TCCPermissionKind
     public private(set) var status: TCCStatus
     public private(set) var openSettingsCallCount = 0
+    /// macOS prompts asked for through `requestPrompt`.
+    public private(set) var promptCallCount = 0
     public private(set) var resetCallCount = 0
     public private(set) var askAgainCallCount = 0
     /// Out-of-process checks requested through `checkCurrentAsync`.
@@ -27,6 +29,10 @@ public final class StubTCCPermission: TCCPermission, @unchecked Sendable {
 
     public func requestOrOpenSettings() {
         openSettingsCallCount += 1
+    }
+
+    public func requestPrompt() {
+        promptCallCount += 1
     }
 
     public func resetAndRetry() async -> Bool {

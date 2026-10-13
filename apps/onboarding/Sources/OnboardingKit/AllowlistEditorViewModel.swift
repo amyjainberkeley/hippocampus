@@ -21,8 +21,7 @@
 //   Wired (deep-hook toggle live):
 //     - `com.apple.MobileSMS` (Messages.app — V2-P7, ADR-0032 §2).
 //     - `com.apple.mail` (Mail.app — V2-P8b).
-//   Scaffold-only (deep-hook toggle visible but disabled, "Coming soon"
-//   tooltip — see ADR-0037):
+//   Scaffold-only (deep-hook toggle visible but disabled — see ADR-0037):
 //     - `com.apple.iCal` (Calendar.app — Phase D wire-up cycle 8.60+).
 //     - `com.apple.Notes` (Notes.app — Phase D wire-up cycle 8.60+).
 //     - `com.apple.reminders` (Reminders.app — Phase D wire-up cycle 8.60+).
@@ -48,9 +47,8 @@ public struct EditorRow: Sendable, Equatable, Identifiable, Hashable {
     /// with a wired plugin OR a scaffold-only plugin).
     public let supportsDeepHook: Bool
     /// True iff the deep-hook plugin is scaffold-only (surface exists but
-    /// no reads wired — the toggle is rendered disabled with the
-    /// [`deepHookScaffoldTooltip`](AllowlistEditorViewModel/deepHookScaffoldTooltip)
-    /// copy). Per ADR-0037 (Calendar / Notes / Reminders — Phase D).
+    /// no reads wired — the toggle is rendered disabled). Per ADR-0037
+    /// (Calendar / Notes / Reminders — Phase D).
     public let deepHookScaffoldOnly: Bool
     /// True iff the bundle is in the CSO baseline. Its capture state is
     /// immutable; the user-layer can only record optional deep-hook consent.
@@ -111,13 +109,6 @@ public final class AllowlistEditorViewModel: ObservableObject {
         "com.apple.Notes",
         "com.apple.reminders",
     ]
-
-    /// Tooltip copy for the disabled deep-hook toggle on scaffold-only
-    /// rows. Kept short to fit the AppKit tooltip cap while explaining
-    /// the deferred wire state honestly.
-    public static let deepHookScaffoldTooltip: String =
-        "Coming soon — deep-hook wire-up for this app is deferred to a later release " +
-        "(macOS Automation permission gate pending review). Capture-only is available today."
 
     /// Whether the deep-hook toggle should be visible for the given bundle.
     /// Union of the wired set and the scaffold-only set — both render the

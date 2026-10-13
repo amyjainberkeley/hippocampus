@@ -45,3 +45,26 @@ final class TCCPermissionTests: XCTestCase {
         XCTAssertEqual(perm.status, .granted)
     }
 }
+
+/// A permission that only has the request every permission has.
+@MainActor
+private final class PlainPermission: TCCPermission, @unchecked Sendable {
+    let kind: TCCPermissionKind = .automation
+    private(set) var status: TCCStatus = .notRequested
+    private(set) var requests = 0
+    func checkCurrent() -> TCCStatus { status }
+    func requestOrOpenSettings() { requests += 1 }
+    func resetAndRetry() async -> Bool { false }
+    func openPrivacySettings() {}
+}
+
+@MainActor
+final class TCCPermissionDefaultsTests: XCTestCase {
+    func testAPermissionWithoutItsOwnPromptAsksTheWayItAlwaysHas() async {
+        let permission = PlainPermission()
+        permission.requestPrompt()
+        XCTAssertEqual(permission.requests, 1)
+        await permission.askAgain()
+        XCTAssertEqual(permission.requests, 2, "Ask Again asks the way Allow does")
+    }
+}

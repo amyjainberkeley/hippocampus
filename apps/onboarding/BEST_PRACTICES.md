@@ -6,19 +6,23 @@ specific contracts derived from PR #83 and ADR-0017.
 
 ## Purpose
 
-The onboarding flow is the ONLY place where the user grants (or
-declines) each TCC permission. A bug here can strand the user in a
-half-permissioned state that produces silent capture failures
-later. Rules below encode the resume-across-quit contract, the
-deferred-permission choreography, and the hotkey-earning pattern.
+Setup is four screens (Welcome, Permissions, Promise, Try it) and
+the panels the app opens by route. It is the ONLY place where the
+person allows Screen Recording and Accessibility, and the only place
+consent is given. A bug here can strand the person in a
+half-permissioned state that produces silent capture failures later.
+Rules below encode the resume-across-quit contract, the single
+consent click, and how permissions are asked.
 
 ## Rules
 
 1. **Resume-across-quit is a hard contract.** If the user quits
    the app mid-onboarding, the next launch MUST resume at the same
-   step. Flow state persists via the OnboardingKit state machine;
-   never store step index in an ephemeral `@State` that dies with
-   the view.
+   screen. `OnboardingFlowViewModel` saves the screen's route name
+   (`.onboarding-state`) on every move, and clamps it at start: Try it
+   needs consent, Promise needs both permissions. A panel keeps its
+   state in memory and never moves the resume point. Never store the
+   screen in an ephemeral `@State` that dies with the view.
 
 2. **TCC: never kill the process to prompt again.** If the user
    denies Screen Recording, DO NOT `exit(0)` to force a re-prompt.
@@ -26,15 +30,17 @@ deferred-permission choreography, and the hotkey-earning pattern.
    denial-recovery.md`) and let the user return to the step from
    System Settings. Killing the process loses onboarding state.
 
-3. **Deferred-permission choreography.** Steps that require a TCC
-   prompt MUST NOT block the flow if denied. The user proceeds
-   with a recorded "deferred" marker; capture stays off for that
-   surface until they grant permission later from Settings.
+3. **Both permissions, then one consent click.** Screen Recording
+   and Accessibility are both required, shown at once, and Continue
+   stays off until both are on. "Allow" raises macOS's prompt only;
+   a row waits until the person comes back to the window, and one
+   refresh decides. Consent is the click on Start Remembering:
+   `startRemembering(keyReady:)` is the only code that writes
+   `.onboarding-complete`, with the open-at-login choice.
 
-4. **Hotkey-earning pattern (PR #83).** Global hotkeys (e.g.,
-   ⌘⇧M for recall) are registered only AFTER the user completes
-   the "What MCI Sees" trust panel. Registering earlier violates
-   the informed-consent posture that ADR-0017 codifies.
+4. **Setup registers no key.** Onboarding never installs a hotkey or
+   key monitor; the app does, after consent. Setup only reads the
+   Ask key preference (`AskShortcutLabel`) to name the key.
 
 5. **Ask for Screen Recording from a child process only.** The
    onboarding window never calls `CGRequestScreenCaptureAccess()`:
@@ -45,9 +51,18 @@ deferred-permission choreography, and the hotkey-earning pattern.
    (`ScreenRecordingProbe.swift`). Tests use injected stand-ins and
    never touch the real permission database.
 
-6. **Copy is CSO-adjacent.** TCC-prompt copy and the trust-panel
-   text set user expectations about what is captured. Changes are
-   Track B — surface any wording edit in the PR body.
+6. **Copy is CSO-adjacent.** Permission copy and the Promise set
+   the person's expectations about what is read and kept. Every
+   string lives in `OnboardingCopy`, and every claim there is checked
+   in code first (`scripts/test-onboarding-product-truth.sh` holds the
+   consent claims). Surface any wording edit in the PR body.
+
+7. **Views decide nothing.** A screen draws what the kit decided
+   (`TryItPresentation`, the row states, `OnboardingCopy`), so the
+   tests and the preview renderer see what a person sees. After a
+   change, render every screen off screen and look at it:
+   `HIPPOCAMPUS_RENDER_ONBOARDING=<dir>` on a debug build writes each
+   screen and state to a PNG and exits before any window exists.
 
 ## Common mistakes
 
@@ -55,9 +70,8 @@ deferred-permission choreography, and the hotkey-earning pattern.
   through OnboardingKit's persisted state machine.
 - Calling a real `CGRequest*Access` in a view or a view model,
   instead of through the `--tcc-request` child.
-- Registering the recall hotkey in `App.init` before the user
-  has seen the trust panel (regression risk called out in PR
-  #83).
+- Writing the consent file anywhere but `startRemembering`, or
+  letting `advance()` or `goTo` pass Promise on a first run.
 
 ## Reference chain
 

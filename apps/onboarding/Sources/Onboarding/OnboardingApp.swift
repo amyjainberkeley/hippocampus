@@ -1,10 +1,7 @@
 import SwiftUI
-import OnboardingKit
-#if canImport(AppKit)
 import AppKit
-#endif
+import OnboardingKit
 
-#if canImport(AppKit)
 /// Pulls the Onboarding window to the foreground the instant it appears.
 ///
 /// Without this, the Onboarding executable spawned by `HippocampusApp`
@@ -26,141 +23,85 @@ final class OnboardingAppDelegate: NSObject, NSApplicationDelegate, @unchecked S
         true
     }
 }
-#endif
 
 /// Started by `OnboardingEntryPoint`, which answers the Screen Recording
-/// probe commands first.
+/// probe commands first. One window, 760 by 560 with its title bar hidden:
+/// the four screens, or the panel the app asked for.
 struct OnboardingApp: App {
-    #if canImport(AppKit)
     @NSApplicationDelegateAdaptor(OnboardingAppDelegate.self) var appDelegate
-    #endif
 
+    /// What `MCI_ONBOARDING_STEP` asked for, once consent is known.
+    private let launch: OnboardingLaunch
     @StateObject private var flowVM: OnboardingFlowViewModel
-    @StateObject private var trustVM: TrustPanelViewModel
-    @StateObject private var retentionVM: RetentionViewModel
-    @StateObject private var extensionVM: BrowserExtensionViewModel
     @StateObject private var prepareBrainVM: PrepareBrainViewModel
+    @StateObject private var extensionVM: BrowserExtensionViewModel
     @StateObject private var allowlistEditorVM: AllowlistEditorViewModel
     @StateObject private var mcpServersVM: McpServersViewModel
 
     init() {
-        #if canImport(AppKit)
-        let sr: any TCCPermission = RealScreenRecordingPermission()
-        let ax: any TCCPermission = RealAccessibilityPermission()
-        // Wire the previously-orphaned Automation TCC surface. Used by
-        // BrowserExtensionSlide's Safari flow (osascript → System
-        // Events keystroke, which fires the Automation dialog) and
-        // surfaced up-front in the PermissionsSlide pre-flight
-        // overview. Fixes audit gap G1 — the Rewind bad pattern where
-        // dialog #3 lands unannounced.
-        let am: any TCCPermission = RealAutomationPermission()
-        let fda: any FullDiskAccessPermission = RealFullDiskAccessPermission()
-        #else
-        let sr: any TCCPermission = StubTCCPermission(kind: .screenRecording)
-        let ax: any TCCPermission = StubTCCPermission(kind: .accessibility)
-        let am: any TCCPermission = StubTCCPermission(kind: .automation)
-        let fda: any FullDiskAccessPermission = StubFullDiskAccessPermission()
-        #endif
+        let consentStore = FileOnboardingConsentStore()
+        let launch = OnboardingLaunch.parse(ProcessInfo.processInfo.environment["MCI_ONBOARDING_STEP"])
+            .resolved(consentGiven: consentStore.isGiven)
+        self.launch = launch
+        let initialScreen: OnboardingScreen? = if case .flow(let screen) = launch { screen } else { nil }
+        let fullDiskAccess: any FullDiskAccessPermission = RealFullDiskAccessPermission()
 
-        let initialStep = ProcessInfo.processInfo.environment["MCI_ONBOARDING_STEP"]
-            .flatMap(OnboardingStep.init(launchRoute:))
         _flowVM = StateObject(wrappedValue: OnboardingFlowViewModel(
-            screenRecording: sr,
-            accessibility: ax,
-            automation: am,
-            fullDiskAccess: fda,
-            stateStore: FileOnboardingStateStore(),
-            initialStep: initialStep
+            screenRecording: RealScreenRecordingPermission(),
+            accessibility: RealAccessibilityPermission(),
+            // The browser extension panel's Safari flow asks for Automation.
+            automation: RealAutomationPermission(),
+            fullDiskAccess: fullDiskAccess,
+            // The flow keeps its place; a panel keeps its state in memory.
+            stateStore: launch.usesResumeFile ? FileOnboardingStateStore() : InMemoryOnboardingStateStore(),
+            consentStore: consentStore,
+            initialScreen: initialScreen
         ))
-        let baselineStore = SignedBaselineAllowlistStore()
-        _trustVM = StateObject(wrappedValue: TrustPanelViewModel(
-            allowlistStore: baselineStore,
-            denylistStore: DiskDenylistEditorStore()
-        ))
-        _retentionVM = StateObject(wrappedValue: RetentionViewModel(
-            store: DiskRetentionStore()
-        ))
-
-        #if canImport(AppKit)
-        let detector: any BrowserDetector = RealBrowserDetector()
-        let appsDetector: any RunningAppsDetector = RealRunningAppsDetector()
-        #else
-        let detector: any BrowserDetector = StubBrowserDetector()
-        let appsDetector: any RunningAppsDetector = StubRunningAppsDetector()
-        #endif
-        // Share the same FDA permission instance across the flow VM
-        // (drives the pre-flight overview pill) and the allowlist
-        // editor (fires the actual deep-link on deep-hook toggle).
-        // Two separate instances would drift out of sync — the
-        // pre-flight would show "Not requested" even after the user
-        // opened Settings from the Allowlist slide.
-        let fdaPermission = fda
-        _extensionVM = StateObject(wrappedValue: BrowserExtensionViewModel(
-            detector: detector
-        ))
-
+        // Setup offers no model download.
         _prepareBrainVM = StateObject(wrappedValue: PrepareBrainViewModel(
             keyGenerator: LocalKeyGenerator(),
-            modelDownloader: RealModelDownloader()
+            modelDownloader: StubModelDownloader()
         ))
-
+        _extensionVM = StateObject(wrappedValue: BrowserExtensionViewModel(
+            detector: RealBrowserDetector()
+        ))
         _allowlistEditorVM = StateObject(wrappedValue: AllowlistEditorViewModel(
-            baselineStore: baselineStore,
+            baselineStore: SignedBaselineAllowlistStore(),
             userStore: FileUserAllowlistStore(),
-            detector: appsDetector,
-            fdaPermission: fdaPermission
+            detector: RealRunningAppsDetector(),
+            fdaPermission: fullDiskAccess
         ))
-
         _mcpServersVM = StateObject(wrappedValue: McpServersViewModel(
             store: FileMcpServersStore()
         ))
     }
 
     var body: some Scene {
-        WindowGroup {
-            OnboardingFlowView()
+        // A single window: there is no second setup to open with ⌘N.
+        Window("Hippocampus", id: "setup") {
+            root
                 .preferredColorScheme(.light)
                 .environmentObject(flowVM)
-                .environmentObject(trustVM)
-                .environmentObject(retentionVM)
-                .environmentObject(extensionVM)
                 .environmentObject(prepareBrainVM)
+                .environmentObject(extensionVM)
                 .environmentObject(allowlistEditorVM)
                 .environmentObject(mcpServersVM)
-                .frame(
-                    width: OnboardingTheme.windowWidth,
-                    height: OnboardingTheme.windowHeight
-                )
-                // Deep-link entrypoint. `onboarding://start?migration=rewind`
-                // (fired by the `/rewind` landing lane, cycle 8.37 PR #30)
-                // flips the flow VM's `migrationSource` so `WelcomeSlide`
-                // renders the Rewind sub-header. Unknown query values are
-                // silently ignored — see `OnboardingFlowViewModel.applyLaunchURL`.
-                .onOpenURL { url in
-                    flowVM.applyLaunchURL(url)
-                }
         }
+        .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
         .commands {
-            CommandMenu("Troubleshoot") {
-                Button("Reset Screen Recording Permission and Retry") {
-                    Task {
-                        flowVM.goTo(.permissions)
-                        _ = await flowVM.screenRecordingPermission.resetAndRetry()
-                        flowVM.refreshPermissions()
-                    }
-                }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
+            CommandGroup(replacing: .newItem) {}
+        }
+    }
 
-                Divider()
-
-                Button("Open Screen Recording Settings") {
-                    flowVM.screenRecordingPermission.openPrivacySettings()
-                }
-
-                Button("Open Accessibility Settings") {
-                    flowVM.accessibilityPermission.openPrivacySettings()
-                }
+    @ViewBuilder
+    private var root: some View {
+        switch launch {
+        case .flow:
+            OnboardingFlowView()
+        case .panel(let panel):
+            OnboardingPanelView(panel: panel) {
+                NSApplication.shared.terminate(nil)
             }
         }
     }

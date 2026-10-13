@@ -117,14 +117,12 @@ final class ConnectClaudeCodeViewModelTests: XCTestCase {
 final class OnboardingSentinelPathTests: XCTestCase {
     func testSentinelPathContract() {
         // The HippocampusKit side computes this path via
-        // OnboardingSentinel.defaultURL — the OnboardingFlowView side
-        // hardcodes the same suffix (no cross-module dep).
+        // OnboardingSentinel.defaultURL; onboarding's consent store holds
+        // the same suffix (no cross-module dep).
         let expectedSuffix = "Library/Application Support/MCI/.onboarding-complete"
-        let url = FileManager.default
-            .homeDirectoryForCurrentUser
-            .appendingPathComponent(expectedSuffix)
-        XCTAssertTrue(
-            url.path.hasSuffix(expectedSuffix),
+        XCTAssertEqual(
+            FileOnboardingConsentStore.defaultURL.path,
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(expectedSuffix).path,
             "Sentinel path must match between Onboarding and Hippocampus apps"
         )
     }

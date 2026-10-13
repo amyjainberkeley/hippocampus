@@ -8,8 +8,8 @@ final class PermissionRowStateTests: XCTestCase {
         accessibility: any TCCPermission,
         clock: TestClock = TestClock(),
         consent: InMemoryOnboardingConsentStore = InMemoryOnboardingConsentStore()
-    ) -> FourScreenFlowViewModel {
-        FourScreenFlowViewModel(
+    ) -> OnboardingFlowViewModel {
+        OnboardingFlowViewModel(
             screenRecording: screenRecording,
             accessibility: accessibility,
             stateStore: InMemoryOnboardingStateStore(),
@@ -41,7 +41,8 @@ final class PermissionRowStateTests: XCTestCase {
         let clock = TestClock()
         let vm = makeVM(screenRecording: sr, accessibility: StubTCCPermission(kind: .accessibility), clock: clock)
         vm.requestPermission(.screenRecording)
-        XCTAssertEqual(sr.openSettingsCallCount, 1, "Allow runs today's request")
+        XCTAssertEqual(sr.promptCallCount, 1, "Allow raises macOS's prompt")
+        XCTAssertEqual(sr.openSettingsCallCount, 0, "and opens nothing else")
         XCTAssertEqual(vm.rowState(.screenRecording), .waiting)
         for _ in 0..<10 {
             clock.advance(30)
@@ -49,6 +50,49 @@ final class PermissionRowStateTests: XCTestCase {
             await vm.refreshPermissionsAsync()
         }
         XCTAssertEqual(vm.rowState(.screenRecording), .waiting, "the person is in System Settings")
+    }
+
+    func testAWaitingRowCanOpenSystemSettingsWhenNoPromptShowed() {
+        let sr = StubTCCPermission(kind: .screenRecording)
+        let vm = makeVM(screenRecording: sr, accessibility: StubTCCPermission(kind: .accessibility))
+        vm.requestPermission(.screenRecording)
+        vm.openSettings(.screenRecording)
+        XCTAssertEqual(sr.openSettingsCallCount, 1)
+        XCTAssertEqual(vm.rowState(.screenRecording), .waiting, "still waiting for the person")
+    }
+
+    func testTheSecondPermissionTurningOnBringsSetupForwardOnce() async {
+        let sr = StubTCCPermission(kind: .screenRecording)
+        let ax = StubTCCPermission(kind: .accessibility)
+        let vm = makeVM(screenRecording: sr, accessibility: ax)
+        sr.simulateGrant()
+        await vm.refreshPermissionsAsync()
+        XCTAssertEqual(vm.bothTurnedOnCount, 0, "one is not both")
+        ax.simulateGrant()
+        await vm.refreshPermissionsAsync()
+        XCTAssertEqual(vm.bothTurnedOnCount, 1)
+        vm.refreshPermissions()
+        await vm.refreshPermissionsAsync()
+        XCTAssertEqual(vm.bothTurnedOnCount, 1, "only the moment it turns on")
+
+        let alreadyOn = makeVM(
+            screenRecording: StubTCCPermission(kind: .screenRecording, status: .granted),
+            accessibility: StubTCCPermission(kind: .accessibility, status: .granted)
+        )
+        await alreadyOn.refreshPermissionsAsync()
+        XCTAssertEqual(alreadyOn.bothTurnedOnCount, 0, "nothing turned on during setup")
+    }
+
+    func testBothTurningOnAwayFromPermissionsBringsNothingForward() async {
+        let sr = StubTCCPermission(kind: .screenRecording)
+        let vm = OnboardingFlowViewModel(
+            screenRecording: sr,
+            accessibility: StubTCCPermission(kind: .accessibility, status: .granted),
+            initialScreen: .welcome
+        )
+        sr.simulateGrant()
+        await vm.refreshPermissionsAsync()
+        XCTAssertEqual(vm.bothTurnedOnCount, 0)
     }
 
     func testOnlyOneRowCanBeAskedAtATime() async {
@@ -138,7 +182,7 @@ final class PermissionRowStateTests: XCTestCase {
         vm.advance()
         XCTAssertEqual(vm.screen, .promise)
 
-        let started = await vm.startRemembering(keyReady: true, openAtLogin: true)
+        let started = await vm.startRemembering(keyReady: true)
         XCTAssertTrue(started)
         XCTAssertEqual(vm.screen, .tryIt)
         XCTAssertEqual(fixture.permission.status, .granted)
@@ -265,7 +309,7 @@ final class PermissionRowStateTests: XCTestCase {
         XCTAssertEqual(vm.rowState(.screenRecording), .granted)
         clock.advance(3)
         await vm.refreshPermissionsAsync()
-        _ = await vm.startRemembering(keyReady: true, openAtLogin: true)
+        _ = await vm.startRemembering(keyReady: true)
         XCTAssertEqual(fixture.probe.calls, 4)
     }
 }

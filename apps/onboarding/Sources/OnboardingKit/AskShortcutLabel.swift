@@ -138,6 +138,15 @@ public enum AskKeyHint: String, Sendable, Equatable, CaseIterable {
     public var pulses: Int {
         self == .shiftTwice ? 2 : 1
     }
+
+    /// When Welcome's keycaps pulse, in seconds from the start of each
+    /// cycle: 0.6 s in, and again 0.3 s later for Shift twice.
+    public var pulseTimes: [TimeInterval] {
+        Array([0.6, 0.9].prefix(pulses))
+    }
+
+    /// Welcome shows the press again this often while it is on screen.
+    public static let pulseCycle: TimeInterval = 6
 }
 
 /// What opens Ask right now, for the sentences on Try it that tell the

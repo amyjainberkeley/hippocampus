@@ -1,48 +1,8 @@
 import Foundation
 
-/// Load-bearing user-facing copy strings that are asserted on by
-/// `OnboardingKitTests`. Kept in `OnboardingKit` (not in the SwiftUI
-/// slide files) so tests can hold ground truth without importing the
-/// executable target.
-///
-/// Why this exists (cycle 8.38 onboarding audit, PR-2):
-/// - Fix (a) The `howItWorksFootprint` copy must reflect the
-///   2026-05-31 amended footprint SLO (≤ 10–15% CPU / ≤ 2 GB RAM).
-///   The prior "under 2% CPU / under 250 MB RAM" string set the
-///   user's expectation 5× too aggressive — CEO Amy flagged this as a
-///   trust-budget bug on the CRS 8.32 scan.
-/// - Fix (b) The `welcomeRewindSubheader` copy is triggered by a
-///   `onboarding://start?migration=rewind` deep-link fired from the
-///   `/rewind` landing lane (cycle 8.37 PR #30).
-/// - Fix (c) `doneMenuBarHint` replaces the previous shortcut promises
-///   for `⇧⌘F` / `⇧⌘P` — neither is bound anywhere in HippocampusApp,
-///   so the copy is a plain-English menu-bar reminder instead of a lie.
+/// Every string setup shows, in one place, so the tests can hold them.
+/// The views in the `Onboarding` target read from here.
 public enum OnboardingCopy {
-    /// `HowItWorksSlide` featureRow — footprint SLO paraphrase for
-    /// non-technical users. Must contain "15%" and "2 GB" so any
-    /// future edit that regresses to the pre-2026-05-31 tight bar
-    /// (or drops the amended numbers entirely) fails a unit test.
-    public static let howItWorksFootprint = "Runs quietly in the background — typically under 15% of one CPU core and under 2 GB of memory during a full-day session."
-
-    /// `WelcomeSlide` sub-header shown only when the flow VM's
-    /// `migrationSource == .rewind`. Copy chosen to reassure a
-    /// user coming from Rewind's 2025-12-19 sunset that Hippocampus
-    /// is fully local — the biggest concern of the ex-Rewind cohort
-    /// per the CRS 8.37 competitor scan.
-    public static let welcomeRewindSubheader = "Welcome from Rewind. Your data stays on your Mac — nothing uploaded, nothing shared."
-
-    /// `DoneSlide` — replaces the previous `⇧⌘F` / `⇧⌘P` shortcut
-    /// promises. Do NOT add hotkey copy back unless `HippocampusApp`
-    /// actually binds a global hotkey (recall-UI audit PR-5).
-    public static let doneMenuBarHint = "You can open Hippocampus from the menu bar icon anytime."
-
-    /// Captured memory has no Hippocampus cloud copy, but a user can request
-    /// context through a connected third-party AI client. These strings keep
-    /// that provider boundary visible in both the welcome and trust screens.
-    public static let welcomeAIHandoff = "Hippocampus keeps no cloud copy. Context you request through a connected AI tool follows that provider's terms."
-
-    public static let trustAIHandoff = "Connected AI tools receive only context you request and follow their provider terms."
-
     // MARK: - The four screens
     //
     // Words follow spec-copy S1 to S3 and RULINGS V and O: Hippocampus
@@ -55,10 +15,6 @@ public enum OnboardingCopy {
     public static let welcomeTitle = "Hippocampus remembers what you see."
     /// Follows the keycaps: "Press ⇧ ⇧ and ask about your screen, now or earlier."
     public static let welcomeBodyAfterKeys = "and ask about your screen, now or earlier."
-    /// Shown when there is no clip: search works on every Mac.
-    public static let welcomeFallback = "Type a word. Find where you saw it."
-    /// Under the clip, once it ships.
-    public static let welcomeClipCaption = "Sample data."
     public static let getStarted = "Get Started"
 
     /// The body as one sentence, keycaps written out.
@@ -66,26 +22,32 @@ public enum OnboardingCopy {
         "\(key.verb) \(key.keycaps.joined(separator: " ")) \(welcomeBodyAfterKeys)"
     }
 
+    /// The body as VoiceOver reads it: the key in words, not symbols.
+    public static func welcomeBodySpoken(_ key: AskKeyHint) -> String {
+        "\(key.phrase) \(welcomeBodyAfterKeys)"
+    }
+
     // Permissions
 
     public static let permissionsTitle = "Two permissions"
-    public static let permissionsBody = "macOS asks before any app can read the screen."
     /// First run only: until consent the app does not start reading.
     public static let permissionsNothingYet = "Nothing is read until you click Start Remembering."
     public static let screenRecordingName = "Screen Recording"
     public static let screenRecordingWhy = "So it can read what’s on your screen."
-    /// macOS 15 and later. Nothing in Hippocampus takes in sound: no
-    /// microphone, and screen reading never turns on audio. (It does play
-    /// sounds, so "doesn’t use sound" would not be true.)
+    /// macOS 15 and later. Nothing in Hippocampus takes in sound: every
+    /// screen stream adds a screen output only, none sets `capturesAudio`,
+    /// and nothing opens the microphone. (It does play sounds, so "doesn’t
+    /// use sound" would not be true.)
     public static let screenRecordingSoundNote = "macOS calls this Screen & System Audio Recording. Hippocampus doesn’t listen."
     public static let accessibilityName = "Accessibility"
     public static let accessibilityWhyBase = "So it knows which window you’re in and skips password fields."
     public static let allow = "Allow"
     public static let waitingForSettings = "Waiting for System Settings…"
-    /// "Allow" shows macOS's prompt as well as opening System Settings:
-    /// Accessibility asks in this process, Screen Recording from a child.
-    public static let screenRecordingWaitingHint = "macOS may ask first. Then turn on Hippocampus in the list. If macOS offers Quit & Reopen, choose Later."
-    public static let accessibilityWaitingHint = "macOS may ask first. Then turn on Hippocampus in the list."
+    /// "Allow" raises macOS's prompt only, whose button is Open System
+    /// Settings. The waiting row has a button with the same words for when
+    /// no prompt shows, so the hint is right either way.
+    public static let screenRecordingWaitingHint = "Choose Open System Settings, then turn on Hippocampus. If macOS offers Quit & Reopen, choose Later."
+    public static let accessibilityWaitingHint = "Choose Open System Settings, then turn on Hippocampus."
     public static let notOnYet = "Not on yet."
     public static let needsHelpHint = "Turn on Hippocampus in the list. Not there? Click + and choose Hippocampus in Applications."
     public static let openSettings = "Open System Settings"
@@ -93,11 +55,32 @@ public enum OnboardingCopy {
     public static let permissionOn = "On"
     public static let permissionsFooter = "Change either one any time in System Settings."
     public static let continueLabel = "Continue"
+    public static let back = "Back"
 
-    /// The Accessibility row. A single key or Shift twice needs it too.
-    public static func accessibilityWhy(_ key: AskKeyHint) -> String {
-        guard let noun = key.noun else { return accessibilityWhyBase }
-        return "\(accessibilityWhyBase) It also lets \(noun) open Ask."
+    /// The Accessibility row's second line: a single key or Shift twice
+    /// needs it too. The chord does not, so it has none.
+    public static func accessibilityKeyNote(_ key: AskKeyHint) -> String? {
+        key.noun.map { "It also lets \($0) open Ask." }
+    }
+
+    /// Under the title. In review remembering may already be on, so the
+    /// first run's sentence would not be true.
+    public static func permissionsBody(isReview: Bool) -> String? {
+        isReview ? nil : permissionsNothingYet
+    }
+
+    /// The Screen Recording row's second line: macOS 15 renamed the
+    /// permission, and the new name mentions audio.
+    public static func screenRecordingNote(macOSMajorVersion: Int) -> String? {
+        macOSMajorVersion >= 15 ? screenRecordingSoundNote : nil
+    }
+
+    /// What a waiting row says to do.
+    public static func waitingHint(_ surface: PermissionSurface) -> String {
+        switch surface {
+        case .screenRecording: screenRecordingWaitingHint
+        case .accessibility: accessibilityWaitingHint
+        }
     }
 
     // Promise
@@ -122,13 +105,30 @@ public enum OnboardingCopy {
     public static let promiseNeverRead = "Password fields and private browser windows."
     public static let promiseStopLead = "You can stop it."
     public static let promiseStop = "Pause from the menu bar. Quit ends it."
+    /// The menu-bar mark's promise (RULINGS B1), word for word. Every state
+    /// in which the screen may be read shows the solid dot.
+    public static let dotPromise = "A solid dot means it is remembering. No solid dot means it is not."
     public static let openAtLogin = "Open Hippocampus at login"
+    /// The panel Preferences opens with "What is never read…": the
+    /// Promise's lines, read-only.
+    public static let neverReadTitle = "What is never read"
     public static let startRemembering = "Start Remembering"
     public static let settingUpEncryption = "Setting up encryption…"
     public static let encryptionFailed = "Couldn’t set up encryption."
     public static let tryAgain = "Try Again"
     public static let consentFailedTitle = "Couldn’t start"
     public static let consentFailedMessage = "Couldn’t save your setup. Free up some disk space and try again."
+
+    /// Promise's button. In review it only continues. On a first run it
+    /// waits for the encryption key, and says so; after a failed setup it
+    /// keeps its name, off, beside "Try Again".
+    public static func promisePrimary(isReview: Bool, keyState: PrepareBrainViewModel.KeyState) -> String {
+        if isReview { return continueLabel }
+        switch keyState {
+        case .checking, .generating: return settingUpEncryption
+        case .ready, .failed: return startRemembering
+        }
+    }
 
     /// The first Promise line, after "Stays on this Mac.".
     ///

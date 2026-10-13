@@ -176,8 +176,28 @@ public final class RealScreenRecordingPermission: TCCPermission, @unchecked Send
         openPrivacySettings()
     }
 
+    /// "Allow" on the setup screen: macOS's prompt only, raised by a fresh
+    /// process (`--tcc-request`) as above. The prompt's Open System
+    /// Settings button takes the person on, and the row offers the same
+    /// words when no prompt shows. macOS asks once, so a second request in
+    /// this session opens the pane instead.
+    public func requestPrompt() {
+        if preflight() {
+            status = .granted
+            return
+        }
+        attempts.attempted = true
+        if requestSent {
+            openPrivacySettings()
+            return
+        }
+        requestSent = true
+        requester.request()
+    }
+
     /// Reset, forget the earlier attempt, and have a fresh process ask
-    /// again. Returns at once: the row's refresh does the waiting.
+    /// again: macOS's prompt only, as Allow. Returns at once: the row's
+    /// refresh does the waiting.
     public func askAgain() async {
         resetter.reset(TCCResetArguments.screenCapture)
         attempts.attempted = false
@@ -185,7 +205,6 @@ public final class RealScreenRecordingPermission: TCCPermission, @unchecked Send
         status = .notRequested
         requestSent = true
         requester.request()
-        openPrivacySettings()
     }
 
     public func resetAndRetry() async -> Bool {
@@ -277,12 +296,19 @@ public final class RealAccessibilityPermission: TCCPermission, @unchecked Sendab
         }
     }
 
-    /// Reset, then the same request as the first click: macOS's prompt,
-    /// and the pane when it is not on.
+    /// "Allow" on the setup screen: macOS's prompt only. Until the person
+    /// answers it the permission is not on, but not off either.
+    public func requestPrompt() {
+        if prompt() {
+            status = .granted
+        }
+    }
+
+    /// Reset, then the same request as Allow: macOS's prompt only.
     public func askAgain() async {
         resetter.reset(TCCResetArguments.accessibility)
         status = .notRequested
-        requestOrOpenSettings()
+        requestPrompt()
     }
 
     public func resetAndRetry() async -> Bool {

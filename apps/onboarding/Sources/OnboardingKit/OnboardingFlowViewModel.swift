@@ -1,368 +1,390 @@
+// SPDX-License-Identifier: TBD-private
+//
+// OnboardingFlowViewModel — setup in four screens: Welcome, Permissions,
+// Promise, Try it.
+//
+// What it holds:
+// - Consent has one writer, `startRemembering(keyReady:)`. Nothing else
+//   moves a first run past Promise.
+// - The resume clamp, at start and on every move: Try it needs consent,
+//   otherwise Promise; Promise needs both permissions, otherwise Permissions.
+// - Two permission rows, both visible at once. "Allow" raises macOS's
+//   prompt only. A row waits from the request until the person comes back
+//   to this window; on return one refresh decides. No timer moves a row.
+// - Screen Recording may be confirmed by a fresh process (see
+//   `ScreenRecordingProbe`). That check runs when the person comes back,
+//   every 2.5 s while the Screen Recording row waits, and once more at
+//   consent; never more than one at a time. A return, or consent, decides
+//   only on a check that started after it: one already running may have
+//   started before the person changed the setting, so it is waited out
+//   and a fresh process is asked once more.
+// - Stores default to memory. Setup passes the file stores; tests and
+//   panels never touch the person's resume or consent files by accident.
+
 import Foundation
 
-/// Where the user came from, for calibrating onboarding copy.
-///
-/// Populated by `OnboardingApp` from a `onboarding://start?migration=<x>`
-/// deep-link; nil for a normal cold-start install. Read by `WelcomeSlide`
-/// to render a migration-specific sub-header (e.g. Rewind sunset cohort,
-/// cycle 8.37 `/rewind` landing lane, PR #30). Kept in the flow VM so it
-/// is testable at the Kit layer without touching SwiftUI.
-public enum MigrationSource: String, Sendable, Equatable, CaseIterable {
-    case rewind
-}
-
-/// Cotypist peer-study P0 pattern #2 — deferred-permission choreography.
-///
-/// The four macOS TCC / FDA surfaces the onboarding flow may need to ask
-/// for. Split out from `TCCPermissionKind` (SR / AX / Automation) so the
-/// Full Disk Access surface — which uses a distinct `FullDiskAccessPermission`
-/// protocol, not `TCCPermission` — can participate in the same one-at-a-time
-/// sequence exposed by `PermissionsSlide`. Order is meaningful: it's the
-/// order the user is asked in.
+/// The two permissions setup asks for, in the order they are shown.
 public enum PermissionSurface: String, Sendable, Equatable, CaseIterable {
     case screenRecording
     case accessibility
-    case automation
-    case fullDiskAccess
 }
 
-/// Outcome recorded per `PermissionSurface` as the user walks the
-/// choreographed sequence on `PermissionsSlide`. `.pending` means the
-/// user has not yet acted on this surface; `.skipped` means they tapped
-/// "Skip for now"; `.notApplicable` means the surface's precondition
-/// doesn't hold (e.g. Automation is skipped when no Safari extension is
-/// desired, FDA when no Messages/Mail deep-hook is desired). Callers
-/// use this to decide whether the "Continue" affordance renders after
-/// denial and to gate advance to the next onboarding slide.
-public enum PermissionOutcome: String, Sendable, Equatable {
-    case pending
+/// What a permission row shows.
+public enum PermissionRowState: Equatable, Sendable {
+    /// Not asked yet: "Allow".
+    case idle
+    /// Asked, and the person has not come back to this window yet.
+    case waiting
+    /// Came back and it is still off, or it was off before this run.
+    case needsHelp
+    /// On.
     case granted
-    case denied
-    case skipped
-    case notApplicable
+}
+
+/// Why Start Remembering did not record consent.
+public enum ConsentFailure: Equatable, Sendable {
+    /// The consent file could not be written (a full disk, say).
+    case notSaved
 }
 
 @MainActor
 public final class OnboardingFlowViewModel: ObservableObject {
-    @Published public private(set) var currentStep: OnboardingStep = .welcome
+    @Published public private(set) var screen: OnboardingScreen
+    @Published public private(set) var consentFailure: ConsentFailure?
+    /// When this run recorded consent, in microseconds since 1970: Try it
+    /// shows what was read after it.
+    @Published public private(set) var consentGivenAtUs: UInt64?
+    /// "Open Hippocampus at login" on Promise, on until the person turns
+    /// it off. Recorded with consent; the app registers the login item
+    /// only when this was on.
+    @Published public var openAtLogin = true
+    /// Start Remembering is checking the permissions once more.
+    @Published public private(set) var isStartingRemembering = false
+    /// Bumped each time the second permission turns on while Permissions
+    /// shows, so the window can come forward from System Settings.
+    @Published public private(set) var bothTurnedOnCount = 0
+    /// Bumped by every refresh, so views that read the permissions redraw.
     @Published public private(set) var permissionRefreshCount = 0
-    /// Set by `OnboardingApp` from the launch URL (or by tests). `nil` for
-    /// normal cold-start. Currently only `.rewind` is honored — surfaces
-    /// a WelcomeSlide sub-header re-using the `/rewind` landing lane copy.
-    @Published public var migrationSource: MigrationSource?
-    /// The chord was observed in onboarding; this does not prove global registration.
-    @Published public private(set) var hotkeyPracticed: Bool = false
-    @Published public private(set) var hotkeySkipped: Bool = false
+    @Published public private(set) var fullDiskAccessStatus: FullDiskAccessStatus = .notRequested
+    @Published private var rows: [PermissionSurface: RowRecord] = [:]
 
-    // MARK: - Cotypist P0 #2 — deferred-permission choreography
-
-    /// The canonical order the Permissions slide asks the four surfaces
-    /// in. Public so tests and slide code share ground truth (fewer
-    /// hard-coded arrays, one source of drift). Screen Recording is
-    /// first; Accessibility is second. Both are required for safe screen capture.
-    /// Automation and Full Disk Access come last because their
-    /// preconditions (Safari extension desired, deep-hook desired) may
-    /// not hold — in which case they resolve to `.notApplicable` and
-    /// the sequence skips past them without rendering a card.
-    public static let permissionSequence: [PermissionSurface] = [
-        .screenRecording, .accessibility, .automation, .fullDiskAccess,
-    ]
-
-    /// Index into `permissionSequence` for the surface currently being
-    /// asked on `PermissionsSlide`. `0` at slide entry; incremented by
-    /// `advancePermissionSequence()` after the user acts (grant, deny +
-    /// continue, or skip). When `>= permissionSequence.count` the slide
-    /// treats the choreography as complete and shows the "All set →
-    /// Continue" affordance that advances to the next onboarding step.
-    @Published public private(set) var permissionSequenceIndex: Int = 0
-
-    /// Per-surface outcome recorded as the user walks the choreography.
-    /// `.pending` for anything not yet reached; `.notApplicable` for
-    /// Automation / FDA on cold-start (both are contextual, deferred
-    /// to their respective later slides — see the class-level comments
-    /// on `automationPermission` and `fullDiskAccessStatus`).
-    @Published public private(set) var permissionResults: [PermissionSurface: PermissionOutcome] = [
-        .screenRecording: .pending,
-        .accessibility: .pending,
-        .automation: .notApplicable,
-        .fullDiskAccess: .notApplicable,
-    ]
-
+    /// Consent existed when setup opened. Promise then only advances.
+    public let isReview: Bool
     public let screenRecordingPermission: any TCCPermission
     public let accessibilityPermission: any TCCPermission
-    /// Automation TCC — wired in per audit gap G1 so `PermissionsSlide`
-    /// can surface it in the pre-flight overview and
-    /// `BrowserExtensionSlide` can render an inline warning + a
-    /// `.denied` recovery path when Safari's osascript keystroke is
-    /// blocked (previously the error was silently swallowed).
+    /// Kept for the panels; the four screens never ask for it.
     public let automationPermission: any TCCPermission
-    /// Full Disk Access status snapshot. Refreshed alongside TCC
-    /// probes so the pre-flight overview can pill the FDA row without
-    /// touching the actor on every render. Stays `.notRequested`
-    /// until the user toggles a Messages / Mail deep-hook on the
-    /// Allowlist slide (ADR-0032 §3(b)).
-    @Published public private(set) var fullDiskAccessStatus: FullDiskAccessStatus = .notRequested
+
+    /// The two rows, in the order they are shown.
+    public static let rowSurfaces: [PermissionSurface] = PermissionSurface.allCases
+    /// Spacing of fresh-process Screen Recording checks while its row waits.
+    public static let outOfProcessCheckInterval: TimeInterval = 2.5
+    /// "Ask Again" is offered after this many returns that found the row off.
+    public static let failedReturnsBeforeAskAgain = 2
 
     private let stateStore: any OnboardingStateStore
+    private let consentStore: any OnboardingConsentStore
     private let fdaPermission: (any FullDiskAccessPermission)?
+    private let now: () -> Date
+    private var lastOutOfProcessCheck: Date?
+    /// The fresh-process Screen Recording check that is running, if any.
+    private var freshCheck: Task<Void, Never>?
+    /// Both permissions were on at the last refresh.
+    private var bothWereOn: Bool
+
+    private struct RowRecord: Equatable {
+        var waiting = false
+        var asked = false
+        var failedReturns = 0
+    }
 
     public init(
         screenRecording: any TCCPermission,
         accessibility: any TCCPermission,
         automation: (any TCCPermission)? = nil,
         fullDiskAccess: (any FullDiskAccessPermission)? = nil,
-        // Memory unless the caller passes the file: `OnboardingApp` does,
-        // so a test that leaves this out never rewrites the person's
-        // resume file.
         stateStore: any OnboardingStateStore = InMemoryOnboardingStateStore(),
-        migrationSource: MigrationSource? = nil,
-        initialStep: OnboardingStep? = nil
+        consentStore: any OnboardingConsentStore = InMemoryOnboardingConsentStore(),
+        now: @escaping () -> Date = Date.init,
+        initialScreen: OnboardingScreen? = nil
     ) {
-        // Default the Automation permission to a stub so pre-audit
-        // callers (unit tests + any downstream) keep compiling without
-        // having to construct one. Production callers in
-        // `OnboardingApp.init` inject `RealAutomationPermission`.
-        let automation = automation ?? StubTCCPermission(kind: .automation, status: .notRequested)
         self.screenRecordingPermission = screenRecording
         self.accessibilityPermission = accessibility
         self.automationPermission = automation
+            ?? StubTCCPermission(kind: .automation, status: .notRequested)
         self.fdaPermission = fullDiskAccess
         self.stateStore = stateStore
-        self.migrationSource = migrationSource
-
-        // Resume where the user left off if we have a persisted step.
-        // Falls back to `.welcome` on a fresh install or any
-        // read/parse failure (CEO dogfood 2026-05-26 — quit + reopen
-        // used to always restart at slide 0).
-        if let initialStep {
-            self.currentStep = initialStep
-        } else if let resumed = stateStore.load() {
-            self.currentStep = resumed
-        }
-
-        // Cotypist P0 #2 — seed the choreography outcome map from the
-        // TCC probes' current status so a re-launch (or a test fixture
-        // that hands us already-granted permissions) doesn't re-ask
-        // for surfaces the user already granted. `.notRequested` stays
-        // `.pending` so the sub-step still renders; `.granted` /
-        // `.denied` stays visible for recovery. Only grants resolve required surfaces.
-        seedChoreographyFromInitialStatus()
+        self.consentStore = consentStore
+        self.now = now
+        self.isReview = consentStore.isGiven
+        let bothOn = screenRecording.status == .granted && accessibility.status == .granted
+        self.bothWereOn = bothOn
+        // An explicit launch screen wins over the resume file.
+        let requested = initialScreen ?? stateStore.loadScreen() ?? .welcome
+        self.screen = Self.clamp(requested, consentGiven: consentStore.isGiven, bothGranted: bothOn)
     }
 
-    private func seedChoreographyFromInitialStatus() {
-        let srStatus = screenRecordingPermission.status
-        let axStatus = accessibilityPermission.status
-        if srStatus == .granted { permissionResults[.screenRecording] = .granted }
-        if srStatus == .denied  { permissionResults[.screenRecording] = .denied  }
-        if axStatus == .granted { permissionResults[.accessibility]  = .granted }
-        if axStatus == .denied  { permissionResults[.accessibility]  = .denied  }
-        advancePermissionSequence()
-    }
+    // MARK: - Moving between screens
 
-    /// Parse a launch URL like `onboarding://start?migration=rewind` and
-    /// apply the migration source if recognized. Unknown values are
-    /// ignored (no throw) so a stale deep-link never breaks first-run.
-    /// Returns `true` iff a known migration source was applied.
-    @discardableResult
-    public func applyLaunchURL(_ url: URL) -> Bool {
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let migrationRaw = components.queryItems?.first(where: { $0.name == "migration" })?.value,
-              let source = MigrationSource(rawValue: migrationRaw) else {
-            return false
-        }
-        migrationSource = source
-        return true
+    public var bothGranted: Bool {
+        screenRecordingPermission.status == .granted && accessibilityPermission.status == .granted
     }
 
     public var canAdvance: Bool {
-        if currentStep == .done { return false }
-        if currentStep == .permissions {
-            // Screen Recording supplies pixels; Accessibility supplies the
-            // focused/secure-field signal needed to apply the privacy policy.
-            // Optional Automation and Full Disk Access remain per-feature.
-            return screenRecordingPermission.status == .granted
-                && accessibilityPermission.status == .granted
+        switch screen {
+        case .welcome: true
+        case .permissions: bothGranted
+        // On a first run only Start Remembering leaves Promise.
+        case .promise: isReview
+        case .tryIt: false
         }
-        if currentStep == .primaryHotkey {
-            return hotkeyPracticed || hotkeySkipped
-        }
-        return true
-    }
-
-    /// Record a chord observed while onboarding is frontmost.
-    public func markHotkeyPracticed() {
-        hotkeyPracticed = true
-        hotkeySkipped = false
-    }
-
-    public func skipHotkeyPractice() {
-        guard !hotkeyPracticed else { return }
-        hotkeySkipped = true
-    }
-
-    /// The surface currently being asked on `PermissionsSlide`, or `nil`
-    /// when the choreography is complete (index past the end). Slides
-    /// bind their sub-step title / rationale / grant-button to this.
-    public var currentPermissionSurface: PermissionSurface? {
-        guard permissionSequenceIndex >= 0,
-              permissionSequenceIndex < Self.permissionSequence.count else {
-            return nil
-        }
-        return Self.permissionSequence[permissionSequenceIndex]
-    }
-
-    /// Required permissions must be granted; optional ones may be deferred.
-    /// `canAdvance` separately checks the current probes before continuing.
-    public var permissionChoreographyComplete: Bool {
-        !Self.permissionSequence.contains(where: needsPermissionAction)
-    }
-
-    private func needsPermissionAction(_ surface: PermissionSurface) -> Bool {
-        let outcome = permissionResults[surface] ?? .pending
-        if surface == .screenRecording || surface == .accessibility {
-            return outcome != .granted
-        }
-        return outcome == .pending
-    }
-
-    /// Called by `PermissionsSlide` after the user acts on the current
-    /// sub-step (grant landed, denial acknowledged with "Continue", or
-    /// "Skip for now" tapped). Records the outcome for that surface and
-    /// advances the sequence index past any surfaces whose precondition
-    /// does NOT hold (`.notApplicable`) — so cold-start users who don't
-    /// desire Safari + deep-hooks walk exactly the SR + AX sub-steps and
-    /// see the completion affordance immediately after AX.
-    ///
-    /// Idempotent past the end: extra calls once
-    /// `permissionSequenceIndex >= permissionSequence.count` are no-ops.
-    public func recordPermissionOutcome(_ surface: PermissionSurface,
-                                        _ outcome: PermissionOutcome) {
-        permissionResults[surface] = outcome
-        advancePermissionSequence()
-    }
-
-    /// Select the first unresolved surface after an action or Settings change.
-    public func advancePermissionSequence() {
-        // Required denials stay reachable, including after relaunch or revocation.
-        permissionSequenceIndex = Self.permissionSequence.firstIndex(where: needsPermissionAction)
-            ?? Self.permissionSequence.count
-    }
-
-    /// Mark Automation and/or FDA as *applicable* — flips the surface's
-    /// outcome from `.notApplicable` to `.pending` so the choreography
-    /// will render a card for it. Callers: `BrowserExtensionSlide`
-    /// (Safari detected → `.automation`), `AllowlistSlide` (deep-hook
-    /// toggled ON → `.fullDiskAccess`). Idempotent — flipping an
-    /// already-applicable surface is a no-op. Wiring the actual triggers
-    /// is deferred to a follow-up PR; this API lets tests exercise the
-    /// applicable path today.
-    public func markPermissionApplicable(_ surface: PermissionSurface) {
-        if permissionResults[surface] == .notApplicable {
-            permissionResults[surface] = .pending
-            advancePermissionSequence()
-        }
-    }
-
-    public func refreshPermissions() {
-        _ = screenRecordingPermission.checkCurrent()
-        _ = accessibilityPermission.checkCurrent()
-        // Automation: cheap probe (NSAppleScript against System Events).
-        // Do NOT probe here on the Permissions slide poll if the user
-        // hasn't yet reached the Browser Extension flow — probing pre-
-        // grant would fire the OS Automation dialog silently, which is
-        // exactly the "surprise dialog #3" pattern we're fixing.
-        // Instead, only trust the last-known status; the Browser
-        // Extension slide will do the real probe when the user clicks
-        // the Safari install button.
-        _ = automationPermission.status
-        // Required outcomes track the OS, including recovery from a denial.
-        syncChoreographyFromTCC(surface: .screenRecording,
-                                 status: screenRecordingPermission.status)
-        syncChoreographyFromTCC(surface: .accessibility,
-                                 status: accessibilityPermission.status)
-        advancePermissionSequence()
-        permissionRefreshCount += 1
-    }
-
-    /// The check that may also turn a permission off; `refreshPermissions()`
-    /// only ever turns one on. Run before consent, so a permission turned
-    /// off during setup is seen.
-    public func refreshPermissionsAsync() async {
-        _ = await screenRecordingPermission.checkCurrentAsync(outOfProcess: false)
-        _ = await accessibilityPermission.checkCurrentAsync(outOfProcess: false)
-        syncChoreographyFromTCC(surface: .screenRecording,
-                                 status: screenRecordingPermission.status)
-        syncChoreographyFromTCC(surface: .accessibility,
-                                 status: accessibilityPermission.status)
-        advancePermissionSequence()
-        permissionRefreshCount += 1
-    }
-
-    /// Synchronize required permission presentation without requesting a grant.
-    private func syncChoreographyFromTCC(surface: PermissionSurface,
-                                          status: TCCStatus) {
-        switch status {
-        case .granted: permissionResults[surface] = .granted
-        case .denied: permissionResults[surface] = .denied
-        case .notRequested: permissionResults[surface] = .pending
-        }
-    }
-
-    /// Snapshot the Full Disk Access status from the actor into the
-    /// synchronous `fullDiskAccessStatus` @Published so views can pill
-    /// the row without awaiting on every render. Idempotent.
-    public func refreshFullDiskAccessStatus() async {
-        guard let fda = fdaPermission else { return }
-        let s = await fda.status()
-        if s != fullDiskAccessStatus {
-            fullDiskAccessStatus = s
-        }
-    }
-
-    /// Probe Automation TCC on demand — called by the Browser
-    /// Extension slide just before the Safari click so the returned
-    /// status reflects "did the user grant when they saw the dialog?"
-    /// Distinct from `refreshPermissions()` (which deliberately doesn't
-    /// probe Automation — see comment there).
-    @discardableResult
-    public func probeAutomation() -> TCCStatus {
-        automationPermission.checkCurrent()
     }
 
     public var canGoBack: Bool {
-        currentStep != .welcome
-    }
-
-    public var progress: Double {
-        Double(currentStep.rawValue) / Double(OnboardingStep.allCases.count - 1)
+        screen == .permissions || screen == .promise
     }
 
     public func advance() {
-        guard canAdvance,
-              let next = OnboardingStep(rawValue: currentStep.rawValue + 1) else { return }
-        currentStep = next
-        stateStore.save(next)
+        guard canAdvance, let next = OnboardingScreen(rawValue: screen.rawValue + 1) else { return }
+        move(to: next)
     }
 
     public func back() {
-        guard canGoBack,
-              let prev = OnboardingStep(rawValue: currentStep.rawValue - 1) else { return }
-        currentStep = prev
-        stateStore.save(prev)
+        guard canGoBack, let previous = OnboardingScreen(rawValue: screen.rawValue - 1) else { return }
+        move(to: previous)
     }
 
-    public func goTo(_ step: OnboardingStep) {
-        currentStep = step
-        stateStore.save(step)
+    /// Jump to a screen, clamped like a resume.
+    public func goTo(_ target: OnboardingScreen) {
+        move(to: target)
     }
 
-    /// Called by the final "Get Started" tap. Removes the resume file
-    /// so that a future re-launch (e.g. after a wipe that left the
-    /// sentinel untouched, or future re-onboarding flows) starts at
-    /// `.welcome` instead of stuck at `.done`. The
-    /// `OnboardingSentinel` itself is the source of truth for "the
-    /// user finished" and is written separately by the slide.
+    /// Called when setup is done, so a later run starts fresh.
     public func clearResumeState() {
         stateStore.clear()
+    }
+
+    /// Try it needs consent, otherwise Promise. Promise needs both
+    /// permissions, otherwise Permissions.
+    static func clamp(
+        _ target: OnboardingScreen,
+        consentGiven: Bool,
+        bothGranted: Bool
+    ) -> OnboardingScreen {
+        var screen = target
+        if screen == .tryIt, !consentGiven { screen = .promise }
+        if screen == .promise, !bothGranted { screen = .permissions }
+        return screen
+    }
+
+    private func move(to target: OnboardingScreen) {
+        screen = Self.clamp(target, consentGiven: consentStore.isGiven, bothGranted: bothGranted)
+        stateStore.save(screen)
+    }
+
+    // MARK: - Consent
+
+    /// The only code that writes consent: the click on Start Remembering.
+    /// It checks the permissions once more (asking a fresh process about
+    /// Screen Recording if this one still says no), then requires Promise,
+    /// both permissions and the encryption key. On success it records the
+    /// time with the open-at-login choice and opens Try it. A click while
+    /// one is being checked does nothing.
+    @discardableResult
+    public func startRemembering(keyReady: Bool) async -> Bool {
+        guard !isStartingRemembering else { return false }
+        isStartingRemembering = true
+        defer { isStartingRemembering = false }
+        await refreshDeciding(askFreshProcess: true)
+        guard screen == .promise, bothGranted, keyReady else { return false }
+        do {
+            try consentStore.give(openAtLogin: openAtLogin)
+        } catch {
+            consentFailure = .notSaved
+            return false
+        }
+        consentFailure = nil
+        consentGivenAtUs = Self.microseconds(now())
+        move(to: .tryIt)
+        return true
+    }
+
+    public func dismissConsentFailure() {
+        consentFailure = nil
+    }
+
+    static func microseconds(_ date: Date) -> UInt64 {
+        UInt64(max(0, date.timeIntervalSince1970 * 1_000_000))
+    }
+
+    // MARK: - Permission rows
+
+    public func rowState(_ surface: PermissionSurface) -> PermissionRowState {
+        let permission = permission(for: surface)
+        if permission.status == .granted { return .granted }
+        let row = rows[surface] ?? RowRecord()
+        if row.waiting { return .waiting }
+        if row.asked || permission.status == .denied { return .needsHelp }
+        return .idle
+    }
+
+    /// A row's "Allow" is off while it is on, and while the other row waits
+    /// for System Settings.
+    public func canRequest(_ surface: PermissionSurface) -> Bool {
+        guard rowState(surface) != .granted else { return false }
+        return !Self.rowSurfaces.contains { $0 != surface && rowState($0) == .waiting }
+    }
+
+    /// True once the person has come back twice and found the row still off.
+    public func offersAskAgain(_ surface: PermissionSurface) -> Bool {
+        rowState(surface) == .needsHelp
+            && (rows[surface]?.failedReturns ?? 0) >= Self.failedReturnsBeforeAskAgain
+    }
+
+    /// "Allow": macOS's prompt for the permission, and nothing else. The
+    /// row waits until the person comes back.
+    public func requestPermission(_ surface: PermissionSurface) {
+        guard canRequest(surface) else { return }
+        markWaiting(surface)
+        permission(for: surface).requestPrompt()
+        refreshPermissions()
+    }
+
+    /// "Open System Settings": on a row that needs help, and on a waiting
+    /// row for when macOS showed no prompt.
+    public func openSettings(_ surface: PermissionSurface) {
+        guard rowState(surface) != .granted else { return }
+        markWaiting(surface)
+        permission(for: surface).openPrivacySettings()
+    }
+
+    /// "Ask Again": reset and ask macOS again, then wait for the person.
+    public func askAgain(_ surface: PermissionSurface) async {
+        // A fresh-process check still running started before the reset;
+        // let it answer first, so its answer cannot land after the reset.
+        while let running = freshCheck {
+            await running.value
+        }
+        guard rowState(surface) != .granted else { return }
+        markWaiting(surface)
+        await permission(for: surface).askAgain()
+    }
+
+    /// The window became active again. One refresh first, then each row
+    /// that was waiting decides: on, or needs help.
+    public func userReturned() async {
+        let returning = Self.rowSurfaces.filter { rows[$0]?.waiting == true }
+        await refreshDeciding(askFreshProcess: screenRecordingPermission.status != .granted)
+        for surface in returning {
+            var row = rows[surface] ?? RowRecord()
+            row.waiting = false
+            if permission(for: surface).status != .granted {
+                row.failedReturns += 1
+            }
+            rows[surface] = row
+        }
+    }
+
+    /// The quick check. It can turn a row on, never off.
+    public func refreshPermissions() {
+        _ = screenRecordingPermission.checkCurrent()
+        _ = accessibilityPermission.checkCurrent()
+        refreshed()
+    }
+
+    /// The poll, about once a second while Permissions shows. It may turn a
+    /// row off; a fresh process is asked about Screen Recording only while
+    /// that row waits, at most every 2.5 s.
+    public func refreshPermissionsAsync() async {
+        await refreshPermissionsAsync(outOfProcess: outOfProcessCheckIsDue())
+    }
+
+    /// The poll's refresh. While a fresh-process check runs, the poll does
+    /// not wait for it: this process answers for this tick.
+    func refreshPermissionsAsync(outOfProcess: Bool) async {
+        if outOfProcess, freshCheck == nil {
+            await startFreshCheck().value
+        } else {
+            _ = await screenRecordingPermission.checkCurrentAsync(outOfProcess: false)
+        }
+        _ = await accessibilityPermission.checkCurrentAsync(outOfProcess: false)
+        refreshed()
+    }
+
+    /// A refresh that may decide a row. Its Screen Recording answer comes
+    /// from a check that started after this call: a fresh-process check
+    /// already running may have started before the person turned the
+    /// permission on, so it is waited out, and with `askFreshProcess` a
+    /// new one runs.
+    private func refreshDeciding(askFreshProcess: Bool) async {
+        while let running = freshCheck {
+            await running.value
+        }
+        if askFreshProcess {
+            await startFreshCheck().value
+        } else {
+            _ = await screenRecordingPermission.checkCurrentAsync(outOfProcess: false)
+        }
+        _ = await accessibilityPermission.checkCurrentAsync(outOfProcess: false)
+        refreshed()
+    }
+
+    /// After every refresh: redraw, and when the second permission has
+    /// just turned on while Permissions shows, say so once.
+    private func refreshed() {
+        permissionRefreshCount += 1
+        let bothOn = bothGranted
+        if bothOn, !bothWereOn, screen == .permissions {
+            bothTurnedOnCount += 1
+        }
+        bothWereOn = bothOn
+    }
+
+    /// Start a fresh-process check of Screen Recording and keep it, so a
+    /// return can wait for it. Only call when none is running.
+    private func startFreshCheck() -> Task<Void, Never> {
+        lastOutOfProcessCheck = now()
+        let check = Task { [weak self] in
+            guard let self else { return }
+            _ = await self.screenRecordingPermission.checkCurrentAsync(outOfProcess: true)
+            self.freshCheck = nil
+        }
+        freshCheck = check
+        return check
+    }
+
+    private func outOfProcessCheckIsDue() -> Bool {
+        guard rowState(.screenRecording) == .waiting else { return false }
+        guard let last = lastOutOfProcessCheck else { return true }
+        return now().timeIntervalSince(last) >= Self.outOfProcessCheckInterval
+    }
+
+    private func markWaiting(_ surface: PermissionSurface) {
+        var row = rows[surface] ?? RowRecord()
+        row.waiting = true
+        row.asked = true
+        rows[surface] = row
+    }
+
+    private func permission(for surface: PermissionSurface) -> any TCCPermission {
+        switch surface {
+        case .screenRecording: screenRecordingPermission
+        case .accessibility: accessibilityPermission
+        }
+    }
+
+    // MARK: - For the panels
+
+    public func refreshFullDiskAccessStatus() async {
+        guard let fda = fdaPermission else { return }
+        let status = await fda.status()
+        if status != fullDiskAccessStatus {
+            fullDiskAccessStatus = status
+        }
+    }
+
+    @discardableResult
+    public func probeAutomation() -> TCCStatus {
+        automationPermission.checkCurrent()
     }
 }

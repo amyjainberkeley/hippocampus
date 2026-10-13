@@ -52,7 +52,7 @@ final class ScreenRecordingPermissionTests: XCTestCase {
         XCTAssertEqual(fixture.permission.status, .denied)
     }
 
-    func testAllowAsksFromAFreshProcessOnceAndOpensThePaneEachTime() {
+    func testTheRequestThatAlsoOpensThePaneAsksFromAFreshProcessOnce() {
         let fixture = ScreenRecordingFixture(inProcess: false, freshProcessSays: nil)
         fixture.permission.requestOrOpenSettings()
         fixture.permission.requestOrOpenSettings()
@@ -61,7 +61,28 @@ final class ScreenRecordingPermissionTests: XCTestCase {
         XCTAssertTrue(fixture.attempts.attempted)
     }
 
-    func testAllowWhenAlreadyOnAsksNothing() {
+    func testAllowRaisesOnlyMacOSsPromptFromAFreshProcess() {
+        let fixture = ScreenRecordingFixture(inProcess: false, freshProcessSays: nil)
+        fixture.permission.requestPrompt()
+        XCTAssertEqual(fixture.requester.requests, 1, "a fresh process asks macOS")
+        XCTAssertTrue(fixture.panesOpened.isEmpty, "System Settings stays closed until the person chooses it")
+        XCTAssertTrue(fixture.attempts.attempted)
+
+        // macOS asks once; asking again in this session opens the pane.
+        fixture.permission.requestPrompt()
+        XCTAssertEqual(fixture.requester.requests, 1)
+        XCTAssertEqual(fixture.panesOpened, ["Privacy_ScreenCapture"])
+    }
+
+    func testAllowRaisesNothingWhenItIsAlreadyOn() {
+        let fixture = ScreenRecordingFixture(inProcess: true, freshProcessSays: nil)
+        fixture.permission.requestPrompt()
+        XCTAssertEqual(fixture.requester.requests, 0)
+        XCTAssertTrue(fixture.panesOpened.isEmpty)
+        XCTAssertEqual(fixture.permission.status, .granted)
+    }
+
+    func testTheRequestThatAlsoOpensThePaneAsksNothingWhenOn() {
         let fixture = ScreenRecordingFixture(inProcess: true, freshProcessSays: nil)
         fixture.permission.requestOrOpenSettings()
         XCTAssertEqual(fixture.requester.requests, 0)
@@ -81,6 +102,7 @@ final class ScreenRecordingPermissionTests: XCTestCase {
         XCTAssertFalse(fixture.permission.grantLatched)
         XCTAssertEqual(fixture.permission.status, .notRequested)
         XCTAssertEqual(fixture.requester.requests, 1)
+        XCTAssertTrue(fixture.panesOpened.isEmpty, "the prompt only, as Allow")
     }
 
     // MARK: - Accessibility
@@ -103,7 +125,30 @@ final class ScreenRecordingPermissionTests: XCTestCase {
 
         await permission.askAgain()
         XCTAssertEqual(resetter.resets, [["reset", "Accessibility", "ai.hippocampus"]])
-        XCTAssertEqual(panes.value, ["Privacy_Accessibility"], "the prompt plus the pane, as Allow does")
+        XCTAssertEqual(panes.value, [], "the prompt only, as Allow")
+    }
+
+    func testAccessibilityAllowRaisesOnlyMacOSsPromptAndBlamesNothing() {
+        let prompts = MainBox(0)
+        let panes = MainBox<[String]>([])
+        let permission = RealAccessibilityPermission(
+            isTrusted: { false },
+            prompt: { prompts.value += 1; return false },
+            resetter: RecordingResetter(),
+            openPane: { panes.value.append($0) }
+        )
+        permission.requestPrompt()
+        XCTAssertEqual(prompts.value, 1)
+        XCTAssertTrue(panes.value.isEmpty, "System Settings stays closed until the person chooses it")
+        XCTAssertEqual(permission.status, .notRequested, "not off before the person answered macOS")
+    }
+
+    func testAccessibilityAllowTurnsTheRowOnWhenAlreadyTrusted() {
+        let permission = RealAccessibilityPermission(
+            isTrusted: { false }, prompt: { true }, resetter: RecordingResetter(), openPane: { _ in }
+        )
+        permission.requestPrompt()
+        XCTAssertEqual(permission.status, .granted)
     }
 }
 #endif

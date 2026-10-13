@@ -1,201 +1,127 @@
 import SwiftUI
-import OnboardingKit
-#if canImport(AppKit)
 import AppKit
-#endif
+import OnboardingKit
 
+/// Setup in four screens: Welcome, Permissions, Promise, Try it. Back on
+/// Permissions and Promise only, four dots, one primary button. Start
+/// Remembering on Promise is the only thing that records consent.
 struct OnboardingFlowView: View {
     @EnvironmentObject var flowVM: OnboardingFlowViewModel
     @EnvironmentObject var prepareBrainVM: PrepareBrainViewModel
-    @EnvironmentObject var retentionVM: RetentionViewModel
-    @State private var completionError: String?
+    /// How long text and screenshots are kept, for the Promise. A missing
+    /// retention file means 90 days; the real file is read at launch.
+    @State private var kept = OnboardingCopy.kept(policy: .ninetyDays, customDays: nil, needsReview: false)
+    /// A panel opened from Try it ("Add Extension"), shown in this window
+    /// until its Done.
+    @State private var panel: OnboardingPanel?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        VStack(spacing: 0) {
-            slideContent
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .id(flowVM.currentStep)
-                .transition(OnboardingDesign.Motion.entrance(reduceMotion: reduceMotion))
+        ZStack {
+            OnboardingWindow {
+                screen
+                    .id(flowVM.screen)
+                    .transition(OnboardingDesign.Motion.entrance(reduceMotion: reduceMotion))
+            } bar: {
+                BottomBar(
+                    screen: flowVM.screen,
+                    back: flowVM.canGoBack ? { flowVM.back() } : nil,
+                    primaryLabel: primaryLabel,
+                    primaryEnabled: primaryEnabled,
+                    primary: primary
+                )
+            }
+            // A panel covers the flow without ending it: Try it keeps
+            // reading underneath and is as it was after Done.
+            .opacity(panel == nil ? 1 : 0)
+            .disabled(panel != nil)
+            .accessibilityHidden(panel != nil)
 
-            navigationBar
+            if let panel {
+                OnboardingPanelView(panel: panel) { self.panel = nil }
+            }
         }
-        .background(OnboardingMaterialBackdrop(intensity: backdropIntensity))
         .animation(
             OnboardingDesign.Motion.resolve(OnboardingDesign.Motion.standard, reduceMotion: reduceMotion),
-            value: flowVM.currentStep
+            value: flowVM.screen
         )
-        .alert("Setup could not finish", isPresented: Binding(get: { completionError != nil }, set: { if !$0 { completionError = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: { Text(completionError ?? "") }
-    }
-
-    /// The material stays quiet on working steps and slightly more translucent
-    /// at the three bookends. There is no decorative color wash.
-    private var backdropIntensity: Double {
-        switch flowVM.currentStep {
-        case .welcome, .primaryHotkey, .done: return 0.95
-        default: return 0.4
+        .alert(OnboardingCopy.consentFailedTitle, isPresented: consentFailed) {
+            Button("OK", role: .cancel) { flowVM.dismissConsentFailure() }
+        } message: {
+            Text(OnboardingCopy.consentFailedMessage)
+        }
+        .task {
+            kept = await OnboardingCopy.kept(from: DiskRetentionStore())
         }
     }
 
     @ViewBuilder
-    private var slideContent: some View {
-        switch flowVM.currentStep {
+    private var screen: some View {
+        switch flowVM.screen {
         case .welcome:
             WelcomeSlide()
-        case .howItWorks:
-            HowItWorksSlide()
-        case .trust:
-            TrustSlide()
         case .permissions:
             PermissionsSlide()
-        case .primaryHotkey:
-            PrimaryHotkeySlide()
-        case .allowlist:
-            AllowlistSlide()
-        case .browserExtension:
-            BrowserExtensionSlide()
-        case .livePreview:
-            LivePreviewSlide()
-        case .retention:
-            RetentionSlide()
-        case .prepareBrain:
-            PrepareBrainSlide()
-        case .connectClaudeCode:
-            ConnectClaudeCodeSlide()
-        case .mcpServers:
-            McpServersSlide()
-        case .done:
-            DoneSlide()
+        case .promise:
+            PromiseSlide(kept: kept)
+        case .tryIt:
+            TryItSlide(
+                consentGivenAtUs: flowVM.consentGivenAtUs,
+                remembering: RememberingState(environment: ProcessInfo.processInfo.environment),
+                permissionsOn: { [flowVM] in
+                    (flowVM.screenRecordingPermission.status == .granted,
+                     flowVM.accessibilityPermission.status == .granted)
+                },
+                openSettings: { [flowVM] in flowVM.openSettings($0) },
+                openPanel: { panel = $0 }
+            )
         }
     }
 
-    // MARK: - Bottom navigation bar (Raycast/Cotypist layout)
-    //
-    // Back on the left, wayfinding dots in the center, the single accent
-    // CTA on the right. The dots stay centered via the flanking spacers
-    // even when Back is absent (Welcome).
-
-    private var navigationBar: some View {
-        HStack(spacing: OnboardingDesign.Space.lg) {
-            // Left — Back (subtle ghost), or nothing on the first slide.
-            ZStack {
-                if flowVM.canGoBack {
-                    Button("Back") { flowVM.back() }
-                        .keyboardShortcut(.cancelAction)
-                        .onboardingSecondary()
-                }
-            }
-            .frame(width: 96, alignment: .leading)
-
-            Spacer(minLength: 0)
-
-            ProgressDots(currentStep: flowVM.currentStep)
-
-            Spacer(minLength: 0)
-
-            // Right — the one primary action for this screen.
-            ZStack {
-                if flowVM.currentStep == .done {
-                    Button("Get Started") { finish() }
-                        .keyboardShortcut(.defaultAction)
-                        .onboardingPrimary()
-                        .disabled(!canFinish)
-                } else {
-                    navPrimaryButton
-                }
-            }
-            .frame(width: 160, alignment: .trailing)
-        }
-        .padding(.horizontal, OnboardingDesign.Space.xxl)
-        .padding(.vertical, OnboardingDesign.Space.lg)
-        .background(
-            reduceTransparency
-                ? AnyShapeStyle(Color(nsColor: .windowBackgroundColor))
-                : AnyShapeStyle(.ultraThinMaterial)
-        )
-        .overlay(alignment: .top) {
-            Divider()
-        }
-    }
-
-    /// Steps whose in-content action is the screen's real filled CTA (e.g.
-    /// PrepareBrain's "Download"). There, the nav "Continue" steps down to a
-    /// ghost so only one filled accent shows per screen (the one-CTA rule).
-    private var navPrimaryIsGhost: Bool {
-        flowVM.currentStep == .prepareBrain
-    }
-
-    @ViewBuilder
-    private var navPrimaryButton: some View {
-        if navPrimaryIsGhost {
-            Button(primaryLabel) { advance() }
-                .keyboardShortcut(.defaultAction)
-                .onboardingSecondary()
-                .disabled(!canUsePrimaryAction)
-                .opacity(canUsePrimaryAction ? 1 : 0.5)
-        } else {
-            Button(primaryLabel) { advance() }
-                .keyboardShortcut(.defaultAction)
-                .onboardingPrimary()
-                .disabled(!canUsePrimaryAction)
-                .opacity(canUsePrimaryAction ? 1 : 0.5)
-        }
-    }
-
-    private var canUsePrimaryAction: Bool {
-        flowVM.canAdvance && !(flowVM.currentStep == .retention && retentionVM.isSaving)
-            && (flowVM.currentStep != .prepareBrain || prepareBrainVM.canContinue)
-    }
-
-    private var canFinish: Bool {
-        prepareBrainVM.canContinue
-            && flowVM.screenRecordingPermission.status == .granted
-            && flowVM.accessibilityPermission.status == .granted
-            && !retentionVM.isSaving
-    }
-
-    /// Raycast labels its first step "Start Setup"; the rest are "Continue".
     private var primaryLabel: String {
-        flowVM.currentStep == .welcome ? "Start Setup" : "Continue"
-    }
-
-    private func advance() {
-        guard canUsePrimaryAction else { return }
-        if flowVM.currentStep == .retention {
-            Task { @MainActor in
-                await retentionVM.saveThen { flowVM.advance() }
-            }
-            return
+        switch flowVM.screen {
+        case .welcome: OnboardingCopy.getStarted
+        case .permissions: OnboardingCopy.continueLabel
+        case .promise: OnboardingCopy.promisePrimary(isReview: flowVM.isReview, keyState: prepareBrainVM.keyState)
+        case .tryIt: OnboardingCopy.done
         }
-        flowVM.advance()
     }
 
-    private func finish() {
-        Task { @MainActor in
-            // The quick check never turns a permission off; this one does.
-            await flowVM.refreshPermissionsAsync()
-            guard canFinish else { return }
-            do {
-                // Cross-process sentinel so Hippocampus.app starts remembering
-                // and skips its auto-spawn on the next launch. This flow has
-                // no open-at-login checkbox, so it records no.
-                try FileOnboardingConsentStore().give(openAtLogin: false)
-            } catch {
-                completionError = "Setup could not be saved. Check available disk space and try again."
-                return
-            }
-            UserDefaults.standard.set(true, forKey: "MCIOnboardingCompleted")
-            // Clear the resume-state file so a future re-launch (e.g. dev-tool
-            // wipe that touches the sentinel but not the state file) starts at
-            // `.welcome` instead of stuck at `.done`.
+    /// Start Remembering needs both permissions and the encryption key, and
+    /// is off while a click is being checked.
+    private var canStart: Bool {
+        prepareBrainVM.canContinue && flowVM.bothGranted && !flowVM.isStartingRemembering
+    }
+
+    private var primaryEnabled: Bool {
+        switch flowVM.screen {
+        case .welcome, .tryIt: true
+        case .permissions: flowVM.canAdvance
+        case .promise: flowVM.isReview ? flowVM.canAdvance : canStart
+        }
+    }
+
+    private func primary() {
+        switch flowVM.screen {
+        case .welcome, .permissions:
+            flowVM.advance()
+        case .promise where flowVM.isReview:
+            flowVM.advance()
+        case .promise:
+            // Consent: the one click that records it.
+            Task { await flowVM.startRemembering(keyReady: prepareBrainVM.canContinue) }
+        case .tryIt:
+            // Setup is done; a later run starts fresh.
             flowVM.clearResumeState()
-            #if canImport(AppKit)
             NSApplication.shared.terminate(nil)
-            #endif
         }
+    }
+
+    private var consentFailed: Binding<Bool> {
+        Binding(
+            get: { flowVM.consentFailure != nil },
+            set: { if !$0 { flowVM.dismissConsentFailure() } }
+        )
     }
 }

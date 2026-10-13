@@ -34,6 +34,15 @@ final class AskShortcutLabelTests: XCTestCase {
         XCTAssertEqual(AskKeyHint.allCases.map(\.pulses), [2, 1, 1, 1, 1])
     }
 
+    func testWelcomesKeycapsPressTheWayTheKeyIsPressed() {
+        // 0.6 s in; Shift twice again 0.3 s later, like a double press.
+        XCTAssertEqual(AskKeyHint.shiftTwice.pulseTimes, [0.6, 0.9])
+        for key in AskKeyHint.allCases where key != .shiftTwice {
+            XCTAssertEqual(key.pulseTimes, [0.6], "\(key)")
+        }
+        XCTAssertGreaterThan(AskKeyHint.pulseCycle, AskKeyHint.shiftTwice.pulseTimes.last ?? 0)
+    }
+
     // MARK: - What opens Ask right now (RULINGS X2)
 
     func testWhatTheAppPublishesWinsOverTheChosenKey() {

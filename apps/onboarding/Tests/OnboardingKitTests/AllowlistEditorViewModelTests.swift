@@ -372,12 +372,4 @@ final class AllowlistEditorViewModelTests: XCTestCase {
         let status = await fda.status()
         XCTAssertEqual(status, .notRequested)
     }
-
-    func testScaffoldTooltipIsSet() {
-        XCTAssertFalse(AllowlistEditorViewModel.deepHookScaffoldTooltip.isEmpty)
-        XCTAssertTrue(
-            AllowlistEditorViewModel.deepHookScaffoldTooltip.contains("Coming soon"),
-            "tooltip must signal deferred wire-up honestly"
-        )
-    }
 }

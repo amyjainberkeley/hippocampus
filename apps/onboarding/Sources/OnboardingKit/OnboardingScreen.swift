@@ -84,6 +84,13 @@ public enum OnboardingLaunch: Equatable, Sendable {
         return self
     }
 
+    /// Only the flow keeps its place in the resume file. A panel keeps its
+    /// state in memory, so opening one never moves where setup resumes.
+    public var usesResumeFile: Bool {
+        if case .flow = self { return true }
+        return false
+    }
+
     static func normalized(_ route: String) -> String {
         route.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }

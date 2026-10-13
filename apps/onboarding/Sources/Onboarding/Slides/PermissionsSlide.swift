@@ -1,425 +1,256 @@
 import SwiftUI
+import AppKit
 import OnboardingKit
 
-/// Ask for each permission in context. Required denials keep recovery controls
-/// visible; only optional Automation and Full Disk Access can be deferred.
+/// Screen 2. Both permissions show at once. "Allow" raises macOS's prompt
+/// only; the row then waits until the person comes back to this window,
+/// and one refresh decides whether it is on. Nothing moves a row on a
+/// timer. The window comes forward when the second one turns on.
 struct PermissionsSlide: View {
     @EnvironmentObject var flowVM: OnboardingFlowViewModel
     @EnvironmentObject var prepareBrainVM: PrepareBrainViewModel
-    @State private var isResetting = false
-    @State private var showResetFailedFallback = false
-    /// SwiftUI timer polled every 1 s while this slide is on screen.
-    /// Lets the slide auto-detect a Screen Recording / Accessibility
-    /// grant made by the user in System Settings without requiring
-    /// them to leave + re-enter the slide.
-    private let pollTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
-
-    private var screenRecording: any TCCPermission {
-        flowVM.screenRecordingPermission
-    }
-
-    private var accessibility: any TCCPermission {
-        flowVM.accessibilityPermission
-    }
 
     var body: some View {
-        SlideContainer {
-            VStack(spacing: OnboardingDesign.Space.xl) {
-                OnboardingTheme.title("macOS requires your permission")
-
-                // Describe the exact storage boundary before asking for the
-                // broadest permission: raw frames are transient, while a
-                // selected post-privacy subset may become encrypted evidence.
-                ReassuranceBanner(
-                    systemImage: "eye.slash.fill",
-                    message: "Raw screen frames are OCR'd in memory and discarded. Extracted text and selected encrypted visual keyframes stay on this Mac under your retention setting.",
-                    highlight: "selected encrypted visual keyframes"
-                )
-
-                // The Raycast "Ask anything" assurance strip — three short
-                // promises with a popover that spells each one out.
-                AssuranceRow(items: [
-                    AssuranceItem(
-                        icon: "desktopcomputer",
-                        title: "On-device",
-                        detail: "OCR and indexing run entirely on your Mac — no server ever sees your screen."
-                    ),
-                    AssuranceItem(
-                        icon: "icloud.slash",
-                        title: "No collection",
-                        detail: "Hippocampus does not upload captured memory. Connected AI tools may send requested context under their provider terms."
-                    ),
-                    AssuranceItem(
-                        icon: "lock.fill",
-                        title: "Encrypted",
-                        detail: "The text index is sealed with a 256-bit key that never leaves this Mac."
-                    ),
-                ])
-
-                // Pre-flight overview (PR #44) — kept at the top so the
-                // user still sees the map of all upcoming asks before
-                // the first OS dialog fires.
-                TCCPreflightOverview(
-                    screenRecordingStatus: screenRecording.status,
-                    accessibilityStatus: accessibility.status,
-                    automationStatus: flowVM.automationPermission.status,
-                    fullDiskAccessStatus: flowVM.fullDiskAccessStatus
-                )
-
-                // The choreographed sub-step. Renders one surface at a
-                // time; advances via `flowVM.recordPermissionOutcome`.
-                if let surface = flowVM.currentPermissionSurface {
-                    permissionCard(for: surface)
-                } else {
-                    choreographyCompleteSummary
-                }
-
-                Text("You can revoke any permission at any time in System Settings.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .onAppear {
-            flowVM.refreshPermissions()
-        }
+        PermissionsScreen(
+            intro: OnboardingCopy.permissionsBody(isReview: flowVM.isReview),
+            rows: OnboardingFlowViewModel.rowSurfaces.map(row),
+            perform: perform
+        )
+        // The poll: about once a second while this screen shows.
         .task {
-            await flowVM.refreshFullDiskAccessStatus()
+            while !Task.isCancelled {
+                await flowVM.refreshPermissionsAsync()
+                try? await Task.sleep(for: .seconds(1))
+            }
         }
         // Key setup starts here so the key is ready before consent;
         // it returns at once when the key is already ready.
         .task {
             await prepareBrainVM.generateKey()
         }
-        .onReceive(pollTimer) { _ in
-            // Cheap CGPreflightScreenCaptureAccess / AXIsProcessTrusted
-            // checks. Also opportunistically syncs the choreography
-            // outcome map when the user grants via System Settings.
-            flowVM.refreshPermissions()
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await flowVM.userReturned() }
+        }
+        // Both on, likely from System Settings: come back to the front.
+        .onChange(of: flowVM.bothTurnedOnCount) {
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.windows.filter(\.isVisible).forEach { $0.orderFrontRegardless() }
         }
     }
 
-    // MARK: - Per-surface card (one at a time)
-
-    @ViewBuilder
-    private func permissionCard(for surface: PermissionSurface) -> some View {
-        let copy = PermissionCopy.for(surface)
-        let currentStatus = statusFor(surface)
-        let outcome = flowVM.permissionResults[surface] ?? .pending
-
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                Image(systemName: copy.icon)
-                    .foregroundStyle(OnboardingDesign.Palette.accent)
-                    .font(.system(size: 18))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(copy.title)
-                        .font(.system(size: 16, weight: .semibold))
-                    Text(copy.requirementBadge)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text("Step \(flowVM.permissionSequenceIndex + 1) of \(OnboardingFlowViewModel.permissionSequence.count)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-            }
-
-            Text(copy.why)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            // Screen Recording and Accessibility jointly enforce the screen
-            // privacy boundary, so neither can be skipped. Automation and
-            // Full Disk Access remain optional and may be deferred.
-            if currentStatus != .granted && outcome != .denied {
-                HStack(spacing: 12) {
-                    Button {
-                        grantCurrent(surface: surface)
-                    } label: {
-                        Label("Grant \(copy.shortName)", systemImage: "checkmark.shield")
-                    }
-                    .onboardingPrimary()
-
-                    if surface == .automation || surface == .fullDiskAccess {
-                        Button("Skip for now") {
-                            flowVM.recordPermissionOutcome(surface, .skipped)
-                        }
-                        .onboardingSecondary()
-                    }
-                }
-            }
-
-            // Inline denial-recovery banner. Matches Cotypist pattern —
-            // banner, not modal; "Continue" advances without blocking.
-            // Screen Recording is the exception: it's hard-required, so
-            // we surface the Reset & Retry affordance from PR #44
-            // rather than a "Continue" that would silently drop the
-            // user into a broken app.
-            if outcome == .denied || (currentStatus == .denied && outcome == .pending) {
-                denialRecoveryBanner(for: surface, copy: copy)
-            }
-
-            // Post-grant confirmation.
-            if currentStatus == .granted {
-                HStack(spacing: 8) {
-                    Label("\(copy.shortName) granted", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .font(.system(size: 13, weight: .medium))
-                    Spacer()
-                    Button("Continue") {
-                        flowVM.recordPermissionOutcome(surface, .granted)
-                    }
-                    .onboardingSecondary()
-                }
-            }
-        }
-        .glassCard(padding: OnboardingDesign.Space.lg)
-        .frame(maxWidth: 520)
-    }
-
-    // MARK: - Denial recovery (inline, matches Cotypist)
-
-    @ViewBuilder
-    private func denialRecoveryBanner(for surface: PermissionSurface,
-                                       copy: PermissionCopy) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                    .font(.system(size: 14))
-                Text("\(copy.shortName) was denied")
-                    .font(.system(size: 13, weight: .semibold))
-            }
-            Text(copy.denialRecovery)
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 10) {
-                if surface == .screenRecording || surface == .accessibility {
-                    // Both screen permissions are hard-required. A Continue
-                    // path would complete onboarding into a capture pipeline
-                    // that correctly refuses to retain anything.
-                    Button {
-                        Task { await performResetAndRetry(surface: surface) }
-                    } label: {
-                        if isResetting {
-                            HStack(spacing: 6) {
-                                ProgressView().controlSize(.small)
-                                Text("Resetting...")
-                            }
-                        } else {
-                            Label("Reset & retry", systemImage: "arrow.clockwise")
-                        }
-                    }
-                    .onboardingPrimary()
-                    .disabled(isResetting)
-                } else {
-                    // Automation / FDA are soft-fail and can be revisited in
-                    // context when the corresponding integration is enabled.
-                    Button("Continue") {
-                        flowVM.recordPermissionOutcome(surface, .denied)
-                    }
-                    .onboardingPrimary()
-                }
-
-                Button("Open Privacy Settings") {
-                    openSettingsFor(surface: surface)
-                }
-                .onboardingSecondary()
-            }
-
-            if showResetFailedFallback
-                && (surface == .screenRecording || surface == .accessibility) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Still denied after reset.")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.red)
-                    // Cycle 8.54 copy audit — pared down the engineer-
-                    // only "MCICaptureHelper" bundle-name leak; users
-                    // still get the concrete fix path (Settings pane +
-                    // relaunch) without the internal bundle jargon.
-                    Text("Open System Settings → Privacy & Security → \(copy.shortName). Enable Hippocampus, then return here to continue setup.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .padding(OnboardingDesign.Space.md)
-        .background(
-            OnboardingDesign.Palette.attention.opacity(0.10),
-            in: RoundedRectangle(cornerRadius: OnboardingDesign.Radius.card)
+    private func row(_ surface: PermissionSurface) -> PermissionRowModel {
+        PermissionRowModel(
+            surface: surface,
+            key: AskKeyHint.current(),
+            state: flowVM.rowState(surface),
+            canAllow: flowVM.canRequest(surface),
+            offersAskAgain: flowVM.offersAskAgain(surface)
         )
     }
 
-    // MARK: - Choreography-complete summary
-
-    private var choreographyCompleteSummary: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "checkmark.seal.fill")
-                    .foregroundStyle(.green)
-                Text("Permissions set")
-                    .font(.system(size: 14, weight: .semibold))
-            }
-            ForEach(OnboardingFlowViewModel.permissionSequence, id: \.self) { surface in
-                let outcome = flowVM.permissionResults[surface] ?? .pending
-                if outcome != .notApplicable {
-                    HStack(spacing: 8) {
-                        Image(systemName: iconFor(outcome: outcome))
-                            .foregroundStyle(colorFor(outcome: outcome))
-                            .font(.system(size: 11))
-                        Text(PermissionCopy.for(surface).shortName)
-                            .font(.system(size: 12))
-                        Spacer()
-                        Text(labelFor(outcome: outcome))
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-        .glassCard(padding: OnboardingDesign.Space.md)
-        .frame(maxWidth: 520)
-    }
-
-    // MARK: - Actions
-
-    private func grantCurrent(surface: PermissionSurface) {
-        switch surface {
-        case .screenRecording:
-            screenRecording.requestOrOpenSettings()
-        case .accessibility:
-            accessibility.requestOrOpenSettings()
-        case .automation:
-            // No probe here — surprise-dialog #3 pattern. The Browser
-            // Extension slide fires the real Automation probe on Safari
-            // install click. For the choreography we just mark skipped
-            // so the sequence advances; the user will see the OS dialog
-            // in context on the Browser Extension slide.
-            flowVM.recordPermissionOutcome(surface, .skipped)
-        case .fullDiskAccess:
-            // FDA is contextual — deferred to the Allowlist slide when
-            // the user toggles a Messages / Mail deep-hook ON. Same
-            // rationale as Automation.
-            flowVM.recordPermissionOutcome(surface, .skipped)
-        }
-        flowVM.refreshPermissions()
-    }
-
-    private func openSettingsFor(surface: PermissionSurface) {
-        switch surface {
-        case .screenRecording: screenRecording.openPrivacySettings()
-        case .accessibility:   accessibility.openPrivacySettings()
-        case .automation:      flowVM.automationPermission.openPrivacySettings()
-        case .fullDiskAccess:  break
-        }
-    }
-
-    private func performResetAndRetry(surface: PermissionSurface) async {
-        isResetting = true
-        showResetFailedFallback = false
-        let target: any TCCPermission = surface == .screenRecording
-            ? screenRecording : accessibility
-        let succeeded = await target.resetAndRetry()
-        isResetting = false
-        flowVM.refreshPermissions()
-        if !succeeded {
-            showResetFailedFallback = true
-        }
-    }
-
-    // MARK: - Status readouts
-
-    private func statusFor(_ surface: PermissionSurface) -> TCCStatus {
-        switch surface {
-        case .screenRecording: screenRecording.status
-        case .accessibility:   accessibility.status
-        case .automation:      flowVM.automationPermission.status
-        case .fullDiskAccess:  .notRequested
-        }
-    }
-
-    private func iconFor(outcome: PermissionOutcome) -> String {
-        switch outcome {
-        case .granted: "checkmark.circle.fill"
-        case .denied: "xmark.circle.fill"
-        case .skipped: "forward.circle"
-        case .pending, .notApplicable: "circle"
-        }
-    }
-
-    private func colorFor(outcome: PermissionOutcome) -> Color {
-        switch outcome {
-        case .granted: .green
-        case .denied: .red
-        case .skipped: .orange
-        case .pending, .notApplicable: .secondary
-        }
-    }
-
-    private func labelFor(outcome: PermissionOutcome) -> String {
-        switch outcome {
-        case .granted: "Granted"
-        case .denied: "Denied"
-        case .skipped: "Skipped"
-        case .pending: "Pending"
-        case .notApplicable: "N/A"
+    private func perform(_ action: PermissionRowModel.Action, _ surface: PermissionSurface) {
+        switch action {
+        case .allow: flowVM.requestPermission(surface)
+        case .openSettings: flowVM.openSettings(surface)
+        case .askAgain: Task { await flowVM.askAgain(surface) }
         }
     }
 }
 
-/// Load-bearing per-surface copy for the choreography. Kept as a Slide-
-/// local view helper (not `OnboardingCopy`) so the marketing-facing
-/// strings there stay focused on marketing / migrator copy and slide
-/// copy stays with the slide.
-private struct PermissionCopy {
-    let title: String
-    let shortName: String
-    let icon: String
-    let requirementBadge: String
-    let why: String
-    let denialRecovery: String
+/// What one row shows.
+struct PermissionRowModel: Identifiable {
+    enum Action { case allow, openSettings, askAgain }
 
-    static func `for`(_ surface: PermissionSurface) -> PermissionCopy {
+    let surface: PermissionSurface
+    let name: String
+    let why: String
+    let note: String?
+    let state: PermissionRowState
+    let canAllow: Bool
+    let offersAskAgain: Bool
+
+    var id: PermissionSurface { surface }
+
+    init(
+        surface: PermissionSurface,
+        key: AskKeyHint,
+        state: PermissionRowState,
+        canAllow: Bool,
+        offersAskAgain: Bool,
+        macOSMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+    ) {
+        self.surface = surface
         switch surface {
         case .screenRecording:
-            return PermissionCopy(
-                title: "Screen Recording",
-                shortName: "Screen Recording",
-                icon: "rectangle.inset.filled.and.person.filled",
-                requirementBadge: "Required",
-                why: "Lets Hippocampus OCR what is on your screen. Raw frames are discarded; extracted text and selected encrypted keyframes are retained locally according to your settings.",
-                denialRecovery: "Screen Recording is required for Hippocampus to work. macOS won't re-prompt automatically — use Reset & Retry to clear the old TCC entry and try again."
-            )
+            name = OnboardingCopy.screenRecordingName
+            why = OnboardingCopy.screenRecordingWhy
+            note = OnboardingCopy.screenRecordingNote(macOSMajorVersion: macOSMajorVersion)
         case .accessibility:
-            return PermissionCopy(
-                title: "Accessibility",
-                shortName: "Accessibility",
-                icon: "accessibility",
-                requirementBadge: "Required",
-                why: "Lets Hippocampus identify the focused window and detect password fields before capture. It is required for the screen privacy boundary.",
-                denialRecovery: "Accessibility is required before screen capture can run safely. Use Reset & Retry, or grant it later from Privacy & Security settings."
-            )
-        case .automation:
-            return PermissionCopy(
-                title: "Automation (Safari)",
-                shortName: "Automation",
-                icon: "applescript",
-                requirementBadge: "Optional · only if you use Safari",
-                why: "Only if you plan to use the Safari extension — lets Hippocampus open Settings → Extensions with one click. If you use Chrome, Arc, or another browser, skip this step.",
-                denialRecovery: "That's OK — you can still install the Safari extension manually from Settings → Extensions. Grant later in Privacy & Security → Automation if you want the one-click flow."
-            )
-        case .fullDiskAccess:
-            return PermissionCopy(
-                title: "Full Disk Access",
-                shortName: "Full Disk Access",
-                icon: "externaldrive",
-                requirementBadge: "Optional · only for Messages / Mail",
-                why: "Only if you want Hippocampus to remember Messages or Mail conversations. Skip this if you only want browser + app-window capture. You can enable per-app deep-hooks later on the Allowlist step.",
-                denialRecovery: "That's OK — Hippocampus still remembers everything you see on screen. Messages / Mail deep-integration is off; you can toggle it later on the Allowlist step."
-            )
+            name = OnboardingCopy.accessibilityName
+            why = OnboardingCopy.accessibilityWhyBase
+            note = OnboardingCopy.accessibilityKeyNote(key)
         }
+        self.state = state
+        self.canAllow = canAllow
+        self.offersAskAgain = offersAskAgain
+    }
+
+    var symbol: String {
+        switch surface {
+        case .screenRecording: "rectangle.dashed"
+        case .accessibility: "accessibility"
+        }
+    }
+}
+
+/// The screen as drawn: the preview renderer builds it from fixture rows.
+struct PermissionsScreen: View {
+    let intro: String?
+    let rows: [PermissionRowModel]
+    let perform: (PermissionRowModel.Action, PermissionSurface) -> Void
+
+    var body: some View {
+        SlideContainer {
+            VStack(spacing: OnboardingDesign.Space.xl) {
+                ScreenHeader(title: OnboardingCopy.permissionsTitle, intro: intro)
+
+                VStack(spacing: OnboardingDesign.Space.md) {
+                    ForEach(rows) { row in
+                        PermissionRowView(row: row) { perform($0, row.surface) }
+                    }
+                }
+
+                Text(OnboardingCopy.permissionsFooter)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+struct PermissionRowView: View {
+    let row: PermissionRowModel
+    let perform: (PermissionRowModel.Action) -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: OnboardingDesign.Space.md) {
+            Image(systemName: row.symbol)
+                .font(.system(size: 18, weight: .regular))
+                .foregroundStyle(OnboardingDesign.Palette.accent)
+                .frame(width: 26, height: 22)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(row.name)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(OnboardingDesign.Palette.ink)
+                Text(row.why)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let note = row.note {
+                    Text(note)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                guidance
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            trailing
+        }
+        .padding(OnboardingDesign.Space.lg)
+        .glassCard(padding: 0)
+        .animation(.easeOut(duration: 0.18), value: row.state)
+    }
+
+    /// What to do next, under the row's own lines, while it is not on.
+    /// It takes the row's full width, so the lines above keep theirs.
+    @ViewBuilder
+    private var guidance: some View {
+        switch row.state {
+        case .waiting:
+            VStack(alignment: .leading, spacing: OnboardingDesign.Space.xs + 2) {
+                HStack(spacing: OnboardingDesign.Space.xs + 2) {
+                    ProgressView().controlSize(.small)
+                    Text(OnboardingCopy.waitingForSettings)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.primary)
+                }
+                Text(OnboardingCopy.waitingHint(row.surface))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                // For when macOS showed no prompt: the words the hint names.
+                Button(OnboardingCopy.openSettings) { perform(.openSettings) }
+                    .onboardingText(color: OnboardingDesign.Palette.accentText)
+            }
+            .padding(.top, OnboardingDesign.Space.sm)
+        case .needsHelp:
+            VStack(alignment: .leading, spacing: OnboardingDesign.Space.sm) {
+                (Text(OnboardingCopy.notOnYet).fontWeight(.semibold).foregroundStyle(.primary)
+                    + Text(" " + OnboardingCopy.needsHelpHint))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 480, alignment: .leading)
+                HStack(spacing: OnboardingDesign.Space.lg) {
+                    Button(OnboardingCopy.openSettings) { perform(.openSettings) }
+                        .buttonStyle(RowButtonStyle(filled: false))
+                    if row.offersAskAgain {
+                        Button(OnboardingCopy.askAgain) { perform(.askAgain) }
+                            .onboardingText(color: OnboardingDesign.Palette.accentText)
+                    }
+                }
+            }
+            .padding(.top, OnboardingDesign.Space.sm)
+        case .idle, .granted:
+            EmptyView()
+        }
+    }
+
+    /// "Allow" before asking, "On" after; nothing in between, where the
+    /// row's own lines say what to do.
+    @ViewBuilder
+    private var trailing: some View {
+        switch row.state {
+        case .idle:
+            Button(OnboardingCopy.allow) { perform(.allow) }
+                .buttonStyle(RowButtonStyle(filled: true))
+                .disabled(!row.canAllow)
+                .opacity(row.canAllow ? 1 : 0.45)
+        case .granted:
+            Label(OnboardingCopy.permissionOn, systemImage: "checkmark.circle.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(OnboardingDesign.Palette.success)
+                .padding(.top, 2)
+        case .waiting, .needsHelp:
+            EmptyView()
+        }
+    }
+}
+
+/// The compact button a row carries: filled for "Allow", outlined for
+/// "Open System Settings".
+struct RowButtonStyle: ButtonStyle {
+    let filled: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(filled ? Color.white : OnboardingDesign.Palette.ink)
+            .padding(.horizontal, OnboardingDesign.Space.md + 2)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(filled ? OnboardingDesign.Palette.accent : Color.white)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(filled ? Color.clear : Color.primary.opacity(0.18), lineWidth: 1)
+            )
+            .opacity(configuration.isPressed ? 0.8 : 1)
+            .fixedSize()
     }
 }

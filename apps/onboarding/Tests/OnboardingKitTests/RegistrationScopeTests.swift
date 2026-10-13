@@ -21,6 +21,6 @@ final class RegistrationScopeTests: XCTestCase {
         let report = try await DefaultClaudeCodeRegistrar(
             agentURL: URL(fileURLWithPath: "/usr/bin/true")
         ).register()
-        XCTAssertTrue(report.contains("not been verified"))
+        XCTAssertEqual(report, "Done, but Hippocampus couldn’t confirm it. Restart your AI tool and check.")
     }
 }
