@@ -238,6 +238,43 @@ final class MainSwiftWiringTests: XCTestCase {
         XCTAssertTrue(src.contains("exit(79)"), "SCStream startup failure must exit nonzero")
     }
 
+    /// Stop Sharing and an orphaned drain end the process without unwinding,
+    /// so the OCR worker's stop must be registered as before-exit work, the
+    /// parent-gone deadline armed on every way out of the lease wait, and a
+    /// clean drain reported in a content-free line.
+    func test_main_swift_ends_the_ocr_worker_and_an_orphaned_drain_with_the_process() throws {
+        let src = try Self.readMainSwift()
+
+        let prewarm = try XCTUnwrap(src.range(of: "paddle.prewarm()"))
+        let register = try XCTUnwrap(src.range(of: "HelperExit.registerBeforeExit { paddle.stop() }"),
+                                     "the OCR worker must end with the capture process")
+        XCTAssertLessThan(prewarm.lowerBound, register.lowerBound)
+
+        let leaseWait = try XCTUnwrap(src.range(of: "group.addTask { try await ParentLifetimeLease.waitForEOF() }"))
+        let arm = try XCTUnwrap(src.range(of: "defer { parentGoneDeadline.arm() }"),
+                                "nothing may keep the process alive once its parent is gone")
+        let next = try XCTUnwrap(src.range(of: "_ = try await group.next()"))
+        XCTAssertLessThan(leaseWait.lowerBound, arm.lowerBound)
+        XCTAssertLessThan(arm.lowerBound, next.lowerBound, "armed before the group waits on its tasks")
+
+        let drain = try XCTUnwrap(src.range(of: "try await captureRuntime.session.stop()"))
+        let clean = try XCTUnwrap(src.range(of: "\"mci-capture-helper: helper_health capture_stopped=clean\\n\""))
+        let drainFailedExit = try XCTUnwrap(src.range(of: "    exit(82)\n"))
+        XCTAssertLessThan(drain.lowerBound, clean.lowerBound)
+        XCTAssertLessThan(clean.lowerBound, drainFailedExit.lowerBound)
+
+        // Every exit after the worker starts stops it first.
+        for exit in [
+            "        HelperExit.runBeforeExit()\n        exit(78)",
+            "        HelperExit.runBeforeExit()\n        exit(79)",
+            "    HelperExit.runBeforeExit()\n    exit(80)",
+            "    HelperExit.runBeforeExit()\n    exit(5)",
+            "HelperExit.runBeforeExit()\nif captureDrainFailed {\n    exit(82)",
+        ] {
+            XCTAssertTrue(src.contains(exit), exit)
+        }
+    }
+
     func test_main_swift_wires_tcc_monitor_into_capture_session() throws {
         let src = try Self.readMainSwift()
 

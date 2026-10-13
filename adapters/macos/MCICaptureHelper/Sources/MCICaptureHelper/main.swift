@@ -483,6 +483,10 @@ if captureOptions.captureEnabled {
         // One warm worker for every frame; its models load during startup.
         let paddle = PaddleOCRRunner(executableURL: executable, persistent: true)
         paddle.prewarm()
+        // The worker is this process's child and must end with it. Every exit
+        // after this point stops it first, including Stop Sharing, a lost
+        // stream and an orphaned drain, which end without unwinding.
+        HelperExit.registerBeforeExit { paddle.stop() }
         ocrEngine = paddle
         ocrTimeoutMs = PaddleOCRRunner.timeoutMs
     } else {
@@ -526,6 +530,7 @@ if captureOptions.captureEnabled {
              + "capture is disabled: \(error.localizedDescription)\n")
                 .data(using: .utf8) ?? Data()
         )
+        HelperExit.runBeforeExit()
         exit(78)
     }
 
@@ -663,6 +668,7 @@ if let captureRuntime {
             "mci-capture-helper: live capture start failed: \(error)\n"
                 .data(using: .utf8) ?? Data()
         )
+        HelperExit.runBeforeExit()
         exit(79)
     }
     captureRuntime.background?.start()
@@ -675,14 +681,23 @@ do {
         "mci-capture-helper: readiness publication failed: \(error.localizedDescription)\n"
             .data(using: .utf8) ?? Data()
     )
+    HelperExit.runBeforeExit()
     exit(80)
 }
 
+// The end of lease input means the app quit or died. A live app bounds the
+// drain below itself (SIGTERM a second after it closes the lease); a dead one
+// cannot, so once the parent is gone this ends the process within 10 seconds.
+let parentGoneDeadline = ParentGoneDeadline()
 do {
     if args.parentLeaseStdin {
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask { try await loop.run() }
             group.addTask { try await ParentLifetimeLease.waitForEOF() }
+            // Armed on every way out, before the group waits for the heartbeat
+            // task: a heartbeat stuck on a full pipe must not keep this
+            // process alive once the parent is gone.
+            defer { parentGoneDeadline.arm() }
             _ = try await group.next()
             group.cancelAll()
         }
@@ -693,6 +708,7 @@ do {
     // graceful shutdown
 } catch {
     FileHandle.standardError.write("mci-capture-helper: loop error: \(error)\n".data(using: .utf8)!)
+    HelperExit.runBeforeExit()
     exit(5)
 }
 
@@ -708,7 +724,15 @@ if let captureRuntime {
         )
     }
     captureRuntime.contextProvider.stop()
+    if !captureDrainFailed {
+        FileHandle.standardError.write(
+            "mci-capture-helper: helper_health capture_stopped=clean\n"
+                .data(using: .utf8) ?? Data()
+        )
+    }
 }
+// Nothing this process started outlives it.
+HelperExit.runBeforeExit()
 if captureDrainFailed {
     exit(82)
 }

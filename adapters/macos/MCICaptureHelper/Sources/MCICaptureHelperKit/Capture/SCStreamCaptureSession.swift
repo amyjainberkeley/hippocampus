@@ -1816,6 +1816,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             await emitter?.stopAndDrain()
         }
         FileHandle.standardError.write(Data(diagnostic.healthLogLine.utf8))
+        // The production handler ends the process. What must not outlive it,
+        // such as the OCR worker, stops before the handler runs.
+        HelperExit.runBeforeExit()
         runtimeFailureHandler(diagnostic.failure)
     }
 
@@ -1874,8 +1877,20 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// would leave the supervisor with a live helper that cannot capture, so
     /// process death is the fail-closed truth signal. The claiming session
     /// already emitted its bounded diagnostic before invoking this handler.
+    ///
+    /// The registered before-exit work (stopping the OCR worker) runs first.
+    /// Stop Sharing then ends the process with `_exit(82)`: the focused stream
+    /// and each display's whole-screen stream report it on their own queues,
+    /// so two threads can arrive here at once. `exit` from two threads, or a
+    /// crash in an exit handler, could end with a status other than 82, which
+    /// the app reads as a crash and answers by starting capture again. Other
+    /// failures keep `exit`.
     @usableFromInline
     static func terminateHelper(for failure: CaptureRuntimeFailure) -> Never {
+        HelperExit.runBeforeExit()
+        if failure == .userStoppedCapture {
+            _exit(failure.helperExitStatus)
+        }
         exit(failure.helperExitStatus)
     }
 
