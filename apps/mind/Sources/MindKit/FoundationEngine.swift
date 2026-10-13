@@ -55,14 +55,19 @@ struct GEpisode {
 }
 
 // No advice: the day's account says what happened. `DayOutput` still carries
-// an empty `suggestion` for the agent.
+// an empty `suggestion` for the agent. The insights are a second request
+// that sees no sessions (`Prompts.dayFacts`).
 @Generable
 struct GDay {
-    @Guide(description: "One sentence naming the day's main work and the active time, with no judgement")
+    @Guide(description: "One sentence naming the day's main work, with no judgement")
     var headline: String
     @Guide(description: "One to four short sentences to the user as 'you', adding detail the headline does not have")
     var narrative: String
-    @Guide(description: "Up to three short sentences to the user as 'you', each restating a different duration, app or search from the facts", .maximumCount(3))
+}
+
+@Generable
+struct GDayFacts {
+    @Guide(description: "Up to three short sentences to the user as 'you', each restating a different fact as written", .maximumCount(3))
     var insights: [String]
 }
 
@@ -114,18 +119,20 @@ public struct FoundationEngine: MindEngine {
         LanguageModelSession(instructions: Prompts.instructions(userName: "")).prewarm()
     }
 
+    /// A reply cut off at `maximumResponseTokens` does not decode, and fails.
     private func generate<T: Generable>(
         _ type: T.Type,
         userName: String,
         prompt: String,
-        temperature: Double = 0.3
+        temperature: Double = 0.3,
+        maximumResponseTokens: Int? = nil
     ) async throws -> T {
         let session = LanguageModelSession(instructions: Prompts.instructions(userName: userName))
         do {
             let response = try await session.respond(
                 to: prompt,
                 generating: type,
-                options: GenerationOptions(temperature: temperature)
+                options: GenerationOptions(temperature: temperature, maximumResponseTokens: maximumResponseTokens)
             )
             return response.content
         } catch let error as LanguageModelSession.GenerationError {
@@ -160,9 +167,28 @@ public struct FoundationEngine: MindEngine {
         return EpisodeOutput(title: result.title, surface: result.surface, beneath: result.beneath)
     }
 
+    /// The account is asked for up to three times. On a day with little in
+    /// it, the model can repeat one sentence until its window is full, about
+    /// 50 s; cut off at 300 tokens, that reply fails in seconds. An account
+    /// that states a length is asked for again too (`DayReply`).
     public func day(_ input: DayInput) async throws -> DayOutput {
-        let result = try await generate(GDay.self, userName: input.userName, prompt: Prompts.day(input), temperature: 0.4)
-        return DayOutput(headline: result.headline, narrative: result.narrative, insights: result.insights)
+        let prompt = Prompts.day(input)
+        for _ in 1...3 {
+            let written: GDay
+            do {
+                written = try await generate(GDay.self, userName: input.userName, prompt: prompt,
+                                             temperature: 0.4, maximumResponseTokens: 300)
+            } catch MindError.failed {
+                continue
+            }
+            guard let account = DayReply.account(headline: written.headline, narrative: written.narrative, shown: prompt) else { continue }
+            // Insights are optional, so the account stands without them.
+            let facts = try? await generate(GDayFacts.self, userName: input.userName, prompt: Prompts.dayFacts(input),
+                                            maximumResponseTokens: 300)
+            return DayOutput(headline: account.headline, narrative: account.narrative,
+                             insights: DayReply.insights(facts?.insights ?? [], facts: Prompts.dayFactLines(input.facts)))
+        }
+        throw MindError.failed
     }
 
     public func answer(_ input: AnswerInput) async throws -> AnswerOutput {

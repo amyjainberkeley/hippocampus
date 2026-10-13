@@ -95,8 +95,8 @@ public struct DayInput: Codable, Sendable, Equatable {
     public var facts: String
     /// Episode titles and summaries, in order.
     public var episodes: [String]
-    /// What the user model holds. Still decoded, but the day's prompt leaves
-    /// it out (`Prompts.day`).
+    /// What the user model holds. Still decoded, but the day's prompts leave
+    /// it out (`Prompts.day`, `Prompts.dayFacts`).
     public var propositions: [String]
     public init(userName: String, facts: String, episodes: [String], propositions: [String]) {
         self.userName = userName; self.facts = facts; self.episodes = episodes; self.propositions = propositions

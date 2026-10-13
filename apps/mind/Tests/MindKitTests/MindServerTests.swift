@@ -131,17 +131,66 @@ final class MindServerTests: XCTestCase {
     }
 
     func testTheDayPromptAsksForTheWorkInOrderAndNothingCut() {
-        let prompt = Prompts.day(DayInput(userName: "Amy", facts: "Active at the computer: 5 h 30 min.",
-                                          episodes: ["Pricing the Team plan"], propositions: []))
-        for cut in ["suggest", "advice", "tomorrow", "broke", "fragmented", "hesitat"] {
-            XCTAssertFalse(prompt.lowercased().contains(cut), cut)
+        let input = DayInput(userName: "Amy", facts: "Active at the computer: 5 h 30 min.\nSearches (1): \"team plan pricing\".",
+                             episodes: ["14:02–14:31 Pricing the Team plan"], propositions: [])
+        for prompt in [Prompts.day(input), Prompts.dayFacts(input)] {
+            for cut in ["suggest", "advice", "tomorrow", "broke", "fragmented", "hesitat"] {
+                XCTAssertFalse(prompt.lowercased().contains(cut), cut)
+            }
         }
+        let prompt = Prompts.day(input)
         XCTAssertTrue(prompt.contains("Write every sentence to Amy as \"you\", and refer to anyone else by name."))
-        XCTAssertTrue(prompt.contains("Use only the facts and sessions below"))
-        XCTAssertTrue(prompt.contains("Say what they worked on, in order and for how long, using the session titles, and what they looked up."))
-        XCTAssertTrue(prompt.contains("Be specific: times, durations, apps, searches."))
-        XCTAssertTrue(prompt.contains("Sessions:\n- Pricing the Team plan\n"))
-        XCTAssertTrue(prompt.hasSuffix("Facts:\nActive at the computer: 5 h 30 min."))
+        XCTAssertTrue(prompt.contains("Use only the sessions and facts below"))
+        XCTAssertTrue(prompt.contains("Say what they worked on, in order, using the session titles and their times, and what they looked up."))
+        XCTAssertTrue(prompt.contains("Sessions:\n- 14:02–14:31 Pricing the Team plan\n"))
+        XCTAssertTrue(prompt.hasSuffix("Facts:\nSearches (1): \"team plan pricing\"."))
+    }
+
+    func testNoSessionIsGivenALength() throws {
+        // A session line holds only clock times. Asked "for how long", with
+        // the day's totals beside the sessions, the model wrote "You worked
+        // on the invoice list for 2 hours and 15 minutes" (the Code total)
+        // and made other lengths up. The account now sees no totals, and the
+        // insights that restate them see no sessions.
+        let facts = [
+            "Active at the computer: 5 h 30 min.",
+            "First activity 09:12, last 17:40.",
+            "By kind of work: Code 2 h 15 min, Writing 1 h 10 min, Communication 50 min.",
+            "By app: Xcode 2 h 15 min, Notes 1 h 10 min, Slack 50 min.",
+            "Focus blocks: 09:40–11:10 code in Xcode.",
+            "Searches (2): \"swiftui list selection\", \"sqlite fts5 bm25\".",
+        ]
+        let input = DayInput(userName: "Sam", facts: facts.joined(separator: "\n"), episodes: [
+            "09:40–10:10 Invoice list in SwiftUI: You were building the invoice list view.",
+            "14:02–14:31 Pricing the Team plan: You were settling the Team plan price before the beta.",
+        ], propositions: [])
+        let account = Prompts.day(input)
+        XCTAssertFalse(account.contains("how long") || account.contains("duration"))
+        XCTAssertTrue(account.contains("Never give a session a length, and never work one out from times."))
+        XCTAssertTrue(account.hasSuffix("Facts:\nFirst activity 09:12, last 17:40.\nSearches (2): \"swiftui list selection\", \"sqlite fts5 bm25\"."),
+                      "no totals beside the sessions")
+        let totals = Prompts.dayFacts(input)
+        XCTAssertTrue(totals.contains("Restate them to Sam as \"you\". Keep each one as written and add nothing to it."))
+        XCTAssertTrue(totals.hasSuffix("Facts:\n" + facts.joined(separator: "\n")))
+        XCTAssertFalse(totals.contains("Invoice list") || totals.contains("Team plan"), "no session beside the totals")
+        XCTAssertEqual(try properties(of: GDay.self)["headline"]?["description"] as? String,
+                       "One sentence naming the day's main work, with no judgement")
+        XCTAssertEqual(try properties(of: GDayFacts.self)["insights"]?["description"] as? String,
+                       "Up to three short sentences to the user as 'you', each restating a different fact as written")
+    }
+
+    func testTheDayAsksOnlyForWhatItHolds() {
+        // Asked what they looked up on a day with no searches, the model
+        // made searches up, once in a loop.
+        let noSearches = Prompts.day(DayInput(userName: "Sam", facts: "First activity 13:10, last 15:40.", episodes: [
+            "13:20–13:44 Launch notes for the beta: You were drafting the beta announcement in Notes.",
+        ], propositions: []))
+        XCTAssertTrue(noSearches.contains("Say what they worked on, in order, using the session titles and their times. Never"))
+        XCTAssertFalse(noSearches.contains("looked up"))
+        let noSessions = Prompts.day(DayInput(userName: "Sam", facts: "Searches (1): \"eurostar luggage rules\".",
+                                              episodes: [], propositions: []))
+        XCTAssertTrue(noSessions.contains("Sessions. Say what they looked up. Never"))
+        XCTAssertFalse(noSessions.contains("worked on"))
     }
 
     func testTheDayPromptLeavesOutHowOftenAppsChanged() {
@@ -155,39 +204,41 @@ final class MindServerTests: XCTestCase {
             "Most fragmented hour: 15:00 with 48 switches.",
             "Searches (1): \"team plan pricing\".",
         ].joined(separator: "\n")
-        let prompt = Prompts.day(DayInput(userName: "Sam", facts: facts, episodes: [
+        let input = DayInput(userName: "Sam", facts: facts, episodes: [
             "13:20–13:44 Launch notes for the beta: You were drafting the beta announcement in Notes.",
-        ], propositions: []))
-        for cut in ["switch", "fragmented", "no stretch"] {
-            XCTAssertFalse(prompt.lowercased().contains(cut), cut)
+        ], propositions: [])
+        for prompt in [Prompts.day(input), Prompts.dayFacts(input)] {
+            for cut in ["switch", "fragmented", "no stretch"] {
+                XCTAssertFalse(prompt.lowercased().contains(cut), cut)
+            }
         }
-        XCTAssertTrue(prompt.hasSuffix("Facts:\nActive at the computer: 1 h 5 min.\nBy app: Slack 35 min, Notes 30 min.\nSearches (1): \"team plan pricing\"."))
+        XCTAssertTrue(Prompts.day(input).hasSuffix("Facts:\nSearches (1): \"team plan pricing\"."))
+        XCTAssertTrue(Prompts.dayFacts(input).hasSuffix("Facts:\nActive at the computer: 1 h 5 min.\nBy app: Slack 35 min, Notes 30 min.\nSearches (1): \"team plan pricing\"."))
     }
 
     func testADayNamesOnlyItsOwnSessionsAndIsNotPadded() throws {
-        let prompt = Prompts.day(DayInput(userName: "Sam", facts: "Active at the computer: 1 h 5 min.", episodes: [
+        let input = DayInput(userName: "Sam", facts: "First activity 13:10, last 15:40.", episodes: [
             "13:20–13:44 Launch notes for the beta: You were drafting the beta announcement in Notes.",
             "13:50–14:00 Invoice list: Nothing notable.",
-        ], propositions: ["Sam is setting per-seat pricing for the Team plan with Priya."]))
+        ], propositions: ["Sam is setting per-seat pricing for the Team plan with Priya."])
+        let prompt = Prompts.day(input)
         XCTAssertTrue(prompt.contains("name only work listed under Sessions."))
         XCTAssertTrue(prompt.contains("Say each thing once"))
-        XCTAssertFalse(prompt.contains("per-seat"), "what Hippocampus believes about Sam is not the day's work")
+        for written in [prompt, Prompts.dayFacts(input)] {
+            XCTAssertFalse(written.contains("per-seat"), "what Hippocampus believes about Sam is not the day's work")
+        }
         XCTAssertTrue(prompt.contains("in Notes.\n- 13:50–14:00 Invoice list\n\nFacts:"), "no placeholder to repeat")
-        let empty = Prompts.day(DayInput(userName: "Sam", facts: "f", episodes: [], propositions: ["Sam writes Rust."]))
-        XCTAssertTrue(empty.hasSuffix("Sessions:\nNone.\n\nFacts:\nf"), empty)
-        let day = try properties(of: GDay.self)
-        XCTAssertEqual(day["narrative"]?["description"] as? String,
+        let empty = Prompts.day(DayInput(userName: "Sam", facts: "Active at the computer: 20 min.", episodes: [], propositions: ["Sam writes Rust."]))
+        XCTAssertTrue(empty.hasSuffix("Sessions:\nNone.\n\nFacts:\nNone."), empty)
+        XCTAssertEqual(try properties(of: GDay.self)["narrative"]?["description"] as? String,
                        "One to four short sentences to the user as 'you', adding detail the headline does not have")
-        // Asked for a time each, the model made up sessions to fill a thin day.
-        XCTAssertEqual(day["insights"]?["description"] as? String,
-                       "Up to three short sentences to the user as 'you', each restating a different duration, app or search from the facts")
     }
 
     func testTheDayAccountIsAskedForNoSuggestionAndAtMostThreeInsights() throws {
-        let day = try properties(of: GDay.self)
-        XCTAssertEqual(Set(day.keys), ["headline", "narrative", "insights"])
-        XCTAssertEqual(day["insights"]?["maxItems"] as? Int, 3)
-        XCTAssertNil(day["insights"]?["minItems"], "a thin day is not padded")
+        XCTAssertEqual(Set(try properties(of: GDay.self).keys), ["headline", "narrative"])
+        let insights = try XCTUnwrap(properties(of: GDayFacts.self)["insights"])
+        XCTAssertEqual(insights["maxItems"] as? Int, 3)
+        XCTAssertNil(insights["minItems"], "a thin day is not padded")
     }
 
     func testADayReplyStillCarriesTheSuggestionKeyAlwaysEmpty() async throws {
@@ -205,6 +256,7 @@ final class MindServerTests: XCTestCase {
             Prompts.propose(ProposeInput(userName: "Amy", observation: observation, known: [])),
             Prompts.episode(EpisodeInput(userName: "Amy", observation: observation)),
             Prompts.day(DayInput(userName: "Amy", facts: observation, episodes: [], propositions: [])),
+            Prompts.dayFacts(DayInput(userName: "Amy", facts: observation, episodes: [], propositions: [])),
         ]
         for prompt in prompts {
             for word in ["stuck", "hesitat", "attention", "focus"] {
@@ -330,6 +382,27 @@ final class FoundationEngineLiveProbe: XCTestCase {
         let written = ([day.headline, day.narrative] + day.insights).joined(separator: " ").lowercased()
         for cut in ["fragmented", "per-seat"] {
             XCTAssertFalse(written.contains(cut), cut)
+        }
+        // A full day. The invoice list ran 30 + 30 min and the Team plan 29,
+        // which no line states, so no sentence may give either a length.
+        let full = try await engine.day(DayInput(userName: "Sam", facts: [
+            "Active at the computer: 5 h 30 min.",
+            "First activity 09:12, last 17:40.",
+            "By kind of work: Code 2 h 15 min, Writing 1 h 10 min, Communication 50 min.",
+            "By app: Xcode 2 h 15 min, Notes 1 h 10 min, Slack 50 min.",
+            "Focus blocks: 09:40–11:10 code in Xcode.",
+            "App switches: 212 (38 per active hour).",
+            "Most fragmented hour: 15:00 with 64 switches.",
+            "Searches (2): \"swiftui list selection\", \"sqlite fts5 bm25\".",
+        ].joined(separator: "\n"), episodes: [
+            "09:40–10:10 Invoice list in SwiftUI: You were building the invoice list view.",
+            "10:10–10:40 Invoice list in SwiftUI: Nothing notable.",
+            "14:02–14:31 Pricing the Team plan: You were settling the Team plan price before the beta.",
+        ], propositions: []))
+        print("FULL DAY", full.headline, "|", full.narrative, "|", full.insights.joined(separator: " | "))
+        for sentence in [full.headline] + DayReply.sentences(full.narrative) + full.insights {
+            let session = ["invoice", "team plan", "pricing"].contains { sentence.lowercased().contains($0) }
+            XCTAssertFalse(session && !DayReply.minutes(in: sentence).isEmpty, sentence)
         }
         let suggested = try await engine.suggest(SuggestInput(
             userName: "Sam", now: "Safari, Plans and pricing | Stripe Docs\nPer-seat pricing. Tiered pricing.",

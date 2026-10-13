@@ -141,35 +141,65 @@ public enum Prompts {
         }.joined(separator: "\n")
     }
 
-    /// Fact lines the day's account leaves out: how often apps changed and
-    /// where the day broke up. The agent still sends them.
+    /// Fact lines the day leaves out: how often apps changed and where the
+    /// day broke up. The agent still sends them.
     static let cutDayFacts = ["App switches:", "Most fragmented hour:", "No stretch of"]
 
-    /// The day's account says only what happened that day. What Hippocampus
-    /// believes about the person is left out: the small model wrote it up as
-    /// the day's work.
+    /// The only fact lines the account reads beside the sessions: when the
+    /// day began and ended, and what was looked up. The others hold totals
+    /// for the day, a kind of work or an app. With them in view the small
+    /// model gave sessions those totals ("You worked on the invoice list for
+    /// 2 hours and 15 minutes"), so only `dayFacts` reads them.
+    static let accountFacts = ["First activity", "Searches ("]
+
+    /// The day's headline and narrative: what happened that day, in order.
+    /// What Hippocampus believes about the person is left out: the small
+    /// model wrote it up as the day's work. It is asked only for what the
+    /// day holds: asked what they looked up on a day with no searches, it
+    /// made searches up.
     public static func day(_ input: DayInput) -> String {
         let user = name(input.userName)
-        let facts = input.facts
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .filter { line in !cutDayFacts.contains { line.hasPrefix($0) } }
-            .joined(separator: "\n")
+        let facts = dayFactLines(input.facts).filter { line in accountFacts.contains { line.hasPrefix($0) } }
         let sessions = input.episodes.prefix(16).map { "- \(clip(session($0), 220))" }
+        let searched = facts.contains { $0.hasPrefix("Searches (") }
+        let asked = [
+            sessions.isEmpty ? nil : "what they worked on, in order, using the session titles and their times",
+            searched ? "what they looked up" : nil,
+        ].compactMap { $0 }
+        let say = asked.isEmpty ? "" : "Say \(asked.joined(separator: ", and ")). "
         return """
         Write \(user)'s account of their day on the computer. Write every \
         sentence to \(user) as "you", and refer to anyone else by name. Use \
-        only the facts and sessions below, and name only work listed under \
-        Sessions. Say what they worked on, in order and for how long, using \
-        the session titles, and what they looked up. Be specific: times, \
-        durations, apps, searches. No praise, no filler. Say each thing once, \
-        and do not repeat the headline in the narrative.
+        only the sessions and facts below, and name only work listed under \
+        Sessions. \(say)Never give a session a length, and never work one \
+        out from times. No praise, no filler. Say each thing once, and do not \
+        repeat the headline in the narrative.
 
         Sessions:
         \(sessions.isEmpty ? "None." : sessions.joined(separator: "\n"))
 
         Facts:
-        \(clip(facts, 2_500))
+        \(facts.isEmpty ? "None." : clip(facts.joined(separator: "\n"), 2_500))
         """
+    }
+
+    /// The day's insights: its facts said back to the person, with no
+    /// session in view, so each total stays with what it measures.
+    public static func dayFacts(_ input: DayInput) -> String {
+        let user = name(input.userName)
+        return """
+        Below are facts about \(user)'s day on the computer. Restate them to \
+        \(user) as "you". Keep each one as written and add nothing to it.
+
+        Facts:
+        \(clip(dayFactLines(input.facts).joined(separator: "\n"), 2_500))
+        """
+    }
+
+    static func dayFactLines(_ facts: String) -> [String] {
+        facts.split(separator: "\n")
+            .filter { line in !cutDayFacts.contains { line.hasPrefix($0) } }
+            .map(String.init)
     }
 
     public static func answer(_ input: AnswerInput) -> String {
