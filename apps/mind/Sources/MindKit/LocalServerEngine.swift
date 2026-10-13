@@ -102,9 +102,31 @@ public final class LocalServerEngine: MindEngine, @unchecked Sendable {
         }
         let usable = names.filter { !isCloud($0) && !isEmbedding($0) }
         for family in preferred {
-            if let name = usable.first(where: { $0.lowercased().contains(family) }) { return .success(name) }
+            if let name = usable.first(where: { isOf(family, $0) }) { return .success(name) }
         }
         return usable.first.map { .success($0) } ?? .failure(Refusal(reason: "local_model_unset"))
+    }
+
+    /// Whether `name` is one of `family`'s models, written as Ollama writes
+    /// it ("llama3.1:8b") or as LM Studio does ("meta-llama-3.1-8b-instruct",
+    /// "google/gemma-3-4b"). The family starts a word: "dolphin" is not phi.
+    static func isOf(_ family: String, _ name: String) -> Bool {
+        // LM Studio puts a hyphen between a family and its version.
+        let letters = Array(name.lowercased())
+        var joined = ""
+        for (index, letter) in letters.enumerated() {
+            let beforeVersion = "-_ ".contains(letter) && index > 0 && index + 1 < letters.count
+                && letters[index - 1].isLetter && letters[index + 1].isNumber
+            if !beforeVersion { joined.append(letter) }
+        }
+        var from = joined.startIndex
+        while let found = joined.range(of: family, range: from..<joined.endIndex) {
+            if found.lowerBound == joined.startIndex || !joined[joined.index(before: found.lowerBound)].isLetter {
+                return true
+            }
+            from = joined.index(after: found.lowerBound)
+        }
+        return false
     }
 
     /// Ollama names the models it runs on its own servers "…-cloud" or "…:cloud".

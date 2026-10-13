@@ -43,6 +43,15 @@ final class LocalServerEngineTests: XCTestCase {
         XCTAssertEqual(pick(["phi4:14b"]), "phi4:14b")
         // Ollama runs "-cloud" models on its own servers: never one of those.
         XCTAssertEqual(pick(["qwen3-coder:480b-cloud", "gpt-oss:120b-cloud", "glm-4.6:cloud", "llama3.1:8b"]), "llama3.1:8b")
+        // LM Studio's names, in the same order.
+        XCTAssertEqual(pick(["text-embedding-nomic-embed-text-v1.5", "google/gemma-3-4b", "meta-llama-3.1-8b-instruct"]),
+                       "meta-llama-3.1-8b-instruct")
+        XCTAssertEqual(pick(["microsoft/phi-4", "llama-3.2-3b-instruct", "qwen/qwen3-4b-2507"]), "qwen/qwen3-4b-2507")
+        XCTAssertEqual(pick(["microsoft/phi-4", "google/gemma-3-12b"]), "google/gemma-3-12b")
+        // A family starts a word: "dolphin" holds "phi" but is not one.
+        XCTAssertEqual(pick(["dolphin-llama3:8b", "phi3:mini"]), "phi3:mini")
+        XCTAssertFalse(LocalServerEngine.isOf("phi", "dolphin-mixtral:8x7b"))
+        XCTAssertTrue(LocalServerEngine.isOf("llama3.2", "hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M"))
         // With no family it knows, the first that can chat.
         XCTAssertEqual(pick(["nomic-embed-text:latest", "deepseek-r1:8b"]), "deepseek-r1:8b")
         XCTAssertEqual(LocalServerEngine.choose("", from: ["qwen3-coder:480b-cloud", "nomic-embed-text:latest"]),
