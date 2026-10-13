@@ -1,13 +1,13 @@
 import Combine
 import Foundation
 
-/// Holds only the selected event's text; canceled or superseded reads never publish.
+/// Holds only the selected event's reading; canceled or superseded reads never publish.
 @MainActor
 public final class EventTextViewModel: ObservableObject {
     public enum State: Equatable {
         case idle
         case loading
-        case loaded(EventText)
+        case loaded(EventReading)
         case unavailable
         case failed
     }
@@ -22,13 +22,15 @@ public final class EventTextViewModel: ObservableObject {
         selection == hit ? currentState : .idle
     }
 
-    public func text(for hit: Hit) -> EventText? {
-        guard case let .loaded(text) = state(for: hit), text.matches(hit) else { return nil }
-        return text
+    public func text(for hit: Hit) -> EventReading? {
+        guard case let .loaded(reading) = state(for: hit), reading.matches(hit) else { return nil }
+        return reading
     }
 
-    public func copyText(for hit: Hit) -> String {
-        text(for: hit)?.text ?? Formatters.stripContextHeader(hit.ocrTextSnippet)
+    /// What is shown, and what "Copy" copies: the reading, then the rest of the
+    /// window when it is shown. Never a header (RULINGS T14, T17).
+    public func copyText(for hit: Hit, includingRest: Bool = true) -> String {
+        text(for: hit)?.text(includingRest: includingRest) ?? ReadableText.guarded(hit.ocrTextSnippet)
     }
 
     public func copyTitle(for hit: Hit) -> String {
@@ -36,7 +38,9 @@ public final class EventTextViewModel: ObservableObject {
         return value.isTruncated ? "Copy Shown Text" : "Copy Full Text"
     }
 
-    public func load(hit: Hit, reader: BrainReader?) async {
+    /// Read the selected moment. With the search's text, the reading says
+    /// whether its words are only in the rest of the window.
+    public func load(hit: Hit, reader: BrainReader?, query: String? = nil) async {
         guard !Task.isCancelled else { return }
         let request = UUID()
         requestID = request
@@ -47,7 +51,7 @@ public final class EventTextViewModel: ObservableObject {
             return
         }
         do {
-            let value = try await reader.eventText(eventId: hit.id)
+            let value = try await reader.eventReading(eventId: hit.id, query: query)
             guard requestID == request else { return }
             guard !Task.isCancelled else {
                 currentState = .idle

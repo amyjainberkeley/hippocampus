@@ -39,8 +39,8 @@ public enum RecallTab: Int, Hashable, Sendable {
     /// Pinned by `BriefDeepLinkRoutingTests`.
     public static func from(deepLinkValue: String) -> RecallTab? {
         switch deepLinkValue.lowercased() {
-        case "today", "now", "daily": return .now
-        case "search":   return .search
+        case "today", "now", "daily", "overview": return .now
+        case "search", "ask": return .search
         case "timeline", "history": return .timeline
         case "episodes", "sessions": return .episodes
         case "privacy":  return .privacy
@@ -64,6 +64,61 @@ public enum RecallTab: Int, Hashable, Sendable {
         case .privacyDashboard: return .privacy
         default: return self
         }
+    }
+}
+
+/// The three places in the window (RULINGS G5).
+public enum RecallPlace: String, CaseIterable, Sendable {
+    case overview, ask, you
+}
+
+/// Where a `tab=` name opens the window: one of the three places, and what
+/// to show inside it (RULINGS X9). The app opens the window with `overview`,
+/// `ask` or `you`; every older name keeps working.
+public struct RecallRoute: Equatable, Sendable {
+    public let place: RecallPlace
+    /// Ask with an empty field, so History shows.
+    public let showsHistory: Bool
+    /// You, with what is remembered and the delete controls open.
+    public let showsPrivacy: Bool
+
+    public init(place: RecallPlace, showsHistory: Bool = false, showsPrivacy: Bool = false) {
+        self.place = place
+        self.showsHistory = showsHistory
+        self.showsPrivacy = showsPrivacy
+    }
+
+    /// Nil for a name the window does not know, so junk is ignored.
+    public init?(tab: String) {
+        switch tab.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "overview", "today", "now", "daily", "brief", "briefs":
+            self.init(place: .overview)
+        case "ask", "search":
+            self.init(place: .ask)
+        case "history", "timeline", "timeline-strip", "strip", "sessions", "episodes":
+            self.init(place: .ask, showsHistory: true)
+        case "you", "settings":
+            self.init(place: .you)
+        case "privacy", "dashboard", "privacy-dashboard":
+            self.init(place: .you, showsPrivacy: true)
+        default:
+            return nil
+        }
+    }
+
+    /// The route the app asked for at launch (`MCI_INITIAL_TAB`), if any.
+    public init?(environment: [String: String]) {
+        guard let tab = environment[RecallTab.initialTabEnvVar] else { return nil }
+        self.init(tab: tab)
+    }
+
+    /// The route in `hippocampus://recall?tab=…`, if any.
+    public init?(url: URL) {
+        guard url.scheme == "hippocampus", url.host == "recall",
+              let tab = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "tab" })?.value
+        else { return nil }
+        self.init(tab: tab)
     }
 }
 

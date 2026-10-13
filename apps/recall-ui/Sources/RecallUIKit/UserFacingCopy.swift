@@ -92,6 +92,41 @@ public enum UserFacingCopy {
     /// PrivacyDashboard fresh-brain empty-state title. "brain" →
     /// "memory" (see MCIEmptyState.noPrivacyEvents).
     public static let emptyPrivacyEventsFreshTitle = "Your memory is empty"
+
+    // The Ask key, named exactly as the menu-bar app names it
+    // (`HippocampusKit/SoloKeyTrigger.swift`, `AskShortcut.swift`), for when
+    // the app has not published what works now (RULINGS X2). The raw keys are
+    // the stored values of `ai.hippocampus.prefs.askKey`. With the key off,
+    // ⌃⇧Space still opens Ask (RULINGS G3).
+    public static let askKeyNames: [String: (label: String, phrase: String)] = [
+        "shiftTwice": ("⇧⇧", "Press Shift twice"),
+        "rightShift": ("right ⇧", "Tap right Shift"),
+        "rightCommand": ("right ⌘", "Tap right ⌘"),
+        "rightOption": ("right ⌥", "Tap right ⌥"),
+        "off": ("⌃⇧Space", "Press ⌃⇧Space"),
+    ]
+
+    /// The instruction for a key the window has no phrase for.
+    public static func askKeyPhrase(_ label: String) -> String {
+        "Press \(label)"
+    }
+
+    /// Who wrote a session's title, a note or the day's summary, as the
+    /// caption names it (RULINGS I11): Apple Intelligence for Apple's
+    /// on-device model, any other model by its own name. Nil when it was
+    /// measured, not written.
+    public static func writerName(_ writtenBy: String) -> String? {
+        switch writtenBy {
+        case "", "measured": nil
+        case "apple-foundation-models": "Apple Intelligence"
+        default: writtenBy
+        }
+    }
+
+    /// "Written on this Mac by {writer}" (RULINGS I11).
+    public static func writtenOnThisMac(by writtenBy: String) -> String? {
+        writerName(writtenBy).map { "Written on this Mac by \($0)" }
+    }
 }
 
 // MARK: - Copy-style validators (referenced by CopyStyleTests)

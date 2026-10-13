@@ -33,7 +33,12 @@ final class CopyStyleTests: XCTestCase {
         ("mcpAgentMissing", UserFacingCopy.mcpAgentMissing),
         ("mcpRegisterFailed", UserFacingCopy.mcpRegisterFailed),
         ("emptyPrivacyEventsFreshTitle", UserFacingCopy.emptyPrivacyEventsFreshTitle),
-    ]
+        ("askKeyPhrase", UserFacingCopy.askKeyPhrase("⌃⇧Space")),
+        ("writtenOnThisMac", UserFacingCopy.writtenOnThisMac(by: "apple-foundation-models") ?? ""),
+    ] + UserFacingCopy.askKeyNames.sorted { $0.key < $1.key }.flatMap { entry -> [(name: String, text: String)] in
+        [(name: "askKeyNames.\(entry.key).label", text: entry.value.label),
+         (name: "askKeyNames.\(entry.key).phrase", text: entry.value.phrase)]
+    }
 
     /// Rule 1 — no raw error codes.
     func testUserFacingCopyDoesNotLeakErrorCodes() {

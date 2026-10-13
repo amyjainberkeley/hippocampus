@@ -205,6 +205,43 @@ public final class FFIBrainReader: BrainReader, @unchecked Sendable {
         return try Self.decodeEventText(Data(bytes: raw, count: count), eventId: eventId)
     }
 
+    /// The reading the FFI makes (`mci_brain_ffi_event_reading`): cleaned,
+    /// split into `main` and `rest`, never the header or U+001E.
+    public func eventReading(eventId: UInt64, query: String?) async throws -> EventReading? {
+        try Task.checkCancellation()
+        guard let h = handle else {
+            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        }
+        let raw: UnsafeMutablePointer<CChar>? = if let query {
+            query.withCString { mci_brain_ffi_event_reading(h, eventId, $0) }
+        } else {
+            mci_brain_ffi_event_reading(h, eventId, nil)
+        }
+        guard let raw else {
+            throw BrainReaderError.queryFailed("Readable text unavailable")
+        }
+        defer { mci_brain_ffi_string_free(raw) }
+        try Task.checkCancellation()
+        let count = strnlen(raw, EventReading.maxJSONBytes + 1)
+        guard count <= EventReading.maxJSONBytes else {
+            throw BrainReaderError.decodeFailed("Invalid bounded event reading response")
+        }
+        return try Self.decodeEventReading(Data(bytes: raw, count: count), eventId: eventId)
+    }
+
+    static func decodeEventReading(_ data: Data, eventId: UInt64) throws -> EventReading? {
+        do {
+            let value = try JSONDecoder().decode(EventReading?.self, from: data)
+            guard value == nil || value?.eventId == eventId else {
+                throw BrainReaderError.decodeFailed("Invalid bounded event reading response")
+            }
+            return value
+        } catch {
+            // Decoder diagnostics must never echo stored content to callers or logs.
+            throw BrainReaderError.decodeFailed("Invalid bounded event reading response")
+        }
+    }
+
     static func decodeEventText(_ data: Data, eventId: UInt64) throws -> EventText? {
         do {
             guard data.count <= EventText.maxJSONBytes else {
@@ -506,6 +543,7 @@ struct HitWire: Decodable {
     let thumbnail_path: String?
     let source_kind: String?
 
+    /// List snippets reach a person: never with a header or U+001E (RULINGS T14).
     func toHit() -> Hit {
         Hit(
             eventId: event_id,
@@ -513,7 +551,7 @@ struct HitWire: Decodable {
             appBundleId: app_bundle_id,
             windowTitle: window_title,
             url: url,
-            ocrTextSnippet: ocr_text_snippet,
+            ocrTextSnippet: ReadableText.guarded(ocr_text_snippet),
             source: source,
             score: score,
             entities: entities ?? [],
@@ -681,7 +719,7 @@ struct TimelineEventWire: Decodable {
             eventId: event_id,
             tsUs: ts_us,
             appBundleId: app_bundle_id,
-            snippet: snippet,
+            snippet: ReadableText.guarded(snippet),
             thumbnailPath: thumbnail_path,
             sourceKind: source_kind
         )
@@ -714,39 +752,46 @@ struct SummaryStatsWire: Decodable {
 // invariant — see `tests/readonly_invariant.rs` for the allow-list.
 // ---------------------------------------------------------------------------
 
+// Every committed delete is reported through `MemoryDeletionSignal`, so the
+// window drops everything it made from the deleted moments, whichever screen
+// asked for the delete.
 extension FFIBrainReader: PrivacyMutator {
     public func deleteEvent(id: UInt64) async throws -> DeleteResult {
-        guard let h = handle else {
-            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        try await MemoryDeletionSignal.shared.reporting {
+            guard let h = handle else {
+                throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+            }
+            let payload = DeleteEventPayload(event_id: id)
+            let queryJsonData = try JSONEncoder().encode(payload)
+            guard let queryJsonString = String(data: queryJsonData, encoding: .utf8) else {
+                throw BrainReaderError.decodeFailed("FFIBrainReader: non-UTF8 delete payload")
+            }
+            let rawJson: UnsafeMutablePointer<CChar>? = queryJsonString.withCString { q in
+                mci_brain_ffi_delete_event(h, q)
+            }
+            guard let rawJson else {
+                throw Self.mutationError(Self.consumeLastError())
+            }
+            defer { mci_brain_ffi_string_free(rawJson) }
+            return try Self.decodeDeleteResult(rawJson)
         }
-        let payload = DeleteEventPayload(event_id: id)
-        let queryJsonData = try JSONEncoder().encode(payload)
-        guard let queryJsonString = String(data: queryJsonData, encoding: .utf8) else {
-            throw BrainReaderError.decodeFailed("FFIBrainReader: non-UTF8 delete payload")
-        }
-        let rawJson: UnsafeMutablePointer<CChar>? = queryJsonString.withCString { q in
-            mci_brain_ffi_delete_event(h, q)
-        }
-        guard let rawJson else {
-            throw Self.mutationError(Self.consumeLastError())
-        }
-        defer { mci_brain_ffi_string_free(rawJson) }
-        return try Self.decodeDeleteResult(rawJson)
     }
 
     public func deleteEventsInRange(
         startTsUs: UInt64,
         endTsUs: UInt64
     ) async throws -> DeleteResult {
-        guard let h = handle else {
-            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        try await MemoryDeletionSignal.shared.reporting {
+            guard let h = handle else {
+                throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+            }
+            guard let rawJson = mci_brain_ffi_delete_events_in_range(h, startTsUs, endTsUs)
+            else {
+                throw Self.mutationError(Self.consumeLastError())
+            }
+            defer { mci_brain_ffi_string_free(rawJson) }
+            return try Self.decodeDeleteResult(rawJson)
         }
-        guard let rawJson = mci_brain_ffi_delete_events_in_range(h, startTsUs, endTsUs)
-        else {
-            throw Self.mutationError(Self.consumeLastError())
-        }
-        defer { mci_brain_ffi_string_free(rawJson) }
-        return try Self.decodeDeleteResult(rawJson)
     }
 
     public func prepareWipe() async throws -> String {
@@ -770,17 +815,19 @@ extension FFIBrainReader: PrivacyMutator {
     }
 
     public func wipeBrain(token: String) async throws -> DeleteResult {
-        guard let h = handle else {
-            throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+        try await MemoryDeletionSignal.shared.reporting {
+            guard let h = handle else {
+                throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+            }
+            let rawJson: UnsafeMutablePointer<CChar>? = token.withCString { t in
+                mci_brain_ffi_wipe_brain(h, t)
+            }
+            guard let rawJson else {
+                throw Self.mutationError(Self.consumeLastError())
+            }
+            defer { mci_brain_ffi_string_free(rawJson) }
+            return try Self.decodeDeleteResult(rawJson)
         }
-        let rawJson: UnsafeMutablePointer<CChar>? = token.withCString { t in
-            mci_brain_ffi_wipe_brain(h, t)
-        }
-        guard let rawJson else {
-            throw Self.mutationError(Self.consumeLastError())
-        }
-        defer { mci_brain_ffi_string_free(rawJson) }
-        return try Self.decodeDeleteResult(rawJson)
     }
 
     private static func decodeDeleteResult(

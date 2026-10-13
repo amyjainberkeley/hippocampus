@@ -58,14 +58,14 @@ public struct ContextHandoffCommand: Equatable, Sendable {
         return Self(executableURL: agent, arguments: arguments)
     }
 
-    /// Resolve only an app-bundled sibling in production. An explicit path is
-    /// accepted solely in the already-gated development-key mode.
-    public static func make(
-        focus: String,
+    /// The bundled agent: only the app-bundled sibling in production. An
+    /// explicit path is accepted solely in the already-gated development-key
+    /// mode. Every command the window runs resolves the agent here.
+    public static func agentURL(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         recallExecutableURL: URL? = Bundle.main.executableURL,
         isExecutable: (URL) -> Bool = { FileManager.default.isExecutableFile(atPath: $0.path) }
-    ) throws -> Self {
+    ) throws -> URL {
         let explicitDevelopmentURL: URL? = if environment["MCI_DEVELOPMENT_FILE_KEY"] == "1",
                                               let path = environment["MCI_AGENT_PATH"],
                                               !path.isEmpty {
@@ -82,6 +82,22 @@ public struct ContextHandoffCommand: Equatable, Sendable {
         else {
             throw ContextHandoffError.agentUnavailable
         }
+        return executableURL
+    }
+
+    /// Resolve only an app-bundled sibling in production. An explicit path is
+    /// accepted solely in the already-gated development-key mode.
+    public static func make(
+        focus: String,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        recallExecutableURL: URL? = Bundle.main.executableURL,
+        isExecutable: (URL) -> Bool = { FileManager.default.isExecutableFile(atPath: $0.path) }
+    ) throws -> Self {
+        let executableURL = try agentURL(
+            environment: environment,
+            recallExecutableURL: recallExecutableURL,
+            isExecutable: isExecutable
+        )
 
         var arguments = ["context"]
         if let dbPath = environment["MCI_DB_PATH"], !dbPath.isEmpty {
@@ -117,12 +133,29 @@ public enum ContextHandoffExporter {
         return try await run(command: command)
     }
 
+    /// The only environment a child of the window gets: the memory's path,
+    /// the Keychain reference and the locale, with a fixed `PATH`. Key bytes
+    /// pass only in the development-key mode.
+    public static func childEnvironment(from parent: [String: String]) -> [String: String] {
+        let names = ["HOME", "TMPDIR", "LANG", "LC_ALL", "MCI_DB_PATH",
+            "MCI_DB_KEYCHAIN_SERVICE", "MCI_DB_KEYCHAIN_ACCOUNT", "MCI_DEVELOPMENT_FILE_KEY",
+            "MCI_DB_KEY_FILE", "MCI_EMBEDDER_DISABLED"]
+        var environment = parent.filter { names.contains($0.key) }
+        environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        if parent["MCI_DEVELOPMENT_FILE_KEY"] == "1" {
+            environment["MCI_DB_KEY_HEX"] = parent["MCI_DB_KEY_HEX"]
+        }
+        return environment
+    }
+
     /// Execute a local context command with a hard wall-clock bound.
     /// Timeout first requests a normal exit, then uses `SIGKILL` if the
-    /// bundled child does not honor the grace period.
+    /// bundled child does not honor the grace period. The child is listed in
+    /// `children` while it runs, so quitting the window stops it too.
     public static func run(
         command: ContextHandoffCommand,
-        timeoutSeconds: TimeInterval = defaultTimeoutSeconds
+        timeoutSeconds: TimeInterval = defaultTimeoutSeconds,
+        children: ChildProcesses = .shared
     ) async throws -> String {
         guard timeoutSeconds.isFinite, timeoutSeconds > 0 else {
             throw ContextHandoffError.timedOut
@@ -136,17 +169,9 @@ public enum ContextHandoffExporter {
             process.standardOutput = outputPipe
             process.standardError = FileHandle.nullDevice
             process.standardInput = FileHandle.nullDevice
-            let parent = ProcessInfo.processInfo.environment
-            let names = ["HOME", "TMPDIR", "LANG", "LC_ALL", "MCI_DB_PATH",
-                "MCI_DB_KEYCHAIN_SERVICE", "MCI_DB_KEYCHAIN_ACCOUNT", "MCI_DEVELOPMENT_FILE_KEY",
-                "MCI_DB_KEY_FILE", "MCI_EMBEDDER_DISABLED"]
-            process.environment = parent.filter { names.contains($0.key) }
-            process.environment?["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
-            if parent["MCI_DEVELOPMENT_FILE_KEY"] == "1" {
-                process.environment?["MCI_DB_KEY_HEX"] = parent["MCI_DB_KEY_HEX"]
-            }
+            process.environment = childEnvironment(from: ProcessInfo.processInfo.environment)
             do {
-                try process.run()
+                try children.run(process)
             } catch {
                 throw ContextHandoffError.launchFailed
             }

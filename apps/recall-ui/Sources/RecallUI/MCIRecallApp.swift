@@ -10,7 +10,15 @@ import SwiftUI
 /// feedback 2026-05-26). Same pattern as the OnboardingAppDelegate
 /// fix from PR #195.
 final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
+    /// The window ends with the app that opened it, and stops its children
+    /// first (RULINGS G7, G7a).
+    private var lifetime: ProcessLifetime?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        lifetime = ProcessLifetime { _ in
+            ChildProcesses.shared.terminateAll()
+            exit(0)
+        }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
@@ -54,6 +62,7 @@ final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Se
 
     func applicationWillTerminate(_ notification: Notification) {
         DistributedNotificationCenter.default().removeObserver(self)
+        ChildProcesses.shared.terminateAll()
     }
 
     @objc

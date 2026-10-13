@@ -1,0 +1,685 @@
+{
+  "date": "2026-10-12",
+  "sessions": [
+    {
+      "start_us": 1791821112000000,
+      "end_us": 1791822880000000,
+      "time": "09:05–09:34",
+      "title": "Invoices and morning messages",
+      "surface": "You matched supplier invoices against October orders, then replied in the shop channel.",
+      "beneath": "Nothing notable.",
+      "written_by": "apple-foundation-models",
+      "kind": "communication",
+      "kind_label": "Communication",
+      "segments": [
+        {
+          "start_us": 1791821112000000,
+          "end_us": 1791821620000000,
+          "app": "com.apple.mail",
+          "name": "Mail",
+          "title": "Invoice 2291 from Spokewise",
+          "host": null,
+          "activity": "reading",
+          "keys": 40,
+          "events": [
+            90100,
+            90101,
+            90102,
+            90103,
+            90104,
+            90105
+          ]
+        },
+        {
+          "start_us": 1791821620000000,
+          "end_us": 1791822290000000,
+          "app": "com.example.Ledgerly",
+          "name": "Ledgerly",
+          "title": "October invoices",
+          "host": null,
+          "activity": "typing a little",
+          "keys": 210,
+          "events": [
+            90106,
+            90107,
+            90108,
+            90109,
+            90110,
+            90111,
+            90112,
+            90113
+          ]
+        },
+        {
+          "start_us": 1791822290000000,
+          "end_us": 1791822570000000,
+          "app": "com.apple.mail",
+          "name": "Mail",
+          "title": "Invoice 2291 from Spokewise",
+          "host": null,
+          "activity": "typing",
+          "keys": 380,
+          "events": [
+            90114,
+            90115,
+            90116,
+            90117
+          ]
+        },
+        {
+          "start_us": 1791822570000000,
+          "end_us": 1791822880000000,
+          "app": "com.tinyspeck.slackmacgap",
+          "name": "Slack",
+          "title": "#shop-ops",
+          "host": null,
+          "activity": "typing",
+          "keys": 260,
+          "events": [
+            90118,
+            90119,
+            90120,
+            90121,
+            90122
+          ]
+        }
+      ],
+      "searches": []
+    },
+    {
+      "start_us": 1791823265000000,
+      "end_us": 1791825055000000,
+      "time": "09:41–10:10",
+      "title": "Pricing page copy",
+      "surface": "You wrote the plan descriptions in Notes and checked them against the Figma layout.",
+      "beneath": "You rewrote the plan names twice and kept the shortest version.",
+      "written_by": "apple-foundation-models",
+      "kind": "writing",
+      "kind_label": "Writing",
+      "segments": [
+        {
+          "start_us": 1791823265000000,
+          "end_us": 1791823950000000,
+          "app": "com.apple.Notes",
+          "name": "Notes",
+          "title": "Pricing page draft",
+          "host": null,
+          "activity": "typing",
+          "keys": 820,
+          "events": [
+            90123,
+            90124,
+            90125,
+            90126,
+            90127,
+            90128,
+            90129,
+            90130
+          ]
+        },
+        {
+          "start_us": 1791823950000000,
+          "end_us": 1791824430000000,
+          "app": "com.figma.Desktop",
+          "name": "Figma",
+          "title": "Trailhead pricing v3",
+          "host": null,
+          "activity": "clicking through",
+          "keys": 30,
+          "events": [
+            90131,
+            90132,
+            90133,
+            90134,
+            90135,
+            90136
+          ]
+        },
+        {
+          "start_us": 1791824430000000,
+          "end_us": 1791824860000000,
+          "app": "com.apple.Notes",
+          "name": "Notes",
+          "title": "Pricing page draft",
+          "host": null,
+          "activity": "typing",
+          "keys": 510,
+          "events": [
+            90137,
+            90138,
+            90139,
+            90140,
+            90141
+          ]
+        },
+        {
+          "start_us": 1791824860000000,
+          "end_us": 1791825055000000,
+          "app": "com.tinyspeck.slackmacgap",
+          "name": "Slack",
+          "title": "#design",
+          "host": null,
+          "activity": "typing a little",
+          "keys": 60,
+          "events": [
+            90142,
+            90143,
+            90144,
+            90145
+          ]
+        }
+      ],
+      "searches": []
+    },
+    {
+      "start_us": 1791825080000000,
+      "end_us": 1791826700000000,
+      "time": "10:11–10:38",
+      "title": "Pricing page copy, plan details",
+      "surface": "You filled in what each plan includes and pasted the final text into Figma.",
+      "beneath": "Nothing notable.",
+      "written_by": "apple-foundation-models",
+      "kind": "writing",
+      "kind_label": "Writing",
+      "segments": [
+        {
+          "start_us": 1791825080000000,
+          "end_us": 1791825840000000,
+          "app": "com.apple.Notes",
+          "name": "Notes",
+          "title": "Pricing page draft",
+          "host": null,
+          "activity": "typing",
+          "keys": 900,
+          "events": [
+            90146,
+            90147,
+            90148,
+            90149,
+            90150,
+            90151,
+            90152,
+            90153,
+            90154
+          ]
+        },
+        {
+          "start_us": 1791825840000000,
+          "end_us": 1791826260000000,
+          "app": "com.figma.Desktop",
+          "name": "Figma",
+          "title": "Trailhead pricing v3",
+          "host": null,
+          "activity": "clicking through",
+          "keys": 20,
+          "events": [
+            90155,
+            90156,
+            90157,
+            90158,
+            90159
+          ]
+        },
+        {
+          "start_us": 1791826260000000,
+          "end_us": 1791826700000000,
+          "app": "com.apple.Notes",
+          "name": "Notes",
+          "title": "Pricing page draft",
+          "host": null,
+          "activity": "typing",
+          "keys": 430,
+          "events": [
+            90160,
+            90161,
+            90162,
+            90163,
+            90164,
+            90165
+          ]
+        }
+      ],
+      "searches": []
+    },
+    {
+      "start_us": 1791828150000000,
+      "end_us": 1791829940000000,
+      "time": "11:02–11:32",
+      "title": "Checkout tax rounding",
+      "surface": "You changed how order totals are rounded in tax.rs and ran the tests.",
+      "beneath": "You traced the off-by-a-cent totals to rounding on each line and moved the rounding to the order total.",
+      "written_by": "apple-foundation-models",
+      "kind": "code",
+      "kind_label": "Code",
+      "segments": [
+        {
+          "start_us": 1791828150000000,
+          "end_us": 1791828600000000,
+          "app": "com.microsoft.VSCode",
+          "name": "VS Code",
+          "title": "tax.rs — trailhead-shop",
+          "host": null,
+          "activity": "typing",
+          "keys": 600,
+          "events": [
+            90166,
+            90167,
+            90168,
+            90169,
+            90170
+          ]
+        },
+        {
+          "start_us": 1791828600000000,
+          "end_us": 1791828640000000,
+          "app": "com.apple.Safari",
+          "name": "Safari",
+          "title": "rust round half to even - Google Search",
+          "host": "google.com",
+          "activity": "looking",
+          "keys": 0,
+          "events": [
+            90171
+          ]
+        },
+        {
+          "start_us": 1791828640000000,
+          "end_us": 1791828960000000,
+          "app": "com.apple.Safari",
+          "name": "Safari",
+          "title": "Rounding half to even · Dev Notes",
+          "host": "devnotes.example",
+          "activity": "reading",
+          "keys": 0,
+          "events": [
+            90172,
+            90173,
+            90174,
+            90175
+          ]
+        },
+        {
+          "start_us": 1791828960000000,
+          "end_us": 1791829350000000,
+          "app": "com.microsoft.VSCode",
+          "name": "VS Code",
+          "title": "tax.rs — trailhead-shop",
+          "host": null,
+          "activity": "typing",
+          "keys": 540,
+          "events": [
+            90176,
+            90177,
+            90178,
+            90179,
+            90180
+          ]
+        },
+        {
+          "start_us": 1791829350000000,
+          "end_us": 1791829770000000,
+          "app": "com.apple.Terminal",
+          "name": "Terminal",
+          "title": "trailhead-shop — cargo test",
+          "host": null,
+          "activity": "typing a little",
+          "keys": 90,
+          "events": [
+            90181,
+            90182,
+            90183,
+            90184,
+            90185
+          ]
+        },
+        {
+          "start_us": 1791829770000000,
+          "end_us": 1791829940000000,
+          "app": "com.microsoft.VSCode",
+          "name": "VS Code",
+          "title": "tax.rs — trailhead-shop",
+          "host": null,
+          "activity": "typing",
+          "keys": 160,
+          "events": [
+            90186,
+            90187,
+            90188
+          ]
+        }
+      ],
+      "searches": [
+        [
+          1791828600000000,
+          "google",
+          "rust round half to even"
+        ]
+      ]
+    },
+    {
+      "start_us": 1791829955000000,
+      "end_us": 1791831555000000,
+      "time": "11:32–11:59",
+      "title": "Tax rounding tests",
+      "surface": "You wrote tests for order-level rounding and ran them in Terminal.",
+      "beneath": "Nothing notable.",
+      "written_by": "apple-foundation-models",
+      "kind": "code",
+      "kind_label": "Code",
+      "segments": [
+        {
+          "start_us": 1791829955000000,
+          "end_us": 1791830225000000,
+          "app": "com.microsoft.VSCode",
+          "name": "VS Code",
+          "title": "tax_tests.rs — trailhead-shop",
+          "host": null,
+          "activity": "typing",
+          "keys": 420,
+          "events": [
+            90189,
+            90190,
+            90191
+          ]
+        },
+        {
+          "start_us": 1791830225000000,
+          "end_us": 1791830375000000,
+          "app": "com.apple.Terminal",
+          "name": "Terminal",
+          "title": "trailhead-shop — cargo test",
+          "host": null,
+          "activity": "typing a little",
+          "keys": 40,
+          "events": [
+            90192,
+            90193
+          ]
+        },
+        {
+          "start_us": 1791830375000000,
+          "end_us": 1791830645000000,
+          "app": "com.microsoft.VSCode",
+          "name": "VS Code",
+          "title": "tax_tests.rs — trailhead-shop",
+          "host": null,
+          "activity": "typing",
+          "keys": 390,
+          "events": [
+            90194,
+            90195,
+            90196
+          ]
+        },
+        {
+          "start_us": 1791830645000000,
+          "end_us": 1791830765000000,
+          "app": "com.apple.Terminal",
+          "name": "Terminal",
+          "title": "trailhead-shop — cargo test",
+          "host": null,
+          "activity": "typing a little",
+          "keys": 30,
+          "events": [
+            90197,
+            90198
+          ]
+        },
+        {
+          "start_us": 1791830765000000,
+          "end_us": 1791831035000000,
+          "app": "com.microsoft.VSCode",
+          "name": "VS Code",
+          "title": "tax_tests.rs — trailhead-shop",
+          "host": null,
+          "activity": "typing",
+          "keys": 410,
+          "events": [
+            90199,
+            90200,
+            90201
+          ]
+        },
+        {
+          "start_us": 1791831035000000,
+          "end_us": 1791831185000000,
+          "app": "com.apple.Terminal",
+          "name": "Terminal",
+          "title": "trailhead-shop — cargo test",
+          "host": null,
+          "activity": "typing a little",
+          "keys": 35,
+          "events": [
+            90202,
+            90203
+          ]
+        },
+        {
+          "start_us": 1791831185000000,
+          "end_us": 1791831555000000,
+          "app": "com.microsoft.VSCode",
+          "name": "VS Code",
+          "title": "tax_tests.rs — trailhead-shop",
+          "host": null,
+          "activity": "typing",
+          "keys": 500,
+          "events": [
+            90204,
+            90205,
+            90206,
+            90207,
+            90208,
+            90209
+          ]
+        }
+      ],
+      "searches": []
+    },
+    {
+      "start_us": 1791835500000000,
+      "end_us": 1791837190000000,
+      "time": "13:05–13:33",
+      "title": "Weekly design review",
+      "surface": "You presented the pricing page in a Zoom call and opened the Figma file afterwards.",
+      "beneath": "You walked the team through the three pricing tiers and noted two changes to the annual plan.",
+      "written_by": "apple-foundation-models",
+      "kind": "meetings",
+      "kind_label": "Meetings",
+      "segments": [
+        {
+          "start_us": 1791835500000000,
+          "end_us": 1791837060000000,
+          "app": "us.zoom.xos",
+          "name": "Zoom",
+          "title": "Zoom Meeting",
+          "host": null,
+          "activity": "looking",
+          "keys": 0,
+          "events": [
+            90210,
+            90211,
+            90212,
+            90213,
+            90214,
+            90215,
+            90216,
+            90217,
+            90218,
+            90219,
+            90220,
+            90221,
+            90222,
+            90223,
+            90224,
+            90225,
+            90226,
+            90227
+          ]
+        },
+        {
+          "start_us": 1791837060000000,
+          "end_us": 1791837190000000,
+          "app": "com.figma.Desktop",
+          "name": "Figma",
+          "title": "Trailhead pricing v3",
+          "host": null,
+          "activity": "looking",
+          "keys": 0,
+          "events": [
+            90228,
+            90229,
+            90230
+          ]
+        }
+      ],
+      "searches": []
+    },
+    {
+      "start_us": 1791837660000000,
+      "end_us": 1791839120000000,
+      "time": "13:41–14:05",
+      "title": "Competitor pricing tables",
+      "surface": "You read pricing pages from two other bike shops and updated your draft in Notes.",
+      "beneath": "You compared how two shops show annual pricing, then copied one layout idea into your draft.",
+      "written_by": "apple-foundation-models",
+      "kind": "research",
+      "kind_label": "Research",
+      "segments": [
+        {
+          "start_us": 1791837660000000,
+          "end_us": 1791837710000000,
+          "app": "com.apple.Safari",
+          "name": "Safari",
+          "title": "bike shop pricing page examples - Google Search",
+          "host": "google.com",
+          "activity": "looking",
+          "keys": 0,
+          "events": [
+            90231
+          ]
+        },
+        {
+          "start_us": 1791837710000000,
+          "end_us": 1791837750000000,
+          "app": "com.apple.Safari",
+          "name": "Safari",
+          "title": "bike shop pricing tiers examples - Google Search",
+          "host": "google.com",
+          "activity": "looking",
+          "keys": 0,
+          "events": [
+            90232
+          ]
+        },
+        {
+          "start_us": 1791837750000000,
+          "end_us": 1791838020000000,
+          "app": "com.apple.Safari",
+          "name": "Safari",
+          "title": "Pricing · Velo Cycles",
+          "host": "velocycles.example",
+          "activity": "reading",
+          "keys": 0,
+          "events": [
+            90233,
+            90234,
+            90235
+          ]
+        },
+        {
+          "start_us": 1791838020000000,
+          "end_us": 1791838060000000,
+          "app": "com.apple.Safari",
+          "name": "Safari",
+          "title": "bike rental pricing tiers - Google Search",
+          "host": "google.com",
+          "activity": "looking",
+          "keys": 0,
+          "events": [
+            90236
+          ]
+        },
+        {
+          "start_us": 1791838060000000,
+          "end_us": 1791838260000000,
+          "app": "com.apple.Safari",
+          "name": "Safari",
+          "title": "Plans and pricing · Spoke & Chain",
+          "host": "spokeandchain.example",
+          "activity": "reading",
+          "keys": 0,
+          "events": [
+            90237,
+            90238,
+            90239
+          ]
+        },
+        {
+          "start_us": 1791838260000000,
+          "end_us": 1791838860000000,
+          "app": "com.apple.Notes",
+          "name": "Notes",
+          "title": "Pricing page draft",
+          "host": null,
+          "activity": "typing",
+          "keys": 700,
+          "events": [
+            90240,
+            90241,
+            90242,
+            90243,
+            90244,
+            90245,
+            90246
+          ]
+        },
+        {
+          "start_us": 1791838860000000,
+          "end_us": 1791839010000000,
+          "app": "com.tinyspeck.slackmacgap",
+          "name": "Slack",
+          "title": "#design",
+          "host": null,
+          "activity": "typing",
+          "keys": 80,
+          "events": [
+            90247,
+            90248
+          ]
+        },
+        {
+          "start_us": 1791839010000000,
+          "end_us": 1791839120000000,
+          "app": "com.apple.Safari",
+          "name": "Safari",
+          "title": "Pricing · Velo Cycles",
+          "host": "velocycles.example",
+          "activity": "reading",
+          "keys": 0,
+          "events": [
+            90249,
+            90250,
+            90251
+          ]
+        }
+      ],
+      "searches": [
+        [
+          1791837660000000,
+          "google",
+          "bike shop pricing page examples"
+        ],
+        [
+          1791837710000000,
+          "google",
+          "bike shop pricing tiers examples"
+        ],
+        [
+          1791838020000000,
+          "google",
+          "bike rental pricing tiers"
+        ]
+      ]
+    }
+  ]
+}

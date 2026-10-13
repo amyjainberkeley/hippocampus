@@ -18,16 +18,16 @@ struct DetailPaneView: View {
     @State private var showsScreenshot = false
     @StateObject private var textModel = EventTextViewModel()
 
-    /// Copy preserves stored text; presentation omits the duplicated context header.
+    /// What the window read, then the rest of it: never the stored header.
     private var copiedBody: String {
         textModel.copyText(for: hit)
     }
 
     private var displayBody: String {
-        Formatters.stripContextHeader(copiedBody)
+        copiedBody
     }
 
-    private var storedText: EventText? {
+    private var storedText: EventReading? {
         textModel.text(for: hit)
     }
 

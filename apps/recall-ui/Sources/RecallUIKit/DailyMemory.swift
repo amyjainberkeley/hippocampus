@@ -165,7 +165,7 @@ public final class DailyMemoryViewModel: ObservableObject {
                 throw CancellationError()
             }
             guard let text, text.matches(hit) else { continue }
-            let body = Formatters.stripContextHeader(text.text)
+            let body = ReadableText.parts(stored: text.text, sourceKind: hit.sourceKind).main
             // A header truncated by the bounded text read is not evidence of the body.
             guard !text.text.hasPrefix("[app=") || body != text.text else { continue }
             excerpts.append(Hit(eventId: hit.id, tsUs: hit.tsUs, appBundleId: hit.appBundleId,
@@ -205,7 +205,7 @@ public final class DailyMemoryViewModel: ObservableObject {
         if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return screenshots }
         return searchHits.map {
             TimelineEvent(eventId: $0.id, tsUs: $0.tsUs, appBundleId: $0.appBundleId,
-                          snippet: Formatters.stripContextHeader($0.ocrTextSnippet),
+                          snippet: ReadableText.guarded($0.ocrTextSnippet),
                           thumbnailPath: $0.thumbnailPath, sourceKind: $0.sourceKind)
         }
     }

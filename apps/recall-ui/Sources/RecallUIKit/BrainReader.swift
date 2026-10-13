@@ -471,7 +471,16 @@ public protocol BrainReader: Sendable {
     /// Fetch only the selected event's stored text (at most 128 KiB UTF-8).
     /// The response's timestamp/app identity must match the selected Hit before use.
     /// Nil means the event is absent or this reader does not support inspection.
+    /// The stored text keeps its header: it is for audits, never shown as is.
     func eventText(eventId: UInt64) async throws -> EventText?
+
+    /// The selected moment's text, ready to read: what the person was reading
+    /// and the rest of the window (contract reading.md). Views and exports use
+    /// this, never `eventText`. With a search's text, `matchIn` says whether
+    /// its words are in `main` or only in `rest`. The response's
+    /// timestamp/app identity must match the selected Hit before use. Nil
+    /// means the event is absent.
+    func eventReading(eventId: UInt64, query: String?) async throws -> EventReading?
 
     /// Measured input/foreground records for [startUs, endUs), never screenshot durations.
     func activityIntervals(startUs: UInt64, endUs: UInt64, limit: UInt32) async throws -> ActivityPage
@@ -518,6 +527,21 @@ public protocol BrainReader: Sendable {
 public extension BrainReader {
     func eventText(eventId: UInt64) async throws -> EventText? { nil }
 
+    func eventReading(eventId: UInt64) async throws -> EventReading? {
+        try await eventReading(eventId: eventId, query: nil)
+    }
+
+    /// A reader without the FFI's reading (fixtures, previews) cuts the stored
+    /// text where the store marked it, with nothing cleaned
+    /// (`ReadableText.parts`), and does not look for a search's words.
+    func eventReading(eventId: UInt64, query: String?) async throws -> EventReading? {
+        guard let text = try await eventText(eventId: eventId) else { return nil }
+        let source = try? await fetchEventsByIds([eventId]).first {
+            $0.id == eventId && $0.tsUs == text.tsUs && $0.appBundleId == text.appBundleId
+        }?.sourceKind
+        return EventReading(stored: text, sourceKind: source)
+    }
+
     func activityIntervals(startUs: UInt64, endUs: UInt64, limit: UInt32) async throws -> ActivityPage {
         throw ActivityReadError.unavailable
     }
@@ -541,7 +565,7 @@ public extension BrainReader {
                     eventId: hit.eventId,
                     tsUs: hit.tsUs,
                     appBundleId: hit.appBundleId,
-                    snippet: String(Formatters.stripContextHeader(hit.ocrTextSnippet).prefix(80)),
+                    snippet: String(ReadableText.guarded(hit.ocrTextSnippet).prefix(80)),
                     thumbnailPath: hit.thumbnailPath,
                     sourceKind: hit.sourceKind
                 )

@@ -59,7 +59,7 @@ final class EventTextViewModelTests: XCTestCase {
         XCTAssertNil(vm.text(for: original))
     }
 
-    func testReadsOnlySelectedEventOnDemandAndKeepsExactText() async throws {
+    func testReadsOnlySelectedEventOnDemandAndKeepsEveryLine() async throws {
         let reader = ControlledEventTextReader()
         let vm = EventTextViewModel()
         let initialCalls = await reader.calls
@@ -68,8 +68,8 @@ final class EventTextViewModelTests: XCTestCase {
         await vm.load(hit: hit(1), reader: reader)
         let calls = await reader.calls
         XCTAssertEqual(calls, [1])
-        XCTAssertEqual(vm.text(for: hit(1))?.text, ControlledEventTextReader.body)
-        XCTAssertGreaterThan(try XCTUnwrap(vm.text(for: hit(1))).text.count, 280)
+        XCTAssertEqual(vm.text(for: hit(1))?.main, ControlledEventTextReader.reading)
+        XCTAssertGreaterThan(try XCTUnwrap(vm.text(for: hit(1))).main.count, 280)
         XCTAssertNil(vm.text(for: hit(2)), "selection must hide old text before its new task even starts")
         XCTAssertEqual(vm.state(for: hit(2)), .idle)
     }
@@ -95,7 +95,7 @@ final class EventTextViewModelTests: XCTestCase {
             await reader.finish(failing: failing)
             await old.value
             XCTAssertEqual(vm.text(for: hit(2))?.eventId, 2)
-            XCTAssertEqual(vm.text(for: hit(2))?.text, ControlledEventTextReader.body)
+            XCTAssertEqual(vm.text(for: hit(2))?.main, ControlledEventTextReader.reading)
             XCTAssertNil(vm.text(for: hit(1)))
         }
     }
@@ -109,7 +109,7 @@ final class EventTextViewModelTests: XCTestCase {
         await vm.load(hit: hit(1), reader: reader)
         await reader.finish(failing: false)
         await old.value
-        XCTAssertEqual(vm.text(for: hit(1))?.text, ControlledEventTextReader.body)
+        XCTAssertEqual(vm.text(for: hit(1))?.main, ControlledEventTextReader.reading)
     }
 
     func testCanceledReadCannotPublishEvenWhenReaderIgnoresCancellation() async {
@@ -157,7 +157,7 @@ final class EventTextViewModelTests: XCTestCase {
         let reader = ControlledEventTextReader(body: "", truncated: true)
         let vm = EventTextViewModel()
         await vm.load(hit: hit(1), reader: reader)
-        XCTAssertEqual(vm.text(for: hit(1))?.text, "")
+        XCTAssertEqual(vm.text(for: hit(1))?.main, "")
         XCTAssertEqual(vm.text(for: hit(1))?.isTruncated, true)
     }
 
@@ -173,21 +173,21 @@ final class EventTextViewModelTests: XCTestCase {
         XCTAssertNil(vm.text(for: hit(1)))
     }
 
-    func testCopyUsesExactStoredTextAndLabelsCappedTextHonestly() async {
+    func testCopyCarriesTheReadingNeverTheStoredHeaderAndLabelsCappedTextHonestly() async {
         let hit = self.hit(1)
         let vm = EventTextViewModel()
         XCTAssertEqual(vm.copyTitle(for: hit), "Copy Snippet")
-        XCTAssertEqual(vm.copyText(for: hit), Formatters.stripContextHeader(hit.ocrTextSnippet))
-        let stored = "[app=fixture | title=Fixture]\n" + ControlledEventTextReader.body
+        XCTAssertEqual(vm.copyText(for: hit), ReadableText.guarded(hit.ocrTextSnippet))
+        let stored = "[app=fixture | title=Fixture | url=? | ts=now]\n" + ControlledEventTextReader.body
         await vm.load(hit: hit, reader: ControlledEventTextReader(body: stored))
         XCTAssertEqual(vm.copyTitle(for: hit), "Copy Full Text")
-        XCTAssertEqual(vm.copyText(for: hit), stored, "copy must not silently discard stored header text")
+        XCTAssertEqual(vm.copyText(for: hit), ControlledEventTextReader.reading, "copy never carries the stored header")
         await vm.load(hit: hit, reader: ControlledEventTextReader(body: "prefix", truncated: true))
         XCTAssertEqual(vm.copyTitle(for: hit), "Copy Shown Text")
         XCTAssertEqual(vm.copyText(for: hit), "prefix")
         let other = self.hit(2)
         XCTAssertEqual(vm.copyTitle(for: other), "Copy Snippet")
-        XCTAssertEqual(vm.copyText(for: other), Formatters.stripContextHeader(other.ocrTextSnippet))
+        XCTAssertEqual(vm.copyText(for: other), ReadableText.guarded(other.ocrTextSnippet))
     }
 }
 
@@ -195,6 +195,8 @@ final class EventTextViewModelTests: XCTestCase {
 // run in the production model. No database or personal memory is opened.
 private actor ControlledEventTextReader: BrainReader {
     static let body = String(repeating: "stored line\n", count: 60)
+    /// What a person reads of `body`: the same lines, without the trailing line break.
+    static let reading = String(body.dropLast())
     let started: XCTestExpectation?
     let body: String
     let truncated: Bool

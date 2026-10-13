@@ -231,6 +231,36 @@ public enum Formatters {
         return tsString(usSinceEpoch: usSinceEpoch)
     }
 
+    /// A clock time in the person's own format ("2:09 PM", "14:09"). The agent
+    /// never writes one into text; it sends microseconds (RULINGS I4).
+    public static func clockTime(
+        us: Int64,
+        locale: Locale = .autoupdatingCurrent,
+        timeZone: TimeZone = .autoupdatingCurrent
+    ) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = timeZone
+        let style = Date.FormatStyle(date: .omitted, time: .shortened, locale: locale,
+                                     calendar: calendar, timeZone: timeZone)
+        return Date(timeIntervalSince1970: Double(us) / 1_000_000).formatted(style)
+    }
+
+    /// A length of time through the system formatter, abbreviated, in hours
+    /// and minutes, rounded to the nearest minute and never under one
+    /// ("5h 30m", "12m") (RULINGS V).
+    public static func duration(us: Int64, locale: Locale = .autoupdatingCurrent) -> String {
+        let minutes = max(1, Int((Double(max(0, us)) / 60_000_000).rounded()))
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.hour, .minute]
+        formatter.unitsStyle = .abbreviated
+        formatter.zeroFormattingBehavior = .dropAll
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        formatter.calendar = calendar
+        return formatter.string(from: TimeInterval(minutes * 60)) ?? "\(minutes)m"
+    }
+
     /// Score → percent string with one decimal, or empty for nil.
     public static func scoreString(_ s: Float?) -> String {
         guard let s else { return "" }

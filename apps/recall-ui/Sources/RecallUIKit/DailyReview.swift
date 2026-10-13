@@ -65,10 +65,10 @@ public struct DailyReview: Equatable, Sendable {
         self.events = sorted
         var observations: [Observation] = []
         if let last = sorted.last {
-            var detail = Formatters.stripContextHeader(last.snippet)
+            var detail = ReadableText.guarded(last.snippet)
             if let text = latestContextText, text.eventId == last.id,
                text.tsUs == last.tsUs, text.appBundleId == last.appBundleId {
-                let body = Formatters.stripContextHeader(text.text)
+                let body = ReadableText.parts(stored: text.text, sourceKind: last.sourceKind).main
                 // A bounded read ending inside an internal header has no usable body.
                 if !text.text.hasPrefix("[app=") || body != text.text {
                     detail = Formatters.snippet(body, maxLen: 400)

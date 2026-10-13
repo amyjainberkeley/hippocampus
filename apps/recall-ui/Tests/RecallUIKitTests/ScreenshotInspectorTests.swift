@@ -8,9 +8,15 @@ final class ScreenshotInspectorTests: XCTestCase {
                           url: "https://example.invalid/source", ocrTextSnippet: "Saved preview only.",
                           source: "timeline", score: nil, sourceKind: "screen_ocr")
 
+    private func reading(_ id: UInt64? = nil, tsUs: UInt64? = nil, app: String?? = .none,
+                         main: String, rest: String = "", truncated: Bool = false) throws -> EventReading {
+        try EventReading(eventId: id ?? hit.id, tsUs: tsUs ?? hit.tsUs, appBundleId: app ?? hit.appBundleId,
+                         sourceKind: "screen_ocr", main: main, rest: rest, isTruncated: truncated)
+    }
+
     func testContextKeepsCitationAndProvenanceAndIncludesTextBeyondExportSnippetLimit() throws {
         let body = String(repeating: "stored line\n", count: 1000) + "final stored line"
-        let text = try EventText(eventId: hit.id, tsUs: hit.tsUs, appBundleId: hit.appBundleId, text: body, isTruncated: false)
+        let text = try reading(main: body)
         let context = ScreenshotInspectorContext.markdown(hit: hit, text: text)
         XCTAssertTrue(context.hasPrefix(VisualMemoryExport.markdown(title: "Selected screenshot", hits: [hit])))
         XCTAssertTrue(context.contains("[Event 42](hippocampus://recall?tab=search&focus=42)"))
@@ -18,13 +24,14 @@ final class ScreenshotInspectorTests: XCTestCase {
         XCTAssertTrue(context.contains("Review before sharing"))
         XCTAssertTrue(context.contains("Fixture screenshot"))
         XCTAssertTrue(context.contains(body), "the inspector must not reapply the shared excerpt export cap")
-        XCTAssertTrue(context.contains("## Complete stored text"))
+        XCTAssertTrue(context.contains("## Text\n"))
+        XCTAssertFalse(context.contains("## Also in this window"), "no rest, no second heading")
     }
 
     func testUnavailableOrMismatchedTextCannotExportAnotherSelection() throws {
         let preview = VisualMemoryExport.markdown(title: "Selected screenshot", hits: [hit])
         XCTAssertEqual(ScreenshotInspectorContext.markdown(hit: hit, text: nil), preview)
-        let stale = try EventText(eventId: 99, tsUs: hit.tsUs, appBundleId: hit.appBundleId, text: "old selection text", isTruncated: false)
+        let stale = try reading(99, main: "old selection text")
         XCTAssertEqual(ScreenshotInspectorContext.markdown(hit: hit, text: stale), preview)
         XCTAssertFalse(ScreenshotInspectorContext.markdown(hit: hit, text: stale).contains("old selection text"))
     }
@@ -32,8 +39,7 @@ final class ScreenshotInspectorTests: XCTestCase {
     func testReusedIdWithDifferentIdentityCannotExportUnderOldCitation() throws {
         let preview = VisualMemoryExport.markdown(title: "Selected screenshot", hits: [hit])
         for (timestamp, app) in [(hit.tsUs + 1, hit.appBundleId), (hit.tsUs, nil)] {
-            let replacement = try EventText(eventId: hit.id, tsUs: timestamp, appBundleId: app,
-                                             text: "replacement private body", isTruncated: false)
+            let replacement = try reading(tsUs: timestamp, app: .some(app), main: "replacement private body")
             XCTAssertEqual(ScreenshotInspectorContext.markdown(hit: hit, text: replacement), preview)
         }
     }
@@ -50,21 +56,21 @@ final class ScreenshotInspectorTests: XCTestCase {
 
     func testCapIsVisibleAndEmptyStoredTextIsNotReplacedWithPreview() throws {
         let body = String(repeating: "\u{e9}", count: EventText.maxUTF8Bytes / 2)
-        let text = try EventText(eventId: hit.id, tsUs: hit.tsUs, appBundleId: hit.appBundleId, text: body, isTruncated: true)
+        let text = try reading(main: body, truncated: true)
         let context = ScreenshotInspectorContext.markdown(hit: hit, text: text)
         XCTAssertTrue(context.contains(body))
-        XCTAssertTrue(context.contains("## Stored text (truncated)"))
-        XCTAssertTrue(context.contains("128 KiB"))
-        XCTAssertFalse(context.contains("## Complete stored text"))
-        let empty = try EventText(eventId: hit.id, tsUs: hit.tsUs, appBundleId: hit.appBundleId, text: "", isTruncated: false)
+        XCTAssertTrue(context.contains("## Text (shortened)"))
+        XCTAssertTrue(context.contains("Shortened to fit."))
+        XCTAssertFalse(context.contains("## Text\n"))
+        let empty = try reading(main: "")
         let emptyContext = ScreenshotInspectorContext.markdown(hit: hit, text: empty)
-        XCTAssertTrue(emptyContext.contains("## Complete stored text"))
+        XCTAssertTrue(emptyContext.contains("## Text\n"))
         XCTAssertTrue(emptyContext.hasSuffix("```text\n\n```\n"))
     }
 
     func testCapturedMarkdownAndFenceRunsRemainInsideOneLiteralBlock() throws {
         let body = "```\n![image](https://example.invalid)\n<script>data</script>\r\n````\n# captured heading"
-        let text = try EventText(eventId: hit.id, tsUs: hit.tsUs, appBundleId: hit.appBundleId, text: body, isTruncated: false)
+        let text = try reading(main: body)
         let context = ScreenshotInspectorContext.markdown(hit: hit, text: text)
         XCTAssertTrue(context.hasSuffix("`````text\n" + body + "\n`````\n"))
         XCTAssertEqual(context.components(separatedBy: "hippocampus://").count - 1, 1)
@@ -72,7 +78,7 @@ final class ScreenshotInspectorTests: XCTestCase {
 
     func testWorstCaseFenceGrowthIsStillBoundedWithoutLosingStoredBytes() throws {
         let body = String(repeating: "`", count: EventText.maxUTF8Bytes)
-        let text = try EventText(eventId: hit.id, tsUs: hit.tsUs, appBundleId: hit.appBundleId, text: body, isTruncated: true)
+        let text = try reading(main: body, truncated: true)
         let context = ScreenshotInspectorContext.markdown(hit: hit, text: text)
         let fence = String(repeating: "`", count: EventText.maxUTF8Bytes + 1)
         XCTAssertTrue(context.hasSuffix(fence + "text\n" + body + "\n" + fence + "\n"))

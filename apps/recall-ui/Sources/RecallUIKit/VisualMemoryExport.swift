@@ -32,7 +32,7 @@ public enum VisualMemoryExport {
             if let title = hit.windowTitle, !title.isEmpty { item += "\nWindow: \(literal(title, limit: 512))" }
             if let url = hit.url, !url.isEmpty { item += "\nURL: \(literal(url, limit: 512))" }
             let snippet = String(decoding: hit.ocrTextSnippet.utf8.prefix(8192), as: UTF8.self)
-            let body = Formatters.stripContextHeader(snippet)
+            let body = ReadableText.guarded(snippet)
             item += "\n\n> " + (body.isEmpty ? "No text snippet stored." : literal(body, limit: 4096)) + "\n"
             if hit.ocrTextSnippet.utf8.count > 8192 { item += "\nText shortened for export.\n" }
             guard result.utf8.count + item.utf8.count < 63_000 else { break }
