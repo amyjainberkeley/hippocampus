@@ -2838,8 +2838,11 @@ fn render_understanding_text(command: &str, value: &serde_json::Value, tz: i32) 
         "sessions" => {
             for s in value["sessions"].as_array().into_iter().flatten() {
                 out.push(format!("{}  {}", s["time"].as_str().unwrap_or(""), s["title"].as_str().unwrap_or("")));
-                out.push(format!("    {}", s["surface"].as_str().unwrap_or("")));
-                out.push(format!("    Beneath: {}", s["beneath"].as_str().unwrap_or("")));
+                for (label, key) in [("", "surface"), ("Beneath: ", "beneath")] {
+                    if let Some(text) = s[key].as_str().filter(|t| !t.is_empty()) {
+                        out.push(format!("    {label}{text}"));
+                    }
+                }
             }
         }
         "ask" => {

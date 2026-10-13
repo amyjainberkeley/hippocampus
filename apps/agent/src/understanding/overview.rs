@@ -1942,6 +1942,93 @@ mod tests {
         assert_eq!(ModelStatus::read(&store), ModelStatus::unknown(), "an unknown state reads as unknown");
     }
 
+    fn put_with_screenshot(store: &SqlCipherBrainStore, ts_us: u64, app: &str, title: &str, source: EventSource, n: u8) -> i64 {
+        let event = Event {
+            id: EventId(0),
+            ts_us,
+            app_bundle_id: Some(app.into()),
+            window_title: Some(title.into()),
+            url: None,
+            text: "synthetic text".into(),
+            summary: None,
+            entities: None,
+            episode_id: None,
+            cascade_reason: 0,
+            keyframe_blob: Some(format!("{n:02x}").repeat(32)),
+            tab_id: None,
+            embedding: None,
+        };
+        i64::try_from(store.put_event_with_source(&event, source).unwrap().0).unwrap()
+    }
+
+    #[test]
+    fn the_screenshot_is_the_keyframe_nearest_the_middle() {
+        let (_dir, store) = store();
+        let start = DAY0 + 9 * 60 * MIN;
+        // Notes held for 20 minutes (the longest window), then Figma for 6.
+        for m in 0..20 {
+            let (title, ts) = ("Pricing page draft", start + m * MIN);
+            match m {
+                3 => put_with_screenshot(&store, ts, "com.apple.Notes", title, EventSource::ScreenOcr, 1),
+                12 => put_with_screenshot(&store, ts, "com.apple.Notes", title, EventSource::ScreenOcr, 2),
+                _ => put(&store, ts, "com.apple.Notes", title, None),
+            };
+        }
+        let figma = put_with_screenshot(&store, start + 20 * MIN, "com.figma.Desktop", "Trailhead pricing v3", EventSource::ScreenOcr, 3);
+        run(&store, start + 21 * MIN, 5, "com.figma.Desktop", "Trailhead pricing v3");
+        // A window beside Notes, right at the middle of its time, with a
+        // screenshot: another app, so never chosen.
+        let beside = put_with_screenshot(&store, start + 10 * MIN, "com.tinyspeck.slackmacgap", "#design", EventSource::ScreenContext, 4);
+        let o = day(&store, start + 3 * 60 * MIN, false);
+        assert_eq!(o.blocks.len(), 1);
+        let shown = o.blocks[0].screenshot_event_id.expect("a screenshot");
+        let heads = store.event_heads(&[shown]).unwrap();
+        assert_eq!(heads[0].ts_us, start + 12 * MIN, "the Notes screenshot nearest the middle of its own time");
+        assert_ne!(shown, figma);
+        assert_ne!(shown, beside);
+        // With no screenshot of the longest window, none of another app is shown.
+        let (_dir2, other) = self::store();
+        run(&other, start, 20, "com.apple.Notes", "Pricing page draft");
+        put_with_screenshot(&other, start + 10 * MIN, "com.tinyspeck.slackmacgap", "#design", EventSource::ScreenContext, 5);
+        assert_eq!(day(&other, start + 3 * 60 * MIN, false).blocks[0].screenshot_event_id, None);
+    }
+
+    #[test]
+    fn an_error_on_screen_is_never_a_sentence() {
+        // The error sentence was cut (RULINGS I3): a code session whose
+        // stored signals hold an error says nothing about it.
+        let (_dir, store) = store();
+        let start = DAY0 + 9 * 60 * MIN;
+        let ids = run(&store, start, 20, "com.microsoft.VSCode", "tax.rs — shop");
+        let signals = serde_json::json!({
+            "signals": { "back_and_forth": [], "reworded_searches": 0, "errors": ["error[E0308]: mismatched types"],
+                "pauses": [[start, 240_000_000u64, "Code — tax.rs — shop"]], "keys": 900, "clicks": 40, "scrolls": 12 },
+            "segments": [{ "start_us": start, "end_us": start + 19 * MIN, "app": "com.microsoft.VSCode", "name": "Code",
+                "title": "tax.rs — shop", "host": null, "activity": "typing", "keys": 900, "events": ids }],
+        });
+        store
+            .put_session_note(&SessionNote {
+                start_us: start,
+                end_us: start + 19 * MIN,
+                title: "Code — tax.rs — shop".into(),
+                surface: "Typing in Code (tax.rs — shop)".into(),
+                beneath: "Paused 4 min with no input in Code — tax.rs — shop; had an error on screen.".into(),
+                signals: signals.to_string(),
+                event_count: 20,
+                generated_us: start + 25 * MIN,
+                model: "measured".into(),
+            })
+            .unwrap();
+        let o = day(&store, start + 60 * MIN, false);
+        assert_eq!(o.blocks[0].kind, "code");
+        assert!(o.blocks[0].sentences.is_empty(), "{:?}", o.blocks[0].sentences);
+        assert!(o.blocks[0].noticed.is_none());
+        let json = serde_json::to_string(&o).unwrap().to_lowercase();
+        for said in ["error", "paus", "keys\":", "clicks"] {
+            assert!(!json.contains(said), "{said} reached the overview");
+        }
+    }
+
     #[test]
     fn templates_fill_in_plain_text_and_keep_escaped_braces() {
         let t = Template::new("Active {active}, {first} to {last}. {{x}} {missing}")

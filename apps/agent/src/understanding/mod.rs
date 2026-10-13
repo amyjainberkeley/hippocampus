@@ -437,6 +437,17 @@ impl Understanding {
     }
 }
 
+/// Mark a memory's understanding as current and its sessions as noted
+/// through `sessions_through_us`, so the worker neither rebuilds nor notes
+/// again what a seeder wrote. For synthetic demo memories only.
+///
+/// # Errors
+/// Store failures.
+pub fn mark_noted_through(store: &SqlCipherBrainStore, sessions_through_us: u64) -> Result<(), StoreError> {
+    store.set_understanding_state(PIPELINE_KEY, PIPELINE_VERSION)?;
+    store.set_understanding_state(SESSIONS_CURSOR, &sessions_through_us.to_string())
+}
+
 fn measured_note(
     segments: &[observe::Segment],
     signals: &observe::Signals,
@@ -465,18 +476,14 @@ fn measured_note(
         })
         .collect::<Vec<_>>()
         .join("; ");
+    // No pause, input or error line: those say nothing a person can act on
+    // (RULINGS I3), and AI tools are sent this text.
     let mut beneath = Vec::new();
-    if let Some((_, pause, window)) = signals.pauses.iter().max_by_key(|p| p.1) {
-        beneath.push(format!("paused {} min with no input in {window}", (pause + 30_000_000) / 60_000_000));
-    }
     for (a, b, n) in &signals.back_and_forth {
         beneath.push(format!("switched between {a} and {b} {n} times"));
     }
     if signals.reworded_searches > 0 {
         beneath.push(format!("reworded a search {} time(s)", signals.reworded_searches));
-    }
-    if let Some(error) = signals.errors.first() {
-        beneath.push(format!("had an error on screen (\"{error}\")"));
     }
     SessionNote {
         start_us: span.start_us,

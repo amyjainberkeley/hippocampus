@@ -168,7 +168,11 @@ fn session_json(n: &SessionNote, tz: i32) -> serde_json::Value {
     serde_json::json!({
         "start_us": n.start_us, "end_us": n.end_us,
         "time": format!("{}–{}", observe::clock(n.start_us, tz), observe::clock(n.end_us, tz)),
-        "title": n.title, "surface": n.surface, "beneath": n.beneath, "written_by": n.model,
+        // Without any sentence about pauses, input counts or judgements
+        // (RULINGS I14); notes written before the model stopped seeing input
+        // still carry them.
+        "title": n.title, "surface": super::overview::model_prose(&n.surface),
+        "beneath": super::overview::model_prose(&n.beneath), "written_by": n.model,
         "kind": kind.as_str(), "kind_label": kind.label(),
         "segments": signals["segments"], "searches": signals["signals"]["searches"],
     })
@@ -940,6 +944,10 @@ pub struct Suggestion {
     pub action: serde_json::Value,
     /// 1–10.
     pub score: u8,
+    /// When it happened, for the app to show in the person's own clock
+    /// format; no time is ever written into `why`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ts_us: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -990,22 +998,36 @@ pub fn suggest(
             kind: "screen".into(),
             title: "What’s on this screen?".into(),
             why: match &event.window_title {
-                Some(title) if !title.is_empty() => format!("{app} — {}", clip(title, 60)),
+                Some(title) if !title.is_empty() => format!("{app} · {}", clip(title, 60)),
                 _ => app,
             },
             action: serde_json::json!({ "ask": "What is on my screen right now, and what matters in it?" }),
             score: 8,
+            ts_us: None,
         });
     }
     // Resume: the last session that was not in the current window.
     let notes = store.session_notes_in_range(now_us.saturating_sub(12 * hour), now_us + 1)?;
     if let Some(last) = notes.iter().rev().find(|n| !now.title.as_deref().is_some_and(|t| n.title.contains(t))) {
+        let (title, _) = super::overview::note_title(last);
+        // A note written from measurements has only input telemetry for a
+        // surface, which is never shown: name its main app instead.
+        let why = session_detail(last).map_or_else(
+            || {
+                super::overview::stored_segments(last)
+                    .and_then(|segments| segments.into_iter().max_by_key(|s| s.end_us.saturating_sub(s.start_us)))
+                    .map(|s| apps::name(&s.app))
+                    .unwrap_or_default()
+            },
+            |detail| first_sentence(&detail),
+        );
         out.push(Suggestion {
             kind: "resume".into(),
-            title: format!("Resume: {}", last.title),
-            why: format!("{} · {}", observe::clock(last.start_us, tz), first_sentence(&last.surface)),
+            title: format!("Resume: {title}"),
+            why,
             action: serde_json::json!({ "open_session": last.start_us }),
             score: 7,
+            ts_us: Some(last.start_us),
         });
     }
     // Searches in the last two hours.
@@ -1013,9 +1035,10 @@ pub fn suggest(
         out.push(Suggestion {
             kind: "searched".into(),
             title: format!("“{}”", search.query),
-            why: format!("You searched this at {}", observe::clock(search.ts_us, tz)),
+            why: "You searched for this".into(),
             action: serde_json::json!({ "query": search.query }),
             score: 6,
+            ts_us: Some(search.ts_us),
         });
     }
     // Related to the current window: what else you saw about it. Only a
@@ -1027,28 +1050,38 @@ pub fn suggest(
             out.push(Suggestion {
                 kind: "related".into(),
                 title: format!("More about {}", clip(&title, 48)),
-                why: "Everything you saw on this, across apps".into(),
+                why: "Everything else you saw about this".into(),
                 action: serde_json::json!({ "query": topic }),
                 score: 5,
+                ts_us: None,
             });
         }
     }
-    let learned = store.propositions_with_status(PropositionStatus::Active, 500)?.len();
+    // Counted as the You page lists them: what can be shown, nothing else.
+    let active = store.propositions_with_status(PropositionStatus::Active, 500)?;
+    let lens = ItemLens::read(store, &active, tz, now_us)?;
+    let learned = active.iter().filter(|p| lens.servable(p)).count();
     if learned > 0 {
         out.push(Suggestion {
             kind: "model".into(),
-            title: "What Hippocampus has learned about you".into(),
-            why: format!("{learned} things from your work; correct anything wrong"),
+            title: "What Hippocampus understands about you".into(),
+            why: if learned == 1 {
+                "One thing, from your own work. Fix anything wrong.".to_owned()
+            } else {
+                format!("{learned} things, from your own work. Fix anything wrong.")
+            },
             action: serde_json::json!({ "view": "model" }),
             score: 3,
+            ts_us: None,
         });
     }
     out.push(Suggestion {
         kind: "day".into(),
         title: "Your day so far".into(),
-        why: "Time, focus, searches and where you got stuck".into(),
+        why: "What you worked on and looked up".into(),
         action: serde_json::json!({ "view": "day" }),
         score: 4,
+        ts_us: None,
     });
     if let Some(mind) = mind {
         let confirmed = store.confirmed_proposition_ids()?;
@@ -1063,7 +1096,18 @@ pub fn suggest(
             || now.app.as_deref().map(apps::name).unwrap_or_default(),
             |e| format!("{} — {}\n{}", apps::name(e.app_bundle_id.as_deref().unwrap_or("")), e.window_title.clone().unwrap_or_default(), clip(&screen_text(e).main, 1_000)),
         );
-        let recent_lines: Vec<String> = notes.iter().rev().take(6).map(|n| format!("{} {}: {}", observe::clock(n.start_us, tz), n.title, n.beneath)).collect();
+        let recent_lines: Vec<String> = notes
+            .iter()
+            .rev()
+            .take(6)
+            .map(|n| {
+                let (title, _) = super::overview::note_title(n);
+                match session_detail(n) {
+                    Some(detail) => format!("{} {title}: {detail}", observe::clock(n.start_us, tz)),
+                    None => format!("{} {title}", observe::clock(n.start_us, tz)),
+                }
+            })
+            .collect();
         if let Ok(predicted) = mind.call::<_, SuggestOut>(
             "suggest",
             &serde_json::json!({ "user_name": user_name, "now": now_text, "recent": recent_lines, "propositions": propositions }),
@@ -1076,6 +1120,7 @@ pub fn suggest(
                     why: item.why,
                     action: serde_json::json!({ "ask": item.title }),
                     score: item.usefulness.min(10),
+                    ts_us: None,
                 });
             }
         }
