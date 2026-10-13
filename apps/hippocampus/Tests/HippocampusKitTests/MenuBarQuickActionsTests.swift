@@ -10,13 +10,11 @@
 //     and the supervisor mirrors that with `setPaused(true)` (which
 //     flips its `state` to `.paused`), `MenuBarStatus.derive` must
 //     yield `.paused` — the label under the pulse-dot flips to
-//     "Paused" and the icon overlay is the pause glyph.
-//   - The same set of four states (idle / recording / paused / error)
-//     renders four visually distinct icons — the MenuBarStatusIcon
-//     snapshot test is in `MenuBarStatusTests.swift`; this file adds
-//     the paired label-per-state distinctness check driven from the
-//     user-pause layer, matching the brief's "snapshot per state
-//     (idle/recording/paused/error)" pin.
+//     "Paused" and the icon shows the dim picture.
+//   - The four states (idle / recording / paused / error) keep four
+//     distinct labels. The icon pictures are pinned in
+//     `MenuBarStatusTests.swift`; this file adds the label-per-state
+//     check driven from the user-pause layer.
 
 import XCTest
 @testable import HippocampusKit

@@ -12,7 +12,6 @@ External product name: **Hippocampus**. Engineering codename: **MCI**.
 | `AppIcon.icns` | Compiled Finder, Dock, Launchpad, Cmd-Tab, DMG, and Gatekeeper icon. |
 | `hippocampus-icon.svg` | The same mark without the tile, for light backgrounds. |
 | `hippocampus-wordmark.svg` | Text-only product wordmark using the Apple system sans stack. |
-| `statusbar-icon*.png` | 22/44/66 px menu-bar template images generated from `AppIcon-template.svg`. |
 | `colors.json` | Canonical adaptive product and semantic color tokens. |
 
 The Dock, menu bar, browser extensions and installer share one mark: a
@@ -56,7 +55,6 @@ rendered by headless Chrome at each exact size:
 | Output | Source | Sizes (px) |
 |---|---|---|
 | `AppIcon.iconset/icon_NxN[@2x].png` | `AppIcon.svg` | 16, 32, 32, 64, 128, 256, 256, 512, 512, 1024 |
-| `statusbar-icon[@2x\|@3x].png` | `AppIcon-template.svg` | 22, 44, 66 |
 
 Then:
 

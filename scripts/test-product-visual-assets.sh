@@ -90,15 +90,11 @@ while read -r relative expected_width expected_height; do
     [[ "$width" == "$expected_width" && "$height" == "$expected_height" ]] \
         || fail "$relative is ${width}x${height}; expected ${expected_width}x${expected_height}"
 done <<'SIZES'
-statusbar-icon.png 22 22
-statusbar-icon@2x.png 44 44
-statusbar-icon@3x.png 66 66
 AppIcon.iconset/icon_16x16.png 16 16
 AppIcon.iconset/icon_512x512@2x.png 1024 1024
 SIZES
 
-xcrun swift - "$BRAND/AppIcon.iconset/icon_512x512@2x.png" \
-    "$BRAND/statusbar-icon@3x.png" <<'SWIFT' \
+xcrun swift - "$BRAND/AppIcon.iconset/icon_512x512@2x.png" <<'SWIFT' \
     || fail "icon pixels lost transparency or restored the retired palette"
 import CoreGraphics
 import Foundation

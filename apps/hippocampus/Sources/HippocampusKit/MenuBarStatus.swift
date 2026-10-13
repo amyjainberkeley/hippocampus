@@ -40,9 +40,8 @@ public enum MenuBarStatus: Equatable, Sendable {
         }
     }
 
-    /// The dot color to render next to the header row text.
-    /// Matches the overlay dot / border color on the icon so the two
-    /// surfaces read as the same signal.
+    /// The dot color to render next to the header row text. Color stays
+    /// inside the menu; the menu-bar icon is a single-color template.
     public var indicatorColor: Color {
         switch self {
         case .idle, .starting, .unchanged: return .secondary
@@ -291,129 +290,130 @@ public struct MenuBarStatusLabel: View {
     }
 }
 
+// MARK: - Picture
+
+extension MenuBarStatus {
+    /// The picture the menu bar shows. Any state in which the screen may be
+    /// read shows the solid dot: the icon may overstate, never understate.
+    public var markState: HiMark.State {
+        switch self {
+        case .recording, .unchanged, .starting, .noMemory: return .remembering
+        case .paused, .idle: return .off
+        case .needsPermission, .error, .blocked, .stale: return .needsYou
+        }
+    }
+}
+
 // MARK: - NSImage factory
 
 #if canImport(AppKit)
 
-/// Composes the base template glyph with per-state overlays. Called
-/// from `MenuBarStatusLabel` and from tests (which check pixel-level
-/// distinctness across the four states).
-///
-/// The base template is
-/// `HippocampusApp.MenuBarIcon.templateImage` (loaded from
-/// `Contents/Resources/statusbar-icon.png` at bundle time). We
-/// duplicate the lookup here so `HippocampusKit` doesn't depend on
-/// the executable target — the load falls back to a 22×22 blank
-/// canvas if the resource is missing (unit tests, headless CI).
+/// Draws the four `HiMark` pictures once each, for `MenuBarStatusLabel`
+/// and the tests. Every picture is a single-color template that macOS
+/// tints for light and dark bars, so state lives in shape, not color.
 @MainActor
 public enum MenuBarStatusIcon {
 
-    /// Canonical NSStatusItem size on macOS 14+. Matches the
-    /// existing MenuBarIcon fallback.
+    /// Canonical NSStatusItem size on macOS 14+.
     static let baseSize = NSSize(width: 22, height: 22)
+    /// One bitmap per display scale: 22, 44 and 66 px.
+    static let scales: [CGFloat] = [1, 2, 3]
 
-    // Fixed, reason-independent cache: repeated health updates must not load
-    // templates or allocate another rendered image for the same visual state.
-    private static let base = loadBaseTemplate()
-    private static let idle = withAlpha(base, alpha: 0.55)
-    private static let starting = overlay(base: base, glyph: "clock", tint: nil)
-    private static let paused = overlay(base: base, glyph: "pause.fill", tint: nil)
-    private static let error = overlay(base: base, glyph: "circle.fill", tint: .systemRed)
-    private static let permission = overlay(base: base, glyph: "lock.fill", tint: .systemOrange)
-    private static let blocked = overlay(base: base, glyph: "exclamationmark.triangle.fill", tint: .systemOrange)
-    private static let stale = overlay(base: base, glyph: "clock.fill", tint: .systemOrange)
-    private static let unchanged = overlay(base: base, glyph: "minus", tint: nil)
+    // Fixed, reason-independent cache: repeated health updates must not
+    // draw or allocate another image for the same picture.
+    private static let remembering = render(.remembering)
+    private static let skipping = render(.skipping)
+    private static let off = render(.off)
+    private static let needsYou = render(.needsYou)
 
     public static func image(for status: MenuBarStatus) -> NSImage {
-        switch status {
-        case .idle:
-            return idle
-        case .recording:
-            return base
-        case .starting:
-            return starting
-        case .paused:
-            return paused
-        case .error:
-            return error
-        case .needsPermission:
-            return permission
-        case .blocked, .noMemory:
-            return blocked
-        case .stale:
-            return stale
-        case .unchanged:
-            return unchanged
+        image(for: status.markState)
+    }
+
+    public static func image(for state: HiMark.State) -> NSImage {
+        switch state {
+        case .remembering: return remembering
+        case .skipping: return skipping
+        case .off: return off
+        case .needsYou: return needsYou
         }
     }
 
-    private static func loadBaseTemplate() -> NSImage {
-        if let bundled = NSImage(named: "statusbar-icon") {
-            bundled.isTemplate = true
-            return bundled
+    private static func render(_ state: HiMark.State) -> NSImage {
+        let image = NSImage(size: baseSize)
+        for scale in scales {
+            guard let bitmap = bitmap(state, scale: scale) else { continue }
+            let rep = NSBitmapImageRep(cgImage: bitmap)
+            rep.size = baseSize
+            image.addRepresentation(rep)
         }
-        // Test/headless fallback: draw a filled rounded rect so the
-        // downstream compositions have visible pixels to differ on.
-        // Never taken in the shipped .app (statusbar-icon.png is in
-        // Resources/); exists so `swift test` doesn't rely on the
-        // resource pipeline.
-        let img = NSImage(size: baseSize, flipped: false) { rect in
-            NSColor.black.setFill()
-            NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
-            return true
-        }
-        img.isTemplate = true
-        return img
+        image.isTemplate = true
+        return image
     }
 
-    /// Idle: bake a lower alpha into the template. Bake (not
-    /// `.opacity` at the view layer) so NSStatusItem's template tint
-    /// path sees "muted" content and doesn't compete with dark/light-
-    /// bar tinting for the same signal.
-    private static func withAlpha(_ image: NSImage, alpha: CGFloat) -> NSImage {
-        let out = NSImage(size: image.size)
-        out.lockFocus()
-        image.draw(
-            in: NSRect(origin: .zero, size: image.size), from: .zero,
-            operation: .sourceOver, fraction: alpha
-        )
-        out.unlockFocus()
-        out.isTemplate = false
-        return out
-    }
+    /// One bitmap in its own sRGB context, y growing downward. Stems are
+    /// 2 pt, so the h is 8 pt wide and the letters 12.9 pt tall; the h stem
+    /// starts 5 pt from the left and the baseline sits 4.5 pt up. The h
+    /// stem's left edge, the i's left edge, the baseline and the dot's
+    /// center are snapped to this bitmap's pixels, so stems stay sharp at 1x.
+    static func bitmap(_ state: HiMark.State, scale: CGFloat) -> CGImage? {
+        let side = Int(baseSize.width * scale)
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+                space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              )
+        else { return nil }
+        context.translateBy(x: 0, y: CGFloat(side))
+        context.scaleBy(x: 1, y: -1)
 
-    /// Draws `base` full-size then stamps an SF Symbol `glyph` into
-    /// the bottom-right quadrant. `tint == nil` leaves the glyph as a
-    /// template (menu bar tints it); otherwise the tint is baked (the
-    /// red error dot must stay red regardless of menu-bar mode).
-    private static func overlay(base: NSImage, glyph: String, tint: NSColor?) -> NSImage {
-        let size = base.size
-        let out = NSImage(size: size)
-        out.lockFocus()
-        base.draw(in: NSRect(origin: .zero, size: size))
-        let overlaySize = NSSize(width: size.width * 0.55, height: size.height * 0.55)
-        let overlayRect = NSRect(
-            x: size.width - overlaySize.width, y: 0,
-            width: overlaySize.width, height: overlaySize.height
-        )
-        if let symbol = NSImage(systemSymbolName: glyph, accessibilityDescription: nil) {
-            let config = NSImage.SymbolConfiguration(pointSize: overlaySize.height, weight: .bold)
-            let configured = symbol.withSymbolConfiguration(config) ?? symbol
-            if let tint {
-                let tinted = NSImage(size: configured.size, flipped: false) { rect in
-                    configured.draw(in: rect)
-                    tint.set()
-                    rect.fill(using: .sourceIn)
-                    return true
-                }
-                tinted.draw(in: overlayRect)
-            } else {
-                configured.draw(in: overlayRect)
+        let unit = 2 / HiMark.stemWidth * scale
+        let hLeft = (5 * scale).rounded()
+        let baseline = (17.5 * scale).rounded()
+        let top = baseline - HiMark.baseline * unit
+        let iLeft = (hLeft + HiMark.iStemLeft * unit).rounded()
+        let dotX = iLeft + HiMark.stemWidth / 2 * unit
+        // A dot centered on the i shares the i's pixel phase.
+        let phase = dotX - dotX.rounded(.down)
+        func snapped(_ y: CGFloat) -> CGFloat { (y - phase).rounded() + phase }
+        let dotY = snapped(top + HiMark.dotCenter.y * unit)
+        let dotRadius = HiMark.dotRadius * unit
+
+        context.setFillColor(CGColor(srgbRed: 0, green: 0, blue: 0, alpha: HiMark.letterStrength(for: state)))
+        for part in HiMark.parts(for: state) {
+            switch part {
+            case .h:
+                context.addPath(placed(HiMark.hOnly(), x: hLeft, y: top, unit: unit))
+                context.fillPath(using: .winding)
+            case .iStem, .bangStem:
+                let stem = part == .iStem ? HiMark.iStem() : HiMark.bangStem()
+                context.addPath(placed(stem, x: iLeft - HiMark.iStemLeft * unit, y: top, unit: unit))
+                context.fillPath(using: .winding)
+            case .dot:
+                context.fillEllipse(in: square(x: dotX, y: dotY, radius: dotRadius))
+            case .bangDot:
+                context.fillEllipse(in: square(x: dotX, y: snapped(top + HiMark.bangDotCenter.y * unit), radius: dotRadius))
+            case .ring:
+                // Whole-pixel radii keep the hole open at 1x. The ring
+                // rests where the solid dot does.
+                let outer = (HiMark.ringOuterRadius * unit).rounded()
+                let inner = (HiMark.ringInnerRadius * unit).rounded()
+                let y = snapped(dotY + dotRadius - outer)
+                context.addEllipse(in: square(x: dotX, y: y, radius: outer))
+                context.addEllipse(in: square(x: dotX, y: y, radius: inner))
+                context.fillPath(using: .evenOdd)
             }
         }
-        out.unlockFocus()
-        out.isTemplate = (tint == nil)
-        return out
+        return context.makeImage()
+    }
+
+    private static func placed(_ path: CGPath, x: CGFloat, y: CGFloat, unit: CGFloat) -> CGPath {
+        var transform = CGAffineTransform(translationX: x, y: y).scaledBy(x: unit, y: unit)
+        return path.copy(using: &transform) ?? path
+    }
+
+    private static func square(x: CGFloat, y: CGFloat, radius: CGFloat) -> CGRect {
+        CGRect(x: x - radius, y: y - radius, width: 2 * radius, height: 2 * radius)
     }
 }
 

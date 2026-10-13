@@ -25,8 +25,9 @@ for state in states {
     }
 }
 require(MenuBarStatusIcon.image(for: .error(reason: "first")) === MenuBarStatusIcon.image(for: .error(reason: "new reason")), "Reasons must not grow the image cache")
-require(MenuBarStatusIcon.image(for: .blocked(reason: "first")) === MenuBarStatusIcon.image(for: .noMemory), "Shared glyphs share their cached image")
-let distinct = [MenuBarStatus.idle, .recording, .paused, .error(reason: "test")]
-let pixels = distinct.map { MenuBarStatusIcon.image(for: $0).tiffRepresentation! }
-require(Set(pixels).count == distinct.count, "Static status glyphs remain visually distinct")
-print("PASS: static menu label, 10000 cached icon reads, bounded reason-independent cache, distinct glyphs")
+require(MenuBarStatusIcon.image(for: .blocked(reason: "first")) === MenuBarStatusIcon.image(for: .stale(reason: "first")), "Shared pictures share their cached image")
+require(MenuBarStatusIcon.image(for: .starting) === MenuBarStatusIcon.image(for: .recording), "Starting shows the solid dot")
+require(MenuBarStatusIcon.image(for: .starting) !== MenuBarStatusIcon.image(for: .paused), "Starting never shows the paused picture")
+let pictures = HiMark.State.allCases.map { MenuBarStatusIcon.image(for: $0).tiffRepresentation! }
+require(Set(pictures).count == HiMark.State.allCases.count, "The four pictures remain visually distinct")
+print("PASS: static menu label, 10000 cached icon reads, bounded reason-independent cache, four distinct pictures")

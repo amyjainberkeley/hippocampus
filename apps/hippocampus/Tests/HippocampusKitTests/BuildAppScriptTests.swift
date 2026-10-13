@@ -181,9 +181,6 @@ final class BuildAppScriptTests: XCTestCase {
         try fileManager.createDirectory(at: kitBundle, withIntermediateDirectories: true)
         try writeFile(kitBundle.appendingPathComponent("placeholder.txt"), contents: "fixture\n")
         try writeFile(repoRoot.appendingPathComponent("assets/branding/AppIcon.icns"))
-        try writeFile(repoRoot.appendingPathComponent("assets/branding/statusbar-icon.png"))
-        try writeFile(repoRoot.appendingPathComponent("assets/branding/statusbar-icon@2x.png"))
-        try writeFile(repoRoot.appendingPathComponent("assets/branding/statusbar-icon@3x.png"))
 
         if includeChangelog {
             let contents: String
