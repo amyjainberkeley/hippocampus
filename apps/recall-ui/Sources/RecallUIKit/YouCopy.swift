@@ -25,6 +25,9 @@ public extension UserFacingCopy {
         }
         /// Once, under the heading (insights product critique 10).
         public static let exactWords = "The exact words, which is why they use your name. Fix anything that\u{2019}s wrong."
+        /// Under the heading when nothing is sure enough to send yet, while
+        /// other items wait under "Not sent unless your AI looks it up".
+        public static let sharedEmpty = "Nothing is sent about you yet."
         public static let keptBackTitle = "Not sent unless your AI looks it up"
         public static let notSeenLatelyTitle = "Not seen lately"
         /// RULINGS I7.

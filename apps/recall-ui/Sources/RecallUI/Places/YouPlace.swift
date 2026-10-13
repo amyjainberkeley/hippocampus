@@ -121,17 +121,25 @@ struct YouPlace: View {
     // MARK: What your AI can be told about you
 
     private var shared: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let shared = model.groups(.shared)
+        return VStack(alignment: .leading, spacing: 10) {
             SectionTitle(UserFacingCopy.You.sharedTitle, caption: UserFacingCopy.You.sharedCaption)
-            Text(UserFacingCopy.You.exactWords)
-                .font(MCI.Font.caption)
-                .foregroundStyle(MCI.Color.foregroundSecondary)
+            if shared.isEmpty {
+                // Early on, everything learned may still be below the bar.
+                Text(UserFacingCopy.You.sharedEmpty)
+                    .font(MCI.Font.body)
+                    .foregroundStyle(MCI.Color.foregroundSecondary)
+            } else {
+                Text(UserFacingCopy.You.exactWords)
+                    .font(MCI.Font.caption)
+                    .foregroundStyle(MCI.Color.foregroundSecondary)
+            }
             if model.verdictFailed {
                 Text(UserFacingCopy.verdictNotSaved)
                     .font(MCI.Font.caption)
                     .foregroundStyle(MCI.Color.error)
             }
-            groups(model.groups(.shared), openFirstWhy: firstWhyOpen)
+            groups(shared, openFirstWhy: firstWhyOpen)
         }
     }
 

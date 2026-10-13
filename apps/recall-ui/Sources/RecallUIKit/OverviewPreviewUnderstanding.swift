@@ -28,6 +28,9 @@ public struct OverviewPreviewUnderstanding: UnderstandingReader {
         case nothingLearned
         /// You, nothing learned, and Apple Intelligence is off.
         case nothingLearnedModelOff
+        /// You, with nothing sure enough to send yet: every item is kept
+        /// back or not seen lately.
+        case nothingSentYet
     }
 
     public let state: State
@@ -40,7 +43,7 @@ public struct OverviewPreviewUnderstanding: UnderstandingReader {
         switch state {
         case .unavailable:
             throw UnderstandingError.unavailable
-        case .todayEmpty, .nothingLearned, .nothingLearnedModelOff:
+        case .todayEmpty, .nothingLearned, .nothingLearnedModelOff, .nothingSentYet:
             return try Self.edited(PreviewUnderstandingFixtures.overview) { json in
                 Self.empty(&json)
             }
@@ -113,6 +116,10 @@ public struct OverviewPreviewUnderstanding: UnderstandingReader {
         case .modelOff:
             return try Self.edited(PreviewUnderstandingFixtures.modelPage, as: ModelPage.self) { json in
                 json["model_status"] = Self.modelOffStatus
+            }
+        case .nothingSentYet:
+            return try Self.edited(PreviewUnderstandingFixtures.modelPage, as: ModelPage.self) { json in
+                json["shared"] = []
             }
         case .today, .pastDay, .noAITool:
             return try Self.decode(ModelPage.self, PreviewUnderstandingFixtures.modelPage)

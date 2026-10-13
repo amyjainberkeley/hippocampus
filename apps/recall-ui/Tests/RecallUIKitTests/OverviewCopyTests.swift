@@ -32,7 +32,7 @@ final class OverviewCopyTests: XCTestCase {
             ("stripLabel", Overview.stripLabel), ("legendHint", Overview.legendHint),
             ("recentWorkTitle", You.recentWorkTitle), ("recentWorkCaption", You.recentWorkCaption),
             ("recentWorkEmpty", You.recentWorkEmpty), ("sharedTitle", You.sharedTitle),
-            ("sharedCaption", You.sharedCaption), ("exactWords", You.exactWords),
+            ("sharedCaption", You.sharedCaption), ("exactWords", You.exactWords), ("sharedEmpty", You.sharedEmpty),
             ("keptBackTitle", You.keptBackTitle), ("notSeenLatelyTitle", You.notSeenLatelyTitle),
             ("footer", You.footer), ("right", You.right), ("rightHelp", You.rightHelp), ("forget", You.forget),
             ("forgetHelp", You.forgetHelp), ("forgotten", You.forgotten), ("undo", You.undo), ("why", You.why),

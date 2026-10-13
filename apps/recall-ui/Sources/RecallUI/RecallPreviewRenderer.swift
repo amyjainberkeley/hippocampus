@@ -140,6 +140,7 @@ enum RecallPreviewRenderer {
         try await you("you-nothing-learned", .nothingLearned, height: firstScreen)
         try await you("you-nothing-learned-model-off", .nothingLearnedModelOff, height: firstScreen)
         try await you("you-unavailable", .unavailable, height: firstScreen)
+        try await you("you-nothing-sent-yet", .nothingSentYet, height: firstScreen, open: true)
         try await you("you-dark", .today, dark: true)
         return written
     }
