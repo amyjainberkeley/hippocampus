@@ -6,6 +6,7 @@ import Foundation
 // Request:  {"id": 7, "task": "propose", "input": {...}}
 // Reply:    {"id": 7, "ok": true, "output": {...}}
 //           {"id": 7, "ok": false, "error": "context_too_long"}
+//           (codes: `MindError`)
 // On start: {"ready": true, "available": true, "engine": "apple-foundation-models"}
 //           {"ready": true, "available": true, "engine": "local:qwen3:4b"}
 //           {"ready": true, "available": false, "reason": "apple_intelligence_off"}
@@ -25,7 +26,11 @@ public enum MindError: String, Error, Codable, Sendable {
     case refused
     /// Malformed request.
     case badRequest = "bad_request"
-    /// Anything else.
+    /// Work nobody asked for (claims, session notes, the day), put off while
+    /// this Mac runs on battery with a model server answering. Ask's answers
+    /// and suggestions still come. Not `unavailable`: the model is there.
+    case onBattery = "on_battery"
+    /// Anything else, including a model server that took too long once.
     case failed
 }
 

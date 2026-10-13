@@ -16,8 +16,8 @@ import IOKit.ps
 ///   inputs (`LocalInputs`), because a server can cut a long prompt without
 ///   saying so. Replies are held to the limits the guided shapes set there.
 /// - Work nobody asked for (claims, session notes, the day) waits for a power
-///   cable: a local model keeps gigabytes in memory and the GPU busy. Ask's
-///   answers and suggestions always run.
+///   cable (`on_battery`): a local model keeps gigabytes in memory and the
+///   GPU busy. Ask's answers and suggestions always run.
 public final class LocalServerEngine: MindEngine, @unchecked Sendable {
     /// Model families to use when none is set, best first.
     static let preferred = ["qwen3", "llama3.2", "llama3.1", "gemma3", "mistral", "phi"]
@@ -28,18 +28,21 @@ public final class LocalServerEngine: MindEngine, @unchecked Sendable {
     let base: URL?
     private let onACPower: @Sendable () -> Bool
     private let freshFor: TimeInterval
+    /// The most any one request waits; tests make it short.
+    private let longestWait: TimeInterval
     private let lock = NSLock()
     private var reason: String?
     private var checkedAt = Date()
     private var checking = false
 
     init(model: String, base: URL?, reason: String?,
-         onACPower: @escaping @Sendable () -> Bool, freshFor: TimeInterval) {
+         onACPower: @escaping @Sendable () -> Bool, freshFor: TimeInterval, longestWait: TimeInterval = .infinity) {
         self.model = model
         self.base = base
         self.reason = reason
         self.onACPower = onACPower
         self.freshFor = freshFor
+        self.longestWait = longestWait
     }
 
     public var label: String { "local:\(model)" }
@@ -63,7 +66,8 @@ public final class LocalServerEngine: MindEngine, @unchecked Sendable {
     /// `local_server_unreachable`.
     public static func find(_ settings: EngineSettings,
                             onACPower: @escaping @Sendable () -> Bool = { PowerSource.onACPower() },
-                            freshFor: TimeInterval = 30) async -> LocalServerEngine {
+                            freshFor: TimeInterval = 30,
+                            longestWait: TimeInterval = .infinity) async -> LocalServerEngine {
         var why = "local_server_unreachable"
         for address in settings.baseURLs {
             guard let base = local(address) else {
@@ -73,12 +77,14 @@ public final class LocalServerEngine: MindEngine, @unchecked Sendable {
             guard let names = await models(at: base) else { continue }
             switch choose(settings.model, from: names) {
             case .success(let model):
-                return LocalServerEngine(model: model, base: base, reason: nil, onACPower: onACPower, freshFor: freshFor)
+                return LocalServerEngine(model: model, base: base, reason: nil, onACPower: onACPower,
+                                         freshFor: freshFor, longestWait: longestWait)
             case .failure(let refusal):
                 why = worse(why, refusal.reason)
             }
         }
-        return LocalServerEngine(model: settings.model, base: nil, reason: why, onACPower: onACPower, freshFor: freshFor)
+        return LocalServerEngine(model: settings.model, base: nil, reason: why, onACPower: onACPower,
+                                 freshFor: freshFor, longestWait: longestWait)
     }
 
     struct Refusal: Error, Equatable { let reason: String }
@@ -290,7 +296,7 @@ public final class LocalServerEngine: MindEngine, @unchecked Sendable {
     }
 
     private func waitForPower() throws {
-        guard onACPower() else { throw MindError.unavailable }
+        guard onACPower() else { throw MindError.onBattery }
     }
 
     // MARK: Asking the server
@@ -302,6 +308,7 @@ public final class LocalServerEngine: MindEngine, @unchecked Sendable {
     private func chat(_ name: String, _ schema: String, userName: String, prompt: String,
                       temperature: Double, maxTokens: Int, timeout: TimeInterval) async throws -> [String: Any] {
         guard let base else { throw MindError.unavailable }
+        let timeout = min(timeout, longestWait)
         let shaped = prompt + "\n\nReply in JSON that follows this schema:\n" + schema
         func messages(_ user: String) -> [[String: String]] {
             // Qwen3 thinks aloud first unless told not to, which the time
@@ -322,6 +329,17 @@ public final class LocalServerEngine: MindEngine, @unchecked Sendable {
     }
 
     private struct FormatRefused: Error {}
+
+    /// What a request with no reply means. Nothing listening: `unavailable`
+    /// until the server is seen again. Too slow (a model loading, a large
+    /// model) or cut off: `failed`, this once. Ask stops offering answers
+    /// for a while after `unavailable`, so a slow reply must not say it.
+    static func failure(_ error: Error) -> MindError {
+        switch (error as? URLError)?.code {
+        case .cannotConnectToHost?, .cannotFindHost?, .dnsLookupFailed?, .notConnectedToInternet?: .unavailable
+        default: .failed
+        }
+    }
 
     private func complete(_ base: URL, _ messages: [[String: String]], format: (name: String, schema: String)?,
                           temperature: Double, maxTokens: Int, timeout: TimeInterval) async throws -> [String: Any] {
@@ -344,13 +362,10 @@ public final class LocalServerEngine: MindEngine, @unchecked Sendable {
             let (reply, response) = try await Self.session.data(for: request)
             data = reply
             status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        } catch let error as URLError where error.code == .timedOut {
-            throw MindError.unavailable
-        } catch let error as URLError where error.code != .cancelled {
-            saw("local_server_unreachable")
-            throw MindError.unavailable
         } catch {
-            throw MindError.failed
+            let failure = Self.failure(error)
+            if failure == .unavailable { saw("local_server_unreachable") }
+            throw failure
         }
         guard status == 200 else {
             let said = String(decoding: data.prefix(4_096), as: UTF8.self).lowercased()

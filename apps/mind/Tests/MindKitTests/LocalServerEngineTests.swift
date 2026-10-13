@@ -10,18 +10,24 @@ final class LocalServerEngineTests: XCTestCase {
     ], propositions: [], today: "Friday, October 10")
 
     private func engine(_ server: FakeModelServer, model: String = "", freshFor: TimeInterval = 30,
+                        requestTimeout: TimeInterval = .infinity,
                         onACPower: @escaping @Sendable () -> Bool = { true }) async -> LocalServerEngine {
         await LocalServerEngine.find(EngineSettings(engine: .local, baseURL: server.baseURL, model: model),
-                                     onACPower: onACPower, freshFor: freshFor)
+                                     onACPower: onACPower, freshFor: freshFor, longestWait: requestTimeout)
     }
 
     private func assertUnavailable<T>(_ work: () async throws -> T, _ message: String = "",
                                       file: StaticString = #filePath, line: UInt = #line) async {
+        await assertFails(with: .unavailable, work, message, file: file, line: line)
+    }
+
+    private func assertFails<T>(with expected: MindError, _ work: () async throws -> T, _ message: String = "",
+                                file: StaticString = #filePath, line: UInt = #line) async {
         do {
             _ = try await work()
             XCTFail("answered: \(message)", file: file, line: line)
         } catch {
-            XCTAssertEqual(error as? MindError, .unavailable, message, file: file, line: line)
+            XCTAssertEqual(error as? MindError, expected, message, file: file, line: line)
         }
     }
 
@@ -221,14 +227,44 @@ final class LocalServerEngineTests: XCTestCase {
         }
         defer { server.stop() }
         let engine = await engine(server, onACPower: { false })
-        await assertUnavailable({ try await engine.propose(ProposeInput(userName: "Sam", observation: "o", known: [])) }, "propose")
-        await assertUnavailable({ try await engine.relate(RelateInput(proposition: "p", candidates: [])) }, "relate")
-        await assertUnavailable({ try await engine.episode(EpisodeInput(userName: "Sam", observation: "o")) }, "episode")
-        await assertUnavailable({ try await engine.day(DayInput(userName: "Sam", facts: "f", episodes: [], propositions: [])) }, "day")
+        await assertFails(with: .onBattery, { try await engine.propose(ProposeInput(userName: "Sam", observation: "o", known: [])) }, "propose")
+        await assertFails(with: .onBattery, { try await engine.relate(RelateInput(proposition: "p", candidates: [])) }, "relate")
+        await assertFails(with: .onBattery, { try await engine.revise(ReviseInput(userName: "Sam", new: PropositionDraft(text: "t", reasoning: "r", kind: "goal", confidence: 5, decay: 5), old: [])) }, "revise")
+        await assertFails(with: .onBattery, { try await engine.episode(EpisodeInput(userName: "Sam", observation: "o")) }, "episode")
+        await assertFails(with: .onBattery, { try await engine.day(DayInput(userName: "Sam", facts: "f", episodes: [], propositions: [])) }, "day")
+        // The agent stores "unavailable" as the model being gone and the
+        // window would say so, so the reply names the battery instead.
+        let reply = try JSONSerialization.jsonObject(with: await MindServer(engine: engine).handle(
+            try JSONSerialization.data(withJSONObject: ["id": 3, "task": "episode", "input": ["user_name": "Sam", "observation": "o"]] as [String: Any])
+        )) as? [String: Any]
+        XCTAssertEqual(reply?["error"] as? String, "on_battery")
+        XCTAssertNil(engine.unavailableReason(), "the model is still there")
         // Ask still answers on battery.
         _ = try await engine.answer(question)
         _ = try await engine.suggest(SuggestInput(userName: "Sam", now: "n", recent: [], propositions: []))
         XCTAssertEqual(server.requests.compactMap(\.schemaName), ["answer", "suggest"])
+    }
+
+    /// Ask stops offering answers for a while after "unavailable", so only a
+    /// server that is not there says it; one slow reply only failed.
+    func testOnlyAServerThatIsNotThereIsUnavailable() {
+        XCTAssertEqual(LocalServerEngine.failure(URLError(.cannotConnectToHost)), .unavailable)
+        XCTAssertEqual(LocalServerEngine.failure(URLError(.timedOut)), .failed, "a model loading or a large model")
+        XCTAssertEqual(LocalServerEngine.failure(URLError(.networkConnectionLost)), .failed)
+        XCTAssertEqual(LocalServerEngine.failure(URLError(.cancelled)), .failed)
+        XCTAssertEqual(LocalServerEngine.failure(CocoaError(.fileReadUnknown)), .failed)
+    }
+
+    func testAReplyThatTakesTooLongFailsAndTheModelStaysAvailable() async throws {
+        let server = try FakeModelServer { request in
+            request.method == "GET"
+                ? FakeModelServer.models(["llama3.2:3b"])
+                : FakeModelServer.Reply(body: FakeModelServer.chat(#"{"answer":"Late.","sources":[]}"#).body, delay: 2)
+        }
+        defer { server.stop() }
+        let engine = await engine(server, requestTimeout: 0.5)
+        await assertFails(with: .failed, { try await engine.answer(question) }, "answer")
+        XCTAssertNil(engine.unavailableReason())
     }
 
     func testAServerThatStopsMakesTheEngineUnavailable() async throws {
