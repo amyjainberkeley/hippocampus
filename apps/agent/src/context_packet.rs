@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use mci_brain::reading::{body, reading};
+use mci_brain::reading::{body, excerpt, reading, ExcerptQuery, Reading};
 use mci_brain::{
     ClaimStatus, Event, EventSource, MemoryClaim, NothingMatchedReason, RetrievalDegradation,
 };
@@ -15,6 +15,9 @@ use serde::Serialize;
 
 const MIN_GROUNDED_CONFIDENCE: f32 = 0.65;
 const MAX_BYTES_PER_TOKEN_ESTIMATE: usize = 24;
+/// The most of one window an observation shows, in bytes, so a long window
+/// leaves room for others (transcript product critique 10).
+const EVIDENCE_EXCERPT_BYTES: usize = 1_200;
 /// Default content-token budget shared by MCP and direct handoff commands.
 pub const DEFAULT_CONTEXT_TOKENS: usize = 1_200;
 /// Allowed content-token bounds for public context handoff surfaces.
@@ -71,8 +74,8 @@ pub struct ContextEvidence {
     pub window_title: Option<String>,
     /// Captured URL, when known.
     pub url: Option<String>,
-    /// The event's stored text, header included. Filters and de-duplication
-    /// read it; the packet shows its reading instead.
+    /// The event's stored text, header included. Filters read it; the packet
+    /// shows a passage of its reading, and de-duplicates on the reading.
     pub excerpt: String,
     /// Candidate-pool priority.
     pub priority: EvidencePriority,
@@ -580,6 +583,67 @@ impl PacketBuilder {
         self.byte_estimate += bytes;
         true
     }
+
+    /// The passage of an observation's reading that fits what is left of the
+    /// budget after `label`, at most [`EVIDENCE_EXCERPT_BYTES`]: around the
+    /// focus words when `main` holds them, otherwise its first lines (the
+    /// last for a terminal or chat). `rest` is shown only when `main` is
+    /// empty. None when there is nothing to read or nothing fits.
+    fn fitting_excerpt(
+        &mut self,
+        read: &Reading,
+        app: Option<&str>,
+        focus: &ExcerptQuery,
+        label: &str,
+    ) -> Option<String> {
+        let whole = if read.main.trim().is_empty() {
+            read.rest.trim().len()
+        } else {
+            read.main.trim().len()
+        };
+        if whole == 0 {
+            return None;
+        }
+        let shown_part = if read.main.trim().is_empty() {
+            read.clone()
+        } else {
+            Reading {
+                main: read.main.clone(),
+                rest: String::new(),
+            }
+        };
+        let max_bytes = self
+            .budget
+            .max_tokens
+            .saturating_mul(MAX_BYTES_PER_TOKEN_ESTIMATE);
+        let room_bytes = max_bytes
+            .saturating_sub(self.byte_estimate)
+            .saturating_sub(label.len());
+        let room_tokens = self
+            .budget
+            .max_tokens
+            .saturating_sub(self.token_estimate)
+            .saturating_sub(token_count(label));
+        let mut cap = EVIDENCE_EXCERPT_BYTES.min(room_bytes);
+        while cap > 0 && room_tokens > 0 {
+            let shown = excerpt(&shown_part, app, focus, cap);
+            let shown = shown.trim();
+            if shown.is_empty() {
+                break;
+            }
+            let tokens = token_count(shown);
+            if tokens <= room_tokens {
+                if cap < EVIDENCE_EXCERPT_BYTES && shown.len() < whole {
+                    self.truncated = true;
+                }
+                return Some(shown.to_owned());
+            }
+            // More words than room: shrink in proportion and try again.
+            cap = cap * room_tokens / tokens;
+        }
+        self.truncated = true;
+        None
+    }
 }
 
 /// Compile a deterministic, cited packet without invoking a model.
@@ -629,7 +693,7 @@ pub fn compile_context_packet(
         );
     }
 
-    add_observations(&mut builder, &evidence);
+    add_observations(&mut builder, &evidence, focus.as_deref());
 
     let has_observation = builder
         .sections
@@ -706,7 +770,11 @@ fn select_eligible_claims<'a>(
         .collect()
 }
 
-fn add_observations(builder: &mut PacketBuilder, evidence: &[&ContextEvidence]) {
+fn add_observations(
+    builder: &mut PacketBuilder,
+    evidence: &[&ContextEvidence],
+    focus: Option<&str>,
+) {
     let mut observed_changes = BTreeSet::new();
     for candidate in evidence {
         let citation = citation_from_evidence(candidate);
@@ -721,13 +789,24 @@ fn add_observations(builder: &mut PacketBuilder, evidence: &[&ContextEvidence]) 
             );
         }
     }
+    let focus = focus.map_or_else(ExcerptQuery::default, ExcerptQuery::new);
+    let mut shown_before = BTreeSet::new();
     for candidate in evidence {
-        let shown = shown_text(candidate);
-        if shown.is_empty() {
+        let label = format!("Event {}: ", candidate.event_id);
+        let Some(shown) = builder.fitting_excerpt(
+            &candidate_reading(candidate),
+            candidate.app_bundle_id.as_deref(),
+            &focus,
+            &label,
+        ) else {
+            continue;
+        };
+        // Two windows that read the same say it once.
+        if !shown_before.insert(shown.clone()) {
             continue;
         }
         let citation = citation_from_evidence(candidate);
-        let text = format!("Event {}: {shown}", candidate.event_id);
+        let text = format!("{label}{shown}");
         builder.add_item(
             ContextSectionKind::Evidence,
             ContextSectionStatus::Observed,
@@ -932,12 +1011,15 @@ fn candidate_is_explicitly_historical(candidate: &ContextEvidence) -> bool {
     .any(|prefix| body.starts_with(prefix))
 }
 
+/// What de-duplicates screen observations: the reading's `main`, what the
+/// packet shows, so two captures of one window that differ only in its
+/// status bar or tabs count once.
 fn screen_ocr_fingerprint(candidate: &ContextEvidence) -> Option<String> {
     if candidate.priority == EvidencePriority::Claim || candidate.source_kind != "screen_ocr" {
         return None;
     }
-    let body = context_body(&candidate.excerpt);
-    let fingerprint = body
+    let main = candidate_reading(candidate).main;
+    let fingerprint = main
         .split_whitespace()
         .flat_map(str::chars)
         .flat_map(char::to_lowercase)
@@ -949,18 +1031,15 @@ fn context_body(excerpt: &str) -> &str {
     body(excerpt)
 }
 
-/// What the packet shows of an observation: what the person was reading
-/// (the reading's `main`), never the stored header or U+001E.
-fn shown_text(candidate: &ContextEvidence) -> String {
+/// The reading of an observation's stored text: what the packet shows,
+/// never the stored header or U+001E.
+fn candidate_reading(candidate: &ContextEvidence) -> Reading {
     reading(
         &candidate.excerpt,
         EventSource::from_stored(&candidate.source_kind),
         candidate.app_bundle_id.as_deref(),
         candidate.window_title.as_deref(),
     )
-    .main
-    .trim()
-    .to_owned()
 }
 
 fn evidence_search_text(candidate: &ContextEvidence) -> String {

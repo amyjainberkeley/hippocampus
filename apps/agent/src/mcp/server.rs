@@ -457,7 +457,7 @@ impl Server {
             Ok(rows) => {
                 let rows_json: Vec<serde_json::Value> = rows
                     .iter()
-                    .map(|r| event_row_json(r, self.reader.event_source(r.event_id)))
+                    .map(|r| event_row_json(r, self.reader.as_ref()))
                     .collect();
                 JsonRpcResponse::ok(
                     id,
@@ -592,7 +592,7 @@ impl Server {
             Ok(rows) => {
                 let rows_json: Vec<serde_json::Value> = rows
                     .iter()
-                    .map(|r| event_row_json(r, self.reader.event_source(r.event_id)))
+                    .map(|r| event_row_json(r, self.reader.as_ref()))
                     .collect();
                 JsonRpcResponse::ok(
                     id,
@@ -670,27 +670,20 @@ impl Server {
     }
 }
 
-/// One event row as an AI tool sees it. `text_snippet` is the start of the
-/// row's reading, made from the store's bounded snippet: never the stored
-/// header or U+001E, at most [`mci_brain::EventRecord::SNIPPET_MAX_CHARS`]
-/// bytes. The store's own `text_snippet` is unchanged.
-fn event_row_json(
-    record: &mci_brain::EventRecord,
-    source: mci_brain::EventSource,
-) -> serde_json::Value {
-    let shown = mci_brain::reading::reading_prefix(
-        &record.text_snippet,
-        source,
-        record.app_bundle_id.as_deref(),
-        mci_brain::EventRecord::SNIPPET_MAX_CHARS,
-    );
+/// One event row as an AI tool sees it. `text_snippet` is a passage of the
+/// event's reading ([`BrainReader::listed_text`]): its first lines, or the
+/// last for a terminal or chat app, never the stored header or U+001E, at
+/// most [`mci_brain::EventRecord::SNIPPET_MAX_CHARS`] bytes. The store's own
+/// `text_snippet` is unchanged.
+fn event_row_json(record: &mci_brain::EventRecord, reader: &dyn BrainReader) -> serde_json::Value {
+    let source = reader.event_source(record.event_id);
     serde_json::json!({
         "event_id": record.event_id.0,
         "ts_us": record.ts_us,
         "app_bundle_id": record.app_bundle_id,
         "window_title": record.window_title,
         "url": record.url,
-        "text_snippet": mci_brain::EventRecord::truncate_snippet(&shown),
+        "text_snippet": reader.listed_text(record, source),
         "source_kind": source.as_str(),
     })
 }

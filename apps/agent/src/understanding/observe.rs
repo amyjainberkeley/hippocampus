@@ -14,7 +14,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use mci_brain::reading::reading;
+use mci_brain::reading::screen_reading;
 use mci_brain::understanding::{InteractionCounts, ObservedEvent, SearchRecord};
 use mci_brain::EventSource;
 
@@ -142,9 +142,10 @@ impl Segment {
     }
 }
 
-/// What the person was reading in one capture: the reading's `main`.
+/// What the person was reading in one capture: the reading's `main`, and
+/// for a browser page read both ways the part that was on the screen (T10).
 fn read_text(event: &ObservedEvent) -> String {
-    reading(
+    screen_reading(
         &event.text,
         EventSource::from_stored(&event.source),
         event.app_bundle_id.as_deref(),
@@ -549,6 +550,14 @@ mod tests {
         let observation = render(&segs, &s, 0, 4_000);
         assert!(!observation.contains("[app="), "{observation}");
         assert!(observation.contains("fn sweep(store: &Store)"));
+    }
+
+    #[test]
+    fn a_page_read_both_ways_is_read_as_the_part_on_the_screen() {
+        let stored = "[app=com.google.Chrome | title=Pricing | url=? | ts=1]\nHome Pricing Docs Blog\nThe whole page, top to bottom\n\n[VISIBLE-OCR]\nWhat was visible\n\n\u{1e}\nTabs";
+        let events = vec![ev(1, 0, "com.google.Chrome", "Pricing", "browser_page_with_ocr", stored)];
+        let segs = segments(&events, &[], events[0].ts_us);
+        assert_eq!(segs[0].text, "What was visible");
     }
 
     #[test]

@@ -5,8 +5,9 @@
 //! headless stub without exposing the test stub on the public mci-brain
 //! API.
 
+use mci_brain::reading::{body, passage, ExcerptQuery};
 use mci_brain::{
-    BrainStats, EpisodeRecord, EventRecord, NothingMatchedReason, RetrievalDegradation,
+    BrainStats, EpisodeRecord, EventRecord, EventSource, NothingMatchedReason, RetrievalDegradation,
 };
 use thiserror::Error;
 
@@ -70,6 +71,26 @@ pub enum McpRecallOutcome {
     },
 }
 
+/// [`BrainReader::listed_text`] made from the row's 512-byte snippet. A long
+/// header can fill the snippet, so a header left unfinished by the cut leaves
+/// nothing to show rather than part of the header.
+#[must_use]
+pub fn snippet_listed_text(record: &EventRecord, source: EventSource) -> String {
+    let snippet = record.text_snippet.as_str();
+    let header_left = body(snippet).len() == snippet.len()
+        && (snippet.starts_with("[app=") || snippet.starts_with("[MCP_RESOURCE"));
+    if header_left {
+        return String::new();
+    }
+    EventRecord::truncate_snippet(&passage(
+        snippet,
+        source,
+        record.app_bundle_id.as_deref(),
+        &ExcerptQuery::default(),
+        EventRecord::SNIPPET_MAX_CHARS,
+    ))
+}
+
 /// Errors a [`BrainReader`] may surface to the MCP dispatcher.
 #[derive(Debug, Error)]
 pub enum BrainReaderError {
@@ -123,6 +144,17 @@ pub trait BrainReader: Send + Sync {
         app_bundle_id: &str,
         limit: usize,
     ) -> Result<Vec<EventRecord>, BrainReaderError>;
+
+    /// What an AI tool reads of one listed event (`mci_events_since`,
+    /// `mci_events_by_app`): a passage of its reading, the first lines or,
+    /// for a terminal or chat app, the last (RULINGS T8, T9), never the
+    /// stored header or U+001E (T14), at most
+    /// [`EventRecord::SNIPPET_MAX_CHARS`] bytes. Readers that hold the
+    /// event's text read it from there; this default has only the row's
+    /// 512-byte snippet.
+    fn listed_text(&self, record: &EventRecord, source: EventSource) -> String {
+        snippet_listed_text(record, source)
+    }
 
     /// Compile a bounded, cited packet for one optional work focus.
     fn context(

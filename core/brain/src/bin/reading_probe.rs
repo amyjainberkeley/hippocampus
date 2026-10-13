@@ -6,8 +6,9 @@
 //! [`mci_brain::reading::reading`]. `source` is a stored source label
 //! (`screen_ocr`, `browser_page_with_ocr`, …); a missing or unknown label is
 //! `unknown`. `app` and `title` may be missing or null. A line that is not
-//! such an object is answered with `{"error": "..."}`, so answers stay in step
-//! with questions. Blank lines get no answer.
+//! such an object, or not UTF-8, is answered with `{"error":"bad_input"}`, so
+//! answers stay in step with questions. Blank lines get no answer. It exits 0
+//! at the end of its input, and non-zero only when it cannot write.
 //!
 //! ```bash
 //! cargo run -p mci-brain --bin reading-probe < questions.jsonl
@@ -32,9 +33,12 @@ struct Question {
     title: Option<String>,
 }
 
-fn answer(line: &str) -> serde_json::Value {
-    match serde_json::from_str::<Question>(line) {
-        Ok(question) => {
+fn answer(line: &[u8]) -> serde_json::Value {
+    let question = std::str::from_utf8(line)
+        .ok()
+        .and_then(|line| serde_json::from_str::<Question>(line).ok());
+    match question {
+        Some(question) => {
             let source = EventSource::from_stored(question.source.as_deref().unwrap_or(""));
             let read = reading(
                 &question.stored,
@@ -44,20 +48,24 @@ fn answer(line: &str) -> serde_json::Value {
             );
             serde_json::json!({ "main": read.main, "rest": read.rest })
         }
-        Err(error) => serde_json::json!({ "error": error.to_string() }),
+        None => serde_json::json!({ "error": "bad_input" }),
     }
 }
 
 fn main() -> io::Result<()> {
-    let stdin = io::stdin();
+    let mut input = io::stdin().lock();
     let mut out = io::stdout().lock();
-    for line in stdin.lock().lines() {
-        let line = line?;
-        if line.trim().is_empty() {
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        if input.read_until(b'\n', &mut line)? == 0 {
+            return Ok(());
+        }
+        let question = line.strip_suffix(b"\n").unwrap_or(&line);
+        if std::str::from_utf8(question).is_ok_and(|text| text.trim().is_empty()) {
             continue;
         }
-        writeln!(out, "{}", answer(&line))?;
+        writeln!(out, "{}", answer(question))?;
         out.flush()?;
     }
-    Ok(())
 }

@@ -1,5 +1,5 @@
 use super::*;
-use mci_brain::reading::Reading;
+use mci_brain::reading::{excerpt, Reading};
 use mci_brain::{Event, EventSource};
 use serde_json::{json, Value};
 
@@ -172,8 +172,8 @@ fn lexical_snippet_multiline_match_is_visible_without_changing_source_readback()
     unsafe { mci_brain_ffi_string_free(raw) };
     assert_eq!(full["event_id"], id.0);
     assert_eq!(
-        full["text"], text,
-        "the raw path still returns what is stored"
+        full["text"], body,
+        "the audit path returns every stored word, without the header"
     );
     assert_eq!(full["truncated"], false);
     let recent = TestBrain::read_hits(unsafe { mci_brain_ffi_recent_events(brain.handle, 10) });
@@ -396,7 +396,8 @@ fn search_snippet_fallback_and_boundary_cases_remain_verbatim() {
     for query in ["", "   ", "?! () *", "needle", "unmatched"] {
         assert_eq!(
             passage(&keywords(query), &long),
-            long.chars().take(280).collect::<String>()
+            "filler ".repeat(40).trim_end(),
+            "no match: the first words that fit, never half a word"
         );
     }
     let query = keywords("needle");
@@ -470,7 +471,8 @@ fn related_snippet_without_literal_match_preserves_source_and_body_prefix() {
         assert_eq!(hit.score, Some(0.75));
         assert_eq!(
             hit.ocr_text_snippet,
-            body.chars().take(280).collect::<String>()
+            "Ordinary unrelated body. ".repeat(11).trim_end(),
+            "no literal match: the first words that fit"
         );
     }
 }

@@ -1,5 +1,6 @@
 //! The FFI hands the window readable text: a reading for the detail view,
-//! readable list rows, and the raw stored text only through the audit path.
+//! readable list rows, and every stored word, without the header or U+001E,
+//! through the audit path.
 
 use std::ffi::{c_char, CStr, CString};
 use std::ptr;
@@ -109,7 +110,7 @@ fn classified_notes() -> String {
 }
 
 #[test]
-fn the_detail_view_reads_main_then_rest_and_the_audit_path_stays_raw() {
+fn the_detail_view_reads_main_then_rest_and_the_audit_path_keeps_every_word() {
     let brain = TestBrain::new();
     let stored = classified_notes();
     let id = brain.seed(&stored, 100, NOTES, EventSource::ScreenOcr);
@@ -127,11 +128,13 @@ fn the_detail_view_reads_main_then_rest_and_the_audit_path_stays_raw() {
     assert_eq!(value["match_in"], Value::Null);
     assert_eq!(value["truncated"], false);
 
-    let raw = take_json(unsafe { mci_brain_ffi_event_text(brain.handle, id.0) });
+    let audit = take_json(unsafe { mci_brain_ffi_event_text(brain.handle, id.0) });
     assert_eq!(
-        raw["text"], stored,
-        "the raw path returns exactly what is stored"
+        audit["text"],
+        "\u{4e09} Launch plan\nThe beta opens on October 21. Everything below has to be true by then, and nothing else is in\nscope.\n\n\u{53e3} Search\nRoadmap\nRecently Deleted 3",
+        "every stored word, junk and chrome included; no header, and the separator is a blank line"
     );
+    assert_eq!(audit["text"], mci_brain::reading::audit_text(&stored));
 }
 
 #[test]
@@ -145,6 +148,73 @@ fn match_in_says_where_a_searchs_words_are() {
         Value::Null
     );
     assert_eq!(brain.reading(id.0, Some(""))["match_in"], Value::Null);
+}
+
+#[test]
+fn a_search_with_a_common_word_opens_the_rest_where_its_telling_word_is() {
+    let brain = TestBrain::new();
+    let stored = format!(
+        "{}The beta opens on October 21 and the plan is final.\n\n\u{1e}\nSearch\nRoadmap",
+        header(NOTES)
+    );
+    let id = brain.seed(&stored, 100, NOTES, EventSource::ScreenOcr);
+    assert_eq!(
+        brain.reading(id.0, Some("the roadmap"))["match_in"],
+        "rest",
+        "\"the\" in main does not count while \"roadmap\" is in the rest"
+    );
+    assert_eq!(brain.reading(id.0, Some("the"))["match_in"], "main");
+    let hits = brain.call(
+        mci_brain_ffi_search,
+        &json!({"text": "the roadmap", "mode": "text", "limit": 10}),
+    );
+    assert_eq!(hits[0]["ocr_text_snippet"], "Roadmap");
+}
+
+#[test]
+fn text_never_stored_is_refused_over_256_kib() {
+    let fits = json!({"stored": "a".repeat(200 * 1024), "source": "screen_ocr"}).to_string();
+    let fits = CString::new(fits).unwrap();
+    assert!(
+        !take_json(unsafe { mci_brain_ffi_reading(fits.as_ptr()) })["main"]
+            .as_str()
+            .unwrap()
+            .is_empty()
+    );
+    let over = json!({"stored": "a".repeat(256 * 1024), "source": "screen_ocr"}).to_string();
+    let over = CString::new(over).unwrap();
+    assert!(unsafe { mci_brain_ffi_reading(over.as_ptr()) }.is_null());
+}
+
+#[test]
+fn a_reading_longer_than_the_window_decodes_is_cut_after_a_whole_line() {
+    // Four-space indents make the screen part of this page longer than it is
+    // stored, past the 128 KiB and 1 KiB the window decodes.
+    let brain = TestBrain::new();
+    let page = "a".repeat(120_000);
+    let seen = " x\n".repeat(3_000);
+    let stored = format!(
+        "{}{page}\n\n[VISIBLE-OCR]\n{seen}\n\u{1e}\nTabs",
+        header("com.google.Chrome")
+    );
+    assert!(stored.len() < 128 * 1024);
+    let id = brain.seed(
+        &stored,
+        100,
+        "com.google.Chrome",
+        EventSource::BrowserPageWithOcr,
+    );
+    let value = brain.reading(id.0, None);
+    let main = value["main"].as_str().unwrap();
+    let rest = value["rest"].as_str().unwrap();
+    assert_eq!(main, page);
+    assert!(main.len() + rest.len() <= mci_brain_ffi::EVENT_READING_BYTE_CAP);
+    assert!(
+        rest.starts_with("    x\n") && rest.ends_with("\n    x"),
+        "{}",
+        rest.len()
+    );
+    assert_eq!(value["truncated"], true);
 }
 
 #[test]
@@ -282,6 +352,10 @@ fn no_text_the_window_reads_holds_the_separator_or_a_header() {
     );
     for id in ids {
         strings(&brain.reading(id.0, Some("launch")), &mut seen);
+        strings(
+            &take_json(unsafe { mci_brain_ffi_event_text(brain.handle, id.0) }),
+            &mut seen,
+        );
     }
     assert!(seen.len() > 30);
     for text in seen {

@@ -12,8 +12,12 @@
 //!   junk tokens disappear.
 //! - [`reading_prefix`] is the start of `main` for list rows. It stops as soon
 //!   as it has enough.
-//! - [`excerpt`] is a short passage: around a search's words, the last lines
-//!   of a terminal or a chat, otherwise the first lines.
+//! - [`excerpt`] is a short passage of a reading: around a search's words,
+//!   the last lines of a terminal or a chat, otherwise the first lines.
+//! - [`passage`] is the same passage made from stored text, cleaning only the
+//!   blocks it shows, for lists and search results.
+//! - [`audit_text`] is everything stored, for an audit: no header and no
+//!   U+001E, every stored word kept.
 //!
 //! # Rules this round
 //!
@@ -31,19 +35,26 @@
 //!   its wrapped lines joined into paragraphs and its indents set to none or
 //!   four spaces, outside preformatted blocks. Older text keeps its lines.
 //!
-//! A block (lines between blank lines) is preformatted, and kept byte for
+//! A block (the lines between blank lines) is preformatted, and kept byte for
 //! byte but for junk tokens, in a terminal, when it reads like code, a table
-//! or a shell session, or when it holds a tab. Every other source is shown as
-//! stored, without its header. No reading holds U+001E.
+//! or a shell session, or when it holds a tab. The whole block is judged at
+//! once. Every other source is shown as stored, without its header. No
+//! reading holds U+001E.
 //!
 //! # The guard
 //!
 //! The capture helper stores no OCR text that one of its four secret patterns
 //! matches ([`crate::redaction::ocr_secrets`]). Cleaning could make one appear,
-//! for example by removing a stray symbol between `token` and `=`. When a
-//! cleaned reading matches, it falls back to the stored parts with no other
-//! cleaning, cut in the same places. A short passage whose cut makes a pattern
-//! appear leaves out the words the cut split.
+//! for example by removing a stray symbol between `token` and `=`, and so
+//! could putting two stored pieces side by side that U+001E or a marker kept
+//! apart. So:
+//! - a cleaned part that matches falls back to the stored parts, with no
+//!   other cleaning, cut in the same places;
+//! - when `main` and `rest` shown one after the other would match, the words
+//!   beside the boundary are left out;
+//! - a stray U+001E reads as a space, unless that would match: then the words
+//!   on either side of it are left out;
+//! - a passage whose cut would make a pattern appear leaves out the cut words.
 
 use std::borrow::Cow;
 use std::cell::OnceCell;
@@ -67,8 +78,11 @@ pub const VISIBLE_OCR_SEPARATOR: &str = "\n\n[VISIBLE-OCR]\n";
 /// The line an MCP resource event starts with, before its header.
 const MCP_REVISION_PREFIX: &str = "[MCP_RESOURCE revision_sha256=";
 
+/// A header whose title holds a line break is looked for this far.
+const WRAPPED_HEADER_BYTES: usize = 8 * 1024;
+
 /// Terminals: every block is kept as it was read, and a passage is the end.
-pub const TERMINAL_APPS: [&str; 7] = [
+pub const TERMINAL_APPS: [&str; 8] = [
     "com.apple.Terminal",
     "com.googlecode.iterm2",
     "com.mitchellh.ghostty",
@@ -76,6 +90,7 @@ pub const TERMINAL_APPS: [&str; 7] = [
     "net.kovidgoyal.kitty",
     "com.github.wez.wezterm",
     "org.alacritty",
+    "co.zeit.hyper",
 ];
 
 /// Chat apps: the newest message is at the bottom, so a passage is the end.
@@ -92,6 +107,15 @@ pub const CHAT_APPS: [&str; 12] = [
     "com.facebook.archon",
     "com.openai.chat",
     "com.anthropic.claudefordesktop",
+];
+
+/// Words that tell no passage from another: a search for "the roadmap" is
+/// shown where "roadmap" is. They count only in a search that has no other
+/// word.
+const STOP_WORDS: [&str; 34] = [
+    "a", "about", "an", "and", "are", "as", "at", "be", "did", "do", "does", "for", "from", "how",
+    "i", "in", "is", "it", "of", "on", "or", "that", "the", "this", "to", "was", "we", "what",
+    "when", "where", "which", "who", "why", "with",
 ];
 
 /// Left context a search passage may show before its first word, in bytes.
@@ -111,7 +135,9 @@ pub struct Reading {
 ///
 /// Strict: the first line is removed only when it is a whole header,
 /// `[app=… | title=… | url=…` and `]`, as captures (with `| ts=…`) and
-/// transcript imports (with `| session=… | src=…`) write it. An MCP
+/// transcript imports (with `| session=… | src=…`) write it. A title holding
+/// a line break makes the header several lines: it then ends with the first
+/// later line that holds ` | url=` and ends in `]`, within 8 KiB. An MCP
 /// resource's revision line before the header goes with it. Any other text
 /// comes back unchanged.
 #[must_use]
@@ -121,10 +147,12 @@ pub fn body(stored: &str) -> &str {
         .and_then(|rest| rest.split_once("]\n"))
         .filter(|(digest, _)| digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit()))
         .map_or(stored, |(_, rest)| rest);
-    match after_revision.split_once('\n') {
-        Some((first, rest)) if is_header(first) => rest,
-        _ => stored,
+    if let Some((first, rest)) = after_revision.split_once('\n') {
+        if is_header(first) {
+            return rest;
+        }
     }
+    wrapped_header_len(after_revision).map_or(stored, |len| &after_revision[len..])
 }
 
 fn is_header(line: &str) -> bool {
@@ -132,6 +160,50 @@ fn is_header(line: &str) -> bool {
         .and_then(|fields| fields.strip_suffix(']'))
         .and_then(|fields| fields.split_once(" | title="))
         .is_some_and(|(_, after_title)| after_title.contains(" | url="))
+}
+
+/// The byte length, newline included, of a header whose title holds a line
+/// break: its first line opens it with the app and the title, and a later
+/// line closes it with ` | url=` and `]`.
+fn wrapped_header_len(text: &str) -> Option<usize> {
+    let (first, _) = text.split_once('\n')?;
+    if !first.starts_with("[app=") || !first.contains(" | title=") {
+        return None;
+    }
+    let window = &text[..floor_char_boundary(text, WRAPPED_HEADER_BYTES)];
+    let mut at = first.len() + 1;
+    while let Some(len) = window[at..].find('\n') {
+        let line = &window[at..at + len];
+        if line.ends_with(']') && line.contains(" | url=") {
+            return Some(at + len + 1);
+        }
+        at += len + 1;
+    }
+    None
+}
+
+/// Everything stored, for an audit: the text without its header line, the
+/// separator between a window's content and its chrome as a blank line, and
+/// any other U+001E as a space. No stored word is left out and nothing is
+/// cleaned.
+#[must_use]
+pub fn audit_text(stored: &str) -> String {
+    let text = body(stored);
+    if !text.contains('\u{1E}') {
+        return text.to_owned();
+    }
+    let mut out = String::with_capacity(text.len());
+    for (index, piece) in text.split(CHROME_SEPARATOR).enumerate() {
+        if index > 0 {
+            out.push_str("\n\n");
+        }
+        if piece.contains('\u{1E}') {
+            out.push_str(&piece.replace('\u{1E}', " "));
+        } else {
+            out.push_str(piece);
+        }
+    }
+    out
 }
 
 /// The reading of one stored event.
@@ -149,10 +221,10 @@ pub fn reading(
     match source {
         EventSource::ScreenOcr | EventSource::ScreenContext => read_screen(text, app),
         EventSource::BrowserPageWithOcr => match text.split_once(VISIBLE_OCR_SEPARATOR) {
-            Some((page, seen)) => Reading {
+            Some((page, seen)) => apart(Reading {
                 main: shown(page).into_owned(),
                 rest: joined(&read_screen(seen, app)),
-            },
+            }),
             None => as_stored(text),
         },
         _ => as_stored(text),
@@ -176,11 +248,12 @@ pub fn screen_reading(
     reading(stored, source, app, title)
 }
 
-/// The first `max_chars` characters of the event's `main`, for a list row.
+/// The first `max_chars` characters of the event's `main`, or of its `rest`
+/// when `main` is empty, for a list row.
 ///
-/// The same text as `reading(…).main` cut to `max_chars`, but it reads only
-/// as many blocks as it needs. It takes `app` because a terminal's blocks are
-/// kept as they were read.
+/// The same text as `reading(…).main` cut to `max_chars`, but it cleans only
+/// the blocks it shows. It takes `app` because a terminal's blocks are kept
+/// as they were read.
 #[must_use]
 pub fn reading_prefix(
     stored: &str,
@@ -193,7 +266,16 @@ pub fn reading_prefix(
     }
     let text = body(stored);
     match source {
-        EventSource::ScreenOcr | EventSource::ScreenContext => screen_prefix(text, app, max_chars),
+        EventSource::ScreenOcr | EventSource::ScreenContext => {
+            let (content, chrome, classified) = split_chrome(text);
+            let rules = Rules::new(text, classified);
+            let main = part_prefix(content, &rules, is_terminal(app), max_chars);
+            if main.is_empty() {
+                part_prefix(chrome, &rules, false, max_chars)
+            } else {
+                main
+            }
+        }
         EventSource::BrowserPageWithOcr => {
             // The page's own text comes first. Look for the marker only as
             // far as `max_chars` characters can reach.
@@ -206,9 +288,14 @@ pub fn reading_prefix(
             let page = text[..reach]
                 .find(VISIBLE_OCR_SEPARATOR)
                 .map_or(text, |at| &text[..at]);
-            shown(first_chars(page, max_chars)).into_owned()
+            let page = shown(page);
+            if page.is_empty() && text.contains(VISIBLE_OCR_SEPARATOR) {
+                let rest = reading(stored, source, app, None).rest;
+                return first_chars(&rest, max_chars).to_owned();
+            }
+            first_chars(&page, max_chars).to_owned()
         }
-        _ => shown(first_chars(text, max_chars)).into_owned(),
+        _ => first_chars(&shown(text), max_chars).to_owned(),
     }
 }
 
@@ -216,6 +303,10 @@ pub fn reading_prefix(
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ExcerptQuery {
     words: HashSet<String>,
+    /// Bit `n` is set when an ASCII word is `n` bytes long (the last bit
+    /// stands for every length from 127 up), so most words of a text are
+    /// passed over without lower-casing them.
+    ascii_lengths: u128,
 }
 
 impl ExcerptQuery {
@@ -226,21 +317,35 @@ impl ExcerptQuery {
     }
 
     /// The words of every spelling a search tried, as the store matched them.
+    /// Words such as "the" and "what" count only when there is no other.
     #[must_use]
     pub fn from_alternatives(alternatives: &[LexicalAlternative<'_>]) -> Self {
-        let mut words = HashSet::new();
+        let mut all = HashSet::new();
         for alternative in alternatives {
             let (LexicalAlternative::Keywords(text) | LexicalAlternative::Phrase(text)) =
                 alternative;
             let literal = sanitize_fts5_query(text);
-            words.extend(
+            all.extend(
                 literal
                     .split(|ch: char| !ch.is_alphanumeric())
                     .filter(|word| !word.is_empty())
                     .map(str::to_lowercase),
             );
         }
-        Self { words }
+        let telling: HashSet<String> = all
+            .iter()
+            .filter(|word| !STOP_WORDS.contains(&word.as_str()))
+            .cloned()
+            .collect();
+        let words = if telling.is_empty() { all } else { telling };
+        let ascii_lengths = words
+            .iter()
+            .filter(|word| word.is_ascii())
+            .fold(0u128, |bits, word| bits | length_bit(word.len()));
+        Self {
+            words,
+            ascii_lengths,
+        }
     }
 
     /// True when there is no word to look for.
@@ -255,27 +360,39 @@ impl ExcerptQuery {
         !self.words.is_empty() && self.closest_words(text, usize::MAX).is_some()
     }
 
+    /// The query's spelling of `word`, when it is one of the words.
+    fn term(&self, word: &str) -> Option<&str> {
+        if word.is_ascii() {
+            if self.ascii_lengths & length_bit(word.len()) == 0 {
+                return None;
+            }
+            self.words
+                .get(word.to_ascii_lowercase().as_str())
+                .map(String::as_str)
+        } else {
+            self.words
+                .get(word.to_lowercase().as_str())
+                .map(String::as_str)
+        }
+    }
+
     /// Byte range from the first to the end of the last word of the span
     /// that holds the most different words within `max_bytes`, shortest
     /// first. Literal words only: the store's stemming is not repeated.
     fn closest_words(&self, text: &str, max_bytes: usize) -> Option<(usize, usize)> {
+        if self.words.is_empty() {
+            return None;
+        }
         let mut window: VecDeque<(usize, &str)> = VecDeque::new();
         let mut counts: HashMap<&str, usize> = HashMap::new();
         let mut best: Option<(usize, usize, usize)> = None; // (distinct words, first, end)
-        let mut offset = 0;
-        for segment in text.split_inclusive(|ch: char| !ch.is_alphanumeric()) {
-            let word = segment.trim_end_matches(|ch: char| !ch.is_alphanumeric());
-            let start = offset;
-            offset += segment.len();
-            if word.is_empty() {
-                continue;
-            }
-            let Some(term) = self.words.get(&word.to_lowercase()) else {
+        for (start, word) in words(text) {
+            let Some(term) = self.term(word) else {
                 continue;
             };
             let end = start + word.len().min(max_bytes);
-            window.push_back((start, term.as_str()));
-            *counts.entry(term.as_str()).or_default() += 1;
+            window.push_back((start, term));
+            *counts.entry(term).or_default() += 1;
             while let Some(&(first, front)) = window.front() {
                 if end - first <= max_bytes && counts[front] == 1 {
                     break;
@@ -302,13 +419,59 @@ impl ExcerptQuery {
     }
 }
 
-/// A passage of `text` of at most `max_bytes`, verbatim.
+/// The words of `text`, runs of letters and digits, with their byte offsets.
+/// ASCII is read byte by byte; other characters are decoded.
+fn words(text: &str) -> impl Iterator<Item = (usize, &str)> + '_ {
+    let bytes = text.as_bytes();
+    // Whether the character at `at` is a letter or digit, and its length.
+    let char_at = move |at: usize| -> (bool, usize) {
+        let byte = bytes[at];
+        if byte < 0x80 {
+            return (byte.is_ascii_alphanumeric(), 1);
+        }
+        text[at..]
+            .chars()
+            .next()
+            .map_or((false, 1), |ch| (ch.is_alphanumeric(), ch.len_utf8()))
+    };
+    let mut at = 0;
+    std::iter::from_fn(move || {
+        loop {
+            if at >= bytes.len() {
+                return None;
+            }
+            let (word, len) = char_at(at);
+            if word {
+                break;
+            }
+            at += len;
+        }
+        let start = at;
+        while at < bytes.len() {
+            let (word, len) = char_at(at);
+            if !word {
+                break;
+            }
+            at += len;
+        }
+        Some((start, &text[start..at]))
+    })
+}
+
+/// The bit [`ExcerptQuery`] keeps for a word `len` bytes long.
+fn length_bit(len: usize) -> u128 {
+    1u128 << len.min(127)
+}
+
+/// A passage of a reading of at most `max_bytes`, verbatim.
 ///
 /// With a query: on the line of the closest group of its words, with a little
 /// of what comes before them, from `main` when the words are there and from
-/// `rest` otherwise. Otherwise, or when no word is found: the last lines of
-/// `main` for a terminal or chat app, the first part of `main` for any other.
-/// A cut never makes a secret pattern appear.
+/// `rest` otherwise. Otherwise, or when no word is found: the last whole
+/// lines of `main` for a terminal or chat app, the first whole lines of
+/// `main` for any other (a first line longer than that is cut between
+/// words); `rest` when `main` is empty. A cut never makes a secret pattern
+/// appear.
 #[must_use]
 pub fn excerpt(
     text: &Reading,
@@ -327,24 +490,70 @@ pub fn excerpt(
             }
         }
     }
-    let main = text.main.as_str();
-    let newest_last =
-        app.is_some_and(|app| TERMINAL_APPS.contains(&app) || CHAT_APPS.contains(&app));
-    let (start, stop) = if newest_last {
-        last_lines(main, max_bytes)
+    let part = if text.main.trim().is_empty() {
+        text.rest.as_str()
     } else {
-        (0, floor_char_boundary(main, max_bytes))
+        text.main.as_str()
     };
-    cut_clean(main, start, stop)
+    let (start, stop) = if newest_last(app) {
+        last_lines(part, max_bytes)
+    } else {
+        first_lines(part, max_bytes)
+    };
+    cut_clean(part, start, stop)
+}
+
+/// The passage [`excerpt`] makes of `reading(stored, source, app, None)`,
+/// made from the stored text by cleaning only the blocks it needs: for a
+/// search, the blocks from the one where its words are; otherwise the first
+/// blocks, or the last for a terminal or chat app. For lists and search
+/// results, where reading every window whole would cost too much.
+///
+/// Without a search it is the excerpt's passage. With one, the words are
+/// looked for in the stored text first, so when they come more than once the
+/// passage may stand around a different group of them; it is still verbatim
+/// in the reading. Only what it shows is checked for secret patterns; when
+/// that holds one, the window is read whole.
+#[must_use]
+pub fn passage(
+    stored: &str,
+    source: EventSource,
+    app: Option<&str>,
+    query: &ExcerptQuery,
+    max_bytes: usize,
+) -> String {
+    if max_bytes == 0 {
+        return String::new();
+    }
+    let text = body(stored);
+    match source {
+        EventSource::ScreenOcr | EventSource::ScreenContext => {
+            screen_passage(text, app, query, max_bytes)
+        }
+        EventSource::BrowserPageWithOcr => match text.split_once(VISIBLE_OCR_SEPARATOR) {
+            Some((page, seen)) => {
+                // The page is shown as stored. The part read off the screen
+                // is read only when the page is empty or lacks the words it
+                // holds.
+                let main = shown(page);
+                if main.trim().is_empty() || (!query.found_in(&main) && query.found_in(seen)) {
+                    return excerpt(&reading(stored, source, app, None), app, query, max_bytes);
+                }
+                let page_only = Reading {
+                    main: main.into_owned(),
+                    rest: String::new(),
+                };
+                excerpt(&page_only, app, query, max_bytes)
+            }
+            None => excerpt(&as_stored(text), app, query, max_bytes),
+        },
+        _ => excerpt(&as_stored(text), app, query, max_bytes),
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Screen text
 // ---------------------------------------------------------------------------
-
-/// A block longer than this is judged in pieces of this many lines, so no
-/// decision needs a whole window's text.
-const BLOCK_LINES: usize = 64;
 
 /// What the rules know about one screen text.
 struct Rules<'t> {
@@ -375,6 +584,11 @@ fn is_terminal(app: Option<&str>) -> bool {
     app.is_some_and(|app| TERMINAL_APPS.contains(&app))
 }
 
+/// A terminal or chat app: the newest text is at the bottom.
+fn newest_last(app: Option<&str>) -> bool {
+    app.is_some_and(|app| TERMINAL_APPS.contains(&app) || CHAT_APPS.contains(&app))
+}
+
 fn read_screen(text: &str, app: Option<&str>) -> Reading {
     let (content, chrome, classified) = split_chrome(text);
     let rules = Rules::new(text, classified);
@@ -384,33 +598,15 @@ fn read_screen(text: &str, app: Option<&str>) -> Reading {
         main: clean(content, &rules, is_terminal(app)),
         rest: clean(chrome, &rules, false),
     };
-    if makes_secret(&cleaned) {
-        return Reading {
+    if contains_secret(&cleaned.main) || contains_secret(&cleaned.rest) {
+        // Cleaning made a pattern appear, or the stored text holds one: show
+        // the stored parts with no other cleaning.
+        return apart(Reading {
             main: shown(content).into_owned(),
             rest: shown(chrome).into_owned(),
-        };
+        });
     }
-    cleaned
-}
-
-fn screen_prefix(text: &str, app: Option<&str>, max_chars: usize) -> String {
-    let (content, _, classified) = split_chrome(text);
-    let rules = Rules::new(text, classified);
-    let content = shown(content);
-    let mut out = String::new();
-    let mut chars = 0usize;
-    clean_blocks(&content, &rules, is_terminal(app), &mut |gap, block| {
-        out.push_str(gap);
-        out.push_str(block);
-        chars += gap.chars().count() + block.chars().count();
-        chars < max_chars
-    });
-    out.truncate(first_chars(&out, max_chars).len());
-    if !contains_secret(&out) {
-        return out;
-    }
-    // Cleaning or the cut made a secret pattern appear: show the stored start.
-    cut_clean(&content, 0, first_chars(&content, max_chars).len())
+    apart(cleaned)
 }
 
 /// The content before the separator, the chrome after it, and whether the
@@ -428,14 +624,8 @@ fn split_chrome(text: &str) -> (&str, &str, bool) {
     (text, "", false)
 }
 
-fn makes_secret(reading: &Reading) -> bool {
-    if reading.rest.is_empty() {
-        contains_secret(&reading.main)
-    } else {
-        contains_secret(&joined(reading))
-    }
-}
-
+/// `main` and `rest` as they are shown one after the other, with a blank
+/// line between them.
 fn joined(reading: &Reading) -> String {
     match (reading.main.is_empty(), reading.rest.is_empty()) {
         (_, true) => reading.main.clone(),
@@ -444,13 +634,80 @@ fn joined(reading: &Reading) -> String {
     }
 }
 
-/// Stored text as it may be shown: no U+001E.
-fn shown(text: &str) -> Cow<'_, str> {
-    if text.contains('\u{1E}') {
-        Cow::Owned(text.replace('\u{1E}', " "))
-    } else {
-        Cow::Borrowed(text)
+/// `reading`, unless `main` and `rest` shown one after the other would make a
+/// secret pattern appear that neither holds alone: then the words beside the
+/// boundary are left out, one from each side at a time, until none does.
+fn apart(mut reading: Reading) -> Reading {
+    if reading.main.is_empty()
+        || reading.rest.is_empty()
+        || contains_secret(&reading.main)
+        || contains_secret(&reading.rest)
+    {
+        return reading;
     }
+    while !reading.main.is_empty() && !reading.rest.is_empty() && contains_secret(&joined(&reading))
+    {
+        reading.main = without_last_word(&reading.main).to_owned();
+        reading.rest = without_first_word(&reading.rest).to_owned();
+    }
+    reading
+}
+
+/// `left`, `glue` and `right` in a row, unless that makes a secret pattern
+/// appear that neither side holds: then the words beside the join are left
+/// out, one from each side at a time, until it does not.
+fn join_apart(left: &str, glue: &str, right: &str) -> String {
+    let whole = format!("{left}{glue}{right}");
+    if !contains_secret(&whole) || contains_secret(left) || contains_secret(right) {
+        return whole;
+    }
+    let (mut left, mut right) = (left, right);
+    loop {
+        left = without_last_word(left);
+        right = without_first_word(right);
+        if left.is_empty() || right.is_empty() {
+            return format!("{left}{right}");
+        }
+        let whole = format!("{left}{glue}{right}");
+        if !contains_secret(&whole) {
+            return whole;
+        }
+    }
+}
+
+/// `text` without its last whitespace-delimited word and the whitespace
+/// around it.
+fn without_last_word(text: &str) -> &str {
+    let text = text.trim_end();
+    text.rfind(char::is_whitespace)
+        .map_or("", |at| text[..at].trim_end())
+}
+
+/// `text` without its first whitespace-delimited word and the whitespace
+/// around it.
+fn without_first_word(text: &str) -> &str {
+    let text = text.trim_start();
+    text.find(char::is_whitespace)
+        .map_or("", |at| text[at..].trim_start())
+}
+
+/// Stored text as it may be shown: no U+001E. A stray one, not part of the
+/// separator, reads as a space, unless that would make a secret pattern
+/// appear: then the words on either side of it are left out.
+fn shown(text: &str) -> Cow<'_, str> {
+    if !text.contains('\u{1E}') {
+        return Cow::Borrowed(text);
+    }
+    let spaced = text.replace('\u{1E}', " ");
+    if !contains_secret(&spaced) || contains_secret(text) {
+        return Cow::Owned(spaced);
+    }
+    let mut pieces = text.split('\u{1E}');
+    let mut out = pieces.next().unwrap_or_default().to_owned();
+    for piece in pieces {
+        out = join_apart(&out, " ", piece);
+    }
+    Cow::Owned(out)
 }
 
 fn as_stored(text: &str) -> Reading {
@@ -461,80 +718,337 @@ fn as_stored(text: &str) -> Reading {
 }
 
 fn clean(text: &str, rules: &Rules<'_>, terminal: bool) -> String {
-    let text = shown(text);
-    let mut out = String::with_capacity(text.len());
-    clean_blocks(&text, rules, terminal, &mut |gap, block| {
-        out.push_str(gap);
-        out.push_str(block);
-        true
-    });
+    clean_blocks(&shown(text), rules, terminal, usize::MAX)
+}
+
+/// The start of one part's reading, `max_chars` characters long, cleaning
+/// only the blocks it shows.
+fn part_prefix(part: &str, rules: &Rules<'_>, terminal: bool, max_chars: usize) -> String {
+    let part = shown(part);
+    let cleaned = clean_blocks(&part, rules, terminal, max_chars);
+    let cut = first_chars(&cleaned, max_chars);
+    if !contains_secret(cut) {
+        return cut.to_owned();
+    }
+    // Cleaning or the cut made a secret pattern appear: show the stored start.
+    cut_clean(&part, 0, first_chars(&part, max_chars).len())
+}
+
+/// A block's byte range in its text: from the start of its first line to the
+/// end of its last.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Span {
+    start: usize,
+    end: usize,
+}
+
+/// The blocks of a text, in order: runs of lines that are not blank.
+struct Blocks<'t> {
+    text: &'t str,
+    at: usize,
+}
+
+impl<'t> Blocks<'t> {
+    fn new(text: &'t str) -> Self {
+        Self { text, at: 0 }
+    }
+
+    /// The blocks from the line that starts at byte `at` on.
+    fn from(text: &'t str, at: usize) -> Self {
+        Self { text, at }
+    }
+}
+
+/// The blocks of a text from its end back to its start.
+struct BlocksBack<'t> {
+    text: &'t str,
+    /// The end of the next line to look at; none when the start is passed.
+    at: Option<usize>,
+}
+
+impl<'t> BlocksBack<'t> {
+    fn new(text: &'t str) -> Self {
+        Self {
+            text,
+            at: Some(text.len()),
+        }
+    }
+}
+
+impl Iterator for BlocksBack<'_> {
+    type Item = Span;
+
+    fn next(&mut self) -> Option<Span> {
+        let text = self.text;
+        let mut found: Option<Span> = None;
+        while let Some(end) = self.at {
+            let start = text[..end].rfind('\n').map_or(0, |at| at + 1);
+            self.at = start.checked_sub(1);
+            if text[start..end].trim().is_empty() {
+                if found.is_some() {
+                    return found;
+                }
+            } else {
+                match found.as_mut() {
+                    Some(span) => span.start = start,
+                    None => found = Some(Span { start, end }),
+                }
+            }
+        }
+        found
+    }
+}
+
+/// The start of the block that holds byte `at` of `text`, which is on a line
+/// that is not blank: the first line after the blank line before it.
+fn block_start(text: &str, at: usize) -> usize {
+    let mut start = text[..at].rfind('\n').map_or(0, |found| found + 1);
+    while start > 0 {
+        let before = text[..start - 1].rfind('\n').map_or(0, |found| found + 1);
+        if text[before..start - 1].trim().is_empty() {
+            break;
+        }
+        start = before;
+    }
+    start
+}
+
+impl Iterator for Blocks<'_> {
+    type Item = Span;
+
+    fn next(&mut self) -> Option<Span> {
+        let text = self.text;
+        let mut found: Option<Span> = None;
+        while self.at <= text.len() {
+            let start = self.at;
+            let end = text[start..].find('\n').map_or(text.len(), |at| start + at);
+            self.at = end + 1;
+            if text[start..end].trim().is_empty() {
+                if found.is_some() {
+                    return found;
+                }
+            } else {
+                match found.as_mut() {
+                    Some(span) => span.end = end,
+                    None => found = Some(Span { start, end }),
+                }
+            }
+        }
+        found
+    }
+}
+
+fn block_lines(text: &str, span: Span) -> Vec<&str> {
+    text[span.start..span.end].split('\n').collect()
+}
+
+/// The cleaned text of `text`, block by block, until `budget` characters
+/// stand before its trailing whitespace (`usize::MAX` for all of it). A
+/// block that keeps no text goes with the blank lines before it; blank lines
+/// at the start and end go.
+fn clean_blocks(text: &str, rules: &Rules<'_>, terminal: bool, budget: usize) -> String {
+    let mut out = String::new();
+    let mut total = 0usize;
+    let mut shown_chars = 0usize;
+    let mut previous_end: Option<usize> = None;
+    for span in Blocks::new(text) {
+        if !out.is_empty() && shown_chars >= budget {
+            break;
+        }
+        let gap = previous_end.map_or("", |end| &text[end..span.start]);
+        previous_end = Some(span.end);
+        let gap_chars = if out.is_empty() {
+            0
+        } else {
+            gap.chars().count()
+        };
+        let room = budget.saturating_sub(total + gap_chars).max(1);
+        let cleaned = clean_block(&block_lines(text, span), rules, terminal, room);
+        if cleaned.is_empty() {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push_str(gap);
+            total += gap_chars;
+        }
+        let chars = cleaned.chars().count();
+        shown_chars = total + chars - trailing_whitespace(&cleaned);
+        total += chars;
+        out.push_str(&cleaned);
+    }
     out
 }
 
-/// Clean `text` block by block (a block is the lines between blank lines,
-/// in pieces of at most [`BLOCK_LINES`]). Each block that keeps any text goes
-/// to `sink` with what stood before it (nothing before the first), in order.
-/// A block that loses all its text takes the blank lines before it along.
-/// `sink` returns false to stop.
-fn clean_blocks(
-    text: &str,
-    rules: &Rules<'_>,
-    terminal: bool,
-    sink: &mut dyn FnMut(&str, &str) -> bool,
-) {
-    let mut gap = String::new();
-    let mut started = false;
-    let mut block: Vec<&str> = Vec::new();
-    // A blank line after the text ends the last block.
-    for line in text.split('\n').chain(std::iter::once("")) {
-        let blank = line.trim().is_empty();
-        if !blank && block.len() < BLOCK_LINES {
-            block.push(line);
+/// The cleaned text of the last blocks of `text`: the end of
+/// `clean_blocks(text, …)`, long enough that more than `min_bytes` bytes of
+/// it stand before its trailing whitespace, or all of it. It reads the text
+/// from its end.
+fn clean_tail(text: &str, rules: &Rules<'_>, terminal: bool, min_bytes: usize) -> String {
+    // From the end: a cleaned block, the text before it, a cleaned block, …
+    let mut pieces: Vec<Cow<'_, str>> = Vec::new();
+    let mut length = 0usize;
+    let mut trailing = 0usize;
+    // The earliest block kept so far, and the text between it and the block
+    // before it, which stands before it once an earlier block is kept.
+    let mut head: Option<Span> = None;
+    let mut head_gap = "";
+    let mut later: Option<Span> = None;
+    for span in BlocksBack::new(text) {
+        if later.is_some() && later == head {
+            head_gap = &text[span.end..later.map_or(span.end, |next| next.start)];
+        }
+        later = Some(span);
+        let cleaned = clean_block(&block_lines(text, span), rules, terminal, usize::MAX);
+        if cleaned.is_empty() {
             continue;
         }
-        if !block.is_empty() {
-            let cleaned = clean_block(&block, rules, terminal);
-            block.clear();
-            if !cleaned.is_empty() {
-                let before = if started { gap.as_str() } else { "" };
-                if !sink(before, &cleaned) {
-                    return;
-                }
-                started = true;
-            }
-            gap.clear();
-            gap.push('\n');
-        }
-        if blank {
-            if started {
-                gap.push_str(line);
-                gap.push('\n');
-            }
+        if head.is_some() {
+            pieces.push(Cow::Borrowed(head_gap));
+            length += head_gap.len();
         } else {
-            // The first line of the next piece of a long block.
-            block.push(line);
+            trailing = cleaned.len() - cleaned.trim_end().len();
         }
+        length += cleaned.len();
+        pieces.push(Cow::Owned(cleaned));
+        head = Some(span);
+        if length - trailing > min_bytes {
+            break;
+        }
+    }
+    pieces.reverse();
+    pieces.concat()
+}
+
+/// The passage of one part's cleaned text around the closest group of the
+/// query's words, cleaning only the blocks from the one where the group
+/// starts in the stored text. None when the words are not there.
+fn query_passage(
+    part: &str,
+    rules: &Rules<'_>,
+    terminal: bool,
+    query: &ExcerptQuery,
+    max_bytes: usize,
+) -> Option<String> {
+    let (first, _) = query.closest_words(part, max_bytes)?;
+    let mut region = String::new();
+    let mut previous_end: Option<usize> = None;
+    for span in Blocks::from(part, block_start(part, first)) {
+        let gap = previous_end.map_or("", |end| &part[end..span.start]);
+        previous_end = Some(span.end);
+        let cleaned = clean_block(&block_lines(part, span), rules, terminal, usize::MAX);
+        if cleaned.is_empty() {
+            continue;
+        }
+        if !region.is_empty() {
+            region.push_str(gap);
+        }
+        region.push_str(&cleaned);
+        if let Some((at, _)) = query.closest_words(&region, max_bytes) {
+            if region.len() >= at.saturating_add(max_bytes) {
+                break;
+            }
+        }
+    }
+    let found = query.closest_words(&region, max_bytes)?;
+    let (start, stop) = around(&region, found, max_bytes);
+    Some(cut_clean(&region, start, stop))
+}
+
+/// [`passage`] for screen text.
+fn screen_passage(text: &str, app: Option<&str>, query: &ExcerptQuery, max_bytes: usize) -> String {
+    let (content, chrome, classified) = split_chrome(text);
+    let rules = Rules::new(text, classified);
+    let content = shown(content);
+    let chrome = shown(chrome);
+    let parts = [(&*content, is_terminal(app)), (&*chrome, false)];
+    let mut found = None;
+    if !query.is_empty() {
+        found = parts
+            .iter()
+            .find_map(|&(part, terminal)| query_passage(part, &rules, terminal, query, max_bytes));
+    }
+    let piece = found.unwrap_or_else(|| {
+        for &(part, terminal) in &parts {
+            if newest_last(app) {
+                let tail = clean_tail(part, &rules, terminal, max_bytes);
+                if !tail.is_empty() {
+                    let (start, stop) = last_lines(&tail, max_bytes);
+                    return cut_clean(&tail, start, stop);
+                }
+            } else {
+                // Enough characters that the first lines are the same as in
+                // the whole reading: more than `max_bytes` after any blank
+                // lines it opens with.
+                let budget = max_bytes.saturating_add(1);
+                let mut head = clean_blocks(part, &rules, terminal, budget);
+                let opening = head.len() - head.trim_start_matches('\n').len();
+                if opening > 0 {
+                    head = clean_blocks(part, &rules, terminal, budget.saturating_add(opening));
+                }
+                if !head.is_empty() {
+                    let (start, stop) = first_lines(&head, max_bytes);
+                    return cut_clean(&head, start, stop);
+                }
+            }
+        }
+        String::new()
+    });
+    if contains_secret(&piece) {
+        // Cleaned on its own, the passage holds a pattern: read the window
+        // whole, which knows what the stored text holds.
+        return excerpt(&read_screen(text, app), app, query, max_bytes);
+    }
+    piece
+}
+
+/// Characters of whitespace at the end of `text`.
+fn trailing_whitespace(text: &str) -> usize {
+    text.chars()
+        .rev()
+        .take_while(|ch| ch.is_whitespace())
+        .count()
+}
+
+fn clean_block(lines: &[&str], rules: &Rules<'_>, terminal: bool, budget: usize) -> String {
+    if terminal || is_preformatted(lines) {
+        // Junk tokens go; every line keeps its place.
+        return joined_lines(lines.iter().map(|line| without_junk(line, rules)), budget);
+    }
+    let kept = lines
+        .iter()
+        .map(|line| without_junk(line, rules))
+        .filter(|line| line.chars().any(char::is_alphanumeric));
+    if rules.classified {
+        shaped(&kept.collect::<Vec<_>>())
+    } else {
+        joined_lines(kept, budget)
     }
 }
 
-fn clean_block(lines: &[&str], rules: &Rules<'_>, terminal: bool) -> String {
-    if terminal || is_preformatted(lines) {
-        // Junk tokens go; every line keeps its place.
-        let kept: Vec<Cow<'_, str>> = lines.iter().map(|line| without_junk(line, rules)).collect();
-        if kept.iter().all(|line| line.trim().is_empty()) {
-            return String::new();
+/// `lines` joined by line breaks, stopping once `budget` characters stand
+/// before the trailing whitespace. Empty when no line holds text.
+fn joined_lines<'l>(lines: impl Iterator<Item = Cow<'l, str>>, budget: usize) -> String {
+    let mut out = String::new();
+    let mut total = 0usize;
+    let mut has_text = false;
+    for (index, line) in lines.enumerate() {
+        if index > 0 {
+            out.push('\n');
+            total += 1;
         }
-        return kept.join("\n");
+        out.push_str(&line);
+        total += line.chars().count();
+        if line.chars().any(|ch| !ch.is_whitespace()) {
+            has_text = true;
+            if total - trailing_whitespace(&line) >= budget {
+                break;
+            }
+        }
     }
-    let kept: Vec<Cow<'_, str>> = lines
-        .iter()
-        .map(|line| without_junk(line, rules))
-        .filter(|line| line.chars().any(char::is_alphanumeric))
-        .collect();
-    if rules.classified {
-        shaped(&kept)
+    if has_text {
+        out
     } else {
-        kept.join("\n")
+        String::new()
     }
 }
 
@@ -609,48 +1123,79 @@ fn indent(line: &str) -> &str {
 /// A block is preformatted when 40% of its lines read like code, when it has
 /// three indent levels with a quarter of its lines indented, when a line
 /// holds a tab or starts with a shell prompt, or when 60% of its lines carry
-/// two numbers.
+/// two numbers. The whole block is judged: each count only grows, so the
+/// answer is known as soon as one of them is reached.
 fn is_preformatted(lines: &[&str]) -> bool {
     let count = lines.len();
-    if lines
-        .iter()
-        .any(|line| line.contains('\t') || starts_with_prompt(line))
-    {
-        return true;
+    let (mut code, mut indented, mut numeric) = (0usize, 0usize, 0usize);
+    let mut levels: Vec<usize> = Vec::with_capacity(3);
+    for line in lines {
+        let facts = LineFacts::of(line);
+        if line.contains('\t') || (facts.prompt_mark && starts_with_prompt(line)) {
+            return true;
+        }
+        code += usize::from(facts.code);
+        let depth = line.chars().take_while(|ch| ch.is_whitespace()).count();
+        indented += usize::from(depth > 0);
+        if levels.len() < 3 && !levels.contains(&depth) {
+            levels.push(depth);
+        }
+        numeric += usize::from(
+            facts.digit
+                && line
+                    .split_whitespace()
+                    .filter(|token| is_number(token))
+                    .nth(1)
+                    .is_some(),
+        );
+        if code * 10 >= count * 4
+            || numeric * 10 >= count * 6
+            || (levels.len() >= 3 && indented * 4 >= count)
+        {
+            return true;
+        }
     }
-    let code = lines.iter().filter(|line| reads_like_code(line)).count();
-    if code * 10 >= count * 4 {
-        return true;
-    }
-    let levels: HashSet<usize> = lines
-        .iter()
-        .map(|line| indent(line).chars().count())
-        .collect();
-    let indented = lines.iter().filter(|line| !indent(line).is_empty()).count();
-    if levels.len() >= 3 && indented * 4 >= count {
-        return true;
-    }
-    let numeric = lines
-        .iter()
-        .filter(|line| {
-            line.split_whitespace()
-                .filter(|token| is_number(token))
-                .count()
-                >= 2
-        })
-        .count();
-    numeric * 10 >= count * 6
+    false
 }
 
-fn reads_like_code(line: &str) -> bool {
-    const INSIDE: &[char] = &['{', '}', '(', ')', ';', '=', '<', '>', '[', ']'];
-    const AT_END: &[char] = &['{', '}', '(', ')', ';', ',', '=', '[', ']', '<', '>', ':'];
-    let line = line.trim_end();
-    line.contains(INSIDE)
-        || line.contains("::")
-        || line.contains("->")
-        || line.contains("=>")
-        || line.ends_with(AT_END)
+/// What the preformatted test needs of one line, from one pass over its
+/// bytes.
+struct LineFacts {
+    /// It holds a character a shell prompt starts with (or a lead byte of
+    /// one), so the prompt pattern is worth trying.
+    prompt_mark: bool,
+    /// It reads like code: one of `{}();=<>[]`, or `::`, or it ends in `,`
+    /// or `:`. (`->` and `=>` hold `>` and `=`.)
+    code: bool,
+    /// It holds an ASCII digit, so it may carry numbers.
+    digit: bool,
+}
+
+impl LineFacts {
+    fn of(line: &str) -> Self {
+        let mut facts = Self {
+            prompt_mark: false,
+            code: false,
+            digit: false,
+        };
+        let mut previous = 0u8;
+        for &byte in line.as_bytes() {
+            match byte {
+                b'{' | b'}' | b'(' | b')' | b';' | b'=' | b'<' | b'[' | b']' => facts.code = true,
+                b'>' => {
+                    facts.code = true;
+                    facts.prompt_mark = true;
+                }
+                b'$' | b'%' | b'#' | 0xCE | 0xE2 => facts.prompt_mark = true,
+                b'0'..=b'9' => facts.digit = true,
+                b':' if previous == b':' => facts.code = true,
+                _ => {}
+            }
+            previous = byte;
+        }
+        facts.code = facts.code || line.trim_end().ends_with([',', ':']);
+        facts
+    }
 }
 
 fn is_number(token: &str) -> bool {
@@ -825,6 +1370,34 @@ fn around(text: &str, (first, end): (usize, usize), max_bytes: usize) -> (usize,
     )
 }
 
+/// The byte range of the first whole lines of `text` that fit `max_bytes`,
+/// after any blank lines it opens with. A first line longer than that is cut
+/// after its last word that fits, or, when what fits is one word, at the
+/// limit.
+fn first_lines(text: &str, max_bytes: usize) -> (usize, usize) {
+    let start = text.len() - text.trim_start_matches('\n').len();
+    let text_from = &text[start..];
+    let end = text_from.trim_end().len();
+    if end <= max_bytes {
+        return (start, start + end);
+    }
+    let limit = floor_char_boundary(text_from, max_bytes);
+    let head = &text_from[..limit];
+    let after = &text_from[limit..];
+    let stop = if after.starts_with('\n') || after.starts_with("\r\n") {
+        limit
+    } else if let Some(at) = head.rfind('\n') {
+        at
+    } else if after.starts_with(char::is_whitespace) {
+        limit
+    } else {
+        head.rfind(char::is_whitespace)
+            .filter(|&at| !head[..at].trim().is_empty())
+            .unwrap_or(limit)
+    };
+    (start, start + text_from[..stop].trim_end().len())
+}
+
 /// The byte range of the last whole lines of `text` that fit `max_bytes`.
 /// A last line longer than that gives its end, from a word's start.
 fn last_lines(text: &str, max_bytes: usize) -> (usize, usize) {
@@ -929,20 +1502,25 @@ mod tests {
     }
 
     #[test]
-    fn a_long_block_is_judged_in_pieces() {
-        let prose = "the plan grows with every seat the customer adds and the price follows it\n";
-        let code = "    let deleted = store.delete_batch(batch)?;\n";
-        let text = format!("{}{}", prose.repeat(BLOCK_LINES), code.repeat(BLOCK_LINES));
+    fn a_long_block_is_judged_as_a_whole() {
+        // 64 lines of code, then 4 comment lines indented 8 spaces and 4 of
+        // prose: code is most of the block, so all of it is kept as read.
+        let code = "    let deleted = store.delete_batch(batch)?;\n".repeat(64);
+        let comments = "        // the sweep goes on until nothing is left\n".repeat(4);
+        let prose =
+            "the plan grows with every seat the customer adds and the price follows it\n".repeat(4);
+        let text = format!("{code}{comments}{prose}");
         let rules = Rules::new(&text, true);
-        let cleaned = clean(text.trim_end(), &rules, false);
-        assert!(
-            cleaned.ends_with(code.trim_end()),
-            "the code piece keeps its indent"
-        );
-        assert!(
-            !cleaned.contains("follows it\nthe plan"),
-            "the prose piece joins its lines"
-        );
+        assert_eq!(clean(text.trim_end(), &rules, false), text.trim_end());
+    }
+
+    #[test]
+    fn a_list_prefix_stops_inside_a_long_block() {
+        let text = "the plan grows with every seat the customer adds\n".repeat(2_000);
+        let rules = Rules::new(&text, false);
+        let head = clean_blocks(&text, &rules, false, 100);
+        assert!(head.len() < 200, "{}", head.len());
+        assert_eq!(head, text[..head.len()]);
     }
 
     #[test]
@@ -956,5 +1534,99 @@ mod tests {
         assert_eq!(split_chrome("a\u{1e}b"), ("a\u{1e}b", "", false));
         assert_eq!(split_chrome("a\n\n\u{1e}\nb"), ("a", "b", true));
         assert_eq!(split_chrome("a\u{1e}\n\n\u{1e}\nb"), ("a\u{1e}", "b", true));
+    }
+
+    #[test]
+    fn blocks_are_the_runs_of_lines_between_blank_lines() {
+        let text = "\n a\nb\n \n\nc\n";
+        let spans: Vec<Span> = Blocks::new(text).collect();
+        assert_eq!(
+            spans,
+            vec![Span { start: 1, end: 5 }, Span { start: 9, end: 10 }]
+        );
+        assert_eq!(Blocks::new("").count(), 0);
+        assert_eq!(Blocks::new("\n \n").count(), 0);
+    }
+
+    #[test]
+    fn words_are_runs_of_letters_and_digits() {
+        let text = "Caf\u{e9}, \u{6771}\u{4eac}-2 \u{1f642}x_y";
+        let found: Vec<(usize, &str)> = words(text).collect();
+        assert_eq!(
+            found,
+            vec![
+                (0, "Caf\u{e9}"),
+                (7, "\u{6771}\u{4eac}"),
+                (14, "2"),
+                (20, "x"),
+                (22, "y")
+            ]
+        );
+        assert_eq!(words("").count(), 0);
+        assert_eq!(words(" ,.").count(), 0);
+    }
+
+    #[test]
+    fn blocks_read_from_the_end_are_the_same_blocks() {
+        for text in [
+            "\n a\nb\n \n\nc\n",
+            "",
+            "a",
+            "a\n\nb",
+            "\n\n",
+            "x\ny\n\n\nz \n",
+        ] {
+            let mut back: Vec<Span> = BlocksBack::new(text).collect();
+            back.reverse();
+            assert_eq!(back, Blocks::new(text).collect::<Vec<_>>(), "{text:?}");
+        }
+        let text = "one\n\ntwo\nthree\n\nfour";
+        assert_eq!(block_start(text, text.find("three").unwrap()), 5);
+        assert_eq!(block_start(text, 1), 0);
+        assert_eq!(block_start(text, text.find("four").unwrap()), 16);
+    }
+
+    #[test]
+    fn the_first_lines_that_fit_are_whole_lines_or_whole_words() {
+        let text = "first line\nsecond line\nthird";
+        assert_eq!(
+            &text[first_lines(text, 22).0..first_lines(text, 22).1],
+            "first line\nsecond line"
+        );
+        assert_eq!(&text[..first_lines(text, 15).1], "first line");
+        let one = "one long line of words";
+        assert_eq!(&one[..first_lines(one, 10).1], "one long");
+        assert_eq!(&one[..first_lines(one, 8).1], "one long");
+        let word = "x".repeat(40);
+        assert_eq!(first_lines(&word, 10), (0, 10));
+        let indented = format!("    {}", "y".repeat(40));
+        assert_eq!(first_lines(&indented, 10), (0, 10));
+        let opening = "\nfirst\nsecond";
+        let (start, stop) = first_lines(opening, 8);
+        assert_eq!(&opening[start..stop], "first");
+    }
+
+    #[test]
+    fn a_stray_separator_character_never_joins_a_key_to_its_value() {
+        assert_eq!(shown("a\u{1e}b"), "a b");
+        let joined = shown("Access password\u{1e}: hunter2 now");
+        assert!(!contains_secret(&joined), "{joined:?}");
+        assert!(joined.contains("Access") && joined.contains("now"));
+    }
+
+    #[test]
+    fn main_and_rest_never_make_a_secret_where_they_meet() {
+        let read = apart(Reading {
+            main: "Account settings\nAccess token".into(),
+            rest: "= 12345\nSidebar".into(),
+        });
+        assert!(!contains_secret(&joined(&read)), "{read:?}");
+        assert_eq!(read.main, "Account settings\nAccess");
+        assert_eq!(read.rest, "12345\nSidebar");
+        let fine = Reading {
+            main: "Launch plan".into(),
+            rest: "Sidebar".into(),
+        };
+        assert_eq!(apart(fine.clone()), fine);
     }
 }

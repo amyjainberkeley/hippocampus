@@ -33,7 +33,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mci_brain::graph::{Entity, EntityIdentity};
-use mci_brain::reading::{excerpt, reading, ExcerptQuery};
+use mci_brain::reading::{passage, ExcerptQuery};
 use mci_brain::{
     explicit_evidence_signal, has_explicit_current_supersession_context, BrainStats, BrainStore,
     EmbedError, Embedder, EntityId, EpisodeRecord, Event, EventId, EventRecord, EvidenceCandidate,
@@ -460,16 +460,16 @@ impl LiveBrainReader {
     /// What an AI tool is shown of one recalled event: the passage of its
     /// reading around the query's words (or its first lines, the last for a
     /// terminal or chat), never the stored header or U+001E, capped at
-    /// [`EventRecord::SNIPPET_MAX_CHARS`] bytes. The store keeps the raw text.
+    /// [`EventRecord::SNIPPET_MAX_CHARS`] bytes. Only the blocks it shows are
+    /// cleaned. The store keeps the raw text.
     fn shown_text(&self, event: &Event, query: &ExcerptQuery) -> String {
-        let app = event.app_bundle_id.as_deref();
-        let read = reading(
+        EventRecord::truncate_snippet(&passage(
             &event.text,
             self.event_source(event.id),
-            app,
-            event.window_title.as_deref(),
-        );
-        EventRecord::truncate_snippet(&excerpt(&read, app, query, EventRecord::SNIPPET_MAX_CHARS))
+            event.app_bundle_id.as_deref(),
+            query,
+            EventRecord::SNIPPET_MAX_CHARS,
+        ))
     }
 
     fn materialize_matches(
@@ -527,6 +527,27 @@ impl LiveBrainReader {
 impl BrainReader for LiveBrainReader {
     fn event_source(&self, id: EventId) -> mci_brain::EventSource {
         self.store.event_source(id).unwrap_or_default()
+    }
+
+    /// Reads the listed event's own text (its first 128 KiB), not the row's
+    /// 512-byte snippet, which a long header can fill and which ends before a
+    /// classified window's chrome. Falls back to the snippet when the text is
+    /// gone or now belongs to another event.
+    fn listed_text(&self, record: &EventRecord, source: mci_brain::EventSource) -> String {
+        match self.store.event_text(record.event_id) {
+            Ok(Some(text))
+                if text.ts_us == record.ts_us && text.app_bundle_id == record.app_bundle_id =>
+            {
+                EventRecord::truncate_snippet(&passage(
+                    &text.text,
+                    source,
+                    record.app_bundle_id.as_deref(),
+                    &ExcerptQuery::default(),
+                    EventRecord::SNIPPET_MAX_CHARS,
+                ))
+            }
+            _ => super::brain_reader::snippet_listed_text(record, source),
+        }
     }
     fn recall(&self, query: &str, limit: usize) -> Result<McpRecallOutcome, BrainReaderError> {
         if query.trim().is_empty() {

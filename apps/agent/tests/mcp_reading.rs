@@ -2,6 +2,7 @@
 //! stored header or U+001E (RULINGS T8, T14). The store keeps its text as
 //! it arrived, header included.
 
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use mci_agent::mcp::{BrainReader, JsonRpcId, JsonRpcRequest, LiveBrainReader, Server};
@@ -304,4 +305,144 @@ fn listed_rows_start_with_the_window_text_while_the_store_keeps_its_header() {
             "{row}"
         );
     }
+}
+
+/// A header of about 700 bytes: a search address with a long query string.
+/// The store's 512-byte snippet of an event with it is all header.
+fn long_header(app: &str) -> String {
+    format!(
+        "[app={app} | title=team plan pricing - Example Search | url=https://www.example.com/search?q=team+plan+pricing&{} | ts=2026-10-12T14:02:00.000Z]\n",
+        "p=xxxxxxxxxxxxxxxxxxxx&".repeat(24)
+    )
+}
+
+#[test]
+fn a_listed_row_after_a_long_header_starts_with_the_window_text() {
+    let (_dir, store) = open_temp_store();
+    let chrome = "com.google.Chrome";
+    assert!(long_header(chrome).len() > 512);
+    seed(
+        &store,
+        &format!(
+            "{}Pricing for teams\nPer-seat plans start at $18.",
+            long_header(chrome)
+        ),
+        1_000_000,
+        chrome,
+        EventSource::BrowserPage,
+    );
+    seed(
+        &store,
+        &format!(
+            "{}Pricing for teams\nPer-seat plans start at $18.\n\n\u{1e}\nTabs",
+            long_header(chrome)
+        ),
+        2_000_000,
+        chrome,
+        EventSource::ScreenOcr,
+    );
+    let reader = LiveBrainReader::from_store_with_embedder(Arc::clone(&store), None);
+    assert!(
+        !reader.events_since(0, 10).unwrap()[0]
+            .text_snippet
+            .contains('\n'),
+        "the store's snippet is all header"
+    );
+    let server = Server::new(Arc::new(reader));
+    for result in [
+        call(
+            &server,
+            "mci_events_since",
+            serde_json::json!({ "ts_us": 0 }),
+        ),
+        call(
+            &server,
+            "mci_events_by_app",
+            serde_json::json!({ "app_bundle_id": chrome }),
+        ),
+    ] {
+        let rows = result["events"].as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        for row in rows {
+            assert_eq!(
+                row["text_snippet"], "Pricing for teams\nPer-seat plans start at $18.",
+                "{row}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_listed_chat_row_reads_past_the_stores_512_bytes() {
+    // A classified chat whose replies sit far to the right, with more than
+    // 512 bytes of messages before the separator.
+    let (_dir, store) = open_temp_store();
+    let slack = "com.tinyspeck.slackmacgap";
+    let mut messages = String::new();
+    for n in 1..=12 {
+        writeln!(
+            messages,
+            "Maya: are we still on for the launch review number {n}?\n{}Yes, running five minutes late for number {n}",
+            " ".repeat(30)
+        )
+        .unwrap();
+    }
+    let stored = format!(
+        "{}{messages}\n\u{1e}\nChannels\nMessage #launch",
+        header(slack)
+    );
+    assert!(stored.find('\u{1e}').unwrap() > 512);
+    seed(&store, &stored, 1_000_000, slack, EventSource::ScreenOcr);
+    let server = Server::new(Arc::new(LiveBrainReader::from_store_with_embedder(
+        Arc::clone(&store),
+        None,
+    )));
+    let result = call(
+        &server,
+        "mci_events_since",
+        serde_json::json!({ "ts_us": 0 }),
+    );
+    let text = result["events"][0]["text_snippet"].as_str().unwrap();
+    assert!(
+        text.ends_with("    Yes, running five minutes late for number 12"),
+        "a chat row shows its newest messages: {text:?}"
+    );
+    assert!(
+        text.lines().all(|line| !line.starts_with("     ")),
+        "indents are none or four spaces: {text:?}"
+    );
+    assert!(!text.contains("Channels"), "{text:?}");
+    assert!(text.len() <= mci_brain::EventRecord::SNIPPET_MAX_CHARS);
+}
+
+#[test]
+fn a_listed_terminal_row_shows_its_last_lines() {
+    let (_dir, store) = open_temp_store();
+    let lines: Vec<String> = (1..=120)
+        .map(|n| format!("compile step {n} done"))
+        .collect();
+    let text = format!(
+        "{}{}\nerror: the release build failed\n\n\u{1e}\nzsh",
+        header("com.apple.Terminal"),
+        lines.join("\n")
+    );
+    seed(
+        &store,
+        &text,
+        1_000_000,
+        "com.apple.Terminal",
+        EventSource::ScreenOcr,
+    );
+    let server = Server::new(Arc::new(LiveBrainReader::from_store_with_embedder(
+        Arc::clone(&store),
+        None,
+    )));
+    let result = call(
+        &server,
+        "mci_events_by_app",
+        serde_json::json!({ "app_bundle_id": "com.apple.Terminal" }),
+    );
+    let row = result["events"][0]["text_snippet"].as_str().unwrap();
+    assert!(row.ends_with("error: the release build failed"), "{row:?}");
+    assert!(!row.contains("compile step 1 done"));
 }

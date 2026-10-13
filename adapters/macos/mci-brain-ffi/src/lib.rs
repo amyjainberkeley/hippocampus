@@ -70,7 +70,7 @@ use mci_brain::arctic_embed_s::ArcticEmbedSEmbedder;
 use mci_brain::fts_sanitizer::{
     LexicalAlternative, MAX_LEXICAL_ALTERNATIVES, MAX_LEXICAL_ALTERNATIVE_BYTES,
 };
-use mci_brain::reading::{excerpt, reading, reading_prefix, ExcerptQuery};
+use mci_brain::reading::{audit_text, passage, reading, reading_prefix, ExcerptQuery};
 use mci_brain::{
     BrainStore, DeletionOutcome, Embedder, EventId, EventSource, HybridRetriever,
     RetrievalDegradation, RetrievalMatch, RetrievalOutcome, RetrievalQuery, SqlCipherBrainStore,
@@ -111,11 +111,11 @@ pub struct HitJson {
     /// `events.url` (nullable).
     pub url: Option<String>,
     /// Readable text, never the stored header or U+001E: for a search, the
-    /// passage around its words ([`mci_brain::reading::excerpt`], at most
-    /// [`SNIPPET_CHAR_CAP`] bytes); for history and linked rows, the start
-    /// of the reading's `main` ([`mci_brain::reading::reading_prefix`], at
-    /// most [`SNIPPET_CHAR_CAP`] characters). Swift list cells never receive
-    /// megabytes of text per row.
+    /// passage around its words ([`mci_brain::reading::passage`], at most
+    /// [`SNIPPET_CHAR_CAP`] bytes, made by cleaning only the blocks it
+    /// shows); for history and linked rows, the start of the reading's `main`
+    /// ([`mci_brain::reading::reading_prefix`], at most [`SNIPPET_CHAR_CAP`]
+    /// characters). Swift list cells never receive megabytes of text per row.
     pub ocr_text_snippet: String,
     /// Which retrieval source produced this hit. `"lexical"` is plain
     /// FTS5 search; `"timeline"` is the recent-events list. Model-backed
@@ -931,10 +931,7 @@ fn hit_json(
     let kind = acquisition_source(handle, event_id);
     let app = event.app_bundle_id.as_deref();
     let ocr_text_snippet = match snippet_query {
-        Some(query) => {
-            let read = reading(&event.text, kind, app, event.window_title.as_deref());
-            excerpt(&read, app, query, SNIPPET_CHAR_CAP)
-        }
+        Some(query) => passage(&event.text, kind, app, query, SNIPPET_CHAR_CAP),
         None => list_snippet(&event.text, kind, app),
     };
     HitJson {
@@ -1162,13 +1159,19 @@ pub struct EventTextJson {
     pub ts_us: u64,
     /// Exact nullable source app, bounded to 1 KiB of UTF-8.
     pub app_bundle_id: Option<String>,
-    /// Exact UTF-8 prefix, at most 128 KiB, without replacement characters.
+    /// Everything stored, for an audit ([`mci_brain::reading::audit_text`]
+    /// of the stored prefix, at most 128 KiB, without replacement
+    /// characters): no header line, the separator between a window's content
+    /// and its chrome as a blank line, any other U+001E as a space. No stored
+    /// word is left out and nothing is cleaned.
     pub text: String,
     /// True only when the byte cap omits part of the stored text.
     pub truncated: bool,
 }
 
-/// Read one admitted event's stored text through the existing read-only handle.
+/// Read one admitted event's stored text, for an audit, through the existing
+/// read-only handle: every stored word, without the header line or U+001E
+/// (RULINGS T8, T14). A person reads [`mci_brain_ffi_event_reading`] instead.
 /// No paths are accepted and no vectors or blobs are fetched. Timestamp and
 /// app identity accompany text atomically; callers must compare both against
 /// the selected hit, because deleted numeric IDs can be reused.
@@ -1194,7 +1197,7 @@ pub unsafe extern "C" fn mci_brain_ffi_event_text(h: *mut Handle, event_id: u64)
             event_id,
             ts_us: value.ts_us,
             app_bundle_id: value.app_bundle_id,
-            text: value.text,
+            text: audit_text(&value.text),
             truncated: value.truncated,
         }))
     } else {
@@ -1217,13 +1220,17 @@ pub struct EventReadingJson {
     pub source_kind: String,
     /// What the person was reading.
     pub main: String,
-    /// Everything else in the window: tabs, sidebars, menus, status bars.
-    /// Empty when the window was not classified.
+    /// Everything else in the window: tabs, sidebars, menus, status bars;
+    /// for a browser page read both ways, the text read off the screen.
+    /// Empty when there is nothing else, as for a window read before windows
+    /// were classified.
     pub rest: String,
     /// Where a search's words are: `"main"`, `"rest"`, or null when no
-    /// search was given or neither holds them.
+    /// search was given or neither holds them. Words such as "the" count only
+    /// when the search has no other.
     pub match_in: Option<&'static str>,
-    /// True only when the 128 KiB read omitted part of the stored text.
+    /// True when the 128 KiB read omitted part of the stored text, or when
+    /// `main` and `rest` were cut to [`EVENT_READING_BYTE_CAP`].
     pub truncated: bool,
 }
 
@@ -1231,7 +1238,7 @@ pub struct EventReadingJson {
 /// stored header or U+001E (`mci_brain::reading::reading`). `query` is null
 /// or a search's UTF-8 text; with one, `match_in` says whether its words are
 /// in `main` or only in `rest`. Reads the same 128 KiB prefix as
-/// [`mci_brain_ffi_event_text`], which stays the raw path for audits.
+/// [`mci_brain_ffi_event_text`], which is the audit path.
 /// Returns JSON `null` for a missing, deleted, suppressed or invalid id, and
 /// a null pointer on error with a content-free last-error message. Caller
 /// must release any non-null pointer with [`mci_brain_ffi_string_free`].
@@ -1267,7 +1274,16 @@ pub unsafe extern "C" fn mci_brain_ffi_event_reading(
     };
     json_to_c_string(&value.map(|value| {
         let kind = acquisition_source(handle, EventId(event_id));
-        let read = reading(&value.text, kind, value.app_bundle_id.as_deref(), None);
+        let mut read = reading(&value.text, kind, value.app_bundle_id.as_deref(), None);
+        let mut truncated = value.truncated;
+        if read.main.len() + read.rest.len() > EVENT_READING_BYTE_CAP {
+            whole_lines_within(
+                &mut read.rest,
+                EVENT_READING_BYTE_CAP.saturating_sub(read.main.len()),
+            );
+            whole_lines_within(&mut read.main, EVENT_READING_BYTE_CAP);
+            truncated = true;
+        }
         let match_in = query.as_ref().and_then(|query| {
             if query.found_in(&read.main) {
                 Some("main")
@@ -1285,9 +1301,32 @@ pub unsafe extern "C" fn mci_brain_ffi_event_reading(
             main: read.main,
             rest: read.rest,
             match_in,
-            truncated: value.truncated,
+            truncated,
         }
     }))
+}
+
+/// The most bytes of `main` and `rest` together in one detail-view reading:
+/// the stored text it reads and 1 KiB, as the window's decoder allows. Four
+/// space indents can make a reading a little longer than its stored text.
+pub const EVENT_READING_BYTE_CAP: usize = SqlCipherBrainStore::EVENT_TEXT_BYTE_CAP + 1024;
+
+/// `text` cut to its whole lines that fit `max_bytes`. A cut just before a
+/// line break never makes a secret pattern appear.
+fn whole_lines_within(text: &mut String, max_bytes: usize) {
+    if text.len() <= max_bytes {
+        return;
+    }
+    let mut limit = max_bytes;
+    while !text.is_char_boundary(limit) {
+        limit -= 1;
+    }
+    let keep = if text[limit..].starts_with('\n') {
+        limit
+    } else {
+        text[..limit].rfind('\n').unwrap_or(0)
+    };
+    text.truncate(keep);
 }
 
 /// Input of [`mci_brain_ffi_reading`]: text that was never stored, such as
@@ -1317,11 +1356,14 @@ pub struct ReadingJson {
     pub rest: String,
 }
 
+/// Largest input [`mci_brain_ffi_reading`] reads, in bytes of JSON.
+pub const READING_INPUT_CAP: usize = 256 * 1024;
+
 /// The readable text of text that was never stored (a screenshot read
 /// again), by the same rules as stored text. Nothing is read from memory and
 /// no handle is needed. Returns `{"main","rest"}`, or a null pointer on bad
-/// input with a last-error message. Free the result with
-/// [`mci_brain_ffi_string_free`].
+/// input or input over [`READING_INPUT_CAP`] bytes, with a last-error
+/// message. Free the result with [`mci_brain_ffi_string_free`].
 ///
 /// # Safety
 /// `input_json` must be null or a null-terminated UTF-8 C string holding a
@@ -1333,7 +1375,12 @@ pub unsafe extern "C" fn mci_brain_ffi_reading(input_json: *const c_char) -> *mu
         return ptr::null_mut();
     }
     // Safety: the caller passes a null-terminated C string.
-    let Ok(input) = unsafe { CStr::from_ptr(input_json) }.to_str() else {
+    let input = unsafe { CStr::from_ptr(input_json) }.to_bytes();
+    if input.len() > READING_INPUT_CAP {
+        set_last_error("mci_brain_ffi_reading: input over 256 KiB");
+        return ptr::null_mut();
+    }
+    let Ok(input) = std::str::from_utf8(input) else {
         set_last_error("mci_brain_ffi_reading: non-UTF8 input");
         return ptr::null_mut();
     };

@@ -83,11 +83,14 @@ char *mci_brain_activity_intervals(McibrainHandle *h, uint64_t start_us,
  * (excess is truncated) to bound the per-call get_event loop. */
 char *mci_brain_ffi_events_by_ids(McibrainHandle *h, const char *query_json);
 
-/* Read one selected admitted event through the existing read-only handle.
- * Returns {"event_id":N,"ts_us":N,"app_bundle_id":<string|null>,
+/* Read one selected admitted event through the existing read-only handle,
+ * for an audit. Returns {"event_id":N,"ts_us":N,"app_bundle_id":<string|null>,
  *          "text":"...","truncated":false}, or JSON null for
- * a missing/deleted/suppressed/invalid id. Text is an exact UTF-8 prefix,
- * capped at 128 KiB without splitting a scalar; truncated means text was
+ * a missing/deleted/suppressed/invalid id. Text is every stored word of a
+ * UTF-8 prefix capped at 128 KiB without splitting a scalar: no header line,
+ * the separator between a window's content and its chrome as a blank line,
+ * any other U+001E as a space, nothing cleaned. A person reads
+ * mci_brain_ffi_event_reading instead. truncated means text was
  * omitted. Timestamp/app and text come from the same row snapshot. Callers
  * MUST match timestamp and nullable app against the selected Hit: IDs can reuse.
  * App identity is capped at 1 KiB; oversized identity returns JSON null.
@@ -102,11 +105,14 @@ char *mci_brain_ffi_event_text(McibrainHandle *h, uint64_t event_id);
  *    "match_in":"main"|"rest"|null,"truncated":false}
  * or JSON null for a missing/deleted/suppressed/invalid id. main is what the
  * person was reading; rest is everything else in the window (tabs, sidebars,
- * menus, status bars), empty for windows read before they were classified.
- * Neither holds the stored header or U+001E. `query` is NULL or a search's
- * UTF-8 text; match_in says whether its words are in main or only in rest
- * (null without a query, or when neither holds them). Reads the same 128 KiB
- * prefix as mci_brain_ffi_event_text, which stays the raw path for audits.
+ * menus, status bars), and for a browser page read both ways the text read
+ * off the screen; empty when there is nothing else. Neither holds the stored
+ * header or U+001E. `query` is NULL or a search's UTF-8 text; match_in says
+ * whether its words are in main or only in rest (null without a query, or
+ * when neither holds them; words such as "the" count only when the search has
+ * no other). Reads the same 128 KiB prefix as mci_brain_ffi_event_text;
+ * main and rest together are at most 128 KiB + 1 KiB, cut after a whole
+ * line, and truncated says when either the read or that bound left text out.
  * NULL on error. Free non-NULL with mci_brain_ffi_string_free. */
 char *mci_brain_ffi_event_reading(McibrainHandle *h, uint64_t event_id,
                                   const char *query);
@@ -117,7 +123,8 @@ char *mci_brain_ffi_event_reading(McibrainHandle *h, uint64_t event_id,
  *   input_json: {"stored":"...","source":"screen_ocr"?,"app":"..."?,
  *                "title":"..."?}
  *   returns: {"main":"...","rest":"..."}
- * A missing or unknown source is shown as given. NULL on bad input.
+ * A missing or unknown source is shown as given. NULL on bad input or input
+ * over 256 KiB.
  * Free non-NULL with mci_brain_ffi_string_free. */
 char *mci_brain_ffi_reading(const char *input_json);
 

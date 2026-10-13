@@ -318,9 +318,13 @@ fn packet_enforces_a_byte_ceiling_for_pathological_single_tokens() {
 
     assert!(packet.byte_estimate <= 16 * 24);
     assert!(packet.truncated);
-    assert!(section(&packet, ContextSectionKind::Evidence)
-        .items
-        .is_empty());
+    let items = &section(&packet, ContextSectionKind::Evidence).items;
+    assert_eq!(items.len(), 1, "the token is cut to the room that is left");
+    assert!(
+        items[0].text.starts_with("Event 50: xxx"),
+        "{}",
+        items[0].text
+    );
 }
 
 #[test]
@@ -675,4 +679,72 @@ fn an_observation_with_nothing_left_to_read_is_not_listed_as_evidence() {
         1,
         "the window is still cited as seen"
     );
+}
+
+fn screen_evidence(id: u64, ts_us: u64, text: &str) -> ContextEvidence {
+    let source = event(id, ts_us, text);
+    let mut evidence = ContextEvidence::from_event(&source, EvidencePriority::Recent, None);
+    evidence.source_kind = "screen_ocr".into();
+    evidence
+}
+
+#[test]
+fn captures_of_one_window_that_differ_only_in_its_status_bar_are_shown_once() {
+    let code = "fn sweep(store: &Store) -> u64 {\n    store.vacuum()\n}";
+    let evidence = (14..17)
+        .map(|column| {
+            screen_evidence(
+                70 + column,
+                1_900_000 + column,
+                &format!(
+                    "[app=com.microsoft.VSCode | title=sweep.rs | url=? | ts=1]\n{code}\n\n\u{1e}\nLn 14, Col {column}  UTF-8  Rust"
+                ),
+            )
+        })
+        .collect();
+    let packet = compile_context_packet(
+        None,
+        NOW_US,
+        ContextBudget::new(200, 8),
+        ContextSources {
+            claims: Vec::new(),
+            evidence,
+        },
+    );
+    let items = &section(&packet, ContextSectionKind::Evidence).items;
+    assert_eq!(items.len(), 1, "{items:?}");
+    assert!(items[0].text.ends_with(code), "{}", items[0].text);
+}
+
+#[test]
+fn a_long_window_is_shown_around_the_focus_words_within_the_budget() {
+    let body = format!(
+        "{}The launch decision is recorded here.\n{}",
+        "Earlier notes about the quarter.\n".repeat(300),
+        "Later notes about the quarter.\n".repeat(300)
+    );
+    let packet = compile_context_packet(
+        Some("launch decision"),
+        NOW_US,
+        ContextBudget::new(300, 8),
+        ContextSources {
+            claims: Vec::new(),
+            evidence: vec![screen_evidence(
+                80,
+                1_900_000,
+                &format!("[app=com.apple.Notes | title=Plan | url=? | ts=1]\n{body}"),
+            )],
+        },
+    );
+    let items = &section(&packet, ContextSectionKind::Evidence).items;
+    assert_eq!(items.len(), 1, "a long window is cut, not dropped");
+    assert!(
+        items[0]
+            .text
+            .starts_with("Event 80: The launch decision is recorded here."),
+        "{}",
+        items[0].text
+    );
+    assert!(items[0].text.len() <= "Event 80: ".len() + 1_200);
+    assert!(packet.token_estimate <= 300);
 }

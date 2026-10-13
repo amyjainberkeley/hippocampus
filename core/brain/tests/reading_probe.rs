@@ -8,7 +8,7 @@ use mci_brain::reading::reading;
 use mci_brain::EventSource;
 use serde_json::{json, Value};
 
-fn ask(input: &str) -> Vec<Value> {
+fn ask(input: &[u8]) -> Vec<Value> {
     let mut child = Command::new(env!("CARGO_BIN_EXE_reading-probe"))
         .env_clear()
         .stdin(Stdio::piped())
@@ -20,7 +20,7 @@ fn ask(input: &str) -> Vec<Value> {
         .stdin
         .take()
         .expect("stdin")
-        .write_all(input.as_bytes())
+        .write_all(input)
         .expect("write questions");
     let output = child.wait_with_output().expect("reading-probe exits");
     assert!(
@@ -48,7 +48,7 @@ fn each_question_line_gets_one_answer_line_from_the_reader() {
         input.push_str(&question.to_string());
         input.push_str("\n\n");
     }
-    let answers = ask(&input);
+    let answers = ask(input.as_bytes());
     assert_eq!(answers.len(), 3, "blank lines get no answer");
 
     let expected = reading(
@@ -80,10 +80,14 @@ fn each_question_line_gets_one_answer_line_from_the_reader() {
 }
 
 #[test]
-fn a_line_that_is_not_a_question_is_answered_with_an_error_and_the_rest_still_answered() {
-    let answers = ask("not json\n{\"source\": \"screen_ocr\"}\n{\"stored\": \"Plain text\"}\n");
-    assert_eq!(answers.len(), 3);
-    assert!(answers[0]["error"].is_string());
-    assert!(answers[1]["error"].is_string(), "stored is required");
-    assert_eq!(answers[2], json!({"main": "Plain text", "rest": ""}));
+fn a_line_that_is_not_a_question_is_answered_bad_input_and_the_rest_still_answered() {
+    let mut input = b"not json\n{\"source\": \"screen_ocr\"}\n".to_vec();
+    input.extend_from_slice(b"{\"stored\": \"\xff not utf-8\"}\n");
+    input.extend_from_slice(b"{\"stored\": \"Plain text\"}\n");
+    let answers = ask(&input);
+    assert_eq!(answers.len(), 4);
+    for answer in &answers[..3] {
+        assert_eq!(answer, &json!({"error": "bad_input"}));
+    }
+    assert_eq!(answers[3], json!({"main": "Plain text", "rest": ""}));
 }
