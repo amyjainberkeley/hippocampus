@@ -12,7 +12,9 @@ public enum HiMark {
     public enum State: CaseIterable, Sendable {
         /// hi with a solid dot: remembering, or about to.
         case remembering
-        /// hi with a hollow dot: on, but skipping this window.
+        /// hi with a hollow dot: on, but nothing is read while a password
+        /// field is active. Every other skip keeps the solid dot, because
+        /// the rest of the screen is still read.
         case skipping
         /// h and a dotless i, dimmed: paused or off.
         case off

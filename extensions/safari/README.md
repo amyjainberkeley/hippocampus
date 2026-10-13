@@ -44,9 +44,8 @@ Hippocampus.app/
 
 ## Toolbar icon
 
-The toolbar icons under `icons/` are drawn from the same geometry as the
-app icon, so Safari, Chromium and the Mac app show the same mark, and both
-browsers get identical files. Regenerate after any change to the mark:
+The toolbar icons under `icons/` share the app icon's geometry. Safari and
+Chromium get identical files. Regenerate them after any change to the mark:
 
 ```bash
 scripts/generate-brand-assets.sh

@@ -13,8 +13,9 @@
 //
 //   2. The `MenuBarStatusIcon` factory draws the four hi pictures
 //      (solid dot, hollow dot, dim, h!) as templates with 22, 44 and
-//      66 px bitmaps, keeps them distinct, and shows the solid dot for
-//      every status in which the screen may be read.
+//      66 px bitmaps and keeps them distinct. Recording, unchanged,
+//      starting and noMemory show the solid dot, and only a password
+//      field may ever show the hollow one.
 import XCTest
 #if canImport(AppKit)
 import AppKit
@@ -100,6 +101,44 @@ final class MenuBarStatusTests: XCTestCase {
         for state in states { XCTAssertFalse(state.shouldPulse) }
     }
 
+    // MARK: - The hollow dot
+
+    /// Only a password field stops every read. Any other skip leaves the
+    /// rest of the screen being read, and a fault is not a skip, so
+    /// neither may show the hollow dot: the icon must never understate.
+    func testOnlyAPasswordFieldCanShowTheHollowDot() throws {
+        let now = Date(timeIntervalSince1970: 1_788_609_600)
+        func picture(suppression: String? = nil, blocked: String? = nil) throws -> HiMark.State {
+            let stamp = ISO8601DateFormatter().string(from: now)
+            var json: [String: Any] = [
+                "schema_version": 1, "updated_at": stamp, "last_stored_frame_at": stamp,
+                "stored_frame_count": 12, "stored_screenshot_count": 12,
+            ]
+            json["suppression_reason"] = suppression
+            json["blocked_reason"] = blocked
+            let receipt = try CaptureStatusReceipt.decode(JSONSerialization.data(withJSONObject: json))
+            return MenuBarStatus.derive(from: .running, receipt: receipt,
+                                        captureStartedAt: now.addingTimeInterval(-60), now: now).markState
+        }
+        // The receipt is fresh: with no reason it shows the solid dot.
+        XCTAssertEqual(try picture(), .remembering)
+        let skips = [
+            "app_denied", "denylist-source", "denylist-postcapture", "ax-secure-subrole",
+            "os-blacked-region", "ocr-time-secret", "failsafe-unknown", "focus-race-dropped",
+            "private_browsing", "browser_window_unknown", "app_identity_unknown",
+        ]
+        for code in skips {
+            XCTAssertNotEqual(try picture(suppression: code), .skipping, code)
+        }
+        let faults = [
+            "storage_error", "store_unavailable", "ingest_failed", "helper_disconnected",
+            "capture_failed", "capture_disabled", "unrecognized",
+        ]
+        for code in faults {
+            XCTAssertNotEqual(try picture(blocked: code), .skipping, code)
+        }
+    }
+
     // MARK: - Icon pictures
 
     #if canImport(AppKit)
@@ -148,10 +187,9 @@ final class MenuBarStatusTests: XCTestCase {
         }
     }
 
-    /// The icon may overstate, never understate: whenever the screen may
-    /// be read, the dot is solid.
+    /// Each of these may read the screen, so each shows the solid dot.
     @MainActor
-    func testEveryStatusThatMayReadTheScreenShowsTheSolidDot() {
+    func testRecordingUnchangedStartingAndNoMemoryShowTheSolidDot() {
         let solid = MenuBarStatusIcon.image(for: HiMark.State.remembering)
         for status in [MenuBarStatus.recording, .unchanged, .starting, .noMemory] {
             XCTAssertEqual(status.markState, .remembering, "\(status)")
@@ -170,7 +208,7 @@ final class MenuBarStatusTests: XCTestCase {
             XCTAssertEqual(status.markState, .needsYou, "\(status)")
             XCTAssertTrue(MenuBarStatusIcon.image(for: status) === bang, "\(status)")
         }
-        // The hollow dot waits for the status that skips a window.
+        // The hollow dot waits for the password-field skip.
         let hollow = MenuBarStatusIcon.image(for: HiMark.State.skipping)
         for status in Self.allStatuses {
             XCTAssertFalse(MenuBarStatusIcon.image(for: status) === hollow, "\(status)")

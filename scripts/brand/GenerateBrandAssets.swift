@@ -152,9 +152,9 @@ enum Icon {
         return context.makeImage()!
     }
 
-    /// The mark at 56% of the tile's width, snapped like the menu bar: the
-    /// h stem's left edge, the i's left edge, the baseline and the dot's
-    /// center land on whole pixels.
+    /// The mark at 56% of the tile's width. The h stem's left edge, the i's
+    /// left edge and the baseline land on whole pixels, and the dot is
+    /// centered on the i.
     static func drawMark(in context: CGContext, tile: CGRect, k: CGFloat, stem: CGFloat?, shadow: Bool) {
         var unit = HiMark.iconMarkScale * k
         var origin = CGPoint(x: tile.minX + (HiMark.iconMarkOrigin.x - HiMark.iconTileRect.minX) * k,
@@ -295,7 +295,7 @@ enum SVG {
     /// The menu bar's four pictures with their words, one color, for the README.
     static func states(ink: String) -> String {
         let words: [(HiMark.State, String)] = [
-            (.remembering, "Remembering"), (.skipping, "Skipping this window"),
+            (.remembering, "Remembering"), (.skipping, "Password field"),
             (.off, "Paused or off"), (.needsYou, "Needs you"),
         ]
         let cell: CGFloat = 180, scale: CGFloat = 0.6
@@ -324,7 +324,7 @@ enum SVG {
             body += "<g transform=\"translate(\(n(x)) \(n(y))) scale(\(n(scale)))\">\(letters)\(parts)</g>\n"
             body += "<text x=\"\(n(centerX))\" y=\"136\" text-anchor=\"middle\">\(word)</text>\n"
         }
-        let title = "The menu-bar icon: remembering, skipping this window, paused or off, needs you"
+        let title = "The menu-bar icon: remembering, password field, paused or off, needs you"
         return """
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 \(n(cell * 4)) 160" role="img" aria-label="\(title)">
         <title>\(title)</title>

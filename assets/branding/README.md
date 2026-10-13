@@ -4,16 +4,16 @@ External product name: **Hippocampus**. Engineering codename: **MCI**.
 
 ## The Mark
 
-**hi**: a lowercase h and i side by side, navy on a white tile, with the dot of
-the i in blue. The Dock, the menu bar, Ask, the browser extensions, the website
-and the installer all show it.
+**hi**: a lowercase h and i side by side. Navy letters on a white tile, with a
+blue dot. It appears in the Dock, menu bar, Ask, browsers, website and
+installer.
 
 In the menu bar the dot says what Hippocampus is doing:
 
 | Picture | Means |
 |---|---|
 | hi, solid dot | Remembering |
-| hi, hollow dot | Skipping this window |
+| hi, hollow dot | A password field is active, so nothing is read |
 | h and a dotless i, dimmed | Paused or off |
 | h! | Needs you |
 
@@ -25,8 +25,8 @@ their words.
 
 One file draws every version of the mark:
 `apps/hippocampus/Sources/HippocampusKit/Brand/HiMarkGeometry.swift`. The app
-draws the menu bar and Ask from it while running, and
-`scripts/generate-brand-assets.sh` draws every file here from it.
+draws the menu bar and Ask from it. `scripts/generate-brand-assets.sh` draws
+every file here from it.
 
 | File | Purpose |
 |---|---|
@@ -59,17 +59,17 @@ structure.
 
 ## Drawing
 
-- **App icon:** Apple's 1024 grid, an 824 tile inside a 100 gutter with a soft
-  shadow and a hairline edge. The mark spans 56% of the tile's width, with a
-  faint shadow under the letters.
-- **Small sizes:** stems, baseline and dot sit on whole pixels, and the letter
-  shadow starts at 64 px. At 16 px the app icon's mark is slightly larger, so
-  the h, the i and the dot stay three shapes.
-- **Browser toolbar icons and the favicon:** the tile fills the canvas, with no
-  gutter and no tile shadow.
-- **Touch icon:** an opaque square; iOS rounds the corners.
-- **Menu bar:** four single-color templates at 1x, 2x and 3x, which macOS tints
-  for light and dark menu bars.
+- **App icon:** an 824 tile in a 100 gutter on Apple's 1024 grid. The tile has
+  a soft shadow and a hairline edge. The mark spans 56% of the tile's width. A
+  faint shadow sits under the letters.
+- **Small sizes:** the stems' left edges and the baseline sit on whole pixels.
+  The letter shadow starts at 64 px. The 16 px app icon uses a larger mark.
+  That keeps its h, i and dot apart.
+- **Browser toolbar icons and the favicon:** the tile fills the canvas. There is
+  no gutter and no tile shadow.
+- **Touch icon:** an opaque square. iOS rounds the corners.
+- **Menu bar:** four one-color templates at 1x, 2x and 3x. macOS tints them for
+  light and dark menu bars.
 
 ## Regenerating Assets
 
@@ -80,4 +80,4 @@ scripts/test-product-visual-assets.sh
 ```
 
 The generator draws the PNGs with Core Graphics. PNG bytes can differ between
-macOS versions, so `--check` compares only the SVGs.
+macOS versions, so `--check` compares only SVGs.

@@ -1,10 +1,9 @@
 # Website Assets
 
-`icon.png` is the 1024 px app icon (`assets/branding/AppIcon.iconset/icon_512x512@2x.png`):
-the hi mark on its white tile. `favicon.png` (32 px) and `favicon-16.png` (16 px) draw
-the tile to the edges, so the mark stays readable in a browser tab, and
-`apple-touch-icon.png` is an opaque 180 px square for iOS. `scripts/generate-brand-assets.sh`
-writes all four.
+`icon.png` is the 1024 px app icon, `assets/branding/AppIcon.iconset/icon_512x512@2x.png`.
+It shows the hi mark on its white tile. `favicon.png` is 32 px and `favicon-16.png` is 16 px.
+Their tile fills the canvas, so the mark reads in a tab. `apple-touch-icon.png` is an
+opaque 180 px square for iOS. `scripts/generate-brand-assets.sh` writes all four.
 
 `product-recall.jpeg` is an unedited native app capture from September 7, 2026,
 12:08 PM Pacific. It shows the optimized Recall executable from `c5a8774`, run

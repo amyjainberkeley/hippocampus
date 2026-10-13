@@ -293,8 +293,10 @@ public struct MenuBarStatusLabel: View {
 // MARK: - Picture
 
 extension MenuBarStatus {
-    /// The picture the menu bar shows. Any state in which the screen may be
-    /// read shows the solid dot: the icon may overstate, never understate.
+    /// The picture the menu bar shows. Recording, unchanged, starting and
+    /// noMemory show the solid dot. Until `derive` gains the 45 s start
+    /// grace and `.skipping`, a start-up `.stale` and a privacy skip's
+    /// `.blocked` show h! while the screen may still be read.
     public var markState: HiMark.State {
         switch self {
         case .recording, .unchanged, .starting, .noMemory: return .remembering
@@ -330,7 +332,9 @@ public enum MenuBarStatusIcon {
         image(for: status.markState)
     }
 
-    public static func image(for state: HiMark.State) -> NSImage {
+    /// One picture on its own, for tests and previews. The menu bar always
+    /// goes through a status, so the icon follows the supervisor's state.
+    static func image(for state: HiMark.State) -> NSImage {
         switch state {
         case .remembering: return remembering
         case .skipping: return skipping

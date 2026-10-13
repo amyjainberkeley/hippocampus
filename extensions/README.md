@@ -16,8 +16,8 @@ One extension per browser, sharing a minimal common shape.
   extensions talk to. All content is filtered there before it hits
   the agent.
 - `../docs/research/browser-extension-audit.md`.
-- `../scripts/generate-brand-assets.sh` — draws the toolbar icons
-  with every other hi mark asset.
+- `../scripts/generate-brand-assets.sh` draws the toolbar icons and
+  every other hi mark asset.
 
 ## When to edit here
 
