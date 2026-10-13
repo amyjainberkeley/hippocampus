@@ -106,6 +106,22 @@ final class SessionCopyTests: XCTestCase {
         XCTAssertEqual(detail.sentences, ["You switched between Figma and Notes five times."])
     }
 
+    func testAFinishedSessionOpensTheAppItSpentMostTimeIn() throws {
+        let overview = try UnderstandingFixture.overview()
+        let zone = TimeZone(secondsFromGMT: -25_200)!
+        func detail(_ title: String) throws -> SessionDetail {
+            let block = try XCTUnwrap(overview.blocks.first { $0.title == title })
+            return SessionDetail(block: block, locale: Locale(identifier: "en_US"), timeZone: zone)
+        }
+        // Mostly Notes, last seen in Slack: Notes, not Slack.
+        XCTAssertEqual(try detail("Pricing page copy").reopen, .app(bundleId: "com.apple.Notes", name: "Notes"))
+        XCTAssertEqual(try detail("Weekly design review").reopen?.label, "Open Zoom")
+        // Mostly Safari, and the agent's page is in Safari: the page.
+        XCTAssertEqual(try detail("Competitor pricing tables").reopen?.label, "Open Page")
+        // Still going: where the person is now.
+        XCTAssertEqual(try detail("Trailhead pricing v3").reopen, .app(bundleId: "com.apple.Notes", name: "Notes"))
+    }
+
     func testARowOnYouNamesItsDayAndTime() {
         let text = SessionDetail.dayAndTime(startUs: 1_791_837_660_000_000, endUs: 1_791_839_120_000_000,
                                             locale: Locale(identifier: "en_US"),

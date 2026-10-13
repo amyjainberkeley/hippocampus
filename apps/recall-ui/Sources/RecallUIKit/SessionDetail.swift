@@ -79,9 +79,23 @@ public struct SessionDetail: Equatable, Sendable {
             return query
         }
         screenshotEventId = block.screenshotEventId
-        reopen = ReopenAction(block.reopen)
+        reopen = Self.reopen(for: block)
         copyRange = min(block.startUs, block.endUs)...max(block.startUs, block.endUs)
         history = .history(of: copyRange, selecting: block.openEventId)
+    }
+
+    /// "Open Page" or "Open {App}" for a session. The agent names the
+    /// session's newest moment, which for a finished session is often a
+    /// quick look elsewhere: a session in Notes that ended on Slack would
+    /// offer "Open Slack". A finished session opens the app it spent the
+    /// most time in, keeping the agent's page when that page is in the same
+    /// app. A session still going keeps the newest moment: that is where the
+    /// person is.
+    public static func reopen(for block: DayBlock) -> ReopenAction? {
+        let newest = ReopenAction(block.reopen)
+        guard !block.inProgress, let main = block.apps.first else { return newest }
+        if let reopen = block.reopen, reopen.bundleId == main.bundleId { return newest }
+        return ReopenAction(Reopen(url: nil, bundleId: main.bundleId, appName: main.name)) ?? newest
     }
 
     /// A span of clock times in the person's format: "9:05 – 9:34 AM".
