@@ -9,10 +9,13 @@
 // back to deterministic summaries. Nothing it reads or writes leaves the Mac.
 //
 // Targets:
-//   - `MindKit` (library): the wire protocol, prompts and the engine seam.
+//   - `MindKit` (library): the wire protocol, the serve loop, prompts and the
+//     engine seam.
 //   - `hippocampus-mind` (executable): the serve loop over a real engine.
 //   - `MindKitTests`: protocol and prompt tests with a fake engine; a live
 //     Foundation Models probe runs only with MCI_LIVE_MIND=1.
+//   - `SlowMindServe` (test fixture, never shipped): the serve loop over an
+//     engine that takes a minute per request, run by `ServeLoopTests`.
 
 import PackageDescription
 
@@ -27,5 +30,6 @@ let package = Package(
         .target(name: "MindKit", path: "Sources/MindKit"),
         .executableTarget(name: "hippocampus-mind", dependencies: ["MindKit"], path: "Sources/hippocampus-mind"),
         .testTarget(name: "MindKitTests", dependencies: ["MindKit"], path: "Tests/MindKitTests"),
+        .executableTarget(name: "SlowMindServe", dependencies: ["MindKit"], path: "Tests/Fixtures/SlowMindServe"),
     ]
 )

@@ -1,6 +1,7 @@
 import Foundation
 
-// One JSON object per line in each direction.
+// One JSON object per line in each direction. Lines end at a newline (0x0A)
+// only.
 //
 // Request:  {"id": 7, "task": "propose", "input": {...}}
 // Reply:    {"id": 7, "ok": true, "output": {...}}
@@ -171,10 +172,13 @@ public struct EpisodeOutput: Codable, Sendable, Equatable {
 public struct DayOutput: Codable, Sendable, Equatable {
     public var headline: String
     public var narrative: String
+    /// At most three.
     public var insights: [String]
-    public var suggestion: String
-    public init(headline: String, narrative: String, insights: [String], suggestion: String) {
-        self.headline = headline; self.narrative = narrative; self.insights = insights; self.suggestion = suggestion
+    /// Always empty: the day's account gives no advice. The key stays so the
+    /// agent decodes the reply unchanged.
+    public private(set) var suggestion = ""
+    public init(headline: String, narrative: String, insights: [String]) {
+        self.headline = headline; self.narrative = narrative; self.insights = insights
     }
 }
 
@@ -278,5 +282,40 @@ public struct MindServer: Sendable {
         var data = (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data("{}".utf8)
         data.append(0x0A)
         return data
+    }
+}
+
+extension MindServer {
+    /// `hippocampus-mind --serve`: writes the ready line, then answers each
+    /// request line on stdin with one reply line on stdout, in order. Exits
+    /// as soon as stdin ends, even mid-request: whoever asked has gone, and
+    /// an answer can take a minute.
+    public func serve() async -> Never {
+        FileHandle.standardOutput.write(readyLine())
+        // stdin is read in a task of its own, so its end is seen while a
+        // request is being answered.
+        let (requests, received) = AsyncStream.makeStream(of: Data.self)
+        Task.detached {
+            var line = Data()
+            do {
+                // Only a newline ends a request. `lines` also breaks at
+                // U+2028 and U+0085, which JSON strings carry unescaped.
+                for try await byte in FileHandle.standardInput.bytes {
+                    if byte != 0x0A {
+                        line.append(byte)
+                    } else if !line.isEmpty {
+                        received.yield(line)
+                        line = Data()
+                    }
+                }
+            } catch {
+                FileHandle.standardError.write(Data("hippocampus-mind: input closed with an error\n".utf8))
+            }
+            exit(0)
+        }
+        for await request in requests {
+            FileHandle.standardOutput.write(await handle(request))
+        }
+        exit(0)
     }
 }

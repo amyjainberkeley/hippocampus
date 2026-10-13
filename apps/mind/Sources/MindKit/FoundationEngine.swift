@@ -50,20 +50,20 @@ struct GEpisode {
     var title: String
     @Guide(description: "Two sentences, to the user as 'you', on what was on screen and what you did")
     var surface: String
-    @Guide(description: "Under 40 words, to the user as 'you': intent and attention; hesitation only if a named signal shows it; or 'Nothing notable.'")
+    @Guide(description: "Under 40 words, to the user as 'you', on what you were trying to do, or 'Nothing notable.'")
     var beneath: String
 }
 
+// No advice: the day's account says what happened. `DayOutput` still carries
+// an empty `suggestion` for the agent.
 @Generable
 struct GDay {
-    @Guide(description: "One sentence naming the day's main work and the active time; no judgement")
+    @Guide(description: "One sentence naming the day's main work and the active time, with no judgement")
     var headline: String
     @Guide(description: "Three to five sentences to the user as 'you', adding detail the headline does not have")
     var narrative: String
-    @Guide(description: "Specific observations, each citing a time, a duration, an app or a search", .count(3...5))
+    @Guide(description: "Up to three specific observations, each citing a time, a duration, an app or a search", .maximumCount(3))
     var insights: [String]
-    @Guide(description: "One concrete change for tomorrow tied to a measured pattern from today")
-    var suggestion: String
 }
 
 @Generable
@@ -78,7 +78,7 @@ struct GAnswer {
 struct GSuggestion {
     @Guide(description: "Short title under eight words, naming the thing from the observations")
     var title: String
-    @Guide(description: "One sentence on why, citing what the user was doing")
+    @Guide(description: "One sentence that starts with what the user was doing, so they can see why this is suggested")
     var why: String
     @Guide(description: "How likely the user wants this right now", .range(1...10))
     var usefulness: Int
@@ -162,8 +162,7 @@ public struct FoundationEngine: MindEngine {
 
     public func day(_ input: DayInput) async throws -> DayOutput {
         let result = try await generate(GDay.self, userName: input.userName, prompt: Prompts.day(input), temperature: 0.4)
-        return DayOutput(headline: result.headline, narrative: result.narrative,
-                         insights: result.insights, suggestion: result.suggestion)
+        return DayOutput(headline: result.headline, narrative: result.narrative, insights: result.insights)
     }
 
     public func answer(_ input: AnswerInput) async throws -> AnswerOutput {

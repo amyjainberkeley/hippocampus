@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModels
 import XCTest
 @testable import MindKit
 
@@ -21,7 +22,7 @@ private struct FakeEngine: MindEngine {
         EpisodeOutput(title: "Pricing", surface: "Read docs.", beneath: "Nothing notable.")
     }
     func day(_ input: DayInput) async throws -> DayOutput {
-        DayOutput(headline: "h", narrative: "n", insights: ["a", "b", "c"], suggestion: "s")
+        DayOutput(headline: "h", narrative: "n", insights: ["a", "b", "c"])
     }
     func answer(_ input: AnswerInput) async throws -> AnswerOutput {
         AnswerOutput(answer: "On Tuesday.", sources: [1])
@@ -116,6 +117,82 @@ final class MindServerTests: XCTestCase {
         XCTAssertLessThan(prompt.count, 8_000, "the observation is clipped to fit the model's window")
         XCTAssertTrue(Prompts.instructions(userName: "").contains("The user is the user."))
         XCTAssertTrue(Prompts.instructions(userName: "Amy").contains("Other people named on screen are not the user"))
+    }
+
+    func testTheInstructionsSetTheVoiceAndKeepTheirOwnStyle() {
+        let instructions = Prompts.instructions(userName: "Amy")
+        XCTAssertTrue(instructions.contains("When you write to the user, say \"you\". When you write a claim about them, start with their name. Never assume anyone's gender."))
+        XCTAssertFalse(instructions.contains("by name or as \"they\""))
+        XCTAssertTrue(instructions.contains("productive, unproductive, distracted, stuck, good or bad. Give advice only when asked."))
+        XCTAssertTrue(instructions.contains("Use short sentences. No dashes used as pauses, no semicolons, no lists of adjectives."))
+        XCTAssertTrue(instructions.contains("never say \"the user\", \"observations\", \"signals\", \"captures\", \"memories\" or \"sources\""))
+        XCTAssertTrue(instructions.contains("Give times the way a clock shows them."))
+        XCTAssertFalse(instructions.contains(";") || instructions.contains("—"), "they follow their own rules")
+    }
+
+    func testTheDayPromptAsksForTheWorkInOrderAndNothingCut() {
+        let prompt = Prompts.day(DayInput(userName: "Amy", facts: "Active at the computer: 5 h 30 min.",
+                                          episodes: ["Pricing the Team plan"], propositions: []))
+        for cut in ["suggest", "advice", "tomorrow", "broke", "fragmented", "hesitat"] {
+            XCTAssertFalse(prompt.lowercased().contains(cut), cut)
+        }
+        XCTAssertTrue(prompt.contains("addressed to them as \"you\"."))
+        XCTAssertTrue(prompt.contains("Use only the facts below."))
+        XCTAssertTrue(prompt.contains("Say what they worked on, in order and for how long, using the session titles, and what they looked up."))
+        XCTAssertTrue(prompt.contains("Be specific: times, durations, apps, searches."))
+        XCTAssertTrue(prompt.contains("Active at the computer: 5 h 30 min.\n"))
+        XCTAssertTrue(prompt.contains("- Pricing the Team plan"))
+    }
+
+    func testTheDayAccountIsAskedForNoSuggestionAndAtMostThreeInsights() throws {
+        let day = try properties(of: GDay.self)
+        XCTAssertEqual(Set(day.keys), ["headline", "narrative", "insights"])
+        XCTAssertEqual(day["insights"]?["maxItems"] as? Int, 3)
+        XCTAssertNil(day["insights"]?["minItems"], "a thin day is not padded")
+    }
+
+    func testADayReplyStillCarriesTheSuggestionKeyAlwaysEmpty() async throws {
+        let reply = try object(await MindServer(engine: FakeEngine()).handle(
+            try request(4, "day", ["user_name": "A", "facts": "f", "episodes": [], "propositions": []])))
+        let output = try XCTUnwrap(reply["output"] as? [String: Any])
+        // The agent decodes all four keys.
+        XCTAssertEqual(Set(output.keys), ["headline", "narrative", "insights", "suggestion"])
+        XCTAssertEqual(output["suggestion"] as? String, "")
+    }
+
+    func testNoPromptForWrittenTextInvitesAJudgement() throws {
+        let observation = "Notes, Launch plan: typed the beta date."
+        let prompts = [
+            Prompts.propose(ProposeInput(userName: "Amy", observation: observation, known: [])),
+            Prompts.episode(EpisodeInput(userName: "Amy", observation: observation)),
+            Prompts.day(DayInput(userName: "Amy", facts: observation, episodes: [], propositions: [])),
+        ]
+        for prompt in prompts {
+            for word in ["stuck", "hesitat", "attention", "focus"] {
+                XCTAssertFalse(prompt.lowercased().contains(word), "\(word) in: \(prompt.prefix(60))")
+            }
+        }
+        XCTAssertTrue(prompts[0].contains("struggle (something that took them several tries)"))
+        XCTAssertTrue(prompts[1].contains("If they switched back and forth between two windows or reworded a search, say that plainly."))
+        XCTAssertTrue(prompts[1].contains("Leave out pauses and counts of keys, clicks and scrolls."))
+        let beneath = try XCTUnwrap(properties(of: GEpisode.self)["beneath"]?["description"] as? String)
+        XCTAssertTrue(beneath.contains("'Nothing notable.'"), "the sentinel the agent hides")
+        for word in ["hesitat", "attention"] {
+            XCTAssertFalse(beneath.lowercased().contains(word), word)
+        }
+    }
+
+    func testASuggestionSaysFirstWhatYouWereDoing() throws {
+        XCTAssertEqual(try properties(of: GSuggestion.self)["why"]?["description"] as? String,
+                       "One sentence that starts with what the user was doing, so they can see why this is suggested")
+    }
+
+    /// What a guided-generation shape asks the model for, by property.
+    private func properties<T: Generable>(of type: T.Type) throws -> [String: [String: Any]] {
+        let data = try JSONEncoder().encode(T.generationSchema)
+        let json = String(decoding: data, as: UTF8.self)
+        let schema = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any], json)
+        return try XCTUnwrap(schema["properties"] as? [String: [String: Any]], json)
     }
 }
 
