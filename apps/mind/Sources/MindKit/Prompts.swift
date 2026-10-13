@@ -39,14 +39,16 @@ public enum Prompts {
         var prompt = """
         Below are observations of \(user)'s screen and activity over a stretch of \
         time: what was visible, what they searched for, and measured signals such \
-        as typing, reading, pauses and switching between windows.
+        as typing, reading and switching between windows.
 
         Propose up to three propositions about \(user). Each must say something \
         different from the others and be useful to an assistant tomorrow: what \
         they are working on, what they are trying to achieve, how they tend to \
         work, what they prefer, what they know or are learning, who they work \
         with, or what took them several tries. Infer; do not summarize the \
-        screen, and skip anything trivial. Not everything is work: watching, \
+        screen, and skip anything trivial. Say what they do, not what kind \
+        of person they are. Leave out pauses and counts of keys, clicks and \
+        scrolls. Not everything is work: watching, \
         shopping, personal errands and browsing for fun are interests or \
         states, never projects. Start each with "\(user)".
 
@@ -72,7 +74,7 @@ public enum Prompts {
 
             """
         }
-        prompt += "Observations:\n\(clip(input.observation, maxFieldCharacters))"
+        prompt += "Observations:\n\(clip(withoutInputCounts(input.observation), maxFieldCharacters))"
         return prompt
     }
 
@@ -121,28 +123,52 @@ public enum Prompts {
         contradict the record. Do not guess at motives the record does not \
         show. If nothing notable shows, say so plainly.
 
-        \(clip(input.observation, maxFieldCharacters))
+        \(clip(withoutInputCounts(input.observation), maxFieldCharacters))
         """
     }
 
+    /// An observation without the key counts and pauses the agent still
+    /// writes at the end of each window's line ("…: typing for 11 min, 290
+    /// keys, paused 3 min with no input. Text: …"). What was on screen,
+    /// after "Text:", is left as it is.
+    static func withoutInputCounts(_ observation: String) -> String {
+        observation.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+            let end = line.range(of: ". Text: ")?.lowerBound ?? line.endIndex
+            let header = line[..<end]
+                .replacing(/, paused \d+ (?:min|s) with no input$/, with: "")
+                .replacing(/, \d+ keys$/, with: "")
+            return String(header + line[end...])
+        }.joined(separator: "\n")
+    }
+
+    /// Fact lines the day's account leaves out: how often apps changed and
+    /// where the day broke up. The agent still sends them.
+    static let cutDayFacts = ["App switches:", "Most fragmented hour:", "No stretch of"]
+
+    /// The day's account says only what happened that day. What Hippocampus
+    /// believes about the person is left out: the small model wrote it up as
+    /// the day's work.
     public static func day(_ input: DayInput) -> String {
         let user = name(input.userName)
+        let facts = input.facts
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { line in !cutDayFacts.contains { line.hasPrefix($0) } }
+            .joined(separator: "\n")
+        let sessions = input.episodes.prefix(16).map { "- \(clip(session($0), 220))" }
         return """
-        Write \(user)'s account of their day on the computer, addressed to them \
-        as "you". Refer to anyone else by name. Use only the facts below. Say \
-        what they worked on, in order and for how long, using the session \
-        titles, and what they looked up. Leave out how often they switched \
-        apps. Be specific: times, durations, apps, searches. No praise, no \
-        filler, and do not repeat the headline in the narrative.
-
-        Facts:
-        \(clip(input.facts, 2_500))
+        Write \(user)'s account of their day on the computer. Write every \
+        sentence to \(user) as "you", and refer to anyone else by name. Use \
+        only the facts and sessions below, and name only work listed under \
+        Sessions. Say what they worked on, in order and for how long, using \
+        the session titles, and what they looked up. Be specific: times, \
+        durations, apps, searches. No praise, no filler. Say each thing once, \
+        and do not repeat the headline in the narrative.
 
         Sessions:
-        \(input.episodes.prefix(16).map { "- \(clip($0, 220))" }.joined(separator: "\n"))
+        \(sessions.isEmpty ? "None." : sessions.joined(separator: "\n"))
 
-        What Hippocampus understands about \(user):
-        \(input.propositions.prefix(8).map { "- \(clip($0, 200))" }.joined(separator: "\n"))
+        Facts:
+        \(clip(facts, 2_500))
         """
     }
 
@@ -215,18 +241,27 @@ public enum Prompts {
         likely want right now, given what is on screen, what they did recently \
         and what is known about them. Each should be something Hippocampus can \
         do from memory: find something they saw, resume earlier work, recall \
-        what they looked up, or summarize. Rate how likely each is wanted now, \
-        1 to 10; only rate above 6 when the evidence is direct.
+        what they looked up, or summarize. Write each title and reason to \
+        \(user) as "you". Rate how likely each is wanted now, 1 to 10; only \
+        rate above 6 when the evidence is direct.
 
         On screen:
         \(clip(input.now, 1_200))
 
         Recently:
-        \(input.recent.prefix(8).map { "- \(clip($0, 200))" }.joined(separator: "\n"))
+        \(input.recent.prefix(8).map { "- \(clip(session($0), 200))" }.joined(separator: "\n"))
 
         About \(user):
         \(input.propositions.prefix(6).map { "- \(clip($0, 200))" }.joined(separator: "\n"))
         """
+    }
+
+    /// A session line ("{time} {title}: {what lay beneath}") without the
+    /// placeholder the episode task writes when nothing stood out, so the
+    /// model does not repeat it.
+    static func session(_ line: String) -> String {
+        let placeholder = ": Nothing notable."
+        return line.hasSuffix(placeholder) ? String(line.dropLast(placeholder.count)) : line
     }
 
     static func name(_ userName: String) -> String {

@@ -136,12 +136,51 @@ final class MindServerTests: XCTestCase {
         for cut in ["suggest", "advice", "tomorrow", "broke", "fragmented", "hesitat"] {
             XCTAssertFalse(prompt.lowercased().contains(cut), cut)
         }
-        XCTAssertTrue(prompt.contains("addressed to them as \"you\"."))
-        XCTAssertTrue(prompt.contains("Use only the facts below."))
+        XCTAssertTrue(prompt.contains("Write every sentence to Amy as \"you\", and refer to anyone else by name."))
+        XCTAssertTrue(prompt.contains("Use only the facts and sessions below"))
         XCTAssertTrue(prompt.contains("Say what they worked on, in order and for how long, using the session titles, and what they looked up."))
         XCTAssertTrue(prompt.contains("Be specific: times, durations, apps, searches."))
-        XCTAssertTrue(prompt.contains("Active at the computer: 5 h 30 min.\n"))
-        XCTAssertTrue(prompt.contains("- Pricing the Team plan"))
+        XCTAssertTrue(prompt.contains("Sessions:\n- Pricing the Team plan\n"))
+        XCTAssertTrue(prompt.hasSuffix("Facts:\nActive at the computer: 5 h 30 min."))
+    }
+
+    func testTheDayPromptLeavesOutHowOftenAppsChanged() {
+        // The agent still sends these lines. The account must not report
+        // them back as where the day broke.
+        let facts = [
+            "Active at the computer: 1 h 5 min.",
+            "By app: Slack 35 min, Notes 30 min.",
+            "No stretch of 25 minutes or more on one kind of work.",
+            "App switches: 140 (129 per active hour).",
+            "Most fragmented hour: 15:00 with 48 switches.",
+            "Searches (1): \"team plan pricing\".",
+        ].joined(separator: "\n")
+        let prompt = Prompts.day(DayInput(userName: "Sam", facts: facts, episodes: [
+            "13:20–13:44 Launch notes for the beta: You were drafting the beta announcement in Notes.",
+        ], propositions: []))
+        for cut in ["switch", "fragmented", "no stretch"] {
+            XCTAssertFalse(prompt.lowercased().contains(cut), cut)
+        }
+        XCTAssertTrue(prompt.hasSuffix("Facts:\nActive at the computer: 1 h 5 min.\nBy app: Slack 35 min, Notes 30 min.\nSearches (1): \"team plan pricing\"."))
+    }
+
+    func testADayNamesOnlyItsOwnSessionsAndIsNotPadded() throws {
+        let prompt = Prompts.day(DayInput(userName: "Sam", facts: "Active at the computer: 1 h 5 min.", episodes: [
+            "13:20–13:44 Launch notes for the beta: You were drafting the beta announcement in Notes.",
+            "13:50–14:00 Invoice list: Nothing notable.",
+        ], propositions: ["Sam is setting per-seat pricing for the Team plan with Priya."]))
+        XCTAssertTrue(prompt.contains("name only work listed under Sessions."))
+        XCTAssertTrue(prompt.contains("Say each thing once"))
+        XCTAssertFalse(prompt.contains("per-seat"), "what Hippocampus believes about Sam is not the day's work")
+        XCTAssertTrue(prompt.contains("in Notes.\n- 13:50–14:00 Invoice list\n\nFacts:"), "no placeholder to repeat")
+        let empty = Prompts.day(DayInput(userName: "Sam", facts: "f", episodes: [], propositions: ["Sam writes Rust."]))
+        XCTAssertTrue(empty.hasSuffix("Sessions:\nNone.\n\nFacts:\nf"), empty)
+        let day = try properties(of: GDay.self)
+        XCTAssertEqual(day["narrative"]?["description"] as? String,
+                       "One to four short sentences to the user as 'you', adding detail the headline does not have")
+        // Asked for a time each, the model made up sessions to fill a thin day.
+        XCTAssertEqual(day["insights"]?["description"] as? String,
+                       "Up to three short sentences to the user as 'you', each restating a different duration, app or search from the facts")
     }
 
     func testTheDayAccountIsAskedForNoSuggestionAndAtMostThreeInsights() throws {
@@ -173,18 +212,62 @@ final class MindServerTests: XCTestCase {
             }
         }
         XCTAssertTrue(prompts[0].contains("struggle (something that took them several tries)"))
+        // Claims once read "Sam is a multitasker" and "Sam is a
+        // self-motivated worker who likes to research on her own".
+        XCTAssertTrue(prompts[0].contains("Say what they do, not what kind of person they are."))
+        XCTAssertEqual(try properties(of: GProposition.self)["text"]?["description"] as? String,
+                       "One sentence about the user, starting with their name and never using he or she")
+        // The observation carries ", 290 keys, paused 3 min with no input"
+        // on window lines. Claims and session notes leave both out.
+        XCTAssertTrue(prompts[0].contains("Leave out pauses and counts of keys, clicks and scrolls."))
         XCTAssertTrue(prompts[1].contains("If they switched back and forth between two windows or reworded a search, say that plainly."))
         XCTAssertTrue(prompts[1].contains("Leave out pauses and counts of keys, clicks and scrolls."))
-        let beneath = try XCTUnwrap(properties(of: GEpisode.self)["beneath"]?["description"] as? String)
+        let episode = try properties(of: GEpisode.self)
+        let surface = try XCTUnwrap(episode["surface"]?["description"] as? String)
+        XCTAssertTrue(surface.hasSuffix("with no pauses or counts"), surface)
+        let beneath = try XCTUnwrap(episode["beneath"]?["description"] as? String)
         XCTAssertTrue(beneath.contains("'Nothing notable.'"), "the sentinel the agent hides")
         for word in ["hesitat", "attention"] {
             XCTAssertFalse(beneath.lowercased().contains(word), word)
         }
     }
 
+    func testClaimsAndSessionNotesSeeNoKeyCountsOrPauses() {
+        // The agent ends each window's line with what the input counted.
+        // Screen text after "Text:" is kept as it was, whatever it says.
+        let observation = """
+        14:09–14:20 Notes — "Launch plan": typing for 11 min, 290 keys, paused 3 min with no input. Text: Price, 5 keys, paused 2 min with no input
+        14:20–14:28 Slack — "#pricing": reading for 8 min, paused 50 s with no input
+        14:28–14:35 Notes — "Launch plan": typing for 7 min, 120 keys
+        14:30 searched Google: "team plan, 4 keys"
+        Signals: switched back and forth between Notes — Launch plan and Slack — #pricing 6 times.
+        """
+        let expected = """
+        14:09–14:20 Notes — "Launch plan": typing for 11 min. Text: Price, 5 keys, paused 2 min with no input
+        14:20–14:28 Slack — "#pricing": reading for 8 min
+        14:28–14:35 Notes — "Launch plan": typing for 7 min
+        14:30 searched Google: "team plan, 4 keys"
+        Signals: switched back and forth between Notes — Launch plan and Slack — #pricing 6 times.
+        """
+        XCTAssertTrue(Prompts.propose(ProposeInput(userName: "Sam", observation: observation, known: [])).hasSuffix("Observations:\n" + expected))
+        XCTAssertTrue(Prompts.episode(EpisodeInput(userName: "Sam", observation: observation)).hasSuffix("\n\n" + expected))
+    }
+
     func testASuggestionSaysFirstWhatYouWereDoing() throws {
+        // spec-copy S4.15 item 5, said to the person: with "what the user
+        // was doing" the model wrote the reason about them by name.
         XCTAssertEqual(try properties(of: GSuggestion.self)["why"]?["description"] as? String,
-                       "One sentence that starts with what the user was doing, so they can see why this is suggested")
+                       "One sentence to the user as 'you' that starts with what you were doing, so you can see why this is suggested")
+    }
+
+    func testSuggestionsAreWrittenToYou() {
+        let prompt = Prompts.suggest(SuggestInput(userName: "Sam", now: "Notes, Launch plan", recent: [
+            "11:05 Invoice list in SwiftUI: Nothing notable.",
+            "14:02 Pricing the Team plan: You were settling the Team plan price.",
+        ], propositions: ["Sam is building an invoicing app."]))
+        XCTAssertTrue(prompt.contains("Write each title and reason to Sam as \"you\"."))
+        XCTAssertTrue(prompt.contains("- 11:05 Invoice list in SwiftUI\n- 14:02 Pricing the Team plan: You were settling the Team plan price."),
+                      "no placeholder to repeat")
     }
 
     /// What a guided-generation shape asks the model for, by property.
@@ -205,13 +288,15 @@ final class FoundationEngineLiveProbe: XCTestCase {
         }
         let engine = FoundationEngine()
         if let reason = engine.unavailableReason() { throw XCTSkip("model unavailable: \(reason)") }
+        // The agent's line format (observe.rs `render`), made-up content.
         let observation = """
-        14:02–14:09 Google Chrome — "Pricing | Stripe Documentation" (stripe.com/docs/billing/subscriptions/pricing): read for 6 min (scrolling, no typing). Text: Per-seat pricing. Tiered pricing. Volume pricing charges the same price per unit…
+        14:02–14:09 Google Chrome — "Pricing | Stripe Documentation" (stripe.com): reading for 7 min. Text: Per-seat pricing. Tiered pricing. Volume pricing charges the same price per unit…
+        14:09–14:16 Notes — "Launch plan": typing for 7 min, 310 keys. Text: Beta ships to 40 design partners on Oct 21. Owner: Maya. Open question: Team plan price before the beta?
+        14:16–14:24 Slack — "#pricing": reading for 8 min. Text: Ravi: Let's land Team at $18 a seat, billed annually. Maya: Agreed, I'll update the pricing page today.
+        14:24–14:31 Notes — "Launch plan": typing a little for 7 min, 40 keys, paused 3 min with no input. Text: Team: $18/seat annual
         14:03 searched Google: "stripe per seat vs tiered pricing"
         14:05 searched Google: "team plan pricing saas 2026"
-        14:09–14:16 Notes — "Launch plan": typed steadily (310 keys). Text: Beta ships to 40 design partners on Oct 21. Owner: Maya. Open question: Team plan price before the beta?
-        14:16–14:24 Slack — "#pricing": read, switched back and forth with Notes 5 times. Text: Ravi: Let's land Team at $18 a seat, billed annually. Maya: Agreed, I'll update the pricing page today.
-        14:24–14:31 Notes — "Launch plan": paused 3 min with no input, then typed "Team: $18/seat annual".
+        Signals: switched back and forth between Notes — Launch plan and Slack — #pricing 5 times.
         """
         let start = Date()
         let proposed = try await engine.propose(ProposeInput(userName: "Amy", observation: observation, known: []))
@@ -227,5 +312,31 @@ final class FoundationEngineLiveProbe: XCTestCase {
             propositions: proposed.propositions.map(\.text), today: "Friday, October 10"))
         print("ANSWER", answer.answer, answer.sources)
         XCTAssertTrue(answer.answer.contains("18"))
+
+        // A thin day: one session, the fact lines the account leaves out,
+        // and a belief about the person that is not today's work.
+        let day = try await engine.day(DayInput(userName: "Sam", facts: [
+            "Active at the computer: 1 h 5 min.",
+            "First activity 13:10, last 15:40.",
+            "By kind of work: Communication 35 min, Writing 30 min.",
+            "By app: Slack 35 min, Notes 30 min.",
+            "No stretch of 25 minutes or more on one kind of work.",
+            "App switches: 140 (129 per active hour).",
+            "Most fragmented hour: 15:00 with 48 switches.",
+        ].joined(separator: "\n"), episodes: [
+            "13:20–13:44 Launch notes for the beta: You were drafting the beta announcement in Notes.",
+        ], propositions: ["Sam is setting per-seat pricing for the Team plan with Priya."]))
+        print("DAY", day.headline, "|", day.narrative, "|", day.insights.joined(separator: " | "))
+        let written = ([day.headline, day.narrative] + day.insights).joined(separator: " ").lowercased()
+        for cut in ["fragmented", "per-seat"] {
+            XCTAssertFalse(written.contains(cut), cut)
+        }
+        let suggested = try await engine.suggest(SuggestInput(
+            userName: "Sam", now: "Safari, Plans and pricing | Stripe Docs\nPer-seat pricing. Tiered pricing.",
+            recent: ["14:02 Pricing the Team plan: You were settling the Team plan price before the beta.",
+                     "13:20 Launch notes for the beta: You were drafting the beta announcement in Notes.",
+                     "11:05 Invoice list in SwiftUI: Nothing notable."],
+            propositions: ["Sam is setting per-seat pricing for the Team plan with Priya."]))
+        for s in suggested.suggestions { print("SUGGEST", s.usefulness, s.title, "|", s.why) }
     }
 }

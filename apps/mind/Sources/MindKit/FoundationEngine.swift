@@ -13,7 +13,7 @@ enum GKind: String {
 struct GProposition {
     @Guide(description: "Which observations support this and why")
     var reasoning: String
-    @Guide(description: "One sentence about the user, starting with their name")
+    @Guide(description: "One sentence about the user, starting with their name and never using he or she")
     var text: String
     @Guide(description: "What the proposition is about")
     var kind: GKind
@@ -48,7 +48,7 @@ struct GRelations {
 struct GEpisode {
     @Guide(description: "Three to seven words naming the activity, using names from the observations")
     var title: String
-    @Guide(description: "Two sentences, to the user as 'you', on what was on screen and what you did")
+    @Guide(description: "Two sentences, to the user as 'you', on what was on screen and what you did there, with no pauses or counts")
     var surface: String
     @Guide(description: "Under 40 words, to the user as 'you', on what you were trying to do, or 'Nothing notable.'")
     var beneath: String
@@ -60,9 +60,9 @@ struct GEpisode {
 struct GDay {
     @Guide(description: "One sentence naming the day's main work and the active time, with no judgement")
     var headline: String
-    @Guide(description: "Three to five sentences to the user as 'you', adding detail the headline does not have")
+    @Guide(description: "One to four short sentences to the user as 'you', adding detail the headline does not have")
     var narrative: String
-    @Guide(description: "Up to three specific observations, each citing a time, a duration, an app or a search", .maximumCount(3))
+    @Guide(description: "Up to three short sentences to the user as 'you', each restating a different duration, app or search from the facts", .maximumCount(3))
     var insights: [String]
 }
 
@@ -78,7 +78,7 @@ struct GAnswer {
 struct GSuggestion {
     @Guide(description: "Short title under eight words, naming the thing from the observations")
     var title: String
-    @Guide(description: "One sentence that starts with what the user was doing, so they can see why this is suggested")
+    @Guide(description: "One sentence to the user as 'you' that starts with what you were doing, so you can see why this is suggested")
     var why: String
     @Guide(description: "How likely the user wants this right now", .range(1...10))
     var usefulness: Int

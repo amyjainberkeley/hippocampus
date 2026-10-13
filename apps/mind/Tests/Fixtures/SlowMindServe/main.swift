@@ -22,4 +22,10 @@ struct SlowEngine: MindEngine {
     }
 }
 
+// Exit handlers must not run when stdin closes mid-request, because the
+// model's threads may still be working. This one stands in for the
+// frameworks' own: with `exit` instead of `_exit`, the fixture either
+// traps while a request is still running or prints this.
+atexit { _ = write(STDERR_FILENO, "exit handlers ran\n", 18) }
+
 await MindServer(engine: SlowEngine()).serve()

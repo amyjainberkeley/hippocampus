@@ -95,7 +95,8 @@ public struct DayInput: Codable, Sendable, Equatable {
     public var facts: String
     /// Episode titles and summaries, in order.
     public var episodes: [String]
-    /// What the user model holds.
+    /// What the user model holds. Still decoded, but the day's prompt leaves
+    /// it out (`Prompts.day`).
     public var propositions: [String]
     public init(userName: String, facts: String, episodes: [String], propositions: [String]) {
         self.userName = userName; self.facts = facts; self.episodes = episodes; self.propositions = propositions
@@ -289,7 +290,9 @@ extension MindServer {
     /// `hippocampus-mind --serve`: writes the ready line, then answers each
     /// request line on stdin with one reply line on stdout, in order. Exits
     /// as soon as stdin ends, even mid-request: whoever asked has gone, and
-    /// an answer can take a minute.
+    /// an answer can take a minute. It exits with `_exit`, so no exit
+    /// handlers or static destructors run while the model's threads are
+    /// still working.
     public func serve() async -> Never {
         FileHandle.standardOutput.write(readyLine())
         // stdin is read in a task of its own, so its end is seen while a
@@ -311,11 +314,11 @@ extension MindServer {
             } catch {
                 FileHandle.standardError.write(Data("hippocampus-mind: input closed with an error\n".utf8))
             }
-            exit(0)
+            _exit(0)
         }
         for await request in requests {
             FileHandle.standardOutput.write(await handle(request))
         }
-        exit(0)
+        _exit(0)
     }
 }

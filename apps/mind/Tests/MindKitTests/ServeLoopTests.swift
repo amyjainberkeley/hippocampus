@@ -47,6 +47,9 @@ final class ServeLoopTests: XCTestCase {
         XCTAssertTrue(read(child.errors) { $0.contains("answering") }.contains("answering"), "the request is being answered")
         try child.input.close()
         assertEnded(child.process, within: exited)
+        // `_exit`, not `exit`: nothing runs at exit while the model may
+        // still be working.
+        XCTAssertFalse(read(child.errors) { _ in false }.contains("exit handlers ran"))
     }
 
     // MARK: Helpers
@@ -58,8 +61,10 @@ final class ServeLoopTests: XCTestCase {
         let errors: FileHandle
     }
 
-    /// Starts `name --serve` from beside the tests, on pipes. It is stopped
-    /// when the test ends, and after 30 s so that no read waits forever.
+    /// Starts `name --serve` from beside the tests, on pipes, with PATH as
+    /// its only environment, as the onboarding check starts it. It is
+    /// stopped when the test ends, and after 30 s so that no read waits
+    /// forever.
     private func serve(_ name: String, exited: XCTestExpectation? = nil) throws -> Child {
         let binary = Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent(name)
         guard FileManager.default.isExecutableFile(atPath: binary.path) else {
@@ -68,6 +73,7 @@ final class ServeLoopTests: XCTestCase {
         let process = Process()
         process.executableURL = binary
         process.arguments = ["--serve"]
+        process.environment = ["PATH": "/usr/bin:/bin"]
         let input = Pipe(), output = Pipe(), errors = Pipe()
         process.standardInput = input
         process.standardOutput = output
