@@ -80,6 +80,9 @@ fn print_usage() {
         \x20 --keyframe-digest SHA256   attach an existing encrypted blob to one\n\
         \x20                            newest event; repeat for multiple blobs\n\
         \x20 --force                    overwrite-into a non-empty brain (default: refuse)\n\
+        \x20 --demo-day                 instead, write a made-up workday ending now: moments\n\
+        \x20                            in everyday apps, session notes, searches, a day\n\
+        \x20                            summary and learned items (Overview, You)\n\
         \x20 -h, --help                 print this and exit\n\
         \x20 --version                  print version and exit\n\
         \n\
@@ -95,6 +98,7 @@ fn print_usage() {
 struct Args {
     db_path: PathBuf,
     force: bool,
+    demo_day: bool,
     keyframe_digests: Vec<String>,
 }
 
@@ -106,6 +110,7 @@ enum ParseOutcome {
 
 fn parse_args(argv: &[String]) -> ParseOutcome {
     let mut force = false;
+    let mut demo_day = false;
     let mut db_path: Option<PathBuf> = None;
     let mut keyframe_digests = Vec::new();
     let mut i = 1;
@@ -115,6 +120,10 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
             "--version" => return ParseOutcome::Version,
             "--force" => {
                 force = true;
+                i += 1;
+            }
+            "--demo-day" => {
+                demo_day = true;
                 i += 1;
             }
             "--db-path" => {
@@ -151,6 +160,7 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
     ParseOutcome::Run(Args {
         db_path,
         force,
+        demo_day,
         keyframe_digests,
     })
 }
@@ -380,6 +390,317 @@ pub fn canned_events(now_us: u64) -> Vec<Event> {
     out
 }
 
+/// A made-up workday for Sam, who runs a bike shop's website: eight
+/// sessions ending now, the last still going. Every app is an everyday one
+/// so kinds and names read as they would; every title, page, search and
+/// statement is invented.
+mod demo_day {
+    use mci_agent::understanding::observe;
+    use mci_agent::understanding::overview::ModelStatus;
+    use mci_brain::understanding::{DayReport, NewProposition, ObservedEvent, PropositionKind, SessionNote};
+    use mci_brain::{ActivityInterval, ActivityState, BrainStore, Event, EventId, EventSource, SqlCipherBrainStore};
+
+    const MIN: u64 = 60_000_000;
+    const DAY: u64 = 24 * 60 * MIN;
+    const MODEL: &str = "apple-foundation-models";
+
+    /// One window held for some minutes, one moment a minute; `url` is set
+    /// for a browser page.
+    struct Hold {
+        app: &'static str,
+        title: &'static str,
+        url: Option<&'static str>,
+        minutes: u64,
+    }
+
+    struct Session {
+        /// Minutes before now.
+        starts_ago: u64,
+        holds: Vec<Hold>,
+        /// (title, surface, beneath, model); none while it is still going.
+        note: Option<(&'static str, &'static str, &'static str, &'static str)>,
+    }
+
+    const fn hold(app: &'static str, title: &'static str, minutes: u64) -> Hold {
+        Hold { app, title, url: None, minutes }
+    }
+
+    const fn page(title: &'static str, url: &'static str, minutes: u64) -> Hold {
+        Hold { app: "com.apple.Safari", title, url: Some(url), minutes }
+    }
+
+    const NOTES: &str = "com.apple.Notes";
+    const FIGMA: &str = "com.figma.Desktop";
+    const SLACK: &str = "com.tinyspeck.slackmacgap";
+    const CODE: &str = "com.microsoft.VSCode";
+    const TERMINAL: &str = "com.apple.Terminal";
+
+    fn sessions() -> Vec<Session> {
+        vec![
+            Session {
+                starts_ago: 335,
+                holds: vec![
+                    hold("com.apple.mail", "Invoice 2291 from Spokewise", 8),
+                    hold("com.example.Ledgerly", "October invoices", 11),
+                    hold("com.apple.mail", "Invoice 2291 from Spokewise", 5),
+                    hold(SLACK, "#shop-ops", 5),
+                ],
+                note: Some((
+                    "Invoices and morning messages",
+                    "You matched supplier invoices against October orders, then replied in the shop channel.",
+                    "Nothing notable.",
+                    MODEL,
+                )),
+            },
+            Session {
+                starts_ago: 300,
+                holds: vec![hold(NOTES, "Pricing page draft", 18), hold(FIGMA, "Trailhead pricing v3", 8), hold(SLACK, "#design", 3)],
+                note: Some((
+                    "Pricing page copy",
+                    "You drafted plan names and prices in Notes and checked them against the layout in Figma.",
+                    "You rewrote the plan names twice and kept the shortest version.",
+                    MODEL,
+                )),
+            },
+            Session {
+                starts_ago: 270,
+                holds: vec![hold(NOTES, "Pricing page draft", 20), hold(FIGMA, "Trailhead pricing v3", 7)],
+                note: Some(("Notes — Pricing page draft", "Typing in Notes (Pricing page draft)", "Nothing notable.", "measured")),
+            },
+            Session {
+                starts_ago: 225,
+                holds: vec![
+                    hold(CODE, "tax.rs — trailhead-shop", 17),
+                    page("rust round half to even - Google Search", "https://www.google.com/search?q=rust+round+half+to+even", 1),
+                    page("Rounding half to even · Dev Notes", "https://devnotes.example/rounding", 4),
+                    hold(TERMINAL, "trailhead-shop — cargo test", 7),
+                ],
+                note: Some((
+                    "Checkout tax rounding",
+                    "You looked into totals that were off by a cent and changed where rounding happens.",
+                    "You traced the off-by-a-cent totals to rounding on each line and moved the rounding to the order total.",
+                    MODEL,
+                )),
+            },
+            Session {
+                starts_ago: 195,
+                holds: vec![hold(CODE, "tax_tests.rs — trailhead-shop", 20), hold(TERMINAL, "trailhead-shop — cargo test", 7)],
+                note: Some(("Tax rounding tests", "You wrote tests for order-level rounding and ran them in Terminal.", "Nothing notable.", MODEL)),
+            },
+            Session {
+                starts_ago: 150,
+                holds: vec![hold("us.zoom.xos", "Weekly design review", 22), hold(FIGMA, "Trailhead pricing v3", 6)],
+                note: Some((
+                    "Weekly design review",
+                    "You presented the pricing page in a call and took notes on the annual plan.",
+                    "You walked the team through the three pricing tiers and noted two changes to the annual plan.",
+                    MODEL,
+                )),
+            },
+            Session {
+                starts_ago: 110,
+                holds: vec![
+                    page("bike shop pricing page examples - Google Search", "https://www.google.com/search?q=bike+shop+pricing+page+examples", 1),
+                    page("Pricing · Velo Cycles", "https://www.velocycles.example/pricing", 6),
+                    page("bike shop pricing tiers examples - Google Search", "https://www.google.com/search?q=bike+shop+pricing+tiers+examples", 1),
+                    page("Plans and pricing · Spoke & Chain", "https://spokeandchain.example/plans", 4),
+                    page("bike rental pricing tiers - Google Search", "https://www.google.com/search?q=bike+rental+pricing+tiers", 1),
+                    hold(NOTES, "Pricing page draft", 10),
+                    hold(SLACK, "#design", 2),
+                ],
+                note: Some((
+                    "Competitor pricing tables",
+                    "You looked at how other bike shops lay out their plans.",
+                    "You compared how two shops show annual pricing, then copied one layout idea into your draft.",
+                    MODEL,
+                )),
+            },
+            Session {
+                starts_ago: 24,
+                holds: vec![
+                    hold(FIGMA, "Trailhead pricing v3", 4),
+                    hold(NOTES, "Pricing page draft", 3),
+                    hold(FIGMA, "Trailhead pricing v3", 4),
+                    hold(NOTES, "Pricing page draft", 3),
+                    hold(FIGMA, "Trailhead pricing v3", 4),
+                    hold(NOTES, "Pricing page draft", 5),
+                ],
+                note: None,
+            },
+        ]
+    }
+
+    fn put(store: &SqlCipherBrainStore, ts_us: u64, app: &str, title: &str, url: Option<&str>) -> Result<i64, String> {
+        let event = Event {
+            id: EventId(0),
+            ts_us,
+            app_bundle_id: Some(app.to_owned()),
+            window_title: Some(title.to_owned()),
+            url: url.map(str::to_owned),
+            text: format!("{title}\nMade-up text for a demo memory."),
+            summary: None,
+            entities: None,
+            episode_id: None,
+            cascade_reason: 0,
+            keyframe_blob: None,
+            tab_id: None,
+            embedding: None,
+        };
+        let source = if url.is_some() { EventSource::BrowserPage } else { EventSource::ScreenOcr };
+        let id = store.put_event_with_source(&event, source).map_err(|e| format!("put event: {e}"))?;
+        i64::try_from(id.0).map_err(|_| "event id".to_owned())
+    }
+
+    fn active(store: &SqlCipherBrainStore, start_us: u64, minutes: u64, app: &str) -> Result<(), String> {
+        for step in 0..minutes * 12 {
+            let interval = ActivityInterval {
+                start_us: start_us + step * 5_000_000,
+                end_us: start_us + (step + 1) * 5_000_000,
+                state: ActivityState::InputActive,
+                app_bundle_id: Some(app.to_owned()),
+                capture_generation: "demo-day".into(),
+            };
+            store.append_activity_interval(&interval).map_err(|e| format!("activity: {e}"))?;
+        }
+        Ok(())
+    }
+
+    fn claim(text: &str, kind: PropositionKind, confidence: f64, decay: f64) -> NewProposition {
+        NewProposition {
+            text: text.into(),
+            reasoning: "Made up for a demo memory.".into(),
+            kind,
+            confidence,
+            decay,
+            model: MODEL.into(),
+        }
+    }
+
+    /// Write the day. Returns how many moments were written.
+    pub fn seed(store: &SqlCipherBrainStore, now_us: u64, tz: i32) -> Result<usize, String> {
+        let mut written = 0;
+        // Each session's segments, for picking evidence as the worker does.
+        let mut by_session: Vec<Vec<observe::Segment>> = Vec::new();
+        let mut noted_through = 0;
+        let sessions = sessions();
+        for session in &sessions {
+            let start = now_us - session.starts_ago * MIN;
+            let mut at = start;
+            let mut events: Vec<ObservedEvent> = Vec::new();
+            for h in &session.holds {
+                active(store, at, h.minutes, h.app)?;
+                for minute in 0..h.minutes {
+                    let ts = at + minute * MIN;
+                    // The last moment of the newest session is 30 seconds old.
+                    let ts = ts.min(now_us - 30_000_000);
+                    let id = put(store, ts, h.app, h.title, h.url)?;
+                    events.push(ObservedEvent {
+                        id,
+                        ts_us: ts,
+                        app_bundle_id: Some(h.app.into()),
+                        window_title: Some(h.title.into()),
+                        url: h.url.map(str::to_owned),
+                        text: String::new(),
+                        source: if h.url.is_some() { "browser_page" } else { "screen_ocr" }.into(),
+                    });
+                    written += 1;
+                }
+                at += h.minutes * MIN;
+            }
+            let end = events.last().map_or(start, |e| e.ts_us);
+            let segments = observe::segments(&events, &[], end);
+            by_session.push(segments.clone());
+            let Some((title, surface, beneath, model)) = session.note else {
+                continue;
+            };
+            store.backfill_search_queries(0, 10_000).map_err(|e| format!("searches: {e}"))?;
+            let mut searches = store.search_queries_in_range(start, end + 1, 50).map_err(|e| format!("searches: {e}"))?;
+            searches.reverse();
+            let signals = observe::signals(&events, &segments, &searches);
+            let signals_json = serde_json::json!({
+                "signals": &signals,
+                "segments": segments.iter().map(|s| serde_json::json!({
+                    "start_us": s.start_us, "end_us": s.end_us, "app": s.app,
+                    "name": mci_agent::understanding::apps::name(&s.app),
+                    "title": s.title, "host": s.url.as_deref().and_then(mci_agent::understanding::apps::host_of),
+                    "activity": s.activity(), "keys": s.keys, "events": s.event_ids,
+                })).collect::<Vec<_>>(),
+            });
+            store
+                .put_session_note(&SessionNote {
+                    start_us: start,
+                    end_us: end,
+                    title: title.into(),
+                    surface: surface.into(),
+                    beneath: beneath.into(),
+                    signals: signals_json.to_string(),
+                    event_count: u32::try_from(events.len()).unwrap_or(u32::MAX),
+                    generated_us: end + 5 * MIN,
+                    model: model.into(),
+                })
+                .map_err(|e| format!("note: {e}"))?;
+            noted_through = end + 1;
+        }
+        store.backfill_search_queries(0, 10_000).map_err(|e| format!("searches: {e}"))?;
+
+        // Earlier days, for items seen on more than one day.
+        let yesterday = put(store, now_us - DAY - 3 * 60 * MIN, FIGMA, "Trailhead pricing v2", None)?;
+        let two_days = put(store, now_us - 2 * DAY - 4 * 60 * MIN, NOTES, "Pricing page ideas", None)?;
+        let last_week = put(store, now_us - 6 * DAY - 5 * 60 * MIN, "com.example.Ledgerly", "September invoices", None)?;
+        let old_a = put(store, now_us - 52 * DAY, "com.apple.Safari", "Payments settings · Paybridge", Some("https://paybridge.example/settings"))?;
+        let old_b = put(store, now_us - 51 * DAY, "com.apple.Safari", "Migration checklist · Paybridge", Some("https://paybridge.example/migrate"))?;
+        written += 5;
+
+        // Spread over the session's windows, the last of each first, as
+        // the worker links an item to the session it was learned in.
+        let pick = |session: usize| -> Vec<i64> { observe::evidence(&by_session[session], 8) };
+        let items: Vec<(NewProposition, Vec<i64>, u64, bool)> = vec![
+            (claim("Sam is redesigning the pricing page for Trailhead Bikes.", PropositionKind::Project, 0.9, 0.3), [pick(6), pick(2), pick(1), vec![yesterday, two_days]].concat(), 20, true),
+            (claim("Sam is fixing how the Trailhead checkout rounds sales tax.", PropositionKind::Project, 0.8, 0.5), [pick(3), pick(4)].concat(), 160, false),
+            (claim("Sam drafts copy in Notes before laying it out in Figma.", PropositionKind::Habit, 0.7, 0.3), [pick(1), pick(2)].concat(), 230, false),
+            (claim("Sam wants the new pricing page live before the October sale.", PropositionKind::Goal, 0.7, 0.5), pick(5), 115, false),
+            (claim("Sam writes Rust and runs tests from the terminal.", PropositionKind::Skill, 0.8, 0.2), pick(4), 160, false),
+            (claim("Sam prefers short plan names over descriptive ones.", PropositionKind::Preference, 0.6, 0.4), pick(1), 260, false),
+            (claim("Sam checks the shop channel in Slack between tasks.", PropositionKind::Habit, 0.4, 0.5), [pick(0), pick(1)].concat(), 260, false),
+            (claim("Sam reviews pricing changes with the design team on Mondays.", PropositionKind::Relationship, 0.7, 0.4), pick(5), 115, false),
+            (claim("Sam took several tries to get the tax rounding tests passing.", PropositionKind::Struggle, 0.7, 0.6), pick(4), 160, false),
+            (claim("Sam took several tries to match supplier invoices to orders.", PropositionKind::Struggle, 0.6, 0.4), [pick(0), vec![last_week]].concat(), 300, false),
+            (claim("Sam is busy with pricing work today.", PropositionKind::State, 0.8, 0.9), pick(6), 60, false),
+            (claim("Sam is moving the shop to a new payment provider.", PropositionKind::Project, 0.8, 0.3), vec![old_b, old_a], 50 * 24 * 60, true),
+        ];
+        for (item, evidence, minutes_ago, confirmed) in items {
+            let id = store.insert_proposition(&item, &evidence, now_us - minutes_ago * MIN).map_err(|e| format!("item: {e}"))?;
+            if confirmed {
+                store.confirm_proposition(id, now_us - minutes_ago * MIN).map_err(|e| format!("confirm: {e}"))?;
+            }
+        }
+
+        let date = mci_agent::brief_worker::local_date_string(i64::try_from(now_us / 1_000_000).unwrap_or(0), tz);
+        let (day_start, day_end) = mci_agent::understanding::query::day_bounds(&date, tz).map_err(|e| e.to_string())?;
+        store
+            .put_day_report(&DayReport {
+                date_local: date,
+                start_us: day_start,
+                end_us: day_end,
+                generated_us: now_us - 55 * MIN,
+                model: MODEL.into(),
+                body: serde_json::json!({ "narrative": {
+                    "headline": "Pricing page copy, a tax rounding fix and a design review.",
+                    "narrative": "You started with supplier invoices and the shop channel, then wrote the pricing page copy in Notes. Late morning went to the checkout tax rounding fix and its tests. After that you walked the team through the pricing page at the weekly design review.",
+                    "insights": [],
+                    "suggestion": "",
+                }})
+                .to_string(),
+            })
+            .map_err(|e| format!("day report: {e}"))?;
+        ModelStatus { state: "available".into(), reason: None, checked_us: Some(now_us - 20 * MIN) }
+            .write(store)
+            .map_err(|e| format!("model status: {e}"))?;
+        mci_agent::understanding::mark_noted_through(store, noted_through).map_err(|e| format!("state: {e}"))?;
+        Ok(written)
+    }
+}
+
 fn now_us() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -463,6 +784,24 @@ fn main() -> ExitCode {
             existing.len()
         );
         return ExitCode::from(15);
+    }
+
+    if args.demo_day {
+        let tz = mci_agent::brief_worker::current_tz_offset_secs();
+        return match demo_day::seed(&store, now_us(), tz) {
+            Ok(written) => {
+                eprintln!(
+                    "mci-seed-brain: wrote a made-up workday ({written} moments, session notes, \
+                     searches, a summary and learned items) to {}.",
+                    args.db_path.display()
+                );
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("mci-seed-brain: demo day failed: {e}");
+                ExitCode::from(16)
+            }
+        };
     }
 
     let mut events = canned_events(now_us());
