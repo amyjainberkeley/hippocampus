@@ -95,6 +95,11 @@ struct MCIRecallApp: App {
     // same file) reads MCIRecallApp.reader to wire the global-recall popup.
     fileprivate static let reader: BrainReader = Self.makeReader()
 
+    /// The day, the person and answers, read through the bundled agent. Its
+    /// children stop with the window (`ChildProcesses`, RULINGS G7).
+    @MainActor
+    fileprivate static let understanding: UnderstandingReader = AgentUnderstandingReader()
+
     var body: some Scene {
         WindowGroup("Hippocampus") {
             #if DEBUG
@@ -118,6 +123,7 @@ struct MCIRecallApp: App {
             )
             RootView(
                 reader: MCIRecallApp.reader,
+                understanding: MCIRecallApp.understanding,
                 initialTab: launchRequest.initialTab,
                 initialFocusEventId: launchRequest.focusEventId
             )
@@ -196,6 +202,7 @@ struct MCIRecallApp: App {
 
 struct RootView: View {
     let reader: BrainReader
+    let understanding: UnderstandingReader
     @State private var selection: MemoryWorkspaceSelection
     @State private var searchFocusTrigger = false
     @State private var focusRequest: RecallFocusRequest?
@@ -210,10 +217,12 @@ struct RootView: View {
 
     init(
         reader: BrainReader,
+        understanding: UnderstandingReader,
         initialTab: RecallTab = RecallTab.defaultTab,
         initialFocusEventId: UInt64? = nil
     ) {
         self.reader = reader
+        self.understanding = understanding
         self._selection = State(initialValue: MemoryWorkspaceSelection(initialTab: initialFocusEventId == nil ? initialTab : .search))
         self._focusRequest = State(
             initialValue: initialFocusEventId.map {
@@ -363,6 +372,7 @@ struct RootView: View {
     var body: some View {
         MemoryWorkspaceView(
             reader: reader,
+            understanding: understanding,
             selection: $selection,
             searchFocusTrigger: searchFocusTrigger,
             focusRequest: focusRequest,

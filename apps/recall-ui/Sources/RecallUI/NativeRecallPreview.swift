@@ -3,19 +3,28 @@ import RecallUIKit
 import SwiftUI
 
 /// Uses the shipping views with synthetic readers; never starts the production app services.
+/// Every reader here is a fixture: the moments are `NativePreviewReader`'s and what
+/// the agent would say about them is `PreviewUnderstandingReader`'s, both on the
+/// samples' Monday in their time zone, so the two describe one day.
 struct NativeRecallPreview: View {
     private let reader: NativePreviewReader
+    private let understanding: PreviewUnderstandingReader
     @State private var selection: MemoryWorkspaceSelection
     @State private var searchFocus = false
     @StateObject private var dailyModel: DailyMemoryViewModel
     @StateObject private var searchModel: SearchViewModel
 
     init(configuration: NativePreviewConfiguration) {
-        let reader = NativePreviewReader(scenario: configuration.scenario)
+        let reader = NativePreviewReader(date: PreviewUnderstandingReader.sampleNow,
+                                         now: PreviewUnderstandingReader.sampleNow,
+                                         calendar: PreviewUnderstandingReader.sampleCalendar,
+                                         scenario: configuration.scenario)
         self.reader = reader
+        understanding = PreviewUnderstandingReader(
+            scenario: PreviewUnderstandingReader.Scenario(rawValue: configuration.scenario.rawValue) ?? .populated)
         _selection = State(initialValue: MemoryWorkspaceSelection(initialTab: configuration.tab))
         _dailyModel = StateObject(wrappedValue: DailyMemoryViewModel(reader: reader, selectedDate: reader.date,
-            healthLoader: { nil }, now: { reader.now }))
+            calendar: reader.calendar, healthLoader: { nil }, now: { reader.now }))
         let search = SearchViewModel(reader: reader,
             persistence: QueryPersistence(environment: ["MCI_EPHEMERAL_UI_STATE": "1"], store: PreviewQueryStore()),
             userDictionaryLoader: { .empty })
@@ -24,7 +33,8 @@ struct NativeRecallPreview: View {
     }
 
     var body: some View {
-        MemoryWorkspaceView(reader: reader, selection: $selection, searchFocusTrigger: searchFocus,
+        MemoryWorkspaceView(reader: reader, understanding: understanding, selection: $selection,
+            searchFocusTrigger: searchFocus,
             dailyModel: dailyModel, searchModel: searchModel, isSyntheticPreview: true,
             contextExporter: { query in
                 let hits = try await reader.search(SearchOptions(text: query, mode: .text))

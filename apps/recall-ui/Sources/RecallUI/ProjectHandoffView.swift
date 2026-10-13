@@ -5,6 +5,8 @@ import SwiftUI
 struct ProjectHandoffView: View {
     @StateObject private var model = ProjectHandoffModel()
     @Environment(\.dismiss) private var dismiss
+    /// The synthetic preview never runs Hippocampus on a real folder.
+    @Environment(\.isSyntheticPreview) private var isSyntheticPreview
     @State private var copied = false
     @State private var refreshRevision = 0
 
@@ -36,6 +38,7 @@ struct ProjectHandoffView: View {
                 Spacer()
                 Button(model.project == nil ? "Choose folder…" : "Change…") { chooseFolder() }
                     .keyboardShortcut("o", modifiers: .command)
+                    .disabled(isSyntheticPreview)
             }.padding(.horizontal, 24).padding(.bottom, 18)
             Text("For Git projects, context uses the whole repository, including related worktrees. It can include screen observations from the same work session. Review the sources before copying.")
                 .font(.caption).foregroundStyle(.secondary)

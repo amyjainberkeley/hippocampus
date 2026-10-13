@@ -23,27 +23,49 @@ public struct NativePreviewConfiguration: Sendable {
 public struct NativePreviewReader: BrainReader {
     public let date: Date
     public let now: Date
+    /// The calendar and time zone the preview's day is in.
+    public let calendar: Calendar
     private let scenario: NativePreviewConfiguration.Scenario
     private let start: UInt64
     private let hits: [Hit]
 
-    public init(date: Date = Date(), scenario: NativePreviewConfiguration.Scenario = .populated) {
+    /// The moment saved just before `now`: the newest one, which the Right
+    /// now card names. Its id is the samples' (`now.open_event_id`).
+    public static let recentEventId: UInt64 = 90_269
+
+    /// `now` defaults to noon of the day. The preview passes the understanding
+    /// samples' clock, so these moments and the samples describe one day.
+    public init(date: Date = Date(), now: Date? = nil, calendar: Calendar = .current,
+                scenario: NativePreviewConfiguration.Scenario = .populated) {
         self.date = date
+        self.calendar = calendar
         self.scenario = scenario
-        let day = MemoryDay(date: date)
+        let day = MemoryDay(date: date, calendar: calendar)
         start = day.startUs
-        now = Date(timeIntervalSince1970: Double(day.startUs) / 1_000_000 + 12 * 3600)
+        let now = now ?? Date(timeIntervalSince1970: Double(day.startUs) / 1_000_000 + 12 * 3600)
+        self.now = now
         let samples: [(UInt64, String, String, String, String)] = [
             (9 * 3600, "com.apple.Safari", "Launch checklist", "Question: which launch checks still need a source?", "browser_page_with_ocr"),
             (9 * 3600 + 120, "com.apple.dt.Xcode", "ReviewTests.swift", "Expected: deleted evidence cannot be exported.", "screen_ocr"),
             (9 * 3600 + 240, "com.apple.Safari", "Launch checklist", "Launch notes: compare the saved draft with the cited test output.", "browser_page_with_ocr"),
             (11 * 3600, "com.apple.Notes", "Imported meeting notes", "Open question in imported notes: who will review the launch wording?", "transcript_import"),
         ]
-        hits = samples.enumerated().map { index, row in
+        var rows = samples.enumerated().map { index, row in
             Hit(eventId: UInt64(index + 1), tsUs: day.startUs + row.0 * 1_000_000,
                 appBundleId: row.1, windowTitle: row.2, url: nil, ocrTextSnippet: row.3,
                 source: "timeline", score: nil, sourceKind: row.4)
         }
+        // What is on screen now, saved 25 seconds ago, so the Right now card
+        // has a moment to name, copy and open (critique-recall-engineering
+        // finding 13).
+        let nowUs = UInt64(max(0, now.timeIntervalSince1970 * 1_000_000))
+        if nowUs >= 25_000_000, day.contains(nowUs - 25_000_000) {
+            rows.append(Hit(eventId: Self.recentEventId, tsUs: nowUs - 25_000_000,
+                            appBundleId: "com.apple.Notes", windowTitle: "Pricing page draft", url: nil,
+                            ocrTextSnippet: "Pricing page draft\nThree plans: Ride, Tour and Club.",
+                            source: "timeline", score: nil, sourceKind: "screen_ocr"))
+        }
+        hits = rows.sorted { $0.tsUs == $1.tsUs ? $0.id < $1.id : $0.tsUs < $1.tsUs }
     }
 
     private func records() throws -> [Hit] {
@@ -54,14 +76,22 @@ public struct NativePreviewReader: BrainReader {
     public func search(_ options: SearchOptions) async throws -> [Hit] {
         let rows = try records()
         let query = options.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        func inWindow(_ hit: Hit) -> Bool {
+            (options.appFilter == nil || options.appFilter == hit.appBundleId)
+                && (options.appFilters.isEmpty || options.appFilters.contains(hit.appBundleId ?? ""))
+                && (!options.hasUrl || hit.url?.isEmpty == false)
+                && (options.timeFromUs == nil || hit.tsUs >= options.timeFromUs!)
+                && (options.timeToUs == nil || hit.tsUs <= options.timeToUs!)
+        }
+        // History browses a day newest first, as the FFI's browse does.
+        if options.browse {
+            guard query.isEmpty else { throw BrainReaderError.queryFailed("browse requires empty text") }
+            return Array(rows.filter(inWindow).reversed().prefix(max(0, options.limit)))
+        }
         guard !query.isEmpty else { return [] }
         return Array(rows.filter {
             ($0.ocrTextSnippet.localizedCaseInsensitiveContains(query) || ($0.windowTitle?.localizedCaseInsensitiveContains(query) ?? false))
-                && (options.appFilter == nil || options.appFilter == $0.appBundleId)
-                && (options.appFilters.isEmpty || options.appFilters.contains($0.appBundleId ?? ""))
-                && (!options.hasUrl || $0.url?.isEmpty == false)
-                && (options.timeFromUs == nil || $0.tsUs >= options.timeFromUs!)
-                && (options.timeToUs == nil || $0.tsUs <= options.timeToUs!)
+                && inWindow($0)
         }.prefix(options.limit))
     }
 

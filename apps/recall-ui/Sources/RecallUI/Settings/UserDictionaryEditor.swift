@@ -36,6 +36,8 @@ struct UserDictionaryEditor: View {
     @State private var canonicalBuffers: [String]
     @State private var errorMessage: String? = nil
     @State private var savedIndicator: Bool = false
+    /// The synthetic preview never writes the person's names file.
+    @Environment(\.isSyntheticPreview) private var isSyntheticPreview
 
     init(initial: UserDictionary = (try? loadUserDictionary()) ?? .empty) {
         let d = initial
@@ -81,6 +83,7 @@ struct UserDictionaryEditor: View {
                         .buttonStyle(.borderedProminent)
                         .tint(Color.brandMint)
                         .keyboardShortcut(.return, modifiers: .command)
+                        .disabled(isSyntheticPreview)
                 }
             }
             .padding(20)

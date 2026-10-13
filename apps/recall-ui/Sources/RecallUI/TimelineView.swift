@@ -27,7 +27,9 @@ struct TimelineView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) {
             _ in
-            Task { await viewModel.reload() }
+            // Reads again only when something newer was saved; a delete
+            // reads again by itself (critique-recall-engineering finding 7).
+            Task { await viewModel.refresh() }
         }
     }
 

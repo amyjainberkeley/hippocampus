@@ -465,6 +465,8 @@ struct DestructiveActions: View {
     /// a double-tap can't fire the confirmation sheet twice against
     /// an in-progress mutation.
     var isBusy: Bool = false
+    /// The synthetic preview never exports or deletes anything.
+    @Environment(\.isSyntheticPreview) private var isSyntheticPreview
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -481,15 +483,15 @@ struct DestructiveActions: View {
                 Button("Export my data as JSON") { onExport() }
                     .buttonStyle(.bordered)
                     .tint(Color.brandMint)
-                    .disabled(isBusy)
+                    .disabled(isBusy || isSyntheticPreview)
                 Button("Delete last 24 hours") { onDeleteLast24h() }
                     .buttonStyle(.bordered)
                     .tint(Color.brandWarning)
-                    .disabled(isBusy)
+                    .disabled(isBusy || isSyntheticPreview)
                 Button("Delete everything") { onDeleteEverything() }
                     .buttonStyle(.borderedProminent)
                     .tint(Color.brandError)
-                    .disabled(isBusy)
+                    .disabled(isBusy || isSyntheticPreview)
             }
         }
         .padding(16)

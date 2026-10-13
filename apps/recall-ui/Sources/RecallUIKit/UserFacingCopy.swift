@@ -159,6 +159,52 @@ public enum UserFacingCopy {
     public static func lineCount(_ count: Int) -> String {
         count == 1 ? "1 line" : "\(count) lines"
     }
+
+    // The Right now card and a session's actions (RULINGS W5, W8).
+
+    /// While working: "Now · since 2:12 PM", from the start of the run of
+    /// sessions that touch.
+    public static func rightNowSince(_ time: String) -> String {
+        "Now \u{00B7} since \(time)"
+    }
+
+    /// When not working: "Last saved 2:36 PM".
+    public static func lastSavedAt(_ time: String) -> String {
+        "Last saved \(time)"
+    }
+
+    /// Copies that session's own moments (RULINGS I13).
+    public static let copyForYourAI = "Copy for your AI"
+    /// Opens the page the moment was on.
+    public static let openPage = "Open Page"
+
+    /// Brings the moment's app to the front: "Open Notes".
+    public static func openApp(_ name: String) -> String {
+        "Open \(name)"
+    }
+
+    /// Over the lines a connected AI is given when a session starts.
+    public static let yourAIAlreadyKnows = "Your AI already knows"
+    /// No AI tool starts its sessions with these lines yet.
+    public static let connectAction = "Connect"
+    /// History on a session's own time (RULINGS W8).
+    public static let showInHistory = "Show in History"
+    /// History's next page down.
+    public static let showEarlier = "Show Earlier"
+
+    /// "1 moment", "4 moments": several moments of one window in a row.
+    public static func momentCount(_ count: Int) -> String {
+        count == 1 ? "1 moment" : "\(count) moments"
+    }
+
+    // The groups on You (contract model-page.md section 4).
+
+    public static let groupWorkingOn = "Working on"
+    public static let groupHowYouWork = "How you work"
+    public static let groupSkills = "Skills"
+    public static let groupPeople = "People"
+    public static let groupStruggles = "Where you got stuck"
+
 }
 
 // MARK: - Copy-style validators (referenced by CopyStyleTests)

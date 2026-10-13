@@ -27,6 +27,10 @@ enum MemoryWorkspaceSelection: String, CaseIterable, Identifiable {
             self = .privacy
         case .settings:
             self = .settings
+        case .you:
+            // You is built later in this round; until then its name opens
+            // what is remembered, the part of You this window already has.
+            self = .privacy
         }
     }
 
@@ -54,6 +58,10 @@ enum MemoryWorkspaceSelection: String, CaseIterable, Identifiable {
 
 struct MemoryWorkspaceView: View {
     let reader: BrainReader
+    /// What the places read about the day and the person. Required, so the
+    /// synthetic preview can never fall back to the agent and the person's
+    /// own memory (critique-recall-engineering finding 12).
+    let understanding: UnderstandingReader
     @Binding var selection: MemoryWorkspaceSelection
     var searchFocusTrigger: Bool
     var focusRequest: RecallFocusRequest? = nil
@@ -94,6 +102,9 @@ struct MemoryWorkspaceView: View {
                 MemoryRefreshSignal.post()
             }
         }
+        // Outermost, so sheets and every place see it: in the synthetic
+        // preview nothing opens the person's own data or deletes anything.
+        .environment(\.isSyntheticPreview, isSyntheticPreview)
     }
 
     private var sidebar: some View {

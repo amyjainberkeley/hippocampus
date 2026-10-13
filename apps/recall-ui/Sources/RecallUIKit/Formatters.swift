@@ -246,6 +246,20 @@ public enum Formatters {
         return Date(timeIntervalSince1970: Double(us) / 1_000_000).formatted(style)
     }
 
+    /// An hour in the person's own format ("3 PM", "15"): History's heading
+    /// over moments in no session, and the day strip's ticks.
+    public static func clockHour(
+        us: Int64,
+        locale: Locale = .autoupdatingCurrent,
+        timeZone: TimeZone = .autoupdatingCurrent
+    ) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = timeZone
+        let style = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: timeZone).hour()
+        return Date(timeIntervalSince1970: Double(us) / 1_000_000).formatted(style)
+    }
+
     /// A length of time through the system formatter, abbreviated, in hours
     /// and minutes, rounded to the nearest minute and never under one
     /// ("5h 30m", "12m") (RULINGS V).

@@ -14,6 +14,12 @@ public struct PreviewUnderstandingReader: UnderstandingReader {
     public static let sampleNow = Date(timeIntervalSince1970: 1_791_841_025)
     public static let sampleTimeZone = TimeZone(secondsFromGMT: -25_200)!
     public static let sampleDay = UnderstandingDay(dateLocal: "2026-10-12", tzOffsetSeconds: -25_200)
+    /// The samples' calendar: Gregorian, in their time zone.
+    public static var sampleCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = sampleTimeZone
+        return calendar
+    }
 
     public let scenario: Scenario
 
