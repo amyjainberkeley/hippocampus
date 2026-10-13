@@ -49,7 +49,8 @@ public enum OnboardingCopy {
     public static let screenRecordingWaitingHint = "Choose Open System Settings, then turn on Hippocampus. If macOS offers Quit & Reopen, choose Later."
     public static let accessibilityWaitingHint = "Choose Open System Settings, then turn on Hippocampus."
     public static let notOnYet = "Not on yet."
-    public static let needsHelpHint = "Turn on Hippocampus in the list. Not there? Click + and choose Hippocampus in Applications."
+    /// After "Not on yet.", on one line of the row: "it" is Hippocampus.
+    public static let needsHelpHint = "Turn on Hippocampus in the list. Not there? Click + and choose it in Applications."
     public static let openSettings = "Open System Settings"
     public static let askAgain = "Ask Again"
     public static let permissionOn = "On"
@@ -86,6 +87,11 @@ public enum OnboardingCopy {
     // Promise
 
     public static let promiseTitle = "Before it starts"
+    /// In review remembering has started, so "Before it starts" would not
+    /// be true: the screen reads as the never-read panel does.
+    public static func promiseTitle(isReview: Bool) -> String {
+        isReview ? neverReadTitle : promiseTitle
+    }
     public static let promiseBody = "When you click Start Remembering, Hippocampus begins reading your screen."
     /// The body above the button: on a first run it says what the click
     /// does. In review the button is "Continue" and remembering may already
@@ -132,16 +138,21 @@ public enum OnboardingCopy {
 
     /// The first Promise line, after "Stays on this Mac.".
     ///
-    /// "Nothing is uploaded by Hippocampus." holds in code (RULINGS O10,
-    /// product critique finding 13): the client's only network calls are
-    /// the optional model download and update check (fetches, with system
-    /// profiling off), loopback-only MCP servers and crash reports, and a
-    /// feedback link opened in the browser. The `server` crate is not a
-    /// dependency of anything shipped. The last sentence is the provider
-    /// boundary engineering critique 8 keeps at consent, in RULINGS V's
-    /// words ("your AI", "the company that runs it").
+    /// No upload holds in code (RULINGS O10, product critique finding 13):
+    /// the client's only network calls are the optional model download and
+    /// update check (fetches, with system profiling off), loopback-only MCP
+    /// servers and crash reports, and a feedback link opened in the
+    /// browser. The `server` crate is not a dependency of anything shipped.
+    ///
+    /// Sharing waits on the person: an AI tool is connected only from the
+    /// menu's Connect AI Tools… and the AI Tools pane, and setup connects
+    /// nothing. Hippocampus is the subject, because "Copy for your AI"
+    /// lets the person paste text into an AI that is not connected. The
+    /// last sentence is the provider boundary engineering critique 8 keeps
+    /// at consent, in RULINGS V's words ("your AI", "the company that runs
+    /// it").
     public static func promiseStays(kept: String) -> String {
-        "Text and screenshots, encrypted, \(kept). Nothing is uploaded by Hippocampus. What your AI reads goes to the company that runs it."
+        "Text and screenshots, encrypted, \(kept). Nothing is uploaded by Hippocampus. It shares them with your AI only if you connect it. What your AI reads goes to the company that runs it."
     }
 
     /// How long text and screenshots are kept, for `promiseStays`. A
@@ -252,4 +263,50 @@ public enum OnboardingCopy {
         if openedForThem { return "That’s Ask. \(phrase) to open it anywhere." }
         return "That’s it. \(name.prefix(1).uppercased() + name.dropFirst()) works anywhere."
     }
+
+    // MARK: - The browser extension panel
+    //
+    // Opened by Try it's "Add Extension" on a first run, and from
+    // Preferences. Words from spec-copy S4.9, with two cuts for truth: no
+    // "whole" in the title (the extension sends a page's text up to a
+    // limit), and no "not only the part on screen" (Safari, Firefox and
+    // Arc are not read at all without the extension).
+
+    public static let extensionTitle = "Remember web pages"
+    public static let extensionBody = "The extension lets Hippocampus read the text of the pages you open."
+    public static let noBrowserFound = "No supported browser found."
+    public static let safariExtensionHint = "In Safari’s extension settings, turn on Hippocampus."
+    public static let openSafariSettings = "Open Safari Settings"
+    public static let install = "Install"
+    /// Before the first click on Open Safari Settings, which raises
+    /// macOS's Automation prompt.
+    public static let automationAskTitle = "macOS will ask first"
+    public static let automationAskBody = "macOS asks to let Hippocampus control Safari. That’s how it reads the tab’s address."
+    public static let automationOffTitle = "Automation is off"
+    public static let automationOffBody = "macOS won’t ask twice. Click Ask Again, or turn it on in System Settings."
+    public static let openAutomationSettings = "Open Automation Settings"
+    public static let extensionStepDeveloperMode = "Turn on Developer mode, top right."
+    public static let extensionStepLoadUnpacked = "Click Load unpacked."
+    public static let extensionStepChooseFolder = "Choose the folder Finder is showing."
+    public static let copyPath = "Copy Path"
+    public static let showInFinder = "Show in Finder"
+    public static let copyAddress = "Copy Address"
+    /// The extension's state is being looked up.
+    public static let checking = "Checking…"
+    /// Install found no extension folder to show: the app is incomplete.
+    public static let extensionFolderMissing = "Part of Hippocampus is missing. Reinstall it, then try again."
+
+    /// Over the three steps after Install, by whether the browser opened.
+    public static func extensionStepsIntro(browser: String, didOpenBrowser: Bool) -> String {
+        didOpenBrowser
+            ? "\(browser) and a Finder window opened. Three steps:"
+            : "Open \(browser) yourself, go to chrome://extensions, then:"
+    }
+
+    // MARK: - The app access panel
+
+    /// Under its title. Every ordinary app is read, so what is skipped in
+    /// all of them is what the person needs to know (spec-copy S3 #9, in
+    /// the Promise's checked words).
+    public static let appAccessSkipped = "Password fields and private browser windows are skipped in every app."
 }

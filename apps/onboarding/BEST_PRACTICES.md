@@ -19,10 +19,13 @@ consent click, and how permissions are asked.
 1. **Resume-across-quit is a hard contract.** If the user quits
    the app mid-onboarding, the next launch MUST resume at the same
    screen. `OnboardingFlowViewModel` saves the screen's route name
-   (`.onboarding-state`) on every move, and clamps it at start: Try it
-   needs consent, Promise needs both permissions. A panel keeps its
-   state in memory and never moves the resume point. Never store the
-   screen in an ephemeral `@State` that dies with the view.
+   (`.onboarding-state`) on every move before consent, and clamps it
+   at start: Try it needs consent, Promise needs both permissions.
+   Once consent exists the resume point is cleared and never read, so
+   setup shown again starts at Welcome rather than on Try it, which
+   has no Back. A panel keeps its state in memory and never moves the
+   resume point. Never store the screen in an ephemeral `@State` that
+   dies with the view.
 
 2. **TCC: never kill the process to prompt again.** If the user
    denies Screen Recording, DO NOT `exit(0)` to force a re-prompt.
@@ -36,7 +39,8 @@ consent click, and how permissions are asked.
    a row waits until the person comes back to the window, and one
    refresh decides. Consent is the click on Start Remembering:
    `startRemembering(keyReady:)` is the only code that writes
-   `.onboarding-complete`, with the open-at-login choice.
+   `.onboarding-complete`, with the open-at-login choice. A
+   permission it finds off sends the person back to Permissions.
 
 4. **Setup registers no key.** Onboarding never installs a hotkey or
    key monitor; the app does, after consent. Setup only reads the

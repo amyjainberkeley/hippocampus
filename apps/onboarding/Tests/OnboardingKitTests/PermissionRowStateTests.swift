@@ -36,6 +36,14 @@ final class PermissionRowStateTests: XCTestCase {
         XCTAssertFalse(on.canRequest(.screenRecording))
     }
 
+    func testOnlyARowThatSaysWhatToDoTakesTheFootersRoom() {
+        // Two such rows and the footer do not fit the 560-point window.
+        XCTAssertTrue(PermissionRowState.waiting.showsGuidance)
+        XCTAssertTrue(PermissionRowState.needsHelp.showsGuidance)
+        XCTAssertFalse(PermissionRowState.idle.showsGuidance)
+        XCTAssertFalse(PermissionRowState.granted.showsGuidance)
+    }
+
     func testAllowWaitsAndNoTimerEverMovesTheRow() async {
         let sr = StubTCCPermission(kind: .screenRecording)
         let clock = TestClock()

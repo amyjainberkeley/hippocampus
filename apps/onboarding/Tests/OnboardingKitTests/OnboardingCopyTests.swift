@@ -10,8 +10,9 @@ final class OnboardingCopyTests: XCTestCase {
         XCTAssertEqual(OnboardingCopy.promiseTitle, "Before it starts")
         XCTAssertEqual(OnboardingCopy.promiseBody,
                        "When you click Start Remembering, Hippocampus begins reading your screen.")
+        // Setup connects no AI tool, so sharing waits on the person.
         XCTAssertEqual(OnboardingCopy.promiseStays(kept: "kept 90 days"),
-                       "Text and screenshots, encrypted, kept 90 days. Nothing is uploaded by Hippocampus. What your AI reads goes to the company that runs it.")
+                       "Text and screenshots, encrypted, kept 90 days. Nothing is uploaded by Hippocampus. It shares them with your AI only if you connect it. What your AI reads goes to the company that runs it.")
         // Password managers are left out: the helper skips a fixed list of
         // them, not every one.
         XCTAssertEqual(OnboardingCopy.promiseNeverRead, "Password fields and private browser windows.")
@@ -27,8 +28,16 @@ final class OnboardingCopyTests: XCTestCase {
     func testThePromiseNeverSaysNeverUploaded() {
         let promise = OnboardingCopy.promiseStays(kept: "kept 90 days").lowercased()
         XCTAssertFalse(promise.contains("never uploaded"))
+        XCTAssertTrue(promise.contains("only if you connect it"), "sharing waits on the person")
         XCTAssertTrue(promise.contains("goes to the company that runs"), "the provider boundary stays at consent")
         XCTAssertFalse(promise.contains("ai tools"), "\"your AI\" in sentences; AI Tools is only the pane's name")
+    }
+
+    func testInReviewThePromiseIsTitledLikeTheNeverReadPanel() {
+        // Remembering has started, so "Before it starts" is not true then.
+        XCTAssertEqual(OnboardingCopy.promiseTitle(isReview: false), "Before it starts")
+        XCTAssertEqual(OnboardingCopy.promiseTitle(isReview: true), "What is never read")
+        XCTAssertEqual(OnboardingCopy.promiseTitle(isReview: true), OnboardingCopy.neverReadTitle)
     }
 
     func testThePromiseNeverPromisesEveryPasswordManager() {
@@ -100,7 +109,7 @@ final class OnboardingCopyTests: XCTestCase {
         XCTAssertEqual(OnboardingCopy.notOnYet, "Not on yet.")
         XCTAssertEqual(OnboardingCopy.permissionOn, "On")
         XCTAssertEqual(OnboardingCopy.needsHelpHint,
-                       "Turn on Hippocampus in the list. Not there? Click + and choose Hippocampus in Applications.")
+                       "Turn on Hippocampus in the list. Not there? Click + and choose it in Applications.")
         // macOS's app is System Settings; "Settings" alone is Preferences' old name.
         XCTAssertEqual(OnboardingCopy.openSettings, "Open System Settings")
     }
@@ -145,6 +154,40 @@ final class OnboardingCopyTests: XCTestCase {
         XCTAssertEqual(OnboardingCopy.answersUnsupported, "Search works. Answers need macOS 26 with Apple Intelligence.")
     }
 
+    // MARK: - The panels a first run can reach
+
+    func testTheBrowserExtensionPanelSaysOnlyWhatHoldsForEveryBrowser() {
+        // Try it opens it for Safari, Firefox and Arc, which are not read
+        // at all without the extension: nothing says the screen part is.
+        XCTAssertEqual(OnboardingCopy.extensionTitle, "Remember web pages")
+        XCTAssertEqual(OnboardingCopy.extensionBody, "The extension lets Hippocampus read the text of the pages you open.")
+        XCTAssertFalse(OnboardingCopy.extensionBody.contains("on screen"))
+        XCTAssertEqual(OnboardingCopy.safariExtensionHint, "In Safari’s extension settings, turn on Hippocampus.")
+        XCTAssertEqual(OnboardingCopy.automationAskBody,
+                       "macOS asks to let Hippocampus control Safari. That’s how it reads the tab’s address.")
+        XCTAssertEqual(OnboardingCopy.automationOffBody,
+                       "macOS won’t ask twice. Click Ask Again, or turn it on in System Settings.")
+        XCTAssertTrue(OnboardingCopy.automationOffBody.contains(OnboardingCopy.askAgain), "names the button beside it")
+    }
+
+    func testTheExtensionStepsSayWhatOpened() {
+        XCTAssertEqual(OnboardingCopy.extensionStepsIntro(browser: "Chrome", didOpenBrowser: true),
+                       "Chrome and a Finder window opened. Three steps:")
+        XCTAssertEqual(OnboardingCopy.extensionStepsIntro(browser: "Chrome", didOpenBrowser: false),
+                       "Open Chrome yourself, go to chrome://extensions, then:")
+        XCTAssertEqual([OnboardingCopy.extensionStepDeveloperMode, OnboardingCopy.extensionStepLoadUnpacked,
+                        OnboardingCopy.extensionStepChooseFolder],
+                       ["Turn on Developer mode, top right.", "Click Load unpacked.", "Choose the folder Finder is showing."])
+    }
+
+    func testTheAppAccessPanelSaysWhatIsSkippedInEveryApp() {
+        // Every ordinary app is read; the Promise's checked words say what
+        // is not.
+        XCTAssertEqual(OnboardingCopy.appAccessSkipped,
+                       "Password fields and private browser windows are skipped in every app.")
+        XCTAssertTrue(OnboardingCopy.appAccessSkipped.hasPrefix(String(OnboardingCopy.promiseNeverRead.dropLast())))
+    }
+
     // MARK: - Style (spec-copy S2, RULINGS V)
 
     /// Every string the four screens add, with the key-dependent ones for
@@ -177,6 +220,19 @@ final class OnboardingCopyTests: XCTestCase {
             .needsExtension(browser: "Safari"), .browserWillAsk(browser: "Google Chrome"),
         ]
         strings += notes.map(OnboardingCopy.waitingText)
+        // The panels a first run can reach, and the Promise in review.
+        strings += [
+            OnboardingCopy.promiseTitle(isReview: true), OnboardingCopy.appAccessSkipped,
+            OnboardingCopy.extensionTitle, OnboardingCopy.extensionBody, OnboardingCopy.noBrowserFound,
+            OnboardingCopy.safariExtensionHint, OnboardingCopy.openSafariSettings, OnboardingCopy.install,
+            OnboardingCopy.automationAskTitle, OnboardingCopy.automationAskBody, OnboardingCopy.automationOffTitle,
+            OnboardingCopy.automationOffBody, OnboardingCopy.openAutomationSettings,
+            OnboardingCopy.extensionStepDeveloperMode, OnboardingCopy.extensionStepLoadUnpacked,
+            OnboardingCopy.extensionStepChooseFolder, OnboardingCopy.copyPath, OnboardingCopy.showInFinder,
+            OnboardingCopy.copyAddress, OnboardingCopy.checking, OnboardingCopy.extensionFolderMissing,
+            OnboardingCopy.extensionStepsIntro(browser: "Google Chrome", didOpenBrowser: true),
+            OnboardingCopy.extensionStepsIntro(browser: "Google Chrome", didOpenBrowser: false),
+        ]
         for key in AskKeyHint.allCases {
             strings += [OnboardingCopy.welcomeBody(key), OnboardingCopy.welcomeBodySpoken(key)]
             strings += [OnboardingCopy.accessibilityKeyNote(key)].compactMap { $0 }
@@ -238,11 +294,16 @@ final class OnboardingCopyTests: XCTestCase {
     }
 
     func testButtonsAreTitleCase() {
+        // As macOS writes them: short words after the first stay lowercase
+        // ("Show in Finder").
+        let minor: Set<Substring> = ["a", "an", "and", "as", "at", "but", "by", "for", "in", "of", "on", "or", "the", "to"]
         for button in [OnboardingCopy.getStarted, OnboardingCopy.back, OnboardingCopy.allow, OnboardingCopy.openSettings,
                        OnboardingCopy.askAgain,
                        OnboardingCopy.continueLabel, OnboardingCopy.startRemembering, OnboardingCopy.tryAgain,
-                       OnboardingCopy.addExtension, OnboardingCopy.done] {
-            for word in button.split(separator: " ") {
+                       OnboardingCopy.addExtension, OnboardingCopy.done,
+                       OnboardingCopy.openSafariSettings, OnboardingCopy.install, OnboardingCopy.openAutomationSettings,
+                       OnboardingCopy.copyPath, OnboardingCopy.showInFinder, OnboardingCopy.copyAddress] {
+            for (index, word) in button.split(separator: " ").enumerated() where index == 0 || !minor.contains(word) {
                 XCTAssertTrue(word.first?.isUppercase == true, "\(button)")
             }
         }

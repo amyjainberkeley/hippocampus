@@ -31,6 +31,16 @@ final class PreflightOverviewTests: XCTestCase {
         XCTAssertEqual(vm.probeAutomation(), .granted)
     }
 
+    /// The panel reads Automation through the flow; a look that finds a
+    /// "no" must redraw it, or "Automation is off" never shows.
+    func testProbeAutomationRedrawsThePanel() {
+        let vm = makeVM(sr: .granted, ax: .granted, am: .notRequested)
+        let before = vm.permissionRefreshCount
+        (vm.automationPermission as! StubTCCPermission).simulateDeny()
+        vm.probeAutomation()
+        XCTAssertEqual(vm.permissionRefreshCount, before + 1)
+    }
+
     /// Automation status survives a full `refreshPermissions()` sweep.
     func testRefreshPermissionsDoesNotClobberAutomation() {
         let vm = makeVM(sr: .granted, ax: .granted, am: .granted)

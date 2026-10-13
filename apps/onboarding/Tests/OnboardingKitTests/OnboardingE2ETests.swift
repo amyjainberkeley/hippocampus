@@ -71,9 +71,10 @@ final class OnboardingE2ETests: XCTestCase {
         XCTAssertEqual(consent.writeCount, 1)
         XCTAssertEqual(consent.openAtLogin, true)
         XCTAssertEqual(flow.screen, .tryIt)
-        XCTAssertEqual(state.loadRoute(), "try-it")
+        XCTAssertNil(state.loadRoute(), "after consent there is nothing to resume")
 
-        // Try it: "Turning on…", then what was read, then Ask.
+        // Try it: "Turning on…", then what was read, then Ask. The app was
+        // not remembering when it opened setup; consent started it.
         let consentAt = try XCTUnwrap(flow.consentGivenAtUs)
         let reads = OneRowReads(row: ReadRow(
             tsUs: consentAt + 5_000_000, appBundleId: "com.apple.Notes", windowTitle: "Launch plan",
@@ -82,7 +83,9 @@ final class OnboardingE2ETests: XCTestCase {
         let tryIt = TryItViewModel(
             probe: reads, startedAt: clock.now,
             cursorTsUs: TryItViewModel.cursor(consentGivenAtUs: flow.consentGivenAtUs, now: clock.now),
+            remembering: flow.rememberingForTryIt(environment: [RememberingState.environmentKey: "off"]),
             turningOn: flow.consentGivenAtUs != nil, now: { clock.now },
+            permissionsOn: { await flow.permissionsStillOn() },
             nameFor: { _ in "Notes" }
         )
         let key0 = AskKeyNow(effectiveLabel: "⇧⇧", effectivePhrase: "Press Shift twice", stored: nil)

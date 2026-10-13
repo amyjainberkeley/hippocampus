@@ -20,8 +20,9 @@ struct AllowlistSlide: View {
                 OnboardingDesign.TypeRamp.title("Which apps should Hippocampus remember?")
 
                 // The capture helper admits every ordinary app
-                // (`admissionPolicy: .ordinaryApplications`).
-                OnboardingDesign.TypeRamp.body("Hippocampus remembers every app except the ones it never reads.")
+                // (`admissionPolicy: .ordinaryApplications`), so what is
+                // skipped in all of them is what matters here.
+                OnboardingDesign.TypeRamp.body(OnboardingCopy.appAccessSkipped)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: 520, alignment: .leading)
 

@@ -99,13 +99,27 @@ final class OnboardingFlowViewModelTests: XCTestCase {
     }
 
     func testSetupResumesAtTheSavedScreenWithinTheClamp() {
-        for screen in OnboardingScreen.allCases {
-            let consent = InMemoryOnboardingConsentStore(given: true)
-            let vm = makeVM(consent: consent, stateStore: InMemoryOnboardingStateStore(route: screen.routeName))
+        for screen in [OnboardingScreen.welcome, .permissions, .promise] {
+            let vm = makeVM(stateStore: InMemoryOnboardingStateStore(route: screen.routeName))
             XCTAssertEqual(vm.screen, screen, screen.routeName)
         }
+        XCTAssertEqual(makeVM(stateStore: InMemoryOnboardingStateStore(route: "try-it")).screen, .promise,
+                       "Try it needs consent")
         let firstRun = makeVM(screenRecording: .denied, stateStore: InMemoryOnboardingStateStore(route: "try-it"))
         XCTAssertEqual(firstRun.screen, .permissions, "Try it needs consent, Promise both permissions")
+    }
+
+    func testAfterConsentNoResumePointIsReadOrWritten() {
+        // Only a file left over from before consent, or by an older build,
+        // could be there; setup shown again starts at Welcome.
+        for screen in OnboardingScreen.allCases {
+            let store = InMemoryOnboardingStateStore(route: screen.routeName)
+            let vm = makeVM(consent: InMemoryOnboardingConsentStore(given: true), stateStore: store)
+            XCTAssertEqual(vm.screen, .welcome, screen.routeName)
+            XCTAssertNil(store.loadRoute(), "the left-over point is removed")
+            vm.advance()
+            XCTAssertNil(store.loadRoute())
+        }
     }
 
     func testALaunchScreenWinsOverTheResumeFileAndIsClampedTheSameWay() {

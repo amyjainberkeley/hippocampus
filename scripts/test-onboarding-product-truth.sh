@@ -20,16 +20,35 @@ if rg -n -i \
     fail "onboarding still makes an absolute claim the code does not keep"
 fi
 
-# Consent is the Promise screen. It says that screenshots are kept as well
-# as text, that Hippocampus itself uploads nothing, and that what an AI
-# tool reads goes to the company that runs it.
-rg -Fq 'Text and screenshots, encrypted' "$COPY" \
-    || fail "onboarding does not disclose that text and screenshots are kept, encrypted"
-rg -Fq 'Nothing is uploaded by Hippocampus.' "$COPY" \
-    || fail "onboarding does not state Hippocampus's own network boundary"
-rg -Fq 'goes to the company that runs' "$COPY" \
-    || fail "onboarding does not disclose the AI tool provider boundary"
+# Consent is the Promise screen, and its first line is what
+# `promiseStays(kept:)` returns. Only that function's code counts: its
+# body with comment lines dropped, so a comment that quotes a claim can
+# never stand in for the claim.
+STAYS="$(awk '
+    /func promiseStays\(kept: String\) -> String \{/ { inside = 1; next }
+    inside && /^    \}/ { exit }
+    inside && !/^[[:space:]]*\/\// { print }
+' "$COPY")"
+[[ -n "$STAYS" ]] || fail "OnboardingCopy.promiseStays(kept:) is missing; the Promise has no first line to check"
+
+# Each disclosure must be inside the line's string literal.
+require_in_promise() {
+    local phrase="$1" reason="$2"
+    printf '%s\n' "$STAYS" | rg -q "\"[^\"]*${phrase}[^\"]*\"" || fail "$reason"
+}
+
+# Screenshots are kept as well as text; Hippocampus itself uploads
+# nothing; sharing with an AI waits on the person connecting it; and what
+# an AI reads goes to the company that runs it.
+require_in_promise 'Text and screenshots, encrypted' \
+    "onboarding does not disclose that text and screenshots are kept, encrypted"
+require_in_promise 'Nothing is uploaded by Hippocampus\.' \
+    "onboarding does not state Hippocampus's own network boundary"
+require_in_promise 'only if you connect it\.' \
+    "onboarding does not say that an AI gets nothing until the person connects it"
+require_in_promise 'goes to the company that runs' \
+    "onboarding does not disclose the AI tool provider boundary"
 rg -Fq 'OnboardingCopy.promiseStays(kept:' "$PROMISE" \
     || fail "the Promise screen does not show the line that makes these disclosures"
 
-printf 'PASS: onboarding discloses screenshots, its own network boundary and the AI tool boundary truthfully\n'
+printf 'PASS: onboarding discloses screenshots, its own network boundary, connecting and the AI tool boundary truthfully\n'

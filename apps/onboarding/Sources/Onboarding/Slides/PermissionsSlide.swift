@@ -120,9 +120,13 @@ struct PermissionsScreen: View {
                     }
                 }
 
-                Text(OnboardingCopy.permissionsFooter)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                // A row that says what to do in System Settings needs the
+                // room, and the footer would only say it again, vaguer.
+                if !rows.contains(where: { $0.state.showsGuidance }) {
+                    Text(OnboardingCopy.permissionsFooter)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -189,12 +193,13 @@ struct PermissionRowView: View {
             .padding(.top, OnboardingDesign.Space.sm)
         case .needsHelp:
             VStack(alignment: .leading, spacing: OnboardingDesign.Space.sm) {
+                // The row's full width, as the waiting hint has: one line
+                // where it fits, so two rows that need help fit the window.
                 (Text(OnboardingCopy.notOnYet).fontWeight(.semibold).foregroundStyle(.primary)
                     + Text(" " + OnboardingCopy.needsHelpHint))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 480, alignment: .leading)
                 HStack(spacing: OnboardingDesign.Space.lg) {
                     Button(OnboardingCopy.openSettings) { perform(.openSettings) }
                         .buttonStyle(RowButtonStyle(filled: false))

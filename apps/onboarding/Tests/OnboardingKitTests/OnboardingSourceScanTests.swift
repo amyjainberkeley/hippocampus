@@ -175,6 +175,46 @@ final class OnboardingSourceScanTests: XCTestCase {
         XCTAssertTrue(promise.contains("Toggle(OnboardingCopy.openAtLogin, isOn: openAtLogin)"))
     }
 
+    func testThePromiseIsTitledByMode() throws {
+        let promise = code(try source("Onboarding/Slides/PromiseSlide.swift")).joined(separator: "\n")
+        XCTAssertTrue(promise.contains("title: OnboardingCopy.promiseTitle(isReview: flowVM.isReview)"))
+        XCTAssertTrue(promise.contains("ScreenHeader(title: title, intro: intro)"))
+        XCTAssertFalse(promise.contains("ScreenHeader(title: OnboardingCopy.promiseTitle,"), "one title for both modes")
+    }
+
+    func testTryItTakesRememberingAndThePermissionsFromTheFlowWhenItNeedsThem() throws {
+        let flow = code(try source("Onboarding/OnboardingFlowView.swift")).joined(separator: "\n")
+        // A first run is on whatever the app said at spawn.
+        XCTAssertTrue(flow.contains("remembering: flowVM.rememberingForTryIt(environment: ProcessInfo.processInfo.environment)"))
+        XCTAssertFalse(flow.contains("RememberingState(environment:"))
+        // Checked when nothing was read, not what was seen at consent.
+        XCTAssertTrue(flow.contains("permissionsOn: { [flowVM] in await flowVM.permissionsStillOn() }"))
+        XCTAssertFalse(flow.contains("Permission.status == .granted"))
+    }
+
+    func testThePermissionsFooterMakesRoomForARowThatSaysWhatToDo() throws {
+        let slide = code(try source("Onboarding/Slides/PermissionsSlide.swift")).joined(separator: "\n")
+        XCTAssertTrue(slide.contains("if !rows.contains(where: { $0.state.showsGuidance }) {\n                    Text(OnboardingCopy.permissionsFooter)"))
+        XCTAssertFalse(slide.contains(".frame(maxWidth: 480"), "the help line takes the row's width")
+    }
+
+    func testTheBrowserExtensionPanelTakesEveryWordFromTheCopyFile() throws {
+        // Try it opens it on a first run, so its words are held by the copy
+        // tests like the four screens'.
+        let panel = code(try source("Onboarding/Slides/BrowserExtensionSlide.swift"))
+        let literalWords = try NSRegularExpression(pattern: #"(Text|Button|title:|body:)\(?\s*"[A-Za-z]"#)
+        for line in panel {
+            let range = NSRange(line.startIndex..., in: line)
+            XCTAssertNil(literalWords.firstMatch(in: line, range: range), line)
+            for mark in ["→", "—", "SectionChip("] {
+                XCTAssertFalse(line.contains(mark), line)
+            }
+        }
+        XCTAssertTrue(panel.contains { $0.contains("BrowserExtensionScreen(") }, "a screen the renderer draws")
+        let renderer = try source("Onboarding/OnboardingPreviewRenderer.swift")
+        XCTAssertTrue(renderer.contains("add(\"panel-browser-extension\""))
+    }
+
     // MARK: - The preview renderer
 
     func testThePreviewRendererDrawsNothingOnScreen() throws {

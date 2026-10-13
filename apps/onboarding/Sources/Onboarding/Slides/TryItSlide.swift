@@ -19,7 +19,7 @@ struct TryItSlide: View {
     init(
         consentGivenAtUs: UInt64?,
         remembering: RememberingState,
-        permissionsOn: @escaping () -> (screenRecording: Bool, accessibility: Bool),
+        permissionsOn: @escaping @MainActor () async -> (screenRecording: Bool, accessibility: Bool),
         openSettings: @escaping (PermissionSurface) -> Void,
         openPanel: @escaping (OnboardingPanel) -> Void
     ) {

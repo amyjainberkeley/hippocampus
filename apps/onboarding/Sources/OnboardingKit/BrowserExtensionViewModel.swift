@@ -39,6 +39,12 @@ public final class BrowserExtensionViewModel: ObservableObject {
         public let didOpenBrowser: Bool
         /// Browser display name for copy.
         public let browserName: String
+
+        public init(unpackedDirPath: String?, didOpenBrowser: Bool, browserName: String) {
+            self.unpackedDirPath = unpackedDirPath
+            self.didOpenBrowser = didOpenBrowser
+            self.browserName = browserName
+        }
     }
 
     @Published public private(set) var rows: [BrowserRow]

@@ -15,14 +15,18 @@
 // In review (Show Setup Again) remembering was already on, so there is no
 // "Turning on…". "Try Again" on a stalled card has the app restart
 // remembering in place, and the timeline starts over with it.
+//
+// A stalled card names a permission that is off only from a check made
+// then: what setup saw at consent may no longer be true.
 
 import Foundation
 #if canImport(AppKit)
 import AppKit
 #endif
 
-/// Whether the app was remembering when it opened setup again. A first
-/// run is always `on`: consent starts it.
+/// Whether the app was remembering when it opened setup again. It counts
+/// only in review: a first run is always `on`, because consent starts it
+/// (`OnboardingFlowViewModel.rememberingForTryIt`).
 public enum RememberingState: String, Sendable, Equatable {
     case on
     case paused
@@ -153,11 +157,13 @@ public final class TryItViewModel: ObservableObject {
     /// it opens on "Turning on…".
     private var turningOn: Bool
     private let now: () -> Date
-    private let permissionsOn: () -> (screenRecording: Bool, accessibility: Bool)
+    private let permissionsOn: @MainActor () async -> (screenRecording: Bool, accessibility: Bool)
     private let nameFor: (String) -> String
     private var lastReadAt: Date?
     private var firstProofAt: Date?
     private var openedForThemAt: Date?
+    /// Bumped by Try Again. A step that started before it decides nothing.
+    private var timeline = 0
     private var observers: [Any] = []
 
     /// - Parameters:
@@ -166,6 +172,8 @@ public final class TryItViewModel: ObservableObject {
     ///   - remembering: `.on` on a first run; the app's state in review.
     ///   - turningOn: true on a first run, where consent just started
     ///     remembering; false in review, where it was already on.
+    ///   - permissionsOn: checks both permissions now. Asked only when
+    ///     nothing was read for 45 s, to name the cause.
     public init(
         probe: any LastReadProbe,
         startedAt: Date,
@@ -173,7 +181,7 @@ public final class TryItViewModel: ObservableObject {
         remembering: RememberingState = .on,
         turningOn: Bool = true,
         now: @escaping () -> Date = Date.init,
-        permissionsOn: @escaping () -> (screenRecording: Bool, accessibility: Bool) = { (true, true) },
+        permissionsOn: @escaping @MainActor () async -> (screenRecording: Bool, accessibility: Bool) = { (true, true) },
         nameFor: @escaping (String) -> String = BundleDisplayNameResolver.displayName(for:)
     ) {
         self.probe = probe
@@ -207,6 +215,7 @@ public final class TryItViewModel: ObservableObject {
     public func tick() async {
         if case .finished = card { return }
         if case .notRemembering = card { return }
+        let timeline = self.timeline
         let elapsed = now().timeIntervalSince(startedAt)
         if isReading, elapsed >= Self.firstReadAfter, readIsDue() {
             lastReadAt = now()
@@ -215,12 +224,20 @@ public final class TryItViewModel: ObservableObject {
                 consider(rows)
             }
         }
+        // Try Again started the screen over while this step read: what was
+        // read counts, and the next step decides on the new clock.
+        guard timeline == self.timeline else { return }
         if isReading, shouldStopReading(elapsed: elapsed) {
             await stopReading()
         }
         // Ask may have opened while this step waited.
         if case .finished = card { return }
-        card = chooseCard(elapsed: elapsed)
+        let next = await chooseCard(elapsed: elapsed)
+        // …or opened, or Try Again started over, while the permissions
+        // were checked.
+        if case .finished = card { return }
+        guard timeline == self.timeline else { return }
+        card = next
     }
 
     /// The person brought an app forward.
@@ -252,10 +269,11 @@ public final class TryItViewModel: ObservableObject {
     public func tryAgain() async {
         guard remembering == .on else { return }
         if case .finished = card { return }
+        timeline += 1
         startedAt = now()
         turningOn = true
         lastReadAt = nil
-        card = chooseCard(elapsed: 0)
+        card = await chooseCard(elapsed: 0)
         if !isReading {
             isReading = true
             await probe.resume()
@@ -321,16 +339,18 @@ public final class TryItViewModel: ObservableObject {
         if firstProofAt == nil { firstProofAt = now() }
     }
 
-    private func chooseCard(elapsed: TimeInterval) -> Card {
+    private func chooseCard(elapsed: TimeInterval) async -> Card {
         if let latestProof { return .proof(latestProof) }
         if turningOn, elapsed < Self.startingFor { return .starting }
         let note = FrontAppNote(bundleId: frontApp?.bundleId, name: frontApp?.name)
-        if elapsed >= Self.stalledAfter { return .stalled(stallCause(note)) }
+        if elapsed >= Self.stalledAfter { return .stalled(await stallCause(note)) }
         return .waiting(note)
     }
 
-    private func stallCause(_ note: FrontAppNote) -> StallCause {
-        let on = permissionsOn()
+    /// Checked now, not taken from consent: a permission turned off since
+    /// is the cause most worth naming.
+    private func stallCause(_ note: FrontAppNote) async -> StallCause {
+        let on = await permissionsOn()
         if !on.screenRecording { return .permissionOff(.screenRecording) }
         if !on.accessibility { return .permissionOff(.accessibility) }
         if note != .ordinary { return .frontApp(note) }

@@ -24,8 +24,9 @@ final class OnboardingPaletteTests: XCTestCase {
         XCTAssertTrue(design.contains("static let accent = color(OnboardingPalette.accent)"))
         XCTAssertTrue(design.contains("static let accentText = color(OnboardingPalette.accentText)"))
         XCTAssertTrue(design.contains("static let ink = color(OnboardingPalette.ink)"))
-        XCTAssertTrue(theme.contains("static let accentBlue = OnboardingDesign.Palette.accent"))
+        // The theme holds the window's size and margins, and no colour.
+        XCTAssertFalse(theme.contains("Color("), "no second accent")
+        XCTAssertFalse(theme.contains("Palette."), "no second name for the accent")
         XCTAssertFalse(design.contains("Double(0x0A)"), "no second, hand-typed accent")
-        XCTAssertFalse(theme.contains("Double(0x0A)"), "no second, hand-typed accent")
     }
 }

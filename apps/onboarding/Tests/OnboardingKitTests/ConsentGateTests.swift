@@ -101,6 +101,48 @@ final class ConsentGateTests: XCTestCase {
         }
     }
 
+    func testAPermissionTurnedOffBeforeTheClickGoesBackToPermissions() async {
+        let consent = InMemoryOnboardingConsentStore()
+        let ax = LivePermission(kind: .accessibility, isOn: true)
+        let vm = OnboardingFlowViewModel(
+            screenRecording: StubTCCPermission(kind: .screenRecording, status: .granted),
+            accessibility: ax,
+            consentStore: consent,
+            initialScreen: .promise
+        )
+        XCTAssertEqual(vm.screen, .promise)
+        // Turned off in System Settings while Promise showed. Nothing on
+        // Promise looks, so the button still looked ready.
+        ax.isOn = false
+        XCTAssertEqual(vm.accessibilityPermission.status, .granted)
+
+        let started = await vm.startRemembering(keyReady: true)
+        XCTAssertFalse(started)
+        XCTAssertEqual(consent.writeCount, 0)
+        XCTAssertEqual(vm.screen, .permissions, "back where the row says what to do")
+        XCTAssertEqual(vm.rowState(.accessibility), .needsHelp)
+        XCTAssertNil(vm.consentFailure, "nothing failed to save")
+    }
+
+    func testScreenRecordingTurnedOffBeforeTheClickGoesBackToPermissions() async {
+        // The real Screen Recording permission: this process and a fresh
+        // one both say no now.
+        let sr = ScreenRecordingFixture(inProcess: true, freshProcessSays: true)
+        let vm = OnboardingFlowViewModel(
+            screenRecording: sr.permission,
+            accessibility: StubTCCPermission(kind: .accessibility, status: .granted),
+            initialScreen: .promise
+        )
+        XCTAssertEqual(vm.screen, .promise)
+        sr.inProcess = false
+        sr.probe.answer = false
+
+        let started = await vm.startRemembering(keyReady: true)
+        XCTAssertFalse(started)
+        XCTAssertEqual(vm.screen, .permissions)
+        XCTAssertEqual(vm.rowState(.screenRecording), .needsHelp)
+    }
+
     func testStartRememberingRefusesUntilTheKeyIsReady() async {
         let consent = InMemoryOnboardingConsentStore()
         let vm = makeVM(consent: consent)
@@ -171,6 +213,53 @@ final class ConsentGateTests: XCTestCase {
         vm.advance()
         XCTAssertEqual(vm.screen, .tryIt)
         XCTAssertEqual(consent.writeCount, 0)
+    }
+
+    // MARK: - After consent
+
+    func testConsentClearsTheResumePointSoSetupShownAgainStartsAtWelcome() async {
+        let consent = InMemoryOnboardingConsentStore()
+        let state = InMemoryOnboardingStateStore()
+        let vm = makeVM(consent: consent, stateStore: state)
+        vm.back()
+        vm.advance()
+        XCTAssertEqual(state.loadRoute(), "promise", "before consent a quit resumes here")
+
+        await vm.startRemembering(keyReady: true)
+        XCTAssertEqual(vm.screen, .tryIt)
+        XCTAssertNil(state.loadRoute(), "closing Try it leaves nothing to come back to")
+
+        // Show Setup Again, over a file an older build left on Try it,
+        // which has no Back.
+        let leftOver = InMemoryOnboardingStateStore(route: "try-it")
+        let again = makeVM(consent: consent, stateStore: leftOver, at: nil)
+        XCTAssertTrue(again.isReview)
+        XCTAssertEqual(again.screen, .welcome)
+        XCTAssertNil(leftOver.loadRoute())
+        again.advance()
+        again.advance()
+        XCTAssertEqual(again.screen, .promise)
+        XCTAssertNil(leftOver.loadRoute(), "a review keeps no place")
+
+        // A route the app names still opens that screen.
+        XCTAssertEqual(makeVM(consent: consent, stateStore: leftOver, at: .permissions).screen, .permissions)
+    }
+
+    func testAFirstRunTryItIsRememberingWhateverTheAppSaidAtSpawn() async {
+        let off = [RememberingState.environmentKey: "off"]
+        let paused = [RememberingState.environmentKey: "paused"]
+        // The app opened setup before consent, when it was not remembering.
+        let vm = makeVM()
+        await vm.startRemembering(keyReady: true)
+        XCTAssertEqual(vm.screen, .tryIt)
+        XCTAssertEqual(vm.rememberingForTryIt(environment: off), .on, "the consent click started it")
+        XCTAssertEqual(vm.rememberingForTryIt(environment: paused), .on)
+
+        // In review, the app's state when it opened setup is what counts.
+        let review = makeVM(consent: InMemoryOnboardingConsentStore(given: true), at: .tryIt)
+        XCTAssertEqual(review.rememberingForTryIt(environment: off), .off)
+        XCTAssertEqual(review.rememberingForTryIt(environment: paused), .paused)
+        XCTAssertEqual(review.rememberingForTryIt(environment: [:]), .on)
     }
 
     // MARK: - The consent file

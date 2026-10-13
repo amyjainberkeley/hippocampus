@@ -160,6 +160,56 @@ final class HeldPermission: TCCPermission, @unchecked Sendable {
     func openPrivacySettings() {}
 }
 
+/// A permission as Accessibility behaves: `isOn` is what macOS says now,
+/// `status` what this process last saw. The quick check only turns it on;
+/// the async check also turns it off.
+@MainActor
+final class LivePermission: TCCPermission, @unchecked Sendable {
+    let kind: TCCPermissionKind
+    private(set) var status: TCCStatus
+    var isOn: Bool
+
+    init(kind: TCCPermissionKind, isOn: Bool) {
+        self.kind = kind
+        self.isOn = isOn
+        status = isOn ? .granted : .notRequested
+    }
+
+    func checkCurrent() -> TCCStatus {
+        if isOn { status = .granted }
+        return status
+    }
+
+    func checkCurrentAsync(outOfProcess: Bool) async -> TCCStatus {
+        if isOn {
+            status = .granted
+        } else if status == .granted {
+            status = .denied
+        }
+        return status
+    }
+
+    func requestOrOpenSettings() {}
+    func resetAndRetry() async -> Bool { false }
+    func openPrivacySettings() {}
+}
+
+/// Holds an async step open until the test lets it go.
+@MainActor
+final class Gate {
+    private var waiting: CheckedContinuation<Void, Never>?
+    var isHeld: Bool { waiting != nil }
+
+    func wait() async {
+        await withCheckedContinuation { waiting = $0 }
+    }
+
+    func open() {
+        waiting?.resume()
+        waiting = nil
+    }
+}
+
 /// Consent that fails to save, as a full disk would.
 struct DiskFull: Error {}
 

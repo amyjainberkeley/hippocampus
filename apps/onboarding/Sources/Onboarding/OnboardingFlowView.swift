@@ -68,11 +68,10 @@ struct OnboardingFlowView: View {
         case .tryIt:
             TryItSlide(
                 consentGivenAtUs: flowVM.consentGivenAtUs,
-                remembering: RememberingState(environment: ProcessInfo.processInfo.environment),
-                permissionsOn: { [flowVM] in
-                    (flowVM.screenRecordingPermission.status == .granted,
-                     flowVM.accessibilityPermission.status == .granted)
-                },
+                // A first run is on: its consent started remembering.
+                remembering: flowVM.rememberingForTryIt(environment: ProcessInfo.processInfo.environment),
+                // Checked when nothing was read, not taken from consent.
+                permissionsOn: { [flowVM] in await flowVM.permissionsStillOn() },
                 openSettings: { [flowVM] in flowVM.openSettings($0) },
                 openPanel: { panel = $0 }
             )

@@ -86,14 +86,10 @@ final class BrowserExtensionViewModelTests: XCTestCase {
         XCTAssertEqual(vm.rows[0].extensionStatus, .unknown)
     }
 
-    /// PR-3 regression contract: fresh rows must start in `.unknown`,
-    /// which the `BrowserExtensionSlide.extensionStatusBadge` now
-    /// renders as an animated "checking…" hourglass instead of the
-    /// prior `EmptyView()`. If a future refactor changes the default
-    /// state (say, to `.notInstalled`) the slide would show a scary
-    /// orange x-circle to every user on first paint before any probe
-    /// ran — this test guards the invariant that drives the loading
-    /// badge UX.
+    /// Fresh rows start in `.unknown`, which `BrowserExtensionScreen`
+    /// draws as the "Checking…" hourglass until the first look. If a
+    /// refactor changed the default (say, to `.notInstalled`), the panel
+    /// would claim an answer before any check ran.
     func testFreshRowStartsInUnknownState() {
         let (vm, _) = makeVM(browsers: [chrome, safari])
         for row in vm.rows {

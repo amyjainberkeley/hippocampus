@@ -4,8 +4,9 @@ import OnboardingKit
 /// Screen 3. What happens to what Hippocampus reads, before anything is
 /// read. Consent is the click on Start Remembering in the bar below, the
 /// only thing that writes it. The open-at-login choice is made here and
-/// recorded with consent. In review, consent exists: no body sentence,
-/// no checkbox, and the button only continues.
+/// recorded with consent. In review, consent exists and remembering has
+/// started: the never-read panel's title, no body sentence, no checkbox,
+/// and the button only continues.
 struct PromiseSlide: View {
     @EnvironmentObject var flowVM: OnboardingFlowViewModel
     @EnvironmentObject var prepareBrainVM: PrepareBrainViewModel
@@ -14,6 +15,7 @@ struct PromiseSlide: View {
 
     var body: some View {
         PromiseScreen(
+            title: OnboardingCopy.promiseTitle(isReview: flowVM.isReview),
             intro: OnboardingCopy.promiseBody(isReview: flowVM.isReview),
             kept: kept,
             openAtLogin: flowVM.isReview ? nil : $flowVM.openAtLogin,
@@ -30,6 +32,7 @@ struct PromiseSlide: View {
 
 /// The screen as drawn: the preview renderer builds it from fixtures.
 struct PromiseScreen: View {
+    let title: String
     let intro: String?
     let kept: String
     /// The checkbox, on a first run only.
@@ -40,7 +43,7 @@ struct PromiseScreen: View {
     var body: some View {
         SlideContainer {
             VStack(spacing: OnboardingDesign.Space.xl) {
-                ScreenHeader(title: OnboardingCopy.promiseTitle, intro: intro)
+                ScreenHeader(title: title, intro: intro)
 
                 PromiseLines(kept: kept)
 

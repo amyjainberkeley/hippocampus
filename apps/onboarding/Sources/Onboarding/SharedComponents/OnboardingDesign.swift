@@ -22,9 +22,7 @@ import SwiftUI
 /// Every token is appearance-adaptive so the flow reads correctly in light
 /// and dark. Zero external dependencies (ADR-0008) — pure SwiftUI.
 ///
-/// `OnboardingTheme` (the pre-existing namespace many slides already call
-/// into) forwards its accent + type helpers here, so this file is additive:
-/// no call site had to change to adopt the tokens.
+/// The window's size and margins are in `OnboardingTheme`.
 enum OnboardingDesign {
 
     // MARK: - Color
@@ -157,16 +155,6 @@ enum OnboardingDesign {
         static let card: CGFloat = 8
         static let large: CGFloat = 8
         static let pill: CGFloat = 8
-    }
-
-    // MARK: - Layout width clamps
-
-    /// Content-width clamps, from the 1280-pt window the panels were
-    /// drawn for. The four screens use `OnboardingTheme.contentMaxWidth`.
-    enum Width {
-        static let prose: CGFloat = 600
-        static let hero: CGFloat = 720
-        static let wide: CGFloat = 960
     }
 
     // MARK: - Motion

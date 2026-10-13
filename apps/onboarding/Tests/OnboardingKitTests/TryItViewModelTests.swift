@@ -157,6 +157,72 @@ final class TryItViewModelTests: XCTestCase {
         XCTAssertEqual(OnboardingCopy.stalledText(.unknown), "Still nothing read.")
     }
 
+    func testAStalledCardChecksThePermissionsThenNotBefore() async {
+        let clock = TestClock()
+        let checks = MainBox(0)
+        let vm = TryItViewModel(
+            probe: ScriptedReads(clock: clock), startedAt: clock.now, cursorTsUs: 1_000, now: { clock.now },
+            permissionsOn: {
+                checks.value += 1
+                // Accessibility is turned off after the first check.
+                return (true, checks.value < 2)
+            }
+        )
+        await run(vm, clock, for: 44)
+        XCTAssertEqual(checks.value, 0, "nothing is checked while the card waits")
+        await run(vm, clock, for: 1)
+        XCTAssertEqual(vm.card, .stalled(.unknown))
+        await run(vm, clock, for: 1)
+        XCTAssertEqual(vm.card, .stalled(.permissionOff(.accessibility)), "each look checks again")
+    }
+
+    func testAPermissionTurnedOffSinceConsentIsNamed() async throws {
+        // Setup saw both on at consent, and nothing has looked since.
+        let clock = TestClock()
+        let ax = LivePermission(kind: .accessibility, isOn: true)
+        let flow = OnboardingFlowViewModel(
+            screenRecording: StubTCCPermission(kind: .screenRecording, status: .granted),
+            accessibility: ax,
+            now: { clock.now },
+            initialScreen: .promise
+        )
+        let started = await flow.startRemembering(keyReady: true)
+        XCTAssertTrue(started)
+        let vm = TryItViewModel(
+            probe: ScriptedReads(clock: clock), startedAt: clock.now,
+            cursorTsUs: try XCTUnwrap(flow.consentGivenAtUs), now: { clock.now },
+            permissionsOn: { await flow.permissionsStillOn() }
+        )
+        ax.isOn = false
+        XCTAssertEqual(flow.accessibilityPermission.status, .granted, "what setup last saw")
+        await run(vm, clock, for: 45)
+        XCTAssertEqual(vm.card, .stalled(.permissionOff(.accessibility)))
+        XCTAssertEqual(TryItPresentation(card: vm.card, keyNow: AskKeyNow(effectiveLabel: nil, effectivePhrase: nil, stored: nil),
+                                         understanding: nil).action,
+                       .openSettings(.accessibility))
+    }
+
+    func testTryAgainWhileTheStallIsCheckedIsNotUndone() async {
+        let clock = TestClock()
+        let gate = Gate()
+        let vm = TryItViewModel(
+            probe: ScriptedReads(clock: clock), startedAt: clock.now, cursorTsUs: 1_000, now: { clock.now },
+            permissionsOn: {
+                await gate.wait()
+                return (true, true)
+            }
+        )
+        await run(vm, clock, for: 44)
+        clock.advance(1)
+        let step = Task { await vm.tick() }
+        while !gate.isHeld { await Task.yield() }
+        await vm.tryAgain()
+        XCTAssertEqual(vm.card, .starting)
+        gate.open()
+        await step.value
+        XCTAssertEqual(vm.card, .starting, "the stall found before Try Again is not drawn over it")
+    }
+
     func testReadingStopsThirtySecondsAfterTheFirstProof() async {
         let clock = TestClock()
         let reads = ScriptedReads(clock: clock, batches: [.rows([row(2_000)], newestTsUs: 2_000)])

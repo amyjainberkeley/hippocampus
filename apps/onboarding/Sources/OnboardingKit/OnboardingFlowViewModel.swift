@@ -5,9 +5,13 @@
 //
 // What it holds:
 // - Consent has one writer, `startRemembering(keyReady:)`. Nothing else
-//   moves a first run past Promise.
+//   moves a first run past Promise. A permission found off at the click
+//   sends the person back to Permissions, where its row says what to do.
 // - The resume clamp, at start and on every move: Try it needs consent,
 //   otherwise Promise; Promise needs both permissions, otherwise Permissions.
+// - The resume point is for a quit before consent (Quit & Reopen on
+//   Permissions, say). Once consent exists it is cleared and never read,
+//   so closing Try it, or a review, leaves nothing to come back to.
 // - Two permission rows, both visible at once. "Allow" raises macOS's
 //   prompt only. A row waits from the request until the person comes back
 //   to this window; on return one refresh decides. No timer moves a row.
@@ -39,6 +43,12 @@ public enum PermissionRowState: Equatable, Sendable {
     case needsHelp
     /// On.
     case granted
+
+    /// The row says what to do in System Settings. The screen's footer,
+    /// which says the same more vaguely, then makes room for it.
+    public var showsGuidance: Bool {
+        self == .waiting || self == .needsHelp
+    }
 }
 
 /// Why Start Remembering did not record consent.
@@ -116,12 +126,17 @@ public final class OnboardingFlowViewModel: ObservableObject {
         self.stateStore = stateStore
         self.consentStore = consentStore
         self.now = now
-        self.isReview = consentStore.isGiven
+        let consentGiven = consentStore.isGiven
+        self.isReview = consentGiven
         let bothOn = screenRecording.status == .granted && accessibility.status == .granted
         self.bothWereOn = bothOn
-        // An explicit launch screen wins over the resume file.
-        let requested = initialScreen ?? stateStore.loadScreen() ?? .welcome
-        self.screen = Self.clamp(requested, consentGiven: consentStore.isGiven, bothGranted: bothOn)
+        // An explicit launch screen wins over the resume file. After
+        // consent a resume file can only be left over, so it is ignored
+        // and removed: setup shown again starts at Welcome.
+        if consentGiven { stateStore.clear() }
+        let resumed = consentGiven ? nil : stateStore.loadScreen()
+        let requested = initialScreen ?? resumed ?? .welcome
+        self.screen = Self.clamp(requested, consentGiven: consentGiven, bothGranted: bothOn)
     }
 
     // MARK: - Moving between screens
@@ -177,9 +192,16 @@ public final class OnboardingFlowViewModel: ObservableObject {
         return screen
     }
 
+    /// Every move is clamped. Before consent it is saved, so a quit resumes
+    /// here; after it the resume point is cleared.
     private func move(to target: OnboardingScreen) {
-        screen = Self.clamp(target, consentGiven: consentStore.isGiven, bothGranted: bothGranted)
-        stateStore.save(screen)
+        let consentGiven = consentStore.isGiven
+        screen = Self.clamp(target, consentGiven: consentGiven, bothGranted: bothGranted)
+        if consentGiven {
+            stateStore.clear()
+        } else {
+            stateStore.save(screen)
+        }
     }
 
     // MARK: - Consent
@@ -187,16 +209,24 @@ public final class OnboardingFlowViewModel: ObservableObject {
     /// The only code that writes consent: the click on Start Remembering.
     /// It checks the permissions once more (asking a fresh process about
     /// Screen Recording if this one still says no), then requires Promise,
-    /// both permissions and the encryption key. On success it records the
-    /// time with the open-at-login choice and opens Try it. A click while
-    /// one is being checked does nothing.
+    /// both permissions and the encryption key. A permission turned off
+    /// since Permissions sends the person back there, where its row says
+    /// what to do. On success it records the time with the open-at-login
+    /// choice and opens Try it. A click while one is being checked does
+    /// nothing.
     @discardableResult
     public func startRemembering(keyReady: Bool) async -> Bool {
         guard !isStartingRemembering else { return false }
         isStartingRemembering = true
         defer { isStartingRemembering = false }
         await refreshDeciding(askFreshProcess: true)
-        guard screen == .promise, bothGranted, keyReady else { return false }
+        guard screen == .promise else { return false }
+        guard bothGranted else {
+            // The clamp lands on Permissions.
+            move(to: .promise)
+            return false
+        }
+        guard keyReady else { return false }
         do {
             try consentStore.give(openAtLogin: openAtLogin)
         } catch {
@@ -373,6 +403,25 @@ public final class OnboardingFlowViewModel: ObservableObject {
         }
     }
 
+    // MARK: - For Try it
+
+    /// Whether remembering is on, for Try it. Consent given in this run
+    /// started it, whatever the app was doing when it opened setup, so a
+    /// first run is always `on`. Only in review does the app's state at
+    /// spawn count (`MCI_ONBOARDING_REMEMBERING`, contract section 2).
+    public func rememberingForTryIt(environment: [String: String]) -> RememberingState {
+        consentGivenAtUs != nil ? .on : RememberingState(environment: environment)
+    }
+
+    /// For Try it, when nothing has been read: are both permissions still
+    /// on? This process checks again, so one turned off since consent
+    /// shows. No fresh process is started, and a Screen Recording grant a
+    /// fresh process confirmed stands.
+    public func permissionsStillOn() async -> (screenRecording: Bool, accessibility: Bool) {
+        await refreshPermissionsAsync(outOfProcess: false)
+        return (screenRecordingPermission.status == .granted, accessibilityPermission.status == .granted)
+    }
+
     // MARK: - For the panels
 
     public func refreshFullDiskAccessStatus() async {
@@ -383,8 +432,12 @@ public final class OnboardingFlowViewModel: ObservableObject {
         }
     }
 
+    /// Look at Automation again, after Open Safari Settings raised macOS's
+    /// prompt. The panel redraws, so a "no" shows its note.
     @discardableResult
     public func probeAutomation() -> TCCStatus {
-        automationPermission.checkCurrent()
+        let status = automationPermission.checkCurrent()
+        permissionRefreshCount += 1
+        return status
     }
 }

@@ -4,8 +4,9 @@ import OnboardingKit
 import SwiftUI
 
 /// Debug only: `HIPPOCAMPUS_RENDER_ONBOARDING=<dir>` draws every screen of
-/// setup, each permission row state, each Promise button state, each Try
-/// it card and the never-read panel, from fixture state, to
+/// setup, each permission row state and the tallest pairs of them, each
+/// Promise button state, each Try it card, the never-read panel and the
+/// browser extension panel Try it opens, from fixture state, to
 /// `<dir>/<name>.png` at 2x, then returns from `main` before setup starts.
 ///
 /// Nothing reaches the screen. `OnboardingEntryPoint.main` calls this
@@ -73,6 +74,16 @@ enum OnboardingPreviewRenderer {
             row(.screenRecording, .needsHelp, offersAskAgain: true), row(.accessibility, .idle),
         ]))
         add("2-permissions-accessibility-waiting", permissions([srOn, row(.accessibility, .waiting)]))
+        // The tallest pairs: one row turned down, then the other tried.
+        add("2-permissions-screen-needs-help-accessibility-waiting", permissions([
+            row(.screenRecording, .needsHelp), row(.accessibility, .waiting),
+        ]))
+        add("2-permissions-screen-waiting-accessibility-needs-help", permissions([
+            row(.screenRecording, .waiting), row(.accessibility, .needsHelp),
+        ]))
+        add("2-permissions-both-need-help", permissions([
+            row(.screenRecording, .needsHelp, offersAskAgain: true), row(.accessibility, .needsHelp, offersAskAgain: true),
+        ]))
         add("2-permissions-both-on", permissions([srOn, axOn]))
         add("2-permissions-review", permissions([srOn, axOn], review: true))
         add("2-permissions-macos-14", permissions([
@@ -110,7 +121,55 @@ enum OnboardingPreviewRenderer {
 
         // The panel Preferences opens for what is never read.
         add("panel-never-read", OnboardingPanelView(panel: .neverRead, keptForPreview: kept) {})
+
+        // The browser extension panel, which Try it opens on a first run.
+        let safari = DetectedBrowser(id: "com.apple.Safari", name: "Safari", kind: .safari)
+        let chrome = DetectedBrowser(id: "com.google.Chrome", name: "Chrome", kind: .chromium)
+        let arc = DetectedBrowser(id: "company.thebrowser.Browser", name: "Arc", kind: .chromium)
+        let folder = "/Applications/Hippocampus.app/Contents/Resources/Extensions/Chromium"
+        func steps(_ browser: DetectedBrowser, path: String?, opened: Bool) -> BrowserExtensionViewModel.BrowserRow {
+            BrowserExtensionViewModel.BrowserRow(
+                browser: browser, extensionStatus: .notInstalled,
+                installInstructions: .init(unpackedDirPath: path, didOpenBrowser: opened, browserName: browser.name)
+            )
+        }
+        add("panel-browser-extension", browserExtension([
+            .init(browser: safari, extensionStatus: .notInstalled), .init(browser: chrome),
+            .init(browser: arc, extensionStatus: .notInstalled),
+        ]))
+        add("panel-browser-extension-steps", browserExtension(
+            [.init(browser: safari, extensionStatus: .notInstalled), steps(chrome, path: folder, opened: true)],
+            askedAboutAutomation: true
+        ))
+        add("panel-browser-extension-open-it-yourself", browserExtension(
+            [steps(chrome, path: folder, opened: false)]
+        ))
+        add("panel-browser-extension-folder-missing", browserExtension(
+            [steps(chrome, path: nil, opened: true)]
+        ))
+        add("panel-browser-extension-automation-off", browserExtension(
+            [.init(browser: safari, extensionStatus: .notInstalled)], automation: .denied, askedAboutAutomation: true
+        ))
+        add("panel-browser-extension-on", browserExtension(
+            [.init(browser: safari, extensionStatus: .installed), .init(browser: chrome, extensionStatus: .installed)],
+            automation: .granted
+        ))
+        add("panel-browser-extension-none", browserExtension([]))
         return states
+    }
+
+    private static func browserExtension(
+        _ rows: [BrowserExtensionViewModel.BrowserRow],
+        automation: TCCStatus = .notRequested,
+        askedAboutAutomation: Bool = false
+    ) -> some View {
+        OnboardingWindow {
+            BrowserExtensionScreen(
+                rows: rows, automation: automation, didAttemptSafariAutomation: askedAboutAutomation, perform: { _ in }
+            )
+        } bar: {
+            BottomBar(primaryLabel: OnboardingCopy.done, primary: {})
+        }
     }
 
     private static func welcome(_ key: AskKeyHint) -> some View {
@@ -151,6 +210,7 @@ enum OnboardingPreviewRenderer {
     private static func promise(keyState: PrepareBrainViewModel.KeyState, review: Bool = false) -> some View {
         OnboardingWindow {
             PromiseScreen(
+                title: OnboardingCopy.promiseTitle(isReview: review),
                 intro: OnboardingCopy.promiseBody(isReview: review),
                 kept: kept,
                 openAtLogin: review ? nil : .constant(true),
