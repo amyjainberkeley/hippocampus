@@ -112,14 +112,18 @@ final class BackgroundCapturePolicyTests: XCTestCase {
             vault, focusedWindowId: nil, excludedBundleIds: ["com.1password.1password"], denylist: denylist))
     }
 
-    func testExclusionsCoverPasswordManagersBrowsersBannersAndItself() {
+    func testExclusionsCoverPasswordManagersBannersAndItselfButNotBrowsers() {
         let excluded = BackgroundCapturePolicy.excludedBundleIds(
             userEntries: [DenylistEntry(kind: .appBundle, pattern: "com.example.secret")])
-        for bundle in ["com.1password.1password", "com.google.Chrome", "com.apple.Safari",
+        for bundle in ["com.1password.1password",
                        "com.apple.notificationcenterui", "ai.hippocampus", "com.apple.systempreferences", "com.apple.dock",
                        "com.apple.loginwindow", "com.apple.ScreenSaver.Engine",
                        "com.example.secret"] {
             XCTAssertTrue(BackgroundCapturePolicy.isExcluded(bundle, from: excluded), bundle)
+        }
+        // Browsers are read like every other window (RULINGS G8).
+        for bundle in ["com.google.Chrome", "com.apple.Safari", "org.mozilla.firefox"] {
+            XCTAssertFalse(BackgroundCapturePolicy.isExcluded(bundle, from: excluded), bundle)
         }
     }
 

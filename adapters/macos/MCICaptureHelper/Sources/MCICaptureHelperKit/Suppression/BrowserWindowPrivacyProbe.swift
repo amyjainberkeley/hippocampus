@@ -2,39 +2,35 @@ import AppKit
 import Foundation
 
 public protocol BrowserWindowPrivacyChecking: Sendable {
-    func permitsPixels(for context: WorkflowContext, capturedWindow: FocusedWindow?) -> Bool
+    /// True only when the browser says the captured window is private. False
+    /// means "not known to be private", and the window is read (RULINGS G8).
+    func isPrivate(for context: WorkflowContext, capturedWindow: FocusedWindow?) -> Bool
 }
 
-/// Chromium exposes normal/incognito mode via its public scripting dictionary.
-/// Match the captured window uniquely among ALL browser windows, including
-/// private windows. Front-window mode alone cannot authorize queued pixels.
+/// Chromium browsers report each window's mode ("normal" or "incognito")
+/// through their scripting dictionary. Asking needs Automation, which
+/// Hippocampus never requests: the listing runs only when the person already
+/// allowed it for that browser (`RealAppleScriptRunner` checks with
+/// `askUserIfNeeded: false`). The answer can only add a skip: a window whose
+/// bounds match an incognito window is private; anything else, including no
+/// answer, leaves the window to the other checks.
 public struct BrowserWindowPrivacyProbe: BrowserWindowPrivacyChecking {
     private let runner: any AppleScriptRunner
-    private let focusedWindow: @Sendable () -> FocusedWindow?
     private let cache: WindowListCache
     private let now: @Sendable () -> Date
 
-    /// A busy Chrome answers the window listing in about half a second, so
-    /// the former 250 ms budget denied every frame. The listing is cached
-    /// briefly: a window opened after it was taken is absent from it, so the
-    /// cache can only deny, never authorize, a window it has not seen.
+    /// A busy Chrome answers the window listing in about half a second. The
+    /// listing is cached briefly, and a window it does not hold is looked up
+    /// afresh, so a window opened after the listing is never judged by it.
     static let timeoutMs = 1500
     static let cacheTTL: TimeInterval = 1.0
-    /// A denial from a listing at least this old is retried with a fresh one.
-    static let refreshAfter: TimeInterval = 0.25
 
     public init() {
-        self.init(runner: RealAppleScriptRunner(),
-                  focusedWindow: { AXFocusedWindowReader().readFocusedWindowIdentity() })
+        self.init(runner: RealAppleScriptRunner())
     }
 
-    internal init(
-        runner: any AppleScriptRunner,
-        focusedWindow: @escaping @Sendable () -> FocusedWindow?,
-        now: @escaping @Sendable () -> Date = Date.init
-    ) {
+    internal init(runner: any AppleScriptRunner, now: @escaping @Sendable () -> Date = Date.init) {
         self.runner = runner
-        self.focusedWindow = focusedWindow
         self.cache = WindowListCache()
         self.now = now
     }
@@ -45,62 +41,60 @@ public struct BrowserWindowPrivacyProbe: BrowserWindowPrivacyChecking {
         "com.brave.Browser": "Brave Browser",
         "com.microsoft.edgemac": "Microsoft Edge",
     ].mapValues { app in
-        // Inside the tell block `tab` names the browser's tab class, which
-        // coerces to the text "tab"; `character id 9` is the separator.
+        // Each window's mode and bounds, never its address. Inside the tell
+        // block `tab` names the browser's tab class, which coerces to the
+        // text "tab"; `character id 9` is the separator.
         """
         tell application "\(app)"
             set sep to character id 9
             set rows to ""
             repeat with w in windows
                 set b to bounds of w
-                set rows to rows & (mode of w as text) & sep & (item 1 of b as text) & sep & (item 2 of b as text) & sep & (item 3 of b as text) & sep & (item 4 of b as text) & sep & (URL of active tab of w) & linefeed
+                set rows to rows & (mode of w as text) & sep & (item 1 of b as text) & sep & (item 2 of b as text) & sep & (item 3 of b as text) & sep & (item 4 of b as text) & linefeed
             end repeat
             return rows
         end tell
         """
     }
 
-    public func permitsPixels(for context: WorkflowContext, capturedWindow: FocusedWindow?) -> Bool {
+    public func isPrivate(for context: WorkflowContext, capturedWindow: FocusedWindow?) -> Bool {
         guard let bundle = context.appBundleId,
               let script = Self.scripts[bundle],
-              let expectedURL = context.url, !expectedURL.isEmpty,
               let capturedWindow, capturedWindow.bundleId == bundle,
-              let rect = capturedWindow.axRect, rect.width > 0, rect.height > 0,
-              focusedWindow() == capturedWindow
+              let rect = capturedWindow.axRect, rect.width > 0, rect.height > 0
         else { return false }
-        if let cached = cache.listing(for: bundle, at: now(), ttl: Self.cacheTTL) {
-            if Self.isNormalWindow(.success(cached.rows), expectedURL: expectedURL, capturedRect: rect) {
-                return focusedWindow() == capturedWindow
-            }
-            guard now().timeIntervalSince(cached.taken) >= Self.refreshAfter else { return false }
+        if let cached = cache.listing(for: bundle, at: now(), ttl: Self.cacheTTL),
+           let verdict = Self.mode(of: rect, in: cached.rows) {
+            return verdict
         }
-        let result = runner.run(script, timeoutMs: Self.timeoutMs)
-        if case .success(let rows) = result { cache.store(rows, for: bundle, at: now()) }
-        guard focusedWindow() == capturedWindow else { return false }
-        return Self.isNormalWindow(result, expectedURL: expectedURL, capturedRect: rect)
+        guard case .success(let rows) = runner.run(script, target: bundle, timeoutMs: Self.timeoutMs) else {
+            return false
+        }
+        cache.store(rows, for: bundle, at: now())
+        return Self.mode(of: rect, in: rows) ?? false
     }
 
-    internal static func isNormalWindow(_ result: AppleScriptOutcome, expectedURL: String, capturedRect: CGRect) -> Bool {
-        guard case .success(let value) = result else { return false }
-        guard value.utf8.count <= 65_536,
-              let components = URLComponents(string: expectedURL),
-              ["http", "https"].contains(components.scheme?.lowercased() ?? ""),
-              components.host != nil,
-              !SensitiveCaptureDenylist(entries: []).urlIsDenied(expectedURL)
-        else { return false }
-        var matches: [(mode: String, url: String)] = []
-        for row in value.split(separator: "\n") {
+    /// Whether the window with bounds `capturedRect` is private according to
+    /// a listing: true when any window with those bounds is not "normal", false
+    /// when every one is "normal", nil when the listing holds none or cannot
+    /// be read.
+    internal static func mode(of capturedRect: CGRect, in listing: String) -> Bool? {
+        guard listing.utf8.count <= 65_536 else { return nil }
+        var matched = false
+        for row in listing.split(separator: "\n") {
             let fields = row.split(separator: "\t", omittingEmptySubsequences: false)
-            guard fields.count == 6,
+            guard fields.count == 5, !fields[0].isEmpty,
                   let left = Double(fields[1]), let top = Double(fields[2]),
                   let right = Double(fields[3]), let bottom = Double(fields[4]),
                   [left, top, right, bottom].allSatisfy(\.isFinite),
                   right > left, bottom > top
-            else { return false }
+            else { return nil }
             let bounds = CGRect(x: left, y: top, width: right - left, height: bottom - top)
-            if bounds == capturedRect { matches.append((String(fields[0]), String(fields[5]))) }
+            guard bounds == capturedRect else { continue }
+            if fields[0] != "normal" { return true }
+            matched = true
         }
-        return matches.count == 1 && matches[0].mode == "normal" && matches[0].url == expectedURL
+        return matched ? false : nil
     }
 }
 

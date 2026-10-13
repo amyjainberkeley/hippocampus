@@ -48,7 +48,7 @@ private func cascade(
     denyURLs: [String] = [],
     denyTitles: [String] = [],
     knownSafe: Set<String> = [],
-    rawPixelExcludedApps: Set<String> = []
+    browserApps: Set<String> = []
 ) -> SuppressionCascade {
     SuppressionCascade(
         secureEventInput: MockSecureEventInput(enabled: secureEventInput),
@@ -56,7 +56,8 @@ private func cascade(
         denylist: MockDenylist(apps: denyApps, urls: denyURLs, titles: denyTitles),
         blackedRegion: MockBlackedRegion(present: blackedRegion),
         knownSafeAppBundles: knownSafe,
-        rawPixelExcludedAppBundles: rawPixelExcludedApps
+        browserAppBundles: browserApps,
+        privateWindows: PrivateBrowserWindows()
     )
 }
 
@@ -88,23 +89,32 @@ final class CascadeDenylistTests: XCTestCase {
     }
 }
 
-// MARK: - Browser pixels stay outside ambient OCR
+// MARK: - Browsers are read like every other app (RULINGS G8)
 
-final class CascadeRawPixelExclusionTests: XCTestCase {
-    func testExcludedBrowserBundleSuppressesEvenWhenAllowlisted() {
+final class CascadeBrowserWindowTests: XCTestCase {
+    func testAllowlistedBrowserIsReadLikeAnyOtherApp() {
         let c = cascade(
             knownSafe: ["com.apple.Safari"],
-            rawPixelExcludedApps: BrowserPixelCapturePolicy.excludedBundleIds
+            browserApps: BrowserPixelCapturePolicy.browserBundleIds
         )
         let ctx = WorkflowContext(appBundleId: "com.apple.Safari")
 
-        XCTAssertEqual(c.decide(context: ctx), .suppress(reason: .failsafeUnknown))
+        XCTAssertEqual(c.decide(context: ctx), .allow)
+    }
+
+    func testBrowserStillMeetsEveryOtherGate() {
+        let c = cascade(
+            ax: nil,
+            knownSafe: ["com.apple.Safari"],
+            browserApps: BrowserPixelCapturePolicy.browserBundleIds
+        )
+        XCTAssertEqual(c.decide(context: WorkflowContext(appBundleId: "com.apple.Safari")), .suppress(reason: .failsafeUnknown))
     }
 
     func testNonBrowserAllowlistedBundleStillPassesPixelGate() {
         let c = cascade(
             knownSafe: ["com.apple.Terminal"],
-            rawPixelExcludedApps: BrowserPixelCapturePolicy.excludedBundleIds
+            browserApps: BrowserPixelCapturePolicy.browserBundleIds
         )
         let ctx = WorkflowContext(appBundleId: "com.apple.Terminal")
 

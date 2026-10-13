@@ -8,9 +8,10 @@ import ScreenCaptureKit
 /// visible windows the focused-window stream does not, and files each window's
 /// text under that window. See `BackgroundCapturePolicy` for attribution.
 ///
-/// Excluded apps (password managers, system authentication, browsers,
-/// notification banners, Hippocampus) are removed from the stream's pixels by
-/// the content filter. A display is read at most every `minimumReadInterval`,
+/// Excluded apps (password managers, system authentication, notification
+/// banners, Hippocampus) are removed from the stream's pixels by the content
+/// filter. Browsers are read, and a browser window that shows it is private is
+/// dropped after recognition. A display is read at most every `minimumReadInterval`,
 /// only when its text visibly changed, never while secure text entry is
 /// active, and not while the user is idle. No screenshot is kept.
 public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
@@ -242,8 +243,10 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
             pixelsPerPoint: bounds.width > 0 ? CGFloat(CVPixelBufferGetWidth(pixelBuffer)) / bounds.width : 1)
         let emitter = emitter
         let pixelsPerPoint = input.pixelsPerPoint
+        let pixelSize = CGSize(width: CVPixelBufferGetWidth(pixelBuffer), height: CVPixelBufferGetHeight(pixelBuffer))
         Task {
             await emitter.processBackground(tsUs: tsUs, input: input) { lines in
+                BackgroundCapturePolicy.rememberPrivateBrowserWindows(windows)
                 let groups = BackgroundCapturePolicy.attribute(
                     lines: lines, displayBounds: bounds, windows: windows,
                     excludedBundleIds: excluded, focusedWindowId: focused, denylist: denylist
@@ -252,12 +255,19 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
                 // Content-free: counts only.
                 OCRTrace.emit("background-attribute", "lines=\(lines.count) windows=\(groups.count) "
                     + "kept=\(groups.reduce(0) { $0 + $1.lines.count }) changed_windows=\(changed.count)")
-                return changed.map { group in
+                return changed.compactMap { group in
                     // The window in the display frame (global top-left points to
                     // the frame's normalized bottom-left space), which turns on roles.
                     let placed = BackgroundCapturePolicy.geometry(
                         of: group.window, displayBounds: bounds, pixelsPerPoint: pixelsPerPoint,
                         windows: windows, excludedBundleIds: excluded)
+                    // A private browser window, or one showing a site that is
+                    // never read, is dropped before anything is stored.
+                    if BackgroundCapturePolicy.skipsBrowserWindow(
+                        group.window, lines: group.lines, geometry: placed.geometry,
+                        pixelSize: pixelSize, denylist: denylist) {
+                        return nil
+                    }
                     return (WorkflowContext(appBundleId: group.window.bundleId, windowTitle: group.window.title,
                                             url: nil, pageText: nil),
                             group.lines, placed.geometry, placed.ownsSeparators)

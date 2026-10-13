@@ -50,8 +50,8 @@ import Foundation
 /// tri-state verdicts and cannot recover from a mid-poll throw.
 ///
 /// `askUser` is exposed for parity with the underlying Apple API but
-/// the monitor ALWAYS passes `false`. Prompting the user at 0.5 Hz is
-/// a UX disaster (mission constraint).
+/// the monitor ALWAYS passes `false`, and the default probe never
+/// forwards it: Hippocampus never shows an Automation prompt (RULINGS G8).
 public protocol AutomationProbe: Sendable {
     func status(forTargetBundle bundleId: String, askUser: Bool) -> TCCStatus
 }
@@ -79,7 +79,7 @@ public protocol AutomationProbe: Sendable {
 public struct DefaultAutomationProbe: AutomationProbe {
     public init() {}
 
-    public func status(forTargetBundle bundleId: String, askUser: Bool) -> TCCStatus {
+    public func status(forTargetBundle bundleId: String, askUser _: Bool) -> TCCStatus {
         #if canImport(AppKit)
             // UNVERIFIED — needs live macOS; do not claim working.
             //
@@ -99,7 +99,7 @@ public struct DefaultAutomationProbe: AutomationProbe {
                 aeDescPtr,
                 AEEventClass(kAEMiscStandards),
                 AEEventID(kAEActivate),
-                askUser
+                false
             )
             switch status {
             case noErr:

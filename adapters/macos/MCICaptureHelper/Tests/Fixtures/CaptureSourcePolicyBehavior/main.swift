@@ -155,12 +155,27 @@ struct CaptureSourcePolicyBehavior {
             denylist: NoDenylist(),
             blackedRegion: NoBlackRegion(),
             knownSafeAppBundles: ["com.apple.Safari", "com.apple.Terminal"],
-            rawPixelExcludedAppBundles: BrowserPixelCapturePolicy.excludedBundleIds
+            browserAppBundles: BrowserPixelCapturePolicy.browserBundleIds
         )
 
+        // Browsers are read like every other app; a window that shows it is
+        // private is not (RULINGS G8).
         precondition(
             cascade.decide(context: WorkflowContext(appBundleId: "com.apple.Safari"))
-                == .suppress(reason: .failsafeUnknown)
+                == .allow
+        )
+        let sensitive = SuppressionCascade(
+            secureEventInput: SecureInput(),
+            axSecureSubrole: NonSecureAX(),
+            denylist: SensitiveCaptureDenylist(entries: []),
+            blackedRegion: NoBlackRegion(),
+            browserAppBundles: BrowserPixelCapturePolicy.browserBundleIds,
+            admissionPolicy: .ordinaryApplications
+        )
+        precondition(
+            sensitive.decide(context: WorkflowContext(appBundleId: "com.apple.Safari",
+                                                      windowTitle: "Release notes — Private Browsing"))
+                == .suppress(reason: .denylistSource)
         )
         precondition(
             cascade.decide(context: WorkflowContext(appBundleId: "com.apple.Terminal"))

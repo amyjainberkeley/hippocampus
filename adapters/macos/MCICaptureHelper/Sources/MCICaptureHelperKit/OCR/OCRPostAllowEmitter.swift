@@ -685,6 +685,35 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
             )
             return
         }
+        let pixelSize = pixelBuffer.map {
+            CGSize(width: CVPixelBufferGetWidth($0), height: CVPixelBufferGetHeight($0))
+        } ?? OCRMemoryText.defaultPixelSize
+        // RULINGS G8: a browser window whose top bar shows that it is private,
+        // or shows a site that is never read, is skipped before anything is
+        // stored, and a focused window once seen private stays skipped. A
+        // background window is dropped without a tombstone: the menu's skip
+        // speaks for the focused window only.
+        if let geometry {
+            let windowId = background ? nil : evidenceCandidate.map { CGWindowID($0.focusedWindowId) }
+            let finding = cascade.browserTopBarFinding(
+                lines: result.recognizedLines, context: context,
+                window: geometry.rect, pixelSize: pixelSize, pixelsPerPoint: geometry.pixelsPerPoint)
+            if let windowId, finding == .privateWindow { cascade.privateWindows.remember(windowId) }
+            let remembered = windowId.map { BrowserPixelCapturePolicy.isBrowser(context.appBundleId)
+                && cascade.privateWindows.contains($0) } ?? false
+            if finding != nil || remembered {
+                // Content-free: the finding's kind only.
+                OCRTrace.emit("ocr-post-allow-result",
+                              "decision=browser_top_bar finding=\(finding == .deniedSite ? "site" : "private")")
+                if !background {
+                    await emitTombstone(
+                        tsUs: tsUs, context: context, reason: .denylistSource,
+                        sink: sink, sequence: sequence, counters: counters
+                    )
+                }
+                return
+            }
+        }
         let decision = cascade.decideOcr(text: text, context: context)
         // PR #226 §5.1 (2) — MCI_OCR_TRACE=1 trace at the post-allow
         // OCR completion. Logs cascade-twice §6 decision + OCR text LENGTH
@@ -723,9 +752,6 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                 )
                 return
             }
-            let pixelSize = pixelBuffer.map {
-                CGSize(width: CVPixelBufferGetWidth($0), height: CVPixelBufferGetHeight($0))
-            } ?? OCRMemoryText.defaultPixelSize
             // The page in reading order, without roles: what was stored before
             // roles existed.
             let readingOrderText = OCRMemoryText.make(from: result.recognizedLines, pixelSize: pixelSize)

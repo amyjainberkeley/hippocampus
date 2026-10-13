@@ -2,44 +2,46 @@ import Foundation
 import XCTest
 @testable import MCICaptureHelperKit
 
+/// The Automation probe (RULINGS G8): it runs only when the person already
+/// allowed it, and its answer can only add a skip.
 final class BrowserWindowPrivacyTests: XCTestCase {
     private let rect = CGRect(x: 0, y: 25, width: 1200, height: 775)
-    private let url = "https://example.org/page"
     private var captured: FocusedWindow {
         FocusedWindow(bundleId: "com.google.Chrome", windowId: 42, axRect: rect)
     }
-    private func allows(_ output: String) -> Bool {
-        BrowserWindowPrivacyProbe.isNormalWindow(.success(output), expectedURL: url, capturedRect: rect)
+    private let context = WorkflowContext(appBundleId: "com.google.Chrome")
+
+    func testAnIncognitoWindowWithTheCapturedBoundsIsPrivate() {
+        XCTAssertEqual(BrowserWindowPrivacyProbe.mode(of: rect, in: "incognito\t0\t25\t1200\t800\n"), true)
+        XCTAssertEqual(BrowserWindowPrivacyProbe.mode(of: rect, in: "normal\t0\t25\t1200\t800\n"), false)
+        XCTAssertNil(BrowserWindowPrivacyProbe.mode(of: rect, in: "incognito\t10\t25\t1210\t800\n"),
+                     "a listing without the captured window says nothing about it")
     }
-    func testNormalModeRequiresUniqueCapturedBoundsAndExactURL() {
-        XCTAssertTrue(allows("normal\t0\t25\t1200\t800\t\(url)\n"))
-        XCTAssertFalse(allows("normal\t0\t25\t1200\t800\thttps://example.org/other\n"))
-        XCTAssertFalse(allows("normal\t10\t25\t1210\t800\t\(url)\n"))
+
+    func testAnyIncognitoWindowSharingTheBoundsMakesItPrivate() {
+        let normal = "normal\t0\t25\t1200\t800\n"
+        let incognito = "incognito\t0\t25\t1200\t800\n"
+        XCTAssertEqual(BrowserWindowPrivacyProbe.mode(of: rect, in: normal + incognito), true)
+        XCTAssertEqual(BrowserWindowPrivacyProbe.mode(of: rect, in: incognito + normal), true)
+        XCTAssertEqual(BrowserWindowPrivacyProbe.mode(of: rect, in: normal + normal), false)
     }
-    func testNormalFrontWindowCannotAuthorizePrivateCapturedWindow() {
-        let normal = "normal\t100\t100\t1300\t875\t\(url)\n"
-        let privateWindow = "incognito\t0\t25\t1200\t800\t\(url)\n"
-        XCTAssertFalse(allows(normal + privateWindow))
-        XCTAssertFalse(allows(privateWindow + normal))
-    }
-    func testOverlappingWindowBoundsAreAmbiguousEvenIfBothNormal() {
-        let normal = "normal\t0\t25\t1200\t800\t\(url)\n"
-        XCTAssertFalse(allows(normal + normal))
-        XCTAssertFalse(allows(normal + "incognito\t0\t25\t1200\t800\t\(url)\n"))
-    }
-    func testMalformedMissingUnknownAndSensitiveWindowsNeverPermitPixels() {
-        for output in ["", "normal", "\t0\t25\t1200\t800\t\(url)",
-                       "normal\t0\t25\t1200\t800\t\(url)\textra", "normal\tNaN\t25\t1200\t800\t\(url)",
-                       "normal\t0\t25\t1200\t800\t"] {
-            XCTAssertFalse(allows(output))
+
+    func testAMalformedListingNeverClaimsAnything() {
+        for listing in ["", "normal", "\t0\t25\t1200\t800", "normal\t0\t25\t1200\t800\textra",
+                        "normal\tNaN\t25\t1200\t800", "incognito\t0\t25\t1200"] {
+            XCTAssertNil(BrowserWindowPrivacyProbe.mode(of: rect, in: listing), listing)
         }
-        for result in [AppleScriptOutcome.timeout, .scriptError] {
-            XCTAssertFalse(BrowserWindowPrivacyProbe.isNormalWindow(result, expectedURL: url, capturedRect: rect))
-        }
-        XCTAssertFalse(BrowserWindowPrivacyProbe.isNormalWindow(
-            .success("normal\t0\t25\t1200\t800\thttps://secure.chase.com/"),
-            expectedURL: "https://secure.chase.com/", capturedRect: rect))
     }
+
+    func testNoAnswerFromTheBrowserIsNotPrivate() {
+        for outcome in [AppleScriptOutcome.timeout, .scriptError, .success("garbage")] {
+            let probe = BrowserWindowPrivacyProbe(runner: Fixed(outcome))
+            XCTAssertFalse(probe.isPrivate(for: context, capturedWindow: captured))
+        }
+        XCTAssertTrue(BrowserWindowPrivacyProbe(runner: Fixed(.success("incognito\t0\t25\t1200\t800\n")))
+            .isPrivate(for: context, capturedWindow: captured))
+    }
+
     func testMissingOrMismatchedCaptureIdentityNeverRunsScript() {
         struct ForbiddenRunner: AppleScriptRunner {
             func run(_ source: String, timeoutMs: Int) -> AppleScriptOutcome {
@@ -47,53 +49,90 @@ final class BrowserWindowPrivacyTests: XCTestCase {
                 return .scriptError
             }
         }
-        let probe = BrowserWindowPrivacyProbe(runner: ForbiddenRunner(), focusedWindow: { nil })
-        let context = WorkflowContext(appBundleId: "com.google.Chrome", url: url)
-        XCTAssertFalse(probe.permitsPixels(for: context, capturedWindow: nil))
-        XCTAssertFalse(probe.permitsPixels(for: context, capturedWindow: captured))
+        let probe = BrowserWindowPrivacyProbe(runner: ForbiddenRunner())
+        XCTAssertFalse(probe.isPrivate(for: context, capturedWindow: nil))
+        XCTAssertFalse(probe.isPrivate(for: context, capturedWindow: FocusedWindow(bundleId: "com.google.Chrome", windowId: 42)))
+        XCTAssertFalse(probe.isPrivate(for: WorkflowContext(appBundleId: "com.apple.Safari"),
+                                       capturedWindow: FocusedWindow(bundleId: "com.apple.Safari", windowId: 1, axRect: rect)))
     }
-    func testFocusChangeDuringQueryRejectsSameBrowserSameURL() {
-        final class Focus: @unchecked Sendable {
-            private let lock = NSLock()
-            private var value: FocusedWindow
-            init(_ value: FocusedWindow) { self.value = value }
-            func read() -> FocusedWindow { lock.lock(); defer { lock.unlock() }; return value }
-            func change(_ value: FocusedWindow) { lock.lock(); defer { lock.unlock() }; self.value = value }
+
+    func testTheListingIsAskedOfTheBrowserItTalksTo() {
+        for bundle in BrowserWindowPrivacyProbe.scripts.keys {
+            let runner = Listing(["normal\t0\t25\t1200\t800\n"])
+            let window = FocusedWindow(bundleId: bundle, windowId: 42, axRect: rect)
+            _ = BrowserWindowPrivacyProbe(runner: runner).isPrivate(for: WorkflowContext(appBundleId: bundle), capturedWindow: window)
+            XCTAssertEqual(runner.targets, [bundle])
         }
-        struct Runner: AppleScriptRunner {
-            let focus: Focus
-            let output: String
-            func run(_ source: String, timeoutMs: Int) -> AppleScriptOutcome {
-                focus.change(FocusedWindow(bundleId: "com.google.Chrome", windowId: 99,
-                                           axRect: CGRect(x: 0, y: 25, width: 1200, height: 775)))
-                return .success(output)
-            }
-        }
-        let focus = Focus(captured)
-        let probe = BrowserWindowPrivacyProbe(
-            runner: Runner(focus: focus, output: "normal\t0\t25\t1200\t800\t\(url)\n"),
-            focusedWindow: { focus.read() })
-        XCTAssertFalse(probe.permitsPixels(for: WorkflowContext(appBundleId: "com.google.Chrome", url: url), capturedWindow: captured))
     }
-    func testListingScriptsUseARealTabSeparator() {
+
+    func testListingScriptsUseARealTabSeparatorAndNeverReadAddresses() {
         // Inside `tell application "Google Chrome"`, `tab` is the browser's
-        // tab class and coerces to the text "tab": every row failed to parse
-        // and every Chrome frame was refused.
+        // tab class and coerces to the text "tab": every row failed to parse.
         for (bundle, script) in BrowserWindowPrivacyProbe.scripts {
             XCTAssertFalse(script.contains("& tab &"), bundle)
             XCTAssertTrue(script.contains("character id 9"), bundle)
+            XCTAssertFalse(script.contains("URL"), bundle)
         }
+    }
+
+    func testAFreshListingIsReusedForAWindowItHolds() {
+        let runner = Listing(["normal\t0\t25\t1200\t800\n"])
+        let clock = Clock()
+        let window = captured
+        let probe = BrowserWindowPrivacyProbe(runner: runner, now: { clock.read() })
+        XCTAssertFalse(probe.isPrivate(for: context, capturedWindow: window))
+        clock.advance(0.5)
+        XCTAssertFalse(probe.isPrivate(for: context, capturedWindow: window))
+        XCTAssertEqual(runner.runs, 1)
+        clock.advance(0.6)
+        XCTAssertFalse(probe.isPrivate(for: context, capturedWindow: window))
+        XCTAssertEqual(runner.runs, 2, "an expired listing is taken again")
+    }
+
+    func testAWindowTheCachedListingHasNotSeenIsLookedUpAfresh() {
+        let newRect = CGRect(x: 300, y: 125, width: 900, height: 675)
+        let newWindow = FocusedWindow(bundleId: "com.google.Chrome", windowId: 77, axRect: newRect)
+        let before = "normal\t0\t25\t1200\t800\n"
+        let after = before + "incognito\t300\t125\t1200\t800\n"
+        let runner = Listing([before, after])
+        let probe = BrowserWindowPrivacyProbe(runner: runner, now: { Date(timeIntervalSince1970: 1_000) })
+        XCTAssertFalse(probe.isPrivate(for: context, capturedWindow: captured))
+        // A private window opens: the cached listing does not hold it.
+        XCTAssertTrue(probe.isPrivate(for: context, capturedWindow: newWindow))
+        XCTAssertEqual(runner.runs, 2)
+    }
+
+    func testEveryBrowserVariantIsReadAndOnlyChromiumOnesAreAsked() {
+        for bundle in ["org.mozilla.firefoxdeveloperedition", "org.mozilla.nightly", "com.apple.SafariTechnologyPreview",
+                       "com.apple.Safari", "company.thebrowser.Browser"] {
+            XCTAssertTrue(BrowserPixelCapturePolicy.browserBundleIds.contains(bundle))
+            XCTAssertNil(BrowserWindowPrivacyProbe.scripts[bundle])
+        }
+    }
+
+    // MARK: - Fixtures
+
+    private struct Fixed: AppleScriptRunner {
+        let outcome: AppleScriptOutcome
+        init(_ outcome: AppleScriptOutcome) { self.outcome = outcome }
+        func run(_ source: String, timeoutMs: Int) -> AppleScriptOutcome { outcome }
     }
 
     private final class Listing: AppleScriptRunner, @unchecked Sendable {
         private let lock = NSLock()
         private var outputs: [String]
         private(set) var runs = 0
+        private(set) var targets: [String] = []
         init(_ outputs: [String]) { self.outputs = outputs }
         func run(_ source: String, timeoutMs: Int) -> AppleScriptOutcome {
+            XCTFail("the probe names the browser it asks")
+            return .scriptError
+        }
+        func run(_ source: String, target: String, timeoutMs: Int) -> AppleScriptOutcome {
             lock.lock(); defer { lock.unlock() }
             XCTAssertEqual(timeoutMs, BrowserWindowPrivacyProbe.timeoutMs)
             runs += 1
+            targets.append(target)
             return .success(outputs.count > 1 ? outputs.removeFirst() : outputs[0])
         }
     }
@@ -103,51 +142,5 @@ final class BrowserWindowPrivacyTests: XCTestCase {
         private var value = Date(timeIntervalSince1970: 1_000)
         func read() -> Date { lock.lock(); defer { lock.unlock() }; return value }
         func advance(_ seconds: TimeInterval) { lock.lock(); value += seconds; lock.unlock() }
-    }
-
-    func testFreshListingIsReusedWithoutAnotherQuery() {
-        let runner = Listing(["normal\t0\t25\t1200\t800\t\(url)\n"])
-        let clock = Clock()
-        let window = captured
-        let probe = BrowserWindowPrivacyProbe(runner: runner, focusedWindow: { window }, now: { clock.read() })
-        let context = WorkflowContext(appBundleId: "com.google.Chrome", url: url)
-        XCTAssertTrue(probe.permitsPixels(for: context, capturedWindow: window))
-        clock.advance(0.5)
-        XCTAssertTrue(probe.permitsPixels(for: context, capturedWindow: window))
-        XCTAssertEqual(runner.runs, 1)
-        clock.advance(0.6)
-        XCTAssertTrue(probe.permitsPixels(for: context, capturedWindow: window))
-        XCTAssertEqual(runner.runs, 2, "an expired listing is taken again")
-    }
-
-    func testCachedListingNeverAuthorizesAWindowItHasNotSeen() {
-        let newRect = CGRect(x: 300, y: 125, width: 900, height: 675)
-        let newWindow = FocusedWindow(bundleId: "com.google.Chrome", windowId: 77, axRect: newRect)
-        let before = "normal\t0\t25\t1200\t800\t\(url)\n"
-        let after = before + "incognito\t300\t125\t1200\t800\t\(url)\n"
-        let runner = Listing([before, after])
-        let clock = Clock()
-        final class Focus: @unchecked Sendable {
-            var window: FocusedWindow?
-        }
-        let focus = Focus()
-        focus.window = captured
-        let probe = BrowserWindowPrivacyProbe(runner: runner, focusedWindow: { focus.window }, now: { clock.read() })
-        let context = WorkflowContext(appBundleId: "com.google.Chrome", url: url)
-        XCTAssertTrue(probe.permitsPixels(for: context, capturedWindow: captured))
-        // A private window opens: the cached listing does not contain it.
-        focus.window = newWindow
-        XCTAssertFalse(probe.permitsPixels(for: context, capturedWindow: newWindow))
-        XCTAssertEqual(runner.runs, 1, "a denial from a very fresh listing is not retried")
-        clock.advance(0.3)
-        XCTAssertFalse(probe.permitsPixels(for: context, capturedWindow: newWindow))
-        XCTAssertEqual(runner.runs, 2, "a stale denial is retried, and the private window is still refused")
-    }
-
-    func testUnsupportedBrowserVariantsStayExcluded() {
-        for bundle in ["org.mozilla.firefoxdeveloperedition", "org.mozilla.nightly", "com.apple.SafariTechnologyPreview"] {
-            XCTAssertTrue(BrowserPixelCapturePolicy.excludedBundleIds.contains(bundle))
-            XCTAssertNil(BrowserWindowPrivacyProbe.scripts[bundle])
-        }
     }
 }

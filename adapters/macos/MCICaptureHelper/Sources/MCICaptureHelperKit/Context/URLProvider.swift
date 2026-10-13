@@ -34,9 +34,9 @@ import Foundation
 ///   document, unsupported bundle id, AppleScript timeout, AppleScript
 ///   syntax/runtime error — every one of these resolves to `nil`.
 ///   Impls do not throw, do not log noisily, do not retry within the
-///   same call. ADR-0015 §4 invariant 4 ("no auto-grant Apple Events"):
-///   the OS dialog firing on first call IS the consent UX; denial
-///   → `nil`-forever (cache the denial within a session).
+///   same call. No Automation prompt (RULINGS G8): a script runs only
+///   when the person already allowed it (`AutomationConsent`);
+///   otherwise → `nil`.
 /// - **MUST be `Sendable`.** Phase 2 polling runs on a detached
 ///   background `Task`; the snapshot actor receives the produced
 ///   value across an isolation boundary.

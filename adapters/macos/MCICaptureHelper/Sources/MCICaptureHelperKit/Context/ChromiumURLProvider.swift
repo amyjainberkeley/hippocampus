@@ -22,13 +22,12 @@
 //      is ADR-0015 §6 P2.5, not this PR).
 //   2. cascade-before-storage — vacuous this PR (no cascade wiring;
 //      provider ships in isolation per ADR-0015 §6).
-//   3. no auto-grant Apple Events — NO `tccutil` call, NO programmatic
-//      permission API. The OS Automation-pane dialog firing on the
-//      first `NSAppleScript` execution per (helper → browser) pair IS
-//      the consent UX. Each browser bundle id is its own consent
-//      dialog. Denial → `nil`; no retry-storm (single invocation per
-//      cache window). Safari granted + Chrome denied → Safari works,
-//      Chrome returns `nil` cleanly (per-browser graceful failure).
+//   3. no Automation prompt (RULINGS G8) — NO `tccutil` call. Each
+//      browser's script runs only when the person already allowed it
+//      for that browser (`AutomationConsent`, never asking); otherwise
+//      → `nil`; no retry-storm (single invocation per cache window).
+//      Safari allowed + Chrome not → Safari works, Chrome returns `nil`
+//      cleanly (per-browser graceful failure).
 //   4. real `appBundleId` in tombstone — vacuous this PR (cascade
 //      wiring at P2.5).
 //
@@ -175,7 +174,7 @@ public final class ChromiumURLProvider: URLProvider, @unchecked Sendable {
         }
         lock.unlock()
 
-        let outcome = runner.run(source, timeoutMs: Self.timeoutMs)
+        let outcome = runner.run(source, target: bundleId, timeoutMs: Self.timeoutMs)
         let resolved: String?
         switch outcome {
         case .success(let url):

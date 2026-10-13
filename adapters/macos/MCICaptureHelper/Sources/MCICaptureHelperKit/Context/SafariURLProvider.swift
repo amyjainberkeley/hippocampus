@@ -14,11 +14,11 @@
 //      wiring is ADR-0015 §6 P2.5, not this PR).
 //   2. cascade-before-storage — vacuous this PR (no cascade wiring;
 //      provider ships in isolation per ADR-0015 §6).
-//   3. no auto-grant Apple Events — NO `tccutil` call, NO programmatic
-//      permission API, NO "click here to grant" UX. The OS Automation-
-//      pane dialog firing on the first `NSAppleScript` execution IS
-//      the consent UX. User mediation only. Denial → return `nil`;
-//      no retry-storm (single invocation per cache window).
+//   3. no Automation prompt (RULINGS G8) — NO `tccutil` call, NO
+//      "click here to grant" UX. The script runs only when macOS says
+//      the person already allowed it (`AutomationConsent`, asked with
+//      `askUserIfNeeded: false`); otherwise → `nil`. No retry-storm
+//      (single invocation per cache window).
 //   4. real `appBundleId` in tombstone — vacuous this PR (cascade
 //      wiring at P2.5).
 //
@@ -79,6 +79,18 @@ internal protocol AppleScriptRunner: Sendable {
     /// respect `timeoutMs` (return `.timeout` rather than blocking
     /// the caller indefinitely).
     func run(_ source: String, timeoutMs: Int) -> AppleScriptOutcome
+
+    /// Execute `source`, which talks to the app `target` (a bundle id).
+    /// Production runs it only when the person already allowed this
+    /// process to control `target` (RULINGS G8: never an Automation
+    /// prompt). Test stubs answer through `run(_:timeoutMs:)`.
+    func run(_ source: String, target: String, timeoutMs: Int) -> AppleScriptOutcome
+}
+
+extension AppleScriptRunner {
+    func run(_ source: String, target: String, timeoutMs: Int) -> AppleScriptOutcome {
+        run(source, timeoutMs: timeoutMs)
+    }
 }
 
 /// Production runner. Executes `NSAppleScript` on a private serial
@@ -86,8 +98,44 @@ internal protocol AppleScriptRunner: Sendable {
 /// by `timeoutMs`. If the semaphore times out, the in-flight
 /// AppleScript continues on the dispatch queue and its result is
 /// dropped — the caller has already returned `.timeout`.
+///
+/// A script runs only for a named target that macOS says this process
+/// may already control (`AutomationConsent`), asked inside the same
+/// bounded job, so no script can raise an Automation prompt. Without a
+/// target nothing is sent.
 internal struct RealAppleScriptRunner: AppleScriptRunner {
-    private static let executor = BoundedAppleScriptExecutor { source in
+    private static let executor = BoundedAppleScriptExecutor(execute: executeScript)
+
+    private let isAlreadyGranted: @Sendable (String) -> Bool
+    private let execute: @Sendable (String) -> AppleScriptOutcome
+
+    init() {
+        self.init(isAlreadyGranted: AutomationConsent.isAlreadyGranted, execute: Self.executeScript)
+    }
+
+    /// Test seam: the consent answer and the script execution.
+    init(
+        isAlreadyGranted: @escaping @Sendable (String) -> Bool,
+        execute: @escaping @Sendable (String) -> AppleScriptOutcome
+    ) {
+        self.isAlreadyGranted = isAlreadyGranted
+        self.execute = execute
+    }
+
+    /// Without a target there is no way to know whether macOS would ask
+    /// the person, so nothing is sent.
+    func run(_ source: String, timeoutMs: Int) -> AppleScriptOutcome {
+        .scriptError
+    }
+
+    func run(_ source: String, target: String, timeoutMs: Int) -> AppleScriptOutcome {
+        let isAlreadyGranted = isAlreadyGranted, execute = execute
+        return Self.executor.run(timeoutMs: timeoutMs) {
+            isAlreadyGranted(target) ? execute(source) : .scriptError
+        }
+    }
+
+    static func executeScript(_ source: String) -> AppleScriptOutcome {
         if let script = NSAppleScript(source: source) {
             var errInfo: NSDictionary?
             let desc = script.executeAndReturnError(&errInfo)
@@ -102,12 +150,6 @@ internal struct RealAppleScriptRunner: AppleScriptRunner {
             return .scriptError
         }
     }
-
-    init() {}
-
-    func run(_ source: String, timeoutMs: Int) -> AppleScriptOutcome {
-        Self.executor.run(source, timeoutMs: timeoutMs)
-    }
 }
 
 internal final class BoundedAppleScriptExecutor: @unchecked Sendable {
@@ -120,20 +162,27 @@ internal final class BoundedAppleScriptExecutor: @unchecked Sendable {
     }
 
     func run(_ source: String, timeoutMs: Int) -> AppleScriptOutcome {
+        let execute = execute
+        return run(timeoutMs: timeoutMs) { execute(source) }
+    }
+
+    /// Runs `job` as the only job in flight, within `timeoutMs` including
+    /// the wait for the slot.
+    func run(timeoutMs: Int, _ job: @escaping @Sendable () -> AppleScriptOutcome) -> AppleScriptOutcome {
         guard timeoutMs > 0 else { return .timeout }
         let deadline = DispatchTime.now() + .milliseconds(timeoutMs)
-        // A permission dialog can outlive the caller. Keep its OS request as
-        // the only pending job, and include contention in each caller's budget.
+        // A slow app can outlive the caller. Keep its OS request as the only
+        // pending job, and include contention in each caller's budget.
         guard slot.wait(timeout: deadline) == .success else { return .timeout }
         let sem = DispatchSemaphore(value: 0)
         let box = OutcomeBox()
-        queue.async { [execute, slot] in
+        queue.async { [slot] in
             defer { slot.signal(); sem.signal() }
             guard DispatchTime.now() < deadline else {
                 box.set(.timeout)
                 return
             }
-            box.set(execute(source))
+            box.set(job())
         }
         let wait = sem.wait(timeout: deadline)
         if wait == .timedOut { return .timeout }
@@ -228,7 +277,7 @@ public final class SafariURLProvider: URLProvider, @unchecked Sendable {
         }
         lock.unlock()
 
-        let outcome = runner.run(Self.script, timeoutMs: Self.timeoutMs)
+        let outcome = runner.run(Self.script, target: Self.bundleId, timeoutMs: Self.timeoutMs)
         let resolved: String?
         switch outcome {
         case .success(let url):

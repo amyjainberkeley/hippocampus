@@ -25,10 +25,10 @@
 //      wiring is ADR-0015 §6 P2.5, not this PR).
 //   2. cascade-before-storage — vacuous this PR (no cascade wiring;
 //      provider ships in isolation per ADR-0015 §6).
-//   3. no auto-grant Apple Events — NO `tccutil` call, NO programmatic
-//      permission API. The OS Automation-pane dialog firing on the
-//      first `NSAppleScript` execution per (helper → Firefox) pair
-//      IS the consent UX. Denial → `nil`; no retry-storm.
+//   3. no Automation prompt (RULINGS G8) — NO `tccutil` call. The
+//      script runs only when the person already allowed it for
+//      Firefox (`AutomationConsent`, never asking); otherwise → `nil`.
+//      No retry-storm.
 //   4. real `appBundleId` in tombstone — vacuous this PR (cascade
 //      wiring at P2.5).
 //
@@ -74,6 +74,10 @@ public final class FirefoxURLProvider: URLProvider, @unchecked Sendable {
     /// access — see DESIGN.md §16 R2 / ADR-0015 §1.3).
     internal static let script: String =
         "tell application \"Firefox\" to get URL of front window"
+
+    /// The app the script talks to: "Firefox" is the release build, whichever
+    /// Firefox is in front, so that is the app whose consent counts.
+    internal static let scriptTarget: String = "org.mozilla.firefox"
 
     /// Cache TTL. V2-P2 dropped from 1.0 s → 100 ms (memo §3).
     internal static let cacheTTL: TimeInterval = 0.100
@@ -132,7 +136,7 @@ public final class FirefoxURLProvider: URLProvider, @unchecked Sendable {
         }
         lock.unlock()
 
-        let outcome = runner.run(Self.script, timeoutMs: Self.timeoutMs)
+        let outcome = runner.run(Self.script, target: Self.scriptTarget, timeoutMs: Self.timeoutMs)
         let resolved: String?
         switch outcome {
         case .success(let url):

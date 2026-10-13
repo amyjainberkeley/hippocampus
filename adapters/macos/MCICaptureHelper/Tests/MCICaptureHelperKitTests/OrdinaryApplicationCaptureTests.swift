@@ -17,8 +17,9 @@ final class OrdinaryApplicationCaptureTests: XCTestCase {
         SuppressionCascade(
             secureEventInput: Secure(enabled: secure), axSecureSubrole: AX(secure: ax),
             denylist: SensitiveCaptureDenylist(entries: []), blackedRegion: Blacked(),
-            rawPixelExcludedAppBundles: BrowserPixelCapturePolicy.excludedBundleIds,
-            admissionPolicy: .ordinaryApplications
+            browserAppBundles: BrowserPixelCapturePolicy.browserBundleIds,
+            admissionPolicy: .ordinaryApplications,
+            privateWindows: PrivateBrowserWindows()
         )
     }
     func testOrdinaryIdentifiableAppsCaptureWithoutCatalogueEntry() {
@@ -51,8 +52,10 @@ final class OrdinaryApplicationCaptureTests: XCTestCase {
             XCTAssertTrue(denylist.appIsDenied(bundleId: bundle.uppercased()))
         }
     }
-    func testBrowserRemainsExcludedWithoutPositiveNormalWindowEvidence() {
-        XCTAssertEqual(cascade().decide(context: WorkflowContext(appBundleId: "com.google.Chrome")), .suppress(reason: .failsafeUnknown))
+    func testABrowserWindowNotKnownToBePrivateIsRead() {
+        XCTAssertEqual(cascade().decide(context: WorkflowContext(appBundleId: "com.google.Chrome")), .allow)
+        XCTAssertEqual(cascade().decide(context: WorkflowContext(appBundleId: "com.google.Chrome", windowTitle: "New Incognito Tab")),
+                       .suppress(reason: .denylistSource))
     }
 
     func testMemorySurfacesDoNotRecaptureTheirOwnEvidence() {

@@ -355,7 +355,7 @@ let cascade = SuppressionCascade(
     denylist: SensitiveCaptureDenylist(entries: denylistEntries),
     blackedRegion: blackedRegionProbe,
     knownSafeAppBundles: cascadeEligibleBundles,
-    rawPixelExcludedAppBundles: BrowserPixelCapturePolicy.excludedBundleIds,
+    browserAppBundles: BrowserPixelCapturePolicy.browserBundleIds,
     admissionPolicy: .ordinaryApplications,
     browserWindowPrivacy: BrowserWindowPrivacyProbe()
 )

@@ -23,6 +23,7 @@
 // `PrivacyTombstone(reason=ocrTimeSecret)` and never reach the wire
 // as an `OCREvent`.
 
+import CoreGraphics
 import Foundation
 
 /// What the cascade decided about a candidate event.
@@ -87,9 +88,12 @@ public struct SuppressionCascade: Sendable {
     private let blackedRegion: any BlackedRegionProbe
     private let denylistDrift: any DenylistDriftProbe
     private let knownSafeAppBundles: Set<String>
-    private let rawPixelExcludedAppBundles: Set<String>
+    private let browserAppBundles: Set<String>
     private let admissionPolicy: CaptureAdmissionPolicy
     private let browserWindowPrivacy: (any BrowserWindowPrivacyChecking)?
+    /// Browser windows seen private, so they stay skipped once their marker
+    /// is hidden or gone (a new tab's title, a covered top bar).
+    let privateWindows: PrivateBrowserWindows
 
     /// Construct a cascade orchestrator.
     ///
@@ -105,6 +109,10 @@ public struct SuppressionCascade: Sendable {
     /// behavior; the live adapter supplies a real implementation on a
     /// real machine (Track B). The §5 *decision* is locked + tested
     /// here regardless (Track A).
+    ///
+    /// `browserAppBundles` are read like every other app (RULINGS G8);
+    /// `browserWindowPrivacy` can only add a skip, for a window the
+    /// browser itself reports as private.
     public init(
         secureEventInput: any SecureEventInputProbe,
         axSecureSubrole: any AXSecureSubroleProbe,
@@ -112,9 +120,10 @@ public struct SuppressionCascade: Sendable {
         blackedRegion: any BlackedRegionProbe,
         denylistDrift: any DenylistDriftProbe = NoDenylistDrift(),
         knownSafeAppBundles: Set<String> = [],
-        rawPixelExcludedAppBundles: Set<String> = [],
+        browserAppBundles: Set<String> = [],
         admissionPolicy: CaptureAdmissionPolicy = .approvedApplications,
-        browserWindowPrivacy: (any BrowserWindowPrivacyChecking)? = nil
+        browserWindowPrivacy: (any BrowserWindowPrivacyChecking)? = nil,
+        privateWindows: PrivateBrowserWindows = .shared
     ) {
         self.secureEventInput = secureEventInput
         self.axSecureSubrole = axSecureSubrole
@@ -122,9 +131,10 @@ public struct SuppressionCascade: Sendable {
         self.blackedRegion = blackedRegion
         self.denylistDrift = denylistDrift
         self.knownSafeAppBundles = knownSafeAppBundles
-        self.rawPixelExcludedAppBundles = rawPixelExcludedAppBundles
+        self.browserAppBundles = browserAppBundles
         self.admissionPolicy = admissionPolicy
         self.browserWindowPrivacy = browserWindowPrivacy
+        self.privateWindows = privateWindows
     }
 
     /// Apply the ADR-0013 cascade in binding order. First match wins.
@@ -199,16 +209,24 @@ public struct SuppressionCascade: Sendable {
             return .suppress(reason: .denylistSource)
         }
         if let title = context.windowTitle, denylist.windowTitleIsDenied(title) {
+            if let window = capturedWindow, browserAppBundles.contains(window.bundleId),
+               BrowserPixelCapturePolicy.titleMarksPrivateWindow(title) {
+                privateWindows.remember(window.windowId)
+            }
             return .suppress(reason: .denylistSource)
         }
 
-        // Browser pixels need a positive normal-window classification in
-        // addition to the ordinary capture checks. Unknown stays excluded.
-        if let bundle = context.appBundleId,
-           rawPixelExcludedAppBundles.contains(bundle),
-           browserWindowPrivacy?.permitsPixels(for: context, capturedWindow: capturedWindow) != true
-        {
-            return .suppress(reason: .failsafeUnknown)
+        // Browsers are read like every other app (RULINGS G8). A window the
+        // browser reports as private is never read; the probe asks only when
+        // the person already allowed it, and no answer is not a yes.
+        if let bundle = context.appBundleId, browserAppBundles.contains(bundle) {
+            if let window = capturedWindow, window.bundleId == bundle, privateWindows.contains(window.windowId) {
+                return .suppress(reason: .denylistSource)
+            }
+            if browserWindowPrivacy?.isPrivate(for: context, capturedWindow: capturedWindow) == true {
+                if let window = capturedWindow { privateWindows.remember(window.windowId) }
+                return .suppress(reason: .denylistSource)
+            }
         }
 
         // §2 — OS-already-blacked-out region.
@@ -268,6 +286,26 @@ public struct SuppressionCascade: Sendable {
         default:
             return .suppress(reason: .failsafeUnknown)
         }
+    }
+
+    // MARK: - Browser top bar, after recognition (RULINGS G8)
+
+    /// After recognition and before anything is stored: whether a browser
+    /// window's top bar shows that it is private ("Incognito", "InPrivate",
+    /// "Private Browsing", a "Private" badge) or shows the address of a site
+    /// that is never read (the built-in sign-in and bank sites and the
+    /// person's URL rules, which otherwise need the URL). Either one is
+    /// suppressed like a denied source. `window` is the window in the lines'
+    /// normalized frame space; only lines in its top bar count, so page text
+    /// never decides it. Nil for any other app.
+    public func browserTopBarFinding(
+        lines: [OCRLine], context: WorkflowContext,
+        window: CGRect, pixelSize: CGSize, pixelsPerPoint: CGFloat
+    ) -> BrowserPixelCapturePolicy.TopBarFinding? {
+        guard let bundle = context.appBundleId, browserAppBundles.contains(bundle) else { return nil }
+        return BrowserPixelCapturePolicy.topBarFinding(
+            lines, window: window, pixelSize: pixelSize, pixelsPerPoint: pixelsPerPoint, denylist: denylist
+        )
     }
 
     // MARK: - ADR-0016 P3.6 — §6 OCR-time cascade (cascade-twice)

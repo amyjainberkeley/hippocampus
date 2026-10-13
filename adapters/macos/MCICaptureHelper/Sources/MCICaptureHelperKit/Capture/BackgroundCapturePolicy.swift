@@ -30,15 +30,14 @@ public struct VisibleWindow: Sendable, Equatable {
 /// app; here every line is attributed to the window it sits in, by geometry,
 /// and a line that cannot be attributed to an eligible window is dropped.
 public enum BackgroundCapturePolicy {
-    /// Not in the pixels at all. Browsers stay with the focused path, where a
-    /// window is confirmed non-private before any pixel is read; background
-    /// browser windows cannot be confirmed. Notification banners carry
-    /// one-time codes. Hippocampus never records itself. The Dock keeps a
-    /// display-sized window above every app window (it draws Launchpad and
-    /// Mission Control there); left in the pixels it would own every point.
+    /// Not in the pixels at all. Notification banners carry one-time codes.
+    /// Hippocampus never records itself. The Dock keeps a display-sized window
+    /// above every app window (it draws Launchpad and Mission Control there);
+    /// left in the pixels it would own every point. Browsers are read like
+    /// every other window (RULINGS G8); `skipsBrowserWindow` drops the private
+    /// ones after recognition.
     public static func excludedBundleIds(userEntries: [DenylistEntry]) -> Set<String> {
         var out = SensitiveCaptureDenylist.appBundles
-        out.formUnion(BrowserPixelCapturePolicy.excludedBundleIds)
         out.formUnion(["com.apple.notificationcenterui", "ai.hippocampus", "com.apple.dock"])
         out.formUnion(userEntries.filter { $0.kind == .appBundle }.map(\.pattern))
         return out
@@ -182,6 +181,50 @@ public enum BackgroundCapturePolicy {
         return (OCRWindowGeometry(rect: rect, pixelsPerPoint: pixelsPerPoint, title: window.title,
                                   bundleId: window.bundleId, partial: partial),
                 !covered)
+    }
+
+    /// Remembers every visible browser window whose title only a private
+    /// window has ("New Incognito Tab"), so it stays skipped after it moves
+    /// on to a page whose title shows nothing (RULINGS G8).
+    public static func rememberPrivateBrowserWindows(
+        _ windows: [VisibleWindow], privateWindows: PrivateBrowserWindows = .shared
+    ) {
+        for window in windows where BrowserPixelCapturePolicy.isBrowser(window.bundleId) {
+            if let title = window.title, BrowserPixelCapturePolicy.titleMarksPrivateWindow(title) {
+                privateWindows.remember(window.windowId)
+            }
+        }
+    }
+
+    /// After recognition and before anything is stored (RULINGS G8): whether
+    /// a browser window must not be read. It is skipped when it was seen
+    /// private before (on either path), when its title marks it private, when
+    /// its top bar shows it is private, or when its top bar shows a site that
+    /// is never read. A window whose badge showed it private is remembered, so
+    /// a later read that cannot see the badge (another window covers the top
+    /// bar) still skips it. `pixelSize` is the display frame's size.
+    public static func skipsBrowserWindow(
+        _ window: VisibleWindow, lines: [OCRLine], geometry: OCRWindowGeometry?, pixelSize: CGSize,
+        denylist: any DenylistProbe, privateWindows: PrivateBrowserWindows = .shared
+    ) -> Bool {
+        guard BrowserPixelCapturePolicy.isBrowser(window.bundleId) else { return false }
+        if privateWindows.contains(window.windowId) { return true }
+        if let title = window.title, BrowserPixelCapturePolicy.titleIsPrivate(title) {
+            if BrowserPixelCapturePolicy.titleMarksPrivateWindow(title) { privateWindows.remember(window.windowId) }
+            return true
+        }
+        guard let geometry else { return false }
+        switch BrowserPixelCapturePolicy.topBarFinding(
+            lines, window: geometry.rect, pixelSize: pixelSize,
+            pixelsPerPoint: geometry.pixelsPerPoint, denylist: denylist) {
+        case .privateWindow?:
+            privateWindows.remember(window.windowId)
+            return true
+        case .privateWords?, .deniedSite?:
+            return true
+        case nil:
+            return false
+        }
     }
 
     static func isEligible(

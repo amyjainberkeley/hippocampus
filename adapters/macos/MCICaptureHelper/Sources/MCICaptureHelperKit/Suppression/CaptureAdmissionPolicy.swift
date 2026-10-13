@@ -60,8 +60,6 @@ public struct SensitiveCaptureDenylist: DenylistProbe {
 
     public func windowTitleIsDenied(_ title: String) -> Bool {
         if user.windowTitleIsDenied(title) { return true }
-        let folded = title.lowercased()
-        return ["incognito", "private browsing", "private window", "inprivate"]
-            .contains { folded.contains($0) }
+        return BrowserPixelCapturePolicy.titleIsPrivate(title)
     }
 }

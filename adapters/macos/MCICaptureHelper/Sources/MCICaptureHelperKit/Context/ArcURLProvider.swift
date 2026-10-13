@@ -28,10 +28,10 @@
 //      wiring is ADR-0015 §6 P2.5, not this PR).
 //   2. cascade-before-storage — vacuous this PR (no cascade wiring;
 //      provider ships in isolation per ADR-0015 §6).
-//   3. no auto-grant Apple Events — NO `tccutil` call, NO programmatic
-//      permission API. The OS Automation-pane dialog firing on the
-//      first `NSAppleScript` execution per (helper → Arc) pair IS the
-//      consent UX. Denial → `nil`; no retry-storm.
+//   3. no Automation prompt (RULINGS G8) — NO `tccutil` call. The
+//      script runs only when the person already allowed it for Arc
+//      (`AutomationConsent`, never asking); otherwise → `nil`. No
+//      retry-storm.
 //   4. real `appBundleId` in tombstone — vacuous this PR (cascade
 //      wiring at P2.5).
 //
@@ -129,7 +129,7 @@ public final class ArcURLProvider: URLProvider, @unchecked Sendable {
         }
         lock.unlock()
 
-        let outcome = runner.run(Self.script, timeoutMs: Self.timeoutMs)
+        let outcome = runner.run(Self.script, target: Self.bundleId, timeoutMs: Self.timeoutMs)
         let resolved: String?
         switch outcome {
         case .success(let url):
