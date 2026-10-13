@@ -360,11 +360,14 @@ final class VisionOCRExecutionLane: @unchecked Sendable {
         }
     }
 
+    /// Only the duration changes. Dropping the separators here once kept every
+    /// pane separator the worker found from reaching the reading order.
     private static func result(_ rawResult: OCRResult, started: DispatchTime) -> OCRResult {
         OCRResult(
             recognizedLines: rawResult.recognizedLines,
             durationMs: elapsedMilliseconds(since: started),
-            timedOut: rawResult.timedOut
+            timedOut: rawResult.timedOut,
+            separators: rawResult.separators
         )
     }
 

@@ -37,6 +37,18 @@ final class PaddleOCRLiveWorkerProbe: XCTestCase {
                 timeoutMs: 30_000)
             print("PROBE attempt \(attempt) timedOut=\(result.timedOut) lines=\(result.recognizedLines.count) elapsed=\(start.duration(to: .now))")
             print("PROBE text:", result.recognizedLines.map(\.text).joined(separator: " | "))
+            // Geometry only: where the worker says the window divides into panes.
+            print("PROBE separators:", result.separators.map {
+                String(format: "[%.3f, %.3f, %.3f, %.3f]", $0.minX, $0.minY, $0.width, $0.height)
+            }.joined(separator: " "))
+            // What would be stored for the image as one whole window.
+            let window = OCRWindowGeometry(rect: CGRect(x: 0, y: 0, width: 1, height: 1), pixelsPerPoint: 1,
+                                           title: nil, bundleId: nil)
+            let stored = OCRMemoryText.make(from: result.recognizedLines,
+                                            pixelSize: CGSize(width: image.width, height: image.height),
+                                            separators: result.separators, geometry: window)
+            print("PROBE stored:", stored.replacingOccurrences(of: "\u{1E}", with: "<chrome>")
+                .replacingOccurrences(of: "\n", with: " | "))
         }
         runner.stop()
     }

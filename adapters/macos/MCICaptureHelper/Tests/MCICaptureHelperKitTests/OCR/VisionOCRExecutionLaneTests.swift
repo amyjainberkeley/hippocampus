@@ -20,4 +20,20 @@ final class VisionOCRExecutionLaneTests: XCTestCase {
             XCTAssertEqual(result.recognizedLines.map(\.text), ["ok"])
         }
     }
+
+    /// Every Paddle reading passes through the lane. It once rebuilt the
+    /// result without the worker's pane separators, so the reading order never
+    /// cut at a pane even though the worker had found it.
+    func testTheWorkersPaneSeparatorsSurviveTheLane() async throws {
+        var created: CVPixelBuffer?
+        CVPixelBufferCreate(kCFAllocatorDefault, 8, 8, kCVPixelFormatType_32BGRA, nil, &created)
+        let input = OCREngineInput(pixelBuffer: try XCTUnwrap(created), roi: CGRect(x: 0, y: 0, width: 1, height: 1))
+        let separators = [CGRect(x: 0.3, y: 0, width: 0, height: 1), CGRect(x: 0, y: 0.9, width: 1, height: 0)]
+        let lane = VisionOCRExecutionLane(label: "test.lane.separators") { _, _, _ in
+            OCRResult(recognizedLines: [OCRLine(text: "ok", boundingBox: .zero, confidence: 1)],
+                      durationMs: 0, timedOut: false, separators: separators)
+        }
+        let result = await lane.recognize(input: input, languages: [], timeoutMs: 5_000)
+        XCTAssertEqual(result.separators, separators)
+    }
 }
