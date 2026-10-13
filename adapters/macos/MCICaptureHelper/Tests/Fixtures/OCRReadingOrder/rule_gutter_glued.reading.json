@@ -1,0 +1,17 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "fn main() {\n    let x = 1;\n    if x > 0 {\n        run(x);\n    }\n}"
+  },
+  {
+   "role": "chrome",
+   "rule": "gutter",
+   "text": "1 2 3 4 5 6"
+  }
+ ],
+ "stored": "fn main() {\n    let x = 1;\n    if x > 0 {\n        run(x);\n    }\n}\n\n\u001e\n1 2 3 4 5 6",
+ "plain": "1 fn main() {\n2 let x = 1;\n3 if x > 0 {\n4 run(x);\n5 }\n6 }"
+}

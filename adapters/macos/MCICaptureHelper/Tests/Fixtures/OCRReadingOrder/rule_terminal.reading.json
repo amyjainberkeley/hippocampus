@@ -1,0 +1,12 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "$ cargo test\n    Compiling mci v0.3.0\ntest result: ok. 6 passed"
+  }
+ ],
+ "stored": "$ cargo test\n    Compiling mci v0.3.0\ntest result: ok. 6 passed\n\n\u001e\n",
+ "plain": "$ cargo test\n    Compiling mci v0.3.0\ntest result: ok. 6 passed"
+}

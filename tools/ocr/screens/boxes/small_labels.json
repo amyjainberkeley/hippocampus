@@ -1,0 +1,164 @@
+{
+"width": 2880,
+"height": 1800,
+"lines": [
+{
+"text": "General",
+"confidence": 1.0,
+"box": [
+0.009028,
+0.957778,
+0.034722,
+0.02
+]
+},
+{
+"text": "Capture",
+"confidence": 1.0,
+"box": [
+0.171528,
+0.953333,
+0.044444,
+0.023333
+]
+},
+{
+"text": "Capture",
+"confidence": 1.0,
+"box": [
+0.009028,
+0.936111,
+0.035417,
+0.020556
+]
+},
+{
+"text": "Privacy",
+"confidence": 0.9999,
+"box": [
+0.007986,
+0.913889,
+0.034722,
+0.026111
+]
+},
+{
+"text": "Remember what is on screen",
+"confidence": 0.9999,
+"box": [
+0.170833,
+0.912778,
+0.113889,
+0.020556
+]
+},
+{
+"text": "Storage",
+"confidence": 0.9999,
+"box": [
+0.009028,
+0.895,
+0.035417,
+0.02
+]
+},
+{
+"text": "Text is read on this Mac and stored encrypted. Nothing is uploaded.",
+"confidence": 0.984,
+"box": [
+0.170833,
+0.889444,
+0.25,
+0.02
+]
+},
+{
+"text": "Shortcuts",
+"confidence": 0.9991,
+"box": [
+0.008333,
+0.873889,
+0.04375,
+0.022222
+]
+},
+{
+"text": "Excluded apps",
+"confidence": 0.9998,
+"box": [
+0.171528,
+0.866111,
+0.059028,
+0.021111
+]
+},
+{
+"text": "About",
+"confidence": 1.0,
+"box": [
+0.007986,
+0.853333,
+0.029861,
+0.024444
+]
+},
+{
+"text": "1Password, Keychain Access, System Settings, Hippocampus",
+"confidence": 0.9903,
+"box": [
+0.172222,
+0.843889,
+0.225694,
+0.017778
+]
+},
+{
+"text": "Keep memories for",
+"confidence": 0.9997,
+"box": [
+0.171528,
+0.820556,
+0.075694,
+0.017778
+]
+},
+{
+"text": "90 days (about 2.4 GB on this Mac)",
+"confidence": 0.9924,
+"box": [
+0.172222,
+0.796667,
+0.131944,
+0.018333
+]
+},
+{
+"text": "Last capture: 2 minutes ago · 3,288 memories · index healthy",
+"confidence": 0.9734,
+"box": [
+0.171528,
+0.773333,
+0.234722,
+0.017778
+]
+},
+{
+"text": "Version 0.2.1 (build 8e82e03) · macOS 26.5 · Apple M3",
+"confidence": 0.975,
+"box": [
+0.172222,
+0.751111,
+0.211806,
+0.017778
+]
+}
+],
+"separators": [
+[
+0.152778,
+0.0,
+0.0,
+1.0
+]
+]
+}

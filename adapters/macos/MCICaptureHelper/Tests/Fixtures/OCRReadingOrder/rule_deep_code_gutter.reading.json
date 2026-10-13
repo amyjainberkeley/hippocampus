@@ -1,0 +1,17 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "let a = load(path)?;\nlet b = parse(&a)?;\nstore.put(b)?;\nOk(())"
+  },
+  {
+   "role": "chrome",
+   "rule": "gutter",
+   "text": "40 41 42 43"
+  }
+ ],
+ "stored": "let a = load(path)?;\nlet b = parse(&a)?;\nstore.put(b)?;\nOk(())\n\n\u001e\n40 41 42 43",
+ "plain": "40 let a = load(path)?;\n41 let b = parse(&a)?;\n42 store.put(b)?;\n43 Ok(())"
+}

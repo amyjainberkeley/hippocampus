@@ -33,6 +33,19 @@ lines, and go when it exits. Recognition pads each batch to its widest line, so
 a remembered reading can differ from a fresh one by a space or a trailing
 mark; neither is the more accurate.
 
+A reply with text also carries `separators`: where the window divides into
+panes. App windows draw a hairline or change background between panes, and
+either is a long straight edge; text never crosses one. The worker reports the
+long vertical and horizontal edges that no detected text box crosses, as
+`[x, y, w, h]` in the lines' convention (normalized, bottom-left origin), with
+`w` zero for a vertical separator and `h` zero for a horizontal one. A Retina
+frame is examined at half size; a 2880x1800 window takes under 10 ms.
+The field is additive: a reader that predates it ignores it, an empty reading
+keeps the old reply, and a reply that would exceed the size limit drops the
+separators, never lines. The capture helper cuts the reading order at them
+(`screens/layout.py` is the reference; `screens/README.md` describes the
+transcript bench).
+
 ## Build on macOS
 
 Use Python 3.12 and an isolated environment. These commands download public

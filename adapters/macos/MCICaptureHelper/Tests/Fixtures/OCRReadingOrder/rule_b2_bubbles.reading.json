@@ -1,0 +1,12 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Are we still on for 3?\n    Yes, running five minutes late\nSee you there\n    Already in my bag"
+  }
+ ],
+ "stored": "Are we still on for 3?\n    Yes, running five minutes late\nSee you there\n    Already in my bag\n\n\u001e\n",
+ "plain": "Are we still on for 3?\n                                        Yes, running five minutes late\nSee you there\n                                        Already in my bag"
+}

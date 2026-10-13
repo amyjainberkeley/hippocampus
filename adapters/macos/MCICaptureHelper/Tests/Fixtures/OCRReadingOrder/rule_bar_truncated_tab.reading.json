@@ -1,0 +1,17 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "Per-seat or tiered? How to p... X Stripe Docs"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose."
+  }
+ ],
+ "stored": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\n\n\u001e\nPer-seat or tiered? How to p... X Stripe Docs",
+ "plain": "Per-seat or tiered? How to p... X\n\nStripe Docs\n\nParagraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose."
+}

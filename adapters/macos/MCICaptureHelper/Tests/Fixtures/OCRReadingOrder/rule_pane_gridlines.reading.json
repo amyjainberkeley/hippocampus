@@ -1,0 +1,12 @@
+{
+ "classified": false,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Acme Won\nBlue Lost\nCedar Open"
+  }
+ ],
+ "stored": "Acme Won\nBlue Lost\nCedar Open",
+ "plain": "Acme Won\nBlue Lost\nCedar Open"
+}

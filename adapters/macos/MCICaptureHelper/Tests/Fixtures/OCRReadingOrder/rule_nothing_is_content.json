@@ -1,0 +1,58 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "Inbox",
+   "confidence": 0.95,
+   "box": [
+    0.034722,
+    0.972222,
+    0.104167,
+    0.016667
+   ]
+  },
+  {
+   "text": "Drafts",
+   "confidence": 0.95,
+   "box": [
+    0.208333,
+    0.972222,
+    0.104167,
+    0.016667
+   ]
+  },
+  {
+   "text": "Sent",
+   "confidence": 0.95,
+   "box": [
+    0.381944,
+    0.972222,
+    0.104167,
+    0.016667
+   ]
+  },
+  {
+   "text": "Archive",
+   "confidence": 0.95,
+   "box": [
+    0.555556,
+    0.972222,
+    0.104167,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Weekly review",
+  "bundle_id": "com.example.notes"
+ }
+}

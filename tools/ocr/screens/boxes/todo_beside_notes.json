@@ -1,0 +1,234 @@
+{
+"width": 2560,
+"height": 1600,
+"lines": [
+{
+"text": "Workspace / Weekly review",
+"confidence": 0.9729,
+"box": [
+0.18125,
+0.96,
+0.132812,
+0.02625
+]
+},
+{
+"text": "Share ☆≡",
+"confidence": 0.8639,
+"box": [
+0.924219,
+0.96,
+0.064844,
+0.02625
+]
+},
+{
+"text": "Workspace >",
+"confidence": 0.9763,
+"box": [
+0.007812,
+0.955,
+0.078906,
+0.025
+]
+},
+{
+"text": "Weekly review",
+"confidence": 0.9999,
+"box": [
+0.008594,
+0.9075,
+0.092969,
+0.02875
+]
+},
+{
+"text": "Launch plan",
+"confidence": 0.9999,
+"box": [
+0.008594,
+0.8725,
+0.083594,
+0.02875
+]
+},
+{
+"text": "Weekly review",
+"confidence": 1.0,
+"box": [
+0.244531,
+0.84875,
+0.160156,
+0.045
+]
+},
+{
+"text": "Reading list",
+"confidence": 0.9983,
+"box": [
+0.009375,
+0.83875,
+0.080469,
+0.025
+]
+},
+{
+"text": "Week of October 12",
+"confidence": 0.9755,
+"box": [
+0.245312,
+0.81125,
+0.100781,
+0.02125
+]
+},
+{
+"text": "Recipes",
+"confidence": 1.0,
+"box": [
+0.008594,
+0.80125,
+0.064062,
+0.03
+]
+},
+{
+"text": "Travel",
+"confidence": 1.0,
+"box": [
+0.008594,
+0.76625,
+0.053125,
+0.03
+]
+},
+{
+"text": "Notes",
+"confidence": 0.9999,
+"box": [
+0.465234,
+0.748125,
+0.042969,
+0.035
+]
+},
+{
+"text": "To do",
+"confidence": 0.9998,
+"box": [
+0.24375,
+0.7525,
+0.039062,
+0.0275
+]
+},
+{
+"text": "Book the venue",
+"confidence": 0.9842,
+"box": [
+0.259375,
+0.71875,
+0.083594,
+0.02125
+]
+},
+{
+"text": "The venue holds 80 people, so the guest list stays under 70.",
+"confidence": 0.9883,
+"box": [
+0.467969,
+0.7125,
+0.317188,
+0.025
+]
+},
+{
+"text": "Email the caterer",
+"confidence": 0.9999,
+"box": [
+0.259375,
+0.6825,
+0.0875,
+0.02125
+]
+},
+{
+"text": "Ravi wants the Team plan settled before the beta. Maya is fine with three seats as the",
+"confidence": 0.9942,
+"box": [
+0.46875,
+0.6725,
+0.449219,
+0.025
+]
+},
+{
+"text": " Print the badges",
+"confidence": 0.946,
+"box": [
+0.244531,
+0.64375,
+0.102344,
+0.025
+]
+},
+{
+"text": "minimum.",
+"confidence": 1.0,
+"box": [
+0.467187,
+0.64375,
+0.05625,
+0.025
+]
+},
+{
+"text": "Call Ravi about pricing",
+"confidence": 0.9996,
+"box": [
+0.245312,
+0.6075,
+0.13125,
+0.025
+]
+},
+{
+"text": "Next week: a dry run of the demo on Tuesday, then badges on Thursday.",
+"confidence": 0.9836,
+"box": [
+0.467969,
+0.6025,
+0.382812,
+0.025
+]
+},
+{
+"text": "Order stamps",
+"confidence": 0.96,
+"box": [
+0.244531,
+0.57125,
+0.089063,
+0.025
+]
+},
+{
+"text": "+ New page",
+"confidence": 0.9721,
+"box": [
+0.008594,
+0.02125,
+0.072656,
+0.02875
+]
+}
+],
+"separators": [
+[
+0.171094,
+0.0,
+0.0,
+1.0
+]
+]
+}

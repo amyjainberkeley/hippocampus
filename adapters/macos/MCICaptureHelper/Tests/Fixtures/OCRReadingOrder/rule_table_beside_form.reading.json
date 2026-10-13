@@ -1,0 +1,12 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Shipping address Order summary\nSam Rivera Notebook $18.00\n41 Harbor Street Pens $28.00\nPortland, OR 97209 Total $46.00\nVisa ending in 4242"
+  }
+ ],
+ "stored": "Shipping address Order summary\nSam Rivera Notebook $18.00\n41 Harbor Street Pens $28.00\nPortland, OR 97209 Total $46.00\nVisa ending in 4242\n\n\u001e\n",
+ "plain": "Shipping address Order summary\nSam Rivera Notebook $18.00\n41 Harbor Street Pens $28.00\nPortland, OR 97209 Total $46.00\nVisa ending in 4242"
+}

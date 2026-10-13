@@ -1,0 +1,98 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "To do",
+   "confidence": 0.95,
+   "box": [
+    0.222222,
+    0.816667,
+    0.104167,
+    0.016667
+   ]
+  },
+  {
+   "text": "Book the venue",
+   "confidence": 0.95,
+   "box": [
+    0.222222,
+    0.792222,
+    0.104167,
+    0.016667
+   ]
+  },
+  {
+   "text": "Email the caterer",
+   "confidence": 0.95,
+   "box": [
+    0.222222,
+    0.767778,
+    0.104167,
+    0.016667
+   ]
+  },
+  {
+   "text": "Print the badges",
+   "confidence": 0.95,
+   "box": [
+    0.222222,
+    0.743333,
+    0.104167,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 0 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.381944,
+    0.816667,
+    0.555556,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 1 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.381944,
+    0.79,
+    0.555556,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 2 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.381944,
+    0.763333,
+    0.555556,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 3 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.381944,
+    0.736667,
+    0.555556,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Weekly review",
+  "bundle_id": "com.example.notes"
+ }
+}

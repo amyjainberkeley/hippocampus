@@ -1,0 +1,22 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose."
+  },
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "CHAT"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Message 0 in the chat panel.\nMessage 1 in the chat panel.\nMessage 2 in the chat panel.\nMessage 3 in the chat panel."
+  }
+ ],
+ "stored": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\n\nMessage 0 in the chat panel.\nMessage 1 in the chat panel.\nMessage 2 in the chat panel.\nMessage 3 in the chat panel.\n\n\u001e\nCHAT",
+ "plain": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\n\nCHAT\n\nMessage 0 in the chat panel.\nMessage 1 in the chat panel.\nMessage 2 in the chat panel.\nMessage 3 in the chat panel."
+}

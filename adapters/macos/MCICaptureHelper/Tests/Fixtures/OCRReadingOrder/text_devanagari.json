@@ -1,0 +1,88 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "\u0905\u0928\u0941\u092e\u093e\u0928",
+   "confidence": 0.95,
+   "box": [
+    0.020833,
+    0.872222,
+    0.052083,
+    0.016667
+   ]
+  },
+  {
+   "text": "3",
+   "confidence": 0.95,
+   "box": [
+    0.104167,
+    0.872222,
+    0.008333,
+    0.016667
+   ]
+  },
+  {
+   "text": "\u0938\u094d\u0915\u094d\u0930\u0940\u0928 \u092a\u0930 \u0915\u094d\u092f\u093e \u0939\u0948",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.816667,
+    0.208333,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 0 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.761111,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 1 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.734444,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 2 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.707778,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 3 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.681111,
+    0.520833,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Weekly review",
+  "bundle_id": "com.example.notes"
+ }
+}

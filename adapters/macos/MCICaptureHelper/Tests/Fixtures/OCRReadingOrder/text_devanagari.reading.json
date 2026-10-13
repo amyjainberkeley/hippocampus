@@ -1,0 +1,12 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "\u0905\u0928\u0941\u092e\u093e\u0928 3\n    \u0938\u094d\u0915\u094d\u0930\u0940\u0928 \u092a\u0930 \u0915\u094d\u092f\u093e \u0939\u0948\n    Paragraph line 0 with enough words to read as prose.\n    Paragraph line 1 with enough words to read as prose.\n    Paragraph line 2 with enough words to read as prose.\n    Paragraph line 3 with enough words to read as prose."
+  }
+ ],
+ "stored": "\u0905\u0928\u0941\u092e\u093e\u0928 3\n    \u0938\u094d\u0915\u094d\u0930\u0940\u0928 \u092a\u0930 \u0915\u094d\u092f\u093e \u0939\u0948\n    Paragraph line 0 with enough words to read as prose.\n    Paragraph line 1 with enough words to read as prose.\n    Paragraph line 2 with enough words to read as prose.\n    Paragraph line 3 with enough words to read as prose.\n\n\u001e\n",
+ "plain": "\u0905\u0928\u0941\u092e\u093e\u0928 3\n                      \u0938\u094d\u0915\u094d\u0930\u0940\u0928 \u092a\u0930 \u0915\u094d\u092f\u093e \u0939\u0948\n                      Paragraph line 0 with enough words to read as prose.\n                      Paragraph line 1 with enough words to read as prose.\n                      Paragraph line 2 with enough words to read as prose.\n                      Paragraph line 3 with enough words to read as prose."
+}

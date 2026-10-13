@@ -1,0 +1,12 @@
+{
+ "classified": false,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "1 fn main() {\n2 let x = 1;\n3 if x > 0 {\n4 run(x);\n5 }\n6 }"
+  }
+ ],
+ "stored": "1 fn main() {\n2 let x = 1;\n3 if x > 0 {\n4 run(x);\n5 }\n6 }",
+ "plain": "1 fn main() {\n2 let x = 1;\n3 if x > 0 {\n4 run(x);\n5 }\n6 }"
+}

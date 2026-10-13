@@ -1,0 +1,17 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Main column line 0 with words\nMain column line 1 with words\nMain column line 2 with words\nMain column line 3 with words\nMain column line 4 with words\nMain column line 5 with words\nMain column line 6 with words\nMain column line 7 with words\nMain column line 8 with words\nMain column line 9 with words\nMain column line 10 with words\nMain column line 11 with words\nMain column line 12 with words"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Rail 0\nRail 1\nRail 2\nRail 3\nRail 4\nRail 5\nRail 6\nRail 7\nRail 8\nRail 9\nRail 10\nRail 11\nRail 12\nRail 13\nRail 14"
+  }
+ ],
+ "stored": "Main column line 0 with words\nMain column line 1 with words\nMain column line 2 with words\nMain column line 3 with words\nMain column line 4 with words\nMain column line 5 with words\nMain column line 6 with words\nMain column line 7 with words\nMain column line 8 with words\nMain column line 9 with words\nMain column line 10 with words\nMain column line 11 with words\nMain column line 12 with words\n\nRail 0\nRail 1\nRail 2\nRail 3\nRail 4\nRail 5\nRail 6\nRail 7\nRail 8\nRail 9\nRail 10\nRail 11\nRail 12\nRail 13\nRail 14\n\n\u001e\n",
+ "plain": "Main column line 0 with words\nMain column line 1 with words\nMain column line 2 with words\nMain column line 3 with words\nMain column line 4 with words\nMain column line 5 with words\nMain column line 6 with words\nMain column line 7 with words\nMain column line 8 with words\nMain column line 9 with words\nMain column line 10 with words\nMain column line 11 with words\nMain column line 12 with words\n\nRail 0\nRail 1\nRail 2\nRail 3\nRail 4\nRail 5\nRail 6\nRail 7\nRail 8\nRail 9\nRail 10\nRail 11\nRail 12\nRail 13\nRail 14"
+}

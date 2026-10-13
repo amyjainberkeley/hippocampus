@@ -1,0 +1,12 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Dana\nHi Sam, phase two is wrapped up. The invoice is\u2026\n    Paragraph line 0 with enough words to read as prose.\nRavi\n    Paragraph line 1 with enough words to read as prose.\nSeat minimums: I would say three. Anything lower\u2026\n    Paragraph line 2 with enough words to read as prose.\n    Paragraph line 3 with enough words to read as prose.\nJonas\nRecall is down to 41 ms. Details in the doc\u2026"
+  }
+ ],
+ "stored": "Dana\nHi Sam, phase two is wrapped up. The invoice is\u2026\n    Paragraph line 0 with enough words to read as prose.\nRavi\n    Paragraph line 1 with enough words to read as prose.\nSeat minimums: I would say three. Anything lower\u2026\n    Paragraph line 2 with enough words to read as prose.\n    Paragraph line 3 with enough words to read as prose.\nJonas\nRecall is down to 41 ms. Details in the doc\u2026\n\n\u001e\n",
+ "plain": "Dana\nHi Sam, phase two is wrapped up. The invoice is\u2026\n                                 Paragraph line 0 with enough words to read as prose.\nRavi\n                                 Paragraph line 1 with enough words to read as prose.\nSeat minimums: I would say three. Anything lower\u2026\n                                 Paragraph line 2 with enough words to read as prose.\n                                 Paragraph line 3 with enough words to read as prose.\nJonas\nRecall is down to 41 ms. Details in the doc\u2026"
+}

@@ -1,0 +1,167 @@
+{
+"width": 2880,
+"height": 1800,
+"lines": [
+{
+"text": "sam@studio hippocampus % cargo test -p mci-agent --test handoff_cli",
+"confidence": 0.9918,
+"box": [
+0.011806,
+0.961111,
+0.368056,
+0.021111
+]
+},
+{
+"text": "Compiling mci-agent v0.2.1 (/Users/you/hippo-work/usable/apps/agent)",
+"confidence": 0.9985,
+"box": [
+0.027778,
+0.938889,
+0.372222,
+0.021111
+]
+},
+{
+"text": "Finished `test profile [unoptimized + debuginfo] target(s) in 41.07s",
+"confidence": 0.9855,
+"box": [
+0.032639,
+0.916111,
+0.379861,
+0.021667
+]
+},
+{
+"text": "Running tests/handoff_cli.rs (target/debug/deps/handoff_cli-73790ef006b0f461)",
+"confidence": 0.9994,
+"box": [
+0.038889,
+0.893889,
+0.420833,
+0.021111
+]
+},
+{
+"text": "test today_prints_the_daily_packet ... FAILED",
+"confidence": 0.9927,
+"box": [
+0.011806,
+0.870556,
+0.249306,
+0.023333
+]
+},
+{
+"text": "thread 'today_prints_the_daily_packet'panicked at apps/agent/tests/handoff_cli.rs:266:5:",
+"confidence": 0.9995,
+"box": [
+0.0125,
+0.848333,
+0.486111,
+0.022222
+]
+},
+{
+"text": "assertion failed: text.contains(\"## hippocampus (\")",
+"confidence": 0.9959,
+"box": [
+0.011806,
+0.826111,
+0.280556,
+0.022222
+]
+},
+{
+"text": "error[E0308]: mismatched types: expected `u64`, found `i64",
+"confidence": 0.9607,
+"box": [
+0.011806,
+0.804444,
+0.322917,
+0.021667
+]
+},
+{
+"text": "test result: FAILED. 8 passed; 1 failed; 0 ignored; finished in 1.91s",
+"confidence": 0.9868,
+"box": [
+0.011111,
+0.781111,
+0.379861,
+0.023333
+]
+},
+{
+"text": "sam@studio hippocampus % git log --oneline -3",
+"confidence": 0.9874,
+"box": [
+0.0125,
+0.76,
+0.247917,
+0.018889
+]
+},
+{
+"text": "539ece6 fix(recall): return degraded rankings as labelled hits",
+"confidence": 0.9845,
+"box": [
+0.011111,
+0.736667,
+0.341667,
+0.023333
+]
+},
+{
+"text": "328afb9 Qualify retained JPEG screenshots through local OCR",
+"confidence": 0.9954,
+"box": [
+0.011806,
+0.714444,
+0.325,
+0.022222
+]
+},
+{
+"text": "afed4a3 Allow explicit screenshot re-read to recover key access",
+"confidence": 0.9889,
+"box": [
+0.011111,
+0.692222,
+0.347222,
+0.021111
+]
+},
+{
+"text": "sam@studio hippocampus % shasum -a 256 dist/Hippocampus-0.2.1.dmg",
+"confidence": 0.9866,
+"box": [
+0.011806,
+0.669444,
+0.357639,
+0.021667
+]
+},
+{
+"text": "14443edcdcb43c00455a86d9b454b2c19aeb990b250d99ecb435e7dc643fc823",
+"confidence": 1.0,
+"box": [
+0.011806,
+0.648333,
+0.351389,
+0.021111
+]
+},
+{
+"text": "sam@studio hippocampus % curl -I https://example.com/v1/status?id=42&mode=full",
+"confidence": 0.9942,
+"box": [
+0.011806,
+0.625,
+0.427083,
+0.021111
+]
+}
+],
+"separators": []
+}

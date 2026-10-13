@@ -1,0 +1,254 @@
+{
+"width": 2880,
+"height": 1800,
+"lines": [
+{
+"text": "The Field Notes",
+"confidence": 0.9737,
+"box": [
+0.025694,
+0.956667,
+0.075,
+0.022222
+]
+},
+{
+"text": "Research",
+"confidence": 1.0,
+"box": [
+0.122222,
+0.956667,
+0.047222,
+0.022222
+]
+},
+{
+"text": "Essays",
+"confidence": 0.9999,
+"box": [
+0.175,
+0.956667,
+0.043056,
+0.022222
+]
+},
+{
+"text": "Archive",
+"confidence": 1.0,
+"box": [
+0.217361,
+0.958889,
+0.043056,
+0.018889
+]
+},
+{
+"text": "Subscribe",
+"confidence": 1.0,
+"box": [
+0.265278,
+0.958889,
+0.051389,
+0.018889
+]
+},
+{
+"text": "Why your computer",
+"confidence": 0.9999,
+"box": [
+0.026389,
+0.857222,
+0.194444,
+0.036667
+]
+},
+{
+"text": "forgets everything",
+"confidence": 0.9999,
+"box": [
+0.025,
+0.816111,
+0.182639,
+0.036667
+]
+},
+{
+"text": "Related",
+"confidence": 1.0,
+"box": [
+0.692361,
+0.767778,
+0.0375,
+0.02
+]
+},
+{
+"text": "Every day a laptop sees the paper you",
+"confidence": 0.9881,
+"box": [
+0.026389,
+0.762222,
+0.194444,
+0.022222
+]
+},
+{
+"text": "People remember situations, not names.",
+"confidence": 0.9924,
+"box": [
+0.345833,
+0.764444,
+0.204167,
+0.018889
+]
+},
+{
+"text": "On-device OCR, measured",
+"confidence": 0.9994,
+"box": [
+0.693056,
+0.745556,
+0.115278,
+0.018889
+]
+},
+{
+"text": "The pricing page from last Tuesday, read",
+"confidence": 0.9964,
+"box": [
+0.345833,
+0.734444,
+0.206944,
+0.022222
+]
+},
+{
+"text": "skimmed, the number in the dashboard and",
+"confidence": 0.997,
+"box": [
+0.027083,
+0.736667,
+0.220139,
+0.018889
+]
+},
+{
+"text": "A year of local search",
+"confidence": 0.9856,
+"box": [
+0.693056,
+0.723333,
+0.09375,
+0.017778
+]
+},
+{
+"text": "the error you fixed in March. Then it",
+"confidence": 0.9946,
+"box": [
+0.025694,
+0.706667,
+0.184028,
+0.022222
+]
+},
+{
+"text": "while annoyed, is easy to recall and hard",
+"confidence": 0.9998,
+"box": [
+0.345833,
+0.706667,
+0.20625,
+0.022222
+]
+},
+{
+"text": "Encryption at rest, explained",
+"confidence": 0.9994,
+"box": [
+0.690972,
+0.698889,
+0.125694,
+0.023333
+]
+},
+{
+"text": "forgets all of it, and you do the",
+"confidence": 0.9996,
+"box": [
+0.026389,
+0.677222,
+0.15625,
+0.022778
+]
+},
+{
+"text": "to search for. A memory that keeps what",
+"confidence": 0.9943,
+"box": [
+0.345139,
+0.677222,
+0.207639,
+0.022778
+]
+},
+{
+"text": "Most read this week",
+"confidence": 0.9997,
+"box": [
+0.693056,
+0.678333,
+0.091667,
+0.019444
+]
+},
+{
+"text": "remembering: scrolling history, searching",
+"confidence": 0.9962,
+"box": [
+0.025694,
+0.648333,
+0.210417,
+0.022222
+]
+},
+{
+"text": "was on screen, and when, can answer the",
+"confidence": 0.9943,
+"box": [
+0.345139,
+0.648333,
+0.2125,
+0.022222
+]
+},
+{
+"text": "files for a word you are not sure you used.",
+"confidence": 0.9882,
+"box": [
+0.025694,
+0.620556,
+0.213194,
+0.022222
+]
+},
+{
+"text": "question the way it was actually asked.",
+"confidence": 0.989,
+"box": [
+0.345833,
+0.620556,
+0.197917,
+0.022222
+]
+}
+],
+"separators": [
+[
+0.0,
+0.937778,
+1.0,
+0.0
+]
+]
+}

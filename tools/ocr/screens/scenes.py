@@ -6,19 +6,25 @@ an engine that reads chrome or labels is not reading text the truth lacks.
 Reading order is block order, then line order inside a block. Text never
 wraps, so each truth line is exactly one visual row of one block.
 
+Every block also carries a role, as the windows in windows.py do: content
+(what the screen is showing), navigation (lists of other places) or chrome (the
+interface). The transcript bench scores the reading against those roles.
+
 The text is fabricated. No real person, message or credential appears.
 """
 import html
+
+CONTENT, NAVIGATION, CHROME = 'content', 'navigation', 'chrome'
 
 SANS = "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif"
 MONO = "Menlo, 'SF Mono', monospace"
 
 
 def block(x, y, lines, *, size=13, color='#1d1d1f', font=SANS, weight=400,
-          line_height=1.55, bold=()):
+          line_height=1.55, bold=(), role=CONTENT):
     return {'x': x, 'y': y, 'lines': lines, 'size': size, 'color': color,
             'font': font, 'weight': weight, 'line_height': line_height,
-            'bold': set(bold)}
+            'bold': set(bold), 'role': role}
 
 
 SCENES = {}
@@ -29,8 +35,9 @@ SCENES['chat_light'] = {
     'blocks': [
         block(20, 22, ['Northwind Studio', 'Channels', '# general', '# design-review',
                        '# launch-plan', '# eng-oncall', 'Direct messages', 'Maya Chen',
-                       'Ravi Patel', 'Jonas Weber'], size=14, color='#3a3a3c', bold=(0, 1, 6)),
-        block(280, 16, ['# design-review'], size=16, weight=600),
+                       'Ravi Patel', 'Jonas Weber'], size=14, color='#3a3a3c', bold=(0, 1, 6),
+              role=NAVIGATION),
+        block(280, 16, ['# design-review'], size=16, weight=600, role=CHROME),
         block(280, 80, [
             'Maya Chen  10:42 AM',
             'Pushed the new onboarding flow to staging. The permissions step is now one screen.',
@@ -44,7 +51,7 @@ SCENES['chat_light'] = {
             'Maya Chen  11:09 AM',
             'Great. Shipping 0.2.1 to the beta group after lunch unless anyone objects.',
         ], size=14, bold=(0, 3, 6, 9)),
-        block(280, 840, ['Message #design-review'], size=14, color='#8e8e93'),
+        block(280, 840, ['Message #design-review'], size=14, color='#8e8e93', role=CHROME),
     ],
 }
 
@@ -54,8 +61,8 @@ SCENES['code_dark'] = {
     'blocks': [
         block(16, 14, ['EXPLORER', 'HIPPOCAMPUS', 'apps', 'agent', 'src', 'brain_ingest.rs',
                        'retention_worker.rs', 'today.rs', 'core', 'scripts', 'install.sh',
-                       'README.md'], size=12, color='#cccccc'),
-        block(280, 12, ['retention_worker.rs'], size=13, color='#ffffff'),
+                       'README.md'], size=12, color='#cccccc', role=NAVIGATION),
+        block(280, 12, ['retention_worker.rs'], size=13, color='#ffffff', role=CHROME),
         block(280, 56, [
             'use std::time::Duration;',
             '',
@@ -76,7 +83,7 @@ SCENES['code_dark'] = {
             '}',
         ], size=13, color='#d4d4d4', font=MONO, line_height=1.6),
         block(12, 876, ['main  0 errors, 2 warnings  Ln 14, Col 37  UTF-8  Rust'],
-              size=12, color='#ffffff'),
+              size=12, color='#ffffff', role=CHROME),
     ],
 }
 
@@ -85,7 +92,7 @@ SCENES['article_columns'] = {
     'panels': [(0, 0, 1440, 56, '#fafafa')],
     'blocks': [
         block(40, 18, ['The Field Notes          Research     Essays     Archive     Subscribe'],
-              size=14, color='#333333'),
+              size=14, color='#333333', role=CHROME),
         block(40, 90, ['Why your computer', 'forgets everything'], size=30, weight=700,
               line_height=1.25),
         block(40, 190, [
@@ -106,7 +113,7 @@ SCENES['article_columns'] = {
         ], size=16, line_height=1.6),
         block(1000, 190, ['Related', 'On-device OCR, measured', 'A year of local search',
                           'Encryption at rest, explained', 'Most read this week'],
-              size=13, color='#555555', bold=(0, 4)),
+              size=13, color='#555555', bold=(0, 4), role=NAVIGATION),
     ],
 }
 
@@ -140,7 +147,7 @@ SCENES['email_panes'] = {
     'panels': [(0, 0, 200, 900, '#f2f2f7'), (200, 0, 420, 900, '#fbfbfd')],
     'blocks': [
         block(18, 24, ['Inbox', 'Flagged', 'Drafts', 'Sent', 'Archive', 'Receipts',
-                       'Travel'], size=14, color='#3a3a3c'),
+                       'Travel'], size=14, color='#3a3a3c', role=NAVIGATION),
         block(222, 24, [
             'Priya Natarajan  9:14 AM',
             'Offsite agenda, final',
@@ -151,7 +158,7 @@ SCENES['email_panes'] = {
             'Daniel Okafor  Yesterday',
             'Contract redlines (v3)',
             'Two changes in section 4.2, both minor.',
-        ], size=13, bold=(0, 3, 6), line_height=1.7),
+        ], size=13, bold=(0, 3, 6), line_height=1.7, role=NAVIGATION),
         block(650, 24, [
             'Offsite agenda, final',
             'From: Priya Natarajan    To: Team',
@@ -169,7 +176,7 @@ SCENES['table_light'] = {
     'background': '#ffffff',
     'panels': [(0, 0, 1440, 40, '#f5f5f7')],
     'blocks': [
-        block(16, 10, ['Q3 pipeline.xlsx'], size=13, weight=600),
+        block(16, 10, ['Q3 pipeline.xlsx'], size=13, weight=600, role=CHROME),
         block(40, 70, [
             'Account          Stage        Owner     ARR (USD)   Close date',
             'Acme Robotics    Negotiation  M. Chen   $184,000    2026-10-21',
@@ -187,7 +194,7 @@ SCENES['small_labels'] = {
     'panels': [(0, 0, 220, 900, '#e3e3e3')],
     'blocks': [
         block(16, 20, ['General', 'Capture', 'Privacy', 'Storage', 'Shortcuts', 'About'],
-              size=12, color='#4a4a4a'),
+              size=12, color='#4a4a4a', role=NAVIGATION),
         block(250, 20, ['Capture'], size=15, weight=600),
         block(250, 60, [
             'Remember what is on screen',
@@ -207,7 +214,7 @@ SCENES['doc_notes'] = {
     'panels': [(0, 0, 240, 900, '#f7f6f3')],
     'blocks': [
         block(18, 22, ['Workspace', 'Product notes', 'Meeting notes', 'Roadmap',
-                       'Reading list'], size=14, color='#37352f'),
+                       'Reading list'], size=14, color='#37352f', role=NAVIGATION),
         block(300, 40, ['Launch checklist'], size=28, weight=700),
         block(300, 100, [
             'Owner: Maya Chen   Due: Oct 21   Status: In progress',
@@ -253,3 +260,9 @@ def truth_lines(scene):
 
 def truth_blocks(scene):
     return [[line for line in b['lines'] if line.strip()] for b in scene['blocks']]
+
+
+def truth_items(scene):
+    """Every truth line as {role, text}, in reading order, as windows.py gives."""
+    return [{'role': b['role'], 'text': ' '.join(line.split())}
+            for b in scene['blocks'] for line in b['lines'] if line.strip()]

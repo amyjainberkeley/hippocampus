@@ -1,0 +1,214 @@
+{
+"width": 2880,
+"height": 1800,
+"lines": [
+{
+"text": "which is why the pilot ran for four weeks instead of two.",
+"confidence": 0.9913,
+"box": [
+0.234028,
+0.963333,
+0.293056,
+0.025556
+]
+},
+{
+"text": "Results",
+"confidence": 0.9997,
+"box": [
+0.233333,
+0.863889,
+0.084028,
+0.034444
+]
+},
+{
+"text": "Six teams used the memory for four weeks. Each kept its usual tools and was asked one question a",
+"confidence": 0.9969,
+"box": [
+0.232639,
+0.811111,
+0.514583,
+0.028333
+]
+},
+{
+"text": "day about work from the week before.",
+"confidence": 0.9997,
+"box": [
+0.234722,
+0.783333,
+0.198611,
+0.022222
+]
+},
+{
+"text": "Answers grounded in a remembered window were right far more often than answers from search",
+"confidence": 0.9974,
+"box": [
+0.234722,
+0.733333,
+0.505556,
+0.022222
+]
+},
+{
+"text": "alone, and people stopped retyping context into their AI tools after the first week.",
+"confidence": 0.9915,
+"box": [
+0.232639,
+0.701111,
+0.427083,
+0.026667
+]
+},
+{
+"text": "Week",
+"confidence": 0.9999,
+"box": [
+0.231944,
+0.641667,
+0.033333,
+0.027778
+]
+},
+{
+"text": "Sessions",
+"confidence": 0.9999,
+"box": [
+0.3375,
+0.643889,
+0.042361,
+0.023333
+]
+},
+{
+"text": "Questions",
+"confidence": 1.0,
+"box": [
+0.441667,
+0.643889,
+0.049306,
+0.023333
+]
+},
+{
+"text": "212",
+"confidence": 1.0,
+"box": [
+0.336111,
+0.607222,
+0.023611,
+0.026667
+]
+},
+{
+"text": "48",
+"confidence": 1.0,
+"box": [
+0.440972,
+0.608333,
+0.017361,
+0.024444
+]
+},
+{
+"text": "1",
+"confidence": 0.9999,
+"box": [
+0.233333,
+0.609444,
+0.010417,
+0.022222
+]
+},
+{
+"text": "240",
+"confidence": 1.0,
+"box": [
+0.336111,
+0.573889,
+0.023611,
+0.026667
+]
+},
+{
+"text": "61",
+"confidence": 0.9999,
+"box": [
+0.440972,
+0.575,
+0.015972,
+0.024444
+]
+},
+{
+"text": "2",
+"confidence": 0.9999,
+"box": [
+0.232639,
+0.576111,
+0.011111,
+0.022222
+]
+},
+{
+"text": "236",
+"confidence": 1.0,
+"box": [
+0.336111,
+0.538889,
+0.023611,
+0.027222
+]
+},
+{
+"text": "57",
+"confidence": 1.0,
+"box": [
+0.440972,
+0.54,
+0.016667,
+0.025
+]
+},
+{
+"text": "3",
+"confidence": 1.0,
+"box": [
+0.232639,
+0.541111,
+0.011111,
+0.022778
+]
+},
+{
+"text": "Questions per session stayed flat, so the gain is not more asking.",
+"confidence": 0.9965,
+"box": [
+0.234028,
+0.486667,
+0.336111,
+0.025556
+]
+},
+{
+"text": "Retention fell to 61 percent in week three, then recovered.",
+"confidence": 0.9975,
+"box": [
+0.234722,
+0.015556,
+0.302083,
+0.022222
+]
+}
+],
+"separators": [
+[
+0.236806,
+0.638889,
+0.527778,
+0.0
+]
+]
+}

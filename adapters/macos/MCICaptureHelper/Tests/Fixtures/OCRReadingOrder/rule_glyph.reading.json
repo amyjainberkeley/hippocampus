@@ -1,0 +1,17 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "    Inbox\nD Drafts\nOk\n}\nEstimate 3\n    Paragraph line 0 with enough words to read as prose.\n    Paragraph line 1 with enough words to read as prose.\n    Paragraph line 2 with enough words to read as prose.\n    Paragraph line 3 with enough words to read as prose."
+  },
+  {
+   "role": "chrome",
+   "rule": "glyph",
+   "text": "D"
+  }
+ ],
+ "stored": "    Inbox\nD Drafts\nOk\n}\nEstimate 3\n    Paragraph line 0 with enough words to read as prose.\n    Paragraph line 1 with enough words to read as prose.\n    Paragraph line 2 with enough words to read as prose.\n    Paragraph line 3 with enough words to read as prose.\n\n\u001e\nD",
+ "plain": "D Inbox\nD Drafts\nOk\n}\nEstimate 3\n                      Paragraph line 0 with enough words to read as prose.\n                      Paragraph line 1 with enough words to read as prose.\n                      Paragraph line 2 with enough words to read as prose.\n                      Paragraph line 3 with enough words to read as prose."
+}

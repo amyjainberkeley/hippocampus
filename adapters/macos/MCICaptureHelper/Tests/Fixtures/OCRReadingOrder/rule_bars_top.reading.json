@@ -1,0 +1,22 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "Weekly review Launch plan Recipes"
+  },
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "docs.example.com/weekly-review"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose."
+  }
+ ],
+ "stored": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\n\n\u001e\nWeekly review Launch plan Recipes\n\ndocs.example.com/weekly-review",
+ "plain": "Weekly review Launch plan\n\ndocs.example.com/weekly-review\n\nRecipes\n\nParagraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose."
+}

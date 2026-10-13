@@ -1,0 +1,62 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "0 Aa 8 Q Search"
+  },
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "iCloud\nAll iCloud 42\nNotes 17\n\u53e3 Launch 6\nPersonal 19\nRecently Deleted 3"
+  },
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "+ New Folder"
+  },
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "Launch plan\n2:31 Team plan price before the b...\nPM"
+  },
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "Pricing ideas\nYesterday Per seat with a minimum o..."
+  },
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "Groceries\nMonday Oat milk, lemons, rice"
+  },
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "Reading list\nOct 2 The Design of Everyday Things"
+  },
+  {
+   "role": "chrome",
+   "rule": "date",
+   "text": "October 12, 2026 at 2:31 PM"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Launch plan\nThe beta opens on October 21. Everything below has to be true by then, and nothing else is in\nscope.\nPricing\n\u2022 Team plan at $18 a seat, billed annually (Ravi and Maya agreed on Tuesday).\n\u2022 Open question: seat minimums. Ravi suggests three.\n\u2022 Update the pricing page before the announcement goes out.\nOnboarding\nFour screens, two permissions, and a moment of proof at the end. If a new person has not\nseen it work on their own screen within a minute, the flow has failed."
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Open loops\n\u2022 Reply to Dana about invoice 4471.\n\u00b7 Send Jonas the benchmark doc."
+  },
+  {
+   "role": "chrome",
+   "rule": "glyph",
+   "text": "\u4e09 \u53e3 + \u4e09 A"
+  }
+ ],
+ "stored": "Launch plan\nThe beta opens on October 21. Everything below has to be true by then, and nothing else is in\nscope.\nPricing\n\u2022 Team plan at $18 a seat, billed annually (Ravi and Maya agreed on Tuesday).\n\u2022 Open question: seat minimums. Ravi suggests three.\n\u2022 Update the pricing page before the announcement goes out.\nOnboarding\nFour screens, two permissions, and a moment of proof at the end. If a new person has not\nseen it work on their own screen within a minute, the flow has failed.\n\nOpen loops\n\u2022 Reply to Dana about invoice 4471.\n\u00b7 Send Jonas the benchmark doc.\n\n\u001e\n0 Aa 8 Q Search\n\niCloud\nAll iCloud 42\nNotes 17\n\u53e3 Launch 6\nPersonal 19\nRecently Deleted 3\n\n+ New Folder\n\nLaunch plan\n2:31 Team plan price before the b...\nPM\n\nPricing ideas\nYesterday Per seat with a minimum o...\n\nGroceries\nMonday Oat milk, lemons, rice\n\nReading list\nOct 2 The Design of Everyday Things\n\nOctober 12, 2026 at 2:31 PM\n\n\u4e09 \u53e3 + \u4e09 A",
+ "plain": "\u4e09 0 \u53e3 + Aa \u4e09 8 A Q Search\n\niCloud\nAll iCloud 42\nNotes 17\n\u53e3 Launch 6\nPersonal 19\nRecently Deleted 3\n\n+ New Folder\n\nLaunch plan\n2:31 Team plan price before the b...\nPM\n\nPricing ideas\nYesterday Per seat with a minimum o...\n\nGroceries\nMonday Oat milk, lemons, rice\n\nReading list\nOct 2 The Design of Everyday Things\n\n                                        October 12, 2026 at 2:31 PM\nLaunch plan\nThe beta opens on October 21. Everything below has to be true by then, and nothing else is in\nscope.\nPricing\n\u2022 Team plan at $18 a seat, billed annually (Ravi and Maya agreed on Tuesday).\n\u2022 Open question: seat minimums. Ravi suggests three.\n\u2022 Update the pricing page before the announcement goes out.\nOnboarding\nFour screens, two permissions, and a moment of proof at the end. If a new person has not\nseen it work on their own screen within a minute, the flow has failed.\n\nOpen loops\n\u2022 Reply to Dana about invoice 4471.\n\u00b7 Send Jonas the benchmark doc."
+}

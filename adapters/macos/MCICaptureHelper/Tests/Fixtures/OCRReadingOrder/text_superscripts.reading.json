@@ -1,0 +1,12 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "\u00b9 Footnote 1 says something about the text.\n\u00b2 Footnote 2 says something about the text.\n\u00b3 Footnote 3 says something about the text.\n\u2074 Footnote 4 says something about the text."
+  }
+ ],
+ "stored": "\u00b9 Footnote 1 says something about the text.\n\u00b2 Footnote 2 says something about the text.\n\u00b3 Footnote 3 says something about the text.\n\u2074 Footnote 4 says something about the text.\n\n\u001e\n",
+ "plain": "\u00b9 Footnote 1 says something about the text.\n\u00b2 Footnote 2 says something about the text.\n\u00b3 Footnote 3 says something about the text.\n\u2074 Footnote 4 says something about the text."
+}

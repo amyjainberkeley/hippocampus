@@ -1,0 +1,17 @@
+{
+ "classified": false,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Item 0\nItem 1\nItem 2\nItem 3\nItem 4\nItem 5\nItem 6\nItem 7\nItem 8\nItem 9\nItem 10\nItem 11"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Note"
+  }
+ ],
+ "stored": "Item 0\nItem 1\nItem 2\nItem 3\nItem 4\nItem 5\nItem 6\nItem 7\nItem 8\nItem 9\nItem 10\nItem 11\n\nNote",
+ "plain": "Item 0\nItem 1\nItem 2\nItem 3\nItem 4\nItem 5\nItem 6\nItem 7\nItem 8\nItem 9\nItem 10\nItem 11\n\nNote"
+}

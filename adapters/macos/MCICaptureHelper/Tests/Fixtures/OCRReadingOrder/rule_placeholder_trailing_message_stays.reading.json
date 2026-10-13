@@ -1,0 +1,12 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\nParagraph line 4 with enough words to read as prose.\nParagraph line 5 with enough words to read as prose.\nLet me check\u2026"
+  }
+ ],
+ "stored": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\nParagraph line 4 with enough words to read as prose.\nParagraph line 5 with enough words to read as prose.\nLet me check\u2026\n\n\u001e\n",
+ "plain": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\nParagraph line 4 with enough words to read as prose.\nParagraph line 5 with enough words to read as prose.\nLet me check\u2026"
+}

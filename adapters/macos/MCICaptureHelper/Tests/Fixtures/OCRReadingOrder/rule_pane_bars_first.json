@@ -1,0 +1,110 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "A wide title bar that spans both panes below",
+   "confidence": 0.95,
+   "box": [
+    0.034722,
+    0.972222,
+    0.694444,
+    0.016667
+   ]
+  },
+  {
+   "text": "Inbox",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.872222,
+    0.052083,
+    0.016667
+   ]
+  },
+  {
+   "text": "Drafts",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.847778,
+    0.052083,
+    0.016667
+   ]
+  },
+  {
+   "text": "Sent",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.823333,
+    0.052083,
+    0.016667
+   ]
+  },
+  {
+   "text": "Trash",
+   "confidence": 0.95,
+   "box": [
+    0.013889,
+    0.798889,
+    0.052083,
+    0.016667
+   ]
+  },
+  {
+   "text": "The page says something long enough to be read 0.",
+   "confidence": 0.95,
+   "box": [
+    0.079861,
+    0.872222,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "The page says something long enough to be read 1.",
+   "confidence": 0.95,
+   "box": [
+    0.079861,
+    0.847778,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "The page says something long enough to be read 2.",
+   "confidence": 0.95,
+   "box": [
+    0.079861,
+    0.823333,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "The page says something long enough to be read 3.",
+   "confidence": 0.95,
+   "box": [
+    0.079861,
+    0.798889,
+    0.520833,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [
+  [
+   0.0,
+   0.955556,
+   1.0,
+   0.0
+  ],
+  [
+   0.072917,
+   0.0,
+   0.0,
+   0.955556
+  ]
+ ]
+}

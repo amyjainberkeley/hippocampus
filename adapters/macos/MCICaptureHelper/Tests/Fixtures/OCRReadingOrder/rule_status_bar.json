@@ -1,0 +1,98 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "Paragraph line 0 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.816667,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 1 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.79,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 2 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.763333,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 3 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.736667,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "main",
+   "confidence": 0.95,
+   "box": [
+    0.034722,
+    0.002778,
+    0.069444,
+    0.016667
+   ]
+  },
+  {
+   "text": "Ln 9, Col 34",
+   "confidence": 0.95,
+   "box": [
+    0.173611,
+    0.002778,
+    0.069444,
+    0.016667
+   ]
+  },
+  {
+   "text": "UTF-8",
+   "confidence": 0.95,
+   "box": [
+    0.3125,
+    0.002778,
+    0.069444,
+    0.016667
+   ]
+  },
+  {
+   "text": "Rust",
+   "confidence": 0.95,
+   "box": [
+    0.451389,
+    0.002778,
+    0.069444,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Weekly review",
+  "bundle_id": "com.example.notes"
+ }
+}

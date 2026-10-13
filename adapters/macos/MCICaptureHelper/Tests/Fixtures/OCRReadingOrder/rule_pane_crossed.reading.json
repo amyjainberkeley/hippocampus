@@ -1,0 +1,17 @@
+{
+ "classified": false,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "A title written right across the panes"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Inbox The page says something long enough to be read 0.\nDrafts The page says something long enough to be read 1.\nSent The page says something long enough to be read 2.\nTrash The page says something long enough to be read 3."
+  }
+ ],
+ "stored": "A title written right across the panes\n\nInbox The page says something long enough to be read 0.\nDrafts The page says something long enough to be read 1.\nSent The page says something long enough to be read 2.\nTrash The page says something long enough to be read 3.",
+ "plain": "A title written right across the panes\n\nInbox The page says something long enough to be read 0.\nDrafts The page says something long enough to be read 1.\nSent The page says something long enough to be read 2.\nTrash The page says something long enough to be read 3."
+}

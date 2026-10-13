@@ -1,0 +1,47 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "Checkout \u00b7Northwind Supply X Linen notebook\u00b7Northwind... \u00d7 +"
+  },
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "8shop.northwind.example/checkout"
+  },
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "Northwind Supply Notebooks Pens Paper Cart (3)"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Checkout\nShipping address\nSam Rivera\n41 Harbor Street\nPortland, OR 97209\nDelivery\nStandard shipping, 3 to 5 business days\nPayment\nVisa ending in 4242"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Place order"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Order summary\nLinen notebook $18.00\nBrass pen \u00d7 2 $28.00\nSubtotal $46.00\nShipping $5.00\nTax $4.14\nTotal $55.14"
+  },
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "Returns Privacy Terms"
+  },
+  {
+   "role": "chrome",
+   "rule": "glyph",
+   "text": "\u304f > C \u2606 \u4e09"
+  }
+ ],
+ "stored": "Checkout\nShipping address\nSam Rivera\n41 Harbor Street\nPortland, OR 97209\nDelivery\nStandard shipping, 3 to 5 business days\nPayment\nVisa ending in 4242\n\nPlace order\n\nOrder summary\nLinen notebook $18.00\nBrass pen \u00d7 2 $28.00\nSubtotal $46.00\nShipping $5.00\nTax $4.14\nTotal $55.14\n\n\u001e\nCheckout \u00b7Northwind Supply X Linen notebook\u00b7Northwind... \u00d7 +\n\n8shop.northwind.example/checkout\n\nNorthwind Supply Notebooks Pens Paper Cart (3)\n\nReturns Privacy Terms\n\n\u304f > C \u2606 \u4e09",
+ "plain": "             Checkout \u00b7Northwind Supply X Linen notebook\u00b7Northwind... \u00d7 +\n\u304f > C 8shop.northwind.example/checkout\n\n\u2606 \u4e09\n\nNorthwind Supply Notebooks Pens Paper Cart (3)\n\nCheckout\nShipping address\nSam Rivera\n41 Harbor Street\nPortland, OR 97209\nDelivery\nStandard shipping, 3 to 5 business days\nPayment\nVisa ending in 4242\n\nPlace order\n\nOrder summary\nLinen notebook $18.00\nBrass pen \u00d7 2 $28.00\nSubtotal $46.00\nShipping $5.00\nTax $4.14\nTotal $55.14\n\nReturns Privacy Terms"
+}

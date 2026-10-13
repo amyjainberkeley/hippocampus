@@ -1,0 +1,17 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "impl Store {\n    fn open() {}"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "    fn close() {}\n}"
+  }
+ ],
+ "stored": "impl Store {\n    fn open() {}\n\n    fn close() {}\n}\n\n\u001e\n",
+ "plain": "impl Store {\n    fn open() {}\n\n    fn close() {}\n}"
+}

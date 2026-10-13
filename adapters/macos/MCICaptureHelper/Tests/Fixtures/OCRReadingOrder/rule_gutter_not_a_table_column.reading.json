@@ -1,0 +1,22 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "1\n2\n3\n4"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "200 sessions in week 1\n213 sessions in week 2\n226 sessions in week 3\n239 sessions in week 4"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose."
+  }
+ ],
+ "stored": "1\n2\n3\n4\n\n200 sessions in week 1\n213 sessions in week 2\n226 sessions in week 3\n239 sessions in week 4\n\nParagraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\n\n\u001e\n",
+ "plain": "1\n2\n3\n4\n\n200 sessions in week 1\n213 sessions in week 2\n226 sessions in week 3\n239 sessions in week 4\n\nParagraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose."
+}

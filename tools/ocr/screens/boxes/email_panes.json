@@ -1,0 +1,254 @@
+{
+"width": 2880,
+"height": 1800,
+"lines": [
+{
+"text": "Inbox",
+"confidence": 0.9969,
+"box": [
+0.009722,
+0.948889,
+0.030556,
+0.024444
+]
+},
+{
+"text": "Offsite agenda, final",
+"confidence": 0.9999,
+"box": [
+0.449306,
+0.947222,
+0.099306,
+0.025
+]
+},
+{
+"text": "Priya Natarajan 9:14 AM",
+"confidence": 0.993,
+"box": [
+0.152778,
+0.951111,
+0.111111,
+0.018889
+]
+},
+{
+"text": "Flagged",
+"confidence": 0.9997,
+"box": [
+0.009722,
+0.925,
+0.040972,
+0.023889
+]
+},
+{
+"text": "Offsite agenda, final",
+"confidence": 0.9999,
+"box": [
+0.152778,
+0.926111,
+0.0875,
+0.019444
+]
+},
+{
+"text": "From: Priya Natarajan To: Team",
+"confidence": 0.9979,
+"box": [
+0.448611,
+0.920556,
+0.152083,
+0.023889
+]
+},
+{
+"text": "Room is booked for Thursday, 10 to 4.",
+"confidence": 0.9881,
+"box": [
+0.152083,
+0.900556,
+0.161806,
+0.023333
+]
+},
+{
+"text": "Drafts",
+"confidence": 1.0,
+"box": [
+0.010417,
+0.902778,
+0.031944,
+0.02
+]
+},
+{
+"text": "Hi all,",
+"confidence": 0.9918,
+"box": [
+0.448611,
+0.892778,
+0.029861,
+0.023333
+]
+},
+{
+"text": "Sent",
+"confidence": 1.0,
+"box": [
+0.010417,
+0.878333,
+0.025,
+0.021111
+]
+},
+{
+"text": "Linear 8:02 AM",
+"confidence": 0.9959,
+"box": [
+0.152083,
+0.878333,
+0.072917,
+0.017778
+]
+},
+{
+"text": "The room is booked for Thursday from 10:00 to 16:00 at 410 Townsend.",
+"confidence": 0.9886,
+"box": [
+0.45,
+0.867222,
+0.323611,
+0.021111
+]
+},
+{
+"text": "Archive",
+"confidence": 1.0,
+"box": [
+0.009722,
+0.852778,
+0.038194,
+0.023333
+]
+},
+{
+"text": "HIP-412 moved to In Review",
+"confidence": 0.984,
+"box": [
+0.152083,
+0.852778,
+0.122222,
+0.018889
+]
+},
+{
+"text": "Morning: roadmap review and the Q4 hiring plan.",
+"confidence": 0.9911,
+"box": [
+0.448611,
+0.839444,
+0.222917,
+0.023333
+]
+},
+{
+"text": "Receipts",
+"confidence": 1.0,
+"box": [
+0.010417,
+0.829444,
+0.043056,
+0.022222
+]
+},
+{
+"text": "Persistent OCR worker: ready for review.",
+"confidence": 0.9908,
+"box": [
+0.151389,
+0.828333,
+0.173611,
+0.02
+]
+},
+{
+"text": "Afternoon: customer interviews readout, then the launch checklist.",
+"confidence": 0.9999,
+"box": [
+0.45,
+0.812222,
+0.300694,
+0.021667
+]
+},
+{
+"text": "Travel",
+"confidence": 1.0,
+"box": [
+0.009722,
+0.804444,
+0.032639,
+0.023889
+]
+},
+{
+"text": "Daniel Okafor Yesterday",
+"confidence": 0.9976,
+"box": [
+0.152778,
+0.803333,
+0.111111,
+0.019444
+]
+},
+{
+"text": "Please send slides by Wednesday at noon so we can print handouts.",
+"confidence": 0.9963,
+"box": [
+0.449306,
+0.785556,
+0.308333,
+0.021111
+]
+},
+{
+"text": "Contract redlines (v3)",
+"confidence": 0.9998,
+"box": [
+0.152778,
+0.778889,
+0.094444,
+0.018889
+]
+},
+{
+"text": "Thanks, Priya",
+"confidence": 0.9693,
+"box": [
+0.449306,
+0.757778,
+0.064583,
+0.022222
+]
+},
+{
+"text": "Two changes in section 4.2, both minor.",
+"confidence": 0.9975,
+"box": [
+0.152778,
+0.754444,
+0.16875,
+0.018889
+]
+}
+],
+"separators": [
+[
+0.138889,
+0.0,
+0.0,
+1.0
+]
+]
+}

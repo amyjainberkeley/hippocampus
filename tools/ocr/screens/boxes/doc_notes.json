@@ -1,0 +1,164 @@
+{
+"width": 2880,
+"height": 1800,
+"lines": [
+{
+"text": "Workspace",
+"confidence": 1.0,
+"box": [
+0.010417,
+0.952222,
+0.054167,
+0.023333
+]
+},
+{
+"text": "Product notes",
+"confidence": 0.9961,
+"box": [
+0.009722,
+0.928333,
+0.068056,
+0.022778
+]
+},
+{
+"text": "Launch checklist",
+"confidence": 0.9997,
+"box": [
+0.20625,
+0.916111,
+0.158333,
+0.030556
+]
+},
+{
+"text": "Meeting notes",
+"confidence": 0.9649,
+"box": [
+0.009028,
+0.901667,
+0.069444,
+0.026111
+]
+},
+{
+"text": "Roadmap",
+"confidence": 1.0,
+"box": [
+0.009028,
+0.878333,
+0.047917,
+0.026111
+]
+},
+{
+"text": "Owner: Maya Chen Due: Oct 21 Status: In progress",
+"confidence": 0.993,
+"box": [
+0.20625,
+0.861667,
+0.255556,
+0.024444
+]
+},
+{
+"text": "Reading list",
+"confidence": 0.9995,
+"box": [
+0.009722,
+0.853333,
+0.057639,
+0.026111
+]
+},
+{
+"text": "Before the beta",
+"confidence": 0.9864,
+"box": [
+0.20625,
+0.832778,
+0.080556,
+0.022222
+]
+},
+{
+"text": "1. Notarize the DMG and staple the ticket.",
+"confidence": 0.9898,
+"box": [
+0.206944,
+0.804444,
+0.199306,
+0.019444
+]
+},
+{
+"text": "2. Publish the Homebrew cask and the install script.",
+"confidence": 0.9901,
+"box": [
+0.205556,
+0.772222,
+0.249306,
+0.023333
+]
+},
+{
+"text": "3. Record a 30-second demo with synthetic data only.",
+"confidence": 0.9875,
+"box": [
+0.205556,
+0.742222,
+0.260417,
+0.023333
+]
+},
+{
+"text": "Open questions",
+"confidence": 0.9889,
+"box": [
+0.206944,
+0.712222,
+0.08125,
+0.022222
+]
+},
+{
+"text": "- Should retention default to 30 or 90 days?",
+"confidence": 0.988,
+"box": [
+0.206944,
+0.683889,
+0.210417,
+0.019444
+]
+},
+{
+"text": "- Which apps are excluded on first run?",
+"confidence": 0.9845,
+"box": [
+0.207639,
+0.653889,
+0.188889,
+0.018889
+]
+},
+{
+"text": "- Do we show a capture indicator in the menu bar?",
+"confidence": 0.983,
+"box": [
+0.206944,
+0.625,
+0.240972,
+0.018889
+]
+}
+],
+"separators": [
+[
+0.166667,
+0.0,
+0.0,
+1.0
+]
+]
+}

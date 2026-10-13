@@ -1,0 +1,52 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "0 Northwind >\nInbox\nMy issues\n= Views\nYour teams\nEngineering\n    Issues\n    Cycles\n    Projects\nDesign\nMarketing"
+  },
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "Engineering  ENG-412 \u2606\u4e09"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "The OCR worker drops the first frame after wake"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "After the Mac wakes from sleep, the first window read comes back empty. The second read is fine, so the\nproblem is the warm worker, not the screen."
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Steps to reproduce\n1. Close the lid for ten minutes."
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "2. Open it and switch to any window with text.\n3. Compare the first two reads in the trace.\nActivity\n    Ravi Patel2 hours ago\n    Seen on two machines. Both were on battery."
+  },
+  {
+   "role": "chrome",
+   "rule": "placeholder",
+   "text": "Leave a comment..."
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Status In Progress\nPriority High\nAssignee Maya Chen\nLabels Bug Capture\nProject Launch\nCycle Cycle 14\nEstimate 3\nDue date Oct 21"
+  },
+  {
+   "role": "chrome",
+   "rule": "glyph",
+   "text": "Q @ A"
+  }
+ ],
+ "stored": "The OCR worker drops the first frame after wake\n\nAfter the Mac wakes from sleep, the first window read comes back empty. The second read is fine, so the\nproblem is the warm worker, not the screen.\n\nSteps to reproduce\n1. Close the lid for ten minutes.\n\n2. Open it and switch to any window with text.\n3. Compare the first two reads in the trace.\nActivity\n    Ravi Patel2 hours ago\n    Seen on two machines. Both were on battery.\n\nStatus In Progress\nPriority High\nAssignee Maya Chen\nLabels Bug Capture\nProject Launch\nCycle Cycle 14\nEstimate 3\nDue date Oct 21\n\n\u001e\n0 Northwind >\nInbox\nMy issues\n= Views\nYour teams\nEngineering\n    Issues\n    Cycles\n    Projects\nDesign\nMarketing\n\nEngineering  ENG-412 \u2606\u4e09\n\nLeave a comment...\n\nQ @ A",
+ "plain": "0 Northwind >\nInbox\nMy issues\n= Views\nYour teams\nEngineering\n   Issues\n   Cycles\n   Projects\nDesign\nMarketing\n\nQ\n\nEngineering  ENG-412 \u2606\u4e09\n\nThe OCR worker drops the first frame after wake\n\nAfter the Mac wakes from sleep, the first window read comes back empty. The second read is fine, so the\nproblem is the warm worker, not the screen.\n\nSteps to reproduce\n1. Close the lid for ten minutes.\n\n2. Open it and switch to any window with text.\n3. Compare the first two reads in the trace.\nActivity\n      Ravi Patel2 hours ago\n      Seen on two machines. Both were on battery.\n\nLeave a comment... @ A\n\nStatus In Progress\nPriority High\nAssignee Maya Chen\nLabels Bug Capture\nProject Launch\nCycle Cycle 14\nEstimate 3\nDue date Oct 21"
+}

@@ -1,0 +1,88 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "Dana Whitfield <dana@northwind.example>",
+   "confidence": 0.95,
+   "box": [
+    0.525694,
+    0.794444,
+    0.177778,
+    0.019444
+   ]
+  },
+  {
+   "text": "11:02 AM",
+   "confidence": 0.95,
+   "box": [
+    0.903472,
+    0.782222,
+    0.078472,
+    0.022222
+   ]
+  },
+  {
+   "text": "to me",
+   "confidence": 0.95,
+   "box": [
+    0.525,
+    0.772222,
+    0.027778,
+    0.02
+   ]
+  },
+  {
+   "text": "Paragraph line 0 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.520833,
+    0.705556,
+    0.451389,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 1 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.520833,
+    0.678889,
+    0.451389,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 2 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.520833,
+    0.652222,
+    0.451389,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 3 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.520833,
+    0.625556,
+    0.451389,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Weekly review",
+  "bundle_id": "com.example.notes"
+ }
+}

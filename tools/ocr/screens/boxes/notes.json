@@ -1,0 +1,486 @@
+{
+"width": 2880,
+"height": 1800,
+"lines": [
+{
+"text": "Q Search",
+"confidence": 0.9417,
+"box": [
+0.854167,
+0.958889,
+0.050694,
+0.026667
+]
+},
+{
+"text": "0",
+"confidence": 0.7007,
+"box": [
+0.190972,
+0.96,
+0.016667,
+0.024444
+]
+},
+{
+"text": "三",
+"confidence": 0.8504,
+"box": [
+0.16875,
+0.96,
+0.015278,
+0.023333
+]
+},
+{
+"text": "Aa",
+"confidence": 0.9997,
+"box": [
+0.745139,
+0.961111,
+0.020833,
+0.022222
+]
+},
+{
+"text": "A",
+"confidence": 0.8175,
+"box": [
+0.824306,
+0.96,
+0.015972,
+0.023333
+]
+},
+{
+"text": "口",
+"confidence": 0.8483,
+"box": [
+0.698611,
+0.961111,
+0.0125,
+0.021111
+]
+},
+{
+"text": "+",
+"confidence": 0.9145,
+"box": [
+0.723611,
+0.962222,
+0.013889,
+0.02
+]
+},
+{
+"text": "8",
+"confidence": 0.962,
+"box": [
+0.8,
+0.961111,
+0.0125,
+0.021111
+]
+},
+{
+"text": "三",
+"confidence": 0.8672,
+"box": [
+0.774306,
+0.962222,
+0.014583,
+0.018889
+]
+},
+{
+"text": "Launch plan",
+"confidence": 1.0,
+"box": [
+0.155556,
+0.909444,
+0.059722,
+0.022222
+]
+},
+{
+"text": "iCloud",
+"confidence": 0.9981,
+"box": [
+0.009028,
+0.907222,
+0.03125,
+0.023333
+]
+},
+{
+"text": "October 12, 2026 at 2:31 PM",
+"confidence": 0.9987,
+"box": [
+0.614583,
+0.902778,
+0.111806,
+0.018889
+]
+},
+{
+"text": "2:31",
+"confidence": 0.9999,
+"box": [
+0.154167,
+0.883889,
+0.025,
+0.025556
+]
+},
+{
+"text": "42",
+"confidence": 1.0,
+"box": [
+0.119444,
+0.876111,
+0.017361,
+0.024444
+]
+},
+{
+"text": "All iCloud",
+"confidence": 0.9984,
+"box": [
+0.010417,
+0.877222,
+0.061806,
+0.022222
+]
+},
+{
+"text": "Team plan price before the b...",
+"confidence": 0.9886,
+"box": [
+0.196528,
+0.875,
+0.129861,
+0.018889
+]
+},
+{
+"text": "Launch plan",
+"confidence": 0.999,
+"box": [
+0.370833,
+0.858333,
+0.102778,
+0.033333
+]
+},
+{
+"text": "PM",
+"confidence": 0.9996,
+"box": [
+0.154167,
+0.862778,
+0.023611,
+0.025556
+]
+},
+{
+"text": "17",
+"confidence": 1.0,
+"box": [
+0.119444,
+0.843889,
+0.017361,
+0.024444
+]
+},
+{
+"text": "Notes",
+"confidence": 0.9998,
+"box": [
+0.009722,
+0.843889,
+0.047917,
+0.023333
+]
+},
+{
+"text": "The beta opens on October 21. Everything below has to be true by then, and nothing else is in",
+"confidence": 0.9957,
+"box": [
+0.371528,
+0.826111,
+0.441667,
+0.022222
+]
+},
+{
+"text": "Pricing ideas",
+"confidence": 1.0,
+"box": [
+0.155556,
+0.818333,
+0.063194,
+0.023333
+]
+},
+{
+"text": "Launch",
+"confidence": 0.9999,
+"box": [
+0.022917,
+0.812222,
+0.039583,
+0.020556
+]
+},
+{
+"text": "6",
+"confidence": 0.9997,
+"box": [
+0.125694,
+0.813889,
+0.009722,
+0.016667
+]
+},
+{
+"text": "口",
+"confidence": 0.9683,
+"box": [
+0.0125,
+0.816111,
+0.0125,
+0.013333
+]
+},
+{
+"text": "scope.",
+"confidence": 0.9995,
+"box": [
+0.369444,
+0.796667,
+0.039583,
+0.028333
+]
+},
+{
+"text": "Yesterday Per seat with a minimum o...",
+"confidence": 0.9803,
+"box": [
+0.15625,
+0.794444,
+0.170139,
+0.022778
+]
+},
+{
+"text": "Personal",
+"confidence": 0.9998,
+"box": [
+0.010417,
+0.778889,
+0.058333,
+0.022222
+]
+},
+{
+"text": "19",
+"confidence": 1.0,
+"box": [
+0.120139,
+0.777778,
+0.016667,
+0.023333
+]
+},
+{
+"text": "Pricing",
+"confidence": 1.0,
+"box": [
+0.368403,
+0.748333,
+0.050694,
+0.035556
+]
+},
+{
+"text": "Groceries",
+"confidence": 1.0,
+"box": [
+0.155556,
+0.748889,
+0.049306,
+0.023333
+]
+},
+{
+"text": "Recently Deleted",
+"confidence": 0.9986,
+"box": [
+0.010417,
+0.745556,
+0.093056,
+0.022222
+]
+},
+{
+"text": "3",
+"confidence": 0.9999,
+"box": [
+0.125,
+0.746667,
+0.011111,
+0.021111
+]
+},
+{
+"text": "Monday Oat milk, lemons, rice",
+"confidence": 0.9981,
+"box": [
+0.155556,
+0.725556,
+0.136111,
+0.022222
+]
+},
+{
+"text": "• Team plan at $18 a seat, billed annually (Ravi and Maya agreed on Tuesday).",
+"confidence": 0.9832,
+"box": [
+0.370833,
+0.717778,
+0.369444,
+0.026667
+]
+},
+{
+"text": "• Open question: seat minimums. Ravi suggests three.",
+"confidence": 0.999,
+"box": [
+0.372222,
+0.685,
+0.258333,
+0.022778
+]
+},
+{
+"text": "Reading list",
+"confidence": 1.0,
+"box": [
+0.155556,
+0.679444,
+0.059028,
+0.023889
+]
+},
+{
+"text": "Oct 2 The Design of Everyday Things",
+"confidence": 0.9897,
+"box": [
+0.15625,
+0.657222,
+0.1625,
+0.022222
+]
+},
+{
+"text": "• Update the pricing page before the announcement goes out.",
+"confidence": 0.9952,
+"box": [
+0.370833,
+0.648333,
+0.297222,
+0.027778
+]
+},
+{
+"text": "Onboarding",
+"confidence": 0.9999,
+"box": [
+0.370139,
+0.600556,
+0.075694,
+0.03
+]
+},
+{
+"text": "Four screens, two permissions, and a moment of proof at the end. If a new person has not",
+"confidence": 0.9945,
+"box": [
+0.371528,
+0.570556,
+0.424306,
+0.022222
+]
+},
+{
+"text": "seen it work on their own screen within a minute, the flow has failed.",
+"confidence": 0.9988,
+"box": [
+0.370833,
+0.545556,
+0.321528,
+0.021667
+]
+},
+{
+"text": "Open loops",
+"confidence": 1.0,
+"box": [
+0.370139,
+0.494444,
+0.070833,
+0.03
+]
+},
+{
+"text": "• Reply to Dana about invoice 4471.",
+"confidence": 0.9923,
+"box": [
+0.372222,
+0.465556,
+0.172917,
+0.018889
+]
+},
+{
+"text": "· Send Jonas the benchmark doc.",
+"confidence": 0.9853,
+"box": [
+0.370833,
+0.429444,
+0.165972,
+0.023889
+]
+},
+{
+"text": "+ New Folder",
+"confidence": 0.9593,
+"box": [
+0.011111,
+0.02,
+0.06875,
+0.022222
+]
+}
+],
+"separators": [
+[
+0.0,
+0.943333,
+1.0,
+0.0
+],
+[
+0.145833,
+0.0,
+0.0,
+0.941111
+],
+[
+0.340278,
+0.0,
+0.0,
+0.941111
+]
+]
+}

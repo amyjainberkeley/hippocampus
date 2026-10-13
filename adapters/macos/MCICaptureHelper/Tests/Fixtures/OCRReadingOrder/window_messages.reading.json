@@ -1,0 +1,62 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "Q Search"
+  },
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "Maya Chen\nI will send it tonight"
+  },
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "9:41 AM"
+  },
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "Ravi Patel Yesterday\nSent the pricing doc\nJonas Weber Monday\nBenchmarks look good"
+  },
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "Dana Whitfield\nInvoice attached"
+  },
+  {
+   "role": "chrome",
+   "rule": "navigation",
+   "text": "Oct 9"
+  },
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "To: Maya Chen \u2261"
+  },
+  {
+   "role": "chrome",
+   "rule": "date",
+   "text": "Today 9:30 AM"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Are we still on for 3?\n    Yes, running five minutes late\nSee you there\nCan you bring the printed badges?\n    Already in my bag\n    The venue wants a final headcount by Friday\nI will send it tonight"
+  },
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "iMessage"
+  },
+  {
+   "role": "chrome",
+   "rule": "glyph",
+   "text": "0"
+  }
+ ],
+ "stored": "Are we still on for 3?\n    Yes, running five minutes late\nSee you there\nCan you bring the printed badges?\n    Already in my bag\n    The venue wants a final headcount by Friday\nI will send it tonight\n\n\u001e\nQ Search\n\nMaya Chen\nI will send it tonight\n\n9:41 AM\n\nRavi Patel Yesterday\nSent the pricing doc\nJonas Weber Monday\nBenchmarks look good\n\nDana Whitfield\nInvoice attached\n\nOct 9\n\nTo: Maya Chen \u2261\n\nToday 9:30 AM\n\niMessage\n\n0",
+ "plain": "                            0\nQ Search\n\nMaya Chen\nI will send it tonight\n\n9:41 AM\n\nRavi Patel Yesterday\nSent the pricing doc\nJonas Weber Monday\nBenchmarks look good\n\nDana Whitfield\nInvoice attached\n\nOct 9\n\nTo: Maya Chen \u2261\n\n                                        Today 9:30 AM\nAre we still on for 3?\n                                        Yes, running five minutes late\nSee you there\nCan you bring the printed badges?\n                                        Already in my bag\n                                        The venue wants a final headcount by Friday\nI will send it tonight\n\niMessage"
+}

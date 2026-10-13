@@ -1,0 +1,484 @@
+{
+"width": 2880,
+"height": 1800,
+"lines": [
+{
+"text": "Stripe Docs",
+"confidence": 0.9999,
+"box": [
+0.229167,
+0.960556,
+0.052083,
+0.025
+]
+},
+{
+"text": "×",
+"confidence": 0.4314,
+"box": [
+0.352083,
+0.962222,
+0.015278,
+0.023333
+]
+},
+{
+"text": "Inbox (12) - sam@example.c... ×",
+"confidence": 0.9757,
+"box": [
+0.388889,
+0.962222,
+0.1375,
+0.022222
+]
+},
+{
+"text": "hippocampus/README.md ... ×",
+"confidence": 0.9502,
+"box": [
+0.549306,
+0.962222,
+0.1375,
+0.022222
+]
+},
+{
+"text": "Per-seat or tiered? How to p... X",
+"confidence": 0.9856,
+"box": [
+0.072222,
+0.964444,
+0.134028,
+0.017778
+]
+},
+{
+"text": "+",
+"confidence": 0.9384,
+"box": [
+0.690278,
+0.954444,
+0.013194,
+0.02
+]
+},
+{
+"text": "☆",
+"confidence": 0.9628,
+"box": [
+0.93125,
+0.919444,
+0.01875,
+0.028333
+]
+},
+{
+"text": "0 ≡",
+"confidence": 0.6279,
+"box": [
+0.959028,
+0.919444,
+0.0375,
+0.028333
+]
+},
+{
+"text": "C",
+"confidence": 0.9938,
+"box": [
+0.044444,
+0.923889,
+0.013194,
+0.019444
+]
+},
+{
+"text": "8 pricingnotes.example/team-plans/per-seat-or-tiered",
+"confidence": 0.985,
+"box": [
+0.073611,
+0.923889,
+0.227778,
+0.019444
+]
+},
+{
+"text": "く",
+"confidence": 0.5114,
+"box": [
+0.008333,
+0.925,
+0.009722,
+0.017222
+]
+},
+{
+"text": ">",
+"confidence": 0.912,
+"box": [
+0.027083,
+0.924444,
+0.010069,
+0.017778
+]
+},
+{
+"text": " Docs",
+"confidence": 0.9226,
+"box": [
+0.004514,
+0.882778,
+0.042361,
+0.026111
+]
+},
+{
+"text": "Pricing notes",
+"confidence": 1.0,
+"box": [
+0.051389,
+0.883889,
+0.072222,
+0.022222
+]
+},
+{
+"text": "Roadmap",
+"confidence": 0.9999,
+"box": [
+0.128472,
+0.885,
+0.058333,
+0.018889
+]
+},
+{
+"text": "Design system",
+"confidence": 0.9999,
+"box": [
+0.193056,
+0.885,
+0.077778,
+0.018889
+]
+},
+{
+"text": "Analytics",
+"confidence": 0.9999,
+"box": [
+0.275,
+0.885,
+0.054861,
+0.018889
+]
+},
+{
+"text": "Sign in",
+"confidence": 0.9999,
+"box": [
+0.841667,
+0.832778,
+0.038889,
+0.028889
+]
+},
+{
+"text": "Pricing Notes",
+"confidence": 0.9999,
+"box": [
+0.038889,
+0.835,
+0.086111,
+0.025556
+]
+},
+{
+"text": "Subscribe",
+"confidence": 1.0,
+"box": [
+0.900694,
+0.833889,
+0.052778,
+0.026667
+]
+},
+{
+"text": "Guides",
+"confidence": 1.0,
+"box": [
+0.138194,
+0.835,
+0.038194,
+0.024444
+]
+},
+{
+"text": "Calculator",
+"confidence": 0.9999,
+"box": [
+0.264583,
+0.836111,
+0.050694,
+0.023333
+]
+},
+{
+"text": "Case studies",
+"confidence": 0.9999,
+"box": [
+0.188889,
+0.836111,
+0.063194,
+0.022222
+]
+},
+{
+"text": "RELATED",
+"confidence": 1.0,
+"box": [
+0.572222,
+0.755556,
+0.045833,
+0.023333
+]
+},
+{
+"text": "TEAM PLANS",
+"confidence": 0.9999,
+"box": [
+0.038889,
+0.754444,
+0.065972,
+0.022222
+]
+},
+{
+"text": "When to raise prices",
+"confidence": 0.9883,
+"box": [
+0.572222,
+0.723333,
+0.095139,
+0.022222
+]
+},
+{
+"text": "Per-seat or tiered? How to price a",
+"confidence": 0.9963,
+"box": [
+0.0375,
+0.690556,
+0.415278,
+0.050556
+]
+},
+{
+"text": "The case against free tiers",
+"confidence": 0.9913,
+"box": [
+0.572917,
+0.69,
+0.119444,
+0.022222
+]
+},
+{
+"text": "team plan",
+"confidence": 1.0,
+"box": [
+0.038194,
+0.647222,
+0.127778,
+0.045
+]
+},
+{
+"text": "Annual billing, explained",
+"confidence": 0.9998,
+"box": [
+0.573611,
+0.655,
+0.109722,
+0.022222
+]
+},
+{
+"text": "What a seat minimum signals",
+"confidence": 0.9994,
+"box": [
+0.573611,
+0.622778,
+0.130556,
+0.018889
+]
+},
+{
+"text": "By Lena Ortiz · October 3, 2026 ·6 min read",
+"confidence": 0.9695,
+"box": [
+0.039583,
+0.610556,
+0.181944,
+0.022222
+]
+},
+{
+"text": "Most teams choose between charging for every seat and charging by tier. Per-seat pricing",
+"confidence": 0.9916,
+"box": [
+0.038194,
+0.564444,
+0.467361,
+0.027222
+]
+},
+{
+"text": "Get one pricing note a week",
+"confidence": 0.9939,
+"box": [
+0.584722,
+0.552222,
+0.135417,
+0.022778
+]
+},
+{
+"text": "is easy to explain and grows with the customer, but it punishes the customers who invite",
+"confidence": 0.9994,
+"box": [
+0.038889,
+0.536667,
+0.4625,
+0.022222
+]
+},
+{
+"text": "the most colleagues.",
+"confidence": 0.9768,
+"box": [
+0.038889,
+0.504444,
+0.109722,
+0.025556
+]
+},
+{
+"text": "you@example.com",
+"confidence": 1.0,
+"box": [
+0.589583,
+0.507778,
+0.088889,
+0.022222
+]
+},
+{
+"text": "Tiered pricing hides that penalty. A team of four and a team of nine pay the same, so",
+"confidence": 0.9994,
+"box": [
+0.038889,
+0.456667,
+0.443056,
+0.026667
+]
+},
+{
+"text": "nobody hesitates before adding a colleague. The cost is a harder first decision: which tier",
+"confidence": 0.9834,
+"box": [
+0.039583,
+0.428333,
+0.463194,
+0.022778
+]
+},
+{
+"text": "am I?",
+"confidence": 0.9981,
+"box": [
+0.0375,
+0.395,
+0.036806,
+0.027778
+]
+},
+{
+"text": "A seat minimum is the usual compromise. Charge per seat, but start every team at three.",
+"confidence": 0.9979,
+"box": [
+0.038889,
+0.348333,
+0.463194,
+0.026667
+]
+},
+{
+"text": "Small teams get a predictable bill, and the price still follows growth after that.",
+"confidence": 0.9941,
+"box": [
+0.039583,
+0.320556,
+0.405556,
+0.022222
+]
+},
+{
+"text": "Whichever you choose, write the price down in one sentence. If the sentence needs the",
+"confidence": 0.9978,
+"box": [
+0.039583,
+0.27,
+0.452778,
+0.025556
+]
+},
+{
+"text": "word “depending\", the plan is not finished.",
+"confidence": 0.9856,
+"box": [
+0.039583,
+0.24,
+0.227083,
+0.025556
+]
+}
+],
+"separators": [
+[
+0.0,
+0.878889,
+1.0,
+0.0
+],
+[
+0.0,
+0.816667,
+1.0,
+0.0
+],
+[
+0.073611,
+0.95,
+0.873611,
+0.0
+],
+[
+0.073611,
+0.916667,
+0.873611,
+0.0
+],
+[
+0.213194,
+0.955556,
+0.786806,
+0.0
+],
+[
+0.555556,
+0.48,
+0.0,
+0.294444
+]
+]
+}

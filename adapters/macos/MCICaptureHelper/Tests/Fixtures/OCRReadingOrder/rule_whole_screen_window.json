@@ -1,0 +1,128 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "Weekly review",
+   "confidence": 0.95,
+   "box": [
+    0.361111,
+    0.755556,
+    0.104167,
+    0.016667
+   ]
+  },
+  {
+   "text": "Launch plan",
+   "confidence": 0.95,
+   "box": [
+    0.506944,
+    0.755556,
+    0.104167,
+    0.016667
+   ]
+  },
+  {
+   "text": "Recipes",
+   "confidence": 0.95,
+   "box": [
+    0.652778,
+    0.755556,
+    0.104167,
+    0.016667
+   ]
+  },
+  {
+   "text": "Inbox",
+   "confidence": 0.95,
+   "box": [
+    0.354167,
+    0.694444,
+    0.055556,
+    0.016667
+   ]
+  },
+  {
+   "text": "Starred",
+   "confidence": 0.95,
+   "box": [
+    0.354167,
+    0.67,
+    0.055556,
+    0.016667
+   ]
+  },
+  {
+   "text": "Sent",
+   "confidence": 0.95,
+   "box": [
+    0.354167,
+    0.645556,
+    0.055556,
+    0.016667
+   ]
+  },
+  {
+   "text": "Drafts",
+   "confidence": 0.95,
+   "box": [
+    0.354167,
+    0.621111,
+    0.055556,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 0 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.520833,
+    0.694444,
+    0.416667,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 1 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.520833,
+    0.667778,
+    0.416667,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 2 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.520833,
+    0.641111,
+    0.416667,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 3 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.520833,
+    0.614444,
+    0.416667,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.347222,
+   0.166667,
+   0.625,
+   0.611111
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Weekly review",
+  "bundle_id": "com.example.notes"
+ }
+}

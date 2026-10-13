@@ -1,0 +1,148 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "Week",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.972222,
+    0.052083,
+    0.016667
+   ]
+  },
+  {
+   "text": "Sessions",
+   "confidence": 0.95,
+   "box": [
+    0.381944,
+    0.972222,
+    0.052083,
+    0.016667
+   ]
+  },
+  {
+   "text": "Questions",
+   "confidence": 0.95,
+   "box": [
+    0.520833,
+    0.972222,
+    0.052083,
+    0.016667
+   ]
+  },
+  {
+   "text": "One",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.944444,
+    0.052083,
+    0.016667
+   ]
+  },
+  {
+   "text": "212",
+   "confidence": 0.95,
+   "box": [
+    0.381944,
+    0.944444,
+    0.052083,
+    0.016667
+   ]
+  },
+  {
+   "text": "48",
+   "confidence": 0.95,
+   "box": [
+    0.520833,
+    0.944444,
+    0.052083,
+    0.016667
+   ]
+  },
+  {
+   "text": "Two",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.916667,
+    0.052083,
+    0.016667
+   ]
+  },
+  {
+   "text": "240",
+   "confidence": 0.95,
+   "box": [
+    0.381944,
+    0.916667,
+    0.052083,
+    0.016667
+   ]
+  },
+  {
+   "text": "61",
+   "confidence": 0.95,
+   "box": [
+    0.520833,
+    0.916667,
+    0.052083,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 0 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.816667,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 1 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.79,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 2 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.763333,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 3 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.736667,
+    0.520833,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Weekly review",
+  "bundle_id": "com.example.notes"
+ }
+}

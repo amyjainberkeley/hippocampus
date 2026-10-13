@@ -1,0 +1,42 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "which is why the pilot ran for four weeks instead of two."
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Results"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Six teams used the memory for four weeks. Each kept its usual tools and was asked one question a\nday about work from the week before."
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Answers grounded in a remembered window were right far more often than answers from search\nalone, and people stopped retyping context into their AI tools after the first week."
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Week Sessions Questions\n1 212 48\n2 240 61\n3 236 57"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Questions per session stayed flat, so the gain is not more asking."
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Retention fell to 61 percent in week three, then recovered."
+  }
+ ],
+ "stored": "which is why the pilot ran for four weeks instead of two.\n\nResults\n\nSix teams used the memory for four weeks. Each kept its usual tools and was asked one question a\nday about work from the week before.\n\nAnswers grounded in a remembered window were right far more often than answers from search\nalone, and people stopped retyping context into their AI tools after the first week.\n\nWeek Sessions Questions\n1 212 48\n2 240 61\n3 236 57\n\nQuestions per session stayed flat, so the gain is not more asking.\n\nRetention fell to 61 percent in week three, then recovered.\n\n\u001e\n",
+ "plain": "which is why the pilot ran for four weeks instead of two.\n\nResults\n\nSix teams used the memory for four weeks. Each kept its usual tools and was asked one question a\nday about work from the week before.\n\nAnswers grounded in a remembered window were right far more often than answers from search\nalone, and people stopped retyping context into their AI tools after the first week.\n\nWeek Sessions Questions\n1 212 48\n2 240 61\n3 236 57\n\nQuestions per session stayed flat, so the gain is not more asking.\n\nRetention fell to 61 percent in week three, then recovered."
+}

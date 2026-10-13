@@ -1,0 +1,298 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "Main column line 0 with words",
+   "confidence": 0.95,
+   "box": [
+    0.034722,
+    0.872222,
+    0.3125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Main column line 1 with words",
+   "confidence": 0.95,
+   "box": [
+    0.034722,
+    0.851667,
+    0.3125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Main column line 2 with words",
+   "confidence": 0.95,
+   "box": [
+    0.034722,
+    0.831111,
+    0.3125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Main column line 3 with words",
+   "confidence": 0.95,
+   "box": [
+    0.034722,
+    0.810556,
+    0.3125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Main column line 4 with words",
+   "confidence": 0.95,
+   "box": [
+    0.034722,
+    0.79,
+    0.3125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Main column line 5 with words",
+   "confidence": 0.95,
+   "box": [
+    0.034722,
+    0.769444,
+    0.3125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Main column line 6 with words",
+   "confidence": 0.95,
+   "box": [
+    0.034722,
+    0.748889,
+    0.3125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Main column line 7 with words",
+   "confidence": 0.95,
+   "box": [
+    0.034722,
+    0.728333,
+    0.3125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Main column line 8 with words",
+   "confidence": 0.95,
+   "box": [
+    0.034722,
+    0.707778,
+    0.3125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Main column line 9 with words",
+   "confidence": 0.95,
+   "box": [
+    0.034722,
+    0.687222,
+    0.3125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Main column line 10 with words",
+   "confidence": 0.95,
+   "box": [
+    0.034722,
+    0.666667,
+    0.3125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Main column line 11 with words",
+   "confidence": 0.95,
+   "box": [
+    0.034722,
+    0.646111,
+    0.3125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Main column line 12 with words",
+   "confidence": 0.95,
+   "box": [
+    0.034722,
+    0.625556,
+    0.3125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Rail 0",
+   "confidence": 0.95,
+   "box": [
+    0.555556,
+    0.872222,
+    0.069444,
+    0.016667
+   ]
+  },
+  {
+   "text": "Rail 1",
+   "confidence": 0.95,
+   "box": [
+    0.555556,
+    0.847222,
+    0.069444,
+    0.016667
+   ]
+  },
+  {
+   "text": "Rail 2",
+   "confidence": 0.95,
+   "box": [
+    0.555556,
+    0.822222,
+    0.069444,
+    0.016667
+   ]
+  },
+  {
+   "text": "Rail 3",
+   "confidence": 0.95,
+   "box": [
+    0.555556,
+    0.797222,
+    0.069444,
+    0.016667
+   ]
+  },
+  {
+   "text": "Rail 4",
+   "confidence": 0.95,
+   "box": [
+    0.555556,
+    0.772222,
+    0.069444,
+    0.016667
+   ]
+  },
+  {
+   "text": "Rail 5",
+   "confidence": 0.95,
+   "box": [
+    0.555556,
+    0.747222,
+    0.069444,
+    0.016667
+   ]
+  },
+  {
+   "text": "Rail 6",
+   "confidence": 0.95,
+   "box": [
+    0.555556,
+    0.722222,
+    0.069444,
+    0.016667
+   ]
+  },
+  {
+   "text": "Rail 7",
+   "confidence": 0.95,
+   "box": [
+    0.555556,
+    0.697222,
+    0.069444,
+    0.016667
+   ]
+  },
+  {
+   "text": "Rail 8",
+   "confidence": 0.95,
+   "box": [
+    0.555556,
+    0.672222,
+    0.069444,
+    0.016667
+   ]
+  },
+  {
+   "text": "Rail 9",
+   "confidence": 0.95,
+   "box": [
+    0.555556,
+    0.647222,
+    0.069444,
+    0.016667
+   ]
+  },
+  {
+   "text": "Rail 10",
+   "confidence": 0.95,
+   "box": [
+    0.555556,
+    0.622222,
+    0.069444,
+    0.016667
+   ]
+  },
+  {
+   "text": "Rail 11",
+   "confidence": 0.95,
+   "box": [
+    0.555556,
+    0.597222,
+    0.069444,
+    0.016667
+   ]
+  },
+  {
+   "text": "Rail 12",
+   "confidence": 0.95,
+   "box": [
+    0.555556,
+    0.572222,
+    0.069444,
+    0.016667
+   ]
+  },
+  {
+   "text": "Rail 13",
+   "confidence": 0.95,
+   "box": [
+    0.555556,
+    0.547222,
+    0.069444,
+    0.016667
+   ]
+  },
+  {
+   "text": "Rail 14",
+   "confidence": 0.95,
+   "box": [
+    0.555556,
+    0.522222,
+    0.069444,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Weekly review",
+  "bundle_id": "com.example.notes"
+ }
+}
