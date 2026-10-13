@@ -191,6 +191,32 @@ final class PaddleOCRRunnerTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: marker, encoding: .utf8), "start\n")
     }
 
+    /// The whole path a reading takes: the warm worker, the reply decoder and
+    /// the execution lane. The lane once dropped the separators, so the
+    /// reading order never cut at a pane the worker had found.
+    func testTheWorkersPaneSeparatorsReachTheCallerMappedToTheFrame() async throws {
+        let executable = try fixture(Self.serveLoop + """
+        print(json.dumps({'version':1,'ready':True}),flush=True)
+        while frame():
+            print(json.dumps({'version':1,
+                              'lines':[{'text':'Synthetic pane','confidence':0.9,'box':[0.6,0.2,0.3,0.1]}],
+                              'separators':[[0.5,0.0,0.0,1.0],[0.1,0.1,0.2,0.3]]}),flush=True)
+        """)
+        let runner = PaddleOCRRunner(executableURL: executable, persistent: true)
+        addTeardownBlock { runner.stop() }
+        let result = await runner.recognize(input: try input(), timeoutMs: 4000)
+        XCTAssertFalse(result.timedOut)
+        XCTAssertEqual(result.recognizedLines.map(\.text), ["Synthetic pane"])
+        // The read region is the middle half of the frame. The malformed
+        // separator (neither width nor height zero) is skipped.
+        let separator = try XCTUnwrap(result.separators.first)
+        XCTAssertEqual(result.separators.count, 1)
+        XCTAssertEqual(separator.minX, 0.5, accuracy: 0.00001)
+        XCTAssertEqual(separator.minY, 0.25, accuracy: 0.00001)
+        XCTAssertEqual(separator.width, 0, accuracy: 0.00001)
+        XCTAssertEqual(separator.height, 0.5, accuracy: 0.00001)
+    }
+
     func testSlowStartTimesOutWithoutRestartingThenServes() async throws {
         let marker = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         addTeardownBlock { try? FileManager.default.removeItem(at: marker) }
