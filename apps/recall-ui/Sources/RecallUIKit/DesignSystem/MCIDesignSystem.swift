@@ -1,8 +1,8 @@
 // MCIDesignSystem.swift — native memory-workspace design tokens.
 //
 // A single source of truth for MCI's SwiftUI surface. Every view —
-// HitRow, DetailPane, Search, PrivacyDashboard, GlobalRecallPopup,
-// ActionPanel, onboarding — pulls from the same tokens.
+// HitRow, DetailPane, Ask, PrivacyDashboard, ActionPanel,
+// onboarding — pulls from the same tokens.
 //
 // Design language:
 //   - Typography: native SF roles with regular + semibold weight only

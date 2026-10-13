@@ -15,13 +15,10 @@
 //
 // # Why NSPanel + NSHostingView (not `.sheet` / `.alert`)
 //
-// A sheet is modal to a window; the recall UI has multiple windows and
-// the Global Recall popup runs off its own NSPanel — a sheet would only
-// attach to whichever window sent the event. NSPanel with a floating
-// level sits above every app window at once (same pattern as
-// `GlobalRecallPopupPanel.swift`, PR #79), so a ⌘R fired from the
-// popup, the search view, or the timeline all present in the same
-// place.
+// A sheet is modal to a window and would only attach to whichever window
+// sent the event. NSPanel with a floating level sits above every app
+// window at once, so a ⌘R fired from Ask, History or a sheet presents in
+// the same place.
 //
 // # Position
 //

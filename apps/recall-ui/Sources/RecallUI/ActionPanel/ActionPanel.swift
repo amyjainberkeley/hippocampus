@@ -27,8 +27,7 @@ struct ActionPanel: View {
             .frame(maxHeight: 400)
             .background(Color.brandBgSecondary)
             // Cycle 8.48 MCIDesignSystem: use modal radius + modal shadow
-            // preset so all floating panels (this + GlobalRecallPopup)
-            // share a single depth language.
+            // preset so floating panels share a single depth language.
             .clipShape(RoundedRectangle(cornerRadius: MCI.Radius.l))
             .mciShadow(.modal)
             .overlay(
