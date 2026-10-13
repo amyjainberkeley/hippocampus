@@ -279,7 +279,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 supervisor: supervisor,
                 openEvent: { eventId in supervisor.openRecallUI(initialTab: "search", focusEventId: eventId) },
                 openWindow: { tab in supervisor.openRecallUI(initialTab: tab) },
-                statusAction: { [weak self] action in self?.performAskStatusAction(action) },
+                statusAction: { action in
+                    supervisor.performAskStatusAction(action) { NSWorkspace.shared.open($0) }
+                },
                 announceShown: {
                     AskPanelNotice.announceShown(onboardingRunning: supervisor.onboardingIsRunning) { name in
                         DistributedNotificationCenter.default().postNotificationName(
@@ -473,33 +475,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// background; the key starts listening as soon as it is.
     func applicationDidBecomeActive(_ notification: Notification) {
         SoloKeyMonitor.shared.recheck()
-    }
-
-    /// The Ask footer's button, doing what the menu's status action does.
-    private func performAskStatusAction(_ action: AskPanelStatus.Action) {
-        switch action {
-        case .resume:
-            UserPauseController.shared.setPaused(false)
-            supervisor.setPaused(false)
-        case .turnOn:
-            UserPauseController.shared.setPaused(false)
-            supervisor.setPaused(false)
-            if supervisor.captureEnabled {
-                supervisor.start()
-            } else {
-                Task { @MainActor [weak self] in
-                    try? await self?.supervisor.applyCaptureEnabled(true)
-                }
-            }
-        case .openSystemSettings(let permission):
-            if let url = URL(string: permission.settingsPaneURLString) {
-                NSWorkspace.shared.open(url)
-            }
-        case .tryAgain:
-            // A start retries a stopped or failed run and leaves a running
-            // one alone; the supervisor's own retry replaces it later.
-            supervisor.start()
-        }
     }
 
     private func presentShutdownFailure(_ error: Error) {

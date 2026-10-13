@@ -112,6 +112,15 @@ public enum BarRow: Sendable, Equatable, Identifiable {
     }
 }
 
+/// What ⇧⌘C fetched for an AI tool.
+public enum CopyForAIResult: Sendable, Equatable {
+    case text(String)
+    case failed
+    /// Ask closed, or closed and opened again, before it arrived: the person
+    /// has moved on, and may have copied something else since.
+    case dropped
+}
+
 /// What Ask asks the app to do outside the panel.
 public enum BarAction: Sendable, Equatable {
     case openURL(URL)
@@ -130,13 +139,17 @@ public enum BarAction: Sendable, Equatable {
 public enum AnswerLine: Equatable, Sendable {
     case answer(String)
     case thinking
+    /// A request runs where no answer can be written: it can only find.
+    case searching
     case note(String)
 
-    /// The answer; "Thinking…" while it is written; why there is none; or
-    /// the notice of a request that failed.
-    public static func make(answer: BarAnswer?, asking: Bool, notice: String?) -> AnswerLine? {
+    /// The answer; "Thinking…" while it is written, or "Searching…" when
+    /// none can be; why there is none; or the notice of a request that failed.
+    public static func make(
+        answer: BarAnswer?, asking: Bool, notice: String?, answersAvailable: Bool = true
+    ) -> AnswerLine? {
         if let text = answer?.answer { return .answer(text) }
-        if asking { return .thinking }
+        if asking { return answersAvailable ? .thinking : .searching }
         if let reason = answer?.unavailable {
             return .note(explain(reason, matched: answer?.sources.isEmpty == false))
         }
@@ -234,6 +247,7 @@ public final class CommandBarModel: ObservableObject {
     private let now: () -> Date
     private var availability: AnswerAvailability
     private var openID = 0
+    private var isOpen = false
     private var homeGeneration = 0
     private var homeLoaded = false
     private var homeWaitsForAsk = false
@@ -283,7 +297,7 @@ public final class CommandBarModel: ObservableObject {
 
     public var footerText: String {
         if let flash { return flash }
-        if status.isRemembering, !answersAvailable { return "Answers need Apple Intelligence" }
+        if status.isRemembering, !answersAvailable { return availability.footerReason }
         return status.text
     }
 
@@ -293,15 +307,21 @@ public final class CommandBarModel: ObservableObject {
     public var answerText: String? { mode == .answer ? answer?.answer : nil }
 
     public var answerLine: AnswerLine? {
-        mode == .answer ? AnswerLine.make(answer: answer, asking: isAsking, notice: notice) : nil
+        guard mode == .answer else { return nil }
+        return AnswerLine.make(answer: answer, asking: isAsking, notice: notice, answersAvailable: answersAvailable)
     }
 
     /// The window chip is at full strength only when Hippocampus has read
     /// the window (product critique 2).
     public var chipStrength: Double { windowRead ? 1 : 0.5 }
 
-    public var chipTooltip: String {
-        windowRead ? "Ask about this window" : "Hippocampus hasn’t read this window"
+    /// What the chip says about the window, or nil while that is not known.
+    /// A window read before a pause was read; it is not being read now.
+    public var chipTooltip: String? {
+        if windowRead { return "Ask about this window" }
+        if savedRead == false { return "Hippocampus hasn’t read this window" }
+        if !status.readsThisWindow { return "Hippocampus isn’t reading this window" }
+        return nil
     }
 
     public var rows: [BarRow] {
@@ -320,15 +340,19 @@ public final class CommandBarModel: ObservableObject {
 
     /// The agent puts the window in front first when the answer read it
     /// (`answer_sources` in `query.rs`). It is the moment Ask found for that
-    /// window, or one with its title (or app) from the time asked.
+    /// window, or a newer read of it: only when this window is known to be
+    /// read, and only from the same app with the same title (or, untitled,
+    /// from the last two minutes). A title alone is no proof: two editors can
+    /// show the same file, two browsers the same page.
     private func isThisWindow(_ source: BarSource) -> Bool {
         if let readEventId, source.eventId >= 0, UInt64(source.eventId) == readEventId { return true }
-        guard let context, let askedAt else { return false }
+        guard savedRead == true, let context, let askedAt, let app = context.appName, source.app == app
+        else { return false }
         let age = askedAt.timeIntervalSince1970 - Double(source.tsUs) / 1_000_000
         if let title = context.windowTitle {
             return source.title == title && age <= ThisWindowRead.sameTitleWithin
         }
-        return context.appName != nil && source.app == context.appName && age <= ThisWindowRead.sameAppWithin
+        return age <= ThisWindowRead.sameAppWithin
     }
 
     /// The rows offered before anything is typed, in the agent's order, cut
@@ -352,6 +376,7 @@ public final class CommandBarModel: ObservableObject {
     @discardableResult
     public func opened() -> Int {
         openID += 1
+        isOpen = true
         focusRequest += 1
         flash = nil
         liveContext = nil
@@ -397,6 +422,7 @@ public final class CommandBarModel: ObservableObject {
     /// Ask closed. A question and its answer stay; a request keeps running.
     public func closed() {
         closedAt = now()
+        isOpen = false
         flash = nil
         searchTask?.cancel()
         isSearching = false
@@ -490,7 +516,8 @@ public final class CommandBarModel: ObservableObject {
                     answersAvailable: self.answersAvailable
                 )
             } catch {
-                guard generation == self.homeGeneration else { return }
+                // Said only over the home rows, never over an answer or results.
+                guard generation == self.homeGeneration, self.mode == .home else { return }
                 self.notice = Self.notice(for: error, otherwise: "Opening your memory…")
             }
         }
@@ -617,7 +644,9 @@ public final class CommandBarModel: ObservableObject {
                 self.isAsking = false
                 if let reply { self.answer = reply } else { self.notice = failure }
             }
-            if self.asksRunning == 0, self.homeWaitsForAsk { self.loadHome() }
+            // Rows put off for this answer load once Ask is back home; Esc
+            // from an answer or results loads them then.
+            if self.asksRunning == 0, self.homeWaitsForAsk, self.mode == .home { self.loadHome() }
         }
     }
 
@@ -646,16 +675,21 @@ public final class CommandBarModel: ObservableObject {
     }
 
     /// Context for an AI tool: a cited packet for the question or the window.
-    public func copyForAI() async -> String? {
+    /// What arrives after Ask has closed, or closed and opened again, is
+    /// dropped, so it never replaces something copied since.
+    public func copyForAI() async -> CopyForAIResult {
+        let open = openID
         let focus = query.isEmpty ? (context?.windowTitle ?? "") : query
-        guard let data = try? await memory.call(
-                .reads, "mci_context", arguments: Self.json(["focus": focus, "max_tokens": 1200]), timeout: .seconds(15)
-              ),
+        let data = try? await memory.call(
+            .reads, "mci_context", arguments: Self.json(["focus": focus, "max_tokens": 1200]), timeout: .seconds(15)
+        )
+        guard isOpen, open == openID else { return .dropped }
+        guard let data,
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let content = object["content"] as? [[String: Any]],
               let text = content.first?["text"] as? String
-        else { return nil }
-        return text
+        else { return .failed }
+        return .text(text)
     }
 
     public func showFlash(_ text: String?) {
@@ -802,6 +836,12 @@ extension CommandBarModel {
         self.status = status
         self.savedRead = savedRead
         self.answersAvailable = answersAvailable
+        // Unavailable for a reason, as in the app: the answer's own, or a
+        // Mac older than macOS 26, the most common one.
+        if !answersAvailable {
+            availability = AnswerAvailability(systemSupportsAnswers: answer?.unavailable != nil)
+            if let answer { availability.learn(from: answer, at: now()) }
+        }
         self.homeRows = homeRows
         self.hits = hits
         self.answer = answer

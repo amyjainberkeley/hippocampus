@@ -56,6 +56,22 @@ final class AskPanelWiringTests: XCTestCase {
         XCTAssertTrue(bar.contains("Task.detached(priority: .userInitiated)"), "Accessibility is asked off the main thread")
     }
 
+    func testTheFooterKnowsWhereSetupStands() throws {
+        let bar = try source("CommandBar.swift")
+        XCTAssertEqual(bar.components(separatedBy: "askPanelStatus()").count - 1, 2,
+                       "on show and on every status change")
+        XCTAssertFalse(bar.contains("AskPanelStatus(supervisor.menuBarStatus)"))
+        XCTAssertFalse(bar.contains("AskPanelStatus($0.menuBarStatus)"))
+    }
+
+    func testCopyForAIEndsWithTheOpenItWasPressedIn() throws {
+        let bar = try source("CommandBar.swift")
+        let hide = try XCTUnwrap(bar.range(of: "func hide() {"))
+        let body = String(bar[hide.lowerBound...].prefix(700))
+        XCTAssertTrue(body.contains("copyForAITask?.cancel()"))
+        XCTAssertTrue(bar.contains("case .dropped: break"))
+    }
+
     func testTheMarkFollowsTheMenuBarAndNoSparklesRemain() throws {
         let bar = try source("CommandBar.swift")
         XCTAssertTrue(bar.contains("HiMarkView(style: .brand, state: model.status.mark)"))
@@ -82,6 +98,9 @@ final class AskPanelWiringTests: XCTestCase {
         XCTAssertTrue(app.contains("AskPanelNotice.announceShown(onboardingRunning: supervisor.onboardingIsRunning)"))
         XCTAssertTrue(app.contains("name, object: nil, userInfo: nil, deliverImmediately: true"))
         XCTAssertTrue(app.contains("openWindow: { tab in supervisor.openRecallUI(initialTab: tab) }"))
+        // The footer's buttons run the tested HippocampusKit code, not a copy.
+        XCTAssertTrue(app.contains("supervisor.performAskStatusAction(action) { NSWorkspace.shared.open($0) }"))
+        XCTAssertFalse(app.contains("private func performAskStatusAction("))
         XCTAssertTrue(app.contains("SoloKeyMonitor.shared.watch.setFallbackRegistered(true)"))
         XCTAssertTrue(app.contains("SoloKeyMonitor.shared.watch.setFallbackRegistered(false)"))
         let launch = try XCTUnwrap(app.range(of: "func applicationDidFinishLaunching("))

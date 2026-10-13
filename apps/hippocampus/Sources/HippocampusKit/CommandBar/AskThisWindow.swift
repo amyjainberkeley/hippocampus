@@ -39,6 +39,17 @@ public struct AnswerAvailability: Equatable, Sendable {
         return now.timeIntervalSince(learnedAt) >= Self.remembered
     }
 
+    /// Why no answer can be written, in the few words Ask's footer has room
+    /// for, from the same reason the answer card explains.
+    public var footerReason: String {
+        guard systemSupportsAnswers else { return "Answers need macOS 26" }
+        switch reason {
+        case "apple_intelligence_off", "device_not_eligible": return "Answers need Apple Intelligence"
+        case "model_not_ready": return "Apple Intelligence is getting ready"
+        default: return "Answers aren’t available"
+        }
+    }
+
     /// Learn from a reply to a question. A timeout or another failure says
     /// nothing about the model, so only its own reasons are kept.
     public mutating func learn(from answer: BarAnswer, at now: Date) {

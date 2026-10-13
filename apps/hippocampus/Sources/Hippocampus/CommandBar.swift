@@ -30,6 +30,8 @@ final class CommandBarController: NSObject, NSWindowDelegate {
     private var entering = false
     private var statusWatch: AnyCancellable?
     private var closeAfterCopy: Task<Void, Never>?
+    /// ⇧⌘C's fetch, cancelled when Ask closes.
+    private var copyForAITask: Task<Void, Never>?
 
     func configure(
         model: CommandBarModel,
@@ -60,7 +62,7 @@ final class CommandBarController: NSObject, NSWindowDelegate {
             // The status is polled every 5 s; read it now, as the menu does.
             if let supervisor {
                 supervisor.refreshCaptureStatus()
-                model.setStatus(AskPanelStatus(supervisor.menuBarStatus))
+                model.setStatus(supervisor.askPanelStatus())
             }
             let openID = model.opened()
             present(panel)
@@ -80,6 +82,8 @@ final class CommandBarController: NSObject, NSWindowDelegate {
         statusWatch = nil
         closeAfterCopy?.cancel()
         closeAfterCopy = nil
+        copyForAITask?.cancel()
+        copyForAITask = nil
         // Opened from a link, the app was activated: give focus back to the
         // app the person was in, unless a Hippocampus window is in use.
         let others = NSApp.windows.filter { !($0 is CommandBarPanel) }.map {
@@ -166,7 +170,7 @@ final class CommandBarController: NSObject, NSWindowDelegate {
         statusWatch = supervisor.objectWillChange
             .receive(on: RunLoop.main)
             .map { [weak supervisor] _ in
-                MainActor.assumeIsolated { supervisor.map { AskPanelStatus($0.menuBarStatus) } }
+                MainActor.assumeIsolated { supervisor?.askPanelStatus() }
             }
             .compactMap { $0 }
             .removeDuplicates()
@@ -201,12 +205,17 @@ final class CommandBarController: NSObject, NSWindowDelegate {
         case .copy(let text):
             copy(text)
         case .copyForAI:
-            Task { [weak self] in
-                guard let model = self?.model else { return }
-                if let text = await model.copyForAI() {
-                    self?.copy(text)
-                } else {
-                    model.showFlash("Couldn’t copy. Try again.")
+            // Tied to this open: closing Ask cancels it, and a result that
+            // arrives after Ask closed or opened again is dropped.
+            guard let model else { return }
+            copyForAITask?.cancel()
+            copyForAITask = Task { [weak self] in
+                let result = await model.copyForAI()
+                guard !Task.isCancelled else { return }
+                switch result {
+                case .text(let text): self?.copy(text)
+                case .failed: model.showFlash("Couldn’t copy. Try again.")
+                case .dropped: break
                 }
             }
         case .status(let action):
@@ -602,10 +611,11 @@ private struct ContextChip: View {
     let name: String
     let title: String?
     let strength: Double
-    let tooltip: String
+    /// Nil while it is not known whether the window was read.
+    let tooltip: String?
 
     var body: some View {
-        HStack(spacing: 6) {
+        let chip = HStack(spacing: 6) {
             AppIcon(bundleId: bundleId).frame(width: 16, height: 16)
             Text(BarRowView.place(app: name, title: title))
                 .font(.caption)
@@ -618,7 +628,11 @@ private struct ContextChip: View {
         .background(.quaternary.opacity(0.6), in: Capsule())
         .foregroundStyle(.secondary)
         .opacity(strength)
-        .help(tooltip)
+        if let tooltip {
+            chip.help(tooltip)
+        } else {
+            chip
+        }
     }
 }
 
@@ -741,8 +755,9 @@ private struct BarRowView: View {
     }
 }
 
-/// The answer, "Thinking…" while it is written, why there is none, or what
-/// went wrong: never an empty card (spec-copy M2 finding 7).
+/// The answer, "Thinking…" while it is written ("Searching…" where none can
+/// be), why there is none, or what went wrong: never an empty card (spec-copy
+/// M2 finding 7).
 private struct AnswerCard: View {
     let line: AnswerLine?
 
@@ -754,10 +769,10 @@ private struct AnswerCard: View {
                     .font(.system(size: 15))
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
-            case .thinking:
+            case .thinking, .searching:
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Thinking…").font(.callout).foregroundStyle(.secondary)
+                    Text(line == .thinking ? "Thinking…" : "Searching…").font(.callout).foregroundStyle(.secondary)
                 }
             case .note(let text):
                 Text(text).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

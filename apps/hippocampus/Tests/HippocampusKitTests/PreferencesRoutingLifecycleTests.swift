@@ -40,8 +40,11 @@ final class PreferencesRoutingLifecycleTests: XCTestCase {
     func testPreferencesLaunchDoesNotOpenASecondRecallWindowAtStartup() throws {
         let app = try source("HippocampusApp.swift")
         let start = try method("private func startSupervisorOrDeferUntilOnboarded()", in: app)
+        // Pinned as 4df194f left it; the launch step replaces the condition
+        // with `launchReason == .user` (spec-shell S7).
         XCTAssertEqual(start.components(separatedBy:
-            "if initialPreferencesRequest == nil { supervisor.openRecallWhenReady(initialLaunch: true) }").count - 1, 2)
+            "if initialPreferencesRequest == nil, !Self.isQuietLaunch { supervisor.openRecallWhenReady(initialLaunch: true) }")
+            .count - 1, 2)
     }
 
     private func source(_ name: String) throws -> String {

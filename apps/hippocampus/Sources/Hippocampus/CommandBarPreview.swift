@@ -54,9 +54,14 @@ enum CommandBarPreviewRenderer {
         """)
         let read = CommandBarModel.homeRows(from: suggestions, readsThisWindow: true)
         let readWithoutAnswers = CommandBarModel.homeRows(from: suggestions, readsThisWindow: true, answersAvailable: false)
-        // Not read: the agent offers no screen row, and Ask offers none while
-        // nothing is read.
-        let unread = CommandBarModel.homeRows(from: suggestions.filter { $0.kind != "screen" }, readsThisWindow: false)
+        // Read before a pause: the agent still offers the screen and more
+        // about it, and Ask offers no screen row while nothing is read.
+        let readButNotReading = CommandBarModel.homeRows(from: suggestions, readsThisWindow: false)
+        // Never read: the agent offers neither the screen nor more about it
+        // (`suggest` in `query.rs`), so only the last session is left.
+        let unread = CommandBarModel.homeRows(
+            from: suggestions.filter { $0.kind != "screen" && $0.kind != "related" }, readsThisWindow: true
+        )
         let hits = decode([BarHit].self, """
         [{"event_id":11,"ts_us":\(minutesAgo(26)),"app_bundle_id":"com.tinyspeck.slackmacgap","window_title":"#pricing","url":null,"text_snippet":"[app=Slack]\\nRavi: Let's land Team at $18 a seat, billed annually. Maya: Agreed."},
          {"event_id":12,"ts_us":\(minutesAgo(33)),"app_bundle_id":"com.apple.Notes","window_title":"Launch plan","url":null,"text_snippet":"[app=Notes]\\nBeta ships to 40 design partners on Oct 21. Open question: Team plan price?"},
@@ -76,13 +81,20 @@ enum CommandBarPreviewRenderer {
         let question = "What did we decide on Team pricing?"
         let paused = AskPanelStatus(.paused)
         let permission = AskPanelStatus(.needsPermission(.screenRecording))
+        let notSetUp = AskPanelStatus(.idle, setup: .notFinished)
         return [
             State(name: "home") { $0.preview(mode: .home, context: safari, homeRows: read) },
             State(name: "home-dark", dark: true) { $0.preview(mode: .home, context: safari, homeRows: read) },
             State(name: "home-unread") { $0.preview(mode: .home, context: safari, savedRead: false, homeRows: unread) },
-            State(name: "home-paused") { $0.preview(mode: .home, context: safari, status: paused, homeRows: unread) },
+            State(name: "home-paused") {
+                $0.preview(mode: .home, context: safari, status: paused, homeRows: readButNotReading)
+            },
             State(name: "home-needs-permission") {
-                $0.preview(mode: .home, context: safari, status: permission, homeRows: unread)
+                $0.preview(mode: .home, context: safari, status: permission, homeRows: readButNotReading)
+            },
+            // Before setup there is nothing saved, so nothing to offer.
+            State(name: "home-not-set-up") {
+                $0.preview(mode: .home, context: safari, status: notSetUp, savedRead: false)
             },
             State(name: "home-no-answers") {
                 $0.preview(mode: .home, context: safari, answersAvailable: false, homeRows: readWithoutAnswers)
@@ -92,6 +104,9 @@ enum CommandBarPreviewRenderer {
                 $0.preview(mode: .results, query: "team pricing", context: safari, answersAvailable: false, hits: hits)
             },
             State(name: "thinking") { $0.preview(mode: .answer, query: question, context: safari, working: true) },
+            State(name: "searching") {
+                $0.preview(mode: .answer, query: "team pricing", context: safari, answersAvailable: false, working: true)
+            },
             State(name: "answer") {
                 $0.preview(mode: .answer, query: question, context: safari, answer: answer, askedAt: Date())
             },

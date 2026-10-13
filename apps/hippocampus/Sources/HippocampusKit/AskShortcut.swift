@@ -69,7 +69,7 @@ public struct AskKeyCaption: Equatable, Sendable {
         case .shiftTwice: "Press either Shift twice. Capitals and shortcuts don’t count."
         case .rightShift: "Tap right Shift by itself. Capitals and shortcuts don’t count."
         case .rightCommand: "Tap right ⌘ by itself. Shortcuts like ⌘C never open Ask."
-        case .rightOption: "Tap right ⌥ by itself. Capitals and shortcuts don’t count."
+        case .rightOption: "Tap right ⌥ by itself. Symbols and shortcuts don’t count."
         case .off: ""
         }
     }

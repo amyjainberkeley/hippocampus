@@ -277,7 +277,23 @@ final class AskPanelTests: XCTestCase {
             XCTAssertFalse(model.windowRead, "\(status)")
             XCTAssertEqual(model.placeholder, "Ask about anything you’ve seen", "\(status)")
             XCTAssertEqual(model.chipStrength, 0.5, "\(status)")
+            XCTAssertEqual(model.chipTooltip, "Hippocampus isn’t reading this window",
+                           "it was read before; it is not being read now (\(status))")
         }
+    }
+
+    func testTheChipSaysNothingAboutAReadItHasNotCheckedYet() async {
+        let (model, memory, _) = rig()
+        memory.held = ["mci_events_by_app", "mci_suggest"]
+        await open(model, over: safari)
+        XCTAssertNil(model.savedRead)
+        XCTAssertNil(model.chipTooltip)
+        XCTAssertEqual(model.chipStrength, 0.5)
+        memory.release("mci_events_by_app")
+        await eventually { model.savedRead == true }
+        XCTAssertEqual(model.chipTooltip, "Ask about this window")
+        memory.release("mci_suggest")
+        await settle()
     }
 
     func testTheAgentOfferingTheScreenIsProofOfARead() async {
@@ -350,6 +366,53 @@ final class AskPanelTests: XCTestCase {
         XCTAssertEqual(model.rows, [.source(answer.sources[0])])
     }
 
+    /// The same file open in two editors: a title is no proof of the window.
+    func testASourceWithThisWindowsTitleFromAnotherAppIsNotThisWindow() async throws {
+        let xcode = FrontmostContext(bundleId: "com.apple.dt.Xcode", appName: "Xcode", windowTitle: "Package.swift")
+        let otherEditor = { (clock: TestClock) in
+            """
+            {"answer":"It adds the kit.","sources":[{"n":1,"event_id":21,"ts_us":\(clock.us(minutesAgo: 3)),"app":"Visual Studio Code","title":"Package.swift","url":null,"text":"x"}],"unavailable":null}
+            """
+        }
+
+        // Never read: the chip says so, and no source may say "This window".
+        let (unread, unreadMemory, unreadClock) = rig()
+        unreadMemory.replies["mci_events_by_app"] = .success(#"{"events":[]}"#)
+        unreadMemory.replies["mci_suggest"] = .success(#"{"suggestions":[]}"#)
+        unreadMemory.replies["mci_ask"] = .success(otherEditor(unreadClock))
+        await open(unread, over: xcode)
+        await eventually { unread.savedRead == false }
+        unread.ask("what does this change?")
+        await eventually { unread.answer != nil }
+        XCTAssertEqual(unread.rows, [.source(try XCTUnwrap(unread.answer).sources[0])])
+
+        // Read, but the source is the other editor's.
+        let (read, readMemory, readClock) = rig()
+        readMemory.replies["mci_events_by_app"] = .success("""
+        {"events":[{"event_id":20,"ts_us":\(readClock.us(minutesAgo: 1)),"app_bundle_id":"com.apple.dt.Xcode","window_title":"Package.swift","url":null,"text_snippet":"let package = Package("}]}
+        """)
+        readMemory.replies["mci_ask"] = .success(otherEditor(readClock))
+        await open(read, over: xcode)
+        await eventually { read.savedRead == true }
+        read.ask("what does this change?")
+        await eventually { read.answer != nil }
+        XCTAssertEqual(read.rows, [.source(try XCTUnwrap(read.answer).sources[0])])
+    }
+
+    /// The window was read again between opening Ask and asking: the newer
+    /// read of the same window is still "This window".
+    func testANewerReadOfTheSameWindowIsThisWindow() async throws {
+        let (model, memory, clock) = rig()
+        memory.replies["mci_ask"] = .success("""
+        {"answer":"Team is $18 a seat.","sources":[{"n":1,"event_id":8,"ts_us":\(clock.us(minutesAgo: 0.1)),"app":"Safari","title":"Pricing","url":null,"text":"Per-seat pricing."}],"unavailable":null}
+        """)
+        await open(model, over: safari)
+        await eventually { model.savedRead == true }
+        model.ask("what is this?")
+        await eventually { model.answer != nil }
+        XCTAssertEqual(model.rows, [.thisWindow(try XCTUnwrap(model.answer).sources[0])])
+    }
+
     func testAnswersAreLearnedUnavailableFromTheFirstReplyAndForgottenAfterHalfAnHour() async {
         let (model, memory, clock) = rig()
         memory.replies["mci_ask"] = .success("""
@@ -373,6 +436,50 @@ final class AskPanelTests: XCTestCase {
         model.closed()
         model.opened()
         XCTAssertTrue(model.answersAvailable, "the model is asked again after 30 minutes")
+    }
+
+    func testTheFooterSaysWhyNoAnswerCanBeWritten() async {
+        // Before macOS 26 there are none, whether or not Apple Intelligence is on.
+        let (older, _, _) = rig(answers: false)
+        await open(older, over: safari)
+        XCTAssertEqual(older.footerText, "Answers need macOS 26")
+
+        let reasons = [
+            ("apple_intelligence_off", "Answers need Apple Intelligence"),
+            ("device_not_eligible", "Answers need Apple Intelligence"),
+            ("model_not_ready", "Apple Intelligence is getting ready"),
+            ("not_installed", "Answers aren’t available"),
+        ]
+        for (reason, footer) in reasons {
+            let (model, memory, _) = rig()
+            memory.replies["mci_ask"] = .success(#"{"answer":null,"sources":[],"unavailable":"\#(reason)"}"#)
+            await open(model, over: safari)
+            XCTAssertEqual(model.footerText, "On this Mac", reason)
+            model.ask("what is this?")
+            await eventually { model.answer != nil }
+            XCTAssertEqual(model.footerText, footer, reason)
+        }
+
+        // Paused or off, the footer says that first.
+        let (paused, _, _) = rig(answers: false, status: .paused)
+        await open(paused, over: safari)
+        XCTAssertEqual(paused.footerText, "Paused")
+    }
+
+    /// Where no answer can be written, Return can only find: the card says
+    /// so instead of "Thinking…".
+    func testWithoutAnswersARunningRequestSaysSearching() async {
+        let (model, memory, _) = rig(answers: false)
+        memory.held = ["mci_ask"]
+        await open(model, over: safari)
+        model.query = "pricing"
+        await eventually { !model.hits.isEmpty }
+        XCTAssertNil(model.activate())
+        XCTAssertEqual(model.mode, .answer)
+        XCTAssertEqual(model.answerLine, .searching)
+        memory.release("mci_ask")
+        await eventually { !model.isAsking }
+        XCTAssertEqual(AnswerLine.make(answer: nil, asking: true, notice: nil, answersAvailable: true), .thinking)
     }
 
     func testATimeoutSaysNothingAboutWhetherAnswersWork() {
@@ -507,6 +614,70 @@ final class AskPanelTests: XCTestCase {
         XCTAssertNil(AnswerLine.make(answer: nil, asking: false, notice: nil))
     }
 
+    /// Rows put off while an answer was written wait for Ask to be home
+    /// again, so their failure never replaces the answer's.
+    func testRowsPutOffForAnAnswerNeverReplaceItsFailure() async {
+        let (model, memory, _) = rig()
+        memory.held = ["mci_ask"]
+        let id = model.opened()
+        model.ask("what is this?")
+        model.contextArrived(safari, openID: id)
+        await eventually { memory.calls(to: "mci_ask").count == 1 }
+        XCTAssertTrue(model.back(), "Esc while it is written: the rows wait for it")
+        model.ask("what did we decide?")
+        await eventually { memory.calls(to: "mci_ask").count == 2 }
+        memory.replies["mci_ask"] = .failure(.timedOut)
+        memory.replies["mci_suggest"] = .failure(.timedOut)
+        memory.release("mci_ask")
+        await eventually { !model.isAsking }
+        await settle()
+        XCTAssertEqual(model.answerLine, .note("Couldn’t answer that. Try again."))
+        XCTAssertTrue(memory.calls(to: "mci_suggest").isEmpty, "not under an answer")
+
+        // Typed over it: still not home, so still no rows.
+        model.query = "pricing"
+        await settle()
+        XCTAssertTrue(memory.calls(to: "mci_suggest").isEmpty)
+        XCTAssertNotEqual(model.notice, "Opening your memory…")
+
+        // Home again: the rows load, and their failure is said there.
+        XCTAssertTrue(model.back())
+        await eventually { memory.calls(to: "mci_suggest").count == 1 }
+        await eventually { model.notice == "Opening your memory…" }
+    }
+
+    func testCopyForAIIsDroppedOnceAskHasClosedOrOpenedAgain() async {
+        let (model, memory, _) = rig()
+        memory.replies["mci_context"] = .success(##"{"content":[{"type":"text","text":"# Hippocampus context"}]}"##)
+        await open(model, over: safari)
+        let copied = await model.copyForAI()
+        XCTAssertEqual(copied, .text("# Hippocampus context"))
+
+        // Closed before it arrived: the person may have copied something since.
+        memory.held = ["mci_context"]
+        let afterClose = Task { await model.copyForAI() }
+        await eventually { memory.calls(to: "mci_context").count == 2 }
+        model.closed()
+        memory.release("mci_context")
+        let closedResult = await afterClose.value
+        XCTAssertEqual(closedResult, .dropped)
+
+        // Closed and opened again: it belongs to the earlier open.
+        model.opened()
+        memory.held = ["mci_context"]
+        let afterReopen = Task { await model.copyForAI() }
+        await eventually { memory.calls(to: "mci_context").count == 3 }
+        model.closed()
+        model.opened()
+        memory.release("mci_context")
+        let reopenedResult = await afterReopen.value
+        XCTAssertEqual(reopenedResult, .dropped)
+
+        memory.replies["mci_context"] = .failure(.timedOut)
+        let failed = await model.copyForAI()
+        XCTAssertEqual(failed, .failed)
+    }
+
     func testAFailedSearchIsSaid() async {
         let (model, memory, _) = rig()
         memory.replies["mci_recall"] = .failure(.timedOut)
@@ -569,8 +740,9 @@ final class AskPanelTests: XCTestCase {
             (.idle, "Off", .turnOn, .off),
             (.needsPermission(.accessibility), "Needs permission", .openSystemSettings(.accessibility), .needsYou),
             (.error(reason: "x"), "Not saving", .tryAgain, .needsYou),
-            (.blocked(reason: "x"), "Not saving", .tryAgain, .needsYou),
-            (.stale(reason: "x"), "Not saving", .tryAgain, .needsYou),
+            // Remembering runs in both, where a start does nothing.
+            (.blocked(reason: "x"), "Not saving", nil, .needsYou),
+            (.stale(reason: "x"), "Not saving", nil, .needsYou),
         ]
         for (status, text, action, mark) in expected {
             let footer = AskPanelStatus(status)
@@ -580,9 +752,141 @@ final class AskPanelTests: XCTestCase {
             XCTAssertEqual(footer.mark, status.markState, "Ask's mark matches the menu bar")
         }
         XCTAssertEqual(
-            [AskPanelStatus.Action.resume, .turnOn, .openSystemSettings(.screenRecording), .tryAgain].map(\.title),
-            ["Resume", "Turn On", "Open System Settings…", "Try Again"]
+            [AskPanelStatus.Action.resume, .turnOn, .openSystemSettings(.screenRecording), .tryAgain, .finishSetup]
+                .map(\.title),
+            ["Resume", "Turn On", "Open System Settings…", "Try Again", "Finish Setup…"]
         )
+    }
+
+    /// Start Remembering in onboarding is the only consent, so before setup
+    /// nothing in Ask turns remembering on (product critique 4).
+    func testBeforeSetupAskOffersOnlyToFinishSetup() {
+        let statuses: [MenuBarStatus] = [
+            .idle, .starting, .recording, .unchanged, .noMemory, .paused, .needsPermission(.screenRecording),
+            .error(reason: "x"), .blocked(reason: "x"), .stale(reason: "x"),
+        ]
+        for status in statuses {
+            let closed = AskPanelStatus(status, setup: .notFinished)
+            XCTAssertEqual(closed.text, "Not set up yet", "\(status)")
+            XCTAssertEqual(closed.action, .finishSetup, "\(status)")
+            XCTAssertFalse(closed.readsThisWindow, "\(status)")
+            XCTAssertFalse(closed.isRemembering, "\(status)")
+            XCTAssertEqual(closed.mark, status.markState, "the mark never shows less than is happening")
+            let open = AskPanelStatus(status, setup: .inProgress)
+            XCTAssertEqual(open.text, "Not set up yet", "\(status)")
+            XCTAssertNil(open.action, "onboarding is on screen; a second copy would only compete with it")
+        }
+        XCTAssertEqual(AskPanelStatus.Setup(sentinelPresent: false, hasOnboarding: true, onboardingOpen: false), .notFinished)
+        XCTAssertEqual(AskPanelStatus.Setup(sentinelPresent: false, hasOnboarding: true, onboardingOpen: true), .inProgress)
+        XCTAssertEqual(AskPanelStatus.Setup(sentinelPresent: true, hasOnboarding: true, onboardingOpen: true), .complete)
+        XCTAssertEqual(AskPanelStatus.Setup(sentinelPresent: false, hasOnboarding: false, onboardingOpen: false), .complete,
+                       "a build without onboarding has no setup to finish")
+    }
+
+    func testBeforeSetupThePlaceholderAndChipPromiseNothingAboutThisWindow() async {
+        let (model, _, _) = rig()
+        model.setStatus(AskPanelStatus(.recording, setup: .inProgress))
+        await open(model, over: safari)
+        await eventually { model.savedRead == true }
+        XCTAssertFalse(model.windowRead)
+        XCTAssertEqual(model.placeholder, "Ask about anything you’ve seen")
+        XCTAssertEqual(model.footerText, "Not set up yet")
+        XCTAssertNil(model.footerAction)
+    }
+
+    /// Every button the footer shows changes something in the state it is
+    /// shown for; one that could not act is not shown.
+    func testEveryFooterButtonActsInTheStateItIsShownFor() async throws {
+        let pauses = UserPauseController()
+        var opened: [URL] = []
+
+        // Paused: Resume starts remembering again.
+        let (paused, pausedTopology) = footerSupervisor(captureEnabled: true)
+        pausedTopology.readinessResults = [.success(()), .success(())]
+        try await paused.startAndWaitForReadiness()
+        try await paused.setPausedAndWait(true)
+        XCTAssertEqual(paused.askPanelStatus(setupFinished: true).action, .resume)
+        paused.performAskStatusAction(.resume, setupFinished: true, pauses: pauses) { opened.append($0) }
+        await eventually { paused.state == .running }
+
+        // Off: Turn On turns remembering on.
+        let (off, offTopology) = footerSupervisor(captureEnabled: false)
+        offTopology.readinessResults = [.success(())]
+        XCTAssertEqual(off.askPanelStatus(setupFinished: true).action, .turnOn)
+        off.performAskStatusAction(.turnOn, setupFinished: true, pauses: pauses) { opened.append($0) }
+        await eventually { off.captureEnabled && off.state == .running }
+
+        // A failed start: Try Again starts again.
+        let (failed, failedTopology) = footerSupervisor(captureEnabled: true)
+        failedTopology.readinessResults = [.failure(MemorySessionError.timedOut), .success(())]
+        try? await failed.startAndWaitForReadiness()
+        await settle()
+        XCTAssertNotEqual(failed.state, .running, "a failed start does not retry by itself")
+        XCTAssertEqual(failed.askPanelStatus(setupFinished: true).action, .tryAgain)
+        failed.performAskStatusAction(.tryAgain, setupFinished: true, pauses: pauses) { opened.append($0) }
+        await eventually { failed.state == .running }
+
+        // Running with nothing confirmed saved ("Not saving"): a start leaves a
+        // running run alone, so there is no button.
+        let (running, runningTopology) = footerSupervisor(captureEnabled: true)
+        runningTopology.readinessResults = [.success(())]
+        try await running.startAndWaitForReadiness()
+        XCTAssertEqual(running.askPanelStatus(setupFinished: true).text, "Not saving")
+        XCTAssertNil(running.askPanelStatus(setupFinished: true).action)
+        running.start()
+        await settle()
+        XCTAssertEqual(runningTopology.launchPlans.count, 1, "Try Again would have done nothing here")
+
+        // A permission turned off: Open System Settings… opens its pane.
+        running.tccRevokedSurface = .screenRecording
+        XCTAssertEqual(running.askPanelStatus(setupFinished: true).action, .openSystemSettings(.screenRecording))
+        running.performAskStatusAction(.openSystemSettings(.screenRecording), setupFinished: true, pauses: pauses) {
+            opened.append($0)
+        }
+        XCTAssertEqual(opened, [URL(string: TCCRevokedReason.screenRecording.settingsPaneURLString)!])
+
+        // Before setup, with onboarding closed: Finish Setup… opens it, and
+        // while it is open there is nothing to press.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let onboarding = dir.appendingPathComponent("onboarding")
+        try "#!/bin/sh\nsleep 0.4\n".write(to: onboarding, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: onboarding.path)
+        let (setup, _) = footerSupervisor(captureEnabled: false, onboarding: onboarding)
+        XCTAssertEqual(setup.askPanelStatus(setupFinished: false).action, .finishSetup)
+        setup.performAskStatusAction(.finishSetup, setupFinished: false, pauses: pauses) { opened.append($0) }
+        XCTAssertTrue(setup.onboardingIsRunning)
+        XCTAssertNil(setup.askPanelStatus(setupFinished: false).action)
+        // Whatever asks, nothing turns remembering on before Start Remembering.
+        for action in [AskPanelStatus.Action.turnOn, .resume, .tryAgain] {
+            setup.performAskStatusAction(action, setupFinished: false, pauses: pauses) { opened.append($0) }
+        }
+        await settle()
+        XCTAssertFalse(setup.captureEnabled, "setup is never skipped")
+        XCTAssertEqual(setup.state, .idle)
+    }
+
+    private func footerSupervisor(
+        captureEnabled: Bool, onboarding: URL? = nil
+    ) -> (ProcessSupervisor, FakeSupervisorTopology) {
+        let locator = FakeBinaryLocator()
+        locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
+        locator.agentURL = URL(fileURLWithPath: "/bundle/mci-agent")
+        locator.onboardingURL = onboarding
+        let keyStore = FakeKeyStore()
+        keyStore.storedKey = String(repeating: "ab", count: 32)
+        let topology = FakeSupervisorTopology()
+        let supervisor = ProcessSupervisor(
+            locator: locator,
+            keyStore: keyStore,
+            runtimeConfig: FakeRuntimeConfig(captureEnabled: captureEnabled),
+            topology: topology,
+            keyCustodyPreparer: FakeKeyCustodyPreparer(),
+            readinessTimeout: 0.1,
+            captureStatusReader: { (nil, nil) }
+        )
+        return (supervisor, topology)
     }
 
     func testCopiedShowsForAMomentInPlaceOfTheStatus() async {

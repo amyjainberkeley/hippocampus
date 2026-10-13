@@ -55,7 +55,8 @@ final class AskShortcutTests: XCTestCase {
             (.shiftTwice, "Press either Shift twice. Capitals and shortcuts don’t count."),
             (.rightShift, "Tap right Shift by itself. Capitals and shortcuts don’t count."),
             (.rightCommand, "Tap right ⌘ by itself. Shortcuts like ⌘C never open Ask."),
-            (.rightOption, "Tap right ⌥ by itself. Capitals and shortcuts don’t count."),
+            // Option types symbols, not capitals.
+            (.rightOption, "Tap right ⌥ by itself. Symbols and shortcuts don’t count."),
         ]
         for (key, text) in expected {
             let caption = AskKeyCaption(key: key, accessibilityGranted: true, fallbackRegistered: true)
