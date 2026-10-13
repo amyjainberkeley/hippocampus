@@ -81,19 +81,57 @@ final class SoloKeyDetectorTests: XCTestCase {
         XCTAssertFalse(detector.modifiersChanged(keyCode: rightCommand, flags: 0, activity: 1, atMs: 150))
     }
 
+    func testRightShiftAloneOpensAskWithOneTap() {
+        var detector = SoloKeyDetector(key: .rightShift)
+        XCTAssertFalse(detector.modifiersChanged(keyCode: rightShift, flags: rShift, activity: 3, atMs: 1_000))
+        XCTAssertTrue(detector.modifiersChanged(keyCode: rightShift, flags: 0, activity: 3, atMs: 1_090))
+        XCTAssertFalse(detector.modifiersChanged(keyCode: rightShift, flags: rShift, activity: 3, atMs: 2_000))
+        XCTAssertTrue(detector.modifiersChanged(keyCode: rightShift, flags: 0, activity: 3, atMs: 2_070))
+    }
+
+    func testLeftShiftDoesNothingWhenRightShiftIsTheKey() {
+        var detector = SoloKeyDetector(key: .rightShift)
+        XCTAssertFalse(detector.modifiersChanged(keyCode: leftShift, flags: lShift, activity: 3, atMs: 1_000))
+        XCTAssertFalse(detector.modifiersChanged(keyCode: leftShift, flags: 0, activity: 3, atMs: 1_080))
+        // Twice, quickly: still nothing.
+        XCTAssertFalse(detector.modifiersChanged(keyCode: leftShift, flags: lShift, activity: 3, atMs: 1_200))
+        XCTAssertFalse(detector.modifiersChanged(keyCode: leftShift, flags: 0, activity: 3, atMs: 1_260))
+    }
+
+    func testACapitalTypedWithRightShiftIsNotATap() {
+        var detector = SoloKeyDetector(key: .rightShift)
+        XCTAssertFalse(detector.modifiersChanged(keyCode: rightShift, flags: rShift, activity: 3, atMs: 1_000))
+        XCTAssertFalse(detector.modifiersChanged(keyCode: rightShift, flags: 0, activity: 4, atMs: 1_100))
+    }
+
+    func testEveryKeyHasItsNamesInTheOrderTheyAreOffered() {
+        XCTAssertEqual(SoloKey.allCases, [.shiftTwice, .rightShift, .rightCommand, .rightOption, .off])
+        XCTAssertEqual(SoloKey.allCases.map(\.rawValue), ["shiftTwice", "rightShift", "rightCommand", "rightOption", "off"])
+        XCTAssertEqual(SoloKey.allCases.map(\.shortcutLabel), ["⇧⇧", "right ⇧", "right ⌘", "right ⌥", nil])
+        XCTAssertEqual(
+            SoloKey.allCases.map(\.phrase),
+            ["Press Shift twice", "Tap right Shift", "Tap right ⌘", "Tap right ⌥", nil]
+        )
+    }
+
     @MainActor
     func testEveryChoiceHasALabelAndTheChoiceIsRemembered() throws {
-        XCTAssertEqual(SoloKey.allCases.map(\.label), ["Right ⌘", "Right ⌥", "Shift, twice", "Off"])
+        XCTAssertEqual(SoloKey.allCases.map(\.label), ["Shift twice", "Right Shift", "Right ⌘", "Right ⌥", "Off"])
         let suite = "solo-key-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let retention = FileManager.default.temporaryDirectory
             .appendingPathComponent("solo-key-\(UUID().uuidString)").appendingPathComponent("retention.json")
         let store = PreferencesStore(defaults: defaults, retentionURL: retention)
-        XCTAssertEqual(store.askKey, .rightCommand, "right ⌘ unless the person chose otherwise")
-        store.askKey = .off
-        XCTAssertEqual(PreferencesStore(defaults: defaults, retentionURL: retention).askKey, .off)
+        XCTAssertEqual(store.askKey, .shiftTwice, "Shift twice unless the person chose otherwise")
+        XCTAssertNil(defaults.object(forKey: PreferencesStore.Keys.askKey), "the default is never written")
+        store.askKey = .rightCommand
+        XCTAssertEqual(PreferencesStore(defaults: defaults, retentionURL: retention).askKey, .rightCommand,
+                       "a stored choice is kept")
+        store.askKey = .rightShift
+        XCTAssertEqual(defaults.string(forKey: PreferencesStore.Keys.askKey), "rightShift")
+        XCTAssertEqual(PreferencesStore(defaults: defaults, retentionURL: retention).askKey, .rightShift)
         defaults.set("capsLock", forKey: PreferencesStore.Keys.askKey)
-        XCTAssertEqual(PreferencesStore(defaults: defaults, retentionURL: retention).askKey, .rightCommand)
+        XCTAssertEqual(PreferencesStore(defaults: defaults, retentionURL: retention).askKey, .shiftTwice)
     }
 }

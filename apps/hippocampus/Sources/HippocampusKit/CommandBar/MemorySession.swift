@@ -71,6 +71,9 @@ public actor MemorySession {
         }
     }
 
+    /// Whether a child is running now.
+    public var isRunning: Bool { process?.isRunning == true }
+
     /// Stop the child. Pending calls fail.
     public func stop() {
         process?.terminate()

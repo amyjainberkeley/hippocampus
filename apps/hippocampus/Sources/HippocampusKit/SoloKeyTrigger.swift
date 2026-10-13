@@ -7,20 +7,25 @@
 
 import Foundation
 
-/// Which key opens Ask when tapped alone.
+/// Which key opens Ask when tapped alone. The raw values are stored in
+/// `ai.hippocampus.prefs.askKey`, and onboarding and the window read them
+/// (RULINGS X2), so they never change.
 public enum SoloKey: String, CaseIterable, Sendable, Identifiable {
+    case shiftTwice
+    case rightShift
     case rightCommand
     case rightOption
-    case shiftTwice
     case off
 
     public var id: String { rawValue }
 
+    /// The key's name in the Preferences picker.
     public var label: String {
         switch self {
+        case .shiftTwice: "Shift twice"
+        case .rightShift: "Right Shift"
         case .rightCommand: "Right ⌘"
         case .rightOption: "Right ⌥"
-        case .shiftTwice: "Shift, twice"
         case .off: "Off"
         }
     }
@@ -28,18 +33,31 @@ public enum SoloKey: String, CaseIterable, Sendable, Identifiable {
     /// How the key is named where a shortcut is shown.
     public var shortcutLabel: String? {
         switch self {
+        case .shiftTwice: "⇧⇧"
+        case .rightShift: "right ⇧"
         case .rightCommand: "right ⌘"
         case .rightOption: "right ⌥"
-        case .shiftTwice: "⇧⇧"
+        case .off: nil
+        }
+    }
+
+    /// The instruction for the key.
+    public var phrase: String? {
+        switch self {
+        case .shiftTwice: "Press Shift twice"
+        case .rightShift: "Tap right Shift"
+        case .rightCommand: "Tap right ⌘"
+        case .rightOption: "Tap right ⌥"
         case .off: nil
         }
     }
 
     var keyCodes: Set<UInt16> {
         switch self {
+        case .shiftTwice: [56, 60]
+        case .rightShift: [60]
         case .rightCommand: [54]
         case .rightOption: [61]
-        case .shiftTwice: [56, 60]
         case .off: []
         }
     }
@@ -47,9 +65,10 @@ public enum SoloKey: String, CaseIterable, Sendable, Identifiable {
     /// Device-dependent modifier bits (IOKit NX_DEVICE…KEYMASK) for the key.
     var mask: UInt {
         switch self {
+        case .shiftTwice: SoloKeyDetector.leftShift | SoloKeyDetector.rightShift
+        case .rightShift: SoloKeyDetector.rightShift
         case .rightCommand: SoloKeyDetector.rightCommand
         case .rightOption: SoloKeyDetector.rightOption
-        case .shiftTwice: SoloKeyDetector.leftShift | SoloKeyDetector.rightShift
         case .off: 0
         }
     }

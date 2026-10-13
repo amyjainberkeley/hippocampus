@@ -3,90 +3,165 @@ import AppKit
 import HippocampusKit
 import SwiftUI
 
-/// Debug only: `HIPPOCAMPUS_RENDER_BAR=<dir>` renders the command bar's states
-/// from fixture data (no brain, no real memories) to PNGs and exits.
+/// Debug only: `HIPPOCAMPUS_RENDER_BAR=<dir>` draws Ask's states from fixture
+/// data (no memory, no real moments) to `panel-<state>.png` at 2x, then
+/// returns from `main` before the app starts.
+///
+/// Nothing reaches the screen. `HippocampusEntryPoint.main` calls this before
+/// `HippocampusApp.main()`, so no scene, menu-bar item or app delegate
+/// exists. The application object is given the `.prohibited` policy (no Dock
+/// icon, no menu bar, never active) and is never run. Each state is hosted in
+/// an `NSHostingView` that is never put in a window, and drawn into a bitmap
+/// allocated at twice its size, with a solid fill where the glass would be.
 @MainActor
 enum CommandBarPreviewRenderer {
-    static func renderIfRequested() {
-        guard let dir = ProcessInfo.processInfo.environment["HIPPOCAMPUS_RENDER_BAR"] else { return }
+    /// True when it rendered; `main` then returns.
+    static func renderIfRequested() -> Bool {
+        guard let dir = ProcessInfo.processInfo.environment["HIPPOCAMPUS_RENDER_BAR"] else { return false }
+        NSApplication.shared.setActivationPolicy(.prohibited)
         let out = URL(fileURLWithPath: dir)
         try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
-        let context = FrontmostContext(bundleId: "com.apple.Safari", appName: "Safari", windowTitle: "Pricing | Stripe Documentation")
-        func decode<T: Decodable>(_ type: T.Type, _ json: String) -> T {
-            // swiftlint:disable:next force_try
-            try! JSONDecoder().decode(T.self, from: Data(json.utf8))
-        }
-        let suggestions = decode([BarSuggestion].self, """
-        [{"kind":"resume","title":"Resume: Pricing the Team plan","why":"2:09 PM · You set Team at $18 a seat in the launch plan","action":{"open_session":1},"score":7},
-         {"kind":"predicted","title":"Draft the pricing page update","why":"Maya agreed to update the pricing page today","action":{"ask":"what did we decide about team pricing?"},"score":7},
-         {"kind":"searched","title":"“stripe per seat vs tiered pricing”","why":"You searched this at 2:03 PM","action":{"query":"stripe per seat vs tiered pricing"},"score":6},
-         {"kind":"related","title":"More about Pricing | Stripe Documentation","why":"Everything you saw on this, across apps","action":{"query":"Pricing Stripe"},"score":5},
-         {"kind":"day","title":"Your day so far","why":"Time, focus, searches and where you got stuck","action":{"view":"day"},"score":4}]
-        """)
-        let hits = decode([BarHit].self, """
-        [{"event_id":11,"ts_us":\(now(-26)),"app_bundle_id":"com.tinyspeck.slackmacgap","window_title":"#pricing","url":null,"text_snippet":"[app=Slack]\\nRavi: Let's land Team at $18 a seat, billed annually. Maya: Agreed."},
-         {"event_id":12,"ts_us":\(now(-33)),"app_bundle_id":"com.apple.Notes","window_title":"Launch plan","url":null,"text_snippet":"[app=Notes]\\nBeta ships to 40 design partners on Oct 21. Open question: Team plan price?"},
-         {"event_id":13,"ts_us":\(now(-40)),"app_bundle_id":"com.apple.Safari","window_title":"Pricing | Stripe Documentation","url":"https://stripe.com/docs/billing","text_snippet":"[app=Safari]\\nPer-seat pricing. Tiered pricing. Volume pricing charges the same price per unit."}]
-        """)
-        let answer = decode(BarAnswer.self, """
-        {"answer":"You and Ravi settled on $18 a seat for Team, billed annually, and Maya said she'd update the pricing page today.","sources":[
-          {"n":1,"event_id":11,"ts_us":\(now(-26)),"app":"Slack","title":"#pricing","url":null,"text":"[app=Slack]\\nRavi: Let's land Team at $18 a seat, billed annually."},
-          {"n":2,"event_id":12,"ts_us":\(now(-33)),"app":"Notes","title":"Launch plan","url":null,"text":"[app=Notes]\\nOpen question: Team plan price before the beta?"}],"unavailable":null}
-        """)
-        let day = decode(BarDay.self, """
-        {"facts":"","day":{"written_by":"apple-foundation-models","breakdown":{"date_local":"2026-10-11","basis":"measured","active_us":19800000000,
-          "apps":[{"bundle_id":"com.microsoft.VSCode","name":"VS Code","active_us":8100000000}],
-          "kinds":[{"kind":"code","label":"Code","active_us":8100000000},{"kind":"writing","label":"Writing","active_us":4300000000},{"kind":"communication","label":"Communication","active_us":3600000000},{"kind":"research","label":"Research","active_us":2700000000},{"kind":"meetings","label":"Meetings","active_us":1100000000}],
-          "focus_blocks":[{"start_us":1,"end_us":5400000001,"kind":"code","app":"VS Code"}],"switches":212,"switches_per_hour":38.5,
-          "searches":[{"query":"stripe per seat vs tiered pricing","ts_us":1},{"query":"swiftui glass effect","ts_us":2},{"query":"sqlite fts5 bm25","ts_us":3}],
-          "sessions":[{"start_us":\(now(-300)),"end_us":\(now(-210)),"title":"Command bar in SwiftUI","beneath":"Nothing notable."},
-                      {"start_us":\(now(-120)),"end_us":\(now(-60)),"title":"Pricing the Team plan","beneath":"You paused 3 min in Notes before typing the price, after switching with Slack 5 times."}]},
-          "narrative":{"headline":"5 h 30 min at the computer, mostly building the command bar and settling Team pricing.",
-            "narrative":"You held one 90-minute block of code in VS Code in the morning. The afternoon broke up around 3 PM, when you moved between Slack and Notes on pricing.",
-            "insights":["Longest focus: 9:40–11:10, code in VS Code.","Most switching around 15:00 (64 app switches).","You searched pricing models twice before deciding."],
-            "suggestion":"Batch Slack around 3 PM so the afternoon has one long block."}}}
-        """)
-        let propositions = decode([BarProposition].self, """
-        [{"id":1,"text":"Sam is setting per-seat pricing for the Team plan with Ravi and Maya.","reasoning":"","kind":"project","confidence":0.8,"evidence":[1,2,3]},
-         {"id":2,"text":"Amy writes in the morning and handles messages after 3 PM.","reasoning":"","kind":"habit","confidence":0.6,"evidence":[4,5]},
-         {"id":3,"text":"Amy hesitates before committing a price, switching between notes and chat.","reasoning":"","kind":"struggle","confidence":0.5,"evidence":[6]},
-         {"id":4,"text":"Sam is learning SwiftUI layout and Liquid Glass.","reasoning":"","kind":"skill","confidence":0.6,"evidence":[7,8]}]
-        """)
-        let states: [(String, (CommandBarModel) -> Void)] = [
-            ("model", { $0.preview(mode: .model, context: context, propositions: propositions) }),
-            ("home", { $0.preview(mode: .home, context: context, suggestions: suggestions) }),
-            ("results", { $0.preview(mode: .results, query: "team pricing", context: context, hits: hits) }),
-            ("answer", { $0.preview(mode: .answer, query: "what did we decide on team pricing?", context: context, answer: answer, question: "what did we decide on team pricing?") }),
-            ("thinking", { $0.preview(mode: .answer, query: "q", context: context, question: "what did we decide on team pricing?", working: true) }),
-            ("day", { $0.preview(mode: .day, context: context, day: day) }),
-        ]
-        for (name, configure) in states {
-            let model = CommandBarModel(launch: { _ in nil })
-            configure(model)
-            let view = CommandBarView(model: model, perform: { _ in }, close: {}, heightChanged: { _ in })
-                .padding(40)
-                .background(LinearGradient(colors: [Color(red: 0.32, green: 0.45, blue: 0.62), Color(red: 0.62, green: 0.52, blue: 0.70)], startPoint: .topLeading, endPoint: .bottomTrailing))
-            let hosting = NSHostingView(rootView: view)
-            hosting.frame = NSRect(origin: .zero, size: hosting.fittingSize)
-            let window = NSWindow(contentRect: hosting.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-            window.contentView = hosting
-            window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
-            window.orderFrontRegardless()
-            hosting.layoutSubtreeIfNeeded()
-            RunLoop.main.run(until: Date().addingTimeInterval(0.4))
-            if let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) {
-                hosting.cacheDisplay(in: hosting.bounds, to: rep)
-                if let png = rep.representation(using: .png, properties: [:]) {
-                    try? png.write(to: out.appendingPathComponent("bar-\(name).png"))
-                }
+        for state in states() {
+            let model = CommandBarModel(
+                memory: NoMemory(), availability: AnswerAvailability(systemSupportsAnswers: true)
+            )
+            state.configure(model)
+            if let png = render(model: model, dark: state.dark) {
+                try? png.write(to: out.appendingPathComponent("panel-\(state.name).png"))
             }
-            window.orderOut(nil)
         }
-        exit(0)
+        return true
     }
 
-    private static func now(_ minutes: Int) -> UInt64 {
-        UInt64((Date().timeIntervalSince1970 + Double(minutes) * 60) * 1_000_000)
+    private struct State {
+        let name: String
+        var dark = false
+        let configure: (CommandBarModel) -> Void
     }
+
+    private static func states() -> [State] {
+        let safari = FrontmostContext(
+            bundleId: "com.apple.Safari", appName: "Safari", windowTitle: "Pricing | Stripe Documentation"
+        )
+        // What `mci_suggest` sends with `model: false`, after Ask keeps its
+        // three kinds: no past search, no day, nothing about you.
+        let suggestions = decode([BarSuggestion].self, """
+        [{"kind":"screen","title":"What’s on this screen?","why":"Safari · Pricing | Stripe Documentation","action":{"ask":"What is on my screen right now, and what matters in it?"},"score":8},
+         {"kind":"resume","title":"Resume: Pricing the Team plan","why":"2:09 PM · You set Team at $18 a seat in the launch plan","action":{"open_session":1},"score":7},
+         {"kind":"searched","title":"“stripe per seat vs tiered pricing”","why":"You searched for this at 2:03 PM","action":{"query":"stripe per seat vs tiered pricing"},"score":6},
+         {"kind":"related","title":"More about Pricing | Stripe Documentation","why":"Everything else you saw about this","action":{"query":"Pricing Stripe"},"score":5},
+         {"kind":"day","title":"Your day so far","why":"Time, focus, searches and where you got stuck","action":{"view":"day"},"score":4}]
+        """)
+        let read = CommandBarModel.homeRows(from: suggestions, readsThisWindow: true)
+        let readWithoutAnswers = CommandBarModel.homeRows(from: suggestions, readsThisWindow: true, answersAvailable: false)
+        // Not read: the agent offers no screen row, and Ask offers none while
+        // nothing is read.
+        let unread = CommandBarModel.homeRows(from: suggestions.filter { $0.kind != "screen" }, readsThisWindow: false)
+        let hits = decode([BarHit].self, """
+        [{"event_id":11,"ts_us":\(minutesAgo(26)),"app_bundle_id":"com.tinyspeck.slackmacgap","window_title":"#pricing","url":null,"text_snippet":"[app=Slack]\\nRavi: Let's land Team at $18 a seat, billed annually. Maya: Agreed."},
+         {"event_id":12,"ts_us":\(minutesAgo(33)),"app_bundle_id":"com.apple.Notes","window_title":"Launch plan","url":null,"text_snippet":"[app=Notes]\\nBeta ships to 40 design partners on Oct 21. Open question: Team plan price?"},
+         {"event_id":13,"ts_us":\(minutesAgo(40)),"app_bundle_id":"com.apple.Safari","window_title":"Pricing | Stripe Documentation","url":"https://stripe.com/docs/billing","text_snippet":"[app=Safari]\\nPer-seat pricing. Tiered pricing. Volume pricing charges the same price per unit."}]
+        """)
+        let sources = """
+          [{"n":1,"event_id":14,"ts_us":\(minutesAgo(0.15)),"app":"Safari","title":"Pricing | Stripe Documentation","url":null,"text":"[app=com.apple.Safari | title=Pricing | Stripe Documentation]\\nPer-seat pricing charges for each user."},
+           {"n":2,"event_id":11,"ts_us":\(minutesAgo(26)),"app":"Slack","title":"#pricing","url":null,"text":"[app=Slack]\\nRavi: Let's land Team at $18 a seat, billed annually."},
+           {"n":3,"event_id":12,"ts_us":\(minutesAgo(33)),"app":"Notes","title":"Launch plan","url":null,"text":"Open question: Team plan price before the beta?"}]
+        """
+        let answer = decode(BarAnswer.self, """
+        {"answer":"You and Ravi settled on $18 a seat for Team, billed annually. Maya said she would update the pricing page today.","sources":\(sources),"unavailable":null}
+        """)
+        let unavailable = decode(BarAnswer.self, """
+        {"answer":null,"sources":\(sources),"unavailable":"apple_intelligence_off"}
+        """)
+        let question = "What did we decide on Team pricing?"
+        let paused = AskPanelStatus(.paused)
+        let permission = AskPanelStatus(.needsPermission(.screenRecording))
+        return [
+            State(name: "home") { $0.preview(mode: .home, context: safari, homeRows: read) },
+            State(name: "home-dark", dark: true) { $0.preview(mode: .home, context: safari, homeRows: read) },
+            State(name: "home-unread") { $0.preview(mode: .home, context: safari, savedRead: false, homeRows: unread) },
+            State(name: "home-paused") { $0.preview(mode: .home, context: safari, status: paused, homeRows: unread) },
+            State(name: "home-needs-permission") {
+                $0.preview(mode: .home, context: safari, status: permission, homeRows: unread)
+            },
+            State(name: "home-no-answers") {
+                $0.preview(mode: .home, context: safari, answersAvailable: false, homeRows: readWithoutAnswers)
+            },
+            State(name: "results") { $0.preview(mode: .results, query: "team pricing", context: safari, hits: hits) },
+            State(name: "results-no-answers") {
+                $0.preview(mode: .results, query: "team pricing", context: safari, answersAvailable: false, hits: hits)
+            },
+            State(name: "thinking") { $0.preview(mode: .answer, query: question, context: safari, working: true) },
+            State(name: "answer") {
+                $0.preview(mode: .answer, query: question, context: safari, answer: answer, askedAt: Date())
+            },
+            State(name: "answer-dark", dark: true) {
+                $0.preview(mode: .answer, query: question, context: safari, answer: answer, askedAt: Date())
+            },
+            State(name: "answer-unavailable") {
+                $0.preview(
+                    mode: .answer, query: question, context: safari, answersAvailable: false,
+                    answer: unavailable, askedAt: Date()
+                )
+            },
+            State(name: "answer-failed") {
+                $0.preview(mode: .answer, query: question, context: safari, notice: "Couldn’t answer that. Try again.")
+            },
+            State(name: "copied") {
+                $0.preview(
+                    mode: .answer, query: question, context: safari, answer: answer, flash: "Copied", askedAt: Date()
+                )
+            },
+        ]
+    }
+
+    private static func render(model: CommandBarModel, dark: Bool) -> Data? {
+        let backdrop = dark
+            ? [Color(red: 0.12, green: 0.15, blue: 0.21), Color(red: 0.21, green: 0.17, blue: 0.26)]
+            : [Color(red: 0.78, green: 0.84, blue: 0.92), Color(red: 0.89, green: 0.85, blue: 0.93)]
+        let view = CommandBarView(model: model, perform: { _ in }, close: {}, heightChanged: { _ in })
+            .frame(width: AskPanelPlacement.preferredWidth)
+            .environment(\.askSolidBackground, true)
+            .padding(32)
+            .background(LinearGradient(colors: backdrop, startPoint: .topLeading, endPoint: .bottomTrailing))
+            .environment(\.colorScheme, dark ? .dark : .light)
+        let hosting = NSHostingView(rootView: view)
+        hosting.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        let size = hosting.fittingSize
+        hosting.frame = NSRect(origin: .zero, size: size)
+        hosting.layoutSubtreeIfNeeded()
+        let scale: CGFloat = 2
+        guard size.width > 0, size.height > 0,
+              let rep = NSBitmapImageRep(
+                  bitmapDataPlanes: nil,
+                  pixelsWide: Int((size.width * scale).rounded()),
+                  pixelsHigh: Int((size.height * scale).rounded()),
+                  bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                  colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+              )
+        else { return nil }
+        rep.size = size
+        hosting.cacheDisplay(in: hosting.bounds, to: rep)
+        return rep.representation(using: .png, properties: [:])
+    }
+
+    private static func decode<T: Decodable>(_ type: T.Type, _ json: String) -> T {
+        // swiftlint:disable:next force_try
+        try! JSONDecoder().decode(T.self, from: Data(json.utf8))
+    }
+
+    private static func minutesAgo(_ minutes: Double) -> UInt64 {
+        UInt64((Date().timeIntervalSince1970 - minutes * 60) * 1_000_000)
+    }
+}
+
+/// Memory that is never there: the renderer draws fixtures only.
+@MainActor
+private final class NoMemory: AskMemory {
+    func call(_ session: AskSession, _ tool: String, arguments: Data, timeout: Duration) async throws -> Data {
+        throw MemorySessionError.unavailable
+    }
+
+    func stop() async {}
 }
 #endif

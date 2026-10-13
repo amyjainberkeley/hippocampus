@@ -198,6 +198,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// competing window and duplicate database reader.
     private var recallProcess: Process?
     private var recallPresentationGate = RecallPresentationGate()
+    /// The onboarding last started, so Ask can tell it when it opens.
+    private var onboardingProcess: Process?
 
     private static let maxRetries = 10
     private static let maxBackoff: TimeInterval = 60
@@ -1082,8 +1084,13 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         )
         task.executableURL = path
         try? task.run()
+        onboardingProcess = task
         return true
     }
+
+    /// Whether the onboarding this app started is still open. Ask posts
+    /// `ai.hippocampus.ask.didShow` only then (RULINGS X1).
+    public var onboardingIsRunning: Bool { onboardingProcess?.isRunning == true }
 
     public var hasOnboarding: Bool { locator.onboardingPath() != nil }
     public var agentBinaryPath: URL? { locator.agentPath() }

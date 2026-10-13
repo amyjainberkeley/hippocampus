@@ -6,6 +6,11 @@ import SwiftUI
 enum HippocampusEntryPoint {
     @MainActor
     static func main() {
+        #if DEBUG
+        // Draws Ask's states to PNGs and returns before any scene, menu-bar
+        // item, window or activation exists.
+        if CommandBarPreviewRenderer.renderIfRequested() { return }
+        #endif
         let arguments = Array(CommandLine.arguments.dropFirst())
         if arguments.first == SessionContextHook.flag {
             SessionContextHook.runCLI(arguments: arguments, executableURL: Bundle.main.executableURL)

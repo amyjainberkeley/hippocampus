@@ -1,50 +1,91 @@
 import AppKit
 import ApplicationServices
+import Combine
 import HippocampusKit
 import SwiftUI
 
 // MARK: Controller
 
-/// Owns the command bar panel. ⌃⇧Space toggles it over whatever app is in
-/// front; it never activates Hippocampus or opens a window of its own.
+/// Owns Ask. The key (Shift twice unless the person chose another), ⌃⇧Space,
+/// the menu and `hippocampus://ask` open it. It drops from the top bar of the
+/// screen the pointer is on, over whatever app is in front, and never
+/// activates Hippocampus, so the window being asked about stays in front and
+/// stays the one being read.
 @MainActor
 final class CommandBarController: NSObject, NSWindowDelegate {
     static let shared = CommandBarController()
 
     private var panel: CommandBarPanel?
     private var model: CommandBarModel?
+    private var supervisor: ProcessSupervisor?
     private var openEvent: ((UInt64) -> Void)?
-    private var topEdge: CGFloat = 0
+    private var openWindow: ((String) -> Void)?
+    private var statusAction: ((AskPanelStatus.Action) -> Void)?
+    private var announceShown: (() -> Void)?
+    /// Where the panel hangs this time; set on every show.
+    private var placement: AskPanelPlacement?
+    /// The content's own height, as the view last measured it.
+    private var contentHeight = AskPanelPlacement.shortest
+    /// While the entrance runs, a new height is only recorded.
+    private var entering = false
+    private var statusWatch: AnyCancellable?
+    private var closeAfterCopy: Task<Void, Never>?
 
-    func configure(model: CommandBarModel, openEvent: @escaping (UInt64) -> Void) {
+    func configure(
+        model: CommandBarModel,
+        supervisor: ProcessSupervisor,
+        openEvent: @escaping (UInt64) -> Void,
+        openWindow: @escaping (String) -> Void,
+        statusAction: @escaping (AskPanelStatus.Action) -> Void,
+        announceShown: @escaping () -> Void
+    ) {
         self.model = model
+        self.supervisor = supervisor
         self.openEvent = openEvent
+        self.openWindow = openWindow
+        self.statusAction = statusAction
+        self.announceShown = announceShown
     }
 
+    /// The key again closes it; it does not jump screens.
     func toggle() {
         if panel?.isVisible == true { hide() } else { show() }
     }
 
     func show(asking question: String? = nil) {
         guard let model else { return }
-        model.opened(context: Self.frontmostContext())
-        if let question {
-            model.query = question
-            model.ask(question)
-        }
         let panel = self.panel ?? makePanel(model: model)
         self.panel = panel
-        place(panel)
-        panel.makeKeyAndOrderFront(nil)
+        if !panel.isVisible {
+            // The status is polled every 5 s; read it now, as the menu does.
+            if let supervisor {
+                supervisor.refreshCaptureStatus()
+                model.setStatus(AskPanelStatus(supervisor.menuBarStatus))
+            }
+            let openID = model.opened()
+            present(panel)
+            watchStatus()
+            SoloKeyMonitor.shared.recheck()
+            announceShown?()
+            fillContext(openID: openID)
+        }
+        // Sent once the window in front is known.
+        if let question { model.ask(question) }
     }
 
     func hide() {
-        guard panel?.isVisible == true else { return }
-        panel?.orderOut(nil)
-        // Opened from a link, the app was activated; give focus back to the
+        guard let panel, panel.isVisible else { return }
+        panel.orderOut(nil)
+        model?.closed()
+        statusWatch = nil
+        closeAfterCopy?.cancel()
+        closeAfterCopy = nil
+        // Opened from a link, the app was activated: give focus back to the
         // app the person was in, unless a Hippocampus window is in use.
-        if NSApp.isActive,
-           !NSApp.windows.contains(where: { $0.isVisible && !($0 is CommandBarPanel) && $0.canBecomeMain }) {
+        let others = NSApp.windows.filter { !($0 is CommandBarPanel) }.map {
+            AskPanelDismissal.Window(isVisible: $0.isVisible, isTitled: $0.styleMask.contains(.titled))
+        }
+        if AskPanelDismissal.shouldHideApp(appIsActive: NSApp.isActive, otherWindows: others) {
             NSApp.hide(nil)
         }
     }
@@ -54,6 +95,7 @@ final class CommandBarController: NSObject, NSWindowDelegate {
         panel.onCancel = { [weak self, weak model] in
             if model?.back() != true { self?.hide() }
         }
+        panel.onKeyCommand = { [weak self] command in self?.handle(command) ?? false }
         let view = CommandBarView(
             model: model,
             perform: { [weak self] action in self?.perform(action) },
@@ -67,33 +109,121 @@ final class CommandBarController: NSObject, NSWindowDelegate {
         return panel
     }
 
-    private func place(_ panel: NSPanel) {
-        let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main ?? NSScreen.screens[0]
-        let visible = screen.visibleFrame
-        let width = CommandBarView.width
-        let height = max(panel.frame.height, CommandBarView.searchHeight)
-        topEdge = visible.maxY - visible.height * 0.22
-        panel.setFrame(NSRect(x: visible.midX - width / 2, y: topEdge - height, width: width, height: height), display: true)
+    // MARK: Placement and entrance (spec-shell S1)
+
+    private func present(_ panel: CommandBarPanel) {
+        let screens = NSScreen.screens.map(Self.placementScreen)
+        guard let screen = AskPanelPlacement.screen(
+            containing: NSEvent.mouseLocation, in: screens, main: NSScreen.main.map(Self.placementScreen)
+        ) else { return }
+        let placement = AskPanelPlacement(screen: screen)
+        self.placement = placement
+        model?.maxContentHeight = placement.maxContentHeight
+        let final = placement.frame(height: contentHeight)
+        let entrance = AskPanelEntrance(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        panel.setFrame(entrance.start(for: final), display: false)
+        panel.alphaValue = 0
+        panel.makeKeyAndOrderFront(nil)
+        entering = true
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = entrance.duration
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().setFrame(final, display: true)
+            panel.animator().alphaValue = 1
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated { self?.entranceEnded() }
+        })
     }
 
+    private func entranceEnded() {
+        entering = false
+        resize(height: contentHeight)
+    }
+
+    /// Hangs from the same top edge and grows downward only, never past the
+    /// cap; past it the content scrolls.
     private func resize(height: CGFloat) {
-        guard let panel, abs(panel.frame.height - height) > 0.5 else { return }
-        var frame = panel.frame
-        frame.origin.y = (topEdge > 0 ? topEdge : frame.maxY) - height
-        frame.size.height = height
+        contentHeight = height
+        guard !entering, let panel, panel.isVisible, let placement else { return }
+        let frame = placement.frame(height: height)
+        guard abs(panel.frame.height - frame.height) > 0.5 || abs(panel.frame.maxY - frame.maxY) > 0.5 else { return }
         panel.setFrame(frame, display: true, animate: false)
     }
 
+    private static func placementScreen(_ screen: NSScreen) -> AskPanelPlacement.Screen {
+        AskPanelPlacement.Screen(
+            frame: screen.frame, visibleFrame: screen.visibleFrame, safeAreaTop: screen.safeAreaInsets.top
+        )
+    }
+
+    // MARK: Status
+
+    /// The footer and the mark follow the status while Ask is up. The
+    /// supervisor announces a change before making it, so read it a turn
+    /// later.
+    private func watchStatus() {
+        guard let supervisor else { return }
+        statusWatch = supervisor.objectWillChange
+            .receive(on: RunLoop.main)
+            .map { [weak supervisor] _ in
+                MainActor.assumeIsolated { supervisor.map { AskPanelStatus($0.menuBarStatus) } }
+            }
+            .compactMap { $0 }
+            .removeDuplicates()
+            .sink { [weak self] status in
+                MainActor.assumeIsolated { self?.model?.setStatus(status) }
+            }
+    }
+
+    // MARK: Actions
+
+    private func handle(_ command: AskKeyCommand) -> Bool {
+        if command == .close {
+            hide()
+            return true
+        }
+        guard let action = model?.action(for: command) else { return false }
+        perform(action)
+        return true
+    }
+
     private func perform(_ action: BarAction) {
-        hide()
         switch action {
         case .openURL(let url):
+            hide()
             NSWorkspace.shared.open(url)
         case .openEvent(let id):
+            hide()
             openEvent?(id)
+        case .openWindow(let tab):
+            hide()
+            openWindow?(tab)
         case .copy(let text):
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
+            copy(text)
+        case .copyForAI:
+            Task { [weak self] in
+                guard let model = self?.model else { return }
+                if let text = await model.copyForAI() {
+                    self?.copy(text)
+                } else {
+                    model.showFlash("Couldn’t copy. Try again.")
+                }
+            }
+        case .status(let action):
+            statusAction?(action)
+        }
+    }
+
+    /// "Copied" in the footer for a moment, then Ask closes.
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        model?.showFlash("Copied")
+        closeAfterCopy?.cancel()
+        closeAfterCopy = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(800))
+            guard !Task.isCancelled else { return }
+            self?.hide()
         }
     }
 
@@ -101,36 +231,53 @@ final class CommandBarController: NSObject, NSWindowDelegate {
         hide()
     }
 
-    /// The app in front, and its focused window's title when Accessibility
-    /// allows reading it. Hippocampus's own windows are not context.
-    static func frontmostContext() -> FrontmostContext? {
+    // MARK: The window in front
+
+    /// Read after Ask is up, so the panel never waits on Accessibility
+    /// (RULINGS S9). Hippocampus's own windows are not context.
+    private func fillContext(openID: Int) {
+        guard let model else { return }
         guard let app = NSWorkspace.shared.frontmostApplication,
               app.bundleIdentifier != Bundle.main.bundleIdentifier
-        else { return nil }
-        var title: String?
-        if AXIsProcessTrusted() {
-            let element = AXUIElementCreateApplication(app.processIdentifier)
-            AXUIElementSetMessagingTimeout(element, 0.15)
-            var window: CFTypeRef?
-            if AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &window) == .success,
-               let window, CFGetTypeID(window) == AXUIElementGetTypeID() {
-                var value: CFTypeRef?
-                // swiftlint:disable:next force_cast
-                if AXUIElementCopyAttributeValue(window as! AXUIElement, kAXTitleAttribute as CFString, &value) == .success {
-                    title = (value as? String).flatMap { $0.isEmpty ? nil : $0 }
-                }
-            }
+        else {
+            model.contextArrived(nil, openID: openID)
+            return
         }
-        return FrontmostContext(bundleId: app.bundleIdentifier, appName: app.localizedName, windowTitle: title)
+        let pid = app.processIdentifier
+        let bundleId = app.bundleIdentifier
+        let name = app.localizedName
+        Task.detached(priority: .userInitiated) {
+            let title = Self.focusedWindowTitle(pid: pid)
+            await model.contextArrived(
+                FrontmostContext(bundleId: bundleId, appName: name, windowTitle: title), openID: openID
+            )
+        }
+    }
+
+    /// The focused window's title when Accessibility allows reading it.
+    nonisolated private static func focusedWindowTitle(pid: pid_t) -> String? {
+        guard AXIsProcessTrusted() else { return nil }
+        let element = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(element, 0.15)
+        var window: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &window) == .success,
+              let window, CFGetTypeID(window) == AXUIElementGetTypeID()
+        else { return nil }
+        var value: CFTypeRef?
+        // swiftlint:disable:next force_cast
+        guard AXUIElementCopyAttributeValue(window as! AXUIElement, kAXTitleAttribute as CFString, &value) == .success
+        else { return nil }
+        return (value as? String).flatMap { $0.isEmpty ? nil : $0 }
     }
 }
 
 /// A borderless, non-activating panel that takes keyboard focus without
-/// taking it from the app you are in, like Spotlight.
+/// taking it from the app you are in, like Spotlight. It hangs from the top
+/// bar and cannot be dragged.
 final class CommandBarPanel: NSPanel {
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: CommandBarView.width, height: CommandBarView.searchHeight),
+            contentRect: NSRect(x: 0, y: 0, width: AskPanelPlacement.preferredWidth, height: AskPanelPlacement.shortest),
             styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
             backing: .buffered,
             defer: true
@@ -143,8 +290,10 @@ final class CommandBarPanel: NSPanel {
         hasShadow = true
         backgroundColor = .clear
         isOpaque = false
-        isMovableByWindowBackground = true
-        animationBehavior = .utilityWindow
+        isMovableByWindowBackground = false
+        isMovable = false
+        // The entrance is drawn by the controller.
+        animationBehavior = .none
     }
 
     override var canBecomeKey: Bool { true }
@@ -152,9 +301,28 @@ final class CommandBarPanel: NSPanel {
 
     /// Esc anywhere in the panel, even when the field has lost focus.
     var onCancel: (() -> Void)?
+    /// ⌘C, ⇧⌘C, ⌘D, ⌘U and ⌘Q, seen before the field or the main menu
+    /// takes them. Returns false to let them through.
+    var onKeyCommand: ((AskKeyCommand) -> Bool)?
 
     override func cancelOperation(_ sender: Any?) {
         onCancel?()
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags
+        if let key = event.charactersIgnoringModifiers,
+           let command = AskKeyCommand(
+               key: key,
+               command: flags.contains(.command),
+               shift: flags.contains(.shift),
+               option: flags.contains(.option),
+               control: flags.contains(.control)
+           ),
+           onKeyCommand?(command) == true {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 }
 
@@ -165,8 +333,20 @@ private struct HeightKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
+/// A solid fill in place of the window-server material, which an off-screen
+/// render draws blank. Only the preview renderer sets it.
+private struct AskSolidBackgroundKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var askSolidBackground: Bool {
+        get { self[AskSolidBackgroundKey.self] }
+        set { self[AskSolidBackgroundKey.self] = newValue }
+    }
+}
+
 struct CommandBarView: View {
-    static let width: CGFloat = 700
     static let searchHeight: CGFloat = 60
     static let corner: CGFloat = 22
 
@@ -175,19 +355,22 @@ struct CommandBarView: View {
     let close: () -> Void
     let heightChanged: (CGFloat) -> Void
     @FocusState private var focused: Bool
+    /// The row under the pointer: highlighted, never chosen, so Return keeps
+    /// asking (product critique 6).
+    @State private var hovered: String?
 
     var body: some View {
         VStack(spacing: 0) {
             searchRow
-            if hasBody {
+            if hasContent {
                 Divider().opacity(0.6)
                 content
-                    .frame(maxHeight: 520)
-                Divider().opacity(0.6)
-                footer
+                    .frame(maxHeight: model.maxContentHeight)
             }
+            Divider().opacity(0.6)
+            footer
         }
-        .frame(width: Self.width)
+        .frame(maxWidth: .infinity)
         // Measure the content's ideal height, not the window's current one:
         // a scroll view takes whatever height it is given, so measuring the
         // laid-out height would keep the panel at its first size.
@@ -202,21 +385,30 @@ struct CommandBarView: View {
             // After the panel becomes key; a focus set before that is lost.
             DispatchQueue.main.async { focused = true }
         }
+        .onChange(of: model.selectQuestionRequest) { _, _ in
+            // A kept question comes back selected, so typing replaces it.
+            DispatchQueue.main.async {
+                focused = true
+                DispatchQueue.main.async {
+                    NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+                }
+            }
+        }
     }
 
-    private var hasBody: Bool {
-        !model.rows.isEmpty || model.mode == .answer || model.mode == .day || model.mode == .model || model.notice != nil
+    private var hasContent: Bool {
+        !model.rows.isEmpty || model.mode == .answer || model.notice != nil
     }
 
     // Search row
 
     private var searchRow: some View {
         HStack(spacing: 12) {
-            HiMarkView(style: .brand, state: .remembering)
+            HiMarkView(style: .brand, state: model.status.mark)
                 .frame(height: 17)
                 .frame(width: 22, height: 22)
                 .foregroundStyle(.primary)
-            TextField(placeholder, text: $model.query)
+            TextField(model.placeholder, text: $model.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 22, weight: .regular))
                 .focused($focused)
@@ -226,83 +418,47 @@ struct CommandBarView: View {
                     if !model.back() { close() }
                     return .handled
                 }
-                .onKeyPress(.return, phases: .down) { press in
-                    if let action = model.activate(preferAsk: press.modifiers.contains(.command)) { perform(action) }
+                .onKeyPress(.return, phases: .down) { _ in
+                    if let action = model.activate() { perform(action) }
                     return .handled
                 }
-                .onKeyPress(characters: ["d", "c", "u"], phases: .down) { press in
-                    if press.modifiers.contains(.command), press.characters == "d" {
-                        model.showDay()
-                        return .handled
-                    }
-                    if press.modifiers.contains(.command), press.characters == "u" {
-                        model.showModel()
-                        return .handled
-                    }
-                    if press.modifiers.contains([.command, .shift]), press.characters.lowercased() == "c" {
-                        Task {
-                            if let text = await model.copyContext() { perform(.copy(text)) }
-                        }
-                        return .handled
-                    }
-                    return .ignored
-                }
-            if model.isWorking {
+            // The answer card shows its own progress.
+            if model.isSearching {
                 ProgressView().controlSize(.small)
             }
             if let context = model.context, let name = context.appName {
-                ContextChip(bundleId: context.bundleId, name: name, title: context.windowTitle)
+                ContextChip(
+                    bundleId: context.bundleId, name: name, title: context.windowTitle,
+                    strength: model.chipStrength, tooltip: model.chipTooltip
+                )
             }
         }
         .padding(.horizontal, 18)
         .frame(height: Self.searchHeight)
     }
 
-    private var placeholder: String {
-        "Ask or search your memory"
-    }
-
     // Content
 
-    @ViewBuilder
     private var content: some View {
-        switch model.mode {
-        case .day:
-            ScrollView { DayCard(day: model.day) }
-        case .model:
-            ScrollView {
-                ModelCard(propositions: model.propositions, working: model.isWorking) { id, right in
-                    model.judge(id, right: right)
-                }
-            }
-        case .answer:
+        ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    AnswerCard(question: model.askedQuestion ?? "", answer: model.answer, working: model.isWorking)
-                    if !model.rows.isEmpty {
-                        SectionHeader(title: "From your memory")
-                        rowList
+                    if model.mode == .answer {
+                        AnswerCard(line: model.answerLine)
+                        // Without an answer the card already says "Here’s what matched:".
+                        if model.answerText != nil, !model.rows.isEmpty {
+                            SectionHeader(title: "Sources")
+                        }
+                    } else if let notice = model.notice {
+                        Text(notice).font(.callout).foregroundStyle(.secondary).padding(16)
                     }
+                    rowList
                 }
+                .padding(.bottom, 6)
             }
-        default:
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        if let notice = model.notice, model.rows.isEmpty {
-                            Text(notice).font(.callout).foregroundStyle(.secondary).padding(16)
-                        }
-                        if model.mode == .home, !model.rows.isEmpty {
-                            SectionHeader(title: "Suggested for right now")
-                        }
-                        rowList
-                    }
-                    .padding(.bottom, 6)
-                }
-                .onChange(of: model.selection) { _, index in
-                    if model.rows.indices.contains(index) {
-                        withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(model.rows[index].id) }
-                    }
+            .onChange(of: model.selection) { _, index in
+                if model.rows.indices.contains(index) {
+                    withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(model.rows[index].id) }
                 }
             }
         }
@@ -310,59 +466,90 @@ struct CommandBarView: View {
 
     private var rowList: some View {
         ForEach(Array(model.rows.enumerated()), id: \.element.id) { index, row in
-            if model.mode == .results, index == 1 {
+            if model.mode == .results, index == firstHit {
                 SectionHeader(title: "From your memory")
             }
-            BarRowView(row: row, selected: index == model.selection)
-                .id(row.id)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    model.select(index)
-                    if let action = model.activate() { perform(action) }
-                }
-                .onHover { inside in if inside { model.select(index) } }
+            BarRowView(
+                row: row,
+                selected: index == model.selection,
+                hovered: hovered == row.id,
+                context: model.context,
+                mark: model.status.mark,
+                windowRead: model.windowRead
+            )
+            .id(row.id)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                model.select(index)
+                if let action = model.activate() { perform(action) }
+            }
+            .onHover { inside in
+                if inside { hovered = row.id } else if hovered == row.id { hovered = nil }
+            }
         }
+    }
+
+    private var firstHit: Int? {
+        model.rows.firstIndex { if case .hit = $0 { true } else { false } }
     }
 
     // Footer
 
     private var footer: some View {
-        HStack(spacing: 14) {
-            Text("Hippocampus").font(.caption).foregroundStyle(.tertiary)
-            Text("On this Mac").font(.caption).foregroundStyle(.tertiary)
-            Spacer()
-            switch model.mode {
-            case .home:
-                KeyHint(keys: "↩", label: "Open")
-                KeyHint(keys: "⌘D", label: "Your day")
-                KeyHint(keys: "⌘U", label: "About you")
-            case .results:
-                KeyHint(keys: "↩", label: "Open")
-                KeyHint(keys: "⌘↩", label: "Ask")
-                KeyHint(keys: "⇧⌘C", label: "Copy context")
-            case .answer, .day, .model:
-                KeyHint(keys: "esc", label: "Back")
-                KeyHint(keys: "⇧⌘C", label: "Copy context")
+        HStack(spacing: 10) {
+            Text(model.footerText).font(.caption).foregroundStyle(.secondary)
+            if let action = model.footerAction {
+                Button(action.title) { perform(.status(action)) }
+                    .buttonStyle(.link)
+                    .font(.caption)
             }
+            Spacer()
+            HStack(spacing: 14) { hints }
         }
         .padding(.horizontal, 16)
         .frame(height: 34)
+    }
+
+    @ViewBuilder
+    private var hints: some View {
+        switch model.mode {
+        case .home:
+            KeyHint(keys: "⌘D", label: "Overview")
+            KeyHint(keys: "⌘U", label: "You")
+        case .results:
+            if !model.answersAvailable {
+                KeyHint(keys: "↩", label: "Search")
+            }
+            KeyHint(keys: "⇧⌘C", label: "Copy for your AI")
+        case .answer:
+            if model.answerText != nil {
+                KeyHint(keys: "⌘C", label: "Copy Answer")
+            }
+            KeyHint(keys: "⇧⌘C", label: "Copy for your AI")
+        }
     }
 }
 
 /// Liquid Glass on macOS 26; the native HUD material before it.
 private struct GlassBackground: ViewModifier {
     let corner: CGFloat
+    @Environment(\.askSolidBackground) private var solid
 
     func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
+        let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
+        if solid {
             content
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: corner, style: .continuous))
+                .background(Color(nsColor: .windowBackgroundColor), in: shape)
+                .overlay(shape.strokeBorder(Color.primary.opacity(0.12)))
+                .clipShape(shape)
+        } else if #available(macOS 26.0, *) {
+            content
+                .glassEffect(.regular, in: shape)
         } else {
             content
                 .background(VisualEffect())
-                .overlay(RoundedRectangle(cornerRadius: corner, style: .continuous).strokeBorder(.white.opacity(0.12)))
-                .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+                .overlay(shape.strokeBorder(.white.opacity(0.12)))
+                .clipShape(shape)
         }
     }
 }
@@ -408,14 +595,19 @@ private struct KeyHint: View {
     }
 }
 
+/// The window a question is about. At full strength only when Hippocampus
+/// has read it (product critique 2).
 private struct ContextChip: View {
     let bundleId: String?
     let name: String
     let title: String?
+    let strength: Double
+    let tooltip: String
+
     var body: some View {
         HStack(spacing: 6) {
             AppIcon(bundleId: bundleId).frame(width: 16, height: 16)
-            Text(title.map { "\(name) · \($0)" } ?? name)
+            Text(BarRowView.place(app: name, title: title))
                 .font(.caption)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -425,7 +617,8 @@ private struct ContextChip: View {
         .frame(maxWidth: 220)
         .background(.quaternary.opacity(0.6), in: Capsule())
         .foregroundStyle(.secondary)
-        .help("Hippocampus knows what you’re looking at")
+        .opacity(strength)
+        .help(tooltip)
     }
 }
 
@@ -443,6 +636,10 @@ private struct AppIcon: View {
 private struct BarRowView: View {
     let row: BarRow
     let selected: Bool
+    let hovered: Bool
+    let context: FrontmostContext?
+    let mark: HiMark.State
+    let windowRead: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -465,7 +662,7 @@ private struct BarRowView: View {
         .padding(.vertical, 7)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(selected ? Color.primary.opacity(0.09) : .clear)
+                .fill(selected ? Color.primary.opacity(0.09) : hovered ? Color.primary.opacity(0.05) : .clear)
         )
         .padding(.horizontal, 6)
     }
@@ -473,47 +670,65 @@ private struct BarRowView: View {
     @ViewBuilder private var icon: some View {
         switch row {
         case .hit(let hit): AppIcon(bundleId: hit.appBundleId)
+        case .thisWindow: AppIcon(bundleId: context?.bundleId)
         case .source: Image(systemName: "quote.opening").font(.system(size: 15)).foregroundStyle(.secondary)
-        case .ask: Image(systemName: "sparkles").font(.system(size: 17)).foregroundStyle(.tint)
+        case .ask:
+            HiMarkView(style: .brand, state: mark)
+                .frame(height: 14)
+                .foregroundStyle(.primary)
         case .suggestion(let s):
-            Image(systemName: Self.symbol(for: s.kind)).font(.system(size: 16)).foregroundStyle(s.kind == "predicted" ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+            Image(systemName: Self.symbol(for: s.kind)).font(.system(size: 16)).foregroundStyle(.secondary)
         }
     }
 
     static func symbol(for kind: String) -> String {
         switch kind {
-        case "screen": "eye"
+        case "screen": "macwindow"
         case "resume": "arrow.uturn.backward.circle"
-        case "searched": "magnifyingglass"
         case "related": "link"
-        case "day": "chart.bar.xaxis"
-        case "model": "person.crop.circle"
-        default: "sparkles"
+        default: "circle"
         }
+    }
+
+    /// An app and a window title, one "·" between them.
+    static func place(app: String, title: String?) -> String {
+        guard let title, !title.isEmpty else { return app }
+        return "\(app) · \(title)"
     }
 
     private var title: String {
         switch row {
         case .hit(let hit): hit.windowTitle?.isEmpty == false ? hit.windowTitle! : (hit.body.isEmpty ? "Untitled" : hit.body)
+        case .thisWindow: "This window"
         case .source(let s): s.title?.isEmpty == false ? s.title! : s.app
-        case .ask(let q): "Ask Hippocampus: “\(q)”"
+        case .ask(let q): "Ask: “\(q)”"
         case .suggestion(let s): s.title
         }
     }
 
     private var subtitle: String? {
         switch row {
-        case .hit(let hit): hit.body
-        case .source(let s): "\(s.app) · \(s.text.split(separator: "\n").dropFirst().joined(separator: " "))"
-        case .ask: "Answers from what you’ve seen, on this Mac"
-        case .suggestion(let s): s.why
+        case .hit(let hit):
+            return hit.body
+        case .thisWindow(let s):
+            return Self.place(app: s.app, title: s.title)
+        case .source(let s):
+            return "\(s.app) · \(s.body)"
+        case .ask:
+            return windowRead ? "From this screen and what you’ve seen" : "From what you’ve seen"
+        case .suggestion(let s):
+            // The window in front, named as the chip names it.
+            if s.kind == "screen", let app = context?.appName {
+                return Self.place(app: app, title: context?.windowTitle)
+            }
+            return s.why
         }
     }
 
     private var trailing: String? {
         switch row {
         case .hit(let hit): Self.relative(hit.tsUs)
-        case .source(let s): Self.relative(s.tsUs)
+        case .source(let s), .thisWindow(let s): Self.relative(s.tsUs)
         default: nil
         }
     }
@@ -526,281 +741,32 @@ private struct BarRowView: View {
     }
 }
 
+/// The answer, "Thinking…" while it is written, why there is none, or what
+/// went wrong: never an empty card (spec-copy M2 finding 7).
 private struct AnswerCard: View {
-    let question: String
-    let answer: BarAnswer?
-    let working: Bool
+    let line: AnswerLine?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let text = answer?.answer {
+            switch line {
+            case .answer(let text):
                 Text(text)
                     .font(.system(size: 15))
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
-            } else if working {
+            case .thinking:
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Thinking on your Mac…").font(.callout).foregroundStyle(.secondary)
+                    Text("Thinking…").font(.callout).foregroundStyle(.secondary)
                 }
-            } else if let reason = answer?.unavailable {
-                Text(Self.explain(reason)).font(.callout).foregroundStyle(.secondary)
+            case .note(let text):
+                Text(text).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            case nil:
+                EmptyView()
             }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    static func explain(_ reason: String) -> String {
-        switch reason {
-        case "apple_intelligence_off": "Turn on Apple Intelligence in System Settings to get answers. Here’s what Hippocampus found:"
-        case "device_not_eligible", "not_installed", "cannot_launch": "Answers need macOS 26 with Apple Intelligence. Here’s what Hippocampus found:"
-        case "model_not_ready": "Apple Intelligence is still getting ready. Here’s what Hippocampus found:"
-        default: "Here’s what Hippocampus found:"
-        }
-    }
-}
-
-private struct DayCard: View {
-    let day: BarDay?
-
-    var body: some View {
-        if let day {
-            let b = day.day.breakdown
-            VStack(alignment: .leading, spacing: 14) {
-                if let n = day.day.narrative {
-                    Text(n.headline).font(.system(size: 16, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
-                    if day.day.writtenBy != "measured" {
-                        Text(n.narrative).font(.callout).fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                HStack(spacing: 22) {
-                    Metric(value: Self.hours(b.activeUs), label: b.basis == "measured" ? "Active" : "Active (est.)")
-                    Metric(value: Self.hours(b.focusBlocks.map { $0.endUs - $0.startUs }.max() ?? 0), label: "Longest focus")
-                    Metric(value: String(format: "%.0f", b.switchesPerHour), label: "Switches / hr")
-                    Metric(value: "\(b.searches.count)", label: "Searches")
-                }
-                KindBar(kinds: b.kinds)
-                if let n = day.day.narrative, !n.insights.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(n.insights, id: \.self) { insight in
-                            Label(insight, systemImage: "circle.fill")
-                                .labelStyle(BulletLabel())
-                                .font(.callout)
-                        }
-                        if !n.suggestion.isEmpty {
-                            Label(n.suggestion, systemImage: "arrow.forward")
-                                .font(.callout)
-                                .foregroundStyle(.tint)
-                        }
-                    }
-                }
-                if !b.sessions.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Sessions").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                        ForEach(b.sessions.suffix(8), id: \.startUs) { session in
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack {
-                                    Text(Self.clock(session.startUs)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                                    Text(session.title).font(.callout.weight(.medium)).lineLimit(1)
-                                }
-                                if session.beneath != "Nothing notable." {
-                                    Text(session.beneath).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                                }
-                            }
-                        }
-                    }
-                }
-                if !b.searches.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("You looked up").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                        FlowChips(items: b.searches.prefix(12).map(\.query))
-                    }
-                }
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text("Reading your day…").font(.callout).foregroundStyle(.secondary)
-            }
-            .padding(18)
-        }
-    }
-
-    static func hours(_ us: UInt64) -> String {
-        let minutes = Int(us / 60_000_000)
-        return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"
-    }
-
-    static func clock(_ us: UInt64) -> String {
-        Date(timeIntervalSince1970: TimeInterval(us) / 1_000_000).formatted(date: .omitted, time: .shortened)
-    }
-}
-
-/// What Hippocampus has learned about you, each claim with a confidence and
-/// a way to say it is right or wrong.
-private struct ModelCard: View {
-    let propositions: [BarProposition]
-    let working: Bool
-    let judge: (Int64, Bool) -> Void
-    @State private var confirmed: Set<Int64> = []
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("What Hippocampus has learned about you")
-                .font(.system(size: 15, weight: .semibold))
-            Text("Learned on this Mac from what you did. Mark what’s wrong and it won’t come back.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            if propositions.isEmpty {
-                if working {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Text("Nothing yet. Hippocampus learns from finished stretches of work.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            ForEach(propositions) { proposition in
-                HStack(alignment: .top, spacing: 10) {
-                    Text(proposition.kind.capitalized)
-                        .font(.caption2.weight(.medium))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.quaternary.opacity(0.7), in: Capsule())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 76, alignment: .leading)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(proposition.text).font(.callout).fixedSize(horizontal: false, vertical: true)
-                        Text(confirmed.contains(proposition.id) ? "You confirmed this" : "\(Int((proposition.confidence * 100).rounded()))% sure · \(proposition.evidence.count) \(proposition.evidence.count == 1 ? "moment" : "moments")")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    Spacer(minLength: 8)
-                    Button {
-                        confirmed.insert(proposition.id)
-                        judge(proposition.id, true)
-                    } label: { Image(systemName: "checkmark") }
-                        .buttonStyle(.borderless)
-                        .help("That’s right")
-                        .disabled(confirmed.contains(proposition.id))
-                    Button { judge(proposition.id, false) } label: { Image(systemName: "xmark") }
-                        .buttonStyle(.borderless)
-                        .help("That’s wrong: forget it")
-                }
-            }
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct BulletLabel: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Circle().fill(.secondary).frame(width: 4, height: 4).alignmentGuide(.firstTextBaseline) { $0[.bottom] + 3 }
-            configuration.title.fixedSize(horizontal: false, vertical: true)
-        }
-    }
-}
-
-private struct Metric: View {
-    let value: String
-    let label: String
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(value).font(.system(size: 18, weight: .semibold).monospacedDigit())
-            Text(label).font(.caption).foregroundStyle(.secondary)
-        }
-    }
-}
-
-private struct KindBar: View {
-    let kinds: [BarDay.Kind]
-
-    static func color(_ kind: String) -> Color {
-        switch kind {
-        case "code": .blue
-        case "writing": .indigo
-        case "research": .teal
-        case "communication": .orange
-        case "meetings": .pink
-        case "design": .purple
-        case "ai": .mint
-        case "planning": .yellow
-        case "media": .red
-        default: .gray
-        }
-    }
-
-    var body: some View {
-        let total = max(kinds.reduce(0) { $0 + $1.activeUs }, 1)
-        VStack(alignment: .leading, spacing: 6) {
-            GeometryReader { proxy in
-                HStack(spacing: 2) {
-                    ForEach(kinds, id: \.kind) { kind in
-                        Self.color(kind.kind)
-                            .frame(width: max(2, proxy.size.width * CGFloat(kind.activeUs) / CGFloat(total) - 2))
-                    }
-                }
-            }
-            .frame(height: 8)
-            .clipShape(Capsule())
-            HStack(spacing: 12) {
-                ForEach(kinds.prefix(5), id: \.kind) { kind in
-                    HStack(spacing: 4) {
-                        Circle().foregroundStyle(Self.color(kind.kind)).frame(width: 7, height: 7)
-                        Text("\(kind.label) \(DayCard.hours(kind.activeUs))").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-    }
-}
-
-private struct FlowChips: View {
-    let items: [String]
-    var body: some View {
-        // A simple wrapping layout for short chips.
-        WrapLayout(spacing: 6) {
-            ForEach(items, id: \.self) { item in
-                Text(item)
-                    .font(.caption)
-                    .lineLimit(1)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(.quaternary.opacity(0.7), in: Capsule())
-            }
-        }
-    }
-}
-
-private struct WrapLayout: Layout {
-    let spacing: CGFloat
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? 600
-        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
-        for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
-            if x + size.width > width, x > 0 { x = 0; y += rowHeight + spacing; rowHeight = 0 }
-            x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
-        }
-        return CGSize(width: width, height: y + rowHeight)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x = bounds.minX, y = bounds.minY, rowHeight: CGFloat = 0
-        for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
-            if x + size.width > bounds.maxX, x > bounds.minX { x = bounds.minX; y += rowHeight + spacing; rowHeight = 0 }
-            view.place(at: CGPoint(x: x, y: y), proposal: .unspecified)
-            x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
-        }
     }
 }

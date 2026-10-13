@@ -98,24 +98,20 @@ public enum RetentionPolicy: String, CaseIterable, Sendable, Codable {
 public final class PreferencesStore: ObservableObject {
     // MARK: General
 
-    /// Whether the menu-bar icon renders. If off, only ⌃⇧Space
-    /// remains as an entry point. Currently informational — the
-    /// MenuBarExtra scene reads this at launch (a future PR wires
-    /// the live hide/show; today the value is persisted and the
-    /// scene reads it on next relaunch).
+    /// Persisted but read by nothing; Preferences no longer shows it
+    /// (spec-shell S8, D16).
     @Published public var showMenuBarIcon: Bool {
         didSet { defaults.set(showMenuBarIcon, forKey: Keys.showMenuBarIcon) }
     }
 
-    /// Recall UI's initial tab. Read by `ProcessSupervisor.openRecallUI`
-    /// when no explicit `initialTab:` is passed (menu-bar "Show Recall
-    /// Window" uses the default; "Show Timeline" passes `"timeline"`
-    /// explicitly and is unaffected).
+    /// Persisted but read by nothing; Preferences no longer shows it
+    /// (spec-shell S8, D16).
     @Published public var defaultRecallTab: PreferredRecallTab {
         didSet { defaults.set(defaultRecallTab.rawValue, forKey: Keys.defaultRecallTab) }
     }
 
-    /// The key that opens Ask when tapped by itself. ⌃⇧Space always works.
+    /// The key that opens Ask when tapped by itself. ⌃⇧Space stays
+    /// registered whatever this is.
     @Published public var askKey: SoloKey {
         didSet { defaults.set(askKey.rawValue, forKey: Keys.askKey) }
     }
@@ -188,7 +184,9 @@ public final class PreferencesStore: ObservableObject {
 
         let rawTab = defaults.string(forKey: Keys.defaultRecallTab) ?? PreferredRecallTab.search.rawValue
         self.defaultRecallTab = PreferredRecallTab(rawValue: rawTab) ?? .search
-        self.askKey = defaults.string(forKey: Keys.askKey).flatMap(SoloKey.init(rawValue:)) ?? .rightCommand
+        // Never written here: a stored choice stays, and anyone who never
+        // chose gets Shift twice (spec-shell S3).
+        self.askKey = defaults.string(forKey: Keys.askKey).flatMap(SoloKey.init(rawValue:)) ?? .shiftTwice
 
         self.retentionPolicy = .forever
         self.retentionCustomDays = nil

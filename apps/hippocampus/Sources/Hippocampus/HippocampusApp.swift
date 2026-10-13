@@ -168,9 +168,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// strictly BEFORE the user can interact with anything, including
     /// opening the menu bar.
     func applicationDidFinishLaunching(_ notification: Notification) {
-        #if DEBUG
-        CommandBarPreviewRenderer.renderIfRequested()
-        #endif
         // Mask SIGPIPE before any pipe, socket, or child-process work.
         //
         // CEO-reported (cycle 8.23, 2026-05-29): even after PR #254 shipped
@@ -279,15 +276,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let supervisor = self.supervisor
             CommandBarController.shared.configure(
                 model: CommandBarModel(launch: { assist in supervisor.memorySessionLaunch(assist: assist) }),
-                openEvent: { eventId in supervisor.openRecallUI(initialTab: "search", focusEventId: eventId) }
+                supervisor: supervisor,
+                openEvent: { eventId in supervisor.openRecallUI(initialTab: "search", focusEventId: eventId) },
+                openWindow: { tab in supervisor.openRecallUI(initialTab: tab) },
+                statusAction: { [weak self] action in self?.performAskStatusAction(action) },
+                announceShown: {
+                    AskPanelNotice.announceShown(onboardingRunning: supervisor.onboardingIsRunning) { name in
+                        DistributedNotificationCenter.default().postNotificationName(
+                            name, object: nil, userInfo: nil, deliverImmediately: true
+                        )
+                    }
+                }
             )
             let hotkeyResult = GlobalHotkeyManager.shared.registerDefault {
                 CommandBarController.shared.toggle()
             }
             if case .osError(let status) = hotkeyResult {
                 self.firstLaunchLogger.error(
-                    "global Recall hotkey registration failed: \(status)"
+                    "global Ask hotkey registration failed: \(status)"
                 )
+                SoloKeyMonitor.shared.watch.setFallbackRegistered(false)
+            } else {
+                SoloKeyMonitor.shared.watch.setFallbackRegistered(true)
             }
             self.watchAskKey()
             self.installBrowserHostManifests()
@@ -459,6 +469,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Accessibility may have been allowed while the app was in the
+    /// background; the key starts listening as soon as it is.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        SoloKeyMonitor.shared.recheck()
+    }
+
+    /// The Ask footer's button, doing what the menu's status action does.
+    private func performAskStatusAction(_ action: AskPanelStatus.Action) {
+        switch action {
+        case .resume:
+            UserPauseController.shared.setPaused(false)
+            supervisor.setPaused(false)
+        case .turnOn:
+            UserPauseController.shared.setPaused(false)
+            supervisor.setPaused(false)
+            if supervisor.captureEnabled {
+                supervisor.start()
+            } else {
+                Task { @MainActor [weak self] in
+                    try? await self?.supervisor.applyCaptureEnabled(true)
+                }
+            }
+        case .openSystemSettings(let permission):
+            if let url = URL(string: permission.settingsPaneURLString) {
+                NSWorkspace.shared.open(url)
+            }
+        case .tryAgain:
+            // A start retries a stopped or failed run and leaves a running
+            // one alone; the supervisor's own retry replaces it later.
+            supervisor.start()
+        }
+    }
+
     private func presentShutdownFailure(_ error: Error) {
         let alert = NSAlert()
         alert.messageText = "Hippocampus could not quit safely"
@@ -539,7 +582,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Cycle 8.48 — the cycle 8.46 Action Panel "Show
                 // Onboarding" command now works end-to-end. Re-opens
                 // the Onboarding executable so users can revisit the
-                // flow (e.g. to re-run the ⌃⇧Space live-try after
+                // flow (e.g. to try the Ask key again after
                 // configuring Alfred/SetApp, or to review the trust
                 // panel). No sentinel change — reopening is safe
                 // even after first-run has completed.

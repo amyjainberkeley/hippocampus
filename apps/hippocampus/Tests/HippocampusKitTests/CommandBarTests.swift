@@ -3,15 +3,6 @@ import XCTest
 @testable import HippocampusKit
 
 final class CommandBarTests: XCTestCase {
-    func testQuestionsAreAskedAndPhrasesAreSearched() {
-        for question in ["what did we decide on pricing?", "When is the beta", "who owns the launch plan", "summarize my day"] {
-            XCTAssertTrue(CommandBarModel.looksLikeQuestion(question), question)
-        }
-        for phrase in ["stripe pricing", "launch plan", "Ravi"] {
-            XCTAssertFalse(CommandBarModel.looksLikeQuestion(phrase), phrase)
-        }
-    }
-
     func testHitBodyDropsTheProvenanceHeader() throws {
         let json = #"{"event_id":3,"ts_us":5,"app_bundle_id":"com.apple.Notes","window_title":"Plan","url":null,"text_snippet":"[app=com.apple.Notes | title=Plan]\nBeta ships Oct 21.\nOwner: Maya"}"#
         let hit = try JSONDecoder().decode(BarHit.self, from: Data(json.utf8))
@@ -73,6 +64,44 @@ final class CommandBarTests: XCTestCase {
         XCTAssertEqual(model.rows, [], "no suggestions without a running agent")
         XCTAssertNil(model.activate())
         XCTAssertFalse(model.back(), "Esc on the home screen closes the bar")
+    }
+
+    @MainActor
+    func testAsksWarmSessionsStopAfterTimeWithoutACall() async throws {
+        let launch = try fakeAgent(#"""
+        while read line; do
+          id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+          echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"hits\":[]}}"
+        done
+        """#)
+        let sessions = WarmMemorySessions(launch: { _ in launch }, idleAfter: .milliseconds(300))
+        _ = try await sessions.call(.reads, "mci_recall", arguments: Data(#"{"query":"q"}"#.utf8), timeout: .seconds(5))
+        let runningAfterCall = await sessions.reads.isRunning
+        XCTAssertTrue(runningAfterCall, "warm between calls")
+        _ = try await sessions.call(.reads, "mci_recall", arguments: Data(#"{"query":"r"}"#.utf8), timeout: .seconds(5))
+        try await Task.sleep(for: .milliseconds(150))
+        let runningSoonAfter = await sessions.reads.isRunning
+        XCTAssertTrue(runningSoonAfter, "each call starts the wait again")
+        var stopped = false
+        for _ in 0..<100 where !stopped {
+            try await Task.sleep(for: .milliseconds(20))
+            stopped = await !sessions.reads.isRunning
+        }
+        XCTAssertTrue(stopped, "stopped once idle")
+        XCTAssertEqual(WarmMemorySessions.idleStop, .seconds(600), "about ten minutes in the app")
+    }
+
+    @MainActor
+    func testWithoutTheAgentACallSaysUnavailable() async {
+        let sessions = WarmMemorySessions(launch: { _ in nil })
+        do {
+            _ = try await sessions.call(.assistant, "mci_ask", arguments: Data("{}".utf8), timeout: .seconds(1))
+            XCTFail("expected unavailable")
+        } catch let error as MemorySessionError {
+            XCTAssertEqual(error, .unavailable)
+        } catch {
+            XCTFail("\(error)")
+        }
     }
 }
 

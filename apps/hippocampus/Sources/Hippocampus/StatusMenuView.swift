@@ -129,9 +129,7 @@ struct StatusMenuView: View {
         let paused = (supervisor.state == .paused)
             || UserPauseController.shared.isPaused
 
-        Button("Ask Hippocampus…  ⌃⇧Space") {
-            CommandBarController.shared.show()
-        }
+        AskMenuItem(watch: SoloKeyMonitor.shared.watch)
 
         Button("Open Recall") {
             supervisor.openRecallUI()
@@ -148,6 +146,22 @@ struct StatusMenuView: View {
                 toggleUserPause()
             }
             .keyboardShortcut("p", modifiers: [.command, .shift])
+        }
+    }
+
+    /// "Ask", named by `AskShortcut`: ⌃⇧Space shows as its key equivalent
+    /// when that is what opens Ask. A chosen key that is listening gets its
+    /// badge once the menu is an AppKit status item (spec-shell S2, S3).
+    private struct AskMenuItem: View {
+        @ObservedObject var watch: AskKeyWatch
+
+        var body: some View {
+            if watch.label == AskShortcut.fallbackLabel {
+                Button("Ask") { CommandBarController.shared.show() }
+                    .keyboardShortcut(.space, modifiers: [.control, .shift])
+            } else {
+                Button("Ask") { CommandBarController.shared.show() }
+            }
         }
     }
 

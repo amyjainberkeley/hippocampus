@@ -83,6 +83,8 @@ struct PreferencesRootView: View {
     @ObservedObject var loginItemVM: LoginItemViewModel
     @ObservedObject var captureController: CapturePreferenceController
     @ObservedObject var supervisor: ProcessSupervisor
+    /// What opens Ask right now: the key's caption follows it.
+    @ObservedObject var askKey: AskKeyWatch
     let updater: SparkleUpdaterService
     let dbPath: String
     let onOpenRecallTab: (String) -> Void
@@ -121,36 +123,43 @@ struct PreferencesRootView: View {
         VStack(alignment: .leading, spacing: PreferencesStyle.sectionSpacing) {
             sectionHeader("General")
 
-            Toggle("Launch at login", isOn: Binding(
+            Toggle("Open at login", isOn: Binding(
                 get: { loginItemVM.isEnabled },
                 set: { _ in loginItemVM.toggle() }
             ))
-            Text("Hippocampus will start automatically when you log in.")
-                .font(PreferencesStyle.captionFont)
-                .foregroundStyle(.secondary)
 
-            Picker("Open Ask with", selection: $store.askKey) {
-                ForEach(SoloKey.allCases) { key in
-                    Text(key.label).tag(key)
+            VStack(alignment: .leading, spacing: PreferencesStyle.controlSpacing) {
+                Picker("Open Ask with", selection: $store.askKey) {
+                    ForEach(SoloKey.allCases) { key in
+                        Text(key.label).tag(key)
+                    }
+                }
+                .pickerStyle(.menu)
+                let caption = AskKeyCaption(
+                    key: store.askKey,
+                    accessibilityGranted: askKey.accessibilityGranted,
+                    fallbackRegistered: askKey.fallbackRegistered
+                )
+                Text(caption.text)
+                    .font(PreferencesStyle.captionFont)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let secondLine = caption.secondLine {
+                    Text(secondLine)
+                        .font(PreferencesStyle.captionFont)
+                        .foregroundStyle(.secondary)
+                }
+                if caption.needsAccessibility {
+                    Button("Open System Settings…") {
+                        if let url = URL(string: TCCRevokedReason.accessibility.settingsPaneURLString) {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
                 }
             }
-            .pickerStyle(.menu)
-            Text("Tap the key by itself. Shortcuts that use it, like ⌘C, never open Ask. ⌃⇧Space always works.")
-                .font(PreferencesStyle.captionFont)
-                .foregroundStyle(.secondary)
-
-            Toggle("Show menu-bar icon", isOn: $store.showMenuBarIcon)
-            Text("If off, only ⌃⇧Space (Recall popup) remains as an entry point. Restart to apply.")
-                .font(PreferencesStyle.captionFont)
-                .foregroundStyle(.secondary)
-
-            Picker("Default view when opening recall UI", selection: $store.defaultRecallTab) {
-                ForEach(PreferredRecallTab.allCases, id: \.self) { tab in
-                    Text(tab.displayLabel).tag(tab)
-                }
-            }
-            .pickerStyle(.menu)
         }
+        // Accessibility may have been allowed since the key last looked.
+        .onAppear { askKey.recheck() }
     }
 
     // MARK: Capture
@@ -525,6 +534,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
             loginItemVM: loginItemVM,
             captureController: captureController,
             supervisor: supervisor,
+            askKey: SoloKeyMonitor.shared.watch,
             updater: updater,
             dbPath: dbPath,
             onOpenRecallTab: onOpenRecallTab,
