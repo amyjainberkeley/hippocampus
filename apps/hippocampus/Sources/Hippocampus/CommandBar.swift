@@ -212,9 +212,10 @@ struct CommandBarView: View {
 
     private var searchRow: some View {
         HStack(spacing: 12) {
-            CurlGlyph()
+            HiMarkView(style: .brand, state: .remembering)
+                .frame(height: 17)
                 .frame(width: 22, height: 22)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.primary)
             TextField(placeholder, text: $model.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 22, weight: .regular))
@@ -376,54 +377,6 @@ private struct VisualEffect: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
-}
-
-/// The curl mark, drawn from the same golden-ratio arcs as the app icon.
-struct CurlGlyph: View {
-    var body: some View {
-        GeometryReader { proxy in
-            let side = min(proxy.size.width, proxy.size.height)
-            ZStack {
-                CurlShape().stroke(style: StrokeStyle(lineWidth: side * 0.125, lineCap: .round))
-                CurlDot()
-            }
-        }
-        .aspectRatio(1, contentMode: .fit)
-    }
-}
-
-/// Quarter arcs whose radii shrink by the golden ratio, in a unit box.
-struct CurlShape: Shape {
-    static func geometry() -> (path: Path, end: CGPoint, radius: CGFloat) {
-        var path = Path()
-        var center = CGPoint(x: 0.465, y: 0.545)
-        var radius: CGFloat = 0.385
-        var angle: CGFloat = -.pi / 4
-        path.move(to: CGPoint(x: center.x + radius * cos(angle), y: center.y + radius * sin(angle)))
-        for _ in 0..<5 {
-            let next = angle - .pi / 2
-            path.addArc(center: center, radius: radius, startAngle: .radians(angle), endAngle: .radians(next), clockwise: true)
-            let end = CGPoint(x: center.x + radius * cos(next), y: center.y + radius * sin(next))
-            let smaller = radius / 1.618
-            center = CGPoint(x: end.x + (center.x - end.x) * smaller / radius, y: end.y + (center.y - end.y) * smaller / radius)
-            radius = smaller
-            angle = next
-        }
-        return (path, center, radius)
-    }
-
-    func path(in rect: CGRect) -> Path {
-        Self.geometry().path.applying(CGAffineTransform(scaleX: rect.width, y: rect.height))
-    }
-}
-
-private struct CurlDot: Shape {
-    func path(in rect: CGRect) -> Path {
-        let center = CurlShape.geometry().end
-        let r: CGFloat = 0.075
-        return Path(ellipseIn: CGRect(x: (center.x - r) * rect.width, y: (center.y - r) * rect.height,
-                                      width: 2 * r * rect.width, height: 2 * r * rect.height))
-    }
 }
 
 private struct SectionHeader: View {
