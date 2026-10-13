@@ -2375,7 +2375,7 @@ fn blob_dir_for_brain(brain_path: &Path) -> PathBuf {
         .map_or_else(|| PathBuf::from("blobs"), |parent| parent.join("blobs"))
 }
 
-fn is_keyframe_digest(value: &str) -> bool {
+pub(crate) fn is_keyframe_digest(value: &str) -> bool {
     value.len() == 64
         && value
             .bytes()
@@ -2933,6 +2933,12 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
     // do not know these tables are unaffected.
     tx.execute_batch(include_str!("../migrations/0013_understanding.sql"))
         .map_err(|error| StoreError::Backend(format!("apply migration 0013: {error}")))?;
+    // 0014 — what the user confirmed about the user model. One fresh table,
+    // `IF NOT EXISTS`, so the apply is idempotent on re-open. The schema
+    // version stays at 10; a read-only reader of a brain without the table
+    // sees nothing confirmed (see `understanding::confirmed_proposition_ids`).
+    tx.execute_batch(include_str!("../migrations/0014_understanding_verdicts.sql"))
+        .map_err(|error| StoreError::Backend(format!("apply migration 0014: {error}")))?;
     tx.execute(
         "INSERT OR REPLACE INTO meta (key, value) VALUES ('brain_schema_version', '10')",
         [],

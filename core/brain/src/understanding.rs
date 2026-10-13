@@ -6,12 +6,16 @@
 //! - **Propositions**: a general user model (GUM, Shaikh et al. 2025). Each is
 //!   a natural-language statement about the user with the model's reasoning,
 //!   a confidence, a decay rate and the events it rests on.
+//! - **Verdicts**: which propositions the user confirmed. One they reject is
+//!   kept as `rejected` instead, so it is not proposed again.
 //! - **Session notes** and **day reports**: titles, summaries and written
 //!   accounts of stretches of work.
 //!
 //! Everything here is derived from events and goes with them:
 //! [`delete_for_events`] runs inside every deletion transaction before the
 //! events themselves are removed.
+
+use std::collections::HashSet;
 
 use rusqlite::{params, OptionalExtension, Row, Transaction};
 use serde::{Deserialize, Serialize};
@@ -468,6 +472,61 @@ pub struct ObservedEvent {
     pub source: String,
 }
 
+/// What an event is, without what it says: enough to place it in time, name
+/// its window, reopen its page and show its screenshot. It never carries the
+/// event's text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventHead {
+    /// Event id.
+    pub id: i64,
+    /// Capture time.
+    pub ts_us: u64,
+    /// App it was seen in.
+    pub app_bundle_id: Option<String>,
+    /// Window or page title.
+    pub window_title: Option<String>,
+    /// Page URL, if any, as stored.
+    pub url: Option<String>,
+    /// `screen_ocr`, `screen_context`, `browser_page`, … (see `EventSource`);
+    /// `unknown` in a brain older than event sources.
+    pub source: String,
+    /// Whether a screenshot of it is stored: its keyframe is a managed blob
+    /// digest, the same test the store's blob cleanup and the window's
+    /// thumbnail path apply.
+    pub has_screenshot: bool,
+}
+
+/// `SELECT` for [`EventHead`] rows over `events e`, with the source when the
+/// brain has event sources. The text column is never selected.
+fn event_head_select(has_sources: bool) -> &'static str {
+    if has_sources {
+        "SELECT e.id, e.ts_us, e.app_bundle_id, e.window_title, e.url,
+                COALESCE(s.source_kind, 'unknown'), e.keyframe_blob
+         FROM events e LEFT JOIN event_sources s ON s.event_id = e.id"
+    } else {
+        "SELECT e.id, e.ts_us, e.app_bundle_id, e.window_title, e.url, 'unknown', e.keyframe_blob
+         FROM events e"
+    }
+}
+
+fn row_to_event_head(row: &Row<'_>) -> rusqlite::Result<EventHead> {
+    let keyframe: Option<String> = row.get(6)?;
+    Ok(EventHead {
+        id: row.get(0)?,
+        ts_us: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(0),
+        app_bundle_id: row.get(2)?,
+        window_title: row.get(3)?,
+        url: row.get(4)?,
+        source: row.get(5)?,
+        has_screenshot: keyframe
+            .as_deref()
+            .is_some_and(crate::sqlcipher_brain_store::is_keyframe_digest),
+    })
+}
+
+/// Event ids per `IN (…)` list, well under `SQLite`'s bound-parameter limit.
+const EVENT_HEAD_BATCH: usize = 500;
+
 // ---------------------------------------------------------------------------
 // Store methods
 // ---------------------------------------------------------------------------
@@ -517,6 +576,124 @@ impl SqlCipherBrainStore {
             .map_err(|e| backend("query observed events", e))?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| backend("read observed events", e))
+    }
+
+    /// The heads of the given events (never their text), oldest first. Ids
+    /// that no longer exist are left out, and repeats are read once.
+    ///
+    /// # Errors
+    /// Database failures.
+    pub fn event_heads(&self, ids: &[i64]) -> Result<Vec<EventHead>, StoreError> {
+        let mut wanted = ids.to_vec();
+        wanted.sort_unstable();
+        wanted.dedup();
+        if wanted.is_empty() {
+            return Ok(Vec::new());
+        }
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let select = event_head_select(table_exists(guard.conn(), "event_sources")?);
+        let mut heads = Vec::with_capacity(wanted.len());
+        for batch in wanted.chunks(EVENT_HEAD_BATCH) {
+            let sql = format!("{select} WHERE e.id IN ({})", vec!["?"; batch.len()].join(", "));
+            let mut statement = guard
+                .conn()
+                .prepare(&sql)
+                .map_err(|e| backend("prepare event heads", e))?;
+            let rows = statement
+                .query_map(rusqlite::params_from_iter(batch), row_to_event_head)
+                .map_err(|e| backend("query event heads", e))?;
+            for row in rows {
+                heads.push(row.map_err(|e| backend("read event heads", e))?);
+            }
+        }
+        heads.sort_by(|a, b| a.ts_us.cmp(&b.ts_us).then(a.id.cmp(&b.id)));
+        Ok(heads)
+    }
+
+    /// The heads of the events in `[start_us, end_us)` (never their text),
+    /// oldest first: a day's events without loading what they say. At most
+    /// `limit`; when there are more, the newest are kept, so the present is
+    /// never the part that is cut.
+    ///
+    /// # Errors
+    /// Database failures.
+    pub fn event_heads_in_range(
+        &self,
+        start_us: u64,
+        end_us: u64,
+        limit: usize,
+    ) -> Result<Vec<EventHead>, StoreError> {
+        if limit == 0 || start_us >= end_us {
+            return Ok(Vec::new());
+        }
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let sql = format!(
+            "{} WHERE e.ts_us >= ?1 AND e.ts_us < ?2 ORDER BY e.ts_us DESC, e.id DESC LIMIT ?3",
+            event_head_select(table_exists(guard.conn(), "event_sources")?)
+        );
+        let mut statement = guard
+            .conn()
+            .prepare(&sql)
+            .map_err(|e| backend("prepare event heads in range", e))?;
+        let rows = statement
+            .query_map(
+                params![sql_i64(start_us), sql_i64(end_us), i64::try_from(limit).unwrap_or(i64::MAX)],
+                row_to_event_head,
+            )
+            .map_err(|e| backend("query event heads in range", e))?;
+        let mut heads = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| backend("read event heads in range", e))?;
+        heads.reverse();
+        Ok(heads)
+    }
+
+    /// Events in `[start_us, end_us]` that have a stored screenshot, nearest
+    /// to `target_us` first (ties: the earlier, then the lower id), at most
+    /// `limit`. Never their text.
+    ///
+    /// # Errors
+    /// Database failures.
+    pub fn keyframe_events_near(
+        &self,
+        start_us: u64,
+        end_us: u64,
+        target_us: u64,
+        limit: usize,
+    ) -> Result<Vec<EventHead>, StoreError> {
+        if limit == 0 || start_us > end_us {
+            return Ok(Vec::new());
+        }
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        // A keyframe column can hold a value that is not a managed blob (a
+        // legacy path, say); `has_screenshot` applies the store's own test,
+        // so the limit is counted after it.
+        let sql = format!(
+            "{} WHERE e.ts_us >= ?1 AND e.ts_us <= ?2 AND e.keyframe_blob IS NOT NULL
+             ORDER BY ABS(e.ts_us - ?3), e.ts_us, e.id",
+            event_head_select(table_exists(guard.conn(), "event_sources")?)
+        );
+        let mut statement = guard
+            .conn()
+            .prepare(&sql)
+            .map_err(|e| backend("prepare keyframe events", e))?;
+        let rows = statement
+            .query_map(
+                params![sql_i64(start_us), sql_i64(end_us), sql_i64(target_us)],
+                row_to_event_head,
+            )
+            .map_err(|e| backend("query keyframe events", e))?;
+        let mut near = Vec::new();
+        for row in rows {
+            let head = row.map_err(|e| backend("read keyframe events", e))?;
+            if head.has_screenshot {
+                near.push(head);
+                if near.len() == limit {
+                    break;
+                }
+            }
+        }
+        Ok(near)
     }
 
     /// Record one interval's input counts. Returns false when an interval
@@ -790,7 +967,8 @@ impl SqlCipherBrainStore {
         Ok(id)
     }
 
-    /// Mark a proposition active, retired or rejected.
+    /// Mark a proposition active, retired or rejected. Rejecting it also
+    /// withdraws any confirmation. Returns whether it existed.
     ///
     /// # Errors
     /// Database failures.
@@ -800,33 +978,145 @@ impl SqlCipherBrainStore {
         status: PropositionStatus,
         now_us: u64,
     ) -> Result<bool, StoreError> {
-        let guard = self.db.lock().expect("brain store mutex poisoned");
-        let changed = guard
-            .conn()
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| backend("begin proposition status", e))?;
+        let changed = tx
             .execute(
                 "UPDATE propositions SET status = ?2, updated_us = ?3 WHERE id = ?1",
                 params![id, status.as_str(), sql_i64(now_us)],
             )
             .map_err(|e| backend("update proposition status", e))?;
+        if status == PropositionStatus::Rejected {
+            tx.execute("DELETE FROM proposition_verdicts WHERE proposition_id = ?1", params![id])
+                .map_err(|e| backend("withdraw proposition confirmation", e))?;
+        }
+        tx.commit().map_err(|e| backend("commit proposition status", e))?;
         Ok(changed == 1)
     }
 
     /// The user said a proposition is right: it becomes certain and slow to
-    /// go stale. Returns whether it existed.
+    /// go stale, and the confirmation is recorded, so a rebuild of the user
+    /// model keeps it and a merge never rewrites it. A retired proposition
+    /// (revised or merged away) is left as it is: resolve an id with
+    /// [`Self::newest_revision`] first. Returns whether it was confirmed.
     ///
     /// # Errors
     /// Database failures.
     pub fn confirm_proposition(&self, id: i64, now_us: u64) -> Result<bool, StoreError> {
-        let guard = self.db.lock().expect("brain store mutex poisoned");
-        let changed = guard
-            .conn()
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| backend("begin proposition confirmation", e))?;
+        let changed = tx
             .execute(
                 "UPDATE propositions SET confidence = 1.0, decay = MIN(decay, 0.3), status = 'active', updated_us = ?2
-                 WHERE id = ?1",
+                 WHERE id = ?1 AND status <> 'retired'",
                 params![id, sql_i64(now_us)],
             )
             .map_err(|e| backend("confirm proposition", e))?;
+        if changed == 1 {
+            tx.execute(
+                "INSERT OR REPLACE INTO proposition_verdicts (proposition_id, verdict, ts_us)
+                 VALUES (?1, 'confirmed', ?2)",
+                params![id, sql_i64(now_us)],
+            )
+            .map_err(|e| backend("record proposition confirmation", e))?;
+        }
+        tx.commit().map_err(|e| backend("commit proposition confirmation", e))?;
         Ok(changed == 1)
+    }
+
+    /// Ids of the propositions the user confirmed. A brain older than the
+    /// verdict table has none.
+    ///
+    /// # Errors
+    /// Database failures.
+    pub fn confirmed_proposition_ids(&self) -> Result<HashSet<i64>, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        if !table_exists(guard.conn(), "proposition_verdicts")? {
+            return Ok(HashSet::new());
+        }
+        let mut statement = guard
+            .conn()
+            .prepare("SELECT proposition_id FROM proposition_verdicts WHERE verdict = 'confirmed'")
+            .map_err(|e| backend("prepare confirmed propositions", e))?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, i64>(0))
+            .map_err(|e| backend("query confirmed propositions", e))?;
+        rows.collect::<Result<HashSet<_>, _>>()
+            .map_err(|e| backend("read confirmed propositions", e))
+    }
+
+    /// Where an id the user saw now lives: the newest proposition that
+    /// revised it, through `revised_from` any number of times, preferring one
+    /// still in use; or the id itself when nothing revised it. `None` when
+    /// neither it nor any revision of it exists.
+    ///
+    /// # Errors
+    /// Database failures.
+    pub fn newest_revision(&self, id: i64) -> Result<Option<i64>, StoreError> {
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        if !table_exists(guard.conn(), "propositions")? {
+            return Ok(None);
+        }
+        guard
+            .conn()
+            .query_row(
+                "WITH RECURSIVE line(id) AS (
+                     SELECT ?1
+                     UNION
+                     SELECT p.id FROM propositions p JOIN line ON p.revised_from = line.id
+                 )
+                 SELECT p.id FROM propositions p JOIN line ON line.id = p.id
+                 ORDER BY p.status = 'active' DESC, p.id DESC
+                 LIMIT 1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| backend("resolve proposition revision", e))
+    }
+
+    /// Link more events to a proposition and mark it seen now (`updated_us`
+    /// never moves back). Events that no longer exist are skipped. Returns how
+    /// many links were added; 0 when the proposition is gone.
+    ///
+    /// # Errors
+    /// Database failures.
+    pub fn add_proposition_evidence(&self, id: i64, evidence: &[i64], now_us: u64) -> Result<usize, StoreError> {
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| backend("begin proposition evidence", e))?;
+        let seen = tx
+            .execute(
+                "UPDATE propositions SET updated_us = MAX(updated_us, ?2) WHERE id = ?1",
+                params![id, sql_i64(now_us)],
+            )
+            .map_err(|e| backend("mark proposition seen", e))?;
+        if seen == 0 {
+            return Ok(0);
+        }
+        let mut events = evidence.to_vec();
+        events.sort_unstable();
+        events.dedup();
+        let mut added = 0;
+        for event_id in events {
+            added += tx
+                .execute(
+                    "INSERT OR IGNORE INTO proposition_evidence (proposition_id, event_id)
+                     SELECT ?1, ?2 WHERE EXISTS (SELECT 1 FROM events WHERE id = ?2)",
+                    params![id, event_id],
+                )
+                .map_err(|e| backend("add proposition evidence", e))?;
+        }
+        tx.commit().map_err(|e| backend("commit proposition evidence", e))?;
+        Ok(added)
     }
 
     /// Permanently delete a proposition (the user asked to forget it).
@@ -1048,7 +1338,9 @@ impl SqlCipherBrainStore {
 
     /// Clear every inference (propositions, session notes, day reports and
     /// progress markers) so they are made again. Measurements (searches and
-    /// interaction counts) are kept.
+    /// interaction counts) are kept, and so is what the user decided: the
+    /// propositions they rejected or confirmed stay, with the evidence they
+    /// rest on, so deleting one of those events still deletes them.
     ///
     /// # Errors
     /// Database failures.
@@ -1059,8 +1351,10 @@ impl SqlCipherBrainStore {
             .transaction()
             .map_err(|e| backend("begin understanding reset", e))?;
         tx.execute_batch(
-            "DELETE FROM proposition_evidence;
-             DELETE FROM propositions;
+            "DELETE FROM propositions
+             WHERE status <> 'rejected'
+               AND id NOT IN (SELECT proposition_id FROM proposition_verdicts);
+             DELETE FROM proposition_evidence WHERE proposition_id NOT IN (SELECT id FROM propositions);
              DELETE FROM session_notes;
              DELETE FROM day_reports;
              DELETE FROM understanding_state WHERE key <> 'searches_through_event_id';",
@@ -1146,8 +1440,9 @@ fn attach_evidence(conn: &rusqlite::Connection, props: &mut [Proposition]) -> Re
 
 /// Delete everything derived from `event_ids`, inside the caller's deletion
 /// transaction and before the events go: every proposition that cites one of
-/// them (not only the link), the notes of sessions containing them, and the
-/// reports of days they fall on. Searches cascade from their event.
+/// them (not only the link; a confirmation cascades with its proposition),
+/// the notes of sessions containing them, and the reports of days they fall
+/// on. Searches cascade from their event.
 pub(crate) fn delete_for_events(tx: &Transaction<'_>, event_ids: &[i64]) -> Result<(), StoreError> {
     if event_ids.is_empty() || !table_exists(tx, "propositions")? {
         return Ok(());
@@ -1209,6 +1504,10 @@ pub(crate) fn delete_interactions_in_range(
 pub(crate) fn wipe(tx: &Transaction<'_>) -> Result<(), StoreError> {
     if !table_exists(tx, "propositions")? {
         return Ok(());
+    }
+    if table_exists(tx, "proposition_verdicts")? {
+        tx.execute("DELETE FROM proposition_verdicts", [])
+            .map_err(|e| backend("wipe proposition verdicts", e))?;
     }
     tx.execute_batch(
         "DELETE FROM proposition_evidence;
