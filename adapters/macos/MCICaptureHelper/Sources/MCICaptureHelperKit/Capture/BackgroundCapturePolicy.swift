@@ -199,8 +199,8 @@ public enum BackgroundCapturePolicy {
     /// After recognition and before anything is stored (RULINGS G8): whether
     /// a browser window must not be read. It is skipped when it was seen
     /// private before (on either path), when its title marks it private, when
-    /// its top bar shows it is private, or when its top bar shows a site that
-    /// is never read. A window whose badge showed it private is remembered, so
+    /// its top bar shows it is private, or when its title or top bar shows a
+    /// site that is never read. A window whose badge showed it private is remembered, so
     /// a later read that cannot see the badge (another window covers the top
     /// bar) still skips it. `pixelSize` is the display frame's size.
     public static func skipsBrowserWindow(
@@ -213,6 +213,7 @@ public enum BackgroundCapturePolicy {
             if BrowserPixelCapturePolicy.titleMarksPrivateWindow(title) { privateWindows.remember(window.windowId) }
             return true
         }
+        if let title = window.title, BrowserPixelCapturePolicy.namesDeniedSite(title, denylist: denylist) { return true }
         guard let geometry else { return false }
         switch BrowserPixelCapturePolicy.topBarFinding(
             lines, window: geometry.rect, pixelSize: pixelSize,

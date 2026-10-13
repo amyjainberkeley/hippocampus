@@ -234,6 +234,29 @@ final class BrowserPrivateWindowTests: XCTestCase {
         XCTAssertEqual(frames.map(Self.isTombstone), [true])
     }
 
+    func testAPageTitledWithASignInOrBankAddressIsSkipped() {
+        let denylist = SensitiveCaptureDenylist(entries: [])
+        let window = FocusedWindow(bundleId: "com.apple.Safari", windowId: 101)
+        let frame = CGRect(x: 0, y: 25, width: 1200, height: 800)
+        for title in ["secure.chase.com/accounts", "accounts.google.com"] {
+            XCTAssertEqual(Self.cascade().snapshotPixelPrivacy(
+                context: WorkflowContext(appBundleId: "com.apple.Safari", windowTitle: title),
+                capturedWindow: window).decision, .suppress(reason: .denylistSource), title)
+            XCTAssertTrue(BackgroundCapturePolicy.skipsBrowserWindow(
+                VisibleWindow(windowId: 102, bundleId: "com.apple.Safari", title: title, bounds: frame, layer: 0),
+                lines: [], geometry: nil, pixelSize: Self.pixelSize, denylist: denylist,
+                privateWindows: PrivateBrowserWindows()), title)
+        }
+        let news = "Chase reports earnings for the quarter"
+        XCTAssertEqual(Self.cascade().snapshotPixelPrivacy(
+            context: WorkflowContext(appBundleId: "com.apple.Safari", windowTitle: news),
+            capturedWindow: window).decision, .allow)
+        XCTAssertFalse(BackgroundCapturePolicy.skipsBrowserWindow(
+            VisibleWindow(windowId: 103, bundleId: "com.apple.Safari", title: news, bounds: frame, layer: 0),
+            lines: [], geometry: nil, pixelSize: Self.pixelSize, denylist: denylist,
+            privateWindows: PrivateBrowserWindows()))
+    }
+
     func testThePersonsOwnURLRulesApplyToTheAddressBar() {
         let denylist = SensitiveCaptureDenylist(entries: [DenylistEntry(kind: .urlPrefix, pattern: "https://intranet.example.com/")])
         XCTAssertEqual(BrowserPixelCapturePolicy.topBarFinding(

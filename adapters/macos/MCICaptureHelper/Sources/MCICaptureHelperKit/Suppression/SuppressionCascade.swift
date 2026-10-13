@@ -215,6 +215,12 @@ public struct SuppressionCascade: Sendable {
             }
             return .suppress(reason: .denylistSource)
         }
+        // A page without a title is titled with its address: the sign-in and
+        // bank sites and the person's URL rules apply to it as to a URL.
+        if let title = context.windowTitle, let bundle = context.appBundleId, browserAppBundles.contains(bundle),
+           BrowserPixelCapturePolicy.namesDeniedSite(title, denylist: denylist) {
+            return .suppress(reason: .denylistSource)
+        }
 
         // Browsers are read like every other app (RULINGS G8). A window the
         // browser reports as private is never read; the probe asks only when
