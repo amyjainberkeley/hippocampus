@@ -96,6 +96,31 @@ char *mci_brain_ffi_events_by_ids(McibrainHandle *h, const char *query_json);
  * Keep h alive during the call. Free non-NULL with mci_brain_ffi_string_free. */
 char *mci_brain_ffi_event_text(McibrainHandle *h, uint64_t event_id);
 
+/* The readable text of one selected event, for the detail view. Returns
+ *   {"event_id":N,"ts_us":N,"app_bundle_id":<string|null>,
+ *    "source_kind":"screen_ocr","main":"...","rest":"...",
+ *    "match_in":"main"|"rest"|null,"truncated":false}
+ * or JSON null for a missing/deleted/suppressed/invalid id. main is what the
+ * person was reading; rest is everything else in the window (tabs, sidebars,
+ * menus, status bars), empty for windows read before they were classified.
+ * Neither holds the stored header or U+001E. `query` is NULL or a search's
+ * UTF-8 text; match_in says whether its words are in main or only in rest
+ * (null without a query, or when neither holds them). Reads the same 128 KiB
+ * prefix as mci_brain_ffi_event_text, which stays the raw path for audits.
+ * NULL on error. Free non-NULL with mci_brain_ffi_string_free. */
+char *mci_brain_ffi_event_reading(McibrainHandle *h, uint64_t event_id,
+                                  const char *query);
+
+/* The readable text of text that was never stored (a screenshot read
+ * again), by the same rules as stored text. No handle: nothing is read from
+ * memory.
+ *   input_json: {"stored":"...","source":"screen_ocr"?,"app":"..."?,
+ *                "title":"..."?}
+ *   returns: {"main":"...","rest":"..."}
+ * A missing or unknown source is shown as given. NULL on bad input.
+ * Free non-NULL with mci_brain_ffi_string_free. */
+char *mci_brain_ffi_reading(const char *input_json);
+
 /* V2-P13 (Phase D scaffold) — Return a lightweight event summary for a
  * time range, downsampled to at most ~1000 rows per call.
  *   query_json: {"start_ts_us":<u64>,"end_ts_us":<u64>,

@@ -588,6 +588,10 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
         "mci_brain_ffi_events_by_ids",
         // Bounded selected-event stored text through the existing read-only handle.
         "mci_brain_ffi_event_text",
+        // The same event's readable text (main and rest) for the detail view.
+        "mci_brain_ffi_event_reading",
+        // Readable text of text that was never stored; no handle, no store read.
+        "mci_brain_ffi_reading",
         // Cycle 8.46 — Privacy Dashboard summary card (read-only).
         // Returns content-free aggregate: event count, oldest/newest ts,
         // on-disk byte size. Uses `BrainStore::stats` + `fs::metadata` —
@@ -631,6 +635,8 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
         mci_brain_ffi::mci_brain_ffi_brief_dates as *const (),
         mci_brain_ffi_events_by_ids as *const (),
         mci_brain_ffi::mci_brain_ffi_event_text as *const (),
+        mci_brain_ffi::mci_brain_ffi_event_reading as *const (),
+        mci_brain_ffi::mci_brain_ffi_reading as *const (),
         mci_brain_ffi::mci_brain_ffi_summary_stats as *const (),
         mci_brain_ffi::mci_brain_ffi_storage_usage as *const (),
         // V2-P13 (Phase D scaffold) — timeline strip fetch surface.
@@ -645,9 +651,9 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
     ];
     assert_eq!(
         allowed_reads.len(),
-        18,
-        "read-tier FFI surface size pinned at 18 \
-         (explicit storage accounting adds no mutation)"
+        20,
+        "read-tier FFI surface size pinned at 20 \
+         (the two reading calls add no mutation)"
     );
     assert_eq!(
         allowed_mutations.len(),

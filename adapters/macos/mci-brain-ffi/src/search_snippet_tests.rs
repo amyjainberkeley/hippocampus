@@ -1,6 +1,17 @@
 use super::*;
+use mci_brain::reading::Reading;
 use mci_brain::{Event, EventSource};
 use serde_json::{json, Value};
+
+/// A search passage of `body` read as screen text, as `hit_json` makes it.
+fn passage(query: &ExcerptQuery, body: &str) -> String {
+    let read = reading(body, EventSource::ScreenOcr, Some("test.snippets"), None);
+    excerpt(&read, Some("test.snippets"), query, SNIPPET_CHAR_CAP)
+}
+
+fn keywords(text: &str) -> ExcerptQuery {
+    ExcerptQuery::from_alternatives(&[LexicalAlternative::Keywords(text)])
+}
 
 struct TestBrain {
     handle: *mut Handle,
@@ -68,8 +79,12 @@ fn assert_excerpt(body: &str, excerpt: &str, expected: &str) {
         excerpt.contains(expected),
         "missing matching passage {expected:?}"
     );
-    assert!(body.contains(excerpt), "excerpt must be verbatim body text");
-    assert!(excerpt.chars().count() <= SNIPPET_CHAR_CAP);
+    let read: Reading = reading(body, EventSource::ScreenOcr, Some("test.snippets"), None);
+    assert!(
+        read.main.contains(excerpt) || read.rest.contains(excerpt),
+        "excerpt must be verbatim in the reading"
+    );
+    assert!(excerpt.len() <= SNIPPET_CHAR_CAP);
 }
 
 #[test]
@@ -156,23 +171,27 @@ fn lexical_snippet_multiline_match_is_visible_without_changing_source_readback()
     let full: Value = serde_json::from_slice(unsafe { CStr::from_ptr(raw) }.to_bytes()).unwrap();
     unsafe { mci_brain_ffi_string_free(raw) };
     assert_eq!(full["event_id"], id.0);
-    assert_eq!(full["text"], text);
+    assert_eq!(
+        full["text"], text,
+        "the raw path still returns what is stored"
+    );
     assert_eq!(full["truncated"], false);
     let recent = TestBrain::read_hits(unsafe { mci_brain_ffi_recent_events(brain.handle, 10) });
     assert_eq!(
         recent[0].ocr_text_snippet,
-        text.chars().take(280).collect::<String>()
+        body.chars().take(280).collect::<String>(),
+        "a list row starts with the text, not the header"
     );
 }
 
 #[test]
 fn search_snippet_short_multiline_and_unicode_separators_keep_match_visible() {
-    let query = SearchSnippet::new(&[LexicalAlternative::Keywords("caf\u{e9}")]);
+    let query = keywords("caf\u{e9}");
     for separator in ["\n", "\r\n", "\r", "\u{85}", "\u{2028}", "\u{2029}"] {
         let prefix = format!("earlier{separator}").repeat(10);
         let body = format!("{prefix}CAF\u{c9} launch decision");
         assert!(body.chars().count() < 280);
-        let excerpt = query.excerpt(&body);
+        let excerpt = passage(&query, &body);
         assert_excerpt(&body, &excerpt, "CAF\u{c9} launch decision");
         assert_visible_match(&excerpt, "CAF\u{c9} launch decision");
     }
@@ -180,7 +199,7 @@ fn search_snippet_short_multiline_and_unicode_separators_keep_match_visible() {
 
 #[test]
 fn search_snippet_limits_same_line_context_and_does_not_backfill_at_end() {
-    let query = SearchSnippet::new(&[LexicalAlternative::Keywords("needle")]);
+    let query = keywords("needle");
     for body in [
         format!(
             "{}needle launch decision. {}",
@@ -194,7 +213,7 @@ fn search_snippet_limits_same_line_context_and_does_not_backfill_at_end() {
             "\u{130}\u{1f642} ".repeat(50)
         ),
     ] {
-        let excerpt = query.excerpt(&body);
+        let excerpt = passage(&query, &body);
         assert_excerpt(&body, &excerpt, "needle launch decision");
         assert_visible_match(&excerpt, "needle launch decision");
     }
@@ -324,11 +343,14 @@ fn snippet_search_preserves_empty_queries_and_recent_history_formatting() {
     }
     let recent = TestBrain::read_hits(unsafe { mci_brain_ffi_recent_events(brain.handle, 10) });
     let browse = brain.search(&json!({"text": "", "browse": true, "limit": 10}));
-    let prefix: String = text.chars().take(280).collect();
+    let prefix: String = format!("{}needle launch decision", "filler ".repeat(100))
+        .chars()
+        .take(280)
+        .collect();
     assert_eq!(recent[0].ocr_text_snippet, prefix);
     assert_eq!(browse[0].ocr_text_snippet, prefix);
     assert_eq!(
-        timeline_snippet(&text),
+        timeline_snippet(&text, EventSource::ScreenOcr, Some("test.snippets")),
         "filler ".repeat(12).chars().take(80).collect::<String>()
     );
 }
@@ -372,25 +394,25 @@ fn lexical_snippet_centers_expanded_alias_without_changing_ranking() {
 fn search_snippet_fallback_and_boundary_cases_remain_verbatim() {
     let long = format!("{}needlework {}", "filler ".repeat(100), "tail ".repeat(80));
     for query in ["", "   ", "?! () *", "needle", "unmatched"] {
-        let query = SearchSnippet::new(&[LexicalAlternative::Keywords(query)]);
         assert_eq!(
-            query.excerpt(&long),
+            passage(&keywords(query), &long),
             long.chars().take(280).collect::<String>()
         );
     }
-    let query = SearchSnippet::new(&[LexicalAlternative::Keywords("needle")]);
+    let query = keywords("needle");
     for body in [
         "",
         "needle",
         "[app=needle]\nOrdinary text.",
         "[app=needle | title=x | url= | ts=100]",
     ] {
-        assert_eq!(query.excerpt(body), body);
+        assert_eq!(passage(&query, body), body);
     }
     let header = "[app=needle | title=x | url= | ts=100]\n";
     assert_eq!(
-        query.excerpt(&format!("{header}{header}body")),
-        format!("{header}body")
+        passage(&query, &format!("{header}{header}body")),
+        format!("{header}body"),
+        "only a whole first-line header is stripped, once"
     );
     for body in [
         format!("needle launch decision {}", "tail ".repeat(100)),
@@ -401,14 +423,31 @@ fn search_snippet_fallback_and_boundary_cases_remain_verbatim() {
             "tail ".repeat(100)
         ),
     ] {
-        assert_excerpt(&body, &query.excerpt(&body), "needle launch decision");
+        assert_excerpt(&body, &passage(&query, &body), "needle launch decision");
     }
     let long_word = "x".repeat(600);
-    let long_query = SearchSnippet::new(&[LexicalAlternative::Keywords(&long_word)]);
     assert_eq!(
-        long_query.excerpt(&format!("before {long_word} after")),
+        passage(&keywords(&long_word), &format!("before {long_word} after")),
         "x".repeat(280)
     );
+}
+
+#[test]
+fn a_search_word_only_in_the_window_chrome_is_shown_from_there() {
+    let brain = TestBrain::new();
+    let text = format!(
+        "[app=test.snippets | title=Notes | url= | ts=100]\n{}Launch notes for the beta.\n\n\u{1e}\nRoadmap\nChangelog",
+        "Ordinary body text. ".repeat(20)
+    );
+    brain.seed(&text, "Notes", 100);
+    let hits = brain.search(&json!({"text": "roadmap", "mode": "text", "limit": 10}));
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].ocr_text_snippet, "Roadmap\nChangelog");
+    let hits = brain.search(&json!({"text": "launch", "mode": "text", "limit": 10}));
+    assert!(hits[0]
+        .ocr_text_snippet
+        .contains("Launch notes for the beta."));
+    assert!(!hits[0].ocr_text_snippet.contains('\u{1e}'));
 }
 
 #[test]
@@ -416,7 +455,7 @@ fn related_snippet_without_literal_match_preserves_source_and_body_prefix() {
     let brain = TestBrain::new();
     let body = "Ordinary unrelated body. ".repeat(20);
     let id = brain.seed(&body, "Notes", 100);
-    let query = SearchSnippet::new(&[LexicalAlternative::Keywords("needle")]);
+    let query = keywords("needle");
     for source in [
         "hybrid",
         "hybrid-related",

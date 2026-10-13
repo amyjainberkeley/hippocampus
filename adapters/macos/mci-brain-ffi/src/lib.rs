@@ -70,9 +70,11 @@ use mci_brain::arctic_embed_s::ArcticEmbedSEmbedder;
 use mci_brain::fts_sanitizer::{
     LexicalAlternative, MAX_LEXICAL_ALTERNATIVES, MAX_LEXICAL_ALTERNATIVE_BYTES,
 };
+use mci_brain::reading::{excerpt, reading, reading_prefix, ExcerptQuery};
 use mci_brain::{
-    BrainStore, DeletionOutcome, Embedder, EventId, HybridRetriever, RetrievalDegradation,
-    RetrievalMatch, RetrievalOutcome, RetrievalQuery, SqlCipherBrainStore, TimeRange,
+    BrainStore, DeletionOutcome, Embedder, EventId, EventSource, HybridRetriever,
+    RetrievalDegradation, RetrievalMatch, RetrievalOutcome, RetrievalQuery, SqlCipherBrainStore,
+    TimeRange,
 };
 use mci_core::crypto::DbKey;
 #[cfg(target_os = "macos")]
@@ -82,9 +84,6 @@ use rustix::fs::{flock, FlockOperation, OFlags};
 use serde::{Deserialize, Serialize};
 
 pub mod storage_usage;
-
-mod search_snippet;
-use search_snippet::SearchSnippet;
 
 #[cfg(test)]
 mod search_snippet_tests;
@@ -111,10 +110,12 @@ pub struct HitJson {
     pub window_title: Option<String>,
     /// `events.url` (nullable).
     pub url: Option<String>,
-    /// Query-centered body excerpt for search, or the stored text prefix for history. The
-    /// FFI caps this at [`SNIPPET_CHAR_CAP`] characters at the Rust
-    /// boundary so the Swift list cells never receive megabytes of OCR
-    /// text per row.
+    /// Readable text, never the stored header or U+001E: for a search, the
+    /// passage around its words ([`mci_brain::reading::excerpt`], at most
+    /// [`SNIPPET_CHAR_CAP`] bytes); for history and linked rows, the start
+    /// of the reading's `main` ([`mci_brain::reading::reading_prefix`], at
+    /// most [`SNIPPET_CHAR_CAP`] characters). Swift list cells never receive
+    /// megabytes of text per row.
     pub ocr_text_snippet: String,
     /// Which retrieval source produced this hit. `"lexical"` is plain
     /// FTS5 search; `"timeline"` is the recent-events list. Model-backed
@@ -345,7 +346,8 @@ pub struct TimelineEventJson {
     pub ts_us: u64,
     /// `events.app_bundle_id`, nullable in schema.
     pub app_bundle_id: Option<String>,
-    /// Display body, stripped of the indexing header before the ~80-char cap.
+    /// The start of the event's readable text, at most
+    /// [`TIMELINE_SNIPPET_CAP`] characters, without the stored header.
     pub snippet: String,
     /// Absolute filesystem path to the encrypted keyframe blob, or
     /// `None` for events with no keyframe (Messages / Mail / text-only
@@ -803,7 +805,7 @@ fn search_lexical(
         )
     }
     .map_err(|error| format!("fts5_search: {error}"))?;
-    let snippet_query = SearchSnippet::new(&alternatives);
+    let snippet_query = ExcerptQuery::from_alternatives(&alternatives);
     let mut hits_json = Vec::with_capacity(hits_raw.len());
     for (event_id, score) in hits_raw {
         let Some(event) = handle
@@ -874,7 +876,7 @@ fn search_hybrid(handle: &Handle, query: &QueryJson, limit: usize) -> Result<Vec
             (fallback_matches, source)
         }
     };
-    let snippet_query = SearchSnippet::new(&[LexicalAlternative::Keywords(&query.text)]);
+    let snippet_query = ExcerptQuery::new(&query.text);
     materialize_retrieval_matches(handle, matches, source, limit, &snippet_query)
 }
 
@@ -884,7 +886,7 @@ fn materialize_retrieval_matches(
     matches: Vec<RetrievalMatch>,
     source: &str,
     limit: usize,
-    snippet_query: &SearchSnippet,
+    snippet_query: &ExcerptQuery,
 ) -> Result<Vec<HitJson>, String> {
     let mut hits = Vec::with_capacity(matches.len().min(limit));
     for value in matches.into_iter().take(limit) {
@@ -912,13 +914,8 @@ fn unknown_source_kind() -> String {
     "unknown".into()
 }
 
-fn acquisition_source(handle: &Handle, id: EventId) -> String {
-    handle
-        .store
-        .event_source(id)
-        .unwrap_or_default()
-        .as_str()
-        .into()
+fn acquisition_source(handle: &Handle, id: EventId) -> EventSource {
+    handle.store.event_source(id).unwrap_or_default()
 }
 
 fn hit_json(
@@ -927,19 +924,27 @@ fn hit_json(
     event: mci_brain::Event,
     source: &str,
     score: Option<f32>,
-    snippet_query: Option<&SearchSnippet>,
+    snippet_query: Option<&ExcerptQuery>,
 ) -> HitJson {
     let (entities, linked_event_ids) = enrich_hit(&handle.store, event_id);
     let thumbnail_path = thumbnail_path_for(&handle.blob_dir, event.keyframe_blob.as_deref());
+    let kind = acquisition_source(handle, event_id);
+    let app = event.app_bundle_id.as_deref();
+    let ocr_text_snippet = match snippet_query {
+        Some(query) => {
+            let read = reading(&event.text, kind, app, event.window_title.as_deref());
+            excerpt(&read, app, query, SNIPPET_CHAR_CAP)
+        }
+        None => list_snippet(&event.text, kind, app),
+    };
     HitJson {
-        source_kind: acquisition_source(handle, event_id),
+        source_kind: kind.as_str().into(),
         event_id: event_id.0,
         ts_us: event.ts_us,
         app_bundle_id: event.app_bundle_id,
         window_title: event.window_title,
         url: event.url,
-        ocr_text_snippet: snippet_query
-            .map_or_else(|| snippet(&event.text), |query| query.excerpt(&event.text)),
+        ocr_text_snippet,
         source: source.into(),
         score,
         entities,
@@ -979,14 +984,15 @@ pub unsafe extern "C" fn mci_brain_ffi_recent_events(h: *mut Handle, limit: u32)
         .map(|ev| {
             let (entities, linked_event_ids) = enrich_hit(&handle.store, ev.id);
             let thumbnail_path = thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
+            let kind = acquisition_source(handle, ev.id);
             HitJson {
-                source_kind: acquisition_source(handle, ev.id),
+                source_kind: kind.as_str().into(),
+                ocr_text_snippet: list_snippet(&ev.text, kind, ev.app_bundle_id.as_deref()),
                 event_id: ev.id.0,
                 ts_us: ev.ts_us,
                 app_bundle_id: ev.app_bundle_id,
                 window_title: ev.window_title,
                 url: ev.url,
-                ocr_text_snippet: snippet(&ev.text),
                 source: "timeline".into(),
                 score: None,
                 entities,
@@ -1118,14 +1124,15 @@ pub unsafe extern "C" fn mci_brain_ffi_events_by_ids(
                 let (entities, linked_event_ids) = enrich_hit(&handle.store, EventId(id));
                 let thumbnail_path =
                     thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
+                let kind = acquisition_source(handle, EventId(id));
                 out.push(HitJson {
-                    source_kind: acquisition_source(handle, EventId(id)),
+                    source_kind: kind.as_str().into(),
+                    ocr_text_snippet: list_snippet(&ev.text, kind, ev.app_bundle_id.as_deref()),
                     event_id: id,
                     ts_us: ev.ts_us,
                     app_bundle_id: ev.app_bundle_id,
                     window_title: ev.window_title,
                     url: ev.url,
-                    ocr_text_snippet: snippet(&ev.text),
                     source: "linked".into(),
                     score: None,
                     entities,
@@ -1194,6 +1201,162 @@ pub unsafe extern "C" fn mci_brain_ffi_event_text(h: *mut Handle, event_id: u64)
         set_last_error("mci_brain_ffi_event_text: stored text unavailable");
         ptr::null_mut()
     }
+}
+
+/// The readable text of one selected event, for the detail view.
+#[derive(Debug, Serialize)]
+pub struct EventReadingJson {
+    /// The requested, still-present admitted event id.
+    pub event_id: u64,
+    /// Capture timestamp from the same row snapshot as the text.
+    pub ts_us: u64,
+    /// Exact nullable source app, bounded to 1 KiB of UTF-8.
+    pub app_bundle_id: Option<String>,
+    /// Acquisition provenance: `screen_ocr`, `browser_page`, … (`unknown`
+    /// for rows stored before sources were recorded).
+    pub source_kind: String,
+    /// What the person was reading.
+    pub main: String,
+    /// Everything else in the window: tabs, sidebars, menus, status bars.
+    /// Empty when the window was not classified.
+    pub rest: String,
+    /// Where a search's words are: `"main"`, `"rest"`, or null when no
+    /// search was given or neither holds them.
+    pub match_in: Option<&'static str>,
+    /// True only when the 128 KiB read omitted part of the stored text.
+    pub truncated: bool,
+}
+
+/// Read one admitted event's readable text: `main` and `rest`, never the
+/// stored header or U+001E (`mci_brain::reading::reading`). `query` is null
+/// or a search's UTF-8 text; with one, `match_in` says whether its words are
+/// in `main` or only in `rest`. Reads the same 128 KiB prefix as
+/// [`mci_brain_ffi_event_text`], which stays the raw path for audits.
+/// Returns JSON `null` for a missing, deleted, suppressed or invalid id, and
+/// a null pointer on error with a content-free last-error message. Caller
+/// must release any non-null pointer with [`mci_brain_ffi_string_free`].
+///
+/// # Safety
+/// `h` must be a live handle or null. `query` must be null or a
+/// null-terminated UTF-8 C string. Do not close the handle during the call.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_event_reading(
+    h: *mut Handle,
+    event_id: u64,
+    query: *const c_char,
+) -> *mut c_char {
+    if h.is_null() {
+        set_last_error("mci_brain_ffi_event_reading: null handle");
+        return ptr::null_mut();
+    }
+    // Safety: the caller keeps this read-only handle alive for the call.
+    let handle = unsafe { &*h };
+    let query = if query.is_null() {
+        None
+    } else {
+        // Safety: the caller passes a null-terminated C string.
+        match unsafe { CStr::from_ptr(query) }.to_str() {
+            Ok(text) => Some(ExcerptQuery::new(text)),
+            Err(_) => {
+                set_last_error("mci_brain_ffi_event_reading: non-UTF8 query");
+                return ptr::null_mut();
+            }
+        }
+    };
+    let Ok(value) = handle.store.event_text(EventId(event_id)) else {
+        set_last_error("mci_brain_ffi_event_reading: stored text unavailable");
+        return ptr::null_mut();
+    };
+    json_to_c_string(&value.map(|value| {
+        let kind = acquisition_source(handle, EventId(event_id));
+        let read = reading(&value.text, kind, value.app_bundle_id.as_deref(), None);
+        let match_in = query.as_ref().and_then(|query| {
+            if query.found_in(&read.main) {
+                Some("main")
+            } else if query.found_in(&read.rest) {
+                Some("rest")
+            } else {
+                None
+            }
+        });
+        EventReadingJson {
+            event_id,
+            ts_us: value.ts_us,
+            app_bundle_id: value.app_bundle_id,
+            source_kind: kind.as_str().into(),
+            main: read.main,
+            rest: read.rest,
+            match_in,
+            truncated: value.truncated,
+        }
+    }))
+}
+
+/// Input of [`mci_brain_ffi_reading`]: text that was never stored, such as
+/// a screenshot read again, with what is known about where it came from.
+#[derive(Debug, Deserialize)]
+pub struct ReadingInputJson {
+    /// The text, in the shape the store would keep it.
+    pub stored: String,
+    /// Acquisition label (`screen_ocr`, …). Missing or unknown labels are
+    /// shown as given.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Bundle id of the app the text came from.
+    #[serde(default)]
+    pub app: Option<String>,
+    /// Window title.
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+/// What [`mci_brain_ffi_reading`] returns.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReadingJson {
+    /// What the person was reading.
+    pub main: String,
+    /// Everything else in the window.
+    pub rest: String,
+}
+
+/// The readable text of text that was never stored (a screenshot read
+/// again), by the same rules as stored text. Nothing is read from memory and
+/// no handle is needed. Returns `{"main","rest"}`, or a null pointer on bad
+/// input with a last-error message. Free the result with
+/// [`mci_brain_ffi_string_free`].
+///
+/// # Safety
+/// `input_json` must be null or a null-terminated UTF-8 C string holding a
+/// [`ReadingInputJson`].
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_reading(input_json: *const c_char) -> *mut c_char {
+    if input_json.is_null() {
+        set_last_error("mci_brain_ffi_reading: null input");
+        return ptr::null_mut();
+    }
+    // Safety: the caller passes a null-terminated C string.
+    let Ok(input) = unsafe { CStr::from_ptr(input_json) }.to_str() else {
+        set_last_error("mci_brain_ffi_reading: non-UTF8 input");
+        return ptr::null_mut();
+    };
+    let input: ReadingInputJson = match serde_json::from_str(input) {
+        Ok(value) => value,
+        Err(e) => {
+            set_last_error(&format!("mci_brain_ffi_reading: bad input JSON: {e}"));
+            return ptr::null_mut();
+        }
+    };
+    let source = EventSource::from_stored(input.source.as_deref().unwrap_or(""));
+    let read = reading(
+        &input.stored,
+        source,
+        input.app.as_deref(),
+        input.title.as_deref(),
+    );
+    json_to_c_string(&ReadingJson {
+        main: read.main,
+        rest: read.rest,
+    })
 }
 
 /// **V2-P13 (Phase D scaffold)** — Return lightweight event summaries for
@@ -1280,12 +1443,13 @@ pub unsafe extern "C" fn mci_brain_ffi_timeline_events(
         .into_iter()
         .map(|ev| {
             let thumbnail_path = thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
+            let kind = acquisition_source(handle, ev.id);
             TimelineEventJson {
-                source_kind: acquisition_source(handle, ev.id),
+                source_kind: kind.as_str().into(),
+                snippet: timeline_snippet(&ev.text, kind, ev.app_bundle_id.as_deref()),
                 event_id: ev.id.0,
                 ts_us: ev.ts_us,
                 app_bundle_id: ev.app_bundle_id,
-                snippet: timeline_snippet(&ev.text),
                 thumbnail_path,
             }
         })
@@ -2055,45 +2219,18 @@ fn hex_nibble(b: u8) -> Result<u8, String> {
     }
 }
 
-/// Truncate `s` to at most [`SNIPPET_CHAR_CAP`] characters (not bytes —
-/// multi-byte UTF-8 is preserved). Appends nothing; the recall-UI adds
-/// an ellipsis affordance if it likes.
-fn snippet(s: &str) -> String {
-    if s.chars().count() <= SNIPPET_CHAR_CAP {
-        return s.to_string();
-    }
-    s.chars().take(SNIPPET_CHAR_CAP).collect()
+/// The start of an event's readable text for a list row: at most
+/// [`SNIPPET_CHAR_CAP`] characters (not bytes; multi-byte UTF-8 is kept
+/// whole), without the stored header or U+001E. The recall UI adds an
+/// ellipsis if it likes.
+fn list_snippet(text: &str, source: EventSource, app: Option<&str>) -> String {
+    reading_prefix(text, source, app, SNIPPET_CHAR_CAP)
 }
 
-/// **V2-P13.** Shorter snippet for timeline strip cards.
-/// [`TIMELINE_SNIPPET_CAP`] chars; multi-byte UTF-8 boundaries preserved.
-fn timeline_snippet(s: &str) -> String {
-    let s = display_body(s);
-    if s.chars().count() <= TIMELINE_SNIPPET_CAP {
-        return s.to_string();
-    }
-    s.chars().take(TIMELINE_SNIPPET_CAP).collect()
-}
-
-/// Remove only a complete leading ingestion header before budgeting UI text.
-/// The stored/indexed text and separate source metadata remain unchanged.
-fn display_body(s: &str) -> &str {
-    let Some((header, body)) = s.split_once('\n') else {
-        return s;
-    };
-    let fields = header
-        .strip_prefix("[app=")
-        .and_then(|v| v.strip_suffix(']'));
-    let complete = fields
-        .and_then(|v| v.split_once(" | title=").map(|(_, rest)| rest))
-        .and_then(|v| v.split_once(" | url=").map(|(_, rest)| rest))
-        .and_then(|v| v.split_once(" | ts=").map(|(_, rest)| rest))
-        .is_some();
-    if complete {
-        body
-    } else {
-        s
-    }
+/// **V2-P13.** Shorter list text for timeline strip cards:
+/// [`TIMELINE_SNIPPET_CAP`] characters of the same reading.
+fn timeline_snippet(text: &str, source: EventSource, app: Option<&str>) -> String {
+    reading_prefix(text, source, app, TIMELINE_SNIPPET_CAP)
 }
 
 /// **V2-P13.** Downsample an ascending-order timeline slice to at most
@@ -2555,21 +2692,21 @@ mod tests {
     #[test]
     fn snippet_caps_long_text() {
         let long = "x".repeat(SNIPPET_CHAR_CAP + 100);
-        let s = snippet(&long);
+        let s = list_snippet(&long, EventSource::ScreenOcr, None);
         assert_eq!(s.chars().count(), SNIPPET_CHAR_CAP);
     }
 
     #[test]
     fn snippet_passes_short_text() {
         let short = "hello";
-        assert_eq!(snippet(short), "hello");
+        assert_eq!(list_snippet(short, EventSource::ScreenOcr, None), "hello");
     }
 
     #[test]
     fn snippet_preserves_multibyte_char_boundaries() {
         // Each emoji is multiple bytes; ensure we cut on char count, not bytes.
         let s: String = "🦀".repeat(SNIPPET_CHAR_CAP + 5);
-        let cut = snippet(&s);
+        let cut = list_snippet(&s, EventSource::Unknown, None);
         assert_eq!(cut.chars().count(), SNIPPET_CHAR_CAP);
         // Round-trip via str so we know we didn't slice mid-codepoint.
         assert!(cut.is_char_boundary(cut.len()));
@@ -3256,13 +3393,13 @@ mod tests {
     #[test]
     fn timeline_snippet_caps_long_text() {
         let long = "x".repeat(TIMELINE_SNIPPET_CAP + 100);
-        let s = timeline_snippet(&long);
+        let s = timeline_snippet(&long, EventSource::ScreenOcr, None);
         assert_eq!(s.chars().count(), TIMELINE_SNIPPET_CAP);
     }
 
     #[test]
     fn timeline_snippet_passes_short_text() {
-        assert_eq!(timeline_snippet("hi"), "hi");
+        assert_eq!(timeline_snippet("hi", EventSource::ScreenOcr, None), "hi");
     }
 
     #[test]
@@ -3272,11 +3409,16 @@ mod tests {
             "long document title ".repeat(50)
         );
         let text = format!("{header}The revised launch plan is ready.");
-        assert_eq!(timeline_snippet(&text), "The revised launch plan is ready.");
-        assert_eq!(
-            snippet(&text),
-            text.chars().take(SNIPPET_CHAR_CAP).collect::<String>()
-        );
+        for source in [EventSource::ScreenOcr, EventSource::Unknown] {
+            assert_eq!(
+                timeline_snippet(&text, source, None),
+                "The revised launch plan is ready."
+            );
+            assert_eq!(
+                list_snippet(&text, source, None),
+                "The revised launch plan is ready."
+            );
+        }
         assert!(
             text.starts_with(&header),
             "display must not mutate stored text"
@@ -3292,10 +3434,10 @@ mod tests {
             "Notes\n[app=editor | title=title | url=? | ts=now]\nVisible content",
         ] {
             assert_eq!(
-                timeline_snippet(text),
+                timeline_snippet(text, EventSource::Unknown, None),
                 text.chars().take(TIMELINE_SNIPPET_CAP).collect::<String>()
             );
-            assert_eq!(snippet(text), text);
+            assert_eq!(list_snippet(text, EventSource::Unknown, None), text);
         }
     }
 
@@ -3303,13 +3445,25 @@ mod tests {
     fn display_snippet_strips_only_one_header_and_preserves_unicode_boundaries() {
         let header = "[app=editor | title=title | url=? | ts=now]\n";
         assert_eq!(
-            timeline_snippet(&format!("{header}{header}body")),
+            timeline_snippet(&format!("{header}{header}body"), EventSource::Unknown, None),
             format!("{header}body")
         );
+        // Text kept as stored, so N3 does not drop a line with no letter.
         let body = "\u{1f9e0}".repeat(TIMELINE_SNIPPET_CAP + 1);
         assert_eq!(
-            timeline_snippet(&format!("{header}{body}")),
+            timeline_snippet(&format!("{header}{body}"), EventSource::Unknown, None),
             "\u{1f9e0}".repeat(TIMELINE_SNIPPET_CAP)
+        );
+    }
+
+    #[test]
+    fn list_snippets_are_the_reading_not_the_stored_text() {
+        let stored = "[app=com.apple.Notes | title=Plan | url=? | ts=now]\n\u{4e09} Launch plan\n\u{53e3}\nThe beta opens on October 21.\n\n\u{1e}\nRecently Deleted 3";
+        let shown = list_snippet(stored, EventSource::ScreenOcr, Some("com.apple.Notes"));
+        assert_eq!(shown, "Launch plan\nThe beta opens on October 21.");
+        assert_eq!(
+            timeline_snippet(stored, EventSource::ScreenOcr, Some("com.apple.Notes")),
+            shown
         );
     }
 
