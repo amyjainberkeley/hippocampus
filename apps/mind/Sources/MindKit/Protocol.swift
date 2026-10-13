@@ -6,7 +6,8 @@ import Foundation
 // Request:  {"id": 7, "task": "propose", "input": {...}}
 // Reply:    {"id": 7, "ok": true, "output": {...}}
 //           {"id": 7, "ok": false, "error": "context_too_long"}
-// On start: {"ready": true, "available": true}
+// On start: {"ready": true, "available": true, "engine": "apple-foundation-models"}
+//           {"ready": true, "available": true, "engine": "local:qwen3:4b"}
 //           {"ready": true, "available": false, "reason": "apple_intelligence_off"}
 
 /// The tasks the mind performs.
@@ -206,9 +207,14 @@ public struct SuggestOutput: Codable, Sendable, Equatable {
 
 // MARK: Engine seam
 
-/// What answers the tasks. The real engine is Foundation Models; tests use a fake.
+/// What answers the tasks: Apple's Foundation Models or a model server on
+/// this Mac (`EngineChoice`); tests use a fake.
 public protocol MindEngine: Sendable {
-    /// `nil` when available, else a short reason code.
+    /// Who writes the answers, as the ready line names it:
+    /// "apple-foundation-models", or "local:" and the model's name.
+    var label: String { get }
+    /// `nil` when available, else a short reason code. Never waits on the
+    /// network: it runs before every request.
     func unavailableReason() -> String?
     func propose(_ input: ProposeInput) async throws -> ProposeOutput
     func relate(_ input: RelateInput) async throws -> RelateOutput
@@ -235,6 +241,7 @@ public struct MindServer: Sendable {
             object["reason"] = reason
         } else {
             object["available"] = true
+            object["engine"] = engine.label
         }
         return line(object)
     }

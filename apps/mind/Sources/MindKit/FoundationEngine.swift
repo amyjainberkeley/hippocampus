@@ -1,14 +1,22 @@
+#if canImport(FoundationModels) && !MIND_NO_FOUNDATION_MODELS
 import Foundation
 import FoundationModels
 
-// Guided-generation shapes. Property order is generation order: reasoning is
-// produced before the claim it supports.
+// Apple's on-device model, on macOS 26 only. Everything here is marked
+// `@available(macOS 26.0, *)` so the binary still runs on macOS 14, where
+// `EngineChoice` uses a model server on this Mac instead.
 
+// Guided-generation shapes. Property order is generation order: reasoning is
+// produced before the claim it supports. `Schemas.swift` holds the same
+// shapes for a model server; a test keeps the two the same.
+
+@available(macOS 26.0, *)
 @Generable
 enum GKind: String {
     case project, goal, state, habit, preference, skill, relationship, struggle
 }
 
+@available(macOS 26.0, *)
 @Generable
 struct GProposition {
     @Guide(description: "Which observations support this and why")
@@ -23,15 +31,18 @@ struct GProposition {
     var decay: Int
 }
 
+@available(macOS 26.0, *)
 @Generable
 struct GPropositions {
     @Guide(description: "Up to three distinct propositions", .maximumCount(3))
     var propositions: [GProposition]
 }
 
+@available(macOS 26.0, *)
 @Generable
 enum GRelationKind: String { case identical, similar, unrelated }
 
+@available(macOS 26.0, *)
 @Generable
 struct GRelation {
     @Guide(description: "The stored proposition's number")
@@ -39,11 +50,13 @@ struct GRelation {
     var relation: GRelationKind
 }
 
+@available(macOS 26.0, *)
 @Generable
 struct GRelations {
     var relations: [GRelation]
 }
 
+@available(macOS 26.0, *)
 @Generable
 struct GEpisode {
     @Guide(description: "Three to seven words naming the activity, using names from the observations")
@@ -57,6 +70,7 @@ struct GEpisode {
 // No advice: the day's account says what happened. `DayOutput` still carries
 // an empty `suggestion` for the agent. The insights are a second request
 // that sees no sessions (`Prompts.dayFacts`).
+@available(macOS 26.0, *)
 @Generable
 struct GDay {
     @Guide(description: "One sentence naming the day's main work, with no judgement")
@@ -65,12 +79,14 @@ struct GDay {
     var narrative: String
 }
 
+@available(macOS 26.0, *)
 @Generable
 struct GDayFacts {
     @Guide(description: "Up to three short sentences to the user as 'you', each restating a different fact as written", .maximumCount(3))
     var insights: [String]
 }
 
+@available(macOS 26.0, *)
 @Generable
 struct GAnswer {
     @Guide(description: "The answer, one to four sentences, from the memories only")
@@ -79,6 +95,7 @@ struct GAnswer {
     var sources: [Int]
 }
 
+@available(macOS 26.0, *)
 @Generable
 struct GSuggestion {
     @Guide(description: "Short title under eight words, naming the thing from the observations")
@@ -89,15 +106,19 @@ struct GSuggestion {
     var usefulness: Int
 }
 
+@available(macOS 26.0, *)
 @Generable
 struct GSuggestions {
     @Guide(description: "Up to four suggestions", .maximumCount(4))
     var suggestions: [GSuggestion]
 }
 
-/// The real engine: Apple's on-device language model.
+/// Apple's on-device language model.
+@available(macOS 26.0, *)
 public struct FoundationEngine: MindEngine {
     public init() {}
+
+    public var label: String { "apple-foundation-models" }
 
     public func unavailableReason() -> String? {
         switch SystemLanguageModel.default.availability {
@@ -209,3 +230,4 @@ public struct FoundationEngine: MindEngine {
                          confidence: min(10, max(1, g.confidence)), decay: min(10, max(1, g.decay)))
     }
 }
+#endif

@@ -6,6 +6,7 @@ import MindKit
 // request writes "answering" to stderr as it starts.
 
 struct SlowEngine: MindEngine {
+    var label: String { "slow" }
     func unavailableReason() -> String? { nil }
     func propose(_ input: ProposeInput) async throws -> ProposeOutput { try await slowly() }
     func relate(_ input: RelateInput) async throws -> RelateOutput { try await slowly() }

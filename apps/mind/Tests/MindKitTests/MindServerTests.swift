@@ -1,5 +1,4 @@
 import Foundation
-import FoundationModels
 import XCTest
 @testable import MindKit
 
@@ -7,6 +6,7 @@ private struct FakeEngine: MindEngine {
     var reason: String?
     var failWith: MindError?
 
+    var label: String { "fake" }
     func unavailableReason() -> String? { reason }
     func propose(_ input: ProposeInput) async throws -> ProposeOutput {
         if let failWith { throw failWith }
@@ -43,10 +43,13 @@ final class MindServerTests: XCTestCase {
     }
 
     func testReadyLineReportsAvailability() throws {
-        XCTAssertEqual(try object(MindServer(engine: FakeEngine()).readyLine())["available"] as? Bool, true)
+        let on = try object(MindServer(engine: FakeEngine()).readyLine())
+        XCTAssertEqual(on["available"] as? Bool, true)
+        XCTAssertEqual(on["engine"] as? String, "fake", "who writes the answers")
         let off = try object(MindServer(engine: FakeEngine(reason: "apple_intelligence_off")).readyLine())
         XCTAssertEqual(off["available"] as? Bool, false)
         XCTAssertEqual(off["reason"] as? String, "apple_intelligence_off")
+        XCTAssertNil(off["engine"], "no one writes them")
     }
 
     func testProposeRoundTripsWithSnakeCaseInput() async throws {
@@ -173,9 +176,9 @@ final class MindServerTests: XCTestCase {
         XCTAssertTrue(totals.contains("Restate them to Sam as \"you\". Keep each one as written and add nothing to it."))
         XCTAssertTrue(totals.hasSuffix("Facts:\n" + facts.joined(separator: "\n")))
         XCTAssertFalse(totals.contains("Invoice list") || totals.contains("Team plan"), "no session beside the totals")
-        XCTAssertEqual(try properties(of: GDay.self)["headline"]?["description"] as? String,
+        XCTAssertEqual(try Shape.day.properties["headline"]?["description"] as? String,
                        "One sentence naming the day's main work, with no judgement")
-        XCTAssertEqual(try properties(of: GDayFacts.self)["insights"]?["description"] as? String,
+        XCTAssertEqual(try Shape.dayFacts.properties["insights"]?["description"] as? String,
                        "Up to three short sentences to the user as 'you', each restating a different fact as written")
     }
 
@@ -230,13 +233,13 @@ final class MindServerTests: XCTestCase {
         XCTAssertTrue(prompt.contains("in Notes.\n- 13:50–14:00 Invoice list\n\nFacts:"), "no placeholder to repeat")
         let empty = Prompts.day(DayInput(userName: "Sam", facts: "Active at the computer: 20 min.", episodes: [], propositions: ["Sam writes Rust."]))
         XCTAssertTrue(empty.hasSuffix("Sessions:\nNone.\n\nFacts:\nNone."), empty)
-        XCTAssertEqual(try properties(of: GDay.self)["narrative"]?["description"] as? String,
+        XCTAssertEqual(try Shape.day.properties["narrative"]?["description"] as? String,
                        "One to four short sentences to the user as 'you', adding detail the headline does not have")
     }
 
     func testTheDayAccountIsAskedForNoSuggestionAndAtMostThreeInsights() throws {
-        XCTAssertEqual(Set(try properties(of: GDay.self).keys), ["headline", "narrative"])
-        let insights = try XCTUnwrap(properties(of: GDayFacts.self)["insights"])
+        XCTAssertEqual(Set(try Shape.day.properties.keys), ["headline", "narrative"])
+        let insights = try XCTUnwrap(Shape.dayFacts.properties["insights"])
         XCTAssertEqual(insights["maxItems"] as? Int, 3)
         XCTAssertNil(insights["minItems"], "a thin day is not padded")
     }
@@ -267,14 +270,14 @@ final class MindServerTests: XCTestCase {
         // Claims once read "Sam is a multitasker" and "Sam is a
         // self-motivated worker who likes to research on her own".
         XCTAssertTrue(prompts[0].contains("Say what they do, not what kind of person they are."))
-        XCTAssertEqual(try properties(of: GProposition.self)["text"]?["description"] as? String,
+        XCTAssertEqual(try Shape.proposition.properties["text"]?["description"] as? String,
                        "One sentence about the user, starting with their name and never using he or she")
         // The observation carries ", 290 keys, paused 3 min with no input"
         // on window lines. Claims and session notes leave both out.
         XCTAssertTrue(prompts[0].contains("Leave out pauses and counts of keys, clicks and scrolls."))
         XCTAssertTrue(prompts[1].contains("If they switched back and forth between two windows or reworded a search, say that plainly."))
         XCTAssertTrue(prompts[1].contains("Leave out pauses and counts of keys, clicks and scrolls."))
-        let episode = try properties(of: GEpisode.self)
+        let episode = try Shape.episode.properties
         let surface = try XCTUnwrap(episode["surface"]?["description"] as? String)
         XCTAssertTrue(surface.hasSuffix("with no pauses or counts"), surface)
         let beneath = try XCTUnwrap(episode["beneath"]?["description"] as? String)
@@ -308,7 +311,7 @@ final class MindServerTests: XCTestCase {
     func testASuggestionSaysFirstWhatYouWereDoing() throws {
         // spec-copy S4.15 item 5, said to the person: with "what the user
         // was doing" the model wrote the reason about them by name.
-        XCTAssertEqual(try properties(of: GSuggestion.self)["why"]?["description"] as? String,
+        XCTAssertEqual(try Shape.suggestion.properties["why"]?["description"] as? String,
                        "One sentence to the user as 'you' that starts with what you were doing, so you can see why this is suggested")
     }
 
@@ -321,16 +324,9 @@ final class MindServerTests: XCTestCase {
         XCTAssertTrue(prompt.contains("- 11:05 Invoice list in SwiftUI\n- 14:02 Pricing the Team plan: You were settling the Team plan price."),
                       "no placeholder to repeat")
     }
-
-    /// What a guided-generation shape asks the model for, by property.
-    private func properties<T: Generable>(of type: T.Type) throws -> [String: [String: Any]] {
-        let data = try JSONEncoder().encode(T.generationSchema)
-        let json = String(decoding: data, as: UTF8.self)
-        let schema = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any], json)
-        return try XCTUnwrap(schema["properties"] as? [String: [String: Any]], json)
-    }
 }
 
+#if canImport(FoundationModels) && !MIND_NO_FOUNDATION_MODELS
 /// Live probe: real Foundation Models on a realistic observation. Prints the
 /// output for review. Run with MCI_LIVE_MIND=1.
 final class FoundationEngineLiveProbe: XCTestCase {
@@ -338,6 +334,7 @@ final class FoundationEngineLiveProbe: XCTestCase {
         guard ProcessInfo.processInfo.environment["MCI_LIVE_MIND"] == "1" else {
             throw XCTSkip("set MCI_LIVE_MIND=1")
         }
+        guard #available(macOS 26.0, *) else { throw XCTSkip("needs macOS 26") }
         let engine = FoundationEngine()
         if let reason = engine.unavailableReason() { throw XCTSkip("model unavailable: \(reason)") }
         // The agent's line format (observe.rs `render`), made-up content.
@@ -413,3 +410,4 @@ final class FoundationEngineLiveProbe: XCTestCase {
         for s in suggested.suggestions { print("SUGGEST", s.usefulness, s.title, "|", s.why) }
     }
 }
+#endif
