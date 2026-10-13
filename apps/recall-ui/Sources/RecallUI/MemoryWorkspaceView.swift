@@ -2,35 +2,33 @@ import AppKit
 import RecallUIKit
 import SwiftUI
 
+/// The three places in the window (RULINGS G5): the sidebar's rows.
 enum MemoryWorkspaceSelection: String, CaseIterable, Identifiable {
-    case now
-    case search
-    case timeline
-    case episodes
-    case sources
-    case privacy
-    case settings
+    case overview
+    case ask
+    case you
 
     var id: String { rawValue }
 
+    init(place: RecallPlace) {
+        switch place {
+        case .overview: self = .overview
+        case .ask: self = .ask
+        case .you: self = .you
+        }
+    }
+
+    /// Every old name keeps working and opens one of the three places
+    /// (RULINGS X9).
     init(initialTab: RecallTab) {
-        switch initialTab.workspaceTab {
-        case .now, .brief:
-            self = .now
-        case .search:
-            self = .search
-        case .timeline, .timelineStrip:
-            self = .timeline
-        case .episodes:
-            self = .episodes
-        case .privacy, .privacyDashboard:
-            self = .privacy
-        case .settings:
-            self = .settings
-        case .you:
-            // You is built later in this round; until then its name opens
-            // what is remembered, the part of You this window already has.
-            self = .privacy
+        self.init(place: initialTab.place)
+    }
+
+    var place: RecallPlace {
+        switch self {
+        case .overview: .overview
+        case .ask: .ask
+        case .you: .you
         }
     }
 
@@ -56,6 +54,16 @@ enum MemoryWorkspaceSelection: String, CaseIterable, Identifiable {
     }
 }
 
+/// One route for the window to apply, with a sequence so the same route
+/// twice is applied twice (a second "Show in History" on one session).
+struct RecallRouteRequest: Equatable {
+    let route: RecallRoute
+    let sequence: UInt64
+}
+
+/// The window: the hi mark, three places and whether Hippocampus is
+/// remembering (RULINGS W10). It owns every place's model, so what a place
+/// shows survives moving between them (critique-recall-engineering finding 16).
 struct MemoryWorkspaceView: View {
     let reader: BrainReader
     /// What the places read about the day and the person. Required, so the
@@ -63,43 +71,97 @@ struct MemoryWorkspaceView: View {
     /// own memory (critique-recall-engineering finding 12).
     let understanding: UnderstandingReader
     @Binding var selection: MemoryWorkspaceSelection
-    var searchFocusTrigger: Bool
-    var focusRequest: RecallFocusRequest? = nil
-    var latestBriefRequest: UUID? = nil
-    var dailyModel: DailyMemoryViewModel? = nil
-    var searchModel: SearchViewModel? = nil
+    /// The newest route from a link, the app or a command.
+    var routeRequest: RecallRouteRequest? = nil
+    /// Moves on each time a command asks for the cursor in Ask's field.
+    var fieldFocusRequest = 0
     var isSyntheticPreview = false
+    /// The status Hippocampus saves, for the sidebar's footer.
+    var healthLoader: @Sendable () async -> CaptureHealthReceipt? = { await CaptureHealthReceipt.load() }
     var contextExporter: @Sendable (String) async throws -> String = { try await ContextHandoffExporter.export(focus: $0) }
+    var calendar: Calendar = .current
+    var now: @Sendable () -> Date = { Date() }
 
+    @StateObject private var ask: AskViewModel
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
-    @State private var historyExpanded = true
-    @State private var showsProjectHandoff = false
+    @State private var status = SidebarStatus(receipt: nil)
     @Environment(\.scenePhase) private var scenePhase
+
+    init(
+        reader: BrainReader,
+        understanding: UnderstandingReader,
+        selection: Binding<MemoryWorkspaceSelection>,
+        routeRequest: RecallRouteRequest? = nil,
+        fieldFocusRequest: Int = 0,
+        isSyntheticPreview: Bool = false,
+        healthLoader: @escaping @Sendable () async -> CaptureHealthReceipt? = { await CaptureHealthReceipt.load() },
+        contextExporter: @escaping @Sendable (String) async throws -> String = {
+            try await ContextHandoffExporter.export(focus: $0)
+        },
+        calendar: Calendar = .current,
+        now: @escaping @Sendable () -> Date = { Date() },
+        ask: AskViewModel? = nil,
+        status: SidebarStatus? = nil
+    ) {
+        self.reader = reader
+        self.understanding = understanding
+        _selection = selection
+        self.routeRequest = routeRequest
+        self.fieldFocusRequest = fieldFocusRequest
+        self.isSyntheticPreview = isSyntheticPreview
+        self.healthLoader = healthLoader
+        self.contextExporter = contextExporter
+        self.calendar = calendar
+        self.now = now
+        _ask = StateObject(wrappedValue: ask ?? Self.makeAsk(
+            reader: reader, understanding: understanding, calendar: calendar, now: now))
+        if let status { _status = State(initialValue: status) }
+    }
+
+    /// Ask opens empty every time: nothing typed is kept on disk
+    /// (spec-recall S3, "Fresh start").
+    @MainActor
+    static func makeAsk(
+        reader: BrainReader,
+        understanding: UnderstandingReader,
+        calendar: Calendar,
+        now: @escaping @Sendable () -> Date
+    ) -> AskViewModel {
+        AskViewModel(
+            search: SearchViewModel(
+                reader: reader,
+                persistence: QueryPersistence(environment: ["MCI_EPHEMERAL_UI_STATE": "1"])
+            ),
+            history: TimelineViewModel(
+                reader: reader, pageSize: 200, day: MemoryDay(date: now(), calendar: calendar), now: now
+            ),
+            understanding: understanding,
+            calendar: calendar
+        )
+    }
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebar
-                .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 260)
+                .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
         } detail: {
             workspaceDetail
         }
         .background(Color.brandBgPrimary)
-        .toolbar {
-            Button("Continue a project", systemImage: "arrow.turn.down.right") { showsProjectHandoff = true }
-                .keyboardShortcut("j", modifiers: .command)
-                .disabled(isSyntheticPreview)
-        }
-        .sheet(isPresented: $showsProjectHandoff) { ProjectHandoffView() }
-        .onChange(of: selection) { _, destination in
-            if destination == .episodes { historyExpanded = true }
+        .navigationTitle(UserFacingCopy.windowTitle)
+        .task(id: routeRequest?.sequence) {
+            guard let routeRequest else { return }
+            await apply(routeRequest.route)
         }
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
             MemoryRefreshSignal.post()
+            await loadStatus()
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(10)) } catch { return }
                 guard !Task.isCancelled else { return }
                 MemoryRefreshSignal.post()
+                await loadStatus()
             }
         }
         // Outermost, so sheets and every place see it: in the synthetic
@@ -107,76 +169,87 @@ struct MemoryWorkspaceView: View {
         .environment(\.isSyntheticPreview, isSyntheticPreview)
     }
 
-    private var sidebar: some View {
-        List(selection: $selection) {
-            Section("Memory") {
-                ForEach(MemoryWorkspaceSelection.primary) { item in
-                    if item == .timeline {
-                        DisclosureGroup(isExpanded: $historyExpanded) {
-                            MemorySidebarRow(item: .episodes)
-                                .tag(MemoryWorkspaceSelection.episodes)
-                        } label: {
-                            MemorySidebarRow(item: item)
-                        }
-                        .tag(item)
-                    } else {
-                        MemorySidebarRow(item: item)
-                            .tag(item)
-                    }
-                }
-            }
-
-            Section("Workspace") {
-                ForEach(MemoryWorkspaceSelection.secondary) { item in
-                    MemorySidebarRow(item: item)
-                        .tag(item)
-                        .disabled(isSyntheticPreview)
-                }
-            }
-        }
-        .listStyle(.sidebar)
-        .scrollContentBackground(.hidden)
-        .background(.regularMaterial)
+    private func loadStatus() async {
+        let receipt = await healthLoader()
+        status = SidebarStatus(receipt: receipt, now: now())
     }
 
-    // Daily review, query results, chronological history, and grouped sessions.
+    /// A route from a link, the app or a command: the place, then what Ask
+    /// shows (a memory, History on a day or a session's own time).
+    private func apply(_ route: RecallRoute) async {
+        let place = route.place(keeping: selection.place)
+        selection = MemoryWorkspaceSelection(place: place)
+        if route.opensAskPanel, !isSyntheticPreview {
+            // The window has no panel of its own: the menu bar opens Ask.
+            NSWorkspace.shared.open(RecallRoute.askPanelURL)
+        }
+        if place == .ask {
+            await ask.open(route)
+        }
+    }
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            WindowHiMarkView(remembering: status.remembering)
+                .frame(height: 22)
+                .foregroundStyle(Color.brandFgPrimary)
+                .padding(.horizontal, MCI.Spacing.l)
+                .padding(.top, MCI.Spacing.s)
+                .padding(.bottom, MCI.Spacing.m)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            List(selection: $selection) {
+                ForEach(MemoryWorkspaceSelection.allCases) { item in
+                    MemorySidebarRow(item: item)
+                        .tag(item)
+                }
+            }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            Button {
+                Task { _ = await WorkspacePreferencesRouter.shared.open(.capture, bundleURL: Bundle.main.bundleURL) }
+            } label: {
+                HStack(spacing: MCI.Spacing.s) {
+                    Circle()
+                        .fill(status.remembering ? Color.brandAccentFill : Color.brandFgMuted.opacity(0.5))
+                        .frame(width: 7, height: 7)
+                    Text(status.text)
+                        .mciFont(.caption)
+                        .foregroundStyle(Color.brandFgSecondary)
+                        .lineLimit(1)
+                }
+            }
+            .buttonStyle(.plain)
+            .help(UserFacingCopy.footerHelp)
+            .disabled(isSyntheticPreview)
+            .padding(.horizontal, MCI.Spacing.l)
+            .padding(.vertical, MCI.Spacing.m)
+        }
+        .background(Color.brandBgSecondary)
+    }
+
     @ViewBuilder
     private var workspaceDetail: some View {
         Group {
-            if isSyntheticPreview && MemoryWorkspaceSelection.secondary.contains(selection) {
-                ContentUnavailableView("Synthetic preview", systemImage: "eye")
-            } else {
             switch selection {
-            case .now:
-                DailyMemoryView(reader: reader, onOpenPrivacy: { selection = .privacy }, latestBriefRequest: latestBriefRequest, model: dailyModel)
-            case .search:
-                SearchView(
-                    viewModel: searchModel ?? SearchViewModel(reader: reader),
-                    focusTrigger: searchFocusTrigger,
-                    focusRequest: focusRequest,
+            case .overview:
+                PendingPlace(title: selection.descriptor.title, systemImage: selection.descriptor.systemImage)
+            case .ask:
+                AskPlace(
+                    model: ask,
                     reader: reader,
-                    contextExporter: contextExporter
+                    fieldFocusRequest: fieldFocusRequest,
+                    contextExporter: contextExporter,
+                    calendar: calendar,
+                    now: now
                 )
-            case .timeline, .episodes:
-                HistoryWorkspaceView(reader: reader, selection: $selection)
-            case .sources:
-                SourcesWorkspaceView(reader: reader)
-            case .privacy:
-                PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator)
-            case .settings:
-                WorkspaceSettingsView()
-            }
+            case .you:
+                PendingPlace(title: selection.descriptor.title, systemImage: selection.descriptor.systemImage)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.brandBgPrimary)
-        .navigationTitle(selection == .episodes ? "History" : selection.descriptor.title)
+        .navigationTitle(UserFacingCopy.windowTitle)
     }
-}
-
-private extension MemoryWorkspaceSelection {
-    static let primary: [MemoryWorkspaceSelection] = [.now, .search, .timeline]
-    static let secondary: [MemoryWorkspaceSelection] = [.sources, .privacy, .settings]
 }
 
 private struct MemorySidebarRow: View {
@@ -189,119 +262,4 @@ private struct MemorySidebarRow: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel(item.descriptor.title)
     }
-}
-
-private struct HistoryWorkspaceView: View {
-    let reader: BrainReader
-    @Binding var selection: MemoryWorkspaceSelection
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Picker("History view", selection: $selection) {
-                    Text("Evidence").tag(MemoryWorkspaceSelection.timeline)
-                    Text("Sessions").tag(MemoryWorkspaceSelection.episodes)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 240)
-                Spacer()
-            }
-            .padding(.horizontal, 20).padding(.vertical, 12)
-            Divider()
-            if selection == .episodes {
-                EpisodesView(viewModel: EpisodesViewModel(reader: reader), reader: reader)
-            } else {
-                TimelineView(viewModel: TimelineViewModel(reader: reader), reader: reader)
-            }
-        }
-    }
-}
-
-private struct SourcesWorkspaceView: View {
-    let reader: BrainReader
-    @State private var observedApps: [ObservedApp] = []
-    @State private var isLoading = false
-    @State private var errorMessage: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("Observed apps").font(.headline)
-                Spacer()
-                WorkspacePreferencesButton(title: "App access", systemImage: "display", destination: .capture)
-                WorkspacePreferencesButton(title: "AI context", systemImage: "point.3.connected.trianglepath.dotted", destination: .sources)
-            }
-            .buttonStyle(.borderless)
-            .padding(.horizontal, 24).padding(.top, 20)
-            if isLoading && observedApps.isEmpty {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let errorMessage {
-                ContentUnavailableView(
-                    "Sources are unavailable",
-                    systemImage: "exclamationmark.triangle.fill",
-                    description: Text(errorMessage)
-                )
-                .foregroundStyle(Color.brandError)
-            } else if observedApps.isEmpty {
-                ContentUnavailableView(
-                    "No sources yet",
-                    systemImage: "link.badge.plus",
-                    description: Text("Sources appear after permitted applications add events to memory.")
-                )
-                .foregroundStyle(Color.brandFgSecondary)
-            } else {
-                List(observedApps) { app in
-                    HStack(spacing: MCI.Spacing.m) {
-                        Image(systemName: "app")
-                            .foregroundStyle(Color.brandFgSecondary)
-                            .accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
-                            Text(Formatters.appDisplayName(app.appBundleId))
-                                .mciFont(.bodyStrong)
-                                .foregroundStyle(Color.brandFgPrimary)
-                            Text(app.appBundleId)
-                                .font(MCI.Font.mono)
-                                .foregroundStyle(Color.brandFgMuted)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                        Spacer()
-                        Text("\(app.count) events")
-                            .mciFont(.caption)
-                            .foregroundStyle(Color.brandFgSecondary)
-                    }
-                    .padding(.vertical, MCI.Spacing.s)
-                    .listRowBackground(Color.clear)
-                    .accessibilityElement(children: .combine)
-                }
-                .listStyle(.inset)
-                .scrollContentBackground(.hidden)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.brandBgPrimary)
-        .refreshable { await load() }
-        .task {
-            await load()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) {
-            _ in
-            Task { await load() }
-        }
-    }
-
-    @MainActor
-    private func load() async {
-        guard !isLoading else { return }
-        isLoading = true
-        defer { isLoading = false }
-        do {
-            observedApps = try await reader.listObservedApps(limit: 100, timeFromUs: nil)
-            errorMessage = nil
-        } catch {
-            observedApps = []
-            errorMessage = UserFacingCopy.memoryUnreachableBody
-        }
-    }
-
 }

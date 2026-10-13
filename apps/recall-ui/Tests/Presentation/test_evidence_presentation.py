@@ -45,10 +45,7 @@ class EvidencePresentationTests(unittest.TestCase):
     def test_search_does_not_observe_command_registration_during_detail_teardown(self):
         source = (SOURCE / "SearchView.swift").read_text()
         self.assertFalse("@ObservedObject private var actionPanelRegistry" in source,
-                         "Detail teardown publishes commands; Search only needs the refresh flag")
-        self.assertTrue("ActionPanelRegistry.shared.$isRefreshing" in source)
-        self.assertTrue(".removeDuplicates()" in source)
-        self.assertTrue(".receive(on: RunLoop.main)" in source)
+                         "Detail teardown publishes commands; Search observes no registry")
 
     def test_search_shell_keeps_toolbar_and_content_inside_one_stable_viewport(self):
         source = (SOURCE / "SearchView.swift").read_text()
@@ -94,10 +91,10 @@ class EvidencePresentationTests(unittest.TestCase):
     def test_only_related_mode_is_disabled_for_unsupported_filters(self):
         source = (SOURCE / "SearchView.swift").read_text()
         self.assertIsNotNone(re.search(
-            r'Text\("Related"\)\.tag\(SearchMode\.related\)\s*'
+            r'Text\(UserFacingCopy\.matchModeMeaning\)\.tag\(SearchMode\.related\)\s*'
             r'\.selectionDisabled\(viewModel\.hasUnsupportedRelatedFilters\)', source))
         self.assertIsNone(re.search(
-            r'Text\("Text"\)\.tag\(SearchMode\.text\)\s*\.(selectionDisabled|disabled)', source))
+            r'Text\(UserFacingCopy\.matchModeExact\)\.tag\(SearchMode\.text\)\s*\.(selectionDisabled|disabled)', source))
 
     def test_unsupported_related_filters_are_not_reported_as_no_matches(self):
         source = (SOURCE / "SearchView.swift").read_text()
@@ -105,8 +102,8 @@ class EvidencePresentationTests(unittest.TestCase):
         self.assertTrue("viewModel.filterLimitationMessage" in status)
         self.assertTrue("viewModel.hasUnsupportedRelatedFilters" in status)
         self.assertLess(status.index("viewModel.filterLimitationMessage"),
-                        status.index('"No matching memories"'))
-        self.assertTrue('"Related search unavailable"' in status)
+                        status.index("UserFacingCopy.nothingMatched"))
+        self.assertTrue("UserFacingCopy.meaningFiltersUnavailable" in status)
         self.assertTrue("description: Text(message)" in status)
 
     def test_supported_related_filter_warning_is_visible_with_results(self):

@@ -1,8 +1,8 @@
 import XCTest
 @testable import RecallUIKit
 
-final class DailyReviewRoutingTests: XCTestCase {
-    func testPopupOnlyAndForwardedEmptyCommandsPreserveTheCurrentWorkspace() throws {
+final class LaunchRoutingTests: XCTestCase {
+    func testARequestForTheOldPopupAloneKeepsThePlaceOnScreen() throws {
         let popup = try XCTUnwrap(RecallLaunchRequest(userInfo: ["open_popup": true]))
         let forwarded = RecallLaunchRequest(tab: popup.tab, focusEventId: popup.focusEventId, openPopup: false)
         for current in [RecallTab.search, .timeline, .episodes, .settings] {
@@ -15,7 +15,7 @@ final class DailyReviewRoutingTests: XCTestCase {
         XCTAssertEqual(RecallLaunchRequest(tab: .brief, focusEventId: 42, openPopup: true).navigationTab, .search)
     }
 
-    func testNoRouteOpensDailyReviewButExplicitSearchAndFocusedEventsWin() throws {
+    func testNoRouteOpensOverviewButExplicitSearchAndFocusedEventsWin() throws {
         XCTAssertEqual(RecallLaunchRequest(environment: [:]).initialTab, .now)
         XCTAssertEqual(RecallLaunchRequest(environment: ["MCI_INITIAL_TAB": "search"]).initialTab, .search)
         XCTAssertEqual(RecallLaunchRequest(environment: ["MCI_INITIAL_TAB": "timeline"]).initialTab, .timeline)
@@ -25,7 +25,7 @@ final class DailyReviewRoutingTests: XCTestCase {
         XCTAssertEqual(popup.initialTab, .search)
     }
 
-    func testOldAndNewRoutesResolveToTheSameVisibleDestinations() {
+    func testOldNamesStillResolveToTheTabsTheyAlwaysNamed() {
         for route in ["today", "now", "brief", "briefs", "daily"] {
             XCTAssertEqual(RecallTab.from(deepLinkValue: route)?.workspaceTab, .now)
         }

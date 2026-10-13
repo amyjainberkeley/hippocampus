@@ -15,12 +15,50 @@ import SwiftUI
 
 struct HitRow: View {
     let hit: Hit
+    /// History shows the clock time ("2:14 PM"); matches show how long ago.
+    var showsClockTime = false
+    /// Moments in a row from the same window, shown as one row.
+    var count = 1
+
+    private var title: String {
+        if let title = hit.windowTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+            return title
+        }
+        if let url = hit.url, !url.isEmpty { return url }
+        return Formatters.appDisplayName(hit.appBundleId)
+    }
+
+    /// One line of what the window said, without the stored header or a
+    /// first line that only repeats the title.
+    private var line: String {
+        Formatters.rowLine(hit.ocrTextSnippet, title: hit.windowTitle, maxLen: 160)
+    }
+
+    /// History has the day above it, so a row shows the clock time; a match
+    /// can be from any day ("Oct 12, 2:36 PM").
+    private var when: String {
+        showsClockTime
+            ? Formatters.clockTime(us: Int64(clamping: hit.tsUs))
+            : Formatters.dayAndTime(us: hit.tsUs)
+    }
+
+    /// Only a match by meaning says how it matched: an exact-words match
+    /// already shows the words, and History is not a search.
+    private var reason: String? {
+        guard !showsClockTime, hit.source != "lexical" else { return nil }
+        return Formatters.matchReason(hit.source)
+    }
+
+    /// "Safari · Web page", and how many moments the row holds.
+    private var origin: String {
+        let source = "\(Formatters.appDisplayName(hit.appBundleId)) \u{00B7} "
+            + UserFacingCopy.momentSource(sourceKind: hit.sourceKind)
+        return count > 1 ? "\(source), \(UserFacingCopy.momentCount(count))" : source
+    }
 
     var body: some View {
         // Spacing tokens (cycle 8.48 MCIDesignSystem): row internal
-        // rhythm is on the 8pt grid — 10pt inter-column, 4pt tight
-        // stack, 8pt inline. The pre-refactor magic numbers matched
-        // the grid already; naming them makes it audit-safe.
+        // rhythm is on the 8pt grid.
         HStack(alignment: .top, spacing: MCI.Spacing.m - 2) {
             EvidenceThumbnail(
                 url: hit.thumbnailURL,
@@ -28,44 +66,38 @@ struct HitRow: View {
                 maxPixelSize: 160
             )
             VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
-                Text(Formatters.contextLine(hit))
-                    .mciFont(.bodyStrong)
-                    .foregroundStyle(Color.brandFgPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
                 HStack(alignment: .firstTextBaseline, spacing: MCI.Spacing.s) {
-                    Text(Formatters.relativeTime(usSinceEpoch: hit.tsUs))
-                        .font(MCI.Font.mono)
-                        .foregroundStyle(Color.brandMint)
-                        .help(Formatters.tsString(usSinceEpoch: hit.tsUs))
+                    Text(verbatim: title)
+                        .mciFont(.bodyStrong)
+                        .foregroundStyle(Color.brandFgPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                     Spacer(minLength: 0)
-                    if let reason = Formatters.matchReason(hit.source) {
+                    Text(verbatim: when)
+                        .mciFont(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(Color.brandFgSecondary)
+                        .help(Formatters.dayAndTime(us: hit.tsUs))
+                }
+                if !line.isEmpty {
+                    Text(verbatim: line)
+                        .mciFont(.body)
+                        .foregroundStyle(Color.brandFgSecondary)
+                        .lineLimit(1)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: MCI.Spacing.s) {
+                    Text(verbatim: origin)
+                        .font(.caption)
+                        .foregroundStyle(Color.brandFgMuted)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if let reason {
                         Text(reason)
                             .font(MCI.Font.footnote)
-                            .foregroundStyle(Color.brandMintDim)
+                            .foregroundStyle(Color.brandFgMuted)
                             .lineLimit(1)
                             .accessibilityLabel(reason)
                     }
-                }
-                Text(Formatters.snippet(Formatters.stripContextHeader(hit.ocrTextSnippet)))
-                    .mciFont(.body)
-                    .foregroundStyle(Color.brandFgSecondary)
-                    .lineLimit(3)
-                Label(MemorySourceKind.label(hit.sourceKind) + (hit.thumbnailURL == nil ? " / Text only" : " / Screenshot"),
-                      systemImage: hit.thumbnailURL == nil ? "doc.text" : "photo")
-                    .font(.caption).foregroundStyle(Color.brandFgMuted)
-                // Entity chips + related-events badge. Only render the row
-                // when there's something to show, so the backward-compat
-                // zero-entity case stays visually identical to the pre-PR-2
-                // layout.
-                if !hit.entities.isEmpty || !hit.linkedEventIds.isEmpty {
-                    HStack(spacing: MCI.Spacing.s - 2) {
-                        EntityChipStrip(entities: hit.entities)
-                        if let badge = Formatters.linkedBadge(hit.linkedEventIds) {
-                            LinkedEventsBadge(label: badge)
-                        }
-                    }
-                    .padding(.top, MCI.Spacing.xxs)
                 }
             }
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
@@ -92,12 +124,12 @@ struct EntityChipStrip: View {
             }
             if disp.overflow > 0 {
                 EntityChip(label: "+\(disp.overflow) more", isOverflow: true)
-                    .accessibilityLabel("\(disp.overflow) more entities")
+                    .accessibilityLabel(UserFacingCopy.moreNames(disp.overflow))
             }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
-            entities.isEmpty ? "" : "Entities: \(entities.joined(separator: ", "))"
+            entities.isEmpty ? "" : UserFacingCopy.names(entities)
         )
     }
 }

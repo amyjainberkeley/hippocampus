@@ -122,16 +122,16 @@ final class FormattersTests: XCTestCase {
     // MARK: - matchReason (cycle 8.36 PR-2, audit §5 G6)
 
     func testMatchReasonMapsLexicalToPlainEnglish() {
-        XCTAssertEqual(Formatters.matchReason("lexical"), "Matched: text")
+        XCTAssertEqual(Formatters.matchReason("lexical"), "Exact words")
     }
 
     func testMatchReasonMapsHybridToPlainEnglish() {
-        XCTAssertEqual(Formatters.matchReason("hybrid"), "Matched: meaning")
+        XCTAssertEqual(Formatters.matchReason("hybrid"), "Similar meaning")
     }
 
     func testMatchReasonKeepsUnverifiedHybridResultsHonest() {
-        XCTAssertEqual(Formatters.matchReason("hybrid-related"), "Related by meaning")
-        XCTAssertEqual(Formatters.matchReason("hybrid-conflict"), "Conflicting evidence")
+        XCTAssertEqual(Formatters.matchReason("hybrid-related"), "Related")
+        XCTAssertEqual(Formatters.matchReason("hybrid-conflict"), "Says something different")
     }
 
     func testMatchReasonTimelineIsNil() {
@@ -363,5 +363,44 @@ final class FormattersTests: XCTestCase {
             Formatters.sourceLabel(url: nil, textSnippet: snippet),
             "Event"
         )
+    }
+
+    // MARK: - List rows and moments (the window's Ask)
+
+    func testARowLineSkipsAFirstLineThatOnlyRepeatsTheTitle() {
+        XCTAssertEqual(
+            Formatters.rowLine("Pricing page draft\nThree plans: Ride, Tour and Club.", title: "Pricing page draft"),
+            "Three plans: Ride, Tour and Club."
+        )
+        XCTAssertEqual(
+            Formatters.rowLine("Rounding half to even\nRound half to even keeps totals.",
+                               title: "Rounding half to even \u{00B7} Dev Notes"),
+            "Round half to even keeps totals."
+        )
+        XCTAssertEqual(Formatters.rowLine("Pricing page draft", title: "Pricing page draft"), "Pricing page draft",
+                       "a title that is the only line is still the line")
+        XCTAssertEqual(Formatters.rowLine("Are we still on for 3?\nSee you there", title: "Sam Lee"),
+                       "Are we still on for 3?")
+        XCTAssertEqual(Formatters.rowLine("\n  \nShip Friday.", title: nil), "Ship Friday.")
+        XCTAssertEqual(Formatters.rowLine("", title: "Plan"), "")
+    }
+
+    func testAMomentsDayAndTimeFollowThePersonsLocaleAndZone() {
+        let us: UInt64 = 1_792_000_000_000_000 // 2026-10-14 17:46:40 UTC
+        let us12 = Formatters.dayAndTime(us: us, locale: Locale(identifier: "en_US"),
+                                         timeZone: TimeZone(identifier: "America/Los_Angeles")!)
+        XCTAssertTrue(us12.contains("Oct 14"), us12)
+        XCTAssertTrue(us12.contains("10:46"), us12)
+        XCTAssertTrue(us12.contains("AM"), us12)
+        let gb = Formatters.dayAndTime(us: us, locale: Locale(identifier: "en_GB"),
+                                       timeZone: TimeZone(identifier: "UTC")!)
+        XCTAssertTrue(gb.contains("17:46"), gb)
+        XCTAssertFalse(gb.contains("UTC"), gb)
+    }
+
+    func testAppsAPersonKnowsByNameAreNamedThatWay() {
+        XCTAssertEqual(Formatters.appDisplayName("com.apple.MobileSMS"), "Messages")
+        XCTAssertEqual(Formatters.appDisplayName("com.googlecode.iterm2"), "iTerm")
+        XCTAssertEqual(Formatters.appDisplayName("com.anthropic.claudefordesktop"), "Claude")
     }
 }

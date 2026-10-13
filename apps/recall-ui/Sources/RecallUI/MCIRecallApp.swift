@@ -38,25 +38,20 @@ final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Se
             ]
         )
 
-        // The always-running Hippocampus shell owns the system-wide hotkey.
-        // This child process owns only the popup and handles the initial
-        // command passed by the shell.
+        // Ask keeps nothing on disk: clear what older builds saved once
+        // (critique-recall-engineering finding 18).
+        UserDefaults.standard.removeObject(forKey: QueryPersistence.defaultKey)
+
+        // The always-running Hippocampus shell owns the system-wide key and
+        // the Ask panel. This window has no popup of its own: a request for
+        // one opens hippocampus://ask (RULINGS W3).
         MainActor.assumeIsolated {
-            GlobalRecallPopupController.shared.configure(reader: MCIRecallApp.reader)
             DistributedNotificationCenter.default().addObserver(
                 self,
                 selector: #selector(receiveRecallCommand(_:)),
                 name: RecallLaunchRequest.distributedCommandName,
                 object: nil
             )
-            let launchRequest = RecallLaunchRequest(
-                environment: ProcessInfo.processInfo.environment
-            )
-            if launchRequest.openPopup {
-                DispatchQueue.main.async {
-                    GlobalRecallPopupController.shared.show()
-                }
-            }
         }
     }
 
@@ -69,30 +64,24 @@ final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Se
     private func receiveRecallCommand(_ notification: Notification) {
         guard let request = RecallLaunchRequest(userInfo: notification.userInfo) else { return }
         Task { @MainActor in
-            NSApp.activate(ignoringOtherApps: true)
-            if let tab = request.navigationTab {
-                let navigationRequest = RecallLaunchRequest(
-                    tab: tab, focusEventId: request.focusEventId, openPopup: false
-                )
-                NotificationCenter.default.post(
-                    name: RecallLaunchRequest.localCommandName,
-                    object: navigationRequest
-                )
+            // A request for the old popup alone leaves the window where it is.
+            if request.navigationTab != nil || request.focusEventId != nil {
+                NSApp.activate(ignoringOtherApps: true)
             }
-            if request.openPopup {
-                GlobalRecallPopupController.shared.show()
-            }
+            NotificationCenter.default.post(
+                name: RecallLaunchRequest.localCommandName,
+                object: request
+            )
         }
     }
 }
 
-@main
+/// Started by `RecallEntryPoint`.
 struct MCIRecallApp: App {
     @NSApplicationDelegateAdaptor(MCIRecallAppDelegate.self) var appDelegate
 
     @MainActor
-    // fileprivate (not private): MCIRecallAppDelegate (a separate type in this
-    // same file) reads MCIRecallApp.reader to wire the global-recall popup.
+    // fileprivate (not private): the live workspace below reads it.
     fileprivate static let reader: BrainReader = Self.makeReader()
 
     /// The day, the person and answers, read through the bundled agent. Its
@@ -113,7 +102,8 @@ struct MCIRecallApp: App {
             #endif
         }
         .defaultPosition(.center)
-        .defaultSize(width: 920, height: 620)
+        .defaultSize(width: 1100, height: 720)
+        .commands { WindowCommands() }
     }
 
     @ViewBuilder
@@ -124,27 +114,11 @@ struct MCIRecallApp: App {
             RootView(
                 reader: MCIRecallApp.reader,
                 understanding: MCIRecallApp.understanding,
-                initialTab: launchRequest.initialTab,
-                initialFocusEventId: launchRequest.focusEventId
+                launchRequest: launchRequest
             )
             .preferredColorScheme(.light)
-            .frame(minWidth: 720, minHeight: 440)
+            .frame(minWidth: 760, minHeight: 480)
             .background(Color.brandBgPrimary)
-            .task {
-                // Per `docs/design/brief-viewer-spec.md` §"When the user
-                // discovers their first brief": on Recall app launch, ask
-                // for notification permission politely (once) and fire
-                // the first-brief notification iff a brief exists and the
-                // fire-once flag is not yet set.
-                let reader = MCIRecallApp.reader
-                let exists = (try? await reader.latestBrief()) != nil
-                let latestDate = try? await reader.latestBrief()?.dateLocal
-                let controller = BriefNotificationController()
-                _ = await controller.checkAndMaybeFireFirstBriefNotification(
-                    briefExists: exists,
-                    latestBriefDate: latestDate
-                )
-            }
     }
 
     @MainActor
@@ -200,14 +174,70 @@ struct MCIRecallApp: App {
     }
 }
 
+/// What the window's menus ask of it: a place, a route, or a refresh.
+enum WindowCommand {
+    static let notification = Notification.Name("ai.hippocampus.recall.window-command.v1")
+
+    case go(RecallRoute)
+    case refresh
+    /// "What your AI gets in this folder" (⌘J).
+    case folderContext
+
+    @MainActor
+    func post() {
+        NotificationCenter.default.post(name: Self.notification, object: WindowCommandBox(self))
+    }
+}
+
+final class WindowCommandBox: NSObject {
+    let command: WindowCommand
+    init(_ command: WindowCommand) { self.command = command }
+}
+
+/// The menu bar's items for the window: no New Window, Preferences… and a Go
+/// menu whose keys really work (critique-recall-engineering finding 6).
+struct WindowCommands: Commands {
+    var body: some Commands {
+        CommandGroup(replacing: .newItem) {}
+        CommandGroup(replacing: .appSettings) {
+            Button(UserFacingCopy.commandPreferences) {
+                Task { _ = await WorkspacePreferencesRouter.shared.open(.general, bundleURL: Bundle.main.bundleURL) }
+            }
+            .keyboardShortcut(",", modifiers: .command)
+        }
+        CommandMenu(UserFacingCopy.goMenu) {
+            ForEach(MCI.Workspace.primaryDestinations) { destination in
+                Button(destination.title) {
+                    if let place = RecallPlace(rawValue: destination.id) {
+                        WindowCommand.go(RecallRoute(place: place)).post()
+                    }
+                }
+                .keyboardShortcut(KeyEquivalent(Character(destination.keyboardShortcut)), modifiers: .command)
+            }
+            Divider()
+            Button(UserFacingCopy.commandNewQuestion) { WindowCommand.go(.newQuestion).post() }
+                .keyboardShortcut("n", modifiers: .command)
+            Button(UserFacingCopy.commandHistory) { WindowCommand.go(.showHistory).post() }
+                .keyboardShortcut("t", modifiers: .command)
+            Button(UserFacingCopy.commandFind) { WindowCommand.go(.findInAsk).post() }
+                .keyboardShortcut("f", modifiers: .command)
+            Button(UserFacingCopy.commandFolderContext) { WindowCommand.folderContext.post() }
+                .keyboardShortcut("j", modifiers: .command)
+            Divider()
+            Button(UserFacingCopy.commandRefresh) { WindowCommand.refresh.post() }
+                .keyboardShortcut("r", modifiers: .command)
+        }
+    }
+}
+
 struct RootView: View {
     let reader: BrainReader
     let understanding: UnderstandingReader
     @State private var selection: MemoryWorkspaceSelection
-    @State private var searchFocusTrigger = false
-    @State private var focusRequest: RecallFocusRequest?
-    @State private var nextFocusSequence: UInt64
-    @State private var latestBriefRequest: UUID?
+    @State private var routeRequest: RecallRouteRequest?
+    @State private var nextRouteSequence: UInt64 = 2
+    @State private var fieldFocusRequest = 0
+    @State private var showsFolderContext = false
     private let actionPanelRegistry = ActionPanelRegistry.shared
     @State private var isHelpVisible = ActionPanelRegistry.shared.isHelpVisible
     // Cycle 8.54 — "What's new" release-notes modal. Coordinator owns
@@ -215,113 +245,82 @@ struct RootView: View {
     // release loaded from Contents/Resources/CHANGELOG.md.
     @StateObject private var whatsNewCoord = WhatsNewCoordinator()
 
+    /// The window opens where the app asked: the same route a running window
+    /// takes (critique-recall-engineering finding 5).
     init(
         reader: BrainReader,
         understanding: UnderstandingReader,
-        initialTab: RecallTab = RecallTab.defaultTab,
-        initialFocusEventId: UInt64? = nil
+        launchRequest: RecallLaunchRequest = RecallLaunchRequest(tab: nil, focusEventId: nil, openPopup: false)
     ) {
         self.reader = reader
         self.understanding = understanding
-        self._selection = State(initialValue: MemoryWorkspaceSelection(initialTab: initialFocusEventId == nil ? initialTab : .search))
-        self._focusRequest = State(
-            initialValue: initialFocusEventId.map {
-                RecallFocusRequest(eventId: $0, sequence: 1)
-            }
-        )
-        self._nextFocusSequence = State(initialValue: initialFocusEventId == nil ? 1 : 2)
-        self._latestBriefRequest = State(initialValue: initialTab == .brief && initialFocusEventId == nil ? UUID() : nil)
+        let route = RecallRoute(launchRequest)
+        self._selection = State(initialValue: MemoryWorkspaceSelection(place: route.place(keeping: .overview)))
+        self._routeRequest = State(initialValue: RecallRouteRequest(route: route, sequence: 1))
     }
 
-    /// Global (non-contextual) commands. Registered once for the
-    /// lifetime of the recall UI. Contextual commands (per-hit,
-    /// per-view) are registered by their owning views on
-    /// `.onAppear`.
+    /// Global (non-contextual) commands, shown in the command palette and the
+    /// keyboard shortcuts sheet. The keys themselves are the menu bar's.
     private var globalCommands: [ActionPanelCommand] {
         [
             .init(
                 id: "app.newSearch",
-                title: "New Search",
+                title: UserFacingCopy.commandNewQuestion,
                 shortcut: "⌘N",
                 category: .search,
-                description: "Focus the search field and clear it."
+                description: UserFacingCopy.commandNewQuestionDetail
             ) {
-                selection = .search
-                searchFocusTrigger.toggle()
+                go(.newQuestion)
             },
             .init(
                 id: "app.showTimeline",
-                title: "Show History",
+                title: UserFacingCopy.commandHistory,
                 shortcut: "⌘T",
                 category: .app,
-                description: "Switch to the timeline of recent events."
+                description: UserFacingCopy.commandHistoryDetail
             ) {
-                selection = .timeline
+                go(.showHistory)
             },
             .init(
                 id: "app.openSettings",
-                title: "Open Settings",
+                title: UserFacingCopy.commandPreferences,
                 shortcut: "⌘,",
-                category: .app,
-                description: "Open the settings and dictionary tab."
+                category: .app
             ) {
-                selection = .settings
+                Task { _ = await WorkspacePreferencesRouter.shared.open(.general, bundleURL: Bundle.main.bundleURL) }
             },
             .init(
                 id: "app.openCustomNames",
-                title: "Open Custom Names Dictionary",
-                shortcut: "⌘\(MemoryWorkspaceSelection.settings.keyboardShortcutLabel)",
+                title: UserFacingCopy.commandNames,
+                shortcut: "",
                 category: .app,
-                description: "Edit user-defined entity aliases."
+                description: UserFacingCopy.commandNamesDetail
             ) {
-                selection = .settings
+                go(.names)
             },
             .init(
-                id: "app.togglePlayback",
-                title: "Toggle Playback",
-                shortcut: "Space",
-                category: .app,
-                description: "Play or pause the timeline scrubber."
+                id: "app.folderContext",
+                title: UserFacingCopy.commandFolderContext,
+                shortcut: "⌘J",
+                category: .app
             ) {
-                selection = .timeline
+                showsFolderContext = true
             },
             .init(
                 id: "app.refreshBrain",
-                title: "Refresh Brain",
+                title: UserFacingCopy.commandRefresh,
                 shortcut: "⌘R",
                 category: .app,
-                description: "Re-query the brain to pick up new captures."
+                description: UserFacingCopy.commandRefreshDetail
             ) {
-                Task { @MainActor in
-                    actionPanelRegistry.beginRefresh()
-                    MemoryRefreshSignal.post()
-                    await Task.yield()
-                    actionPanelRegistry.endRefresh()
-                    ToastNotifier.shared.notify("Refreshing memory")
-                }
-            },
-            .init(
-                id: "app.showOnboarding",
-                title: "Show Onboarding",
-                shortcut: "",
-                category: .app,
-                description: "Re-run the onboarding flow."
-            ) {
-                // Cycle 8.48 — canonical form is
-                // `hippocampus://onboarding/show`; the legacy
-                // `?show=1` query-form is also honored by
-                // `HippocampusApp.application(_:open:)` so any older
-                // NSWorkspace-open callers keep working.
-                if let url = URL(string: "hippocampus://onboarding/show") {
-                    NSWorkspace.shared.open(url)
-                }
+                refresh()
             },
             .init(
                 id: "app.exportDebugBundle",
-                title: "Export Debug Bundle",
+                title: UserFacingCopy.commandSupportReport,
                 shortcut: "",
                 category: .debug,
-                description: "Export a support bundle (redacted) for troubleshooting."
+                description: UserFacingCopy.commandSupportReportDetail
             ) {
                 if let url = URL(string: "hippocampus://debug?export=1") {
                     NSWorkspace.shared.open(url)
@@ -329,10 +328,9 @@ struct RootView: View {
             },
             .init(
                 id: "app.showHelp",
-                title: "Show Help / Keyboard Shortcuts",
+                title: UserFacingCopy.commandShortcuts,
                 shortcut: "⌘/",
-                category: .app,
-                description: "Show every registered command and its shortcut."
+                category: .app
             ) {
                 actionPanelRegistry.showHelp()
             },
@@ -341,28 +339,18 @@ struct RootView: View {
             // check) so the user can revisit the changelog any time.
             .init(
                 id: "app.whatsNew",
-                title: "What's New",
+                title: UserFacingCopy.commandWhatsNew,
                 shortcut: "⌘⇧N",
                 category: .app,
-                description: "Release notes for the version you're on (parses bundled CHANGELOG.md)."
+                description: UserFacingCopy.commandWhatsNewDetail
             ) {
                 whatsNewCoord.showOnDemand()
             },
             .init(
-                id: "app.showGlobalRecallPopup",
-                title: "Show Global Recall Popup",
-                shortcut: "⌃⇧Space",
-                category: .app,
-                description: "Open the always-on Spotlight-style recall popup."
-            ) {
-                GlobalRecallPopupController.shared.show()
-            },
-            .init(
                 id: "app.quit",
-                title: "Quit Hippocampus Recall",
+                title: UserFacingCopy.commandCloseWindow,
                 shortcut: "⌘Q",
-                category: .app,
-                description: "Quit the recall app."
+                category: .app
             ) {
                 NSApp.terminate(nil)
             },
@@ -374,23 +362,27 @@ struct RootView: View {
             reader: reader,
             understanding: understanding,
             selection: $selection,
-            searchFocusTrigger: searchFocusTrigger,
-            focusRequest: focusRequest,
-            latestBriefRequest: latestBriefRequest
+            routeRequest: routeRequest,
+            fieldFocusRequest: fieldFocusRequest
         )
         .background(Color.brandBgPrimary)
-        .onChange(of: selection) { _, destination in
-            if destination != .now { latestBriefRequest = nil }
-        }
         .onOpenURL { url in
             guard let request = RecallLaunchRequest(url: url) else { return }
-            apply(request)
+            go(RecallRoute(request))
         }
         .onReceive(
             NotificationCenter.default.publisher(for: RecallLaunchRequest.localCommandName)
         ) { notification in
             guard let request = notification.object as? RecallLaunchRequest else { return }
-            apply(request)
+            go(RecallRoute(request))
+        }
+        .onReceive(NotificationCenter.default.publisher(for: WindowCommand.notification)) { notification in
+            guard let box = notification.object as? WindowCommandBox else { return }
+            switch box.command {
+            case let .go(route): go(route)
+            case .refresh: refresh()
+            case .folderContext: showsFolderContext = true
+            }
         }
         .focusable(true, interactions: .automatic)
         .onKeyPress(
@@ -398,7 +390,7 @@ struct RootView: View {
                 MCI.Workspace.allDestinations.compactMap { destination in
                     destination.keyboardShortcut.first.map { KeyEquivalent($0) }
                 }
-            ).union([KeyEquivalent("5")]),
+            ),
             phases: .down
         ) { press in
             guard
@@ -409,22 +401,7 @@ struct RootView: View {
             else {
                 return .ignored
             }
-            if press.key.character == "5" {
-                apply(RecallLaunchRequest(tab: .brief, focusEventId: nil, openPopup: false))
-            } else {
-                selection = destination
-            }
-            return .handled
-        }
-        .onKeyPress(.init("f"), phases: .down) { press in
-            guard press.modifiers == .command else { return .ignored }
-            selection = .search
-            searchFocusTrigger.toggle()
-            return .handled
-        }
-        .onKeyPress(.init("b"), phases: .down) { press in
-            guard press.modifiers == .command else { return .ignored }
-            apply(RecallLaunchRequest(tab: .brief, focusEventId: nil, openPopup: false))
+            go(RecallRoute(place: destination.place))
             return .handled
         }
         .onKeyPress(.init("/"), phases: .down) { press in
@@ -435,8 +412,7 @@ struct RootView: View {
         .onKeyPress(.init("n"), phases: .down) { press in
             // Cycle 8.54 — ⌘⇧N opens the "What's new" release notes.
             // Guarded on the exact chord (Cmd + Shift, nothing else)
-            // so a bare ⌘N (New Search) still routes cleanly through
-            // the existing `app.newSearch` command.
+            // so a bare ⌘N (New Question) still routes cleanly.
             guard press.modifiers == [.command, .shift] else { return .ignored }
             whatsNewCoord.showOnDemand()
             return .handled
@@ -455,6 +431,9 @@ struct RootView: View {
         .sheet(isPresented: $whatsNewCoord.isVisible) {
             WhatsNewModal(coord: whatsNewCoord)
         }
+        .sheet(isPresented: $showsFolderContext) {
+            ProjectHandoffView()
+        }
         .task {
             // Fire once per launch: if the current version is new
             // (last-shown-version != current), show the modal. The
@@ -464,21 +443,23 @@ struct RootView: View {
         }
     }
 
-    private func apply(_ request: RecallLaunchRequest) {
-        if request.openPopup {
-            GlobalRecallPopupController.shared.show()
-        }
-        if let tab = request.navigationTab {
-            selection = MemoryWorkspaceSelection(initialTab: tab)
-            latestBriefRequest = tab == .brief ? UUID() : nil
-        }
-        if let eventId = request.focusEventId {
-            selection = .search
-            focusRequest = RecallFocusRequest(
-                eventId: eventId,
-                sequence: nextFocusSequence
-            )
-            nextFocusSequence &+= 1
+    /// Every route, from a link, the app, a menu or a button, goes the same
+    /// way: the workspace applies it (selection, then what Ask shows).
+    private func go(_ route: RecallRoute) {
+        if route.focusesField { fieldFocusRequest &+= 1 }
+        routeRequest = RecallRouteRequest(route: route, sequence: nextRouteSequence)
+        nextRouteSequence &+= 1
+    }
+
+    /// "Refresh": forget what was read about the day and the person, then
+    /// read everything shown again.
+    private func refresh() {
+        Task { @MainActor in
+            actionPanelRegistry.beginRefresh()
+            await understanding.invalidate()
+            MemoryRefreshSignal.post()
+            actionPanelRegistry.endRefresh()
+            ToastNotifier.shared.notify(UserFacingCopy.refreshingToast)
         }
     }
 }

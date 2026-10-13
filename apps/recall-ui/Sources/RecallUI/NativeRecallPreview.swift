@@ -10,9 +10,7 @@ struct NativeRecallPreview: View {
     private let reader: NativePreviewReader
     private let understanding: PreviewUnderstandingReader
     @State private var selection: MemoryWorkspaceSelection
-    @State private var searchFocus = false
-    @StateObject private var dailyModel: DailyMemoryViewModel
-    @StateObject private var searchModel: SearchViewModel
+    @StateObject private var ask: AskViewModel
 
     init(configuration: NativePreviewConfiguration) {
         let reader = NativePreviewReader(date: PreviewUnderstandingReader.sampleNow,
@@ -20,42 +18,46 @@ struct NativeRecallPreview: View {
                                          calendar: PreviewUnderstandingReader.sampleCalendar,
                                          scenario: configuration.scenario)
         self.reader = reader
-        understanding = PreviewUnderstandingReader(
+        let understanding = PreviewUnderstandingReader(
             scenario: PreviewUnderstandingReader.Scenario(rawValue: configuration.scenario.rawValue) ?? .populated)
+        self.understanding = understanding
         _selection = State(initialValue: MemoryWorkspaceSelection(initialTab: configuration.tab))
-        _dailyModel = StateObject(wrappedValue: DailyMemoryViewModel(reader: reader, selectedDate: reader.date,
-            calendar: reader.calendar, healthLoader: { nil }, now: { reader.now }))
+        _ask = StateObject(wrappedValue: Self.makeAsk(reader: reader, understanding: understanding,
+                                                      query: configuration.query))
+    }
+
+    /// Ask over the fixtures, with nothing kept on disk and no names file read.
+    @MainActor
+    static func makeAsk(reader: NativePreviewReader, understanding: UnderstandingReader, query: String = "") -> AskViewModel {
+        let now = reader.now
         let search = SearchViewModel(reader: reader,
             persistence: QueryPersistence(environment: ["MCI_EPHEMERAL_UI_STATE": "1"], store: PreviewQueryStore()),
             userDictionaryLoader: { .empty })
-        search.query = configuration.query
-        _searchModel = StateObject(wrappedValue: search)
+        search.query = query
+        return AskViewModel(
+            search: search,
+            history: TimelineViewModel(reader: reader, pageSize: 200,
+                                       day: MemoryDay(date: now, calendar: reader.calendar), now: { now }),
+            understanding: understanding,
+            calendar: reader.calendar
+        )
     }
 
     var body: some View {
+        let reader = self.reader
+        let now = reader.now
         MemoryWorkspaceView(reader: reader, understanding: understanding, selection: $selection,
-            searchFocusTrigger: searchFocus,
-            dailyModel: dailyModel, searchModel: searchModel, isSyntheticPreview: true,
+            isSyntheticPreview: true,
+            healthLoader: { nil },
             contextExporter: { query in
                 let hits = try await reader.search(SearchOptions(text: query, mode: .text))
-                return VisualMemoryExport.markdown(title: "Synthetic preview", hits: hits)
-            })
-            .toolbar { Text("Synthetic preview").font(.caption).foregroundStyle(.secondary) }
-            .focusable(true, interactions: .automatic)
-            .onKeyPress(keys: ["1", "2", "3", "4"], phases: .down) { press in
-                guard press.modifiers == .command,
-                      let destination = MemoryWorkspaceSelection(keyboardShortcut: press.key.character) else { return .ignored }
-                selection = destination
-                return .handled
-            }
-            .onKeyPress("f", phases: .down) { press in
-                guard press.modifiers == .command else { return .ignored }
-                selection = .search
-                searchFocus.toggle()
-                return .handled
-            }
+                return VisualMemoryExport.markdown(title: "Example", hits: hits)
+            },
+            calendar: reader.calendar,
+            now: { now },
+            ask: ask)
             .preferredColorScheme(.light)
-            .frame(minWidth: 720, minHeight: 440)
+            .frame(minWidth: 760, minHeight: 480)
     }
 }
 

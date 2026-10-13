@@ -57,7 +57,7 @@ struct DetailPaneView: View {
                     .buttonStyle(.plain)
                     .disabled(reader == nil)
                 } else {
-                    Label("Text-only record", systemImage: "doc.text")
+                    Label(UserFacingCopy.noScreenshot, systemImage: "doc.text")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Divider().background(Color.brandCardBorder)
@@ -122,7 +122,7 @@ struct DetailPaneView: View {
             },
             .init(
                 id: "hit.openInApp",
-                title: "Open in App",
+                title: UserFacingCopy.openInApp,
                 shortcut: "⌘O",
                 category: .hit,
                 isEnabled: { hit.url.flatMap(URL.init(string:)) != nil }
@@ -133,7 +133,7 @@ struct DetailPaneView: View {
             },
             .init(
                 id: "hit.showRelated",
-                title: "Show Related Hits",
+                title: UserFacingCopy.showRelated,
                 shortcut: "⌘R",
                 category: .hit,
                 isEnabled: { !hit.linkedEventIds.isEmpty }
@@ -149,20 +149,19 @@ struct DetailPaneView: View {
                 Text(Formatters.appDisplayName(hit.appBundleId))
                     .mciFont(.title2)
                     .foregroundStyle(Color.brandFgPrimary)
-                    .help(hit.appBundleId ?? "No bundle identifier")
                 Spacer()
                 if reader != nil, !hit.linkedEventIds.isEmpty {
                     relatedBadge
                 }
                 Text(MemorySourceKind.label(hit.sourceKind))
-                    .font(MCI.Font.mono)
+                    .mciFont(.caption)
                     .padding(.horizontal, MCI.Spacing.s - 2)
                     .padding(.vertical, MCI.Spacing.xxs)
                     .background(
                         RoundedRectangle(cornerRadius: MCI.Radius.xs)
-                            .stroke(Color.brandMintDim, lineWidth: 0.5)
+                            .stroke(Color.brandFgMuted.opacity(0.5), lineWidth: 0.5)
                     )
-                    .foregroundStyle(Color.brandMintDim)
+                    .foregroundStyle(Color.brandFgSecondary)
             }
             if let title = hit.windowTitle, !title.isEmpty {
                 Text(title)
@@ -171,10 +170,9 @@ struct DetailPaneView: View {
                     .lineLimit(2)
             }
             HStack(spacing: 8) {
-                Text(Formatters.relativeTime(usSinceEpoch: hit.tsUs))
+                Text(Formatters.dayAndTime(us: hit.tsUs))
                     .font(.system(.caption, design: .default))
-                    .foregroundStyle(Color.brandMint)
-                    .help(Formatters.tsString(usSinceEpoch: hit.tsUs))
+                    .foregroundStyle(Color.brandFgSecondary)
             }
             HStack(spacing: 8) {
                 Button {
@@ -188,7 +186,7 @@ struct DetailPaneView: View {
                 .tint(Color.brandMint)
 
                 if let urlStr = hit.url, URL(string: urlStr) != nil {
-                    Button("Open URL") {
+                    Button(UserFacingCopy.openLink) {
                         if let url = URL(string: urlStr) {
                             NSWorkspace.shared.open(url)
                         }
@@ -224,9 +222,8 @@ struct DetailPaneView: View {
             .foregroundStyle(Color.brandMint)
         }
         .buttonStyle(.plain)
-        .help("Show cross-app siblings of this event")
-        .accessibilityLabel("Show \(hit.linkedEventIds.count) related events")
-        .accessibilityHint("Opens the cross-app siblings flyout for this event")
+        .help(UserFacingCopy.showRelatedHelp)
+        .accessibilityLabel(UserFacingCopy.showRelatedCount(hit.linkedEventIds.count))
         .popover(
             isPresented: Binding(
                 get: {
@@ -491,8 +488,8 @@ private struct EntityChipTrigger<PopoverContent: View>: View {
             .foregroundStyle(Color.brandMint)
             .contentShape(Rectangle())
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("Entity \(name)")
-            .accessibilityHint("Show related events for this entity")
+            .accessibilityLabel(name)
+            .accessibilityHint(UserFacingCopy.mentions(name))
             .accessibilityAddTraits(.isButton)
             .onTapGesture { onOpen() }
             .onHover { entered in

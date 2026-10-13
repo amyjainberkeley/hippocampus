@@ -3,19 +3,20 @@ import XCTest
 @testable import RecallUIKit
 
 final class MemoryWorkspaceTests: XCTestCase {
-    func testPrimaryNavigationDestinationsMatchNativeMemoryWorkspace() {
+    func testTheWindowHasThreePlaces() {
         let destinations = MCI.Workspace.primaryDestinations
-        XCTAssertEqual(destinations.map(\.title), ["Today", "Search", "History"])
+        XCTAssertEqual(destinations.map(\.title), ["Overview", "Ask", "You"])
+        XCTAssertEqual(destinations.map(\.id), ["overview", "ask", "you"])
         XCTAssertEqual(destinations.map(\.systemImage), [
-            "calendar",
+            "house",
             "magnifyingglass",
-            "clock",
+            "person.crop.circle",
         ])
     }
 
-    func testPrimaryEvidenceDestinationsExposeSourceAccess() {
+    func testOnlyAskReadsMoments() {
         let sourceBacked = MCI.Workspace.primaryDestinations.filter(\.requiresSourceAccess)
-        XCTAssertEqual(sourceBacked.map(\.title), ["Search", "History"])
+        XCTAssertEqual(sourceBacked.map(\.title), ["Ask"])
     }
 
     func testNowMetricDescribesHistoricalRowsWithoutClaimingLiveCaptureState() {
@@ -81,24 +82,21 @@ final class MemoryWorkspaceTests: XCTestCase {
         )
     }
 
-    func testWorkspaceShortcutMapIsUniqueAndResolvesSourcesToCommandSix() {
+    func testThePlacesAreCommandOneToThreeAndNothingElse() {
         let destinations = MCI.Workspace.allDestinations
-        XCTAssertEqual(destinations.map(\.keyboardShortcut), ["1", "2", "3", "4", "6", "7", "8"])
-        XCTAssertEqual(Set(destinations.map(\.keyboardShortcut)).count, destinations.count)
-        XCTAssertEqual(MCI.Workspace.destination(forKeyboardShortcut: "6")?.id, "sources")
-        XCTAssertEqual(MCI.Workspace.destination(forKeyboardShortcut: "8")?.id, "settings")
-        XCTAssertEqual(MCI.Workspace.destination(forKeyboardShortcut: "5")?.id, "now")
+        XCTAssertEqual(destinations.count, 3)
+        XCTAssertEqual(destinations.map(\.keyboardShortcut), ["1", "2", "3"])
+        XCTAssertEqual(MCI.Workspace.destination(forKeyboardShortcut: "1")?.id, "overview")
+        XCTAssertEqual(MCI.Workspace.destination(forKeyboardShortcut: "3")?.id, "you")
+        XCTAssertNil(MCI.Workspace.destination(forKeyboardShortcut: "5"))
+        XCTAssertNil(MCI.Workspace.destination(forKeyboardShortcut: "6"))
     }
 
-    func testUtilityAndPlaceholderSurfacesAreNotPrimaryDestinations() {
-        let primaryTitles = Set(MCI.Workspace.primaryDestinations.map(\.title))
-        XCTAssertFalse(primaryTitles.contains("Privacy"))
-        XCTAssertFalse(primaryTitles.contains("Settings"))
-        XCTAssertFalse(primaryTitles.contains("Strip"))
-        XCTAssertFalse(primaryTitles.contains("Chat"))
-        XCTAssertEqual(MCI.Workspace.secondaryDestinations.map(\.title), [
-            "Connections", "Privacy", "Settings",
-        ])
+    func testOldPlacesAreNotInTheSidebar() {
+        let titles = Set(MCI.Workspace.allDestinations.map(\.title))
+        for old in ["Today", "Search", "History", "Sessions", "Connections", "Privacy", "Settings", "Strip", "Chat"] {
+            XCTAssertFalse(titles.contains(old), old)
+        }
     }
 
     private func makeHit(

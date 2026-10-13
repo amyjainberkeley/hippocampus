@@ -171,7 +171,9 @@ final class AccessibilityCoverageTests: XCTestCase {
         let counts = countAccessibilityModifiers()
         // Measured baseline, not a target. Raise in lockstep with new
         // labels; never allow a decrease.
-        let minLabels = 37
+        // 39 after the window's three places: Ask's filter, clear and day
+        // buttons are labelled; the retired Today, Brief and popup views go.
+        let minLabels = 39
         let minGrouping = 8
         XCTAssertGreaterThanOrEqual(
             counts.labels, minLabels,

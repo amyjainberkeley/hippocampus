@@ -62,6 +62,9 @@ public extension MCI {
         public static let accent = dynamic(light: 0x0A66D8, dark: 0x6EA8FF)
         public static let accentSubtle = dynamic(light: 0xEAF2FC, dark: 0x172A42)
         public static let accentDim = dynamic(light: 0x527EAE, dark: 0x9DC2F5)
+        /// Fills, selection and dots: the mark's blue (RULINGS B4). Blue text
+        /// on white keeps `accent`.
+        public static let accentFill = dynamic(light: 0x2F6BFF, dark: 0x5C8DFF)
 
         public static let background = dynamic(light: 0xF7F8FA, dark: 0x17191D)
         public static let surface = dynamic(light: 0xFFFFFF, dark: 0x202226)
@@ -301,6 +304,7 @@ public extension MCI.Color {
         ("accent", 0x0A66D8, 0x6EA8FF),
         ("accentSubtle", 0xEAF2FC, 0x172A42),
         ("accentDim", 0x527EAE, 0x9DC2F5),
+        ("accentFill", 0x2F6BFF, 0x5C8DFF),
         ("background", 0xF7F8FA, 0x17191D),
         ("surface", 0xFFFFFF, 0x202226),
         ("surfaceElevated", 0xFFFFFF, 0x292C31),
@@ -354,67 +358,33 @@ public extension MCI {
 
         public static let primaryDestinations: [Destination] = [
             .init(
-                id: "now",
-                title: "Today",
-                systemImage: "calendar",
+                id: "overview",
+                title: "Overview",
+                systemImage: "house",
                 requiresSourceAccess: false,
                 keyboardShortcut: "1"
             ),
             .init(
-                id: "search",
-                title: "Search",
+                id: "ask",
+                title: "Ask",
                 systemImage: "magnifyingglass",
                 requiresSourceAccess: true,
                 keyboardShortcut: "2"
             ),
             .init(
-                id: "timeline",
-                title: "History",
-                systemImage: "clock",
-                requiresSourceAccess: true,
+                id: "you",
+                title: "You",
+                systemImage: "person.crop.circle",
+                requiresSourceAccess: false,
                 keyboardShortcut: "3"
             ),
         ]
 
-        public static let historyDestinations: [Destination] = [
-            .init(
-                id: "episodes",
-                title: "Sessions",
-                systemImage: "rectangle.stack",
-                requiresSourceAccess: true,
-                keyboardShortcut: "4"
-            ),
-        ]
-
-        public static let secondaryDestinations: [Destination] = [
-            .init(
-                id: "sources",
-                title: "Connections",
-                systemImage: "link.badge.plus",
-                requiresSourceAccess: true,
-                keyboardShortcut: "6"
-            ),
-            .init(
-                id: "privacy",
-                title: "Privacy",
-                systemImage: "lock.shield",
-                requiresSourceAccess: false,
-                keyboardShortcut: "7"
-            ),
-            .init(
-                id: "settings",
-                title: "Settings",
-                systemImage: "gearshape",
-                requiresSourceAccess: false,
-                keyboardShortcut: "8"
-            ),
-        ]
-
-        public static let allDestinations = primaryDestinations + historyDestinations + secondaryDestinations
+        /// The window has three places and nothing else (RULINGS G5).
+        public static let allDestinations = primaryDestinations
 
         public static func destination(forKeyboardShortcut shortcut: String) -> Destination? {
-            if shortcut == "5" { return primaryDestinations.first }
-            return allDestinations.first { $0.keyboardShortcut == shortcut }
+            allDestinations.first { $0.keyboardShortcut == shortcut }
         }
 
         public static func historicalEventMetric(for summary: SummaryStats) -> HistoricalMetric {

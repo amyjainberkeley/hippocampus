@@ -69,17 +69,17 @@ struct UserDictionaryEditor: View {
                     Button {
                         addRow()
                     } label: {
-                        Label("Add name", systemImage: "plus")
+                        Label(UserFacingCopy.namesAdd, systemImage: "plus")
                     }
                     .buttonStyle(.bordered)
                     .tint(Color.brandMint)
                     Spacer()
                     if savedIndicator {
-                        Label("Saved", systemImage: "checkmark.circle.fill")
+                        Label(UserFacingCopy.namesSaved, systemImage: "checkmark.circle.fill")
                             .foregroundStyle(Color.brandMint)
                             .transition(.opacity)
                     }
-                    Button("Save") { commit() }
+                    Button(UserFacingCopy.namesSave) { commit() }
                         .buttonStyle(.borderedProminent)
                         .tint(Color.brandMint)
                         .keyboardShortcut(.return, modifiers: .command)
@@ -93,17 +93,13 @@ struct UserDictionaryEditor: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Custom Names")
+            Text(UserFacingCopy.namesTitle)
                 .font(.title2.bold())
                 .foregroundStyle(Color.brandFgPrimary)
-            Text(
-                "Tell Hippocampus that a person or topic goes by multiple names. "
-                    + "Aliases match with high confidence — the brain treats them as the "
-                    + "same person or topic at query time."
-            )
+            Text(UserFacingCopy.namesBody)
             .font(.callout)
             .foregroundStyle(Color.brandFgSecondary)
-            Text("Example: canonical \"Amy Jain\", aliases: AJ, Amy, @amyjainberkeley")
+            Text(UserFacingCopy.namesExample)
                 .font(.callout)
                 .italic()
                 .foregroundStyle(Color.brandFgMuted)
@@ -112,11 +108,8 @@ struct UserDictionaryEditor: View {
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("No custom names yet.")
+            Text(UserFacingCopy.namesEmpty)
                 .foregroundStyle(Color.brandFgSecondary)
-            Text("Click Add name to teach Hippocampus your vocabulary.")
-                .foregroundStyle(Color.brandFgMuted)
-                .font(.callout)
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -134,7 +127,7 @@ struct UserDictionaryEditor: View {
     private func row(at idx: Int) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                TextField("Canonical name (e.g. Amy Jain)", text: bindingCanonical(idx))
+                TextField(UserFacingCopy.namesNameField, text: bindingCanonical(idx))
                     .textFieldStyle(.roundedBorder)
                 Button(role: .destructive) {
                     removeRow(at: idx)
@@ -142,11 +135,10 @@ struct UserDictionaryEditor: View {
                     Image(systemName: "trash")
                 }
                 .buttonStyle(.borderless)
-                .accessibilityLabel("Remove custom name row")
-                .accessibilityHint("Deletes this canonical name and its aliases")
+                .accessibilityLabel(UserFacingCopy.namesRemove)
             }
             TextField(
-                "Aliases, comma-separated (e.g. AJ, Amy, @amyjainberkeley)",
+                UserFacingCopy.namesAlsoCalledField,
                 text: bindingAliases(idx)
             )
             .textFieldStyle(.roundedBorder)

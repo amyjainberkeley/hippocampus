@@ -10,8 +10,6 @@ ONBOARDING_APP="$ONBOARDING/OnboardingApp.swift"
 PREFERENCES_APP="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/PreferencesWindow.swift"
 MEMORY_WORKSPACE="$REPO_ROOT/apps/recall-ui/Sources/RecallUI/MemoryWorkspaceView.swift"
 EVIDENCE_THUMBNAIL="$REPO_ROOT/apps/recall-ui/Sources/RecallUI/EvidenceThumbnail.swift"
-DAILY_MEMORY="$REPO_ROOT/apps/recall-ui/Sources/RecallUI/DailyMemoryView.swift"
-MEASURED_INPUT="$REPO_ROOT/apps/recall-ui/Sources/RecallUI/MeasuredInputView.swift"
 
 fail() {
     printf 'FAIL: %s\n' "$1" >&2
@@ -68,20 +66,15 @@ rg -q 'panel\.appearance = NSAppearance\(named: \.aqua\)' "$PREFERENCES_APP" \
 if rg -q '\.blur\(' "$EVIDENCE_THUMBNAIL"; then
     fail "evidence pixels must remain inspectable; blur belongs on the surrounding material"
 fi
-rg -q 'CGSize\(width: 108, height: 68\)' "$DAILY_MEMORY" \
-    || fail "resume evidence does not use its stable compact thumbnail size"
-rg -q 'Text\(verbatim: point.detail\)' "$DAILY_MEMORY" \
-    || fail "resume rows do not render their source-derived detail"
-rg -q '\.sheet\(item: \$selectedEvidence' "$DAILY_MEMORY" \
-    || fail "resume evidence is not inspectable"
-rg -q 'static let primary:.*\[\.now, \.search, \.timeline\]' "$MEMORY_WORKSPACE" \
-    || fail "primary navigation must separate Today, Search and History"
-rg -q 'MeasuredInputView\(summary: summary\)' "$DAILY_MEMORY" \
-    || fail "Today does not connect its measured interval summary"
-rg -q 'SectorMark\(angle:' "$MEASURED_INPUT" \
-    || fail "measured activity distribution is missing"
-rg -q '\.defaultSize\(width: 920, height: 620\)' "$RECALL_APP" \
-    || fail "Recall default window lost its compact native size"
+rg -U -q 'case overview\n\s*case ask\n\s*case you' "$MEMORY_WORKSPACE" \
+    || fail "the window must have three places: Overview, Ask and You"
+rg -q 'case \.ask:\s*$' "$MEMORY_WORKSPACE" && rg -q 'AskPlace\(' "$MEMORY_WORKSPACE" \
+    || fail "Ask must show its own place"
+if rg -q 'DailyMemoryView\(|EpisodesView\(|SourcesWorkspaceView|MeasuredInputView\(' "$MEMORY_WORKSPACE"; then
+    fail "the window must not show Today, Sessions, Connections or the input chart"
+fi
+rg -q '\.defaultSize\(width: 1100, height: 720\)' "$RECALL_APP" \
+    || fail "the window must open at 1100 by 720, wide enough for a list beside its detail"
 
 if rg -q 'Use System Appearance|follows the current macOS light or dark appearance' "$RECALL_APP"; then
     fail "Recall still advertises the retired adaptive appearance control"

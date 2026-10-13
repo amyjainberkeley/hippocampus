@@ -22,6 +22,8 @@ extension Color {
     static var brandMint: Color { MCI.Color.accent }
     static var brandMintDim: Color { MCI.Color.accentDim }
     static var brandMintSubtle: Color { MCI.Color.accentSubtle }
+    /// Fills, selection and dots (RULINGS B4).
+    static var brandAccentFill: Color { MCI.Color.accentFill }
 
     static var brandChange: Color { MCI.Color.change }
     static var brandError: Color { MCI.Color.error }

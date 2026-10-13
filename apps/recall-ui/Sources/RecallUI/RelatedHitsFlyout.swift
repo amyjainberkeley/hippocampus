@@ -197,7 +197,7 @@ private struct RelatedHitRow: View {
                 Text(Formatters.relativeTime(usSinceEpoch: hit.tsUs))
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(Color.brandMint)
-                    .help(Formatters.tsString(usSinceEpoch: hit.tsUs))
+                    .help(Formatters.dayAndTime(us: hit.tsUs))
             }
             Text(Formatters.snippet(
                 Formatters.stripContextHeader(hit.ocrTextSnippet),

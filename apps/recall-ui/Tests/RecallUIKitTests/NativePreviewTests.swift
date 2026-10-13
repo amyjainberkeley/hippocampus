@@ -10,6 +10,9 @@ final class NativePreviewTests: XCTestCase {
         XCTAssertEqual(config?.tab, .episodes)
         XCTAssertEqual(config?.query, "launch")
         XCTAssertEqual(NativePreviewConfiguration(arguments: ["--synthetic-preview", "--preview-tab=privacy"])?.tab, .now)
+        XCTAssertEqual(NativePreviewConfiguration(arguments: ["--synthetic-preview", "--preview-tab=you"])?.tab, .you)
+        XCTAssertEqual(NativePreviewConfiguration(arguments: ["--synthetic-preview", "--preview-tab=ask"])?.tab, .search)
+        XCTAssertEqual(NativePreviewConfiguration(arguments: ["--synthetic-preview", "--preview-tab=overview"])?.tab, .now)
     }
 
     func testSyntheticNativeReaderSupportsReviewSearchHistoryAndCanonicalText() async throws {
@@ -17,7 +20,9 @@ final class NativePreviewTests: XCTestCase {
         let model = DailyMemoryViewModel(reader: reader, selectedDate: reader.date,
                                         healthLoader: { nil }, now: { reader.now })
         await model.reload()
-        XCTAssertEqual(model.review.resumePoints.count, 3)
+        // Three apps, and the recent moment the Right now card needs
+        // (critique-recall-engineering finding 13).
+        XCTAssertEqual(model.review.resumePoints.count, 4)
         XCTAssertNotNil(model.activitySummary)
         XCTAssertTrue(model.review.events.allSatisfy { !$0.hasScreenshot })
         let hits = try await reader.search(SearchOptions(text: "launch", mode: .text))

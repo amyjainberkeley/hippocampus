@@ -50,14 +50,14 @@ struct ScreenshotViewer: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Button { clearLoadedEvent(); index -= 1 } label: { Image(systemName: "chevron.left") }
-                    .disabled(index <= 0).help("Previous screenshot")
-                    .accessibilityLabel("Previous screenshot")
+                    .disabled(index <= 0).help(UserFacingCopy.previousAction)
+                    .accessibilityLabel(UserFacingCopy.previousAction)
                     .keyboardShortcut(.leftArrow, modifiers: [])
                 Text("\(selection.eventIDs.isEmpty ? 0 : index + 1) of \(selection.eventIDs.count)")
                     .font(.callout.monospacedDigit()).frame(minWidth: 76)
                 Button { clearLoadedEvent(); index += 1 } label: { Image(systemName: "chevron.right") }
-                    .disabled(index + 1 >= selection.eventIDs.count).help("Next screenshot")
-                    .accessibilityLabel("Next screenshot")
+                    .disabled(index + 1 >= selection.eventIDs.count).help(UserFacingCopy.nextAction)
+                    .accessibilityLabel(UserFacingCopy.nextAction)
                     .keyboardShortcut(.rightArrow, modifiers: [])
                 Spacer()
                 if let hit = selectedHit {
@@ -67,7 +67,7 @@ struct ScreenshotViewer: View {
                 }
                 Spacer()
                 Button { dismiss() } label: { Image(systemName: "xmark") }
-                    .help("Close screenshot").accessibilityLabel("Close screenshot")
+                    .help(UserFacingCopy.closeAction).accessibilityLabel(UserFacingCopy.closeAction)
                     .keyboardShortcut(.cancelAction)
             }
             .buttonStyle(.borderless)
@@ -75,11 +75,11 @@ struct ScreenshotViewer: View {
             .background(.regularMaterial)
             Divider()
             if isLoading {
-                ProgressView("Loading screenshot").frame(maxWidth: .infinity, maxHeight: .infinity)
+                ProgressView(UserFacingCopy.momentTextLoading).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let errorMessage {
-                ContentUnavailableView("Screenshot unavailable", systemImage: "photo.badge.exclamationmark",
+                ContentUnavailableView(UserFacingCopy.screenshotLoadFailed, systemImage: "photo.badge.exclamationmark",
                                        description: Text(errorMessage))
-                Button("Retry", systemImage: "arrow.clockwise") { refreshID += 1 }.padding()
+                Button(UserFacingCopy.tryAgainAction, systemImage: "arrow.clockwise") { refreshID += 1 }.padding()
             } else if let hit = selectedHit {
                 HSplitView {
                     VStack(spacing: 8) {
@@ -115,7 +115,7 @@ struct ScreenshotViewer: View {
                             if let url = hit.url, !url.isEmpty {
                                 Text(url).font(.callout).textSelection(.enabled)
                                 if let destination = URL(string: url), ["http", "https"].contains(destination.scheme?.lowercased() ?? "") {
-                                    Link(destination: destination) { Label("Open source", systemImage: "arrow.up.right.square") }
+                                    Link(destination: destination) { Label(UserFacingCopy.openLink, systemImage: "arrow.up.right.square") }
                                 }
                             }
                             Divider()
@@ -127,10 +127,10 @@ struct ScreenshotViewer: View {
                             }
                             textSection(for: hit)
                             Divider()
-                            Button("Copy context", systemImage: "doc.on.clipboard") {
+                            Button(UserFacingCopy.copyForYourAI, systemImage: "doc.on.clipboard") {
                                 copyContext()
                             }
-                            Button("Export context", systemImage: "square.and.arrow.up") {
+                            Button(UserFacingCopy.saveContextAction, systemImage: "square.and.arrow.up") {
                                 exportContext()
                             }
                         }

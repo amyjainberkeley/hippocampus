@@ -35,7 +35,7 @@ struct EvidenceThumbnail: View {
                             Image(systemName: placeholderSymbol)
                                 .font(.system(size: min(size.height * 0.3, 20)))
                             if showsStatus {
-                                Text(url == nil ? "No screenshot stored" : "Screenshot unavailable")
+                                Text(url == nil ? UserFacingCopy.noScreenshot : UserFacingCopy.screenshotMissing)
                                     .font(.caption)
                                 if url != nil {
                                     Text("The saved image could not be opened.")
@@ -46,7 +46,7 @@ struct EvidenceThumbnail: View {
                         .foregroundStyle(Color.brandFgMuted)
                     }
                 }
-                .accessibilityLabel(isLoading ? "Loading screenshot" : (url == nil ? "No screenshot stored" : "Screenshot unavailable"))
+                .accessibilityLabel(isLoading ? UserFacingCopy.momentTextLoading : (url == nil ? UserFacingCopy.noScreenshot : UserFacingCopy.screenshotMissing))
             }
         }
         .frame(width: size.width, height: size.height)

@@ -136,15 +136,10 @@ public struct CaptureHealthReceipt: Decodable, Equatable, Sendable {
 }
 
 public enum MemorySourceKind {
+    /// Where a moment came from, in the window's words ("Screen", "Web
+    /// page"), for the detail, the screenshot viewer and what is copied for
+    /// an AI (spec-copy S4.11).
     public static func label(_ sourceKind: String?) -> String {
-        switch sourceKind {
-        case "screen_ocr": return "Screen capture"
-        case "browser_page": return "Browser page"
-        case "browser_page_with_ocr": return "Browser page + screen text"
-        case "transcript_import": return "Imported transcript"
-        case "structured_app": return "App record"
-        case "mcp_resource": return "MCP resource"
-        default: return "Unknown source"
-        }
+        UserFacingCopy.momentSource(sourceKind: sourceKind)
     }
 }

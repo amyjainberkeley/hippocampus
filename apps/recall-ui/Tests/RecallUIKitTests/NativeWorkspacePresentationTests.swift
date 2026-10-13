@@ -4,14 +4,6 @@ import XCTest
 // Source contracts cover the executable's composition without launching the app
 // or opening a brain. Native focus and layout still require the UI proof pass.
 final class NativeWorkspacePresentationTests: XCTestCase {
-    func testSessionsKeepTextOnlyEvidenceAndRevalidateTheSelectedIdentity() throws {
-        let source = try source("EpisodesView.swift")
-        XCTAssertTrue(source.contains("episode.evidence(from: events)"))
-        XCTAssertTrue(source.contains("expectedEvents: screenshots"))
-        XCTAssertFalse(source.contains("$0.hasScreenshot &&"))
-        XCTAssertTrue(source.contains("Text(verbatim: Formatters.stripContextHeader(event.snippet))"))
-    }
-
     func testNativePreviewBypassesProductionStartupAndUsesIsolatedModels() throws {
         let app = try source("MCIRecallApp.swift")
         XCTAssertTrue(app.contains("NativePreviewConfiguration(arguments: CommandLine.arguments)"))
@@ -22,41 +14,37 @@ final class NativeWorkspacePresentationTests: XCTestCase {
         XCTAssertTrue(preview.contains("isSyntheticPreview: true"))
         XCTAssertFalse(preview.contains("ProcessInfo.processInfo.environment"))
         XCTAssertFalse(preview.contains("ContextHandoffExporter"))
+        XCTAssertTrue(preview.contains("PreviewUnderstandingReader("),
+                      "the preview reads fixtures, never the agent (critique-recall-engineering finding 12)")
     }
 
-    func testTodayUsesResumeSourcesAndOnlyChartsAvailableMeasurements() throws {
-        let today = try source("DailyMemoryView.swift")
-        XCTAssertTrue(today.contains("model.review.resumePoints"))
-        XCTAssertTrue(today.contains("if let summary = model.activitySummary"))
-        XCTAssertFalse(today.contains("if !model.review.visualEvidence.isEmpty { visualEvidence }"))
-        XCTAssertTrue(today.contains("expectedEvents: events"))
-        XCTAssertTrue(today.contains("Text(verbatim: point.detail)"))
-    }
-
-    func testSelectedDestinationOwnsItsEvidenceWithoutASharedRecentFeed() throws {
+    func testEachPlaceShowsItsOwnViewWithoutASharedRecentFeed() throws {
         let source = try source("MemoryWorkspaceView.swift")
-        for (destination, view) in [
-            ("now", "DailyMemoryView"), ("search", "SearchView"),
-            ("sources", "SourcesWorkspaceView"),
-            ("privacy", "PrivacyDashboard"), ("settings", "WorkspaceSettingsView"),
-        ] {
+        for (place, view) in [("overview", "PendingPlace"), ("ask", "AskPlace"), ("you", "PendingPlace")] {
             XCTAssertNotNil(source.range(
-                of: "case \\.\(destination):\\s*\(view)\\(",
+                of: "case \\.\(place):\\s*\(view)\\(",
                 options: .regularExpression
-            ), "Destination \(destination) must retain its native view")
+            ), "Place \(place) must show \(view)")
         }
-        XCTAssertFalse(source.contains("WorkspaceFilmstrip("),
-                       "A shared feed duplicates each destination's own evidence")
-        XCTAssertFalse(source.contains("reader.recentEvents("),
-                       "The navigation shell must not fetch unrelated recent evidence")
-        XCTAssertTrue(source.contains("case .timeline, .episodes:"))
-        XCTAssertTrue(source.contains("HistoryWorkspaceView(reader: reader, selection: $selection)"))
-        XCTAssertTrue(source.contains("DisclosureGroup(isExpanded: $historyExpanded)"))
-        XCTAssertTrue(source.contains("MemorySidebarRow(item: .episodes)"))
-        XCTAssertTrue(source.contains("Picker(\"History view\""))
-        XCTAssertTrue(source.contains(".pickerStyle(.segmented)"))
-        XCTAssertTrue(source.contains("TimelineView(viewModel:"))
-        XCTAssertTrue(source.contains("EpisodesView(viewModel:"))
+        for gone in ["DisclosureGroup(", "Picker(\"History view\"", "reader.recentEvents(",
+                     "DailyMemoryView(", "EpisodesView(", "SourcesWorkspaceView", "WorkspaceSettingsView"] {
+            XCTAssertFalse(source.contains(gone), gone)
+        }
+        XCTAssertTrue(source.contains("@StateObject private var ask: AskViewModel"),
+                      "The shell owns Ask's model, so it survives a change of place")
+        XCTAssertTrue(source.contains("WindowHiMarkView("))
+        XCTAssertTrue(source.contains("SidebarStatus("))
+    }
+
+    func testTheWindowHasNoPopupOfItsOwnAndNoNewWindow() throws {
+        let app = try source("MCIRecallApp.swift")
+        XCTAssertFalse(app.contains("GlobalRecallPopupController"))
+        XCTAssertTrue(app.contains("CommandGroup(replacing: .newItem) {}"))
+        XCTAssertTrue(app.contains("CommandGroup(replacing: .appSettings)"))
+        XCTAssertTrue(app.contains(".defaultSize(width: 1100, height: 720)"))
+        XCTAssertTrue(app.contains("QueryPersistence.defaultKey"), "the old saved query is cleared at launch")
+        let ask = try source("Places/AskPlace.swift")
+        XCTAssertTrue(ask.contains(".keyboardShortcut(.return, modifiers: .command)"))
     }
 
     func testSidebarLabelsKeepNativeListSelectionWithoutExtraFocusTargets() throws {
@@ -83,17 +71,6 @@ final class NativeWorkspacePresentationTests: XCTestCase {
         XCTAssertTrue(source.contains(".onOpenURL"))
         XCTAssertTrue(source.contains("RecallLaunchRequest.localCommandName"))
         XCTAssertFalse(source.contains(".focusEffectDisabled("))
-    }
-
-    func testObservedSourcesUsePassiveIconsAndKeepPreferencesActions() throws {
-        let source = try source("MemoryWorkspaceView.swift")
-        let start = try XCTUnwrap(source.range(of: "private struct SourcesWorkspaceView: View"))
-        let sources = String(source[start.lowerBound...])
-        XCTAssertFalse(sources.contains("\"app.dashed\""),
-                       "Observed sources are passive metadata, not dashed action placeholders")
-        XCTAssertTrue(sources.contains("Image(systemName: \"app\")"))
-        XCTAssertTrue(sources.contains("WorkspacePreferencesButton(title: \"App access\""))
-        XCTAssertTrue(sources.contains("WorkspacePreferencesButton(title: \"AI context\""))
     }
 
     private func source(_ file: String) throws -> String {

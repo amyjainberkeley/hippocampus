@@ -24,9 +24,26 @@ public enum Formatters {
             "com.apple.finder": "Finder",
             "com.apple.safari": "Safari",
             "com.apple.terminal": "Terminal",
+            "com.apple.mobilesms": "Messages",
+            "com.apple.ical": "Calendar",
+            "com.apple.facetime": "FaceTime",
+            "com.apple.textedit": "TextEdit",
+            "com.apple.systempreferences": "System Settings",
             "com.github.githubclient": "GitHub",
             "com.microsoft.vscode": "VS Code",
+            "com.microsoft.edgemac": "Microsoft Edge",
+            "com.microsoft.teams2": "Microsoft Teams",
             "com.tinyspeck.slackmacgap": "Slack",
+            "com.googlecode.iterm2": "iTerm",
+            "com.openai.chat": "ChatGPT",
+            "com.anthropic.claudefordesktop": "Claude",
+            "com.figma.desktop": "Figma",
+            "company.thebrowser.browser": "Arc",
+            "com.brave.browser": "Brave",
+            "net.whatsapp.whatsapp": "WhatsApp",
+            "notion.id": "Notion",
+            "us.zoom.xos": "Zoom",
+            "dev.warp.warp-stable": "Warp",
         ]
         if let name = exactNames[bundleId.lowercased()] {
             return name
@@ -55,6 +72,36 @@ public enum Formatters {
         return words.map { word in
             word.prefix(1).uppercased() + word.dropFirst()
         }.joined(separator: " ")
+    }
+
+    /// One line of what a window said, for a list row: the first line of
+    /// its text with any stored header removed, skipping a first line that
+    /// only repeats the window's title ("Pricing page draft" under the title
+    /// "Pricing page draft") when another line follows.
+    public static func rowLine(_ text: String, title: String?, maxLen: Int = 160) -> String {
+        let lines = stripContextHeader(text)
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard let first = lines.first else { return "" }
+        let heading = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lines.count > 1, !heading.isEmpty, heading.hasPrefix(first.lowercased()) {
+            return snippet(lines[1], maxLen: maxLen)
+        }
+        return snippet(first, maxLen: maxLen)
+    }
+
+    /// "Oct 12, 2:36 PM" in the person's locale: when a moment was, for
+    /// rows and details that can come from any day.
+    public static func dayAndTime(
+        us: UInt64,
+        locale: Locale = .autoupdatingCurrent,
+        timeZone: TimeZone = .autoupdatingCurrent
+    ) -> String {
+        var style = Date.FormatStyle.dateTime.month(.abbreviated).day().hour().minute()
+        style.locale = locale
+        style.timeZone = timeZone
+        return Date(timeIntervalSince1970: Double(us) / 1_000_000).formatted(style)
     }
 
     /// Snippet truncation — keeps the recall-list cell from rendering
@@ -130,10 +177,10 @@ public enum Formatters {
     /// unknown sources (forward-compat: a future retrieval mode shouldn't
     /// leak raw jargon into the UI).
     ///
-    /// - `"lexical"` → `"Matched: text"` (BM25 / FTS5 keyword match)
-    /// - `"hybrid"` → `"Matched: meaning"` after evidence verification
-    /// - `"hybrid-related"` / `"semantic-related"` → unverified related context
-    /// - `"hybrid-conflict"` → evidence the verifier marked contradictory
+    /// - `"lexical"` → `"Exact words"` (BM25 / FTS5 keyword match)
+    /// - `"hybrid"` → `"Similar meaning"` after evidence verification
+    /// - `"hybrid-related"` / `"semantic-related"` → `"Related"`
+    /// - `"hybrid-conflict"` → `"Says something different"`
     /// - `"timeline"` → `nil`
     /// - unknown → `nil`
     ///
@@ -141,10 +188,10 @@ public enum Formatters {
     /// §5 / G6 / §7 WOW moment.
     public static func matchReason(_ s: String) -> String? {
         switch s {
-        case "lexical": return "Matched: text"
-        case "hybrid": return "Matched: meaning"
-        case "hybrid-related", "semantic-related": return "Related by meaning"
-        case "hybrid-conflict": return "Conflicting evidence"
+        case "lexical": return "Exact words"
+        case "hybrid": return "Similar meaning"
+        case "hybrid-related", "semantic-related": return "Related"
+        case "hybrid-conflict": return "Says something different"
         case "timeline": return nil
         default: return nil
         }

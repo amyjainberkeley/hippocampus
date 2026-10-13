@@ -2,12 +2,18 @@ import AppKit
 import RecallUIKit
 import SwiftUI
 
+/// History's list: one day's moments, newest first, under their clock hour,
+/// with "Show Earlier" below the last row (RULINGS W8). The model belongs to
+/// Ask, so the rows and the pages already read stay when a place changes.
 struct TimelineView: View {
-    @StateObject var viewModel: TimelineViewModel
+    @ObservedObject var viewModel: TimelineViewModel
     /// Injected so `DetailPaneView`'s related-hits flyout (cycle 8.37
     /// PR-3) can resolve linked event ids. Optional so previews / tests
     /// omit it.
     var reader: BrainReader? = nil
+    /// The day shown is today: its empty state says so.
+    var isToday = true
+    var calendar: Calendar = .current
 
     var body: some View {
         Group {
@@ -23,7 +29,12 @@ struct TimelineView: View {
         }
         .background(Color.brandBgPrimary)
         .task {
-            await viewModel.reload()
+            // The rows already read stay when Ask comes back on screen.
+            if viewModel.hits.isEmpty {
+                await viewModel.reload()
+            } else {
+                await viewModel.refresh()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) {
             _ in
@@ -34,9 +45,11 @@ struct TimelineView: View {
     }
 
     private var emptyView: some View {
-        // Cycle 8.49 polished empty state (audit-gap fix). Timeline with
-        // no events = fresh brain — reassuring, informative.
-        MCIEmptyState.noTimelineEvents()
+        ContentUnavailableView(
+            isToday ? UserFacingCopy.historyEmptyToday : UserFacingCopy.historyEmptyPastDay,
+            systemImage: "clock"
+        )
+        .foregroundStyle(Color.brandFgSecondary)
     }
 
     private func errorView(_ err: String) -> some View {
@@ -53,34 +66,70 @@ struct TimelineView: View {
             .foregroundStyle(Color.brandError)
 
             Button(UserFacingCopy.openHippocampusAction) {
-                let appPath = NSHomeDirectory() + "/Applications/Hippocampus.app"
-                NSWorkspace.shared.open(URL(fileURLWithPath: appPath))
+                // The window runs inside Hippocampus.app, wherever it is.
+                NSWorkspace.shared.open(Bundle.main.bundleURL)
             }
             .buttonStyle(.bordered)
-            .tint(Color.brandMint)
+        }
+    }
+
+    private var sections: [HistorySection] {
+        HistorySections.group(hits: viewModel.hits, sessions: [], calendar: calendar)
+    }
+
+    private func heading(_ section: HistorySection) -> String {
+        switch section.owner {
+        case let .hour(startUs):
+            Formatters.clockHour(us: startUs, timeZone: calendar.timeZone)
+        case let .session(block):
+            block.title
         }
     }
 
     private var contentView: some View {
         AdaptiveEvidencePanes(
             showsDetail: viewModel.isDetailFocused && viewModel.selectedHit != nil,
-            backLabel: "Back to timeline",
+            backLabel: UserFacingCopy.backToHistory,
             onDismissDetail: { viewModel.dismissDetail() }
         ) {
             List(selection: $viewModel.selectedHitId) {
-                ForEach(viewModel.hits) { hit in
-                    HitRow(hit: hit)
-                        .tag(hit.id)
-                        .listRowBackground(
-                            viewModel.selectedHitId == hit.id
-                                ? Color.brandMintSubtle : Color.clear
-                        )
+                ForEach(sections) { section in
+                    Section {
+                        ForEach(section.rows) { row in
+                            HitRow(hit: row.hit, showsClockTime: true, count: row.count)
+                                .tag(row.hit.id)
+                                .listRowBackground(
+                                    viewModel.selectedHitId == row.hit.id
+                                        ? Color.brandMintSubtle : Color.clear
+                                )
+                        }
+                    } header: {
+                        Text(verbatim: heading(section))
+                            .mciFont(.caption)
+                            .foregroundStyle(Color.brandFgSecondary)
+                    }
+                }
+                if viewModel.canLoadEarlier || viewModel.isLoadingEarlier {
+                    HStack {
+                        Spacer()
+                        if viewModel.isLoadingEarlier {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Button(UserFacingCopy.showEarlier) {
+                                Task { await viewModel.loadEarlier() }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, MCI.Spacing.s)
+                    .listRowBackground(Color.clear)
+                    .selectionDisabled()
                 }
             }
             .listStyle(.inset)
             .scrollContentBackground(.hidden)
             .background(Color.brandBgPrimary)
-            .refreshable { await viewModel.reload() }
             .onKeyPress(.return, phases: .down) { _ in
                 viewModel.focusDetail()
                 return viewModel.selectedHitId != nil ? .handled : .ignored
@@ -88,10 +137,13 @@ struct TimelineView: View {
             .onKeyPress(.escape, phases: .down) { _ in
                 if viewModel.isDetailFocused {
                     viewModel.dismissDetail()
-                } else {
-                    viewModel.selectedHitId = nil
+                    return .handled
                 }
-                return .handled
+                if viewModel.selectedHitId != nil {
+                    viewModel.selectedHitId = nil
+                    return .handled
+                }
+                return .ignored
             }
 
         } detail: {

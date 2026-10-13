@@ -25,10 +25,9 @@ public enum UserFacingCopy {
     // TimelineView, PrivacyMomentsView. Prior copy was
     // "Couldn't open your brain".
     public static let memoryUnreachableTitle =
-        "Hippocampus can\u{2019}t reach your local memory right now"
+        "Hippocampus couldn\u{2019}t open your memory"
     public static let memoryUnreachableBody =
-        "Try relaunching Hippocampus, or open the Privacy Dashboard "
-        + "to check its status."
+        "Check that Hippocampus is running in the menu bar, then try again."
     public static let openHippocampusAction = "Open Hippocampus"
 
     // Brief / timeline / event-detail load failures. Reassuring body
@@ -205,6 +204,183 @@ public enum UserFacingCopy {
     public static let groupPeople = "People"
     public static let groupStruggles = "Where you got stuck"
 
+    // The window: its title, its places and the sidebar (RULINGS W10, X9).
+
+    public static let windowTitle = "Hippocampus"
+    /// The sidebar's footer, from the saved status.
+    public static let footerRemembering = "Remembering"
+    public static let footerNotRemembering = "Not remembering"
+    /// The footer when there is no saved status at all.
+    public static let footerNoStatus = "Not remembering right now."
+    public static let footerHelp = "Open Preferences"
+    /// Where Overview and You go until they are wired in.
+    public static let pendingPlaceTitle = "Coming next"
+
+    // Ask (spec-recall S3, RULINGS S1, T17).
+
+    public static let askPlaceholder = "Ask or search your memory"
+    /// The field while answers cannot come on this Mac: it only searches.
+    public static let searchOnlyPlaceholder = "Search anything you\u{2019}ve seen"
+    /// Return asks what is typed.
+    public static let askKeyHintReturn = "\u{21A9} Ask"
+    /// Only ⌘Return asks what is typed.
+    public static let askKeyHintCommandReturn = "\u{2318}\u{21A9} Ask"
+    public static let askThinking = "Thinking on your Mac\u{2026}"
+    public static let askFailed = "Couldn\u{2019}t answer that. Try again."
+    public static let tryAgainAction = "Try Again"
+    public static let stopAction = "Stop"
+    public static let sourcesHeading = "Sources"
+    /// Over the matches when an answer is shown.
+    public static let moreFromYourMemory = "More from your memory"
+    public static let filtersAction = "Filters"
+    public static let clearAction = "Clear"
+    public static let nothingMatched = "Nothing matched"
+    public static let matchModeLabel = "Match"
+    public static let matchModeExact = "Exact words"
+    public static let matchModeMeaning = "Meaning"
+    public static let matchModeHelp = "Exact words finds those words. Meaning also finds related things."
+    /// Meaning search cannot use several apps or a link filter.
+    public static let meaningFiltersUnavailable = "Meaning can\u{2019}t use these filters"
+    /// Copies context for the question, with sources.
+    public static let copyForYourAIHelp = "Copies this, your recent work and what Hippocampus knows about you, with sources."
+    public static let copiedToast = "Copied"
+    public static let copyFailedTitle = "Couldn\u{2019}t copy"
+    public static let copyFailedBody = "Check that Hippocampus is running in the menu bar, then try again."
+
+    /// Why there is no answer, in the Ask panel's words (`CommandBarModel.explain`).
+    public static func noAnswer(_ reason: String?) -> String {
+        switch reason {
+        case "apple_intelligence_off": "Turn on Apple Intelligence in System Settings to get answers."
+        case "device_not_eligible", "not_installed", "cannot_launch": "Answers need macOS 26 with Apple Intelligence."
+        case "model_not_ready": "Apple Intelligence is still getting ready."
+        default: "Couldn\u{2019}t write an answer."
+        }
+    }
+
+    /// Where a moment came from, in one word or two: "Screen", "Web page".
+    public static func momentSource(sourceKind: String?) -> String {
+        switch sourceKind {
+        case "screen_ocr", "screen_context": "Screen"
+        case "browser_page", "browser_page_with_ocr": "Web page"
+        case "transcript_import": "AI session"
+        case "structured_app": "App"
+        case "mcp_resource": "Connected app"
+        default: "Other"
+        }
+    }
+
+    /// "Safari \u{00B7} 2:14 PM": a source under an answer.
+    public static func sourceLine(app: String, time: String) -> String {
+        "\(app) \u{00B7} \(time)"
+    }
+
+    // History, inside Ask (RULINGS W8).
+
+    public static let historyEmptyToday = "Nothing saved yet"
+    public static let historyEmptyPastDay = "Nothing saved on this day."
+    public static let historyLoadFailed = "Couldn\u{2019}t load History"
+    public static let historyLoadFailedBody = "Nothing is lost. Try again."
+    public static let previousDay = "Previous day"
+    public static let nextDay = "Next day"
+    public static let todayAction = "Today"
+    public static let backToResults = "Results"
+    public static let backToHistory = "History"
+    public static let wholeDayAction = "Show Whole Day"
+
+    // Commands and menus (spec-copy S4.10).
+
+    public static let commandNewQuestion = "New Question"
+    public static let commandNewQuestionDetail = "Start a new question."
+    public static let commandHistory = "History"
+    public static let commandHistoryDetail = "See what you saw, in order."
+    public static let commandPreferences = "Preferences\u{2026}"
+    public static let commandNames = "Names You Use"
+    public static let commandNamesDetail = "Tell Hippocampus when two names mean the same thing."
+    public static let commandRefresh = "Refresh"
+    public static let commandRefreshDetail = "Load the newest moments."
+    public static let refreshingToast = "Refreshing\u{2026}"
+    public static let commandSupportReport = "Save a Report for Support"
+    public static let commandSupportReportDetail = "A file with your screen content removed."
+    public static let commandShortcuts = "Keyboard Shortcuts"
+    public static let commandWhatsNew = "What\u{2019}s New"
+    public static let commandWhatsNewDetail = "What changed in this version."
+    public static let commandCloseWindow = "Close Hippocampus Window"
+    /// ⌘J: what your AI gets in a folder you choose.
+    public static let commandFolderContext = "Context for a Folder\u{2026}"
+    public static let goMenu = "Go"
+
+    // A moment's detail and its screenshot (spec-copy S4.12, RULINGS T17).
+
+    public static let noScreenshot = "No screenshot"
+    public static let screenshotMissing = "Screenshot missing"
+    public static let openInApp = "Open in App"
+    public static let openLink = "Open Link"
+    public static let showRelated = "Show Related"
+    public static let showRelatedHelp = "See related moments in other apps"
+    public static func showRelatedCount(_ count: Int) -> String {
+        count == 1 ? "Show 1 related moment" : "Show \(count) related moments"
+    }
+    public static func mentions(_ name: String) -> String {
+        "Show moments that mention \(name)"
+    }
+    public static func moreNames(_ count: Int) -> String {
+        "\(count) more names"
+    }
+    public static func names(_ names: [String]) -> String {
+        "Names: " + names.joined(separator: ", ")
+    }
+    public static let previousAction = "Previous"
+    public static let nextAction = "Next"
+    public static let closeAction = "Close"
+    public static let screenshotLoadFailed = "Couldn\u{2019}t open this screenshot"
+    public static let saveContextAction = "Save Context\u{2026}"
+
+    // Names you use (spec-copy S4.13; no real person in the example).
+
+    public static let namesTitle = "Names you use"
+    public static let namesBody = "Tell Hippocampus when two names mean the same person or thing."
+    public static let namesExample = "Example: Alex Rivera is also Alex, AR, @arivera."
+    public static let namesEmpty = "No names yet."
+    public static let namesAdd = "Add Name"
+    public static let namesSaved = "Saved"
+    public static let namesSave = "Save"
+    public static let namesNameField = "Name"
+    public static let namesAlsoCalledField = "Also called (separate with commas)"
+    public static let namesRemove = "Remove"
+
+    // What your AI gets in a folder (spec-copy S4.13, critique-recall-product 8).
+
+    public static let folderTitle = "What your AI gets in this folder"
+    public static let folderSubtitle = "Your last decisions, next steps, and their sources."
+    public static let folderChoose = "Choose a project"
+    public static let folderChooseAction = "Choose Folder\u{2026}"
+    public static let folderChangeAction = "Change\u{2026}"
+    public static let folderScope = "Uses the whole repository, and what was on screen while you worked in it."
+    public static let folderLoading = "Getting it ready\u{2026}"
+    public static let folderFailed = "Couldn\u{2019}t get context"
+    public static let folderEmptyTitle = "Continue a project"
+    public static let folderEmptyBody = "Choose the folder you worked in. Hippocampus writes up where you stopped, for you to check and copy."
+    public static let folderNothingSent = "Nothing is sent anywhere until you copy it."
+    public static func folderWrittenAt(_ time: String) -> String { "Written at \(time)." }
+    public static let folderCopy = "Copy"
+    public static let folderPanelTitle = "Choose a Project Folder"
+
+    // Reading a screenshot again (RULINGS T5, T17).
+
+    public static let readAgainAction = "Read Again"
+    public static let readingAgain = "Reading\u{2026}"
+    public static let readAgainCaption = "Some small text may be missing."
+    public static let readAgainUnreadable = "Couldn\u{2019}t read this one. It may be too small or blurred."
+    public static let readAgainTimedOut = "Reading took too long. Try again when your Mac is less busy."
+    public static let readAgainBlocked = "This looked private, so the text isn\u{2019}t shown."
+    public static let readAgainUnavailable = "Couldn\u{2019}t read this screenshot. Nothing was changed."
+    /// ⌘F: the cursor in Ask's field.
+    public static let commandFind = "Find"
+
+    /// "Press Shift twice in any app to open Ask."
+    public static func askKeyHelp(_ phrase: String) -> String {
+        phrase.isEmpty ? "Choose a key for Ask in Preferences." : "\(phrase) in any app to open Ask."
+    }
 }
 
 // MARK: - Copy-style validators (referenced by CopyStyleTests)

@@ -4,162 +4,86 @@ import RecallUIKit
 import SwiftUI
 
 struct SearchView: View {
-    @StateObject var viewModel: SearchViewModel
-    var focusTrigger: Bool = false
-    var focusRequest: RecallFocusRequest? = nil
+    /// Ask owns the model, so matches and their selection survive a change
+    /// of place (critique-recall-engineering finding 16).
+    @ObservedObject var viewModel: SearchViewModel
     /// Injected so `DetailPaneView`'s related-hits flyout (cycle 8.37
     /// PR-3) can resolve linked event ids. Optional so previews / tests
     /// that stub the VM can omit it — the flyout button hides in that
     /// case.
     var reader: BrainReader? = nil
-    var contextExporter: @Sendable (String) async throws -> String = { try await ContextHandoffExporter.export(focus: $0) }
-    @FocusState private var isSearchFieldFocused: Bool
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @State private var isRegistryRefreshing = false
-    @State private var isExportingContext = false
-    @State private var showsContextHandoffError = false
+    /// The match mode and filters show when asked for, or while one is on.
+    var showsFilters = false
+    /// Ask decides when "Nothing matched" may show: never for a question
+    /// that has not been asked (critique-recall-engineering finding 16).
+    var showsNoMatches = true
+    /// Over the matches while an answer shows.
+    var heading: String? = nil
 
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
-                searchBar
-                ScrollView(.horizontal) {
-                    FilterPillsView(
-                        filters: $viewModel.filters,
-                        observedApps: viewModel.observedApps
-                    ) {
-                        Task {
-                            await viewModel.runSearch()
-                            await viewModel.reloadObservedApps()
-                        }
-                    }
+                if showsFilters || viewModel.filters.anyActive {
+                    filterBar
+                    Divider().background(Color.brandCardBorder)
                 }
-                .frame(height: 72)
-                Divider().background(Color.brandCardBorder)
+                if let heading, !viewModel.hits.isEmpty {
+                    Text(heading)
+                        .mciFont(.caption)
+                        .foregroundStyle(Color.brandFgSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, MCI.Spacing.l)
+                        .padding(.top, MCI.Spacing.m)
+                }
                 content
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
         }
         .background(Color.brandBgPrimary)
-        // Detail command registration must not invalidate the search layout.
-        .onReceive(
-            ActionPanelRegistry.shared.$isRefreshing
-                .removeDuplicates()
-                .receive(on: RunLoop.main)
-        ) { isRefreshing in
-            if isRegistryRefreshing != isRefreshing {
-                isRegistryRefreshing = isRefreshing
-            }
-        }
         .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) {
             _ in
             Task { await viewModel.refresh() }
         }
-        .task(id: focusRequest) {
-            if let focusRequest {
-                await viewModel.focusEvent(id: focusRequest.eventId)
-                await viewModel.reloadObservedApps()
-            } else {
-                isSearchFieldFocused = true
-                await viewModel.refresh()
-            }
-        }
-        .onChange(of: focusTrigger) { _, _ in
-            isSearchFieldFocused = true
-        }
         .registerActionPanelCommands([
             .init(
                 id: "search.clearQuery",
-                title: "Clear Query",
-                shortcut: "⌘⇧K",
+                title: UserFacingCopy.clearAction,
+                shortcut: "\u{2318}\u{21E7}K",
                 category: .search,
                 isEnabled: { !viewModel.query.isEmpty || viewModel.filters.anyActive }
             ) {
                 viewModel.clear()
             },
-            .init(
-                id: "search.copyAgentContext",
-                title: "Copy Agent Context",
-                shortcut: "",
-                category: .search,
-                description: "Copy a bounded, cited packet for the current task.",
-                isEnabled: { !isExportingContext }
-            ) {
-                copyAgentContext()
-            }
         ])
-        .alert("Couldn’t copy agent context", isPresented: $showsContextHandoffError) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Open Hippocampus and try again.")
-        }
     }
 
-    private var searchBar: some View {
-        // MCIDesignSystem cycle 8.48: 8pt grid + Stripe-tuned body font.
-        HStack(spacing: MCI.Spacing.s) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(Color.brandFgMuted)
-            TextField(
-                "Search captured text…",
-                text: $viewModel.query
-            )
-            .textFieldStyle(.plain)
-            .mciFont(.body)
-            .foregroundStyle(Color.brandFgPrimary)
-            .focused($isSearchFieldFocused)
-            .frame(minWidth: 0, maxWidth: .infinity)
-            .onSubmit {
-                Task { await viewModel.runSearch() }
-            }
-            Picker("Search mode", selection: $viewModel.mode) {
-                Text("Text").tag(SearchMode.text)
-                Text("Related").tag(SearchMode.related)
+    /// Exact words or meaning, then the date and app filters.
+    private var filterBar: some View {
+        HStack(spacing: MCI.Spacing.m) {
+            Picker(UserFacingCopy.matchModeLabel, selection: $viewModel.mode) {
+                Text(UserFacingCopy.matchModeExact).tag(SearchMode.text)
+                Text(UserFacingCopy.matchModeMeaning).tag(SearchMode.related)
                     .selectionDisabled(viewModel.hasUnsupportedRelatedFilters)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 142)
-            .help("Text finds indexed words. Related also retrieves unverified semantic context.")
-            if viewModel.isSearching || isRegistryRefreshing {
-                ProgressView().controlSize(.small)
-            }
-            Button {
-                copyAgentContext()
-            } label: {
-                Group {
-                    if isExportingContext {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "doc.on.clipboard")
+            .frame(width: 200)
+            .help(UserFacingCopy.matchModeHelp)
+            ScrollView(.horizontal) {
+                FilterPillsView(
+                    filters: $viewModel.filters,
+                    observedApps: viewModel.observedApps
+                ) {
+                    Task {
+                        await viewModel.runSearch()
+                        await viewModel.reloadObservedApps()
                     }
                 }
-                .frame(width: 18, height: 18)
             }
-            .buttonStyle(.plain)
-            .disabled(isExportingContext)
-            .help("Copy a bounded, cited context packet for an agent")
-            .accessibilityLabel("Copy agent context")
-            .accessibilityHint("Copies memory related to this search with source citations")
-            if !viewModel.query.isEmpty || viewModel.filters.anyActive {
-                Button {
-                    viewModel.clear()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(Color.brandFgMuted)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear search")
-                .accessibilityHint("Clears the query and any active filters")
-            }
+            .frame(height: 72)
         }
-        .padding(.horizontal, MCI.Spacing.xl)
-        .padding(.vertical, MCI.Spacing.m)
-        .background(
-            reduceTransparency
-                ? AnyShapeStyle(Color.brandBgSecondary)
-                : AnyShapeStyle(.ultraThinMaterial)
-        )
+        .padding(.horizontal, MCI.Spacing.l)
+        .task { await viewModel.reloadObservedApps() }
     }
 
     @ViewBuilder
@@ -204,29 +128,24 @@ struct SearchView: View {
                 .foregroundStyle(Color.brandError)
 
                 Button(UserFacingCopy.openHippocampusAction) {
-                    let appPath = NSHomeDirectory() + "/Applications/Hippocampus.app"
-                    NSWorkspace.shared.open(URL(fileURLWithPath: appPath))
+                    // The window runs inside Hippocampus.app, wherever it is.
+                    NSWorkspace.shared.open(Bundle.main.bundleURL)
                 }
                 .buttonStyle(.bordered)
-                .tint(Color.brandMint)
             }
         } else if let message = viewModel.filterLimitationMessage,
             viewModel.mode == .related,
             !viewModel.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
             viewModel.hasUnsupportedRelatedFilters {
             ContentUnavailableView(
-                "Related search unavailable",
+                UserFacingCopy.meaningFiltersUnavailable,
                 systemImage: "line.3.horizontal.decrease.circle",
                 description: Text(message)
             )
             .foregroundStyle(Color.brandFgSecondary)
-        } else if viewModel.hits.isEmpty
-            && viewModel.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            ContentUnavailableView(
-                "Search your memory",
-                systemImage: "magnifyingglass"
-            )
-            .foregroundStyle(Color.brandFgSecondary)
+        } else if viewModel.hits.isEmpty && !viewModel.isSearching && !showsNoMatches {
+            // A question waiting to be asked, or one answered above: nothing to say.
+            EmptyView()
         } else if viewModel.hits.isEmpty && !viewModel.isSearching {
             // Keep the query in the search field so long input cannot size the heading.
             if viewModel.filters.anyActive {
@@ -235,7 +154,7 @@ struct SearchView: View {
                 }
             } else {
                 ContentUnavailableView(
-                    "No matching memories",
+                    UserFacingCopy.nothingMatched,
                     systemImage: "magnifyingglass"
                 )
                 .foregroundStyle(Color.brandFgSecondary)
@@ -248,7 +167,7 @@ struct SearchView: View {
     private var searchResults: some View {
         AdaptiveEvidencePanes(
             showsDetail: viewModel.isDetailFocused && viewModel.selectedHit != nil,
-            backLabel: "Back to results",
+            backLabel: UserFacingCopy.backToResults,
             onDismissDetail: { viewModel.dismissDetail() }
         ) {
             List(selection: $viewModel.selectedHitId) {
@@ -286,26 +205,6 @@ struct SearchView: View {
         .onChange(of: viewModel.selectedHitId) { _, newValue in
             if newValue != nil {
                 viewModel.isDetailFocused = true
-            }
-        }
-    }
-
-    private func copyAgentContext() {
-        guard !isExportingContext else { return }
-        isExportingContext = true
-        let focus = viewModel.query
-        Task {
-            defer { isExportingContext = false }
-            do {
-                let packet = try await contextExporter(focus)
-                NSPasteboard.general.clearContents()
-                guard NSPasteboard.general.setString(packet, forType: .string) else {
-                    showsContextHandoffError = true
-                    return
-                }
-                ToastNotifier.shared.notify("Agent context copied")
-            } catch {
-                showsContextHandoffError = true
             }
         }
     }

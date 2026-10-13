@@ -13,7 +13,7 @@ public struct NativePreviewConfiguration: Sendable {
             arguments.first { $0.hasPrefix(name + "=") }.map { String($0.dropFirst(name.count + 1)) }
         }
         let requested = value("--preview-tab").flatMap(RecallTab.from) ?? .now
-        tab = [.now, .search, .timeline, .episodes].contains(requested.workspaceTab) ? requested.workspaceTab : .now
+        tab = [.now, .search, .timeline, .episodes, .you].contains(requested.workspaceTab) ? requested.workspaceTab : .now
         query = value("--preview-query") ?? ""
         scenario = value("--preview-state").flatMap(Scenario.init(rawValue:)) ?? .populated
     }

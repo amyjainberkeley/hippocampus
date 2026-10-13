@@ -27,7 +27,7 @@ final class DailyReviewTests: XCTestCase {
         XCTAssertEqual(review.resumePoints.map { $0.evidence.map(\.id) }, [[4], [3, 1], [2]])
         XCTAssertEqual(review.resumePoints.map(\.detail),
                        ["Imported claim: complete", "Question: ship the draft?", "Saved text"])
-        XCTAssertEqual(review.resumePoints.first?.sourceLabel, "Imported transcript")
+        XCTAssertEqual(review.resumePoints.first?.sourceLabel, "AI session")
         XCTAssertTrue(review.resumePoints.allSatisfy { !$0.title.contains("complete") })
     }
 
@@ -38,7 +38,7 @@ final class DailyReviewTests: XCTestCase {
         }
         let review = DailyReview(day: day, events: rows)
         XCTAssertEqual(review.resumePoints.map(\.id), [12, 11, 10, 9])
-        XCTAssertTrue(review.resumePoints.allSatisfy { $0.sampleCount == 1 && $0.sourceLabel == "Unknown source" })
+        XCTAssertTrue(review.resumePoints.allSatisfy { $0.sampleCount == 1 && $0.sourceLabel == "Other" })
     }
 
     func testCountsDeduplicateAndExcludeOtherDatesWithoutTreatingImagesAsText() {
