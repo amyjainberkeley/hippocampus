@@ -48,15 +48,20 @@ package final class DelayedApplicationRestartLauncher: ApplicationRestartLaunchi
         self.bundlePath = bundlePath
     }
 
-    package func scheduleRestart() throws {
-        let task = ChildProcessEnvironment.makeProcess()
-        task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = [
+    /// The relaunch is quiet: it stays in the menu bar (spec-shell S7).
+    package static func restartArguments(bundlePath: String) -> [String] {
+        [
             "-c",
-            "sleep 1; exec /usr/bin/open \"$1\"",
+            "sleep 1; exec /usr/bin/open --env \(QuietLaunchNote.environmentKey)=1 \"$1\"",
             "hippocampus-restart",
             bundlePath,
         ]
+    }
+
+    package func scheduleRestart() throws {
+        let task = ChildProcessEnvironment.makeProcess()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = Self.restartArguments(bundlePath: bundlePath)
         try task.run()
     }
 }

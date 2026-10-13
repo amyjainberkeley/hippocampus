@@ -48,6 +48,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: StatusItemController?
     private var preferencesControllerConfigured = false
     private let initialPreferencesRequest = PreferencesOpenRequest(arguments: Array(CommandLine.arguments.dropFirst()))
+    /// Why this launch happened; only `.user` opens the window (spec-shell S7).
+    private var launchReason = LaunchReason.user
 
     private let firstLaunchLogger = Logger(
         subsystem: "ai.hippocampus", category: "first-launch"
@@ -178,6 +180,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // library convention: Rust's `std` masks `SIGPIPE` by default
         // for the same reason.
         signal(SIGPIPE, SIG_IGN)
+
+        // Why Hippocampus was opened, read while the launch's Apple event is
+        // still the current one (spec-shell S7). The raw event is logged so a
+        // login can be told from a launch with no event at all.
+        let launch = LaunchReason.read(preferencesRequested: initialPreferencesRequest != nil)
+        launchReason = launch.reason
+        firstLaunchLogger.info(
+            "launch: reason=\(launch.reason.rawValue, privacy: .public) event=\(launch.event?.logDescription ?? "none", privacy: .public)"
+        )
 
         // A Quit from outside the menu (a script, the installer, Homebrew,
         // logout) arrives as kAEQuitApplication. Under SwiftUI it is not
@@ -641,14 +652,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if OnboardingSentinel.isComplete {
             firstLaunchLogger.info("first-launch: sentinel present → start supervisor immediately")
             loginItemVM.enableByDefaultOnce()
-            if initialPreferencesRequest == nil, !Self.isQuietLaunch { supervisor.openRecallWhenReady(initialLaunch: true) }
+            if launchReason == .user { supervisor.openRecallWhenReady(initialLaunch: true) }
             supervisor.start()
             return
         }
 
         guard supervisor.hasOnboarding else {
             firstLaunchLogger.warning("first-launch: no Onboarding binary bundled → start supervisor as fallback")
-            if initialPreferencesRequest == nil, !Self.isQuietLaunch { supervisor.openRecallWhenReady(initialLaunch: true) }
+            if launchReason == .user { supervisor.openRecallWhenReady(initialLaunch: true) }
             supervisor.start()
             return
         }
@@ -744,13 +755,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sentinelWatcher = nil
         sentinelPollTask?.cancel()
         sentinelPollTask = nil
-    }
-
-    /// A relaunch after an update asks to stay in the menu bar
-    /// (`open -g --env HIPPOCAMPUS_QUIET_LAUNCH=1`), so it does not put a
-    /// window in front of whatever the person is doing.
-    static var isQuietLaunch: Bool {
-        ProcessInfo.processInfo.environment["HIPPOCAMPUS_QUIET_LAUNCH"] == "1"
     }
 
     /// Completing the first-run flow is the user's explicit capture opt-in.

@@ -20,9 +20,20 @@ public protocol UpdaterService: AnyObject {
     func checkForUpdates()
 }
 
+/// Sparkle relaunches the app after installing an update. The relaunch
+/// stays in the menu bar: no window opens over what the person is doing
+/// (spec-shell S7).
+final class QuietRelaunchDelegate: NSObject, SPUUpdaterDelegate {
+    func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
+        QuietLaunchNote.record()
+    }
+}
+
 @MainActor
 public final class SparkleUpdaterService: NSObject, UpdaterService, @unchecked Sendable {
     private let controller: SPUStandardUpdaterController
+    /// Sparkle holds its delegate weakly.
+    private let relaunchDelegate: QuietRelaunchDelegate
     private let stateSubject = CurrentValueSubject<UpdaterState, Never>(.idle)
     private let logger = Logger(subsystem: "ai.hippocampus", category: "updater")
 
@@ -43,9 +54,11 @@ public final class SparkleUpdaterService: NSObject, UpdaterService, @unchecked S
     }
 
     public override init() {
+        let relaunchDelegate = QuietRelaunchDelegate()
+        self.relaunchDelegate = relaunchDelegate
         self.controller = SPUStandardUpdaterController(
             startingUpdater: false,
-            updaterDelegate: nil,
+            updaterDelegate: relaunchDelegate,
             userDriverDelegate: nil
         )
         super.init()
