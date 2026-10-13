@@ -6,8 +6,8 @@ import SwiftUI
 /// Debug only: `HIPPOCAMPUS_RENDER_ONBOARDING=<dir>` draws every screen of
 /// setup, each permission row state and the tallest pairs of them, each
 /// Promise button state, each Try it card, the never-read panel and the
-/// browser extension panel Try it opens, from fixture state, to
-/// `<dir>/<name>.png` at 2x, then returns from `main` before setup starts.
+/// browser extension panel, from fixture state, to `<dir>/<name>.png` at
+/// 2x, then returns from `main` before setup starts.
 ///
 /// Nothing reaches the screen. `OnboardingEntryPoint.main` calls this
 /// first, before the parent watch and `OnboardingApp.main()`, so no scene,
@@ -102,14 +102,17 @@ enum OnboardingPreviewRenderer {
         // Try it
         let notes = proof()
         add("4-try-it-turning-on", tryIt(.starting))
-        add("4-try-it-waiting", tryIt(.waiting(.ordinary)))
-        add("4-try-it-waiting-safari", tryIt(.waiting(.needsExtension(browser: "Safari"))))
-        add("4-try-it-waiting-chrome", tryIt(.waiting(.browserWillAsk(browser: "Google Chrome"))))
-        add("4-try-it-waiting-firefox", tryIt(.waiting(.unreadBrowser(browser: "Firefox"))))
+        // A browser in front is read like any window: the ordinary card.
+        add("4-try-it-waiting", tryIt(.waiting(FrontAppNote(bundleId: "com.apple.Safari", name: "Safari"))))
         add("4-try-it-waiting-system-settings", tryIt(.waiting(.neverRead(app: "System Settings"))))
         add("4-try-it-stalled", tryIt(.stalled(.unknown)))
         add("4-try-it-stalled-permission", tryIt(.stalled(.permissionOff(.screenRecording))))
         add("4-try-it-proof", tryIt(.proof(notes), understanding: .available))
+        // No Apple Intelligence and no model on this Mac, before and on macOS 26.
+        add("4-try-it-proof-no-model", tryIt(.proof(notes), understanding: .noModel, macOS: 15))
+        add("4-try-it-proof-no-model-macos-26", tryIt(.proof(notes), understanding: .noModel, macOS: 26))
+        add("4-try-it-proof-preparing", tryIt(.proof(notes), understanding: .preparing))
+        // Set to use Apple Intelligence alone.
         add("4-try-it-proof-no-answers", tryIt(.proof(notes), understanding: .turnedOff))
         add("4-try-it-proof-unsupported", tryIt(.proof(notes), understanding: .unsupported))
         add("4-try-it-proof-no-key", tryIt(.proof(notes), keyNow: nothingOpensAsk, understanding: .available))
@@ -122,7 +125,7 @@ enum OnboardingPreviewRenderer {
         // The panel Preferences opens for what is never read.
         add("panel-never-read", OnboardingPanelView(panel: .neverRead, keptForPreview: kept) {})
 
-        // The browser extension panel, which Try it opens on a first run.
+        // The browser extension panel, which Preferences opens.
         let safari = DetectedBrowser(id: "com.apple.Safari", name: "Safari", kind: .safari)
         let chrome = DetectedBrowser(id: "com.google.Chrome", name: "Chrome", kind: .chromium)
         let arc = DetectedBrowser(id: "company.thebrowser.Browser", name: "Arc", kind: .chromium)
@@ -228,11 +231,14 @@ enum OnboardingPreviewRenderer {
     private static func tryIt(
         _ card: TryItViewModel.Card,
         keyNow: AskKeyNow = shiftTwiceNow,
-        understanding: UnderstandingAvailability? = nil
+        understanding: UnderstandingAvailability? = nil,
+        macOS: Int = 26
     ) -> some View {
         OnboardingWindow {
             TryItScreen(
-                presentation: TryItPresentation(card: card, keyNow: keyNow, understanding: understanding),
+                presentation: TryItPresentation(
+                    card: card, keyNow: keyNow, understanding: understanding, macOSMajorVersion: macOS
+                ),
                 now: now,
                 locale: locale,
                 perform: { _ in }

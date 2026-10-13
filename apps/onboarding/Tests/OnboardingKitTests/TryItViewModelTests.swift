@@ -93,10 +93,11 @@ final class TryItViewModelTests: XCTestCase {
         let cases: [(String, String, FrontAppNote)] = [
             ("com.apple.systempreferences", "System Settings", .neverRead(app: "System Settings")),
             ("com.1password.1password", "1Password", .neverRead(app: "1Password")),
-            ("com.apple.Safari", "Safari", .needsExtension(browser: "Safari")),
-            ("company.thebrowser.Browser", "Arc", .needsExtension(browser: "Arc")),
-            ("com.google.Chrome", "Google Chrome", .browserWillAsk(browser: "Google Chrome")),
-            ("org.mozilla.firefox", "Firefox", .unreadBrowser(browser: "Firefox")),
+            // Browsers are read like every other window (RULINGS G8).
+            ("com.apple.Safari", "Safari", .ordinary),
+            ("company.thebrowser.Browser", "Arc", .ordinary),
+            ("com.google.Chrome", "Google Chrome", .ordinary),
+            ("org.mozilla.firefox", "Firefox", .ordinary),
             ("com.apple.TextEdit", "TextEdit", .ordinary),
         ]
         for (bundle, name, note) in cases {
@@ -109,12 +110,8 @@ final class TryItViewModelTests: XCTestCase {
 
         XCTAssertEqual(OnboardingCopy.waitingText(.neverRead(app: "System Settings")),
                        "System Settings is never read. Try a document, note or chat.")
-        XCTAssertEqual(OnboardingCopy.waitingText(.needsExtension(browser: "Safari")),
-                       "Safari isn’t read until you add the extension.")
-        XCTAssertEqual(OnboardingCopy.waitingText(.browserWillAsk(browser: "Google Chrome")),
-                       "macOS will ask about Google Chrome. Choose Allow so Hippocampus can skip private windows.")
-        XCTAssertEqual(OnboardingCopy.waitingText(.unreadBrowser(browser: "Firefox")),
-                       "Firefox isn’t read. Try a document, note or chat.")
+        XCTAssertEqual(OnboardingCopy.waitingText(.ordinary),
+                       "Nothing read yet. Open a document, note or chat, then come back.")
     }
 
     func testAProofReplacesTheCardAndANewerOneReplacesIt() async {
@@ -147,9 +144,14 @@ final class TryItViewModelTests: XCTestCase {
                        "Accessibility is off. Turn it on in System Settings.")
 
         permissions.value = (true, true)
+        vm.appActivated(bundleId: "com.apple.systempreferences", name: "System Settings")
+        await vm.tick()
+        XCTAssertEqual(vm.card, .stalled(.frontApp(.neverRead(app: "System Settings"))))
+
+        // A browser is read like any window, so it names no cause.
         vm.appActivated(bundleId: "com.apple.Safari", name: "Safari")
         await vm.tick()
-        XCTAssertEqual(vm.card, .stalled(.frontApp(.needsExtension(browser: "Safari"))))
+        XCTAssertEqual(vm.card, .stalled(.unknown))
 
         vm.appActivated(bundleId: "com.apple.TextEdit", name: "TextEdit")
         await vm.tick()

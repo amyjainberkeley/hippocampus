@@ -10,7 +10,6 @@ struct TryItSlide: View {
     /// Whether answers work on this Mac; nil until the check answers.
     @State private var understanding: UnderstandingAvailability?
     private let openSettings: (PermissionSurface) -> Void
-    private let openPanel: (OnboardingPanel) -> Void
 
     /// - Parameters:
     ///   - consentGivenAtUs: set when this run gave consent. Then reading
@@ -20,8 +19,7 @@ struct TryItSlide: View {
         consentGivenAtUs: UInt64?,
         remembering: RememberingState,
         permissionsOn: @escaping @MainActor () async -> (screenRecording: Bool, accessibility: Bool),
-        openSettings: @escaping (PermissionSurface) -> Void,
-        openPanel: @escaping (OnboardingPanel) -> Void
+        openSettings: @escaping (PermissionSurface) -> Void
     ) {
         let now = Date()
         _tryIt = StateObject(wrappedValue: TryItViewModel(
@@ -33,7 +31,6 @@ struct TryItSlide: View {
             permissionsOn: permissionsOn
         ))
         self.openSettings = openSettings
-        self.openPanel = openPanel
     }
 
     var body: some View {
@@ -59,8 +56,6 @@ struct TryItSlide: View {
         case .tryAgain:
             NSWorkspace.shared.open(AppLink.restart)
             Task { await tryIt.tryAgain() }
-        case .addExtension:
-            openPanel(.browserExtension)
         case .openSettings(let surface):
             openSettings(surface)
         case .openItForMe:
@@ -74,7 +69,6 @@ struct TryItSlide: View {
 struct TryItScreen: View {
     enum Action: Equatable {
         case tryAgain
-        case addExtension
         case openSettings(PermissionSurface)
         case openItForMe
     }
@@ -199,7 +193,6 @@ struct TryItScreen: View {
     private func label(_ action: Action) -> String {
         switch action {
         case .tryAgain: OnboardingCopy.tryAgain
-        case .addExtension: OnboardingCopy.addExtension
         case .openSettings: OnboardingCopy.openSettings
         case .openItForMe: OnboardingCopy.openItForMe
         }
@@ -210,7 +203,6 @@ private extension TryItScreen.Action {
     init(_ action: TryItPresentation.Action) {
         switch action {
         case .tryAgain: self = .tryAgain
-        case .addExtension: self = .addExtension
         case .openSettings(let surface): self = .openSettings(surface)
         }
     }

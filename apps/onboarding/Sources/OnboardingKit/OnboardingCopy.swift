@@ -103,12 +103,18 @@ public enum OnboardingCopy {
     public static let promiseNeverReadLead = "Never read."
     /// Password fields: the focused-window path drops the frame during
     /// secure input or on a secure field, whole-screen reading stops during
-    /// secure input, and the extension never reads input values. Private
-    /// windows: browser pixels need a positive normal-window check, and the
-    /// extension skips incognito. Password managers are left out: the
-    /// helper skips a fixed list of them (1Password, Bitwarden, Dashlane,
-    /// LastPass, Keychain Access, Passwords), not every one.
-    public static let promiseNeverRead = "Password fields and private browser windows."
+    /// secure input, and the extension never reads input values. Password
+    /// managers are left out: the helper skips a fixed list of them
+    /// (1Password, Bitwarden, Dashlane, LastPass, Keychain Access,
+    /// Passwords), not every one. Private windows are not "never read":
+    /// see `privateWindowsSkipped`.
+    public static let promiseNeverRead = "Password fields. \(privateWindowsSkipped)"
+    /// Browsers are read like every other window (RULINGS G8). A private
+    /// window is skipped only when Hippocampus can tell without asking: a
+    /// private marker in its title or top bar, the extension's private
+    /// flag, or a check macOS already allowed. A private window that shows
+    /// none of these is read, so the sentence promises no more than that.
+    public static let privateWindowsSkipped = "Private browser windows are skipped when they show they are private."
     public static let promiseStopLead = "You can stop it."
     public static let promiseStop = "Pause from the menu bar. Quit ends it."
     /// The menu-bar mark's promise (RULINGS B1), word for word. Every state
@@ -190,29 +196,40 @@ public enum OnboardingCopy {
     /// (`hippocampus://restart`, the menu's own Try Again), and this
     /// screen starts over with it.
     public static let tryItStillNothing = "Still nothing read."
-    public static let addExtension = "Add Extension"
     public static let openItForMe = "Open it for me"
     public static let tryItPaused = "Remembering is paused. Resume it from the menu bar."
     public static let tryItOff = "Remembering is off. Turn it on from the menu bar."
     /// Once a proof shows: where the indicator is, and what it does.
     public static let stopSharingNote = "macOS shows an icon in the menu bar while Hippocampus reads. Stop Sharing there ends it."
-    /// Under a proof when answers are not available: one of these three,
-    /// for the reason the Apple Intelligence check gives.
-    public static let answersNeedAppleIntelligence = "Answers need Apple Intelligence. Search works without it."
+    /// Under a proof when answers are not available: one line, for the
+    /// reason the model check gives (`UnderstandingProbe`). Answers come
+    /// from Apple Intelligence or from a model Ollama or LM Studio serves
+    /// on this Mac; when either answers, nothing is said.
+    ///
+    /// Neither answers. On macOS 26 Apple Intelligence can be turned on,
+    /// so the line says what to do; before it, what answers need.
+    public static func noModelNote(macOSMajorVersion: Int) -> String {
+        macOSMajorVersion >= 26 ? turnOnAppleIntelligenceOrInstallAModel : answersNeedAModel
+    }
+    public static let answersNeedAModel = "Answers need Apple Intelligence or a model on this Mac. Search works now."
+    public static let turnOnAppleIntelligenceOrInstallAModel =
+        "For answers, turn on Apple Intelligence or install Ollama and a model."
+    /// Apple Intelligence is on but not ready, and no model on this Mac answers.
     public static let appleIntelligencePreparing = "Apple Intelligence is getting ready. Search works now."
+    /// Set to use Apple Intelligence alone, and it is off.
+    public static let answersNeedAppleIntelligence = "Answers need Apple Intelligence. Search works without it."
+    /// Set to use Apple Intelligence alone, on a Mac that cannot run it.
     public static let answersUnsupported = "Search works. Answers need macOS 26 with Apple Intelligence."
     public static let done = "Done"
     /// Ask opened, but not by a key that works now.
     public static let askFromMenuBar = "That’s Ask. Open it from the menu bar."
 
-    /// The waiting card, by the app in front.
+    /// The waiting card, by the app in front. A browser is read like any
+    /// other window (RULINGS G8), so it gets the ordinary card.
     public static func waitingText(_ note: FrontAppNote) -> String {
         switch note {
         case .ordinary: tryItWaiting
         case .neverRead(let app): "\(app) is never read. Try a document, note or chat."
-        case .unreadBrowser(let browser): "\(browser) isn’t read. Try a document, note or chat."
-        case .needsExtension(let browser): "\(browser) isn’t read until you add the extension."
-        case .browserWillAsk(let browser): "macOS will ask about \(browser). Choose Allow so Hippocampus can skip private windows."
         }
     }
 
@@ -243,9 +260,10 @@ public enum OnboardingCopy {
     }
 
     /// Under a proof: what to try now, with the key that opens Ask right
-    /// now. With Apple Intelligence a question works; without it, a word
-    /// from the window still finds it. Nil when no key opens Ask now: the
-    /// card then offers only "Open it for me".
+    /// now. When answers work (Apple Intelligence, or a model on this Mac)
+    /// a question works; otherwise a word from the window still finds it.
+    /// Nil when no key opens Ask now: the card then offers only "Open it
+    /// for me".
     public static func tryItNext(_ key: AskKeyNow, answersAvailable: Bool) -> String? {
         guard let phrase = key.phrase else { return nil }
         let press = phrase.prefix(1).lowercased() + phrase.dropFirst()
@@ -266,22 +284,23 @@ public enum OnboardingCopy {
 
     // MARK: - The browser extension panel
     //
-    // Opened by Try it's "Add Extension" on a first run, and from
-    // Preferences. Words from spec-copy S4.9, with two cuts for truth: no
-    // "whole" in the title (the extension sends a page's text up to a
-    // limit), and no "not only the part on screen" (Safari, Firefox and
-    // Arc are not read at all without the extension).
+    // Opened from Preferences. Browsers are read like every other window
+    // without it (RULINGS G8), so the body says what it adds: the page's
+    // address, and its text beyond what is on screen (the extension sends
+    // a page's text up to a limit, so not "the whole page").
 
     public static let extensionTitle = "Remember web pages"
-    public static let extensionBody = "The extension lets Hippocampus read the text of the pages you open."
+    public static let extensionBody = "The extension adds each page’s address and the text not on screen."
     public static let noBrowserFound = "No supported browser found."
     public static let safariExtensionHint = "In Safari’s extension settings, turn on Hippocampus."
     public static let openSafariSettings = "Open Safari Settings"
     public static let install = "Install"
     /// Before the first click on Open Safari Settings, which raises
-    /// macOS's Automation prompt.
+    /// macOS's Automation prompt: the click opens Safari and presses ⌘,
+    /// there. Reading a browser needs no prompt (RULINGS G8), so the note
+    /// names only what the click does.
     public static let automationAskTitle = "macOS will ask first"
-    public static let automationAskBody = "macOS asks to let Hippocampus control Safari. That’s how it reads the tab’s address."
+    public static let automationAskBody = "macOS asks to let Hippocampus control Safari. That’s how it opens Safari’s settings."
     public static let automationOffTitle = "Automation is off"
     public static let automationOffBody = "macOS won’t ask twice. Click Ask Again, or turn it on in System Settings."
     public static let openAutomationSettings = "Open Automation Settings"
@@ -308,5 +327,5 @@ public enum OnboardingCopy {
     /// Under its title. Every ordinary app is read, so what is skipped in
     /// all of them is what the person needs to know (spec-copy S3 #9, in
     /// the Promise's checked words).
-    public static let appAccessSkipped = "Password fields and private browser windows are skipped in every app."
+    public static let appAccessSkipped = "Password fields are skipped in every app. \(privateWindowsSkipped)"
 }

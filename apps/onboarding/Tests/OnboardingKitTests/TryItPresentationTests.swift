@@ -29,15 +29,34 @@ final class TryItPresentationTests: XCTestCase {
     }
 
     func testWithoutAnswersTheFirstTryIsAWordAndOneLineSaysWhy() {
-        let cases: [(UnderstandingAvailability, String)] = [
-            (.turnedOff, "Answers need Apple Intelligence. Search works without it."),
-            (.preparing, "Apple Intelligence is getting ready. Search works now."),
-            (.unsupported, "Search works. Answers need macOS 26 with Apple Intelligence."),
+        let cases: [(UnderstandingAvailability, Int, String)] = [
+            // Neither Apple Intelligence nor a model on this Mac answers.
+            (.noModel, 14, "Answers need Apple Intelligence or a model on this Mac. Search works now."),
+            (.noModel, 15, "Answers need Apple Intelligence or a model on this Mac. Search works now."),
+            (.noModel, 26, "For answers, turn on Apple Intelligence or install Ollama and a model."),
+            (.preparing, 26, "Apple Intelligence is getting ready. Search works now."),
+            // Set to use Apple Intelligence alone.
+            (.turnedOff, 26, "Answers need Apple Intelligence. Search works without it."),
+            (.unsupported, 15, "Search works. Answers need macOS 26 with Apple Intelligence."),
         ]
-        for (understanding, line) in cases {
-            let shown = TryItPresentation(card: .proof(proof), keyNow: shiftTwice, understanding: understanding)
+        for (understanding, macOS, line) in cases {
+            let shown = TryItPresentation(
+                card: .proof(proof), keyNow: shiftTwice, understanding: understanding, macOSMajorVersion: macOS
+            )
             XCTAssertEqual(shown.next, "Now press Shift twice and type a word from that window.")
             XCTAssertEqual(shown.answersNote, line)
+        }
+    }
+
+    func testWhenAModelOnThisMacAnswersNothingExtraIsSaid() {
+        // The check says available for Apple Intelligence and for a model
+        // Ollama or LM Studio serves, on any macOS.
+        for macOS in [14, 15, 26] {
+            let shown = TryItPresentation(
+                card: .proof(proof), keyNow: shiftTwice, understanding: .available, macOSMajorVersion: macOS
+            )
+            XCTAssertEqual(shown.next, "Now press Shift twice and ask about it.")
+            XCTAssertNil(shown.answersNote)
         }
     }
 
@@ -67,7 +86,7 @@ final class TryItPresentationTests: XCTestCase {
             XCTAssertEqual(shown.keycaps, [], "\(card)")
             XCTAssertFalse(shown.offersOpenItForMe, "\(card)")
             XCTAssertNil(shown.stopSharingNote, "Stop Sharing is explained once something was read")
-            XCTAssertNil(shown.answersNote, "the Apple Intelligence line shows only under a proof")
+            XCTAssertNil(shown.answersNote, "the answers line shows only under a proof")
         }
     }
 
@@ -79,17 +98,30 @@ final class TryItPresentationTests: XCTestCase {
         XCTAssertTrue(shown(.starting).isWorking)
         XCTAssertFalse(shown(.waiting(.ordinary)).isWorking)
         XCTAssertNil(shown(.waiting(.ordinary)).action)
-        XCTAssertEqual(shown(.waiting(.needsExtension(browser: "Safari"))).action, .addExtension)
-        XCTAssertNil(shown(.waiting(.browserWillAsk(browser: "Google Chrome"))).action)
+        XCTAssertNil(shown(.waiting(.neverRead(app: "System Settings"))).action)
         XCTAssertEqual(shown(.stalled(.unknown)).message, "Still nothing read.")
         XCTAssertEqual(shown(.stalled(.unknown)).action, .tryAgain)
         XCTAssertEqual(shown(.stalled(.permissionOff(.accessibility))).action, .openSettings(.accessibility))
-        XCTAssertEqual(shown(.stalled(.frontApp(.needsExtension(browser: "Arc")))).action, .addExtension)
+        XCTAssertNil(shown(.stalled(.frontApp(.neverRead(app: "1Password")))).action)
         XCTAssertEqual(shown(.notRemembering(.paused)).message, "Remembering is paused. Resume it from the menu bar.")
         XCTAssertEqual(shown(.notRemembering(.off)).message, "Remembering is off. Turn it on from the menu bar.")
         XCTAssertNil(shown(.notRemembering(.off)).action)
         XCTAssertEqual(shown(.finished(openedForThem: false)).finished, "That’s it. Shift twice works anywhere.")
         XCTAssertEqual(shown(.finished(openedForThem: true)).finished, "That’s Ask. Press Shift twice to open it anywhere.")
+    }
+
+    func testABrowserInFrontGetsTheOrdinaryCardWithNoButton() {
+        // Browsers are read like every other window (RULINGS G8): no
+        // extension and no prompt stand in the way.
+        for (bundle, name) in [("com.apple.Safari", "Safari"), ("com.google.Chrome", "Google Chrome"),
+                               ("org.mozilla.firefox", "Firefox"), ("company.thebrowser.Browser", "Arc")] {
+            let note = FrontAppNote(bundleId: bundle, name: name)
+            XCTAssertEqual(note, .ordinary, bundle)
+            let waiting = TryItPresentation(card: .waiting(note), keyNow: shiftTwice, understanding: nil)
+            XCTAssertEqual(waiting.message, "Nothing read yet. Open a document, note or chat, then come back.")
+            XCTAssertNil(waiting.action)
+            XCTAssertNil(TryItPresentation(card: .stalled(.frontApp(note)), keyNow: shiftTwice, understanding: nil).action)
+        }
     }
 
     func testAMessageIsDrawnAsItsFirstSentenceAndTheRestWithNothingDropped() {

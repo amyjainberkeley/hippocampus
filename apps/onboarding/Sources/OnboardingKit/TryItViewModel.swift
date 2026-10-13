@@ -40,22 +40,16 @@ public enum RememberingState: String, Sendable, Equatable {
     }
 }
 
-/// What the waiting card says about the app in front.
+/// What the waiting card says about the app in front. A browser is read
+/// like every other window (RULINGS G8), so it is `ordinary`.
 public enum FrontAppNote: Equatable, Sendable {
     /// "Nothing read yet. Open a document, note or chat, then come back."
     case ordinary
     /// System Settings, a password manager: "{App} is never read."
     case neverRead(app: String)
-    /// A browser with no way to be read: "{Browser} isn’t read."
-    case unreadBrowser(browser: String)
-    /// Safari, Arc: "{Browser} isn’t read until you add the extension."
-    case needsExtension(browser: String)
-    /// Chrome, Canary, Brave, Edge: macOS asks before Hippocampus can tell
-    /// a private window from a normal one.
-    case browserWillAsk(browser: String)
 
-    /// The helper's lists, mirrored (a parity test holds them to the
-    /// capture helper's sources): apps whose windows are never read…
+    /// The apps whose windows are never read, mirrored from the capture
+    /// helper's list (a parity test holds it to the helper's source).
     static let neverReadApps: Set<String> = [
         "com.1password.1password", "com.1password.1password7",
         "com.agilebits.onepassword7", "com.agilebits.onepassword-osx",
@@ -65,41 +59,14 @@ public enum FrontAppNote: Equatable, Sendable {
         "com.apple.usernotificationcenter", "com.apple.securityagent",
         "com.apple.loginwindow", "com.apple.screensaver.engine", "com.apple.screensaver",
     ]
-    /// …browsers whose pixels are never read without a privacy check…
-    static let pixelExcludedBrowsers: Set<String> = [
-        "com.apple.Safari", "com.google.Chrome", "com.google.Chrome.canary",
-        "company.thebrowser.Browser", "com.brave.Browser", "com.microsoft.edgemac",
-        "org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition", "org.mozilla.nightly",
-        "com.apple.SafariTechnologyPreview", "com.google.Chrome.beta", "com.google.Chrome.dev",
-        "com.brave.Browser.beta", "com.brave.Browser.nightly", "com.microsoft.edgemac.Beta",
-        "com.microsoft.edgemac.Dev", "com.microsoft.edgemac.Canary",
-    ]
-    /// …and the browsers that check can ask, which raises macOS's prompt.
-    static let privacyCheckedBrowsers: Set<String> = [
-        "com.google.Chrome", "com.google.Chrome.canary", "com.brave.Browser", "com.microsoft.edgemac",
-    ]
-    /// Browsers the extension panel can install into.
-    static var extensionBrowsers: Set<String> {
-        Set(knownBrowsers.map(\.bundleId))
-    }
 
     public init(bundleId: String?, name: String?) {
-        guard let bundleId, !bundleId.isEmpty else {
+        guard let bundleId, Self.neverReadApps.contains(bundleId.lowercased()) else {
             self = .ordinary
             return
         }
-        let shown = name.flatMap { $0.isEmpty ? nil : $0 }
-            ?? BundleDisplayNameResolver.displayName(for: bundleId)
-        if Self.neverReadApps.contains(bundleId.lowercased()) {
-            self = .neverRead(app: shown)
-        } else if Self.privacyCheckedBrowsers.contains(bundleId) {
-            self = .browserWillAsk(browser: shown)
-        } else if Self.pixelExcludedBrowsers.contains(bundleId) {
-            self = Self.extensionBrowsers.contains(bundleId)
-                ? .needsExtension(browser: shown) : .unreadBrowser(browser: shown)
-        } else {
-            self = .ordinary
-        }
+        self = .neverRead(app: name.flatMap { $0.isEmpty ? nil : $0 }
+            ?? BundleDisplayNameResolver.displayName(for: bundleId))
     }
 }
 

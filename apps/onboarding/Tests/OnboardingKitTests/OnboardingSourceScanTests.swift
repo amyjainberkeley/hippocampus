@@ -160,13 +160,14 @@ final class OnboardingSourceScanTests: XCTestCase {
         XCTAssertTrue(tryIt.contains("tryIt.willOpenAskForThem()\n            NSWorkspace.shared.open(AppLink.ask)"))
     }
 
-    func testAPanelOpenedFromTryItCoversTheFlowWithoutEndingIt() throws {
-        // Replacing the flow would end Try it's reader and start it over.
+    func testTryItSendsNobodyToTheExtensionPanel() throws {
+        // Browsers are read like every other window (RULINGS G8), so Try
+        // it has no "Add Extension" and the flow opens no panel over itself.
+        let tryIt = code(try source("Onboarding/Slides/TryItSlide.swift")).joined(separator: "\n")
+        XCTAssertFalse(tryIt.contains("openPanel"))
+        XCTAssertFalse(tryIt.contains(".browserExtension"))
         let flow = code(try source("Onboarding/OnboardingFlowView.swift")).joined(separator: "\n")
-        XCTAssertTrue(flow.contains("ZStack {"))
-        XCTAssertTrue(flow.contains(".opacity(panel == nil ? 1 : 0)"))
-        XCTAssertTrue(flow.contains(".disabled(panel != nil)"), "its buttons and Return are off underneath")
-        XCTAssertFalse(flow.contains("} else {\n                OnboardingWindow"), "the flow stays in the window")
+        XCTAssertFalse(flow.contains("OnboardingPanelView("), "panels open by route, after consent")
     }
 
     func testTheOpenAtLoginCheckboxIsShownOnlyBeforeConsent() throws {
@@ -199,8 +200,8 @@ final class OnboardingSourceScanTests: XCTestCase {
     }
 
     func testTheBrowserExtensionPanelTakesEveryWordFromTheCopyFile() throws {
-        // Try it opens it on a first run, so its words are held by the copy
-        // tests like the four screens'.
+        // Preferences opens it, so its words are held by the copy tests
+        // like the four screens'.
         let panel = code(try source("Onboarding/Slides/BrowserExtensionSlide.swift"))
         let literalWords = try NSRegularExpression(pattern: #"(Text|Button|title:|body:)\(?\s*"[A-Za-z]"#)
         for line in panel {

@@ -1,8 +1,8 @@
 import SwiftUI
 import OnboardingKit
 
-/// One panel, opened by route after consent (`hippocampus://setup/<panel>`)
-/// or from Try it: the same window, no dots, no Back, one "Done".
+/// One panel, opened by route after consent (`hippocampus://setup/<panel>`):
+/// the same window, no dots, no Back, one "Done".
 struct OnboardingPanelView: View {
     let panel: OnboardingPanel
     /// The preview renderer fixes what the never-read panel says is kept.

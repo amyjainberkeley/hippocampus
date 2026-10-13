@@ -14,8 +14,10 @@ final class OnboardingCopyTests: XCTestCase {
         XCTAssertEqual(OnboardingCopy.promiseStays(kept: "kept 90 days"),
                        "Text and screenshots, encrypted, kept 90 days. Nothing is uploaded by Hippocampus. It shares them with your AI only if you connect it. What your AI reads goes to the company that runs it.")
         // Password managers are left out: the helper skips a fixed list of
-        // them, not every one.
-        XCTAssertEqual(OnboardingCopy.promiseNeverRead, "Password fields and private browser windows.")
+        // them, not every one. Private windows are skipped only when they
+        // show it (RULINGS G8).
+        XCTAssertEqual(OnboardingCopy.promiseNeverRead,
+                       "Password fields. Private browser windows are skipped when they show they are private.")
         XCTAssertEqual(OnboardingCopy.promiseStop, "Pause from the menu bar. Quit ends it.")
         // The menu-bar mark's promise, word for word (RULINGS B1).
         XCTAssertEqual(OnboardingCopy.dotPromise, "A solid dot means it is remembering. No solid dot means it is not.")
@@ -42,6 +44,30 @@ final class OnboardingCopyTests: XCTestCase {
 
     func testThePromiseNeverPromisesEveryPasswordManager() {
         XCTAssertFalse(OnboardingCopy.promiseNeverRead.lowercased().contains("password manager"))
+    }
+
+    func testPrivateBrowserWindowsArePromisedOnlyWhenTheyShowIt() {
+        // Browsers are read like every other window, and a private one is
+        // skipped when Hippocampus can tell without asking (RULINGS G8).
+        XCTAssertEqual(OnboardingCopy.privateWindowsSkipped,
+                       "Private browser windows are skipped when they show they are private.")
+        XCTAssertTrue(OnboardingCopy.promiseNeverRead.hasSuffix(OnboardingCopy.privateWindowsSkipped))
+        XCTAssertTrue(OnboardingCopy.appAccessSkipped.hasSuffix(OnboardingCopy.privateWindowsSkipped))
+        for string in newStrings {
+            let lower = string.lowercased()
+            XCTAssertFalse(lower.contains("and private browser windows"), "\"\(string)\" lists them as never read")
+            XCTAssertFalse(lower.contains("private browser windows."), "\"\(string)\" lists them as never read")
+        }
+    }
+
+    func testNoStringSaysABrowserNeedsAnExtensionOrAPromptToBeRead() {
+        for string in newStrings {
+            let lower = string.lowercased()
+            for claim in ["until you add the extension", "isn’t read until", "macos will ask about",
+                          "choose allow so hippocampus", "add extension"] {
+                XCTAssertFalse(lower.contains(claim), "\"\(string)\" says \"\(claim)\"")
+            }
+        }
     }
 
     func testInReviewThePromiseHasNoStartRememberingBody() {
@@ -150,21 +176,35 @@ final class OnboardingCopyTests: XCTestCase {
     }
 
     func testAnswersLinesSayWhyEachTime() {
+        // Neither Apple Intelligence nor a model on this Mac answers: on
+        // macOS 26 Apple Intelligence can be turned on, so say how.
+        XCTAssertEqual(OnboardingCopy.noModelNote(macOSMajorVersion: 14),
+                       "Answers need Apple Intelligence or a model on this Mac. Search works now.")
+        XCTAssertEqual(OnboardingCopy.noModelNote(macOSMajorVersion: 15), OnboardingCopy.answersNeedAModel)
+        XCTAssertEqual(OnboardingCopy.noModelNote(macOSMajorVersion: 26),
+                       "For answers, turn on Apple Intelligence or install Ollama and a model.")
+        XCTAssertEqual(OnboardingCopy.noModelNote(macOSMajorVersion: 27),
+                       OnboardingCopy.turnOnAppleIntelligenceOrInstallAModel)
+        XCTAssertEqual(OnboardingCopy.appleIntelligencePreparing, "Apple Intelligence is getting ready. Search works now.")
+        // Set to use Apple Intelligence alone.
         XCTAssertEqual(OnboardingCopy.answersNeedAppleIntelligence, "Answers need Apple Intelligence. Search works without it.")
         XCTAssertEqual(OnboardingCopy.answersUnsupported, "Search works. Answers need macOS 26 with Apple Intelligence.")
     }
 
-    // MARK: - The panels a first run can reach
+    // MARK: - The panels
 
-    func testTheBrowserExtensionPanelSaysOnlyWhatHoldsForEveryBrowser() {
-        // Try it opens it for Safari, Firefox and Arc, which are not read
-        // at all without the extension: nothing says the screen part is.
+    func testTheBrowserExtensionPanelSaysWhatTheExtensionAdds() {
+        // Every browser window is read without it (RULINGS G8), so the
+        // body says what it adds. It sends a page's text up to a limit, so
+        // nothing says "whole".
         XCTAssertEqual(OnboardingCopy.extensionTitle, "Remember web pages")
-        XCTAssertEqual(OnboardingCopy.extensionBody, "The extension lets Hippocampus read the text of the pages you open.")
-        XCTAssertFalse(OnboardingCopy.extensionBody.contains("on screen"))
+        XCTAssertEqual(OnboardingCopy.extensionBody, "The extension adds each page’s address and the text not on screen.")
+        XCTAssertFalse(OnboardingCopy.extensionBody.lowercased().contains("whole"))
         XCTAssertEqual(OnboardingCopy.safariExtensionHint, "In Safari’s extension settings, turn on Hippocampus.")
+        // The prompt comes from opening Safari's settings; reading a
+        // browser needs none.
         XCTAssertEqual(OnboardingCopy.automationAskBody,
-                       "macOS asks to let Hippocampus control Safari. That’s how it reads the tab’s address.")
+                       "macOS asks to let Hippocampus control Safari. That’s how it opens Safari’s settings.")
         XCTAssertEqual(OnboardingCopy.automationOffBody,
                        "macOS won’t ask twice. Click Ask Again, or turn it on in System Settings.")
         XCTAssertTrue(OnboardingCopy.automationOffBody.contains(OnboardingCopy.askAgain), "names the button beside it")
@@ -184,8 +224,7 @@ final class OnboardingCopyTests: XCTestCase {
         // Every ordinary app is read; the Promise's checked words say what
         // is not.
         XCTAssertEqual(OnboardingCopy.appAccessSkipped,
-                       "Password fields and private browser windows are skipped in every app.")
-        XCTAssertTrue(OnboardingCopy.appAccessSkipped.hasPrefix(String(OnboardingCopy.promiseNeverRead.dropLast())))
+                       "Password fields are skipped in every app. Private browser windows are skipped when they show they are private.")
     }
 
     // MARK: - Style (spec-copy S2, RULINGS V)
@@ -208,19 +247,19 @@ final class OnboardingCopyTests: XCTestCase {
             OnboardingCopy.settingUpEncryption, OnboardingCopy.encryptionFailed, OnboardingCopy.tryAgain,
             OnboardingCopy.consentFailedTitle, OnboardingCopy.consentFailedMessage,
             OnboardingCopy.promiseStays(kept: "kept until you delete it"),
+            OnboardingCopy.privateWindowsSkipped,
             OnboardingCopy.tryItTitle, OnboardingCopy.tryItStarting, OnboardingCopy.tryItStillNothing,
-            OnboardingCopy.addExtension, OnboardingCopy.openItForMe, OnboardingCopy.askFromMenuBar,
+            OnboardingCopy.openItForMe, OnboardingCopy.askFromMenuBar,
             OnboardingCopy.tryItPaused, OnboardingCopy.tryItOff, OnboardingCopy.stopSharingNote,
+            OnboardingCopy.answersNeedAModel, OnboardingCopy.turnOnAppleIntelligenceOrInstallAModel,
             OnboardingCopy.answersNeedAppleIntelligence, OnboardingCopy.appleIntelligencePreparing,
             OnboardingCopy.answersUnsupported, OnboardingCopy.done,
             OnboardingCopy.stalledText(.permissionOff(.screenRecording)), OnboardingCopy.stalledText(.unknown),
         ]
-        let notes: [FrontAppNote] = [
-            .ordinary, .neverRead(app: "System Settings"), .unreadBrowser(browser: "Firefox"),
-            .needsExtension(browser: "Safari"), .browserWillAsk(browser: "Google Chrome"),
-        ]
+        let notes: [FrontAppNote] = [.ordinary, .neverRead(app: "System Settings")]
         strings += notes.map(OnboardingCopy.waitingText)
-        // The panels a first run can reach, and the Promise in review.
+        strings += [14, 15, 26].map(OnboardingCopy.noModelNote)
+        // The panels, and the Promise in review.
         strings += [
             OnboardingCopy.promiseTitle(isReview: true), OnboardingCopy.appAccessSkipped,
             OnboardingCopy.extensionTitle, OnboardingCopy.extensionBody, OnboardingCopy.noBrowserFound,
@@ -300,7 +339,7 @@ final class OnboardingCopyTests: XCTestCase {
         for button in [OnboardingCopy.getStarted, OnboardingCopy.back, OnboardingCopy.allow, OnboardingCopy.openSettings,
                        OnboardingCopy.askAgain,
                        OnboardingCopy.continueLabel, OnboardingCopy.startRemembering, OnboardingCopy.tryAgain,
-                       OnboardingCopy.addExtension, OnboardingCopy.done,
+                       OnboardingCopy.done,
                        OnboardingCopy.openSafariSettings, OnboardingCopy.install, OnboardingCopy.openAutomationSettings,
                        OnboardingCopy.copyPath, OnboardingCopy.showInFinder, OnboardingCopy.copyAddress] {
             for (index, word) in button.split(separator: " ").enumerated() where index == 0 || !minor.contains(word) {

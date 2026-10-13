@@ -7,7 +7,7 @@
 // Only a proof carries the lines under it: what to try now (a question
 // when answers work on this Mac, a word from that window when they do
 // not), "Open it for me", where macOS's recording icon is and what Stop
-// Sharing does, and at most one line about Apple Intelligence.
+// Sharing does, and at most one line about what answers need.
 
 import Foundation
 
@@ -24,8 +24,6 @@ public struct TryItPresentation: Equatable, Sendable {
     public enum Action: Equatable, Sendable {
         /// "Try Again": the app restarts remembering in place.
         case tryAgain
-        /// "Add Extension": the browser extension panel.
-        case addExtension
         /// "Open System Settings", at the permission that is off.
         case openSettings(PermissionSurface)
     }
@@ -50,7 +48,14 @@ public struct TryItPresentation: Equatable, Sendable {
     /// Under a proof, when answers do not work: why, in one line.
     public let answersNote: String?
 
-    public init(card: TryItViewModel.Card, keyNow: AskKeyNow, understanding: UnderstandingAvailability?) {
+    /// - Parameter macOSMajorVersion: picks the line for a Mac with no
+    ///   model: macOS 26 can turn Apple Intelligence on.
+    public init(
+        card: TryItViewModel.Card,
+        keyNow: AskKeyNow,
+        understanding: UnderstandingAvailability?,
+        macOSMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+    ) {
         var message: String?
         var proof: ReadProof?
         var action: Action?
@@ -60,13 +65,12 @@ public struct TryItPresentation: Equatable, Sendable {
             message = OnboardingCopy.tryItStarting
         case .waiting(let note):
             message = OnboardingCopy.waitingText(note)
-            action = Self.action(for: note)
         case .stalled(let cause):
             message = OnboardingCopy.stalledText(cause)
             switch cause {
             case .unknown: action = .tryAgain
             case .permissionOff(let surface): action = .openSettings(surface)
-            case .frontApp(let note): action = Self.action(for: note)
+            case .frontApp: break
             }
         case .proof(let shown):
             proof = shown
@@ -86,7 +90,7 @@ public struct TryItPresentation: Equatable, Sendable {
         self.keycaps = underProof && keyNow.phrase != nil ? keyNow.keycaps : []
         self.offersOpenItForMe = underProof
         self.stopSharingNote = underProof ? OnboardingCopy.stopSharingNote : nil
-        self.answersNote = underProof ? Self.answersNote(understanding) : nil
+        self.answersNote = underProof ? Self.answersNote(understanding, macOSMajorVersion: macOSMajorVersion) : nil
     }
 
     /// The message as drawn: its first sentence as the heading, the rest
@@ -99,17 +103,14 @@ public struct TryItPresentation: Equatable, Sendable {
         return (heading, detail.isEmpty ? nil : detail)
     }
 
-    private static func action(for note: FrontAppNote) -> Action? {
-        if case .needsExtension = note { return .addExtension }
-        return nil
-    }
-
     /// One line, only when the check has answered and answers do not work.
-    static func answersNote(_ understanding: UnderstandingAvailability?) -> String? {
+    /// A model on this Mac that answers is `.available`: nothing is said.
+    static func answersNote(_ understanding: UnderstandingAvailability?, macOSMajorVersion: Int) -> String? {
         switch understanding {
         case nil, .available: nil
-        case .turnedOff: OnboardingCopy.answersNeedAppleIntelligence
+        case .noModel: OnboardingCopy.noModelNote(macOSMajorVersion: macOSMajorVersion)
         case .preparing: OnboardingCopy.appleIntelligencePreparing
+        case .turnedOff: OnboardingCopy.answersNeedAppleIntelligence
         case .unsupported: OnboardingCopy.answersUnsupported
         }
     }

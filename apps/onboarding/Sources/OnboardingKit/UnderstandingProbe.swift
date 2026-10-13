@@ -1,15 +1,22 @@
 import Foundation
 
 /// Whether Hippocampus can understand (answers, the day's account, the user
-/// model) on this Mac: the bundled `hippocampus-mind` reports Apple
-/// Intelligence availability on its first line.
+/// model) on this Mac: the bundled `hippocampus-mind` picks Apple
+/// Intelligence or a model served on this Mac (Ollama, LM Studio) when it
+/// starts, and says on its first line whether either can answer.
 public enum UnderstandingAvailability: Equatable, Sendable {
+    /// Apple Intelligence or a model on this Mac answers.
     case available
-    /// Apple Intelligence is off in System Settings.
-    case turnedOff
-    /// Still downloading or preparing.
+    /// Neither answers: Apple Intelligence is off or missing and no model
+    /// server on this Mac has a usable model. Also a reply it cannot read.
+    case noModel
+    /// Apple Intelligence is on but still downloading or preparing, and
+    /// no model on this Mac answers.
     case preparing
-    /// This Mac or macOS version cannot run it.
+    /// Set to use Apple Intelligence alone, and it is off.
+    case turnedOff
+    /// Set to use Apple Intelligence alone, on a Mac or macOS that cannot
+    /// run it.
     case unsupported
 }
 
@@ -21,28 +28,41 @@ public enum UnderstandingProbe {
         return url
     }
 
-    /// Map the ready line's fields to an availability.
+    /// Map the ready line's fields to an availability. With no settings
+    /// the mind says `needs_apple_intelligence_or_local_model` when neither
+    /// answers; the `local_…` reasons come from a model server named in its
+    /// settings, and the Apple-only reasons from a setting for Apple alone
+    /// (`EngineChoice` in apps/mind).
     public static func availability(fromReadyLine line: String) -> UnderstandingAvailability {
         guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else {
-            return .unsupported
+            return .noModel
         }
         if object["available"] as? Bool == true { return .available }
         switch object["reason"] as? String {
-        case "apple_intelligence_off": return .turnedOff
         case "model_not_ready": return .preparing
-        default: return .unsupported
+        case "apple_intelligence_off": return .turnedOff
+        case "needs_macos_26", "device_not_eligible", "unavailable": return .unsupported
+        default: return .noModel
         }
+    }
+
+    /// The child's environment: `PATH`, and `HOME` so the mind reads the
+    /// person's model settings, as the agent starts it.
+    static func environment(_ parent: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+        var environment = ["PATH": "/usr/bin:/bin"]
+        if let home = parent["HOME"], !home.isEmpty { environment["HOME"] = home }
+        return environment
     }
 
     /// Start the binary, read its first line, stop it.
     public static func check(mind: URL? = mindURL(), timeout: TimeInterval = 10) async -> UnderstandingAvailability {
-        guard let mind else { return .unsupported }
+        guard let mind else { return .noModel }
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
                 let process = Process()
                 process.executableURL = mind
                 process.arguments = ["--serve"]
-                process.environment = ["PATH": "/usr/bin:/bin"]
+                process.environment = Self.environment()
                 let input = Pipe(), output = Pipe()
                 process.standardInput = input
                 process.standardOutput = output

@@ -4,11 +4,12 @@ import OnboardingKit
 import AppKit
 #endif
 
-/// The browser extension panel: opened by Try it's "Add Extension" on a
-/// first run, and from Preferences. Install for a Chromium browser opens
-/// chrome://extensions and shows the extension's folder in Finder; for
-/// Safari it opens Safari's settings, which raises macOS's Automation
-/// prompt the first time.
+/// The browser extension panel, opened from Preferences. Browsers are
+/// read without it (RULINGS G8); it adds each page's address and the text
+/// off screen. Install for a Chromium browser opens chrome://extensions
+/// and shows the extension's folder in Finder; for Safari it opens
+/// Safari's settings, which raises macOS's Automation prompt the first
+/// time.
 struct BrowserExtensionSlide: View {
     @EnvironmentObject var extensionVM: BrowserExtensionViewModel
     @EnvironmentObject var flowVM: OnboardingFlowViewModel
