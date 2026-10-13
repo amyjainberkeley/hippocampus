@@ -156,6 +156,12 @@ fn shipped_consumers_and_children_use_reference_only_custody() {
         root.join("apps/hippocampus/Sources/Hippocampus/StatusMenuView.swift"),
     )
     .expect("read status menu");
+    // "Connect AI Tools…" starts the agent from here since the menu was
+    // rewritten.
+    let connect = std::fs::read_to_string(
+        root.join("apps/hippocampus/Sources/Hippocampus/ConnectAITools.swift"),
+    )
+    .expect("read the AI tools connector");
     let onboarding = std::fs::read_to_string(
         root.join("apps/onboarding/Sources/Onboarding/LocalKeyGenerator.swift"),
     )
@@ -163,7 +169,8 @@ fn shipped_consumers_and_children_use_reference_only_custody() {
 
     assert!(brain.contains("resolve_database_key()"));
     assert!(brain.contains("MCI_DEVELOPMENT_FILE_KEY"));
-    assert!(status.contains("sanitizedChildEnvironment()"));
+    assert!(connect.contains("sanitizedChildEnvironment()"));
+    assert!(!connect.contains("dev.key"));
     assert!(!status.contains("dev.key"));
     assert!(onboarding.contains("ensure-key"));
     assert!(!onboarding.contains("SecRandomCopyBytes"));
