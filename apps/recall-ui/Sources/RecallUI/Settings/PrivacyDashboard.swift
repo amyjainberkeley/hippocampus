@@ -112,12 +112,6 @@ struct PrivacyDashboard: View {
                     onShowAll: { showAllAudit.toggle() },
                     onExport: { runExportAuditLog() }
                 )
-                // Freemium tier footer (cycle 8.48). Reinforces trust
-                // invariant #1 from `docs/business/tier-structure.md`
-                // — every v1.0 feature stays Free forever. Reads from
-                // `TierManager.shared.current` so once Pro state lands
-                // in v1.5+ the label reflects it automatically.
-                TierFooter(tier: TierManager.shared.current)
             }
             .padding(MCI.Spacing.xl)
         }
@@ -434,20 +428,6 @@ struct EventRow: View {
                 .lineLimit(2)
             }
             Spacer()
-            Menu {
-                Button("Delete this event") {}
-                Button("Delete this hour") {}
-                Button("Delete this day") {}
-                Divider()
-                Button("Report as sensitive") {}
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .foregroundStyle(Color.brandFgMuted)
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .accessibilityLabel("Event actions")
-            .accessibilityHint("Delete this event, hour, or day; or report as sensitive")
         }
         .padding(10)
         .background(Color.brandBgSecondary)
@@ -676,39 +656,5 @@ struct RecentActivitySection: View {
         return details.keys.sorted()
             .map { "\($0)=\(details[$0] ?? "")" }
             .joined(separator: ", ")
-    }
-}
-
-// MARK: - Tier footer
-
-/// Trust-signal footer showing the user's current tier. Reads a
-/// snapshotted `Tier` value at render time so the view stays a pure
-/// function of its input (`TierManager.shared.current` is queried at
-/// the call site in `PrivacyDashboard.body` above). See
-/// `docs/business/tier-structure.md` for the full tier boundary.
-struct TierFooter: View {
-    let tier: Tier
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "sparkles")
-                .foregroundStyle(Color.brandMintDim)
-            Text(footerText)
-                .font(.caption)
-                .foregroundStyle(Color.brandFgMuted)
-            Spacer()
-        }
-        .padding(.top, 12)
-    }
-
-    private var footerText: String {
-        switch tier {
-        case .free:
-            return "You're on Free forever — every feature you use today, at $0, always."
-        case .pro:
-            return "You're on Pro — thanks for supporting local-first."
-        case .enterprise:
-            return "You're on Enterprise."
-        }
     }
 }
