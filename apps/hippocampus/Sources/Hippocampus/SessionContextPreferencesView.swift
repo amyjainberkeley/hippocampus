@@ -1,150 +1,122 @@
 import HippocampusKit
 import SwiftUI
 
+/// Preferences, AI Tools (RULINGS S4, product critique 5, spec-copy S4.5):
+/// which tools are connected, and whether each starts its sessions with what
+/// you are working on. Every word is in `AIToolsCopy`.
 struct SessionContextPreferencesView: View {
     @ObservedObject var supervisor: ProcessSupervisor
-    @State private var claudeStatus = "Not checked"
-    @State private var codexStatus = "Not checked"
-    @State private var message: String?
-    @State private var connecting = false
-    @State private var consentClient: Client?
+    /// Runs Connect AI Tools…, then calls back so the pane reads again.
+    let connect: (@escaping () -> Void) -> Void
+    /// Fixed facts for the off-screen renderer; nil reads them from disk.
+    var preview: Facts?
 
-    private enum Client: String, Identifiable {
-        case claude = "Claude Code", codex = "Codex"
-        var id: String { rawValue }
+    struct Facts {
+        var connected: Set<AITool>
+        var statuses: [AITool: SessionContextConfigurationStatus]
+    }
+
+    @State private var facts: Facts
+    @State private var message: String?
+    @State private var asking: AITool?
+
+    init(supervisor: ProcessSupervisor, connect: @escaping (@escaping () -> Void) -> Void, preview: Facts? = nil) {
+        self.supervisor = supervisor
+        self.connect = connect
+        self.preview = preview
+        _facts = State(initialValue: preview ?? Facts(connected: [], statuses: [:]))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: PreferencesStyle.sectionSpacing) {
-            Text("AI Context").font(PreferencesStyle.sectionTitleFont)
-            Text("Memory shared with an AI client may be sent to its model provider and retained in its session history. Hippocampus adds no network transmission.")
+            Text(AIToolsCopy.paneTitle).font(PreferencesStyle.sectionTitleFont)
+            Text(AIToolsCopy.boundary)
                 .font(PreferencesStyle.captionFont)
                 .foregroundStyle(.secondary)
-            Text("Registering MCP tools leaves session hooks and transcript importing unchanged. Choose session context separately below.")
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(AITool.allCases) { tool in
+                toolRow(tool)
+                Divider()
+            }
+            Button(AIToolsCopy.connectButton) {
+                connect { Task { await refresh() } }
+            }
+            Text(AIToolsCopy.whileQuit)
                 .font(PreferencesStyle.captionFont)
                 .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Claude Code").font(.headline)
-                Text(claudeStatus).font(PreferencesStyle.captionFont)
-                Text("Local session hook: startup, resume, clear, and compaction. Configuration does not verify delivery; client policy can disable hooks.")
-                    .font(PreferencesStyle.captionFont).foregroundStyle(.secondary)
-                HStack {
-                    Button { consentClient = .claude } label: {
-                        Label("Enable Session Context", systemImage: "link.badge.plus")
-                    }
-                    Button { apply(.claude, enabled: false) } label: {
-                        Label("Remove", systemImage: "link.badge.minus")
-                    }
-                }
-            }
-            Divider()
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Codex").font(.headline)
-                Text(codexStatus).font(PreferencesStyle.captionFont)
-                Text("Persistent AGENTS.md instructions request the Hippocampus MCP tool. Requires MCP registration. Retrieval is client-directed, not a guaranteed session hook.")
-                    .font(PreferencesStyle.captionFont).foregroundStyle(.secondary)
-                HStack {
-                    Button { consentClient = .codex } label: {
-                        Label("Enable Context Instructions", systemImage: "doc.badge.plus")
-                    }
-                    Button { apply(.codex, enabled: false) } label: {
-                        Label("Remove", systemImage: "link.badge.minus")
-                    }
-                }
-            }
-            Divider()
-            HStack {
-                Button { registerMCP() } label: {
-                    Label("Register MCP Tools", systemImage: "point.3.connected.trianglepath.dotted")
-                }
-                .disabled(connecting)
-                Button { refresh() } label: {
-                    Label("Refresh Status", systemImage: "arrow.clockwise")
-                }
-            }
+                .fixedSize(horizontal: false, vertical: true)
             if let message {
-                Text(message).font(PreferencesStyle.captionFont).textSelection(.enabled)
+                Text(message).font(PreferencesStyle.captionFont)
             }
         }
-        .task { refresh() }
-        .alert(item: $consentClient) { client in
+        .task { await refresh() }
+        .alert(item: $asking) { tool in
             Alert(
-                title: Text("Share local memory with \(client.rawValue)?"),
-                message: Text(client == .claude
-                    ? "Enable a user-level hook for local Claude sessions in all projects. It supplies a bounded cited packet focused on the working directory, which can include memory from other projects. Claude and its model provider may receive and retain it. No secret keys are added to settings. Restart Claude after enabling or removing."
-                    : "Add user-level Codex instructions requesting a bounded cited memory packet through MCP. Codex and its model provider may receive and retain memory from any project. Tool availability, permissions, and instruction overrides still apply. Restart Codex after enabling or removing."),
-                primaryButton: .default(Text("Enable")) { apply(client, enabled: true) },
+                title: Text(AIToolsCopy.shareTitle(tool)),
+                message: Text(AIToolsCopy.shareMessage(tool)),
+                primaryButton: .default(Text(AIToolsCopy.share)) { apply(tool, enabled: true) },
                 secondaryButton: .cancel()
             )
         }
     }
 
-    private func installer() throws -> SessionContextInstaller {
-        guard let executable = Bundle.main.executableURL else { throw SessionContextInstallError.unsafePath }
-        let environment = ProcessInfo.processInfo.environment
-        func directory(_ key: String) throws -> URL? {
-            guard let path = environment[key], !path.isEmpty else { return nil }
-            guard path.hasPrefix("/") else { throw SessionContextInstallError.unsafePath }
-            return URL(fileURLWithPath: path)
-        }
-        return try SessionContextInstaller(
-            homeURL: FileManager.default.homeDirectoryForCurrentUser,
-            executableURL: executable, dbURL: supervisor.dbPath,
-            claudeConfigURL: directory("CLAUDE_CONFIG_DIR"), codexHomeURL: directory("CODEX_HOME")
-        )
-    }
-
-    private func refresh() {
-        do {
-            let installer = try installer()
-            do { claudeStatus = label(try installer.claudeStatus()) }
-            catch { claudeStatus = diagnostic(error) }
-            do { codexStatus = label(try installer.codexStatus()) }
-            catch { codexStatus = diagnostic(error) }
-        } catch { message = diagnostic(error) }
-    }
-
-    private func apply(_ client: Client, enabled: Bool) {
-        do {
-            let installer = try installer()
-            switch client {
-            case .claude: try installer.setClaudeEnabled(enabled)
-            case .codex: try installer.setCodexEnabled(enabled)
+    private func toolRow(_ tool: AITool) -> some View {
+        let connected = facts.connected.contains(tool)
+        let status = facts.statuses[tool] ?? .notConfigured
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(tool.name).font(.headline)
+                Spacer()
+                Text(connected ? AIToolsCopy.connected : AIToolsCopy.notConnected)
+                    .font(PreferencesStyle.captionFont)
+                    .foregroundStyle(.secondary)
             }
-            message = enabled
-                ? "Configuration saved. Restart \(client.rawValue). Context delivery has not been verified."
-                : "Context setup removed. Restart \(client.rawValue). Previously shared context remains in client history. MCP registration is unchanged."
-        } catch { message = diagnostic(error) }
-        refresh()
+            Toggle(AIToolsCopy.sessionToggle, isOn: Binding(
+                get: { status == .configured },
+                set: { on in
+                    if on { asking = tool } else { apply(tool, enabled: false) }
+                }
+            ))
+            .disabled(!connected || status == .disabledByClient || status == .overridden)
+            if let note = AIToolsCopy.status(status, for: tool) {
+                Text(note)
+                    .font(PreferencesStyle.captionFont)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
-    private func registerMCP() {
-        guard let agent = supervisor.agentBinaryPath else {
-            message = "The bundled agent is unavailable."
+    private func installer() throws -> SessionContextInstaller {
+        try SessionContextInstaller.forApp(executableURL: Bundle.main.executableURL, dbURL: supervisor.dbPath)
+    }
+
+    private func refresh() async {
+        if let preview {
+            facts = preview
             return
         }
-        connecting = true
-        let environment = supervisor.sanitizedChildEnvironment()
-        Task {
-            defer { connecting = false }
-            do {
-                message = try await AIToolConnector(agentURL: agent, baseEnvironment: environment).connectAll()
-                    + "\nRegistration is not proof of context delivery."
-            } catch { message = "MCP registration failed. Client connection has not been verified." }
+        var statuses: [AITool: SessionContextConfigurationStatus] = [:]
+        if let installer = try? installer() {
+            for tool in AITool.allCases {
+                statuses[tool] = try? installer.status(for: tool)
+            }
         }
+        // Claude Code's settings file can be large: read it off the main thread.
+        let environment = ProcessInfo.processInfo.environment
+        let connected = await Task.detached(priority: .userInitiated) {
+            AIToolRegistrations.connected(environment: environment)
+        }.value
+        facts = Facts(connected: connected, statuses: statuses)
     }
 
-    private func label(_ status: SessionContextConfigurationStatus) -> String {
-        switch status {
-        case .notConfigured: "Not configured"
-        case .configured: "Configured; context delivery not verified"
-        case .disabledByClient: "Disabled in Claude settings"
-        case .overridden: "Blocked by Codex AGENTS.override.md"
+    private func apply(_ tool: AITool, enabled: Bool) {
+        do {
+            try installer().setEnabled(enabled, for: tool)
+            message = enabled ? AIToolsCopy.turnedOn(tool) : AIToolsCopy.turnedOff(tool)
+        } catch {
+            message = (error as? SessionContextInstallError)?.errorDescription
+                ?? "Couldn’t change that tool’s settings. Try again."
         }
-    }
-
-    private func diagnostic(_ error: Error) -> String {
-        (error as? SessionContextInstallError)?.errorDescription
-            ?? "Client settings could not be updated. No connection has been verified."
+        Task { await refresh() }
     }
 }

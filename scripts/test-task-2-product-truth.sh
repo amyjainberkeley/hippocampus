@@ -48,8 +48,7 @@ rg -Uq 'The Developer ID Application[[:space:]]+identity and its private key are
 rg -Uq '`notarytool-profile` authenticates[[:space:]]+successfully' "$STATUS"
 rg -Uq 'Sparkle private/public key pair matches' "$STATUS"
 
-rg -Fq 'Deleted memories are removed as database rows and local storage is compacted.' \
-    "$REPO_ROOT/apps/onboarding/Sources/Onboarding/Slides/RetentionSlide.swift"
+rg -Fq 'Anything older is deleted for good.' "$PREFERENCES_WINDOW"
 rg -Fq 'python3 "$GENERATE_EULA" --check' "$INSTALLER"
 rg -Fq 'cp "$EULA_RTF" "$DMG_STAGING/Legal/License.rtf"' "$INSTALLER"
 if rg -q 'hdiutil (unflatten|flatten)|Rez -append' "$INSTALLER"; then
@@ -71,7 +70,7 @@ rg -Fq 'public func saveThen(' "$ONBOARDING_RETENTION_MODEL"
 rg -Fq 'await retentionVM.saveThen { flowVM.advance() }' "$ONBOARDING_FLOW"
 rg -Fq 'parsed[key] = value' "$RUNTIME_CONFIG"
 rg -Fq 'parsed.convert(to: .toml)' "$RUNTIME_CONFIG"
-rg -Fq 'captureEnabled: supervisor.captureEnabled' "$STATUS_MENU" "$APP"
+rg -Fq 'from: state, captureEnabled: captureEnabled,' "$PROCESS_SUPERVISOR"
 rg -Fq 'environment["MCI_ONBOARDING_STEP"] = initialStep' "$PROCESS_SUPERVISOR"
 rg -Fq 'OnboardingStep.init(launchRoute:)' "$ONBOARDING_APP"
 rg -Fq 'case "allowlist", "app-access": self = .allowlist' "$ONBOARDING_STEP"
@@ -80,10 +79,11 @@ if rg -q 'deepHookPlugins|defaultDeepHookPlugins|deepHookPluginOrder' \
     echo "FAIL: disconnected UserDefaults deep-hook control returned" >&2
     exit 1
 fi
-rg -Fq 'RecordingControl.derive(' "$STATUS_MENU"
-rg -Fq 'CaptureHealthView(supervisor: supervisor)' "$STATUS_MENU"
+rg -Fq 'StatusMenuModel.items(' "$STATUS_MENU"
+rg -Fq 'supervisor.statusRow(setupFinished: setupFinished)' "$STATUS_MENU"
 rg -Fq 'let status = supervisor.menuBarStatus' "$CAPTURE_HEALTH"
-rg -Fq 'Text(status.displayText)' "$CAPTURE_HEALTH"
+rg -Fq 'let row = supervisor.statusRow()' "$CAPTURE_HEALTH"
+rg -Fq 'Text(row.title)' "$CAPTURE_HEALTH"
 if rg -Fq 'defaults.set(retentionPolicy.rawValue' "$PREFERENCES_STORE"; then
     echo "FAIL: UserDefaults remains a competing retention authority" >&2
     exit 1

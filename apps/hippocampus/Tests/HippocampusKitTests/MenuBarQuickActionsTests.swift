@@ -1,91 +1,60 @@
 // SPDX-License-Identifier: TBD-private
 //
 // Tests for the state coordination between UserPauseController and
-// MenuBarStatus. StatusMenuView itself lives in the executable
-// target (Hippocampus) which is not testable, but the two data
-// layers under the drop-down are testable — so we pin those.
+// MenuBarStatus. The status item itself lives in the executable target
+// (Hippocampus), which is not testable, but the data layers under the
+// menu are — so we pin those.
 //
 // The invariants:
-//   - When the user pauses via `UserPauseController.setPaused(true)`
-//     and the supervisor mirrors that with `setPaused(true)` (which
-//     flips its `state` to `.paused`), `MenuBarStatus.derive` must
-//     yield `.paused` — the label under the pulse-dot flips to
-//     "Paused" and the icon shows the dim picture.
-//   - The four states (idle / recording / paused / error) keep four
-//     distinct labels. The icon pictures are pinned in
-//     `MenuBarStatusTests.swift`; this file adds the label-per-state
-//     check driven from the user-pause layer.
+//   - When the supervisor reports `.paused`, `MenuBarStatus.derive` yields
+//     `.paused`: the menu's first line reads "Paused" and the icon shows
+//     the dim picture.
+//   - The four canonical states (off, remembering, paused, not saving) keep
+//     four distinct labels. The icon pictures are pinned in
+//     `MenuBarStatusTests.swift`; this file adds the label-per-state check.
+//
+// Each test uses its own controller: the app's shared one keeps the pause
+// in real defaults.
 
 import XCTest
 @testable import HippocampusKit
 
 final class MenuBarQuickActionsTests: XCTestCase {
 
-    override func setUp() {
-        super.setUp()
-        UserPauseController.shared.resetForTesting()
-    }
-
-    override func tearDown() {
-        UserPauseController.shared.resetForTesting()
-        super.tearDown()
-    }
-
-    /// The four canonical states the menu-bar drop-down header must
-    /// render, each derived from the state a supervisor + user-pause
-    /// combination would present. Snapshot-equivalent: display text
-    /// distinctness across the four visual states.
     func testFourStates_labelDistinctness() {
-        let idle = MenuBarStatus.derive(from: .idle)
-        let recording = MenuBarStatus.derive(from: .running)
-        let paused = MenuBarStatus.derive(from: .paused)
-        let error = MenuBarStatus.derive(from: .crashed(reason: "boom"))
-
         let labels = Set([
-            idle.displayText,
-            recording.displayText,
-            paused.displayText,
-            error.displayText,
+            MenuBarStatus.derive(from: .idle).displayText,
+            MenuBarStatus.recording.displayText,
+            MenuBarStatus.derive(from: .paused).displayText,
+            MenuBarStatus.derive(from: .crashed(reason: "boom")).displayText,
         ])
-        XCTAssertEqual(labels.count, 4)
+        XCTAssertEqual(labels, ["Off", "Remembering", "Paused", "Not saving"])
     }
 
-    func testDefaultOffRunningTopologyIsIdleWithStartRecordingControl() {
-        XCTAssertEqual(
-            MenuBarStatus.derive(from: .running, captureEnabled: false),
-            .idle
-        )
-        XCTAssertEqual(
-            RecordingControl.derive(from: .running, captureEnabled: false),
-            .start
-        )
+    /// Remembering turned off in Preferences still runs the agent: the menu
+    /// says Off and offers Turn On.
+    func testDefaultOffRunningTopologyIsOffWithTurnOn() {
+        let status = MenuBarStatus.derive(from: .running, captureEnabled: false)
+        XCTAssertEqual(status, .idle)
+        XCTAssertEqual(StatusRow(StatusFacts(status: status), now: Date()).action, .turnOn)
     }
 
-    /// User-pause round-trip through the menu-bar quick-actions
-    /// coordinator: user flips ⌘⇧P → controller flips → supervisor
-    /// hypothetically mirrors → derivation shows `.paused`. On
-    /// resume the derivation returns to `.recording`.
+    /// The person pauses → the supervisor reports `.paused` → the status
+    /// reads Paused. On resume a run must save before it says Remembering.
     func testUserPauseCoordination_pausedThenResumed() {
-        UserPauseController.shared.setPaused(true)
-        XCTAssertTrue(UserPauseController.shared.isPaused)
-
-        // Supervisor mirrors the flip (menu-bar closure does this via
-        // `supervisor.setPaused(nextPaused)` — we assert the
-        // downstream derivation directly).
+        let pauses = UserPauseController()
+        pauses.setPaused(true)
+        XCTAssertTrue(pauses.isPaused)
         XCTAssertEqual(MenuBarStatus.derive(from: .paused), .paused)
 
-        UserPauseController.shared.setPaused(false)
-        XCTAssertFalse(UserPauseController.shared.isPaused)
+        pauses.setPaused(false)
+        XCTAssertFalse(pauses.isPaused)
         XCTAssertNotEqual(MenuBarStatus.derive(from: .running), .recording)
     }
 
-    /// TCC-revoke + user-pause interplay: if the user has ALSO
-    /// paused, the TCC-revoke error still takes precedence in the
-    /// derivation — the user must see the error signal above the
-    /// pause label per `MenuBarStatus.derive` precedence.
-    func testUserPauseAndTCCRevoke_errorTakesPrecedence() {
-        UserPauseController.shared.setPaused(true)
-
+    /// Paused and a permission turned off together: the pause is what the
+    /// person did last, so it is what the menu says.
+    func testUserPauseAndTCCRevoke_pauseTakesPrecedence() {
         let status = MenuBarStatus.derive(
             from: .paused,
             tccRevokedSurface: .screenRecording

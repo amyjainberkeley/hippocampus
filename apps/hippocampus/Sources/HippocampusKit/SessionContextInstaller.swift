@@ -10,12 +10,12 @@ public enum SessionContextInstallError: Error, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .malformed: "Client settings could not be read safely. Repair the file before trying again."
-        case .conflict: "An edited Hippocampus entry already exists. Review it before changing this connection."
-        case .unsafePath: "Client settings must be regular, user-owned files, without links."
-        case .concurrentChange: "Client settings changed during setup. Try again."
-        case .disabledByClient: "Claude hooks are disabled in client settings. No setting was overridden."
-        case .overridden: "Codex AGENTS.override.md takes precedence. Review that file before enabling context instructions."
+        case .malformed: "Couldn’t read that tool’s settings file. Fix the file, then try again."
+        case .conflict: "That tool’s settings already have an edited Hippocampus entry. Remove it, then try again."
+        case .unsafePath: "That settings file is a link or isn’t yours, so Hippocampus won’t change it."
+        case .concurrentChange: "The settings file changed while saving. Try again."
+        case .disabledByClient: "Hooks are turned off in Claude Code’s settings. Turn them on there first."
+        case .overridden: "Your AGENTS.override.md file takes over in Codex. Edit it first."
         }
     }
 }
@@ -40,6 +40,40 @@ public struct SessionContextInstaller: Sendable {
         claudeSettingsURL = claude.appendingPathComponent("settings.json")
         codexInstructionsURL = codex.appendingPathComponent("AGENTS.md")
         codexOverrideURL = codex.appendingPathComponent("AGENTS.override.md")
+    }
+
+    /// The app's installer: this executable, the memory at `dbURL`, and the
+    /// tools' own settings folders when the environment moves them.
+    public static func forApp(
+        executableURL: URL?, dbURL: URL,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws -> SessionContextInstaller {
+        guard let executableURL else { throw SessionContextInstallError.unsafePath }
+        func directory(_ key: String) throws -> URL? {
+            guard let path = environment[key], !path.isEmpty else { return nil }
+            guard path.hasPrefix("/") else { throw SessionContextInstallError.unsafePath }
+            return URL(fileURLWithPath: path)
+        }
+        return SessionContextInstaller(
+            homeURL: FileManager.default.homeDirectoryForCurrentUser,
+            executableURL: executableURL, dbURL: dbURL,
+            claudeConfigURL: try directory("CLAUDE_CONFIG_DIR"), codexHomeURL: try directory("CODEX_HOME")
+        )
+    }
+
+    /// Turns starting each session with recent work on or off for one tool.
+    public func setEnabled(_ enabled: Bool, for tool: AITool) throws {
+        switch tool {
+        case .claudeCode: try setClaudeEnabled(enabled)
+        case .codex: try setCodexEnabled(enabled)
+        }
+    }
+
+    public func status(for tool: AITool) throws -> SessionContextConfigurationStatus {
+        switch tool {
+        case .claudeCode: try claudeStatus()
+        case .codex: try codexStatus()
+        }
     }
 
     /// The bundled Rust agent, next to the app executable in Contents/MacOS.

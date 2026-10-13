@@ -162,7 +162,7 @@ struct RetentionPreferencesBehavior {
             MenuBarStatus.derive(from: .running, captureEnabled: false) == .idle
         )
         precondition(
-            RecordingControl.derive(from: .running, captureEnabled: false) == .start
+            StatusRow(StatusFacts(status: .idle), now: Date()).action == .turnOn
         )
     }
 }

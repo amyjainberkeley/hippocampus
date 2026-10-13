@@ -201,7 +201,7 @@ public final class PreferencesStore: ObservableObject {
                 self.retentionCustomDays = loaded.days
                 self.retentionNeedsReview = loaded.needsReview
             } catch {
-                self.retentionWriteError = "Retention policy could not be read; keeping events forever."
+                self.retentionWriteError = "Couldn’t read this setting, so nothing is being deleted. Choose again."
             }
         } else if let migrated = Self.legacyRetention(
             defaults.string(forKey: Keys.retentionPolicy)
@@ -214,7 +214,7 @@ public final class PreferencesStore: ObservableObject {
                 try writeRetention(policy: migrated.policy, days: migrated.days, schemaVersion: nil)
                 defaults.removeObject(forKey: Keys.retentionPolicy)
             } catch {
-                self.retentionWriteError = "Retention policy was not migrated: \(error.localizedDescription)"
+                self.retentionWriteError = "Couldn’t carry over your old setting. Choose again."
             }
         } else {
             self.retentionPolicy = .ninetyDays
@@ -239,7 +239,7 @@ public final class PreferencesStore: ObservableObject {
         switch policy {
         case .custom:
             guard let customDays, (1...365).contains(customDays) else {
-                retentionWriteError = "Custom retention must be between 1 and 365 days."
+                retentionWriteError = "Choose between 1 and 365 days."
                 return false
             }
             normalizedDays = customDays
@@ -256,7 +256,7 @@ public final class PreferencesStore: ObservableObject {
             defaults.removeObject(forKey: Keys.retentionPolicy)
             return true
         } catch {
-            retentionWriteError = "Retention policy was not saved: \(error.localizedDescription)"
+            retentionWriteError = "Couldn’t save. Try again."
             return false
         }
     }

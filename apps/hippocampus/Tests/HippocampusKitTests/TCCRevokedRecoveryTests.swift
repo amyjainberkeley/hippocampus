@@ -124,13 +124,13 @@ final class TCCRevokedRecoveryTests: XCTestCase {
         }
     }
 
-    func testMenuBarReason_isDistinctPerSurface() {
-        let reasons = Set(TCCRevokedReason.allCases.map(\.menuBarReason))
-        XCTAssertEqual(
-            reasons.count,
-            TCCRevokedReason.allCases.count,
-            "each surface must have a distinct menu-bar reason"
-        )
+    func testTheNotificationButtonSaysWhereItGoes() {
+        XCTAssertEqual(TCCRevokedNotifierRequestBuilder.makeCategory().actions.map(\.title), ["Open System Settings"])
+    }
+
+    func testEachPermissionHasItsMacOSName() {
+        XCTAssertEqual(TCCRevokedReason.allCases.map(\.name),
+                       ["Screen Recording", "Accessibility", "Full Disk Access", "Automation"])
     }
 
     // (d)
@@ -148,10 +148,10 @@ final class TCCRevokedRecoveryTests: XCTestCase {
             center.added[0].identifier,
             TCCRevokedNotifierRequestBuilder.identifier(for: .screenRecording)
         )
-        XCTAssertEqual(center.added[0].content.title, "Hippocampus can't record")
-        XCTAssertTrue(
-            center.added[0].content.body.contains("Screen Recording"),
-            "body must name the surface"
+        XCTAssertEqual(center.added[0].content.title, "Hippocampus stopped remembering")
+        XCTAssertEqual(
+            center.added[0].content.body,
+            "Screen Recording was turned off for Hippocampus. Click to open System Settings."
         )
     }
 

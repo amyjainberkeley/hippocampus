@@ -32,6 +32,8 @@ final class CommandBarController: NSObject, NSWindowDelegate {
     private var closeAfterCopy: Task<Void, Never>?
     /// ⇧⌘C's fetch, cancelled when Ask closes.
     private var copyForAITask: Task<Void, Never>?
+    /// When a `hippocampus://ask` link last opened Ask (RULINGS S12).
+    private var linkOpenedAt: Date?
 
     func configure(
         model: CommandBarModel,
@@ -49,15 +51,24 @@ final class CommandBarController: NSObject, NSWindowDelegate {
         self.announceShown = announceShown
     }
 
-    /// The key again closes it; it does not jump screens.
+    /// The key again closes it; it does not jump screens. Only the key and
+    /// Esc close Ask this way (RULINGS S12).
     func toggle() {
-        if panel?.isVisible == true { hide() } else { show() }
+        if AskPanelDismissal.closes(.key, visible: panel?.isVisible == true) { hide() } else { show(from: .key) }
     }
 
-    func show(asking question: String? = nil) {
+    /// The menu and a link only ever show Ask, even when it is up already
+    /// (RULINGS S12): a second link never hides an answer on its way.
+    func show(asking question: String? = nil, from opening: AskPanelDismissal.Opening = .menu) {
         guard let model else { return }
         let panel = self.panel ?? makePanel(model: model)
         self.panel = panel
+        if opening == .link {
+            linkOpenedAt = Date()
+            // Opening the link may have activated Hippocampus: keep the
+            // keyboard in Ask.
+            if panel.isVisible { panel.makeKeyAndOrderFront(nil) }
+        }
         if !panel.isVisible {
             // The status is polled every 5 s; read it now, as the menu does.
             if let supervisor {
@@ -236,7 +247,18 @@ final class CommandBarController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// Clicking away closes Ask. A link activates Hippocampus as it opens
+    /// Ask, which can take the keyboard a moment later; that is not the
+    /// person clicking away, so Ask takes the keyboard back instead.
     func windowDidResignKey(_ notification: Notification) {
+        let sinceLink = linkOpenedAt.map { Date().timeIntervalSince($0) }
+        guard AskPanelDismissal.closesOnResignKey(sinceLinkOpen: sinceLink) else {
+            DispatchQueue.main.async { [weak self] in
+                guard let panel = self?.panel, panel.isVisible, !panel.isKeyWindow else { return }
+                panel.makeKeyAndOrderFront(nil)
+            }
+            return
+        }
         hide()
     }
 

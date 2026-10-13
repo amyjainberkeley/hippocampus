@@ -5,8 +5,14 @@ import TOMLKit
 public protocol RuntimeConfiguring: Sendable {
     var crashReportOptedIn: Bool { get }
     var captureEnabled: Bool { get }
+    /// When the settings file last changed; nil when unknown.
+    var modifiedAt: Date? { get }
     func setCrashReportOptedIn(_ value: Bool) throws
     func setCaptureEnabled(_ value: Bool) throws
+}
+
+extension RuntimeConfiguring {
+    public var modifiedAt: Date? { nil }
 }
 
 public enum RuntimeConfigError: LocalizedError, Equatable {
@@ -50,6 +56,10 @@ public struct RuntimeConfig: RuntimeConfiguring, Sendable {
 
     public var captureEnabled: Bool {
         boolValue(for: "capture_enabled")
+    }
+
+    public var modifiedAt: Date? {
+        (try? FileManager.default.attributesOfItem(atPath: path.path))?[.modificationDate] as? Date
     }
 
     public func setCrashReportOptedIn(_ value: Bool) throws {

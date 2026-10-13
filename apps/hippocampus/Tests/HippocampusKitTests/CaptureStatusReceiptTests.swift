@@ -30,9 +30,14 @@ final class CaptureStatusReceiptTests: XCTestCase {
                        lastCaptureTs: nil, lastUpdated: now)
     }
 
-    private func status(_ receipt: CaptureStatusReceipt?, helper: HealthSnapshot? = nil) -> MenuBarStatus {
+    /// A run that started a minute ago. `skipHeld` is how long the receipt's
+    /// skip has been seen with no newer save.
+    private func status(
+        _ receipt: CaptureStatusReceipt?, helper: HealthSnapshot? = nil, skipHeld: TimeInterval? = nil
+    ) -> MenuBarStatus {
         MenuBarStatus.derive(from: .running, receipt: receipt, helperHealth: helper,
-                             captureStartedAt: now.addingTimeInterval(-60), now: now)
+                             captureStartedAt: now.addingTimeInterval(-60),
+                             skipSeenSince: skipHeld.map { now.addingTimeInterval(-$0) }, now: now)
     }
 
     func testOnlyRecentCommittedFrameFromCurrentRunCanShowSaving() throws {
@@ -44,9 +49,9 @@ final class CaptureStatusReceiptTests: XCTestCase {
 
     func testZeroMemoryIsPlainEvenWithThousandsOfHelperFrames() throws {
         let result = status(try receipt(count: 0, savedAgo: nil), helper: helper)
-        XCTAssertEqual(result.displayText, "No saved memory yet")
+        XCTAssertEqual(result.displayText, "Nothing saved yet")
         XCTAssertFalse(result.shouldPulse)
-        XCTAssertNotNil(result.action)
+        XCTAssertEqual(result.action, .pause)
         XCTAssertEqual(status(try receipt(count: 0, savedAgo: 120)), .noMemory)
     }
 
@@ -65,11 +70,11 @@ final class CaptureStatusReceiptTests: XCTestCase {
     func testBlockedPermissionAndUnknownBrowserModeHaveActions() throws {
         let permission = status(try receipt(blocked: "screen_recording_permission"))
         XCTAssertEqual(permission, .needsPermission(.screenRecording))
-        XCTAssertEqual(permission.action, .openPermission(.screenRecording))
-        let browser = status(try receipt(suppression: "browser_window_unknown"))
-        XCTAssertEqual(browser.displayText, "Blocked")
-        XCTAssertTrue(browser.detailText.contains("window"))
-        XCTAssertNotNil(browser.action)
+        XCTAssertEqual(permission.action, .openSystemSettings(.screenRecording))
+        let browser = status(try receipt(suppression: "browser_window_unknown"), skipHeld: 11)
+        XCTAssertEqual(browser.displayText, "Skipping this window")
+        XCTAssertEqual(browser.detailText, "It can’t tell if this browser window is private.")
+        XCTAssertEqual(browser.action, .pause)
     }
 
     func testPauseAndOffOverrideOldCaptureEvidence() throws {
@@ -105,19 +110,28 @@ final class CaptureStatusReceiptTests: XCTestCase {
         XCTAssertNotEqual(status(try receipt(savedAgo: -600, updatedAgo: -600)), .recording)
     }
 
-    func testEveryCurrentAgentReasonPreventsSaving() throws {
-        let codes = ["denylist-source", "os-blacked-region", "secure-event-input",
-                     "ax-secure-subrole", "denylist-postcapture", "ocr-time-secret",
-                     "failsafe-unknown", "focus-race-dropped", "capture_disabled",
-                     "store_unavailable", "ingest_failed", "helper_disconnected", "capture_failed"]
-        for code in codes {
-            let result = status(try receipt(blocked: code), helper: helper)
-            XCTAssertEqual(result.displayText, "Blocked", code)
+    /// Every reason the agent writes: a privacy skip is "Skipping this
+    /// window" once it has held, a failure "Not saving" at once (spec-shell
+    /// S9), and a fast window switch nothing at all.
+    func testEveryCurrentAgentReasonSaysSkippingOrNotSaving() throws {
+        let skips = ["denylist-source", "os-blacked-region", "secure-event-input", "ax-secure-subrole",
+                     "denylist-postcapture", "ocr-time-secret", "failsafe-unknown"]
+        for code in skips {
+            let result = status(try receipt(suppression: code), helper: helper, skipHeld: 11)
+            XCTAssertEqual(result.displayText, "Skipping this window", code)
             XCTAssertFalse(result.shouldPulse, code)
-            XCTAssertNotNil(result.action, code)
+            XCTAssertEqual(result.action, .pause, code)
         }
-        let unknown = status(try receipt(suppression: "future-code"))
-        XCTAssertTrue(unknown.detailText.contains("unrecognized"))
+        let failures = ["capture_disabled", "store_unavailable", "ingest_failed", "helper_disconnected", "capture_failed"]
+        for code in failures {
+            let result = status(try receipt(blocked: code), helper: helper)
+            XCTAssertEqual(result.displayText, "Not saving", code)
+            XCTAssertFalse(result.shouldPulse, code)
+            XCTAssertEqual(result.action, .tryAgain, code)
+        }
+        XCTAssertEqual(status(try receipt(suppression: "focus-race-dropped"), skipHeld: 11).displayText, "Remembering")
+        let unknown = status(try receipt(suppression: "future-code"), skipHeld: 11)
+        XCTAssertEqual(unknown.detailText, "It stopped and can’t say why.")
     }
 
     func testMissingPartialAndRemovedFileDiscardEvidence() throws {

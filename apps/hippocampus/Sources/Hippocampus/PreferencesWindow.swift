@@ -11,8 +11,8 @@
 // Layout:
 //   - NSPanel host (borderless-titled, non-modal, floating) with
 //     `contentView` set to an `NSHostingView` wrapping the SwiftUI root.
-//   - NSToolbar with six selectable items (General / Capture / Sources
-//     / Privacy / Advanced / About). Toolbar switching is the same pattern
+//   - NSToolbar with six selectable items (General, Remembering, AI Tools,
+//     Privacy, Advanced, About). Toolbar switching is the same pattern
 //     Xcode and Slack use; feels native.
 //   - Each section is a compact SwiftUI `Form` bound directly to the
 //     `PreferencesStore` (`@ObservedObject`, so toggling writes
@@ -66,7 +66,7 @@ extension PreferencesSection {
     var symbol: String {
         switch self {
         case .general: return "gearshape"
-        case .capture: return "camera.viewfinder"
+        case .capture: return "rectangle.stack"
         case .sources: return "point.3.connected.trianglepath.dotted"
         case .privacy: return "hand.raised"
         case .advanced: return "slider.horizontal.3"
@@ -77,6 +77,21 @@ extension PreferencesSection {
 
 // MARK: - Root view
 
+/// What Preferences asks the app to do.
+struct PreferencesActions {
+    /// The status row's button.
+    var statusAction: (CaptureStatusAction) -> Void = { _ in }
+    /// Open the window on a place.
+    var openWindow: (String) -> Void = { _ in }
+    var neverRead: () -> Void = {}
+    var chooseApps: () -> Void = {}
+    /// Run Connect AI Tools…, then call back.
+    var connectAITools: (@escaping () -> Void) -> Void = { done in done() }
+    var restart: () -> Void = {}
+    /// Setup again, in review once it is done (RULINGS O4).
+    var showSetup: () -> Void = {}
+}
+
 struct PreferencesRootView: View {
     @ObservedObject var store: PreferencesStore
     @Binding var section: PreferencesSection
@@ -85,12 +100,14 @@ struct PreferencesRootView: View {
     @ObservedObject var supervisor: ProcessSupervisor
     /// What opens Ask right now: the key's caption follows it.
     @ObservedObject var askKey: AskKeyWatch
-    let updater: SparkleUpdaterService
-    let dbPath: String
-    let onOpenRecallTab: (String) -> Void
-    let onOpenDenylistEditor: () -> Void
-    let onOpenAllowlistEditor: () -> Void
-    let onExportDebugBundle: () -> Void
+    let updater: any UpdaterService
+    let actions: PreferencesActions
+    /// Fixed AI tool facts for the off-screen renderer.
+    var aiToolsPreview: SessionContextPreferencesView.Facts?
+
+    @State private var crashReports = false
+    @State private var confirmingReset = false
+    @State private var resetResult: (title: String, message: String)?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -110,7 +127,7 @@ struct PreferencesRootView: View {
         switch section {
         case .general: generalSection
         case .capture: captureSection
-        case .sources: SessionContextPreferencesView(supervisor: supervisor)
+        case .sources: SessionContextPreferencesView(supervisor: supervisor, connect: actions.connectAITools, preview: aiToolsPreview)
         case .privacy: privacySection
         case .advanced: advancedSection
         case .about: aboutSection
@@ -162,29 +179,23 @@ struct PreferencesRootView: View {
         .onAppear { askKey.recheck() }
     }
 
-    // MARK: Capture
+    // MARK: Remembering
+
+    /// Start Remembering in onboarding is the only consent, so before setup
+    /// the switch waits (product critique 4).
+    private var setupFinished: Bool {
+        OnboardingSentinel.isComplete || !supervisor.hasOnboarding
+    }
 
     private var captureSection: some View {
         VStack(alignment: .leading, spacing: PreferencesStyle.sectionSpacing) {
-            sectionHeader("Capture")
+            sectionHeader(PreferencesSection.capture.label)
 
-            CaptureHealthView(supervisor: supervisor, onReviewCapture: onOpenAllowlistEditor)
-
-            HStack {
-                Button { supervisor.refreshCaptureStatus() } label: {
-                    Label("Refresh Status", systemImage: "arrow.clockwise")
-                }
-                Button {
-                    NSWorkspace.shared.open(FileManager.default.homeDirectoryForCurrentUser
-                        .appendingPathComponent("Library/Logs/MCI"))
-                } label: {
-                    Label("Open Capture Logs", systemImage: "doc.text.magnifyingglass")
-                }
-            }
+            CaptureHealthView(supervisor: supervisor, perform: actions.statusAction)
 
             Divider()
 
-            Toggle("Capture screen activity", isOn: Binding(
+            Toggle("Remember my screen", isOn: Binding(
                 get: { supervisor.captureEnabled },
                 set: { on in
                     Task { @MainActor in
@@ -192,14 +203,7 @@ struct PreferencesRootView: View {
                     }
                 }
             ))
-            .disabled(captureController.isApplying)
-            LabeledContent("Capture area", value: "Focused window")
-                .help("Only the active, permitted window is eligible. Background windows and unopened tabs are not captured.")
-            Text(supervisor.captureEnabled
-                 ? "Screen capture is enabled."
-                 : "Screen capture is off.")
-                .font(PreferencesStyle.captionFont)
-                .foregroundStyle(.secondary)
+            .disabled(captureController.isApplying || !setupFinished)
             if let errorMessage = captureController.errorMessage {
                 Text(errorMessage)
                     .font(PreferencesStyle.captionFont)
@@ -208,11 +212,7 @@ struct PreferencesRootView: View {
 
             Divider()
 
-            Button {
-                onOpenAllowlistEditor()
-            } label: {
-                Label("Manage app access", systemImage: "checklist.checked")
-            }
+            Button("Choose Apps…") { actions.chooseApps() }
         }
     }
 
@@ -222,12 +222,13 @@ struct PreferencesRootView: View {
         VStack(alignment: .leading, spacing: PreferencesStyle.sectionSpacing) {
             sectionHeader("Privacy")
 
-            Button("Open denylist editor…") { onOpenDenylistEditor() }
-            Button("Open allowlist editor…") { onOpenAllowlistEditor() }
+            // Opens the read-only panel of that name; no list of apps to
+            // edit exists (onboarding contract, section 3).
+            Button("What Is Never Read…") { actions.neverRead() }
 
             Divider()
 
-            Picker("Retention policy", selection: Binding(
+            Picker("Keep my memory for", selection: Binding(
                 get: { store.retentionPolicy },
                 set: { policy in
                     _ = store.setRetentionPolicy(
@@ -245,7 +246,7 @@ struct PreferencesRootView: View {
             .pickerStyle(.menu)
             if store.retentionPolicy == .custom {
                 Stepper(
-                    "Keep events for \(store.retentionCustomDays ?? 90) days",
+                    "\(store.retentionCustomDays ?? 90) days",
                     value: Binding(
                         get: { store.retentionCustomDays ?? 90 },
                         set: { days in
@@ -255,14 +256,14 @@ struct PreferencesRootView: View {
                     in: 1...365
                 )
             }
-            Text("Default: 90 days. Older memories are deleted automatically after the selected period.")
+            Text("Anything older is deleted for good.")
                 .font(PreferencesStyle.captionFont)
                 .foregroundStyle(.secondary)
             if store.retentionNeedsReview {
-                Label("Needs review: your earlier retention choice has not been confirmed. Automatic deletion is on hold; capture continues.", systemImage: "exclamationmark.triangle")
+                Label("Confirm how long to keep your memory. Nothing is deleted until you do.", systemImage: "exclamationmark.triangle")
                     .font(PreferencesStyle.captionFont)
                     .foregroundStyle(.orange)
-                Button("Confirm Retention Choice") {
+                Button("Confirm") {
                     _ = store.setRetentionPolicy(store.retentionPolicy, customDays: store.retentionCustomDays)
                 }
             }
@@ -274,11 +275,8 @@ struct PreferencesRootView: View {
 
             Divider()
 
-            Button("Open Privacy Dashboard (⌘7)") {
-                onOpenRecallTab("privacy")
-            }
-            Button("View recent activity (audit log)") {
-                onOpenRecallTab("privacy")
+            Button("See or Delete What’s Remembered…") {
+                actions.openWindow("privacy")
             }
         }
     }
@@ -289,25 +287,46 @@ struct PreferencesRootView: View {
         VStack(alignment: .leading, spacing: PreferencesStyle.sectionSpacing) {
             sectionHeader("Advanced")
 
-            Toggle("Automatic updates (Sparkle)", isOn: Binding(
-                get: { updater.automaticallyChecksForUpdates },
-                set: { updater.automaticallyChecksForUpdates = $0 }
-            ))
+            Text("Troubleshooting").font(.headline)
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: PreferencesStyle.controlSpacing) {
-                Text("Custom database path (optional)")
-                TextField(dbPath, text: $store.customDatabasePath)
-                    .textFieldStyle(.roundedBorder)
-                Text("Requires restart. Default: \(dbPath)")
-                    .font(PreferencesStyle.captionFont)
-                    .foregroundStyle(.secondary)
+            Button("Show Logs") {
+                NSWorkspace.shared.open(FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent("Library/Logs/MCI"))
             }
+            Button("Reset Permissions…") { confirmingReset = true }
+            Toggle("Send crash reports", isOn: $crashReports)
+                .onChange(of: crashReports) { _, on in
+                    if on != supervisor.isCrashReportOptedIn { supervisor.setCrashReportOptedIn(on) }
+                }
+            Button("Show Setup Again") { actions.showSetup() }
+            Button("Restart Hippocampus") { actions.restart() }
+        }
+        .onAppear { crashReports = supervisor.isCrashReportOptedIn }
+        .alert(PermissionReset.confirmTitle, isPresented: $confirmingReset) {
+            Button("Cancel", role: .cancel) {}
+            Button(PermissionReset.confirmButton, role: .destructive) { resetPermissions() }
+        } message: {
+            Text(PermissionReset.confirmMessage)
+        }
+        .alert(resetResult?.title ?? "", isPresented: Binding(
+            get: { resetResult != nil },
+            set: { if !$0 { resetResult = nil } }
+        )) {
+            Button("OK") { resetResult = nil }
+        } message: {
+            Text(resetResult?.message ?? "")
+        }
+    }
 
-            Divider()
-
-            Button("Export debug bundle…") { onExportDebugBundle() }
+    /// Resets only Hippocampus's own grants (RULINGS S10), off the main thread.
+    private func resetPermissions() {
+        Task {
+            let failed = await Task.detached(priority: .userInitiated) {
+                PermissionReset.reset(run: PermissionReset.runTCCUtil)
+            }.value
+            resetResult = failed.isEmpty
+                ? (PermissionReset.doneTitle, PermissionReset.doneMessage)
+                : ("Couldn’t reset permissions", PermissionReset.failureMessage(names: failed))
         }
     }
 
@@ -325,35 +344,46 @@ struct PreferencesRootView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Version \(version) (\(build))")
                     .font(PreferencesStyle.sectionTitleFont)
-                Text("Git SHA: \(sha)")
+                Text("Build \(sha)")
                     .font(PreferencesStyle.captionFont)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
 
-            Text("Local-first total-recall for your Mac. All capture and inference runs on-device; nothing leaves your machine without your explicit opt-in.")
+            Text("Hippocampus remembers your screen so you and your AI don’t have to. It stays on this Mac unless you send it to an AI tool.")
                 .font(PreferencesStyle.bodyFont)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-            Divider()
-
-            Text("Copyright © 2026 MCI — Memory Context Interface")
-                .font(PreferencesStyle.captionFont)
-                .foregroundStyle(.secondary)
-            Text("License: TBD-private")
-                .font(PreferencesStyle.captionFont)
-                .foregroundStyle(.secondary)
-
-            Divider()
-
-            if let noticeURL = Bundle.main.url(forResource: "NOTICE", withExtension: "txt") {
-                Button("Third-party licenses") {
-                    #if canImport(AppKit)
-                    NSWorkspace.shared.open(noticeURL)
-                    #endif
-                }
-                .buttonStyle(.link)
+            HStack {
+                Button("Check for Updates…") { updater.checkForUpdates() }
+                    .disabled(!updater.canCheckForUpdates)
+                Toggle("Check for updates automatically", isOn: Binding(
+                    get: { updater.automaticallyChecksForUpdates },
+                    set: { updater.automaticallyChecksForUpdates = $0 }
+                ))
             }
+
+            Divider()
+
+            // The facts in NOTICE and LICENSE (spec-copy M2 finding 8).
+            Text("© 2026 Amy Jain")
+                .font(PreferencesStyle.captionFont)
+                .foregroundStyle(.secondary)
+            Text("Apache License 2.0")
+                .font(PreferencesStyle.captionFont)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            Button("Third-party licenses") {
+                #if canImport(AppKit)
+                NSWorkspace.shared.open(
+                    Bundle.main.url(forResource: "NOTICE", withExtension: "txt") ?? Self.noticeOnline
+                )
+                #endif
+            }
+            .buttonStyle(.link)
 
             ForEach(Self.aboutLinks, id: \.label) { link in
                 Button(link.label) {
@@ -368,14 +398,17 @@ struct PreferencesRootView: View {
         }
     }
 
+    /// The bundled notices open offline; a development build without them
+    /// opens the repository's copy.
+    private static let noticeOnline = URL(string: "https://github.com/amyjainberkeley/hippocampus/blob/main/NOTICE")!
+
     /// External URLs surfaced in the About tab. Kept in a static
     /// tuple array so the URL set is reviewable in one place; a
     /// future policy-page rename is a single-line edit.
     private static let aboutLinks: [(label: String, url: String)] = [
-        ("Privacy", "https://github.com/amyjainberkeley/hippocampus/blob/main/PRIVACY.md"),
-        ("License (Apache 2.0)", "https://github.com/amyjainberkeley/hippocampus/blob/main/LICENSE"),
-        ("Third-party licenses", "https://github.com/amyjainberkeley/hippocampus/blob/main/NOTICE"),
-        ("Report an issue on GitHub", "https://github.com/amyjainberkeley/hippocampus/issues"),
+        ("Privacy policy", "https://github.com/amyjainberkeley/hippocampus/blob/main/PRIVACY.md"),
+        ("License", "https://github.com/amyjainberkeley/hippocampus/blob/main/LICENSE"),
+        ("Report a problem", "https://github.com/amyjainberkeley/hippocampus/issues"),
         ("Send feedback", "https://github.com/amyjainberkeley/hippocampus/issues/new?title=Feedback"),
     ]
 
@@ -412,11 +445,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
     private var updater: SparkleUpdaterService?
     private var captureController: CapturePreferenceController?
     private var supervisor: ProcessSupervisor?
-    private var dbPath: String = "~/Library/Application Support/Hippocampus/mci.sqlite"
-    private var onOpenRecallTab: (String) -> Void = { _ in }
-    private var onOpenDenylistEditor: () -> Void = {}
-    private var onOpenAllowlistEditor: () -> Void = {}
-    private var onExportDebugBundle: () -> Void = {}
+    private var actions = PreferencesActions()
 
     /// Provide the dependencies the window needs. Safe to call more
     /// than once — later calls overwrite so a re-initialized supervisor
@@ -427,22 +456,14 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
         updater: SparkleUpdaterService,
         captureApplier: any CaptureSettingApplying,
         supervisor: ProcessSupervisor,
-        dbPath: String,
-        onOpenRecallTab: @escaping (String) -> Void,
-        onOpenDenylistEditor: @escaping () -> Void,
-        onOpenAllowlistEditor: @escaping () -> Void,
-        onExportDebugBundle: @escaping () -> Void
+        actions: PreferencesActions
     ) {
         self.store = store
         self.loginItemVM = loginItemVM
         self.updater = updater
         self.captureController = CapturePreferenceController(applier: captureApplier)
         self.supervisor = supervisor
-        self.dbPath = dbPath
-        self.onOpenRecallTab = onOpenRecallTab
-        self.onOpenDenylistEditor = onOpenDenylistEditor
-        self.onOpenAllowlistEditor = onOpenAllowlistEditor
-        self.onExportDebugBundle = onExportDebugBundle
+        self.actions = actions
     }
 
     /// Open (or focus) the preferences window.
@@ -457,7 +478,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
 
         if let panel {
             panel.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.activate()
             return
         }
 
@@ -499,7 +520,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
 
         self.panel = panel
         panel.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
     }
 
     /// Programmatically switch section — used by the toolbar action.
@@ -536,11 +557,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
             supervisor: supervisor,
             askKey: SoloKeyMonitor.shared.watch,
             updater: updater,
-            dbPath: dbPath,
-            onOpenRecallTab: onOpenRecallTab,
-            onOpenDenylistEditor: onOpenDenylistEditor,
-            onOpenAllowlistEditor: onOpenAllowlistEditor,
-            onExportDebugBundle: onExportDebugBundle
+            actions: actions
         )
         let host = NSHostingView(rootView: root)
         host.frame = NSRect(
@@ -579,11 +596,11 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
             return nil
         }
         let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-        item.label = section.rawValue
-        item.paletteLabel = section.rawValue
+        item.label = section.label
+        item.paletteLabel = section.label
         item.image = NSImage(
             systemSymbolName: section.symbol,
-            accessibilityDescription: section.rawValue
+            accessibilityDescription: section.label
         )
         item.target = self
         item.action = #selector(toolbarItemClicked(_:))

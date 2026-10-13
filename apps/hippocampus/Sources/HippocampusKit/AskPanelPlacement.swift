@@ -120,4 +120,27 @@ public enum AskPanelDismissal {
     public static func shouldHideApp(appIsActive: Bool, otherWindows: [Window]) -> Bool {
         appIsActive && !otherWindows.contains { $0.isVisible && $0.isTitled }
     }
+
+    /// What asked Ask to open. The key toggles it; the menu and a
+    /// `hippocampus://ask` link only ever show it (RULINGS S12).
+    public enum Opening: Equatable, Sendable {
+        case key, menu, link
+    }
+
+    /// Whether this request closes a visible panel instead of showing it.
+    public static func closes(_ opening: Opening, visible: Bool) -> Bool {
+        opening == .key && visible
+    }
+
+    /// Opening a link activates Hippocampus, which can take the keyboard
+    /// from Ask a moment after it shows. That is not the person clicking
+    /// away, so for this long Ask keeps the keyboard instead of closing.
+    public static let linkActivationGrace: TimeInterval = 1
+
+    /// Whether losing the keyboard closes Ask, given the seconds since a
+    /// link last opened it.
+    public static func closesOnResignKey(sinceLinkOpen: TimeInterval?) -> Bool {
+        guard let sinceLinkOpen else { return true }
+        return !(0..<linkActivationGrace).contains(sinceLinkOpen)
+    }
 }

@@ -207,10 +207,8 @@ require_literal "$BRIEF_PRESENCE" '.appendingPathComponent("tokenizer.json")' \
     'runtime readiness and first-launch seed include the Qwen tokenizer'
 reject_pattern "$STATUS_MENU" '@State private var briefsEnabled|MCIBriefsEnabled' \
     'menu does not expose an unwired Daily Briefs toggle'
-require_literal "$STATUS_MENU" 'Button("Open Daily Brief")' \
-    'daily brief is directly reachable without a model'
-require_literal "$STATUS_MENU" 'supervisor.openRecallUI(initialTab: "brief")' \
-    'daily brief menu action opens the real persisted brief surface'
+require_literal "$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/HippocampusURLRoute.swift" 'case "recall":' \
+    'the day stays reachable through the hippocampus://recall route'
 reject_pattern "$STATUS_MENU" 'Add Richer Brief Model|model-download' \
     'menu does not expose the unavailable Qwen download'
 reject_pattern "$HIPPOCAMPUS_APP" 'Download AI Model|model-download|ModelDownloadView' \

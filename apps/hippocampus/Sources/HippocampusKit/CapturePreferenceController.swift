@@ -15,6 +15,8 @@ public final class CapturePreferenceController: ObservableObject {
 
     private let applier: any CaptureSettingApplying
 
+    public static let couldNotChange = "Couldn’t change that. Try again."
+
     public init(applier: any CaptureSettingApplying) {
         self.applier = applier
         self.captureEnabled = applier.captureEnabled
@@ -27,7 +29,9 @@ public final class CapturePreferenceController: ObservableObject {
         do {
             try await applier.applyCaptureEnabled(enabled)
         } catch {
-            errorMessage = error.localizedDescription
+            // The status row above says where things stand; this says only
+            // that the switch did not take. No raw error text (spec-copy S2).
+            errorMessage = Self.couldNotChange
         }
         captureEnabled = applier.captureEnabled
         isApplying = false

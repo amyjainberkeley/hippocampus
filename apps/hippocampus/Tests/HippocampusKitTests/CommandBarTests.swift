@@ -40,6 +40,38 @@ final class CommandBarTests: XCTestCase {
         await session.stop()
     }
 
+    /// The agent writes U+2028 and U+0085 unescaped inside a reply. Replies
+    /// are cut at the 0x0A byte only, so such a reply arrives whole instead
+    /// of timing out (RULINGS S11).
+    func testARepliesHoldingLineSeparatorsArriveWhole() async throws {
+        let launch = try fakeAgent(#"""
+        read line; printf '{"jsonrpc":"2.0","id":1,"result":{"text":"one\342\200\250two\302\205three"}}\n'
+        read line; echo '{"jsonrpc":"2.0","id":2,"result":{"text":"next"}}'
+        cat >/dev/null
+        """#)
+        let session = MemorySession()
+        let first = try await session.call("mci_ask", arguments: Data("{}".utf8), launch: launch, timeout: .seconds(5))
+        XCTAssertEqual((try JSONSerialization.jsonObject(with: first) as? [String: Any])?["text"] as? String,
+                       "one\u{2028}two\u{0085}three")
+        let second = try await session.call("mci_ask", arguments: Data("{}".utf8), launch: launch, timeout: .seconds(5))
+        XCTAssertEqual((try JSONSerialization.jsonObject(with: second) as? [String: Any])?["text"] as? String, "next")
+        await session.stop()
+
+        // Splitting at every line break, as `bytes.lines` does, would cut
+        // the first reply in three.
+        var framer = ReplyFramer()
+        let bytes = Data("{\"a\":\"one\u{2028}two\u{0085}three\"}\n{\"b\":1}\n".utf8)
+        let frames = bytes.compactMap { framer.append($0) }
+        XCTAssertEqual(frames.map { String(decoding: $0, as: UTF8.self) },
+                       ["{\"a\":\"one\u{2028}two\u{0085}three\"}", "{\"b\":1}"])
+        let source = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/HippocampusKit/CommandBar/MemorySession.swift"), encoding: .utf8)
+        XCTAssertFalse(source.contains("in reader.bytes.lines"))
+        XCTAssertTrue(source.contains("for try await byte in reader.bytes {"))
+        XCTAssertTrue(source.contains("var framer = ReplyFramer()"))
+    }
+
     func testSilentAgentTimesOutAndMissingAgentIsUnavailable() async throws {
         let silent = try fakeAgent("sleep 30")
         let session = MemorySession()

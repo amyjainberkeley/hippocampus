@@ -139,18 +139,35 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
 
 @MainActor
 public final class ProcessSupervisor: ObservableObject, Sendable {
-    @Published public private(set) var state: SupervisorState = .idle
+    @Published public private(set) var state: SupervisorState = .idle {
+        didSet { stateChanged() }
+    }
     @Published public private(set) var health: HealthSnapshot?
     @Published public private(set) var captureReceipt: CaptureStatusReceipt?
     public private(set) var captureStartedAt: Date?
+    /// The person asked it to stop, pause or turn off, and that failed, so it
+    /// may still be reading the screen. Cleared by the next committed
+    /// transition (product critique 3, RULINGS S10).
+    @Published public private(set) var stopFailed = false
+    /// When the person pressed macOS's Stop Sharing; nil once remembering is
+    /// turned back on. Kept across launches (spec-shell S5).
+    @Published public private(set) var stoppedSharingAt: Date?
+    /// Called when the window was asked for and a failed start ended the
+    /// request: the app shows Preferences, where the reason and the fix are
+    /// (spec-shell S5, D9).
+    public var onPresentationBlocked: (@MainActor () -> Void)?
 
     public var menuBarStatus: MenuBarStatus {
         MenuBarStatus.derive(
             from: state, captureEnabled: captureEnabled,
             tccRevokedSurface: tccRevokedSurface, receipt: captureReceipt,
-            helperHealth: health, captureStartedAt: captureStartedAt
+            helperHealth: health, captureStartedAt: captureStartedAt,
+            stopFailed: stopFailed, skipSeenSince: skipWatch.since, now: clock()
         )
     }
+
+    /// When the person paused; nil when not paused. Kept across launches.
+    public var pausedSince: Date? { pauses.pausedSince }
     @Published public private(set) var captureEnabled: Bool
     @Published public internal(set) var tccRevokedSurface: TCCRevokedReason? {
         didSet {
@@ -175,6 +192,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private let recoveryNow: @MainActor @Sendable () -> ContinuousClock.Instant
     private let retrySleep: @MainActor @Sendable (TimeInterval) async throws -> Void
     private let captureStatusReader: @MainActor @Sendable () -> (HealthSnapshot?, CaptureStatusReceipt?)
+    private let captureStopNote: any CaptureStopNoting
+    private let pauses: UserPauseController
+    private let clock: @MainActor @Sendable () -> Date
+    private var skipWatch = SkipWatch()
     private let logger = Logger(subsystem: "ai.hippocampus", category: "supervisor")
     private var retryTask: Task<Void, Never>?
     private var healthTimer: Timer?
@@ -205,10 +226,15 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private static let maxBackoff: TimeInterval = 60
     private static let stableRunDuration: Duration = .seconds(5 * 60)
 
+    /// The app passes the stores that keep Stop Sharing and Pause across
+    /// launches; the defaults keep nothing, so tests never touch a real
+    /// defaults domain.
     public convenience init(
         locator: BinaryLocator,
         keyStore: KeyStore,
-        runtimeConfig: any RuntimeConfiguring = RuntimeConfig()
+        runtimeConfig: any RuntimeConfiguring = RuntimeConfig(),
+        captureStopNote: any CaptureStopNoting = NoCaptureStopNote(),
+        pauses: UserPauseController = UserPauseController()
     ) {
         let developmentKeyMode = DevelopmentFileKeyMode.active()
         self.init(
@@ -219,7 +245,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             keyCustodyPreparer: AgentKeyCustodyPreparer(),
             captureConsentAuthority: CaptureConsentAuthority(),
             readinessTimeout: 10,
-            developmentKeyMode: developmentKeyMode
+            developmentKeyMode: developmentKeyMode,
+            captureStopNote: captureStopNote,
+            pauses: pauses
         )
     }
 
@@ -238,7 +266,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         },
         captureStatusReader: @escaping @MainActor @Sendable () -> (HealthSnapshot?, CaptureStatusReceipt?) = {
             (HealthSnapshot.readFromLog(), CaptureStatusReceipt.read())
-        }
+        },
+        captureStopNote: any CaptureStopNoting = NoCaptureStopNote(),
+        pauses: UserPauseController = UserPauseController(),
+        clock: @escaping @MainActor @Sendable () -> Date = { Date() }
     ) {
         self.locator = locator
         self.keyStore = developmentKeyMode.map { FileKeyStore(path: $0.keyURL) } ?? keyStore
@@ -251,7 +282,54 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         self.recoveryNow = recoveryNow
         self.retrySleep = retrySleep
         self.captureStatusReader = captureStatusReader
+        self.captureStopNote = captureStopNote
+        self.pauses = pauses
+        self.clock = clock
         self.captureEnabled = runtimeConfig.captureEnabled
+        // A pause outlives a relaunch: start goes straight to Paused.
+        self.requestedPauseState = pauses.isPaused
+        self.stoppedSharingAt = captureStopNote.stoppedSharingAt
+        stayOffAfterStopSharing()
+    }
+
+    /// After Stop Sharing the next launch stays off, even if saving "off" to
+    /// runtime.toml failed then (spec-shell S5.3, D8): try again, and if the
+    /// setting still says on, latch off for this session. A note older than
+    /// runtime.toml's last change means remembering was turned on elsewhere
+    /// since, so it no longer applies (critique-shell-engineering 13).
+    private func stayOffAfterStopSharing() {
+        guard let stopped = stoppedSharingAt, runtimeConfig.captureEnabled else { return }
+        if let modified = runtimeConfig.modifiedAt, modified > stopped {
+            captureStopNote.clear()
+            stoppedSharingAt = nil
+            return
+        }
+        try? runtimeConfig.setCaptureEnabled(false)
+        captureEnabled = false
+        guard runtimeConfig.captureEnabled else { return }
+        captureStopLatched = true
+        state = .stopped
+        logger.error("supervisor: the person stopped sharing and capture is still on in runtime.toml; staying off")
+    }
+
+    /// Every committed move into running, paused or stopped ends a failed
+    /// stop and shows a window that was asked for (critique-shell-engineering
+    /// 5); a failed start ends the request instead.
+    private func stateChanged() {
+        switch state {
+        case .running, .paused, .stopped:
+            stopFailed = false
+            guard !shutdownRequested else { return }
+            if recallPresentationGate.consumeIfReady(state: state) {
+                openRecallUI(initialTab: Self.windowTab)
+            }
+        case .crashed:
+            if recallPresentationGate.consumeIfBlocked(state: state) {
+                onPresentationBlocked?()
+            }
+        case .idle, .starting:
+            break
+        }
     }
 
     public func start() {
@@ -345,6 +423,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 try await self.revokeConsentAndStopTopology(timeout: timeout)
                 self.state = .stopped
             } catch {
+                self.stopFailed = true
                 self.state = .crashed(reason: error.localizedDescription)
                 throw error
             }
@@ -395,7 +474,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         state = .stopped
     }
 
+    /// Pause or resume. The pause and its time are kept, so it outlives a
+    /// relaunch (spec-shell S5).
     public func setPaused(_ paused: Bool) {
+        pauses.setPaused(paused)
         requestedPauseState = paused
         guard !shutdownRequested, shutdownTask == nil else { return }
         guard state == .starting || state == .running || state == .paused || pauseTask != nil else {
@@ -445,6 +527,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                     state = .paused
                 } catch {
                     if !shutdownRequested {
+                        stopFailed = true
                         state = .crashed(reason: error.localizedDescription)
                     }
                     throw error
@@ -465,6 +548,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             } catch {
                 if transitionGate.ownsTransition(transitionID) {
                     transitionGate.fail(transitionID: transitionID)
+                    stopFailed = true
                     state = .crashed(reason: error.localizedDescription)
                 } else {
                     await stopUncommittedTopologyIfNeeded()
@@ -555,6 +639,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             }
             captureEnabled = enabled
             captureStopLatched = false
+            // Turned back on: the Stop Sharing note and any pause are over
+            // (spec-shell S5, D10).
+            stoppedSharingAt = nil
+            captureStopNote.clear()
+            requestedPauseState = false
+            pauses.setPaused(false)
             activateTopology(captureEnabled: enabled, generationID: generationID)
         } catch {
             let requestedError = error
@@ -652,9 +742,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 crashReportOptedIn: runtimeConfig.crashReportOptedIn,
                 generation: generation
             )
-            captureStartedAt = Date()
+            captureStartedAt = clock()
             captureReceipt = nil
             health = nil
+            skipWatch = SkipWatch()
             try await topology.launch(
                 plan: plan,
                 generation: generation,
@@ -681,6 +772,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             if case SupervisorProcessRuntimeError.helperExited(82) = error,
                launchingGenerationID == currentGenerationID {
                 // Readiness can observe the exit before its delegate callback.
+                noteStoppedSharing()
                 _ = try? await requestCaptureStop().value
             }
             if launched && topology.isRunning && !captureStopLatched {
@@ -726,6 +818,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             catch { failures.append("Stopping capture: \(error.localizedDescription)") }
             guard failures.isEmpty else {
                 let error = SupervisorError.captureStopFailed(failures.joined(separator: "; "))
+                self.stopFailed = true
                 self.state = .crashed(reason: error.localizedDescription)
                 throw error
             }
@@ -741,9 +834,6 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         self.captureEnabled = captureEnabled
         state = .running
         startHealthPolling()
-        if recallPresentationGate.consumeIfReady(state: state) {
-            openRecallUI(initialTab: "now")
-        }
     }
 
     private func prepareCaptureBoundary(
@@ -813,6 +903,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     private func handleUnexpectedExit(generationID: String, label: String, status: Int32) {
         if label == "helper", status == 82, generationID == currentGenerationID {
+            noteStoppedSharing()
             let stopTask = requestCaptureStop()
             Task { @MainActor [weak self] in
                 do { try await stopTask.value }
@@ -865,6 +956,47 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             pendingRetryGenerationID = recoveryID
             scheduleRetry(expectedGenerationID: recoveryID, requireCommittedGeneration: false)
         }
+    }
+
+    /// Try Again (spec-shell S2): restart remembering now, with a fresh
+    /// retry budget. A permission reported turned off is cleared first,
+    /// because after a failed start no helper is left to report it back on;
+    /// a running helper reports a real one again on its first heartbeat
+    /// (critique-shell-engineering 6). An explicit stop, a pause, a quit or
+    /// a change under way wins.
+    public func retryNow() {
+        guard !captureStopLatched, captureStopTask == nil,
+              !requestedPauseState, pauseTask == nil,
+              !shutdownRequested, shutdownTask == nil,
+              inFlightTransitions.isEmpty else { return }
+        cancelPendingRetry()
+        retryCount = 0
+        tccRevokedSurface = nil
+        retryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.restartTopology()
+            } catch {
+                self.logger.error("supervisor: retry failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// While "Needs permission" shows after remembering stopped, nothing is
+    /// left running to notice the permission coming back, so look again when
+    /// the person may have changed it: when the menu opens or the app becomes
+    /// active (RULINGS S10).
+    public func retryIfPermissionMayBeBack() {
+        guard case .crashed = state, captureEnabled, tccRevokedSurface != nil, !stopFailed else { return }
+        retryNow()
+    }
+
+    /// Stop Sharing was pressed: remember when, here and across launches.
+    private func noteStoppedSharing() {
+        let now = clock()
+        stoppedSharingAt = now
+        captureStopNote.record(now)
+        logger.info("supervisor: the person stopped sharing; capture is off")
     }
 
     private func scheduleRetry(expectedGenerationID: String, requireCommittedGeneration: Bool = true) {
@@ -966,7 +1098,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
 
     public func refreshCaptureStatus() {
-        (health, captureReceipt) = captureStatusReader()
+        let (health, receipt) = captureStatusReader()
+        skipWatch.observe(receipt, at: clock())
+        (self.health, captureReceipt) = (health, receipt)
     }
 
     private func stopAncillaryServices(revokeCaptureConsent: Bool = true) {
@@ -984,9 +1118,17 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         healthTimer = nil
     }
 
+    /// Where the window opens when the app is opened (RULINGS X9).
+    static let windowTab = "overview"
+
+    /// Show the window once remembering is running, paused or stopped. After
+    /// a failed start the app shows Preferences instead (spec-shell S5, D9).
     public func openRecallWhenReady(initialLaunch: Bool = false) {
+        guard !shutdownRequested, shutdownTask == nil else { return }
         if recallPresentationGate.request(initialLaunch: initialLaunch, state: state) {
-            openRecallUI(initialTab: "now")
+            openRecallUI(initialTab: Self.windowTab)
+        } else if recallPresentationGate.consumeIfBlocked(state: state) {
+            onPresentationBlocked?()
         }
     }
 
@@ -1127,6 +1269,24 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         )
     }
 }
+
+#if DEBUG
+extension ProcessSupervisor {
+    /// The off-screen renderer only: put the published status where a real
+    /// run would, so Preferences draws from the real derivation.
+    package func showForPreview(
+        state: SupervisorState, captureEnabled: Bool, receipt: CaptureStatusReceipt?,
+        startedAt: Date?, stoppedSharingAt: Date? = nil, stopFailed: Bool = false
+    ) {
+        self.captureEnabled = captureEnabled
+        self.captureStartedAt = startedAt
+        self.captureReceipt = receipt
+        self.stoppedSharingAt = stoppedSharingAt
+        self.state = state
+        self.stopFailed = stopFailed
+    }
+}
+#endif
 
 extension ProcessSupervisor: CaptureSettingApplying {}
 

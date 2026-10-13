@@ -194,6 +194,61 @@ final class UserPauseControllerTests: XCTestCase {
 
         wait(for: [done], timeout: 5.0)
     }
+
+    // MARK: - Kept across launches (spec-shell S5, RULINGS S10)
+
+    private func withDefaults(_ body: (UserDefaults) throws -> Void) rethrows {
+        let suite = "ai.hippocampus.tests.pause.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        try body(defaults)
+    }
+
+    func testAPauseAndItsTimeSurviveARelaunch() {
+        withDefaults { defaults in
+            let pausedAt = Date(timeIntervalSince1970: 1_791_929_040)
+            let first = UserPauseController(defaults: defaults, clock: { pausedAt })
+            XCTAssertNil(first.pausedSince)
+            first.setPaused(true)
+            XCTAssertEqual(first.pausedSince, pausedAt)
+
+            let relaunched = UserPauseController(defaults: defaults)
+            XCTAssertTrue(relaunched.isPaused)
+            XCTAssertEqual(relaunched.pausedSince, pausedAt)
+
+            relaunched.setPaused(false)
+            XCTAssertNil(UserPauseController(defaults: defaults).pausedSince, "resuming forgets it")
+        }
+    }
+
+    func testPausingAgainKeepsTheFirstTime() {
+        final class Clock: @unchecked Sendable { var now = Date(timeIntervalSince1970: 1_791_929_040) }
+        let clock = Clock()
+        withDefaults { defaults in
+            let controller = UserPauseController(defaults: defaults, clock: { clock.now })
+            controller.setPaused(true)
+            clock.now = clock.now.addingTimeInterval(600)
+            controller.setPaused(true)
+            XCTAssertEqual(controller.pausedSince, Date(timeIntervalSince1970: 1_791_929_040))
+        }
+    }
+
+    func testResetForgetsAKeptPause() {
+        withDefaults { defaults in
+            let controller = UserPauseController(defaults: defaults)
+            controller.setPaused(true)
+            controller.resetForTesting()
+            XCTAssertFalse(controller.isPaused)
+            XCTAssertFalse(UserPauseController(defaults: defaults).isPaused)
+        }
+    }
+
+    func testAControllerWithoutDefaultsKeepsNothing() {
+        let controller = UserPauseController()
+        controller.setPaused(true)
+        XCTAssertTrue(controller.isPaused)
+        XCTAssertFalse(UserPauseController().isPaused)
+    }
 }
 
 /// Thread-safe append-only sink capture. Tests read the snapshot

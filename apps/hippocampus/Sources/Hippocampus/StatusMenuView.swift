@@ -1,351 +1,188 @@
 // SPDX-License-Identifier: TBD-private
-import SwiftUI
+//
+// StatusMenuView.swift — the menu-bar icon and its short menu, owned in
+// AppKit (spec-shell S2). Every word comes from `StatusMenuModel.items(`, so
+// tests pin them. The icon is the status's picture (RULINGS B1), with
+// "Hippocampus, {line 1}" as its accessibility label and tooltip (RULINGS
+// B2). The menu is rebuilt each time it opens, from a fresh status read.
+
+import AppKit
+import Combine
 import HippocampusKit
 
-struct StatusMenuView: View {
-    @ObservedObject var supervisor: ProcessSupervisor
-    @ObservedObject var modelProvisioner: BriefModelProvisioner
-    @ObservedObject var loginItemVM: LoginItemViewModel
-    let updater: SparkleUpdaterService
-    @ObservedObject var preferencesStore: PreferencesStore
-    let onRequestQuit: () -> Void
-    let onRequestRestart: () -> Void
+@MainActor
+final class StatusItemController: NSObject, NSMenuDelegate {
+    struct Actions {
+        /// The status row's button.
+        let perform: (CaptureStatusAction) -> Void
+        let ask: () -> Void
+        let openWindow: () -> Void
+        /// "Connect AI Tools…", or "AI Tools…" once a tool is connected.
+        let aiTools: (_ connected: Bool) -> Void
+        let preferences: () -> Void
+        let quit: () -> Void
+    }
 
-    @State private var crashReportOptedIn: Bool = false
-    @State private var mcpRegistering = false
-    @State private var showTCCResetConfirm = false
-    @State private var showKeyWrapAudit = false
+    private let statusItem: NSStatusItem
+    private let menu = NSMenu()
+    private let supervisor: ProcessSupervisor
+    private let modelProvisioner: BriefModelProvisioner
+    private let askKey: AskKeyWatch
+    private let actions: Actions
+    private var statusWatch: AnyCancellable?
+    private var shown: (picture: HiMark.State, label: String)?
+    private var items: [StatusMenuModel.Item] = []
+    /// Whether a tool has Hippocampus in its settings. Read off the main
+    /// thread when the menu opens, for the next time it does.
+    private var aiToolsConnected = false
+    /// While Hippocampus quits nothing in the menu acts (RULINGS S7).
+    private var quitting = false
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            statusHeader
+    init(
+        supervisor: ProcessSupervisor,
+        modelProvisioner: BriefModelProvisioner,
+        askKey: AskKeyWatch,
+        actions: Actions
+    ) {
+        self.supervisor = supervisor
+        self.modelProvisioner = modelProvisioner
+        self.askKey = askKey
+        self.actions = actions
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        super.init()
+        // Keeps its place in the menu bar. Removing it never quits the app.
+        statusItem.autosaveName = "ai.hippocampus.status"
+        menu.autoenablesItems = false
+        menu.delegate = self
+        statusItem.menu = menu
+        updateIcon()
+        // The icon follows the supervisor, a turn after it announces a change.
+        statusWatch = supervisor.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.updateIcon() } }
+        refreshAITools()
+    }
 
-            Divider()
+    /// After Connect AI Tools… connected a tool.
+    func noteAIToolsConnected() {
+        aiToolsConnected = true
+    }
 
-            quickActionsSection
-
-            switch RecordingControl.derive(
-                from: supervisor.state,
-                captureEnabled: supervisor.captureEnabled
-            ) {
-            case .start:
-                Button("Start Recording") {
-                    if supervisor.captureEnabled {
-                        supervisor.start()
-                    } else {
-                        Task { @MainActor in
-                            try? await supervisor.applyCaptureEnabled(true)
-                        }
-                    }
-                }
-            case .stop:
-                Button("Stop Recording") {
-                    Task { @MainActor in
-                        try? await supervisor.applyCaptureEnabled(false)
-                    }
-                }
-            case .none:
-                EmptyView()
-            }
-
-            if supervisor.hasOnboarding {
-                Button("Open Onboarding") {
-                    _ = supervisor.openOnboarding()
-                }
-            }
-
-            Divider()
-
-            briefsMenuItem
-
-            Button("Connect AI Tools…") {
-                connectAITools()
-            }
-            .disabled(mcpRegistering)
-
-            Divider()
-
-            Button("Preferences…") {
-                openPreferencesWindow()
-            }
-            .keyboardShortcut(",", modifiers: [.command])
-
-            troubleshootSection
-
-            Button("Send Feedback…") { sendFeedback() }
-
-            Divider()
-
-            Button("Quit Hippocampus") {
-                onRequestQuit()
-            }
-            .keyboardShortcut("q")
-        }
-        .task {
-            crashReportOptedIn = supervisor.isCrashReportOptedIn
-            modelProvisioner.refreshIfMissing()
-            if loginItemVM.shouldPrompt {
-                loginItemVM.markPrompted()
-            }
-        }
-        .sheet(isPresented: $showKeyWrapAudit) {
-            KeyWrapAuditView(
-                store: .defaultDatabaseKey,
-                onClose: { showKeyWrapAudit = false }
-            )
+    /// From Quit until Hippocampus has stopped, the menu still opens but
+    /// nothing in it acts; a failed restart turns it back on. The icon keeps
+    /// following the supervisor, so it shows Off once the stop is done.
+    func setQuitting(_ quitting: Bool) {
+        self.quitting = quitting
+        if quitting {
+            for item in menu.items { item.isEnabled = false }
         }
     }
 
-    @ViewBuilder
-    private var briefsMenuItem: some View {
-        Button("Open Daily Brief") {
-            supervisor.openRecallUI(initialTab: "brief")
-        }
-
-        if modelProvisioner.state == .ready && modelProvisioner.isReadyOnDisk {
-            Text("Brief quality: Rich local model")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
+    private func updateIcon() {
+        let status = supervisor.menuBarStatus
+        let label = StatusMenuModel.accessibilityLabel(supervisor.statusRow())
+        guard shown?.picture != status.markState || shown?.label != label else { return }
+        shown = (status.markState, label)
+        guard let button = statusItem.button else { return }
+        button.image = MenuBarStatusIcon.image(for: status)
+        button.toolTip = label
+        button.setAccessibilityLabel(label)
     }
 
-    /// Always-visible quick actions a user needs regardless of state:
-    ///
-    ///   - Pause / Resume Capture  ⌘⇧P  (toggle; label flips per state)
-    ///   - Open Recall             ⌘R
-    ///   - Open Timeline           ⌘T  (⌘8 in the recall-ui window,
-    ///                              but from the menu-bar the entry
-    ///                              point is a distinct verb; deep-links
-    ///                              to `timeline` tab via MCI_INITIAL_TAB)
-    /// Pause is a user-initiated stop distinct from the automatic
-    /// TCC-revocation stop. It flips `UserPauseController.shared.isPaused`
-    /// and asks the supervisor to stop the complete owned topology via `setPaused`
-    /// so the visible `MenuBarStatus` derivation flips to
-    /// `.paused`. The controller emits a `helper_health
-    /// user_paused=<bool>` breadcrumb so the health-log ring
-    /// distinguishes user pauses from automated ones.
-    @ViewBuilder
-    private var quickActionsSection: some View {
-        let paused = (supervisor.state == .paused)
-            || UserPauseController.shared.isPaused
+    // MARK: NSMenuDelegate
 
-        AskMenuItem(watch: SoloKeyMonitor.shared.watch)
-
-        Button("Open Recall") {
-            supervisor.openRecallUI()
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        // The status is polled every 5 s; read it now.
+        supervisor.refreshCaptureStatus()
+        modelProvisioner.refreshIfMissing()
+        askKey.recheck()
+        let setupFinished = OnboardingSentinel.isComplete
+        items = StatusMenuModel.items(
+            row: supervisor.statusRow(setupFinished: setupFinished),
+            setupComplete: supervisor.setup(finished: setupFinished) == .complete,
+            askLabel: askKey.label,
+            aiToolsConnected: aiToolsConnected
+        )
+        menu.removeAllItems()
+        for (index, item) in items.enumerated() {
+            menu.addItem(menuItem(item, index: index))
         }
-        .keyboardShortcut("r", modifiers: [.command])
-
-        Button("Open Timeline") {
-            supervisor.openRecallUI(initialTab: "timeline")
-        }
-        .keyboardShortcut("t", modifiers: [.command])
-
-        if supervisor.captureEnabled {
-            Button(paused ? "Resume Capture" : "Pause Capture") {
-                toggleUserPause()
-            }
-            .keyboardShortcut("p", modifiers: [.command, .shift])
-        }
+        updateIcon()
+        // A permission may have been turned back on in System Settings. The
+        // menu shows what is true now; the icon follows the retry.
+        supervisor.retryIfPermissionMayBeBack()
+        refreshAITools()
     }
 
-    /// "Ask", named by `AskShortcut`: ⌃⇧Space shows as its key equivalent
-    /// when that is what opens Ask. A chosen key that is listening gets its
-    /// badge once the menu is an AppKit status item (spec-shell S2, S3).
-    private struct AskMenuItem: View {
-        @ObservedObject var watch: AskKeyWatch
-
-        var body: some View {
-            if watch.label == AskShortcut.fallbackLabel {
-                Button("Ask") { CommandBarController.shared.show() }
-                    .keyboardShortcut(.space, modifiers: [.control, .shift])
-            } else {
-                Button("Ask") { CommandBarController.shared.show() }
-            }
+    private func menuItem(_ item: StatusMenuModel.Item, index: Int) -> NSMenuItem {
+        guard item.role != .separator else { return .separator() }
+        let acts = item.isEnabled && !quitting
+        let menuItem = NSMenuItem(
+            title: item.title,
+            action: acts ? #selector(choose(_:)) : nil,
+            keyEquivalent: item.key?.key ?? ""
+        )
+        menuItem.target = self
+        menuItem.tag = index
+        menuItem.isEnabled = acts
+        if let key = item.key {
+            var modifiers: NSEvent.ModifierFlags = []
+            if key.command { modifiers.insert(.command) }
+            if key.shift { modifiers.insert(.shift) }
+            if key.control { modifiers.insert(.control) }
+            menuItem.keyEquivalentModifierMask = modifiers
         }
+        if let badge = item.badge {
+            menuItem.badge = NSMenuItemBadge(string: badge)
+        }
+        switch item.role {
+        case .status:
+            menuItem.attributedTitle = NSAttributedString(string: item.title, attributes: [
+                .font: NSFont.menuFont(ofSize: 13).withWeight(.semibold),
+                .foregroundColor: NSColor.labelColor,
+            ])
+        case .detail:
+            menuItem.attributedTitle = NSAttributedString(string: item.title, attributes: [
+                .font: NSFont.menuFont(ofSize: 11),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ])
+        default:
+            break
+        }
+        return menuItem
     }
 
-    /// Flip user pause state. Called from menu-bar ⌘⇧P and from the
-    /// ⌘K Action Panel (PR #74). Keeps the two layers coherent:
-    ///   - `UserPauseController.shared` — the user-facing flag +
-    ///     breadcrumb emitter.
-    ///   - `supervisor.setPaused(_:)` — a verified full-topology stop
-    ///     followed by a fresh launch on resume. A pause requested before
-    ///     or during startup is also forwarded so capture cannot race the
-    ///     user's latest intent.
-    private func toggleUserPause() {
-        let nextPaused = UserPauseController.shared.togglePaused()
-        supervisor.setPaused(nextPaused)
-    }
-
-    @ViewBuilder
-    private var statusHeader: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text("Hippocampus").font(.headline)
-            CaptureHealthView(supervisor: supervisor) {
-                PreferencesWindowController.shared.show(section: .capture)
-            }
+    @objc private func choose(_ sender: NSMenuItem) {
+        guard !quitting, items.indices.contains(sender.tag) else { return }
+        switch items[sender.tag].role {
+        case .action(let action): actions.perform(action)
+        case .ask: actions.ask()
+        case .openWindow: actions.openWindow()
+        case .aiTools: actions.aiTools(aiToolsConnected)
+        case .preferences: actions.preferences()
+        case .quit: actions.quit()
+        case .status, .detail, .separator: break
         }
     }
 
-    @ViewBuilder
-    private var troubleshootSection: some View {
-        Menu("Troubleshoot…") {
-            Button("Open Logs Folder") {
-                let logDir = FileManager.default.homeDirectoryForCurrentUser
-                    .appendingPathComponent("Library/Logs/MCI")
-                NSWorkspace.shared.open(logDir)
-            }
-
-            Button("Inspect Key Wrap…") {
-                showKeyWrapAudit = true
-            }
-
-            Button("Reset TCC Permissions…") {
-                showTCCResetConfirm = true
-            }
-
-            Divider()
-
-            Button("Check for Updates…") {
-                updater.checkForUpdates()
-            }
-            .disabled(!updater.canCheckForUpdates)
-
-            Toggle("Send Crash Reports", isOn: $crashReportOptedIn)
-                .onChange(of: crashReportOptedIn) { _, newValue in
-                    supervisor.setCrashReportOptedIn(newValue)
-                }
-
-            Divider()
-
-            Button("Open Screen Recording Settings") {
-                openSettingsPane("Privacy_ScreenCapture")
-            }
-
-            Button("Open Accessibility Settings") {
-                openSettingsPane("Privacy_Accessibility")
-            }
-
-            Divider()
-
-            Button("Quit and Restart") {
-                quitAndRestart()
-            }
-        }
-        .alert("Reset TCC Permissions?", isPresented: $showTCCResetConfirm) {
-            Button("Cancel", role: .cancel) {}
-            Button("Reset", role: .destructive) {
-                resetTCCPermissions()
-            }
-        } message: {
-            Text("Will reset Screen Recording, Accessibility, and Files grants. You'll need to re-grant on next launch.")
+    private func refreshAITools() {
+        let environment = ProcessInfo.processInfo.environment
+        Task.detached(priority: .utility) { [weak self] in
+            let connected = !AIToolRegistrations.connected(environment: environment).isEmpty
+            await self?.setAIToolsConnected(connected)
         }
     }
 
-    private func openSettingsPane(_ pane: String) {
-        guard let url = URL(
-            string: "x-apple.systempreferences:com.apple.preference.security?\(pane)"
-        ) else { return }
-        NSWorkspace.shared.open(url)
+    private func setAIToolsConnected(_ connected: Bool) {
+        aiToolsConnected = connected
     }
+}
 
-    private func resetTCCPermissions() {
-        let services = ["ScreenCapture", "Accessibility", "SystemPolicyAllFiles"]
-        var results: [String] = []
-        for service in services {
-            let proc = ChildProcessEnvironment.makeProcess()
-            proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
-            proc.arguments = ["reset", service]
-            do {
-                try proc.run()
-                proc.waitUntilExit()
-                results.append("\(service): \(proc.terminationStatus == 0 ? "reset" : "failed")")
-            } catch {
-                results.append("\(service): error — \(error.localizedDescription)")
-            }
-        }
-        showAlert(title: "TCC Reset Complete", message: results.joined(separator: "\n") + "\n\nQuit and relaunch to re-grant.")
+private extension NSFont {
+    func withWeight(_ weight: NSFont.Weight) -> NSFont {
+        let descriptor = fontDescriptor.addingAttributes([
+            .traits: [NSFontDescriptor.TraitKey.weight: weight],
+        ])
+        return NSFont(descriptor: descriptor, size: pointSize) ?? self
     }
-
-    private func quitAndRestart() {
-        onRequestRestart()
-    }
-
-    private func connectAITools() {
-        guard let agentPath = supervisor.agentBinaryPath else {
-            // Cycle 8.54 copy audit — plain-English replacement for the
-            // engineer-only "mci-agent binary not found." Users have no
-            // context for what "mci-agent" is.
-            showAlert(
-                title: "Couldn\u{2019}t connect AI tools",
-                message:
-                    "Hippocampus can\u{2019}t find its agent "
-                    + "connector. Try reinstalling Hippocampus."
-            )
-            return
-        }
-        let childEnvironment = supervisor.sanitizedChildEnvironment()
-        mcpRegistering = true
-        Task.detached {
-            do {
-                let message = try await AIToolConnector(
-                    agentURL: agentPath,
-                    baseEnvironment: childEnvironment
-                ).connectAll()
-                await MainActor.run {
-                    mcpRegistering = false
-                    showAlert(title: "MCP Registration", message: message)
-                }
-            } catch {
-                await MainActor.run {
-                    mcpRegistering = false
-                    showAlert(
-                        title: "Couldn\u{2019}t connect AI tools",
-                        message: error.localizedDescription
-                    )
-                }
-            }
-        }
-    }
-
-    private func sendFeedback() {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
-        let title = "Feedback (v\(version))"
-            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        guard let url = URL(string: "https://github.com/amyjainberkeley/hippocampus/issues/new?title=\(title)") else { return }
-        NSWorkspace.shared.open(url)
-    }
-
-    private func showAlert(title: String, message: String) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        // Cycle 8.54 copy audit — the copy audit removed the raw
-        // "Error" title everywhere except this fallback. Warning
-        // styling still fires whenever the title contains "Couldn't"
-        // (our new user-facing failure convention).
-        alert.alertStyle = (title.contains("Couldn") || title == "Error")
-            ? .warning : .informational
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
-    }
-
-    /// Open (or focus) the comprehensive Preferences window bound to
-    /// the ⌘, shortcut. All dependencies were wired in
-    /// `HippocampusApp.configurePreferencesController` at launch; this
-    /// call is idempotent — the controller lazily creates the NSPanel
-    /// on first invocation and focuses the existing window thereafter.
-    ///
-    /// Note (cycle 8.54): PR #105 replaced the legacy `openAboutWindow`
-    /// NSAlert with a proper Preferences window; the About section lives
-    /// there. Copy-audit updates from PR #106 that targeted the removed
-    /// alert are moot — the About section already reads "memory" not
-    /// "brain" per the shared UserFacingCopy vocabulary.
-    private func openPreferencesWindow() {
-        #if canImport(AppKit)
-        PreferencesWindowController.shared.show()
-        #endif
-    }
-
 }

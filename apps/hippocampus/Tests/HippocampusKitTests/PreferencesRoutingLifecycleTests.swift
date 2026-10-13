@@ -71,9 +71,10 @@ final class PreferencesRoutingLifecycleTests: XCTestCase {
             XCTAssertTrue(delegate.contains(constructor), constructor)
             XCTAssertFalse(scene.contains(constructor), constructor)
         }
-        for dependency in ["preferencesStore", "loginItemVM", "updater"] {
-            XCTAssertTrue(scene.contains("\(dependency): appDelegate.\(dependency)"), dependency)
-        }
+        // The menu-bar item is the delegate's; the scene carries commands only.
+        XCTAssertTrue(delegate.contains("StatusItemController("))
+        XCTAssertTrue(scene.contains("Settings {"))
+        XCTAssertFalse(scene.contains("MenuBarExtra"))
         XCTAssertFalse(scene.contains("configurePreferencesController()"))
     }
 
@@ -111,7 +112,7 @@ final class PreferencesRoutingLifecycleTests: XCTestCase {
 
     func testSourcesKeepsExistingConsentViewAndSingleSectionType() throws {
         let window = try source("PreferencesWindow.swift")
-        XCTAssertTrue(window.contains("case .sources: SessionContextPreferencesView(supervisor: supervisor)"))
+        XCTAssertTrue(window.contains("case .sources: SessionContextPreferencesView(supervisor: supervisor,"))
         XCTAssertFalse(window.contains("enum PreferencesSection:"))
         XCTAssertTrue(window.contains("extension PreferencesSection {"))
     }

@@ -59,42 +59,31 @@ public struct CaptureStatusReceipt: Decodable, Equatable, Sendable {
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: raw)
     }
-
-    public var storedCountsText: String {
-        "\(storedFrameCount) saved frames, \(storedScreenshotCount) screenshots"
-    }
-
-    public func lastSavedText(relativeTo now: Date = Date()) -> String {
-        guard let saved = lastStoredFrameAt else { return "Last saved: none reported" }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return "Last saved: \(formatter.localizedString(for: saved, relativeTo: now))"
-    }
 }
 
+/// The one button that goes with a status, the same in the menu, Ask's
+/// footer and Preferences (spec-shell S2, product critique 11).
 public enum CaptureStatusAction: Equatable, Sendable {
+    case pause
     case resume
-    case start
-    case openPermission(TCCRevokedReason)
-    case reviewCapture
-    case openLogs
+    case turnOn
+    case openSystemSettings(TCCRevokedReason)
+    /// Restart remembering now (`ProcessSupervisor.retryNow()`).
+    case tryAgain
+    /// After a failed stop, quitting is the one sure way to stop.
+    case quit
+    /// Before setup, the only way on is onboarding's Start Remembering.
+    case finishSetup
 
     public var title: String {
         switch self {
-        case .resume: return "Resume Capture"
-        case .start: return "Start Capture"
-        case .openPermission: return "Open Permission Settings"
-        case .reviewCapture: return "Review Capture Settings"
-        case .openLogs: return "Open Capture Logs"
-        }
-    }
-
-    public var symbol: String {
-        switch self {
-        case .resume, .start: return "play.fill"
-        case .openPermission: return "lock.shield"
-        case .reviewCapture: return "slider.horizontal.3"
-        case .openLogs: return "doc.text.magnifyingglass"
+        case .pause: return "Pause"
+        case .resume: return "Resume"
+        case .turnOn: return "Turn On"
+        case .openSystemSettings: return "Open System Settings…"
+        case .tryAgain: return "Try Again"
+        case .quit: return "Quit Hippocampus"
+        case .finishSetup: return "Finish Setup…"
         }
     }
 }

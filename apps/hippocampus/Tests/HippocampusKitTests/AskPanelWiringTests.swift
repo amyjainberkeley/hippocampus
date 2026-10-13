@@ -47,8 +47,8 @@ final class AskPanelWiringTests: XCTestCase {
 
     func testTheWindowInFrontIsReadAfterThePanelIsUp() throws {
         let bar = try source("CommandBar.swift")
-        let show = try XCTUnwrap(bar.range(of: "func show(asking question: String? = nil)"))
-        let body = String(bar[show.lowerBound...].prefix(1_200))
+        let show = try XCTUnwrap(bar.range(of: "func show(asking question: String? = nil, from opening: AskPanelDismissal.Opening = .menu)"))
+        let body = String(bar[show.lowerBound...].prefix(1_600))
         let present = try XCTUnwrap(body.range(of: "present(panel)"))
         let fill = try XCTUnwrap(body.range(of: "fillContext(openID: openID)"))
         XCTAssertLessThan(present.lowerBound, fill.lowerBound)
@@ -117,18 +117,51 @@ final class AskPanelWiringTests: XCTestCase {
         XCTAssertLessThan(render.lowerBound, app.lowerBound)
         let renderer = try source("CommandBarPreview.swift")
         XCTAssertTrue(renderer.contains("setActivationPolicy(.prohibited)"))
-        for onScreen in ["orderFront", "makeKeyAndOrderFront", "NSWindow(", "NSPanel(", ".activate(", "NSApp.run", ".run()",
-                         "NSStatusBar"] {
-            XCTAssertFalse(renderer.contains(onScreen), onScreen)
+        // The menu and Preferences are drawn by the same run, after it.
+        let status = try source("StatusPreview.swift")
+        let prohibited = try XCTUnwrap(renderer.range(of: "setActivationPolicy(.prohibited)"))
+        let menus = try XCTUnwrap(renderer.range(of: "StatusPreviewRenderer.render(to: out)"))
+        XCTAssertLessThan(prohibited.lowerBound, menus.lowerBound)
+        for source in [renderer, status] {
+            for onScreen in ["orderFront", "makeKeyAndOrderFront", "NSWindow(", "NSPanel(", ".activate(", "NSApp.run",
+                             ".run()", "NSStatusBar", "statusItem(", "runModal", "NSAlert"] {
+                XCTAssertFalse(source.contains(onScreen), onScreen)
+            }
+            XCTAssertTrue(source.contains("hosting.cacheDisplay(in: hosting.bounds, to: rep)"))
         }
-        XCTAssertTrue(renderer.contains("hosting.cacheDisplay(in: hosting.bounds, to: rep)"))
+    }
+
+    /// The menu's "Ask" is named by `AskShortcut` through `StatusMenuModel`,
+    /// whose tests pin the badge and the ⌃⇧Space key equivalent.
+    /// Opening `hippocampus://ask`, with or without a question, always
+    /// shows Ask; only the key and Esc close it (RULINGS S12). In the
+    /// preview install a second link hid Ask and its answer arrived unseen.
+    func testALinkAlwaysShowsAskAndOnlyTheKeyClosesIt() throws {
+        XCTAssertFalse(AskPanelDismissal.closes(.link, visible: true), "a second link keeps Ask up")
+        XCTAssertFalse(AskPanelDismissal.closes(.menu, visible: true))
+        XCTAssertTrue(AskPanelDismissal.closes(.key, visible: true))
+        XCTAssertFalse(AskPanelDismissal.closes(.key, visible: false))
+        // The link activates Hippocampus, which can take the keyboard from
+        // Ask just after it shows; that is not a click away.
+        XCTAssertFalse(AskPanelDismissal.closesOnResignKey(sinceLinkOpen: 0))
+        XCTAssertFalse(AskPanelDismissal.closesOnResignKey(sinceLinkOpen: 0.4))
+        XCTAssertTrue(AskPanelDismissal.closesOnResignKey(sinceLinkOpen: 1.5))
+        XCTAssertTrue(AskPanelDismissal.closesOnResignKey(sinceLinkOpen: nil))
+
+        let app = try source("HippocampusApp.swift")
+        XCTAssertTrue(app.contains("case .ask(let question):"))
+        XCTAssertTrue(app.contains("CommandBarController.shared.show(asking: question, from: .link)"))
+        let bar = try source("CommandBar.swift")
+        XCTAssertTrue(bar.contains("if AskPanelDismissal.closes(.key, visible: panel?.isVisible == true) { hide() } else { show(from: .key) }"))
+        XCTAssertTrue(bar.contains("guard AskPanelDismissal.closesOnResignKey(sinceLinkOpen: sinceLink) else {"))
+        XCTAssertTrue(bar.contains("if let question { model.ask(question) }"), "with q, it shows and asks")
     }
 
     func testTheMenuNamesAskByWhatOpensIt() throws {
         let menu = try source("StatusMenuView.swift")
         XCTAssertFalse(menu.contains("Ask Hippocampus…"))
-        XCTAssertTrue(menu.contains("Button(\"Ask\")"))
-        XCTAssertTrue(menu.contains("watch.label == AskShortcut.fallbackLabel"))
+        XCTAssertTrue(menu.contains("askLabel: askKey.label"))
+        XCTAssertTrue(menu.contains("NSMenuItemBadge(string: badge)"))
     }
 
     func testPreferencesGeneralSaysHowTheKeyWorks() throws {

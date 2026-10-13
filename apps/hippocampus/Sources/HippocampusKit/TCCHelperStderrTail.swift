@@ -160,15 +160,24 @@ public final class TCCNotifierAndSupervisorSink: TCCRevokedEventSink {
     }
 
     public func handleRevoked(_ reason: TCCRevokedReason) async {
+        forgetIfCleared()
         revoked.insert(reason)
         updateVisibleReason()
         await notifier.notifyRevoked(reason)
     }
 
     public func handleRestored(_ reason: TCCRevokedReason) async {
+        forgetIfCleared()
         revoked.remove(reason)
         updateVisibleReason()
         await notifier.notifyRestored(reason)
+    }
+
+    /// Try Again clears the supervisor's surface before a restart, since no
+    /// helper was left to report a permission back on. Start over with what
+    /// the new helper reports, so an old revoke cannot come back with it.
+    private func forgetIfCleared() {
+        if supervisor?.tccRevokedSurface == nil { revoked.removeAll() }
     }
 
     private func updateVisibleReason() {

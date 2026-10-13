@@ -4,8 +4,9 @@ import HippocampusKit
 import SwiftUI
 
 /// Debug only: `HIPPOCAMPUS_RENDER_BAR=<dir>` draws Ask's states from fixture
-/// data (no memory, no real moments) to `panel-<state>.png` at 2x, then
-/// returns from `main` before the app starts.
+/// data (no memory, no real moments) to `panel-<state>.png` at 2x, the menu
+/// and Preferences to `menu-<state>.png` and `prefs-<pane>.png`
+/// (`StatusPreviewRenderer`), then returns from `main` before the app starts.
 ///
 /// Nothing reaches the screen. `HippocampusEntryPoint.main` calls this before
 /// `HippocampusApp.main()`, so no scene, menu-bar item or app delegate
@@ -30,6 +31,7 @@ enum CommandBarPreviewRenderer {
                 try? png.write(to: out.appendingPathComponent("panel-\(state.name).png"))
             }
         }
+        StatusPreviewRenderer.render(to: out)
         return true
     }
 

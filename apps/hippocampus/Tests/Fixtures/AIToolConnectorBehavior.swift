@@ -93,7 +93,7 @@ struct AIToolConnectorBehavior {
         let silentReport = try await AIToolConnector(
             agentURL: silentAgent, baseEnvironment: [:]
         ).connectAll()
-        precondition(silentReport.contains("not been verified"), "empty output must not claim connection")
+        precondition(silentReport.contains("couldn’t confirm"), "empty output must not claim connection")
 
         print("PASS: menu AI connector timeout, cleanup, output, and error bounds")
     }

@@ -115,11 +115,11 @@ public enum TCCRevokedNotifierRequestBuilder {
         )
     }
 
-    /// The category descriptor with the "Open Settings" action button.
+    /// The category descriptor with the "Open System Settings" action button.
     public static func makeCategory() -> UNNotificationCategory {
         let openSettings = UNNotificationAction(
             identifier: openSettingsActionIdentifier,
-            title: "Open Settings",
+            title: "Open System Settings",
             options: [.foreground]
         )
         return UNNotificationCategory(

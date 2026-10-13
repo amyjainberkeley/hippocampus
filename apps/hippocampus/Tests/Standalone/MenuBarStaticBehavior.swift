@@ -16,6 +16,7 @@ let states: [MenuBarStatus] = [
     .idle, .starting, .recording, .paused, .error(reason: "first"),
     .needsPermission(.screenRecording), .blocked(reason: "first"),
     .stale(reason: "first"), .noMemory, .unchanged,
+    .skipping(reason: "secure_input"), .skipping(reason: "private_browsing"), .stopFailed(reason: "first"),
 ]
 for state in states {
     require(!state.shouldPulse, "Every menu-bar state must be static")
@@ -28,6 +29,8 @@ require(MenuBarStatusIcon.image(for: .error(reason: "first")) === MenuBarStatusI
 require(MenuBarStatusIcon.image(for: .blocked(reason: "first")) === MenuBarStatusIcon.image(for: .stale(reason: "first")), "Shared pictures share their cached image")
 require(MenuBarStatusIcon.image(for: .starting) === MenuBarStatusIcon.image(for: .recording), "Starting shows the solid dot")
 require(MenuBarStatusIcon.image(for: .starting) !== MenuBarStatusIcon.image(for: .paused), "Starting never shows the paused picture")
+require(MenuBarStatusIcon.image(for: .skipping(reason: "private_browsing")) === MenuBarStatusIcon.image(for: .recording), "A skip other than a password field keeps the solid dot")
+require(MenuBarStatusIcon.image(for: .skipping(reason: "secure_input")) !== MenuBarStatusIcon.image(for: .recording), "A password field shows the hollow dot")
 let pictures = HiMark.State.allCases.map { MenuBarStatusIcon.image(for: $0).tiffRepresentation! }
 require(Set(pictures).count == HiMark.State.allCases.count, "The four pictures remain visually distinct")
-print("PASS: static menu label, 10000 cached icon reads, bounded reason-independent cache, four distinct pictures")
+print("PASS: static menu label, 13000 cached icon reads, bounded reason-independent cache, four distinct pictures")

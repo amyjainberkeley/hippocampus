@@ -36,6 +36,19 @@ public enum PreferencesSection: String, CaseIterable, Identifiable, Sendable {
     case about = "About"
 
     public var id: String { rawValue }
+
+    /// The name a person reads (spec-copy S4.4); the raw value stays the
+    /// link and toolbar identifier.
+    public var label: String {
+        switch self {
+        case .general: "General"
+        case .capture: "Remembering"
+        case .sources: "AI Tools"
+        case .privacy: "Privacy"
+        case .advanced: "Advanced"
+        case .about: "About"
+        }
+    }
 }
 
 public enum HippocampusURLRoute: Equatable, Sendable {

@@ -13,9 +13,9 @@
 //
 //   2. The `MenuBarStatusIcon` factory draws the four hi pictures
 //      (solid dot, hollow dot, dim, h!) as templates with 22, 44 and
-//      66 px bitmaps and keeps them distinct. Recording, unchanged,
-//      starting and noMemory show the solid dot, and only a password
-//      field may ever show the hollow one.
+//      66 px bitmaps and keeps them distinct. Every state in which the
+//      screen may be read and nothing failed shows the solid dot; only a
+//      password field shows the hollow one (RULINGS B1).
 import XCTest
 #if canImport(AppKit)
 import AppKit
@@ -139,6 +139,164 @@ final class MenuBarStatusTests: XCTestCase {
         }
     }
 
+    // MARK: - Status truth (spec-shell S4, RULINGS B1 and S8)
+
+    private let now = Date(timeIntervalSince1970: 1_788_609_600)
+
+    private func receipt(
+        count: Int = 12, savedAgo: TimeInterval? = 5, updatedAgo: TimeInterval = 0,
+        suppression: String? = nil, blocked: String? = nil
+    ) throws -> CaptureStatusReceipt {
+        let formatter = ISO8601DateFormatter()
+        var json: [String: Any] = [
+            "schema_version": 1, "updated_at": formatter.string(from: now.addingTimeInterval(-updatedAgo)),
+            "stored_frame_count": count, "stored_screenshot_count": count, "last_stored_frame_at": NSNull(),
+        ]
+        if let savedAgo { json["last_stored_frame_at"] = formatter.string(from: now.addingTimeInterval(-savedAgo)) }
+        json["suppression_reason"] = suppression
+        json["blocked_reason"] = blocked
+        return try CaptureStatusReceipt.decode(JSONSerialization.data(withJSONObject: json))
+    }
+
+    /// A run that started a minute ago, with the skip seen `skipHeld` ago.
+    private func running(_ receipt: CaptureStatusReceipt?, skipHeld: TimeInterval? = nil, startedAgo: TimeInterval = 60) -> MenuBarStatus {
+        MenuBarStatus.derive(from: .running, receipt: receipt, captureStartedAt: now.addingTimeInterval(-startedAgo),
+                             skipSeenSince: skipHeld.map { now.addingTimeInterval(-$0) }, now: now)
+    }
+
+    private static let privacyCodes = [
+        "app_denied", "denylist-source", "denylist-postcapture", "secure_input", "secure-event-input",
+        "ax-secure-subrole", "os-blacked-region", "ocr-time-secret", "failsafe-unknown",
+        "private_browsing", "browser_window_unknown", "app_identity_unknown",
+    ]
+
+    /// Privacy codes are skips, never failures, so they never show h!; a
+    /// password field shows the hollow dot and every other skip the solid
+    /// one, because the rest of the screen is still read.
+    func testAPasswordFieldOrAnExcludedAppNeverShowsHBang() throws {
+        for code in Self.privacyCodes {
+            let status = running(try receipt(suppression: code), skipHeld: 11)
+            XCTAssertEqual(status, .skipping(reason: code), code)
+            XCTAssertEqual(status.displayText, "Skipping this window", code)
+            XCTAssertNotEqual(status.markState, .needsYou, code)
+            let password = ["secure_input", "secure-event-input"].contains(code)
+            XCTAssertEqual(status.markState, password ? .skipping : .remembering, code)
+        }
+        XCTAssertEqual(running(try receipt(suppression: "secure_input"), skipHeld: 11).markState, .skipping)
+        XCTAssertEqual(running(try receipt(suppression: "denylist-source"), skipHeld: 11).markState, .remembering)
+    }
+
+    /// The receipt's skip is the last since the last save, from any window,
+    /// so it shows only once it has held about 10 s (RULINGS S8). Until
+    /// then it stays "Remembering", with the solid dot.
+    func testASkipShowsOnlyOnceItHasHeld() throws {
+        for code in Self.privacyCodes {
+            for held in [nil, 0, 9.9] as [TimeInterval?] {
+                let status = running(try receipt(suppression: code), skipHeld: held)
+                XCTAssertEqual(status, .recording, "\(code) held \(String(describing: held))")
+                XCTAssertEqual(status.markState, .remembering)
+            }
+            XCTAssertEqual(running(try receipt(suppression: code), skipHeld: 10), .skipping(reason: code))
+        }
+    }
+
+    /// A fast window switch is not a skip worth showing; it stays
+    /// "Remembering" (product critique 10).
+    func testAFastWindowSwitchStaysRemembering() throws {
+        for held in [nil, 11, 3600] as [TimeInterval?] {
+            let status = running(try receipt(suppression: "focus-race-dropped"), skipHeld: held)
+            XCTAssertEqual(status, .recording)
+            XCTAssertEqual(status.displayText, "Remembering")
+        }
+    }
+
+    /// Failures named by the agent show at once; they are not skips.
+    func testFailuresShowAtOnceAsNotSaving() throws {
+        for code in ["storage_error", "store_unavailable", "ingest_failed", "activity_ingest_failed",
+                     "helper_disconnected", "capture_failed", "capture_disabled", "a-future-code"] {
+            let status = running(try receipt(blocked: code))
+            XCTAssertEqual(status, .blocked(reason: code), code)
+            XCTAssertEqual(status.displayText, "Not saving", code)
+            XCTAssertEqual(status.markState, .needsYou, code)
+            XCTAssertEqual(status.action, .tryAgain, code)
+        }
+    }
+
+    /// Every start clears the receipt, and the first heartbeat takes about
+    /// 30 s: for 45 s a run with nothing to show is starting, with the
+    /// solid dot, not failing (spec-shell S4.3, RULINGS S6).
+    func testAYoungRunIsStartingForFortyFiveSeconds() throws {
+        XCTAssertEqual(running(nil, startedAgo: 10), .starting)
+        XCTAssertEqual(running(nil, startedAgo: 44.9), .starting)
+        guard case .stale = running(nil, startedAgo: 45) else { return XCTFail("stale after the grace") }
+        // A receipt from before this run.
+        XCTAssertEqual(running(try receipt(savedAgo: 25, updatedAgo: 20), startedAgo: 10), .starting)
+        guard case .stale = running(try receipt(savedAgo: 75, updatedAgo: 70), startedAgo: 60) else { return XCTFail("stale") }
+        // A fresh receipt, no save this run, no heartbeat yet.
+        XCTAssertEqual(running(try receipt(savedAgo: 86_400), startedAgo: 20), .starting)
+        guard case .stale = running(try receipt(savedAgo: 86_400), startedAgo: 50) else { return XCTFail("stale") }
+        XCTAssertEqual(MenuBarStatus.startingGrace, 45)
+        XCTAssertEqual(running(nil, startedAgo: 10).markState, .remembering)
+    }
+
+    /// A permission turned off while starting leaves the state crashed; it
+    /// says which permission so the fix is in reach (spec-shell S4.2). A
+    /// failed stop, with capture off, stays an error.
+    func testACrashWithAPermissionTurnedOffNeedsPermission() {
+        XCTAssertEqual(MenuBarStatus.derive(from: .crashed(reason: "x"), captureEnabled: true,
+                                            tccRevokedSurface: .screenRecording),
+                       .needsPermission(.screenRecording))
+        XCTAssertEqual(MenuBarStatus.derive(from: .crashed(reason: "x"), captureEnabled: false,
+                                            tccRevokedSurface: .screenRecording),
+                       .error(reason: "x"))
+        XCTAssertEqual(MenuBarStatus.derive(from: .crashed(reason: "x")), .error(reason: "x"))
+    }
+
+    /// A failed stop, pause or turn-off says "Couldn’t stop" while the
+    /// failure stands (product critique 3), ahead of every other reading.
+    func testAFailedStopWinsWhileItStands() {
+        XCTAssertEqual(MenuBarStatus.derive(from: .crashed(reason: "x"), captureEnabled: false, stopFailed: true),
+                       .stopFailed(reason: "x"))
+        XCTAssertEqual(MenuBarStatus.derive(from: .crashed(reason: "x"), tccRevokedSurface: .accessibility,
+                                            stopFailed: true),
+                       .stopFailed(reason: "x"))
+        XCTAssertEqual(MenuBarStatus.derive(from: .paused, stopFailed: true), .paused,
+                       "a committed pause has ended the failure")
+    }
+
+    /// The words on line 1 and line 2, and the button, per status (spec-shell
+    /// S2 with product critique 3, 9 and 10).
+    func testEveryStatusHasItsWords() {
+        let expected: [(MenuBarStatus, String, String?, String?)] = [
+            (.recording, "Remembering", nil, "Pause"),
+            (.unchanged, "Remembering", nil, "Pause"),
+            (.starting, "Starting…", nil, "Pause"),
+            (.noMemory, "Nothing saved yet", nil, "Pause"),
+            (.skipping(reason: "ocr-time-secret"), "Skipping this window",
+             "It saw what looks like a password or key, so it saved nothing.", "Pause"),
+            (.skipping(reason: "failsafe-unknown"), "Skipping this window",
+             "It couldn’t tell if this window is private, so it skipped it.", "Pause"),
+            (.skipping(reason: "os-blacked-region"), "Skipping this window", "macOS protects this window.", "Pause"),
+            (.skipping(reason: "browser_window_unknown"), "Skipping this window",
+             "It can’t tell if this browser window is private.", "Pause"),
+            (.skipping(reason: "app_identity_unknown"), "Skipping this window", "It can’t tell which app this is.", "Pause"),
+            (.skipping(reason: "ax-secure-subrole"), "Skipping this window", "A password field is active.", "Pause"),
+            (.paused, "Paused", nil, "Resume"),
+            (.idle, "Off", nil, "Turn On"),
+            (.needsPermission(.screenRecording), "Needs permission", "Screen Recording is off for Hippocampus.",
+             "Open System Settings…"),
+            (.blocked(reason: "ingest_failed"), "Not saving", "It can’t save. Check free disk space.", "Try Again"),
+            (.stale(reason: "x"), "Not saving", "It can’t confirm anything was saved.", "Try Again"),
+            (.error(reason: "x"), "Not saving", "It stopped and couldn’t start again.", "Try Again"),
+            (.stopFailed(reason: "x"), "Couldn’t stop", "Hippocampus may still be reading the screen.", "Quit Hippocampus"),
+        ]
+        for (status, title, detail, action) in expected {
+            XCTAssertEqual(status.displayText, title, "\(status)")
+            XCTAssertEqual(status.detailText, detail, "\(status)")
+            XCTAssertEqual(status.action?.title, action, "\(status)")
+        }
+    }
+
     // MARK: - Icon pictures
 
     #if canImport(AppKit)
@@ -146,7 +304,43 @@ final class MenuBarStatusTests: XCTestCase {
         .idle, .starting, .recording, .paused, .error(reason: "x"),
         .needsPermission(.screenRecording), .blocked(reason: "x"),
         .stale(reason: "x"), .noMemory, .unchanged,
+        .skipping(reason: "secure_input"), .skipping(reason: "secure-event-input"),
+        .skipping(reason: "private_browsing"), .skipping(reason: "denylist-source"),
+        .skipping(reason: "ax-secure-subrole"), .stopFailed(reason: "x"),
     ]
+
+    /// The indicator may overstate, never understate (RULINGS B1): the dim
+    /// and hollow pictures appear only when nothing is read; every state in
+    /// which the screen may be read shows the solid dot, a stop that failed
+    /// included; a fault that stopped remembering shows h!.
+    @MainActor
+    func testNoStateInWhichTheScreenMayBeReadShowsLessThanTheSolidDot() {
+        let mayRead: [MenuBarStatus] = [
+            .recording, .unchanged, .starting, .noMemory, .skipping(reason: "private_browsing"),
+            .skipping(reason: "denylist-source"), .skipping(reason: "ax-secure-subrole"),
+            .skipping(reason: "ocr-time-secret"), .skipping(reason: "failsafe-unknown"),
+            .skipping(reason: "os-blacked-region"), .skipping(reason: "app_identity_unknown"),
+            .skipping(reason: "browser_window_unknown"), .skipping(reason: "app_denied"),
+            .skipping(reason: "denylist-postcapture"), .stopFailed(reason: "x"),
+        ]
+        let solid = MenuBarStatusIcon.image(for: HiMark.State.remembering)
+        for status in mayRead {
+            XCTAssertEqual(status.markState, .remembering, "\(status)")
+            XCTAssertTrue(MenuBarStatusIcon.image(for: status) === solid, "\(status)")
+        }
+        let nothingRead: Set<HiMark.State> = [.off, .skipping]
+        for status in Self.allStatuses where nothingRead.contains(status.markState) {
+            switch status {
+            case .paused, .idle: break
+            case .skipping(let code) where ["secure_input", "secure-event-input"].contains(code): break
+            default: XCTFail("\(status) shows \(status.markState) while the screen may be read")
+            }
+        }
+        for status in [MenuBarStatus.needsPermission(.automation), .error(reason: "x"), .blocked(reason: "x"),
+                       .stale(reason: "x")] {
+            XCTAssertEqual(status.markState, .needsYou, "\(status)")
+        }
+    }
 
     /// The four pictures must render distinctly. Comparing TIFF bytes is
     /// a cheap snapshot that catches two pictures collapsing into one.
@@ -208,10 +402,13 @@ final class MenuBarStatusTests: XCTestCase {
             XCTAssertEqual(status.markState, .needsYou, "\(status)")
             XCTAssertTrue(MenuBarStatusIcon.image(for: status) === bang, "\(status)")
         }
-        // The hollow dot waits for the password-field skip.
+        // Only a password field shows the hollow dot.
         let hollow = MenuBarStatusIcon.image(for: HiMark.State.skipping)
         for status in Self.allStatuses {
-            XCTAssertFalse(MenuBarStatusIcon.image(for: status) === hollow, "\(status)")
+            let password: Bool
+            if case .skipping(let code) = status { password = ["secure_input", "secure-event-input"].contains(code) }
+            else { password = false }
+            XCTAssertEqual(MenuBarStatusIcon.image(for: status) === hollow, password, "\(status)")
         }
     }
 

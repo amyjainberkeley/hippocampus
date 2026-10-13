@@ -49,7 +49,8 @@ final class CapturePreferenceControllerTests: XCTestCase {
         await controller.setCaptureEnabled(false)
 
         XCTAssertTrue(controller.captureEnabled)
-        XCTAssertNotNil(controller.errorMessage)
+        XCTAssertEqual(controller.errorMessage, "Couldn’t change that. Try again.",
+                       "plain words, never the raw error")
     }
 
     func test_restart_failure_reflects_fail_closed_state_instead_of_requested_state() async {

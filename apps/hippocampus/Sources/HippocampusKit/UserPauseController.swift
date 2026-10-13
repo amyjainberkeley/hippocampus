@@ -9,20 +9,19 @@
 //     red pill. Not user-initiated; recovers automatically when the
 //     grant is restored.
 //
-// This layer is the explicit "I want to stop being recorded
-// right now" gate the user flips from the menu-bar drop-down (⌘⇧P) or
-// the ⌘K Action Panel. When set, the supervisor stops the owned helper
+// This layer is the person's explicit Pause, from the menu, Ask's footer
+// or Preferences, through `ProcessSupervisor.setPaused`, which owns the
+// app's controller. When set, the supervisor stops the owned helper
 // and agent topology completely, then launches a fresh generation on
 // resume. A `helper_health
 // user_paused=true` breadcrumb is emitted so the health-log ring
 // surfaces user-initiated pauses distinctly from the automated ones.
 //
-// Thread-safety: `isPaused` is guarded by a serial dispatch queue.
-// Reads and writes cross thread boundaries — the menu-bar (main) and
-// the ⌘K panel (main) drive writes; downstream sinks (logging thread,
+// Thread-safety: the pause is guarded by a serial dispatch queue.
+// Writes come from the main actor; downstream sinks (logging thread,
 // supervisor's main-actor apply) may read. A serial queue is cheaper
-// than an actor here because the menu-bar `Button` closure is
-// synchronous and we need a `Bool` back for immediate title flip.
+// than an actor here because callers are synchronous and need a `Bool`
+// back at once.
 //
 // Breadcrumb emission: on every state flip we call `sink(paused)` on
 // the same serial queue as the state transition. This keeps observable
@@ -33,18 +32,24 @@ import Foundation
 import os
 
 /// Thread-safe user-initiated pause gate. See file header.
+///
+/// A pause survives a relaunch: the app's controller keeps the time of the
+/// pause in its own defaults, so the menu can say "Since {time}." and the
+/// next launch goes straight to Paused (spec-shell S5, RULINGS S5 and S10).
 public final class UserPauseController: @unchecked Sendable {
-    /// The process-wide instance. Menu-bar + ⌘K Action Panel both
-    /// drive this. Fresh in tests via `UserPauseController()` — the
-    /// singleton reference is deliberately not a `let` so the test
-    /// suite can substitute a fake without polluting shared state.
-    public static let shared = UserPauseController()
+    /// The app's pause, kept in its own defaults. Tests make their own
+    /// controllers, which keep nothing.
+    public static let shared = UserPauseController(defaults: .standard)
+    /// When the person paused, as seconds since 1970.
+    public static let defaultsKey = "ai.hippocampus.capture.paused"
 
     private let queue = DispatchQueue(
         label: "ai.hippocampus.user-pause",
         qos: .userInitiated
     )
-    private var _isPaused: Bool = false
+    private let defaults: UserDefaults?
+    private let clock: @Sendable () -> Date
+    private var _pausedSince: Date?
     private var _sinks: [(Bool) -> Void] = []
 
     /// Default sink — writes the breadcrumb to the same subsystem the
@@ -56,7 +61,12 @@ public final class UserPauseController: @unchecked Sendable {
         category: "user-pause"
     )
 
-    public init() {
+    /// `defaults` keeps the pause across launches; nil keeps it in memory.
+    public init(defaults: UserDefaults? = nil, clock: @escaping @Sendable () -> Date = { Date() }) {
+        self.defaults = defaults
+        self.clock = clock
+        _pausedSince = (defaults?.object(forKey: Self.defaultsKey) as? NSNumber)
+            .map { Date(timeIntervalSince1970: $0.doubleValue) }
         // Wire the default logger sink. Tests can attach additional
         // sinks; they never remove this one, but the logger is inert
         // under `swift test` (no os-log listener) so it does not
@@ -68,38 +78,37 @@ public final class UserPauseController: @unchecked Sendable {
 
     /// Current pause state. Thread-safe read.
     public var isPaused: Bool {
-        queue.sync { _isPaused }
+        queue.sync { _pausedSince != nil }
+    }
+
+    /// When the person paused; nil when not paused.
+    public var pausedSince: Date? {
+        queue.sync { _pausedSince }
     }
 
     /// Set the pause state to `paused`. No-op if already at that
     /// value — sinks fire only on actual transitions so the health
-    /// log stays clean of redundant breadcrumbs.
+    /// log stays clean of redundant breadcrumbs, and a repeated pause
+    /// keeps its first time.
     ///
     /// Returns the new (post-call) state, matching what a downstream
     /// menu-title flip should render.
     @discardableResult
     public func setPaused(_ paused: Bool) -> Bool {
         queue.sync {
-            guard _isPaused != paused else { return paused }
-            _isPaused = paused
-            for sink in _sinks {
-                sink(paused)
-            }
+            guard (_pausedSince != nil) != paused else { return paused }
+            apply(paused)
             return paused
         }
     }
 
-    /// Toggle and return the new state. Used by the ⌘⇧P menu-bar
-    /// keyboard shortcut which has no idea what the previous state
-    /// was — it just wants a flip.
+    /// Toggle and return the new state.
     @discardableResult
     public func togglePaused() -> Bool {
         queue.sync {
-            _isPaused.toggle()
-            for sink in _sinks {
-                sink(_isPaused)
-            }
-            return _isPaused
+            let paused = _pausedSince == nil
+            apply(paused)
+            return paused
         }
     }
 
@@ -113,15 +122,30 @@ public final class UserPauseController: @unchecked Sendable {
         }
     }
 
-    /// Reset the controller — clears sinks (keeps the default logger)
-    /// and unpauses. Test-only helper; not used from the app.
+    /// Reset the controller — clears sinks (keeps the default logger),
+    /// unpauses and forgets a kept pause. Test-only helper; not used from
+    /// the app.
     public func resetForTesting() {
         queue.sync {
-            _isPaused = false
+            _pausedSince = nil
+            defaults?.removeObject(forKey: Self.defaultsKey)
             _sinks.removeAll()
         }
         addSink { [logger] paused in
             logger.info("helper_health user_paused=\(paused, privacy: .public)")
+        }
+    }
+
+    /// On the queue: record the change, keep it, then tell the sinks.
+    private func apply(_ paused: Bool) {
+        _pausedSince = paused ? clock() : nil
+        if let since = _pausedSince {
+            defaults?.set(since.timeIntervalSince1970, forKey: Self.defaultsKey)
+        } else {
+            defaults?.removeObject(forKey: Self.defaultsKey)
+        }
+        for sink in _sinks {
+            sink(paused)
         }
     }
 }

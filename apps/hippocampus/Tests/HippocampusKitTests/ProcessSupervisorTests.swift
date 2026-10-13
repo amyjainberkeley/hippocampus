@@ -1409,7 +1409,9 @@ final class ProcessSupervisorTests: XCTestCase {
             return XCTFail("expected visible error, got \(supervisor.state)", file: file, line: line)
         }
         XCTAssertTrue(reason.contains(text), "\(reason) must contain \(text)", file: file, line: line)
-        guard case .error = supervisor.menuBarStatus else {
+        // Every caller is a failed stop: the menu says "Couldn’t stop" and
+        // offers Quit (product critique 3).
+        guard case .stopFailed = supervisor.menuBarStatus else {
             return XCTFail("stop failures must remain visible in the menu", file: file, line: line)
         }
     }

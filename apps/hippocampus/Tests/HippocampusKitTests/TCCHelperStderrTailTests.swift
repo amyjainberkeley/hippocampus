@@ -383,6 +383,23 @@ final class TCCHelperStderrTailIntegrationTests: XCTestCase {
         )
     }
 
+    /// Try Again clears the supervisor's surface before a restart, since no
+    /// helper was left to say a permission came back. The sink starts over
+    /// with what the new helper reports, so the old revoke stays gone.
+    @MainActor
+    func testProductionSink_aSurfaceClearedByTryAgainDoesNotComeBack() async {
+        let notifier = TCCRevokedNotifier(center: FakeUNCenter())
+        let supervisor = ProcessSupervisor(locator: FakeBinaryLocator(), keyStore: FakeKeyStore())
+        let sink = TCCNotifierAndSupervisorSink(notifier: notifier, supervisor: supervisor)
+        await sink.handleRevoked(.screenRecording)
+        XCTAssertEqual(supervisor.tccRevokedSurface, .screenRecording)
+
+        supervisor.tccRevokedSurface = nil
+        await sink.handleRevoked(.accessibility)
+
+        XCTAssertEqual(supervisor.tccRevokedSurface, .accessibility)
+    }
+
     /// Full pipeline via the tail's inject hook: parser → sink →
     /// notifier + supervisor.
     @MainActor

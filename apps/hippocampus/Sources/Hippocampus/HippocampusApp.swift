@@ -10,55 +10,22 @@ import AppKit
 struct HippocampusApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
+    /// The menu-bar item is AppKit's (`StatusItemController`, made by the
+    /// delegate at launch). This scene carries only the app's commands, so
+    /// ⌘, and ⌘Q work wherever Hippocampus is active, with no key monitor
+    /// (RULINGS S7, critique-shell-engineering 12).
     var body: some Scene {
-        MenuBarExtra {
-            StatusMenuView(
-                supervisor: appDelegate.supervisor,
-                modelProvisioner: appDelegate.modelProvisioner,
-                loginItemVM: appDelegate.loginItemVM,
-                updater: appDelegate.updater,
-                preferencesStore: appDelegate.preferencesStore,
-                onRequestQuit: { appDelegate.requestQuit() },
-                onRequestRestart: { appDelegate.requestRestart() }
-            )
-            .task {
-                // Supervisor lifecycle (start / defer-until-onboarded)
-                // is owned by `AppDelegate.applicationDidFinishLaunching`
-                // — see below. Without that, the launch path only ran
-                // when the user OPENED the menu (CEO dogfood 2026-05-26
-                // "onboarding doesn't open unless I touch the icon").
-                // Here we only do menu-open-time chores: Sparkle updater
-                // start + the LoginItem one-time prompt mark.
-                appDelegate.updater.startUpdater()
-                // One-shot delayed background poll of the Sparkle appcast.
-                // The 10 s delay lets `ProcessSupervisor.start()` finish
-                // spinning up MCICaptureHelper + mci-agent before the
-                // updater does any network I/O + XML parse work. Gated on
-                // the user's opt-in inside `checkForUpdatesInBackground()`
-                // — no network call happens if auto-check is OFF.
-                appDelegate.updater.scheduleBackgroundCheck(after: 10.0)
-                if appDelegate.loginItemVM.shouldPrompt {
-                    appDelegate.loginItemVM.markPrompted()
+        Settings { EmptyView() }
+            .commands {
+                CommandGroup(replacing: .appSettings) {
+                    Button("Preferences…") { appDelegate.showPreferences() }
+                        .keyboardShortcut(",", modifiers: [.command])
+                }
+                CommandGroup(replacing: .appTermination) {
+                    Button("Quit Hippocampus") { appDelegate.requestQuit() }
+                        .keyboardShortcut("q", modifiers: [.command])
                 }
             }
-        } label: {
-            MenuBarIcon(supervisor: appDelegate.supervisor)
-        }
-
-    }
-
-}
-
-/// Menu-bar icon rendered as a status light.
-///
-/// Shares the receipt-backed status used in the menu and Preferences.
-struct MenuBarIcon: View {
-    @ObservedObject var supervisor: ProcessSupervisor
-
-    var body: some View {
-        MenuBarStatusLabel(
-            status: supervisor.menuBarStatus
-        )
     }
 }
 
@@ -78,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let preferencesStore = PreferencesStore()
     private var askKeyObservation: AnyCancellable?
     let updater = SparkleUpdaterService()
+    private var statusItem: StatusItemController?
     private var preferencesControllerConfigured = false
     private let initialPreferencesRequest = PreferencesOpenRequest(arguments: Array(CommandLine.arguments.dropFirst()))
 
@@ -120,9 +88,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // (declared above) so the call site is in actor context.
         // `NSApplicationDelegateAdaptor` constructs the delegate on
         // the main thread during the SwiftUI App init.
+        // Stop Sharing and Pause are kept across launches (spec-shell S5).
         self.supervisor = ProcessSupervisor(
             locator: BundleBinaryLocator(),
-            keyStore: KeychainKeyStore.defaultDatabaseKey
+            keyStore: KeychainKeyStore.defaultDatabaseKey,
+            captureStopNote: UserDefaultsCaptureStopNote(),
+            pauses: .shared
         )
         super.init()
     }
@@ -138,28 +109,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             updater: updater,
             captureApplier: supervisor,
             supervisor: supervisor,
-            dbPath: supervisor.dbPath.path,
-            onOpenRecallTab: { tab in
-                Task { @MainActor in
-                    supervisor.openRecallUI(initialTab: tab)
-                }
-            },
-            onOpenDenylistEditor: {
-                Task { @MainActor in
-                    _ = supervisor.openOnboarding(initialStep: "trust")
-                }
-            },
-            onOpenAllowlistEditor: {
-                Task { @MainActor in
-                    _ = supervisor.openOnboarding(initialStep: "allowlist")
-                }
-            },
-            onExportDebugBundle: {
-                // Open the logs folder as a debug-bundle proxy.
-                let logDir = FileManager.default.homeDirectoryForCurrentUser
-                    .appendingPathComponent("Library/Logs/MCI")
-                NSWorkspace.shared.open(logDir)
-            }
+            actions: PreferencesActions(
+                statusAction: { [weak self] action in self?.performStatusAction(action) },
+                openWindow: { tab in supervisor.openRecallUI(initialTab: tab) },
+                neverRead: { _ = supervisor.openOnboarding(initialStep: "never-read") },
+                chooseApps: { _ = supervisor.openOnboarding(initialStep: "app-access") },
+                connectAITools: { done in
+                    ConnectAITools.shared.run(supervisor: supervisor) { _ in done() }
+                },
+                restart: { [weak self] in self?.requestRestart() },
+                showSetup: { _ = supervisor.openOnboarding() }
+            )
         )
         preferencesControllerConfigured = true
     }
@@ -271,6 +231,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let request = initialPreferencesRequest {
             PreferencesWindowController.shared.show(section: request.section)
         }
+        installStatusItem()
+        // A start the person asked to see failed: Preferences shows the
+        // reason and the fix (spec-shell S5, D9).
+        supervisor.onPresentationBlocked = {
+            PreferencesWindowController.shared.show(section: .capture)
+        }
 
         Task { @MainActor in
             let supervisor = self.supervisor
@@ -279,9 +245,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 supervisor: supervisor,
                 openEvent: { eventId in supervisor.openRecallUI(initialTab: "search", focusEventId: eventId) },
                 openWindow: { tab in supervisor.openRecallUI(initialTab: tab) },
-                statusAction: { action in
-                    supervisor.performAskStatusAction(action) { NSWorkspace.shared.open($0) }
-                },
+                statusAction: { [weak self] action in self?.performStatusAction(action) },
                 announceShown: {
                     AskPanelNotice.announceShown(onboardingRunning: supervisor.onboardingIsRunning) { name in
                         DistributedNotificationCenter.default().postNotificationName(
@@ -305,10 +269,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.installBrowserHostManifests()
             self.armTCCStderrTail()
             self.startSupervisorOrDeferUntilOnboarded()
+            // The updater starts at launch, not when the menu first opens
+            // (spec-shell S2, D15). Its first check waits until remembering
+            // has started; it does nothing unless the person opted in.
+            self.updater.startUpdater()
+            self.updater.scheduleBackgroundCheck(after: 10.0)
             // Custom builds may include the optional Qwen model. Seed it on a
             // utility task without delaying the default extractive brief path.
             self.modelProvisioner.startIfNeeded()
         }
+    }
+
+    /// The menu-bar icon and its short menu (spec-shell S2).
+    private func installStatusItem() {
+        let supervisor = self.supervisor
+        statusItem = StatusItemController(
+            supervisor: supervisor,
+            modelProvisioner: modelProvisioner,
+            askKey: SoloKeyMonitor.shared.watch,
+            actions: StatusItemController.Actions(
+                perform: { [weak self] action in self?.performStatusAction(action) },
+                ask: { CommandBarController.shared.show() },
+                openWindow: { supervisor.openRecallUI() },
+                aiTools: { [weak self] connected in
+                    if connected {
+                        self?.showPreferences(section: .sources)
+                    } else {
+                        ConnectAITools.shared.run(supervisor: supervisor) { tools in
+                            if !tools.isEmpty { self?.statusItem?.noteAIToolsConnected() }
+                        }
+                    }
+                },
+                preferences: { [weak self] in self?.showPreferences() },
+                quit: { [weak self] in self?.requestQuit() }
+            )
+        )
+    }
+
+    /// The status row's button, from the menu, Ask's footer or Preferences.
+    /// Quit is the app's; everything else is the supervisor's.
+    func performStatusAction(_ action: CaptureStatusAction) {
+        if action == .quit {
+            requestQuit()
+            return
+        }
+        supervisor.performAskStatusAction(action) { NSWorkspace.shared.open($0) }
+    }
+
+    func showPreferences(section: PreferencesSection? = nil) {
+        configurePreferencesController()
+        PreferencesWindowController.shared.show(section: section)
     }
 
     private func installPreferencesReceiver() {
@@ -379,14 +389,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Single "Quit" button — no bypass path.
     static func presentUnsupportedArchitectureAlert() {
         let alert = NSAlert()
-        alert.messageText = "Hippocampus requires Apple Silicon"
-        alert.informativeText = """
-            This Mac appears to use an Intel processor. Hippocampus's \
-            bundled local models and native components currently support \
-            Apple Silicon only. Intel Macs are not supported.
-
-            Learn more at https://github.com/amyjainberkeley/hippocampus
-            """
+        alert.messageText = "Hippocampus needs a Mac with Apple silicon"
+        alert.informativeText = "This Mac has an Intel processor, so Hippocampus can’t run on it."
         alert.alertStyle = .critical
         alert.addButton(withTitle: "Quit")
         alert.runModal()
@@ -409,6 +413,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func requestTermination(_ intent: ApplicationTerminationIntent) {
         terminationRequests.request(intent)
+        // Nothing in the menu acts while it stops; the icon follows the
+        // supervisor and reaches Off by itself (RULINGS S7).
+        statusItem?.setQuitting(true)
         NSApp.terminate(nil)
     }
 
@@ -475,12 +482,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// background; the key starts listening as soon as it is.
     func applicationDidBecomeActive(_ notification: Notification) {
         SoloKeyMonitor.shared.recheck()
+        // A permission may have been turned back on in System Settings.
+        supervisor.retryIfPermissionMayBeBack()
     }
 
+    /// Only a restart can fail: Quit always stops (spec-shell S6.8). The
+    /// menu acts again, since Hippocampus stays open.
     private func presentShutdownFailure(_ error: Error) {
+        statusItem?.setQuitting(false)
         let alert = NSAlert()
-        alert.messageText = "Hippocampus could not quit safely"
-        alert.informativeText = "A capture process is still running. Hippocampus will stay open so you can try again.\n\n\(error.localizedDescription)"
+        alert.messageText = "Couldn’t restart"
+        alert.informativeText = "Something is still running, so Hippocampus stayed open. Try again."
         alert.alertStyle = .critical
         alert.addButton(withTitle: "OK")
         alert.runModal()
@@ -512,10 +524,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The Hippocampus main process has multiple window-creating
     /// surfaces:
     ///
-    ///   - `NSAlert.runModal()` panels in `StatusMenuView`: About
-    ///     (`openAboutWindow`), Reset TCC confirmation, error
-    ///     alerts via `showAlert`, `KeyWrapAuditView` sheet.
-    ///   - Any future SwiftUI window or sheet attached to the menu.
+    ///   - Preferences, and its Reset Permissions… alerts.
+    ///   - `NSAlert.runModal()` panels from Connect AI Tools….
+    ///   - Any future SwiftUI window or sheet.
     ///
     /// Returning `false` here makes the app's lifecycle explicit:
     /// the app only quits through AppKit's terminate-later lifecycle,
@@ -565,7 +576,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     _ = supervisor.openOnboarding()
                 }
             case .ask(let question):
-                CommandBarController.shared.show(asking: question)
+                // A link always shows Ask, and asks when it carries a
+                // question (RULINGS S12).
+                CommandBarController.shared.show(asking: question, from: .link)
             case .unknown:
                 continue
             }

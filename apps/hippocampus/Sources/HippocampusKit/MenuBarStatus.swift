@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: TBD-private
 //
-// Local capture status for the menu-bar icon and Preferences.
-// Only the agent's durable receipt can establish that memory was saved.
+// What remembering is doing, for the menu-bar icon, the menu, Ask's footer
+// and Preferences (spec-shell S2 and S4, RULINGS S and B1). Only the agent's
+// durable receipt can establish that memory was saved.
 
 import Foundation
-import SwiftUI
 #if canImport(AppKit)
 import AppKit
 #endif
 
-/// Capture status derived from user intent and committed storage evidence.
-/// A running process or helper delivery counter never proves saved memory.
+/// Remembering's status, derived from what the person asked for and what was
+/// committed to storage. A running process or a helper delivery counter never
+/// proves saved memory.
 public enum MenuBarStatus: Equatable, Sendable {
     case idle
     case starting
@@ -18,45 +19,74 @@ public enum MenuBarStatus: Equatable, Sendable {
     case paused
     case error(reason: String)
     case needsPermission(TCCRevokedReason)
+    /// Remembering is failing. `reason` is the receipt's code.
     case blocked(reason: String)
     case stale(reason: String)
     case noMemory
     case unchanged
+    /// A window was skipped for privacy. `reason` is the receipt's code.
+    case skipping(reason: String)
+    /// The person asked it to stop, pause or turn off, and that failed, so
+    /// it may still be reading the screen (product critique 3).
+    case stopFailed(reason: String)
 
-    /// Short label rendered in the drop-down header row + used in
-    /// tests to check state distinctness.
+    /// A start may take this long before missing evidence counts as a fault
+    /// (spec-shell S4, RULINGS S6).
+    public static let startingGrace: TimeInterval = 45
+    /// "Skipping this window" waits until the same skip has held this long
+    /// with no newer save (RULINGS S8).
+    public static let skipHold: TimeInterval = 10
+
+    /// Line 1 of the menu.
     public var displayText: String {
         switch self {
-        case .idle: return "Off"
-        case .starting: return "Starting capture"
-        case .recording: return "Saving memory"
+        case .recording, .unchanged: return "Remembering"
+        case .starting: return "Starting…"
+        case .noMemory: return "Nothing saved yet"
+        case .skipping: return "Skipping this window"
         case .paused: return "Paused"
-        case .error: return "Error"
+        case .idle: return "Off"
         case .needsPermission: return "Needs permission"
-        case .blocked: return "Blocked"
-        case .stale: return "Status unavailable"
-        case .noMemory: return "No saved memory yet"
-        case .unchanged: return "No recent changes"
+        case .blocked, .stale, .error: return "Not saving"
+        case .stopFailed: return "Couldn’t stop"
         }
     }
 
-    /// The dot color to render next to the header row text. Color stays
-    /// inside the menu; the menu-bar icon is a single-color template.
-    public var indicatorColor: Color {
+    /// Line 2, when the status alone says why. "Last saved", "Since" and
+    /// "You stopped it" need times, so `StatusRow` adds them.
+    public var detailText: String? {
         switch self {
-        case .idle, .starting, .unchanged: return .secondary
-        case .recording: return .green
-        case .paused: return .yellow
-        case .error: return .red
-        case .needsPermission, .blocked, .stale, .noMemory: return .orange
+        case .idle, .starting, .recording, .unchanged, .paused, .noMemory: return nil
+        case .skipping(let code): return ReceiptCode.skipText(code)
+        case .needsPermission(let permission): return "\(permission.name) is off for Hippocampus."
+        case .blocked(let code): return ReceiptCode.failureText(code)
+        case .stale: return "It can’t confirm anything was saved."
+        case .error: return "It stopped and couldn’t start again."
+        case .stopFailed: return "Hippocampus may still be reading the screen."
         }
     }
+
+    /// The one button that goes with the status once setup is done. Each
+    /// acts in the state it is shown for (product critique 3 and 11).
+    public var action: CaptureStatusAction? {
+        switch self {
+        case .recording, .unchanged, .starting, .noMemory, .skipping: return .pause
+        case .paused: return .resume
+        case .idle: return .turnOn
+        case .needsPermission(let permission): return .openSystemSettings(permission)
+        case .blocked, .stale, .error: return .tryAgain
+        case .stopFailed: return .quit
+        }
+    }
+
+    /// Remembering as it should, with nothing to report.
+    public var isRemembering: Bool { self == .recording || self == .unchanged }
 
     /// Menu-bar status is static, including while saving memory.
     public var shouldPulse: Bool { false }
 
-    /// Explicit off/pause wins; permission and storage failures then take
-    /// precedence over evidence of previous successful saves.
+    /// A failed stop and an explicit off or pause come first; permission and
+    /// storage failures then take precedence over evidence of earlier saves.
     public static func derive(
         from state: SupervisorState,
         captureEnabled: Bool = true,
@@ -65,11 +95,17 @@ public enum MenuBarStatus: Equatable, Sendable {
         receipt: CaptureStatusReceipt? = nil,
         helperHealth: HealthSnapshot? = nil,
         captureStartedAt: Date? = nil,
+        stopFailed: Bool = false,
+        skipSeenSince: Date? = nil,
         now: Date = Date()
     ) -> MenuBarStatus {
         // A failed shutdown is not proof of being off. Keep that failure visible
         // even after the requested setting has correctly been latched false.
         if case .crashed(let reason) = state {
+            if stopFailed { return .stopFailed(reason: reason) }
+            // A permission turned off during a start: say which, so the fix
+            // is in reach (spec-shell S4.2).
+            if captureEnabled, let surface = tccRevokedSurface { return .needsPermission(surface) }
             return .error(reason: reason)
         }
         guard captureEnabled else { return .idle }
@@ -82,20 +118,34 @@ public enum MenuBarStatus: Equatable, Sendable {
         }
         if state == .starting { return .starting }
         guard state == .running else { return .idle }
+        // Every start clears the receipt, and the helper's first heartbeat
+        // takes about 30 s: a young run is starting, not failing.
+        let young = captureStartedAt.map { (0..<startingGrace).contains(now.timeIntervalSince($0)) } ?? false
+        func notConfirmed(_ why: String) -> MenuBarStatus { young ? .starting : .stale(reason: why) }
         guard let receipt else {
-            return .stale(reason: "Saved memory could not be verified. The capture status is missing or unreadable.")
+            return notConfirmed("The status receipt is missing or unreadable.")
         }
         guard isFresh(receipt.updatedAt, now: now),
               captureStartedAt.map({ receipt.updatedAt >= $0 }) ?? true else {
-            return .stale(reason: "Capture status is out of date. Saved counts below are from the last report.")
+            return notConfirmed("The status receipt is older than this run.")
         }
-        if let code = receipt.blockedReason ?? receipt.suppressionReason {
-            switch code {
-            case "screen_recording_permission": return .needsPermission(.screenRecording)
-            case "accessibility_permission": return .needsPermission(.accessibility)
-            case "unchanged_screen", "deduplicated":
-                if receipt.storedFrameCount == 0 { return .noMemory }
-            default: return .blocked(reason: suppressionText(code))
+        if let code = receipt.blockedReason {
+            switch ReceiptCode(code) {
+            case .permission(let permission): return .needsPermission(permission)
+            case .failure: return .blocked(reason: code)
+            case .skip, .unchanged, .fastSwitch: break
+            }
+        }
+        // The receipt's skip is the last one since the last save, from any
+        // window, so it shows only once it has held (RULINGS S8).
+        let held = skipSeenSince.map { now.timeIntervalSince($0) >= skipHold } ?? false
+        for code in [receipt.blockedReason, receipt.suppressionReason].compactMap({ $0 }) {
+            switch ReceiptCode(code) {
+            case .permission(let permission): return .needsPermission(permission)
+            case .unchanged: if receipt.storedFrameCount == 0 { return .noMemory }
+            case .skip: if held { return .skipping(reason: code) }
+            case .failure: if held { return .blocked(reason: code) }
+            case .fastSwitch: break
             }
         }
         guard receipt.storedFrameCount > 0, let saved = receipt.lastStoredFrameAt else {
@@ -105,133 +155,131 @@ public enum MenuBarStatus: Equatable, Sendable {
         // frame before showing saving status; static-screen dedup stays neutral.
         if captureStartedAt.map({ saved >= $0 }) ?? false,
            now.timeIntervalSince(saved) >= 0,
-           now.timeIntervalSince(saved) <= 600,
-           receipt.suppressionReason == nil {
+           now.timeIntervalSince(saved) <= 600 {
             return .recording
         }
         if let helperHealth, isFresh(helperHealth.lastUpdated, now: now),
            captureStartedAt.map({ helperHealth.lastUpdated >= $0 }) ?? false {
             return .unchanged
         }
-        return .stale(reason: "No recent saved frame or capture heartbeat. Check capture settings and logs.")
+        return notConfirmed("No recent saved frame or capture heartbeat.")
     }
 
     private static func isFresh(_ date: Date, now: Date) -> Bool {
         (0...120).contains(now.timeIntervalSince(date))
     }
+}
 
-    private static func suppressionText(_ code: String) -> String {
+/// What a receipt code means (spec-shell S2 with product critique 10). Codes
+/// are content-free; one this app does not know is a failure it cannot name.
+enum ReceiptCode: Equatable {
+    case permission(TCCRevokedReason)
+    /// The screen did not change: nothing is wrong.
+    case unchanged
+    /// The window changed too quickly to read. It stays "Remembering", so a
+    /// fast switch never flickers the menu (product critique 10).
+    case fastSwitch
+    /// Skipped for privacy. Whole-screen reading goes on for every skip but
+    /// a password field (critique-shell-engineering 4).
+    case skip
+    case failure
+
+    init(_ code: String) {
         switch code {
-        case "app_denied", "denylist-source", "denylist-postcapture": return "The current source is excluded by your privacy settings."
-        case "secure_input", "secure-event-input", "ax-secure-subrole": return "Secure input is active. Capture will resume when it ends."
-        case "os-blacked-region": return "macOS protected the current screen region from capture."
-        case "ocr-time-secret": return "Sensitive content was filtered before it could be saved."
-        case "failsafe-unknown": return "The current content could not be checked for privacy. Switch to another window."
-        case "focus-race-dropped": return "The active window changed during capture. Waiting for a stable window."
-        case "private_browsing": return "Private browsing is excluded from capture."
-        case "browser_window_unknown": return "The browser window's privacy mode could not be verified. Switch to a supported normal window."
-        case "app_identity_unknown": return "The current app could not be identified. Switch to an identifiable app."
-        case "storage_error", "store_unavailable", "ingest_failed": return "Memory could not be saved. Check available disk space and capture logs."
-        case "helper_disconnected": return "The screen capture helper disconnected. Restart capture and check the logs."
-        case "capture_failed": return "Screen capture failed. Check permissions and capture logs."
-        case "capture_disabled": return "The capture service reports that capture is disabled. Review capture settings."
-        default: return "Capture was blocked for an unrecognized reason. Review capture settings and logs."
+        case "screen_recording_permission": self = .permission(.screenRecording)
+        case "accessibility_permission": self = .permission(.accessibility)
+        case "unchanged_screen", "deduplicated": self = .unchanged
+        case "focus-race-dropped": self = .fastSwitch
+        case _ where Self.skipText(code) != nil: self = .skip
+        default: self = .failure
         }
     }
 
-    public var detailText: String {
-        switch self {
-        case .idle: return "Capture is off or has not started."
-        case .starting: return "Starting the capture service. Waiting for saved memory to be verified."
-        case .recording: return "A recent frame was saved to memory."
-        case .paused: return "Capture is paused. Existing memories remain available."
-        case .error(let reason), .blocked(let reason), .stale(let reason): return reason
-        case .needsPermission(let permission):
-            switch permission {
-            case .screenRecording: return "Screen Recording permission is required to capture the screen."
-            case .accessibility: return "Accessibility permission is required to inspect screen content safely."
-            case .fullDiskAccess: return "Full Disk Access permission is required."
-            case .automation: return "Automation permission is required."
-            }
-        case .noMemory: return "No captured frames have been saved to memory."
-        case .unchanged: return "Capture is responding. No new frame has been saved recently."
+    /// While a password field is active nothing at all is read, so this is
+    /// the one skip the hollow dot stands for (RULINGS B1).
+    static let passwordField: Set<String> = ["secure_input", "secure-event-input"]
+
+    static func skipText(_ code: String) -> String? {
+        switch code {
+        case "app_denied", "denylist-source", "denylist-postcapture": return "This window is never read."
+        case "secure_input", "secure-event-input", "ax-secure-subrole": return "A password field is active."
+        case "os-blacked-region": return "macOS protects this window."
+        case "ocr-time-secret": return "It saw what looks like a password or key, so it saved nothing."
+        case "failsafe-unknown": return "It couldn’t tell if this window is private, so it skipped it."
+        case "private_browsing": return "This is a private window."
+        case "browser_window_unknown": return "It can’t tell if this browser window is private."
+        case "app_identity_unknown": return "It can’t tell which app this is."
+        default: return nil
         }
     }
 
-    public var action: CaptureStatusAction? {
-        switch self {
-        case .idle: return .start
-        case .paused: return .resume
-        case .needsPermission(let permission): return .openPermission(permission)
-        case .error: return .openLogs
-        case .blocked, .stale, .noMemory: return .reviewCapture
-        case .starting, .recording, .unchanged: return nil
+    static func failureText(_ code: String) -> String {
+        switch code {
+        case "storage_error", "store_unavailable", "ingest_failed", "activity_ingest_failed":
+            return "It can’t save. Check free disk space."
+        case "helper_disconnected": return "It lost its view of the screen."
+        case "capture_failed": return "It couldn’t read the screen."
+        case "capture_disabled": return "It didn’t start properly."
+        default: return "It stopped and can’t say why."
         }
     }
 }
 
-/// The capture command visible in the status menu. The agent can be
-/// healthy while screen capture is disabled, so topology state alone
-/// cannot decide whether Start or Stop Recording is appropriate.
-public enum RecordingControl: Equatable, Sendable {
-    case none
-    case start
-    case stop
+/// When the receipt's skip was first seen with no newer save, so "Skipping
+/// this window" waits until the same skip has held for about 10 s (RULINGS
+/// S8). The supervisor updates it each time it reads the receipt.
+public struct SkipWatch: Equatable, Sendable {
+    private var codes: [String?] = []
+    private var lastSaved: Date?
+    /// When the current skip was first seen; nil when there is none.
+    public private(set) var since: Date?
 
-    public static func derive(
-        from state: SupervisorState,
-        captureEnabled: Bool
-    ) -> RecordingControl {
-        if state == .starting { return .none }
-        if captureEnabled && state.isActive { return .stop }
-        return .start
+    public init() {}
+
+    public mutating func observe(_ receipt: CaptureStatusReceipt?, at now: Date) {
+        guard let receipt, receipt.suppressionReason != nil || receipt.blockedReason != nil else {
+            self = SkipWatch()
+            return
+        }
+        let codes = [receipt.blockedReason, receipt.suppressionReason]
+        if codes == self.codes, receipt.lastStoredFrameAt == lastSaved, since != nil { return }
+        self.codes = codes
+        lastSaved = receipt.lastStoredFrameAt
+        since = now
     }
 }
 
 // MARK: - TCC revoked reason (cycle 8.45 audit risk #2)
 
-/// Per-surface human-readable copy for the menu-bar red-pill + the
-/// user-facing notification (`TCCRevokedNotifier`). Kept as an enum
-/// (rather than plain strings) so the surface identity round-trips
-/// through the app: the notification click-action deep-links to the
-/// correct System Settings pane per `settingsPaneURLString` below.
+/// A permission macOS can turn off for Hippocampus. Kept as an enum (rather
+/// than plain strings) so the surface identity round-trips through the app:
+/// the notification click-action deep-links to the correct System Settings
+/// pane per `settingsPaneURLString` below.
 public enum TCCRevokedReason: String, Sendable, Equatable, CaseIterable {
     case screenRecording
     case accessibility
     case fullDiskAccess
     case automation
 
-    /// Short reason string embedded in `MenuBarStatus.error(reason:)`.
-    /// Rendered in the drop-down header + read by VoiceOver via
-    /// `MenuBarStatusLabel.accessibilityLabel`.
-    public var menuBarReason: String {
+    /// The permission's name, as macOS spells it.
+    public var name: String {
         switch self {
-        case .screenRecording: return "Screen Recording revoked"
-        case .accessibility: return "Accessibility revoked"
-        case .fullDiskAccess: return "Full Disk Access revoked"
-        case .automation: return "Automation revoked"
+        case .screenRecording: return "Screen Recording"
+        case .accessibility: return "Accessibility"
+        case .fullDiskAccess: return "Full Disk Access"
+        case .automation: return "Automation"
         }
     }
 
-    /// Human-readable title for the user-facing notification.
+    /// Title of the notification shown when a permission is turned off.
     public var notificationTitle: String {
-        return "Hippocampus can't record"
+        return "Hippocampus stopped remembering"
     }
 
-    /// Human-readable body for the user-facing notification. Explains
-    /// why capture stopped in one plain sentence + tells the user the
-    /// button re-grants.
+    /// Body of that notification: what happened, then what the click does
+    /// (product critique 9).
     public var notificationBody: String {
-        switch self {
-        case .screenRecording:
-            return "Screen Recording permission was revoked in System Settings. Click to re-grant."
-        case .accessibility:
-            return "Accessibility permission was revoked in System Settings. Click to re-grant."
-        case .fullDiskAccess:
-            return "Full Disk Access permission was revoked in System Settings. Click to re-grant."
-        case .automation:
-            return "Automation permission was revoked in System Settings. Click to re-grant."
-        }
+        "\(name) was turned off for Hippocampus. Click to open System Settings."
     }
 
     /// Deep-link URL string for the notification's action button. The
@@ -264,42 +312,19 @@ public enum TCCRevokedReason: String, Sendable, Equatable, CaseIterable {
     }
 }
 
-// MARK: - View
-
-/// A static label for MenuBarExtra. Animating its opacity repeatedly updates
-/// the AppKit status button and layout; no clock or animation belongs here.
-public struct MenuBarStatusLabel: View {
-    public let status: MenuBarStatus
-
-    public init(status: MenuBarStatus) {
-        self.status = status
-    }
-
-    public var body: some View {
-        iconImage
-            .accessibilityLabel("Hippocampus — \(status.displayText)")
-    }
-
-    @ViewBuilder
-    private var iconImage: some View {
-        #if canImport(AppKit)
-        Image(nsImage: MenuBarStatusIcon.image(for: status))
-        #else
-        Image(systemName: "brain.head.profile")
-        #endif
-    }
-}
-
 // MARK: - Picture
 
 extension MenuBarStatus {
-    /// The picture the menu bar shows. Recording, unchanged, starting and
-    /// noMemory show the solid dot. Until `derive` gains the 45 s start
-    /// grace and `.skipping`, a start-up `.stale` and a privacy skip's
-    /// `.blocked` show h! while the screen may still be read.
+    /// The picture the menu bar shows (RULINGS B1). It may overstate, never
+    /// understate: every skip but a password field keeps the solid dot,
+    /// because the rest of the screen is still read; a stop that failed
+    /// keeps it, because it may still be reading; and the 45 s grace keeps
+    /// a start from showing h!. Only a password field, which stops all
+    /// reading, shows the hollow dot.
     public var markState: HiMark.State {
         switch self {
-        case .recording, .unchanged, .starting, .noMemory: return .remembering
+        case .recording, .unchanged, .starting, .noMemory, .stopFailed: return .remembering
+        case .skipping(let code): return ReceiptCode.passwordField.contains(code) ? .skipping : .remembering
         case .paused, .idle: return .off
         case .needsPermission, .error, .blocked, .stale: return .needsYou
         }
@@ -310,9 +335,9 @@ extension MenuBarStatus {
 
 #if canImport(AppKit)
 
-/// Draws the four `HiMark` pictures once each, for `MenuBarStatusLabel`
-/// and the tests. Every picture is a single-color template that macOS
-/// tints for light and dark bars, so state lives in shape, not color.
+/// Draws the four `HiMark` pictures once each, for the status item,
+/// Preferences and the tests. Every picture is a single-color template that
+/// macOS tints for light and dark bars, so state lives in shape, not color.
 @MainActor
 public enum MenuBarStatusIcon {
 

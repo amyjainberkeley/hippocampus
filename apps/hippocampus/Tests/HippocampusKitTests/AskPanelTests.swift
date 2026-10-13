@@ -740,9 +740,13 @@ final class AskPanelTests: XCTestCase {
             (.idle, "Off", .turnOn, .off),
             (.needsPermission(.accessibility), "Needs permission", .openSystemSettings(.accessibility), .needsYou),
             (.error(reason: "x"), "Not saving", .tryAgain, .needsYou),
-            // Remembering runs in both, where a start does nothing.
-            (.blocked(reason: "x"), "Not saving", nil, .needsYou),
-            (.stale(reason: "x"), "Not saving", nil, .needsYou),
+            // Try Again restarts a running run now (`retryNow()`).
+            (.blocked(reason: "x"), "Not saving", .tryAgain, .needsYou),
+            (.stale(reason: "x"), "Not saving", .tryAgain, .needsYou),
+            (.skipping(reason: "private_browsing"), "Skipping this window", nil, .remembering),
+            (.skipping(reason: "secure_input"), "Skipping this window", nil, .skipping),
+            // It may still be reading, so the dot stays solid (RULINGS B1).
+            (.stopFailed(reason: "x"), "Couldn’t stop", .quit, .remembering),
         ]
         for (status, text, action, mark) in expected {
             let footer = AskPanelStatus(status)
@@ -752,10 +756,13 @@ final class AskPanelTests: XCTestCase {
             XCTAssertEqual(footer.mark, status.markState, "Ask's mark matches the menu bar")
         }
         XCTAssertEqual(
-            [AskPanelStatus.Action.resume, .turnOn, .openSystemSettings(.screenRecording), .tryAgain, .finishSetup]
+            [AskPanelStatus.Action.resume, .turnOn, .openSystemSettings(.screenRecording), .tryAgain, .quit, .finishSetup]
                 .map(\.title),
-            ["Resume", "Turn On", "Open System Settings…", "Try Again", "Finish Setup…"]
+            ["Resume", "Turn On", "Open System Settings…", "Try Again", "Quit Hippocampus", "Finish Setup…"]
         )
+        // Nothing is read in this window while it is skipped or stopped.
+        XCTAssertFalse(AskPanelStatus(.skipping(reason: "private_browsing")).readsThisWindow)
+        XCTAssertFalse(AskPanelStatus(.stopFailed(reason: "x")).readsThisWindow)
     }
 
     /// Start Remembering in onboarding is the only consent, so before setup
@@ -763,7 +770,8 @@ final class AskPanelTests: XCTestCase {
     func testBeforeSetupAskOffersOnlyToFinishSetup() {
         let statuses: [MenuBarStatus] = [
             .idle, .starting, .recording, .unchanged, .noMemory, .paused, .needsPermission(.screenRecording),
-            .error(reason: "x"), .blocked(reason: "x"), .stale(reason: "x"),
+            .error(reason: "x"), .blocked(reason: "x"), .stale(reason: "x"), .skipping(reason: "secure_input"),
+            .stopFailed(reason: "x"),
         ]
         for status in statuses {
             let closed = AskPanelStatus(status, setup: .notFinished)
@@ -797,7 +805,6 @@ final class AskPanelTests: XCTestCase {
     /// Every button the footer shows changes something in the state it is
     /// shown for; one that could not act is not shown.
     func testEveryFooterButtonActsInTheStateItIsShownFor() async throws {
-        let pauses = UserPauseController()
         var opened: [URL] = []
 
         // Paused: Resume starts remembering again.
@@ -806,14 +813,14 @@ final class AskPanelTests: XCTestCase {
         try await paused.startAndWaitForReadiness()
         try await paused.setPausedAndWait(true)
         XCTAssertEqual(paused.askPanelStatus(setupFinished: true).action, .resume)
-        paused.performAskStatusAction(.resume, setupFinished: true, pauses: pauses) { opened.append($0) }
+        paused.performAskStatusAction(.resume, setupFinished: true) { opened.append($0) }
         await eventually { paused.state == .running }
 
         // Off: Turn On turns remembering on.
         let (off, offTopology) = footerSupervisor(captureEnabled: false)
         offTopology.readinessResults = [.success(())]
         XCTAssertEqual(off.askPanelStatus(setupFinished: true).action, .turnOn)
-        off.performAskStatusAction(.turnOn, setupFinished: true, pauses: pauses) { opened.append($0) }
+        off.performAskStatusAction(.turnOn, setupFinished: true) { opened.append($0) }
         await eventually { off.captureEnabled && off.state == .running }
 
         // A failed start: Try Again starts again.
@@ -823,27 +830,42 @@ final class AskPanelTests: XCTestCase {
         await settle()
         XCTAssertNotEqual(failed.state, .running, "a failed start does not retry by itself")
         XCTAssertEqual(failed.askPanelStatus(setupFinished: true).action, .tryAgain)
-        failed.performAskStatusAction(.tryAgain, setupFinished: true, pauses: pauses) { opened.append($0) }
+        failed.performAskStatusAction(.tryAgain, setupFinished: true) { opened.append($0) }
         await eventually { failed.state == .running }
 
-        // Running with nothing confirmed saved ("Not saving"): a start leaves a
-        // running run alone, so there is no button.
-        let (running, runningTopology) = footerSupervisor(captureEnabled: true)
-        runningTopology.readinessResults = [.success(())]
+        // Running with nothing confirmed saved ("Not saving"): Try Again
+        // restarts the running run now.
+        let clock = TestClock()
+        let (running, runningTopology) = footerSupervisor(captureEnabled: true, clock: clock)
+        runningTopology.readinessResults = [.success(()), .success(())]
         try await running.startAndWaitForReadiness()
+        // Past the 45 s a start may take before missing evidence counts.
+        clock.now = clock.now.addingTimeInterval(46)
         XCTAssertEqual(running.askPanelStatus(setupFinished: true).text, "Not saving")
-        XCTAssertNil(running.askPanelStatus(setupFinished: true).action)
-        running.start()
-        await settle()
-        XCTAssertEqual(runningTopology.launchPlans.count, 1, "Try Again would have done nothing here")
+        XCTAssertEqual(running.askPanelStatus(setupFinished: true).action, .tryAgain)
+        running.performAskStatusAction(.tryAgain, setupFinished: true) { opened.append($0) }
+        await eventually { runningTopology.launchPlans.count == 2 && running.state == .running }
+        XCTAssertEqual(runningTopology.launchPlans.count, 2)
 
         // A permission turned off: Open System Settings… opens its pane.
         running.tccRevokedSurface = .screenRecording
         XCTAssertEqual(running.askPanelStatus(setupFinished: true).action, .openSystemSettings(.screenRecording))
-        running.performAskStatusAction(.openSystemSettings(.screenRecording), setupFinished: true, pauses: pauses) {
+        running.performAskStatusAction(.openSystemSettings(.screenRecording), setupFinished: true) {
             opened.append($0)
         }
         XCTAssertEqual(opened, [URL(string: TCCRevokedReason.screenRecording.settingsPaneURLString)!])
+
+        // A failed stop: Quit Hippocampus, which the app carries out; the
+        // supervisor starts nothing.
+        let (stuck, stuckTopology) = footerSupervisor(captureEnabled: true)
+        try await stuck.startAndWaitForReadiness()
+        stuckTopology.stopResults = [.failure(MemorySessionError.timedOut)]
+        try? await stuck.applyCaptureEnabled(false)
+        XCTAssertEqual(stuck.askPanelStatus(setupFinished: true).text, "Couldn’t stop")
+        XCTAssertEqual(stuck.askPanelStatus(setupFinished: true).action, .quit)
+        stuck.performAskStatusAction(.quit, setupFinished: true) { opened.append($0) }
+        await settle()
+        XCTAssertEqual(stuckTopology.launchPlans.count, 1)
 
         // Before setup, with onboarding closed: Finish Setup… opens it, and
         // while it is open there is nothing to press.
@@ -855,12 +877,12 @@ final class AskPanelTests: XCTestCase {
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: onboarding.path)
         let (setup, _) = footerSupervisor(captureEnabled: false, onboarding: onboarding)
         XCTAssertEqual(setup.askPanelStatus(setupFinished: false).action, .finishSetup)
-        setup.performAskStatusAction(.finishSetup, setupFinished: false, pauses: pauses) { opened.append($0) }
+        setup.performAskStatusAction(.finishSetup, setupFinished: false) { opened.append($0) }
         XCTAssertTrue(setup.onboardingIsRunning)
         XCTAssertNil(setup.askPanelStatus(setupFinished: false).action)
         // Whatever asks, nothing turns remembering on before Start Remembering.
         for action in [AskPanelStatus.Action.turnOn, .resume, .tryAgain] {
-            setup.performAskStatusAction(action, setupFinished: false, pauses: pauses) { opened.append($0) }
+            setup.performAskStatusAction(action, setupFinished: false) { opened.append($0) }
         }
         await settle()
         XCTAssertFalse(setup.captureEnabled, "setup is never skipped")
@@ -868,7 +890,7 @@ final class AskPanelTests: XCTestCase {
     }
 
     private func footerSupervisor(
-        captureEnabled: Bool, onboarding: URL? = nil
+        captureEnabled: Bool, onboarding: URL? = nil, clock: TestClock = TestClock()
     ) -> (ProcessSupervisor, FakeSupervisorTopology) {
         let locator = FakeBinaryLocator()
         locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
@@ -884,7 +906,8 @@ final class AskPanelTests: XCTestCase {
             topology: topology,
             keyCustodyPreparer: FakeKeyCustodyPreparer(),
             readinessTimeout: 0.1,
-            captureStatusReader: { (nil, nil) }
+            captureStatusReader: { (nil, nil) },
+            clock: { clock.now }
         )
         return (supervisor, topology)
     }
