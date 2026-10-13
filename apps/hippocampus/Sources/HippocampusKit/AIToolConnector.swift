@@ -177,6 +177,25 @@ public struct AIToolReport: Equatable, Sendable {
     }
 }
 
+/// Per tool, here rather than in SessionContextInstaller.swift, which the
+/// standalone session-context check compiles without this file.
+extension SessionContextInstaller {
+    /// Turns starting each session with recent work on or off for one tool.
+    public func setEnabled(_ enabled: Bool, for tool: AITool) throws {
+        switch tool {
+        case .claudeCode: try setClaudeEnabled(enabled)
+        case .codex: try setCodexEnabled(enabled)
+        }
+    }
+
+    public func status(for tool: AITool) throws -> SessionContextConfigurationStatus {
+        switch tool {
+        case .claudeCode: try claudeStatus()
+        case .codex: try codexStatus()
+        }
+    }
+}
+
 /// Which tools have Hippocampus in their settings, read where
 /// `register-clients` writes it: `mcpServers.hippocampus` in
 /// `~/.claude.json`, `mcp_servers.hippocampus` in Codex's `config.toml`.

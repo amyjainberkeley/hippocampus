@@ -61,21 +61,6 @@ public struct SessionContextInstaller: Sendable {
         )
     }
 
-    /// Turns starting each session with recent work on or off for one tool.
-    public func setEnabled(_ enabled: Bool, for tool: AITool) throws {
-        switch tool {
-        case .claudeCode: try setClaudeEnabled(enabled)
-        case .codex: try setCodexEnabled(enabled)
-        }
-    }
-
-    public func status(for tool: AITool) throws -> SessionContextConfigurationStatus {
-        switch tool {
-        case .claudeCode: try claudeStatus()
-        case .codex: try codexStatus()
-        }
-    }
-
     /// The bundled Rust agent, next to the app executable in Contents/MacOS.
     public var agentURL: URL {
         executableURL.deletingLastPathComponent().appendingPathComponent("mci-agent")
