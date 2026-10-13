@@ -14,8 +14,11 @@ public enum SessionCopy {
     /// At most this many moments go into one copy (`VisualMemoryExport` caps
     /// an export at the same number).
     public static let maxMoments = 24
-    /// How many moments of the session are read to choose from.
-    public static let readLimit = 300
+    /// How many moments of the session are read to choose from, newest
+    /// first. A session is at most 30 minutes, so this holds a whole one at
+    /// a moment a second; fewer would drop the start of a busy session. The
+    /// reader allows up to 10,000.
+    public static let readLimit = 2_000
 
     /// The Markdown for the session `title` over `range`, read from `reader`.
     public static func markdown(title: String, range: ClosedRange<Int64>, reader: BrainReader) async throws -> String {

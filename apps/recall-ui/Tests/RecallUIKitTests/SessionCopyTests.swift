@@ -61,6 +61,7 @@ final class SessionCopyTests: XCTestCase {
         XCTAssertEqual(options.timeFromUs, 1_791_837_660_000_000)
         XCTAssertEqual(options.timeToUs, 1_791_839_120_000_000)
         XCTAssertEqual(options.limit, SessionCopy.readLimit)
+        XCTAssertGreaterThanOrEqual(SessionCopy.readLimit, 1_800, "a whole 30-minute session at a moment a second")
 
         XCTAssertTrue(text.hasPrefix("# Competitor pricing tables\n"))
         XCTAssertTrue(text.contains("Pricing · Velo Cycles"))
