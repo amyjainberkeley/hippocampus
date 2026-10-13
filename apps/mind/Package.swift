@@ -19,8 +19,10 @@
 //   - `SlowMindServe` (test fixture, never shipped): the serve loop over an
 //     engine that takes a minute per request, run by `ServeLoopTests`.
 //
-// To build and test as on a Mac without Foundation Models:
-//   swift test -Xswiftc -DMIND_NO_FOUNDATION_MODELS
+// To build and test as on a Mac without Foundation Models (the suite with
+// `-Xswiftc -DMIND_NO_FOUNDATION_MODELS`, then a check that the binary does
+// not link the framework):
+//   scripts/test-without-foundation-models.sh
 
 import PackageDescription
 
