@@ -341,6 +341,19 @@ class RoleTests(unittest.TestCase):
         self.assertTrue(reading.main.startswith('Paragraph line 0'))
         self.assertIn('docs.example.com/weekly-review', reading.rest)
 
+    def test_a_row_of_marks_at_the_top_is_a_bar(self):
+        icons = [line('0 \u2261', 2600, 70, 60)]
+        reading = read([line('A sentence of the page below the bar.', 700, 200, 900)] + icons + prose(y=300))
+        self.assertNotIn('\u2261', reading.main)
+
+    def test_letter_buttons_alone_in_their_pane_are_a_bar(self):
+        # A composer's formatting row: B, I, S read as letters, beside an icon.
+        toolbar = [line('BIS', 700, 1610, 120, 40), line('e', 830, 1615, 32, 32)]
+        reading = read(prose() + toolbar + [line('Message #launch-plan', 700, 1700, 400)],
+                       separators=[horizontal(1600), horizontal(1670)])
+        self.assertNotIn('BIS', reading.main)
+        self.assertIn('BIS', reading.rest)
+
     def test_a_sentence_at_the_top_stays(self):
         top = [line('which is why the pilot ran for four weeks instead of two.', 700, 10, 1200)]
         self.assertTrue(read(top + prose(y=200)).main.startswith('which is why'))
@@ -350,6 +363,25 @@ class RoleTests(unittest.TestCase):
         for i, row in enumerate([('Week', 'Sessions', 'Questions'), ('One', '212', '48'), ('Two', '240', '61')]):
             cells += [line(cell, 700 + j * 400, 20 + i * 50, 150) for j, cell in enumerate(row)]
         self.assertIn('Week Sessions Questions', read(cells + prose(y=300)).main)
+
+    def test_a_header_with_its_title_and_controls_at_both_ends_is_a_bar(self):
+        header = [line('# launch-plan', 700, 100, 260), line('14 members', 2500, 100, 200)]
+        reading = read(header + prose(y=260), separators=[horizontal(60), horizontal(170)])
+        self.assertNotIn('14 members', reading.main)
+
+    def test_a_close_set_table_keeps_its_header(self):
+        # Cells too close together for the cut to see a table: the header
+        # lines up with the row below it, so it is not a bar.
+        cells = []
+        for i, row in enumerate([('Account', 'Stage', 'Owner'), ('Acme', 'Won', 'Chen'), ('Blue', 'Lost', 'Patel')]):
+            cells += [line(cell, 700 + j * 180, 20 + i * 44, 150) for j, cell in enumerate(row)]
+        self.assertIn('Account Stage Owner', read(cells + prose(y=300)).main)
+
+    def test_the_windows_title_is_a_bar_only_at_the_top_edge(self):
+        title = [line('Weekly review', 1300, 12, 220)]
+        self.assertNotIn('Weekly review', read(title + prose(y=200)).main)
+        heading = [line('Weekly review', 700, 200, 220)]
+        self.assertIn('Weekly review', read(prose(y=60, count=2) + heading + prose(y=260)).main)
 
     def test_a_truncated_tab_with_its_close_mark_is_a_bar(self):
         tabs = [line('Per-seat or tiered? How to p... X', 100, 10, 500), line('Stripe Docs', 700, 10, 200)]
