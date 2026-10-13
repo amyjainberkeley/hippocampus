@@ -16,8 +16,33 @@ public enum TCCPermissionKind: String, Sendable, Equatable, CaseIterable {
 public protocol TCCPermission: AnyObject, Sendable {
     var kind: TCCPermissionKind { get }
     var status: TCCStatus { get }
+    /// The quick in-process check. It may turn a permission on but never
+    /// off: on some macOS versions a process keeps the "no" it read before
+    /// the person turned the permission on, and a stale answer must not
+    /// undo a grant seen another way.
     func checkCurrent() -> TCCStatus
+    /// The check that may also turn a permission off. With `outOfProcess`,
+    /// Screen Recording also asks a fresh process, whose answer can only
+    /// turn the permission on.
+    func checkCurrentAsync(outOfProcess: Bool) async -> TCCStatus
     func requestOrOpenSettings()
     func resetAndRetry() async -> Bool
+    /// Clear this permission for Hippocampus and ask macOS again, then
+    /// return at once. The caller's refresh does the waiting.
+    func askAgain() async
     func openPrivacySettings()
+}
+
+extension TCCPermission {
+    public func checkCurrentAsync(outOfProcess: Bool) async -> TCCStatus {
+        checkCurrent()
+    }
+
+    public func checkCurrentAsync() async -> TCCStatus {
+        await checkCurrentAsync(outOfProcess: false)
+    }
+
+    public func askAgain() async {
+        requestOrOpenSettings()
+    }
 }

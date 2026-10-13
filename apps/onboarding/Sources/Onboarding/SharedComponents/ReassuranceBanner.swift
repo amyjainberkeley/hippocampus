@@ -55,7 +55,7 @@ struct ReassuranceBanner: View {
         return Text(before)
             + Text(mid)
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(OnboardingDesign.Palette.accent)
+                .foregroundColor(OnboardingDesign.Palette.accentText)
             + Text(after)
     }
 }

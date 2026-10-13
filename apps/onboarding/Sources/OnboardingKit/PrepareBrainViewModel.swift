@@ -36,10 +36,13 @@ public final class PrepareBrainViewModel: ObservableObject {
         modelDownloader.sizeDescription
     }
 
+    /// Start key setup, or return at once when it is running or done. Setup
+    /// starts when Permissions appears, so the key is usually ready by
+    /// Promise; a ready key never goes back to "Setting up", or Back then
+    /// Continue would turn Start Remembering off again.
     public func generateKey() async {
-        guard keyState != .generating else { return }
+        guard keyState != .generating, keyState != .ready else { return }
         keyState = .generating
-        try? await Task.sleep(for: .milliseconds(600))
         do {
             let exists = await keyGenerator.keyExists()
             if !exists {

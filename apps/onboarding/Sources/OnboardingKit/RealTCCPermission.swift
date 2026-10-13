@@ -4,17 +4,80 @@ import AppKit
 import CoreGraphics
 import ApplicationServices
 
+/// Runs `tccutil` for one Hippocampus service. Tests pass a recorder: a real
+/// reset changes System Settings for the whole Mac account.
+public protocol TCCResetting: Sendable {
+    func reset(_ arguments: [String])
+}
+
+public struct TCCUtilResetter: TCCResetting {
+    public init() {}
+
+    public func reset(_ arguments: [String]) {
+        let proc = ChildProcessEnvironment.makeProcess()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        proc.arguments = arguments
+        try? proc.run()
+        proc.waitUntilExit()
+    }
+}
+
+/// Every reset names Hippocampus. Without a bundle id, tccutil resets the
+/// service for every app on the Mac.
+enum TCCResetArguments {
+    static let screenCapture = ["reset", "ScreenCapture", "ai.hippocampus"]
+    static let accessibility = ["reset", "Accessibility", "ai.hippocampus"]
+    static let appleEvents = ["reset", "AppleEvents", "ai.hippocampus"]
+}
+
 @MainActor
 public final class RealScreenRecordingPermission: TCCPermission, @unchecked Sendable {
     public let kind: TCCPermissionKind = .screenRecording
     public private(set) var status: TCCStatus
+    /// A grant a fresh process confirmed. It stands for the rest of this
+    /// session: the in-process answer can only be stale in the "no"
+    /// direction, so nothing this process reads may undo it.
+    public private(set) var grantLatched = false
 
-    private static let tccAttemptedKey = "MCITCCScreenRecordingAttempted"
+    static let tccAttemptedKey = "MCITCCScreenRecordingAttempted"
 
-    public init() {
-        if CGPreflightScreenCaptureAccess() {
+    private let preflight: @MainActor () -> Bool
+    private let probe: any ScreenRecordingProbe
+    private let requester: any ScreenRecordingRequester
+    private let resetter: any TCCResetting
+    private let defaults: UserDefaults
+    private let openPane: @MainActor (String) -> Void
+    private var requestSent = false
+
+    public convenience init() {
+        let executable = OnboardingExecutable.current()
+        self.init(
+            preflight: { CGPreflightScreenCaptureAccess() },
+            probe: ChildScreenRecordingProbe(executable: executable),
+            requester: ChildScreenRecordingRequester(executable: executable),
+            resetter: TCCUtilResetter(),
+            defaults: .standard,
+            openPane: openSystemSettingsPane
+        )
+    }
+
+    public init(
+        preflight: @escaping @MainActor () -> Bool,
+        probe: any ScreenRecordingProbe,
+        requester: any ScreenRecordingRequester,
+        resetter: any TCCResetting,
+        defaults: UserDefaults,
+        openPane: @escaping @MainActor (String) -> Void
+    ) {
+        self.preflight = preflight
+        self.probe = probe
+        self.requester = requester
+        self.resetter = resetter
+        self.defaults = defaults
+        self.openPane = openPane
+        if preflight() {
             status = .granted
-        } else if UserDefaults.standard.bool(forKey: Self.tccAttemptedKey) {
+        } else if defaults.bool(forKey: Self.tccAttemptedKey) {
             status = .denied
         } else {
             status = .notRequested
@@ -22,64 +85,80 @@ public final class RealScreenRecordingPermission: TCCPermission, @unchecked Send
     }
 
     public func checkCurrent() -> TCCStatus {
-        if CGPreflightScreenCaptureAccess() {
+        if grantLatched || preflight() {
             status = .granted
-        } else if status == .granted {
+        }
+        return status
+    }
+
+    public func checkCurrentAsync(outOfProcess: Bool) async -> TCCStatus {
+        if grantLatched || preflight() {
+            status = .granted
+            return status
+        }
+        if outOfProcess, await probe.isGranted() == true {
+            grantLatched = true
+            status = .granted
+            return status
+        }
+        // This process says no and no fresh process said yes. A grant this
+        // process saw earlier has been turned off.
+        if status == .granted {
             status = .denied
         }
         return status
     }
 
     public func requestOrOpenSettings() {
-        if CGPreflightScreenCaptureAccess() {
+        if preflight() {
             status = .granted
             return
         }
-        // DO NOT call CGRequestScreenCaptureAccess() here.
+        // Never call CGRequestScreenCaptureAccess() in this process.
         //
-        // Per Apple's TCC contract, when the user grants Screen
-        // Recording in response to that call, the OS *terminates*
-        // the calling process so the new permission takes effect at
-        // next launch. The onboarding window vanishes from under
-        // the user — they see "I clicked Grant and the app died."
-        // (CEO-reported, 2026-05-24.)
-        //
-        // Fix: deep-link to System Settings → Privacy & Security →
-        // Screen Recording. The user toggles Hippocampus + the
-        // helper ON there. The onboarding app stays alive. The
-        // PermissionsSlide's poll catches the grant on the next
-        // CGPreflightScreenCaptureAccess check — no app kill, no
-        // process restart needed.
-        UserDefaults.standard.set(true, forKey: Self.tccAttemptedKey)
+        // When the person allows Screen Recording, macOS may end the
+        // process that asked, and the onboarding window would vanish from
+        // under them ("I clicked Grant and the app died", CEO-reported
+        // 2026-05-24). A separate copy of this binary asks instead
+        // (`--tcc-request`), once per session, so macOS lists Hippocampus
+        // and shows its prompt from a process that then exits. The pane
+        // opens as well, so something is on screen even if no prompt
+        // appears. The rows' refresh sees the grant without a restart.
+        defaults.set(true, forKey: Self.tccAttemptedKey)
+        if !requestSent {
+            requestSent = true
+            requester.request()
+        }
         openPrivacySettings()
-        // Leave status at .notRequested. The slide's polling timer
-        // upgrades it to .granted as soon as preflight returns true.
+    }
+
+    /// Reset, forget the earlier attempt, and have a fresh process ask
+    /// again. Returns at once: the row's refresh does the waiting.
+    public func askAgain() async {
+        resetter.reset(TCCResetArguments.screenCapture)
+        defaults.removeObject(forKey: Self.tccAttemptedKey)
+        grantLatched = false
+        status = .notRequested
+        requestSent = true
+        requester.request()
+        openPrivacySettings()
     }
 
     public func resetAndRetry() async -> Bool {
-        let bundleIDs = ["ai.hippocampus"]
-        for bid in bundleIDs {
-            let proc = ChildProcessEnvironment.makeProcess()
-            proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
-            proc.arguments = ["reset", "ScreenCapture", bid]
-            try? proc.run()
-            proc.waitUntilExit()
-        }
-
+        resetter.reset(TCCResetArguments.screenCapture)
+        grantLatched = false
         status = .notRequested
 
         try? await Task.sleep(for: .milliseconds(500))
 
-        // Same no-kill discipline as `requestOrOpenSettings`. Deep-
-        // link to Settings + poll instead of calling
-        // CGRequestScreenCaptureAccess (which would terminate this
-        // process on grant and leave the user stranded).
-        UserDefaults.standard.set(true, forKey: Self.tccAttemptedKey)
+        // Same no-kill discipline as `requestOrOpenSettings`: deep-link
+        // to Settings and poll.
+        defaults.set(true, forKey: Self.tccAttemptedKey)
         openPrivacySettings()
 
         for _ in 0..<60 {
             try? await Task.sleep(for: .seconds(1))
-            if CGPreflightScreenCaptureAccess() {
+            if preflight() {
                 status = .granted
                 return true
             }
@@ -90,7 +169,7 @@ public final class RealScreenRecordingPermission: TCCPermission, @unchecked Send
     }
 
     public func openPrivacySettings() {
-        openSystemSettingsPane("Privacy_ScreenCapture")
+        openPane("Privacy_ScreenCapture")
     }
 }
 
@@ -99,23 +178,54 @@ public final class RealAccessibilityPermission: TCCPermission, @unchecked Sendab
     public let kind: TCCPermissionKind = .accessibility
     public private(set) var status: TCCStatus
 
-    public init() {
-        status = AXIsProcessTrusted() ? .granted : .notRequested
+    private let isTrusted: @MainActor () -> Bool
+    private let prompt: @MainActor () -> Bool
+    private let resetter: any TCCResetting
+    private let openPane: @MainActor (String) -> Void
+
+    public convenience init() {
+        self.init(
+            isTrusted: { AXIsProcessTrusted() },
+            prompt: {
+                let opts = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+                return AXIsProcessTrustedWithOptions(opts)
+            },
+            resetter: TCCUtilResetter(),
+            openPane: openSystemSettingsPane
+        )
+    }
+
+    public init(
+        isTrusted: @escaping @MainActor () -> Bool,
+        prompt: @escaping @MainActor () -> Bool,
+        resetter: any TCCResetting,
+        openPane: @escaping @MainActor (String) -> Void
+    ) {
+        self.isTrusted = isTrusted
+        self.prompt = prompt
+        self.resetter = resetter
+        self.openPane = openPane
+        status = isTrusted() ? .granted : .notRequested
     }
 
     public func checkCurrent() -> TCCStatus {
-        if AXIsProcessTrusted() {
+        if isTrusted() {
             status = .granted
-        } else if status == .granted || status == .notRequested {
-            status = status == .granted ? .denied : status
+        }
+        return status
+    }
+
+    public func checkCurrentAsync(outOfProcess: Bool) async -> TCCStatus {
+        if isTrusted() {
+            status = .granted
+        } else if status == .granted {
+            status = .denied
         }
         return status
     }
 
     public func requestOrOpenSettings() {
-        let opts = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        let trusted = AXIsProcessTrustedWithOptions(opts)
-        if trusted {
+        if prompt() {
             status = .granted
         } else {
             status = .denied
@@ -123,29 +233,29 @@ public final class RealAccessibilityPermission: TCCPermission, @unchecked Sendab
         }
     }
 
+    /// Reset, then the same request as the first click: macOS's prompt,
+    /// and the pane when it is not on.
+    public func askAgain() async {
+        resetter.reset(TCCResetArguments.accessibility)
+        status = .notRequested
+        requestOrOpenSettings()
+    }
+
     public func resetAndRetry() async -> Bool {
-        let proc = ChildProcessEnvironment.makeProcess()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
-        // Scoped to Hippocampus. Without a bundle id, tccutil resets the
-        // service for every app on the Mac.
-        proc.arguments = ["reset", "Accessibility", "ai.hippocampus"]
-        try? proc.run()
-        proc.waitUntilExit()
+        resetter.reset(TCCResetArguments.accessibility)
 
         status = .notRequested
 
         try? await Task.sleep(for: .milliseconds(500))
 
-        let opts = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        let trusted = AXIsProcessTrustedWithOptions(opts)
-        if trusted {
+        if prompt() {
             status = .granted
             return true
         }
 
         for _ in 0..<60 {
             try? await Task.sleep(for: .seconds(1))
-            if AXIsProcessTrusted() {
+            if isTrusted() {
                 status = .granted
                 return true
             }
@@ -156,7 +266,7 @@ public final class RealAccessibilityPermission: TCCPermission, @unchecked Sendab
     }
 
     public func openPrivacySettings() {
-        openSystemSettingsPane("Privacy_Accessibility")
+        openPane("Privacy_Accessibility")
     }
 }
 
@@ -194,12 +304,8 @@ public final class RealAutomationPermission: TCCPermission, @unchecked Sendable 
     }
 
     public func resetAndRetry() async -> Bool {
-        let proc = ChildProcessEnvironment.makeProcess()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
         // Scoped to Hippocampus, never every app's Automation grants.
-        proc.arguments = ["reset", "AppleEvents", "ai.hippocampus"]
-        try? proc.run()
-        proc.waitUntilExit()
+        TCCUtilResetter().reset(TCCResetArguments.appleEvents)
         status = .notRequested
         return checkCurrent() == .granted
     }
@@ -209,7 +315,8 @@ public final class RealAutomationPermission: TCCPermission, @unchecked Sendable 
     }
 }
 
-private func openSystemSettingsPane(_ pane: String) {
+@MainActor
+func openSystemSettingsPane(_ pane: String) {
     guard let url = URL(
         string: "x-apple.systempreferences:com.apple.preference.security?\(pane)"
     ) else { return }

@@ -281,6 +281,20 @@ public final class OnboardingFlowViewModel: ObservableObject {
         permissionRefreshCount += 1
     }
 
+    /// The check that may also turn a permission off; `refreshPermissions()`
+    /// only ever turns one on. Run before consent, so a permission turned
+    /// off during setup is seen.
+    public func refreshPermissionsAsync() async {
+        _ = await screenRecordingPermission.checkCurrentAsync(outOfProcess: false)
+        _ = await accessibilityPermission.checkCurrentAsync(outOfProcess: false)
+        syncChoreographyFromTCC(surface: .screenRecording,
+                                 status: screenRecordingPermission.status)
+        syncChoreographyFromTCC(surface: .accessibility,
+                                 status: accessibilityPermission.status)
+        advancePermissionSequence()
+        permissionRefreshCount += 1
+    }
+
     /// Synchronize required permission presentation without requesting a grant.
     private func syncChoreographyFromTCC(surface: PermissionSurface,
                                           status: TCCStatus) {

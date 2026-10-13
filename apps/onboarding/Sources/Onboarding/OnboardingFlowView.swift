@@ -175,45 +175,27 @@ struct OnboardingFlowView: View {
     }
 
     private func finish() {
-        flowVM.refreshPermissions()
-        guard canFinish else { return }
-        do {
-            try writeOnboardingCompleteSentinel()
-        } catch {
-            completionError = "Setup could not be saved. Check available disk space and try again."
-            return
+        Task { @MainActor in
+            // The quick check never turns a permission off; this one does.
+            await flowVM.refreshPermissionsAsync()
+            guard canFinish else { return }
+            do {
+                // Cross-process sentinel so Hippocampus.app starts remembering
+                // and skips its auto-spawn on the next launch. This flow has
+                // no open-at-login checkbox, so it records no.
+                try FileOnboardingConsentStore().give(openAtLogin: false)
+            } catch {
+                completionError = "Setup could not be saved. Check available disk space and try again."
+                return
+            }
+            UserDefaults.standard.set(true, forKey: "MCIOnboardingCompleted")
+            // Clear the resume-state file so a future re-launch (e.g. dev-tool
+            // wipe that touches the sentinel but not the state file) starts at
+            // `.welcome` instead of stuck at `.done`.
+            flowVM.clearResumeState()
+            #if canImport(AppKit)
+            NSApplication.shared.terminate(nil)
+            #endif
         }
-        UserDefaults.standard.set(true, forKey: "MCIOnboardingCompleted")
-        // Cross-process sentinel so Hippocampus.app's auto-launch-onboarding
-        // check at next start sees "completed at least once" and skips the
-        // automatic spawn. See OnboardingSentinel in HippocampusKit — we
-        // duplicate the file path here rather than depending on
-        // HippocampusKit (per Package.swift's "Zero external dependencies").
-        // Clear the resume-state file so a future re-launch (e.g. dev-tool
-        // wipe that touches the sentinel but not the state file) starts at
-        // `.welcome` instead of stuck at `.done`.
-        flowVM.clearResumeState()
-        #if canImport(AppKit)
-        NSApplication.shared.terminate(nil)
-        #endif
-    }
-
-    /// Touch `~/Library/Application Support/MCI/.onboarding-complete`
-    /// so Hippocampus.app skips its auto-spawn on next launch. Mirror
-    /// of `HippocampusKit.OnboardingSentinel.markComplete()` —
-    /// duplicated to avoid an OnboardingKit→HippocampusKit dep.
-    private func writeOnboardingCompleteSentinel() throws {
-        let url = FileManager.default
-            .homeDirectoryForCurrentUser
-            .appendingPathComponent(
-                "Library/Application Support/MCI/.onboarding-complete"
-            )
-        let dir = url.deletingLastPathComponent()
-        try FileManager.default.createDirectory(
-            at: dir, withIntermediateDirectories: true
-        )
-        let stamp = ISO8601DateFormatter().string(from: Date())
-        let body = "onboarding-completed-at \(stamp)\n"
-        try body.write(to: url, atomically: true, encoding: .utf8)
     }
 }

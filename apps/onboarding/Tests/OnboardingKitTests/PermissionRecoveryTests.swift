@@ -17,6 +17,22 @@ final class PermissionRecoveryTests: XCTestCase {
         }
     }
 
+    func testOnlyTheAsyncRefreshSeesAPermissionTurnedOffDuringSetup() async {
+        let fixture = ScreenRecordingFixture(inProcess: true, freshProcessSays: nil)
+        defer { fixture.tearDown() }
+        let vm = OnboardingFlowViewModel(screenRecording: fixture.permission,
+                                        accessibility: StubTCCPermission(kind: .accessibility, status: .granted),
+                                        stateStore: InMemoryOnboardingStateStore(), initialStep: .permissions)
+        XCTAssertTrue(vm.canAdvance)
+        fixture.inProcess = false
+        vm.refreshPermissions()
+        XCTAssertTrue(vm.canAdvance, "the quick check never turns a permission off")
+        await vm.refreshPermissionsAsync()
+        XCTAssertFalse(vm.canAdvance)
+        XCTAssertEqual(vm.permissionResults[.screenRecording], .denied)
+        XCTAssertEqual(vm.currentPermissionSurface, .screenRecording)
+    }
+
     func testSettingsGrantClearsDeniedOutcomeAndRevocationReopensRecovery() {
         let sr = StubTCCPermission(kind: .screenRecording, status: .denied)
         let ax = StubTCCPermission(kind: .accessibility, status: .granted)

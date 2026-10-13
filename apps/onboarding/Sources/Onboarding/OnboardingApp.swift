@@ -22,7 +22,8 @@ final class OnboardingAppDelegate: NSObject, NSApplicationDelegate, @unchecked S
 }
 #endif
 
-@main
+/// Started by `OnboardingEntryPoint`, which answers the Screen Recording
+/// probe commands first.
 struct OnboardingApp: App {
     #if canImport(AppKit)
     @NSApplicationDelegateAdaptor(OnboardingAppDelegate.self) var appDelegate

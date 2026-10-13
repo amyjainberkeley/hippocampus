@@ -1,11 +1,8 @@
 import SwiftUI
 
 enum OnboardingTheme {
-    static let accentBlue = Color(
-        red: Double(0x0A) / 255,
-        green: Double(0x66) / 255,
-        blue: Double(0xD8) / 255
-    )
+    /// The same accent as `OnboardingDesign.Palette.accent`; one source.
+    static let accentBlue = OnboardingDesign.Palette.accent
 
     static let windowWidth: CGFloat = 1280
     static let windowHeight: CGFloat = 720
@@ -15,6 +12,7 @@ enum OnboardingTheme {
     static func title(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 28, weight: .semibold))
+            .foregroundStyle(OnboardingDesign.Palette.ink)
     }
 
     static func subtitle(_ text: String) -> some View {

@@ -1,3 +1,4 @@
+import OnboardingKit
 import SwiftUI
 
 /// OnboardingDesign — the Hippocampus first-run design system.
@@ -12,8 +13,8 @@ import SwiftUI
 ///     "editorial air" comes from restraint, not a wall of `.medium`.
 ///   • **Native type rhythm.** Every role keeps zero letter spacing so long
 ///     words remain stable across Dynamic Type and localized copy.
-///   • **One decisive accent.** The historical `OnboardingTheme.accentBlue`
-///     (#2563EB) stays the single hero hue — one filled CTA per screen.
+///   • **One decisive accent.** #2F6BFF fills, selects and marks the
+///     dots, one filled CTA per screen; blue text on white stays #0A66D8.
 ///   • **8pt spacing grid** and **6–12pt radii** on all containers.
 ///   • **Calm motion budget.** Opacity + transform only, ≤ 300 ms, ease-out,
 ///     no bounce, always Reduce-Motion aware.
@@ -29,13 +30,20 @@ enum OnboardingDesign {
     // MARK: - Color
 
     enum Palette {
-        /// The single decisive accent. Byte-for-byte the historical
-        /// Shared with the Recall workspace and the app icon.
-        static let accent = Color(
-            red: Double(0x0A) / 255,
-            green: Double(0x66) / 255,
-            blue: Double(0xD8) / 255
-        )
+        /// The single decisive accent, for fills, selection and dots: the
+        /// mark's blue dot (RULINGS B4).
+        static let accent = color(OnboardingPalette.accent)
+
+        /// Blue text on white keeps the darker blue, which reads better.
+        static let accentText = color(OnboardingPalette.accentText)
+
+        /// Titles: the mark's navy letters.
+        static let ink = color(OnboardingPalette.ink)
+
+        private static func color(_ hex: UInt32) -> Color {
+            let rgb = OnboardingPalette.components(hex)
+            return Color(red: rgb.red, green: rgb.green, blue: rgb.blue)
+        }
 
         /// A lighter accent for gradients / glows on dark backdrops.
         static let accentBright = accent
@@ -81,6 +89,7 @@ enum OnboardingDesign {
             Text(text)
                 .font(.system(size: 40, weight: .semibold))
                 .tracking(OnboardingDesign.tracking(forSize: 52))
+                .foregroundStyle(Palette.ink)
         }
 
         /// The oversized first-run hero — "Your memory, on your machine."
@@ -90,6 +99,7 @@ enum OnboardingDesign {
             Text(text)
                 .font(.system(size: 36, weight: .semibold))
                 .tracking(OnboardingDesign.tracking(forSize: 44))
+                .foregroundStyle(Palette.ink)
         }
 
         /// Standard slide title. Replaces the old flat 28/bold.
@@ -97,6 +107,7 @@ enum OnboardingDesign {
             Text(text)
                 .font(.system(size: 28, weight: .semibold))
                 .tracking(OnboardingDesign.tracking(forSize: 30))
+                .foregroundStyle(Palette.ink)
         }
 
         /// Section / card heading.

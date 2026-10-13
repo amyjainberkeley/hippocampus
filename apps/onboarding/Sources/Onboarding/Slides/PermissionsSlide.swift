@@ -5,6 +5,7 @@ import OnboardingKit
 /// visible; only optional Automation and Full Disk Access can be deferred.
 struct PermissionsSlide: View {
     @EnvironmentObject var flowVM: OnboardingFlowViewModel
+    @EnvironmentObject var prepareBrainVM: PrepareBrainViewModel
     @State private var isResetting = false
     @State private var showResetFailedFallback = false
     /// SwiftUI timer polled every 1 s while this slide is on screen.
@@ -83,6 +84,11 @@ struct PermissionsSlide: View {
         }
         .task {
             await flowVM.refreshFullDiskAccessStatus()
+        }
+        // Key setup starts here so the key is ready before consent;
+        // it returns at once when the key is already ready.
+        .task {
+            await prepareBrainVM.generateKey()
         }
         .onReceive(pollTimer) { _ in
             // Cheap CGPreflightScreenCaptureAccess / AXIsProcessTrusted

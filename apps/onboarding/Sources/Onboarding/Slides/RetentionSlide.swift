@@ -76,7 +76,7 @@ struct RetentionSlide: View {
             Button("Custom duration") {
                 retentionVM.selectedPolicy = .custom
             }
-            .onboardingText(color: OnboardingDesign.Palette.accent)
+            .onboardingText(color: OnboardingDesign.Palette.accentText)
             .opacity(retentionVM.selectedPolicy == .custom ? 0 : 1)
         }
         .frame(maxWidth: 420)

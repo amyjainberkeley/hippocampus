@@ -36,10 +36,14 @@ deferred-permission choreography, and the hotkey-earning pattern.
    the "What MCI Sees" trust panel. Registering earlier violates
    the informed-consent posture that ADR-0017 codifies.
 
-5. **No real TCC calls in this target.** Per README, TCC probing
-   lives in the Hippocampus supervisor. This app exercises TCC via
-   protocol stubs so it runs on a dev machine without prompting.
-   Live `CGRequestScreenCaptureAccess()` calls belong upstream.
+5. **Ask for Screen Recording from a child process only.** The
+   onboarding window never calls `CGRequestScreenCaptureAccess()`:
+   macOS may end the process that asked once the person allows it.
+   `onboarding --tcc-request screen-recording` asks from a fresh copy
+   of the binary that then exits, and `--tcc-probe screen-recording`
+   checks from a fresh copy, whose answer may only turn a row on
+   (`ScreenRecordingProbe.swift`). Tests use injected stand-ins and
+   never touch the real permission database.
 
 6. **Copy is CSO-adjacent.** TCC-prompt copy and the trust-panel
    text set user expectations about what is captured. Changes are
@@ -49,8 +53,8 @@ deferred-permission choreography, and the hotkey-earning pattern.
 
 - Storing flow progress in `@State` (dies on quit) instead of
   through OnboardingKit's persisted state machine.
-- Calling a real `CGRequest*Access` in a view — bypasses the
-  supervisor and produces prompts the state machine can't track.
+- Calling a real `CGRequest*Access` in a view or a view model,
+  instead of through the `--tcc-request` child.
 - Registering the recall hotkey in `App.init` before the user
   has seen the trust panel (regression risk called out in PR
   #83).

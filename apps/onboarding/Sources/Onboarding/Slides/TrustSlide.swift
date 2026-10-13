@@ -27,7 +27,7 @@ struct TrustSlide: View {
                         Button("Inspect key custody") {
                             showKeyWrapAudit = true
                         }
-                        .onboardingText(color: OnboardingDesign.Palette.accent)
+                        .onboardingText(color: OnboardingDesign.Palette.accentText)
                         .padding(.leading, 34)
                         .accessibilityIdentifier("TrustSlideInspectKeyWrap")
 

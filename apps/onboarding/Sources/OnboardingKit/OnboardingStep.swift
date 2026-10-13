@@ -52,6 +52,25 @@ public enum OnboardingStep: Int, Sendable, Equatable, CaseIterable, Identifiable
 
     public var id: Int { rawValue }
 
+    /// The route that opens this step; the resume file holds it.
+    public var routeName: String {
+        switch self {
+        case .welcome: "welcome"
+        case .howItWorks: "how-it-works"
+        case .trust: "trust"
+        case .permissions: "permissions"
+        case .primaryHotkey: "hotkey"
+        case .allowlist: "allowlist"
+        case .browserExtension: "browser-extension"
+        case .livePreview: "live-preview"
+        case .retention: "retention"
+        case .prepareBrain: "prepare-brain"
+        case .connectClaudeCode: "connect-ai"
+        case .mcpServers: "mcp-servers"
+        case .done: "done"
+        }
+    }
+
     public var title: String {
         switch self {
         case .welcome: "Welcome to Hippocampus"
