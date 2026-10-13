@@ -406,6 +406,99 @@ class CoverageDetector:
                              scores=[scores[i] for i in order], elapse=elapsed)
 
 
+# Pane separators: app windows divide their panes with a hairline or a change
+# of background, and either is a long straight edge. Text never makes an edge
+# longer than a line is tall, and text never crosses a pane boundary, so the
+# long edges that no text box crosses are where the window divides. The
+# capture helper cuts the reading there before it looks for gaps between boxes.
+SEPARATOR_STEP = 5           # grey levels between neighbouring pixels that make an edge
+SEPARATOR_BREAK = 3          # pixels of interruption an edge survives, at the analysed scale
+SEPARATOR_MIN_VERTICAL = 0.22    # a vertical separator runs this share of the frame's height
+SEPARATOR_MIN_HORIZONTAL = 0.30  # a horizontal one, this share of its width
+SEPARATOR_MERGE = 4          # neighbouring edge positions within this many pixels are one separator
+SEPARATOR_PAD = 2.0          # a box crosses a separator when it reaches this far past it
+MAX_SEPARATORS = 64
+
+
+def _longest_runs(mask, minimum):
+    """For each column of a boolean mask, the longest run of True down the
+    column, as (start row, length) arrays. Columns with fewer than `minimum`
+    True cells cannot hold a run that long and are left at zero."""
+    import numpy as np
+    height, width = mask.shape
+    best = np.zeros(width, dtype=np.int64)
+    best_start = np.zeros(width, dtype=np.int64)
+    columns = np.flatnonzero(np.count_nonzero(mask, axis=0) >= minimum)
+    if columns.size:
+        rows = np.arange(height)[:, None]
+        # The last row at or above each cell that is off; a run of True ends
+        # at each cell that is on and is as long as the distance to it.
+        last_off = np.maximum.accumulate(np.where(mask[:, columns], -1, rows), axis=0)
+        run = rows - last_off
+        ends = run.argmax(axis=0)
+        lengths = run[ends, np.arange(columns.size)]
+        best[columns] = lengths
+        best_start[columns] = ends - lengths + 1
+    return best_start, best
+
+
+def _edge_lines(gray, minimum):
+    """Vertical edges in `gray` running at least `minimum` pixels, as
+    (x, top, bottom) with x the pixel boundary the edge lies on."""
+    import cv2
+    import numpy as np
+    step = (cv2.absdiff(gray[:, 1:], gray[:, :-1]) >= SEPARATOR_STEP).view(np.uint8)
+    closed = cv2.morphologyEx(step, cv2.MORPH_CLOSE, np.ones((SEPARATOR_BREAK + 1, 1), np.uint8))
+    starts, lengths = _longest_runs(closed.view(bool), minimum)
+    # A rule two pixels wide has an edge on each side; edges this close
+    # together are one separator, the longer of them.
+    found, group = [], []
+    for column in np.flatnonzero(lengths >= minimum).tolist() + [None]:
+        if group and (column is None or column - group[0] >= SEPARATOR_MERGE):
+            best = max(group, key=lambda c: (int(lengths[c]), -c))
+            found.append((best + 1, int(starts[best]), int(starts[best] + lengths[best])))
+            group = []
+        if column is not None:
+            group.append(column)
+    return found
+
+
+def pane_separators(image, rects, half=False):
+    """Long straight edges of a BGR frame that no text box crosses.
+
+    `rects` are text boxes as [x0, y0, x1, y1] pixels with a top-left origin.
+    `half` analyses the frame at half size, as a Retina frame's detection is.
+    Returns separators as normalized [x, y, w, h] with a bottom-left origin,
+    the boxes' convention: w is 0 for a vertical separator and h is 0 for a
+    horizontal one."""
+    import cv2
+    import numpy as np
+    height, width = image.shape[:2]
+    if height < 8 or width < 8:
+        return []
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    scale = 1.0
+    if half and min(height, width) >= 64:
+        gray = cv2.resize(gray, (width // 2, height // 2), interpolation=cv2.INTER_AREA)
+        scale = width / (width // 2)
+    small_h, small_w = gray.shape
+    boxes = np.asarray(rects, dtype=np.float64).reshape(-1, 4)
+    x0, y0, x1, y1 = boxes.T
+    found = []
+    for x, top, bottom in _edge_lines(gray, SEPARATOR_MIN_VERTICAL * small_h):
+        x, top, bottom = x * scale, top * (height / small_h), bottom * (height / small_h)
+        crossed = ((x0 < x - SEPARATOR_PAD) & (x1 > x + SEPARATOR_PAD) & (y1 > top) & (y0 < bottom)).any()
+        if SEPARATOR_PAD < x < width - SEPARATOR_PAD and not crossed:
+            found.append((bottom - top, [x / width, (height - bottom) / height, 0.0, (bottom - top) / height]))
+    for y, left, right in _edge_lines(np.ascontiguousarray(gray.T), SEPARATOR_MIN_HORIZONTAL * small_w):
+        y, left, right = y * (height / small_h), left * scale, right * scale
+        crossed = ((y0 < y - SEPARATOR_PAD) & (y1 > y + SEPARATOR_PAD) & (x1 > left) & (x0 < right)).any()
+        if SEPARATOR_PAD < y < height - SEPARATOR_PAD and not crossed:
+            found.append((right - left, [left / width, (height - y) / height, (right - left) / width, 0.0]))
+    found.sort(key=lambda item: -item[0])
+    return [[float(v) for v in box] for _, box in found[:MAX_SEPARATORS]]
+
+
 def encode_lines(texts, scores, boxes, width, height):
     if not (len(texts) == len(scores) == len(boxes)) or len(texts) > 4096:
         raise ValueError('invalid OCR result count')
@@ -433,7 +526,16 @@ def recognize(engine, image, retina=False):
     engine.frame.retina = retina
     result = engine(image)
     lines = [] if result.txts is None else encode_lines(result.txts, result.scores, result.boxes, image.shape[1], image.shape[0])
-    reply = json.dumps({'version': 1, 'lines': lines}, ensure_ascii=False, allow_nan=False).encode('utf-8')
+    payload = {'version': 1, 'lines': lines}
+    if lines:
+        # Additive: a reader that predates separators ignores the field.
+        rects = [_rect(quad) for quad in result.boxes]
+        payload['separators'] = pane_separators(image, rects, half=retina or max(image.shape[:2]) >= 2560)
+    reply = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode('utf-8')
+    if len(reply) > MAX_REPLY and 'separators' in payload:
+        # The lines matter more than where the panes are.
+        del payload['separators']
+        reply = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode('utf-8')
     if len(reply) > MAX_REPLY:
         raise ValueError('OCR reply too large')
     return reply

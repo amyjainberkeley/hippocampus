@@ -328,6 +328,40 @@ class CoverageDetectorTests(unittest.TestCase):
                 self.assertEqual(x1, nxt[0])
                 self.assertEqual(image[10:30, int(x1)].min(), 255, 'cut through ink')
 
+    def test_a_frame_with_text_reports_its_pane_separators(self):
+        try:
+            reply = json.loads(worker.recognize(self.engine, self.two_panes(), retina=True))
+        finally:
+            self.engine.frame.retina = False
+        self.assertEqual(reply['version'], 1)
+        self.assertIn('The page beside the sidebar has text', [line['text'] for line in reply['lines']])
+        vertical = [s for s in reply['separators'] if s[2] == 0]
+        self.assertEqual(len(vertical), 1, reply['separators'])
+        x, y, w, h = vertical[0]
+        self.assertAlmostEqual(x, 600 / 2400, delta=2 / 2400)
+        self.assertGreater(h, 0.9)
+
+    def test_an_empty_reading_keeps_the_old_reply(self):
+        import numpy as np
+        reply = json.loads(worker.recognize(self.engine, np.full((400, 600, 3), 255, dtype=np.uint8)))
+        self.assertEqual(reply, {'version': 1, 'lines': []})
+
+    def two_panes(self):
+        """A grey sidebar beside a white page, each with text. Its lines are
+        its own: the engine is shared, and the line cache test expects to read
+        its lines for the first time."""
+        import numpy as np
+        from PIL import Image, ImageDraw, ImageFont
+        font = ImageFont.truetype('/System/Library/Fonts/Supplemental/Arial.ttf', 24)
+        image = Image.new('RGB', (2400, 1500), 'white')
+        draw = ImageDraw.Draw(image)
+        draw.rectangle([0, 0, 599, 1499], fill=(236, 236, 238))
+        draw.text((40, 120), 'Inbox', fill='black', font=font)
+        draw.text((40, 170), 'Drafts', fill='black', font=font)
+        draw.text((680, 120), 'The page beside the sidebar has text', fill='black', font=font)
+        draw.text((680, 170), 'and a second line under the first', fill='black', font=font)
+        return np.array(image)[:, :, ::-1].copy()
+
     def test_only_boxes_from_different_runs_merge(self):
         import numpy as np
         quad = np.zeros((4, 2), dtype=np.float32)
@@ -337,3 +371,93 @@ class CoverageDetectorTests(unittest.TestCase):
         self.assertEqual(len(across), 1)
         self.assertIsNone(across[0][0])
         self.assertEqual(across[0][1], [0, 0, 200, 20])
+
+
+class PaneSeparatorTests(unittest.TestCase):
+    """Where a window divides into panes, found from its pixels."""
+
+    def frame(self, width=1200, height=800):
+        import numpy as np
+        return np.full((height, width, 3), 255, dtype=np.uint8)
+
+    def test_a_change_of_background_is_a_vertical_separator(self):
+        image = self.frame()
+        image[:, :300] = 236
+        separators = worker.pane_separators(image, [])
+        self.assertEqual(separators, [[300 / 1200, 0.0, 0.0, 1.0]])
+
+    def test_a_hairline_is_one_separator_and_a_bar_is_horizontal(self):
+        image = self.frame()
+        image[:, 400:402] = 200          # a two-pixel rule between panes
+        image[:60, :] = 240              # a title bar across the top
+        separators = worker.pane_separators(image, [])
+        vertical = [s for s in separators if s[2] == 0]
+        horizontal = [s for s in separators if s[3] == 0]
+        self.assertEqual(len(vertical), 1, separators)
+        self.assertAlmostEqual(vertical[0][0], 400 / 1200, delta=2 / 1200)
+        self.assertEqual(len(horizontal), 1, separators)
+        x, y, w, h = horizontal[0]
+        # Bottom-left origin, as the line boxes use: 60 px down is 740 up.
+        self.assertAlmostEqual(y, 740 / 800, delta=1 / 800)
+        self.assertEqual((x, w), (0.0, 1.0))
+
+    def test_an_edge_that_text_crosses_is_not_a_separator(self):
+        image = self.frame()
+        image[:, :300] = 236
+        crossing = [[250.0, 390.0, 520.0, 420.0]]    # x0, y0, x1, y1 across x = 300
+        beside = [[320.0, 390.0, 520.0, 420.0]]
+        self.assertEqual(worker.pane_separators(image, crossing), [])
+        self.assertEqual(len(worker.pane_separators(image, beside)), 1)
+
+    def test_short_edges_and_the_frame_border_are_not_separators(self):
+        image = self.frame()
+        image[100:150, 200:400] = 0      # a block smaller than a pane in both directions
+        image[:, :1] = 0                 # the frame's own border
+        self.assertEqual(worker.pane_separators(image, []), [])
+
+    def test_a_frame_too_small_to_hold_panes_has_no_separators(self):
+        for height, width in ((1, 400), (400, 1), (7, 7)):
+            with self.subTest(height=height, width=width):
+                self.assertEqual(worker.pane_separators(self.frame(width, height), []), [])
+
+    def test_a_small_gap_in_an_edge_is_bridged(self):
+        image = self.frame()
+        image[:, :300] = 236
+        image[395:398, :300] = 255       # three pixels where the panes match
+        separators = worker.pane_separators(image, [])
+        self.assertEqual(len(separators), 1)
+        self.assertGreater(separators[0][3], 0.99)
+
+    def test_half_scale_analysis_reports_full_size_positions(self):
+        image = self.frame(2400, 1600)
+        image[:, :640] = 236
+        image[:120, :] = 230
+        separators = worker.pane_separators(image, [], half=True)
+        vertical = [s for s in separators if s[2] == 0]
+        horizontal = [s for s in separators if s[3] == 0]
+        self.assertAlmostEqual(vertical[0][0], 640 / 2400, delta=2 / 2400)
+        self.assertAlmostEqual(horizontal[0][1], 1480 / 1600, delta=2 / 1600)
+
+    def test_separators_cost_little_beside_a_reading(self):
+        # A Retina window with panes and text-like noise. The reading itself
+        # takes well over a second; separators must stay a small part of it.
+        import time
+        import numpy as np
+        rng = np.random.default_rng(7)
+        image = self.frame(2880, 1800)
+        image[:, :560] = 236
+        image[:72, :] = 228
+        image[:, 2100:2102] = 200
+        for row in range(120, 1760, 36):
+            for start in rng.integers(600, 2700, size=12):
+                image[row:row + 20, start:start + int(rng.integers(20, 140))] = 30
+        rects = [[600.0 + 180 * i, 120.0 + 36 * j, 760.0 + 180 * i, 140.0 + 36 * j]
+                 for i in range(8) for j in range(40)]
+        timings = []
+        for _ in range(5):
+            started = time.process_time()
+            worker.pane_separators(image, rects, half=True)
+            timings.append(time.process_time() - started)
+        # Under 10 ms of wall time on an idle M-series Mac. CPU time, so a
+        # busy machine does not fail the test, with room for library threads.
+        self.assertLess(sorted(timings)[2], 0.15)
