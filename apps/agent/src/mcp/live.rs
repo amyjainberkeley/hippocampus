@@ -469,12 +469,7 @@ impl LiveBrainReader {
             app,
             event.window_title.as_deref(),
         );
-        EventRecord::truncate_snippet(&excerpt(
-            &read,
-            app,
-            query,
-            EventRecord::SNIPPET_MAX_CHARS,
-        ))
+        EventRecord::truncate_snippet(&excerpt(&read, app, query, EventRecord::SNIPPET_MAX_CHARS))
     }
 
     fn materialize_matches(

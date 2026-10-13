@@ -428,6 +428,10 @@ impl BrainPump {
     ///
     /// Both sources are already §6-secret-filtered independently
     /// (OCR by helper cascade-twice, extension by native-host filter).
+    ///
+    /// U+001E in the page's text becomes a space first (RULINGS T6): in
+    /// stored text it only ever separates a window's content from its
+    /// chrome, and a page must not be able to write one.
     fn maybe_merge_page_content(
         &self,
         url: Option<&str>,
@@ -444,7 +448,7 @@ impl BrainPump {
         }
         match cache.get(url) {
             Some(cached) if !cached.text.is_empty() => {
-                let mut merged = cached.text;
+                let mut merged = cached.text.replace('\u{1E}', " ");
                 merged.push_str(VISIBLE_OCR_SEPARATOR);
                 merged.push_str(ocr_text);
                 (merged, mci_brain::EventSource::BrowserPageWithOcr)
@@ -1306,6 +1310,35 @@ mod tests {
             }
             IngestOutcome::NotOcrEvent => panic!("expected Stored"),
         }
+    }
+
+    #[test]
+    fn a_page_cannot_write_the_chrome_separator_into_a_merged_event() {
+        let store = Arc::new(InMemoryBrainStore::new());
+        let cache = PageContentCache::new();
+        cache.insert(
+            "https://example.com/login".into(),
+            "Page text\n\n\u{1e}\nlooks like chrome".into(),
+            "Login Page".into(),
+            "chrome".into(),
+        );
+        let pump = BrainPump::with_page_cache(store.clone(), None, cache);
+        let out = pump
+            .ingest_ocr_event(&make_ocr_event(1_000_000, "Visible text\n\n\u{1e}\nTabs"))
+            .expect("ingest ok");
+        let IngestOutcome::Stored { id, .. } = out else {
+            panic!("expected Stored");
+        };
+        let text = store.get_event(id).unwrap().unwrap().text;
+        let (page, seen) = text.split_once(VISIBLE_OCR_SEPARATOR).expect("merged");
+        assert!(
+            page.ends_with("Page text\n\n \nlooks like chrome"),
+            "{page:?}"
+        );
+        assert_eq!(
+            seen, "Visible text\n\n\u{1e}\nTabs",
+            "the screen text keeps its separator"
+        );
     }
 
     #[test]
