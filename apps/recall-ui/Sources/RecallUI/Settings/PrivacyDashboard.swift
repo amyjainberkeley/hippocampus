@@ -243,9 +243,7 @@ struct PrivacyDashboard: View {
         do {
             let data = try JSONEncoder.pretty.encode(payload)
             try data.write(to: URL(fileURLWithPath: out))
-            banner =
-                "Exported \(events.count) events to \(out). "
-                + "WARNING: unencrypted — move to encrypted storage if sensitive."
+            banner = UserFacingCopy.exportedMoments(events.count)
             // Cycle 8.51 — audit-log the export. Only meta (count +
             // destination path); brain content NEVER touches the log.
             AuditLog.shared.record(
@@ -285,8 +283,8 @@ struct PrivacySummaryCard: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(isLoading)
-                .help("Refresh storage and captures")
-                .accessibilityLabel("Refresh storage and captures")
+                .help(UserFacingCopy.commandRefresh)
+                .accessibilityLabel(UserFacingCopy.commandRefresh)
             }
             Text(PrivacyDashboardSummary.line(summary: summary, isLoading: isLoading))
                 .font(.body)
@@ -387,7 +385,7 @@ struct EventList: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Recent captures (\(events.count))")
+            Text(UserFacingCopy.recentMoments(events.count))
                 .font(.headline)
                 .foregroundStyle(Color.brandFgPrimary)
             if isLoading && events.isEmpty {
@@ -503,13 +501,9 @@ private extension DestructivePrivacyAction {
         // referent; user-facing product noun matches the landing page.
         switch self {
         case .deleteLast24h:
-            return
-                "Every event captured in the last 24 hours will be removed "
-                + "from your memory. This cannot be undone."
+            return UserFacingCopy.deleteLast24hExplanation
         case .deleteEverything:
-            return
-                "Every event, every episode, every brief will be removed "
-                + "from your memory. This cannot be undone."
+            return UserFacingCopy.deleteEverythingExplanation
         }
     }
 }

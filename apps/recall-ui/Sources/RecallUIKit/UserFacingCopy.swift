@@ -334,6 +334,23 @@ public enum UserFacingCopy {
     public static let closeAction = "Close"
     public static let screenshotLoadFailed = "Couldn\u{2019}t open this screenshot"
     public static let saveContextAction = "Save Context\u{2026}"
+    /// The moment was deleted, made private, or its number now names another.
+    public static let momentGone = "This moment is gone."
+    public static let momentLoadFailed = "Couldn\u{2019}t load this moment. Try again."
+    public static let momentChangedNothingSaved = "This moment changed, so nothing was saved. Try again."
+    public static let saveContextFailedTitle = "Couldn\u{2019}t save context"
+    public static let saveContextFailedBody = "Couldn\u{2019}t save there. Choose another folder."
+    public static let copyFailedTryAgain = "Couldn\u{2019}t copy. Try again."
+    public static let relatedLoadFailed = "Couldn\u{2019}t load related moments. Try again."
+
+    // What is remembered, and deleting it (spec-copy S4.13).
+
+    public static func recentMoments(_ count: Int) -> String { "Recent moments (\(count))" }
+    public static func exportedMoments(_ count: Int) -> String {
+        "Saved \(count) moments to Downloads. The file isn\u{2019}t encrypted."
+    }
+    public static let deleteLast24hExplanation = "Everything from the last 24 hours is deleted for good."
+    public static let deleteEverythingExplanation = "Every moment, session and summary is deleted for good."
 
     // Names you use (spec-copy S4.13; no real person in the example).
 

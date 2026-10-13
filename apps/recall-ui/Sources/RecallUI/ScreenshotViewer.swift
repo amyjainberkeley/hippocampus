@@ -121,7 +121,7 @@ struct ScreenshotViewer: View {
                             Divider()
                             if hit.thumbnailURL != nil {
                                 ScreenshotRereadSection(hit: hit, reader: reader, model: rereadModel) { text in
-                                    copy(text, notification: "New reading copied")
+                                    copy(text, notification: UserFacingCopy.copiedToast)
                                 }
                                 Divider()
                             }
@@ -149,16 +149,16 @@ struct ScreenshotViewer: View {
             let request = UUID()
             loadGeneration = request
             defer { if loadGeneration == request { isLoading = false } }
-            guard let eventID else { errorMessage = "No screenshot selected."; return }
+            guard let eventID else { errorMessage = UserFacingCopy.momentGone; return }
             do {
                 let current = try await reader.fetchEventsByIds([eventID]).first { $0.id == eventID }
                 guard !Task.isCancelled, loadGeneration == request, eventID == self.eventID else { return }
                 guard let current, current.id == eventID else {
-                    errorMessage = "This event is no longer in memory."
+                    errorMessage = UserFacingCopy.momentGone
                     return
                 }
                 if let expected = selection.expectedEvents.first(where: { $0.id == eventID }), !expected.matches(current) {
-                    errorMessage = "The selected evidence is no longer available. Refresh the daily review."
+                    errorMessage = UserFacingCopy.momentGone
                     return
                 }
                 hit = current
@@ -167,7 +167,7 @@ struct ScreenshotViewer: View {
             } catch {
                 guard !Task.isCancelled, loadGeneration == request, eventID == self.eventID else { return }
                 textModel.clear()
-                errorMessage = "The saved event could not be read. Try again."
+                errorMessage = UserFacingCopy.momentLoadFailed
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) { _ in
@@ -175,7 +175,7 @@ struct ScreenshotViewer: View {
             refreshID += 1
         }
         .onDisappear(perform: clearLoadedEvent)
-        .alert("Context export failed", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) {
+        .alert(UserFacingCopy.saveContextFailedTitle, isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(exportError ?? "") }
     }
@@ -244,20 +244,20 @@ struct ScreenshotViewer: View {
         panel.allowedContentTypes = [.init(filenameExtension: "md") ?? .text]
         if panel.runModal() == .OK, let url = panel.url {
             guard loadGeneration == generation, let current = selectedHit, current.id == hit.id else {
-                exportError = "The selected event changed. Export canceled."
+                exportError = UserFacingCopy.momentChangedNothingSaved
                 return
             }
             let text = ScreenshotInspectorContext.markdown(hit: current, text: textModel.text(for: current))
             do { try text.write(to: url, atomically: true, encoding: .utf8) }
-            catch { exportError = "The context file could not be saved. Choose another location." }
+            catch { exportError = UserFacingCopy.saveContextFailedBody }
         }
     }
 
-    private func copy(_ text: String, notification: String = "Context copied") {
+    private func copy(_ text: String, notification: String = UserFacingCopy.copiedToast) {
         NSPasteboard.general.clearContents()
         if NSPasteboard.general.setString(text, forType: .string) {
             ToastNotifier.shared.notify(notification)
-        } else { exportError = "The clipboard is unavailable. Try again." }
+        } else { exportError = UserFacingCopy.copyFailedTryAgain }
     }
 
 }
