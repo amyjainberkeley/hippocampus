@@ -1,0 +1,26 @@
+retention_worker.rs — hippocampus
+
+EXPLORER
+HIPPOCAMPUS
+apps
+agent
+src
+brain_ingest.rs
+retention_worker.rs
+today.rs
+understanding
+core
+docs
+OUTLINE
+TIMELINE
+
+D brain_ingest.rs × D retention_worker.rs × D Hippocampus end-to-end usab… × D today.rs ×
+apps > agent > src > retention_worker.rs
+
+TR
+CHAT
+Ask about your code…
+
+PROBLEMS OUTPUT DEBUG CONSOLE TERMINAL PORTS
+
+claude/hippocampus-0.3 0 ⚠ 0 Ln 9, Col 34 Spaces: 4 UTF-8 LF Rust

@@ -1,0 +1,17 @@
+Northwind Studio Q Search Northwind Studio
+
+Threads
+Drafts & sent
+Channels
+# general
+# design-review
+# launch-plan
+eng-oncall
+# random
+Direct messages
+Maya Chen
+Ravi Patel
+Jonas Weber
+
+Message #launch-plan
+B/S e

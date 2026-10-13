@@ -60,6 +60,8 @@
 pub mod calendar_attribution;
 pub mod mail_header;
 pub mod messages_plugin;
+/// The capture helper's four OCR secret patterns, for the reader's guard.
+pub mod ocr_secrets;
 pub mod parsed_mail_header;
 pub mod sensitive_domains;
 pub mod sms_otp;

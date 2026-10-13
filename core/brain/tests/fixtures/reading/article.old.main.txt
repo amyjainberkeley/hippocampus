@@ -1,0 +1,21 @@
+            Per-seat or tiered? How to p... X Stripe Docs Inbox (12) - amy@example.c... × hippocampus/README.md ... X
+                                        +
+< > C 8 pricingnotes.example/team-plans/per-seat-or-tiered ☆ ≡
+Docs Pricing notes Roadmap Design system Analytics
+      Pricing Notes Guides Case studies Calculator Sign in Subscribe
+      TEAM PLANS RELATED
+      Per-seat or tiered? How to price a When to raise prices
+                                        The case against free tiers
+      team plan Annual billing, explained
+      By Lena Ortiz · October 3, 2026 ·6 min read What a seat minimum signals
+      Most teams choose between charging for every seat and charging by tier. Per-seat pricing
+                                        Get one pricing note a week
+      is easy to explain and grows with the customer, but it punishes the customers who invite
+      the most colleagues. you@example.com
+      Tiered pricing hides that penalty. A team of four and a team of nine pay the same, so
+      nobody hesitates before adding a colleague. The cost is a harder first decision: which tier
+      am I?
+      A seat minimum is the usual compromise. Charge per seat, but start every team at three.
+      Small teams get a predictable bill, and the price still follows growth after that.
+      Whichever you choose, write the price down in one sentence. If the sentence needs the
+      word "depending", the plan is not finished.

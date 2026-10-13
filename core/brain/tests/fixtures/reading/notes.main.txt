@@ -1,0 +1,13 @@
+October 12, 2026 at 2:31 PM
+Launch plan
+The beta opens on October 21. Everything below has to be true by then, and nothing else is in scope.
+Pricing
+• Team plan at $18 a seat, billed annually (Ravi and Maya agreed on Tuesday).
+• Open question: seat minimums. Ravi suggests three.
+• Update the pricing page before the announcement goes out.
+Onboarding
+Four screens, two permissions, and a moment of proof at the end. If a new person has not seen it work on their own screen within a minute, the flow has failed.
+
+Open loops
+• Reply to Dana about invoice 4471.
+• Send Jonas the benchmark doc.

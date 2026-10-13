@@ -39,7 +39,10 @@ impl EventSource {
         }
     }
 
-    pub(crate) fn from_stored(value: &str) -> Self {
+    /// The source a stored label names, as [`Self::as_str`] writes it.
+    /// Any other label is [`Self::Unknown`].
+    #[must_use]
+    pub fn from_stored(value: &str) -> Self {
         match value {
             "screen_ocr" => Self::ScreenOcr,
             "screen_context" => Self::ScreenContext,

@@ -1,0 +1,57 @@
+三 Mail Q Search mail 0
+
++ Compose
+
+   Inbox
+☆ Starred
+口 Snoozed
+口 Sent
+口 Drafts
+口 Invoices
+口 Travel
+
+0 C 三 1–50 of 1,284 < > < 口 口 三
+
+12
+
+Dana Whitfield 11:02 AM
+Invoice 4471 for phase two
+Hi Sam, phase two is wrapped up. The invoice is attached...
+
+Ravi Patel 10:20 AM
+Re: Team plan pricing
+Seat minimums: I'd say three. Anything lower and support...
+
+Calendar 9:00 AM
+Reminder: beta review at 2 PM
+You have a meeting with Maya Chen and Jonas Weber...
+
+Northwind Billing
+Your receipt from Northwind
+Thanks for your payment of $300.00 for the icon set...
+
+Oct 9
+
+Jonas Weber Oct 9
+Benchmarks, round three
+Recall p95 is down to 41 ms. Details in the doc...
+
+Invoice 4471 for phase two
+
+        Dana Whitfield <dana@northwind.example> 11:02 AM☆≡
+        to me
+Hi Sam,
+Phase two of the brand refresh is wrapped up, and the final files are in the shared folder. The
+invoice for this phase is attached: 2,000.00 for the refresh and 300.00 for the icon set, 2,300.00 in
+total.
+Payment is due October 30 by bank transfer. If the purchase order number has changed since
+phase one, let me know and I will reissue it.
+
+It has been a pleasure working on this. I would love to hear how the launch goes.
+Best,
+Dana
+
+D 84 KB
+   invoice-4471.pdf
+
+Reply Forward

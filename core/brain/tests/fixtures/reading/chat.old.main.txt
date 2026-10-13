@@ -1,0 +1,21 @@
+       Northwind Studio > Q Search Northwind Studio D
+0 Threads # launch-plan☆ 14 members
+       4 Drafts & sent
+                                        Today
+☆ Channels Maya Chen 10:42 AM
+       # general Pushed the new onboarding flow to staging. The permissions step is now one screen.
+       # design-review Can someone check the copy on the screen recording prompt before 3 PM?
+       # launch-plan Ravi Patel 10:47 AM
+         eng-oncall Looks good. One nit: "Allow capture" should say "Turn on memory" to match the menu.
+       # random
+                                        Jonas Weber 11:05 AM
+       Direct messages Benchmarks from last night: recall p95 is 41 ms on the 100k-event store.
+       ●Maya Chen Embedding backfill finished in 6m 12s; 0 events skipped, 3 retried.
+       Ravi Patel Maya Chen 11:09 AM
+       Jonas Weber Great. Shipping 0.3 to the beta group after lunch unless anyone objects.
+                                        Ravi Patel 11:12 AM
+                                        Let's land Team at $18 a seat, billed annually. I still need an answer on seat minimums.
+                                        3 1
+
+B/S e
+Message #launch-plan

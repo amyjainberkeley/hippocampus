@@ -118,6 +118,10 @@ pub use consolidator::{ConsolidatorConfig, DerivedEdge, EpisodeConsolidator, Ide
 
 pub mod fts_sanitizer;
 
+/// Readable text made from stored text, applied wherever text leaves the
+/// store. The stored text is never changed.
+pub mod reading;
+
 pub mod activity;
 pub mod understanding;
 pub use activity::{ActivityInterval, ActivityState};

@@ -1,0 +1,13 @@
+sam@studio hippocampus % cargo test -p mci-brain reading
+   Compiling mci-brain v0.0.1
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 41.07s
+     Running tests/reading.rs
+
+running 2 tests
+test old_text_loses_only_junk ... ok
+test separated_text_joins_paragraphs ... FAILED
+
+failures:
+    separated_text_joins_paragraphs: assertion failed
+error: test failed, to rerun pass `--test reading`
+sam@studio hippocampus %
