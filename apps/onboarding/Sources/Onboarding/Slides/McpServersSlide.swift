@@ -142,7 +142,7 @@ struct McpServersSlide: View {
                     .padding(.horizontal, OnboardingDesign.Space.sm - 2)
                     .padding(.vertical, 2)
                     .background(OnboardingDesign.Palette.accentSoft, in: Capsule())
-                    .foregroundStyle(OnboardingDesign.Palette.accent)
+                    .foregroundStyle(OnboardingDesign.Palette.accentText)
             }
             Button {
                 Task { await mcpVM.remove(entry.name) }

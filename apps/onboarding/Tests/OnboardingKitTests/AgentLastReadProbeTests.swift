@@ -132,10 +132,10 @@ final class AgentLastReadProbeTests: XCTestCase {
         XCTAssertEqual(second, .rows(rows(1...2), newestTsUs: 2))
     }
 
-    func testStopEndsReadingForGood() async {
+    func testStopEndsReadingUntilResumed() async {
         let clock = TestClock()
         let child = FakeChild(pages: [rows(1...1), rows(2...2)])
-        let launcher = FakeLauncher(children: [child, FakeChild(pages: [])], clock: clock)
+        let launcher = FakeLauncher(children: [child, FakeChild(pages: [rows(3...3)])], clock: clock)
         let probe = AgentLastReadProbe(launcher: launcher, now: { clock.now })
         _ = await probe.rows(after: 0)
         await probe.stop()
@@ -143,7 +143,28 @@ final class AgentLastReadProbeTests: XCTestCase {
         clock.advance(10)
         let after = await probe.rows(after: 1)
         XCTAssertEqual(after, .notReady)
+        XCTAssertEqual(launcher.launchTimes.count, 1, "nothing starts the agent after stop")
+
+        // Try Again: reading resumes with a new agent.
+        await probe.resume()
+        let resumed = await probe.rows(after: 2)
+        XCTAssertEqual(resumed, .rows(rows(3...3), newestTsUs: 3))
+        XCTAssertEqual(launcher.launchTimes.count, 2)
+    }
+
+    func testResumingStillStartsTheAgentNoFasterThanEveryTwoSeconds() async {
+        let clock = TestClock()
+        let launcher = FakeLauncher(children: [FakeChild(exitedWith: 12), FakeChild(exitedWith: 12)], clock: clock)
+        let probe = AgentLastReadProbe(launcher: launcher, now: { clock.now })
+        _ = await probe.rows(after: 0)
+        await probe.stop()
+        await probe.resume()
+        let soon = await probe.rows(after: 0)
+        XCTAssertEqual(soon, .notReady)
         XCTAssertEqual(launcher.launchTimes.count, 1)
+        clock.advance(AgentLastReadProbe.minimumRespawnInterval)
+        _ = await probe.rows(after: 0)
+        XCTAssertEqual(launcher.launchTimes.count, 2)
     }
 
     // MARK: - The environment
@@ -196,6 +217,42 @@ final class AgentLastReadProbeTests: XCTestCase {
         XCTAssertEqual(child.exitStatus, 12)
         let reply = await child.call(Data("{}".utf8), id: 1, timeout: .seconds(1))
         XCTAssertNil(reply, "a write to a gone child fails without ending this process")
+    }
+
+    /// A reply as the agent writes it: one line, the snippet's characters
+    /// as they are.
+    private func reply(snippet: String) -> String {
+        #"{"jsonrpc":"2.0","id":7,"result":{"events":[{"ts_us":5,"app_bundle_id":"com.apple.Notes","window_title":"Plan","text_snippet":""#
+            + snippet + #"","source_kind":"screen_ocr"}]}}"#
+    }
+
+    /// Start a child that answers one request with `body` and a newline.
+    private func answer(with body: String) async throws -> Data? {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("reply.json")
+        try Data(body.utf8).write(to: file)
+        let script = "read line; cat \"$0\"; printf '\\n'; read line"
+        let child = try XCTUnwrap(ProcessReaderChild(
+            executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", script, file.path], environment: [:]
+        ))
+        defer { child.stop() }
+        return await child.call(Data(#"{"id":7}"#.utf8), id: 7, timeout: .seconds(5))
+    }
+
+    func testRepliesWithLineSeparatorsInsideAStringStillArrive() async throws {
+        // The agent's JSON writer leaves U+2028, U+2029 and U+0085 as they
+        // are; only the newline byte ends a reply.
+        for separator in ["\u{2028}", "\u{2029}", "\u{85}"] {
+            let snippet = "first\(separator)second"
+            let body = reply(snippet: snippet)
+            XCTAssertNotNil(try? JSONSerialization.jsonObject(with: Data(body.utf8)), "the reply is valid JSON")
+            let delivered = try await answer(with: body)
+            let reply = try XCTUnwrap(delivered, "U+\(String(separator.unicodeScalars.first!.value, radix: 16))")
+            XCTAssertEqual(ReadProof.rows(fromReply: reply)?.first?.text, snippet)
+        }
+        let plain = try await answer(with: reply(snippet: "first second"))
+        XCTAssertEqual(plain.flatMap(ReadProof.rows(fromReply:))?.count, 1)
     }
 
     func testThePipeChildMatchesRepliesToRequestsById() async throws {

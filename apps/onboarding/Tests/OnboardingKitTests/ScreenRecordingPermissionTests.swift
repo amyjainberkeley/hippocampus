@@ -6,7 +6,6 @@ import XCTest
 final class ScreenRecordingPermissionTests: XCTestCase {
     func testTheQuickCheckNeverTurnsScreenRecordingOff() {
         let fixture = ScreenRecordingFixture(inProcess: true, freshProcessSays: nil)
-        defer { fixture.tearDown() }
         XCTAssertEqual(fixture.permission.status, .granted)
         fixture.inProcess = false
         XCTAssertEqual(fixture.permission.checkCurrent(), .granted)
@@ -14,7 +13,6 @@ final class ScreenRecordingPermissionTests: XCTestCase {
 
     func testTheAsyncCheckTurnsItOffWhenThisProcessSaysNo() async {
         let fixture = ScreenRecordingFixture(inProcess: true, freshProcessSays: nil)
-        defer { fixture.tearDown() }
         fixture.inProcess = false
         let status = await fixture.permission.checkCurrentAsync(outOfProcess: false)
         XCTAssertEqual(status, .denied)
@@ -22,7 +20,6 @@ final class ScreenRecordingPermissionTests: XCTestCase {
 
     func testAFreshProcessCanTurnItOnAndThatHoldsForTheSession() async {
         let fixture = ScreenRecordingFixture(inProcess: false, freshProcessSays: true)
-        defer { fixture.tearDown() }
         var status = await fixture.permission.checkCurrentAsync(outOfProcess: false)
         XCTAssertEqual(status, .notRequested)
         XCTAssertEqual(fixture.probe.calls, 0, "a fresh process is asked only when allowed")
@@ -40,31 +37,32 @@ final class ScreenRecordingPermissionTests: XCTestCase {
     func testAFreshProcessNeverTurnsItOff() async {
         for answer in [false, nil] as [Bool?] {
             let fixture = ScreenRecordingFixture(inProcess: false, freshProcessSays: answer)
-            defer { fixture.tearDown() }
             let status = await fixture.permission.checkCurrentAsync(outOfProcess: true)
             XCTAssertEqual(status, .notRequested, "\(String(describing: answer)) keeps the last status")
         }
     }
 
+    func testTheAttemptIsRecordedUnderTheKeySetupAlwaysUsed() {
+        XCTAssertEqual(DefaultsScreenRecordingAttempts.key, "MCITCCScreenRecordingAttempted")
+        XCTAssertEqual(RealScreenRecordingPermission.tccAttemptedKey, DefaultsScreenRecordingAttempts.key)
+    }
+
     func testAnEarlierAttemptStartsOffAsBefore() {
         let fixture = ScreenRecordingFixture(inProcess: false, freshProcessSays: nil, attempted: true)
-        defer { fixture.tearDown() }
         XCTAssertEqual(fixture.permission.status, .denied)
     }
 
     func testAllowAsksFromAFreshProcessOnceAndOpensThePaneEachTime() {
         let fixture = ScreenRecordingFixture(inProcess: false, freshProcessSays: nil)
-        defer { fixture.tearDown() }
         fixture.permission.requestOrOpenSettings()
         fixture.permission.requestOrOpenSettings()
         XCTAssertEqual(fixture.requester.requests, 1)
         XCTAssertEqual(fixture.panesOpened, ["Privacy_ScreenCapture", "Privacy_ScreenCapture"])
-        XCTAssertTrue(fixture.defaults.bool(forKey: RealScreenRecordingPermission.tccAttemptedKey))
+        XCTAssertTrue(fixture.attempts.attempted)
     }
 
     func testAllowWhenAlreadyOnAsksNothing() {
         let fixture = ScreenRecordingFixture(inProcess: true, freshProcessSays: nil)
-        defer { fixture.tearDown() }
         fixture.permission.requestOrOpenSettings()
         XCTAssertEqual(fixture.requester.requests, 0)
         XCTAssertTrue(fixture.panesOpened.isEmpty)
@@ -72,7 +70,6 @@ final class ScreenRecordingPermissionTests: XCTestCase {
 
     func testAskAgainResetsForgetsTheAttemptAsksAgainAndReturnsAtOnce() async {
         let fixture = ScreenRecordingFixture(inProcess: false, freshProcessSays: true, attempted: true)
-        defer { fixture.tearDown() }
         _ = await fixture.permission.checkCurrentAsync(outOfProcess: true)
         XCTAssertTrue(fixture.permission.grantLatched)
 
@@ -80,7 +77,7 @@ final class ScreenRecordingPermissionTests: XCTestCase {
         await fixture.permission.askAgain()
         XCTAssertLessThan(Date().timeIntervalSince(started), 1, "the row's refresh does the waiting")
         XCTAssertEqual(fixture.resetter.resets, [["reset", "ScreenCapture", "ai.hippocampus"]])
-        XCTAssertFalse(fixture.defaults.bool(forKey: RealScreenRecordingPermission.tccAttemptedKey))
+        XCTAssertFalse(fixture.attempts.attempted)
         XCTAssertFalse(fixture.permission.grantLatched)
         XCTAssertEqual(fixture.permission.status, .notRequested)
         XCTAssertEqual(fixture.requester.requests, 1)

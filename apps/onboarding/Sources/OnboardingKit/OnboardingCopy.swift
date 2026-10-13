@@ -74,17 +74,21 @@ public enum OnboardingCopy {
     public static let permissionsNothingYet = "Nothing is read until you click Start Remembering."
     public static let screenRecordingName = "Screen Recording"
     public static let screenRecordingWhy = "So it can read what’s on your screen."
-    /// macOS 15 and later. The capture helper sets up no audio stream.
-    public static let screenRecordingSoundNote = "macOS calls this Screen & System Audio Recording. Hippocampus doesn’t use sound."
+    /// macOS 15 and later. Nothing in Hippocampus takes in sound: no
+    /// microphone, and screen reading never turns on audio. (It does play
+    /// sounds, so "doesn’t use sound" would not be true.)
+    public static let screenRecordingSoundNote = "macOS calls this Screen & System Audio Recording. Hippocampus doesn’t listen."
     public static let accessibilityName = "Accessibility"
     public static let accessibilityWhyBase = "So it knows which window you’re in and skips password fields."
     public static let allow = "Allow"
     public static let waitingForSettings = "Waiting for System Settings…"
-    public static let screenRecordingWaitingHint = "Turn on Hippocampus in the list. If macOS offers Quit & Reopen, choose Later."
-    public static let accessibilityWaitingHint = "Turn on Hippocampus in the list."
+    /// "Allow" shows macOS's prompt as well as opening System Settings:
+    /// Accessibility asks in this process, Screen Recording from a child.
+    public static let screenRecordingWaitingHint = "macOS may ask first. Then turn on Hippocampus in the list. If macOS offers Quit & Reopen, choose Later."
+    public static let accessibilityWaitingHint = "macOS may ask first. Then turn on Hippocampus in the list."
     public static let notOnYet = "Not on yet."
     public static let needsHelpHint = "Turn on Hippocampus in the list. Not there? Click + and choose Hippocampus in Applications."
-    public static let openSettings = "Open Settings"
+    public static let openSettings = "Open System Settings"
     public static let askAgain = "Ask Again"
     public static let permissionOn = "On"
     public static let permissionsFooter = "Change either one any time in System Settings."
@@ -100,14 +104,22 @@ public enum OnboardingCopy {
 
     public static let promiseTitle = "Before it starts"
     public static let promiseBody = "When you click Start Remembering, Hippocampus begins reading your screen."
+    /// The body above the button: on a first run it says what the click
+    /// does. In review the button is "Continue" and remembering may already
+    /// be on, so there is no body.
+    public static func promiseBody(isReview: Bool) -> String? {
+        isReview ? nil : promiseBody
+    }
     public static let promiseStaysLead = "Stays on this Mac."
     public static let promiseNeverReadLead = "Never read."
     /// Password fields: the focused-window path drops the frame during
-    /// secure input or on a secure field, and the extension never reads
-    /// input values. Private windows: browser pixels need a positive
-    /// normal-window check, and the extension skips incognito. Password
-    /// managers: the app list the helper never reads.
-    public static let promiseNeverRead = "Password fields, private browser windows and password managers."
+    /// secure input or on a secure field, whole-screen reading stops during
+    /// secure input, and the extension never reads input values. Private
+    /// windows: browser pixels need a positive normal-window check, and the
+    /// extension skips incognito. Password managers are left out: the
+    /// helper skips a fixed list of them (1Password, Bitwarden, Dashlane,
+    /// LastPass, Keychain Access, Passwords), not every one.
+    public static let promiseNeverRead = "Password fields and private browser windows."
     public static let promiseStopLead = "You can stop it."
     public static let promiseStop = "Pause from the menu bar. Quit ends it."
     public static let openAtLogin = "Open Hippocampus at login"
@@ -126,9 +138,10 @@ public enum OnboardingCopy {
     /// profiling off), loopback-only MCP servers and crash reports, and a
     /// feedback link opened in the browser. The `server` crate is not a
     /// dependency of anything shipped. The last sentence is the provider
-    /// boundary engineering critique 8 keeps at consent.
+    /// boundary engineering critique 8 keeps at consent, in RULINGS V's
+    /// words ("your AI", "the company that runs it").
     public static func promiseStays(kept: String) -> String {
-        "Text and screenshots, encrypted, \(kept). Nothing is uploaded by Hippocampus. What connected AI tools read goes to the company that runs them."
+        "Text and screenshots, encrypted, \(kept). Nothing is uploaded by Hippocampus. What your AI reads goes to the company that runs it."
     }
 
     /// How long text and screenshots are kept, for `promiseStays`. A
@@ -161,18 +174,25 @@ public enum OnboardingCopy {
     public static let tryItTitle = "Try it"
     public static let tryItStarting = "Turning on…"
     public static let tryItWaiting = "Nothing read yet. Open a document, note or chat, then come back."
+    /// The stalled card with no cause it can name. Its button is
+    /// `tryAgain`: the app restarts remembering in place
+    /// (`hippocampus://restart`, the menu's own Try Again), and this
+    /// screen starts over with it.
     public static let tryItStillNothing = "Still nothing read."
-    public static let restartHippocampus = "Restart Hippocampus"
     public static let addExtension = "Add Extension"
     public static let openItForMe = "Open it for me"
     public static let tryItPaused = "Remembering is paused. Resume it from the menu bar."
     public static let tryItOff = "Remembering is off. Turn it on from the menu bar."
     /// Once a proof shows: where the indicator is, and what it does.
     public static let stopSharingNote = "macOS shows an icon in the menu bar while Hippocampus reads. Stop Sharing there ends it."
+    /// Under a proof when answers are not available: one of these three,
+    /// for the reason the Apple Intelligence check gives.
     public static let answersNeedAppleIntelligence = "Answers need Apple Intelligence. Search works without it."
     public static let appleIntelligencePreparing = "Apple Intelligence is getting ready. Search works now."
-    public static let answersUnsupported = "Search works. Answers need Apple Intelligence."
+    public static let answersUnsupported = "Search works. Answers need macOS 26 with Apple Intelligence."
     public static let done = "Done"
+    /// Ask opened, but not by a key that works now.
+    public static let askFromMenuBar = "That’s Ask. Open it from the menu bar."
 
     /// The waiting card, by the app in front.
     public static func waitingText(_ note: FrontAppNote) -> String {
@@ -211,18 +231,25 @@ public enum OnboardingCopy {
         return "Read \(formatter.localizedString(fromTimeInterval: -seconds))"
     }
 
-    /// Under a proof: what to try now. With Apple Intelligence a question
-    /// works; without it, a word from the window still finds it.
-    public static func tryItNext(_ key: AskKeyHint, answersAvailable: Bool) -> String {
-        let press = key.phrase.prefix(1).lowercased() + key.phrase.dropFirst()
+    /// Under a proof: what to try now, with the key that opens Ask right
+    /// now. With Apple Intelligence a question works; without it, a word
+    /// from the window still finds it. Nil when no key opens Ask now: the
+    /// card then offers only "Open it for me".
+    public static func tryItNext(_ key: AskKeyNow, answersAvailable: Bool) -> String? {
+        guard let phrase = key.phrase else { return nil }
+        let press = phrase.prefix(1).lowercased() + phrase.dropFirst()
         return answersAvailable
             ? "Now \(press) and ask about it."
             : "Now \(press) and type a word from that window."
     }
 
-    /// When Ask opens: "That’s it. Shift twice works anywhere."
-    public static func tryItFinished(_ key: AskKeyHint) -> String {
-        let name = key.sentenceName
+    /// When Ask opens. After the key: "That’s it. Shift twice works
+    /// anywhere." After "Open it for me", which proves nothing about the
+    /// key: "That’s Ask. Press Shift twice to open it anywhere." With no key
+    /// working now: "That’s Ask. Open it from the menu bar."
+    public static func tryItFinished(_ key: AskKeyNow, openedForThem: Bool) -> String {
+        guard let phrase = key.phrase, let name = key.name else { return askFromMenuBar }
+        if openedForThem { return "That’s Ask. \(phrase) to open it anywhere." }
         return "That’s it. \(name.prefix(1).uppercased() + name.dropFirst()) works anywhere."
     }
 }

@@ -122,7 +122,6 @@ final class PermissionRowStateTests: XCTestCase {
 
     func testAGrantSeenByAFreshProcessSurvivesTheQuickRefreshAndConsent() async {
         let fixture = ScreenRecordingFixture(inProcess: false, freshProcessSays: true)
-        defer { fixture.tearDown() }
         let consent = InMemoryOnboardingConsentStore()
         let vm = makeVM(
             screenRecording: fixture.permission,
@@ -146,9 +145,88 @@ final class PermissionRowStateTests: XCTestCase {
         XCTAssertEqual(consent.writeCount, 1)
     }
 
+    func testAReturnDuringAFreshCheckWaitsForItThenAsksAgain() async {
+        // This process keeps its stale "no" throughout.
+        let fixture = ScreenRecordingFixture(inProcess: false, freshProcessSays: false)
+        let vm = makeVM(
+            screenRecording: fixture.permission,
+            accessibility: StubTCCPermission(kind: .accessibility, status: .granted)
+        )
+        vm.requestPermission(.screenRecording)
+
+        // The poll starts a fresh check while the person is still in
+        // System Settings; it answers what it read when it started.
+        fixture.probe.holdNextCheck()
+        let poll = Task { await vm.refreshPermissionsAsync() }
+        while !fixture.probe.isHeld { await Task.yield() }
+
+        // The person turns Hippocampus on and comes back during that check.
+        fixture.probe.answer = true
+        let returning = Task { await vm.userReturned() }
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertEqual(vm.rowState(.screenRecording), .waiting, "no \"Not on yet.\" while the earlier check runs")
+
+        fixture.probe.release()
+        await poll.value
+        await returning.value
+        XCTAssertEqual(vm.rowState(.screenRecording), .granted, "decided by a check that started after the return")
+        XCTAssertFalse(vm.offersAskAgain(.screenRecording))
+        XCTAssertEqual(fixture.probe.calls, 2)
+        XCTAssertTrue(vm.canAdvance)
+    }
+
+    func testAReturnThatFindsItStillOffDecidesOnACheckStartedAfterIt() async {
+        let fixture = ScreenRecordingFixture(inProcess: false, freshProcessSays: false)
+        let vm = makeVM(
+            screenRecording: fixture.permission,
+            accessibility: StubTCCPermission(kind: .accessibility, status: .granted)
+        )
+        vm.requestPermission(.screenRecording)
+        fixture.probe.holdNextCheck()
+        let poll = Task { await vm.refreshPermissionsAsync() }
+        while !fixture.probe.isHeld { await Task.yield() }
+        let returning = Task { await vm.userReturned() }
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertEqual(vm.rowState(.screenRecording), .waiting)
+        fixture.probe.release()
+        await poll.value
+        await returning.value
+        XCTAssertEqual(vm.rowState(.screenRecording), .needsHelp)
+        XCTAssertEqual(fixture.probe.calls, 2)
+        XCTAssertFalse(vm.offersAskAgain(.screenRecording), "one failed return so far")
+    }
+
+    func testAskAgainWaitsForAFreshCheckThatStartedBeforeIt() async {
+        let fixture = ScreenRecordingFixture(inProcess: false, freshProcessSays: false)
+        let vm = makeVM(
+            screenRecording: fixture.permission,
+            accessibility: StubTCCPermission(kind: .accessibility, status: .granted)
+        )
+        vm.requestPermission(.screenRecording)
+        await vm.userReturned()
+        vm.openSettings(.screenRecording)
+        await vm.userReturned()
+        XCTAssertTrue(vm.offersAskAgain(.screenRecording))
+
+        // Back once more; this check reads the permission as on, but has
+        // not answered when the person clicks Ask Again.
+        fixture.probe.answer = true
+        fixture.probe.holdNextCheck()
+        let returning = Task { await vm.userReturned() }
+        while !fixture.probe.isHeld { await Task.yield() }
+        let asking = Task { await vm.askAgain(.screenRecording) }
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertTrue(fixture.resetter.resets.isEmpty, "no reset while an earlier check runs")
+
+        fixture.probe.release()
+        await returning.value
+        await asking.value
+        XCTAssertEqual(vm.rowState(.screenRecording), .granted)
+        XCTAssertTrue(fixture.resetter.resets.isEmpty, "it was on, so nothing was reset")
+    }
+
     func testTheFreshProcessIsAskedOnlyWhileTheRowWaitsAndAtMostEveryTwoAndAHalfSeconds() async {
         let fixture = ScreenRecordingFixture(inProcess: false, freshProcessSays: false)
-        defer { fixture.tearDown() }
         let clock = TestClock()
         let vm = makeVM(
             screenRecording: fixture.permission,

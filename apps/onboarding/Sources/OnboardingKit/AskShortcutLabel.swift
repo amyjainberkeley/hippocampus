@@ -1,24 +1,44 @@
 // SPDX-License-Identifier: TBD-private
 //
-// The key that opens Ask, as the person chose it in Preferences
-// (RULINGS X2): `ai.hippocampus.prefs.askKey` in the app's own defaults,
-// one of `shiftTwice`, `rightShift`, `rightCommand`, `rightOption`, `off`.
-// Missing or unknown means `shiftTwice`, as the app treats it. `off` leaves
-// only Control-Shift-Space. Onboarding does not link HippocampusKit, so
-// this is a small copy of the app's names, read at render time so a change
-// in Preferences shows without a restart.
+// The key that opens Ask (RULINGS X2). Onboarding reads two things from the
+// app's own defaults, at render time, so a change shows without a restart:
+//
+// - The key the person chose, `ai.hippocampus.prefs.askKey`: one of
+//   `shiftTwice`, `rightShift`, `rightCommand`, `rightOption`, `off`.
+//   Missing or unknown means `shiftTwice`, as the app treats it; `off`
+//   leaves only Control-Shift-Space. Welcome and the Accessibility row
+//   describe this key: they say what Hippocampus does once it is set up,
+//   and before setup nothing opens Ask at all.
+// - What opens Ask right now, which the app publishes:
+//   `ai.hippocampus.ask.effectiveLabel` ("⇧⇧", "right ⇧", "⌃⇧Space", or
+//   empty when nothing does) and `ai.hippocampus.ask.effectivePhrase`
+//   ("Press Shift twice", "Press ⌃⇧Space"). Try it tells the person to
+//   press a key now, so it names only what these say, and falls back to
+//   the chosen key when the app has published nothing.
+//
+// Onboarding does not link HippocampusKit, so this is a small copy of the
+// app's names.
 
 import Foundation
 
 public enum AskShortcutLabel {
     public static let preferenceKey = "ai.hippocampus.prefs.askKey"
+    /// What opens Ask right now, as the menu shows it; empty when nothing does.
+    public static let effectiveLabelKey = "ai.hippocampus.ask.effectiveLabel"
+    /// The instruction for that key: "Press Shift twice".
+    public static let effectivePhraseKey = "ai.hippocampus.ask.effectivePhrase"
     /// The app's defaults domain. Read by name, because inside the app
     /// bundle and under `swift run` this process's own domain differs.
     public static let applicationID = "ai.hippocampus"
 
+    /// A string from the app's defaults, or nil when it is not set.
+    public static func appValue(_ key: String) -> String? {
+        CFPreferencesCopyAppValue(key as CFString, applicationID as CFString) as? String
+    }
+
     /// The raw stored value, or nil when the person never chose.
     public static func storedValue() -> String? {
-        CFPreferencesCopyAppValue(preferenceKey as CFString, applicationID as CFString) as? String
+        appValue(preferenceKey)
     }
 
     /// The key as the menu shows it: "⇧⇧", "right ⇧", "right ⌘",
@@ -32,7 +52,7 @@ public enum AskShortcutLabel {
     }
 }
 
-/// How onboarding names the Ask key in its sentences and keycaps.
+/// How onboarding names the chosen Ask key in its sentences and keycaps.
 public enum AskKeyHint: String, Sendable, Equatable, CaseIterable {
     case shiftTwice
     case rightShift
@@ -49,6 +69,12 @@ public enum AskKeyHint: String, Sendable, Equatable, CaseIterable {
         case "off": self = .chord
         default: self = .shiftTwice
         }
+    }
+
+    /// The key whose menu label this is ("⇧⇧" is Shift twice), or nil.
+    public init?(label: String) {
+        guard let hint = Self.allCases.first(where: { $0.label == label }) else { return nil }
+        self = hint
     }
 
     /// Read now, from the app's preference.
@@ -111,5 +137,65 @@ public enum AskKeyHint: String, Sendable, Equatable, CaseIterable {
     /// a single key and for the chord.
     public var pulses: Int {
         self == .shiftTwice ? 2 : 1
+    }
+}
+
+/// What opens Ask right now, for the sentences on Try it that tell the
+/// person to press it (RULINGS X2).
+public struct AskKeyNow: Equatable, Sendable {
+    /// The instruction: "Press Shift twice", "Press ⌃⇧Space". Nil when
+    /// nothing opens Ask right now.
+    public let phrase: String?
+    /// The keycaps to draw, one per cap. Empty when nothing opens Ask.
+    public let keycaps: [String]
+
+    public init(phrase: String?, keycaps: [String]) {
+        self.phrase = phrase
+        self.keycaps = keycaps
+    }
+
+    /// From what the app published. No label at all means the app has not
+    /// published one, and the chosen key stands in; an empty label means
+    /// nothing opens Ask. A label onboarding does not know is drawn as one
+    /// keycap.
+    public init(effectiveLabel: String?, effectivePhrase: String?, stored: String?) {
+        guard let rawLabel = effectiveLabel else {
+            let chosen = AskKeyHint(stored: stored)
+            self.init(phrase: chosen.phrase, keycaps: chosen.keycaps)
+            return
+        }
+        let label = rawLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !label.isEmpty else {
+            self.init(phrase: nil, keycaps: [])
+            return
+        }
+        let known = AskKeyHint(label: label)
+        let published = effectivePhrase?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.init(
+            phrase: published.flatMap { $0.isEmpty ? nil : $0 } ?? known?.phrase ?? "Press \(label)",
+            keycaps: known?.keycaps ?? [label]
+        )
+    }
+
+    /// Read with `value`, which answers for a key of the app's defaults.
+    public static func read(_ value: (String) -> String?) -> AskKeyNow {
+        AskKeyNow(
+            effectiveLabel: value(AskShortcutLabel.effectiveLabelKey),
+            effectivePhrase: value(AskShortcutLabel.effectivePhraseKey),
+            stored: value(AskShortcutLabel.preferenceKey)
+        )
+    }
+
+    /// Read now, from the app's defaults.
+    public static func current() -> AskKeyNow {
+        read(AskShortcutLabel.appValue)
+    }
+
+    /// The key's name inside a sentence: the phrase without its verb
+    /// ("Shift twice", "right ⌘", "⌃⇧Space").
+    public var name: String? {
+        guard let phrase else { return nil }
+        let parts = phrase.split(separator: " ", maxSplits: 1)
+        return parts.count == 2 ? String(parts[1]) : phrase
     }
 }

@@ -294,7 +294,7 @@ struct BrowserExtensionSlide: View {
         HStack(alignment: .top, spacing: OnboardingDesign.Space.sm) {
             Text(number)
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .foregroundStyle(OnboardingDesign.Palette.accent)
+                .foregroundStyle(OnboardingDesign.Palette.accentText)
                 .frame(width: 14, alignment: .leading)
             Text(text)
                 .font(.system(size: 12))

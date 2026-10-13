@@ -117,7 +117,7 @@ struct TrustSlide: View {
                 HStack(spacing: 8) {
                     Text("§\(step.section)")
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundStyle(OnboardingDesign.Palette.accent)
+                        .foregroundStyle(OnboardingDesign.Palette.accentText)
                         .frame(width: 22)
                     Text(step.label)
                         .font(.system(size: 12))

@@ -115,7 +115,7 @@ struct AssurancePopover: View {
                         .font(.system(size: 13, weight: .medium))
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(OnboardingDesign.Palette.accent)
+                .foregroundStyle(OnboardingDesign.Palette.accentText)
             }
         }
         .padding(OnboardingDesign.Space.xl)

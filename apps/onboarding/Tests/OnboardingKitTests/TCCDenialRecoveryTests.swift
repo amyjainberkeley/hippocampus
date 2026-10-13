@@ -10,7 +10,9 @@ final class TCCDenialRecoveryTests: XCTestCase {
     ) -> (OnboardingFlowViewModel, StubTCCPermission, StubTCCPermission) {
         let sr = StubTCCPermission(kind: .screenRecording, status: srStatus)
         let ax = StubTCCPermission(kind: .accessibility, status: axStatus)
-        let vm = OnboardingFlowViewModel(screenRecording: sr, accessibility: ax)
+        // Never the person's own resume file.
+        let vm = OnboardingFlowViewModel(screenRecording: sr, accessibility: ax,
+                                        stateStore: InMemoryOnboardingStateStore())
         return (vm, sr, ax)
     }
 

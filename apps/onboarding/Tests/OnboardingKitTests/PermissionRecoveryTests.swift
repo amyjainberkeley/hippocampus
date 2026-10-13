@@ -19,7 +19,6 @@ final class PermissionRecoveryTests: XCTestCase {
 
     func testOnlyTheAsyncRefreshSeesAPermissionTurnedOffDuringSetup() async {
         let fixture = ScreenRecordingFixture(inProcess: true, freshProcessSays: nil)
-        defer { fixture.tearDown() }
         let vm = OnboardingFlowViewModel(screenRecording: fixture.permission,
                                         accessibility: StubTCCPermission(kind: .accessibility, status: .granted),
                                         stateStore: InMemoryOnboardingStateStore(), initialStep: .permissions)

@@ -22,6 +22,50 @@ public struct TCCUtilResetter: TCCResetting {
     }
 }
 
+/// Whether onboarding has asked for Screen Recording before. macOS answers
+/// "no" the same way before and after the person said no, so this is what
+/// tells "not asked yet" from "turned down".
+public protocol ScreenRecordingAttempts: AnyObject, Sendable {
+    var attempted: Bool { get set }
+}
+
+/// The record in this process's defaults, `MCITCCScreenRecordingAttempted`.
+public final class DefaultsScreenRecordingAttempts: ScreenRecordingAttempts, @unchecked Sendable {
+    public static let key = "MCITCCScreenRecordingAttempted"
+    private let defaults: UserDefaults
+
+    public init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    public var attempted: Bool {
+        get { defaults.bool(forKey: Self.key) }
+        set {
+            if newValue {
+                defaults.set(true, forKey: Self.key)
+            } else {
+                defaults.removeObject(forKey: Self.key)
+            }
+        }
+    }
+}
+
+/// A record that lives only in memory, for tests: a defaults suite would
+/// leave a file in the person's `~/Library/Preferences`.
+public final class InMemoryScreenRecordingAttempts: ScreenRecordingAttempts, @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Bool
+
+    public init(attempted: Bool = false) {
+        value = attempted
+    }
+
+    public var attempted: Bool {
+        get { lock.withLock { value } }
+        set { lock.withLock { value = newValue } }
+    }
+}
+
 /// Every reset names Hippocampus. Without a bundle id, tccutil resets the
 /// service for every app on the Mac.
 enum TCCResetArguments {
@@ -39,13 +83,13 @@ public final class RealScreenRecordingPermission: TCCPermission, @unchecked Send
     /// direction, so nothing this process reads may undo it.
     public private(set) var grantLatched = false
 
-    static let tccAttemptedKey = "MCITCCScreenRecordingAttempted"
+    static let tccAttemptedKey = DefaultsScreenRecordingAttempts.key
 
     private let preflight: @MainActor () -> Bool
     private let probe: any ScreenRecordingProbe
     private let requester: any ScreenRecordingRequester
     private let resetter: any TCCResetting
-    private let defaults: UserDefaults
+    private let attempts: any ScreenRecordingAttempts
     private let openPane: @MainActor (String) -> Void
     private var requestSent = false
 
@@ -56,7 +100,7 @@ public final class RealScreenRecordingPermission: TCCPermission, @unchecked Send
             probe: ChildScreenRecordingProbe(executable: executable),
             requester: ChildScreenRecordingRequester(executable: executable),
             resetter: TCCUtilResetter(),
-            defaults: .standard,
+            attempts: DefaultsScreenRecordingAttempts(),
             openPane: openSystemSettingsPane
         )
     }
@@ -66,18 +110,18 @@ public final class RealScreenRecordingPermission: TCCPermission, @unchecked Send
         probe: any ScreenRecordingProbe,
         requester: any ScreenRecordingRequester,
         resetter: any TCCResetting,
-        defaults: UserDefaults,
+        attempts: any ScreenRecordingAttempts,
         openPane: @escaping @MainActor (String) -> Void
     ) {
         self.preflight = preflight
         self.probe = probe
         self.requester = requester
         self.resetter = resetter
-        self.defaults = defaults
+        self.attempts = attempts
         self.openPane = openPane
         if preflight() {
             status = .granted
-        } else if defaults.bool(forKey: Self.tccAttemptedKey) {
+        } else if attempts.attempted {
             status = .denied
         } else {
             status = .notRequested
@@ -124,7 +168,7 @@ public final class RealScreenRecordingPermission: TCCPermission, @unchecked Send
         // and shows its prompt from a process that then exits. The pane
         // opens as well, so something is on screen even if no prompt
         // appears. The rows' refresh sees the grant without a restart.
-        defaults.set(true, forKey: Self.tccAttemptedKey)
+        attempts.attempted = true
         if !requestSent {
             requestSent = true
             requester.request()
@@ -136,7 +180,7 @@ public final class RealScreenRecordingPermission: TCCPermission, @unchecked Send
     /// again. Returns at once: the row's refresh does the waiting.
     public func askAgain() async {
         resetter.reset(TCCResetArguments.screenCapture)
-        defaults.removeObject(forKey: Self.tccAttemptedKey)
+        attempts.attempted = false
         grantLatched = false
         status = .notRequested
         requestSent = true
@@ -153,7 +197,7 @@ public final class RealScreenRecordingPermission: TCCPermission, @unchecked Send
 
         // Same no-kill discipline as `requestOrOpenSettings`: deep-link
         // to Settings and poll.
-        defaults.set(true, forKey: Self.tccAttemptedKey)
+        attempts.attempted = true
         openPrivacySettings()
 
         for _ in 0..<60 {

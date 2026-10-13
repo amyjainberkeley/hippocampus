@@ -41,11 +41,15 @@ final class RecordingRequester: ScreenRecordingRequester, @unchecked Sendable {
     func request() { lock.withLock { count += 1 } }
 }
 
-/// Answers for a fresh process without starting one.
+/// Answers for a fresh process without starting one. The answer is the one
+/// set when a check starts, as a real child reads the permission once; the
+/// test can hold the next check open to see what waits for it.
 final class StubProbe: ScreenRecordingProbe, @unchecked Sendable {
     private let lock = NSLock()
     private var reply: Bool?
     private var count = 0
+    private var holdNext = false
+    private var gate: CheckedContinuation<Void, Never>?
 
     init(_ answer: Bool?) { reply = answer }
 
@@ -56,44 +60,59 @@ final class StubProbe: ScreenRecordingProbe, @unchecked Sendable {
 
     var calls: Int { lock.withLock { count } }
 
-    func isGranted() async -> Bool? {
-        lock.withLock {
-            count += 1
-            return reply
+    /// Make the next check wait until `release()`.
+    func holdNextCheck() { lock.withLock { holdNext = true } }
+
+    var isHeld: Bool { lock.withLock { gate != nil } }
+
+    func release() {
+        let waiting = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+            defer { gate = nil }
+            return gate
         }
+        waiting?.resume()
+    }
+
+    func isGranted() async -> Bool? {
+        let (answerAtStart, hold) = lock.withLock { () -> (Bool?, Bool) in
+            count += 1
+            defer { holdNext = false }
+            return (reply, holdNext)
+        }
+        if hold {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                lock.withLock { gate = continuation }
+            }
+        }
+        return answerAtStart
     }
 }
 
 /// A Screen Recording permission whose in-process answer the test sets,
-/// with every side effect recorded instead of performed.
+/// with every side effect recorded instead of performed. Nothing is written
+/// to defaults: a suite would leave a file in `~/Library/Preferences`.
 @MainActor
 final class ScreenRecordingFixture {
     var inProcess: Bool
     let probe: StubProbe
     let requester = RecordingRequester()
     let resetter = RecordingResetter()
-    let defaults: UserDefaults
-    let suiteName = "onboarding-tests-\(UUID().uuidString)"
+    let attempts: InMemoryScreenRecordingAttempts
     var panesOpened: [String] = []
     private(set) var permission: RealScreenRecordingPermission!
 
     init(inProcess: Bool, freshProcessSays: Bool?, attempted: Bool = false) {
         self.inProcess = inProcess
         self.probe = StubProbe(freshProcessSays)
-        self.defaults = UserDefaults(suiteName: suiteName)!
-        if attempted { defaults.set(true, forKey: RealScreenRecordingPermission.tccAttemptedKey) }
+        self.attempts = InMemoryScreenRecordingAttempts(attempted: attempted)
         permission = RealScreenRecordingPermission(
             preflight: { [unowned self] in self.inProcess },
             probe: probe,
             requester: requester,
             resetter: resetter,
-            defaults: defaults,
+            attempts: attempts,
             openPane: { [unowned self] pane in self.panesOpened.append(pane) }
         )
-    }
-
-    func tearDown() {
-        defaults.removePersistentDomain(forName: suiteName)
     }
 }
 

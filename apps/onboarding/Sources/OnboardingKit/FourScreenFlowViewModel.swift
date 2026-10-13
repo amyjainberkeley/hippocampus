@@ -15,7 +15,12 @@
 // - Screen Recording may be confirmed by a fresh process (see
 //   `ScreenRecordingProbe`). That check runs when the person comes back,
 //   every 2.5 s while the Screen Recording row waits, and once more at
-//   consent; never more than one at a time.
+//   consent; never more than one at a time. A return, or consent, decides
+//   only on a check that started after it: one already running may have
+//   started before the person changed the setting, so it is waited out
+//   and a fresh process is asked once more.
+// - Stores default to memory. Setup passes the file stores; tests and
+//   panels never touch the person's resume or consent files by accident.
 
 import Foundation
 
@@ -68,7 +73,8 @@ public final class FourScreenFlowViewModel: ObservableObject {
     private let fdaPermission: (any FullDiskAccessPermission)?
     private let now: () -> Date
     private var lastOutOfProcessCheck: Date?
-    private var outOfProcessCheckRunning = false
+    /// The fresh-process Screen Recording check that is running, if any.
+    private var freshCheck: Task<Void, Never>?
 
     private struct RowRecord: Equatable {
         var waiting = false
@@ -81,7 +87,7 @@ public final class FourScreenFlowViewModel: ObservableObject {
         accessibility: any TCCPermission,
         automation: (any TCCPermission)? = nil,
         fullDiskAccess: (any FullDiskAccessPermission)? = nil,
-        stateStore: any OnboardingStateStore = FileOnboardingStateStore(),
+        stateStore: any OnboardingStateStore = InMemoryOnboardingStateStore(),
         consentStore: any OnboardingConsentStore = InMemoryOnboardingConsentStore(),
         now: @escaping () -> Date = Date.init,
         initialScreen: OnboardingScreen? = nil
@@ -170,7 +176,7 @@ public final class FourScreenFlowViewModel: ObservableObject {
     /// encryption key. On success it records the time and opens Try it.
     @discardableResult
     public func startRemembering(keyReady: Bool, openAtLogin: Bool) async -> Bool {
-        await refreshPermissionsAsync(outOfProcess: true)
+        await refreshDeciding(askFreshProcess: true)
         guard screen == .promise, bothGranted, keyReady else { return false }
         do {
             try consentStore.give(openAtLogin: openAtLogin)
@@ -225,7 +231,7 @@ public final class FourScreenFlowViewModel: ObservableObject {
         refreshPermissions()
     }
 
-    /// "Open Settings" on a row that needs help.
+    /// "Open System Settings" on a row that needs help.
     public func openSettings(_ surface: PermissionSurface) {
         guard let permission = permission(for: surface), rowState(surface) != .granted else { return }
         markWaiting(surface)
@@ -234,6 +240,11 @@ public final class FourScreenFlowViewModel: ObservableObject {
 
     /// "Ask Again": reset and ask macOS again, then wait for the person.
     public func askAgain(_ surface: PermissionSurface) async {
+        // A fresh-process check still running started before the reset;
+        // let it answer first, so its answer cannot land after the reset.
+        while let running = freshCheck {
+            await running.value
+        }
         guard let permission = permission(for: surface), rowState(surface) != .granted else { return }
         markWaiting(surface)
         await permission.askAgain()
@@ -243,9 +254,7 @@ public final class FourScreenFlowViewModel: ObservableObject {
     /// that was waiting decides: on, or needs help.
     public func userReturned() async {
         let returning = Self.rowSurfaces.filter { rows[$0]?.waiting == true }
-        await refreshPermissionsAsync(
-            outOfProcess: screenRecordingPermission.status != .granted
-        )
+        await refreshDeciding(askFreshProcess: screenRecordingPermission.status != .granted)
         for surface in returning {
             var row = rows[surface] ?? RowRecord()
             row.waiting = false
@@ -270,17 +279,47 @@ public final class FourScreenFlowViewModel: ObservableObject {
         await refreshPermissionsAsync(outOfProcess: outOfProcessCheckIsDue())
     }
 
+    /// The poll's refresh. While a fresh-process check runs, the poll does
+    /// not wait for it: this process answers for this tick.
     func refreshPermissionsAsync(outOfProcess: Bool) async {
-        var askFreshProcess = false
-        if outOfProcess, !outOfProcessCheckRunning {
-            askFreshProcess = true
-            outOfProcessCheckRunning = true
-            lastOutOfProcessCheck = now()
+        if outOfProcess, freshCheck == nil {
+            await startFreshCheck().value
+        } else {
+            _ = await screenRecordingPermission.checkCurrentAsync(outOfProcess: false)
         }
-        _ = await screenRecordingPermission.checkCurrentAsync(outOfProcess: askFreshProcess)
-        if askFreshProcess { outOfProcessCheckRunning = false }
         _ = await accessibilityPermission.checkCurrentAsync(outOfProcess: false)
         permissionRefreshCount += 1
+    }
+
+    /// A refresh that may decide a row. Its Screen Recording answer comes
+    /// from a check that started after this call: a fresh-process check
+    /// already running may have started before the person turned the
+    /// permission on, so it is waited out, and with `askFreshProcess` a
+    /// new one runs.
+    private func refreshDeciding(askFreshProcess: Bool) async {
+        while let running = freshCheck {
+            await running.value
+        }
+        if askFreshProcess {
+            await startFreshCheck().value
+        } else {
+            _ = await screenRecordingPermission.checkCurrentAsync(outOfProcess: false)
+        }
+        _ = await accessibilityPermission.checkCurrentAsync(outOfProcess: false)
+        permissionRefreshCount += 1
+    }
+
+    /// Start a fresh-process check of Screen Recording and keep it, so a
+    /// return can wait for it. Only call when none is running.
+    private func startFreshCheck() -> Task<Void, Never> {
+        lastOutOfProcessCheck = now()
+        let check = Task { [weak self] in
+            guard let self else { return }
+            _ = await self.screenRecordingPermission.checkCurrentAsync(outOfProcess: true)
+            self.freshCheck = nil
+        }
+        freshCheck = check
+        return check
     }
 
     private func outOfProcessCheckIsDue() -> Bool {

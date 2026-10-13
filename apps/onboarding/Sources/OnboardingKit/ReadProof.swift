@@ -5,7 +5,8 @@
 //
 // The card never shows a bundle id, the stored `[app=…]` header, or a row
 // of interface labels. A line is shown only when it has four or more words,
-// is mostly letters and reads like a sentence; the longest go first. When no
+// is mostly letters and reads like a sentence; the longest go first. A long
+// line is shortened to fit, and what is shown must pass on its own. When no
 // line passes, the card shows the app and title alone. It is text only,
 // never a screenshot. Rows from the app the person last brought forward
 // come first, so the card never shows a window they did not click.
@@ -105,27 +106,30 @@ public struct ReadProof: Sendable, Equatable {
         let content = text.split(separator: "\u{1E}", maxSplits: 1, omittingEmptySubsequences: false)
             .first.map(String.init) ?? ""
         var seen = Set<String>()
-        var kept: [String] = []
+        var kept: [(length: Int, shown: String)] = []
         for raw in content.components(separatedBy: .newlines) {
             let line = raw.split(whereSeparator: \.isWhitespace).joined(separator: " ")
             guard qualifies(line), line != windowTitle, seen.insert(line).inserted else { continue }
-            kept.append(line)
+            // Shortening cuts at a space, which can leave fewer than four
+            // words ("Read more at…") or one piece of a long word.
+            let shown = shortened(line)
+            guard shown == line || qualifies(shown) else { continue }
+            kept.append((line.count, shown))
         }
-        let longestFirst = kept.enumerated()
-            .sorted { $0.element.count != $1.element.count ? $0.element.count > $1.element.count : $0.offset < $1.offset }
-            .map(\.element)
-        return longestFirst.prefix(maximumLines).map(shortened)
+        return kept.enumerated()
+            .sorted { $0.element.length != $1.element.length ? $0.element.length > $1.element.length : $0.offset < $1.offset }
+            .prefix(maximumLines)
+            .map { $0.element.shown }
     }
 
     /// A sentence-like line: four or more words, mostly letters, at least one
     /// word in lowercase (a row of labels is all capitals), and no header,
     /// bundle id or dotted name in it.
     public static func qualifies(_ line: String) -> Bool {
-        guard !line.contains("[app="), !line.contains("\u{1E}") else { return false }
+        guard !line.contains("[app="), !line.contains("\u{1E}"), !containsDottedName(line) else { return false }
         let tokens = line.split(whereSeparator: \.isWhitespace)
         let words = tokens.filter { $0.contains(where: \.isLetter) }
         guard words.count >= minimumWords else { return false }
-        guard !tokens.contains(where: { isDottedIdentifier($0) }) else { return false }
         let visible = line.filter { !$0.isWhitespace }
         let letters = visible.filter(\.isLetter)
         guard letters.count * 2 > visible.count else { return false }
@@ -133,13 +137,10 @@ public struct ReadProof: Sendable, Equatable {
     }
 
     /// `com.apple.Safari`, `www.example.com`, `1.2.3`: three or more parts
-    /// joined by dots, with nothing else in the word.
-    static func isDottedIdentifier(_ token: Substring) -> Bool {
-        let parts = token.split(separator: ".", omittingEmptySubsequences: false)
-        guard parts.count >= 3 else { return false }
-        return parts.allSatisfy { part in
-            !part.isEmpty && part.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
-        }
+    /// joined by dots, anywhere in the line, whatever punctuation or text
+    /// sits around them ("com.apple.Safari,", "(app:com.apple.Notes)").
+    static func containsDottedName(_ line: String) -> Bool {
+        line.range(of: #"[\p{L}\p{N}_-]+(\.[\p{L}\p{N}_-]+){2,}"#, options: .regularExpression) != nil
     }
 
     static func shortened(_ line: String) -> String {

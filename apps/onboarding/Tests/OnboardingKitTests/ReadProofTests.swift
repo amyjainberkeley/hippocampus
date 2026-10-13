@@ -39,6 +39,7 @@ final class ReadProofTests: XCTestCase {
     }
 
     func testTheFilterNeverYieldsABundleIdAHeaderOrAShortLine() {
+        let longWord = String(repeating: "supercalifragilistic", count: 5)
         let hostile = [
             "[app=com.apple.Notes | title=Plan | url=? | ts=2026-10-12T21:05:00.000Z]",
             "the [app=com.apple.Notes | title=x] header inside a line",
@@ -47,17 +48,39 @@ final class ReadProofTests: XCTestCase {
             "two words", "one", "", "   ", "a b c", "1 2 3 4 5 6",
             "!!! ??? ... ---", "File Edit View Window Help", "OK Cancel Apply Done",
             "version 1.2.3 is out today", "\u{1E} chrome after a record separator here",
+            // A bundle id with punctuation around it.
+            "Open com.apple.Safari, then type a word", "The app to open is com.tinyspeck.slackmacgap.",
+            "the window (app:com.apple.Notes) is open here",
+            // Lines that qualify until they are shortened to fit the card.
+            "Read more at https://example.com/articles/2026/10/12/a-very-long-slug-that-goes-on-and-on-and-on-and-on",
+            "Notes: \(longWord) and more words here",
         ]
         for combination in [hostile, hostile.reversed(), hostile.shuffled()] {
             let text = combination.joined(separator: "\n")
             for line in ReadProof.lines(from: text, windowTitle: nil) {
                 XCTAssertFalse(line.contains("[app="), line)
-                XCTAssertFalse(line.split(separator: " ").contains { ReadProof.isDottedIdentifier($0) }, line)
+                XCTAssertNil(line.range(of: #"\w+\.\w+\.\w+"#, options: .regularExpression), line)
                 let words = line.split(whereSeparator: \.isWhitespace).filter { $0.contains(where: \.isLetter) }
                 XCTAssertGreaterThanOrEqual(words.count, 4, line)
             }
         }
         XCTAssertTrue(ReadProof.lines(from: hostile.joined(separator: "\n"), windowTitle: nil).isEmpty)
+    }
+
+    func testALineShortenedBelowFourWordsGivesWayToTheNextLongest() {
+        let long = "Read more at https://example.com/articles/2026/10/12/a-very-long-slug-that-goes-on-and-on-and-on-and-on"
+        XCTAssertTrue(ReadProof.qualifies(long), "the whole line passes")
+        let text = [
+            long,
+            "We agreed to ship the pricing page next week.",
+            "Ask Dana about the annual discount before Friday.",
+            "Short but still four words",
+        ].joined(separator: "\n")
+        XCTAssertEqual(ReadProof.lines(from: text, windowTitle: nil), [
+            "Ask Dana about the annual discount before Friday.",
+            "We agreed to ship the pricing page next week.",
+            "Short but still four words",
+        ])
     }
 
     func testTheLongestLinesComeFirstAtMostThreeAndShortened() {

@@ -111,7 +111,10 @@ public final class OnboardingFlowViewModel: ObservableObject {
         accessibility: any TCCPermission,
         automation: (any TCCPermission)? = nil,
         fullDiskAccess: (any FullDiskAccessPermission)? = nil,
-        stateStore: any OnboardingStateStore = FileOnboardingStateStore(),
+        // Memory unless the caller passes the file: `OnboardingApp` does,
+        // so a test that leaves this out never rewrites the person's
+        // resume file.
+        stateStore: any OnboardingStateStore = InMemoryOnboardingStateStore(),
         migrationSource: MigrationSource? = nil,
         initialStep: OnboardingStep? = nil
     ) {

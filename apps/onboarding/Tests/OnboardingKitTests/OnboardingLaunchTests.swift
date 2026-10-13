@@ -53,6 +53,17 @@ final class OnboardingLaunchTests: XCTestCase {
         }
     }
 
+    func testTheShippingFlowOpensEveryPanelRouteTheAppMayPass() {
+        // Until the four screens ship, the thirteen-step flow takes the
+        // app's setup routes (contract section 3a).
+        XCTAssertEqual(OnboardingStep(launchRoute: "app-access"), .allowlist)
+        XCTAssertEqual(OnboardingStep(launchRoute: "browser-extension"), .browserExtension)
+        XCTAssertEqual(OnboardingStep(launchRoute: "mcp-servers"), .mcpServers)
+        for route in ["never-read", "trust", "denylist", "privacy"] {
+            XCTAssertEqual(OnboardingStep(launchRoute: route), .trust, route)
+        }
+    }
+
     // MARK: - The resume file
 
     func testTheResumeFileHoldsTheRouteName() throws {

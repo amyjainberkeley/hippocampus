@@ -35,7 +35,9 @@ public enum OnboardingStep: Int, Sendable, Equatable, CaseIterable, Identifiable
         switch launchRoute.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "welcome": self = .welcome
         case "how-it-works": self = .howItWorks
-        case "trust", "denylist": self = .trust
+        // "never-read" and "privacy" are the app's routes for what is never
+        // read; until the four screens ship, the trust step shows it.
+        case "trust", "denylist", "never-read", "privacy": self = .trust
         case "permissions": self = .permissions
         case "hotkey": self = .primaryHotkey
         case "allowlist", "app-access": self = .allowlist

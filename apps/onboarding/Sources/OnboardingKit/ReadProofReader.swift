@@ -12,7 +12,8 @@
 // starts the agent again on a later call, never sooner than 2 s after the
 // last start. Rows come back oldest first, so the reader pages until a short
 // page and keeps the newest. The agent exits when its input closes, which
-// happens when `stop()` runs or onboarding exits.
+// happens when `stop()` runs or onboarding exits. After `stop()` nothing is
+// read until `resume()` (Try Again on a stalled Try it).
 
 import Foundation
 
@@ -28,7 +29,10 @@ public enum ReadBatch: Equatable, Sendable {
 
 public protocol LastReadProbe: Sendable {
     func rows(after tsUs: UInt64) async -> ReadBatch
+    /// Close the reader. Reads return `.notReady` until `resume()`.
     func stop() async
+    /// Read again after `stop()`; the next read starts the reader.
+    func resume() async
 }
 
 /// One running reader process.
@@ -93,10 +97,17 @@ public actor AgentLastReadProbe: LastReadProbe {
         return .rows(window, newestTsUs: newest)
     }
 
-    /// Close the agent's input and stop it. Later reads return `.notReady`.
+    /// Close the agent's input and stop it. Later reads return `.notReady`
+    /// until `resume()`.
     public func stop() {
         stopped = true
         if let child { dropChild(child) }
+    }
+
+    /// Read again after `stop()`. The agent starts on the next read, still
+    /// no sooner than 2 s after the last start.
+    public func resume() {
+        stopped = false
     }
 
     private func runningChild() -> (any ReaderChild)? {
@@ -224,9 +235,20 @@ public final class ProcessReaderChild: ReaderChild, @unchecked Sendable {
         }
         let reader = stdout.fileHandleForReading
         Task.detached { [weak self] in
+            // One reply per line, cut at the newline byte alone. A reply can
+            // hold U+2028, U+2029 or U+0085 inside a string (the agent's JSON
+            // writer leaves them as they are), and a text line reader breaks
+            // there, so the reply would never parse and every read would
+            // time out.
+            var line = Data()
             do {
-                for try await line in reader.bytes.lines {
-                    self?.deliver(line)
+                for try await byte in reader.bytes {
+                    if byte == 0x0A {
+                        self?.deliver(line)
+                        line.removeAll(keepingCapacity: true)
+                    } else {
+                        line.append(byte)
+                    }
                 }
             } catch {}
             self?.finish()
@@ -273,10 +295,10 @@ public final class ProcessReaderChild: ReaderChild, @unchecked Sendable {
         lock.withLock { pending.removeValue(forKey: id) }
     }
 
-    private func deliver(_ line: String) {
-        guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+    private func deliver(_ line: Data) {
+        guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
               let id = (object["id"] as? NSNumber)?.intValue else { return }
-        take(id)?.resume(returning: Data(line.utf8))
+        take(id)?.resume(returning: line)
     }
 
     private func finish() {

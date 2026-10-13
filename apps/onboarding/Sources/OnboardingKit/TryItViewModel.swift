@@ -8,7 +8,13 @@
 // in, then every 2 s; a proof as soon as one exists (a newer one replaces
 // it); "Still nothing read" after 45 s with none. Reading stops 30 s after
 // the first proof, or 3 minutes in, whichever comes first. When the app
-// posts `ai.hippocampus.ask.didShow` the card ends on "That’s it.".
+// posts `ai.hippocampus.ask.didShow` the card ends on "That’s it.", or on
+// "That’s Ask." when Ask opened because the person clicked "Open it for
+// me", which proves nothing about the key.
+//
+// In review (Show Setup Again) remembering was already on, so there is no
+// "Turning on…". "Try Again" on a stalled card has the app restart
+// remembering in place, and the timeline starts over with it.
 
 import Foundation
 #if canImport(AppKit)
@@ -97,7 +103,7 @@ public enum FrontAppNote: Equatable, Sendable {
 public enum StallCause: Equatable, Sendable {
     case permissionOff(PermissionSurface)
     case frontApp(FrontAppNote)
-    /// "Still nothing read." with "Restart Hippocampus".
+    /// "Still nothing read." with "Try Again".
     case unknown
 }
 
@@ -110,8 +116,9 @@ public final class TryItViewModel: ObservableObject {
         case proof(ReadProof)
         case stalled(StallCause)
         case notRemembering(RememberingState)
-        /// Ask opened: "That’s it. Shift twice works anywhere."
-        case finished
+        /// Ask opened: "That’s it. Shift twice works anywhere." With
+        /// `openedForThem`, Ask opened right after "Open it for me".
+        case finished(openedForThem: Bool)
     }
 
     public static let askDidShowNotification = Notification.Name("ai.hippocampus.ask.didShow")
@@ -123,6 +130,8 @@ public final class TryItViewModel: ObservableObject {
     public static let readingAtMost: TimeInterval = 180
     /// Review mode looks back this far for something to show.
     public static let reviewLookBack: TimeInterval = 30
+    /// Ask showing this soon after "Open it for me" was opened for them.
+    public static let openedForThemWithin: TimeInterval = 10
 
     /// Where reading starts: consent on a first run, otherwise 30 s ago.
     public static func cursor(consentGivenAtUs: UInt64?, now: Date) -> UInt64 {
@@ -137,25 +146,32 @@ public final class TryItViewModel: ObservableObject {
     public private(set) var isReading = true
 
     private let probe: any LastReadProbe
-    private let startedAt: Date
+    private var startedAt: Date
     private var cursor: UInt64
     private let remembering: RememberingState
+    /// Remembering was started for this screen (consent, or Try Again), so
+    /// it opens on "Turning on…".
+    private var turningOn: Bool
     private let now: () -> Date
     private let permissionsOn: () -> (screenRecording: Bool, accessibility: Bool)
     private let nameFor: (String) -> String
     private var lastReadAt: Date?
     private var firstProofAt: Date?
+    private var openedForThemAt: Date?
     private var observers: [Any] = []
 
     /// - Parameters:
     ///   - startedAt: consent on a first run; when the screen opened in review.
     ///   - cursorTsUs: show only what was saved after this, in microseconds.
     ///   - remembering: `.on` on a first run; the app's state in review.
+    ///   - turningOn: true on a first run, where consent just started
+    ///     remembering; false in review, where it was already on.
     public init(
         probe: any LastReadProbe,
         startedAt: Date,
         cursorTsUs: UInt64,
         remembering: RememberingState = .on,
+        turningOn: Bool = true,
         now: @escaping () -> Date = Date.init,
         permissionsOn: @escaping () -> (screenRecording: Bool, accessibility: Bool) = { (true, true) },
         nameFor: @escaping (String) -> String = BundleDisplayNameResolver.displayName(for:)
@@ -164,12 +180,15 @@ public final class TryItViewModel: ObservableObject {
         self.startedAt = startedAt
         self.cursor = cursorTsUs
         self.remembering = remembering
+        self.turningOn = turningOn
         self.now = now
         self.permissionsOn = permissionsOn
         self.nameFor = nameFor
         if remembering != .on {
             card = .notRemembering(remembering)
             isReading = false
+        } else if !turningOn {
+            card = .waiting(.ordinary)
         }
     }
 
@@ -210,10 +229,37 @@ public final class TryItViewModel: ObservableObject {
         frontApp = (bundleId, name)
     }
 
-    /// The app showed Ask: the person found the key. The card ends here.
+    /// "Open it for me" is about to open `hippocampus://ask`. Ask showing
+    /// soon after is that link, not the key.
+    public func willOpenAskForThem() {
+        openedForThemAt = now()
+    }
+
+    /// The app showed Ask. The card ends here: on the key, unless Ask
+    /// opened right after "Open it for me". A later show by the key turns
+    /// "That’s Ask." into "That’s it.".
     public func askDidShow() {
-        card = .finished
+        let forThem = openedForThemAt.map { now().timeIntervalSince($0) < Self.openedForThemWithin } ?? false
+        if forThem { openedForThemAt = nil }
+        if case .finished(openedForThem: false) = card { return }
+        card = .finished(openedForThem: forThem)
         Task { await stopReading() }
+    }
+
+    /// "Try Again" on a stalled card, after the app was asked to restart
+    /// remembering (`hippocampus://restart`). The screen starts over with
+    /// it: "Turning on…", then reading for up to another three minutes.
+    public func tryAgain() async {
+        guard remembering == .on else { return }
+        if case .finished = card { return }
+        startedAt = now()
+        turningOn = true
+        lastReadAt = nil
+        card = chooseCard(elapsed: 0)
+        if !isReading {
+            isReading = true
+            await probe.resume()
+        }
     }
 
     public func stopReading() async {
@@ -277,7 +323,7 @@ public final class TryItViewModel: ObservableObject {
 
     private func chooseCard(elapsed: TimeInterval) -> Card {
         if let latestProof { return .proof(latestProof) }
-        if elapsed < Self.startingFor { return .starting }
+        if turningOn, elapsed < Self.startingFor { return .starting }
         let note = FrontAppNote(bundleId: frontApp?.bundleId, name: frontApp?.name)
         if elapsed >= Self.stalledAfter { return .stalled(stallCause(note)) }
         return .waiting(note)

@@ -50,7 +50,7 @@ struct ConnectClaudeCodeSlide: View {
     private func toolRow(name: String, note: String) -> some View {
         HStack(spacing: OnboardingDesign.Space.sm) {
             OnboardingDesign.TypeRamp.mono(name)
-                .foregroundColor(OnboardingDesign.Palette.accent)
+                .foregroundColor(OnboardingDesign.Palette.accentText)
                 .frame(width: 140, alignment: .leading)
             OnboardingDesign.TypeRamp.caption(note)
                 .foregroundColor(.secondary)

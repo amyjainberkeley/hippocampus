@@ -19,6 +19,12 @@ final class OnboardingAppDelegate: NSObject, NSApplicationDelegate, @unchecked S
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
     }
+
+    /// Closing the window ends setup, as Done does. The resume file keeps
+    /// the step, and the app opens what follows when this process exits.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
+    }
 }
 #endif
 
@@ -63,6 +69,7 @@ struct OnboardingApp: App {
             accessibility: ax,
             automation: am,
             fullDiskAccess: fda,
+            stateStore: FileOnboardingStateStore(),
             initialStep: initialStep
         ))
         let baselineStore = SignedBaselineAllowlistStore()
