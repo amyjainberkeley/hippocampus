@@ -100,7 +100,7 @@ public enum FilterPill: String, CaseIterable, Sendable, Equatable, Hashable, Ide
 
     public var label: String {
         switch self {
-        case .hasUrl: return "Has URL"
+        case .hasUrl: return UserFacingCopy.hasLinkFilter
         }
     }
 }

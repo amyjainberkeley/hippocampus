@@ -16,7 +16,7 @@ struct ActionPanel: View {
             Color.black.opacity(0.35)
                 .ignoresSafeArea()
                 .onTapGesture { registry.hide() }
-                .accessibilityLabel("Dismiss command palette")
+                .accessibilityLabel(UserFacingCopy.closeAction)
 
             VStack(spacing: 0) {
                 inputField
@@ -60,7 +60,7 @@ struct ActionPanel: View {
                 .onSubmit {
                     viewModel.invoke(from: viewModel.filtered(from: registry.commands))
                 }
-                .accessibilityLabel("Command palette query")
+                .accessibilityLabel(UserFacingCopy.commandFieldLabel)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)

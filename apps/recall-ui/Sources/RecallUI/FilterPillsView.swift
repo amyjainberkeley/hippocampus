@@ -90,7 +90,7 @@ struct FilterPillsView: View {
 
     private var customRangePopover: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Custom date range")
+            Text(UserFacingCopy.datesTitle)
                 .font(.headline)
                 .foregroundStyle(Color.brandFgPrimary)
             DatePicker(
@@ -241,7 +241,7 @@ struct FilterPillsView: View {
                 .accessibilityHint(filters.appSelectionHelp)
             }
         } label: {
-            pillLabel("More apps… (\(overflowApps.count))", active: false)
+            pillLabel(UserFacingCopy.moreApps(overflowApps.count), active: false)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -256,7 +256,7 @@ struct FilterPillsView: View {
             filters.toggleHasUrl()
             onChanged()
         } label: {
-            pillLabel("Has URL", active: filters.hasUrl)
+            pillLabel(UserFacingCopy.hasLinkFilter, active: filters.hasUrl)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("filter.hasUrl")

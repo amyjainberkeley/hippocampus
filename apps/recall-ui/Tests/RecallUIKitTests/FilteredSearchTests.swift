@@ -123,7 +123,7 @@ final class FilteredSearchTests: XCTestCase {
             model.filters = filters
             await model.runSearch()
             XCTAssertTrue(model.hasUnsupportedRelatedFilters)
-            XCTAssertTrue(model.filterLimitationMessage?.contains("Text") == true)
+            XCTAssertTrue(model.filterLimitationMessage?.contains("Exact words") == true)
             XCTAssertEqual(model.mode, .related)
             XCTAssertNil(model.errorMessage)
             XCTAssertTrue(model.hits.isEmpty)
@@ -148,7 +148,7 @@ final class FilteredSearchTests: XCTestCase {
         model.filters = FilterState(appBundleIds: ["test.a"], dateRange: .yesterday, hasUrl: false)
         await model.runSearch()
         XCTAssertFalse(model.hasUnsupportedRelatedFilters)
-        XCTAssertTrue(model.filterLimitationMessage?.contains("limited") == true)
+        XCTAssertTrue(model.filterLimitationMessage?.contains("may be missing") == true)
         let recorded = await reader.options
         XCTAssertEqual(recorded.last?.mode, .related)
         XCTAssertEqual(recorded.last?.appFilter, "test.a")

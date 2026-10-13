@@ -113,9 +113,9 @@ public final class SearchViewModel: ObservableObject {
               !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               filters.anyActive else { return nil }
         if hasUnsupportedRelatedFilters {
-            return "Related search does not support multiple-app or URL filters. Choose Text to apply these filters."
+            return UserFacingCopy.meaningFiltersSeveralApps
         }
-        return "Related search filters a limited candidate set and may omit matching memories. Use Text to filter before the result limit."
+        return UserFacingCopy.meaningMayMissMatches
     }
 
     public func runSearch() async {

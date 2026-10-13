@@ -119,7 +119,7 @@ struct RelatedHitsFlyout: View {
         case .loading:
             HStack {
                 ProgressView().controlSize(.small)
-                Text("Resolving links…")
+                Text(UserFacingCopy.momentTextLoading)
                     .font(.caption)
                     .foregroundStyle(Color.brandFgMuted)
             }

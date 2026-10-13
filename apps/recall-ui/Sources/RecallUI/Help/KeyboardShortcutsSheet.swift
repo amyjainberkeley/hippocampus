@@ -49,7 +49,7 @@ struct KeyboardShortcutsSheet: View {
             registry.hideHelp()
             return .handled
         }
-        .accessibilityLabel("Keyboard shortcuts help")
+        .accessibilityLabel(UserFacingCopy.shortcutsSheetLabel)
     }
 
     // MARK: - Sections
@@ -57,12 +57,9 @@ struct KeyboardShortcutsSheet: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
-                Text("Keyboard Shortcuts")
+                Text(UserFacingCopy.commandShortcuts)
                     .mciFont(.title2)
                     .foregroundStyle(MCI.Color.foreground)
-                Text("\(registry.commands.count) commands available")
-                    .mciFont(.caption)
-                    .foregroundStyle(MCI.Color.foregroundMuted)
             }
             Spacer()
             Button("Close") { registry.hideHelp() }

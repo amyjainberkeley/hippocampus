@@ -218,6 +218,6 @@ final class FilterStateTests: XCTestCase {
     func testFilterPillRawValuesStable() {
         // The single remaining boolean pill — `Has URL`.
         XCTAssertEqual(FilterPill.allCases, [.hasUrl])
-        XCTAssertEqual(FilterPill.hasUrl.label, "Has URL")
+        XCTAssertEqual(FilterPill.hasUrl.label, "Has a link")
     }
 }

@@ -129,7 +129,7 @@ struct WhatsNewModal: View {
 
     private var emptyReleaseNote: some View {
         VStack(alignment: .leading, spacing: MCI.Spacing.s) {
-            Text("No entries in this release.")
+            Text(UserFacingCopy.whatsNewNothingListed)
                 .mciFont(.body)
                 .foregroundStyle(MCI.Color.foregroundSecondary)
         }
@@ -140,9 +140,7 @@ struct WhatsNewModal: View {
             Text("You're on a dev build.")
                 .mciFont(.bodyStrong)
                 .foregroundStyle(MCI.Color.foreground)
-            Text(
-                "No release notes are available for this version. The next signed build will show its full CHANGELOG here."
-            )
+            Text(UserFacingCopy.whatsNewNoNotes)
             .mciFont(.body)
             .foregroundStyle(MCI.Color.foregroundSecondary)
             .fixedSize(horizontal: false, vertical: true)
@@ -152,7 +150,7 @@ struct WhatsNewModal: View {
 
     private var footer: some View {
         HStack {
-            Text("Press ⌘⇧N anytime to reopen this window.")
+            Text(UserFacingCopy.whatsNewReopen)
                 .mciFont(.caption)
                 .foregroundStyle(MCI.Color.foregroundMuted)
             Spacer()

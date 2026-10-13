@@ -343,6 +343,19 @@ public enum UserFacingCopy {
     public static let copyFailedTryAgain = "Couldn\u{2019}t copy. Try again."
     public static let relatedLoadFailed = "Couldn\u{2019}t load related moments. Try again."
 
+    // Filters, the command palette and release notes (spec-copy S4.10, S4.12).
+
+    public static let meaningFiltersSeveralApps = "Switch to Exact words to filter by several apps or by link."
+    public static let meaningMayMissMatches = "Some matches may be missing. Switch to Exact words to see them all."
+    public static let hasLinkFilter = "Has a link"
+    public static let datesTitle = "Dates"
+    public static func moreApps(_ count: Int) -> String { "More apps (\(count))" }
+    public static let commandFieldLabel = "Command"
+    public static let shortcutsSheetLabel = "Keyboard shortcuts"
+    public static let whatsNewNothingListed = "Nothing listed for this version."
+    public static let whatsNewNoNotes = "No notes for this version."
+    public static let whatsNewReopen = "\u{2318}\u{21E7}N opens this again."
+
     // What is remembered, and deleting it (spec-copy S4.13).
 
     public static func recentMoments(_ count: Int) -> String { "Recent moments (\(count))" }
