@@ -1,0 +1,22 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Maya Chen 10:42 AM\nCan you send the deck before the call?"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Ravi Patel 10:47 AM\nok"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Maya Chen 10:48 AM\nThanks, got it."
+  }
+ ],
+ "stored": "Maya Chen 10:42 AM\nCan you send the deck before the call?\n\nRavi Patel 10:47 AM\nok\n\nMaya Chen 10:48 AM\nThanks, got it.\n\n\u001e\n",
+ "plain": "Maya Chen 10:42 AM\nCan you send the deck before the call?\n\nRavi Patel 10:47 AM\nok\n\nMaya Chen 10:48 AM\nThanks, got it."
+}

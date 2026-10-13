@@ -1,0 +1,151 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "Paragraph line 0 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.055556,
+    0.761111,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 1 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.055556,
+    0.734444,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 2 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.055556,
+    0.707778,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 3 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.055556,
+    0.681111,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 4 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.055556,
+    0.654444,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 5 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.055556,
+    0.627778,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Sheet1",
+   "confidence": 0.95,
+   "box": [
+    0.055556,
+    0.036111,
+    0.03125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Sheet2",
+   "confidence": 0.95,
+   "box": [
+    0.138889,
+    0.036111,
+    0.03125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Summary",
+   "confidence": 0.95,
+   "box": [
+    0.222222,
+    0.036111,
+    0.036458,
+    0.016667
+   ]
+  },
+  {
+   "text": "Ready",
+   "confidence": 0.95,
+   "box": [
+    0.055556,
+    0.005556,
+    0.026042,
+    0.016667
+   ]
+  },
+  {
+   "text": "Sum: 1,284",
+   "confidence": 0.95,
+   "box": [
+    0.222222,
+    0.005556,
+    0.052083,
+    0.016667
+   ]
+  },
+  {
+   "text": "Count: 12",
+   "confidence": 0.95,
+   "box": [
+    0.381944,
+    0.005556,
+    0.046875,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [
+  [
+   0.0,
+   0.061111,
+   1.0,
+   0.0
+  ],
+  [
+   0.0,
+   0.030556,
+   1.0,
+   0.0
+  ]
+ ],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Budget",
+  "bundle_id": "com.microsoft.Excel"
+ }
+}

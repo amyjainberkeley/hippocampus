@@ -1,0 +1,178 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "Account",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.816667,
+    0.036458,
+    0.016667
+   ]
+  },
+  {
+   "text": "Stage",
+   "confidence": 0.95,
+   "box": [
+    0.451389,
+    0.816667,
+    0.026042,
+    0.016667
+   ]
+  },
+  {
+   "text": "Owner",
+   "confidence": 0.95,
+   "box": [
+    0.581597,
+    0.816667,
+    0.026042,
+    0.016667
+   ]
+  },
+  {
+   "text": "Acme Robotics",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.788889,
+    0.067708,
+    0.016667
+   ]
+  },
+  {
+   "text": "Won",
+   "confidence": 0.95,
+   "box": [
+    0.451389,
+    0.788889,
+    0.015625,
+    0.016667
+   ]
+  },
+  {
+   "text": "Chen",
+   "confidence": 0.95,
+   "box": [
+    0.581597,
+    0.788889,
+    0.020833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Blue Harbor",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.761111,
+    0.057292,
+    0.016667
+   ]
+  },
+  {
+   "text": "Lost",
+   "confidence": 0.95,
+   "box": [
+    0.451389,
+    0.761111,
+    0.020833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Patel",
+   "confidence": 0.95,
+   "box": [
+    0.581597,
+    0.761111,
+    0.026042,
+    0.016667
+   ]
+  },
+  {
+   "text": "Cedar Labs, west",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.733333,
+    0.083333,
+    0.016667
+   ]
+  },
+  {
+   "text": "Open",
+   "confidence": 0.95,
+   "box": [
+    0.451389,
+    0.733333,
+    0.020833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Weber",
+   "confidence": 0.95,
+   "box": [
+    0.581597,
+    0.733333,
+    0.026042,
+    0.016667
+   ]
+  },
+  {
+   "text": "region",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.714444,
+    0.03125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 0 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.594444,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 1 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.567778,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 2 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.541111,
+    0.520833,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Weekly review",
+  "bundle_id": "com.example.notes"
+ }
+}

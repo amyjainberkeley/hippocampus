@@ -1,0 +1,208 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "Account",
+   "confidence": 0.95,
+   "box": [
+    0.069444,
+    0.816667,
+    0.036458,
+    0.016667
+   ]
+  },
+  {
+   "text": "Q1",
+   "confidence": 0.95,
+   "box": [
+    0.196528,
+    0.816667,
+    0.011806,
+    0.016667
+   ]
+  },
+  {
+   "text": "Q2",
+   "confidence": 0.95,
+   "box": [
+    0.265972,
+    0.816667,
+    0.011806,
+    0.016667
+   ]
+  },
+  {
+   "text": "Q3",
+   "confidence": 0.95,
+   "box": [
+    0.335417,
+    0.816667,
+    0.011806,
+    0.016667
+   ]
+  },
+  {
+   "text": "Q4",
+   "confidence": 0.95,
+   "box": [
+    0.404861,
+    0.816667,
+    0.011806,
+    0.016667
+   ]
+  },
+  {
+   "text": "Acme Robotics",
+   "confidence": 0.95,
+   "box": [
+    0.069444,
+    0.788889,
+    0.067708,
+    0.016667
+   ]
+  },
+  {
+   "text": "1,200",
+   "confidence": 0.95,
+   "box": [
+    0.182292,
+    0.788889,
+    0.026042,
+    0.016667
+   ]
+  },
+  {
+   "text": "1,450",
+   "confidence": 0.95,
+   "box": [
+    0.251736,
+    0.788889,
+    0.026042,
+    0.016667
+   ]
+  },
+  {
+   "text": "1,610",
+   "confidence": 0.95,
+   "box": [
+    0.321181,
+    0.788889,
+    0.026042,
+    0.016667
+   ]
+  },
+  {
+   "text": "1,700",
+   "confidence": 0.95,
+   "box": [
+    0.390625,
+    0.788889,
+    0.026042,
+    0.016667
+   ]
+  },
+  {
+   "text": "Blue Harbor",
+   "confidence": 0.95,
+   "box": [
+    0.069444,
+    0.761111,
+    0.057292,
+    0.016667
+   ]
+  },
+  {
+   "text": "880",
+   "confidence": 0.95,
+   "box": [
+    0.192708,
+    0.761111,
+    0.015625,
+    0.016667
+   ]
+  },
+  {
+   "text": "910",
+   "confidence": 0.95,
+   "box": [
+    0.262153,
+    0.761111,
+    0.015625,
+    0.016667
+   ]
+  },
+  {
+   "text": "955",
+   "confidence": 0.95,
+   "box": [
+    0.331597,
+    0.761111,
+    0.015625,
+    0.016667
+   ]
+  },
+  {
+   "text": "990",
+   "confidence": 0.95,
+   "box": [
+    0.401042,
+    0.761111,
+    0.015625,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 0 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.65,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 1 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.623333,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 2 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.596667,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 3 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.57,
+    0.520833,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Pipeline",
+  "bundle_id": "com.apple.iWork.Numbers"
+ }
+}

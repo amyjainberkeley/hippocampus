@@ -1,0 +1,22 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\nParagraph line 4 with enough words to read as prose.\nParagraph line 5 with enough words to read as prose."
+  },
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "Sheet1 Sheet2 Summary"
+  },
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "Ready Sum: 1,284 Count: 12"
+  }
+ ],
+ "stored": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\nParagraph line 4 with enough words to read as prose.\nParagraph line 5 with enough words to read as prose.\n\n\u001e\nSheet1 Sheet2 Summary\n\nReady Sum: 1,284 Count: 12",
+ "plain": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\nParagraph line 4 with enough words to read as prose.\nParagraph line 5 with enough words to read as prose.\n\nSheet1 Sheet2 Summary\n\nReady Sum: 1,284 Count: 12"
+}

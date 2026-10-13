@@ -1,0 +1,22 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "File Edit View Insert Format Data Tools Help"
+  },
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "100% Normal text Arial 11 Bold Italic"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\nParagraph line 4 with enough words to read as prose.\nParagraph line 5 with enough words to read as prose."
+  }
+ ],
+ "stored": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\nParagraph line 4 with enough words to read as prose.\nParagraph line 5 with enough words to read as prose.\n\n\u001e\nFile Edit View Insert Format Data Tools Help\n\n100% Normal text Arial 11 Bold Italic",
+ "plain": "File Edit View Insert Format Data Tools Help\n\n100% Normal text Arial 11 Bold Italic\n\nParagraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\nParagraph line 4 with enough words to read as prose.\nParagraph line 5 with enough words to read as prose."
+}

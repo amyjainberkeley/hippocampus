@@ -1,0 +1,17 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Sweep holds the writer P1\nSearch misses tabs P2\nOnboarding copy P3"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose."
+  }
+ ],
+ "stored": "Sweep holds the writer P1\nSearch misses tabs P2\nOnboarding copy P3\n\nParagraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\n\n\u001e\n",
+ "plain": "Sweep holds the writer P1\nSearch misses tabs P2\nOnboarding copy P3\n\nParagraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose."
+}

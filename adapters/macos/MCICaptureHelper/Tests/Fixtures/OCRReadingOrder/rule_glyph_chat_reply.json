@@ -1,0 +1,78 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "Maya Chen 10:42 AM",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.816667,
+    0.09375,
+    0.016667
+   ]
+  },
+  {
+   "text": "Can you send the deck before the call?",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.794444,
+    0.194444,
+    0.016667
+   ]
+  },
+  {
+   "text": "Ravi Patel 10:47 AM",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.75,
+    0.098958,
+    0.016667
+   ]
+  },
+  {
+   "text": "ok",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.727778,
+    0.010417,
+    0.016667
+   ]
+  },
+  {
+   "text": "Maya Chen 10:48 AM",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.683333,
+    0.09375,
+    0.016667
+   ]
+  },
+  {
+   "text": "Thanks, got it.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.661111,
+    0.076389,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "launch-plan",
+  "bundle_id": "com.tinyspeck.slackmacgap"
+ }
+}

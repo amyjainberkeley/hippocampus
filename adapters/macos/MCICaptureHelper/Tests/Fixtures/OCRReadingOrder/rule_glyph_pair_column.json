@@ -1,0 +1,118 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "Sweep holds the writer",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.816667,
+    0.114583,
+    0.016667
+   ]
+  },
+  {
+   "text": "P1",
+   "confidence": 0.95,
+   "box": [
+    0.520833,
+    0.816667,
+    0.011806,
+    0.016667
+   ]
+  },
+  {
+   "text": "Search misses tabs",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.792222,
+    0.09375,
+    0.016667
+   ]
+  },
+  {
+   "text": "P2",
+   "confidence": 0.95,
+   "box": [
+    0.520833,
+    0.792222,
+    0.011806,
+    0.016667
+   ]
+  },
+  {
+   "text": "Onboarding copy",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.767778,
+    0.078125,
+    0.016667
+   ]
+  },
+  {
+   "text": "P3",
+   "confidence": 0.95,
+   "box": [
+    0.520833,
+    0.767778,
+    0.011806,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 0 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.705556,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 1 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.678889,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 2 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.652222,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 3 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.625556,
+    0.520833,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Weekly review",
+  "bundle_id": "com.example.notes"
+ }
+}

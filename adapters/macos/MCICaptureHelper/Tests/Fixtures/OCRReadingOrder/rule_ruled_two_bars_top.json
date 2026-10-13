@@ -1,0 +1,231 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "File",
+   "confidence": 0.95,
+   "box": [
+    0.055556,
+    0.966667,
+    0.020833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Edit",
+   "confidence": 0.95,
+   "box": [
+    0.104167,
+    0.966667,
+    0.020833,
+    0.016667
+   ]
+  },
+  {
+   "text": "View",
+   "confidence": 0.95,
+   "box": [
+    0.152778,
+    0.966667,
+    0.020833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Insert",
+   "confidence": 0.95,
+   "box": [
+    0.201389,
+    0.966667,
+    0.03125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Format",
+   "confidence": 0.95,
+   "box": [
+    0.263889,
+    0.966667,
+    0.03125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Data",
+   "confidence": 0.95,
+   "box": [
+    0.326389,
+    0.966667,
+    0.020833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Tools",
+   "confidence": 0.95,
+   "box": [
+    0.375,
+    0.966667,
+    0.026042,
+    0.016667
+   ]
+  },
+  {
+   "text": "Help",
+   "confidence": 0.95,
+   "box": [
+    0.423611,
+    0.966667,
+    0.020833,
+    0.016667
+   ]
+  },
+  {
+   "text": "100%",
+   "confidence": 0.95,
+   "box": [
+    0.055556,
+    0.922222,
+    0.020833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Normal text",
+   "confidence": 0.95,
+   "box": [
+    0.114583,
+    0.922222,
+    0.057292,
+    0.016667
+   ]
+  },
+  {
+   "text": "Arial",
+   "confidence": 0.95,
+   "box": [
+    0.201389,
+    0.922222,
+    0.026042,
+    0.016667
+   ]
+  },
+  {
+   "text": "11",
+   "confidence": 0.95,
+   "box": [
+    0.263889,
+    0.922222,
+    0.010417,
+    0.016667
+   ]
+  },
+  {
+   "text": "Bold",
+   "confidence": 0.95,
+   "box": [
+    0.298611,
+    0.922222,
+    0.020833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Italic",
+   "confidence": 0.95,
+   "box": [
+    0.333333,
+    0.922222,
+    0.03125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 0 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.055556,
+    0.761111,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 1 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.055556,
+    0.734444,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 2 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.055556,
+    0.707778,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 3 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.055556,
+    0.681111,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 4 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.055556,
+    0.654444,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 5 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.055556,
+    0.627778,
+    0.520833,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [
+  [
+   0.0,
+   0.955556,
+   1.0,
+   0.0
+  ],
+  [
+   0.0,
+   0.911111,
+   1.0,
+   0.0
+  ]
+ ],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Budget",
+  "bundle_id": "com.google.Chrome"
+ }
+}

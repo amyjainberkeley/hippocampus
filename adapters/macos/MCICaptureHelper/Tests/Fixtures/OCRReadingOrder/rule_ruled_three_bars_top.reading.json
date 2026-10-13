@@ -1,0 +1,27 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "Inbox (3) Pricing notes Stripe Docs Calendar"
+  },
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "Back Forward Reload Share"
+  },
+  {
+   "role": "chrome",
+   "rule": "bar",
+   "text": "Work News Recipes Travel"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose."
+  }
+ ],
+ "stored": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\n\n\u001e\nInbox (3) Pricing notes Stripe Docs Calendar\n\nBack Forward Reload Share\n\nWork News Recipes Travel",
+ "plain": "Inbox (3) Pricing notes Stripe Docs Calendar\n\nBack Forward Reload Share\n\nWork News Recipes Travel\n\nParagraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose."
+}

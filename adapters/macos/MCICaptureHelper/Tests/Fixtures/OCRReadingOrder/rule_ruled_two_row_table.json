@@ -1,0 +1,197 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "Paragraph line 0 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.816667,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 1 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.79,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 2 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.763333,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 3 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.736667,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Item",
+   "confidence": 0.95,
+   "box": [
+    0.069444,
+    0.65,
+    0.020833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Qty",
+   "confidence": 0.95,
+   "box": [
+    0.277778,
+    0.65,
+    0.015625,
+    0.016667
+   ]
+  },
+  {
+   "text": "Price",
+   "confidence": 0.95,
+   "box": [
+    0.486111,
+    0.65,
+    0.026042,
+    0.016667
+   ]
+  },
+  {
+   "text": "Total",
+   "confidence": 0.95,
+   "box": [
+    0.694444,
+    0.65,
+    0.026042,
+    0.016667
+   ]
+  },
+  {
+   "text": "Notebook",
+   "confidence": 0.95,
+   "box": [
+    0.069444,
+    0.594444,
+    0.041667,
+    0.016667
+   ]
+  },
+  {
+   "text": "2",
+   "confidence": 0.95,
+   "box": [
+    0.277778,
+    0.594444,
+    0.005208,
+    0.016667
+   ]
+  },
+  {
+   "text": "$9.00",
+   "confidence": 0.95,
+   "box": [
+    0.486111,
+    0.594444,
+    0.026042,
+    0.016667
+   ]
+  },
+  {
+   "text": "$18.00",
+   "confidence": 0.95,
+   "box": [
+    0.694444,
+    0.594444,
+    0.03125,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 0 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.483333,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 1 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.456667,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 2 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.43,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 3 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.403333,
+    0.520833,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [
+  [
+   0.0,
+   0.683333,
+   1.0,
+   0.0
+  ],
+  [
+   0.0,
+   0.627778,
+   1.0,
+   0.0
+  ],
+  [
+   0.0,
+   0.572222,
+   1.0,
+   0.0
+  ]
+ ],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Weekly review",
+  "bundle_id": "com.example.notes"
+ }
+}

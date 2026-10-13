@@ -1,0 +1,17 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Account Q1 Q2 Q3 Q4\nAcme Robotics 1,200 1,450 1,610 1,700\nBlue Harbor 880 910 955 990"
+  },
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Paragraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose."
+  }
+ ],
+ "stored": "Account Q1 Q2 Q3 Q4\nAcme Robotics 1,200 1,450 1,610 1,700\nBlue Harbor 880 910 955 990\n\nParagraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose.\n\n\u001e\n",
+ "plain": "Account Q1 Q2 Q3 Q4\nAcme Robotics 1,200 1,450 1,610 1,700\nBlue Harbor 880 910 955 990\n\nParagraph line 0 with enough words to read as prose.\nParagraph line 1 with enough words to read as prose.\nParagraph line 2 with enough words to read as prose.\nParagraph line 3 with enough words to read as prose."
+}

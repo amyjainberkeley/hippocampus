@@ -1,0 +1,17 @@
+{
+ "classified": true,
+ "blocks": [
+  {
+   "role": "content",
+   "rule": "content",
+   "text": "Pricing for teams\n    Paragraph line 0 with enough words to read as prose.\n    Paragraph line 1 with enough words to read as prose.\n    Paragraph line 2 with enough words to read as prose.\n    Paragraph line 3 with enough words to read as prose."
+  },
+  {
+   "role": "chrome",
+   "rule": "glyph",
+   "text": "TR"
+  }
+ ],
+ "stored": "Pricing for teams\n    Paragraph line 0 with enough words to read as prose.\n    Paragraph line 1 with enough words to read as prose.\n    Paragraph line 2 with enough words to read as prose.\n    Paragraph line 3 with enough words to read as prose.\n\n\u001e\nTR",
+ "plain": "TR\nPricing for teams\n                     Paragraph line 0 with enough words to read as prose.\n                     Paragraph line 1 with enough words to read as prose.\n                     Paragraph line 2 with enough words to read as prose.\n                     Paragraph line 3 with enough words to read as prose."
+}

@@ -1,0 +1,178 @@
+{
+ "width": 2880,
+ "height": 1800,
+ "lines": [
+  {
+   "text": "ID",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.816667,
+    0.010417,
+    0.016667
+   ]
+  },
+  {
+   "text": "Name",
+   "confidence": 0.95,
+   "box": [
+    0.3125,
+    0.816667,
+    0.020833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Status",
+   "confidence": 0.95,
+   "box": [
+    0.451389,
+    0.816667,
+    0.03125,
+    0.016667
+   ]
+  },
+  {
+   "text": "101",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.788889,
+    0.015625,
+    0.016667
+   ]
+  },
+  {
+   "text": "Maya Chen",
+   "confidence": 0.95,
+   "box": [
+    0.3125,
+    0.788889,
+    0.046875,
+    0.016667
+   ]
+  },
+  {
+   "text": "Open",
+   "confidence": 0.95,
+   "box": [
+    0.451389,
+    0.788889,
+    0.020833,
+    0.016667
+   ]
+  },
+  {
+   "text": "102",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.761111,
+    0.015625,
+    0.016667
+   ]
+  },
+  {
+   "text": "Ravi Patel",
+   "confidence": 0.95,
+   "box": [
+    0.3125,
+    0.761111,
+    0.052083,
+    0.016667
+   ]
+  },
+  {
+   "text": "Done",
+   "confidence": 0.95,
+   "box": [
+    0.451389,
+    0.761111,
+    0.020833,
+    0.016667
+   ]
+  },
+  {
+   "text": "103",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.733333,
+    0.015625,
+    0.016667
+   ]
+  },
+  {
+   "text": "Jonas Weber",
+   "confidence": 0.95,
+   "box": [
+    0.3125,
+    0.733333,
+    0.057292,
+    0.016667
+   ]
+  },
+  {
+   "text": "Open",
+   "confidence": 0.95,
+   "box": [
+    0.451389,
+    0.733333,
+    0.020833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 0 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.594444,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 1 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.567778,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 2 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.541111,
+    0.520833,
+    0.016667
+   ]
+  },
+  {
+   "text": "Paragraph line 3 with enough words to read as prose.",
+   "confidence": 0.95,
+   "box": [
+    0.243056,
+    0.514444,
+    0.520833,
+    0.016667
+   ]
+  }
+ ],
+ "separators": [],
+ "window": {
+  "rect": [
+   0.0,
+   0.0,
+   1.0,
+   1.0
+  ],
+  "pixels_per_point": 2.0,
+  "title": "Weekly review",
+  "bundle_id": "com.example.notes"
+ }
+}
