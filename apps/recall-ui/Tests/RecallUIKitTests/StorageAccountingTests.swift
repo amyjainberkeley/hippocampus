@@ -82,4 +82,18 @@ final class StorageAccountingTests: XCTestCase {
     private func summary(_ storage: StorageUsage) -> SummaryStats {
         SummaryStats(totalEvents: 0, oldestTsUs: nil, newestTsUs: nil, diskBytes: 0, storage: storage)
     }
+
+    func testTextIsTheDatabaseAndItsWorkingFilesTogether() {
+        func usage(_ wal: StorageMeasurement) -> StorageUsage {
+            StorageUsage(database: .init(logicalBytes: 1_000, status: .complete), wal: wal,
+                         shm: .init(logicalBytes: nil, status: .missing),
+                         managedBlobs: .init(logicalBytes: 5, status: .complete),
+                         reportedTotalBytes: nil, complete: false)
+        }
+        XCTAssertEqual(usage(.init(logicalBytes: 200, status: .complete)).textMeasurement,
+                       .init(logicalBytes: 1_200, status: .complete), "an absent working file counts as nothing")
+        XCTAssertEqual(usage(.init(logicalBytes: 200, status: .partial)).textMeasurement.status, .partial,
+                       "a part that was not measured whole says so")
+        XCTAssertEqual(usage(.init(logicalBytes: UInt64.max, status: .complete)).textMeasurement.status, .overflow)
+    }
 }

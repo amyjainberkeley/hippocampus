@@ -364,6 +364,36 @@ public enum UserFacingCopy {
     }
     public static let deleteLast24hExplanation = "Everything from the last 24 hours is deleted for good."
     public static let deleteEverythingExplanation = "Every moment, session and summary is deleted for good."
+    public static let deleteEverythingTitle = "Delete everything Hippocampus remembers?"
+    public static let deleteUnavailable = "Deleting isn\u{2019}t available."
+    public static let deleteAction = "Delete"
+    /// Writes straight to Downloads: no further step, so no ellipsis.
+    public static let exportEverythingAction = "Export Everything"
+    public static let deleteLast24hAction = "Delete Last 24 Hours\u{2026}"
+    public static let deleteEverythingAction = "Delete Everything\u{2026}"
+    public static let exportNotEncrypted = "Exported files aren\u{2019}t encrypted."
+    public static let savedToDownloads = "Saved to Downloads."
+    public static let storageText = "Text"
+    public static let storageScreenshots = "Screenshots"
+    public static let auditTitle = "Deletes and exports"
+    public static let auditExportAction = "Export"
+    public static let auditCaption = "Hippocampus keeps a list of every delete and export, on this Mac."
+    public static let auditEmpty = "Nothing yet."
+
+    /// One line of the list of deletes and exports, in the past tense.
+    public static func auditAction(_ action: AuditAction, details: [String: String]) -> String {
+        switch action {
+        case .appLaunched: "Opened Hippocampus"
+        case .permissionsGranted: "Allowed a permission"
+        case .permissionsRevoked: "Turned off a permission"
+        case .deleteEvent: "Deleted a moment"
+        case .deleteEventsInRange:
+            details["range_hours"] == "24" ? "Deleted the last 24 hours" : "Deleted some moments"
+        case .wipeBrain: "Deleted everything"
+        case .exportJson: "Exported everything"
+        case .settingsChange: "Changed a preference"
+        }
+    }
 
     // Names you use (spec-copy S4.13; no real person in the example).
 

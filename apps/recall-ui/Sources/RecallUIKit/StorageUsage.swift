@@ -48,3 +48,20 @@ public struct StorageUsage: Codable, Equatable, Sendable {
         case reportedTotalBytes = "reported_total_bytes"
     }
 }
+
+public extension StorageUsage {
+    /// The database and its two working files as one measurement, the way a
+    /// person thinks of them: text. Complete when each is measured or absent,
+    /// otherwise it carries the first problem found.
+    var textMeasurement: StorageMeasurement {
+        let parts = [database, wal, shm]
+        var bytes: UInt64 = 0
+        for part in parts {
+            let (sum, overflow) = bytes.addingReportingOverflow(part.logicalBytes ?? 0)
+            if overflow { return StorageMeasurement(logicalBytes: nil, status: .overflow) }
+            bytes = sum
+        }
+        let problem = parts.first { $0.status != .complete && $0.status != .missing }?.status
+        return StorageMeasurement(logicalBytes: bytes, status: problem ?? .complete)
+    }
+}

@@ -134,7 +134,7 @@ struct PrivacyDashboard: View {
     @MainActor
     private func runDestructive(_ kind: DestructivePrivacyAction) async {
         guard let mutator else {
-            banner = "Delete unavailable — mutator not wired."
+            banner = UserFacingCopy.deleteUnavailable
             return
         }
         isMutating = true
@@ -219,8 +219,8 @@ struct PrivacyDashboard: View {
     @MainActor
     private func runExportAuditLog() {
         do {
-            let url = try AuditLog.shared.exportToDownloads()
-            banner = "Exported activity log to \(url.path)."
+            _ = try AuditLog.shared.exportToDownloads()
+            banner = UserFacingCopy.savedToDownloads
         } catch {
             errorMessage = UserFacingCopy.auditExportFailedBanner
         }
@@ -292,30 +292,24 @@ struct PrivacySummaryCard: View {
             if isLoading {
                 HStack(spacing: MCI.Spacing.s) {
                     ProgressView().controlSize(.small)
-                    Text("Refreshing...").mciFont(.caption)
+                    Text(UserFacingCopy.refreshingToast).mciFont(.caption)
                 }
             }
-            Text(measuredAt == nil ? "Storage not measured." : PrivacyDashboardSummary.storageTotal(summary: summary))
+            Text(measuredAt == nil ? UserFacingCopy.momentTextLoading : PrivacyDashboardSummary.storageTotal(summary: summary))
                 .mciFont(.body)
                 .foregroundStyle(Color.brandFgPrimary)
             if let storage = summary?.storage {
                 VStack(spacing: MCI.Spacing.s) {
-                    LabeledContent("Database", value: PrivacyDashboardSummary.storageValue(storage.database))
-                    LabeledContent("Write-ahead log (WAL)", value: PrivacyDashboardSummary.storageValue(storage.wal))
-                    LabeledContent("Shared memory (SHM)", value: PrivacyDashboardSummary.storageValue(storage.shm))
-                    LabeledContent("Screenshot files", value: PrivacyDashboardSummary.storageValue(storage.managedBlobs))
+                    // The database and its two working files are one thing to a person: text.
+                    LabeledContent(UserFacingCopy.storageText,
+                                   value: PrivacyDashboardSummary.storageValue(storage.textMeasurement))
+                    LabeledContent(UserFacingCopy.storageScreenshots,
+                                   value: PrivacyDashboardSummary.storageValue(storage.managedBlobs))
                 }
                 .mciFont(.body)
                 .foregroundStyle(Color.brandFgSecondary)
             }
-            Text("Logical file sizes, not allocated disk space. Includes managed screenshot files and temporary writes. Excludes the app, models, exports, and logs. Files may change during measurement.")
-                .mciFont(.caption)
-                .foregroundStyle(Color.brandFgMuted)
-            if let measuredAt {
-                Text("Measured \(measuredAt.formatted(date: .abbreviated, time: .standard))")
-                    .mciFont(.caption)
-                    .foregroundStyle(Color.brandFgMuted)
-            }
+
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -341,12 +335,12 @@ struct FilterBar: View {
                 Button("All apps") { filter.appBundleId = nil }
                 Divider()
                 ForEach(observedApps) { app in
-                    Button("\(app.appBundleId) (\(app.count))") {
+                    Button("\(Formatters.appDisplayName(app.appBundleId)) (\(app.count))") {
                         filter.appBundleId = app.appBundleId
                     }
                 }
             } label: {
-                Label(filter.appBundleId ?? "All apps", systemImage: "app.badge")
+                Label(filter.appBundleId.map { Formatters.appDisplayName($0) } ?? "All apps", systemImage: "app.badge")
                     .font(.callout)
             }
             Menu {
@@ -364,9 +358,9 @@ struct FilterBar: View {
     private var sinceLabel: String {
         switch filter.sinceHours {
         case .some(1): return "Last hour"
-        case .some(24): return "Last 24h"
+        case .some(24): return "Last 24 hours"
         case .some(let h) where h == 24 * 7: return "Last 7 days"
-        case .some(let h): return "Last \(h)h"
+        case .some(let h): return "Last \(h) hours"
         case .none: return "All time"
         }
     }
@@ -410,8 +404,8 @@ struct EventRow: View {
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
-                    Text(hit.appBundleId ?? "(no app)")
-                        .font(.system(.body, design: .monospaced))
+                    Text(Formatters.appDisplayName(hit.appBundleId))
+                        .font(.body)
                         .foregroundStyle(Color.brandFgPrimary)
                     Text("·").foregroundStyle(Color.brandFgMuted)
                     Text(Formatters.relativeTime(usSinceEpoch: hit.tsUs))
@@ -448,25 +442,19 @@ struct DestructiveActions: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Your controls")
-                .font(.headline)
-                .foregroundStyle(Color.brandFgPrimary)
-            Text(
-                "Exported files are unencrypted. Move them to encrypted "
-                + "storage if the contents are sensitive."
-            )
+            Text(UserFacingCopy.exportNotEncrypted)
             .font(.caption)
             .foregroundStyle(Color.brandWarning)
             HStack(spacing: 10) {
-                Button("Export my data as JSON") { onExport() }
+                Button(UserFacingCopy.exportEverythingAction) { onExport() }
                     .buttonStyle(.bordered)
                     .tint(Color.brandMint)
                     .disabled(isBusy || isSyntheticPreview)
-                Button("Delete last 24 hours") { onDeleteLast24h() }
+                Button(UserFacingCopy.deleteLast24hAction) { onDeleteLast24h() }
                     .buttonStyle(.bordered)
                     .tint(Color.brandWarning)
                     .disabled(isBusy || isSyntheticPreview)
-                Button("Delete everything") { onDeleteEverything() }
+                Button(UserFacingCopy.deleteEverythingAction) { onDeleteEverything() }
                     .buttonStyle(.borderedProminent)
                     .tint(Color.brandError)
                     .disabled(isBusy || isSyntheticPreview)
@@ -492,7 +480,7 @@ private extension DestructivePrivacyAction {
     var title: String {
         switch self {
         case .deleteLast24h: return "Delete the last 24 hours?"
-        case .deleteEverything: return "Delete your entire memory?"
+        case .deleteEverything: return UserFacingCopy.deleteEverythingTitle
         }
     }
 
@@ -529,7 +517,7 @@ struct ConfirmDeleteSheet: View {
                 Button("Cancel") { onFinish(false) }
                     .buttonStyle(.bordered)
                 Spacer()
-                Button("Confirm") { onFinish(true) }
+                Button(UserFacingCopy.deleteAction) { onFinish(true) }
                     .buttonStyle(.borderedProminent)
                     .tint(Color.brandError)
                     .disabled(!kind.matches(typed))
@@ -572,66 +560,43 @@ struct RecentActivitySection: View {
     let onShowAll: () -> Void
     let onExport: () -> Void
 
-    private static let displayFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        f.timeZone = TimeZone.current
-        return f
-    }()
-
     var body: some View {
         VStack(alignment: .leading, spacing: MCI.Spacing.s) {
             HStack {
-                Text("Recent activity")
+                Text(UserFacingCopy.auditTitle)
                     .font(.headline)
                     .foregroundStyle(Color.brandFgPrimary)
                 Spacer()
                 Button(showingAll ? "Show recent" : "Show all") { onShowAll() }
                     .buttonStyle(.borderless)
                     .foregroundStyle(Color.brandMint)
-                Button("Export activity log") { onExport() }
+                Button(UserFacingCopy.auditExportAction) { onExport() }
                     .buttonStyle(.bordered)
                     .tint(Color.brandMint)
             }
-            Text(
-                "Every delete, wipe, export, and permission change is "
-                + "recorded to a plaintext local log — no upload. Share "
-                + "with your security team to prove what MCI touched."
-            )
+            Text(UserFacingCopy.auditCaption)
             .font(.caption)
             .foregroundStyle(Color.brandFgMuted)
 
             if entries.isEmpty {
-                Text("No recorded activity yet.")
+                Text(UserFacingCopy.auditEmpty)
                     .font(.callout)
                     .foregroundStyle(Color.brandFgMuted)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(entries) { entry in
-                            HStack(spacing: MCI.Spacing.m) {
-                                Text(Self.displayFormatter.string(from: entry.timestamp))
-                                    .foregroundStyle(Color.brandFgSecondary)
-                                    .frame(width: 150, alignment: .leading)
-                                Text(entry.action.rawValue)
-                                    .foregroundStyle(Color.brandFgPrimary)
-                                    .frame(width: 190, alignment: .leading)
-                                Text(Self.formatDetails(entry.details))
-                                    .foregroundStyle(Color.brandFgSecondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                            }
-                            .font(.system(.caption, design: .monospaced))
+                            Text(Self.line(entry))
+                                .foregroundStyle(Color.brandFgSecondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .font(.caption)
                             // Combine so VoiceOver reads
                             // "2026-07-13 14:32:11, deleteEventsInRange,
                             //  count=47" as one row-line, not three.
                             .accessibilityElement(children: .combine)
-                            .accessibilityLabel(
-                                "\(Self.displayFormatter.string(from: entry.timestamp)), "
-                                + "\(entry.action.rawValue), "
-                                + "\(Self.formatDetails(entry.details))"
-                            )
+                            .accessibilityLabel(Self.line(entry))
                         }
                     }
                 }
@@ -644,11 +609,9 @@ struct RecentActivitySection: View {
         .cornerRadius(MCI.Radius.m)
     }
 
-    /// Compact one-line details renderer. `{"count":"47"}` → `count=47`.
-    private static func formatDetails(_ details: [String: String]) -> String {
-        if details.isEmpty { return "—" }
-        return details.keys.sorted()
-            .map { "\($0)=\(details[$0] ?? "")" }
-            .joined(separator: ", ")
+    /// "Oct 12, 2:09 PM · Deleted the last 24 hours", in the person's locale.
+    private static func line(_ entry: AuditEntry) -> String {
+        entry.timestamp.formatted(date: .abbreviated, time: .shortened)
+            + " \u{00B7} " + UserFacingCopy.auditAction(entry.action, details: entry.details)
     }
 }
