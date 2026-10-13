@@ -17,17 +17,59 @@ import Foundation
 /// normalized with a bottom-left origin (the boxes' convention); for the
 /// focused window it is the whole frame. `pixelsPerPoint` turns frame pixels
 /// into the window's points.
+///
+/// `partial`: the read did not see a large part of the window. It saw less
+/// than three quarters of the window's width or of its height (the focused
+/// window read only where it changed, or a window partly off the display),
+/// or a window in front hides a block of it wider and taller than a quarter
+/// of it. A partial read still moves the rows it can judge by themselves at
+/// the window's edges (bars, the foot, date lines), but never judges a box by
+/// neighbours it may not have seen: no navigation, no line numbers, no icons
+/// read as characters. A form beside a hidden summary is not a sidebar, and a
+/// table's numbers whose row is hidden are not icons: when unsure, it is
+/// content. Reads that saw at least three quarters of each side moved no
+/// content to chrome when measured against whole reads of the realistic
+/// windows; `layout.py` reads whole windows only.
 public struct OCRWindowGeometry: Sendable, Equatable {
     public let rect: CGRect
     public let pixelsPerPoint: CGFloat
     public let title: String?
     public let bundleId: String?
+    public let partial: Bool
 
-    public init(rect: CGRect, pixelsPerPoint: CGFloat, title: String?, bundleId: String?) {
+    public init(rect: CGRect, pixelsPerPoint: CGFloat, title: String?, bundleId: String?, partial: Bool = false) {
         self.rect = rect
         self.pixelsPerPoint = pixelsPerPoint
         self.title = title
         self.bundleId = bundleId
+        self.partial = partial
+    }
+
+    /// The share of the window's width, and of its height, a read may miss
+    /// and still see the window whole.
+    static let unseenShare: CGFloat = 0.25
+
+    /// Whether a read of `seen` saw at least three quarters of `window`'s
+    /// width and of its height (both in the same units).
+    public static func seesMost(_ seen: CGRect, of window: CGRect) -> Bool {
+        let inner = seen.intersection(window)
+        return !inner.isNull && inner.width >= (1 - unseenShare) * window.width
+            && inner.height >= (1 - unseenShare) * window.height
+    }
+
+    /// Whether `hidden`, a block of `window` a read did not see (same units),
+    /// is wider than a quarter of the window and taller than a quarter of it.
+    public static func hidesPart(_ hidden: CGRect, of window: CGRect) -> Bool {
+        !hidden.isNull && hidden.width > unseenShare * window.width && hidden.height > unseenShare * window.height
+    }
+
+    /// The focused window's geometry: its stream's frame is the window itself,
+    /// and a read of only its changed area (`input.roi`) may be partial.
+    static func focused(context: WorkflowContext, input: OCREngineInput) -> OCRWindowGeometry {
+        let frame = CGRect(x: 0, y: 0, width: 1, height: 1)
+        return OCRWindowGeometry(rect: frame, pixelsPerPoint: input.pixelsPerPoint,
+                                 title: context.windowTitle, bundleId: context.appBundleId,
+                                 partial: !seesMost(input.roi, of: frame))
     }
 
     /// A window given in global points with a top-left origin (the window
@@ -284,6 +326,8 @@ extension OCRReadingOrder {
         let title: String
         let terminal: Bool
         let chat: Bool
+        /// Only part of the window was read (`OCRWindowGeometry.partial`).
+        let partial: Bool
         let x0: CGFloat, y0: CGFloat, x1: CGFloat, y1: CGFloat
         let width: CGFloat, height: CGFloat
         let topBand: CGFloat, bottomBand: CGFloat
@@ -294,6 +338,7 @@ extension OCRReadingOrder {
             title = geometry.title ?? ""
             terminal = geometry.bundleId.map { OCRReadingOrder.terminals.contains($0) } ?? false
             chat = geometry.bundleId.map { OCRReadingOrder.chatApps.contains($0) } ?? false
+            partial = geometry.partial
             let scale = OCRReadingOrder.scale(geometry)
             let rect = OCRReadingOrder.windowRect(geometry, width: frameWidth, height: frameHeight)
             x0 = rect.x0
@@ -355,10 +400,11 @@ extension OCRReadingOrder {
     }
 
     /// A column of short items at the window's left edge, beside something
-    /// wider. Never on the right, never code, never a table.
+    /// wider. Never on the right, never code, never a table, and never in a
+    /// partial read, which may not have seen what stands beside it.
     static func isNavigation(_ region: Region, _ everything: [Region], skip: Set<ObjectIdentifier>,
                              win: Window) -> Bool {
-        if region.table || region.rows.count < navMinRows { return false }
+        if win.partial || region.table || region.rows.count < navMinRows { return false }
         if region.x0 - win.x0 > navEdge * win.width || region.x1 - region.x0 > navMaxWidth * win.width {
             return false
         }
@@ -518,7 +564,7 @@ extension OCRReadingOrder {
                 out += mine.map { Assigned(role: .chrome, rule: "navigation", boxes: $0.boxes, pane: pane) }
                 continue
             }
-            var navigation = previewLists(mine, everything)
+            var navigation = win.partial ? Set<ObjectIdentifier>() : previewLists(mine, everything)
             for region in mine where isNavigation(region, everything, skip: [ObjectIdentifier(region)], win: win) {
                 navigation.insert(ObjectIdentifier(region))
             }
@@ -722,9 +768,10 @@ extension OCRReadingOrder {
         }
         let win = Window(window, width: width, height: height, lineHeight: lineHeight)
         var kept = boxes, numbers: [Box] = [], marks: [Box] = []
-        if !win.terminal {
+        if !win.terminal && !win.partial {
             // A terminal's text is its output: numbers counting down a column
-            // and a lone "y" are what it printed.
+            // and a lone "y" are what it printed. A partial read may not have
+            // seen the lines a number belongs with, or a box's row neighbours.
             (kept, numbers) = withoutGutter(boxes, lineHeight: lineHeight)
             marks = glyphs(kept, lineHeight: lineHeight)
             let taken = Set(marks.map { ObjectIdentifier($0) })

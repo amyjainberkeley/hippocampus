@@ -543,13 +543,9 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                         pixelBuffer: input.pixelBuffer,
                         keyframeRetainer: keyframeRetainer,
                         evidenceCandidate: evidenceCandidate,
-                        // The focused stream's frame is the window itself.
-                        geometry: OCRWindowGeometry(
-                            rect: CGRect(x: 0, y: 0, width: 1, height: 1),
-                            pixelsPerPoint: input.pixelsPerPoint,
-                            title: context.windowTitle,
-                            bundleId: context.appBundleId
-                        )
+                        // The focused stream's frame is the window itself; a
+                        // read of only its changed area is partial.
+                        geometry: OCRWindowGeometry.focused(context: context, input: input)
                     )
                     disposition(resultDisposition)
                 },
@@ -738,11 +734,12 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                 OCRMemoryText.reading(from: result.recognizedLines, pixelSize: pixelSize,
                                       separators: result.separators, geometry: $0)
             }
-            if let reading {
+            if let reading, let geometry {
                 // Content-free: counts of blocks and lines only, never text.
                 OCRTrace.emit(
                     "ocr-reading",
                     "classified=\(reading.classified ? 1 : 0) "
+                        + "partial=\(geometry.partial ? 1 : 0) "
                         + "content_blocks=\(reading.contentBlocks) "
                         + "chrome_blocks=\(reading.chromeBlocks) "
                         + "chrome_lines=\(reading.chromeLines)"

@@ -154,6 +154,36 @@ public enum BackgroundCapturePolicy {
         return true
     }
 
+    /// What turns on roles for a window read from a display frame
+    /// (`displayBounds` in global top-left points): the window in the frame's
+    /// normalized bottom-left space, nil when the display has no size. Only a
+    /// window with nothing in front of it owns the frame's pane separators.
+    /// The reading is partial (it judges no box by neighbours it may not have
+    /// seen) when the display shows less than three quarters of the window's
+    /// width or height, or a window in front hides a block of it wider and
+    /// taller than a quarter of it. A window missing from the list counts as
+    /// hidden: when unsure, it is content.
+    public static func geometry(
+        of window: VisibleWindow, displayBounds: CGRect, pixelsPerPoint: CGFloat,
+        windows: [VisibleWindow], excludedBundleIds: Set<String>
+    ) -> (geometry: OCRWindowGeometry?, ownsSeparators: Bool) {
+        let covered = isCovered(window, windows: windows, excludedBundleIds: excludedBundleIds)
+        let rect = OCRWindowGeometry.normalizedRect(of: window.bounds, in: displayBounds)
+        guard !rect.isNull else { return (nil, !covered) }
+        var partial = !OCRWindowGeometry.seesMost(displayBounds, of: window.bounds)
+            || !windows.contains { $0.windowId == window.windowId }
+        for other in windows {
+            if other.windowId == window.windowId { break }
+            if let bundle = other.bundleId, isExcluded(bundle, from: excludedBundleIds) { continue }
+            if OCRWindowGeometry.hidesPart(other.bounds.intersection(window.bounds), of: window.bounds) {
+                partial = true
+            }
+        }
+        return (OCRWindowGeometry(rect: rect, pixelsPerPoint: pixelsPerPoint, title: window.title,
+                                  bundleId: window.bundleId, partial: partial),
+                !covered)
+    }
+
     static func isEligible(
         _ window: VisibleWindow, focusedWindowId: CGWindowID?,
         excludedBundleIds: Set<String>, denylist: SensitiveCaptureDenylist
