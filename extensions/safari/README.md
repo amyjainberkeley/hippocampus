@@ -44,13 +44,12 @@ Hippocampus.app/
 
 ## Toolbar icon
 
-The toolbar icon set under `icons/` is generated from
-`assets/branding/AppIcon.iconset/icon_512x512.png` so Safari, Chromium, and the
-macOS app present the same mark. Regenerate after any change to the source
-icon:
+The toolbar icons under `icons/` are drawn from the same geometry as the
+app icon, so Safari, Chromium and the Mac app show the same mark, and both
+browsers get identical files. Regenerate after any change to the mark:
 
 ```bash
-python3 scripts/generate-extension-toolbar-icons.py
+scripts/generate-brand-assets.sh
 ```
 
 `build-app.sh` copies `icons/` into the `.appex` `Resources/icons/` during

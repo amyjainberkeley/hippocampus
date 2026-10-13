@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 160" role="img" aria-label="The menu-bar icon: remembering, skipping this window, paused or off, needs you">
+<title>The menu-bar icon: remembering, skipping this window, paused or off, needs you</title>
+<g font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="15" fill="#F5F5F7">
+<g transform="translate(62.001 28.636) scale(0.6)"><path d="M1.5 0H14Q15.5 0 15.5 1.5V98.5Q15.5 100 14 100H1.5Q0 100 0 98.5V1.5Q0 0 1.5 0ZM12.5 44L15.5 40C21 33.2 27.25 28 38.75 28C50.84 28 62 37.87 62 51.5V98.5Q62 100 60.5 100H48.7Q47.2 100 47.2 98.5V52.4C47.2 44.4 41.85 40.4 33.25 40.4C24.25 40.4 18.1 43 15.5 50.5L12.5 54.5Z"/><path d="M77 29.2H89.5Q91 29.2 91 30.7V98.5Q91 100 89.5 100H77Q75.5 100 75.5 98.5V30.7Q75.5 29.2 77 29.2Z"/><circle cx="83.25" cy="7.96" r="10.08"/></g>
+<text x="90" y="136" text-anchor="middle">Remembering</text>
+<g transform="translate(242.001 28.636) scale(0.6)"><path d="M1.5 0H14Q15.5 0 15.5 1.5V98.5Q15.5 100 14 100H1.5Q0 100 0 98.5V1.5Q0 0 1.5 0ZM12.5 44L15.5 40C21 33.2 27.25 28 38.75 28C50.84 28 62 37.87 62 51.5V98.5Q62 100 60.5 100H48.7Q47.2 100 47.2 98.5V52.4C47.2 44.4 41.85 40.4 33.25 40.4C24.25 40.4 18.1 43 15.5 50.5L12.5 54.5Z"/><path d="M77 29.2H89.5Q91 29.2 91 30.7V98.5Q91 100 89.5 100H77Q75.5 100 75.5 98.5V30.7Q75.5 29.2 77 29.2Z"/><circle cx="83.25" cy="4.48" r="9.69" fill="none" stroke="#F5F5F7" stroke-width="7.75"/></g>
+<text x="270" y="136" text-anchor="middle">Skipping this window</text>
+<g transform="translate(422.001 28.636) scale(0.6)"><g opacity="0.55"><path d="M1.5 0H14Q15.5 0 15.5 1.5V98.5Q15.5 100 14 100H1.5Q0 100 0 98.5V1.5Q0 0 1.5 0ZM12.5 44L15.5 40C21 33.2 27.25 28 38.75 28C50.84 28 62 37.87 62 51.5V98.5Q62 100 60.5 100H48.7Q47.2 100 47.2 98.5V52.4C47.2 44.4 41.85 40.4 33.25 40.4C24.25 40.4 18.1 43 15.5 50.5L12.5 54.5Z"/><path d="M77 29.2H89.5Q91 29.2 91 30.7V98.5Q91 100 89.5 100H77Q75.5 100 75.5 98.5V30.7Q75.5 29.2 77 29.2Z"/></g></g>
+<text x="450" y="136" text-anchor="middle">Paused or off</text>
+<g transform="translate(602.001 28.636) scale(0.6)"><path d="M1.5 0H14Q15.5 0 15.5 1.5V98.5Q15.5 100 14 100H1.5Q0 100 0 98.5V1.5Q0 0 1.5 0ZM12.5 44L15.5 40C21 33.2 27.25 28 38.75 28C50.84 28 62 37.87 62 51.5V98.5Q62 100 60.5 100H48.7Q47.2 100 47.2 98.5V52.4C47.2 44.4 41.85 40.4 33.25 40.4C24.25 40.4 18.1 43 15.5 50.5L12.5 54.5Z"/><path d="M77 0H89.5Q91 0 91 1.5V69.3Q91 70.8 89.5 70.8H77Q75.5 70.8 75.5 69.3V1.5Q75.5 0 77 0Z"/><circle cx="83.25" cy="92.04" r="10.08"/></g>
+<text x="630" y="136" text-anchor="middle">Needs you</text>
+</g>
+</svg>

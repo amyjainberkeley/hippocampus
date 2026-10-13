@@ -20,7 +20,13 @@ export const metadata: Metadata = {
   metadataBase: new URL('https://hippocampus-memory.amyjain.chatgpt.site'),
   title: { default: 'Hippocampus | Memory for your computer', template: '%s | Hippocampus' },
   description: 'A local, encrypted memory of your work. Revisit screenshots, search captured text, and bring source-linked context into your AI tools.',
-  icons: { icon: '/icon.png', apple: '/icon.png' },
+  icons: {
+    icon: [
+      { url: '/favicon-16.png', sizes: '16x16', type: 'image/png' },
+      { url: '/favicon.png', sizes: '32x32', type: 'image/png' },
+    ],
+    apple: '/apple-touch-icon.png',
+  },
 };
 
 export default function RootLayout({

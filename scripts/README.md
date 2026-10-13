@@ -105,7 +105,7 @@ Both generators are pure Python stdlib (no Pillow, no external deps). The build 
 
 | Asset | Source | Generator |
 |---|---|---|
-| `assets/installer/background.png` | `assets/branding/colors.json` + layered-memory mark | `generate-background.py` |
+| `assets/installer/background.png` | Text and an arrow, drawn by `render-background.swift` | `generate-background.py` |
 | `assets/installer/EULA.rtf` | `docs/legal/terms-of-service.md` | `generate-eula.py` |
 | `assets/installer/volume-icon.icns` | `assets/branding/AppIcon.icns` | verified mirror; the build stages the canonical file directly |
 

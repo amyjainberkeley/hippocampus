@@ -1,5 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="176.6 176.6 670.7 670.7" role="img" aria-label="Hippocampus curl mark: a golden-ratio curl with a dot for now">
-<title>Hippocampus curl mark: a golden-ratio curl with a dot for now</title>
-<defs><linearGradient id="ink" x1="0.15" y1="0" x2="0.85" y2="1"><stop offset="0" stop-color="#9CC3FF"/><stop offset="1" stop-color="#2E6BFF"/></linearGradient><mask id="gap" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024"><rect width="1024" height="1024" fill="#FFFFFF"/><circle cx="452.9" cy="581.5" r="79.2" fill="#000000"/></mask></defs>
-<g><path id="curl" d="M727.4 418.4 A270.0 270.0 0 0 0 345.5 418.4 A166.9 166.9 0 0 0 345.5 654.4 A103.1 103.1 0 0 0 491.4 654.4 A63.7 63.7 0 0 0 491.4 564.3 A39.4 39.4 0 0 0 435.7 564.3" fill="none" stroke="url(#ink)" stroke-width="88" stroke-linecap="round" mask="url(#gap)"/><circle id="now" cx="452.9" cy="581.5" r="52.8" fill="#2E6BFF"/></g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 -6 102 110" role="img" aria-label="Hippocampus hi mark: a lowercase h and i side by side">
+<title>Hippocampus hi mark: a lowercase h and i side by side</title>
+<path id="letters" d="M1.5 0H14Q15.5 0 15.5 1.5V98.5Q15.5 100 14 100H1.5Q0 100 0 98.5V1.5Q0 0 1.5 0ZM12.5 44L15.5 40C21 33.2 27.25 28 38.75 28C50.84 28 62 37.87 62 51.5V98.5Q62 100 60.5 100H48.7Q47.2 100 47.2 98.5V52.4C47.2 44.4 41.85 40.4 33.25 40.4C24.25 40.4 18.1 43 15.5 50.5L12.5 54.5ZM77 29.2H89.5Q91 29.2 91 30.7V98.5Q91 100 89.5 100H77Q75.5 100 75.5 98.5V30.7Q75.5 29.2 77 29.2Z" fill="#0F1B3D"/><circle id="dot" cx="83.25" cy="7.96" r="10.08" fill="#2F6BFF"/>
 </svg>

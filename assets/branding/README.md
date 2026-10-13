@@ -2,31 +2,48 @@
 
 External product name: **Hippocampus**. Engineering codename: **MCI**.
 
+## The Mark
+
+**hi**: a lowercase h and i side by side, navy on a white tile, with the dot of
+the i in blue. The Dock, the menu bar, Ask, the browser extensions, the website
+and the installer all show it.
+
+In the menu bar the dot says what Hippocampus is doing:
+
+| Picture | Means |
+|---|---|
+| hi, solid dot | Remembering |
+| hi, hollow dot | Skipping this window |
+| h and a dotless i, dimmed | Paused or off |
+| h! | Needs you |
+
+A solid dot means it is remembering. No solid dot means it is not.
+`hi-states-light.svg` and `hi-states-dark.svg` show the four pictures with
+their words.
+
 ## Source Of Truth
+
+One file draws every version of the mark:
+`apps/hippocampus/Sources/HippocampusKit/Brand/HiMarkGeometry.swift`. The app
+draws the menu bar and Ask from it while running, and
+`scripts/generate-brand-assets.sh` draws every file here from it.
 
 | File | Purpose |
 |---|---|
-| `AppIcon.svg` | Canonical app icon: the curl mark on a graphite tile. |
-| `AppIcon-template.svg` | Monochrome, transparent menu-bar version of the same mark. |
-| `AppIcon.iconset/` | macOS app-icon PNGs from 16 through 1024 px. |
-| `AppIcon.icns` | Compiled Finder, Dock, Launchpad, Cmd-Tab, DMG, and Gatekeeper icon. |
-| `hippocampus-icon.svg` | The same mark without the tile, for light backgrounds. |
-| `hippocampus-wordmark.svg` | Text-only product wordmark using the Apple system sans stack. |
-| `colors.json` | Canonical adaptive product and semantic color tokens. |
+| `AppIcon.svg` | The app icon: the mark on its tile. |
+| `AppIcon-template.svg` | The mark in one color, without the tile. |
+| `hippocampus-icon.svg` | The mark in its colors, without the tile, for light backgrounds. |
+| `hi-states-light.svg`, `hi-states-dark.svg` | The four menu-bar pictures and their words. |
+| `AppIcon.iconset/` | App icon PNGs from 16 to 1024 px. |
+| `AppIcon.icns` | The Finder, Dock, Launchpad, ⌘-Tab, DMG and Gatekeeper icon. |
+| `hippocampus-wordmark.svg` | Text-only wordmark in the Apple system sans. |
+| `colors.json` | Product and semantic color tokens. |
 
-The Dock, menu bar, browser extensions and installer share one mark: a
-golden-ratio curl (the seahorse shape the hippocampus is named for) closing on
-a dot for *now*. Memory gathers toward the present moment. The curl is built
-from quarter-circle arcs whose radii shrink by the golden ratio, so it stays
-even at every size. In single-colour versions the curl stops short of the dot,
-so the dot reads as its own point in the menu bar. The brain mark, the nested
-H tiles and the black-and-mint artwork are retired.
+## Colors
 
-## Palette
-
-- Icon tile: graphite `#2A2D35` to `#0B0C10`, a quiet dark surface like the
-  Mac's own pro tools, so the mark carries the colour.
-- Curl: `#9CC3FF` to `#2E6BFF`; dot `#FFFFFF`.
+- Tile: `#FFFFFF` at the top to `#E9EEF6` at the bottom.
+- Letters: `#0F1B3D`.
+- Dot: `#2F6BFF`.
 
 Product surfaces stay adaptive and light-first:
 
@@ -38,29 +55,29 @@ Product surfaces stay adaptive and light-first:
 - Coral change marker: `#C7473A`
 
 Cobalt marks actions, coral marks changes or attention, and neutral grays carry
-structure. Do not restore neon mint.
+structure.
 
-## Design Intent
+## Drawing
 
-Recognizable at Dock and menu-bar sizes, with no lettering or decorative
-wallpaper. All three SVGs share the `curl` path and the `now` dot exactly; only
-the tile and the colours differ. The geometry is original to this project.
+- **App icon:** Apple's 1024 grid, an 824 tile inside a 100 gutter with a soft
+  shadow and a hairline edge. The mark spans 56% of the tile's width, with a
+  faint shadow under the letters.
+- **Small sizes:** stems, baseline and dot sit on whole pixels, and the letter
+  shadow starts at 64 px. At 16 px the app icon's mark is slightly larger, so
+  the h, the i and the dot stay three shapes.
+- **Browser toolbar icons and the favicon:** the tile fills the canvas, with no
+  gutter and no tile shadow.
+- **Touch icon:** an opaque square; iOS rounds the corners.
+- **Menu bar:** four single-color templates at 1x, 2x and 3x, which macOS tints
+  for light and dark menu bars.
 
 ## Regenerating Assets
 
-The SVGs are the source of truth. Rasterize them on a transparent background
-with any SVG renderer that supports filters and masks; the shipped PNGs were
-rendered by headless Chrome at each exact size:
-
-| Output | Source | Sizes (px) |
-|---|---|---|
-| `AppIcon.iconset/icon_NxN[@2x].png` | `AppIcon.svg` | 16, 32, 32, 64, 128, 256, 256, 512, 512, 1024 |
-
-Then:
-
 ```bash
-iconutil -c icns assets/branding/AppIcon.iconset -o assets/branding/AppIcon.icns
-cp assets/branding/AppIcon.icns assets/installer/volume-icon.icns
-python3 scripts/generate-extension-toolbar-icons.py   # needs Pillow
+scripts/generate-brand-assets.sh          # every SVG and PNG, AppIcon.icns, the installer's volume icon and website/public/icon.png
+scripts/generate-brand-assets.sh --check  # fails if the SVGs no longer match the geometry
 scripts/test-product-visual-assets.sh
 ```
+
+The generator draws the PNGs with Core Graphics. PNG bytes can differ between
+macOS versions, so `--check` compares only the SVGs.

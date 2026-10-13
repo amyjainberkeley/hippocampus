@@ -772,7 +772,7 @@ if [[ -f "$APPEX_HANDLER" ]]; then
     done
 
     # Toolbar icon set (referenced by manifest action.default_icon).
-    # Regenerate with scripts/generate-extension-toolbar-icons.py.
+    # Regenerate with scripts/generate-brand-assets.sh.
     if [[ -d "$SAFARI_EXT_DIR/icons" ]]; then
         mkdir -p "$APPEX_RESOURCES/icons"
         cp "$SAFARI_EXT_DIR/icons"/*.png "$APPEX_RESOURCES/icons/"

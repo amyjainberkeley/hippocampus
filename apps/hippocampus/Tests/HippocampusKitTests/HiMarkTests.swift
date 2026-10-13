@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: TBD-private
 //
 // The hi mark's geometry: what the parsed paths cover, where the parts sit,
-// and which parts each picture draws.
+// which parts each picture draws, and that the shipped SVGs carry the same
+// letters.
 
 import CoreGraphics
 import XCTest
@@ -105,6 +106,22 @@ final class HiMarkTests: XCTestCase {
         XCTAssertTrue(small.contains(CGPoint(x: 50, y: 50)))
         XCTAssertTrue(small.contains(CGPoint(x: 50, y: 0.5)))
         XCTAssertFalse(small.contains(CGPoint(x: 1, y: 1)), "the corners are rounded")
+    }
+
+    /// The shipped icons carry the same letters the app draws; the asset
+    /// test's `--check` compares the rest of each file.
+    func testTheShippedSVGsCarryTheseExactLetters() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        for name in ["AppIcon.svg", "AppIcon-template.svg", "hippocampus-icon.svg"] {
+            let svg = try String(contentsOf: root.appendingPathComponent("assets/branding/\(name)"), encoding: .utf8)
+            XCTAssertTrue(svg.contains("<path id=\"letters\" d=\"\(HiMark.lettersSVGPath)\""), name)
+            XCTAssertTrue(svg.contains("<circle id=\"dot\" cx=\"83.25\" cy=\"7.96\" r=\"10.08\""), name)
+        }
     }
 
     func testTheColorsAreTheLabColors() {
