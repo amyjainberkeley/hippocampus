@@ -417,11 +417,16 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     /// unfocused window's lines as its own context event, attributed to that
     /// window. `split` runs after recognition and decides which windows may be
     /// emitted at all; every emitted window passes the same raw and compacted
-    /// secret checks as focused text. No screenshot is retained.
+    /// secret checks as focused text. No screenshot is retained. `geometry`
+    /// is the window in the display frame, which turns on roles; a window
+    /// that `ownsSeparators` (nothing in front of it) also takes the frame's
+    /// pane separators, while a covered one's pixels hold other windows'
+    /// edges, so it takes none.
     public func processBackground(
         tsUs: UInt64,
         input: OCREngineInput,
-        split: @escaping @Sendable ([OCRLine]) -> [(context: WorkflowContext, lines: [OCRLine])]
+        split: @escaping @Sendable ([OCRLine]) -> [(context: WorkflowContext, lines: [OCRLine],
+                                                     geometry: OCRWindowGeometry?, ownsSeparators: Bool)]
     ) async {
         if Self.killOcrEmit { return }
         let cascade = cascade, sink = sink, sequence = sequence, counters = counters
@@ -436,13 +441,15 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                             tsUs: tsUs,
                             context: group.context,
                             result: OCRResult(recognizedLines: group.lines,
-                                              durationMs: result.durationMs, timedOut: false),
+                                              durationMs: result.durationMs, timedOut: false,
+                                              separators: group.ownsSeparators ? result.separators : []),
                             cascade: cascade,
                             sink: sink,
                             sequence: sequence,
                             counters: counters,
                             pixelBuffer: input.pixelBuffer,
-                            background: true
+                            background: true,
+                            geometry: group.geometry
                         )
                     }
                 },
@@ -535,7 +542,14 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                         counters: counters,
                         pixelBuffer: input.pixelBuffer,
                         keyframeRetainer: keyframeRetainer,
-                        evidenceCandidate: evidenceCandidate
+                        evidenceCandidate: evidenceCandidate,
+                        // The focused stream's frame is the window itself.
+                        geometry: OCRWindowGeometry(
+                            rect: CGRect(x: 0, y: 0, width: 1, height: 1),
+                            pixelsPerPoint: input.pixelsPerPoint,
+                            title: context.windowTitle,
+                            bundleId: context.appBundleId
+                        )
                     )
                     disposition(resultDisposition)
                 },
@@ -642,6 +656,13 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     /// Every `OCREvent` byte that reaches the wire passed BOTH cascade
     /// passes. There is no other call site that emits `OCREvent` in
     /// the helper.
+    ///
+    /// `geometry` (the window in the frame) turns on roles: the text that
+    /// leaves is content, the U+001E separator, then chrome. Three strings
+    /// are scanned, and any hit is a tombstone: the raw join, the page in
+    /// reading order without roles (what was stored before roles, so
+    /// suppression is never weaker than it was), and the exact emitted text.
+    /// Without geometry the last two are the same string, as before.
     static func handleOCRResult(
         tsUs: UInt64,
         context: WorkflowContext,
@@ -653,7 +674,8 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         pixelBuffer: CVPixelBuffer? = nil,
         keyframeRetainer: (any KeyframeRetaining)? = nil,
         evidenceCandidate: KeyframeEvidenceCandidate? = nil,
-        background: Bool = false
+        background: Bool = false,
+        geometry: OCRWindowGeometry? = nil
     ) async {
         let text = result.recognizedLines.map(\.text).joined(separator: "\n")
         guard !result.timedOut,
@@ -705,22 +727,43 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                 )
                 return
             }
-            let memoryText = OCRMemoryText.make(
-                from: result.recognizedLines,
-                pixelSize: pixelBuffer.map {
-                    CGSize(width: CVPixelBufferGetWidth($0), height: CVPixelBufferGetHeight($0))
-                } ?? OCRMemoryText.defaultPixelSize
-            )
-            guard !memoryText.isEmpty else { return }
-            // Removing repeated lines can create new multiline adjacency. The
-            // exact text that leaves the helper must independently clear privacy.
-            if memoryText != text,
-               case .suppress(let reason) = cascade.decideOcr(text: memoryText, context: context) {
-                await emitTombstone(
-                    tsUs: tsUs, context: context, reason: reason,
-                    sink: sink, sequence: sequence, counters: counters
+            let pixelSize = pixelBuffer.map {
+                CGSize(width: CVPixelBufferGetWidth($0), height: CVPixelBufferGetHeight($0))
+            } ?? OCRMemoryText.defaultPixelSize
+            // The page in reading order, without roles: what was stored before
+            // roles existed.
+            let readingOrderText = OCRMemoryText.make(from: result.recognizedLines, pixelSize: pixelSize)
+            // With the window's geometry: content, the separator, then chrome.
+            let reading = geometry.map {
+                OCRMemoryText.reading(from: result.recognizedLines, pixelSize: pixelSize,
+                                      separators: result.separators, geometry: $0)
+            }
+            if let reading {
+                // Content-free: counts of blocks and lines only, never text.
+                OCRTrace.emit(
+                    "ocr-reading",
+                    "classified=\(reading.classified ? 1 : 0) "
+                        + "content_blocks=\(reading.contentBlocks) "
+                        + "chrome_blocks=\(reading.chromeBlocks) "
+                        + "chrome_lines=\(reading.chromeLines)"
                 )
-                return
+            }
+            let memoryText = reading?.stored ?? readingOrderText
+            guard !memoryText.isEmpty else { return }
+            // Removing repeated lines, reading panes in order and moving chrome
+            // after the separator can each create new multiline adjacency. The
+            // page in reading order and the exact text that leaves the helper
+            // must each independently clear privacy.
+            var candidates = [readingOrderText]
+            if memoryText != readingOrderText { candidates.append(memoryText) }
+            for candidate in candidates where candidate != text {
+                if case .suppress(let reason) = cascade.decideOcr(text: candidate, context: context) {
+                    await emitTombstone(
+                        tsUs: tsUs, context: context, reason: reason,
+                        sink: sink, sequence: sequence, counters: counters
+                    )
+                    return
+                }
             }
             // Validate the complete event with the zero-hash sentinel before
             // screenshot policy, encoding, or disk I/O becomes reachable.

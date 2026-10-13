@@ -79,8 +79,10 @@ public struct PaddleOCRRunner: OCREngine {
         }
     }
 
-    /// Any malformed geometry or confidence rejects the whole reading.
-    private static func decode(_ reply: Data, region r: CGRect) -> OCRResult? {
+    /// Any malformed geometry or confidence rejects the whole reading. Pane
+    /// separators are additive: a worker that sends none still reads, and a
+    /// malformed one is skipped rather than costing the lines.
+    static func decode(_ reply: Data, region r: CGRect) -> OCRResult? {
         guard let decoded = try? JSONDecoder().decode(Reply.self, from: reply), decoded.version == 1,
               decoded.lines.count <= 4096 else { return nil }
         var lines: [OCRLine] = []
@@ -93,7 +95,15 @@ public struct PaddleOCRRunner: OCREngine {
                 x: r.minX + b.minX*r.width, y: r.minY + b.minY*r.height,
                 width: b.width*r.width, height: b.height*r.height), confidence: line.confidence))
         }
-        return OCRResult(recognizedLines: lines, durationMs: 0, timedOut: false)
+        // Mapped from the region to the frame as the lines are.
+        var separators: [CGRect] = []
+        for item in decoded.separators.prefix(64) where item.count == 4 && item.allSatisfy(\.isFinite) {
+            let (x, y, w, h) = (item[0], item[1], item[2], item[3])
+            guard (w == 0 && h > 0) || (h == 0 && w > 0) else { continue }
+            separators.append(CGRect(x: r.minX + x*r.width, y: r.minY + y*r.height,
+                                     width: w*r.width, height: h*r.height))
+        }
+        return OCRResult(recognizedLines: lines, durationMs: 0, timedOut: false, separators: separators)
     }
 
     private static func perform(input: OCREngineInput, executableURL: URL, deadline: DispatchTime, control: PaddleOCRProcessControl) -> OCRResult {
@@ -158,10 +168,19 @@ public struct PaddleOCRRunner: OCREngine {
     private struct Reply: Decodable {
         let version: Int
         let lines: [Line]
+        let separators: [[Double]]
         struct Line: Decodable {
             let text: String
             let confidence: Float
             let box: [Double]
+        }
+        private enum CodingKeys: String, CodingKey { case version, lines, separators }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            version = try container.decode(Int.self, forKey: .version)
+            lines = try container.decode([Line].self, forKey: .lines)
+            separators = (try? container.decodeIfPresent([[Double]].self, forKey: .separators)) ?? []
         }
     }
 }

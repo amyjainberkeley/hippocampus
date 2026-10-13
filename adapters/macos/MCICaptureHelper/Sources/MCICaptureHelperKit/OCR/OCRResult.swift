@@ -44,15 +44,23 @@ public struct OCRResult: Sendable, Equatable {
     public let recognizedLines: [OCRLine]
     public let durationMs: UInt64
     public let timedOut: Bool
+    /// Pane separators: long straight edges no text box crosses (the Paddle
+    /// worker's `separators`), in the lines' normalized space with a
+    /// bottom-left origin, width 0 for a vertical one and height 0 for a
+    /// horizontal one. Geometry only, never text. Empty when the engine sends
+    /// none (Vision in development builds, or an older worker).
+    public let separators: [CGRect]
 
     public init(
         recognizedLines: [OCRLine],
         durationMs: UInt64,
-        timedOut: Bool
+        timedOut: Bool,
+        separators: [CGRect] = []
     ) {
         self.recognizedLines = recognizedLines
         self.durationMs = durationMs
         self.timedOut = timedOut
+        self.separators = separators
     }
 
     /// Convenience: empty result used on engine error / no input.

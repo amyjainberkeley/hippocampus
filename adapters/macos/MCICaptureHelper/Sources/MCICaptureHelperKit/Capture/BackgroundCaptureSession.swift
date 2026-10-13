@@ -241,6 +241,7 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
             pixelBuffer: pixelBuffer, roi: BackgroundCapturePolicy.ocrRegion(readRegion),
             pixelsPerPoint: bounds.width > 0 ? CGFloat(CVPixelBufferGetWidth(pixelBuffer)) / bounds.width : 1)
         let emitter = emitter
+        let pixelsPerPoint = input.pixelsPerPoint
         Task {
             await emitter.processBackground(tsUs: tsUs, input: input) { lines in
                 let groups = BackgroundCapturePolicy.attribute(
@@ -252,9 +253,17 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
                 OCRTrace.emit("background-attribute", "lines=\(lines.count) windows=\(groups.count) "
                     + "kept=\(groups.reduce(0) { $0 + $1.lines.count }) changed_windows=\(changed.count)")
                 return changed.map { group in
-                    (WorkflowContext(appBundleId: group.window.bundleId, windowTitle: group.window.title,
-                                     url: nil, pageText: nil),
-                     group.lines)
+                    // The window in the display frame (global top-left points to
+                    // the frame's normalized bottom-left space), which turns on roles.
+                    let rect = OCRWindowGeometry.normalizedRect(of: group.window.bounds, in: bounds)
+                    return (WorkflowContext(appBundleId: group.window.bundleId, windowTitle: group.window.title,
+                                            url: nil, pageText: nil),
+                            group.lines,
+                            rect.isNull ? nil : OCRWindowGeometry(rect: rect, pixelsPerPoint: pixelsPerPoint,
+                                                                  title: group.window.title,
+                                                                  bundleId: group.window.bundleId),
+                            !BackgroundCapturePolicy.isCovered(group.window, windows: windows,
+                                                               excludedBundleIds: excluded))
                 }
             }
         }

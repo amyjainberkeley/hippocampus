@@ -138,6 +138,22 @@ public enum BackgroundCapturePolicy {
         return order.compactMap { groups[$0] }
     }
 
+    /// Whether a window drawn in the pixels in front of `window` overlaps it
+    /// (`windows` front to back). A covered window's part of the frame holds
+    /// other windows' edges, so it takes no pane separators from the frame.
+    /// A window missing from the list counts as covered: when unsure, content.
+    public static func isCovered(
+        _ window: VisibleWindow, windows: [VisibleWindow], excludedBundleIds: Set<String>
+    ) -> Bool {
+        for other in windows {
+            if other.windowId == window.windowId { return false }
+            if let bundle = other.bundleId, isExcluded(bundle, from: excludedBundleIds) { continue }
+            let overlap = other.bounds.intersection(window.bounds)
+            if !overlap.isNull && overlap.width > 0 && overlap.height > 0 { return true }
+        }
+        return true
+    }
+
     static func isEligible(
         _ window: VisibleWindow, focusedWindowId: CGWindowID?,
         excludedBundleIds: Set<String>, denylist: SensitiveCaptureDenylist
