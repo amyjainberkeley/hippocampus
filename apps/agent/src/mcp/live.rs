@@ -33,6 +33,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mci_brain::graph::{Entity, EntityIdentity};
+use mci_brain::reading::{excerpt, reading, ExcerptQuery};
 use mci_brain::{
     explicit_evidence_signal, has_explicit_current_supersession_context, BrainStats, BrainStore,
     EmbedError, Embedder, EntityId, EpisodeRecord, Event, EventId, EventRecord, EvidenceCandidate,
@@ -352,6 +353,7 @@ impl LiveBrainReader {
             });
         }
 
+        let excerpt_query = excerpt_query(query);
         let mut out: Vec<McpHit> = Vec::with_capacity(raw.len());
         let mut evidence_candidates = Vec::with_capacity(raw.len());
         for (event_id, score) in raw {
@@ -364,6 +366,7 @@ impl LiveBrainReader {
             };
             evidence_candidates.push((event_id, event.text.clone()));
             let (entities, linked_event_ids) = self.enrich_hit(event_id);
+            let text_snippet = self.shown_text(&event, &excerpt_query);
             out.push(McpHit {
                 record: EventRecord {
                     event_id,
@@ -371,7 +374,7 @@ impl LiveBrainReader {
                     app_bundle_id: event.app_bundle_id,
                     window_title: event.window_title,
                     url: event.url,
-                    text_snippet: EventRecord::truncate_snippet(&event.text),
+                    text_snippet,
                 },
                 score,
                 entities,
@@ -433,12 +436,13 @@ impl LiveBrainReader {
         let outcome = retriever
             .retrieve_outcome(&rq)
             .map_err(|e| BrainReaderError::Backend(format!("hybrid retrieve: {e}")))?;
+        let excerpt_query = excerpt_query(query);
         match outcome {
             RetrievalOutcome::Matched { matches } => Ok(McpRecallOutcome::Matched {
-                hits: self.materialize_matches(matches)?,
+                hits: self.materialize_matches(matches, &excerpt_query)?,
             }),
             RetrievalOutcome::Contradicted { matches } => Ok(McpRecallOutcome::Contradicted {
-                evidence: self.materialize_matches(matches)?,
+                evidence: self.materialize_matches(matches, &excerpt_query)?,
             }),
             RetrievalOutcome::NothingMatched { reason } => {
                 Ok(McpRecallOutcome::NothingMatched { reason })
@@ -448,14 +452,35 @@ impl LiveBrainReader {
                 fallback_matches,
             } => Ok(McpRecallOutcome::Degraded {
                 degradation,
-                related_context: self.materialize_matches(fallback_matches)?,
+                related_context: self.materialize_matches(fallback_matches, &excerpt_query)?,
             }),
         }
+    }
+
+    /// What an AI tool is shown of one recalled event: the passage of its
+    /// reading around the query's words (or its first lines, the last for a
+    /// terminal or chat), never the stored header or U+001E, capped at
+    /// [`EventRecord::SNIPPET_MAX_CHARS`] bytes. The store keeps the raw text.
+    fn shown_text(&self, event: &Event, query: &ExcerptQuery) -> String {
+        let app = event.app_bundle_id.as_deref();
+        let read = reading(
+            &event.text,
+            self.event_source(event.id),
+            app,
+            event.window_title.as_deref(),
+        );
+        EventRecord::truncate_snippet(&excerpt(
+            &read,
+            app,
+            query,
+            EventRecord::SNIPPET_MAX_CHARS,
+        ))
     }
 
     fn materialize_matches(
         &self,
         matches: Vec<RetrievalMatch>,
+        query: &ExcerptQuery,
     ) -> Result<Vec<McpHit>, BrainReaderError> {
         let mut out = Vec::with_capacity(matches.len());
         for value in matches {
@@ -468,6 +493,7 @@ impl LiveBrainReader {
                 continue;
             };
             let (entities, linked_event_ids) = self.enrich_hit(hit.event_id);
+            let text_snippet = self.shown_text(&event, query);
             out.push(McpHit {
                 record: EventRecord {
                     event_id: hit.event_id,
@@ -475,7 +501,7 @@ impl LiveBrainReader {
                     app_bundle_id: event.app_bundle_id,
                     window_title: event.window_title,
                     url: event.url,
-                    text_snippet: EventRecord::truncate_snippet(&event.text),
+                    text_snippet,
                 },
                 score: hit.score_combined,
                 entities,
@@ -654,6 +680,21 @@ impl BrainReader for LiveBrainReader {
         );
         Ok(packet)
     }
+}
+
+/// The words a recall passage centres on: the query's words without the
+/// question words a lexical search drops, so "what did I decide about the
+/// beta" centres on "decide" and "beta", not on the first "the".
+fn excerpt_query(query: &str) -> ExcerptQuery {
+    let terms = relaxed_fts5_terms(query);
+    if terms.is_empty() {
+        return ExcerptQuery::new(query);
+    }
+    let alternatives: Vec<_> = terms
+        .iter()
+        .map(|term| mci_brain::fts_sanitizer::LexicalAlternative::Keywords(term))
+        .collect();
+    ExcerptQuery::from_alternatives(&alternatives)
 }
 
 fn relaxed_fts5_terms(query: &str) -> Vec<String> {

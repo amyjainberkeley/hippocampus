@@ -6,10 +6,11 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use mci_brain::reading::{self, ExcerptQuery, Reading};
 use mci_brain::understanding::{
     ObservedEvent, Proposition, PropositionKind, PropositionStatus, SearchRecord, SessionNote,
 };
-use mci_brain::{SqlCipherBrainStore, StoreError};
+use mci_brain::{EventRecord, EventSource, SqlCipherBrainStore, StoreError};
 
 use super::mind::{MindCallError, MindClient};
 use super::{apps, observe, Understanding};
@@ -348,15 +349,34 @@ fn answer_sources(screen: Option<Source>, memories: Vec<Source>, cited: &[usize]
     }
 }
 
+/// What was on the screen in a capture: for a browser page read both ways,
+/// the part read off the screen (T10), otherwise the reading. Never the
+/// stored header.
+fn screen_text(event: &ObservedEvent) -> Reading {
+    reading::screen_reading(
+        &event.text,
+        EventSource::from_stored(&event.source),
+        event.app_bundle_id.as_deref(),
+        event.window_title.as_deref(),
+    )
+}
+
 fn screen_source(event: &ObservedEvent) -> Source {
+    let app = event.app_bundle_id.as_deref();
+    let shown = reading::excerpt(
+        &screen_text(event),
+        app,
+        &ExcerptQuery::default(),
+        EventRecord::SNIPPET_MAX_CHARS,
+    );
     Source {
         n: 1,
         event_id: event.id,
         ts_us: event.ts_us,
-        app: apps::name(event.app_bundle_id.as_deref().unwrap_or("")),
+        app: apps::name(app.unwrap_or("")),
         title: event.window_title.clone(),
         url: event.url.clone(),
-        text: clip(&event.text, 512),
+        text: shown,
     }
 }
 
@@ -394,7 +414,7 @@ pub fn answer(
         (Some(event), Some(source)) => Some(format!(
             "[1] {}\n{}",
             match &source.title { Some(t) => format!("{} — {t}", source.app), None => source.app.clone() },
-            excerpt(&event.text, ON_SCREEN_CHARS)
+            excerpt(&screen_text(event).main, ON_SCREEN_CHARS)
         )),
         _ => now.map(str::to_owned),
     };
@@ -653,7 +673,7 @@ pub fn suggest(
             .collect();
         let now_text = current.map_or_else(
             || now.app.as_deref().map(apps::name).unwrap_or_default(),
-            |e| format!("{} — {}\n{}", apps::name(e.app_bundle_id.as_deref().unwrap_or("")), e.window_title.clone().unwrap_or_default(), clip(&e.text, 1_000)),
+            |e| format!("{} — {}\n{}", apps::name(e.app_bundle_id.as_deref().unwrap_or("")), e.window_title.clone().unwrap_or_default(), clip(&screen_text(e).main, 1_000)),
         );
         let recent_lines: Vec<String> = notes.iter().rev().take(6).map(|n| format!("{} {}: {}", observe::clock(n.start_us, tz), n.title, n.beneath)).collect();
         if let Ok(predicted) = mind.call::<_, SuggestOut>(
@@ -814,6 +834,35 @@ mod tests {
             "Using Preview. Hippocampus has not read the window in front, so what is in it is not known."
         );
         assert!(unread_window_note(None).starts_with("Hippocampus has not read"));
+    }
+
+    const NOTES_HEADER: &str = "[app=com.apple.Notes | title=Launch plan | url=? | ts=2026-10-12T14:02:00.000Z]\n";
+
+    #[test]
+    fn the_screen_is_shown_and_read_without_its_header_or_chrome() {
+        let stored = format!("{NOTES_HEADER}\u{4e09} The beta opens on October 21.\n\n\u{1e}\nRecently Deleted 3");
+        let event = seen(1, 0, "com.apple.Notes", Some("Launch plan"), &stored);
+        assert_eq!(screen_text(&event).main, "The beta opens on October 21.");
+        assert_eq!(screen_source(&event).text, "The beta opens on October 21.");
+    }
+
+    #[test]
+    fn a_page_read_both_ways_is_on_screen_as_the_part_that_was_visible() {
+        let stored = format!("{NOTES_HEADER}The whole page, top to bottom\n\n[VISIBLE-OCR]\nWhat was visible\n\n\u{1e}\nTabs");
+        let mut event = seen(1, 0, "com.google.Chrome", Some("Pricing"), &stored);
+        event.source = "browser_page_with_ocr".into();
+        assert_eq!(screen_text(&event).main, "What was visible");
+        assert_eq!(screen_source(&event).text, "What was visible");
+    }
+
+    #[test]
+    fn a_terminal_on_screen_is_shown_by_its_last_lines() {
+        let lines: Vec<String> = (1..=100).map(|n| format!("step {n} ok")).collect();
+        let stored = format!("{NOTES_HEADER}{}\nerror: build failed", lines.join("\n"));
+        let event = seen(1, 0, "com.apple.Terminal", Some("zsh"), &stored);
+        let text = screen_source(&event).text;
+        assert!(text.ends_with("error: build failed"), "{text:?}");
+        assert!(text.len() <= 512);
     }
 
     #[test]

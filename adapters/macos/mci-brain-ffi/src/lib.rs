@@ -1255,13 +1255,11 @@ pub unsafe extern "C" fn mci_brain_ffi_event_reading(
         None
     } else {
         // Safety: the caller passes a null-terminated C string.
-        match unsafe { CStr::from_ptr(query) }.to_str() {
-            Ok(text) => Some(ExcerptQuery::new(text)),
-            Err(_) => {
-                set_last_error("mci_brain_ffi_event_reading: non-UTF8 query");
-                return ptr::null_mut();
-            }
-        }
+        let Ok(text) = unsafe { CStr::from_ptr(query) }.to_str() else {
+            set_last_error("mci_brain_ffi_event_reading: non-UTF8 query");
+            return ptr::null_mut();
+        };
+        Some(ExcerptQuery::new(text))
     };
     let Ok(value) = handle.store.event_text(EventId(event_id)) else {
         set_last_error("mci_brain_ffi_event_reading: stored text unavailable");

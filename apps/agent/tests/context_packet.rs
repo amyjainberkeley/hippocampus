@@ -618,3 +618,61 @@ fn multiword_focus_can_match_across_claim_fields() {
         1
     );
 }
+
+#[test]
+fn recent_work_is_found_by_its_stored_text_and_shown_as_what_was_read() {
+    let source = event(
+        60,
+        1_900_000,
+        "[app=com.apple.Notes | title=Plan | url=? | ts=1970-01-01T00:00:01.900Z]\n\u{4e09} The beta opens on October 21.\n\n\u{1e}\nRoadmap",
+    );
+    let mut evidence = ContextEvidence::from_event(&source, EvidencePriority::Recent, None);
+    evidence.source_kind = "screen_ocr".into();
+    let packet = compile_context_packet(
+        Some("roadmap"),
+        NOW_US,
+        ContextBudget::new(200, 4),
+        ContextSources {
+            claims: Vec::new(),
+            evidence: vec![evidence],
+        },
+    );
+    let items = &section(&packet, ContextSectionKind::Evidence).items;
+    assert_eq!(
+        items.len(),
+        1,
+        "a focus word in the window's chrome still finds it"
+    );
+    assert_eq!(items[0].text, "Event 60: The beta opens on October 21.");
+    let markdown = render_context_packet_markdown(&packet);
+    assert!(!markdown.contains("[app="));
+    assert!(!markdown.contains('\u{1e}'));
+}
+
+#[test]
+fn an_observation_with_nothing_left_to_read_is_not_listed_as_evidence() {
+    let source = event(
+        61,
+        1_900_000,
+        "[app=com.apple.Notes | title=Plan | url=? | ts=1]\n\u{25cf} \u{25a1}",
+    );
+    let mut evidence = ContextEvidence::from_event(&source, EvidencePriority::Recent, None);
+    evidence.source_kind = "screen_ocr".into();
+    let packet = compile_context_packet(
+        None,
+        NOW_US,
+        ContextBudget::new(200, 4),
+        ContextSources {
+            claims: Vec::new(),
+            evidence: vec![evidence],
+        },
+    );
+    assert!(section(&packet, ContextSectionKind::Evidence)
+        .items
+        .is_empty());
+    assert_eq!(
+        packet.citations.len(),
+        1,
+        "the window is still cited as seen"
+    );
+}

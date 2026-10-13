@@ -7,7 +7,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use mci_brain::{ClaimStatus, Event, MemoryClaim, NothingMatchedReason, RetrievalDegradation};
+use mci_brain::reading::{body, reading};
+use mci_brain::{
+    ClaimStatus, Event, EventSource, MemoryClaim, NothingMatchedReason, RetrievalDegradation,
+};
 use serde::Serialize;
 
 const MIN_GROUNDED_CONFIDENCE: f32 = 0.65;
@@ -68,7 +71,8 @@ pub struct ContextEvidence {
     pub window_title: Option<String>,
     /// Captured URL, when known.
     pub url: Option<String>,
-    /// Exact bounded source excerpt.
+    /// The event's stored text, header included. Filters and de-duplication
+    /// read it; the packet shows its reading instead.
     pub excerpt: String,
     /// Candidate-pool priority.
     pub priority: EvidencePriority,
@@ -718,8 +722,12 @@ fn add_observations(builder: &mut PacketBuilder, evidence: &[&ContextEvidence]) 
         }
     }
     for candidate in evidence {
+        let shown = shown_text(candidate);
+        if shown.is_empty() {
+            continue;
+        }
         let citation = citation_from_evidence(candidate);
-        let text = format!("Event {}: {}", candidate.event_id, candidate.excerpt.trim());
+        let text = format!("Event {}: {shown}", candidate.event_id);
         builder.add_item(
             ContextSectionKind::Evidence,
             ContextSectionStatus::Observed,
@@ -938,19 +946,21 @@ fn screen_ocr_fingerprint(candidate: &ContextEvidence) -> Option<String> {
 }
 
 fn context_body(excerpt: &str) -> &str {
-    let Some((header, body)) = excerpt.split_once('\n') else {
-        return excerpt;
-    };
-    if header.starts_with("[app=")
-        && header.contains(" | title=")
-        && header.contains(" | url=")
-        && header.contains(" | ts=")
-        && header.ends_with(']')
-    {
-        body
-    } else {
-        excerpt
-    }
+    body(excerpt)
+}
+
+/// What the packet shows of an observation: what the person was reading
+/// (the reading's `main`), never the stored header or U+001E.
+fn shown_text(candidate: &ContextEvidence) -> String {
+    reading(
+        &candidate.excerpt,
+        EventSource::from_stored(&candidate.source_kind),
+        candidate.app_bundle_id.as_deref(),
+        candidate.window_title.as_deref(),
+    )
+    .main
+    .trim()
+    .to_owned()
 }
 
 fn evidence_search_text(candidate: &ContextEvidence) -> String {

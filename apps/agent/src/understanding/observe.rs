@@ -14,7 +14,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use mci_brain::reading::reading;
 use mci_brain::understanding::{InteractionCounts, ObservedEvent, SearchRecord};
+use mci_brain::EventSource;
 
 use super::apps;
 
@@ -101,7 +103,8 @@ pub struct Segment {
     pub url: Option<String>,
     /// Events in it.
     pub event_ids: Vec<i64>,
-    /// The most complete text seen in it.
+    /// What the person was reading in it: the reading's `main` of its most
+    /// complete capture, without the stored header or the window's chrome.
     pub text: String,
     /// Key presses.
     pub keys: u64,
@@ -139,10 +142,23 @@ impl Segment {
     }
 }
 
+/// What the person was reading in one capture: the reading's `main`.
+fn read_text(event: &ObservedEvent) -> String {
+    reading(
+        &event.text,
+        EventSource::from_stored(&event.source),
+        event.app_bundle_id.as_deref(),
+        event.window_title.as_deref(),
+    )
+    .main
+}
+
 /// Merge a session's focused events into segments and attach input counts.
 #[must_use]
 pub fn segments(events: &[ObservedEvent], counts: &[InteractionCounts], session_end_us: u64) -> Vec<Segment> {
     let mut out: Vec<Segment> = Vec::new();
+    // The capture each segment's text comes from: its longest stored text.
+    let mut fullest: Vec<&ObservedEvent> = Vec::new();
     for event in events.iter().filter(|e| is_focus(&e.source)) {
         let app = event.app_bundle_id.clone().unwrap_or_else(|| "unknown".into());
         let same = out.last().is_some_and(|last: &Segment| {
@@ -154,8 +170,9 @@ pub fn segments(events: &[ObservedEvent], counts: &[InteractionCounts], session_
             let last = out.last_mut().expect("checked");
             last.event_ids.push(event.id);
             last.end_us = event.ts_us;
-            if event.text.len() > last.text.len() {
-                last.text = event.text.clone();
+            let chosen = fullest.last_mut().expect("one capture per segment");
+            if event.text.len() > chosen.text.len() {
+                *chosen = event;
             }
             if last.url.is_none() {
                 last.url = event.url.clone();
@@ -171,13 +188,17 @@ pub fn segments(events: &[ObservedEvent], counts: &[InteractionCounts], session_
                 title: event.window_title.clone(),
                 url: event.url.clone(),
                 event_ids: vec![event.id],
-                text: event.text.clone(),
+                text: String::new(),
                 keys: 0,
                 clicks: 0,
                 scrolls: 0,
                 pauses_us: Vec::new(),
             });
+            fullest.push(event);
         }
+    }
+    for (segment, event) in out.iter_mut().zip(fullest) {
+        segment.text = read_text(event);
     }
     if let Some(last) = out.last_mut() {
         last.end_us = last.end_us.max(session_end_us);
@@ -515,6 +536,32 @@ mod tests {
         assert!(text.contains("switched back and forth between"));
         assert!(text.contains("searched google: \"stripe seat pricing annual\""));
         assert!(text.chars().count() <= 4_001);
+    }
+
+    #[test]
+    fn a_segment_reads_what_the_person_read_without_the_header_or_status_bar() {
+        let stored = "[app=com.microsoft.VSCode | title=retention_worker.rs | url=? | ts=2026-10-12T14:02:00.000Z]\nfn sweep(store: &Store) -> u64 {\n    store.vacuum()\n}\n\n\u{1e}\n0 errors, 2 warnings Ln 14, Col 37 UTF-8 Rust";
+        let events = vec![ev(1, 0, "com.microsoft.VSCode", "retention_worker.rs", "screen_ocr", stored)];
+        let segs = segments(&events, &[], events[0].ts_us);
+        assert_eq!(segs[0].text, "fn sweep(store: &Store) -> u64 {\n    store.vacuum()\n}");
+        let s = signals(&events, &segs, &[]);
+        assert!(s.errors.is_empty(), "a status bar is not an error on screen: {:?}", s.errors);
+        let observation = render(&segs, &s, 0, 4_000);
+        assert!(!observation.contains("[app="), "{observation}");
+        assert!(observation.contains("fn sweep(store: &Store)"));
+    }
+
+    #[test]
+    fn a_segment_reads_its_fullest_capture() {
+        let short = "[app=com.apple.Notes | title=Plan | url=? | ts=1]\nTeam plan";
+        let long = "[app=com.apple.Notes | title=Plan | url=? | ts=2]\n\u{4e09} Team plan at $18 a seat\n\n\u{1e}\nNotes 17";
+        let events = vec![
+            ev(1, 0, "com.apple.Notes", "Plan", "screen_ocr", short),
+            ev(2, 1, "com.apple.Notes", "Plan", "screen_ocr", long),
+        ];
+        let segs = segments(&events, &[], events[1].ts_us);
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].text, "Team plan at $18 a seat");
     }
 
     #[test]

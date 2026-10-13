@@ -457,17 +457,7 @@ impl Server {
             Ok(rows) => {
                 let rows_json: Vec<serde_json::Value> = rows
                     .iter()
-                    .map(|r| {
-                        serde_json::json!({
-                            "event_id": r.event_id.0,
-                            "ts_us": r.ts_us,
-                            "app_bundle_id": r.app_bundle_id,
-                            "window_title": r.window_title,
-                            "url": r.url,
-                            "text_snippet": r.text_snippet,
-                            "source_kind": self.reader.event_source(r.event_id).as_str(),
-                        })
-                    })
+                    .map(|r| event_row_json(r, self.reader.event_source(r.event_id)))
                     .collect();
                 JsonRpcResponse::ok(
                     id,
@@ -602,17 +592,7 @@ impl Server {
             Ok(rows) => {
                 let rows_json: Vec<serde_json::Value> = rows
                     .iter()
-                    .map(|r| {
-                        serde_json::json!({
-                            "event_id": r.event_id.0,
-                            "ts_us": r.ts_us,
-                            "app_bundle_id": r.app_bundle_id,
-                            "window_title": r.window_title,
-                            "url": r.url,
-                            "text_snippet": r.text_snippet,
-                            "source_kind": self.reader.event_source(r.event_id).as_str(),
-                        })
-                    })
+                    .map(|r| event_row_json(r, self.reader.event_source(r.event_id)))
                     .collect();
                 JsonRpcResponse::ok(
                     id,
@@ -688,6 +668,31 @@ impl Server {
             Err(error) => brain_err_to_response(id, &error),
         }
     }
+}
+
+/// One event row as an AI tool sees it. `text_snippet` is the start of the
+/// row's reading, made from the store's bounded snippet: never the stored
+/// header or U+001E, at most [`mci_brain::EventRecord::SNIPPET_MAX_CHARS`]
+/// bytes. The store's own `text_snippet` is unchanged.
+fn event_row_json(
+    record: &mci_brain::EventRecord,
+    source: mci_brain::EventSource,
+) -> serde_json::Value {
+    let shown = mci_brain::reading::reading_prefix(
+        &record.text_snippet,
+        source,
+        record.app_bundle_id.as_deref(),
+        mci_brain::EventRecord::SNIPPET_MAX_CHARS,
+    );
+    serde_json::json!({
+        "event_id": record.event_id.0,
+        "ts_us": record.ts_us,
+        "app_bundle_id": record.app_bundle_id,
+        "window_title": record.window_title,
+        "url": record.url,
+        "text_snippet": mci_brain::EventRecord::truncate_snippet(&shown),
+        "source_kind": source.as_str(),
+    })
 }
 
 fn hit_json(hit: &McpHit, reader: &dyn BrainReader) -> serde_json::Value {
