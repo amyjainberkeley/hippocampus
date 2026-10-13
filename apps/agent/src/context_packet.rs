@@ -350,6 +350,42 @@ impl ContextUnderstanding {
     }
 }
 
+/// The "Recent work" and "About the user" block, as every packet that
+/// carries it writes it: `context`, `mci_context` and the session hook. Empty
+/// when there is nothing to tell.
+#[must_use]
+pub fn render_understanding_block(understanding: &ContextUnderstanding) -> String {
+    let mut output = String::new();
+    if understanding.is_empty() {
+        return output;
+    }
+    if !understanding.sessions.is_empty() {
+        output.push_str("\n## Recent work\n");
+        for session in &understanding.sessions {
+            let _ = writeln!(output, "- {session}");
+        }
+    }
+    if !understanding.about.is_empty() {
+        output.push_str("\n## About the user (inferred on this Mac, may be wrong)\n");
+        for claim in &understanding.about {
+            let events = claim
+                .event_ids
+                .iter()
+                .take(3)
+                .map(|event_id| format!("event {event_id}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            if events.is_empty() {
+                let _ = writeln!(output, "- {}", claim.text);
+            } else {
+                let _ = writeln!(output, "- {} [{events}]", claim.text);
+            }
+        }
+    }
+    output.push_str("\nMore, on request: mci_user_model, mci_sessions, mci_day.\n");
+    output
+}
+
 /// Render a prompt-ready, human-readable view of a typed context packet.
 ///
 /// This is a presentation of the same bounded packet returned by
@@ -385,30 +421,7 @@ pub fn render_context_packet_markdown(packet: &ContextPacket) -> String {
 
     let understanding = packet.understanding.as_ref().filter(|u| !u.is_empty());
     if let Some(understanding) = understanding {
-        if !understanding.sessions.is_empty() {
-            output.push_str("\n## Recent work\n");
-            for session in &understanding.sessions {
-                let _ = writeln!(output, "- {session}");
-            }
-        }
-        if !understanding.about.is_empty() {
-            output.push_str("\n## About the user (inferred on this Mac, may be wrong)\n");
-            for claim in &understanding.about {
-                let events = claim
-                    .event_ids
-                    .iter()
-                    .take(3)
-                    .map(|event_id| format!("event {event_id}"))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                if events.is_empty() {
-                    let _ = writeln!(output, "- {}", claim.text);
-                } else {
-                    let _ = writeln!(output, "- {} [{events}]", claim.text);
-                }
-            }
-        }
-        output.push_str("\nMore, on request: mci_user_model, mci_sessions, mci_day.\n");
+        output.push_str(&render_understanding_block(understanding));
     }
 
     for section in packet

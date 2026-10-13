@@ -1461,6 +1461,22 @@ pub fn render_handoff_with_citations(
     max_tokens: usize,
     clock: &RenderClock,
 ) -> (String, Vec<u64>) {
+    render_handoff_with_block(state, max_tokens, clock, "")
+}
+
+/// [`render_handoff_with_citations`] with `block` (the "Recent work" and
+/// "About the user" lines a session starts with, see
+/// [`crate::context_packet::render_understanding_block`]) placed after the
+/// title and "Last worked" lines, before every project section, and counted
+/// against the budget first: a client that cuts a long packet cuts project
+/// sections, never the block.
+#[must_use]
+pub fn render_handoff_with_block(
+    state: &ProjectState,
+    max_tokens: usize,
+    clock: &RenderClock,
+    block: &str,
+) -> (String, Vec<u64>) {
     if state.sessions.is_empty() {
         return (render_empty_handoff(&state.name), Vec::new());
     }
@@ -1482,6 +1498,8 @@ pub fn render_handoff_with_citations(
             plural(state.turns, "turn"),
         );
     }
+
+    out.push_str(block);
 
     let sources_heading_tokens = token_estimate("## Sources");
     let mut used = token_estimate(&out);
@@ -1834,6 +1852,21 @@ pub fn compile_handoff(
     max_tokens: usize,
     clock: &RenderClock,
 ) -> Result<HandoffPacket, String> {
+    compile_handoff_with_block(store, cwd, max_tokens, clock, "")
+}
+
+/// [`compile_handoff`] with the block a session starts with (see
+/// [`render_handoff_with_block`]).
+///
+/// # Errors
+/// A store read failure, as text for the caller's diagnostics.
+pub fn compile_handoff_with_block(
+    store: &SqlCipherBrainStore,
+    cwd: &Path,
+    max_tokens: usize,
+    clock: &RenderClock,
+    block: &str,
+) -> Result<HandoffPacket, String> {
     let root = resolve_project_root(cwd);
     let events = project_events(store, &root, cwd)?;
     let git = collect_git_evidence(&root);
@@ -1853,7 +1886,7 @@ pub fn compile_handoff(
             state = extract_project_state(&events, &sources);
         }
     }
-    let (packet, cited_event_ids) = render_handoff_with_citations(&state, max_tokens, clock);
+    let (packet, cited_event_ids) = render_handoff_with_block(&state, max_tokens, clock, block);
     Ok(HandoffPacket {
         project_root: root.display().to_string(),
         token_estimate: token_estimate(&packet),
@@ -1883,6 +1916,17 @@ pub fn hook_envelope(additional_context: &str) -> String {
 #[must_use]
 pub fn fallback_envelope() -> String {
     hook_envelope(NO_MEMORY_HOOK_TEXT)
+}
+
+/// What a session starts with when the project has no memory yet: the
+/// safety line and the block when there is one, else the fallback.
+#[must_use]
+pub fn no_project_memory_envelope(block: &str) -> String {
+    if block.trim().is_empty() {
+        fallback_envelope()
+    } else {
+        hook_envelope(&format!("{DISCLAIMER}\n{block}"))
+    }
 }
 
 /// Guarantees a hook run prints exactly one envelope within its deadline.

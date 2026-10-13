@@ -379,12 +379,6 @@ pub fn render(segments: &[Segment], signals: &Signals, tz_offset_secs: i32, max_
             line.push_str(&format!(" ({host})"));
         }
         line.push_str(&format!(": {} for {}", segment.activity(), minutes(segment.duration_us())));
-        if segment.keys > 0 {
-            line.push_str(&format!(", {} keys", segment.keys));
-        }
-        if let Some(longest) = segment.pauses_us.iter().max() {
-            line.push_str(&format!(", paused {} with no input", minutes(*longest)));
-        }
         let budget = share.clamp(80, 700);
         if !segment.text.trim().is_empty() {
             line.push_str(&format!(". Text: {}", excerpt(&segment.text, budget)));

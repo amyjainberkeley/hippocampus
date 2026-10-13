@@ -112,6 +112,26 @@ fn words(text: &str) -> BTreeSet<String> {
         .collect()
 }
 
+const DAY_US: u64 = 86_400_000_000;
+
+/// Whether a proposition is too old to use: one that goes stale fast (decay
+/// 0.9 or more) after a day without being seen again, 0.7 or more after a
+/// week, 0.4 or more after 45 days; below 0.4 it never goes stale.
+#[must_use]
+pub fn is_stale(decay: f64, updated_us: u64, now_us: u64) -> bool {
+    let age = now_us.saturating_sub(updated_us);
+    let after_days = if decay >= 0.9 {
+        1
+    } else if decay >= 0.7 {
+        7
+    } else if decay >= 0.4 {
+        45
+    } else {
+        return false;
+    };
+    age >= after_days * DAY_US
+}
+
 /// Jaccard similarity of word sets, 0..=1.
 #[must_use]
 pub fn similarity(a: &str, b: &str) -> f64 {
@@ -367,6 +387,21 @@ pub fn integrate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stale_claims_age_by_their_decay() {
+        let day = 86_400_000_000u64;
+        let now = 400 * day;
+        assert!(!is_stale(0.9, now - day + 1, now));
+        assert!(is_stale(0.9, now - day, now));
+        assert!(!is_stale(0.7, now - 6 * day, now));
+        assert!(is_stale(0.7, now - 7 * day, now));
+        assert!(!is_stale(0.4, now - 44 * day, now));
+        assert!(is_stale(0.5, now - 45 * day, now));
+        assert!(!is_stale(0.3, 0, now), "slow claims never go stale");
+        assert!(is_stale(9.0 / 10.0, now - 2 * day, now), "a stored score of 9 is 0.9");
+        assert!(!is_stale(0.9, now + day, now), "a clock that went back is not age");
+    }
 
     fn prop(id: i64, text: &str) -> Proposition {
         Proposition {

@@ -38,9 +38,18 @@ pub enum UnderstandingQuery {
         query: Option<String>,
         /// Most to return (default 20).
         limit: Option<usize>,
+        /// The You page's shape ([`model_page`]) instead of a list. Only the
+        /// CLI asks for it; the MCP server drops it.
+        #[serde(default)]
+        page: Option<bool>,
     },
     /// A day's sessions: surface and beneath.
     Sessions {
+        /// `YYYY-MM-DD`.
+        date: Option<String>,
+    },
+    /// The day overview the window draws ([`super::overview`]). CLI only.
+    Overview {
         /// `YYYY-MM-DD`.
         date: Option<String>,
     },
@@ -48,6 +57,17 @@ pub enum UnderstandingQuery {
 
 fn today(tz: i32, now_us: u64) -> String {
     local_date_string(i64::try_from(now_us / 1_000_000).unwrap_or(0), tz)
+}
+
+/// `[local midnight, local midnight + 24 h)` of `date_local` in `tz`.
+///
+/// # Errors
+/// A malformed date.
+pub fn day_bounds(date_local: &str, tz: i32) -> Result<(u64, u64), StoreError> {
+    let start_secs = crate::brief_worker::local_date_start_secs(date_local, tz)
+        .ok_or_else(|| StoreError::InvalidInput("date must be YYYY-MM-DD".into()))?;
+    let start_us = u64::try_from(start_secs).unwrap_or(0).saturating_mul(1_000_000);
+    Ok((start_us, start_us + 86_400_000_000))
 }
 
 /// A proposition for display.
@@ -100,29 +120,36 @@ pub fn run(store: &Arc<SqlCipherBrainStore>, tz: i32, now_us: u64, query: &Under
             let searches = store.search_queries_in_range(now_us.saturating_sub(hours * 3_600_000_000), now_us + 1, limit.unwrap_or(50).clamp(1, 500))?;
             serde_json::json!({ "searches": searches.iter().map(|s| search_json(s, tz)).collect::<Vec<_>>() })
         }
-        UnderstandingQuery::UserModel { query, limit } => {
+        UnderstandingQuery::UserModel { page: Some(true), .. } => model_page(store, tz, now_us)?,
+        UnderstandingQuery::UserModel { query, limit, .. } => {
             let limit = limit.unwrap_or(20).clamp(1, 200);
-            let items: Vec<ModelItem> = match query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
-                Some(q) => store
-                    .search_propositions(q, limit)?
-                    .into_iter()
-                    .map(|(p, _)| p)
-                    .filter(|p| p.status == PropositionStatus::Active)
-                    .map(ModelItem::from)
-                    .collect(),
+            let candidates: Vec<Proposition> = match query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
+                Some(q) => store.search_propositions(q, limit)?.into_iter().map(|(p, _)| p).collect(),
                 None => {
                     let mut all = store.propositions_with_status(PropositionStatus::Active, 500)?;
                     all.sort_by(|a, b| b.confidence.total_cmp(&a.confidence).then(b.updated_us.cmp(&a.updated_us)));
-                    all.into_iter().take(limit).map(ModelItem::from).collect()
+                    all
                 }
             };
+            let lens = ItemLens::read(store, &candidates, tz, now_us)?;
+            let items: Vec<ModelItem> = candidates
+                .into_iter()
+                .filter(|p| lens.servable(p))
+                .take(limit)
+                .map(ModelItem::from)
+                .collect();
             serde_json::json!({ "propositions": items })
         }
         UnderstandingQuery::Sessions { date } => {
             let date = date.clone().unwrap_or_else(|| today(tz, now_us));
-            let day = reader.day(&date, now_us)?;
-            let notes = store.session_notes_in_range(day.breakdown.start_us, day.breakdown.end_us)?;
+            let (start_us, end_us) = day_bounds(&date, tz)?;
+            let notes = store.session_notes_in_range(start_us, end_us)?;
             serde_json::json!({ "date": date, "sessions": notes.iter().map(|n| session_json(n, tz)).collect::<Vec<_>>() })
+        }
+        UnderstandingQuery::Overview { date } => {
+            let env = super::overview::OverviewEnv::default();
+            serde_json::to_value(super::overview::overview(store, date.as_deref(), tz, now_us, &env)?)
+                .unwrap_or_default()
         }
     })
 }
@@ -136,10 +163,13 @@ fn search_json(s: &SearchRecord, tz: i32) -> serde_json::Value {
 
 fn session_json(n: &SessionNote, tz: i32) -> serde_json::Value {
     let signals: serde_json::Value = serde_json::from_str(&n.signals).unwrap_or_default();
+    let kind = super::overview::stored_segments(n)
+        .map_or(apps::WorkKind::Other, |segments| super::overview::kind_of_segments(&segments).0);
     serde_json::json!({
         "start_us": n.start_us, "end_us": n.end_us,
         "time": format!("{}–{}", observe::clock(n.start_us, tz), observe::clock(n.end_us, tz)),
         "title": n.title, "surface": n.surface, "beneath": n.beneath, "written_by": n.model,
+        "kind": kind.as_str(), "kind_label": kind.label(),
         "segments": signals["segments"], "searches": signals["signals"]["searches"],
     })
 }
@@ -419,10 +449,11 @@ pub fn answer(
         _ => now.map(str::to_owned),
     };
     let now = now_text.as_deref();
+    let confirmed = store.confirmed_proposition_ids()?;
     let propositions: Vec<String> = store
         .search_propositions(question, 6)?
         .into_iter()
-        .filter(|(p, _)| p.status == PropositionStatus::Active)
+        .filter(|(p, _)| p.status == PropositionStatus::Active && !not_seen_lately(p, confirmed.contains(&p.id), now_us))
         .map(|(p, _)| p.text)
         .collect();
     let input = serde_json::json!({
@@ -456,12 +487,37 @@ pub fn answer(
 }
 
 // ---------------------------------------------------------------------------
-// Context for an AI client
+// What an AI client is told: one decision, used by the context packet, the
+// session hook, the Overview's "Your AI already knows" and the You page
 // ---------------------------------------------------------------------------
 
+/// Recent work lines sent at the start of a session.
+pub const RECENT_WORK_LINES: usize = 4;
+/// How far back recent work reaches.
+pub const RECENT_WORK_WINDOW_US: u64 = 12 * 3_600_000_000;
+/// Items about the person sent with each request.
+pub const ABOUT_YOU_LINES: usize = 6;
+/// Below this an item is sent only once the person confirmed it.
+pub const ABOUT_YOU_MIN_CONFIDENCE: f64 = 0.5;
+/// The most recently updated items the six are chosen from.
+pub const ABOUT_YOU_CANDIDATES: usize = 60;
+/// Items matching the focus, tried first.
+pub const ABOUT_YOU_FOCUS_MATCHES: usize = 4;
+/// A recent work line's title is clipped to this.
+pub const TITLE_CHARS: usize = 80;
+/// A recent work line's detail is clipped to this.
+pub const DETAIL_CHARS: usize = 180;
+/// An item is sent clipped to this.
+pub const STATEMENT_CHARS: usize = 220;
+/// A confirmed project or goal unseen this long is not seen lately.
+pub const NOT_SEEN_LATELY_DAYS: u64 = 45;
+
+const DAY_US: u64 = 86_400_000_000;
+
 /// The kinds of thing about the user that go into context sent without being
-/// asked for. People they work with, where they get stuck and how they are
-/// right now stay behind `mci_user_model`, which a client has to call.
+/// asked for. People they work with, what took them several tries and how
+/// they are right now stay behind `mci_user_model`, which a client has to
+/// call.
 const SHARED_UNASKED: [PropositionKind; 5] = [
     PropositionKind::Project,
     PropositionKind::Goal,
@@ -470,10 +526,189 @@ const SHARED_UNASKED: [PropositionKind; 5] = [
     PropositionKind::Skill,
 ];
 
-/// What an AI client is told about the user's work when a session starts:
-/// the last few work sessions and the surest things in the user model,
-/// those matching `focus` first. `None` when nothing has been learned yet.
-/// Best effort: a store failure yields no block, never a failed packet.
+/// Too old to use: stale by decay ([`super::gum::is_stale`]), or a confirmed
+/// project or goal not seen for [`NOT_SEEN_LATELY_DAYS`].
+#[must_use]
+pub fn not_seen_lately(p: &Proposition, confirmed: bool, now_us: u64) -> bool {
+    super::gum::is_stale(p.decay, p.updated_us, now_us)
+        || (confirmed
+            && matches!(p.kind, PropositionKind::Project | PropositionKind::Goal)
+            && now_us.saturating_sub(p.updated_us) >= NOT_SEEN_LATELY_DAYS * DAY_US)
+}
+
+/// An AI may be given it when it asks (`mci_user_model`), and the You page
+/// shows it. How a person is right now is never shown or served, and what
+/// took them several tries only once it was seen on two days or confirmed.
+#[must_use]
+pub fn is_servable(p: &Proposition, confirmed: bool, days_seen: usize, now_us: u64) -> bool {
+    p.status == PropositionStatus::Active
+        && p.kind != PropositionKind::State
+        && !not_seen_lately(p, confirmed, now_us)
+        && (p.kind != PropositionKind::Struggle || confirmed || days_seen >= 2)
+}
+
+/// Sent with each request without being asked (the six are chosen from these).
+#[must_use]
+pub fn is_shared_unasked(p: &Proposition, confirmed: bool, now_us: u64) -> bool {
+    p.status == PropositionStatus::Active
+        && SHARED_UNASKED.contains(&p.kind)
+        && (p.confidence >= ABOUT_YOU_MIN_CONFIDENCE || confirmed)
+        && !not_seen_lately(p, confirmed, now_us)
+}
+
+/// What is known about a set of propositions besides themselves: which the
+/// person confirmed, and on how many local dates each was seen.
+pub(crate) struct ItemLens {
+    pub(crate) confirmed: std::collections::HashSet<i64>,
+    pub(crate) heads: std::collections::HashMap<i64, mci_brain::understanding::EventHead>,
+    tz: i32,
+    now_us: u64,
+}
+
+impl ItemLens {
+    /// One confirmed-id read and one batch of event heads for all evidence.
+    pub(crate) fn read(store: &SqlCipherBrainStore, items: &[Proposition], tz: i32, now_us: u64) -> Result<Self, StoreError> {
+        let confirmed = store.confirmed_proposition_ids()?;
+        let ids: Vec<i64> = items.iter().flat_map(|p| p.evidence.iter().copied()).collect();
+        let heads = store.event_heads(&ids)?.into_iter().map(|h| (h.id, h)).collect();
+        Ok(Self { confirmed, heads, tz, now_us })
+    }
+
+    pub(crate) fn confirmed(&self, p: &Proposition) -> bool {
+        self.confirmed.contains(&p.id)
+    }
+
+    /// Distinct local dates among the moments the item rests on.
+    pub(crate) fn days_seen(&self, p: &Proposition) -> usize {
+        p.evidence
+            .iter()
+            .filter_map(|id| self.heads.get(id))
+            .map(|h| local_date_string(i64::try_from(h.ts_us / 1_000_000).unwrap_or(0), self.tz))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+    }
+
+    pub(crate) fn servable(&self, p: &Proposition) -> bool {
+        is_servable(p, self.confirmed(p), self.days_seen(p), self.now_us)
+    }
+}
+
+/// One "Recent work" line: a noted session, titled as the Overview titles it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RecentWork {
+    /// The session's start.
+    pub start_us: u64,
+    /// The session's end.
+    pub end_us: u64,
+    /// The Overview's title for it, clipped to [`TITLE_CHARS`].
+    pub title: String,
+    /// What a model wrote about it, clipped to [`DETAIL_CHARS`]; none for a
+    /// session noted from measurements.
+    pub detail: Option<String>,
+}
+
+impl RecentWork {
+    /// As the packet and the hook send it: `14:02–14:31 · {title}: {detail}`.
+    #[must_use]
+    pub fn packet_line(&self, tz: i32) -> String {
+        let times = format!("{}–{}", observe::clock(self.start_us, tz), observe::clock(self.end_us, tz));
+        match &self.detail {
+            Some(detail) => format!("{times} · {}: {detail}", self.title),
+            None => format!("{times} · {}", self.title),
+        }
+    }
+
+    /// As the window shows it: the same line with the times left to Swift.
+    #[must_use]
+    pub fn template(&self) -> super::overview::Template {
+        let escape = super::overview::escape_braces;
+        let text = match &self.detail {
+            Some(detail) => format!("{{start}}–{{end}} · {}: {}", escape(&self.title), escape(detail)),
+            None => format!("{{start}}–{{end}} · {}", escape(&self.title)),
+        };
+        super::overview::Template::new(text).time("start", self.start_us).time("end", self.end_us)
+    }
+}
+
+/// The sessions an AI client is told about at the start of a session: the
+/// newest noted sessions of the last [`RECENT_WORK_WINDOW_US`], newest first.
+/// A session still going has no note yet and is not sent. Best effort: a
+/// store failure yields no lines.
+#[must_use]
+pub fn recent_work(store: &SqlCipherBrainStore, now_us: u64) -> Vec<RecentWork> {
+    store
+        .session_notes_in_range(now_us.saturating_sub(RECENT_WORK_WINDOW_US), now_us + 1)
+        .unwrap_or_default()
+        .iter()
+        .rev()
+        .take(RECENT_WORK_LINES)
+        .map(|note| RecentWork {
+            start_us: note.start_us,
+            end_us: note.end_us,
+            title: clip(&super::overview::note_title(note).0, TITLE_CHARS),
+            detail: session_detail(note).map(|detail| clip(&detail, DETAIL_CHARS)),
+        })
+        .collect()
+}
+
+/// What a model wrote about a session, fit to send: `beneath` (what the
+/// person was trying to do), else `surface`, without any sentence the word
+/// check drops, and never "Nothing notable." A note written from
+/// measurements has none, so input counts are never sent.
+fn session_detail(note: &SessionNote) -> Option<String> {
+    if note.model == "measured" {
+        return None;
+    }
+    [&note.beneath, &note.surface].into_iter().find_map(|text| {
+        let kept = super::overview::model_prose(text);
+        (!kept.is_empty() && kept != "Nothing notable.").then_some(kept)
+    })
+}
+
+/// What an AI client is told about the person, the surest first: up to
+/// [`ABOUT_YOU_LINES`] items sent unasked ([`is_shared_unasked`]), those
+/// matching `focus` first. The session hook and the window pass no focus.
+/// Best effort: a store failure yields none.
+#[must_use]
+pub fn about_you(store: &SqlCipherBrainStore, now_us: u64, focus: Option<&str>) -> Vec<Proposition> {
+    let confirmed = store.confirmed_proposition_ids().unwrap_or_default();
+    let focused: Vec<Proposition> = focus
+        .map(str::trim)
+        .filter(|f| !f.is_empty())
+        .and_then(|f| store.search_propositions(f, ABOUT_YOU_FOCUS_MATCHES).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(p, _)| p)
+        .collect();
+    let recent = store.propositions_with_status(PropositionStatus::Active, ABOUT_YOU_CANDIDATES).unwrap_or_default();
+    shared_claims(focused, recent, &confirmed, now_us)
+}
+
+/// The items sent unasked, `focused` first, then the surest of `recent`.
+fn shared_claims(
+    focused: Vec<Proposition>,
+    mut recent: Vec<Proposition>,
+    confirmed: &std::collections::HashSet<i64>,
+    now_us: u64,
+) -> Vec<Proposition> {
+    recent.sort_by(|a, b| b.confidence.total_cmp(&a.confidence).then(b.updated_us.cmp(&a.updated_us)));
+    let mut out: Vec<Proposition> = Vec::new();
+    for p in focused.into_iter().chain(recent) {
+        if out.len() == ABOUT_YOU_LINES {
+            break;
+        }
+        if is_shared_unasked(&p, confirmed.contains(&p.id), now_us) && !out.iter().any(|kept| kept.id == p.id) {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// What an AI client is told about the user's work: the recent work lines
+/// and the items sent unasked, those matching `focus` first. `None` when
+/// there is nothing to tell. The context packet and the session hook both
+/// take it from here, and the Overview and the You page show the same two
+/// lists.
 #[must_use]
 pub fn context_understanding(
     store: &SqlCipherBrainStore,
@@ -482,60 +717,210 @@ pub fn context_understanding(
     focus: Option<&str>,
 ) -> Option<crate::context_packet::ContextUnderstanding> {
     use crate::context_packet::{ContextUnderstanding, ContextUnderstandingClaim};
-    let half_day = 12 * 3_600_000_000u64;
-    let sessions = store
-        .session_notes_in_range(now_us.saturating_sub(half_day), now_us + 1)
-        .unwrap_or_default()
-        .iter()
-        .rev()
-        .take(4)
-        .map(|note| session_line(note, tz))
-        .collect();
-    let focused = focus
-        .map(str::trim)
-        .filter(|f| !f.is_empty())
-        .and_then(|f| store.search_propositions(f, 4).ok())
-        .unwrap_or_default()
+    let sessions = recent_work(store, now_us).iter().map(|line| line.packet_line(tz)).collect();
+    let about = about_you(store, now_us, focus)
         .into_iter()
-        .map(|(p, _)| p);
-    let recent = store.propositions_with_status(PropositionStatus::Active, 60).unwrap_or_default();
-    let about = shared_claims(focused.collect(), recent)
-        .into_iter()
-        .map(|p| ContextUnderstandingClaim { text: clip(&p.text, 220), confidence: p.confidence, event_ids: p.evidence })
+        .map(|p| ContextUnderstandingClaim { text: clip(&p.text, STATEMENT_CHARS), confidence: p.confidence, event_ids: p.evidence })
         .collect();
     let understanding = ContextUnderstanding { sessions, about };
     (!understanding.is_empty()).then_some(understanding)
 }
 
-fn session_line(note: &SessionNote, tz: i32) -> String {
-    let detail = if note.beneath.trim().is_empty() { &note.surface } else { &note.beneath };
-    format!(
-        "{}–{} · {}: {}",
-        observe::clock(note.start_us, tz),
-        observe::clock(note.end_us, tz),
-        clip(note.title.trim(), 80),
-        clip(detail.trim(), 180)
-    )
+// ---------------------------------------------------------------------------
+// The You page
+// ---------------------------------------------------------------------------
+
+/// Most items in each list of the page.
+const PAGE_LIST_LIMIT: usize = 200;
+/// Dated session rows under one item.
+const EVIDENCE_SESSIONS: usize = 5;
+
+/// One item on the You page.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PageItem {
+    /// The proposition id, the one a verdict names.
+    pub id: i64,
+    /// The statement, exactly as stored and sent.
+    pub text: String,
+    /// `project`, `goal`, `habit`, `preference`, `skill`, `relationship`, `struggle`.
+    pub kind: String,
+    /// `working_on`, `how_you_work`, `skills`, `people`, `struggles`.
+    pub group: String,
+    /// `confirmed`, `seen_on_days` or `seen_once`.
+    pub basis: String,
+    /// Distinct local dates among the moments it rests on.
+    pub days_seen: usize,
+    /// The model's reasoning, as stored.
+    pub reasoning: String,
+    /// When it was last written or seen again.
+    pub updated_us: u64,
+    /// One dated row per session it rests on, newest first.
+    pub evidence_sessions: Vec<EvidenceSession>,
 }
 
-/// Up to six active propositions of the kinds shared unasked: those matching
-/// the focus first, then the surest of the rest.
-fn shared_claims(focused: Vec<Proposition>, mut recent: Vec<Proposition>) -> Vec<Proposition> {
-    recent.sort_by(|a, b| b.confidence.total_cmp(&a.confidence).then(b.updated_us.cmp(&a.updated_us)));
-    let mut out: Vec<Proposition> = Vec::new();
-    for p in focused.into_iter().chain(recent) {
-        if out.len() == 6 {
-            break;
-        }
-        if p.status == PropositionStatus::Active
-            && p.confidence >= 0.5
-            && SHARED_UNASKED.contains(&p.kind)
-            && !out.iter().any(|kept| kept.id == p.id)
+/// A session an item was learned in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EvidenceSession {
+    /// The session's start.
+    pub start_us: u64,
+    /// The session's end.
+    pub end_us: u64,
+    /// One of the item's moments in it, to open.
+    pub open_event_id: i64,
+    /// That moment's app.
+    pub app_name: String,
+    /// That moment's window title, cleaned.
+    pub window_title: Option<String>,
+}
+
+fn group_of(kind: PropositionKind) -> (usize, &'static str) {
+    match kind {
+        PropositionKind::Project | PropositionKind::Goal => (0, "working_on"),
+        PropositionKind::Habit | PropositionKind::Preference => (1, "how_you_work"),
+        PropositionKind::Skill => (2, "skills"),
+        PropositionKind::Relationship => (3, "people"),
+        PropositionKind::Struggle | PropositionKind::State => (4, "struggles"),
+    }
+}
+
+/// The You page (`mci-agent model --page --json`): the recent work lines as
+/// sent, what an AI can be told about the person, what it gets only when it
+/// looks it up, and what has not been seen lately. No counts, no scores.
+///
+/// # Errors
+/// Store failures.
+pub fn model_page(store: &SqlCipherBrainStore, tz: i32, now_us: u64) -> Result<serde_json::Value, StoreError> {
+    let all = store.propositions_with_status(PropositionStatus::Active, 500)?;
+    let lens = ItemLens::read(store, &all, tz, now_us)?;
+    let notes = evidence_notes(store, &lens)?;
+    let mut shared = Vec::new();
+    let mut kept_back = Vec::new();
+    let mut not_seen = Vec::new();
+    for p in &all {
+        let confirmed = lens.confirmed(p);
+        let days_seen = lens.days_seen(p);
+        let list = if is_shared_unasked(p, confirmed, now_us) {
+            &mut shared
+        } else if is_servable(p, confirmed, days_seen, now_us) {
+            &mut kept_back
+        } else if p.kind != PropositionKind::State
+            && (p.kind != PropositionKind::Struggle || confirmed || days_seen >= 2)
+            && not_seen_lately(p, confirmed, now_us)
         {
-            out.push(p);
+            &mut not_seen
+        } else {
+            continue;
+        };
+        list.push((p, confirmed, days_seen));
+    }
+    let shape = |mut list: Vec<(&Proposition, bool, usize)>| -> Vec<PageItem> {
+        list.sort_by(|a, b| {
+            group_of(a.0.kind)
+                .0
+                .cmp(&group_of(b.0.kind).0)
+                .then(b.1.cmp(&a.1))
+                .then(b.2.cmp(&a.2))
+                .then(b.0.updated_us.cmp(&a.0.updated_us))
+                .then(b.0.id.cmp(&a.0.id))
+        });
+        list.into_iter()
+            .take(PAGE_LIST_LIMIT)
+            .map(|(p, confirmed, days_seen)| PageItem {
+                id: p.id,
+                text: clip(p.text.trim(), 1_000),
+                kind: p.kind.as_str().into(),
+                group: group_of(p.kind).1.into(),
+                basis: if confirmed {
+                    "confirmed"
+                } else if days_seen >= 2 {
+                    "seen_on_days"
+                } else {
+                    "seen_once"
+                }
+                .into(),
+                days_seen,
+                reasoning: clip(&p.reasoning, 4_000),
+                updated_us: p.updated_us,
+                evidence_sessions: evidence_sessions(p, &lens, &notes),
+            })
+            .collect()
+    };
+    let recent: Vec<_> = recent_work(store, now_us).iter().map(RecentWork::template).collect();
+    Ok(serde_json::json!({
+        "version": 1,
+        "now_us": now_us,
+        "model_status": super::overview::ModelStatus::read(store),
+        "recent_work": recent,
+        "shared": shape(shared),
+        "kept_back": shape(kept_back),
+        "not_seen_lately": shape(not_seen),
+    }))
+}
+
+/// The stored session notes covering any item's moments: one read over the
+/// span the moments cover.
+fn evidence_notes(store: &SqlCipherBrainStore, lens: &ItemLens) -> Result<Vec<SessionNote>, StoreError> {
+    let first = lens.heads.values().map(|h| h.ts_us).min();
+    let last = lens.heads.values().map(|h| h.ts_us).max();
+    match (first, last) {
+        (Some(first), Some(last)) => store.session_notes_in_range(first, last + 1),
+        _ => Ok(Vec::new()),
+    }
+}
+
+fn evidence_sessions(p: &Proposition, lens: &ItemLens, notes: &[SessionNote]) -> Vec<EvidenceSession> {
+    use mci_brain::understanding::EventHead;
+    let mut moments: Vec<&EventHead> = p.evidence.iter().filter_map(|id| lens.heads.get(id)).collect();
+    moments.sort_by_key(|h| (h.ts_us, h.id));
+    let mut rows: Vec<EvidenceSession> = Vec::new();
+    let mut loose: Vec<&EventHead> = Vec::new();
+    let mut by_note: Vec<(&SessionNote, Vec<&EventHead>)> = Vec::new();
+    for head in moments {
+        match notes.iter().find(|n| n.start_us <= head.ts_us && head.ts_us <= n.end_us) {
+            Some(note) => match by_note.iter_mut().find(|(n, _)| std::ptr::eq(*n, note)) {
+                Some((_, heads)) => heads.push(head),
+                None => by_note.push((note, vec![head])),
+            },
+            None => loose.push(head),
         }
     }
-    out
+    let row = |start_us: u64, end_us: u64, open: &EventHead| {
+        let app = open.app_bundle_id.as_deref().unwrap_or("");
+        let app_name = if app.is_empty() { String::new() } else { apps::name(app) };
+        EvidenceSession {
+            start_us,
+            end_us,
+            open_event_id: open.id,
+            window_title: open
+                .window_title
+                .as_deref()
+                .map(|t| super::overview::clean_title(t, &app_name))
+                .filter(|t| !t.is_empty()),
+            app_name,
+        }
+    };
+    for (note, heads) in by_note {
+        let in_longest = super::overview::stored_segments(note).and_then(|segments| {
+            let longest = super::overview::longest_window_events(&segments);
+            heads.iter().rev().find(|h| longest.contains(&h.id)).copied()
+        });
+        let open = in_longest.unwrap_or_else(|| *heads.last().expect("a note row has a moment"));
+        rows.push(row(note.start_us, note.end_us, open));
+    }
+    let mut group: Vec<&EventHead> = Vec::new();
+    for head in loose {
+        if group.last().is_some_and(|last| head.ts_us.saturating_sub(last.ts_us) >= observe::SESSION_GAP_US) {
+            rows.push(row(group[0].ts_us, group[group.len() - 1].ts_us, group[group.len() - 1]));
+            group.clear();
+        }
+        group.push(head);
+    }
+    if let (Some(first), Some(last)) = (group.first(), group.last()) {
+        rows.push(row(first.ts_us, last.ts_us, last));
+    }
+    rows.sort_by(|a, b| b.end_us.cmp(&a.end_us));
+    rows.truncate(EVIDENCE_SESSIONS);
+    rows
 }
 
 // ---------------------------------------------------------------------------
@@ -666,9 +1051,12 @@ pub fn suggest(
         score: 4,
     });
     if let Some(mind) = mind {
+        let confirmed = store.confirmed_proposition_ids()?;
         let propositions: Vec<String> = store
-            .propositions_with_status(PropositionStatus::Active, 6)?
+            .propositions_with_status(PropositionStatus::Active, 24)?
             .into_iter()
+            .filter(|p| !not_seen_lately(p, confirmed.contains(&p.id), now_us))
+            .take(6)
             .map(|p| p.text)
             .collect();
         let now_text = current.map_or_else(
@@ -794,8 +1182,13 @@ mod tests {
             held(5, Habit, 0.4, PropositionStatus::Active),
             held(6, Goal, 0.7, PropositionStatus::Active),
         ];
-        let shared: Vec<i64> = shared_claims(Vec::new(), recent).into_iter().map(|p| p.id).collect();
+        let none = std::collections::HashSet::new();
+        let shared: Vec<i64> = shared_claims(Vec::new(), recent.clone(), &none, NOW).into_iter().map(|p| p.id).collect();
         assert_eq!(shared, vec![1, 6]);
+        // A guess the person confirmed is no longer a guess.
+        let confirmed: std::collections::HashSet<i64> = [5].into_iter().collect();
+        let shared: Vec<i64> = shared_claims(Vec::new(), recent, &confirmed, NOW).into_iter().map(|p| p.id).collect();
+        assert_eq!(shared, vec![1, 6, 5]);
     }
 
     #[test]
@@ -805,11 +1198,52 @@ mod tests {
         let recent: Vec<Proposition> = (1..=9)
             .map(|id| held(id, if id == 7 { Project } else { Habit }, if id == 7 { 0.6 } else { 0.9 }, PropositionStatus::Active))
             .collect();
-        let shared: Vec<i64> = shared_claims(focused, recent).into_iter().map(|p| p.id).collect();
-        assert_eq!(shared.len(), 6);
+        let shared: Vec<i64> =
+            shared_claims(focused, recent, &std::collections::HashSet::new(), NOW).into_iter().map(|p| p.id).collect();
+        assert_eq!(shared.len(), ABOUT_YOU_LINES);
         assert_eq!(shared[0], 7);
         assert_eq!(shared.iter().filter(|id| **id == 7).count(), 1);
     }
+
+    #[test]
+    fn stale_claims_leave_the_page_and_the_context_packet() {
+        use PropositionKind::{Habit, Project, Skill};
+        let mut fast = held(1, Habit, 0.9, PropositionStatus::Active);
+        fast.decay = 0.9;
+        fast.updated_us = NOW - 2 * DAY_US;
+        let mut slow = held(2, Skill, 0.9, PropositionStatus::Active);
+        slow.decay = 0.3;
+        slow.updated_us = NOW - 400 * DAY_US;
+        let mut finished = held(3, Project, 0.9, PropositionStatus::Active);
+        finished.updated_us = NOW - 46 * DAY_US;
+        let none = std::collections::HashSet::new();
+        let confirmed: std::collections::HashSet<i64> = [3].into_iter().collect();
+        assert!(not_seen_lately(&fast, false, NOW));
+        assert!(!is_shared_unasked(&fast, false, NOW) && !is_servable(&fast, false, 2, NOW));
+        assert!(is_shared_unasked(&slow, false, NOW), "a slow claim never goes stale");
+        assert!(!not_seen_lately(&finished, false, NOW), "an unconfirmed project ages by its decay only");
+        assert!(not_seen_lately(&finished, true, NOW), "a confirmed project unseen for 45 days is not seen lately");
+        let shared: Vec<i64> =
+            shared_claims(Vec::new(), vec![fast.clone(), slow.clone(), finished.clone()], &confirmed, NOW).into_iter().map(|p| p.id).collect();
+        assert_eq!(shared, vec![2]);
+        let shared: Vec<i64> = shared_claims(Vec::new(), vec![fast, slow, finished], &none, NOW).into_iter().map(|p| p.id).collect();
+        assert_eq!(shared, vec![3, 2], "equally sure: the newer first");
+    }
+
+    #[test]
+    fn a_struggle_seen_once_is_neither_shown_nor_sent() {
+        let struggle = held(1, PropositionKind::Struggle, 0.9, PropositionStatus::Active);
+        assert!(!is_servable(&struggle, false, 1, NOW));
+        assert!(is_servable(&struggle, false, 2, NOW), "seen on two days");
+        assert!(is_servable(&struggle, true, 1, NOW), "confirmed");
+        assert!(!is_shared_unasked(&struggle, true, NOW), "never sent unasked");
+        let state = held(2, PropositionKind::State, 0.9, PropositionStatus::Active);
+        assert!(!is_servable(&state, true, 5, NOW), "how they are right now is never shown");
+        let rejected = held(3, PropositionKind::Project, 0.9, PropositionStatus::Rejected);
+        assert!(!is_servable(&rejected, false, 3, NOW) && !is_shared_unasked(&rejected, false, NOW));
+    }
+
+    const NOW: u64 = 1_800_000_000_000_000;
 
     fn source(n: usize) -> Source {
         Source { n, event_id: i64::try_from(n).unwrap_or(0), ts_us: 0, app: "App".into(), title: None, url: None, text: String::new() }

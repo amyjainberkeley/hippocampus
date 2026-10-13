@@ -76,7 +76,7 @@ pub struct SessionLine {
     pub end_us: u64,
     /// Title.
     pub title: String,
-    /// What lay beneath.
+    /// What a model wrote lay beneath; empty for a measured note.
     pub beneath: String,
 }
 
@@ -128,7 +128,9 @@ impl DayBreakdown {
         self.focus_blocks.iter().map(|b| b.end_us - b.start_us).max().unwrap_or(0)
     }
 
-    /// Plain-language facts for the model and for people.
+    /// Plain-language facts for the model and for AI tools: time, kinds,
+    /// apps, focus blocks and searches. Never how often the person switched
+    /// apps or where the day "broke".
     #[must_use]
     pub fn facts(&self, tz_offset_secs: i32) -> String {
         use super::observe::clock;
@@ -158,9 +160,7 @@ impl DayBreakdown {
                 self.apps.iter().take(8).map(|a| format!("{} {}", a.name, h(a.active_us))).collect::<Vec<_>>().join(", ")
             ));
         }
-        if self.focus_blocks.is_empty() {
-            lines.push("No stretch of 25 minutes or more on one kind of work.".into());
-        } else {
+        if !self.focus_blocks.is_empty() {
             lines.push(format!(
                 "Focus blocks: {}.",
                 self.focus_blocks
@@ -175,12 +175,6 @@ impl DayBreakdown {
                     .collect::<Vec<_>>()
                     .join("; ")
             ));
-        }
-        lines.push(format!("App switches: {} ({:.0} per active hour).", self.switches, self.switches_per_hour));
-        if let Some(peak) = self.hours.iter().max_by_key(|hour| hour.switches) {
-            if peak.switches >= 20 {
-                lines.push(format!("Most fragmented hour: {:02}:00 with {} switches.", peak.hour, peak.switches));
-            }
         }
         if !self.searches.is_empty() {
             lines.push(format!(
@@ -366,7 +360,14 @@ pub fn breakdown(
         searches,
         sessions: notes
             .iter()
-            .map(|n| SessionLine { start_us: n.start_us, end_us: n.end_us, title: n.title.clone(), beneath: n.beneath.clone() })
+            // A note written from measurements has only input telemetry
+            // beneath it, which is never shown or sent.
+            .map(|n| SessionLine {
+                start_us: n.start_us,
+                end_us: n.end_us,
+                title: n.title.clone(),
+                beneath: if n.model == "measured" { String::new() } else { n.beneath.clone() },
+            })
             .collect(),
     }
 }

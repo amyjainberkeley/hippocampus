@@ -20,6 +20,7 @@ pub mod feedback;
 pub mod gum;
 pub mod mind;
 pub mod observe;
+pub mod overview;
 pub mod query;
 
 use std::path::PathBuf;
@@ -70,6 +71,8 @@ pub struct CycleStats {
     pub model_unavailable: Option<String>,
     /// The user's confirmations and rejections applied.
     pub verdicts: usize,
+    /// Whether the cycle asked the model for anything.
+    pub model_attempted: bool,
 }
 
 /// The written account of a day.
@@ -80,8 +83,12 @@ pub struct Narrative {
     /// A paragraph.
     pub narrative: String,
     /// Specific observations.
+    #[serde(default)]
     pub insights: Vec<String>,
-    /// One suggestion.
+    /// Always empty: the model is never asked for advice. Kept so stored
+    /// reports and the model's replies still decode; a stored one is blanked
+    /// when read, since earlier reports were written with advice.
+    #[serde(default)]
     pub suggestion: String,
 }
 
@@ -142,6 +149,31 @@ impl Understanding {
             .and_then(|out| String::from_utf8(out.stdout).ok())
             .and_then(|name| name.split_whitespace().next().map(str::to_owned))
             .unwrap_or_default()
+    }
+
+    /// Ask the model whether it can be used, and store the answer for the
+    /// window ([`overview::ModelStatus`]).
+    pub fn check_model(&self, now_us: u64) -> overview::ModelStatus {
+        let status = overview::ModelStatus::from_check(&self.mind.ensure_available(), now_us);
+        let _ = status.write(&self.store);
+        status
+    }
+
+    /// After a cycle: store what a cycle that asked the model found, and put
+    /// back `last` when a rebuild cleared it. Returns the status now stored.
+    pub fn record_model_status(&self, stats: &CycleStats, last: overview::ModelStatus, now_us: u64) -> overview::ModelStatus {
+        let status = if stats.model_attempted {
+            match &stats.model_unavailable {
+                Some(reason) => overview::ModelStatus::from_check(&Err(MindCallError::Unavailable(reason.clone())), now_us),
+                None => overview::ModelStatus::from_check(&Ok(()), now_us),
+            }
+        } else {
+            last
+        };
+        if stats.model_attempted || overview::ModelStatus::read(&self.store) != status {
+            let _ = status.write(&self.store);
+        }
+        status
     }
 
     /// Run one cycle. `max_sessions` bounds the model work per cycle.
@@ -248,6 +280,7 @@ impl Understanding {
 
         let mut note = measured_note(&segments, &signals, span, slice.len(), now_us, &signals_json);
         if duration >= MIN_MODEL_SESSION_US {
+            stats.model_attempted = true;
             match self.mind.call::<_, EpisodeOut>(
                 "episode",
                 &serde_json::json!({ "user_name": self.user_name, "observation": observation }),
@@ -320,7 +353,9 @@ impl Understanding {
             Some(report) => {
                 let body: serde_json::Value = serde_json::from_str(&report.body).unwrap_or_default();
                 (
-                    serde_json::from_value::<Narrative>(body["narrative"].clone()).ok(),
+                    serde_json::from_value::<Narrative>(body["narrative"].clone())
+                        .ok()
+                        .map(|narrative| Narrative { suggestion: String::new(), ..narrative }),
                     Some(report.model),
                     Some(report.generated_us),
                 )
@@ -337,24 +372,44 @@ impl Understanding {
     pub fn write_day(&self, date_local: &str, now_us: u64) -> Result<Day, StoreError> {
         let mut day = self.day(date_local, now_us)?;
         let facts = day.breakdown.facts(self.tz_offset_secs);
-        let episodes: Vec<String> = day
-            .breakdown
-            .sessions
+        // Touching sessions that share a title are one piece of work: the
+        // 30-minute cap split them, not the person.
+        let mut joined: Vec<(u64, u64, String, String)> = Vec::new();
+        for s in &day.breakdown.sessions {
+            let beneath = overview::model_prose(&s.beneath);
+            let beneath = if beneath == "Nothing notable." { String::new() } else { beneath };
+            match joined.last_mut() {
+                Some(last) if last.2 == s.title && s.start_us < last.1 + observe::SESSION_GAP_US => {
+                    last.1 = last.1.max(s.end_us);
+                    if last.3.is_empty() {
+                        last.3 = beneath;
+                    }
+                }
+                _ => joined.push((s.start_us, s.end_us, s.title.clone(), beneath)),
+            }
+        }
+        let episodes: Vec<String> = joined
             .iter()
-            .map(|s| {
-                format!(
-                    "{}–{} {}: {}",
-                    observe::clock(s.start_us, self.tz_offset_secs),
-                    observe::clock(s.end_us, self.tz_offset_secs),
-                    s.title,
-                    s.beneath
-                )
+            .map(|(start, end, title, beneath)| {
+                let times = format!(
+                    "{}–{}",
+                    observe::clock(*start, self.tz_offset_secs),
+                    observe::clock(*end, self.tz_offset_secs)
+                );
+                if beneath.is_empty() {
+                    format!("{times} {title}")
+                } else {
+                    format!("{times} {title}: {beneath}")
+                }
             })
             .collect();
+        let confirmed = self.store.confirmed_proposition_ids()?;
         let propositions: Vec<String> = self
             .store
-            .propositions_with_status(PropositionStatus::Active, 8)?
+            .propositions_with_status(PropositionStatus::Active, 32)?
             .into_iter()
+            .filter(|p| !query::not_seen_lately(p, confirmed.contains(&p.id), now_us))
+            .take(8)
             .map(|p| p.text)
             .collect();
         let (narrative, model) = match self.mind.call::<_, Narrative>(
@@ -466,11 +521,6 @@ fn measured_narrative(day: &day::DayBreakdown, tz_offset_secs: i32) -> Narrative
             block.kind.label().to_lowercase(),
             block.app
         ));
-    }
-    if let Some(peak) = day.hours.iter().max_by_key(|h| h.switches) {
-        if peak.switches > 0 {
-            insights.push(format!("Most switching around {:02}:00 ({} app switches).", peak.hour, peak.switches));
-        }
     }
     if !day.searches.is_empty() {
         insights.push(format!(

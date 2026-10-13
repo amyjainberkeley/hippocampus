@@ -385,6 +385,9 @@ impl Server {
             _ => return JsonRpcResponse::err(id, INVALID_PARAMS, format!("{tool} args must be an object")),
         };
         object.insert("view".into(), serde_json::Value::String(view.into()));
+        // The You page's shape (with what is kept back and not seen lately)
+        // is for the person's own window, never served to an AI tool.
+        object.remove("page");
         let query: UnderstandingQuery = match serde_json::from_value(serde_json::Value::Object(object)) {
             Ok(query) => query,
             Err(e) => return JsonRpcResponse::err(id, INVALID_PARAMS, format!("{tool} args: {e}")),

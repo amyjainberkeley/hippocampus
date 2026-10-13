@@ -18,7 +18,7 @@ pub enum WorkKind {
     Research,
     /// Design and drawing.
     Design,
-    /// AI assistants.
+    /// AI tools.
     Ai,
     /// Calendars, tasks, spreadsheets, planning.
     Planning,
@@ -29,6 +29,37 @@ pub enum WorkKind {
 }
 
 impl WorkKind {
+    /// Every kind, in declaration order (the order ties are broken in).
+    pub const ALL: [Self; 10] = [
+        Self::Communication,
+        Self::Meetings,
+        Self::Code,
+        Self::Writing,
+        Self::Research,
+        Self::Design,
+        Self::Ai,
+        Self::Planning,
+        Self::Media,
+        Self::Other,
+    ];
+
+    /// The name in JSON (`communication`, `ai`, …).
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Communication => "communication",
+            Self::Meetings => "meetings",
+            Self::Code => "code",
+            Self::Writing => "writing",
+            Self::Research => "research",
+            Self::Design => "design",
+            Self::Ai => "ai",
+            Self::Planning => "planning",
+            Self::Media => "media",
+            Self::Other => "other",
+        }
+    }
+
     /// Label for people.
     #[must_use]
     pub fn label(self) -> &'static str {
@@ -39,7 +70,7 @@ impl WorkKind {
             Self::Writing => "Writing",
             Self::Research => "Research",
             Self::Design => "Design",
-            Self::Ai => "AI assistants",
+            Self::Ai => "AI tools",
             Self::Planning => "Planning",
             Self::Media => "Media",
             Self::Other => "Other",
@@ -158,17 +189,24 @@ pub fn kind(bundle_id: &str) -> WorkKind {
 }
 
 /// Kind of work, refined by the page for browsers: mail, chat, docs, code
-/// hosts, meetings and AI assistants in a tab count as those.
+/// hosts, meetings and AI tools in a tab count as those.
 #[must_use]
 pub fn kind_for(bundle_id: &str, url: Option<&str>) -> WorkKind {
+    kind_for_host(bundle_id, url.and_then(host_of).as_deref())
+}
+
+/// [`kind_for`] from a page's host (as [`host_of`] gives it, and as a
+/// session note stores it) rather than its URL.
+#[must_use]
+pub fn kind_for_host(bundle_id: &str, host: Option<&str>) -> WorkKind {
     let base = kind(bundle_id);
     if base != WorkKind::Research {
         return base;
     }
-    let Some(host) = url.and_then(host_of) else {
+    let Some(host) = host.map(str::to_ascii_lowercase) else {
         return base;
     };
-    let host = host.as_str();
+    let host = host.strip_prefix("www.").unwrap_or(&host);
     let is = |suffix: &str| host == suffix || host.ends_with(&format!(".{suffix}"));
     if is("mail.google.com") || is("outlook.live.com") || is("outlook.office.com") || is("app.slack.com") || is("discord.com") || is("web.whatsapp.com") {
         WorkKind::Communication
@@ -214,5 +252,24 @@ mod tests {
         assert_eq!(kind_for("com.google.Chrome", Some("https://en.wikipedia.org/wiki/Hippocampus")), WorkKind::Research);
         assert_eq!(kind_for("com.apple.Notes", Some("https://github.com")), WorkKind::Writing);
         assert_eq!(host_of("https://www.Example.com:8443/a?b"), Some("example.com".into()));
+    }
+
+    #[test]
+    fn a_stored_host_gives_the_same_kind_as_its_url() {
+        for url in [
+            "https://mail.google.com/mail/u/0",
+            "https://www.figma.com/file/x",
+            "https://claude.ai/chat/1",
+            "https://en.wikipedia.org/wiki/Hippocampus",
+            "https://github.com/a/b",
+        ] {
+            let host = host_of(url);
+            assert_eq!(kind_for_host("com.google.Chrome", host.as_deref()), kind_for("com.google.Chrome", Some(url)), "{url}");
+        }
+        assert_eq!(kind_for_host("com.apple.Safari", None), WorkKind::Research);
+        assert_eq!(kind_for_host("com.apple.Safari", Some("WWW.Figma.com")), WorkKind::Design);
+        assert_eq!(WorkKind::Ai.label(), "AI tools");
+        assert_eq!(WorkKind::ALL.len(), 10);
+        assert!(WorkKind::ALL.windows(2).all(|pair| pair[0] < pair[1]), "declaration order");
     }
 }

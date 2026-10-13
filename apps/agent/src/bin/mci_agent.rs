@@ -48,9 +48,9 @@ use mci_agent::crash_recovery::{acquire_lock, lock_path_for_brain, LockAcquireOu
 use mci_agent::device_id::{load_or_generate, DeviceIdSource};
 use mci_agent::episode_worker;
 use mci_agent::handoff::{
-    compile_handoff, cwd_from_stdin, fallback_envelope, hook_envelope, HandoffFormat,
-    HandoffReport, HookWatchdog, RenderClock, DEFAULT_HANDOFF_TOKENS, HOOK_WATCHDOG_DEADLINE,
-    REFRESH_BUDGET,
+    compile_handoff_with_block, cwd_from_stdin, fallback_envelope, hook_envelope,
+    no_project_memory_envelope, HandoffFormat, HandoffReport, HookWatchdog, RenderClock,
+    DEFAULT_HANDOFF_TOKENS, HOOK_WATCHDOG_DEADLINE, REFRESH_BUDGET,
 };
 use mci_agent::health_log::{HealthLog, HealthLogConfig};
 use mci_agent::health_summary::summarize_file;
@@ -694,6 +694,9 @@ fn print_usage() {
         \x20                            stderr, exit 0 unless the brain cannot be opened.\n\
         \x20                            Never loads Qwen. What the handoff hook runs first.\n\
         \x20 doctor                     say why the brain is empty and what to fix\n\
+        \x20 overview                   the day the window's Overview draws: sessions,\n\
+        \x20                            facts and searches. Read-only. --date YYYY-MM-DD,\n\
+        \x20                            --tz-offset-secs N (seconds east of UTC), --json.\n\
         \x20 enrich                     run every understanding stage over an existing\n\
         \x20                            brain: extract entities, embed, segment episodes,\n\
         \x20                            resolve identities, link related episodes.\n\
@@ -2426,7 +2429,16 @@ fn compile_handoff_output(
         ),
     };
     let clock = RenderClock::system();
-    let packet = compile_handoff(&store, &cwd, max_tokens, &clock).map_err(|m| (13, m))?;
+    // A session starts with what Hippocampus understands of the work, the
+    // same block `context` sends, with no focus.
+    let block = if format.is_hook() {
+        mci_agent::understanding::query::context_understanding(&store, clock.tz.offset_secs, clock.now_us, None)
+            .map(|understanding| mci_agent::context_packet::render_understanding_block(&understanding))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let packet = compile_handoff_with_block(&store, &cwd, max_tokens, &clock, &block).map_err(|m| (13, m))?;
     if writable {
         if let Err(error) = store.record_handoff_delivery(
             clock.now_us,
@@ -2469,7 +2481,7 @@ fn compile_handoff_output(
         HandoffFormat::ClaudeHook | HandoffFormat::CodexHook => Ok(if packet.has_memory() {
             hook_envelope(&packet.packet)
         } else {
-            fallback_envelope()
+            no_project_memory_envelope(&block)
         }),
     }
 }
@@ -2584,25 +2596,29 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
 }
 
 /// Read-only understanding commands: `day`, `model`, `searches`, `sessions`,
-/// `ask` and `suggest`. JSON with `--json`, plain text otherwise. `None` when
-/// argv names some other command.
+/// `overview`, `ask` and `suggest`. JSON with `--json`, plain text otherwise.
+/// `None` when argv names some other command.
 fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
     use mci_agent::understanding::mind::MindClient;
+    use mci_agent::understanding::overview;
     use mci_agent::understanding::query::{self, NowContext, Source, UnderstandingQuery};
     let command = argv.get(1)?.as_str();
-    if !matches!(command, "day" | "model" | "searches" | "sessions" | "ask" | "suggest") {
+    if !matches!(command, "day" | "model" | "searches" | "sessions" | "overview" | "ask" | "suggest") {
         return None;
     }
     let mut flags: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
     let mut json = false;
     let mut use_model = false;
+    let mut page = false;
     let mut positional: Vec<String> = Vec::new();
     let mut i = 2;
     while i < argv.len() {
         match argv[i].as_str() {
             "--json" => json = true,
             "--model" => use_model = true,
-            flag @ ("--date" | "--hours" | "--limit" | "--query" | "--app" | "--title" | "--now" | "--db-path") => {
+            "--page" => page = true,
+            flag @ ("--date" | "--hours" | "--limit" | "--query" | "--app" | "--title" | "--now" | "--db-path"
+            | "--tz-offset-secs") => {
                 let Some(value) = argv.get(i + 1) else {
                     eprintln!("mci-agent {command}: {flag} requires a value");
                     return Some(ExitCode::from(2));
@@ -2635,7 +2651,14 @@ fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
             return Some(ExitCode::from(12));
         }
     };
-    let tz = brief_worker::current_tz_offset_secs();
+    let tz = match flags.get("--tz-offset-secs").map(|v| v.parse::<i32>()) {
+        Some(Ok(offset)) if (-14 * 3600..=14 * 3600).contains(&offset) => offset,
+        Some(_) => {
+            eprintln!("mci-agent {command}: --tz-offset-secs must be seconds east of UTC, within 14 hours");
+            return Some(ExitCode::from(2));
+        }
+        None => brief_worker::current_tz_offset_secs(),
+    };
     let now_us = u64::try_from(
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_micros(),
     )
@@ -2647,9 +2670,17 @@ fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
                 "day" => UnderstandingQuery::Day { date: flags.get("--date").cloned() },
                 "sessions" => UnderstandingQuery::Sessions { date: flags.get("--date").cloned() },
                 "searches" => UnderstandingQuery::Searches { hours: flags.get("--hours").and_then(|v| v.parse().ok()), limit },
-                _ => UnderstandingQuery::UserModel { query: flags.get("--query").cloned(), limit },
+                _ => UnderstandingQuery::UserModel { query: flags.get("--query").cloned(), limit, page: page.then_some(true) },
             };
             query::run(&store, tz, now_us, &q).map_err(|e| e.to_string())
+        }
+        "overview" => {
+            let home = std::env::var_os("HOME").map(PathBuf::from);
+            let codex_home = std::env::var_os("CODEX_HOME").map(PathBuf::from);
+            let env = overview::OverviewEnv::read(&db_path, home.as_deref(), codex_home.as_deref(), now_us);
+            overview::overview(&store, flags.get("--date").map(String::as_str), tz, now_us, &env)
+                .map(|value| serde_json::to_value(value).unwrap_or_default())
+                .map_err(|e| e.to_string())
         }
         "ask" => {
             let question = positional.join(" ");
@@ -2697,7 +2728,7 @@ fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
             if json {
                 println!("{}", serde_json::to_string(&value).unwrap_or_else(|_| "{}".into()));
             } else {
-                println!("{}", render_understanding_text(command, &value));
+                println!("{}", render_understanding_text(command, &value, tz));
             }
             Some(ExitCode::SUCCESS)
         }
@@ -2708,9 +2739,80 @@ fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
     }
 }
 
-fn render_understanding_text(command: &str, value: &serde_json::Value) -> String {
+/// Fill a template object's placeholders in 24-hour form, for plain text.
+fn fill_template(value: &serde_json::Value, tz: i32) -> String {
+    let map = |key: &str| -> std::collections::BTreeMap<String, u64> {
+        value[key]
+            .as_object()
+            .map(|o| o.iter().filter_map(|(k, v)| Some((k.clone(), v.as_u64()?))).collect())
+            .unwrap_or_default()
+    };
+    mci_agent::understanding::overview::Template {
+        template: value["template"].as_str().unwrap_or_default().to_owned(),
+        times: map("times"),
+        durations: map("durations"),
+    }
+    .fill(tz)
+}
+
+fn render_understanding_text(command: &str, value: &serde_json::Value, tz: i32) -> String {
     let mut out = Vec::new();
+    let clock = |v: &serde_json::Value| v.as_u64().map(|us| mci_agent::understanding::observe::clock(us, tz)).unwrap_or_default();
     match command {
+        "overview" => {
+            out.push(format!("{}{}", value["date"].as_str().unwrap_or_default(), if value["is_today"] == true { " (today)" } else { "" }));
+            let now = &value["now"];
+            match now["state"].as_str() {
+                Some("in_progress") => out.push(format!("Now · since {} · {}", clock(&now["since_us"]), now["title"].as_str().unwrap_or_default())),
+                Some("last_saved") => out.push(format!("Last saved {} · {}", clock(&now["last_saved_us"]), now["title"].as_str().unwrap_or_default())),
+                _ => {}
+            }
+            let blocks = value["blocks"].as_array().cloned().unwrap_or_default();
+            if blocks.is_empty() {
+                out.push(if value["is_today"] == true {
+                    "Your day fills in as you work. It stays on this Mac.".into()
+                } else {
+                    "Nothing saved on this day.".into()
+                });
+            }
+            for fact in value["facts"].as_array().into_iter().flatten() {
+                out.push(fill_template(fact, tz));
+            }
+            out.push(String::new());
+            for block in &blocks {
+                out.push(format!(
+                    "{}–{}  {}  ({})",
+                    clock(&block["start_us"]),
+                    clock(&block["end_us"]),
+                    block["title"].as_str().unwrap_or_default(),
+                    block["kind_label"].as_str().unwrap_or_default()
+                ));
+                for sentence in block["sentences"].as_array().into_iter().flatten() {
+                    out.push(format!("    {}", fill_template(sentence, tz)));
+                }
+                if let Some(noticed) = block["noticed"]["text"].as_str() {
+                    out.push(format!("    {noticed}"));
+                }
+            }
+            if let Some(account) = value["account"].as_object() {
+                out.push(String::new());
+                out.push(account.get("headline").and_then(|v| v.as_str()).unwrap_or_default().to_owned());
+                out.push(account.get("narrative").and_then(|v| v.as_str()).unwrap_or_default().to_owned());
+            }
+        }
+        "model" if value.get("shared").is_some() => {
+            out.push("Recent work".into());
+            for line in value["recent_work"].as_array().into_iter().flatten() {
+                out.push(format!("- {}", fill_template(line, tz)));
+            }
+            for (heading, key) in [("What your AI can be told about you", "shared"), ("Not sent unless your AI looks it up", "kept_back"), ("Not seen lately", "not_seen_lately")] {
+                out.push(String::new());
+                out.push(heading.into());
+                for item in value[key].as_array().into_iter().flatten() {
+                    out.push(format!("- {}", item["text"].as_str().unwrap_or_default()));
+                }
+            }
+        }
         "day" => {
             if let Some(n) = value["day"]["narrative"].as_object() {
                 out.push(n.get("headline").and_then(|v| v.as_str()).unwrap_or_default().to_owned());
@@ -2719,21 +2821,13 @@ fn render_understanding_text(command: &str, value: &serde_json::Value) -> String
                 for insight in n.get("insights").and_then(|v| v.as_array()).into_iter().flatten() {
                     out.push(format!("- {}", insight.as_str().unwrap_or_default()));
                 }
-                if let Some(s) = n.get("suggestion").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-                    out.push(format!("Tomorrow: {s}"));
-                }
                 out.push(String::new());
             }
             out.push(value["facts"].as_str().unwrap_or_default().to_owned());
         }
         "model" => {
             for p in value["propositions"].as_array().into_iter().flatten() {
-                out.push(format!(
-                    "[{:.0}%] ({}) {}",
-                    p["confidence"].as_f64().unwrap_or(0.0) * 100.0,
-                    p["kind"].as_str().unwrap_or(""),
-                    p["text"].as_str().unwrap_or("")
-                ));
+                out.push(format!("({}) {}", p["kind"].as_str().unwrap_or(""), p["text"].as_str().unwrap_or("")));
             }
         }
         "searches" => {
@@ -2793,6 +2887,15 @@ fn spawn_understanding_worker(
         let tz = brief_worker::current_tz_offset_secs();
         let name = Understanding::account_first_name();
         let understanding = Arc::new(Understanding::new(store, mind, tz, name, inbox));
+        // Whether the model can be used, for the window, before any cycle.
+        let checker = Arc::clone(&understanding);
+        let started_us = u64::try_from(
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_micros(),
+        )
+        .unwrap_or(u64::MAX);
+        let mut model_status = tokio::task::spawn_blocking(move || checker.check_model(started_us))
+            .await
+            .unwrap_or_else(|_| mci_agent::understanding::overview::ModelStatus::unknown());
         let mut delay = std::time::Duration::from_secs(30);
         loop {
             tokio::select! {
@@ -2812,8 +2915,17 @@ fn spawn_understanding_worker(
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_micros(),
             )
             .unwrap_or(u64::MAX);
-            match tokio::task::spawn_blocking(move || worker.run_cycle(now_us, 6)).await {
-                Ok(Ok(stats)) => {
+            let last_status = model_status.clone();
+            match tokio::task::spawn_blocking(move || {
+                worker.run_cycle(now_us, 6).map(|stats| {
+                    let status = worker.record_model_status(&stats, last_status, now_us);
+                    (stats, status)
+                })
+            })
+            .await
+            {
+                Ok(Ok((stats, status))) => {
+                    model_status = status;
                     if stats.sessions > 0 || stats.days > 0 || stats.searches > 0 || stats.verdicts > 0 {
                         eprintln!(
                             "mci-agent: understanding: sessions={} by_model={} propositions +{} ~{} days={} searches={} verdicts={} model={}",
