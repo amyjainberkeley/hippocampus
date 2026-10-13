@@ -195,6 +195,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private let captureStatusReader: @MainActor @Sendable () -> (HealthSnapshot?, CaptureStatusReceipt?)
     private let captureStopNote: any CaptureStopNoting
     private let pauses: UserPauseController
+    private let orphanSweeper: (any CaptureOrphanSweeping)?
     private let clock: @MainActor @Sendable () -> Date
     private var skipWatch = SkipWatch()
     private let logger = Logger(subsystem: "ai.hippocampus", category: "supervisor")
@@ -236,7 +237,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         keyStore: KeyStore,
         runtimeConfig: any RuntimeConfiguring = RuntimeConfig(),
         captureStopNote: any CaptureStopNoting = NoCaptureStopNote(),
-        pauses: UserPauseController = UserPauseController()
+        pauses: UserPauseController = UserPauseController(),
+        orphanSweeper: (any CaptureOrphanSweeping)? = nil
     ) {
         let developmentKeyMode = DevelopmentFileKeyMode.active()
         self.init(
@@ -249,7 +251,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             readinessTimeout: 10,
             developmentKeyMode: developmentKeyMode,
             captureStopNote: captureStopNote,
-            pauses: pauses
+            pauses: pauses,
+            orphanSweeper: orphanSweeper
         )
     }
 
@@ -271,6 +274,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         },
         captureStopNote: any CaptureStopNoting = NoCaptureStopNote(),
         pauses: UserPauseController = UserPauseController(),
+        orphanSweeper: (any CaptureOrphanSweeping)? = nil,
         clock: @escaping @MainActor @Sendable () -> Date = { Date() }
     ) {
         self.locator = locator
@@ -286,6 +290,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         self.captureStatusReader = captureStatusReader
         self.captureStopNote = captureStopNote
         self.pauses = pauses
+        self.orphanSweeper = orphanSweeper
         self.clock = clock
         self.captureEnabled = runtimeConfig.captureEnabled
         // A pause outlives a relaunch: start goes straight to Paused.
@@ -322,6 +327,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         case .running, .paused, .stopped:
             stopFailed = false
             guard !shutdownRequested else { return }
+            // Nothing of ours reads the screen now: end what an earlier run
+            // left behind (spec-shell S6.4). Quit runs its own sweep.
+            if state != .running {
+                let moment: CaptureOrphanSweep.Moment = state == .paused ? .paused : .stopped
+                Task { [weak self] in await self?.sweepOrphans(moment) }
+            }
             if recallPresentationGate.consumeIfReady(state: state) {
                 openRecallUI(initialTab: Self.windowTab)
             }
@@ -332,6 +343,23 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         case .idle, .starting:
             break
         }
+    }
+
+    /// The helper and agent running now.
+    public var captureProcessIDs: Set<pid_t> { topology.childProcessIDs }
+
+    /// End capture processes no live Hippocampus owns: at launch before
+    /// `start()`, after Pause and Stop Sharing, and at Quit (spec-shell
+    /// S6.4). It runs off the main thread. Quit's ends every match; the
+    /// others leave this supervisor's live children, and what they started,
+    /// alone. Nil outside a `.app` bundle.
+    @discardableResult
+    public func sweepOrphans(_ moment: CaptureOrphanSweep.Moment) async -> CaptureOrphanSweep.Outcome? {
+        guard let orphanSweeper else { return nil }
+        let children: @Sendable () async -> Set<pid_t> = { [weak self] in
+            await self?.captureProcessIDs ?? []
+        }
+        return await orphanSweeper.run(moment, liveChildren: moment == .quit ? nil : children)
     }
 
     public func start() {

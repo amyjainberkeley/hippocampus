@@ -80,9 +80,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             bundlePath: Bundle.main.bundlePath
         ),
         stopExtras: { [weak self] in await self?.stopExtrasForQuit() },
+        afterStop: { [weak self] in await self?.sweepAfterQuit() },
         cleanup: { [weak self] in self?.cleanUpLifecycle() },
         onFailure: { [weak self] error in self?.presentShutdownFailure(error) }
     )
+    private let quitLogger = Logger(subsystem: "ai.hippocampus", category: "quit")
 
     override init() {
         // `ProcessSupervisor.init` is `@MainActor`; this class is too
@@ -94,7 +96,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             locator: BundleBinaryLocator(),
             keyStore: KeychainKeyStore.defaultDatabaseKey,
             captureStopNote: UserDefaultsCaptureStopNote(),
-            pauses: .shared
+            pauses: .shared,
+            orphanSweeper: CaptureOrphanSweep(bundleURL: Bundle.main.bundleURL)
         )
         super.init()
     }
@@ -269,6 +272,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.watchAskKey()
             self.installBrowserHostManifests()
             self.armTCCStderrTail()
+            // A helper left by a crash or Force Quit may still be reading the
+            // screen; end it before starting (spec-shell S6.4). Off the main
+            // thread, and quick when there is nothing to end.
+            await self.supervisor.sweepOrphans(.launch)
             self.startSupervisorOrDeferUntilOnboarded()
             // The updater starts at launch, not when the menu first opens
             // (spec-shell S2, D15). Its first check waits until remembering
@@ -466,6 +473,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let windows = Task { @MainActor in await supervisor.stopWindowsForQuit(timeout: 1) }
         await ask.value
         await windows.value
+    }
+
+    /// Once the supervisor has stopped: end every capture process still
+    /// running from this bundle, including one of ours that survived.
+    private func sweepAfterQuit() async {
+        guard let outcome = await supervisor.sweepOrphans(.quit) else { return }
+        if outcome.remaining == 0 {
+            quitLogger.info("quit: nothing left running (swept \(outcome.ended))")
+        } else {
+            quitLogger.error("quit: \(outcome.remaining) capture processes still running")
+        }
     }
 
     private func cleanUpLifecycle() {

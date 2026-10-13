@@ -92,6 +92,13 @@ package protocol SupervisorTopologyControlling: AnyObject {
         timeout: TimeInterval
     ) async throws
     func stop(timeout: TimeInterval) async throws
+    /// The running helper and agent, which the orphan sweep leaves alone
+    /// outside Quit (spec-shell S6.4).
+    var childProcessIDs: Set<pid_t> { get }
+}
+
+extension SupervisorTopologyControlling {
+    package var childProcessIDs: Set<pid_t> { [] }
 }
 
 @MainActor
@@ -117,6 +124,13 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
 
     var isRunning: Bool {
         helper?.isRunning == true && agent?.isRunning == true
+    }
+
+    var childProcessIDs: Set<pid_t> {
+        Set([helper, agent].compactMap { process in
+            guard let process, process.isRunning else { return nil }
+            return process.processIdentifier
+        })
     }
 
     func launch(
