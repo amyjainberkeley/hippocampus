@@ -110,7 +110,7 @@ pub fn tool_definitions() -> serde_json::Value {
             "name": ToolName::Recall.as_str(),
             "description": "Search your local work memory. Hippocampus records permitted \
                              app, window, browser-tab, and page context after you opt in, \
-                             then stores it in a private, encrypted brain on this Mac. \
+                             and keeps it encrypted on this Mac. \
                              Use this tool to recall anything you've seen or done. Query \
                              with natural language: 'that article about Rust I read \
                              yesterday', 'what was I working on this morning', 'the URL \
@@ -172,8 +172,8 @@ pub fn tool_definitions() -> serde_json::Value {
         },
         {
             "name": ToolName::Episodes.as_str(),
-            "description": "List recent work sessions. An episode is a stretch of focused \
-                             activity in one app (e.g. '45 min in VS Code', '20 min \
+            "description": "List recent work sessions. A session is one stretch of work \
+                             in one app (e.g. '45 min in VS Code', '20 min \
                              browsing docs'). Use for 'what did I work on today' at a \
                              glance.",
             "inputSchema": {
@@ -212,12 +212,9 @@ pub fn tool_definitions() -> serde_json::Value {
         },
         {
             "name": ToolName::Context.as_str(),
-            "description": "Compile a bounded, evidence-backed handoff for your current work. \
-                             Governed claims are kept separate from raw screen observations; \
-                             weak or missing sections abstain explicitly, and every rendered \
-                             item cites a canonical local event. Focused packets preserve whether \
-                             retrieval matched, contradicted, abstained, or returned degraded \
-                             related context.",
+            "description": "Get context for the current task: where things stand, what \
+                             changed, decisions and what is still open, each with its source. \
+                             Sections with nothing solid are left out.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -272,7 +269,7 @@ pub fn tool_definitions() -> serde_json::Value {
         {
             "name": ToolName::UserModel.as_str(),
             "description": "What Hippocampus understands about the user: projects, goals, habits, \
-                             preferences, skills, collaborators and where they get stuck, each with \
+                             preferences, skills, collaborators and what took them several tries, each with \
                              a confidence and the evidence it rests on. Read this first to avoid \
                              asking the user to re-explain themselves.",
             "inputSchema": {
@@ -286,7 +283,7 @@ pub fn tool_definitions() -> serde_json::Value {
         {
             "name": ToolName::Sessions.as_str(),
             "description": "A day's work sessions: for each, what was on screen (the surface) and \
-                             what lay beneath it (intent, attention, pauses, hesitation), with the \
+                             what lay beneath it (what you were trying to do), with the \
                              windows and searches involved.",
             "inputSchema": {
                 "type": "object",

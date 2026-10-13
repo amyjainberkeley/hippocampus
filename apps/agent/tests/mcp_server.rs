@@ -365,7 +365,8 @@ fn initialize_returns_server_info_and_protocol_version() {
         .get("instructions")
         .and_then(|v| v.as_str())
         .expect("initialize must include instructions for Claude Code");
-    assert!(instructions.contains("after you opt in"));
+    assert!(instructions.contains("It only remembers what they allowed."));
+    assert!(!instructions.contains("brain") && !instructions.contains("bounded cited"));
     assert!(instructions.contains("AI client you chose"));
     assert!(!instructions.contains("continuously captures"));
     assert!(!instructions.contains("nothing is sent to any server"));

@@ -144,7 +144,7 @@ fn markdown_packet_from_a_temp_brain_records_a_delivery() {
     );
     let text = stdout(&output);
     assert!(text.starts_with(DISCLAIMER));
-    assert!(text.contains("# Handoff: hippocampus ("));
+    assert!(text.contains("\n# hippocampus ("));
     assert!(text.contains("## Sources"));
 
     let store = SqlCipherBrainStore::open_readonly(&db, &key()).unwrap();
@@ -218,7 +218,7 @@ fn stdin_hook_json_supplies_the_cwd() {
     let output = child.wait_with_output().unwrap();
     assert!(output.status.success());
     let context = envelope_context(&output);
-    assert!(context.contains("# Handoff: hippocampus ("), "{context}");
+    assert!(context.contains("\n# hippocampus ("), "{context}");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("hook_event_name=SessionStart"), "{stderr}");
 

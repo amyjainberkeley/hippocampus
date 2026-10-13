@@ -61,7 +61,7 @@ fn packet_sections_follow_contract_order_and_every_cited_line_is_checkable() {
     let text = &packet.packet;
     println!("{text}");
 
-    assert!(text.starts_with(&format!("{DISCLAIMER}\n\n# Handoff: hippocampus (")));
+    assert!(text.starts_with(&format!("{DISCLAIMER}\n\n# hippocampus (")));
     assert!(text.contains("Last worked 2026-09-25 22:43 PDT by Codex, 16 hours ago."));
     assert!(text.contains("In memory: 2 sessions (Claude Code 1, Codex 1), 8 turns."));
 
@@ -250,7 +250,7 @@ fn empty_project_renders_the_contract_text_and_the_hook_fallback() {
     assert_eq!(packet.packet, render_empty_handoff("nothing-here"));
     assert_eq!(
         packet.packet,
-        "# Handoff: nothing-here\nNo memory for this project yet. Hippocampus will have context after your first agent session here.\n"
+        "# nothing-here\nNothing remembered for this project yet. That changes after your first session here.\n"
     );
     assert!(packet.cited_event_ids.is_empty());
     assert!(fallback_envelope().contains(NO_MEMORY_HOOK_TEXT));
@@ -507,7 +507,7 @@ fn git_section_reports_branch_uncommitted_files_and_commits() {
     );
     let packet = compile_handoff(&store, &sub, 4096, &clock(now_us())).unwrap();
     println!("{}", packet.packet);
-    assert!(packet.packet.contains("# Handoff: repo ("));
+    assert!(packet.packet.contains("\n# repo ("));
     let git_lines = section_lines(&packet.packet, "## Git");
     assert!(git_lines[0].starts_with("Branch feat/x, 1 file uncommitted. Last commits: "));
     assert!(git_lines[0].contains("\"first commit\""));

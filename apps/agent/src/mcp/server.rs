@@ -214,16 +214,16 @@ impl Server {
                     "name": "hippocampus",
                     "version": env!("CARGO_PKG_VERSION"),
                 },
-                "instructions": "Hippocampus is your local work memory. It records permitted \
-                    context after you opt in and stores it in a private, encrypted brain on \
-                    this Mac. You can search it with mci_recall, browse recent activity with \
-                    mci_events_since, check capture status with mci_stats, see work sessions \
-                    with mci_episodes, filter by app with mci_events_by_app, or request a \
-                    bounded cited handoff with mci_context. It also understands the user: \
-                    mci_user_model says what they work on, how they work and where they get \
-                    stuck (read it before asking them to re-explain), mci_day and \
-                    mci_sessions describe their day, and mci_searches lists what they \
-                    looked up. Hippocampus keeps no cloud copy; \
+                "instructions": "Hippocampus is the user’s memory of their own screen, kept \
+                    encrypted on this Mac. It only remembers what they allowed. You can \
+                    search it with mci_recall, browse recent activity with mci_events_since, \
+                    check its status with mci_stats, see work sessions with mci_episodes, \
+                    filter by app with mci_events_by_app, or get context for the current \
+                    task with mci_context. It also understands the user: mci_user_model \
+                    says what they work on, how they work and what took them several tries \
+                    (read it before asking them to re-explain), mci_day and mci_sessions \
+                    describe their day, and mci_searches lists what they looked up. \
+                    Hippocampus keeps no cloud copy; \
                     content returned through MCP is handled by the AI client you chose.",
             }),
         )

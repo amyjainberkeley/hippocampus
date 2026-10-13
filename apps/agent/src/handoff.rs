@@ -1445,7 +1445,7 @@ fn sections(state: &ProjectState, tz: &LocalTz) -> Vec<Section> {
 #[must_use]
 pub fn render_empty_handoff(name: &str) -> String {
     format!(
-        "# Handoff: {name}\nNo memory for this project yet. Hippocampus will have context after your first agent session here.\n"
+        "# {name}\nNothing remembered for this project yet. That changes after your first session here.\n"
     )
 }
 
@@ -1482,7 +1482,7 @@ pub fn render_handoff_with_block(
     }
     let tz = &clock.tz;
     let mut out = format!(
-        "{DISCLAIMER}\n\n# Handoff: {} ({})\n",
+        "{DISCLAIMER}\n\n# {} ({})\n",
         state.name, state.root
     );
     if let (Some(last_ts), Some(last_agent)) = (state.last_ts_us, &state.last_agent) {
