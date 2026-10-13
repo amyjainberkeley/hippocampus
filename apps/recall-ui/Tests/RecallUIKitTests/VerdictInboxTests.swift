@@ -26,10 +26,10 @@ final class VerdictInboxTests: XCTestCase {
 
     func testRightAndForgetWriteTheAskPanelsFilesAtOnce() throws {
         let inbox = inbox()
-        let right = inbox.give(.confirm, id: 41)
+        let right = try inbox.give(.confirm, id: 41)
         XCTAssertEqual(right.file?.lastPathComponent, "1791841025125-41.json")
         XCTAssertEqual(try body(right.file), #"{"id":41,"verdict":"confirm"}"#)
-        let forget = inbox.give(.reject, id: 37)
+        let forget = try inbox.give(.reject, id: 37)
         XCTAssertEqual(forget.file?.lastPathComponent, "1791841025125-37.json")
         XCTAssertEqual(try body(forget.file), #"{"id":37,"verdict":"reject"}"#)
         let mode = try FileManager.default.attributesOfItem(atPath: inboxDirectory.path)[.posixPermissions] as? Int
@@ -38,9 +38,22 @@ final class VerdictInboxTests: XCTestCase {
                        "/Users/fixture/Library/Application Support/Hippocampus/understanding-feedback")
     }
 
+    func testAVerdictThatCannotBeWrittenHidesNothingAndSaysSo() throws {
+        // A file where the inbox folder goes: the folder cannot be made.
+        try Data("not a folder".utf8).write(to: inboxDirectory)
+        let inbox = inbox()
+        XCTAssertThrowsError(try inbox.give(.reject, id: 41))
+        XCTAssertThrowsError(try inbox.give(.confirm, id: 45))
+        XCTAssertTrue(inbox.pending().isEmpty, "nothing reached the agent, so nothing is laid over a read")
+        let page = try UnderstandingFixture.modelPage()
+        XCTAssertEqual(page.overlaying(inbox.pending()), page)
+        XCTAssertTrue(page.shared.contains { $0.id == 41 }, "the item stays on screen, never shown as forgotten")
+        XCTAssertTrue(UserFacingCopy.verdictNotSaved.lowercased().contains("try"))
+    }
+
     func testUndoWithdrawsAForgetWhileItsFileIsStillThere() throws {
         let inbox = inbox()
-        let forget = inbox.give(.reject, id: 37)
+        let forget = try inbox.give(.reject, id: 37)
         XCTAssertTrue(inbox.pending().rejected.contains(37))
         XCTAssertTrue(inbox.canUndo(forget))
         XCTAssertTrue(inbox.undo(forget))
@@ -51,7 +64,7 @@ final class VerdictInboxTests: XCTestCase {
 
     func testUndoIsNotOfferedOnceTheAgentHasTakenTheFile() throws {
         let inbox = inbox()
-        let forget = inbox.give(.reject, id: 37)
+        let forget = try inbox.give(.reject, id: 37)
         let file = try XCTUnwrap(forget.file)
         try FileManager.default.moveItem(at: file, to: file.deletingPathExtension().appendingPathExtension("taken"))
         XCTAssertFalse(inbox.canUndo(forget))
@@ -81,7 +94,7 @@ final class VerdictInboxTests: XCTestCase {
     func testTheDevelopmentKeyWritesNothing() throws {
         let inbox = inbox(environment: ["MCI_DEVELOPMENT_FILE_KEY": "1"])
         XCTAssertNil(inbox.directory)
-        let forget = inbox.give(.reject, id: 41)
+        let forget = try inbox.give(.reject, id: 41)
         XCTAssertNil(forget.file)
         XCTAssertFalse(FileManager.default.fileExists(atPath: inboxDirectory.path))
         XCTAssertTrue(inbox.pending().rejected.contains(41), "the window's own verdict still applies on screen")
@@ -91,7 +104,7 @@ final class VerdictInboxTests: XCTestCase {
 
     func testThisWindowsVerdictsStayAppliedAfterTheAgentRemovesTheFile() throws {
         let inbox = inbox()
-        let forget = inbox.give(.reject, id: 41)
+        let forget = try inbox.give(.reject, id: 41)
         try FileManager.default.removeItem(at: try XCTUnwrap(forget.file))
         XCTAssertTrue(inbox.pending().rejected.contains(41))
         XCTAssertTrue(VerdictInbox.pending(directory: inboxDirectory).isEmpty)
@@ -99,10 +112,10 @@ final class VerdictInboxTests: XCTestCase {
 
     func testForgottenItemsAreHiddenAndConfirmedOnesSaySo() throws {
         let inbox = inbox()
-        inbox.give(.reject, id: 41)
-        inbox.give(.reject, id: 27)
-        inbox.give(.confirm, id: 45)
-        inbox.give(.confirm, id: 12)
+        try inbox.give(.reject, id: 41)
+        try inbox.give(.reject, id: 27)
+        try inbox.give(.confirm, id: 45)
+        try inbox.give(.confirm, id: 12)
         let page = try UnderstandingFixture.modelPage().overlaying(inbox.pending())
         XCTAssertFalse(page.shared.contains { $0.id == 41 })
         XCTAssertFalse(page.keptBack.contains { $0.id == 27 })

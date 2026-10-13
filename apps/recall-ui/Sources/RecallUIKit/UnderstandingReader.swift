@@ -28,6 +28,7 @@ public enum UnderstandingError: Error, Equatable, Sendable {
 /// One local day, as the agent is asked about it: the date, and the time
 /// zone's offset at noon of that day (contract overview.md section 1).
 public struct UnderstandingDay: Hashable, Sendable {
+    /// `YYYY-MM-DD`, Gregorian, whatever calendar the person uses.
     public let dateLocal: String
     public let tzOffsetSeconds: Int
 
@@ -36,6 +37,7 @@ public struct UnderstandingDay: Hashable, Sendable {
         self.tzOffsetSeconds = tzOffsetSeconds
     }
 
+    /// The day holding `date` in the person's calendar and time zone.
     public init(date: Date, calendar: Calendar = .current) {
         dateLocal = MemoryDay(date: date, calendar: calendar).dateLocal
         let noon = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: date) ?? date

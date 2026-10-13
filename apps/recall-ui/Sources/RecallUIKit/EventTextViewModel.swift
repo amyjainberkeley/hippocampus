@@ -27,15 +27,17 @@ public final class EventTextViewModel: ObservableObject {
         return reading
     }
 
-    /// What is shown, and what "Copy" copies: the reading, then the rest of the
-    /// window when it is shown. Never a header (RULINGS T14, T17).
-    public func copyText(for hit: Hit, includingRest: Bool = true) -> String {
+    /// What is shown, and what "Copy Text" copies: the reading, then the rest
+    /// of the window when "Also in this window" is open; the list's excerpt
+    /// until the reading is there. Never a header (RULINGS T12, T14, T17).
+    public func copyText(for hit: Hit, includingRest: Bool = false) -> String {
         text(for: hit)?.text(includingRest: includingRest) ?? ReadableText.guarded(hit.ocrTextSnippet)
     }
 
-    public func copyTitle(for hit: Hit) -> String {
-        guard let value = text(for: hit) else { return "Copy Snippet" }
-        return value.isTruncated ? "Copy Shown Text" : "Copy Full Text"
+    /// "Also in this window" opens by itself when the search's words are only
+    /// there (RULINGS T12).
+    public func opensRest(for hit: Hit) -> Bool {
+        text(for: hit)?.matchIn == .rest
     }
 
     /// Read the selected moment. With the search's text, the reading says
@@ -50,6 +52,8 @@ public final class EventTextViewModel: ObservableObject {
             currentState = .unavailable
             return
         }
+        // Blank search text is no search.
+        let query = query.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : $0 }
         do {
             let value = try await reader.eventReading(eventId: hit.id, query: query)
             guard requestID == request else { return }

@@ -57,7 +57,9 @@ public struct DailyReview: Equatable, Sendable {
         Self.sample(events.filter(\.hasScreenshot), limit: 6)
     }
 
-    public init(day: MemoryDay, events: some Sequence<TimelineEvent>, latestContextText: EventText? = nil) {
+    /// `latestContextText` is the reading of the day's last moment: what the
+    /// person was reading, never the stored text (RULINGS T8).
+    public init(day: MemoryDay, events: some Sequence<TimelineEvent>, latestContextText: EventReading? = nil) {
         var seen = Set<UInt64>()
         let sorted = events.filter { day.contains($0.tsUs) }.sorted {
             $0.tsUs == $1.tsUs ? $0.id < $1.id : $0.tsUs < $1.tsUs
@@ -66,13 +68,11 @@ public struct DailyReview: Equatable, Sendable {
         var observations: [Observation] = []
         if let last = sorted.last {
             var detail = ReadableText.guarded(last.snippet)
-            if let text = latestContextText, text.eventId == last.id,
-               text.tsUs == last.tsUs, text.appBundleId == last.appBundleId {
-                let body = ReadableText.parts(stored: text.text, sourceKind: last.sourceKind).main
-                // A bounded read ending inside an internal header has no usable body.
-                if !text.text.hasPrefix("[app=") || body != text.text {
-                    detail = Formatters.snippet(body, maxLen: 400)
-                }
+            if let reading = latestContextText, reading.eventId == last.id,
+               reading.tsUs == last.tsUs, reading.appBundleId == last.appBundleId,
+               // A bounded read ending inside the header has no usable body.
+               !reading.main.hasPrefix("[app=") {
+                detail = Formatters.snippet(reading.main, maxLen: 400)
             }
             observations.append(Observation(kind: .lastContext, title: "Last saved context",
                 detail: detail, evidence: [last]))

@@ -116,6 +116,14 @@ final class ReadableTextTests: XCTestCase {
                                encoding: .utf8)
         XCTAssertTrue(model.contains("reader.eventReading(eventId: hit.id, query: query)"))
         XCTAssertFalse(model.contains("reader.eventText("), "a person reads the reading, never the stored text")
+        // The Today screen too, until it goes: its handoff and its last-context line.
+        let today = try String(contentsOf: package.appendingPathComponent("Sources/RecallUIKit/DailyMemory.swift"),
+                               encoding: .utf8)
+        XCTAssertEqual(today.components(separatedBy: "reader.eventReading(eventId:").count - 1, 2)
+        XCTAssertFalse(today.contains("reader.eventText("))
+        let review = try String(contentsOf: package.appendingPathComponent("Sources/RecallUIKit/DailyReview.swift"),
+                                encoding: .utf8)
+        XCTAssertFalse(review.contains("ReadableText.parts("), "the reading is cut and cleaned by the FFI")
     }
 
     func testTheDetailReadsTheWindowNotTheStoredText() async throws {
@@ -135,9 +143,10 @@ final class ReadableTextTests: XCTestCase {
         let reader = StoredTextReader(stored: capture + classified, sourceKind: "screen_ocr")
         let model = EventTextViewModel()
         await model.load(hit: reader.hit, reader: reader)
-        XCTAssertEqual(model.copyText(for: reader.hit),
+        XCTAssertEqual(model.copyText(for: reader.hit, includingRest: true),
                        "Plans\nPick the plan that fits your rides.\n\nFile Edit View Window Help")
-        XCTAssertEqual(model.copyText(for: reader.hit, includingRest: false), "Plans\nPick the plan that fits your rides.")
+        XCTAssertEqual(model.copyText(for: reader.hit), "Plans\nPick the plan that fits your rides.",
+                       "with \u{201C}Also in this window\u{201D} closed, Copy Text copies what is shown")
         let other = Hit(eventId: 8, tsUs: 6, appBundleId: nil, windowTitle: nil, url: nil,
                         ocrTextSnippet: capture + "Snippet\u{1E}text", source: "timeline", score: nil)
         XCTAssertEqual(model.copyText(for: other), "Snippet text")
@@ -153,6 +162,36 @@ final class ReadableTextTests: XCTestCase {
         XCTAssertTrue(context.contains("## Also in this window\n\n```text\nFile Edit View Window Help\n```\n"))
         XCTAssertFalse(context.contains("[app="))
         XCTAssertFalse(context.contains("\u{1E}"))
+    }
+
+    func testAlsoInThisWindowCountsTheLinesThatHoldText() throws {
+        func reading(rest: String) throws -> EventReading {
+            try EventReading(eventId: 7, tsUs: 5, appBundleId: nil, sourceKind: "screen_ocr",
+                             main: "Plans", rest: rest, isTruncated: false)
+        }
+        XCTAssertEqual(try reading(rest: "File Edit View\n\nRoadmap\n   \nSearch\r\nRecently Deleted 3").restLineCount, 4)
+        XCTAssertEqual(try reading(rest: "").restLineCount, 0)
+        XCTAssertEqual(UserFacingCopy.lineCount(1), "1 line")
+        XCTAssertEqual(UserFacingCopy.lineCount(4), "4 lines")
+    }
+
+    func testTheWordsAroundAMomentsTextAreThePlainOnes() throws {
+        XCTAssertEqual(UserFacingCopy.momentTextHeading(sourceKind: "screen_ocr"), "On screen")
+        XCTAssertEqual(UserFacingCopy.momentTextHeading(sourceKind: "browser_page"), "On the page")
+        XCTAssertEqual(UserFacingCopy.momentTextHeading(sourceKind: "browser_page_with_ocr"), "On the page")
+        XCTAssertEqual(UserFacingCopy.momentTextHeading(sourceKind: "transcript_import"), "Text")
+        XCTAssertEqual(UserFacingCopy.momentTextHeading(sourceKind: nil), "Text")
+        let package = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        for file in ["Sources/RecallUI/DetailPaneView.swift", "Sources/RecallUI/ScreenshotViewer.swift",
+                     "Sources/RecallUIKit/EventTextViewModel.swift"] {
+            let source = try String(contentsOf: package.appendingPathComponent(file), encoding: .utf8)
+            for old in ["\"Stored text", "\"OCR text", "\"Saved OCR text", "\"Loading stored text", "\"No stored text",
+                        "Showing saved snippet", "128 KiB text limit", "\"Copy Snippet", "\"Copy Full Text",
+                        "\"Copy Shown Text", "Text(\"Event \\(", "No text preview is available"] {
+                XCTAssertFalse(source.contains(old), "\(file) still says \(old) (RULINGS T17)")
+            }
+        }
     }
 }
 

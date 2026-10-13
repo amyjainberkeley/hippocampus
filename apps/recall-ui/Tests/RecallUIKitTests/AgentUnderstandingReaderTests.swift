@@ -74,6 +74,20 @@ final class AgentUnderstandingReaderTests: XCTestCase {
         XCTAssertEqual(day(2026, 3, 7, hour: 23), UnderstandingDay(dateLocal: "2026-03-07", tzOffsetSeconds: -28_800))
     }
 
+    func testTheDateIsGregorianWhateverCalendarThePersonUses() {
+        // 14:37:05 on Oct 12, 2026 in Los Angeles: 2569 in the Buddhist
+        // calendar, Reiwa 8 in the Japanese one, 20 Mehr 1405 in the Persian one.
+        let moment = Date(timeIntervalSince1970: 1_791_841_025)
+        for identifier in [Calendar.Identifier.buddhist, .japanese, .persian] {
+            var calendar = Calendar(identifier: identifier)
+            calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+            XCTAssertEqual(UnderstandingDay(date: moment, calendar: calendar),
+                           UnderstandingDay(dateLocal: "2026-10-12", tzOffsetSeconds: -25_200), "\(identifier)")
+            XCTAssertEqual(MemoryDay(date: moment, calendar: calendar), MemoryDay(date: moment, calendar: pacific),
+                           "\(identifier): the same day, named and bounded the same way")
+        }
+    }
+
     func testWithoutTheAgentNothingRunsAndTheReadIsUnavailable() async {
         let runner = Self.samples()
         let reader = reader(runner, isExecutable: { _ in false })
@@ -165,6 +179,16 @@ final class AgentUnderstandingReaderTests: XCTestCase {
         } catch {
             XCTAssertEqual(error as? UnderstandingError, .malformed)
         }
+
+        // An agent without `--page` reads the flags as words and prints its
+        // old list with exit 0 (mci_agent.rs:2613).
+        let older = RecordingRunner { _ in #"{"propositions":[]}"# }
+        do {
+            _ = try await reader(older).modelPage()
+            XCTFail("an older agent's list is not an empty You page")
+        } catch {
+            XCTAssertEqual(error as? UnderstandingError, .malformed)
+        }
     }
 
     func testACancelledReadIsCancellationNeverUnavailable() async throws {
@@ -251,8 +275,8 @@ final class AgentUnderstandingReaderTests: XCTestCase {
         let reader = reader(runner, verdicts: inbox)
         let before = try await reader.modelPage()
         XCTAssertTrue(before.shared.contains { $0.id == 41 })
-        inbox.give(.reject, id: 41)
-        inbox.give(.confirm, id: 45)
+        try inbox.give(.reject, id: 41)
+        try inbox.give(.confirm, id: 45)
         let after = try await reader.modelPage()
         XCTAssertEqual(runner.commands.count, 1, "the second read came from the cache")
         XCTAssertFalse(after.shared.contains { $0.id == 41 })

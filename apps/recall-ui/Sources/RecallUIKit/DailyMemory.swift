@@ -3,6 +3,7 @@ import Foundation
 
 /// A local calendar day, expressed as the inclusive microsecond range the FFI accepts.
 public struct MemoryDay: Equatable, Sendable {
+    /// The day as the agent and the store name it: `YYYY-MM-DD`, Gregorian.
     public let dateLocal: String
     public let startUs: UInt64
     public let endUs: UInt64
@@ -12,12 +13,22 @@ public struct MemoryDay: Equatable, Sendable {
         let end = calendar.date(byAdding: .day, value: 1, to: start)!
         startUs = UInt64(max(0, start.timeIntervalSince1970 * 1_000_000))
         endUs = UInt64(max(1, end.timeIntervalSince1970 * 1_000_000)) - 1
+        dateLocal = Self.dateFormatter(timeZone: calendar.timeZone).string(from: start)
+    }
+
+    /// Writes and reads `YYYY-MM-DD` in the Gregorian calendar whatever
+    /// calendar the person uses: a Buddhist, Japanese or Persian one would
+    /// name another year, or another date, and the agent would read a day
+    /// with nothing in it. Where the day starts stays the person's calendar's.
+    static func dateFormatter(timeZone: TimeZone) -> DateFormatter {
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = timeZone
         let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.timeZone = calendar.timeZone
+        formatter.calendar = gregorian
+        formatter.timeZone = timeZone
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
-        dateLocal = formatter.string(from: start)
+        return formatter
     }
 
     public func contains(_ timestamp: UInt64) -> Bool {
@@ -115,7 +126,7 @@ public final class DailyMemoryViewModel: ObservableObject {
     @Published public private(set) var activitySummary: ActivitySummary?
     @Published public private(set) var activityStatus: String?
     @Published public private(set) var handoffPreview: String?
-    @Published private var latestContextText: EventText?
+    @Published private var latestContextText: EventReading?
     @Published public var showsSavedDraft = false
     private let reader: BrainReader
     private let calendar: Calendar
@@ -160,14 +171,14 @@ public final class DailyMemoryViewModel: ObservableObject {
             .sorted { $0.tsUs == $1.tsUs ? $0.id < $1.id : $0.tsUs < $1.tsUs }
         var excerpts: [Hit] = []
         for hit in hits {
-            let text = try await reader.eventText(eventId: hit.id)
+            let reading = try await reader.eventReading(eventId: hit.id, query: nil)
             guard request == generation, day == selectedDay, canExportSummary, !Task.isCancelled else {
                 throw CancellationError()
             }
-            guard let text, text.matches(hit) else { continue }
-            let body = ReadableText.parts(stored: text.text, sourceKind: hit.sourceKind).main
-            // A header truncated by the bounded text read is not evidence of the body.
-            guard !text.text.hasPrefix("[app=") || body != text.text else { continue }
+            guard let reading, reading.matches(hit) else { continue }
+            let body = reading.main
+            // A header cut off by the bounded text read is still there: it is not the body.
+            guard !body.hasPrefix("[app=") else { continue }
             excerpts.append(Hit(eventId: hit.id, tsUs: hit.tsUs, appBundleId: hit.appBundleId,
                 windowTitle: hit.windowTitle, url: hit.url, ocrTextSnippet: body,
                 source: hit.source, score: hit.score, entities: hit.entities,
@@ -227,11 +238,7 @@ public final class DailyMemoryViewModel: ObservableObject {
                 briefError = "No saved draft is available."
                 return
             }
-            let formatter = DateFormatter()
-            formatter.calendar = calendar
-            formatter.timeZone = calendar.timeZone
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.dateFormat = "yyyy-MM-dd"
+            let formatter = MemoryDay.dateFormatter(timeZone: calendar.timeZone)
             formatter.isLenient = false
             guard let date = formatter.date(from: latest.dateLocal),
                   formatter.string(from: date) == latest.dateLocal else {
@@ -338,20 +345,20 @@ public final class DailyMemoryViewModel: ObservableObject {
     }
 
     private func loadLatestContext(_ event: TimelineEvent, day requestedDay: MemoryDay,
-                                   request: Int) async throws -> EventText? {
+                                   request: Int) async throws -> EventReading? {
         let fetched = try await reader.fetchEventsByIds([event.id])
         guard request == generation, day == requestedDay, !Task.isCancelled else { return nil }
         guard let hit = fetched.first(where: { event.matches($0) && requestedDay.contains($0.tsUs) }) else {
             return nil
         }
-        let text = try await reader.eventText(eventId: event.id)
+        let reading = try await reader.eventReading(eventId: event.id, query: nil)
         guard request == generation, day == requestedDay, !Task.isCancelled else { return nil }
-        guard let text, text.matches(hit) else { return nil }
+        guard let reading, reading.matches(hit) else { return nil }
         // Text and authority reads are separate; reject deletion or replacement during hydration.
         let rechecked = try await reader.fetchEventsByIds([event.id])
         guard request == generation, day == requestedDay, !Task.isCancelled,
               rechecked.contains(hit) else { return nil }
-        return text
+        return reading
     }
 
     public func search() async {

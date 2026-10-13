@@ -4,13 +4,29 @@ import os
 
 /// Every child process the window starts, so none outlives it (RULINGS G7,
 /// critique-recall-engineering finding 3). The agent commands and the warm
-/// answer session start their children here; quitting stops them all.
+/// answer session start their children here; quitting stops them all. A
+/// child another package starts out of the window's reach (the OCR worker
+/// behind "Read Again", inside the capture kit) is stopped through the stop
+/// its owner registers for as long as it runs.
 public final class ChildProcesses: Sendable {
     public static let shared = ChildProcesses()
 
     private let pids = OSAllocatedUnfairLock(initialState: Set<pid_t>())
+    private let stops = OSAllocatedUnfairLock(initialState: [UUID: @Sendable () -> Void]())
 
     public init() {}
+
+    /// Have `terminateAll` call `stop`, which must end the work's process at
+    /// once, from any thread. Pass the key to `unregister` when the work ends.
+    public func register(stop: @escaping @Sendable () -> Void) -> UUID {
+        let key = UUID()
+        stops.withLock { $0[key] = stop }
+        return key
+    }
+
+    public func unregister(_ key: UUID) {
+        stops.withLock { _ = $0.removeValue(forKey: key) }
+    }
 
     /// Start `process` and list it until it exits.
     public func run(_ process: Process) throws {
@@ -35,10 +51,14 @@ public final class ChildProcesses: Sendable {
         pids.withLock { $0 }
     }
 
-    /// Stop every child now: SIGTERM, then SIGKILL for any still running
-    /// after `grace`. Synchronous, for `applicationWillTerminate` and the
-    /// termination signal, where nothing waits for a task.
+    /// Stop every child now: each registered stop, then SIGTERM, then SIGKILL
+    /// for any still running after `grace`. Synchronous, for
+    /// `applicationWillTerminate` and the termination signal, where nothing
+    /// waits for a task.
     public func terminateAll(grace: TimeInterval = 0.5) {
+        for stop in stops.withLock({ Array($0.values) }) {
+            stop()
+        }
         let targets = running
         guard !targets.isEmpty else { return }
         for pid in targets where pid > 0 {
@@ -66,11 +86,16 @@ public final class ProcessLifetime: @unchecked Sendable {
     private let sources: [any DispatchSourceProtocol]
     private let signals: [Int32]
 
-    /// Watch `parent` and `signals`. A parent of 1 is launchd, not the app,
-    /// and is not watched. Each signal is ignored by default from now on and
-    /// handled by `onEnd` instead, which must then end the process.
+    /// Watch `parent` and `signals`. Each signal is ignored by default from
+    /// now on and handled by `onEnd` instead, which must then end the process.
+    ///
+    /// A parent of 1 is launchd. Either the window was opened by hand (Finder,
+    /// `open`) and nothing is watched, or the app that opened it exited before
+    /// this ran and launchd took the window in. The app always passes the
+    /// memory's path (`MCI_DB_PATH`), so with that path the window ends at once.
     public init(
         parent: pid_t = getppid(),
+        environment: [String: String] = ProcessInfo.processInfo.environment,
         signals: [Int32] = [SIGTERM],
         queue: DispatchQueue = .main,
         onEnd: @escaping @Sendable (Reason) -> Void
@@ -102,9 +127,17 @@ public final class ProcessLifetime: @unchecked Sendable {
             if gone {
                 queue.async { once(.parentExited) }
             }
+        } else if ProcessLifetime.openedByTheApp(environment) {
+            queue.async { once(.parentExited) }
         }
         self.sources = sources
         self.signals = signals
+    }
+
+    /// The menu-bar app starts the window with the memory's path; a window
+    /// opened by hand has none.
+    static func openedByTheApp(_ environment: [String: String]) -> Bool {
+        !(environment["MCI_DB_PATH"] ?? "").isEmpty
     }
 
     /// Stop watching, and give the signals their default action back.

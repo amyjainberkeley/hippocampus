@@ -6,7 +6,7 @@ import Foundation
 /// its own heading. Never the stored text, so never a header (RULINGS T14).
 public enum ScreenshotInspectorContext {
     public static func markdown(hit: Hit, text: EventReading?) -> String {
-        let preview = VisualMemoryExport.markdown(title: "Selected screenshot", hits: [hit])
+        let preview = VisualMemoryExport.markdown(title: "Moment", hits: [hit])
         guard let text, text.matches(hit) else { return preview }
         let heading = text.isTruncated ? "Text (shortened)" : "Text"
         let limit = text.isTruncated ? "Shortened to fit.\n\n" : ""

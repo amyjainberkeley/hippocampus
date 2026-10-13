@@ -23,7 +23,6 @@ final class EventTextViewModelTests: XCTestCase {
             XCTAssertEqual(vm.state(for: original), .unavailable)
             XCTAssertNil(vm.text(for: original))
             XCTAssertEqual(vm.copyText(for: original), original.ocrTextSnippet)
-            XCTAssertEqual(vm.copyTitle(for: original), "Copy Snippet")
             let replacement = hit(1, tsUs: timestamp, app: app)
             await vm.load(hit: replacement, reader: reader)
             XCTAssertNotNil(vm.text(for: replacement))
@@ -173,21 +172,39 @@ final class EventTextViewModelTests: XCTestCase {
         XCTAssertNil(vm.text(for: hit(1)))
     }
 
-    func testCopyCarriesTheReadingNeverTheStoredHeaderAndLabelsCappedTextHonestly() async {
+    func testCopyTextCopiesWhatIsShownAndNeverTheStoredHeader() async {
         let hit = self.hit(1)
         let vm = EventTextViewModel()
-        XCTAssertEqual(vm.copyTitle(for: hit), "Copy Snippet")
-        XCTAssertEqual(vm.copyText(for: hit), ReadableText.guarded(hit.ocrTextSnippet))
+        XCTAssertEqual(vm.copyText(for: hit), ReadableText.guarded(hit.ocrTextSnippet), "the excerpt until the text is read")
         let stored = "[app=fixture | title=Fixture | url=? | ts=now]\n" + ControlledEventTextReader.body
         await vm.load(hit: hit, reader: ControlledEventTextReader(body: stored))
-        XCTAssertEqual(vm.copyTitle(for: hit), "Copy Full Text")
         XCTAssertEqual(vm.copyText(for: hit), ControlledEventTextReader.reading, "copy never carries the stored header")
+        let classified = "Launch plan\nThe beta opens on October 21.\n\n\u{1E}\nSearch\nRoadmap"
+        await vm.load(hit: hit, reader: ControlledEventTextReader(body: classified))
+        XCTAssertEqual(vm.copyText(for: hit), "Launch plan\nThe beta opens on October 21.",
+                       "with \u{201C}Also in this window\u{201D} closed, only the text")
+        XCTAssertEqual(vm.copyText(for: hit, includingRest: true),
+                       "Launch plan\nThe beta opens on October 21.\n\nSearch\nRoadmap")
         await vm.load(hit: hit, reader: ControlledEventTextReader(body: "prefix", truncated: true))
-        XCTAssertEqual(vm.copyTitle(for: hit), "Copy Shown Text")
         XCTAssertEqual(vm.copyText(for: hit), "prefix")
+        XCTAssertEqual(vm.text(for: hit)?.isTruncated, true, "\u{201C}Showing the first part.\u{201D} says so")
         let other = self.hit(2)
-        XCTAssertEqual(vm.copyTitle(for: other), "Copy Snippet")
         XCTAssertEqual(vm.copyText(for: other), ReadableText.guarded(other.ocrTextSnippet))
+    }
+
+    func testTheSearchsWordsOnlyInTheRestOfTheWindowOpenIt() async {
+        let hit = self.hit(1)
+        let vm = EventTextViewModel()
+        let reader = MatchReader()
+        await vm.load(hit: hit, reader: reader, query: "  roadmap ")
+        XCTAssertTrue(vm.opensRest(for: hit))
+        XCTAssertFalse(vm.opensRest(for: self.hit(2)))
+        await vm.load(hit: hit, reader: reader, query: " \n ")
+        XCTAssertFalse(vm.opensRest(for: hit), "blank search text is no search")
+        await vm.load(hit: hit, reader: reader)
+        XCTAssertFalse(vm.opensRest(for: hit))
+        let queries = await reader.queries
+        XCTAssertEqual(queries, ["roadmap", nil, nil])
     }
 }
 
@@ -238,6 +255,32 @@ private actor ControlledEventTextReader: BrainReader {
         self.tsUs = tsUs
         self.app = app
     }
+    func search(_ opts: SearchOptions) async throws -> [Hit] { [] }
+    func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] { [] }
+    func recentEvents(limit: Int) async throws -> [Hit] { [] }
+    func recentPrivacyMoments(limit: Int) async throws -> [PrivacyMoment] { [] }
+    func listObservedApps(limit: Int, timeFromUs: UInt64?) async throws -> [ObservedApp] { [] }
+    func listEpisodes(limit: Int) async throws -> [Episode] { [] }
+    func briefForDate(_ dateLocal: String) async throws -> Brief? { nil }
+    func latestBrief() async throws -> Brief? { nil }
+    func briefDates(limit: Int) async throws -> [String] { [] }
+    func summaryStats() async throws -> SummaryStats {
+        SummaryStats(totalEvents: 0, oldestTsUs: nil, newestTsUs: nil, diskBytes: 0)
+    }
+}
+
+/// Reads one moment whose search words are only in the rest of its window,
+/// and records the search text it was given.
+private actor MatchReader: BrainReader {
+    var queries: [String?] = []
+
+    func eventReading(eventId: UInt64, query: String?) async throws -> EventReading? {
+        queries.append(query)
+        return try EventReading(eventId: eventId, tsUs: 100, appBundleId: nil, sourceKind: "screen_ocr",
+                                main: "Launch plan", rest: "Search\nRoadmap",
+                                matchIn: query == nil ? nil : .rest, isTruncated: false)
+    }
+
     func search(_ opts: SearchOptions) async throws -> [Hit] { [] }
     func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] { [] }
     func recentEvents(limit: Int) async throws -> [Hit] { [] }

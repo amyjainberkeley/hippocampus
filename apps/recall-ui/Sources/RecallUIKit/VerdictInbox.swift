@@ -13,6 +13,11 @@ import os
 /// window lays it over every read itself (`pending()`), so a forgotten item
 /// never comes back on screen, and a confirmed one already says so.
 ///
+/// A verdict whose file could not be written is not given at all: `give`
+/// throws, nothing is laid over any read, and the item stays on screen as it
+/// was, so the window never shows "Forgotten" for something the agent will
+/// keep sending (`UserFacingCopy.verdictNotSaved` says so).
+///
 /// With the development key (`MCI_DEVELOPMENT_FILE_KEY=1`) nothing is written:
 /// a development memory's ids name items the real inbox would apply to the
 /// person's own memory. The window's own verdicts still apply on screen.
@@ -28,7 +33,7 @@ public final class VerdictInbox: Sendable {
     public struct Given: Equatable, Sendable {
         public let id: Int64
         public let verdict: Verdict
-        /// Nil when nothing was written: the development key, or a write that failed.
+        /// Nil only with the development key, which writes nothing.
         public let file: URL?
     }
 
@@ -62,12 +67,16 @@ public final class VerdictInbox: Sendable {
                                     isDirectory: true)
     }
 
-    /// "Right" (`confirm`) or "Forget" (`reject`): written at once.
+    /// "Right" (`confirm`) or "Forget" (`reject`): written at once, and only
+    /// then laid over every read. Throws when the file could not be written
+    /// (a full disk, a folder that cannot be made); nothing changes then.
     @discardableResult
-    public func give(_ verdict: Verdict, id: Int64) -> Given {
+    public func give(_ verdict: Verdict, id: Int64) throws -> Given {
+        var file: URL?
+        if let directory {
+            file = try Self.write(id: id, verdict: verdict, directory: directory, now: now())
+        }
         given.withLock { $0[id] = verdict }
-        guard let directory else { return Given(id: id, verdict: verdict, file: nil) }
-        let file = try? Self.write(id: id, verdict: verdict, directory: directory, now: now())
         return Given(id: id, verdict: verdict, file: file)
     }
 

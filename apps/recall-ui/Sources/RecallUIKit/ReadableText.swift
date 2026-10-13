@@ -175,6 +175,11 @@ public struct EventReading: Sendable, Equatable {
         guard includingRest, !rest.isEmpty else { return main }
         return main.isEmpty ? rest : main + "\n\n" + rest
     }
+
+    /// The line count "Also in this window" shows: `rest`'s non-empty lines.
+    public var restLineCount: Int {
+        rest.split(whereSeparator: \.isNewline).filter { !$0.allSatisfy(\.isWhitespace) }.count
+    }
 }
 
 extension EventReading: Decodable {

@@ -127,6 +127,38 @@ public enum UserFacingCopy {
     public static func writtenOnThisMac(by writtenBy: String) -> String? {
         writerName(writtenBy).map { "Written on this Mac by \($0)" }
     }
+
+    /// "Right" or "Forget" could not be saved, so nothing changed (RULINGS I8).
+    public static let verdictNotSaved = "Couldn\u{2019}t save that. Try again."
+
+    // The words around a moment's text (RULINGS T12, T17).
+
+    /// The heading over a moment's text: what was on screen, or on a web
+    /// page. Text from anywhere else is just "Text".
+    public static func momentTextHeading(sourceKind: String?) -> String {
+        switch sourceKind {
+        case "screen_ocr", "screen_context": "On screen"
+        case "browser_page", "browser_page_with_ocr": "On the page"
+        default: "Text"
+        }
+    }
+
+    public static let momentTextLoading = "Loading\u{2026}"
+    public static let momentTextEmpty = "No text here."
+    /// The window held more text than one read takes: its end is missing.
+    public static let momentTextFirstPart = "Showing the first part."
+    /// The whole text could not be read, so the list's excerpt shows. It may
+    /// be taken around a search's words, so it is not "the first part".
+    public static let momentTextExcerpt = "Showing part of it."
+    /// Copies what is shown: the text, and the rest of the window when open.
+    public static let copyTextAction = "Copy Text"
+    /// The closed disclosure after a moment's text: tabs, sidebars, menus.
+    public static let alsoInThisWindow = "Also in this window"
+
+    /// "1 line", "12 lines": how much "Also in this window" holds.
+    public static func lineCount(_ count: Int) -> String {
+        count == 1 ? "1 line" : "\(count) lines"
+    }
 }
 
 // MARK: - Copy-style validators (referenced by CopyStyleTests)

@@ -194,6 +194,10 @@ final class UnderstandingDecodingTests: XCTestCase {
 
         XCTAssertThrowsError(try JSONDecoder().decode(DayOverview.self, from: Data(#"{"date":"2026-10-11"}"#.utf8)),
                              "a reply without the day's bounds is not an overview")
+        let olderAgent = #"{"propositions":[{"id":41,"text":"Sam is redesigning the pricing page.","kind":"project"}]}"#
+        XCTAssertThrowsError(try JSONDecoder().decode(ModelPage.self, from: Data(olderAgent.utf8)),
+                             "an older agent's list is not a page where nothing was learned")
+        XCTAssertThrowsError(try JSONDecoder().decode(ModelPage.self, from: Data("{}".utf8)))
     }
 
     func testModelStatusNamesWhyTheModelCannotWrite() throws {

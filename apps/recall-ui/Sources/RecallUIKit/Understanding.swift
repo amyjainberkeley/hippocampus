@@ -748,7 +748,10 @@ extension ModelPage: Decodable {
         let f = try fields(decoder)
         self.init(
             version: f.maybe("version") ?? 1,
-            nowUs: f.maybe("now_us") ?? 0,
+            // Required: an agent without the page answers `model --page` with
+            // its old `{"propositions": …}` list and exit 0. That must read as
+            // malformed, never as a page where nothing has been learned.
+            nowUs: try f.need("now_us"),
             modelStatus: f.maybe("model_status") ?? .unknown,
             recentWork: f.list("recent_work"),
             shared: f.list("shared"),

@@ -13,21 +13,26 @@ struct DetailPaneView: View {
     /// on a flyout row can push it into the search / timeline selection.
     var onSelectRelated: ((Hit) -> Void)? = nil
     var screenshotEventIDs: [UInt64] = []
+    /// The search's text when the moment was found by one: "Also in this
+    /// window" opens by itself when its words are only there (RULINGS T12).
+    var query: String? = nil
 
     @State private var flyoutScope: RelatedHitsScope? = nil
     @State private var showsScreenshot = false
+    @State private var showsRest = false
     @StateObject private var textModel = EventTextViewModel()
 
-    /// What the window read, then the rest of it: never the stored header.
+    /// What "Copy Text" copies: what the person was reading, and the rest of
+    /// the window when "Also in this window" is open. Never the stored header.
     private var copiedBody: String {
-        textModel.copyText(for: hit)
+        textModel.copyText(for: hit, includingRest: showsRest)
     }
 
     private var displayBody: String {
-        copiedBody
+        textModel.copyText(for: hit, includingRest: false)
     }
 
-    private var storedText: EventReading? {
+    private var reading: EventReading? {
         textModel.text(for: hit)
     }
 
@@ -62,13 +67,16 @@ struct DetailPaneView: View {
                 if let urlStr = hit.url, !urlStr.isEmpty {
                     urlSection(urlStr)
                 }
-                ocrSection
+                textSection
             }
             .padding(MCI.Spacing.l)
         }
         .background(.thinMaterial)
         .task(id: hit) {
-            await textModel.load(hit: hit, reader: reader)
+            showsRest = false
+            await textModel.load(hit: hit, reader: reader, query: query)
+            guard !Task.isCancelled else { return }
+            showsRest = textModel.opensRest(for: hit)
         }
         .onDisappear { textModel.clear() }
         .sheet(isPresented: $showsScreenshot) {
@@ -105,7 +113,7 @@ struct DetailPaneView: View {
         [
             .init(
                 id: "hit.copySnippet",
-                title: textModel.copyTitle(for: hit),
+                title: UserFacingCopy.copyTextAction,
                 shortcut: "⌘C",
                 category: .hit
             ) {
@@ -173,7 +181,7 @@ struct DetailPaneView: View {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(copiedBody, forType: .string)
                 } label: {
-                    Label(textModel.copyTitle(for: hit), systemImage: "doc.on.doc")
+                    Label(UserFacingCopy.copyTextAction, systemImage: "doc.on.doc")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -306,31 +314,34 @@ struct DetailPaneView: View {
         }
     }
 
-    private var ocrSection: some View {
+    /// What the person was reading, then "Also in this window", closed unless
+    /// the search matched only there (RULINGS T12, T17).
+    private var textSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(storedText == nil ? "Stored text snippet" : (hit.sourceKind == "screen_ocr" ? "OCR text" : "Stored text"))
+            Text(UserFacingCopy.momentTextHeading(sourceKind: hit.sourceKind))
                 .font(.system(.caption, design: .default).weight(.semibold))
                 .foregroundStyle(Color.brandFgMuted)
             switch textModel.state(for: hit) {
             case .idle, .loading:
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Loading stored text...").font(.caption).foregroundStyle(.secondary)
+                    Text(UserFacingCopy.momentTextLoading).font(.caption).foregroundStyle(.secondary)
                 }
-            case .unavailable:
-                Text("Full text unavailable. Showing saved snippet.")
-                    .font(.caption).foregroundStyle(.secondary)
-            case .failed:
-                Text("Could not load full text. Showing saved snippet.")
-                    .font(.caption).foregroundStyle(.secondary)
+            case .unavailable, .failed:
+                if !displayBody.isEmpty {
+                    Text(UserFacingCopy.momentTextExcerpt)
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             case let .loaded(text):
                 if text.isTruncated {
-                    Label("Truncated at the 128 KiB text limit.", systemImage: "exclamationmark.triangle")
+                    Label(UserFacingCopy.momentTextFirstPart, systemImage: "exclamationmark.triangle")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
-            if displayBody.isEmpty, storedText != nil {
-                Text("No stored text.").font(.body).foregroundStyle(.secondary)
+            if displayBody.isEmpty {
+                if hasSettled, reading?.rest.isEmpty ?? true {
+                    Text(UserFacingCopy.momentTextEmpty).font(.body).foregroundStyle(.secondary)
+                }
             } else if displayBody.utf8.count > 8192 {
                 // Avoid regex/highlighter work over a large inspection payload.
                 Text(displayBody)
@@ -343,6 +354,18 @@ struct DetailPaneView: View {
             } else {
                 linkedText
             }
+            if let reading, !reading.rest.isEmpty {
+                AlsoInThisWindowDisclosure(rest: reading.rest, lineCount: reading.restLineCount,
+                                           isExpanded: $showsRest)
+            }
+        }
+    }
+
+    /// The read finished, or could not be made: an empty text is really empty.
+    private var hasSettled: Bool {
+        switch textModel.state(for: hit) {
+        case .idle, .loading: false
+        case .unavailable, .failed, .loaded: true
         }
     }
 
@@ -395,6 +418,34 @@ struct DetailPaneView: View {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color.brandBgPrimary)
             )
+    }
+}
+
+/// The rest of a moment's window (tabs, sidebars, menus, status bars) after
+/// its text: one closed disclosure, "Also in this window", with its line
+/// count (RULINGS T12). Shared by the detail pane and the screenshot viewer.
+struct AlsoInThisWindowDisclosure: View {
+    let rest: String
+    let lineCount: Int
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            Text(rest)
+                .font(.body)
+                .foregroundStyle(Color.brandFgSecondary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, MCI.Spacing.s)
+        } label: {
+            HStack(spacing: MCI.Spacing.s) {
+                Text(UserFacingCopy.alsoInThisWindow)
+                    .foregroundStyle(Color.brandFgPrimary)
+                Text(UserFacingCopy.lineCount(lineCount))
+                    .foregroundStyle(Color.brandFgMuted)
+            }
+            .font(.system(.caption, design: .default).weight(.semibold))
+        }
     }
 }
 

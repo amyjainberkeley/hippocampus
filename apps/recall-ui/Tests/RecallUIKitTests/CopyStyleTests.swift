@@ -35,6 +35,17 @@ final class CopyStyleTests: XCTestCase {
         ("emptyPrivacyEventsFreshTitle", UserFacingCopy.emptyPrivacyEventsFreshTitle),
         ("askKeyPhrase", UserFacingCopy.askKeyPhrase("⌃⇧Space")),
         ("writtenOnThisMac", UserFacingCopy.writtenOnThisMac(by: "apple-foundation-models") ?? ""),
+        ("verdictNotSaved", UserFacingCopy.verdictNotSaved),
+        ("momentTextHeading.screen", UserFacingCopy.momentTextHeading(sourceKind: "screen_ocr")),
+        ("momentTextHeading.page", UserFacingCopy.momentTextHeading(sourceKind: "browser_page")),
+        ("momentTextHeading.other", UserFacingCopy.momentTextHeading(sourceKind: nil)),
+        ("momentTextLoading", UserFacingCopy.momentTextLoading),
+        ("momentTextEmpty", UserFacingCopy.momentTextEmpty),
+        ("momentTextFirstPart", UserFacingCopy.momentTextFirstPart),
+        ("momentTextExcerpt", UserFacingCopy.momentTextExcerpt),
+        ("copyTextAction", UserFacingCopy.copyTextAction),
+        ("alsoInThisWindow", UserFacingCopy.alsoInThisWindow),
+        ("lineCount", UserFacingCopy.lineCount(12)),
     ] + UserFacingCopy.askKeyNames.sorted { $0.key < $1.key }.flatMap { entry -> [(name: String, text: String)] in
         [(name: "askKeyNames.\(entry.key).label", text: entry.value.label),
          (name: "askKeyNames.\(entry.key).phrase", text: entry.value.phrase)]
@@ -93,6 +104,7 @@ final class CopyStyleTests: XCTestCase {
             UserFacingCopy.unexpectedErrorGeneric,
             UserFacingCopy.mcpAgentMissing,
             UserFacingCopy.mcpRegisterFailed,
+            UserFacingCopy.verdictNotSaved,
         ]
         for s in failures {
             let lower = s.lowercased()

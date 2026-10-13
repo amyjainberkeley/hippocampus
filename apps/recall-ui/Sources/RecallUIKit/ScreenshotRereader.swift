@@ -18,14 +18,19 @@ public protocol ScreenshotRereading: Sendable {
 
 /// Re-reads only a user-selected, authenticated saved image, fully offline.
 /// No plaintext files, model downloads, history writes or background repair.
+/// The OCR worker is the capture kit's own child, so the read registers the
+/// worker's stop with `children` while it runs: quitting the window stops it.
 public struct LocalScreenshotRereader: ScreenshotRereading {
     private let provider: any ThumbnailDataProviding
     private let executableURL: URL?
+    private let children: ChildProcesses
 
     public init(provider: any ThumbnailDataProviding = ThumbnailDataProvider.shared,
-                executableURL: URL? = PaddleOCRRunner.bundledExecutableURL) {
+                executableURL: URL? = PaddleOCRRunner.bundledExecutableURL,
+                children: ChildProcesses = .shared) {
         self.provider = provider
         self.executableURL = executableURL
+        self.children = children
     }
 
     public func read(url: URL) async -> ScreenshotRereadOutcome {
@@ -35,7 +40,11 @@ public struct LocalScreenshotRereader: ScreenshotRereading {
         let input = await withTaskCancellationHandler { await decoder.value } onCancel: { decoder.cancel() }
         guard !Task.isCancelled, let input else { return .unavailable }
         let engine = PaddleOCRRunner(executableURL: executableURL)
-        defer { engine.stop() }
+        let registration = children.register(stop: { engine.stop() })
+        defer {
+            children.unregister(registration)
+            engine.stop()
+        }
         let result = await withTaskCancellationHandler {
             await engine.recognize(input: input, timeoutMs: PaddleOCRRunner.timeoutMs)
         } onCancel: { engine.stop() }

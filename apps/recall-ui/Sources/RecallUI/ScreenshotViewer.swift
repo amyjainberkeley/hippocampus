@@ -29,6 +29,7 @@ struct ScreenshotViewer: View {
     @StateObject private var textModel = EventTextViewModel()
     @StateObject private var rereadModel = ScreenshotRereadViewModel()
     @State private var imageZoom: CGFloat = 1
+    @State private var showsRest = false
 
     init(selection: ScreenshotSelection, reader: BrainReader) {
         self.selection = selection
@@ -124,7 +125,7 @@ struct ScreenshotViewer: View {
                                 }
                                 Divider()
                             }
-                            storedTextSection(for: hit)
+                            textSection(for: hit)
                             Divider()
                             Button("Copy context", systemImage: "doc.on.clipboard") {
                                 copyContext()
@@ -132,7 +133,6 @@ struct ScreenshotViewer: View {
                             Button("Export context", systemImage: "square.and.arrow.up") {
                                 exportContext()
                             }
-                            Text("Event \(hit.id)").font(.caption.monospaced()).foregroundStyle(.secondary)
                         }
                         .padding(20)
                     }
@@ -180,31 +180,43 @@ struct ScreenshotViewer: View {
         } message: { Text(exportError ?? "") }
     }
 
+    /// What the person was reading, then "Also in this window", closed
+    /// (RULINGS T12, T17).
     @ViewBuilder
-    private func storedTextSection(for hit: Hit) -> some View {
-        let stored = textModel.text(for: hit)
-        let body = Formatters.stripContextHeader(textModel.copyText(for: hit))
-        Text(stored == nil ? "Stored text snippet" : (hit.sourceKind == "screen_ocr" ? "Saved OCR text" : "Stored text"))
+    private func textSection(for hit: Hit) -> some View {
+        let reading = textModel.text(for: hit)
+        let body = textModel.copyText(for: hit, includingRest: false)
+        let state = textModel.state(for: hit)
+        Text(UserFacingCopy.momentTextHeading(sourceKind: hit.sourceKind))
             .font(.headline)
-        switch textModel.state(for: hit) {
+        switch state {
         case .idle, .loading:
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("Loading stored text...").font(.caption).foregroundStyle(.secondary)
+                Text(UserFacingCopy.momentTextLoading).font(.caption).foregroundStyle(.secondary)
             }
-        case .unavailable:
-            Text("Full text unavailable. Showing saved snippet.").font(.caption).foregroundStyle(.secondary)
-        case .failed:
-            Text("Could not load full text. Showing saved snippet.").font(.caption).foregroundStyle(.secondary)
+        case .unavailable, .failed:
+            if !body.isEmpty {
+                Text(UserFacingCopy.momentTextExcerpt).font(.caption).foregroundStyle(.secondary)
+            }
         case let .loaded(text):
             if text.isTruncated {
-                Label("Truncated at the 128 KiB text limit.", systemImage: "exclamationmark.triangle")
+                Label(UserFacingCopy.momentTextFirstPart, systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
-        Text(body.isEmpty ? (stored == nil ? "No text preview is available." : "No stored text.") : body)
-            .font(.body).textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        if !body.isEmpty {
+            Text(body)
+                .font(.body).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else if state != .idle, state != .loading, reading?.rest.isEmpty ?? true {
+            Text(UserFacingCopy.momentTextEmpty)
+                .font(.body).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        if let reading, !reading.rest.isEmpty {
+            AlsoInThisWindowDisclosure(rest: reading.rest, lineCount: reading.restLineCount, isExpanded: $showsRest)
+        }
     }
 
     private func clearLoadedEvent() {
@@ -213,6 +225,7 @@ struct ScreenshotViewer: View {
         textModel.clear()
         rereadModel.clear()
         imageZoom = 1
+        showsRest = false
         errorMessage = nil
         exportError = nil
         isLoading = true
