@@ -24,8 +24,8 @@ const RECENCY_K: f64 = 2.0;
 const MMR_LAMBDA: f64 = 0.5;
 const CANDIDATES: usize = 5;
 const CALL_TIMEOUT: Duration = Duration::from_secs(60);
-/// Model label stored with each proposition.
-pub const MODEL: &str = "apple-foundation-models";
+/// The label stored with a proposition when the ready line named no engine.
+pub const MODEL: &str = super::mind::DEFAULT_ENGINE;
 
 /// A proposition as the mind writes it (scores 1–10).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -43,14 +43,15 @@ pub struct Draft {
 }
 
 impl Draft {
-    fn to_new(&self) -> NewProposition {
+    /// `model` is who wrote it, as [`MindClient::engine_label`] names it.
+    fn to_new(&self, model: &str) -> NewProposition {
         NewProposition {
             text: self.text.trim().to_owned(),
             reasoning: self.reasoning.trim().to_owned(),
             kind: PropositionKind::parse(&self.kind).unwrap_or(PropositionKind::State),
             confidence: (self.confidence.clamp(1, 10) as f64) / 10.0,
             decay: (self.decay.clamp(1, 10) as f64) / 10.0,
-            model: MODEL.into(),
+            model: model.into(),
         }
     }
 
@@ -345,7 +346,7 @@ pub fn integrate(
         };
         if related.is_empty() {
             let draft = prepare(draft.clone(), user_name, true);
-            store.insert_proposition(&draft.to_new(), evidence, now_us)?;
+            store.insert_proposition(&draft.to_new(&mind.engine_label()), evidence, now_us)?;
             outcome.added += 1;
             continue;
         }
@@ -378,7 +379,7 @@ pub fn integrate(
             store.set_proposition_status(old.id, PropositionStatus::Retired, now_us)?;
         }
         let revised = prepare(revised, user_name, false);
-        store.revise_proposition(related[0].id, &revised.to_new(), &all_evidence, now_us)?;
+        store.revise_proposition(related[0].id, &revised.to_new(&mind.engine_label()), &all_evidence, now_us)?;
         outcome.revised += 1;
     }
     Ok(outcome)
@@ -501,7 +502,7 @@ mod tests {
     #[test]
     fn drafts_map_scores_to_unit_range() {
         let d = Draft { text: "Amy ships".into(), reasoning: "r".into(), kind: "goal".into(), confidence: 14, decay: 0 };
-        let n = d.to_new();
+        let n = d.to_new(MODEL);
         assert!((n.confidence - 1.0).abs() < 1e-9 && (n.decay - 0.1).abs() < 1e-9);
         assert_eq!(n.kind, PropositionKind::Goal);
     }

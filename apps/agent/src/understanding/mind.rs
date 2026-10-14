@@ -17,10 +17,27 @@ use serde::Serialize;
 /// The binary's name next to `mci-agent` in `Contents/MacOS`.
 pub const MIND_BINARY: &str = "hippocampus-mind";
 
+/// Who writes when the ready line names no engine: Apple Intelligence, the
+/// only engine before a model server on this Mac could answer.
+pub const DEFAULT_ENGINE: &str = "apple-foundation-models";
+
+/// How long an unavailable model is believed. Apple Intelligence rarely
+/// changes; a model server on this Mac (Ollama, LM Studio) can be started at
+/// any time, so its reasons are checked again after a minute.
+#[must_use]
+pub fn retry_after(reason: &str) -> Duration {
+    if reason == "needs_apple_intelligence_or_local_model" || reason.starts_with("local_") {
+        Duration::from_secs(60)
+    } else {
+        Duration::from_secs(30 * 60)
+    }
+}
+
 /// Why a call did not produce an answer.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum MindCallError {
-    /// No binary, an OS older than macOS 26, or Apple Intelligence off.
+    /// No binary, or neither Apple Intelligence nor a model server on this
+    /// Mac can answer.
     #[error("on-device model unavailable: {0}")]
     Unavailable(String),
     /// The input did not fit the model's window.
@@ -41,6 +58,9 @@ struct Session {
     child: Child,
     stdin: ChildStdin,
     lines: Receiver<String>,
+    /// What the ready line named: "apple-foundation-models" or
+    /// "local:<model>". Stored with whatever this session writes.
+    engine: String,
 }
 
 impl Drop for Session {
@@ -115,10 +135,10 @@ impl MindClient {
             match self.start() {
                 Ok(session) => *state = State::Running(session),
                 Err(reason) => {
-                    // An unavailable model rarely changes; check again later.
+                    // Check again later, sooner for a model server.
                     *state = State::Unavailable {
                         reason: reason.clone(),
-                        retry_at: Instant::now() + Duration::from_secs(30 * 60),
+                        retry_at: Instant::now() + retry_after(&reason),
                     };
                     return Err(MindCallError::Unavailable(reason));
                 }
@@ -162,7 +182,7 @@ impl MindClient {
                 }
             })
             .map_err(|_| "cannot_read".to_owned())?;
-        let session = Session { child, stdin, lines };
+        let mut session = Session { child, stdin, lines, engine: DEFAULT_ENGINE.to_owned() };
         let ready = session
             .lines
             .recv_timeout(Duration::from_secs(20))
@@ -175,7 +195,21 @@ impl MindClient {
         if value["available"] != true {
             return Err(value["reason"].as_str().unwrap_or("unavailable").to_owned());
         }
+        if let Some(engine) = value["engine"].as_str().map(str::trim).filter(|e| !e.is_empty()) {
+            session.engine = engine.to_owned();
+        }
         Ok(session)
+    }
+
+    /// Who writes for the running session, as stored with what it wrote
+    /// ("apple-foundation-models" or "local:<model>"), so a caption names
+    /// the model that wrote (RULINGS I11). [`DEFAULT_ENGINE`] when none runs.
+    #[must_use]
+    pub fn engine_label(&self) -> String {
+        match &*self.state.lock().expect("mind state poisoned") {
+            State::Running(session) => session.engine.clone(),
+            _ => DEFAULT_ENGINE.to_owned(),
+        }
     }
 
     /// Run one task. The child is restarted on the next call after a timeout
@@ -269,6 +303,30 @@ mod tests {
             client.ensure_available(),
             Err(MindCallError::Unavailable("apple_intelligence_off".into()))
         );
+    }
+
+    #[test]
+    fn a_model_server_is_checked_again_after_a_minute() {
+        assert_eq!(retry_after("needs_apple_intelligence_or_local_model"), Duration::from_secs(60));
+        assert_eq!(retry_after("local_server_unreachable"), Duration::from_secs(60));
+        assert_eq!(retry_after("apple_intelligence_off"), Duration::from_secs(30 * 60));
+        assert_eq!(retry_after("not_installed"), Duration::from_secs(30 * 60));
+    }
+
+    #[test]
+    fn the_writer_is_the_engine_the_ready_line_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let local = fake_mind(dir.path(), r#"echo '{"ready":true,"available":true,"engine":"local:qwen3:4b"}'; cat >/dev/null"#);
+        let client = MindClient::new(Some(local));
+        assert_eq!(client.engine_label(), DEFAULT_ENGINE, "nothing runs yet");
+        client.ensure_available().unwrap();
+        assert_eq!(client.engine_label(), "local:qwen3:4b");
+
+        let older = tempfile::tempdir().unwrap();
+        let unnamed = fake_mind(older.path(), r#"echo '{"ready":true,"available":true}'; cat >/dev/null"#);
+        let client = MindClient::new(Some(unnamed));
+        client.ensure_available().unwrap();
+        assert_eq!(client.engine_label(), "apple-foundation-models");
     }
 
     #[test]

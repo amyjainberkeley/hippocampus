@@ -49,7 +49,6 @@ const MIN_MODEL_SESSION_US: u64 = 2 * 60 * 1_000_000;
 /// Today's account is refreshed at most this often.
 const DAY_REFRESH_US: u64 = 60 * 60 * 1_000_000;
 const OBSERVATION_CHARS: usize = 5_200;
-const MODEL_LABEL: &str = gum::MODEL;
 const MEASURED_LABEL: &str = "measured";
 
 /// What one cycle did.
@@ -290,7 +289,8 @@ impl Understanding {
                     note.title = gum::ungender(&out.title, &self.user_name);
                     note.surface = gum::ungender(&out.surface, &self.user_name);
                     note.beneath = gum::ungender(&out.beneath, &self.user_name);
-                    note.model = MODEL_LABEL.into();
+                    // The model that wrote it, so its caption names it (I11).
+                    note.model = self.mind.engine_label();
                     stats.sessions_by_model += 1;
                 }
                 Err(MindCallError::Unavailable(reason)) => stats.model_unavailable = Some(reason),
@@ -419,19 +419,19 @@ impl Understanding {
             }),
             Duration::from_secs(90),
         ) {
-            Ok(narrative) => (narrative, MODEL_LABEL),
-            Err(_) => (measured_narrative(&day.breakdown, self.tz_offset_secs), MEASURED_LABEL),
+            Ok(narrative) => (narrative, self.mind.engine_label()),
+            Err(_) => (measured_narrative(&day.breakdown, self.tz_offset_secs), MEASURED_LABEL.to_owned()),
         };
         self.store.put_day_report(&DayReport {
             date_local: date_local.to_owned(),
             start_us: day.breakdown.start_us,
             end_us: day.breakdown.end_us,
             generated_us: now_us,
-            model: model.into(),
+            model: model.clone(),
             body: serde_json::json!({ "narrative": narrative }).to_string(),
         })?;
         day.narrative = Some(narrative);
-        day.written_by = Some(model.into());
+        day.written_by = Some(model);
         day.generated_us = Some(now_us);
         Ok(day)
     }
