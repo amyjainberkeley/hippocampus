@@ -2,7 +2,7 @@
 
 Hippocampus is a local-first "total recall" desktop app. It continuously records what you see on screen and the structured context around it (frontmost app, focused window, active browser tab URL, page text), turns that stream into a private, encrypted, searchable memory, and lets you — or an agent acting for you — recall any past moment by natural-language query: *"what was that pricing page I looked at last Tuesday?"*
 
-This document is for an engineer reading the codebase cold. It describes what the system is, how data flows through it, why the load-bearing decisions were made, and — honestly — what is actually working versus what is built but unproven. The exhaustive design rationale lives in [`docs/DESIGN.md`](docs/DESIGN.md) and the ADRs under [`docs/decisions/`](docs/decisions/); this is the map.
+This document is for an engineer reading the codebase cold. It describes what the system is, how data flows through it, why the load-bearing decisions were made, and — honestly — what is actually working versus what is built but unproven. The exhaustive design rationale lives in the ADRs under [`docs/decisions/`](docs/decisions/); this is the map.
 
 Platform scope: macOS ships first. Windows is a defined-but-unbuilt later phase. The whole architecture exists to make the second one cheap.
 
@@ -102,7 +102,6 @@ One deliberate constraint shapes the FFI: **pixels never cross the seam as an ow
 
 | Path | Responsibility |
 |---|---|
-| `server/` | Ciphertext sync design scaffold: encrypted delta-log store, device enrollment, crash-report intake. Cross-device convergence and the complete privacy claim are not verified. |
 | `adapters/windows/` | Windows `CaptureSource` adapter (WGC / Media Foundation / Windows.Media.Ocr / UIA). Scaffold, all methods stubbed. |
 | `extensions/` | Optional per-browser page-text extensions (`chromium/` working; `safari/` scaffold). |
 | `tools/`, `eval/` | Perf-soak harness, NER bake-off, retrieval eval corpora. |

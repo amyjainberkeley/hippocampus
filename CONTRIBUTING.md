@@ -4,7 +4,7 @@ This is a solo project, so the most useful contributions are precise ones: an is
 
 ## Set up
 
-Prerequisites are in the [README](README.md#build-from-source): macOS 14 or later on Apple silicon, Xcode 16 or later, and stable Rust.
+Prerequisites are in the [README](README.md#build-from-source): an Apple silicon Mac, Xcode 26, the Rust toolchain named in `rust-toolchain.toml`, and Python 3.12 with uv for the text reader.
 
 ```bash
 git clone https://github.com/amyjainberkeley/hippocampus.git
