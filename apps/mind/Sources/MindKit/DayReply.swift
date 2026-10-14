@@ -26,21 +26,26 @@ enum DayReply {
 
     /// Each length in `text`, in minutes: "5 h 30 min", "1 hour and 5
     /// minutes", "an hour", "forty-five minutes". A length in seconds is -1
-    /// and a vague one ("a few minutes", "you spent the day") is 0, which no
-    /// fact states.
+    /// and a vague one ("a few minutes", "you spent the day", "the next
+    /// hour", "for hours", "all morning") is 0, which no fact states.
     static func minutes(in text: String) -> [Int] {
         let digits = text.lowercased()
             .replacing("half an hour", with: "30 minutes")
             .replacing(/\b(?:a few|a couple of|several)\s+(?=hours?\b|minutes?\b)/, with: "0 ")
             .replacing(/\b(?:spen[dt]s?|spending)\s+(?:the|your|all)(?:\s+whole)?\s+(?:day|morning|afternoon|evening)\b|\ball\s+day\b|\b(?:first|second|last)\s+half\s+of\s+(?:the|your)\s+day\b/, with: "0 minutes")
+            .replacing(/\b(?:all|most\s+of\s+(?:the|your)|(?:the\s+)?rest\s+of\s+(?:the|your)|(?:the|your)\s+whole)\s+(?:morning|afternoon|evening|day)\b/, with: "0 minutes")
             .replacing(/\b[a-z]+(?:-[a-z]+)?\b/) { numbers[String($0.output)].map(String.init) ?? String($0.output) }
         let length = /\b(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b(?:,?\s*(?:and\s+)?(\d+)\s*(?:minutes?|mins?|m)\b)?|\b(\d+)\s*(?:minutes?|mins?|m)\b|\b(\d+)\s*(?:seconds?|secs?)\b/
-        return digits.matches(of: length).compactMap { match in
+        let stated: [Int] = digits.matches(of: length).compactMap { match in
             let (_, hours, andMinutes, minutes, seconds) = match.output
             if seconds != nil { return -1 }
             if let hours { return Int((Double(hours) ?? 0) * 60) + (andMinutes.flatMap { Int($0) } ?? 0) }
             return minutes.flatMap { Int($0) }
         }
+        // A unit with no number before it ("the next hour", "for two and a
+        // half hours", "a half hour") is still a length: a vague one.
+        let unstated = digits.replacing(length, with: " ").matches(of: /\b(?:hours?|hrs?|minutes?|mins?)\b/).map { _ in 0 }
+        return stated + unstated
     }
 
     /// Number words a length is written with, as digits.

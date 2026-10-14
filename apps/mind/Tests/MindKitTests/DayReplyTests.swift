@@ -33,6 +33,11 @@ final class DayReplyTests: XCTestCase {
             "You spent your day working on the grant proposal.": [0], "You spent the day planning your trip.": [0],
             "for the first half of the day": [0],
             "1 minute and 31 seconds": [1, -1],
+            // A unit with no number, or a part of the day, is a vague length.
+            "You spent the next hour refining the view.": [0], "for two and a half hours": [0],
+            "for one and a half hours": [0], "a half hour": [0], "the next half hour": [0], "for hours": [0],
+            "most of the morning": [0], "all morning": [0], "the first hour": [0], "the rest of the afternoon": [0],
+            "an hour and a half": [60],
         ]
         for (text, minutes) in lengths {
             XCTAssertEqual(DayReply.minutes(in: text), minutes, text)
@@ -53,6 +58,10 @@ final class DayReplyTests: XCTestCase {
              "You worked on the invoice list in SwiftUI for 20 minutes, then settled the Team plan price for 29 minutes. You searched for 'swiftui list selection'."),
             ("Beta announcement", "You drafted the beta announcement in Notes. You paused for a minute to review your draft."),
             ("You worked on the invoice list view for 2 hours and 15 minutes in Xcode.", "You built the invoice list view."),
+            // Seen in the reviewers' full day: a length with no number in it.
+            ("The invoice list in SwiftUI",
+             "You started your day by building the invoice list view in SwiftUI. You spent the next hour refining the view."),
+            ("Pricing", "You spent most of the morning on the Team plan price."),
         ] {
             XCTAssertNil(DayReply.account(headline: headline, narrative: narrative, shown: shown), narrative)
         }
