@@ -20,9 +20,9 @@ README="$REPO_ROOT/README.md"
 STATUS="$REPO_ROOT/docs/STATUS.md"
 ONBOARDING_RETENTION_STORE="$REPO_ROOT/apps/onboarding/Sources/OnboardingKit/DiskRetentionStore.swift"
 ONBOARDING_RETENTION_MODEL="$REPO_ROOT/apps/onboarding/Sources/OnboardingKit/RetentionViewModel.swift"
-ONBOARDING_FLOW="$REPO_ROOT/apps/onboarding/Sources/Onboarding/OnboardingFlowView.swift"
 ONBOARDING_APP="$REPO_ROOT/apps/onboarding/Sources/Onboarding/OnboardingApp.swift"
-ONBOARDING_STEP="$REPO_ROOT/apps/onboarding/Sources/OnboardingKit/OnboardingStep.swift"
+ONBOARDING_SCREEN="$REPO_ROOT/apps/onboarding/Sources/OnboardingKit/OnboardingScreen.swift"
+ONBOARDING_COPY="$REPO_ROOT/apps/onboarding/Sources/OnboardingKit/OnboardingCopy.swift"
 
 python3 "$GENERATOR" --check
 
@@ -67,13 +67,15 @@ rg -Fq 'Some(days) if (1..=365).contains(&days)' "$RETENTION_WORKER"
 rg -Fq 'try writer.write(data, to: fileURL)' "$ONBOARDING_RETENTION_STORE"
 rg -Fq 'cached = (policy, validatedDays, false)' "$ONBOARDING_RETENTION_STORE"
 rg -Fq 'public func saveThen(' "$ONBOARDING_RETENTION_MODEL"
-rg -Fq 'await retentionVM.saveThen { flowVM.advance() }' "$ONBOARDING_FLOW"
+# Setup no longer asks how long to keep things: with no retention file the
+# agent keeps 90 days, and Preferences changes it.
+rg -Fq 'return Ok(RetentionConfig::Days(90));' "$RETENTION_WORKER"
 rg -Fq 'parsed[key] = value' "$RUNTIME_CONFIG"
 rg -Fq 'parsed.convert(to: .toml)' "$RUNTIME_CONFIG"
 rg -Fq 'from: state, captureEnabled: captureEnabled,' "$PROCESS_SUPERVISOR"
 rg -Fq 'environment["MCI_ONBOARDING_STEP"] = initialStep' "$PROCESS_SUPERVISOR"
-rg -Fq 'OnboardingStep.init(launchRoute:)' "$ONBOARDING_APP"
-rg -Fq 'case "allowlist", "app-access": self = .allowlist' "$ONBOARDING_STEP"
+rg -Fq 'OnboardingLaunch.parse(ProcessInfo.processInfo.environment["MCI_ONBOARDING_STEP"])' "$ONBOARDING_APP"
+rg -Fq 'case "app-access", "allowlist": self = .appAccess' "$ONBOARDING_SCREEN"
 if rg -q 'deepHookPlugins|defaultDeepHookPlugins|deepHookPluginOrder' \
     "$PREFERENCES_STORE" "$PREFERENCES_WINDOW"; then
     echo "FAIL: disconnected UserDefaults deep-hook control returned" >&2
@@ -102,7 +104,7 @@ for prohibited in \
     'no[[:space:]]+third[[:space:]]+party[[:space:]]+can[[:space:]]+decrypt'; do
     if rg -i -q -- "$prohibited" \
         "$SOURCE" "$EULA" \
-        "$REPO_ROOT/apps/onboarding/Sources/Onboarding/Slides/RetentionSlide.swift" \
+        "$ONBOARDING_COPY" \
         "$REPO_ROOT/apps/agent/src/bin/mci_seed_brain.rs" \
         "$REPO_ROOT/apps/hippocampus/Sources/HippocampusKit/MciBootGuards.swift" \
         "$REPO_ROOT/docs/assets/data-flow-diagram.svg"; then
