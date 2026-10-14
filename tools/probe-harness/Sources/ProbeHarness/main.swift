@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // MCI probe-harness — STEP-2-FINDING-001 isolation surface.
 //

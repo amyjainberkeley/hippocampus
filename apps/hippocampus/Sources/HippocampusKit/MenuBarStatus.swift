@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // What remembering is doing, for the menu-bar icon, the menu, Ask's footer
 // and Preferences (spec-shell S2 and S4, RULINGS S and B1). Only the agent's

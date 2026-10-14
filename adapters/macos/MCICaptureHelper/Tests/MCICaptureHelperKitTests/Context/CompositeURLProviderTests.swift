@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // CompositeURLProviderTests — pin the per-call walk semantics for
 // `CompositeURLProvider`. ADR-0015 §6 P2.4 + §7.

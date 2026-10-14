@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // CalendarAttribution — EventKit-backed "what calendar event is
 // happening right now" attribution source for `WorkflowContext`.

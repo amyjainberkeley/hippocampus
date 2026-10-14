@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // OnboardingStateStore — persist the user's current onboarding slide
 // so that quitting the Onboarding window mid-flow and reopening it

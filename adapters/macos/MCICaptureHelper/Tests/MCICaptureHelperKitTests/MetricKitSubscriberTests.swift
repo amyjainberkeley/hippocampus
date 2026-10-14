@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // MetricKitSubscriberTests — coverage for the Phase 6 PR 6 MetricKit
 // non-content footprint telemetry pipeline.

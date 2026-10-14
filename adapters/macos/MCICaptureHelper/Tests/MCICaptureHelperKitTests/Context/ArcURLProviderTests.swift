@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // ArcURLProviderTests — headless coverage of `ArcURLProvider`.
 // ADR-0015 §6 P2.4 + §7.

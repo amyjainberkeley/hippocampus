@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // The hi mark: a lowercase h and i side by side. One geometry serves the
 // menu bar, Ask, and the asset generator in scripts/brand. Units: the

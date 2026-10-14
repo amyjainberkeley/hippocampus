@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // ConcreteProbesTests — exercises the concrete OS-API probes that
 // implement the ADR-0013 cascade input protocols.

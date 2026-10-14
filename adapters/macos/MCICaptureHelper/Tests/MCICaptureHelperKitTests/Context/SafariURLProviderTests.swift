@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // SafariURLProviderTests — headless coverage of `SafariURLProvider`'s
 // decision matrix. ADR-0015 §6 P2.3 + §7.

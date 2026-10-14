@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // SCStreamCaptureSessionTCCTests — headless integration coverage for
 // the cycle 8.45 audit risk #2 pause/resume wiring. PROTECTED-SET per

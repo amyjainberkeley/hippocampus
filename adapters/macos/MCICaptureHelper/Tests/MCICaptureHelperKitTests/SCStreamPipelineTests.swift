@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // SCStreamPipelineTests — OS-FREE proof of the ADR-0013 §5 ordering
 // invariant: the suppression cascade runs BEFORE any encode call site,

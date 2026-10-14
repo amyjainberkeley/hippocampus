@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: TBD-private
+# SPDX-License-Identifier: Apache-2.0
 #
 # footprint_measure.sh — sample helper RSS + CPU at fixed intervals,
 # emit CSV. PREREQUISITE TOOLING for Track B · Step 3 (the ADR-0013

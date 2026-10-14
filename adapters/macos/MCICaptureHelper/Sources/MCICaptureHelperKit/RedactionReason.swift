@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // RedactionReason — Swift mirror of `core::ipc::RedactionReason`.
 //

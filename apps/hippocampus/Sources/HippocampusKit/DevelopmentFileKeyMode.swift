@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 import Foundation
 
 /// Development file-key authority exists only when the assembled app bundle

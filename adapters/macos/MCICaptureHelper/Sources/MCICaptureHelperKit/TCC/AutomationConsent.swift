@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // AutomationConsent — whether this process may already send Apple Events
 // to an app. RULINGS G8: Hippocampus never shows an Automation prompt, so

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // PermissionReset.swift — "Reset Permissions…" in Preferences, Advanced,
 // Troubleshooting (spec-shell S2, spec-copy S3 #10, RULINGS S10). It resets

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // WorkflowContextSnapshot — single mutable cell that owns the latest
 // `WorkflowContext` value. Writes go through actor isolation;

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // CaptureLaunchOptions — the single source of truth for the
 // "is live SCStream capture allowed to start?" decision.

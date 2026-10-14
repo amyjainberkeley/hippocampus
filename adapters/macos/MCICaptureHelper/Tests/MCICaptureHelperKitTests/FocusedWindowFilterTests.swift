@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // FocusedWindowFilterTests — headless coverage for the ADR-0031 V2-P1
 // focused-window filter machinery:

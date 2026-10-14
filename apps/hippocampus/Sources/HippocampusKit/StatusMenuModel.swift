@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // StatusMenuModel.swift — every word of the menu-bar menu, as data, so tests
 // pin them (spec-shell S2, RULINGS S3 and S5). The status row it builds is

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // PerAppFailsafeCounterTests — coverage for the wire-0x09
 // `failsafe_by_app` per-app counter map (PR #226 §5.1 (1) + Phase 6

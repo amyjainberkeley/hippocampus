@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // CaptureLaunchOptionsTests — OS-FREE proof of ADR-0013 Amendment 1 §4:
 // the live-capture path is DEFAULT-OFF and only the explicit,

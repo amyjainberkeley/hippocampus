@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // Screen Recording, asked of a fresh process. On some macOS versions a
 // process keeps the "no" it read before the person turned Screen Recording

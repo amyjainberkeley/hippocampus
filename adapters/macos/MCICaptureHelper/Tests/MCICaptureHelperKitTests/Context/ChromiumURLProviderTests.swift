@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // ChromiumURLProviderTests — headless coverage of
 // `ChromiumURLProvider`'s decision matrix across the three supported

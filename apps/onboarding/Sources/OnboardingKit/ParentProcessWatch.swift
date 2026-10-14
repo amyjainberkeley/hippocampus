@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // Onboarding exits with the app that started it. If the app crashes or is
 // force-quit, a window left behind would hold a memory reader open and

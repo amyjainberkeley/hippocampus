@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // Tests for UserPauseController — the user-initiated pause layer
 // added in the menu-bar quick-actions PR. Two things to pin:

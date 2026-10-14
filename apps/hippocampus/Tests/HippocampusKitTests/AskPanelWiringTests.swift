@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // How the executable wires Ask and the key. The app target cannot be
 // imported, so these read its source, as MenuBarLifecycleTests and

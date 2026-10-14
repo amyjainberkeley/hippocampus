@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // Denylist — pattern matcher for app bundle IDs, URLs, and window
 // titles. PROTECTED-SET per AGENT_PROTOCOL §5 (sensitive-capture

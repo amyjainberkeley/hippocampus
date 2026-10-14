@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // FullDiskAccessPermission — V2-P10 onboarding-side TCC gate for the
 // per-app deep-hook opt-in.

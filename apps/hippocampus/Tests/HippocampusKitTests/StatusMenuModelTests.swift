@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // Every word of the menu-bar menu, in order, for every row of the menu table
 // (spec-shell S2 with product critique 3, 4, 9, 10 and 17, RULINGS S3 and

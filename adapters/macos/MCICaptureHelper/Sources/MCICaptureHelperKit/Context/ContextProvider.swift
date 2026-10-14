@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // ContextProvider — protocol that surfaces the ADR-0013 cascade's
 // `WorkflowContext` inputs (frontmost app bundle id, focused window

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // NSWorkspaceContextProviderTests — exercises the polling + snapshot
 // push without a real NSWorkspace. Uses a `StubFrontmostAppSource`

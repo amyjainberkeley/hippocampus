@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // WorkflowContextSnapshotTests — pins the storage cell's contract per
 // ADR-0015 §3 (bounded staleness, non-blocking hot-path read).

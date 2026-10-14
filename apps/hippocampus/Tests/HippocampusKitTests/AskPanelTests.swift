@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // Ask's behaviour, against a memory that answers from fixtures: answers are
 // kept across a close, "this" is promised only when it is true, at most three

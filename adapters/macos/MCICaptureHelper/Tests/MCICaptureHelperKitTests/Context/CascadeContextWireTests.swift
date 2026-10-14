@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // CascadeContextWireTests — ADR-0015 §6 P2.5 acceptance: this is the
 // FIRST PR in the repo on which real `appBundleId` / `windowTitle` /

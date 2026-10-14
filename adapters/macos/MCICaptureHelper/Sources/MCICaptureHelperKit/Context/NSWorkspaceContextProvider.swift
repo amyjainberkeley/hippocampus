@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // NSWorkspaceContextProvider — production `ContextProvider` impl.
 // Polls `NSWorkspace.shared.frontmostApplication?.bundleIdentifier`

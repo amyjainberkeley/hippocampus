@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // AutomationTargetMonitorTests — headless XCTest coverage for the
 // cycle 8.47 follow-up. PROTECTED-SET per AGENT_PROTOCOL §5. Pins the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // What opens Ask, and how it is named: one decision for the menu,
 // Preferences, the window and onboarding (spec-shell S3, S8; RULINGS X2).

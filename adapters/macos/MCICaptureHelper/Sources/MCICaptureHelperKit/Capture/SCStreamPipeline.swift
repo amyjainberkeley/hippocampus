@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // SCStreamPipeline — the ScreenCaptureKit wiring SHAPE (PRIORITY-REDIRECT P2).
 //

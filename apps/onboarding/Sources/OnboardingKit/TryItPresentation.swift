@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // What Try it shows for each card. The screen draws this and decides
 // nothing itself, so the tests and the preview renderer see what a person

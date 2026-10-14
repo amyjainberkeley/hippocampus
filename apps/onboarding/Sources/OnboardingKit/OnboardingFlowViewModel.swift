@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // OnboardingFlowViewModel — setup in four screens: Welcome, Permissions,
 // Promise, Try it.

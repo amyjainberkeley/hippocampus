@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // VideoToolboxHEVCEncoder — the HEVC keyframe encode call-site
 // (DOGFOOD_V1 #3). PROTECTED-SET per AGENT_PROTOCOL §5.

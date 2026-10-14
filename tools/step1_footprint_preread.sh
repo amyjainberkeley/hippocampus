@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: TBD-private
+# SPDX-License-Identifier: Apache-2.0
 #
 # step1_footprint_preread.sh — SOFT footprint PRE-READ for Track B Step 1.
 #

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // AllowlistTOMLLoader — parse the CSO-ratified known-safe-apps allowlist
 // from a small TOML document into `AllowlistEntry` values.

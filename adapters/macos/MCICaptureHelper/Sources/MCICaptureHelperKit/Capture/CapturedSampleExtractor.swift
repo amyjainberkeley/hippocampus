@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // CapturedSampleExtractor — the PURE, OS-free core of the in-callback
 // extraction step (enabler PR-1).

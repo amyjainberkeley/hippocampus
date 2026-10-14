@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // Writes every hi mark asset from HiMarkGeometry.swift: the app icon PNGs,
 // the browser toolbar icons, the website favicon and touch icon, and the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 
 /// Pure admission rule for focused-window capture callbacks.
 ///

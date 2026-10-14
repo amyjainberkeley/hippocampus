@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // The supervisor's side of a status that tells the truth (spec-shell S5,
 // RULINGS S5, S8 and S10, critique-shell-engineering 5 and 6): Stop Sharing

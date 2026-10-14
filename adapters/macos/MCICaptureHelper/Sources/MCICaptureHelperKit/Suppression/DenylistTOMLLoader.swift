@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // DenylistTOMLLoader — parse the user's denylist from a small TOML
 // document into [`DenylistEntry`] values.

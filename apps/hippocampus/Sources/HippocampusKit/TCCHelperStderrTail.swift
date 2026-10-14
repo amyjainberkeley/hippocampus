@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // TCCHelperStderrTail — cycle 8.47 PR #80 follow-up.
 //

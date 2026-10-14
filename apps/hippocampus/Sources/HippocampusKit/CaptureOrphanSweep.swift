@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // CaptureOrphanSweep.swift — ends capture processes that no running
 // Hippocampus owns (spec-shell S6.4, critique-shell-engineering 1 and 2).

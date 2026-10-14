@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // TCCStatusMonitorTests — headless XCTest coverage for the cycle 8.45
 // audit risk #2 monitor. PROTECTED-SET per AGENT_PROTOCOL §5. Pins the

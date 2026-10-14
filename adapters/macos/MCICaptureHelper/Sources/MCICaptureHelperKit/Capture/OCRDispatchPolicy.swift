@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 
 /// Keeps privacy-heartbeat probes separate from content extraction.
 ///

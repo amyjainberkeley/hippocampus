@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // MetricKitSubscriber — non-content footprint telemetry pipeline
 // (Phase 6 PR 6 deliverable 3, per CTO §4 Phase 6 PR 6 + CEO answer

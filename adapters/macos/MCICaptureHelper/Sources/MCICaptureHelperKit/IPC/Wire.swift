@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // Wire — Swift mirror of `core::ipc::wire` (encode-only on the helper
 // side; the Rust core is the sole decoder of helper-originated bytes).

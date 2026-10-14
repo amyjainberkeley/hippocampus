@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // AutomationTargetMonitor — cycle 8.47 PR #80 follow-up. Completes the
 // Automation TCC stub with a real per-target probe.

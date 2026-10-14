@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // The hi mark in SwiftUI, drawn from `HiMark` like the menu bar and the
 // app icon. Letters take the foreground style.

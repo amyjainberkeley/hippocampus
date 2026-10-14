@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // MultiWindowWiringBehaviorTests — headless behavior tests for the
 // V2-P1 third-lift wiring (Phase 7 PR 13). Complements the pure

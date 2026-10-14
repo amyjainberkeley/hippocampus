@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // ReadProof — the first thing setup shows of what Hippocampus read: the
 // app's name, the window title, and up to three lines from the window.

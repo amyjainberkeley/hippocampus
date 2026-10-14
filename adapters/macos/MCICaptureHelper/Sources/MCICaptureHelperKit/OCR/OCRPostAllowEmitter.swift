@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // OCRPostAllowEmitter — ADR-0016 P3.6 cascade-twice orchestrator.
 //

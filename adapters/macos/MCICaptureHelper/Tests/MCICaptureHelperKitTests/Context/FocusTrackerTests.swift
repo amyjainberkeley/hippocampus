@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // FocusTrackerTests — headless coverage for the ADR-0031 focused-window
 // observation primitive.

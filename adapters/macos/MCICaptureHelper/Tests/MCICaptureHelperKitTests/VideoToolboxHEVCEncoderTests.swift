@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // VideoToolboxHEVCEncoderTests — DOGFOOD_V1 #3 proofs.
 //

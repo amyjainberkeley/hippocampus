@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // StatusMenuView.swift — the menu-bar icon and its short menu, owned in
 // AppKit (spec-shell S2). Every word comes from `StatusMenuModel.items(`, so

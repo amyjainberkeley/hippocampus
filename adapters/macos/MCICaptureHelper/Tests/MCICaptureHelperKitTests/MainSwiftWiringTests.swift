@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // MainSwiftWiringTests — race-gate sentinel fail-close decision matrix
 // + V2-P1 third-lift construction-graph wiring proof.

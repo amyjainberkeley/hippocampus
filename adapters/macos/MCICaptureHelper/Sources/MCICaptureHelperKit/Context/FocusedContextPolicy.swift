@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 
 /// Prevents independently sampled metadata from being attached to pixels from
 /// another application's focused-window generation.

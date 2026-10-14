@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // AskPanelStatus.swift — what Ask's footer says about remembering, and the
 // one button that goes with it (spec-shell S1, product critique 11). It is the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // RetainedSurface — the IOSurface retain → owned-lease release
 // discipline (enabler PR-2). PROTECTED-SET per AGENT_PROTOCOL §5.

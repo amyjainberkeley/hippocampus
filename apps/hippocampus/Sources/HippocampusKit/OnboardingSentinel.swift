@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 import Foundation
 
 /// Cross-process flag for "the user has finished onboarding at least once."

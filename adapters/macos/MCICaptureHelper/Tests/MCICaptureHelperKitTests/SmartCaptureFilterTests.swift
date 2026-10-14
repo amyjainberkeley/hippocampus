@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // SmartCaptureFilterTests — DESIGN.md §5.2 four-stage filter chain
 // + the RESEARCH_DIGEST Stream A dual-threshold dHash.

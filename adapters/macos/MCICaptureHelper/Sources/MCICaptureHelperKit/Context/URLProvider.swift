@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // URLProvider — active-tab URL extraction trait for Phase 2 context
 // join. ADR-0015 §2 ("`ContextProvider` trait — OS-free protocol,

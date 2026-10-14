@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // Where Ask hangs (spec-shell S1), in AppKit's bottom-left screen
 // coordinates: under the bar, centred, never past 60% of the space below.

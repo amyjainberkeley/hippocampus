@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // CompositeURLProvider — `URLProvider` composite that walks a list
 // of single-browser providers and returns the first non-nil result.

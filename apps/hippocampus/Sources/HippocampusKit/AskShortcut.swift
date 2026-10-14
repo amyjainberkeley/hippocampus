@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // AskShortcut.swift — what opens Ask right now, and the one place that names
 // it (spec-shell S3 and S8, RULINGS X2).

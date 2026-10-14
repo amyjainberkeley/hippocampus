@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // ContactsAttribution — `CNContactStore`-backed person-entity-
 // anchor attribution source for `WorkflowContext`.

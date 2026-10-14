@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 import XCTest
 
 /// Pins the `AppDelegate` overrides that keep the main GUI process

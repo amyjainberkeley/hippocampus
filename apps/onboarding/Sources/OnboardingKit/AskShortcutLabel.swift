@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // The key that opens Ask (RULINGS X2). Onboarding reads two things from the
 // app's own defaults, at render time, so a change shows without a restart:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: TBD-private
+# SPDX-License-Identifier: Apache-2.0
 #
 # wire_decode.py — READ-ONLY decoder for the MCI helper IPC wire stream.
 #

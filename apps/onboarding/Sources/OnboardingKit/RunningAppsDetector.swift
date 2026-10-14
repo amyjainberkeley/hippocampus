@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // RunningAppsDetector — surfaces currently-running, user-launched apps
 // (bundle id + display name) for the V2-P10 allowlist slide.

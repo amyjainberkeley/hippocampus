@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // CalendarAttributionTests — Phase 6 PR 5 (SH Fork D1).
 //

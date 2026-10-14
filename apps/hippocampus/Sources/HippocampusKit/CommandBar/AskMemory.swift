@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // AskMemory.swift — how Ask reaches memory: two warm `mci-agent mcp-serve`
 // children. `reads` searches and checks the window in front; `assistant`

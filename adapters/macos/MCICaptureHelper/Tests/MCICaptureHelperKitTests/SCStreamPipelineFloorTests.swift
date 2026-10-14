@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // SCStreamPipelineFloorTests — OS-FREE proof that the cascade-floor
 // heartbeat (STEP-2-FINDING-004 fix) runs the ADR-0013 cascade at

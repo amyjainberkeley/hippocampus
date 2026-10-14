@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // AskPanelPlacement.swift — where Ask hangs (spec-shell S1): under the top
 // bar of the screen the pointer is on, centred, and never taller than 60% of

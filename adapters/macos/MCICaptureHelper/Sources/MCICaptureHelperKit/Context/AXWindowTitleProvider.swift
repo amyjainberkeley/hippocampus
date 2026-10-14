@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // AXWindowTitleProvider — `WindowTitleProvider` impl backed by the
 // macOS Accessibility API. ADR-0015 §1.2 + §6 P2.2.

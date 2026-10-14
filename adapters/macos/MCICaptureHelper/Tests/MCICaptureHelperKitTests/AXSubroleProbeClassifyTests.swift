@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // AXSubroleProbeClassifyTests — synthetic-input coverage of the pure
 // `AXSubroleProbe.classify(...)` mapping factored out for

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // BriefNotificationController.swift — first-brief notification logic
 // for Hippocampus.app per `docs/design/brief-viewer-spec.md` §"When the

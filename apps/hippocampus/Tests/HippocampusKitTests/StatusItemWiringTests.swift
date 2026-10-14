@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // How the executable wires the status item, the app's commands, Preferences
 // and the supervisor's stores (spec-shell S2, S5 and S8; RULINGS S3, S4, S7,
@@ -118,7 +118,7 @@ final class StatusItemWiringTests: XCTestCase {
         }
         for retired in ["Capture screen activity", "Capture area", "Focused window", "Screen capture is",
                         "denylist", "allowlist", "Retention policy", "Keep events for", "Custom database path",
-                        "Export debug bundle", "Automatic updates (Sparkle)", "Git SHA", "Memory Context Interface", "License: TBD-private",
+                        "Export debug bundle", "Automatic updates (Sparkle)", "Git SHA", "Memory Context Interface", "License: TBD",
                         "total-recall", "Inspect Key Wrap", "KeyWrapAudit", "Refresh Status", "Open Capture Logs",
                         "audit log", "Open Privacy Dashboard", "Report an issue on GitHub", "License (Apache 2.0)"] {
             XCTAssertFalse(preferences.contains(retired), retired)

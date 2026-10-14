@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // VisionOCRRunner — production `OCREngine` implementation that runs
 // Apple Vision's `VNRecognizeTextRequest` on a borrowed

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // MultiWindowFilterScaffoldTests — headless coverage for the ADR-0031
 // V2-P1 third-lift multi-window filter scaffold:

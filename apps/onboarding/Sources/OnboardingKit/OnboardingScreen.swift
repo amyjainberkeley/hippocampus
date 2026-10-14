@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // The four-screen setup (Welcome, Permissions, Promise, Try it) and the
 // panels that open on their own. A route is the name the app passes in

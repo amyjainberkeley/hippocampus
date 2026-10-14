@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // ArcURLProvider — `URLProvider` impl for Arc (bundle id
 // `company.thebrowser.Browser`).

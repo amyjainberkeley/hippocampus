@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // AllowlistEditorViewModel — drives the V2-P10 onboarding slide.
 //

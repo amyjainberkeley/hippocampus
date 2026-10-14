@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // OCRResult / OCRLine — Sendable value types the OCR worker delivers
 // back to its caller. Mirrors the shape Apple Vision's

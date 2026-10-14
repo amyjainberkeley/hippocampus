@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // BundleDisplayNameResolver — turn a raw bundle id (`com.apple.MobileSMS`)
 // into a human-friendly display name (`Messages`) for the AllowlistSlide

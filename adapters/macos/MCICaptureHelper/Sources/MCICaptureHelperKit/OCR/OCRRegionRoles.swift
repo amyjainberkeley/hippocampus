@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // OCRRegionRoles — sorts a window's reading into content and chrome
 // (RULINGS T1, T3, T15). Reference: `tools/ocr/screens/layout.py`; the

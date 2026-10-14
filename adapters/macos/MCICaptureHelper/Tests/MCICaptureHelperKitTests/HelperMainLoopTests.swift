@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // HelperMainLoopTests — drives the helper main loop end-to-end via
 // mockable inputs. The cascade orchestrator + the FrameSink + the

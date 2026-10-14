@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // AXWindowTitleProviderTests — headless coverage of
 // `AXWindowTitleProvider`'s decision matrix. ADR-0015 §6 P2.2 + §7.

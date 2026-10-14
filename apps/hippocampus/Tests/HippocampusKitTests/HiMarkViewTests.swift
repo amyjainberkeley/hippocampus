@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // HiMarkView draws the four pictures off screen: blue only in the brand
 // mark's solid dot, a hole in the hollow dot, dim letters when off, and

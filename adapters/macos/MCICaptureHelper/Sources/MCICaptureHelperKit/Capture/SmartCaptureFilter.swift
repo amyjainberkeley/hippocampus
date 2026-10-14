@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // SmartCaptureFilter — the four-stage filter chain that gates whether a
 // candidate frame becomes a state-transition event.

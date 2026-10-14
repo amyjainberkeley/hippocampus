@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // Tests for the state coordination between UserPauseController and
 // MenuBarStatus. The status item itself lives in the executable target

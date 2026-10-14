@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // FirefoxURLProviderTests — headless coverage of `FirefoxURLProvider`.
 // ADR-0015 §6 P2.4 + §7.

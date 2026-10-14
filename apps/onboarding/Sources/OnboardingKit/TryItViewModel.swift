@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // TryItViewModel — the last setup screen. It shows the first thing
 // Hippocampus read, speaks to the app in front when nothing was read yet,

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // Consent is the click on Start Remembering. Its only record is the file
 // `~/Library/Application Support/MCI/.onboarding-complete`, which the app

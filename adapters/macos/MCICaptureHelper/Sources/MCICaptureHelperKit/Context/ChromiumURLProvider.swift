@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // ChromiumURLProvider — `URLProvider` impl for the Chromium family of
 // browsers that share the same AppleScript dialect:

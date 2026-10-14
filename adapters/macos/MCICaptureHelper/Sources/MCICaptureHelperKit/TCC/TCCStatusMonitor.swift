@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // TCCStatusMonitor — cycle 8.45 audit risk #2 (TCC revoked mid-run).
 // PROTECTED-SET per AGENT_PROTOCOL §5. Privacy invariant STRENGTHENED,

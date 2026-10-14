@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // CarbonSecureEventInputProbe — concrete `SecureEventInputProbe`
 // backed by the Carbon syscall `IsSecureEventInputEnabled()`.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // PreferencesStore — the persisted model behind the
 // comprehensive Preferences window (Mac-native surface, ⌘,).

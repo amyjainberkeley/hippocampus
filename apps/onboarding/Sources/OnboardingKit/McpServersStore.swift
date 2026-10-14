@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // McpServersStore — V2-MCP-2 user-mutable MCP-server registration
 // layer. Mirrors the V2-P10 `UserAllowlistStore` pattern (PR #251)

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // DHash — 64-bit perceptual hash with the dual-threshold drop / store /
 // tie-break decision logic from RESEARCH_DIGEST.md Stream A (capture

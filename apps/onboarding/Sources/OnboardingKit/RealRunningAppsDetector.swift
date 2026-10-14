@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // RealRunningAppsDetector — NSWorkspace-backed enumeration of running
 // regular apps for the V2-P10 allowlist slide.

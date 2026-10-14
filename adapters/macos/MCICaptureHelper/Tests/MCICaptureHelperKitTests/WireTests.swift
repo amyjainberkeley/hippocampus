@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // WireTests — byte-level fixtures that lock the Swift encoder's output
 // to the Rust `core::ipc::wire` decoder's expected layout.

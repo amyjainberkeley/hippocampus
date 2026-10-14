@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // McpServersTOMLDocument — parse + emit the V2-MCP-2 schema in
 // OnboardingKit. Mirrors the strict subset implemented by

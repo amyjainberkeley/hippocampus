@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // OCREngine — the indirection seam between `VisionOCRWorker` (queue +
 // drop-oldest + timeout discipline) and the actual OCR runtime.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // SuppressionCascade — ADR-0013 binding cascade orchestrator.
 //

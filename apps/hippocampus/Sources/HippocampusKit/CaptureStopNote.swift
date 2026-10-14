@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // CaptureStopNote.swift — remembers that the person pressed macOS's Stop
 // Sharing, and when (spec-shell S5). The menu then says why remembering is

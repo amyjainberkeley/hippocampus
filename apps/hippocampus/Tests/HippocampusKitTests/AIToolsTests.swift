@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // Connect AI Tools… in one step (RULINGS S4, product critique 5): what the
 // connector reports per tool, whether a tool is connected, and every word

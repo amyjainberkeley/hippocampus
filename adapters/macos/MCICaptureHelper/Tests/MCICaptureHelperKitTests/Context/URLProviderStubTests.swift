@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // URLProviderStubTests — pin the `URLProvider` trait contract via a
 // stub impl. Mirrors the `StubSecureEventInputProbe` / stub-pattern

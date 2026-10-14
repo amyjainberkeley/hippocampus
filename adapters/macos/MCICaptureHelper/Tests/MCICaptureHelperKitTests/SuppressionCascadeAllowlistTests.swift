@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // SuppressionCascadeAllowlistTests — integration between the bundled
 // `known-safe-apps.toml` seed and `SuppressionCascade`'s §1 source-

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // SafariInboxReader — watches the App Group shared container for
 // JSON payloads written by the Safari web extension handler, applies

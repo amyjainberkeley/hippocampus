@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // HelperExit — what must happen before the capture process ends by itself,
 // and the deadline that ends it once its parent is gone.

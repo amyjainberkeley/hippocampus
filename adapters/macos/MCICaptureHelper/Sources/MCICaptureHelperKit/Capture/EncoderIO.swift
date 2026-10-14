@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // EncoderIO — the Sendable input/output value types for the
 // `FrameEncoder` seam (enabler PR-3 wiring). PROTECTED-SET per

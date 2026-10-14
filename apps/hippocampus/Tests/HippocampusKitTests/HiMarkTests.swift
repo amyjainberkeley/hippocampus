@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // The hi mark's geometry: what the parsed paths cover, where the parts sit,
 // which parts each picture draws, and that the shipped SVGs carry the same

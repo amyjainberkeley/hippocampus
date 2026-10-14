@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // ConnectAITools.swift — "Connect AI Tools…" does the whole job in one step
 // (RULINGS S4, product critique 5): it connects the AI tools it finds, asks

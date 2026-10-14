@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // AllowlistTOMLLoaderTests — ADR-0013 §3 + ADR-0015 §5 + ADR-0017 §3.1
 // CSO-ratified known-safe-apps allowlist loader.

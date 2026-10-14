@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 import XCTest
 
 /// Structural checks for the executable's lifecycle; route behavior is tested

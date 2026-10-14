@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // CascadeTwiceOCREmitterTests — ADR-0016 P3.6 §1.6 + §4.2 cascade-twice
 // invariant tests. Headless — no SCStream, no real OCR engine. Stubs

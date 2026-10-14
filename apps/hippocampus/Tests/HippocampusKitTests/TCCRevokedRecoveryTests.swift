@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // TCCRevokedRecoveryTests — cycle 8.45 audit risk #2. Pins the
 // menu-bar + notifier contract:

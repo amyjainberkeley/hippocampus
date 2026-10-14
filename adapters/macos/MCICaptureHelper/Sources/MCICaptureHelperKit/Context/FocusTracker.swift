@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // FocusTracker — focused-window provider for ADR-0031 Option (a)
 // capture-scope. PROTECTED-SET per AGENT_PROTOCOL §5.

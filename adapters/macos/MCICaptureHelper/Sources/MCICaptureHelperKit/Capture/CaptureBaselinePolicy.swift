@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 
 /// Controls which pipeline outcomes may become the visual deduplication
 /// baseline. Floor-only frames exist to re-check privacy; they are not evidence

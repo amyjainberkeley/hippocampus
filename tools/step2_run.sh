@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: TBD-private
+# SPDX-License-Identifier: Apache-2.0
 #
 # step2_run.sh — interactive runbook for the Track B · Step-2 §7 corpus
 # live verification on the human's Mac. Eliminates the test-execution

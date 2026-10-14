@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // VisionOCRWorkerTests — pins the ADR-0016 §1.1 concurrency contract
 // for the OCR worker WITHOUT touching Apple Vision. Uses a

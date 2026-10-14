@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // The colours setup draws with (RULINGS B4 and G2), as 0xRRGGBB. The
 // SwiftUI tokens in `OnboardingDesign.Palette` are built from these, so a

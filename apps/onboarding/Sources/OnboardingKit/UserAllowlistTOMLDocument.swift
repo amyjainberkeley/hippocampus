@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // UserAllowlistTOMLDocument — parse + emit the user-allowlist TOML
 // schema in OnboardingKit. Mirrors the strict subset implemented by

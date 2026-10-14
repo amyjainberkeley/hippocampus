@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // OCRTrace — `MCI_OCR_TRACE=1` env-gated stderr trace for the
 // cascade + post-allow OCR emit path.

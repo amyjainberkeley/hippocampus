@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // Single source of truth for whether the optional Qwen3 brief author is
 // installed. Evidence-cited extractive briefs do not depend on this model.

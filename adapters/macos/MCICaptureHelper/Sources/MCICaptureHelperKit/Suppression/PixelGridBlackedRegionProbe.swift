@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // PixelGridBlackedRegionProbe — ADR-0013 §2 production implementation.
 //

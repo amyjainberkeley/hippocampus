@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // SuppressionCascadeTests — ADR-0013 cascade decisions on synthetic inputs.
 //

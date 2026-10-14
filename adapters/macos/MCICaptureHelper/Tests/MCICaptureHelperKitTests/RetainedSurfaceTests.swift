@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // RetainedSurfaceTests — OS-FREE proof of the enabler PR-2 retain →
 // owned-lease release discipline (the §4 IOSurface-pool-stall failure

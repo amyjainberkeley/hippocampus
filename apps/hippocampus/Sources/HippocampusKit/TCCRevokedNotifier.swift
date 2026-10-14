@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // TCCRevokedNotifier — cycle 8.45 audit risk #2 (TCC revoked mid-run).
 // Surfaces the helper's `helper_health tcc_revoked=<surface>` signal

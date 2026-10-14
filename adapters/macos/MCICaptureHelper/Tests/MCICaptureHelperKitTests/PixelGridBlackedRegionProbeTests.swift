@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // PixelGridBlackedRegionProbeTests — headless XCTest coverage for the
 // ADR-0013 §2 production probe.

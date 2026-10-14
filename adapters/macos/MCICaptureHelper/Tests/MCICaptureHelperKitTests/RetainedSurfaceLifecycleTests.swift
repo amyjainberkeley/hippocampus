@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // RetainedSurfaceLifecycleTests — DOGFOOD_V1 #2 / ADR-0013 Amendment 1
 // §3 (a)–(d) coverage extension. Pins the IOSurface retain →

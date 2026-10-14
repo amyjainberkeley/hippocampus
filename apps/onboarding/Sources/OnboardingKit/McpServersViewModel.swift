@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // McpServersViewModel — V2-MCP-2 onboarding state for the optional
 // "Connect MCP Servers" slide.

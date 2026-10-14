@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // FileHandleFrameSink — concrete FrameSink backed by a Foundation
 // FileHandle. Production wraps the AF_UNIX socket the Rust core

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // Coordinates first-launch provisioning when a custom build includes the
 // optional Qwen brief author. The multi-gigabyte copy must never occupy

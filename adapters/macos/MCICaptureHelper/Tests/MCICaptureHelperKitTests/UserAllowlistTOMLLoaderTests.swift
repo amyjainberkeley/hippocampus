@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // UserAllowlistTOMLLoaderTests — ADR-0017 §3.2 user-layer allowlist.
 // Pins the parser surface (strict TOML subset; bool parsing for

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // Tests for MenuBarStatus — the status-light state machine + NSImage
 // factory shipped for cycle 8.45 Raycast/Cotypist peer study pattern

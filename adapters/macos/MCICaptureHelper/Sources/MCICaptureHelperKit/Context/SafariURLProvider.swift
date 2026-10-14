@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // SafariURLProvider — `URLProvider` impl for Safari (bundle id
 // `com.apple.Safari`). ADR-0015 §6 P2.3.

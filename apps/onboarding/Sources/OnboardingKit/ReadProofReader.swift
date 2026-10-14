@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // The reader behind Try it: one read-only `mci-agent mcp-serve` child that
 // lists what was saved after a moment in time.

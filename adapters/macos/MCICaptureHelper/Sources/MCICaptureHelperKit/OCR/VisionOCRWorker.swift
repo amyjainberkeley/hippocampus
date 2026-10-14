@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // VisionOCRWorker — bounded-queue + drop-oldest + per-job-timeout
 // driver for the Apple Vision OCR pipeline. Owns the ADR-0016 §1.1
