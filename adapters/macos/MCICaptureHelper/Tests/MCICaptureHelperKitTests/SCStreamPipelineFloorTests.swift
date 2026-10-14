@@ -535,6 +535,6 @@ final class SCStreamPipelineFloorTests: XCTestCase {
     // across the fleet. Lock it.
     func test_stream_policy_default_floor_interval_is_one_second() {
         XCTAssertEqual(StreamPolicy.default.cascadeFloorIntervalMs, 1000,
-            "default floor is 1 Hz (STEP-2-FINDING-004 design); flipping this is a CSO-gated review item")
+            "default floor is 1 Hz (STEP-2-FINDING-004 design); flipping this needs a privacy review")
     }
 }

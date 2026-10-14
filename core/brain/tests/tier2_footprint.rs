@@ -48,7 +48,7 @@ fn synthetic_4k_event() -> String {
                  Auth: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c \
                  Code: [REDACTED:SMS_OTP] please confirm. \
                  Bob met Carol in San Francisco about V2-P5. \
-                 Phone: (415) 555-1234, file: /Users/ao/project/notes.md. ";
+                 Phone: (415) 555-1234, file: /Users/me/project/notes.md. ";
     // ~360 chars per chunk; 12 chunks ≈ 4.3 KB.
     chunk.repeat(12)
 }

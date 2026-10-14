@@ -236,9 +236,8 @@ INFO_PLIST="$SCRIPT_DIR/Info.plist"
 # Cycle 8.16 (DMG 8d4dfc22…) crashed on launch on every end-user machine
 # because both lookups missed. Cycle 8.15 (3fdbc52a…) and earlier appeared
 # to work only because the dev-build fallback path happened to exist on
-# the CEO's primary checkout (`/Users/ao/Documents/GitHub/mci/...`). The
-# /tmp/dmg-reship-cycle-8.16 worktree was deleted post-build, exposing
-# the latent crash.
+# the primary checkout. The build worktree was deleted after the build,
+# exposing the latent crash.
 #
 # Cycle 8.17 fix has two halves:
 #   (a) ModelDownloadManager + AllowlistTOMLLoader: swap resolver order
@@ -557,12 +556,12 @@ if [[ "$EMBEDDER_SOURCE_PRESENT" -eq 1 ]]; then
     fi
 fi
 
-# Embed bert-base-NER Core ML model (V2-P5+ sync NER tier; CEO-ratified
-# 2026-06-04 — see project-gliner-variant-pin / PR #297). Mirrors the
+# Embed bert-base-NER Core ML model (V2-P5+ sync NER tier, 2026-06-04,
+# PR #297). Mirrors the
 # ArcticEmbedS embedder block above exactly. The .mlpackage is produced
 # offline by the conversion env and committed locally (gitignored — the
-# compiled .mlmodelc is ~103 MB; that bundle bloat is expected and accepted
-# per the CEO "best option" directive). load_ner_sync_backend() in mci-agent
+# compiled .mlmodelc is ~103 MB; that bundle size is expected and
+# accepted). load_ner_sync_backend() in mci-agent
 # resolves Contents/Resources/Models/bert_base_NER_INT8.mlmodelc BEFORE its
 # dev fallback, so an INSTALLED app loads THIS bundled copy.
 NER_PACKAGE="$REPO_ROOT/models/bert_base_NER_INT8.mlpackage"

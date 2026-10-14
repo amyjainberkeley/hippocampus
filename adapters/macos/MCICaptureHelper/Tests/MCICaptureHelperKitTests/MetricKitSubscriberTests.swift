@@ -44,7 +44,7 @@ final class MetricKitSubscriberTests: XCTestCase {
         XCTAssertEqual(
             mode & 0o777,
             0o600,
-            "metrickit payload file MUST be 0600 (CSO sign-off + 3-row mini-audit row 3)"
+            "metrickit payload file MUST be 0600"
         )
     }
 

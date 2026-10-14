@@ -361,7 +361,7 @@ fn schema_consistency_unique_entity_keys_and_valid_fks() {
 
     // Ingest a mix of events with overlapping kinds.
     let events = [
-        "Visit https://github.com/amyjainberkeley/hippocampus/pulls and the doc /Users/ao/notes.md",
+        "Visit https://github.com/amyjainberkeley/hippocampus/pulls and the doc /Users/me/notes.md",
         "Closes #244 and #277; tracker https://github.com/amyjainberkeley/hippocampus/pulls overlap",
         "Email me at jane.doe@example.com — phone (415) 555-1234 ip 10.0.0.42",
         "uuid 550e8400-e29b-41d4-a716-446655440000 + eth 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0",
@@ -433,7 +433,7 @@ fn multi_kind_event_populates_each_kind() {
 
     let ts = 1_700_000_000_000_000;
     let text = "see https://example.com/x , ip 10.0.0.42, eth 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0, \
-                file /Users/ao/notes.md, ref #244, uuid 550e8400-e29b-41d4-a716-446655440000, \
+                file /Users/me/notes.md, ref #244, uuid 550e8400-e29b-41d4-a716-446655440000, \
                 email a@b.co, phone (415) 555-1234";
     let event = make_event(ts, text);
     let eid = store.put_event(&event).expect("put_event");

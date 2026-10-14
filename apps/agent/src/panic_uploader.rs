@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn scrub_single_path() {
-        assert_eq!(scrub_user_paths("/Users/ao/src/main.rs"), "<redacted-path>");
+        assert_eq!(scrub_user_paths("/Users/me/src/main.rs"), "<redacted-path>");
     }
 
     #[test]
@@ -310,7 +310,7 @@ mod tests {
     #[test]
     fn scrub_path_at_end() {
         assert_eq!(
-            scrub_user_paths("crashed at /Users/ao/proj/mod.rs:42"),
+            scrub_user_paths("crashed at /Users/me/proj/mod.rs:42"),
             "crashed at <redacted-path>"
         );
     }
@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn scrub_path_in_quotes() {
         assert_eq!(
-            scrub_user_paths(r#"path="/Users/ao/secret""#),
+            scrub_user_paths(r#"path="/Users/me/secret""#),
             r#"path="<redacted-path>""#
         );
     }
@@ -358,7 +358,7 @@ mod tests {
             thread: "main".into(),
             location: "t:1:1".into(),
             message: format!(
-                "panicked at /Users/ao/secret/module.rs:42: {}",
+                "panicked at /Users/me/secret/module.rs:42: {}",
                 "a".repeat(300)
             ),
         };
@@ -542,7 +542,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("panic.jsonl");
         let line =
-            r#"{"ts":"1","thread":"t","location":"l","message":"err at /Users/ao/secret.rs:42"}"#;
+            r#"{"ts":"1","thread":"t","location":"l","message":"err at /Users/me/secret.rs:42"}"#;
         tokio::fs::write(&path, format!("{line}\n")).await.unwrap();
 
         let uploader = PanicUploader::new(url, true);
@@ -554,7 +554,7 @@ mod tests {
             "uploaded body must contain redacted path"
         );
         assert!(
-            !body.contains("/Users/ao"),
+            !body.contains("/Users/me"),
             "uploaded body must NOT contain original path"
         );
 

@@ -376,16 +376,16 @@ mod tests {
     #[test]
     fn email_is_phrase_wrapped() {
         assert_eq!(
-            sanitize_fts5_query("amy@newtandem.com"),
-            "\"amy@newtandem.com\"",
+            sanitize_fts5_query("sam@example.com"),
+            "\"sam@example.com\"",
         );
     }
 
     #[test]
     fn email_inside_sentence_only_wraps_the_email() {
         assert_eq!(
-            sanitize_fts5_query("email amy@newtandem.com about it"),
-            "email \"amy@newtandem.com\" about it",
+            sanitize_fts5_query("email sam@example.com about it"),
+            "email \"sam@example.com\" about it",
         );
     }
 

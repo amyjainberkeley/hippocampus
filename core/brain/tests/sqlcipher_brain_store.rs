@@ -417,12 +417,12 @@ fn fts5_search_email_query_does_not_panic() {
     let (_dir, path) = tmp("brain.sqlite");
     let store = SqlCipherBrainStore::new(&path, &test_key()).expect("open");
 
-    let mut ev = blank_event(1, "message from amy@newtandem.com about the release");
+    let mut ev = blank_event(1, "message from sam@example.com about the release");
     ev.summary = Some("email thread".into());
     let id = store.put_event(&ev).expect("put");
 
     let hits = store
-        .fts5_search("amy@newtandem.com", 10)
+        .fts5_search("sam@example.com", 10)
         .expect("email query must not panic");
     let hit_ids: Vec<EventId> = hits.iter().map(|(i, _)| *i).collect();
     assert!(

@@ -62,7 +62,7 @@ final class DenylistEditorStoreTests: XCTestCase {
         await store.load()
 
         let all = await store.allEntries()
-        XCTAssertEqual(all.count, 4) // 3 CSO + 1 user
+        XCTAssertEqual(all.count, 4) // 3 built-in + 1 user
         let cso = await store.csoEntries()
         XCTAssertEqual(cso.count, 3)
         let user = await store.userEntries()
@@ -113,7 +113,7 @@ final class DenylistEditorStoreTests: XCTestCase {
 
         let cso = await store.csoEntries()
         let removed = await store.removeUserEntry(id: cso[0].id)
-        XCTAssertFalse(removed, "CSO entries must be immutable")
+        XCTAssertFalse(removed, "Built-in entries must be immutable")
 
         let afterAll = await store.allEntries()
         XCTAssertEqual(afterAll.count, 3)
@@ -149,7 +149,7 @@ final class DenylistEditorStoreTests: XCTestCase {
             cso: [DenylistEntry(type: .bundleId, value: "com.cso.locked", source: .csoRatified)]
         )
         let removed = await stub.removeUserEntry(id: "bundleId:com.cso.locked")
-        XCTAssertFalse(removed, "Stub must also enforce CSO immutability")
+        XCTAssertFalse(removed, "Stub must also keep built-in entries immutable")
     }
 
     // MARK: - TOML escaping round-trip

@@ -305,16 +305,14 @@ python3 "$BUILD_PROVENANCE_TOOL" verify --app "$APP_PATH" \
 
 # --- Completeness gate: refuse to ship a DMG missing the bundled embedder ---
 #
-# Cycle 8.24 (`bc5af6af…`) shipped a 14 MB DMG instead of the expected ~73 MB
-# because the COO reship worktree did NOT `cp -R /Users/ao/Documents/GitHub/mci/models .`
-# before running this script. build-app.sh logged
+# A build from a worktree without the models/ directory once shipped a 14 MB
+# DMG instead of the expected ~73 MB. build-app.sh logged
 # `WARNING: ArcticEmbedS .mlpackage not found at $REPO_ROOT/models/...` and
 # continued anyway, producing a .app with no embedder under
 # Contents/Resources/Models/ArcticEmbedS_FP16.mlmodelc. The DMG built + signed
 # + notarized + stapled cleanly because nothing in the signing or notary path
 # inspects resource completeness — but first-launch semantic search silently
-# falls back to a zero-vector stub. By the time CEO mounted the DMG, the bug
-# was live in production.
+# fell back to a zero-vector stub.
 #
 # This gate trips BEFORE codesign / launch-verify / notarize so the operator
 # fixes the worktree and re-runs from scratch instead of shipping broken.
@@ -331,11 +329,9 @@ if [[ ! -d "$EMBEDDER_PATH" ]]; then
     echo "and is .gitignored (~64 MB). For worktree builds, copy it in from"
     echo "the primary checkout before re-running:"
     echo ""
-    echo "  cp -R /Users/ao/Documents/GitHub/mci/models <worktree>/"
+    echo "  cp -R <primary checkout>/models <worktree>/"
     echo ""
     echo "Then re-run: ./scripts/build-installer.sh"
-    echo ""
-    echo "(Codified after cycle 8.24 reship shipped a 14 MB DMG with no embedder.)"
     exit 1
 fi
 
@@ -544,10 +540,10 @@ SIGNING_SCRATCH=""
 
 # --- Step 2.5: Notarize + staple the .app ITSELF (not just the DMG) ---
 #
-# Critical for offline-first-launch (CEO friend, 2026-05-24):
+# Critical for an offline first launch:
 # stapling only the outer DMG means the .app inside has no embedded
 # notarization ticket. When a user without internet at first launch
-# (captive portal, plane, the friend's exact case) double-clicks the
+# (captive portal, plane) double-clicks the
 # .app, Gatekeeper has no staple to verify against and the online
 # notary check fails — they see "Hippocampus cannot be opened
 # because the developer cannot be verified" with no "Open Anyway"

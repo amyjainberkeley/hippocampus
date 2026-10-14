@@ -281,7 +281,7 @@ final class AllowlistBundledSeedTests: XCTestCase {
         for bundleId in expectedBundledSeedBundles {
             XCTAssertTrue(
                 allowlist.contains(bundleId),
-                "Bundled allowlist seed missing CSO-ratified bundle: \(bundleId)"
+                "Bundled allowlist seed missing a reviewed bundle: \(bundleId)"
             )
         }
     }

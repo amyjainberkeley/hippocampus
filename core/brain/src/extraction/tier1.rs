@@ -916,12 +916,12 @@ mod tests {
     fn file_path_two_segments_minimum() {
         let ex = Tier1Extractor::new();
         let hits: Vec<_> = ex
-            .extract("Open /Users/ao/file.txt and /tmp by itself")
+            .extract("Open /Users/me/file.txt and /tmp by itself")
             .into_iter()
             .filter(|m| m.kind == KIND_FILE_PATH)
             .collect();
         let canons: Vec<&str> = hits.iter().map(|m| m.canonical_name.as_str()).collect();
-        assert_eq!(canons, vec!["/Users/ao/file.txt"]);
+        assert_eq!(canons, vec!["/Users/me/file.txt"]);
     }
 
     // -----------------------------------------------------------------------
