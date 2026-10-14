@@ -292,7 +292,7 @@ final class MenuBarStatusTests: XCTestCase {
             (.skipping(reason: "ocr-time-secret"), "Skipping this window",
              "It saw what looks like a password or key, so it saved nothing.", "Pause"),
             (.skipping(reason: "failsafe-unknown"), "Skipping this window",
-             "It couldn’t tell if this window is private, so it skipped it.", "Pause"),
+             "It couldn’t check this window, so it skipped it.", "Pause"),
             (.skipping(reason: "os-blacked-region"), "Skipping this window", "macOS protects this window.", "Pause"),
             (.skipping(reason: "browser_window_unknown"), "Skipping this window",
              "It can’t tell if this browser window is private.", "Pause"),

@@ -210,7 +210,9 @@ enum ReceiptCode: Equatable {
         case "secure_input", "secure-event-input", "ax-secure-subrole": return "A password field is active."
         case "os-blacked-region": return "macOS protects this window."
         case "ocr-time-secret": return "It saw what looks like a password or key, so it saved nothing."
-        case "failsafe-unknown": return "It couldn’t tell if this window is private, so it skipped it."
+        // Accessibility or the app's identity could not be checked. Browsers
+        // no longer need a check to be read (RULINGS G8).
+        case "failsafe-unknown": return "It couldn’t check this window, so it skipped it."
         case "private_browsing": return "This is a private window."
         case "browser_window_unknown": return "It can’t tell if this browser window is private."
         case "app_identity_unknown": return "It can’t tell which app this is."
