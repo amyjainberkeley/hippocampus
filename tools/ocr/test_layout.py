@@ -149,6 +149,10 @@ class ParityFixtureTests(unittest.TestCase):
                      'rule_navigation_left', 'rule_navigation_beside_stays', 'rule_navigation_leftover',
                      'rule_navigation_pane', 'rule_preview_list', 'rule_date_line', 'rule_date_line_document_stays',
                      'rule_caps_panel', 'rule_terminal', 'rule_terminal_numbered', 'rule_flat_small_offset',
+                     'rule_table_labels_beside_numbers', 'rule_table_wrapped_last_cell', 'rule_glyph_pair_value',
+                     'rule_glyph_pair_header', 'rule_glyph_pair_header_right_aligned', 'rule_glyph_pair_column',
+                     'rule_glyph_chat_reply', 'rule_glyph_pair_over_heading', 'rule_ruled_two_bars_top',
+                     'rule_ruled_two_bars_foot', 'rule_ruled_three_bars_top', 'rule_ruled_two_row_table',
                      'text_record_separator', 'text_nbsp', 'text_devanagari', 'text_superscripts', 'window_mail',
                      'window_chat', 'window_editor', 'window_editor_scrolled', 'window_receipt', 'window_invitation'):
             self.assertIn(name, names)
@@ -203,13 +207,63 @@ class GlyphTests(unittest.TestCase):
         reading = case('rule_glyph_letter_pair')
         self.assertNotIn('TR', layout.words(reading.main))
         self.assertEqual(reading.rest, 'TR')
-        # "Ok" alone at the window's edge is a button, and moves the same way.
+        # "Ok" at the window's edge has an icon above it and a lone brace
+        # below: no label to its left and no line of text above or below
+        # it, so it is alone and moves the same way. The rule goes by where
+        # two characters stand, not by whether they spell a word.
         self.assertNotIn('Ok', layout.words(case('rule_glyph').main))
 
-    def test_a_column_of_letter_pairs_is_data(self):
+    def test_a_column_of_pairs_is_data(self):
         # State codes in a table: each is a pair of letters beside others.
         main = case('rule_glyph_letter_pair_column').main
         self.assertIn('Portland OR\nSeattle WA\nAustin TX\nDenver CO', main)
+        # Letters and digits together: priorities down a column, far from
+        # the titles they rate.
+        self.assertTrue(case('rule_glyph_pair_column').main.startswith(
+            'Sweep holds the writer P1\nSearch misses tabs P2\nOnboarding copy P3\n'))
+
+    def test_two_characters_beside_a_label_are_its_value(self):
+        reading = case('rule_glyph_pair_value')
+        self.assertTrue(reading.main.startswith('Priority P1\n'))
+        self.assertEqual(reading.rest, '')
+
+    def test_two_characters_over_a_column_beside_other_headers_are_a_header(self):
+        # "ID" starts where the numbers under it start.
+        self.assertTrue(case('rule_glyph_pair_header').main.startswith('ID Name Status\n101 Maya Chen Open\n'))
+        # Quarters right-aligned over right-aligned amounts end where the
+        # amounts end; without them the table loses its header and splits.
+        reading = case('rule_glyph_pair_header_right_aligned')
+        self.assertTrue(reading.main.startswith('Account Q1 Q2 Q3 Q4\nAcme Robotics 1,200 1,450 1,610 1,700\n'))
+        self.assertEqual(reading.rest, '')
+
+    def test_a_two_letter_reply_under_its_sender_stays(self):
+        # Who said what: "ok" starts where its sender's name starts.
+        reading = case('rule_glyph_chat_reply')
+        self.assertIn('Ravi Patel 10:47 AM\nok\n\nMaya Chen 10:48 AM', reading.main)
+        self.assertEqual(reading.rest, '')
+
+    def test_a_pair_is_a_line_of_a_column_only_beside_a_line_of_text(self):
+        def box(text, x0, y0, w=30):
+            return layout.Box(text, x0, y0, x0 + w, y0 + 30)
+        pair = box('ok', 700, 300)
+
+        def column(*others, row=()):
+            lines = layout.Cells([pair, *others, *row], layout.is_line)
+            return layout.in_column(pair, [pair, *row], lines, 30.0)
+        self.assertTrue(column(box('Ravi Patel', 700, 260, 150)))            # a line above starts where it starts
+        self.assertTrue(column(box('Ravi Patel', 580, 260, 150)))            # or ends where it ends
+        self.assertFalse(column(box('Ravi Patel', 700, 200, 150)))           # more than two lines up
+        self.assertFalse(column(box('Pricing for teams', 700, 340, 255)))    # a line below, alone: a logo
+        self.assertTrue(column(box('101', 700, 340, 45), row=[box('Name', 900, 300, 60)]))  # a header
+        self.assertFalse(column(box('}', 700, 260, 15)))                     # a brace is not a line
+        self.assertFalse(column(box('OK', 700, 260)))                        # nor is another pair
+
+    def test_two_letters_over_a_heading_with_nothing_beside_them_are_a_logo(self):
+        # The heading below starts where "TR" starts, as a column under its
+        # header does, but a header has other headers beside it.
+        reading = case('rule_glyph_pair_over_heading')
+        self.assertTrue(reading.main.startswith('Pricing for teams\n'))
+        self.assertEqual(reading.rest, 'TR')
 
     def test_a_column_of_numbers_is_data(self):
         cells = [line(str(n), 700, 300 + i * 50, 30) for i, n in enumerate([1, 2, 3])]
@@ -397,6 +451,26 @@ class CutTests(unittest.TestCase):
         self.assertIn('Q3 pipeline\nAccount Stage Owner\nAcme Robotics, Won Chen\nwest region\nBlue Harbor Lost Patel',
                       main)
 
+    def test_a_cell_that_wraps_under_the_last_row_stays_in_the_table(self):
+        # The wrapped line runs on below the table's last row, but sits
+        # closer to its cell than the rows sit to each other: it is not text
+        # beside the table, as a form beside an order summary is.
+        main = case('rule_table_wrapped_last_cell').main
+        self.assertTrue(main.startswith('Account Stage Owner\nAcme Robotics Won Chen\nBlue Harbor Lost Patel\n'
+                                        'Cedar Labs, west Open Weber\nregion\n\n'))
+
+    def test_a_column_of_labels_beside_numbers_is_the_tables_own(self):
+        # A spreadsheet: names at the window's left edge beside narrower
+        # columns of right-aligned amounts, so the widest gap is the one
+        # after the names. However far off, the names are the table's first
+        # column, in both paths, and never navigation.
+        data = all_cases()['rule_table_labels_beside_numbers']
+        rows = 'Account Jan Feb Mar\nAcme Robotics 1,200 1,450 1,610\nBlue Harbor 880 910 955\n'
+        reading = case('rule_table_labels_beside_numbers')
+        self.assertTrue(reading.main.startswith(rows))
+        self.assertEqual(reading.rest, '')
+        self.assertTrue(fixtures.expected(data)['plain'].startswith(rows))
+
 
 class RoleTests(unittest.TestCase):
     def test_a_tab_strip_and_an_address_bar_at_the_top_move_to_chrome(self):
@@ -447,6 +521,36 @@ class RoleTests(unittest.TestCase):
                     '6 Elm Street Cafe Negotiation R. Patel 8000'):
             self.assertIn(row, sheet.main)
         self.assertIn('A B C D', sheet.rest)
+
+    def test_two_bars_stacked_between_rules_are_bars_not_a_ruled_table(self):
+        # Each is a one-row pane between rules, and they share an edge or
+        # two by chance, the look of two rows of a table: a menu over a
+        # toolbar at the top, sheet tabs over a status bar at the foot.
+        for name, rest in (('rule_ruled_two_bars_top',
+                            'File Edit View Insert Format Data Tools Help\n\n100% Normal text Arial 11 Bold Italic'),
+                           ('rule_ruled_two_bars_foot', 'Sheet1 Sheet2 Summary\n\nReady Sum: 1,284 Count: 12')):
+            with self.subTest(case=name):
+                reading = case(name)
+                self.assertEqual(reading.rest, rest)
+                self.assertTrue(reading.main.startswith('Paragraph line 0'))
+                self.assertTrue(reading.main.endswith('Paragraph line 5 with enough words to read as prose.'))
+
+    def test_bars_stacked_in_the_top_band_are_bars_even_when_they_line_up(self):
+        # Three rows between rules, each in step with the one above, are a
+        # ruled table's anywhere else; in the window's top band they are a
+        # tab strip, a toolbar and a bookmarks bar.
+        reading = case('rule_ruled_three_bars_top')
+        self.assertTrue(reading.main.startswith('Paragraph line 0'))
+        self.assertEqual(reading.rest, 'Inbox (3) Pricing notes Stripe Docs Calendar\n\nBack Forward Reload Share\n\n'
+                                       'Work News Recipes Travel')
+
+    def test_a_header_over_its_only_row_between_rules_is_a_table(self):
+        # Two rows between rules are a table's when every item of one lines
+        # up with an item of the other; read as bars, both would leave the
+        # page.
+        reading = case('rule_ruled_two_row_table')
+        self.assertIn('Item Qty Price Total\n\nNotebook 2 $9.00 $18.00', reading.main)
+        self.assertEqual(reading.rest, '')
 
     def test_a_toolbar_of_icons_over_labels_is_a_bar(self):
         # The icons line up with their labels as a table's cells do; in a

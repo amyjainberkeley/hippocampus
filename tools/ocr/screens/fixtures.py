@@ -281,6 +281,111 @@ def invitation():
             line('Reply to Maya by October 18.', 1188, 1187, 504, 53)]
 
 
+def labels_beside_numbers():
+    """A spreadsheet's names, left-aligned at the window's left edge, beside
+    narrower columns of right-aligned amounts: the widest gap is the one
+    after the names."""
+    char_w = 14
+    cells = [('Account', 'Jan', 'Feb', 'Mar'), ('Acme Robotics', '1,200', '1,450', '1,610'),
+             ('Blue Harbor', '880', '910', '955'), ('Cedar Labs', '402', '515', '618'),
+             ('Delta Foods', '77', '120', '131')]
+    out = []
+    for r, (name, *amounts) in enumerate(cells):
+        y = 300 + r * 44
+        out.append(line(name, 130, y, char_w * len(name)))
+        out += [line(amount, 670 + c * 160 - char_w * len(amount), y, char_w * len(amount))
+                for c, amount in enumerate(amounts)]
+    return out + prose(x=130, y=600, count=3)
+
+
+def table_with_wrapped_last_cell():
+    """A table whose last row's first cell wraps onto a second line, set
+    closer than the rows are; the widest gap is the one after that column."""
+    cells = [('Account', 'Stage', 'Owner'), ('Acme Robotics', 'Won', 'Chen'), ('Blue Harbor', 'Lost', 'Patel'),
+             ('Cedar Labs, west', 'Open', 'Weber')]
+    out = []
+    for r, row in enumerate(cells):
+        out += [line(cell, x, 300 + r * 50, 15 * len(cell)) for cell, x in zip(row, (700, 1300, 1675))]
+    return out + [line('region', 700, 484, 90)] + prose(y=700, count=3)
+
+
+def quarters_right_aligned():
+    """Quarter headers right-aligned over right-aligned amounts, in columns
+    200 pixels apart."""
+    out = [line('Account', 200, 300, 105)]
+    out += [line(q, 566 + c * 200, 300, 34) for c, q in enumerate(['Q1', 'Q2', 'Q3', 'Q4'])]
+    for r, (name, amounts) in enumerate([('Acme Robotics', ['1,200', '1,450', '1,610', '1,700']),
+                                         ('Blue Harbor', ['880', '910', '955', '990'])]):
+        out.append(line(name, 200, 350 + r * 50, 15 * len(name)))
+        out += [line(n, 600 + c * 200 - 15 * len(n), 350 + r * 50, 15 * len(n)) for c, n in enumerate(amounts)]
+    return out + prose(y=600)
+
+
+def bars(items, y):
+    return [line(text, x, y, 15 * len(text)) for text, x in items]
+
+
+def second_review_cases():
+    """Cases a second review found the first fixes got wrong: a column of
+    labels and a wrapped last cell are a table's own, two characters can be
+    text, and two bars stacked between rules are bars."""
+    cases = {}
+    numbers_window = dict(WINDOW, title='Pipeline', bundle_id='com.apple.iWork.Numbers')
+    cases['rule_table_labels_beside_numbers'] = case(labels_beside_numbers(), window=numbers_window)
+    cases['rule_table_wrapped_last_cell'] = case(table_with_wrapped_last_cell())
+    # Two letters or digits that are text: a label's value, a header over
+    # its column (left- or right-aligned), a column of pairs, a reply under
+    # its sender. Over a heading, with nothing beside it, two letters are a
+    # logo.
+    cases['rule_glyph_pair_value'] = case([line('Priority', 700, 300, 120), line('P1', 980, 300, 32)]
+                                          + prose(y=420))
+    header = [line('ID', 700, 300, 30), line('Name', 900, 300, 60), line('Status', 1300, 300, 90)]
+    for i, (name, status) in enumerate([('Maya Chen', 'Open'), ('Ravi Patel', 'Done'), ('Jonas Weber', 'Open')]):
+        header += [line(str(101 + i), 700, 350 + i * 50, 45), line(name, 900, 350 + i * 50, 15 * len(name)),
+                   line(status, 1300, 350 + i * 50, 60)]
+    cases['rule_glyph_pair_header'] = case(header + prose(y=700))
+    cases['rule_glyph_pair_header_right_aligned'] = case(quarters_right_aligned(), window=numbers_window)
+    issues = []
+    for i, (title, priority) in enumerate([('Sweep holds the writer', 'P1'), ('Search misses tabs', 'P2'),
+                                           ('Onboarding copy', 'P3')]):
+        issues += [line(title, 700, 300 + i * 44, 15 * len(title)), line(priority, 1500, 300 + i * 44, 34)]
+    cases['rule_glyph_pair_column'] = case(issues + prose(y=500))
+    cases['rule_glyph_chat_reply'] = case(
+        [line('Maya Chen 10:42 AM', 700, 300, 270), line('Can you send the deck before the call?', 700, 340, 560),
+         line('Ravi Patel 10:47 AM', 700, 420, 285), line('ok', 700, 460, 30),
+         line('Maya Chen 10:48 AM', 700, 540, 270), line('Thanks, got it.', 700, 580, 220)], window=CHAT_WINDOW)
+    cases['rule_glyph_pair_over_heading'] = case(
+        [line('TR', 100, 120, 36), line('Pricing for teams', 100, 170, 400, 40)] + prose(y=300))
+    # Bars stacked between rules: two that share an edge or two by chance,
+    # at the top (a menu over a toolbar) or the foot (sheet tabs over a
+    # status bar); three in the top band that line up; and a table's header
+    # over its only row, in step, between rules in the middle of a page.
+    menu = bars([('File', 160), ('Edit', 300), ('View', 440), ('Insert', 580), ('Format', 760), ('Data', 940),
+                 ('Tools', 1080), ('Help', 1220)], 30)
+    toolbar = bars([('100%', 160), ('Normal text', 330), ('Arial', 580), ('11', 760), ('Bold', 860),
+                    ('Italic', 960)], 110)
+    sheet_window = dict(WINDOW, title='Budget', bundle_id='com.google.Chrome')
+    cases['rule_ruled_two_bars_top'] = case(menu + toolbar + prose(x=160, y=400, count=6),
+                                            [horizontal(80), horizontal(160)], window=sheet_window)
+    foot = (bars([('Sheet1', 160), ('Sheet2', 400), ('Summary', 640)], 1705)
+            + bars([('Ready', 160), ('Sum: 1,284', 640), ('Count: 12', 1100)], 1760))
+    cases['rule_ruled_two_bars_foot'] = case(prose(x=160, y=400, count=6) + foot,
+                                             [horizontal(1690), horizontal(1745)],
+                                             window=dict(sheet_window, bundle_id='com.microsoft.Excel'))
+    stacked = (bars([('Inbox (3)', 160), ('Pricing notes', 400), ('Stripe Docs', 700), ('Calendar', 1000)], 20)
+               + bars([('Back', 160), ('Forward', 400), ('Reload', 700), ('Share', 1000)], 80)
+               + bars([('Work', 160), ('News', 400), ('Recipes', 700), ('Travel', 1000)], 140))
+    cases['rule_ruled_three_bars_top'] = case(stacked + prose(x=160, y=300),
+                                              [horizontal(60), horizontal(120), horizontal(180)],
+                                              window=dict(WINDOW, title='Pricing notes', bundle_id='com.google.Chrome'))
+    table = [line(cell, 200 + k * 600, 600 + r * 100, 15 * len(cell))
+             for r, row in enumerate([('Item', 'Qty', 'Price', 'Total'), ('Notebook', '2', '$9.00', '$18.00')])
+             for k, cell in enumerate(row)]
+    cases['rule_ruled_two_row_table'] = case(prose(y=300) + table + prose(y=900),
+                                             [horizontal(570), horizontal(670), horizontal(770)])
+    return cases
+
+
 def review_cases():
     """Cases for the rules a review of the first port found wrong or
     untested, one or two per rule."""
@@ -489,6 +594,7 @@ def small_cases():
         [box for i, text in enumerate(['let a = load(path)?;', 'let b = parse(&a)?;', 'store.put(b)?;', 'Ok(())'])
          for box in (line(str(40 + i), 580, 200 + i * 40, 30), line(text, 760, 200 + i * 40, 15 * len(text)))])
     cases.update(review_cases())
+    cases.update(second_review_cases())
     cases['text_record_separator'] = case(
         [line('pay\x1eroll report for the quarter', 700, 300, 900), line('\x1e', 700, 360, 30)] + prose(y=420))
     cases['text_unit_separator'] = case([line('a\x1fb is one word', 700, 300, 400)] + prose(y=400))

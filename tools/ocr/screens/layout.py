@@ -13,21 +13,26 @@ row into fragments. This rebuilds the page:
    itself: horizontal ones (bars) first, top to bottom, then vertical ones
    (sidebars, panels), left to right. A vertical separator between two sides
    that pair row for row, as a table's columns do, is a gridline, not a cut;
-   two lists side by side (a file browser's columns) are panes. A pane that
-   holds one row between rules, lining up item for item with the one-row pane
-   above or below it, is a row of a ruled table (a receipt, a spreadsheet):
-   it is read whole, and it is never a bar.
+   two lists side by side (a file browser's columns) are panes. Three or more
+   one-row panes between rules in a run, each lining up with the one above
+   it, are the rows of a ruled table (a receipt, a spreadsheet): each is
+   read whole, and none is a bar outside the window's top band. Two such
+   rows are a table's only when every item of the shorter lines up (a
+   header over its only row): two bars stacked between rules (a menu over a
+   toolbar, sheet tabs over a status bar) share an edge or two by chance.
 3. Recursive XY-cut inside each pane: split at the widest whitespace band no
    box crosses, horizontally or vertically, until no band is wide enough.
    Side-by-side regions that are all short, row-aligned cells form a table
    and are read row by row; the cells must line up from both sides (B1). A
    table beside other text keeps its columns together, and the text beside it
    (a form beside an order summary) is read on its own: it runs on below the
-   table's last row, or stands twice as far off as the table's columns do. A
-   vertical band whose two sides share no row (alternating chat bubbles) is
-   not a cut: the region is read as one block, top to bottom (B2). Rows that
-   overlap by a fifth of a line are shared. B3, the tolerant cut across a
-   bridging box, is left out: pane separators cut the bars that bridge panes.
+   table's last row, set off from the line above it as the table's rows are.
+   A cell that wraps onto a second line sits closer, and a column of labels,
+   however far from its numbers, is the table's own. A vertical band whose
+   two sides share no row (alternating chat bubbles) is not a cut: the
+   region is read as one block, top to bottom (B2). Rows that overlap by a
+   fifth of a line are shared. B3, the tolerant cut across a bridging box,
+   is left out: pane separators cut the bars that bridge panes.
 4. Inside a block, boxes that share a visual row are joined left to right,
    and leading indentation is kept relative to the block's left edge. A box
    that overlaps another on its row horizontally is an alternative reading
@@ -49,9 +54,14 @@ none of the rules below apply to it. Otherwise, before the cut:
 - Glyphs (RULINGS T3): a box of one or two characters, about square, half a
   line height clear of any text on its row, is an icon read as characters (a
   file icon as "D", a star as a CJK lookalike, a logo as "TR"). Icons side by
-  side stand together. Code punctuation is not a glyph, and neither is data:
-  a number in a column or row of numbers or the value of a label, or a pair
-  of letters in a column or row of letter pairs (state codes).
+  side stand together. Code punctuation is not a glyph, and neither is data
+  or text in its place. A number: in a column or row of numbers, or the
+  value of a label. Two letters or digits ("P1", "ID", "ok", "OR"): in a
+  column or row of such pairs, the value of a label that is text, or a line
+  of a column of text: a line of three or more characters just above it
+  starts or ends where it does (a reply under its sender's name), or one
+  just below it does while its row holds a line too (a header over its
+  column). Alone, or over a heading or a label, two characters are an icon.
 
 Then, pane by pane, after the cut:
 
@@ -114,19 +124,23 @@ TABLE_MAX_WORDS = 3
 TABLE_ALIGNED = 0.7
 TABLE_ANCHOR_ALIGNED = 0.7   # B1: share of the first column's rows matched in another column
 TABLE_ROW_ALIGN = 0.3        # rows of two columns are level when their centres are this share of a row height apart
-TABLE_APART = 2.0            # text beside a table stands this many times further off than its columns do
+WRAP_GAP = 0.75              # a line under a table set off by less than this share of its row gap is a cell that wraps
 MAX_INDENT = 40
 DUPLICATE_POSITIONS = 64     # earlier boxes of the same text compared, as the helper does
 
 SEPARATOR_PAD = 2.0          # pixels a box must reach past a separator to cross it
 SEPARATOR_SPAN = 0.9         # a separator cuts a region it spans this share of
 PANE_MIN = 0.75              # thinnest pane, in line heights
+RULED_RUN = 3                # one-row panes between rules that line up, in a run this long, are a table's rows
+                             # (a run of two only when its rows are in step)
 
 GLYPH_MAX_CHARS = 2
 GLYPH_ASPECT = (0.7, 1.5)    # width over height
 GLYPH_CLEAR = 0.5            # gap to a row neighbour, in line heights
 GLYPH_CHAIN_REACH = 3.0      # other numbers this close, in line heights, make a number data
 GLYPH_LABEL_REACH = 6.0      # a label this far to the left makes a number its value
+GLYPH_COLUMN_REACH = (0.5, 2.0)  # a line of text more than / at most this far above or below, in line heights,
+GLYPH_COLUMN_ALIGN = 0.5         # that starts this close to where a pair starts, makes the pair one of its lines
 CODE_PUNCTUATION = frozenset('{}[]();,')
 
 GUTTER_MIN = 3               # numbers in a gutter chain
@@ -427,18 +441,21 @@ def parallel(left, right):
 def stands_apart(columns):
     """Whether the first of three or more columns is text beside a table,
     not the table's first column (a form beside an order summary): the other
-    columns form a table without it, and it runs on below that table's last
-    row, or it stands TABLE_APART times further off than the table's columns
-    stand from each other. A title above a table, or a cell that wraps onto
-    a second line, has no partner either, and is the table's own."""
+    columns form a table without it, and the first column runs on below that
+    table's last row, set off from its line above about as far as the
+    table's rows are set off from each other (WRAP_GAP of the median gap).
+    A title above a table and a cell that wraps onto a second line (set
+    closer than a row) have no partner either, and are the table's own. So
+    is a column of labels, however far it stands from the numbers beside it
+    (a spreadsheet's names beside right-aligned amounts). Rows are taken in
+    the order rows() gives them."""
     if len(columns) < 3 or not is_table(columns[1:]):
         return False
-    table_rows = rows([b for column in columns[1:] for b in column])
-    last = max(row_span(row)[1] for row in table_rows)
-    if any(row_span(row)[0] >= last for row in rows(columns[0])):
-        return True
-    gaps = [min(b.x0 for b in columns[i + 1]) - max(b.x1 for b in columns[i]) for i in range(len(columns) - 1)]
-    return gaps[0] >= TABLE_APART * max(gaps[1:])
+    spans = [row_span(row) for row in rows([b for column in columns[1:] for b in column])]
+    last = max(bottom for _, bottom in spans)
+    gap = statistics.median([below[0] - above[1] for above, below in zip(spans, spans[1:])] or [0.0])
+    first = [row_span(row) for row in rows(columns[0])]
+    return any(below[0] >= last and below[0] - above[1] >= WRAP_GAP * gap for above, below in zip(first, first[1:]))
 
 
 def cut(boxes, line_h, tables=None):
@@ -576,13 +593,24 @@ def panes(boxes, separators, rect, line_h):
 def ruled_rows(window_panes, line_h):
     """Indexes of the panes (from panes()) that are rows of a ruled table: a
     receipt, a spreadsheet's gridlines, a list with alternating backgrounds.
-    Each such pane holds one row between rules, the pane above or below it
-    spans the same columns, and the two rows line up item for item. A row of
-    a table is read whole: its label is not cut from its amount, and it is
-    never a bar. A pane with no text between two (a double rule) does not
-    break the run."""
+    Each such pane holds one row between rules and spans the same columns as
+    the pane with text before it, and its row lines up with that pane's row
+    (grid). A run of RULED_RUN such panes or more is a table's rows, and so
+    is a run of two when the two rows are in step (in_step: a header over
+    its only row). Two bars stacked between rules (a menu over a toolbar,
+    sheet tabs over a status bar) share a left inset and an edge or two by
+    chance more often than not, and rarely line up item for item. A row of a
+    table is read whole: its label is not cut from its amount, and it is not
+    a bar (classify). A pane with no text between two (a double rule) does
+    not break the run."""
     found = set()
-    previous = None  # (index, rect, row) of the last pane with text, when it held one row
+    run, steps = [], []  # indexes of the panes in the current run, and whether each pair is in step
+    previous = None      # (index, rect, row) of the last pane with text, when it held one row
+
+    def close():
+        if len(run) >= RULED_RUN or (len(run) == 2 and steps[0]):
+            found.update(run)
+
     for i, (rect, boxes) in enumerate(window_panes):
         if not boxes:
             continue
@@ -590,8 +618,13 @@ def ruled_rows(window_panes, line_h):
         current = (i, rect, lines[0]) if len(lines) == 1 else None
         if (current is not None and previous is not None and abs(previous[1][0] - rect[0]) < 1
                 and abs(previous[1][2] - rect[2]) < 1 and grid(previous[2], current[2], line_h)):
-            found.update((previous[0], i))
+            run = (run or [previous[0]]) + [i]
+            steps.append(in_step(previous[2], current[2], line_h))
+        else:
+            close()
+            run, steps = [], []
         previous = current
+    close()
     return found
 
 
@@ -706,14 +739,15 @@ def has_letter(text):
     return any(unicodedata.category(ch).startswith('L') for ch in text)
 
 
-def is_letter_pair(text):
-    """Two letters of any script ("OR", "EN", "kg", "TR")."""
-    return len(text) == 2 and all(unicodedata.category(ch).startswith('L') for ch in text)
+def is_pair(text):
+    """Two letters or digits of any script, Unicode categories L* and N*
+    ("OR", "P1", "Q3", "ok", "42", "TR")."""
+    return len(text) == 2 and all(unicodedata.category(ch)[0] in 'LN' for ch in text)
 
 
 class Cells:
-    """The boxes whose text (whitespace removed) is of one kind, numbers or
-    letter pairs, by height on the screen."""
+    """The boxes whose text (whitespace removed) is of one kind, numbers,
+    pairs or lines, by height on the screen."""
 
     def __init__(self, boxes, kind):
         self.boxes = sorted((b for b in boxes if kind(''.join(words(b.text)))), key=lambda b: b.cy)
@@ -752,11 +786,46 @@ def number_in_place(box, row, index, numbers, line_h):
                for other in row[:index])
 
 
-def pair_in_place(box, pairs, line_h):
-    """Whether two letters are data: in a column or row of other letter
-    pairs (a table's column of state or language codes). An icon read as
-    letters ("TR") stands alone."""
-    return is_letter_pair(''.join(words(box.text))) and pairs.line_up(box, line_h)
+def is_line(text):
+    """Text longer than an icon's GLYPH_MAX_CHARS characters: a line."""
+    return len(text) > GLYPH_MAX_CHARS
+
+
+def in_column(box, row, lines, line_h):
+    """Whether the box is a line of a column of text. One of `lines` (Cells
+    of is_line), off its row and at most GLYPH_COLUMN_REACH line heights
+    away (centre to centre), starts or ends within GLYPH_COLUMN_ALIGN line
+    heights of where the box starts or ends, and lies either above it (a
+    reply "ok" under its sender's name, the last item of a list) or below
+    it while the box's row holds a line too (a header "ID" or "Q1" over its
+    column, beside the other headers). A logo over a heading, or an icon
+    over its label, has a line below it and nothing beside it. A brace or
+    another pair is not a line."""
+    near, far = GLYPH_COLUMN_REACH
+    reach = GLYPH_COLUMN_ALIGN * line_h
+    header = any(is_line(''.join(words(other.text))) for other in row)
+    for other in lines.near(box, far * line_h):
+        if abs(other.cy - box.cy) <= near * line_h:
+            continue
+        if (abs(other.x0 - box.x0) <= reach or abs(other.x1 - box.x1) <= reach) and (other.cy < box.cy or header):
+            return True
+    return False
+
+
+def pair_in_place(box, row, index, pairs, lines, line_h):
+    """Whether two letters or digits ("P1", "ID", "ok", "OR") are data or
+    text in their place, not an icon: in a column or row of other pairs
+    (state codes, a header "Q1 Q2 Q3"), a line of a column of text
+    (in_column), or the value of a label, which here must be text with a
+    letter that is not itself shaped like an icon, at most GLYPH_LABEL_REACH
+    line heights to its left ("Priority  P1"). An icon read as letters
+    ("TR") stands alone."""
+    if not is_pair(''.join(words(box.text))):
+        return False
+    if pairs.line_up(box, line_h) or in_column(box, row, lines, line_h):
+        return True
+    return any(has_letter(other.text) and not glyph_shaped(other)
+               and box.x0 - other.x1 <= GLYPH_LABEL_REACH * line_h for other in row[:index])
 
 
 def glyph_shaped(box):
@@ -774,8 +843,8 @@ def glyphs(boxes, line_h):
     """Boxes that are icons read as characters: glyph-shaped, and at least
     GLYPH_CLEAR line heights from any text on their row. Icons side by side
     (attach and send) stand together, so only text counts as a neighbour.
-    Numbers and letter pairs in place are data."""
-    numbers, pairs = Cells(boxes, is_number), Cells(boxes, is_letter_pair)
+    Numbers and pairs in place are data or text."""
+    numbers, pairs, lines = Cells(boxes, is_number), Cells(boxes, is_pair), Cells(boxes, is_line)
     out = []
     for row in rows(boxes):
         shaped = [glyph_shaped(box) for box in row]
@@ -788,7 +857,7 @@ def glyphs(boxes, line_h):
                 continue
             if after is not None and after.x0 - box.x1 < GLYPH_CLEAR * line_h:
                 continue
-            if number_in_place(box, row, i, numbers, line_h) or pair_in_place(box, pairs, line_h):
+            if number_in_place(box, row, i, numbers, line_h) or pair_in_place(box, row, i, pairs, lines, line_h):
                 continue
             out.append(box)
     return out
@@ -1021,15 +1090,29 @@ def is_navigation(region, everything, skip, win):
     return wider_beside(region, everything, skip, win)
 
 
+def lined_up(row, other, line_h):
+    """How many items of `row` start or end within GRID_ALIGN line heights
+    of where an item of `other` starts or ends."""
+    reach = GRID_ALIGN * line_h
+    return sum(1 for box in row if any(abs(box.x0 - o.x0) <= reach or abs(box.x1 - o.x1) <= reach for o in other))
+
+
 def grid(row, below, line_h):
     """Whether `row` lines up with the row below it, item for item, as a
-    table's rows do. A bar's items do not line up with what is under them."""
+    table's rows do: two of its items at least. A bar's items do not line up
+    with what is under them."""
     if len(row) < 2 or len(below) < 2:
         return False
-    reach = GRID_ALIGN * line_h
-    lined = sum(1 for box in row if any(abs(box.x0 - other.x0) <= reach or abs(box.x1 - other.x1) <= reach
-                                        for other in below))
-    return lined >= 2
+    return lined_up(row, below, line_h) >= 2
+
+
+def in_step(row, below, line_h):
+    """Whether every item of the row with fewer items (the upper one when
+    both have as many) lines up with an item of the other, two items each
+    at least: a table's header over its row. Two bars stacked on each other
+    share an edge or two by chance, rarely all of them."""
+    fewer, more = (row, below) if len(row) <= len(below) else (below, row)
+    return len(fewer) >= 2 and lined_up(fewer, more, line_h) == len(fewer)
 
 
 def caps_label(row):
@@ -1171,12 +1254,13 @@ def classify(window_panes, tables, win):
         # Bars come off the top of a pane, one row at a time, until a row
         # reads as something else. A pane with no separator above it can only
         # have bars in the window's top band. A table's rows are never bars,
-        # nor are rows between rules that line up as a table's do, except in
-        # a pane that lies wholly in the top band (a title bar, a toolbar),
-        # where icons over their labels line up the way a table's cells do.
+        # nor are the rows of a ruled table (ruled_rows), except in a pane
+        # that lies wholly in the top band (a title bar, a menu, a toolbar),
+        # where bars stack and icons over their labels line up the way a
+        # table's cells do.
         top = 0
         band_pane = py1 <= win.top_band
-        while (not pane.ruled and top < len(lines)
+        while ((not pane.ruled or band_pane) and top < len(lines)
                and (band_pane or not any(home[id(b)].table for b in lines[top]))
                and is_bar(lines[top], lines[top + 1] if top + 1 < len(lines) else None, win, pane_top, panel,
                           len(lines) == 1, top + 1 < len(lines) and is_code(lines[top:top + CODE_AHEAD], False),
