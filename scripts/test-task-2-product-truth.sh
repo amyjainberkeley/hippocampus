@@ -43,10 +43,11 @@ for stale_release_claim in \
         exit 1
     fi
 done
-rg -Uq 'Full Xcode 26\.6 is installed and selected' "$STATUS"
-rg -Uq 'The Developer ID Application[[:space:]]+identity and its private key are installed' "$STATUS"
-rg -Uq '`notarytool-profile` authenticates[[:space:]]+successfully' "$STATUS"
-rg -Uq 'Sparkle private/public key pair matches' "$STATUS"
+# STATUS says what works and how it was checked, and carries the baseline
+# line the app assembler and the release identity gate read.
+rg -q '^Audited code baseline: `[0-9a-fA-F]{7,40}`' "$STATUS"
+rg -Fq '## What works' "$STATUS"
+rg -Fq '## Not checked yet' "$STATUS"
 
 rg -Fq 'Anything older is deleted for good.' "$PREFERENCES_WINDOW"
 rg -Fq 'python3 "$GENERATE_EULA" --check' "$INSTALLER"
