@@ -111,12 +111,14 @@ public enum UserFacingCopy {
 
     /// Who wrote a session's title, a note or the day's summary, as the
     /// caption names it (RULINGS I11): Apple Intelligence for Apple's
-    /// on-device model, any other model by its own name. Nil when it was
-    /// measured, not written.
+    /// on-device model, a model server's model by its own name
+    /// ("local:qwen3:4b" is "qwen3:4b"), any other model by its own name. Nil
+    /// when it was measured, not written.
     public static func writerName(_ writtenBy: String) -> String? {
         switch writtenBy {
-        case "", "measured": nil
+        case "", "measured", "local:": nil
         case "apple-foundation-models": "Apple Intelligence"
+        case let local where local.hasPrefix("local:"): String(local.dropFirst("local:".count))
         default: writtenBy
         }
     }
@@ -248,8 +250,15 @@ public enum UserFacingCopy {
     public static func noAnswer(_ reason: String?) -> String {
         switch reason {
         case "apple_intelligence_off": "Turn on Apple Intelligence in System Settings to get answers."
-        case "device_not_eligible", "not_installed", "cannot_launch": "Answers need macOS 26 with Apple Intelligence."
+        case "device_not_eligible", "not_installed", "cannot_launch", "needs_macos_26":
+            "Answers need macOS 26 with Apple Intelligence."
         case "model_not_ready": "Apple Intelligence is still getting ready."
+        case "needs_apple_intelligence_or_local_model": "Answers need Apple Intelligence or your own model."
+        case "local_server_unreachable": "Your model server isn\u{2019}t answering."
+        case "local_model_missing": "Your model server doesn\u{2019}t have that model."
+        case "local_model_unset": "Your model server has no model to answer with."
+        case "local_model_not_local": "That model runs in the cloud. Pick one that runs on this Mac."
+        case "local_server_not_local": "Hippocampus only talks to model servers on this Mac."
         default: "Couldn\u{2019}t write an answer."
         }
     }

@@ -53,6 +53,38 @@ final class AnswerSessionTests: XCTestCase {
         XCTAssertNil(launch.environment["MCI_DB_KEY_HEX"], "key bytes pass only with the development key")
     }
 
+    /// The agent writes U+2028 and U+0085 unescaped inside a reply. Replies
+    /// are cut at the 0x0A byte only, so such a reply arrives whole instead
+    /// of timing out (RULINGS W2).
+    func testARepliesHoldingLineSeparatorsArriveWhole() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("framing-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let agent = folder.appendingPathComponent("mci-agent")
+        try #"""
+        #!/bin/sh
+        read line; printf '{"jsonrpc":"2.0","id":1,"result":{"text":"one\342\200\250two\302\205three"}}\n'
+        read line; echo '{"jsonrpc":"2.0","id":2,"result":{"text":"next"}}'
+        cat >/dev/null
+        """#.write(to: agent, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: agent.path)
+        let launch = MemorySessionLaunch(executable: agent, arguments: [], environment: ["PATH": "/usr/bin:/bin"])
+        let session = MemorySession(children: ChildProcesses())
+        let first = try await session.call("mci_ask", arguments: Data("{}".utf8), launch: launch, timeout: .seconds(5))
+        XCTAssertEqual((try JSONSerialization.jsonObject(with: first) as? [String: Any])?["text"] as? String,
+                       "one\u{2028}two\u{0085}three")
+        let second = try await session.call("mci_ask", arguments: Data("{}".utf8), launch: launch, timeout: .seconds(5))
+        XCTAssertEqual((try JSONSerialization.jsonObject(with: second) as? [String: Any])?["text"] as? String, "next")
+        await session.stop()
+
+        // Splitting at every line break, as `bytes.lines` does, would cut
+        // the first reply in three.
+        var framer = ReplyFramer()
+        let bytes = Data("{\"a\":\"one\u{2028}two\u{0085}three\"}\n{\"b\":1}\n".utf8)
+        XCTAssertEqual(bytes.compactMap { framer.append($0) }.map { String(decoding: $0, as: UTF8.self) },
+                       ["{\"a\":\"one\u{2028}two\u{0085}three\"}", "{\"b\":1}"])
+    }
+
     func testCancellingAnAskStopsItsRequest() async throws {
         let folder = try FakeAgent.install(hang: true)
         defer { try? FileManager.default.removeItem(at: folder) }

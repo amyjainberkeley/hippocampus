@@ -81,7 +81,21 @@ final class UnderstandingFormatTests: XCTestCase {
         XCTAssertEqual(UserFacingCopy.writtenOnThisMac(by: "apple-foundation-models"),
                        "Written on this Mac by Apple Intelligence")
         XCTAssertEqual(UserFacingCopy.writtenOnThisMac(by: "local-model-7b"), "Written on this Mac by local-model-7b")
+        // A model server on this Mac: the agent stores "local:" and the model.
+        XCTAssertEqual(UserFacingCopy.writtenOnThisMac(by: "local:qwen3:4b"), "Written on this Mac by qwen3:4b")
+        XCTAssertNil(UserFacingCopy.writerName("local:"))
         XCTAssertNil(UserFacingCopy.writtenOnThisMac(by: "measured"))
         XCTAssertNil(UserFacingCopy.writerName(""))
+    }
+
+    func testNoModelOnThisMacReadsTheSameAsAnyModelServerProblem() {
+        XCTAssertEqual(ModelUnavailableReason(code: "needs_apple_intelligence_or_local_model"), .needsAModel)
+        XCTAssertEqual(ModelUnavailableReason(code: "local_server_unreachable"), .needsAModel)
+        XCTAssertEqual(ModelUnavailableReason(code: "apple_intelligence_off"), .appleIntelligenceOff)
+        XCTAssertEqual(ModelUnavailableReason(code: "something_new"), .notAvailable)
+        XCTAssertEqual(UserFacingCopy.Overview.modelLine(.needsAModel),
+                       "Summaries need Apple Intelligence or your own model. New sessions are named after their windows.")
+        XCTAssertEqual(UserFacingCopy.noAnswer("needs_apple_intelligence_or_local_model"),
+                       "Answers need Apple Intelligence or your own model.")
     }
 }

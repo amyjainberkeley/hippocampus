@@ -96,6 +96,10 @@ public enum ModelUnavailableReason: Equatable, Sendable {
     case appleIntelligenceOff
     case deviceNotEligible
     case modelNotReady
+    /// Neither Apple Intelligence nor a model server on this Mac can write,
+    /// or the model server chosen cannot (`needs_apple_intelligence_or_local_model`,
+    /// `local_*`).
+    case needsAModel
     case notAvailable
 
     public init(code: String?) {
@@ -103,6 +107,8 @@ public enum ModelUnavailableReason: Equatable, Sendable {
         case "apple_intelligence_off": self = .appleIntelligenceOff
         case "device_not_eligible": self = .deviceNotEligible
         case "model_not_ready": self = .modelNotReady
+        case "needs_apple_intelligence_or_local_model": self = .needsAModel
+        case let code? where code.hasPrefix("local_"): self = .needsAModel
         default: self = .notAvailable
         }
     }

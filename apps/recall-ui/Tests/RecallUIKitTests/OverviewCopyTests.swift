@@ -113,5 +113,7 @@ final class OverviewCopyTests: XCTestCase {
 }
 
 private enum ModelUnavailableReasonCases {
-    static let all: [ModelUnavailableReason] = [.appleIntelligenceOff, .deviceNotEligible, .modelNotReady, .notAvailable]
+    static let all: [ModelUnavailableReason] = [
+        .appleIntelligenceOff, .deviceNotEligible, .modelNotReady, .needsAModel, .notAvailable,
+    ]
 }

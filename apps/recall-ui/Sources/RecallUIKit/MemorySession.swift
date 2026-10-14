@@ -3,7 +3,8 @@ import Foundation
 // A copy of `apps/hippocampus/Sources/HippocampusKit/CommandBar/MemorySession.swift`
 // (RULINGS W2): the window shares no module with the app, so it keeps its own
 // warm child. Two additions: a cancelled call stops its request, and the child
-// is listed in `ChildProcesses` so quitting the window stops it.
+// is listed in `ChildProcesses` so quitting the window stops it. Replies are
+// framed on 0x0A only, as in the app.
 
 /// How to start a read-only `mci-agent mcp-serve` child: the bundled binary
 /// and a sanitized environment carrying only the brain path and the
@@ -149,9 +150,15 @@ public actor MemorySession {
         let myGeneration = generation
         let reader = stdout.fileHandleForReading
         Task.detached { [weak self] in
+            // Replies are framed on 0x0A only: `bytes.lines` also splits on
+            // U+2028 and U+0085, which arrive unescaped inside replies and
+            // would cut one in two, so the request would time out (RULINGS W2).
+            var framer = ReplyFramer()
             do {
-                for try await line in reader.bytes.lines {
-                    await self?.deliver(line: line, generation: myGeneration)
+                for try await byte in reader.bytes {
+                    if let frame = framer.append(byte) {
+                        await self?.deliver(frame: frame, generation: myGeneration)
+                    }
                 }
             } catch {}
             await self?.exited(generation: myGeneration)
@@ -163,9 +170,9 @@ public actor MemorySession {
         stop()
     }
 
-    private func deliver(line: String, generation expected: Int) {
+    private func deliver(frame: Data, generation expected: Int) {
         guard expected == generation,
-              let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+              let object = try? JSONSerialization.jsonObject(with: frame) as? [String: Any],
               let id = object["id"] as? Int,
               let continuation = pending.removeValue(forKey: id)
         else { return }
@@ -183,5 +190,20 @@ public actor MemorySession {
             return
         }
         continuation.resume(returning: data)
+    }
+}
+
+/// Cuts the child's output into replies at each 0x0A byte, and nowhere else.
+struct ReplyFramer {
+    private var buffer = Data()
+
+    /// The finished reply when `byte` ends one.
+    mutating func append(_ byte: UInt8) -> Data? {
+        guard byte == 0x0A else {
+            buffer.append(byte)
+            return nil
+        }
+        defer { buffer.removeAll(keepingCapacity: true) }
+        return buffer
     }
 }

@@ -76,6 +76,8 @@ public extension UserFacingCopy {
                 "This Mac can\u{2019}t run Apple Intelligence. Sessions are named after their windows."
             case .modelNotReady:
                 "Apple Intelligence is getting ready. New sessions are named after their windows."
+            case .needsAModel:
+                "Summaries need Apple Intelligence or your own model. New sessions are named after their windows."
             case .notAvailable:
                 "Apple Intelligence isn\u{2019}t available. New sessions are named after their windows."
             }

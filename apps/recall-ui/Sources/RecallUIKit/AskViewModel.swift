@@ -318,11 +318,13 @@ public final class AskViewModel: ObservableObject {
     }
 
     /// Answers cannot come on this Mac as it is: Apple Intelligence is off or
-    /// cannot run here, or the part that answers is missing. A model still
-    /// getting ready, or an error, may pass.
+    /// cannot run here, there is no model server either, or the part that
+    /// answers is missing. A model still getting ready, a model server that
+    /// is not answering yet, or an error, may pass.
     private static func meansNoAnswers(_ reason: String?) -> Bool {
         switch reason {
-        case "apple_intelligence_off", "device_not_eligible", "not_installed", "cannot_launch": true
+        case "apple_intelligence_off", "device_not_eligible", "not_installed", "cannot_launch",
+             "needs_apple_intelligence_or_local_model", "needs_macos_26": true
         default: false
         }
     }

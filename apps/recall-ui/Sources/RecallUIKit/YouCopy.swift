@@ -53,7 +53,7 @@ public extension UserFacingCopy {
         }
 
         public static let nothingLearnedTitle = "Nothing learned yet"
-        public static let nothingLearnedBody = "This fills in after a few sessions. It needs Apple Intelligence, on this Mac."
+        public static let nothingLearnedBody = "This fills in after a few sessions. It needs Apple Intelligence or your own model."
         public static let unavailableTitle = "Couldn\u{2019}t load this page"
 
         /// The footer line when Apple Intelligence cannot write: what is
@@ -68,6 +68,9 @@ public extension UserFacingCopy {
                     + "Your day and search still work."
             case .modelNotReady:
                 "Hippocampus learns about you with Apple Intelligence, which is still getting ready. "
+                    + "Your day and search still work."
+            case .needsAModel:
+                "Hippocampus learns about you with Apple Intelligence or your own model. "
                     + "Your day and search still work."
             case .notAvailable:
                 "Hippocampus learns about you with Apple Intelligence, which isn\u{2019}t available. "
