@@ -24,7 +24,7 @@
 
 **What it learns about you, in You.** The exact words your AI is given about you, and why Hippocampus thinks so. Mark what’s right. Forget what isn’t.
 
-**Context for your AI.** Connect Claude Code or Codex once, from the menu bar. Each new session starts with your recent work and what Hippocampus has learned about you, with sources. For any chatbot, Copy for your AI puts the same context on your clipboard.
+**Context for your AI.** Connect Claude Code or Codex once, from the menu bar. Each new session starts with your recent work and what Hippocampus has learned about you, with sources. For any other chatbot, Copy for your AI copies what you’re working on, with its sources, for you to paste.
 
 <p align="center">
   <img src="docs/media/window-overview.png" width="720" alt="Overview with sample data. Today’s sessions sit on a strip from 9 AM to 3 PM, coloured by kind of work. The selected one, Competitor pricing tables, 1:41 to 2:05 PM, lists Safari, Notes and Slack, what Hippocampus noticed, the searches behind it, and Copy for your AI. Below, the day in four lines, starting Active 3h 18m.">
