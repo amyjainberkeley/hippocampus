@@ -1,12 +1,10 @@
 # ADR-0030 — Messages + Mail capture redaction threat-model (default-deny until OCR-time redaction lands)
 
-- Status: **Proposed** (2026-05-28; CSO seat draft pending CEO ratification + the implementing PR's cascade-twice integration test green)
-- Owners: **CSO** (binding sign-off authority + threat-model author) + **Director-Recording** (cascade §6 OCR-time-regex extension — implementer scope on the follow-on joint PR)
-- Reviewers: CEO (ratification); Director-Brain (OCR pipeline / Phase 3 cascade-twice integration — consumer of the redaction layer); CRS Telemetry-Gap analyst (false-positive / catch-rate monitoring); Director-Context (Mail header pre-OCR check — touches WorkflowContext composition)
+- Status: **Proposed** (2026-05-28)
 - Phase: 3 follow-on / Phase 4 onramp. This ADR is the gate that converts the recall-coverage-gap memo's §6 ⚠️ hold into a checkable specification.
 - **Protected-set: yes** (AGENT_PROTOCOL §5 — modifies the de-facto policy controlling `known-safe-apps.toml` membership for two of the most-sensitive macOS bundles).
 - **Launch-blocker: no** (this ADR does not block Phase 1→2; it gates a specific Phase-4-era allowlist expansion).
-- **Relationship:** consumes the ADR-0013 cascade as the always-running pixel-time defense; consumes the ADR-0016 §1.6 cascade-twice-for-OCR mechanism as the place new redaction logic mounts; produces the binding conditions under which the orchestrator-CSO seat may issue a follow-on PR adding `com.apple.MobileSMS` and `com.apple.mail` to `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Resources/known-safe-apps.toml`.
+- **Relationship:** consumes the ADR-0013 cascade as the always-running pixel-time defense; consumes the ADR-0016 §1.6 cascade-twice-for-OCR mechanism as the place new redaction logic mounts; produces the binding conditions under which a follow-on PR may add `com.apple.MobileSMS` and `com.apple.mail` to `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Resources/known-safe-apps.toml`.
 
 ## Context
 

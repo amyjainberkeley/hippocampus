@@ -82,7 +82,6 @@ members = [
     # `cargo build --workspace` on macOS/Linux compiles it as an empty
     # library. Phase 8 scaffold — all methods stubbed.
     "adapters/windows",
-    "server",
     "tools/perf-soak",
     # V2-P5+ Phase-3 screen-text NER bake-off harness. Exercises the
     # PRODUCTION inference path (P2′ WordPiece tokenizer → Core ML via

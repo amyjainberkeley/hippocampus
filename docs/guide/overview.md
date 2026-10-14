@@ -14,7 +14,7 @@ authority for current builds and release gates; this guide explains the workflow
 2. **User:** understand capture controls, inspect a source memory, then use search,
    a daily draft, or an explicitly connected agent.
 3. **Contributor:** follow the [architecture](architecture.md) into code, then
-   read the relevant [development milestone](development-history.md) and tests.
+   read the tests beside it.
 4. **Evaluator:** use the [cost audit](cost-and-storage.md), [evaluation index](../eval/README.md),
    and [release checklist](../release/RELEASE_CHECKLIST.md). Fixture results and
    owner-machine observations have different scopes.
@@ -32,9 +32,6 @@ For an update, choose **Quit Hippocampus** from its menu-bar icon first. Closing
 the Recall window leaves the recorder running. If Finder still reports that the
 app is in use, a connected AI tool may still be using its local connector. Do
 not force-quit all your coding tools or delete your memory to get past it.
-The [controlled owner upgrade](../release/OWNER_UPGRADE_2026-09-09.md) preserves
-existing connector processes and requires a consistent recovery copy before
-this candidate's database upgrade.
 
 ### Capture And Recall
 
@@ -113,16 +110,14 @@ not a new legal clearance or dependency scan.
 | Footprint | What the checkout establishes |
 | --- | --- |
 | [LICENSE](../../LICENSE), [Cargo.toml](../../Cargo.toml) | Root Apache License 2.0 text and Apache-2.0 workspace metadata |
-| Source headers, for example [SmartCaptureFilter.swift](../../adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/SmartCaptureFilter.swift) | Some still say `SPDX-License-Identifier: TBD-private`; this conflicts with a uniformly licensed-source claim and needs owner reconciliation |
-| [NOTICE](../../NOTICE), [third_party/licenses](../../third_party/licenses/) | Attribution and pinned TOML license texts exist. NOTICE still describes Qwen and NER as bundled, while the current release manifest requires only Arctic; an exhaustive current dependency-license verdict is not established |
+| Source headers | Every source file with a license header says `SPDX-License-Identifier: Apache-2.0` |
+| [NOTICE](../../NOTICE), [third_party/licenses](../../third_party/licenses/) | Attribution and pinned TOML license texts exist. NOTICE names the copyleft components in the bundled OCR worker and the one bundled model, Arctic Embed S; an exhaustive current dependency-license verdict is not established |
 | [Application terms](../legal/terms-of-service.md) | Separate desktop terms exist and explicitly retain a legal-owner review gate; their relationship to the root license needs clarification |
 | [release-models.json](../../release-models.json) | Model archive URL and hash remain `UNPROVISIONED`; full model-license packaging is an open release gate |
-| [SECURITY.md](../../SECURITY.md), [.github/workflows](../../.github/workflows/) | Private vulnerability-reporting route and CI/release/advisory checks exist. SECURITY's older known-status bullets are superseded by STATUS |
+| [SECURITY.md](../../SECURITY.md), [.github/workflows](../../.github/workflows/) | Private vulnerability-reporting route and CI/release/advisory checks exist |
 | Contribution process | No standalone CONTRIBUTING.md, code of conduct, or issue/PR templates were found in tracked files; this contributor path and AGENTS.md are the available entry points |
 
 The repository is publicly visible and includes an open-source root license.
 A complete, consistently licensed and reproducible distribution still requires
 resolving the footprint above, model-asset provenance, and installation/update
-qualification. The [supply-chain audit](../audit/2026-09-05-supply-chain-check.md)
-records its scope and waivers; the [publication record](../PUBLISHING.md) records
-a scoped history secret scan. Neither is independent security certification.
+qualification.

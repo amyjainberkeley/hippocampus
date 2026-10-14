@@ -446,9 +446,9 @@ missing. Agents must receive the same typed outcome.
 ### Keep action downstream of memory
 
 Capture observes. Memory preserves and compiles. Agents plan. An action service
-executes only within explicit capabilities and approval policy. This separation
-is the answer to the Meta MCI failure mode: information is governed for the
-person, and merely remembering something does not grant authority to act on it.
+executes only within explicit capabilities and approval policy. Information is
+governed for the person, and merely remembering something does not grant
+authority to act on it.
 
 ## Evidence Behind The Major Decisions
 

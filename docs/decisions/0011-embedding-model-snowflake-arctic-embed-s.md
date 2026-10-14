@@ -1,8 +1,6 @@
 # ADR-0011 — Embedding model: swap `all-MiniLM-L6-v2` → `snowflake-arctic-embed-s` (33M, 384-d, Apache-2.0)
 
-- Status: Accepted (2026-05-18; ratified by human CEO via /night-run cycle 2; implements ratified fork #7)
-- Owner: Director-Brain
-- Reviewers: CTO; CSO (embedding leakage line of thought)
+- Status: Accepted (2026-05-18; implements ratified fork #7)
 - Phase: 0
 
 ## Context

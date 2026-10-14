@@ -1,8 +1,6 @@
 # ADR-0014 — fd-pass bindings (rustix) + owned `SurfaceLease` IPC seam
 
-- Status: Accepted (2026-05-19; human CEO ruled the binding choice live in the Track-A enabler session — see `docs/AGENT_QUESTIONS.md` § "2026-05-19 — CSO/CEO — socketpair(2)/SCM_RIGHTS bindings + owned SurfaceLease"). Protected-set authoring (AGENT_PROTOCOL §5).
-- Owners: **CSO** (binding contract; protected-set veto) + **Director-Sync-Core** (the Rust core seam / IPC transport implementation)
-- Reviewers: CEO (ruled the bindings fork); CRS Security-Signal (ADR-0008 supply-chain audit of the new dep); CTO (the `core::capture` seam shape, ADR-0006)
+- Status: Accepted (2026-05-19). Protected-set authoring (AGENT_PROTOCOL §5).
 - Phase: 1 (live-capture enabler sequence — "PR-4")
 - **Protected-set: yes** (AGENT_PROTOCOL §5 — `core/**` IPC + the bytes/fds that cross the helper→core boundary; a new dependency on the IPC seam)
 - Relationship: implements the surface-handle-over-IPC timing contract owed by ADR-0006 (async+push seam) and ADR-0007 (separate signed helper, `AF_UNIX` + `SCM_RIGHTS`, per-frame ack). Feeds — never bypasses — the ADR-0013 cascade (the cascade still runs in the helper, before any fd is sent).

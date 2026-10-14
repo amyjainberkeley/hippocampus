@@ -1,8 +1,6 @@
 # ADR-0033 — `mci-coreml-bridge`: generic Core ML wrapper + per-model shims (Path A refactor + rename)
 
-- Status: **Accepted** (2026-06-03; CEO-ratified Path A — see memory `[[project-coreml-bridge-path-a]]`)
-- Owners: **Director-Brain** (refactor + rename + consumer migration; V2-P5+ GLiNER spike Phase 0)
-- Reviewers: CEO (ratified the path + the rename name `mci-coreml-bridge` on the spike PR); CTO (adapter-below-the-seam discipline); CSO (no protected-set surface — this is a pure internal refactor, no crypto/capture/sync change).
+- Status: **Accepted** (2026-06-03)
 - Phase: V2-P5+ (hybrid GLiNER NER spike), Phase 0 — lands ahead of the six measurement-bound spike phases.
 - **Protected-set: no.** No change to crypto, key-management, sync, the sensitive-capture denylist/redaction, the stores, or entitlements. The crate is a macOS Core ML adapter that runs on-device model inference; it never touches user content at rest or the sync server.
 - **Launch-blocker: no.** Internal refactor; the daily-brief author behavior is preserved byte-for-byte (see Consequences).

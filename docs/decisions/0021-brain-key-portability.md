@@ -1,10 +1,8 @@
 # ADR-0021 — Brain Key Portability (iCloud Keychain + Passphrase Option)
 
-- Status: Accepted (2026-05-21; ratifies the brain-key portability decision from the CEO EOD discussion).
-- Owners: **Director-Brain** (Keychain integration) + **Director-Sync-Core** (cross-device key availability) + **CSO** (crypto review)
-- Reviewers: CSO (protected-set — key management, crypto); CTO (sequencing); CEO (ratification)
+- Status: Accepted (2026-05-21).
 - Phase: 4 (onboarding UX) + 5 (cross-device key availability)
-- **Protected-set: yes** (AGENT_PROTOCOL §5). Justification: key management and crypto. The brain encryption key's storage location and derivation method are the most security-critical choices in the local-only path. CSO veto-gate.
+- **Protected-set: yes** (AGENT_PROTOCOL §5). Justification: key management and crypto. The brain encryption key's storage location and derivation method are the most security-critical choices in the local-only path.
 
 ## Context
 

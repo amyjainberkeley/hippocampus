@@ -26,7 +26,6 @@ their surfaces into the agent's tool set. See
 - `../` — parent `mci-core` crate.
 - `../../apps/agent/src/mcp/` — inbound MCP *server* surface (MCI
   exposes tools) and the aggregator that fans out to this client.
-- `../../docs/decisions/0022-mcp-paid-tier-write-surface.md`.
 
 ## When to edit here
 

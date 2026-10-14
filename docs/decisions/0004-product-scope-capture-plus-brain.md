@@ -1,8 +1,6 @@
 # ADR-0004 — Product scope: capture + brain (recording + workflow context + searchable encrypted memory)
 
-- Status: Accepted (2026-05-18; ratified by human CEO via /night-run cycle 2)
-- Owner: CTO
-- Reviewers: COO; CEO
+- Status: Accepted (2026-05-18)
 - Phase: 0
 
 ## Context

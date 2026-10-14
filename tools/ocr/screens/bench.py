@@ -484,8 +484,8 @@ def show_page(rows, page, screens):
 # ----------------------------------------------------------------- engines (Oct 8 audit)
 
 def engines(args):
-    """The OCR engine comparison of docs/audits/2026-10-08-ocr-transcription.md:
-    exact lines, words, character error and order over every truth line of the
+    """The OCR engine comparison: exact lines, words, character error and
+    order over every truth line of the
     flat scenes, for each engine. Run render.py into the folder first."""
     def run_paddle(worker, png):
         start = time.monotonic()

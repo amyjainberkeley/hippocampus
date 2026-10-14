@@ -1,8 +1,6 @@
 # ADR-0001 — Privacy posture: local-first + end-to-end encrypted sync
 
-- Status: Accepted (2026-05-18; ratified by human CEO via /night-run cycle 2)
-- Owner: CTO
-- Reviewers: CSO; CEO
+- Status: Accepted (2026-05-18)
 - Phase: 0
 
 ## Context

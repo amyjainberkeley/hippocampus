@@ -1,8 +1,6 @@
 # ADR-0005 — Cargo workspace: edition 2021, MSRV pinned at Phase 0 start
 
-- Status: Accepted (2026-05-18; ratified by human CEO via /night-run cycle 2; implements ratified fork #1)
-- Owner: Director-Sync-Core
-- Reviewers: CTO
+- Status: Accepted (2026-05-18; implements ratified fork #1)
 - Phase: 0
 
 ## Context

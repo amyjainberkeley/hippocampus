@@ -1,8 +1,6 @@
 # ADR-0007 — macOS capture mechanism: separate signed Swift helper process, IPC to the Rust core
 
-- Status: Accepted (2026-05-18; ratified by human CEO via /night-run cycle 2; implements ratified fork #3)
-- Owner: Director-Sync-Core
-- Reviewers: CTO; CSO (process model, entitlements, notarization touch the protected set)
+- Status: Accepted (2026-05-18; implements ratified fork #3)
 - Phase: 0
 
 ## Context

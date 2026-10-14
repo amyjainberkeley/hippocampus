@@ -1,8 +1,6 @@
 # ADR-0037 — Deep-hook plugins for Calendar / Notes / Reminders (Phase D scaffold)
 
-- Status: **Proposed** (2026-07-13; Director-Recording seat draft; CEO ratification on Phase D wire-up PR merge in cycle 8.60+)
-- Owners: **Director-Recording** (scaffold + wire-up implementer); **CSO** (binding veto on the wire-up PR — new Automation TCC per-target surfaces + AppleScript automation of Notes); **Director-Brain** (consumer of plugin-emitted events on the Tier2 pipeline).
-- Reviewers: CEO (ratifies on wire-up merge); Director-Context (V2-P10 onboarding UI extension); CRS Telemetry-Gap analyst (per-plugin `plugin_redactions_count` extension).
+- Status: **Proposed** (2026-07-13)
 - Phase: **Phase D** (V2-P13 timeline + deep-hook Calendar/Notes/Reminders + V2-P9 keystroke+clipboard). Scaffold lands cycle 8.5x; wire-up lands cycle 8.60+.
 - **Protected-set: yes** for the wire-up PR (AGENT_PROTOCOL §5 — three NEW ingest paths that bypass the pixel-time SCStream cascade entirely). This scaffold PR touches Track A doc + Track B non-protected scaffold code only (no reads wired; no cascade-equivalent authored; no brain-ingest).
 - **Launch-blocker: no** for v1.0 (per `docs/research/2026-07-12-state-of-product-baseline.md` — v1.5-eligible).

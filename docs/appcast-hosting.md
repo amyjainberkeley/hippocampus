@@ -34,13 +34,14 @@ The tag workflow verifies all of the following before it creates a draft:
 
 ## One-Time Owner Setup
 
-1. Complete [Owner Signing Setup](release/OWNER_SIGNING.md).
+1. Add the Developer ID, notarization and Sparkle secrets that
+   `.github/workflows/release.yml` reads to the `release-signing` environment.
 2. In repository Settings > Pages, choose **GitHub Actions** as the source.
 3. Create protected `release-signing` and `github-pages` environments. Require
    owner review, prevent self-review, disable bypass where available, and
    restrict the signing environment to release tags.
 4. Provision the immutable model archive and commit its URL/digest in
-   `release-models.json` as described in `OWNER_SIGNING.md`.
+   `release-models.json`.
 5. Confirm `SUPublicEDKey` matches the CI secret without exposing either key:
 
    ```bash

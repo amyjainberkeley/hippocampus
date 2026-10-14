@@ -42,7 +42,7 @@ export default function Home() {
       <section className="questions content-width" aria-label="Practical details">
         <details><summary>What is recorded?</summary><p>The focused, permitted window after you opt in. Not unopened tabs or off-screen content. Pause capture, exclude apps, or delete memory at any time. <Link href="/privacy">Privacy details</Link></p></details>
         <details><summary>Does it use a cloud AI?</summary><p>Text recognition and the built-in memory processing run on your Mac. No hosted model subscription is required. Content shared with an external AI follows that service&apos;s policies.</p></details>
-        <details><summary>Can I see how it is built?</summary><p>Yes. The <a href={source}>source code</a>, <a href={`${source}/docs/guide`}>architecture</a>, and <a href={`${source}/docs/guide/development-history.md`}>development history</a> are on GitHub. The <Link href="/download">Mac release page</Link> has current availability, and the <Link href="/setup">setup guide</Link> covers installation.</p></details>
+        <details><summary>Can I see how it is built?</summary><p>Yes. The <a href={source}>source code</a> and <a href={`${source}/docs/guide`}>architecture</a> are on GitHub. The <Link href="/download">Mac release page</Link> has current availability, and the <Link href="/setup">setup guide</Link> covers installation.</p></details>
       </section>
     </main>
   );

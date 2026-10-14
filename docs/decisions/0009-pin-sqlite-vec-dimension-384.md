@@ -1,8 +1,6 @@
 # ADR-0009 — Pin `sqlite-vec` dimension = 384 in the Phase 0 schema
 
-- Status: Accepted (2026-05-18; ratified by human CEO via /night-run cycle 2; implements ratified fork #5)
-- Owner: Director-Brain
-- Reviewers: CTO; CSO (embed-side leakage line of thought is protected-set adjacent)
+- Status: Accepted (2026-05-18; implements ratified fork #5)
 - Phase: 0
 
 ## Context

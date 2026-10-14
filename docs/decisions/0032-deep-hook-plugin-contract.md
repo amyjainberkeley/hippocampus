@@ -1,8 +1,6 @@
 # ADR-0032 — Deep-hook plugin contract (cascade-equivalent for non-OCR sources)
 
-- Status: **Proposed** (2026-05-29; CSO seat + Director-Recording joint draft; CEO ratification on V2-P7 PR merge)
-- Owners: **CSO** (binding sign-off authority on the per-plugin cascade-equivalent invariant) + **Director-Recording** (plugin contract implementation, V2-P7 / V2-P8 / V2-P9 implementers)
-- Reviewers: CEO (ratification on V2-P7 PR merge); Director-Brain (consumer of plugin-emitted CaptureEvents); Director-Context (V2-P10 onboarding UX, FDA permission gate); CRS Telemetry-Gap analyst (per-plugin counter `plugin_redactions_count{plugin_id, reason}`).
+- Status: **Proposed** (2026-05-29)
 - Phase: 3.x (capture-source plurality). First implementation lands as V2-P7 (Messages.app SQLite deep hook).
 - **Protected-set: yes** (AGENT_PROTOCOL §5 — establishes a NEW ingest path that bypasses the pixel-time SCStream cascade entirely; the cascade-equivalent in this ADR is the *only* defense against sensitive content reaching the brain by that path).
 - **Launch-blocker: no** for V2-P7 (Messages is already on the allowlist per PR #228 — the plugin is additive, not a relaxation; the brain-ingest plumbing remains default-OFF per V2-P10).

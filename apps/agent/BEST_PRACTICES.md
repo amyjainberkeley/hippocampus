@@ -68,5 +68,4 @@ consumed by the SwiftUI shell and by external MCP clients.
 - `./README.md` — binary map and edit rules.
 - `../../core/brain/BEST_PRACTICES.md` — refuse-to-serve rationale.
 - `../../docs/decisions/0007-macos-capture-separate-signed-helper-process.md`,
-  `0022-mcp-paid-tier-write-surface.md`,
   `0032-deep-hook-plugin-contract.md`.

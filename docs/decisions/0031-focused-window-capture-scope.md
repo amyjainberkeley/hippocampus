@@ -1,11 +1,9 @@
 # ADR-0031 — Focused-window capture scope (Option (a)) as a load-bearing privacy invariant
 
 - Status: **Accepted** (2026-05-29 V2-P1 merge; **AMENDED 2026-05-30 emergency re-flip — see §"Status — M4 kill-switch is RE-ENGAGED" below**; **AMENDED 2026-05-30 M4 SECOND LIFT — see §"2026-05-30 — M4 SECOND LIFT" below**)
-- Owners: **Director-Recording** (SCStream lifecycle + `SCContentFilter` factory + focus-race gate) + **CSO** (binding sign-off authority on the OCR-input-scope invariant)
-- Reviewers: CEO (ratification on V2-P1 PR); Director-Brain (consumer of the OCREvent attribution; ADR-0030 redaction layer becomes load-bearing in production under this ADR); Director-Context (focused-window observation primitive; `FocusTracker` is a peer of the existing context providers); CRS Telemetry-Gap analyst (`frames_focus_race_dropped` wire counter consumer).
 - Phase: 3.x (capture-spine hardening). Lands as the first commit set in the V2 graph phase plan (brain-architecture v2 vision memo §7.1 — V2-P1).
 - **Protected-set: yes** (AGENT_PROTOCOL §5 — modifies the de-facto privacy gate that every cascade arm rests on; amends ADR-0013 / 0015 / 0016 / 0017 / 0030 in spirit + at the explicit-invariant level).
-- **Launch-blocker: yes — in spirit.** The cycle 8.17 cross-window leak (memo §1) is a §5 protected-set violation. The M4 OCR-emit kill-switch (PR #232) is the Phase A interim mitigation; this ADR's invariant is the Phase B architectural fix. M4 lifts in V2-P1's final commit, conditioned on this ADR's §6 CSO sign-off + the §7 corpus artifact (memo §5.5 condition).
+- **Launch-blocker: yes — in spirit.** The cycle 8.17 cross-window leak (memo §1) is a §5 protected-set violation. The M4 OCR-emit kill-switch (PR #232) is the Phase A interim mitigation; this ADR's invariant is the Phase B architectural fix.
 - **Relationship:** amends ADR-0013 §1 / §3 / Amendment 1 §3; amends ADR-0015 §4 invariants 1–2; amends ADR-0016 §1.6 / §4.2; amends ADR-0017 §3.1; amends ADR-0030 §3 (a)–(c) — makes their pre-existing assumptions explicit and protected. Consumes the brain-architecture v2 vision memo §6.1 §7 PR escalation list entry E8.
 
 ## Context

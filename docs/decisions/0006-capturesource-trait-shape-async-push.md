@@ -1,8 +1,6 @@
 # ADR-0006 — `CaptureSource` trait shape: async + push, opaque borrowed surface handle, tokio, drop-on-backpressure
 
-- Status: Accepted (2026-05-18; ratified by human CEO via /night-run cycle 2; implements ratified fork #2)
-- Owner: Director-Sync-Core
-- Reviewers: CTO; Director-Recording
+- Status: Accepted (2026-05-18; implements ratified fork #2)
 - Phase: 0
 
 ## Context

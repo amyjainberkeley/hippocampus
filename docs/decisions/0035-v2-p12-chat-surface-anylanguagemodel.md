@@ -1,12 +1,10 @@
 # ADR-0035 — V2-P12 chat surface via `AnyLanguageModel` + `foundation-models-utilities` + MLX-Swift (parallel track to ADR-0033)
 
-- Status: **Proposed** (2026-07-13; awaits CEO ratification via `docs/AGENT_QUESTIONS.md`)
+- Status: **Proposed** (2026-07-13)
 - Superseded by ADR-0039 for any default bundled-model or release-size claim.
   No chat model may enter the public bundle without a new measured decision.
-- Owners: **Director-Brain** (proposal + Phase 7 PR 18 implementation seat); **CSO** (veto-gate on network-provider trait exclusion — zero-network invariant)
-- Reviewers: CTO (adapter-tier discipline, Phase-7 sequencing); CSO (protected-set — see below); CEO (ratification via AGENT_QUESTIONS)
 - Phase: **Phase 7 PR 18** (V2-P12 chat surface — SwiftUI recall/chat UI)
-- **Protected-set: YES.** Compile-time exclusion of AnyLanguageModel's cloud provider traits (`ClaudeProvider`, `GeminiProvider`, `ChatCompletionsProvider`, etc.) is a CSO veto-gate: the zero-network invariant (`AGENT_PROTOCOL.md` §4) is enforced *by construction* here, not by runtime policy. Any change to the enumerated provider-trait allow-list requires CSO sign-off per `AGENT_PROTOCOL.md` §5.
+- **Protected-set: YES.** Compile-time exclusion of AnyLanguageModel's cloud provider traits (`ClaudeProvider`, `GeminiProvider`, `ChatCompletionsProvider`, etc.) is a veto gate: the zero-network invariant (`AGENT_PROTOCOL.md` §4) is enforced *by construction* here, not by runtime policy. Any change to the enumerated provider-trait allow-list requires a protected-set review per `AGENT_PROTOCOL.md` §5.
 - **Launch-blocker: NO for v1.0.** The chat surface is Phase 7. If AnyLanguageModel is unfit at V2-P12 kick, fall back to hand-written `LanguageModelSession` on MLX-Swift (see Amendment path). ADR-0033 (`mci-coreml-bridge`) remains the brief-authoring path for v1.0 and is not affected by this ADR.
 - **Relationship:** *Parallel* to ADR-0033 — does NOT collapse it. ADR-0033 continues to own the Rust-side batch brief-author (Qwen3-1.7B FP16 via Core ML through `apps/agent`). This ADR scopes the Swift-side interactive chat surface (V2-P12). Complements ADR-0028 (the brief-author model choice is unchanged; the chat surface's model is Qwen3-4B-4bit MLX, a distinct artifact for a distinct use-case). See cycle 8.40 PR #47 (`docs/research/2026-07-12-anylang-eval-spike.md`) for the two-track rationale.
 

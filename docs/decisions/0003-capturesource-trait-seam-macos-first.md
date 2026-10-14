@@ -1,8 +1,6 @@
 # ADR-0003 — Cross-platform seam: the `CaptureSource` trait; macOS-first; no OS code above the trait
 
-- Status: Accepted (2026-05-18; ratified by human CEO via /night-run cycle 2)
-- Owner: CTO
-- Reviewers: Director-Sync-Core; Director-Recording; Director-Context
+- Status: Accepted (2026-05-18)
 - Phase: 0
 
 ## Context

@@ -1,8 +1,6 @@
 # ADR-0008 — Encrypted store: `rusqlite` + bundled SQLCipher + FTS5 + sqlite-vec; SE-gated, biometric-controlled, non-exportable Keychain-wrapped key
 
-- Status: Accepted (2026-05-18; ratified by human CEO via /night-run cycle 2; implements ratified fork #4)
-- Owner: CSO
-- Reviewers: CEO; Director-Sync-Core (binding on every future `core/store/` and `core/crypto/` change)
+- Status: Accepted (2026-05-18; implements ratified fork #4)
 - Phase: 0
 - **Protected-set: yes** (AGENT_PROTOCOL §5 — at-rest crypto + key custody + the `mci.sqlite` store)
 

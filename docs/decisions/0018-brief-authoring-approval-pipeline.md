@@ -1,10 +1,8 @@
 # ADR-0018 — Brief Authoring + Approval Pipeline (Phase 4.x — Tier-2 surface for F-STRAT-002 dual-market)
 
-- Status: Proposed (2026-05-20 afternoon; CEO+CTO draft pending human CEO ratification). Protected-set authoring (AGENT_PROTOCOL §5) because the brief-authoring path is the FIRST mechanism by which user content can leave the Tier-1 local-only zone — a load-bearing trust boundary.
-- Owners: **Director-Brain** (brief-generator + authoring UI + redaction UI; lands in `apps/recall-ui/` + a new `core/brief/` Rust crate) + **Director-Context** (per-app content classification + brief-relevant signal extraction for the generator) + **CSO** (binding — every protected-set PR carries a sign-off block asserting the §4 invariants)
-- Reviewers: **CSO** (veto-gate); CEO (ratification); **Director-Sync-Core** (only at ADR-0019 wiring time — this ADR specs LOCAL brief lifecycle only; uploads + workspace sync are ADR-0019); CRS (Telemetry-Gap analyst — brief-generation cost + adoption signal)
+- Status: Proposed (2026-05-20 afternoon). Protected-set authoring (AGENT_PROTOCOL §5) because the brief-authoring path is the FIRST mechanism by which user content can leave the Tier-1 local-only zone — a load-bearing trust boundary.
 - Phase: 4.x (between ADR-0017 onboarding/privacy-controls and ADR-0019 workspace-server). Lands AFTER Phase 3 recall UI (P3.9) ships, because the brief generator reads the same brain that recall queries.
-- **Protected-set: yes** (AGENT_PROTOCOL §5). Justification: brief content is user-authored + user-redacted, but the LIFECYCLE (generation → draft → edit → redact → approve → ready-for-upload) is the trust contract for everything ADR-0019 then ships to a workspace server. Every PR below MUST carry a CSO sign-off block.
+- **Protected-set: yes** (AGENT_PROTOCOL §5). Justification: brief content is user-authored + user-redacted, but the LIFECYCLE (generation → draft → edit → redact → approve → ready-for-upload) is the trust contract for everything ADR-0019 then ships to a workspace server.
 - Relationship: F-STRAT-002 ratified the dual-market (B2C + B2B). This ADR specs the Tier-2 authoring surface that produces the only artifacts which cross from Tier-1 (private) to Tier-2 (workspace-shareable). ADR-0019 (workspace server) consumes the output of this ADR but does not re-define its lifecycle.
 
 ## Context

@@ -141,8 +141,7 @@ Require fresh `screen_ocr` provenance, the correct fixture identity, and an
 authenticated encrypted image containing the same visible phrase. Close the
 fixture before restarting Recall and reopening that same event and image.
 The owner-approved client must retrieve the same evidence. Missing text,
-images, identity or readback leaves [Gate 1](../../docs/audits/2026-09-07-observable-gates.md)
-open. No source-kind rewrite, exclusion bypass, stale event, unrelated image
+images, identity or readback leaves Gate 1 open. No source-kind rewrite, exclusion bypass, stale event, unrelated image
 or growing aggregate counter qualifies the gate.
 
 The older `verify_production_memory.py` uses fixed probes and cannot read

@@ -72,7 +72,7 @@ cargo test --workspace
 
 ## Owner Signing
 
-Complete `OWNER_SIGNING.md`, then verify:
+Verify the signing setup:
 
 ```bash
 ./scripts/check-signing-prereqs.sh --release

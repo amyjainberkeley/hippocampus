@@ -11,9 +11,7 @@
 > and the [cost and storage audit](../guide/cost-and-storage.md) before making
 > product or capacity claims. No automatic deletion is authorized by this note.
 
-- Status: Accepted (2026-05-21; ratifies the storage budget decision from the CEO EOD discussion).
-- Owners: **Director-Brain** (storage accounting + purge logic) + **Director-Recording** (onboarding UX + menu bar warning)
-- Reviewers: CTO (sequencing); CEO (ratification)
+- Status: Accepted (2026-05-21).
 - Phase: 4 (retention purger already landed, PR #127) + 7 (onboarding UX for initial cap choice)
 - **Protected-set: no.** No crypto, sync, or sensitive-capture change. Normal review process.
 

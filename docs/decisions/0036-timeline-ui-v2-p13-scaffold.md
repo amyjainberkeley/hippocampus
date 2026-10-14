@@ -1,10 +1,8 @@
 # ADR-0036 — V2-P13 Timeline UI scaffold (Rewind-style visual timeline strip)
 
-- Status: **Proposed** (2026-07-13; awaits CEO ratification)
-- Owners: **Director-Brain** (proposal + this scaffold PR); **CTO** (Phase D sequencing); **CSO** (veto-gate on the new FFI read surface — see §4)
-- Reviewers: CTO (adapter-tier discipline, downsample budget); CSO (read-only invariant carry-through); CEO (ratification)
+- Status: **Proposed** (2026-07-13)
 - Phase: **Phase D — V2-P13** (Rewind-style visual timeline strip)
-- **Protected-set: NO for the Swift + view-model work.** The new FFI entry point `mci_brain_ffi_timeline_events` is added to the FFI's read-only allowlist (`tests/readonly_invariant.rs::ffi_exports_no_mutating_surface_beyond_allowlist`) — a §5 protected-set surface. CSO reviews that no writer path is added.
+- **Protected-set: NO for the Swift + view-model work.** The new FFI entry point `mci_brain_ffi_timeline_events` is added to the FFI's read-only allowlist (`tests/readonly_invariant.rs::ffi_exports_no_mutating_surface_beyond_allowlist`) — a §5 protected-set surface.
 - **Launch-blocker: NO for v1.0.** Timeline strip is Phase D. Scaffold ships now so the shape is locked; live rendering awaits V2-P1 M4 lift + real captures. The `MCIEmptyState.noTimelineEvents()` copy is the load-bearing UX until then.
 - **Relationship:** Complements the existing flat `TimelineView` (⌘2, `recentEvents`-backed chronological list). The strip (⌘8) is the *visual* Rewind-style companion; the two coexist during Phase D scaffold and may collapse into one tab in Phase D full impl (cycle 8.55+). See §5.
 

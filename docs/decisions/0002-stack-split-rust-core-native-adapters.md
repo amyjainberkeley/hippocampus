@@ -1,8 +1,6 @@
 # ADR-0002 — Stack split: portable Rust core + native capture adapters
 
-- Status: Accepted (2026-05-18; ratified by human CEO via /night-run cycle 2)
-- Owner: CTO
-- Reviewers: Director-Sync-Core; Director-Recording; Director-Brain; Director-Context
+- Status: Accepted (2026-05-18)
 - Phase: 0
 
 ## Context

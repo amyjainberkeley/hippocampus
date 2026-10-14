@@ -1,8 +1,6 @@
 # ADR-0013 — Native-grade sensitive-surface suppression (launch-blocker)
 
-- Status: Accepted (2026-05-18; ratified by human CEO via /night-run cycle 4 — F-STRAT-001a derived work). **Amended 2026-05-19 — Amendment 1 (enabler-PR gating boundary); see end of file.**
-- Owners: **CSO** (binding contract) + **Director-Recording** (Phase-1 implementation)
-- Reviewers: CEO; Director-Sync-Core (CaptureSource adapter PR consumes this contract); Director-Context (workflow-context metadata side); CRS (research-spike memo author, `docs/research/2026-05-18-macos-secure-surface-detection.md`)
+- Status: Accepted (2026-05-18). **Amended 2026-05-19 — Amendment 1 (enabler-PR gating boundary); see end of file.**
 - Phase: 0 (contract); implementation lands in Phase 1 (macOS capture spine)
 - **Protected-set: yes** (AGENT_PROTOCOL §5 — sensitive-capture denylist / redaction / incognito-exclusion)
 - **Launch-blocker: yes** (AGENT_PROTOCOL §4 / R5 — privacy is a launch blocker; ships **with** the capture path, not later)

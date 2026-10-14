@@ -1,8 +1,6 @@
 # ADR-0026 — Bundled Hippocampus.app Architecture
 
-- Status: Accepted (2026-05-21; ratifies the bundled-app architecture decision from the CEO EOD discussion. Documents the architecture already implemented across PRs #88, #90, #112, #125).
-- Owners: **Director-Recording** (app shell + child process supervision) + **Director-Brain** (recall WindowGroup)
-- Reviewers: CTO (sequencing); CEO (ratification)
+- Status: Accepted (2026-05-21).
 - Phase: 7 (already implemented — PR #90 menu-bar shell, PR #112 recall UI v2, PR #88 onboarding scaffold, PR #125 onboarding 5-step). iOS/watchOS targets = Phase 9.
 - **Protected-set: no.** App architecture decision. No crypto, sync, or sensitive-capture change. Normal review.
 

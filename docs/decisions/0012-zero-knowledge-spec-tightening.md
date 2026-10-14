@@ -1,8 +1,6 @@
 # ADR-0012 — Zero-knowledge spec: per-device SE-backed keys, authenticated enrollment, hash-chained delta log, same-user-process threat model, process-hardening, crypto-shred deletion, SSE = non-goal
 
-- Status: Accepted (2026-05-18; ratified by human CEO via /night-run cycle 2; implements ratified fork #8)
-- Owner: CSO
-- Reviewers: CEO; Director-Sync-Core (binding on every future `core/crypto/`, `core/sync/`, `core/keymgmt/`, and `server/` change)
+- Status: Accepted (2026-05-18; implements ratified fork #8)
 - Phase: 0
 - **Protected-set: yes** (AGENT_PROTOCOL §5 — crypto, key-management, sync, sensitive-capture, entitlements, notarization)
 

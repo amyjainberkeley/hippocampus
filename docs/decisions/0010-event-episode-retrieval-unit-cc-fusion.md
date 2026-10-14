@@ -1,8 +1,6 @@
 # ADR-0010 — Event/episode is the retrieval & index unit; min-max Convex Combination fusion; query router
 
-- Status: Accepted (2026-05-18; ratified by human CEO via /night-run cycle 2; implements ratified fork #6)
-- Owner: Director-Brain
-- Reviewers: CTO; CSO (embedding leakage line of thought is protected-set adjacent)
+- Status: Accepted (2026-05-18; implements ratified fork #6)
 - Phase: 0
 
 ## Context

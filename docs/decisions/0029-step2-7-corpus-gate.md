@@ -1,10 +1,8 @@
 # ADR-0029 — §7 Secure-Surface Corpus Gate Criteria
 
-- Status: **Proposed** (pending CSO validation of methodology + CEO ratification after live corpus run)
-- Owners: **CSO** (binding sign-off authority) + **CRS** (corpus methodology author)
-- Reviewers: CEO (ratification); Director-Recording (corpus executor); CRS Telemetry-Gap analyst (footprint regression baseline)
+- Status: **Proposed**
 - Phase: 1→2 gate (this ADR formalizes the exit criteria for Phase 1's privacy verification)
-- **Protected-set: yes** (AGENT_PROTOCOL §5 — the gate controls when the capture path becomes default-ON; flipping the gate is a CSO-protected change)
+- **Protected-set: yes** (AGENT_PROTOCOL §5 — the gate controls when the capture path becomes default-ON; flipping the gate is a protected change)
 
 ## Context
 

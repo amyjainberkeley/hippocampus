@@ -1,10 +1,8 @@
 # ADR-0025 — Analytics + Telemetry Policy
 
-- Status: Accepted (2026-05-21; ratifies the analytics policy decision from the CEO EOD discussion).
-- Owners: **Director-Recording** (crash reporter integration, already landed PRs #109/#116) + **Director-Sync-Core** (analytics endpoint)
-- Reviewers: CSO (reviews payload schema to verify content-free invariant); CTO (sequencing); CEO (ratification)
+- Status: Accepted (2026-05-21).
 - Phase: 7 (onboarding opt-in toggle) + post-launch (enterprise self-host)
-- **Protected-set: no.** Analytics payload is content-free (no event text, no URLs, no window titles). However, CSO reviews the payload schema to verify the content-free invariant holds. Normal review process with CSO payload-schema check.
+- **Protected-set: no.** Analytics payload is content-free (no event text, no URLs, no window titles).
 
 ## Context
 

@@ -6,7 +6,7 @@ Subtree invariants for the ADR archive. Read the top-level
 ## Purpose
 
 ADRs are the append-only provenance record for every locked
-material decision in MCI. They are cited by name across `DESIGN.md`,
+material decision in MCI. They are cited by name across the code,
 research memos, and PR bodies, so filename and numbering are load-
 bearing. Rules below preserve that stability.
 
@@ -27,11 +27,9 @@ bearing. Rules below preserve that stability.
    "Superseded by ADR-NNNN" line to the old one — the only edit
    allowed on a shipped ADR.
 
-4. **Ratification path is explicit.** Every ADR names its
-   ratifier: CEO for commercial / product-scope decisions, CSO
-   for crypto / sync / capture / compliance, CTO for
-   architecture. Unratified drafts stay out of `docs/decisions/`
-   (park in `docs/research/` as a memo until ratified).
+4. **Status is explicit.** Every ADR says whether it is Proposed or
+   Accepted, and when. Undecided drafts stay out of `docs/decisions/`
+   (park in `docs/research/` as a memo until decided).
 
 5. **Load-bearing sections.** Each ADR MUST include: Context,
    Decision, Consequences, and Ratifier. "Alternatives
@@ -58,5 +56,5 @@ bearing. Rules below preserve that stability.
 
 - `../../BEST_PRACTICES.md` — MCI-wide invariants (root).
 - `./README.md` — archive map and naming rules.
-- `../DESIGN.md` — the canonical architecture ADRs feed into.
+- `../../ARCHITECTURE.md` — the system map ADRs feed into.
 - `../research/BEST_PRACTICES.md` — sibling memo discipline.

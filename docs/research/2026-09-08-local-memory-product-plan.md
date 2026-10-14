@@ -20,8 +20,6 @@ The opportunity worth testing is narrower and more demanding: dependable work co
 
 This also changes the competitive thesis. Model companies and operating-system vendors can build memory; Microsoft already offers Recall. Meta describes personal superintelligence and acquired Limitless. A sustainable strategy cannot assume that these companies cannot afford to compete. Cross-tool independence, user ownership, reliable capture, and earned trust are potential advantages that must be demonstrated, not an established moat.[^5][^6][^7]
 
-The exact public program name "Meta Model Context Initiative" has not been verified. The useful interpretation here is the broader aspiration toward personal context that assists its owner. It should not be presented as an established Meta specification, or as evidence of why a particular Meta initiative succeeded or failed.
-
 ## Demand And Everyday Use
 
 The strongest demand hypothesis is less reconstruction: finding something again, resuming an interrupted task, and explaining less to AI. The 2025 Stack Overflow survey found that 66% of respondents to its frustration question encountered nearly correct AI answers, and 45% cited time-consuming debugging. That supports a need for dependable assistance, but does not establish that missing memory caused those errors. It is a self-selected developer survey, not a 2026 consumer market estimate.[^8]

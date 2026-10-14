@@ -1,8 +1,6 @@
 # ADR-0020 — `.mediaConsumption` Cascade Outcome + Bibliographic Events
 
-- Status: Accepted (2026-05-21; ratifies the Phase 2.x design fork surfaced in AGENT_QUESTIONS PR #55, answered by CEO 2026-05-20 afternoon).
-- Owners: **Director-Recording** (cascade decision impl in Swift helper) + **Director-Brain** (synthetic-text event writer + retrieval integration)
-- Reviewers: CSO (protected-set — new cascade path carries `windowTitle` to disk); CTO (sequencing + cross-Director arbitration); CEO (ratification)
+- Status: Accepted (2026-05-21).
 - Phase: 3.x (lands AFTER Phase 2 P2.5 wiring + Phase 3 P3.6 wire bump are on `main`; both are prerequisites because the path needs real `appBundleId` + `windowTitle` + `url` reaching the cascade)
 - **Protected-set: yes** (AGENT_PROTOCOL §5). Justification: introduces a new cascade path that carries `windowTitle` and `url` to the brain store. Although `.mediaConsumption` captures LESS than `.allow` (no pixel keyframe, no OCR), it IS a new explicit decision the cascade emits, and the stored text is user content.
 

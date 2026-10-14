@@ -7,8 +7,7 @@ Two benches share these scenes.
   (`shipped.py`) beside the reference (`layout.py`) on every scene.
 - **Engine comparison** (`bench.py OUT --paddle … --engines …`): exact lines,
   words, character error and order over every line of the eight flat scenes,
-  per OCR engine. This is the measurement in
-  `docs/audits/2026-10-08-ocr-transcription.md`.
+  per OCR engine.
 
 ## Scenes
 

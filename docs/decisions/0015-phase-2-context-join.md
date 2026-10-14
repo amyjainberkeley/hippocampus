@@ -1,10 +1,8 @@
 # ADR-0015 — Phase 2 Context Join (NSWorkspace + AX + per-browser AppleScript)
 
-- Status: Proposed (2026-05-20; CTO draft pending human CEO ratification). Protected-set authoring (AGENT_PROTOCOL §5) because it modifies the inputs the ADR-0013 cascade consumes and changes what `WorkflowContext` carries across the helper boundary at suppress-time.
-- Owners: **CTO** (this ADR — sequencing + per-field design) + **Director-Recording** (Phase-2 PR sequence implementation, in the Swift helper)
-- Reviewers: **CSO** (binding — ADR-0013 cascade input contract; first-launch Apple Events consent; tombstone `appBundleId` payload now carries real values); CEO (ratification gate); Director-Sync-Core (notes only — `core::ipc` payload shape unchanged this phase); Director-Context (the org role most adjacent to context-join, even though Phase-2 lands in the macOS helper); CRS (telemetry-gap analyst — per-app/per-browser failure-mode characterization)
+- Status: Proposed (2026-05-20). Protected-set authoring (AGENT_PROTOCOL §5) because it modifies the inputs the ADR-0013 cascade consumes and changes what `WorkflowContext` carries across the helper boundary at suppress-time.
 - Phase: 2 (between Phase-1 close — §7 corpus green + G2 footprint proof — and Phase 3 OCR+brain)
-- **Protected-set: yes** (AGENT_PROTOCOL §5). Justification: every `WorkflowContext` field is user content. The PRs in §6 below MUST carry CSO sign-off blocks asserting the §5 invariants in this ADR.
+- **Protected-set: yes** (AGENT_PROTOCOL §5). Justification: every `WorkflowContext` field is user content.
 - Relationship: makes ADR-0013 cascade §1 (source-level denylist) operationally meaningful for the first time (currently dead because `appBundleId == nil` in every callback — `SCStreamCaptureSession.swift:274–279`, `:382–389`); feeds the existing `PrivacyTombstone` payload (already carries `appBundleId`) with real values; does **not** change the ADR-0014 fd-pass seam or the IPC wire schema.
 
 ## Context

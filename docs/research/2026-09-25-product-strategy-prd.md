@@ -16,7 +16,7 @@ The core job remains useful even when models have larger context windows or nati
 | OneKit-style suite: mail, calendar, chat, agents, browser/computer | Owns a large part of the workflow | Competes on many mature surfaces; increases integrations and security exposure | Integrate with it; do not rebuild the suite now |
 | Company Brain first | A shared Slack/workspace assistant with clear team workflows | Requires identity, source permissions, administration, revocation and cloud operations | Separate later product surface |
 
-“MCI” in this repository means **Memory Context Interface**, not MCP. MCP is an integration protocol, not automatic memory delivery. The exact Meta initiative the owner means remains unconfirmed. Historical ADR-0027 describes an internal Meta pattern without a verifiable primary specification; that narrative is not a basis for this PRD. The personal product should help its owner, with no manager access to personal screen history by default.
+“MCI” in this repository means **Memory Context Interface**, not MCP. MCP is an integration protocol, not automatic memory delivery. The personal product should help its owner, with no manager access to personal screen history.
 
 ## 2. What changed in the market
 

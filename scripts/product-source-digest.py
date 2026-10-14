@@ -24,7 +24,6 @@ SOURCE_PATHS = (
     "core",
     "extensions",
     "scripts",
-    "server",
     "tools/capture-overlap-corpus",
     "tools/ocr/worker.py",
     "tools/ocr/prepare.py",
