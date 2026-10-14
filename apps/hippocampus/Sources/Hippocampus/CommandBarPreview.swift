@@ -49,10 +49,10 @@ enum CommandBarPreviewRenderer {
         // three kinds: no past search, no day, nothing about you.
         let suggestions = decode([BarSuggestion].self, """
         [{"kind":"screen","title":"What’s on this screen?","why":"Safari · Pricing | Stripe Documentation","action":{"ask":"What is on my screen right now, and what matters in it?"},"score":8},
-         {"kind":"resume","title":"Resume: Pricing the Team plan","why":"2:09 PM · You set Team at $18 a seat in the launch plan","action":{"open_session":1},"score":7},
-         {"kind":"searched","title":"“stripe per seat vs tiered pricing”","why":"You searched for this at 2:03 PM","action":{"query":"stripe per seat vs tiered pricing"},"score":6},
+         {"kind":"resume","title":"Resume: Pricing the Team plan","why":"You set Team at $18 a seat in the launch plan.","action":{"open_session":1},"score":7,"ts_us":\(minutesAgo(41))},
+         {"kind":"searched","title":"“stripe per seat vs tiered pricing”","why":"You searched for this","action":{"query":"stripe per seat vs tiered pricing"},"score":6,"ts_us":\(minutesAgo(47))},
          {"kind":"related","title":"More about Pricing | Stripe Documentation","why":"Everything else you saw about this","action":{"query":"Pricing Stripe"},"score":5},
-         {"kind":"day","title":"Your day so far","why":"Time, focus, searches and where you got stuck","action":{"view":"day"},"score":4}]
+         {"kind":"day","title":"Your day so far","why":"What you worked on and looked up","action":{"view":"day"},"score":4}]
         """)
         let read = CommandBarModel.homeRows(from: suggestions, readsThisWindow: true)
         let readWithoutAnswers = CommandBarModel.homeRows(from: suggestions, readsThisWindow: true, answersAvailable: false)

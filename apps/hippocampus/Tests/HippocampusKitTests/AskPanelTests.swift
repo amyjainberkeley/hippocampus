@@ -98,13 +98,13 @@ final class AskPanelTests: XCTestCase {
 
     private static let suggestions = """
     {"suggestions":[
-      {"kind":"screen","title":"What’s on this screen?","why":"Safari — Pricing","action":{"ask":"What is on my screen right now, and what matters in it?"},"score":8},
-      {"kind":"resume","title":"Resume: Pricing the Team plan","why":"14:09 · You set Team at $18","action":{"open_session":5},"score":7},
-      {"kind":"searched","title":"“stripe per seat”","why":"You searched this at 14:03","action":{"query":"stripe per seat"},"score":6},
-      {"kind":"searched","title":"“tiered pricing”","why":"You searched this at 14:01","action":{"query":"tiered pricing"},"score":6},
-      {"kind":"related","title":"More about Pricing","why":"Everything you saw on this, across apps","action":{"query":"Pricing"},"score":5},
-      {"kind":"day","title":"Your day so far","why":"Time, focus, searches and where you got stuck","action":{"view":"day"},"score":4},
-      {"kind":"model","title":"What Hippocampus has learned about you","why":"9 things","action":{"view":"model"},"score":3}]}
+      {"kind":"screen","title":"What’s on this screen?","why":"Safari · Pricing","action":{"ask":"What is on my screen right now, and what matters in it?"},"score":8},
+      {"kind":"resume","title":"Resume: Pricing the Team plan","why":"You set Team at $18.","action":{"open_session":5},"score":7,"ts_us":5},
+      {"kind":"searched","title":"“stripe per seat”","why":"You searched for this","action":{"query":"stripe per seat"},"score":6,"ts_us":3},
+      {"kind":"searched","title":"“tiered pricing”","why":"You searched for this","action":{"query":"tiered pricing"},"score":6,"ts_us":1},
+      {"kind":"related","title":"More about Pricing","why":"Everything else you saw about this","action":{"query":"Pricing"},"score":5},
+      {"kind":"day","title":"Your day so far","why":"What you worked on and looked up","action":{"view":"day"},"score":4},
+      {"kind":"model","title":"What Hippocampus understands about you","why":"9 things, from your own work. Fix anything wrong.","action":{"view":"model"},"score":3}]}
     """
 
     private static let hits = """
@@ -439,15 +439,22 @@ final class AskPanelTests: XCTestCase {
     }
 
     func testTheFooterSaysWhyNoAnswerCanBeWritten() async {
-        // Before macOS 26 there are none, whether or not Apple Intelligence is on.
+        // A Mac with neither Apple Intelligence nor a model server of its own.
         let (older, _, _) = rig(answers: false)
         await open(older, over: safari)
-        XCTAssertEqual(older.footerText, "Answers need macOS 26")
+        XCTAssertEqual(older.footerText, "Answers need Apple Intelligence or your own model")
 
         let reasons = [
             ("apple_intelligence_off", "Answers need Apple Intelligence"),
             ("device_not_eligible", "Answers need Apple Intelligence"),
             ("model_not_ready", "Apple Intelligence is getting ready"),
+            ("needs_macos_26", "Answers need macOS 26"),
+            ("needs_apple_intelligence_or_local_model", "Answers need Apple Intelligence or your own model"),
+            ("local_server_unreachable", "Your model server isn’t answering"),
+            ("local_model_missing", "Your model server doesn’t have that model"),
+            ("local_model_unset", "Your model server has no model to answer with"),
+            ("local_model_not_local", "Pick a model that runs on this Mac"),
+            ("local_server_not_local", "Hippocampus only talks to model servers on this Mac"),
             ("not_installed", "Answers aren’t available"),
         ]
         for (reason, footer) in reasons {
@@ -464,6 +471,16 @@ final class AskPanelTests: XCTestCase {
         let (paused, _, _) = rig(answers: false, status: .paused)
         await open(paused, over: safari)
         XCTAssertEqual(paused.footerText, "Paused")
+    }
+
+    /// The agent sends a row's time as `ts_us` and writes none into `why`;
+    /// the row formats it in the person's locale (RULINGS I14).
+    func testARowsTimeComesAsANumberNotInItsWords() throws {
+        let rows = try JSONDecoder().decode([BarSuggestion].self, from: Data(#"""
+        [{"kind":"searched","title":"“q”","why":"You searched for this","action":{"query":"q"},"score":6,"ts_us":1791841025000000},
+         {"kind":"day","title":"Your day so far","why":"What you worked on and looked up","action":{"view":"day"},"score":4}]
+        """#.utf8))
+        XCTAssertEqual(rows.map(\.tsUs), [1_791_841_025_000_000, nil])
     }
 
     /// Where no answer can be written, Return can only find: the card says
@@ -491,7 +508,25 @@ final class AskPanelTests: XCTestCase {
         XCTAssertFalse(availability.isAvailable(at: now))
         availability.learn(from: BarAnswer(answer: "Yes.", sources: [], unavailable: nil), at: now)
         XCTAssertTrue(availability.isAvailable(at: now))
-        XCTAssertFalse(AnswerAvailability(systemSupportsAnswers: false).isAvailable(at: now), "before macOS 26 there are none")
+        XCTAssertFalse(AnswerAvailability(systemSupportsAnswers: false).isAvailable(at: now), "a Mac with no model has none")
+    }
+
+    /// Before macOS 26 a model server on this Mac can answer, so Ask offers to
+    /// ask until a reply says otherwise. A person can start their model
+    /// server at any time, so its reasons are kept for a minute, not half an
+    /// hour.
+    func testAModelServerIsAskedAgainAfterAMinute() {
+        XCTAssertTrue(AnswerAvailability().isAvailable(at: Date()), "learned from the first reply, not the macOS version")
+        var availability = AnswerAvailability()
+        let now = Date()
+        availability.learn(from: BarAnswer(answer: nil, sources: [], unavailable: "needs_apple_intelligence_or_local_model"), at: now)
+        XCTAssertFalse(availability.isAvailable(at: now.addingTimeInterval(59)))
+        XCTAssertTrue(availability.isAvailable(at: now.addingTimeInterval(60)))
+        availability.learn(from: BarAnswer(answer: nil, sources: [], unavailable: "local_server_unreachable"), at: now)
+        XCTAssertTrue(availability.isAvailable(at: now.addingTimeInterval(60)))
+        availability.learn(from: BarAnswer(answer: nil, sources: [], unavailable: "apple_intelligence_off"), at: now)
+        XCTAssertFalse(availability.isAvailable(at: now.addingTimeInterval(60)))
+        XCTAssertTrue(availability.isAvailable(at: now.addingTimeInterval(30 * 60)))
     }
 
     // MARK: One job (product critique 6)
@@ -606,6 +641,14 @@ final class AskPanelTests: XCTestCase {
             AnswerLine.make(answer: BarAnswer(answer: nil, sources: [source], unavailable: "device_not_eligible"), asking: false, notice: nil),
             .note("Answers need macOS 26 with Apple Intelligence. Here’s what matched:")
         )
+        XCTAssertEqual(
+            AnswerLine.make(answer: BarAnswer(answer: nil, sources: [source], unavailable: "needs_apple_intelligence_or_local_model"),
+                            asking: false, notice: nil),
+            .note("Answers need Apple Intelligence or your own model. Here’s what matched:")
+        )
+        XCTAssertEqual(AnswerLine.explain("local_server_unreachable", matched: false), "Your model server isn’t answering.")
+        XCTAssertEqual(AnswerLine.explain("local_model_not_local", matched: false),
+                       "That model runs in the cloud. Pick one that runs on this Mac.")
         XCTAssertEqual(AnswerLine.make(answer: nil, asking: true, notice: nil), .thinking)
         XCTAssertEqual(
             AnswerLine.make(answer: BarAnswer(answer: "Yes.", sources: [], unavailable: nil), asking: false, notice: "x"),

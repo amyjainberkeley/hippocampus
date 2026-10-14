@@ -772,6 +772,7 @@ private struct BarRowView: View {
         switch row {
         case .hit(let hit): Self.relative(hit.tsUs)
         case .source(let s), .thisWindow(let s): Self.relative(s.tsUs)
+        case .suggestion(let s): s.tsUs.map(Self.relative)
         default: nil
         }
     }

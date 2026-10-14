@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: TBD-private
+// SPDX-License-Identifier: Apache-2.0
 //
 // AskThisWindow.swift — what Ask may promise before anything is asked
 // (product critique 2, RULINGS S1 and S9): whether answers can be written on
@@ -6,46 +6,58 @@
 
 import Foundation
 
-/// Whether answers can be written, known without asking the model: they need
-/// macOS 26 with Apple Intelligence, and an answer that came back without
-/// text says why. The reason is kept for 30 minutes, as long as the agent
-/// keeps it (`apps/agent/src/understanding/mind.rs`), so no open probes the
-/// model.
+/// Whether answers can be written, learned from the first reply rather than
+/// from the macOS version (RULINGS S9): Apple Intelligence or a model server
+/// on this Mac (Ollama, LM Studio) writes them, and an answer that came back
+/// without text says why. An Apple Intelligence reason is kept for 30
+/// minutes, as long as the agent keeps it (`apps/agent/src/understanding/mind.rs`),
+/// so no open probes the model. A model server can be started at any time,
+/// so its reasons are kept for a minute.
 public struct AnswerAvailability: Equatable, Sendable {
     public static let remembered: TimeInterval = 30 * 60
+    public static let rememberedForAModelServer: TimeInterval = 60
     /// The reasons the model process gives for having no model.
-    public static let modelReasons: Set<String> = [
+    public static let modelReasons: Set<String> = Set([
         "apple_intelligence_off", "device_not_eligible", "model_not_ready",
-        "unavailable", "not_installed", "cannot_launch",
+        "unavailable", "not_installed", "cannot_launch", "needs_macos_26",
+    ]).union(modelServerReasons)
+    /// The reasons that clear once a model server on this Mac answers.
+    public static let modelServerReasons: Set<String> = [
+        "needs_apple_intelligence_or_local_model", "local_server_unreachable",
+        "local_model_missing", "local_model_unset", "local_model_not_local",
+        "local_server_not_local",
     ]
 
+    /// False only where a preview or test stands in for a Mac with no model.
     public let systemSupportsAnswers: Bool
     public private(set) var reason: String?
     private var learnedAt: Date?
 
-    public init(systemSupportsAnswers: Bool = AnswerAvailability.systemIsRecentEnough) {
+    public init(systemSupportsAnswers: Bool = true) {
         self.systemSupportsAnswers = systemSupportsAnswers
-    }
-
-    public static var systemIsRecentEnough: Bool {
-        ProcessInfo.processInfo.isOperatingSystemAtLeast(
-            OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0)
-        )
     }
 
     public func isAvailable(at now: Date) -> Bool {
         guard systemSupportsAnswers else { return false }
-        guard let learnedAt, reason != nil else { return true }
-        return now.timeIntervalSince(learnedAt) >= Self.remembered
+        guard let learnedAt, let reason else { return true }
+        let kept = Self.modelServerReasons.contains(reason) ? Self.rememberedForAModelServer : Self.remembered
+        return now.timeIntervalSince(learnedAt) >= kept
     }
 
     /// Why no answer can be written, in the few words Ask's footer has room
     /// for, from the same reason the answer card explains.
     public var footerReason: String {
-        guard systemSupportsAnswers else { return "Answers need macOS 26" }
+        guard systemSupportsAnswers else { return "Answers need Apple Intelligence or your own model" }
         switch reason {
         case "apple_intelligence_off", "device_not_eligible": return "Answers need Apple Intelligence"
         case "model_not_ready": return "Apple Intelligence is getting ready"
+        case "needs_macos_26": return "Answers need macOS 26"
+        case "needs_apple_intelligence_or_local_model": return "Answers need Apple Intelligence or your own model"
+        case "local_server_unreachable": return "Your model server isn’t answering"
+        case "local_model_missing": return "Your model server doesn’t have that model"
+        case "local_model_unset": return "Your model server has no model to answer with"
+        case "local_model_not_local": return "Pick a model that runs on this Mac"
+        case "local_server_not_local": return "Hippocampus only talks to model servers on this Mac"
         default: return "Answers aren’t available"
         }
     }

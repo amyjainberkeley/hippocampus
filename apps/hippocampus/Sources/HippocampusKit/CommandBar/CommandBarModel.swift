@@ -23,7 +23,13 @@ public struct BarSuggestion: Decodable, Sendable, Equatable, Identifiable {
     public let why: String
     public let action: BarSuggestionAction
     public let score: Int
+    /// When it happened, on rows that have a time ("resume", "searched"). The
+    /// agent writes no clock time into `why`; the row formats this one
+    /// (RULINGS I14).
+    public let tsUs: UInt64?
     public var id: String { kind + title }
+
+    enum CodingKeys: String, CodingKey { case kind, title, why, action, score, tsUs = "ts_us" }
 }
 
 public struct BarSuggestionAction: Decodable, Sendable, Equatable {
@@ -161,8 +167,15 @@ public enum AnswerLine: Equatable, Sendable {
     public static func explain(_ reason: String, matched: Bool) -> String {
         let why = switch reason {
         case "apple_intelligence_off": "Turn on Apple Intelligence in System Settings to get answers."
-        case "device_not_eligible", "not_installed", "cannot_launch": "Answers need macOS 26 with Apple Intelligence."
+        case "device_not_eligible", "not_installed", "cannot_launch", "needs_macos_26":
+            "Answers need macOS 26 with Apple Intelligence."
         case "model_not_ready": "Apple Intelligence is still getting ready."
+        case "needs_apple_intelligence_or_local_model": "Answers need Apple Intelligence or your own model."
+        case "local_server_unreachable": "Your model server isn’t answering."
+        case "local_model_missing": "Your model server doesn’t have that model."
+        case "local_model_unset": "Your model server has no model to answer with."
+        case "local_model_not_local": "That model runs in the cloud. Pick one that runs on this Mac."
+        case "local_server_not_local": "Hippocampus only talks to model servers on this Mac."
         default: "Couldn’t write an answer."
         }
         return matched ? "\(why) Here’s what matched:" : why
