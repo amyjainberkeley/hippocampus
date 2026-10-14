@@ -10,9 +10,8 @@ unknown measurement boundary, not an independently measured benchmark.
 of the components below. The scan is content-free, bounded, and reports partial
 or unavailable results rather than estimating a missing total. A disposable
 20-event fixture measured 807 KB in managed files versus 365 KB for the main
-database alone; this is not representative growth data. See the
-[usability review](../audits/2026-09-07-recall-usability.md) and [STATUS](../STATUS.md)
-for test and installed-artifact qualification. The earlier audit below remains
+database alone; this is not representative growth data. See
+[STATUS](../STATUS.md) for what has been checked. The earlier audit below remains
 the basis for the growth and compute discussion.
 
 ## What Takes Space
