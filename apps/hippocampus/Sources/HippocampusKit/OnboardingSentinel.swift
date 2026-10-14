@@ -70,6 +70,22 @@ public enum OnboardingSentinel {
         return (try? body.write(to: url, atomically: true, encoding: .utf8)) != nil
     }
 
+    /// The "Open Hippocampus at login" choice setup wrote with consent: the
+    /// line `open-at-login yes` or `open-at-login no` (onboarding-app
+    /// contract section 5). Nil when the file has no such line (a sentinel
+    /// from an older build) or cannot be read.
+    public static func opensAtLogin(at url: URL = defaultURL) -> Bool? {
+        guard let body = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        for line in body.split(whereSeparator: \.isNewline) {
+            switch line.trimmingCharacters(in: .whitespaces) {
+            case "open-at-login yes": return true
+            case "open-at-login no": return false
+            default: continue
+            }
+        }
+        return nil
+    }
+
     /// Test helper. Not used in production code paths.
     public static func reset(at url: URL = defaultURL) {
         try? FileManager.default.removeItem(at: url)

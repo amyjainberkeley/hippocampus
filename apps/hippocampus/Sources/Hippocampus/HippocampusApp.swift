@@ -60,6 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var sentinelWatcher: DispatchSourceFileSystemObject?
     private var sentinelWatcherFd: Int32 = -1
     private var sentinelPollTask: Task<Void, Never>?
+    /// Opens the window once setup closes (onboarding-app contract section 6).
+    private var setupClosedTask: Task<Void, Never>?
 
     /// TCC-revoke pipeline (cycle 8.47 PR #80 follow-up):
     ///   helper stderr → helper.stderr.log → tccStderrTail → sink →
@@ -503,6 +505,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         DistributedNotificationCenter.default().removeObserver(self)
         cancelSentinelWatcher()
+        setupClosedTask?.cancel()
+        setupClosedTask = nil
         tccStderrTail?.stop()
         tccStderrTail = nil
         GlobalHotkeyManager.shared.unregister()
@@ -620,6 +624,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // A link always shows Ask, and asks when it carries a
                 // question (RULINGS S12).
                 CommandBarController.shared.show(asking: question, from: .link)
+            case .restartRemembering:
+                // Setup's "Try Again": the menu's Try Again, in place. Not
+                // before consent or while turned off; `retryNow` itself
+                // yields to a stop, a pause or a quit.
+                guard OnboardingSentinel.isComplete, supervisor.captureEnabled else { continue }
+                supervisor.retryNow()
             case .unknown:
                 continue
             }
@@ -651,7 +661,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startSupervisorOrDeferUntilOnboarded() {
         if OnboardingSentinel.isComplete {
             firstLaunchLogger.info("first-launch: sentinel present → start supervisor immediately")
-            loginItemVM.enableByDefaultOnce()
             if launchReason == .user { supervisor.openRecallWhenReady(initialLaunch: true) }
             supervisor.start()
             return
@@ -762,8 +771,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the Done screen cannot lead to an inert capture-disabled process tree.
     @MainActor
     private func startCaptureAfterOnboarding() {
-        loginItemVM.enableByDefaultOnce()
-        supervisor.openRecallWhenReady(initialLaunch: true)
+        // The login item follows setup's checkbox, read once (RULINGS O8).
+        loginItemVM.applySetupChoice(opensAtLogin: OnboardingSentinel.opensAtLogin())
+        openWindowWhenSetupCloses()
         if supervisor.captureEnabled {
             supervisor.start()
             return
@@ -780,6 +790,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     "first-launch: could not enable capture after onboarding: \(error.localizedDescription)"
                 )
             }
+        }
+    }
+
+    /// Consent is written on the Promise screen, and Try it follows it: the
+    /// window opens once setup closes, so it never covers Try it
+    /// (onboarding-app contract section 6).
+    @MainActor
+    private func openWindowWhenSetupCloses() {
+        setupClosedTask?.cancel()
+        setupClosedTask = Task { @MainActor [weak self] in
+            while self?.supervisor.onboardingIsRunning == true {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                if Task.isCancelled { return }
+            }
+            self?.supervisor.openRecallWhenReady(initialLaunch: true)
         }
     }
 

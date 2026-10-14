@@ -17,6 +17,8 @@
 //   - `hippocampus://preferences/sources`       → open a preferences pane
 //   - `hippocampus://ask`                        → open the command bar
 //   - `hippocampus://ask?q=what+did+I+decide`    → …and ask right away
+//   - `hippocampus://restart`                    → restart remembering in place
+//     (setup's Try it, "Try Again"; onboarding-app contract section 3b)
 //   - `hippocampus://onboarding/show`            → .showOnboarding
 //   - `hippocampus://onboarding?show=1`          → .showOnboarding
 //     (both forms honored — the cycle 8.46 Action Panel command
@@ -60,6 +62,9 @@ public enum HippocampusURLRoute: Equatable, Sendable {
     case showOnboarding
     /// Open the command bar, optionally asking `question` right away.
     case ask(question: String?)
+    /// Restart remembering in place, as the menu's Try Again does. Never
+    /// quits the app: setup, which asked, exits with it.
+    case restartRemembering
     /// URL scheme matched, but the host / path combination is unknown.
     /// Callers should log-and-ignore rather than throw.
     case unknown
@@ -98,6 +103,9 @@ public enum HippocampusURLRoute: Equatable, Sendable {
             let question = queryItems.first(where: { $0.name == "q" })?.value?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             return .ask(question: question?.isEmpty == false ? question : nil)
+        case "restart":
+            // Exact match only, like the preferences route.
+            return url.absoluteString == "hippocampus://restart" ? .restartRemembering : .unknown
         case "onboarding":
             let showQuery = queryItems.first(where: { $0.name == "show" })?.value
             if url.path == "/show" || showQuery == "1" {

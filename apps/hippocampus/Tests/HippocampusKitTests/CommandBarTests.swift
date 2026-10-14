@@ -179,17 +179,46 @@ private final class RecordingLoginItems: LoginItemService, @unchecked Sendable {
 }
 
 final class LoginItemDefaultTests: XCTestCase {
+    /// Only setup's ticked "Open Hippocampus at login" adds the login item
+    /// (RULINGS O8); unticked, or a sentinel from an older setup, leaves it
+    /// as it is.
     @MainActor
-    func testStartAtLoginIsTurnedOnOnceAndAChoiceSticks() throws {
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: "login-default-\(UUID().uuidString)"))
+    func testOpenAtLoginFollowsSetupsCheckboxAndNothingElse() throws {
         let service = RecordingLoginItems()
         let model = LoginItemViewModel(service: service)
-        model.enableByDefaultOnce(defaults: defaults)
+        model.applySetupChoice(opensAtLogin: false)
+        model.applySetupChoice(opensAtLogin: nil)
+        XCTAssertEqual(service.registered, 0)
+        XCTAssertFalse(model.isEnabled)
+        model.applySetupChoice(opensAtLogin: true)
         XCTAssertEqual(service.registered, 1)
         XCTAssertTrue(model.isEnabled)
-        model.toggle() // the person turns it off
-        model.enableByDefaultOnce(defaults: defaults)
-        XCTAssertEqual(service.registered, 1, "never re-enabled after the default was applied")
-        XCTAssertFalse(model.isEnabled)
+
+        let kept = RecordingLoginItems()
+        kept.enabled = true
+        let existing = LoginItemViewModel(service: kept)
+        existing.applySetupChoice(opensAtLogin: false)
+        XCTAssertTrue(existing.isEnabled, "an existing install keeps whatever it has")
+    }
+
+    func testTheSentinelCarriesTheOpenAtLoginChoice() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("sentinel-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent(OnboardingSentinel.filename)
+        XCTAssertNil(OnboardingSentinel.opensAtLogin(at: url), "no file")
+        for (body, choice) in [
+            ("onboarding-completed-at 2026-10-12T21:05:00Z\nopen-at-login yes\n", true as Bool?),
+            ("onboarding-completed-at 2026-10-12T21:05:00Z\nopen-at-login no\n", false),
+            ("onboarding-completed-at 2026-10-12T21:05:00Z\n", nil),
+        ] {
+            try body.write(to: url, atomically: true, encoding: .utf8)
+            XCTAssertEqual(OnboardingSentinel.opensAtLogin(at: url), choice, body)
+        }
+        let app = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/Hippocampus/HippocampusApp.swift"), encoding: .utf8)
+        XCTAssertFalse(app.contains("enableByDefaultOnce"), "no launch turns the login item on by itself")
+        XCTAssertTrue(app.contains("loginItemVM.applySetupChoice(opensAtLogin: OnboardingSentinel.opensAtLogin())"))
     }
 }

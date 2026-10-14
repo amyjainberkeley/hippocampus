@@ -53,6 +53,16 @@ final class HippocampusURLRouteTests: XCTestCase {
         }
     }
 
+    /// Setup's "Try Again" restarts remembering in place (onboarding-app
+    /// contract section 3b); only the exact URL does.
+    func testRestartIsAnExactRoute() throws {
+        XCTAssertEqual(HippocampusURLRoute.parse(try XCTUnwrap(URL(string: "hippocampus://restart"))), .restartRemembering)
+        for decorated in ["hippocampus://restart/", "hippocampus://restart?now=1", "hippocampus://restart#x",
+                          "hippocampus://restart/app", "hippocampus://user@restart"] {
+            XCTAssertEqual(HippocampusURLRoute.parse(try XCTUnwrap(URL(string: decorated))), .unknown, decorated)
+        }
+    }
+
     // MARK: - Recall route (existing surfaces, regression-guarded)
 
     func testRecallWithoutTabQuery() {

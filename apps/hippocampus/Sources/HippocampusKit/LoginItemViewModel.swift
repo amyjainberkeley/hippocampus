@@ -50,22 +50,20 @@ public final class LoginItemViewModel: ObservableObject, Sendable {
         !hasPromptedOnce && !isEnabled
     }
 
-    private let defaultAppliedKey = "ai.hippocampus.loginItem.defaultApplied"
-
-    /// Start at login by default, once. A memory only works if it is running;
-    /// macOS tells the person a login item was added, and turning it off in
-    /// Preferences sticks (this never runs again).
-    public func enableByDefaultOnce(defaults: UserDefaults = .standard) {
-        guard !defaults.bool(forKey: defaultAppliedKey) else { return }
-        defaults.set(true, forKey: defaultAppliedKey)
+    /// Apply the "Open Hippocampus at login" checkbox setup wrote with
+    /// consent (RULINGS O8): register only when it was ticked. Unticked, or
+    /// no choice at all (an older setup), leaves the login item exactly as
+    /// it is. No launch ever turns it on by itself.
+    public func applySetupChoice(opensAtLogin: Bool?) {
+        guard opensAtLogin == true else { return }
         markPrompted()
         guard !isEnabled else { return }
         do {
             try service.register()
             isEnabled = true
-            logger.info("login-item-vm: enabled by default")
+            logger.info("login-item-vm: enabled as chosen in setup")
         } catch {
-            logger.error("login-item-vm: default register failed: \(error.localizedDescription)")
+            logger.error("login-item-vm: register failed: \(error.localizedDescription)")
         }
     }
 }
