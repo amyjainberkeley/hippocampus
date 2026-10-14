@@ -73,6 +73,7 @@ LANES=(
     "development-file-key-contract|bash|test|scripts/test-development-file-key-contract.sh"
     "no-quarantine-bypass|bash|test|scripts/test-no-quarantine-bypass.sh"
     "app-launch-contract|bash|test|scripts/test-verify-app-launches.sh"
+    "quit-verifier-contract|bash|test|scripts/test-verify-quit-leaves-nothing.sh"
     "demo-contract|bash|lint|scripts/test-demo-contract.sh"
     "keyframe-demo-fixture|bash|test|scripts/test-keyframe-demo-fixture.sh"
     "onboarding-product-truth|bash|lint|scripts/test-onboarding-product-truth.sh"
@@ -149,6 +150,7 @@ LANES
     development-file-key-contract signed ad-hoc file-key capability remains release-safe
     no-quarantine-bypass runtime leaves Gatekeeper provenance enforcement to macOS
     app-launch-contract     isolated GUI launch and onboarding process contract
+    quit-verifier-contract  Quit leaves nothing it started running, on a stand-in app
     demo-contract           demo uses disposable state and bundled UI artifacts
     keyframe-demo-fixture   encrypted visual fixture uses the production codec
     onboarding-product-truth onboarding copy preserves local/provider boundaries
