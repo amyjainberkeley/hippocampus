@@ -12,21 +12,21 @@ I'll acknowledge within a few days. This is a solo project, so I can't promise a
 
 In rough order of how badly I'd want the report:
 
-1. **Anything that gets data off the machine.** The whole premise is that nothing leaves. A path that sends captured content anywhere, including in a crash report or a log, is the worst possible bug.
+1. **Anything that gets data off the Mac.** Nothing you saw should leave unless you connect an AI tool or copy it yourself. A path that sends it anywhere else, including in a crash report or a log, is the worst possible bug.
 2. **Anything that reads the store without the key.** Plaintext on disk, a key that survives where it shouldn't, an unwrapped key in memory longer than it needs to be.
-3. **Capture that should have been blocked.** A password prompt, private browsing window, or DRM surface that gets recorded anyway.
+3. **Reading that should have been skipped.** A password field, a password manager, a private browser window that shows it is private, or protected video that gets saved anyway.
 4. **Redaction that misses.** A one-time code or bank alert that ends up stored. There's a synthetic corpus for this in `core/brain/fixtures/`; a shape it doesn't catch is a useful report.
-5. **The loopback API.** It's authenticated and local-only. Anything that lets another process on the machine query your memory without permission counts.
+5. **Local access.** Connected tools read your memory through `mci-agent mcp-serve`, with the key kept in your Keychain. Hippocampus opens no listening socket. Anything that lets another process on the Mac read your memory some other way counts.
 
 ## What's already known
 
 I try not to waste your time on things I've already written down:
 
-- Live screen capture is not verified on real hardware and ships switched off. Bugs in that path are expected, not news.
-- Encrypted sync is a skeleton. Cross-device convergence is unproven.
-- The build isn't signed or notarized under my own Apple Developer ID yet.
+- Connected tools can still read your memory while Hippocampus is quit. Disconnect a tool to stop that.
+- Private browser windows are skipped when they show they are private, by a title marker or the private badge in the window's top bar. A private window that shows neither is read.
+- The database key is kept in your login Keychain. Wrapping it with the Secure Enclave is designed but not built.
 
-The full honest status is in the README and in [ARCHITECTURE.md](ARCHITECTURE.md).
+What works today, and how it was checked, is in [docs/STATUS.md](docs/STATUS.md). [PRIVACY.md](PRIVACY.md) lists every request the app makes.
 
 ## Scope
 

@@ -1,121 +1,96 @@
-<p align="center"><img src="assets/branding/AppIcon.iconset/icon_256x256.png" width="128" height="128" alt="Hippocampus icon: a blue curl closing on a white dot, on a graphite tile"></p>
+<p align="center"><img src="assets/branding/AppIcon.iconset/icon_128x128@2x.png" width="128" height="128" alt="The Hippocampus icon: the letters hi in navy on a white tile, the dot of the i in blue"></p>
 
 <h1 align="center">Hippocampus</h1>
 
 <p align="center"><strong>Computers should learn from the way you work.<br>First, they have to remember it.</strong></p>
 
-<p align="center">
-  <a href="#install">Install</a> ·
-  <a href="#the-idea">The idea</a> ·
-  <a href="#how-it-works">How it works</a> ·
-  <a href="#privacy">Privacy</a> ·
-  <a href="#status">Status</a> ·
-  <a href="docs/STATUS.md">Release ledger</a>
-</p>
-
----
+<p align="center">Hippocampus remembers what’s on your screen, on your Mac only.<br>Your AI already knows what you’re working on.</p>
 
 <p align="center">
-  <a href="docs/media/hippocampus-30s.mp4"><img src="docs/media/hippocampus-30s.jpg" width="720" alt="Two windows, a launch-plan note and a pricing chat, appear in Hippocampus's encrypted memory as you work."></a><br>
-  <sub><a href="docs/media/hippocampus-30s.mp4">Watch the 30-second clip</a></sub>
+  <a href="https://github.com/amyjainberkeley/hippocampus/releases/latest"><strong>Download for Mac</strong></a><br>
+  <sub>macOS 14 or later, Apple silicon. Free and open source.</sub>
 </p>
 
-Hippocampus is a private memory for your Mac. It reads what is on your screen as you work (the text, the app, the window, the page, the moment), keeps it in one encrypted file on your machine, and lets you, or an agent working for you, find it again in plain language.
+<p align="center">
+  <img src="docs/media/ask-answer.png" width="720" alt="Ask, dropped from the menu bar, answers “What did we decide on Team pricing?”: you and Ravi settled on $18 a seat for Team, billed annually. Its sources follow, this window first, then a Slack message and a note.">
+  <br><sub>Sample data.</sub>
+</p>
 
-Hippocampus itself has no cloud service. There is no account, no server and no telemetry; the reading, the understanding and the search all happen on your Mac.
+## What it does
 
-## Install
+**Ask.** Press Shift twice and Ask drops from the menu bar over any app. Ask about the window in front of you or something from last week. Matches appear as you type, by meaning and by exact words. Every answer cites its sources, this window first. ⌃⇧Space works too.
 
-```bash
-curl -fsSL https://github.com/amyjainberkeley/hippocampus/releases/latest/download/install.sh | sh
-```
+**Your day, in Overview.** Your day as sessions you can click, a card for what you’re on right now, and a short summary written on your Mac.
 
-or with Homebrew:
+**What it learns about you, in You.** The exact words your AI is given about you, and why Hippocampus thinks so. Mark what’s right. Forget what isn’t.
 
-```bash
-brew install --cask amyjainberkeley/tap/hippocampus
-```
+**Context for your AI.** Connect Claude Code or Codex once, from the menu bar. Each new session starts with your recent work and what Hippocampus has learned about you, with sources. For any chatbot, Copy for your AI puts the same context on your clipboard.
 
-Either one installs the notarized app into Applications and opens a short setup that asks which apps it may remember. Nothing is recorded until you turn capture on. It needs macOS 14 or later on Apple silicon. The installer [reads in a minute](scripts/install.sh): it verifies the download's checksum, Apple's notarization and the developer signature, and touches nothing else.
+<p align="center">
+  <img src="docs/media/window-overview.png" width="720" alt="Overview with sample data. Today’s sessions sit on a strip from 9 AM to 3 PM, coloured by kind of work. The selected one, Competitor pricing tables, 1:41 to 2:05 PM, lists Safari, Notes and Slack, what Hippocampus noticed, the searches behind it, and Copy for your AI. Below, the day in four lines, starting Active 3h 18m.">
+  <br><sub>Overview, with sample data.</sub>
+</p>
 
-## The idea
-
-**Your computer sees everything you do and remembers none of it.** It saw the paper you skimmed, the number in the dashboard, the error you fixed in March. Then it forgot all of it, so you do the remembering: scrolling history, searching for a word you are not sure you used, re-explaining your project to an assistant that starts from zero every morning.
-
-**How you work is the most valuable record nobody keeps.** Software learns from what we tell it, almost never from what we do: the order we open things, what we skim and abandon, how a real task moves across five apps over a week. Agents now do a growing share of that work, and an agent acting for you is only as good as what it knows about how you work.
-
-Research on [general user models](https://arxiv.org/abs/2505.10831) shows where this goes: a computer that watches how someone works can infer what they are trying to do and what they care about, hold those inferences with confidence, and revise them as evidence arrives. Those systems are only as trustworthy as the evidence beneath them, and today that evidence is usually screenshots on disk sent to a cloud model.
-
-Hippocampus is that evidence layer, built to be trusted. The name is the design. In the brain, the hippocampus records episodes (this happened, here, then) and, over time, hands them to the neocortex, which distills them into lasting knowledge. Hippocampus records the episodes of your work faithfully and privately; the understanding built on top of it cites the moments it came from, and you confirm or correct it.
-
-1. **Remember.** A complete, private, searchable record of what was on your screen.
-2. **Understand.** Statements about how you work, each linked to the moments that support it, proposed by the system and confirmed or corrected by you. *Begun in 0.3: sessions with what lay beneath them, a user model, and your day, written on your Mac by Apple's on-device model.*
-3. **Act.** Agents that start from your context instead of a blank page. *Begun: ⌃⇧Space answers from your memory; assistants read your user model over MCP.*
-4. **Share on your terms.** Hand a reviewed slice of your record to a teammate or a study, and nothing more.
-
-## How it works
-
-```mermaid
-flowchart LR
-    A["Screen<br/>+ app, window, URL"] --> B["Watch<br/>only when text changes"]
-    B --> C["Read<br/>on-device OCR,<br/>reading order kept"]
-    C --> D["Understand<br/>sessions, signals,<br/>a user model"]
-    D --> E[("One encrypted<br/>SQLite file")]
-    E --> F["Recall<br/>keyword + meaning"]
-    F --> G["You, or an agent<br/>acting for you"]
-```
-
-1. **Watch.** A Swift helper looks at the screen through ScreenCaptureKit and does work only when something meaningful changed: an idle gate, the system's own change signal, a coarse image hash, and a finer check that notices new words without waking up for a blinking cursor. The window you are working in is read closely; the rest of the screen, including other displays, is read every few seconds when its text changes, and each line is filed under the window it came from.
-2. **Read.** Frames are transcribed on the Mac by a bundled PaddleOCR model kept warm between frames, then reassembled the way the screen reads: columns stay columns, tables read row by row, code keeps its indentation. On the [screen benchmark](tools/ocr/screens/) (chat, editor, terminal, mail, tables, small labels), 96.7% of lines come out exactly right with 0.1% character error, in about 1.3 seconds a frame.
-3. **Understand.** Activity is split into work sessions. Measured signals (typing, reading, pauses with no input, switching back and forth, reworded searches, errors on screen) say what lay beneath each one. Apple's on-device Foundation Models write each session's note and propose statements about you in the style of [GUM](https://arxiv.org/abs/2505.10831): reasoning first, a calibrated confidence, a decay rate, and the moments it rests on. New statements are matched against what is already believed (BM25 with recency decay and MMR) and merged only when they say the same thing. Text is also embedded for semantic search.
-4. **Store.** Rows, the full-text index and the vectors all live in one SQLCipher-encrypted file under `~/Library/Application Support/MCI`, with its key in your login Keychain.
-5. **Recall.** Search runs keyword and semantic retrieval together, so you can find the exact error code or "that pricing discussion last week."
-
-Press **⌃⇧Space** anywhere for the command bar: suggestions for right now, search as you type, answers to questions with their sources, and your day.
-
-Agents reach the same memory over MCP (`mci-agent mcp-serve`), with read-only tools for search, recent activity, your day, your searches, your sessions, the user model and a cited context packet. The `mci-agent` command is installed alongside the app; `mci-agent day`, `mci-agent model` and `mci-agent ask "…"` work in a terminal.
+Answers need Apple Intelligence or a model on your Mac. Hippocampus finds Ollama or LM Studio by itself. Without either, search still works.
 
 ## Privacy
 
-The promise is that what Hippocampus captures stays on your Mac. These rules enforce it rather than ask you to trust it.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/branding/hi-states-dark.svg">
+    <img src="assets/branding/hi-states-light.svg" width="540" alt="The four menu-bar pictures: hi with a solid dot, remembering. hi with a hollow dot, a password field, nothing is read. A dimmed h and i with no dot, paused or off. h with an exclamation mark, needs you.">
+  </picture>
+</p>
 
-- **Block at the source.** Password managers, Keychain Access, System Settings, major sign-in and banking sites, private browser windows and secure text entry are refused before a frame is read, and you can exclude any app or site. Hippocampus never records its own windows.
-- **A second check on text.** Recognized text is scanned for one-time codes, API keys and other secrets before it is stored.
-- **One encrypted file.** There is no second store to leak. Deleting a memory removes it with its vectors and links and compacts the file.
-- **No keystrokes, no audio.** Only what was visible, and whether you were active.
-- **Agents see what they ask for.** When you connect an AI client, a connected AI client sends only the context it requests to its selected provider, under that provider's terms. Nothing else leaves.
+- **You can always tell.** A solid dot means it is remembering. No solid dot means it is not.
+- **It stays on your Mac.** Encrypted on disk. Nothing is uploaded by Hippocampus.
+- **Some things are never read.** Password fields and password managers. Private browser windows are skipped when they show they are private, and a short list of bank and sign-in sites when their address shows.
+- **Your AI sees it only if you connect it.** What a connected tool reads goes to the company that runs it. Connected tools can still read your memory while Hippocampus is quit. Disconnect a tool to stop that.
+- **You can stop it.** Pause from the menu bar. Quit, or Stop Sharing in macOS, ends it.
+- **Deleting is real.** Delete the last 24 hours or everything, and what was learned from it goes too.
 
-[PRIVACY.md](PRIVACY.md) lists every network request the app can make; none carries what you captured. [SECURITY.md](SECURITY.md) says how to report a gap.
+Hippocampus itself has no cloud service. There is no account and no telemetry. If you let it, a connected AI tool starts each session with your recent work and up to six things learned about you. Beyond that, a connected AI client sends only the context it requests to its selected provider.
 
-## Status
+[PRIVACY.md](PRIVACY.md) says what is stored, where, and every request the app makes. [SECURITY.md](SECURITY.md) says how to report a gap.
 
-This is a beta. [docs/STATUS.md](docs/STATUS.md) is the ledger of what has been verified and how; this table never claims more than it does.
+## Download
 
-| Piece | State |
-| --- | --- |
-| Encrypted store, keyword and semantic search | Works, tested. |
-| On-device transcription | Works. Measured on synthetic screens; real-screen accuracy is being measured. |
-| Live screen capture | Works on the owner Mac, focused window and whole screen; being qualified on more Macs. See the ledger. |
-| Agent access over MCP | Works. Read-only. |
-| Understanding: sessions, user model, your day | New in 0.3. Needs macOS 26 with Apple Intelligence; without it, sessions and days are written from measurements alone. Confirming or rejecting claims in the app is next. |
-| Command bar (⌃⇧Space) | New in 0.3: suggestions, search, cited answers, your day. |
-| Sync between machines, Windows | Not started. |
+[Download the latest release](https://github.com/amyjainberkeley/hippocampus/releases/latest), open the disk image and drag Hippocampus to Applications. It needs macOS 14 or later on Apple silicon.
+
+Setup is four screens. It asks for two permissions, Screen Recording and Accessibility, and reads nothing until you click Start Remembering.
+
+This is a beta. [docs/STATUS.md](docs/STATUS.md) says what works today and how it was checked.
 
 ## Build from source
 
-You need macOS 14 or later on Apple silicon, Xcode 16 or later and stable Rust.
+You need Xcode 26, the Rust toolchain named in [rust-toolchain.toml](rust-toolchain.toml), and Python 3.12 with [uv](https://docs.astral.sh/uv/) for the text reader.
 
 ```bash
 git clone https://github.com/amyjainberkeley/hippocampus.git && cd hippocampus
-cargo test --workspace
-./apps/hippocampus/Resources/build-app.sh
+./scripts/try-it.sh    # search over a made-up memory, with no permissions
+./scripts/check.sh     # the lanes CI runs
 ```
 
-[ARCHITECTURE.md](ARCHITECTURE.md) is the system map; [docs/decisions/](docs/decisions/) records why things are the way they are.
+To build a disposable copy of the app for your own Mac:
 
-## Contributing
+```bash
+uv venv tools/ocr/.venv --python 3.12
+uv pip install --python tools/ocr/.venv/bin/python --require-hashes --no-deps -r tools/ocr/requirements.txt
+env -i HOME="$HOME" PATH=/usr/bin:/bin tools/ocr/.venv/bin/python tools/ocr/prepare.py
+cargo build -p mci-agent --bins -p hippocampus-native-host
+for package in apps/hippocampus adapters/macos/MCICaptureHelper apps/recall-ui apps/onboarding apps/mind; do
+  ./scripts/swift-package.sh build --package-path "$package"
+done
+./apps/hippocampus/Resources/build-app.sh --debug --development-ad-hoc --development-lite
+```
 
-The most useful thing right now is telling me where this lost you, or where the app did something other than what it said. Open an issue. If you study how people work on computers, I would like to hear what a private, on-device record of that work would need to be useful to you.
+A development copy uses the same data folder as an installed one, so build it under a separate macOS user. [scripts/README.md](scripts/README.md) covers signed builds. [ARCHITECTURE.md](ARCHITECTURE.md) is the map, and [CONTRIBUTING.md](CONTRIBUTING.md) says how to send a change.
+
+## Built on research
+
+Research on general user models describes a computer that learns what you’re working on and what you care about from how you use it, and revises what it believes as it sees more. That starts with a faithful memory of your work, kept on your Mac, where you can see what it learns.
+
+Omar Shaikh, Shardul Sapkota, Shan Rizvi, Eric Horvitz, Joon Sung Park, Diyi Yang and Michael S. Bernstein. [Creating General User Models from Computer Use](https://arxiv.org/abs/2505.10831). 2025.
 
 ## License
 
