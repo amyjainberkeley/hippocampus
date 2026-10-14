@@ -657,7 +657,9 @@ publish_ready_files() {
     local sha="$1"
     # Optional third asset: the Terminal installer, which fetches this DMG and
     # its checksum from the release and checks both before it installs.
-    install -m 0755 "$REPO_ROOT/scripts/install.sh" "$DIST_DIR/install.sh"
+    if [[ -f "$REPO_ROOT/scripts/install.sh" ]]; then
+        install -m 0755 "$REPO_ROOT/scripts/install.sh" "$DIST_DIR/install.sh"
+    fi
     if [[ -n "$NOTES_FILE" ]]; then
         sed "s/{{SHA256}}/$sha/g" "$NOTES_FILE" >"$DIST_DIR/release-notes.md"
         grep -q "$sha" "$DIST_DIR/release-notes.md" || stop "The notes file has no {{SHA256}} placeholder."
@@ -705,7 +707,9 @@ say "  SHA-256:  $SHA256"
 say "  Commit:   $RELEASE_HEAD ($RELEASE_BRANCH; STATUS baseline $(status_baseline))"
 say "  Upload:   $DMG"
 say "            $DMG.sha256"
-say "            $DIST_DIR/install.sh (optional, the Terminal installer)"
+if [[ -f "$DIST_DIR/install.sh" ]]; then
+    say "            $DIST_DIR/install.sh (optional, the Terminal installer)"
+fi
 if [[ -n "$NOTES_FILE" ]]; then
     say "  Notes:    $DIST_DIR/release-notes.md"
 fi
