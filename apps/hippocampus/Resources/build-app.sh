@@ -374,7 +374,13 @@ if [[ -z "$BUNDLE_SHORT_VERSION" ]]; then
         "Refusing to validate What's New against an unknown bundle version."
 fi
 validate_changelog_release "$BUNDLE_SHORT_VERSION"
-validate_status_audit
+# The STATUS audit vouches for an app people are given. An ad-hoc signed
+# development build cannot be given to anyone, so it builds from any commit.
+if [[ "$SIGNING_MODE" == "ad-hoc" ]]; then
+    echo "  docs/STATUS.md audit baseline not required for an ad-hoc development build"
+else
+    validate_status_audit
+fi
 
 if [[ ! -f "$MODELS_MANIFEST_SRC" ]]; then
     fatal \

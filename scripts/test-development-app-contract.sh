@@ -49,4 +49,65 @@ if rg -Fq 'zero-vector stub fallback' "$VERIFY_MODELS"; then
     fail "model verifier still promises the retired zero-vector fallback"
 fi
 
+# The STATUS audit gates apps people are given, not ad-hoc development
+# builds. The real build-app.sh runs in a fixture repository whose
+# docs/STATUS.md baseline is four commits behind HEAD, with empty files for
+# the binaries; each run stops at the first missing input after the gate.
+FIXTURE="$TEST_ROOT/status-fixture"
+mkdir -p "$FIXTURE/apps/hippocampus/Resources" "$FIXTURE/scripts/lib" "$FIXTURE/docs"
+cp "$BUILD_APP" "$REPO_ROOT/apps/hippocampus/Resources/Info.plist" \
+    "$REPO_ROOT/apps/hippocampus/Resources/Hippocampus.entitlements" \
+    "$FIXTURE/apps/hippocampus/Resources/"
+cp "$REPO_ROOT/scripts/lib/app-group-contract.sh" "$FIXTURE/scripts/lib/"
+cp "$REPO_ROOT/CHANGELOG.md" "$REPO_ROOT/NOTICE" "$FIXTURE/"
+printf 'raise SystemExit(0)\n' > "$FIXTURE/scripts/verify-toml-license-contract.py"
+for binary in apps/hippocampus/.build/debug/Hippocampus \
+    adapters/macos/MCICaptureHelper/.build/debug/mci-capture-helper \
+    apps/recall-ui/.build/debug/recall-ui apps/onboarding/.build/debug/onboarding \
+    target/debug/mci-agent target/debug/hippocampus-native-host; do
+    mkdir -p "$FIXTURE/$(dirname "$binary")"
+    : > "$FIXTURE/$binary"
+done
+fixture_git() {
+    git -C "$FIXTURE" -c user.name=fixture -c user.email=fixture@example.invalid \
+        -c commit.gpgsign=false "$@"
+}
+fixture_git -c init.defaultBranch=main init -q
+fixture_git add -A
+fixture_git commit -q -m baseline
+printf 'Audited code baseline: `%s`\n' "$(fixture_git rev-parse HEAD)" > "$FIXTURE/docs/STATUS.md"
+fixture_git add docs/STATUS.md
+fixture_git commit -q -m status
+for n in 1 2 3; do
+    fixture_git commit -q --allow-empty -m "later $n"
+done
+fixture_build() {
+    local name="$1"
+    shift
+    if env -u APPLE_TEAM_ID -u NOTARYTOOL_TEAM_ID \
+        DEVELOPER_ID='Developer ID Application: Fixture (ABCDE12345)' \
+        "$FIXTURE/apps/hippocampus/Resources/build-app.sh" "$@" --dist "$TEST_ROOT/$name" \
+        > "$TEST_ROOT/$name.out" 2>&1; then
+        fail "the $name fixture unexpectedly assembled an app"
+    fi
+}
+
+fixture_build ad-hoc --debug --development-ad-hoc --development-lite
+rg -q 'audit baseline not required for an ad-hoc development build' "$TEST_ROOT/ad-hoc.out" \
+    || fail "an ad-hoc development build still requires a fresh STATUS audit"
+rg -q 'FATAL: models\.json missing' "$TEST_ROOT/ad-hoc.out" \
+    || fail "the ad-hoc fixture did not continue past the STATUS gate"
+
+fixture_build developer-id --debug
+rg -q 'audit baseline is 4 commits behind HEAD; maximum is 3' "$TEST_ROOT/developer-id.out" \
+    || fail "a Developer ID build did not stop at a stale STATUS audit"
+if rg -q 'models\.json missing' "$TEST_ROOT/developer-id.out"; then
+    fail "a Developer ID build continued past a stale STATUS audit"
+fi
+
+printf 'Audited code baseline: `%s`\n' "$(fixture_git rev-parse HEAD~1)" > "$FIXTURE/docs/STATUS.md"
+fixture_build fresh --debug
+rg -q 'audit baseline OK' "$TEST_ROOT/fresh.out" \
+    || fail "a Developer ID build refused a fresh STATUS audit"
+
 printf 'PASS: development app mode is explicit and release-fail-closed\n'

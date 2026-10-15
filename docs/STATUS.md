@@ -63,9 +63,10 @@ with made-up text:
   them.
 - `scripts/verify-quit-leaves-nothing.sh <app>` checks a built app leaves
   nothing running after Quit.
-- `apps/hippocampus/Resources/build-app.sh` refuses to assemble an app when
-  this page's baseline is more than three commits behind `HEAD`. On a branch
-  of your own, point the `Audited code baseline:` line at a recent commit you
-  have checked.
+- `apps/hippocampus/Resources/build-app.sh` refuses to assemble a Developer
+  ID signed app when this page's baseline is more than three commits behind
+  `HEAD`. An ad-hoc development build (`--debug --development-ad-hoc`) builds
+  from any commit. On a branch of your own, point the `Audited code
+  baseline:` line at a recent commit you have checked before a signed build.
 
 Older status notes are in this file's git history.
