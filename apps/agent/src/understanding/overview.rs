@@ -70,7 +70,11 @@ impl Template {
     /// Text with no placeholders filled yet.
     #[must_use]
     pub fn new(text: impl Into<String>) -> Self {
-        Self { template: text.into(), times: BTreeMap::new(), durations: BTreeMap::new() }
+        Self {
+            template: text.into(),
+            times: BTreeMap::new(),
+            durations: BTreeMap::new(),
+        }
     }
 
     /// Add a time.
@@ -141,8 +145,12 @@ pub fn escape_braces(text: &str) -> String {
 
 /// "one" … "nine", then numerals.
 fn number_word(n: usize) -> String {
-    const WORDS: [&str; 10] = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
-    WORDS.get(n).map_or_else(|| n.to_string(), |w| (*w).to_owned())
+    const WORDS: [&str; 10] = [
+        "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+    ];
+    WORDS
+        .get(n)
+        .map_or_else(|| n.to_string(), |w| (*w).to_owned())
 }
 
 /// "once", "twice", "three times" … "nine times", "10 times".
@@ -196,7 +204,8 @@ const TEMPLATE_ONLY_WORDS: &[&str] = &["only", "just"];
 /// counts only as a count ("12 clicks").
 const INPUT_WORDS: &[&str] = &["paus*", "keystroke*", "key presses", "scroll*"];
 const COUNT_WORDS: &[&str] = &[
-    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "dozens", "hundreds", "many",
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "dozens",
+    "hundreds", "many",
 ];
 
 fn words(text: &str) -> Vec<String> {
@@ -220,7 +229,8 @@ fn has_entry(entries: &[&str], words: &[String]) -> bool {
 fn counts_clicks(words: &[String]) -> bool {
     words.windows(2).any(|pair| {
         pair[1].starts_with("click")
-            && (pair[0].chars().all(|c| c.is_ascii_digit()) || COUNT_WORDS.contains(&pair[0].as_str()))
+            && (pair[0].chars().all(|c| c.is_ascii_digit())
+                || COUNT_WORDS.contains(&pair[0].as_str()))
     })
 }
 
@@ -245,7 +255,9 @@ fn sentences(text: &str) -> Vec<&str> {
     let mut start = 0;
     let mut chars = text.char_indices().peekable();
     while let Some((at, c)) = chars.next() {
-        if matches!(c, '.' | '!' | '?') && chars.peek().map_or(true, |(_, next)| next.is_whitespace()) {
+        if matches!(c, '.' | '!' | '?')
+            && chars.peek().map_or(true, |(_, next)| next.is_whitespace())
+        {
             let end = at + c.len_utf8();
             let sentence = text[start..end].trim();
             if !sentence.is_empty() {
@@ -264,7 +276,11 @@ fn sentences(text: &str) -> Vec<&str> {
 /// Model prose without the sentences that fail the word check.
 #[must_use]
 pub fn model_prose(text: &str) -> String {
-    sentences(text).into_iter().filter(|s| passes_word_check(s)).collect::<Vec<_>>().join(" ")
+    sentences(text)
+        .into_iter()
+        .filter(|s| passes_word_check(s))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 // ---------------------------------------------------------------------------
@@ -286,7 +302,10 @@ pub fn clean_title(title: &str, app_name: &str) -> String {
             }
         }
     }
-    while let Some(rest) = ['•', '●', '◦', '·', '*'].iter().find_map(|b| text.strip_prefix(*b)) {
+    while let Some(rest) = ['•', '●', '◦', '·', '*']
+        .iter()
+        .find_map(|b| text.strip_prefix(*b))
+    {
         text = rest.strip_prefix(' ').unwrap_or(rest).trim_start();
     }
     if !app_name.is_empty() {
@@ -338,7 +357,11 @@ impl StoredSegment {
 
     /// The label back-and-forth pairs are stored under.
     fn label(&self) -> String {
-        format!("{} — {}", apps::name(&self.app), self.title.clone().unwrap_or_default())
+        format!(
+            "{} — {}",
+            apps::name(&self.app),
+            self.title.clone().unwrap_or_default()
+        )
     }
 
     fn kind(&self) -> WorkKind {
@@ -365,7 +388,9 @@ struct StoredNoteSignals {
 /// read.
 #[must_use]
 pub fn stored_segments(note: &SessionNote) -> Option<Vec<StoredSegment>> {
-    serde_json::from_str::<StoredNoteSignals>(&note.signals).ok().map(|stored| stored.segments)
+    serde_json::from_str::<StoredNoteSignals>(&note.signals)
+        .ok()
+        .map(|stored| stored.segments)
 }
 
 /// One window across a session: segments that share app, title and host.
@@ -383,10 +408,9 @@ struct WindowHeld {
 fn windows_of(segments: &[StoredSegment]) -> Vec<WindowHeld> {
     let mut out: Vec<WindowHeld> = Vec::new();
     for (index, segment) in segments.iter().enumerate() {
-        match out
-            .iter_mut()
-            .find(|w| w.bundle_id == segment.app && w.title == segment.title && w.host == segment.host)
-        {
+        match out.iter_mut().find(|w| {
+            w.bundle_id == segment.app && w.title == segment.title && w.host == segment.host
+        }) {
             Some(window) => {
                 window.held_us += segment.held_us();
                 if segment.held_us() > segments[window.longest].held_us() {
@@ -413,7 +437,12 @@ fn windows_of(segments: &[StoredSegment]) -> Vec<WindowHeld> {
 pub fn longest_window_events(segments: &[StoredSegment]) -> Vec<i64> {
     windows_of(segments)
         .first()
-        .map(|w| w.segments.iter().flat_map(|i| segments[*i].events.iter().copied()).collect())
+        .map(|w| {
+            w.segments
+                .iter()
+                .flat_map(|i| segments[*i].events.iter().copied())
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -429,7 +458,8 @@ pub fn kind_of_segments(segments: &[StoredSegment]) -> (WorkKind, Vec<(WorkKind,
         // With no time held at all, each window counts once.
         entry.1 += if total > 0 { segment.held_us() } else { 1 };
     }
-    let mut kinds: Vec<(WorkKind, u64, u64)> = held.into_iter().map(|(k, (h, w))| (k, h, w)).collect();
+    let mut kinds: Vec<(WorkKind, u64, u64)> =
+        held.into_iter().map(|(k, (h, w))| (k, h, w)).collect();
     kinds.sort_by(|a, b| b.2.cmp(&a.2));
     let kind = kinds.first().map_or(WorkKind::Other, |k| k.0);
     (kind, kinds.into_iter().map(|(k, h, _)| (k, h)).collect())
@@ -440,7 +470,11 @@ pub fn kind_of_segments(segments: &[StoredSegment]) -> (WorkKind, Vec<(WorkKind,
 fn measured_title(segments: &[StoredSegment]) -> Option<String> {
     let window = windows_of(segments).into_iter().next()?;
     let app = apps::name(&window.bundle_id);
-    let title = window.title.as_deref().map(|t| clean_title(t, &app)).unwrap_or_default();
+    let title = window
+        .title
+        .as_deref()
+        .map(|t| clean_title(t, &app))
+        .unwrap_or_default();
     Some(if title.is_empty() { app } else { title })
 }
 
@@ -451,21 +485,27 @@ pub fn note_title(note: &SessionNote) -> (String, String) {
     if let Some(title) = model_title(note) {
         return (title, note.model.clone());
     }
-    let measured = stored_segments(note).as_deref().and_then(measured_title).unwrap_or_else(|| {
-        // Unreadable signals: the stored measured title is "{App} — {title}".
-        let stored = note.title.trim();
-        match stored.split_once(" — ") {
-            Some((app, title)) if !clean_title(title, app).is_empty() => clean_title(title, app),
-            Some((app, _)) => app.to_owned(),
-            None => clean_title(stored, ""),
-        }
-    });
+    let measured = stored_segments(note)
+        .as_deref()
+        .and_then(measured_title)
+        .unwrap_or_else(|| {
+            // Unreadable signals: the stored measured title is "{App} — {title}".
+            let stored = note.title.trim();
+            match stored.split_once(" — ") {
+                Some((app, title)) if !clean_title(title, app).is_empty() => {
+                    clean_title(title, app)
+                }
+                Some((app, _)) => app.to_owned(),
+                None => clean_title(stored, ""),
+            }
+        });
     (measured, "measured".into())
 }
 
 fn model_title(note: &SessionNote) -> Option<String> {
     let title = note.title.trim();
-    (note.model != "measured" && !title.is_empty() && passes_word_check(title)).then(|| clip(title, TITLE_MAX_CHARS))
+    (note.model != "measured" && !title.is_empty() && passes_word_check(title))
+        .then(|| clip(title, TITLE_MAX_CHARS))
 }
 
 // ---------------------------------------------------------------------------
@@ -490,18 +530,32 @@ impl ModelStatus {
     /// Nothing known.
     #[must_use]
     pub fn unknown() -> Self {
-        Self { state: "unknown".into(), reason: None, checked_us: None }
+        Self {
+            state: "unknown".into(),
+            reason: None,
+            checked_us: None,
+        }
     }
 
     /// The outcome of a check or of a cycle that called the model.
     #[must_use]
     pub fn from_check(result: &Result<(), MindCallError>, now_us: u64) -> Self {
         match result {
-            Ok(()) => Self { state: "available".into(), reason: None, checked_us: Some(now_us) },
-            Err(MindCallError::Unavailable(reason)) => {
-                Self { state: "unavailable".into(), reason: Some(reason.clone()), checked_us: Some(now_us) }
-            }
-            Err(_) => Self { state: "unavailable".into(), reason: Some("unavailable".into()), checked_us: Some(now_us) },
+            Ok(()) => Self {
+                state: "available".into(),
+                reason: None,
+                checked_us: Some(now_us),
+            },
+            Err(MindCallError::Unavailable(reason)) => Self {
+                state: "unavailable".into(),
+                reason: Some(reason.clone()),
+                checked_us: Some(now_us),
+            },
+            Err(_) => Self {
+                state: "unavailable".into(),
+                reason: Some("unavailable".into()),
+                checked_us: Some(now_us),
+            },
         }
     }
 
@@ -514,9 +568,17 @@ impl ModelStatus {
             .flatten()
             .and_then(|value| serde_json::from_str::<Self>(&value).ok());
         match stored {
-            Some(status) if status.state == "available" => Self { reason: None, ..status },
+            Some(status) if status.state == "available" => Self {
+                reason: None,
+                ..status
+            },
             Some(status) if status.state == "unavailable" => Self {
-                reason: Some(status.reason.filter(|r| !r.is_empty()).unwrap_or_else(|| "unavailable".into())),
+                reason: Some(
+                    status
+                        .reason
+                        .filter(|r| !r.is_empty())
+                        .unwrap_or_else(|| "unavailable".into()),
+                ),
                 ..status
             },
             _ => Self::unknown(),
@@ -550,7 +612,12 @@ impl OverviewEnv {
     /// Read both from disk: the capture receipt beside the memory at
     /// `db_path`, and the AI tools' hook files under `home`.
     #[must_use]
-    pub fn read(db_path: &Path, home: Option<&Path>, codex_home: Option<&Path>, now_us: u64) -> Self {
+    pub fn read(
+        db_path: &Path,
+        home: Option<&Path>,
+        codex_home: Option<&Path>,
+        now_us: u64,
+    ) -> Self {
         Self {
             remembering: remembering_now(&db_path.with_file_name("capture-status.json"), now_us),
             hook_installed: home.is_some_and(|home| hook_installed(home, codex_home)),
@@ -563,16 +630,21 @@ impl OverviewEnv {
 /// no skipped window. A paused or quit Hippocampus stops writing it.
 #[must_use]
 pub fn remembering_now(receipt: &Path, now_us: u64) -> bool {
-    let Some(status) = std::fs::read(receipt)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<crate::capture_status::CaptureStatus>(&bytes).ok())
-    else {
+    let Some(status) = std::fs::read(receipt).ok().and_then(|bytes| {
+        serde_json::from_slice::<crate::capture_status::CaptureStatus>(&bytes).ok()
+    }) else {
         return false;
     };
     let fresh = crate::wall_clock::parse_unix_ms(&status.updated_at)
         .map(|ms| ms.saturating_mul(1_000))
-        .is_some_and(|updated_us| updated_us <= now_us + RECEIPT_FRESH_US && now_us.saturating_sub(updated_us) <= RECEIPT_FRESH_US);
-    status.schema_version == 1 && fresh && status.blocked_reason.is_none() && status.suppression_reason.is_none()
+        .is_some_and(|updated_us| {
+            updated_us <= now_us + RECEIPT_FRESH_US
+                && now_us.saturating_sub(updated_us) <= RECEIPT_FRESH_US
+        });
+    status.schema_version == 1
+        && fresh
+        && status.blocked_reason.is_none()
+        && status.suppression_reason.is_none()
 }
 
 /// Whether the Hippocampus session hook is installed for Claude Code or
@@ -780,7 +852,13 @@ pub struct Search {
 
 impl From<&SearchRecord> for Search {
     fn from(s: &SearchRecord) -> Self {
-        Self { query: s.query.clone(), engine: s.engine.clone(), ts_us: s.ts_us, event_id: s.event_id, url: s.url.clone() }
+        Self {
+            query: s.query.clone(),
+            engine: s.engine.clone(),
+            ts_us: s.ts_us,
+            event_id: s.event_id,
+            url: s.url.clone(),
+        }
     }
 }
 
@@ -902,7 +980,10 @@ fn observed(head: &EventHead) -> ObservedEvent {
 }
 
 fn is_focus(head: &EventHead) -> bool {
-    !matches!(head.source.as_str(), "screen_context" | "transcript_import" | "mcp_resource")
+    !matches!(
+        head.source.as_str(),
+        "screen_context" | "transcript_import" | "mcp_resource"
+    )
 }
 
 fn is_noise(head: &EventHead) -> bool {
@@ -910,32 +991,65 @@ fn is_noise(head: &EventHead) -> bool {
 }
 
 /// Segments and signals measured from moments (no text is read).
-fn measure(heads: &[&EventHead], end_us: u64, searches: &[SearchRecord]) -> (Vec<StoredSegment>, observe::Signals) {
+fn measure(
+    heads: &[&EventHead],
+    end_us: u64,
+    searches: &[SearchRecord],
+) -> (Vec<StoredSegment>, observe::Signals) {
     let events: Vec<ObservedEvent> = heads.iter().map(|h| observed(h)).collect();
     let segments = observe::segments(&events, &[], end_us);
     let start = heads.first().map_or(0, |h| h.ts_us);
-    let within: Vec<SearchRecord> = searches.iter().filter(|s| s.ts_us >= start && s.ts_us <= end_us).cloned().collect();
+    let within: Vec<SearchRecord> = searches
+        .iter()
+        .filter(|s| s.ts_us >= start && s.ts_us <= end_us)
+        .cloned()
+        .collect();
     let signals = observe::signals(&events, &segments, &within);
-    (segments.iter().map(StoredSegment::from_observed).collect(), signals)
+    (
+        segments.iter().map(StoredSegment::from_observed).collect(),
+        signals,
+    )
 }
 
 /// Sessions in `[from, to)`: one per stored note, and the moments outside
 /// every note split as the worker splits them. `focus` is oldest first, with
 /// noise and background windows already left out; `searches` oldest first.
-fn drafts(focus: &[EventHead], notes: &[SessionNote], searches: &[SearchRecord], from: u64, to: u64, now_us: u64) -> Vec<Draft> {
+fn drafts(
+    focus: &[EventHead],
+    notes: &[SessionNote],
+    searches: &[SearchRecord],
+    from: u64,
+    to: u64,
+    now_us: u64,
+) -> Vec<Draft> {
     let mut out = Vec::new();
-    let mut notes: Vec<&SessionNote> = notes.iter().filter(|n| n.end_us >= from && n.start_us < to).collect();
+    let mut notes: Vec<&SessionNote> = notes
+        .iter()
+        .filter(|n| n.end_us >= from && n.start_us < to)
+        .collect();
     notes.sort_by_key(|n| n.start_us);
-    let inside = |head: &EventHead| notes.iter().any(|n| n.start_us <= head.ts_us && head.ts_us <= n.end_us);
+    let inside = |head: &EventHead| {
+        notes
+            .iter()
+            .any(|n| n.start_us <= head.ts_us && head.ts_us <= n.end_us)
+    };
     for note in &notes {
-        let heads: Vec<&EventHead> = focus.iter().filter(|h| note.start_us <= h.ts_us && h.ts_us <= note.end_us).collect();
-        let (segments, back_and_forth, reworded_searches) = match serde_json::from_str::<StoredNoteSignals>(&note.signals) {
-            Ok(stored) => (stored.segments, stored.signals.back_and_forth, stored.signals.reworded_searches),
-            Err(_) => {
-                let (segments, signals) = measure(&heads, note.end_us, searches);
-                (segments, signals.back_and_forth, signals.reworded_searches)
-            }
-        };
+        let heads: Vec<&EventHead> = focus
+            .iter()
+            .filter(|h| note.start_us <= h.ts_us && h.ts_us <= note.end_us)
+            .collect();
+        let (segments, back_and_forth, reworded_searches) =
+            match serde_json::from_str::<StoredNoteSignals>(&note.signals) {
+                Ok(stored) => (
+                    stored.segments,
+                    stored.signals.back_and_forth,
+                    stored.signals.reworded_searches,
+                ),
+                Err(_) => {
+                    let (segments, signals) = measure(&heads, note.end_us, searches);
+                    (segments, signals.back_and_forth, signals.reworded_searches)
+                }
+            };
         out.push(Draft {
             own_start_us: note.start_us,
             start_us: note.start_us,
@@ -983,7 +1097,11 @@ fn drafts(focus: &[EventHead], notes: &[SessionNote], searches: &[SearchRecord],
     flush(&mut region, &mut out);
     for draft in &mut out {
         draft.start_us = draft.start_us.clamp(from, to);
-        draft.end_us = draft.end_us.min(to.saturating_sub(1)).min(now_us).max(draft.start_us);
+        draft.end_us = draft
+            .end_us
+            .min(to.saturating_sub(1))
+            .min(now_us)
+            .max(draft.start_us);
     }
     out.retain(|d| d.newest.is_some() || d.segments.iter().any(|s| !s.events.is_empty()));
     out.sort_by_key(|d| (d.start_us, d.own_start_us));
@@ -1027,8 +1145,16 @@ fn block_sentences(draft: &Draft) -> Vec<Sentence> {
         let (app_a, app_b) = (app_of_label(a), app_of_label(b));
         if switches >= 4 && app_a != app_b {
             // The app seen first in the session leads.
-            let first = draft.segments.iter().map(StoredSegment::label).find(|l| l == a || l == b);
-            let (first, second) = if first.as_deref() == Some(b.as_str()) { (app_b, app_a) } else { (app_a, app_b) };
+            let first = draft
+                .segments
+                .iter()
+                .map(StoredSegment::label)
+                .find(|l| l == a || l == b);
+            let (first, second) = if first.as_deref() == Some(b.as_str()) {
+                (app_b, app_a)
+            } else {
+                (app_a, app_b)
+            };
             out.push(Sentence {
                 id: "switched_between".into(),
                 text: Template::new(format!(
@@ -1055,9 +1181,14 @@ fn reopen_of(head: &EventHead) -> Option<Reopen> {
     let bundle_id = head.app_bundle_id.clone().filter(|b| !b.is_empty())?;
     let url = head.url.clone().filter(|url| {
         let lower = url.get(..8).unwrap_or(url).to_ascii_lowercase();
-        (lower.starts_with("http://") || lower.starts_with("https://")) && url.len() <= MAX_URL_BYTES
+        (lower.starts_with("http://") || lower.starts_with("https://"))
+            && url.len() <= MAX_URL_BYTES
     });
-    Some(Reopen { url, app_name: apps::name(&bundle_id), bundle_id })
+    Some(Reopen {
+        url,
+        app_name: apps::name(&bundle_id),
+        bundle_id,
+    })
 }
 
 fn noticed_of(note: &SessionNote) -> Option<Noticed> {
@@ -1069,14 +1200,21 @@ fn noticed_of(note: &SessionNote) -> Option<Noticed> {
         return None;
     }
     let kept = model_prose(beneath);
-    (!kept.is_empty() && kept != "Nothing notable.")
-        .then(|| Noticed { text: clip(&kept, NOTICED_CHARS), written_by: note.model.clone() })
+    (!kept.is_empty() && kept != "Nothing notable.").then(|| Noticed {
+        text: clip(&kept, NOTICED_CHARS),
+        written_by: note.model.clone(),
+    })
 }
 
 /// The screenshot to show: the stored one nearest the middle of the longest
 /// window's longest segment, from that window's app; else nearest the middle
 /// of the session, from that app; else none.
-fn screenshot(store: &SqlCipherBrainStore, block_span: Span, segments: &[StoredSegment], window: Option<&WindowHeld>) -> Option<i64> {
+fn screenshot(
+    store: &SqlCipherBrainStore,
+    block_span: Span,
+    segments: &[StoredSegment],
+    window: Option<&WindowHeld>,
+) -> Option<i64> {
     let window = window?;
     let segment = &segments[window.longest];
     let pick = |start: u64, end: u64| {
@@ -1087,7 +1225,8 @@ fn screenshot(store: &SqlCipherBrainStore, block_span: Span, segments: &[StoredS
             .find(|h| h.app_bundle_id.as_deref() == Some(window.bundle_id.as_str()))
             .map(|h| h.id)
     };
-    pick(segment.start_us, segment.end_us.max(segment.start_us)).or_else(|| pick(block_span.start_us, block_span.end_us))
+    pick(segment.start_us, segment.end_us.max(segment.start_us))
+        .or_else(|| pick(block_span.start_us, block_span.end_us))
 }
 
 fn shape(store: &SqlCipherBrainStore, draft: &Draft, searches: &[SearchRecord]) -> Option<Shaped> {
@@ -1111,14 +1250,31 @@ fn shape(store: &SqlCipherBrainStore, draft: &Draft, searches: &[SearchRecord]) 
     }
     app_time.sort_by(|a, b| b.1.cmp(&a.1));
     let measured = measured_title(&draft.segments).unwrap_or_else(|| {
-        open.app_bundle_id.as_deref().map(apps::name).unwrap_or_default()
+        open.app_bundle_id
+            .as_deref()
+            .map(apps::name)
+            .unwrap_or_default()
     });
     let (title, written_by) = match draft.note.as_ref().and_then(model_title) {
-        Some(title) => (title, draft.note.as_ref().map(|n| n.model.clone()).unwrap_or_default()),
+        Some(title) => (
+            title,
+            draft
+                .note
+                .as_ref()
+                .map(|n| n.model.clone())
+                .unwrap_or_default(),
+        ),
         None => (clip(&measured, TITLE_MAX_CHARS), "measured".to_owned()),
     };
-    let title = if title.trim().is_empty() { "Untitled".to_owned() } else { title };
-    let span = Span { start_us: draft.start_us, end_us: draft.end_us };
+    let title = if title.trim().is_empty() {
+        "Untitled".to_owned()
+    } else {
+        title
+    };
+    let span = Span {
+        start_us: draft.start_us,
+        end_us: draft.end_us,
+    };
     let block = Block {
         id: draft.own_start_us,
         provisional: draft.note.is_none(),
@@ -1134,12 +1290,20 @@ fn shape(store: &SqlCipherBrainStore, draft: &Draft, searches: &[SearchRecord]) 
         kinds: kinds
             .iter()
             .take(3)
-            .map(|(k, held)| KindHeld { kind: k.as_str().into(), kind_label: k.label().into(), held_us: *held })
+            .map(|(k, held)| KindHeld {
+                kind: k.as_str().into(),
+                kind_label: k.label().into(),
+                held_us: *held,
+            })
             .collect(),
         apps: app_time
             .iter()
             .take(3)
-            .map(|(app, held)| AppHeld { bundle_id: app.clone(), name: apps::name(app), held_us: *held })
+            .map(|(app, held)| AppHeld {
+                bundle_id: app.clone(),
+                name: apps::name(app),
+                held_us: *held,
+            })
             .collect(),
         windows: windows
             .iter()
@@ -1147,12 +1311,20 @@ fn shape(store: &SqlCipherBrainStore, draft: &Draft, searches: &[SearchRecord]) 
             .map(|w| {
                 let name = apps::name(&w.bundle_id);
                 WindowOut {
-                    title: w.title.as_deref().filter(|t| !t.trim().is_empty()).map(|t| clean_title(t, &name)),
+                    title: w
+                        .title
+                        .as_deref()
+                        .filter(|t| !t.trim().is_empty())
+                        .map(|t| clean_title(t, &name)),
                     name,
                     bundle_id: w.bundle_id.clone(),
                     host: w.host.clone(),
                     held_us: w.held_us,
-                    event_id: draft.segments[w.longest].events.last().copied().unwrap_or(open.id),
+                    event_id: draft.segments[w.longest]
+                        .events
+                        .last()
+                        .copied()
+                        .unwrap_or(open.id),
                 }
             })
             .collect(),
@@ -1172,16 +1344,32 @@ fn shape(store: &SqlCipherBrainStore, draft: &Draft, searches: &[SearchRecord]) 
         .iter()
         .map(|w| {
             let name = apps::name(&w.bundle_id);
-            let title = w.title.as_deref().map(|t| clean_title(t, &name)).unwrap_or_default();
-            (title, apps::kind_for_host(&w.bundle_id, w.host.as_deref()), w.held_us, name)
+            let title = w
+                .title
+                .as_deref()
+                .map(|t| clean_title(t, &name))
+                .unwrap_or_default();
+            (
+                title,
+                apps::kind_for_host(&w.bundle_id, w.host.as_deref()),
+                w.held_us,
+                name,
+            )
         })
         .collect();
-    Some(Shaped { block, windows: all_windows })
+    Some(Shaped {
+        block,
+        windows: all_windows,
+    })
 }
 
 /// The moments of `[from, to)` without their text, oldest first, with
 /// noise left out; and whether the read limit cut the earliest part.
-fn heads_in(store: &SqlCipherBrainStore, from: u64, to: u64) -> Result<(Vec<EventHead>, bool), StoreError> {
+fn heads_in(
+    store: &SqlCipherBrainStore,
+    from: u64,
+    to: u64,
+) -> Result<(Vec<EventHead>, bool), StoreError> {
     let mut heads = store.event_heads_in_range(from, to, READ_LIMIT + 1)?;
     let truncated = heads.len() > READ_LIMIT;
     if truncated {
@@ -1195,29 +1383,49 @@ fn heads_in(store: &SqlCipherBrainStore, from: u64, to: u64) -> Result<(Vec<Even
 // Facts
 // ---------------------------------------------------------------------------
 
-const GENERIC_TITLES: &[&str] = &["new tab", "untitled", "inbox", "home", "google", "start page", "downloads"];
+const GENERIC_TITLES: &[&str] = &[
+    "new tab",
+    "untitled",
+    "inbox",
+    "home",
+    "google",
+    "start page",
+    "downloads",
+];
 
 fn active_fact(day: &day::DayBreakdown) -> Option<Fact> {
     let (first, last) = (day.first_active_us?, day.last_active_us?);
     if day.active_us < 10 * MINUTE_US {
         return None;
     }
-    let text = if day.basis == "measured" { "Active {active}, {first} to {last}." } else { "Active about {active}, {first} to {last}." };
+    let text = if day.basis == "measured" {
+        "Active {active}, {first} to {last}."
+    } else {
+        "Active about {active}, {first} to {last}."
+    };
     Some(Fact {
         id: "active".into(),
-        text: Template::new(text).duration("active", day.active_us).time("first", first).time("last", last),
+        text: Template::new(text)
+            .duration("active", day.active_us)
+            .time("first", first)
+            .time("last", last),
         action: None,
     })
 }
 
 fn select(blocks: Vec<u64>) -> Option<Action> {
-    (!blocks.is_empty()).then(|| Action { kind: "select_blocks".into(), block_ids: blocks })
+    (!blocks.is_empty()).then(|| Action {
+        kind: "select_blocks".into(),
+        block_ids: blocks,
+    })
 }
 
 fn longest_fact(day: &day::DayBreakdown, blocks: &[Block]) -> Option<Fact> {
     let mut longest: Option<&day::FocusBlock> = None;
     for focus in &day.focus_blocks {
-        if longest.map_or(true, |l| focus.end_us - focus.start_us > l.end_us - l.start_us) {
+        if longest.map_or(true, |l| {
+            focus.end_us - focus.start_us > l.end_us - l.start_us
+        }) {
             longest = Some(focus);
         }
     }
@@ -1227,12 +1435,18 @@ fn longest_fact(day: &day::DayBreakdown, blocks: &[Block]) -> Option<Fact> {
         WorkKind::Ai => " of AI tools".to_owned(),
         kind => format!(" of {}", kind.label().to_lowercase()),
     };
-    let in_app = if focus.app.is_empty() { String::new() } else { format!(", mostly in {}", escape_braces(&focus.app)) };
+    let in_app = if focus.app.is_empty() {
+        String::new()
+    } else {
+        format!(", mostly in {}", escape_braces(&focus.app))
+    };
     Some(Fact {
         id: "longest".into(),
-        text: Template::new(format!("Longest run: about {{length}}{of_kind}{in_app}, from {{start}}."))
-            .duration("length", focus.end_us - focus.start_us)
-            .time("start", focus.start_us),
+        text: Template::new(format!(
+            "Longest run: about {{length}}{of_kind}{in_app}, from {{start}}."
+        ))
+        .duration("length", focus.end_us - focus.start_us)
+        .time("start", focus.start_us),
         action: select(
             blocks
                 .iter()
@@ -1258,14 +1472,21 @@ fn returned_fact(shaped: &[Shaped]) -> Option<Fact> {
             let eligible = title.chars().count() >= 4
                 && !GENERIC_TITLES.contains(&title.to_lowercase().as_str())
                 && !title.eq_ignore_ascii_case(app)
-                && !matches!(kind, WorkKind::Communication | WorkKind::Media | WorkKind::Other | WorkKind::Ai);
+                && !matches!(
+                    kind,
+                    WorkKind::Communication | WorkKind::Media | WorkKind::Other | WorkKind::Ai
+                );
             if !eligible {
                 continue;
             }
             let candidate = match candidates.iter_mut().position(|c| c.title == *title) {
                 Some(at) => &mut candidates[at],
                 None => {
-                    candidates.push(Candidate { title: title.clone(), runs: Vec::new(), held_us: 0 });
+                    candidates.push(Candidate {
+                        title: title.clone(),
+                        runs: Vec::new(),
+                        held_us: 0,
+                    });
                     candidates.last_mut().expect("just pushed")
                 }
             };
@@ -1284,13 +1505,17 @@ fn returned_fact(shaped: &[Shaped]) -> Option<Fact> {
             }
         }
     }
-    let best = candidates.into_iter().filter(|c| c.runs.len() >= 3).fold(None::<Candidate>, |best, c| match best {
-        None => Some(c),
-        Some(b) => {
-            let better = c.runs.len() > b.runs.len() || (c.runs.len() == b.runs.len() && c.held_us > b.held_us);
-            Some(if better { c } else { b })
-        }
-    })?;
+    let best = candidates.into_iter().filter(|c| c.runs.len() >= 3).fold(
+        None::<Candidate>,
+        |best, c| match best {
+            None => Some(c),
+            Some(b) => {
+                let better = c.runs.len() > b.runs.len()
+                    || (c.runs.len() == b.runs.len() && c.held_us > b.held_us);
+                Some(if better { c } else { b })
+            }
+        },
+    )?;
     let returns = best.runs.len() - 1;
     Some(Fact {
         id: "returned".into(),
@@ -1299,7 +1524,13 @@ fn returned_fact(shaped: &[Shaped]) -> Option<Fact> {
             escape_braces(&clip(&best.title, RETURNED_TITLE_CHARS)),
             times_word(returns)
         )),
-        action: select(best.runs.iter().flatten().map(|i| shaped[*i].block.id).collect()),
+        action: select(
+            best.runs
+                .iter()
+                .flatten()
+                .map(|i| shaped[*i].block.id)
+                .collect(),
+        ),
     })
 }
 
@@ -1309,7 +1540,14 @@ fn searched_fact(count: usize) -> Option<Fact> {
         1 => "You looked up one thing.".to_owned(),
         n => format!("You looked up {} things.", number_word(n)),
     };
-    Some(Fact { id: "searched".into(), text: Template::new(text), action: Some(Action { kind: "show_searches".into(), block_ids: Vec::new() }) })
+    Some(Fact {
+        id: "searched".into(),
+        text: Template::new(text),
+        action: Some(Action {
+            kind: "show_searches".into(),
+            block_ids: Vec::new(),
+        }),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1324,15 +1562,22 @@ fn account_of(store: &SqlCipherBrainStore, date: &str) -> Result<Option<Account>
         return Ok(None);
     }
     let body: serde_json::Value = serde_json::from_str(&report.body).unwrap_or_default();
-    let text = |key: &str| body["narrative"][key].as_str().map(model_prose).unwrap_or_default();
+    let text = |key: &str| {
+        body["narrative"][key]
+            .as_str()
+            .map(model_prose)
+            .unwrap_or_default()
+    };
     let headline = clip(&text("headline"), HEADLINE_CHARS);
     let narrative = clip(&text("narrative"), NARRATIVE_CHARS);
-    Ok((!headline.is_empty() || !narrative.is_empty()).then(|| Account {
-        headline,
-        narrative,
-        written_by: report.model,
-        generated_us: report.generated_us,
-    }))
+    Ok(
+        (!headline.is_empty() || !narrative.is_empty()).then(|| Account {
+            headline,
+            narrative,
+            written_by: report.model,
+            generated_us: report.generated_us,
+        }),
+    )
 }
 
 /// The lines a connected AI is given at the start of a session right now:
@@ -1340,10 +1585,16 @@ fn account_of(store: &SqlCipherBrainStore, date: &str) -> Result<Option<Account>
 #[must_use]
 pub fn ai_knows(store: &SqlCipherBrainStore, now_us: u64, hook_installed: bool) -> AiKnows {
     AiKnows {
-        recent_work: query::recent_work(store, now_us).iter().map(query::RecentWork::template).collect(),
+        recent_work: query::recent_work(store, now_us)
+            .iter()
+            .map(query::RecentWork::template)
+            .collect(),
         about_you: query::about_you(store, now_us, None)
             .into_iter()
-            .map(|p| AboutLine { id: p.id, text: clip(&p.text, query::STATEMENT_CHARS) })
+            .map(|p| AboutLine {
+                id: p.id,
+                text: clip(&p.text, query::STATEMENT_CHARS),
+            })
             .collect(),
         hook_installed,
     }
@@ -1389,24 +1640,30 @@ pub fn overview(
     searches.reverse();
 
     // Each session with its newest focus moment.
-    let mut shaped: Vec<(Shaped, u64)> = drafts(&focus, &notes, &searches, day_start, day_end, now_us)
-        .iter()
-        .filter_map(|draft| shape(store, draft, &searches).map(|s| (s, draft.last_us)))
-        .collect();
+    let mut shaped: Vec<(Shaped, u64)> =
+        drafts(&focus, &notes, &searches, day_start, day_end, now_us)
+            .iter()
+            .filter_map(|draft| shape(store, draft, &searches).map(|s| (s, draft.last_us)))
+            .collect();
     if shaped.len() > MAX_BLOCKS {
         shaped.drain(..shaped.len() - MAX_BLOCKS);
         truncated = true;
     }
     for index in 1..shaped.len() {
         let previous_end = shaped[index - 1].0.block.end_us;
-        shaped[index].0.block.touches_previous = shaped[index].0.block.start_us < previous_end + observe::SESSION_GAP_US;
+        shaped[index].0.block.touches_previous =
+            shaped[index].0.block.start_us < previous_end + observe::SESSION_GAP_US;
     }
 
     // Right now.
-    let mut now = Now { state: "none".into(), ..Now::default() };
+    let mut now = Now {
+        state: "none".into(),
+        ..Now::default()
+    };
     if is_today {
         if let Some((last, last_saved)) = shaped.last() {
-            let going = now_us.saturating_sub(*last_saved) < observe::SESSION_GAP_US && env.remembering;
+            let going =
+                now_us.saturating_sub(*last_saved) < observe::SESSION_GAP_US && env.remembering;
             let mut since = last.block.start_us;
             if going {
                 for pair in shaped.windows(2).rev() {
@@ -1416,13 +1673,19 @@ pub fn overview(
                     since = pair[0].0.block.start_us;
                 }
             }
-            now = now_card(&last.block, *last_saved, Some(last.block.id), going.then_some(since));
+            now = now_card(
+                &last.block,
+                *last_saved,
+                Some(last.block.id),
+                going.then_some(since),
+            );
         } else {
             let from = now_us.saturating_sub(LOOKBACK_US).min(day_start);
             let (earlier, _) = heads_in(store, from, day_start)?;
             let earlier_focus: Vec<EventHead> = earlier.into_iter().filter(is_focus).collect();
             let earlier_notes = store.session_notes_in_range(from, day_start)?;
-            let earlier_drafts = drafts(&earlier_focus, &earlier_notes, &[], from, day_start, now_us);
+            let earlier_drafts =
+                drafts(&earlier_focus, &earlier_notes, &[], from, day_start, now_us);
             if let Some(draft) = earlier_drafts.last() {
                 if let Some(shaped_earlier) = shape(store, draft, &[]) {
                     now = now_card(&shaped_earlier.block, draft.last_us, None, None);
@@ -1441,12 +1704,19 @@ pub fn overview(
     let gaps: Vec<Span> = blocks
         .windows(2)
         .filter(|pair| pair[1].start_us >= pair[0].end_us + observe::SESSION_GAP_US)
-        .map(|pair| Span { start_us: pair[0].end_us, end_us: pair[1].start_us })
+        .map(|pair| Span {
+            start_us: pair[0].end_us,
+            end_us: pair[1].start_us,
+        })
         .collect();
     let strip = match (blocks.first(), blocks.last()) {
         (Some(first), Some(last)) => {
             let mut start = round_down_hour(first.start_us, day_start);
-            let reach = if is_today { last.end_us.max(now_us.min(day_end)) } else { last.end_us };
+            let reach = if is_today {
+                last.end_us.max(now_us.min(day_end))
+            } else {
+                last.end_us
+            };
             let mut end = round_up_hour(reach, day_start).min(day_end);
             if end - start < MIN_STRIP_US {
                 start = end.saturating_sub(MIN_STRIP_US).max(day_start);
@@ -1454,13 +1724,19 @@ pub fn overview(
             if end - start < MIN_STRIP_US {
                 end = (start + MIN_STRIP_US).min(day_end);
             }
-            Some(Span { start_us: start, end_us: end })
+            Some(Span {
+                start_us: start,
+                end_us: end,
+            })
         }
         _ => None,
     };
     let mut legend: Vec<(WorkKind, u64)> = Vec::new();
     for block in &blocks {
-        let kind = WorkKind::ALL.into_iter().find(|k| k.as_str() == block.kind).unwrap_or(WorkKind::Other);
+        let kind = WorkKind::ALL
+            .into_iter()
+            .find(|k| k.as_str() == block.kind)
+            .unwrap_or(WorkKind::Other);
         match legend.iter_mut().find(|(k, _)| *k == kind) {
             Some(entry) => entry.1 += block.end_us - block.start_us,
             None => legend.push((kind, block.end_us - block.start_us)),
@@ -1472,7 +1748,17 @@ pub fn overview(
     let mut activity = store.activity_intervals_in_range(day_start, day_end)?;
     activity.retain(|a| !a.app_bundle_id.as_deref().is_some_and(apps::is_noise));
     let events: Vec<ObservedEvent> = heads.iter().map(observed).collect();
-    let breakdown = day::breakdown(&date, day_start, day_end, tz, &activity, &[], &events, Vec::new(), &notes);
+    let breakdown = day::breakdown(
+        &date,
+        day_start,
+        day_end,
+        tz,
+        &activity,
+        &[],
+        &events,
+        Vec::new(),
+        &notes,
+    );
     let facts: Vec<Fact> = [
         active_fact(&breakdown),
         longest_fact(&breakdown, &blocks),
@@ -1498,12 +1784,20 @@ pub fn overview(
         strip,
         kinds: legend
             .into_iter()
-            .map(|(k, us)| LegendKind { kind: k.as_str().into(), kind_label: k.label().into(), duration_us: us })
+            .map(|(k, us)| LegendKind {
+                kind: k.as_str().into(),
+                kind_label: k.label().into(),
+                duration_us: us,
+            })
             .collect(),
         blocks,
         gaps,
         facts,
-        searches: newest_first.iter().take(DAY_SEARCHES).map(Search::from).collect(),
+        searches: newest_first
+            .iter()
+            .take(DAY_SEARCHES)
+            .map(Search::from)
+            .collect(),
         account: account_of(store, &date)?,
         ai_knows: ai_knows(store, now_us, env.hook_installed),
     })
@@ -1511,7 +1805,12 @@ pub fn overview(
 
 fn now_card(block: &Block, last_saved_us: u64, block_id: Option<u64>, since: Option<u64>) -> Now {
     Now {
-        state: if since.is_some() { "in_progress" } else { "last_saved" }.into(),
+        state: if since.is_some() {
+            "in_progress"
+        } else {
+            "last_saved"
+        }
+        .into(),
         since_us: since,
         start_us: Some(block.start_us),
         last_saved_us: Some(last_saved_us),
@@ -1538,11 +1837,19 @@ mod tests {
 
     fn store() -> (tempfile::TempDir, SqlCipherBrainStore) {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqlCipherBrainStore::new(&dir.path().join("b.sqlite"), &DbKey::from_bytes([5; 32])).unwrap();
+        let store =
+            SqlCipherBrainStore::new(&dir.path().join("b.sqlite"), &DbKey::from_bytes([5; 32]))
+                .unwrap();
         (dir, store)
     }
 
-    fn put(store: &SqlCipherBrainStore, ts_us: u64, app: &str, title: &str, url: Option<&str>) -> i64 {
+    fn put(
+        store: &SqlCipherBrainStore,
+        ts_us: u64,
+        app: &str,
+        title: &str,
+        url: Option<&str>,
+    ) -> i64 {
         let event = Event {
             id: EventId(0),
             ts_us,
@@ -1558,17 +1865,32 @@ mod tests {
             tab_id: None,
             embedding: None,
         };
-        let source = if url.is_some() { EventSource::BrowserPage } else { EventSource::ScreenOcr };
+        let source = if url.is_some() {
+            EventSource::BrowserPage
+        } else {
+            EventSource::ScreenOcr
+        };
         i64::try_from(store.put_event_with_source(&event, source).unwrap().0).unwrap()
     }
 
     /// One moment a minute in `app`/`title` from `from` for `minutes`.
-    fn run(store: &SqlCipherBrainStore, from: u64, minutes: u64, app: &str, title: &str) -> Vec<i64> {
-        (0..minutes).map(|m| put(store, from + m * MIN, app, title, None)).collect()
+    fn run(
+        store: &SqlCipherBrainStore,
+        from: u64,
+        minutes: u64,
+        app: &str,
+        title: &str,
+    ) -> Vec<i64> {
+        (0..minutes)
+            .map(|m| put(store, from + m * MIN, app, title, None))
+            .collect()
     }
 
     fn env(remembering: bool) -> OverviewEnv {
-        OverviewEnv { remembering, hook_installed: false }
+        OverviewEnv {
+            remembering,
+            hook_installed: false,
+        }
     }
 
     fn day(store: &SqlCipherBrainStore, now: u64, remembering: bool) -> Overview {
@@ -1601,7 +1923,10 @@ mod tests {
         assert_eq!(o.now.block_id, Some(block.id));
         assert_eq!(o.now.last_saved_us, Some(start + 19 * MIN));
         assert_eq!(o.now.app_name.as_deref(), Some("Notes"));
-        assert_eq!(o.now.reopen.as_ref().map(|r| r.app_name.as_str()), Some("Notes"));
+        assert_eq!(
+            o.now.reopen.as_ref().map(|r| r.app_name.as_str()),
+            Some("Notes")
+        );
     }
 
     #[test]
@@ -1614,7 +1939,14 @@ mod tests {
         assert_eq!(o.now.since_us, None);
         assert!(!o.blocks[0].in_progress);
         // A past day has no Right now card.
-        let past = overview(&store, Some("2027-01-15"), 0, DAY0 + 3 * DAY_US_TEST, &env(true)).unwrap();
+        let past = overview(
+            &store,
+            Some("2027-01-15"),
+            0,
+            DAY0 + 3 * DAY_US_TEST,
+            &env(true),
+        )
+        .unwrap();
         assert!(!past.is_today);
         assert_eq!(past.now.state, "none");
         assert_eq!(past.blocks.len(), 1);
@@ -1641,14 +1973,27 @@ mod tests {
         write(now - 10 * 1_000_000, None, None);
         assert!(remembering_now(&receipt, now));
         write(now - 10 * 60 * 1_000_000, None, None);
-        assert!(!remembering_now(&receipt, now), "paused: the receipt stops being written");
+        assert!(
+            !remembering_now(&receipt, now),
+            "paused: the receipt stops being written"
+        );
         write(now - 10 * 1_000_000, Some("excluded_app"), None);
-        assert!(!remembering_now(&receipt, now), "an excluded app is in front");
+        assert!(
+            !remembering_now(&receipt, now),
+            "an excluded app is in front"
+        );
         write(now - 10 * 1_000_000, None, Some("capture_disabled"));
         assert!(!remembering_now(&receipt, now));
         let db = dir.path().join("b.sqlite");
         write(now - 10 * 1_000_000, Some("secure_input"), None);
-        let o = overview(&store, None, 0, now, &OverviewEnv::read(&db, None, None, now)).unwrap();
+        let o = overview(
+            &store,
+            None,
+            0,
+            now,
+            &OverviewEnv::read(&db, None, None, now),
+        )
+        .unwrap();
         assert_eq!(o.now.state, "last_saved");
         assert!(o.blocks.iter().all(|b| !b.in_progress));
     }
@@ -1658,11 +2003,23 @@ mod tests {
         let (_dir, store) = store();
         let a = DAY0 + 9 * 60 * MIN;
         run(&store, a, 12, "com.microsoft.VSCode", "tax.rs — shop");
-        run(&store, a + 12 * MIN, 5, "com.apple.Safari", "Rounding · Dev Notes");
+        run(
+            &store,
+            a + 12 * MIN,
+            5,
+            "com.apple.Safari",
+            "Rounding · Dev Notes",
+        );
         // A gap of 20 minutes, then a browser tab that is mail.
         let b = a + 37 * MIN;
         for m in 0..10 {
-            put(&store, b + m * MIN, "com.google.Chrome", "Inbox (3)", Some("https://mail.google.com/mail/u/0"));
+            put(
+                &store,
+                b + m * MIN,
+                "com.google.Chrome",
+                "Inbox (3)",
+                Some("https://mail.google.com/mail/u/0"),
+            );
         }
         let o = day(&store, b + 60 * MIN, false);
         assert_eq!(o.blocks.len(), 2);
@@ -1670,14 +2027,30 @@ mod tests {
         assert_eq!(o.blocks[0].kinds[0].kind, "code");
         assert_eq!(o.blocks[0].kinds[1].kind, "research");
         assert!(!o.blocks[0].mixed);
-        assert_eq!(o.blocks[1].kind, "communication", "a mail tab is communication");
-        assert_eq!(o.gaps, vec![Span { start_us: o.blocks[0].end_us, end_us: o.blocks[1].start_us }]);
+        assert_eq!(
+            o.blocks[1].kind, "communication",
+            "a mail tab is communication"
+        );
+        assert_eq!(
+            o.gaps,
+            vec![Span {
+                start_us: o.blocks[0].end_us,
+                end_us: o.blocks[1].start_us
+            }]
+        );
         assert!(!o.blocks[1].touches_previous);
         let legend: Vec<&str> = o.kinds.iter().map(|k| k.kind.as_str()).collect();
-        assert_eq!(legend, vec!["code", "communication"], "the legend comes from the sessions");
+        assert_eq!(
+            legend,
+            vec!["code", "communication"],
+            "the legend comes from the sessions"
+        );
         // 09:00 to now (10:37) is under four hours: the strip starts earlier.
         let strip = o.strip.unwrap();
-        assert_eq!((strip.start_us, strip.end_us), (DAY0 + 7 * 60 * MIN, DAY0 + 11 * 60 * MIN));
+        assert_eq!(
+            (strip.start_us, strip.end_us),
+            (DAY0 + 7 * 60 * MIN, DAY0 + 11 * 60 * MIN)
+        );
         assert!(strip.start_us >= o.day_start_us && strip.end_us <= o.day_end_us);
     }
 
@@ -1713,19 +2086,44 @@ mod tests {
             generated_us: start + 25 * MIN,
             model: model.into(),
         };
-        store.put_session_note(&note("Plan names", "You seemed stuck on the price. You kept the shortest name.", "apple-foundation-models")).unwrap();
+        store
+            .put_session_note(&note(
+                "Plan names",
+                "You seemed stuck on the price. You kept the shortest name.",
+                "apple-foundation-models",
+            ))
+            .unwrap();
         let o = day(&store, start + 60 * MIN, false);
         let block = &o.blocks[0];
         assert!(!block.provisional);
         assert_eq!(block.title, "Plan names");
         assert_eq!(block.written_by, "apple-foundation-models");
-        assert_eq!(block.noticed.as_ref().unwrap().text, "You kept the shortest name.", "the judging sentence is dropped");
+        assert_eq!(
+            block.noticed.as_ref().unwrap().text,
+            "You kept the shortest name.",
+            "the judging sentence is dropped"
+        );
         // A title that judges is replaced by the measured one; a measured note is never shown.
-        store.put_session_note(&note("Distracted pricing", "Nothing notable.", "apple-foundation-models")).unwrap();
+        store
+            .put_session_note(&note(
+                "Distracted pricing",
+                "Nothing notable.",
+                "apple-foundation-models",
+            ))
+            .unwrap();
         let o = day(&store, start + 60 * MIN, false);
-        assert_eq!((o.blocks[0].title.as_str(), o.blocks[0].written_by.as_str()), ("Pricing page draft", "measured"));
+        assert_eq!(
+            (o.blocks[0].title.as_str(), o.blocks[0].written_by.as_str()),
+            ("Pricing page draft", "measured")
+        );
         assert!(o.blocks[0].noticed.is_none());
-        store.put_session_note(&note("Notes — Pricing page draft", "Paused 4 min with no input.", "measured")).unwrap();
+        store
+            .put_session_note(&note(
+                "Notes — Pricing page draft",
+                "Paused 4 min with no input.",
+                "measured",
+            ))
+            .unwrap();
         let o = day(&store, start + 60 * MIN, false);
         assert_eq!(o.blocks[0].title, "Pricing page draft");
         assert!(o.blocks[0].noticed.is_none());
@@ -1746,9 +2144,18 @@ mod tests {
             .collect();
         let events: Vec<ObservedEvent> = segs
             .iter()
-            .map(|s| ObservedEvent { id: s.events[0], ts_us: s.start_us, app_bundle_id: Some(s.app.clone()), window_title: s.title.clone(), url: None, text: String::new(), source: "screen_ocr".into() })
+            .map(|s| ObservedEvent {
+                id: s.events[0],
+                ts_us: s.start_us,
+                app_bundle_id: Some(s.app.clone()),
+                window_title: s.title.clone(),
+                url: None,
+                text: String::new(),
+                source: "screen_ocr".into(),
+            })
             .collect();
-        let observed_segments = observe::segments(&events, &[], segs.last().map_or(0, |s| s.end_us));
+        let observed_segments =
+            observe::segments(&events, &[], segs.last().map_or(0, |s| s.end_us));
         let signals = observe::signals(&events, &observed_segments, &[]);
         Draft {
             own_start_us: 0,
@@ -1768,13 +2175,29 @@ mod tests {
         let figma = ("com.figma.Desktop", "Trailhead pricing v3");
         let notes = ("com.apple.Notes", "Pricing page draft");
         let notes_b = ("com.apple.Notes", "Other draft");
-        let alternate = |n: usize, a, b| (0..=n).map(|i| if i % 2 == 0 { a } else { b }).collect::<Vec<_>>();
+        let alternate = |n: usize, a, b| {
+            (0..=n)
+                .map(|i| if i % 2 == 0 { a } else { b })
+                .collect::<Vec<_>>()
+        };
         let cases: Vec<(Vec<(&str, &str)>, u32, Vec<&str>)> = vec![
             // Four switches between two apps: said; three: not.
-            (alternate(4, figma, notes), 0, vec!["You switched between Figma and Notes four times."]),
+            (
+                alternate(4, figma, notes),
+                0,
+                vec!["You switched between Figma and Notes four times."],
+            ),
             (alternate(3, figma, notes), 0, vec![]),
-            (alternate(5, notes, figma), 0, vec!["You switched between Notes and Figma five times."]),
-            (alternate(10, figma, notes), 0, vec!["You switched between Figma and Notes 10 times."]),
+            (
+                alternate(5, notes, figma),
+                0,
+                vec!["You switched between Notes and Figma five times."],
+            ),
+            (
+                alternate(10, figma, notes),
+                0,
+                vec!["You switched between Figma and Notes 10 times."],
+            ),
             // Two windows of one app: cut.
             (alternate(6, notes, notes_b), 0, vec![]),
             // Reworded searches: twice and up, never once.
@@ -1783,10 +2206,20 @@ mod tests {
             (vec![notes], 3, vec!["You reworded a search three times."]),
             (vec![notes], 12, vec!["You reworded a search 12 times."]),
             // Both, in order.
-            (alternate(4, figma, notes), 2, vec!["You switched between Figma and Notes four times.", "You reworded a search twice."]),
+            (
+                alternate(4, figma, notes),
+                2,
+                vec![
+                    "You switched between Figma and Notes four times.",
+                    "You reworded a search twice.",
+                ],
+            ),
         ];
         for (segments, reworded, expected) in cases {
-            let said: Vec<String> = block_sentences(&draft_with(segments.clone(), reworded)).into_iter().map(|s| s.text.template).collect();
+            let said: Vec<String> = block_sentences(&draft_with(segments.clone(), reworded))
+                .into_iter()
+                .map(|s| s.text.template)
+                .collect();
             assert_eq!(said, expected, "{segments:?} reworded {reworded}");
         }
     }
@@ -1795,17 +2228,38 @@ mod tests {
     fn no_template_contains_a_judgement_word_or_a_raw_count() {
         let mut templates: Vec<String> = Vec::new();
         for n in [2usize, 3, 4, 9, 10, 12] {
-            templates.push(format!("You switched between Figma and Notes {}.", times_word(n)));
+            templates.push(format!(
+                "You switched between Figma and Notes {}.",
+                times_word(n)
+            ));
             templates.push(format!("You reworded a search {}.", times_word(n)));
-            templates.push(format!("You came back to “Pricing page draft” {}.", times_word(n)));
+            templates.push(format!(
+                "You came back to “Pricing page draft” {}.",
+                times_word(n)
+            ));
             templates.extend(searched_fact(n).map(|f| f.text.template));
         }
         templates.extend(searched_fact(1).map(|f| f.text.template));
         templates.push("Active {active}, {first} to {last}.".into());
         templates.push("Active about {active}, {first} to {last}.".into());
         for kind in WorkKind::ALL {
-            let mut breakdown = day::breakdown("2027-01-15", DAY0, DAY0 + DAY_US_TEST, 0, &[], &[], &[], Vec::new(), &[]);
-            breakdown.focus_blocks = vec![day::FocusBlock { start_us: DAY0, end_us: DAY0 + 50 * MIN, kind, app: "Notes".into() }];
+            let mut breakdown = day::breakdown(
+                "2027-01-15",
+                DAY0,
+                DAY0 + DAY_US_TEST,
+                0,
+                &[],
+                &[],
+                &[],
+                Vec::new(),
+                &[],
+            );
+            breakdown.focus_blocks = vec![day::FocusBlock {
+                start_us: DAY0,
+                end_us: DAY0 + 50 * MIN,
+                kind,
+                app: "Notes".into(),
+            }];
             templates.extend(longest_fact(&breakdown, &[]).map(|f| f.text.template));
         }
         templates.push(RecentWorkProbe::line());
@@ -1816,36 +2270,67 @@ mod tests {
                 assert!(!lower.contains(counted), "{template} mentions {counted}");
             }
             // Counts under ten are words; times and durations are placeholders.
-            assert!(!template.chars().any(|c| c.is_ascii_digit()) || template.contains("10") || template.contains("12"), "{template}");
+            assert!(
+                !template.chars().any(|c| c.is_ascii_digit())
+                    || template.contains("10")
+                    || template.contains("12"),
+                "{template}"
+            );
             let chars: Vec<char> = template.chars().collect();
             assert!(
-                !chars.windows(3).any(|w| w[0].is_ascii_digit() && w[1] == ':' && w[2].is_ascii_digit()),
+                !chars
+                    .windows(3)
+                    .any(|w| w[0].is_ascii_digit() && w[1] == ':' && w[2].is_ascii_digit()),
                 "no clock time in {template}"
             );
         }
-        assert!(!template_passes_word_check("You only switched once."), "templates are held to the long list");
-        assert!(passes_word_check("You only switched once."), "model prose is not");
+        assert!(
+            !template_passes_word_check("You only switched once."),
+            "templates are held to the long list"
+        );
+        assert!(
+            passes_word_check("You only switched once."),
+            "model prose is not"
+        );
     }
 
     /// The fixed words of a recent work line.
     struct RecentWorkProbe;
     impl RecentWorkProbe {
         fn line() -> String {
-            query::RecentWork { start_us: 0, end_us: 1, title: "Title".into(), detail: Some("Detail.".into()) }.template().template
+            query::RecentWork {
+                start_us: 0,
+                end_us: 1,
+                title: "Title".into(),
+                detail: Some("Detail.".into()),
+            }
+            .template()
+            .template
         }
     }
 
     #[test]
     fn the_word_check_matches_whole_words_and_drops_only_failing_sentences() {
-        assert!(passes_word_check("You adjusted the commonly used layout."), "substrings do not match");
+        assert!(
+            passes_word_check("You adjusted the commonly used layout."),
+            "substrings do not match"
+        );
         assert!(!passes_word_check("You seemed unsure."));
         assert!(!passes_word_check("It was too much."));
         assert!(passes_word_check("It was too late, much later."));
-        assert!(!passes_word_check("You paused for 3 minutes between searches."));
+        assert!(!passes_word_check(
+            "You paused for 3 minutes between searches."
+        ));
         assert!(!passes_word_check("You made 12 clicks in Figma."));
         assert!(passes_word_check("You clicked through the checkout."));
-        assert_eq!(model_prose("You wrote tests. You probably got frustrated! Then you shipped it."), "You wrote tests. Then you shipped it.");
-        assert_eq!(model_prose("Version 2.5 shipped. You should rest."), "Version 2.5 shipped.");
+        assert_eq!(
+            model_prose("You wrote tests. You probably got frustrated! Then you shipped it."),
+            "You wrote tests. Then you shipped it."
+        );
+        assert_eq!(
+            model_prose("Version 2.5 shipped. You should rest."),
+            "Version 2.5 shipped."
+        );
     }
 
     #[test]
@@ -1868,17 +2353,33 @@ mod tests {
             run(&store, at + 10 * MIN, 5, "com.microsoft.VSCode", "tax.rs");
             at += 60 * MIN;
         }
-        let searched = put(&store, at, "com.google.Chrome", "rust rounding - Google Search", Some("https://www.google.com/search?q=rust+rounding"));
+        let searched = put(
+            &store,
+            at,
+            "com.google.Chrome",
+            "rust rounding - Google Search",
+            Some("https://www.google.com/search?q=rust+rounding"),
+        );
         store.backfill_search_queries(0, 100).unwrap();
         let o = day(&store, at + 60 * MIN, false);
         let ids: Vec<&str> = o.facts.iter().map(|f| f.id.as_str()).collect();
-        assert_eq!(ids, vec!["active", "returned", "searched"], "no 25-minute run, so no longest");
+        assert_eq!(
+            ids,
+            vec!["active", "returned", "searched"],
+            "no 25-minute run, so no longest"
+        );
         let returned = &o.facts[1];
-        assert_eq!(returned.text.template, "You came back to “Pricing page draft” twice.");
+        assert_eq!(
+            returned.text.template,
+            "You came back to “Pricing page draft” twice."
+        );
         assert_eq!(returned.action.as_ref().unwrap().block_ids.len(), 3);
         assert_eq!(o.facts[2].text.template, "You looked up one thing.");
         assert_eq!(o.searches[0].event_id, searched);
-        assert_eq!(o.facts[0].text.template, "Active about {active}, {first} to {last}.", "estimated from moments");
+        assert_eq!(
+            o.facts[0].text.template, "Active about {active}, {first} to {last}.",
+            "estimated from moments"
+        );
         assert!(o.facts.len() <= 4);
     }
 
@@ -1886,7 +2387,13 @@ mod tests {
     fn an_empty_day_has_no_broken_text() {
         let (_dir, store) = store();
         let o = day(&store, DAY0 + 10 * 60 * MIN, true);
-        assert!(o.blocks.is_empty() && o.facts.is_empty() && o.searches.is_empty() && o.kinds.is_empty() && o.gaps.is_empty());
+        assert!(
+            o.blocks.is_empty()
+                && o.facts.is_empty()
+                && o.searches.is_empty()
+                && o.kinds.is_empty()
+                && o.gaps.is_empty()
+        );
         assert!(o.strip.is_none() && o.account.is_none());
         assert_eq!(o.now.state, "none");
         assert_eq!(o.model_status.state, "unknown");
@@ -1912,13 +2419,30 @@ mod tests {
         let (_dir, store) = store();
         let start = DAY0 + 9 * 60 * MIN;
         for m in 0..40 {
-            let (app, title) = if (m / 5) % 2 == 0 { ("com.figma.Desktop", "Trailhead pricing v3") } else { ("com.apple.Notes", "Pricing page draft") };
+            let (app, title) = if (m / 5) % 2 == 0 {
+                ("com.figma.Desktop", "Trailhead pricing v3")
+            } else {
+                ("com.apple.Notes", "Pricing page draft")
+            };
             put(&store, start + m * MIN, app, title, None);
         }
-        let e = put(&store, start + 41 * MIN, "com.apple.Notes", "Pricing page draft", None);
+        let e = put(
+            &store,
+            start + 41 * MIN,
+            "com.apple.Notes",
+            "Pricing page draft",
+            None,
+        );
         let id = store
             .insert_proposition(
-                &NewProposition { text: "Sam is redesigning the pricing page.".into(), reasoning: String::new(), kind: PropositionKind::Project, confidence: 0.8, decay: 0.3, model: "t".into() },
+                &NewProposition {
+                    text: "Sam is redesigning the pricing page.".into(),
+                    reasoning: String::new(),
+                    kind: PropositionKind::Project,
+                    confidence: 0.8,
+                    decay: 0.3,
+                    model: "t".into(),
+                },
                 &[e],
                 start,
             )
@@ -1927,22 +2451,59 @@ mod tests {
         assert_eq!(o.model_status.state, "unknown");
         assert!(o.account.is_none());
         assert!(!o.blocks.is_empty() && !o.facts.is_empty());
-        assert!(o.blocks.iter().all(|b| !b.title.is_empty() && b.written_by == "measured"));
-        assert!(o.blocks[0].sentences.iter().any(|s| s.id == "switched_between"));
-        assert_eq!(o.ai_knows.about_you.iter().map(|a| a.id).collect::<Vec<_>>(), vec![id]);
+        assert!(o
+            .blocks
+            .iter()
+            .all(|b| !b.title.is_empty() && b.written_by == "measured"));
+        assert!(o.blocks[0]
+            .sentences
+            .iter()
+            .any(|s| s.id == "switched_between"));
+        assert_eq!(
+            o.ai_knows
+                .about_you
+                .iter()
+                .map(|a| a.id)
+                .collect::<Vec<_>>(),
+            vec![id]
+        );
         assert!(!o.ai_knows.hook_installed);
         for text in texts(&o) {
             assert!(!text.is_empty());
         }
         // Model status, once the worker has checked.
-        ModelStatus::from_check(&Err(MindCallError::Unavailable("apple_intelligence_off".into())), start).write(&store).unwrap();
+        ModelStatus::from_check(
+            &Err(MindCallError::Unavailable("apple_intelligence_off".into())),
+            start,
+        )
+        .write(&store)
+        .unwrap();
         let o = day(&store, start + 3 * 60 * MIN, false);
-        assert_eq!((o.model_status.state.as_str(), o.model_status.reason.as_deref()), ("unavailable", Some("apple_intelligence_off")));
-        store.set_understanding_state(ModelStatus::KEY, "{\"state\":\"warming\"}").unwrap();
-        assert_eq!(ModelStatus::read(&store), ModelStatus::unknown(), "an unknown state reads as unknown");
+        assert_eq!(
+            (
+                o.model_status.state.as_str(),
+                o.model_status.reason.as_deref()
+            ),
+            ("unavailable", Some("apple_intelligence_off"))
+        );
+        store
+            .set_understanding_state(ModelStatus::KEY, "{\"state\":\"warming\"}")
+            .unwrap();
+        assert_eq!(
+            ModelStatus::read(&store),
+            ModelStatus::unknown(),
+            "an unknown state reads as unknown"
+        );
     }
 
-    fn put_with_screenshot(store: &SqlCipherBrainStore, ts_us: u64, app: &str, title: &str, source: EventSource, n: u8) -> i64 {
+    fn put_with_screenshot(
+        store: &SqlCipherBrainStore,
+        ts_us: u64,
+        app: &str,
+        title: &str,
+        source: EventSource,
+        n: u8,
+    ) -> i64 {
         let event = Event {
             id: EventId(0),
             ts_us,
@@ -1969,28 +2530,76 @@ mod tests {
         for m in 0..20 {
             let (title, ts) = ("Pricing page draft", start + m * MIN);
             match m {
-                3 => put_with_screenshot(&store, ts, "com.apple.Notes", title, EventSource::ScreenOcr, 1),
-                12 => put_with_screenshot(&store, ts, "com.apple.Notes", title, EventSource::ScreenOcr, 2),
+                3 => put_with_screenshot(
+                    &store,
+                    ts,
+                    "com.apple.Notes",
+                    title,
+                    EventSource::ScreenOcr,
+                    1,
+                ),
+                12 => put_with_screenshot(
+                    &store,
+                    ts,
+                    "com.apple.Notes",
+                    title,
+                    EventSource::ScreenOcr,
+                    2,
+                ),
                 _ => put(&store, ts, "com.apple.Notes", title, None),
             };
         }
-        let figma = put_with_screenshot(&store, start + 20 * MIN, "com.figma.Desktop", "Trailhead pricing v3", EventSource::ScreenOcr, 3);
-        run(&store, start + 21 * MIN, 5, "com.figma.Desktop", "Trailhead pricing v3");
+        let figma = put_with_screenshot(
+            &store,
+            start + 20 * MIN,
+            "com.figma.Desktop",
+            "Trailhead pricing v3",
+            EventSource::ScreenOcr,
+            3,
+        );
+        run(
+            &store,
+            start + 21 * MIN,
+            5,
+            "com.figma.Desktop",
+            "Trailhead pricing v3",
+        );
         // A window beside Notes, right at the middle of its time, with a
         // screenshot: another app, so never chosen.
-        let beside = put_with_screenshot(&store, start + 10 * MIN, "com.tinyspeck.slackmacgap", "#design", EventSource::ScreenContext, 4);
+        let beside = put_with_screenshot(
+            &store,
+            start + 10 * MIN,
+            "com.tinyspeck.slackmacgap",
+            "#design",
+            EventSource::ScreenContext,
+            4,
+        );
         let o = day(&store, start + 3 * 60 * MIN, false);
         assert_eq!(o.blocks.len(), 1);
         let shown = o.blocks[0].screenshot_event_id.expect("a screenshot");
         let heads = store.event_heads(&[shown]).unwrap();
-        assert_eq!(heads[0].ts_us, start + 12 * MIN, "the Notes screenshot nearest the middle of its own time");
+        assert_eq!(
+            heads[0].ts_us,
+            start + 12 * MIN,
+            "the Notes screenshot nearest the middle of its own time"
+        );
         assert_ne!(shown, figma);
         assert_ne!(shown, beside);
         // With no screenshot of the longest window, none of another app is shown.
         let (_dir2, other) = self::store();
         run(&other, start, 20, "com.apple.Notes", "Pricing page draft");
-        put_with_screenshot(&other, start + 10 * MIN, "com.tinyspeck.slackmacgap", "#design", EventSource::ScreenContext, 5);
-        assert_eq!(day(&other, start + 3 * 60 * MIN, false).blocks[0].screenshot_event_id, None);
+        put_with_screenshot(
+            &other,
+            start + 10 * MIN,
+            "com.tinyspeck.slackmacgap",
+            "#design",
+            EventSource::ScreenContext,
+            5,
+        );
+        assert_eq!(
+            day(&other, start + 3 * 60 * MIN, false).blocks[0].screenshot_event_id,
+            None
+        );
     }
 
     #[test]
@@ -2012,7 +2621,9 @@ mod tests {
                 end_us: start + 19 * MIN,
                 title: "Code — tax.rs — shop".into(),
                 surface: "Typing in Code (tax.rs — shop)".into(),
-                beneath: "Paused 4 min with no input in Code — tax.rs — shop; had an error on screen.".into(),
+                beneath:
+                    "Paused 4 min with no input in Code — tax.rs — shop; had an error on screen."
+                        .into(),
                 signals: signals.to_string(),
                 event_count: 20,
                 generated_us: start + 25 * MIN,
@@ -2021,7 +2632,11 @@ mod tests {
             .unwrap();
         let o = day(&store, start + 60 * MIN, false);
         assert_eq!(o.blocks[0].kind, "code");
-        assert!(o.blocks[0].sentences.is_empty(), "{:?}", o.blocks[0].sentences);
+        assert!(
+            o.blocks[0].sentences.is_empty(),
+            "{:?}",
+            o.blocks[0].sentences
+        );
         assert!(o.blocks[0].noticed.is_none());
         let json = serde_json::to_string(&o).unwrap().to_lowercase();
         for said in ["error", "paus", "keys\":", "clicks"] {

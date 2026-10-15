@@ -1481,10 +1481,7 @@ pub fn render_handoff_with_block(
         return (render_empty_handoff(&state.name), Vec::new());
     }
     let tz = &clock.tz;
-    let mut out = format!(
-        "{DISCLAIMER}\n\n# {} ({})\n",
-        state.name, state.root
-    );
+    let mut out = format!("{DISCLAIMER}\n\n# {} ({})\n", state.name, state.root);
     if let (Some(last_ts), Some(last_agent)) = (state.last_ts_us, &state.last_agent) {
         let _ = writeln!(
             out,

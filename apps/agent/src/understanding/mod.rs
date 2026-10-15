@@ -133,7 +133,13 @@ impl Understanding {
         user_name: String,
         inbox: Option<PathBuf>,
     ) -> Self {
-        Self { store, mind, tz_offset_secs, user_name, inbox }
+        Self {
+            store,
+            mind,
+            tz_offset_secs,
+            user_name,
+            inbox,
+        }
     }
 
     /// The user's first name from the account's full name, or empty.
@@ -160,10 +166,18 @@ impl Understanding {
 
     /// After a cycle: store what a cycle that asked the model found, and put
     /// back `last` when a rebuild cleared it. Returns the status now stored.
-    pub fn record_model_status(&self, stats: &CycleStats, last: overview::ModelStatus, now_us: u64) -> overview::ModelStatus {
+    pub fn record_model_status(
+        &self,
+        stats: &CycleStats,
+        last: overview::ModelStatus,
+        now_us: u64,
+    ) -> overview::ModelStatus {
         let status = if stats.model_attempted {
             match &stats.model_unavailable {
-                Some(reason) => overview::ModelStatus::from_check(&Err(MindCallError::Unavailable(reason.clone())), now_us),
+                Some(reason) => overview::ModelStatus::from_check(
+                    &Err(MindCallError::Unavailable(reason.clone())),
+                    now_us,
+                ),
                 None => overview::ModelStatus::from_check(&Ok(()), now_us),
             }
         } else {
@@ -188,18 +202,29 @@ impl Understanding {
         }
         if self.store.understanding_state(PIPELINE_KEY)?.as_deref() != Some(PIPELINE_VERSION) {
             self.store.reset_understanding()?;
-            self.store.set_understanding_state(PIPELINE_KEY, PIPELINE_VERSION)?;
+            self.store
+                .set_understanding_state(PIPELINE_KEY, PIPELINE_VERSION)?;
         }
-        let after: i64 = self.store.understanding_state(SEARCH_CURSOR)?.and_then(|v| v.parse().ok()).unwrap_or(0);
+        let after: i64 = self
+            .store
+            .understanding_state(SEARCH_CURSOR)?
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
         let (added, last) = self.store.backfill_search_queries(after.max(0), 5_000)?;
         stats.searches = added;
         if last != after {
-            self.store.set_understanding_state(SEARCH_CURSOR, &last.to_string())?;
+            self.store
+                .set_understanding_state(SEARCH_CURSOR, &last.to_string())?;
         }
         self.run_sessions_and_days(now_us, max_sessions, stats)
     }
 
-    fn run_sessions_and_days(&self, now_us: u64, max_sessions: usize, mut stats: CycleStats) -> Result<CycleStats, StoreError> {
+    fn run_sessions_and_days(
+        &self,
+        now_us: u64,
+        max_sessions: usize,
+        mut stats: CycleStats,
+    ) -> Result<CycleStats, StoreError> {
         let from: u64 = self
             .store
             .understanding_state(SESSIONS_CURSOR)?
@@ -220,14 +245,17 @@ impl Understanding {
             self.note_session(&events, *span, now_us, &mut stats)?;
             processed += 1;
             let through = events[span.end - 1].ts_us.max(span.end_us) + 1;
-            self.store.set_understanding_state(SESSIONS_CURSOR, &through.to_string())?;
+            self.store
+                .set_understanding_state(SESSIONS_CURSOR, &through.to_string())?;
         }
         if processed > 0 || stats.searches > 0 {
-            let today = local_date_string(i64::try_from(now_us / 1_000_000).unwrap_or(0), self.tz_offset_secs);
-            let stale = self
-                .store
-                .day_report(&today)?
-                .map_or(true, |r| now_us.saturating_sub(r.generated_us) >= DAY_REFRESH_US);
+            let today = local_date_string(
+                i64::try_from(now_us / 1_000_000).unwrap_or(0),
+                self.tz_offset_secs,
+            );
+            let stale = self.store.day_report(&today)?.map_or(true, |r| {
+                now_us.saturating_sub(r.generated_us) >= DAY_REFRESH_US
+            });
             if stale && self.write_day(&today, now_us).is_ok() {
                 stats.days += 1;
             }
@@ -253,12 +281,16 @@ impl Understanding {
         stats: &mut CycleStats,
     ) -> Result<(), StoreError> {
         let slice = &events[span.start..span.end];
-        let counts = self.store.interaction_counts_in_range(span.start_us, span.end_us + 1)?;
+        let counts = self
+            .store
+            .interaction_counts_in_range(span.start_us, span.end_us + 1)?;
         let segments = observe::segments(slice, &counts, span.end_us);
         if segments.is_empty() {
             return Ok(());
         }
-        let mut searches = self.store.search_queries_in_range(span.start_us, span.end_us + 1, 50)?;
+        let mut searches =
+            self.store
+                .search_queries_in_range(span.start_us, span.end_us + 1, 50)?;
         searches.reverse();
         let signals = observe::signals(slice, &segments, &searches);
         let observation = format!(
@@ -277,7 +309,14 @@ impl Understanding {
         })
         .to_string();
 
-        let mut note = measured_note(&segments, &signals, span, slice.len(), now_us, &signals_json);
+        let mut note = measured_note(
+            &segments,
+            &signals,
+            span,
+            slice.len(),
+            now_us,
+            &signals_json,
+        );
         if duration >= MIN_MODEL_SESSION_US {
             stats.model_attempted = true;
             match self.mind.call::<_, EpisodeOut>(
@@ -307,7 +346,14 @@ impl Understanding {
                     Ok(drafts) => {
                         let drafts = gum::specific(drafts, &observation, &self.user_name);
                         let evidence = observe::evidence(&segments, 8);
-                        match gum::integrate(&self.store, &self.mind, &self.user_name, &drafts, &evidence, now_us) {
+                        match gum::integrate(
+                            &self.store,
+                            &self.mind,
+                            &self.user_name,
+                            &drafts,
+                            &evidence,
+                            now_us,
+                        ) {
                             Ok(done) => {
                                 stats.propositions_added += done.added;
                                 stats.propositions_revised += done.revised;
@@ -319,7 +365,9 @@ impl Understanding {
                             Err(gum::GumError::Mind(_)) => {}
                         }
                     }
-                    Err(MindCallError::Unavailable(reason)) => stats.model_unavailable = Some(reason),
+                    Err(MindCallError::Unavailable(reason)) => {
+                        stats.model_unavailable = Some(reason)
+                    }
                     Err(_) => {}
                 }
             }
@@ -336,33 +384,54 @@ impl Understanding {
     pub fn day(&self, date_local: &str, _now_us: u64) -> Result<Day, StoreError> {
         let start_secs = local_date_start_secs(date_local, self.tz_offset_secs)
             .ok_or_else(|| StoreError::InvalidInput("date must be YYYY-MM-DD".into()))?;
-        let start_us = u64::try_from(start_secs).unwrap_or(0).saturating_mul(1_000_000);
+        let start_us = u64::try_from(start_secs)
+            .unwrap_or(0)
+            .saturating_mul(1_000_000);
         let end_us = start_us + 86_400_000_000;
         let mut activity = self.store.activity_intervals_in_range(start_us, end_us)?;
         activity.retain(|a| !a.app_bundle_id.as_deref().is_some_and(apps::is_noise));
         let counts = self.store.interaction_counts_in_range(start_us, end_us)?;
-        let mut events = self.store.observed_events_in_range(start_us, end_us, 50_000)?;
+        let mut events = self
+            .store
+            .observed_events_in_range(start_us, end_us, 50_000)?;
         events.retain(|e| !e.app_bundle_id.as_deref().is_some_and(apps::is_noise));
         let searches = self.store.search_queries_in_range(start_us, end_us, 200)?;
         let notes = self.store.session_notes_in_range(start_us, end_us)?;
         let breakdown = day::breakdown(
-            date_local, start_us, end_us, self.tz_offset_secs, &activity, &counts, &events, searches, &notes,
+            date_local,
+            start_us,
+            end_us,
+            self.tz_offset_secs,
+            &activity,
+            &counts,
+            &events,
+            searches,
+            &notes,
         );
         let stored = self.store.day_report(date_local)?;
         let (narrative, written_by, generated_us) = match stored {
             Some(report) => {
-                let body: serde_json::Value = serde_json::from_str(&report.body).unwrap_or_default();
+                let body: serde_json::Value =
+                    serde_json::from_str(&report.body).unwrap_or_default();
                 (
                     serde_json::from_value::<Narrative>(body["narrative"].clone())
                         .ok()
-                        .map(|narrative| Narrative { suggestion: String::new(), ..narrative }),
+                        .map(|narrative| Narrative {
+                            suggestion: String::new(),
+                            ..narrative
+                        }),
                     Some(report.model),
                     Some(report.generated_us),
                 )
             }
             None => (None, None, None),
         };
-        Ok(Day { breakdown, narrative, written_by, generated_us })
+        Ok(Day {
+            breakdown,
+            narrative,
+            written_by,
+            generated_us,
+        })
     }
 
     /// Write (or rewrite) a day's account.
@@ -377,9 +446,15 @@ impl Understanding {
         let mut joined: Vec<(u64, u64, String, String)> = Vec::new();
         for s in &day.breakdown.sessions {
             let beneath = overview::model_prose(&s.beneath);
-            let beneath = if beneath == "Nothing notable." { String::new() } else { beneath };
+            let beneath = if beneath == "Nothing notable." {
+                String::new()
+            } else {
+                beneath
+            };
             match joined.last_mut() {
-                Some(last) if last.2 == s.title && s.start_us < last.1 + observe::SESSION_GAP_US => {
+                Some(last)
+                    if last.2 == s.title && s.start_us < last.1 + observe::SESSION_GAP_US =>
+                {
                     last.1 = last.1.max(s.end_us);
                     if last.3.is_empty() {
                         last.3 = beneath;
@@ -443,7 +518,10 @@ impl Understanding {
 ///
 /// # Errors
 /// Store failures.
-pub fn mark_noted_through(store: &SqlCipherBrainStore, sessions_through_us: u64) -> Result<(), StoreError> {
+pub fn mark_noted_through(
+    store: &SqlCipherBrainStore,
+    sessions_through_us: u64,
+) -> Result<(), StoreError> {
     store.set_understanding_state(PIPELINE_KEY, PIPELINE_VERSION)?;
     store.set_understanding_state(SESSIONS_CURSOR, &sessions_through_us.to_string())
 }
@@ -456,9 +534,14 @@ fn measured_note(
     now_us: u64,
     signals_json: &str,
 ) -> SessionNote {
-    let longest = segments.iter().max_by_key(|s| s.duration_us()).expect("segments is not empty");
+    let longest = segments
+        .iter()
+        .max_by_key(|s| s.duration_us())
+        .expect("segments is not empty");
     let title = match &longest.title {
-        Some(title) if !title.trim().is_empty() => format!("{} — {}", apps::name(&longest.app), title.trim()),
+        Some(title) if !title.trim().is_empty() => {
+            format!("{} — {}", apps::name(&longest.app), title.trim())
+        }
         _ => apps::name(&longest.app),
     };
     let mut by_window: Vec<&observe::Segment> = segments.iter().collect();
@@ -471,7 +554,10 @@ fn measured_note(
                 "{} in {}{}",
                 s.activity(),
                 apps::name(&s.app),
-                s.title.as_deref().map(|t| format!(" ({})", t.trim())).unwrap_or_default()
+                s.title
+                    .as_deref()
+                    .map(|t| format!(" ({})", t.trim()))
+                    .unwrap_or_default()
             )
         })
         .collect::<Vec<_>>()
@@ -483,7 +569,10 @@ fn measured_note(
         beneath.push(format!("switched between {a} and {b} {n} times"));
     }
     if signals.reworded_searches > 0 {
-        beneath.push(format!("reworded a search {} time(s)", signals.reworded_searches));
+        beneath.push(format!(
+            "reworded a search {} time(s)",
+            signals.reworded_searches
+        ));
     }
     SessionNote {
         start_us: span.start_us,
@@ -504,23 +593,45 @@ fn measured_note(
 
 /// "Saturday, 2026-10-11", so the model knows a weekend from a workday.
 fn weekday_and_date(ts_us: u64, tz_offset_secs: i32) -> String {
-    const DAYS: [&str; 7] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const DAYS: [&str; 7] = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+    ];
     let local = i64::try_from(ts_us / 1_000_000).unwrap_or(0) + i64::from(tz_offset_secs);
     // 1970-01-01 was a Thursday.
     let weekday = DAYS[usize::try_from((local.div_euclid(86_400) + 4).rem_euclid(7)).unwrap_or(0)];
-    format!("{weekday}, {}", local_date_string(local - i64::from(tz_offset_secs), tz_offset_secs))
+    format!(
+        "{weekday}, {}",
+        local_date_string(local - i64::from(tz_offset_secs), tz_offset_secs)
+    )
 }
 
 fn capitalize(text: &str) -> String {
     let mut chars = text.chars();
-    chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
+    chars
+        .next()
+        .map(|c| c.to_uppercase().collect::<String>() + chars.as_str())
+        .unwrap_or_default()
 }
 
 fn measured_narrative(day: &day::DayBreakdown, tz_offset_secs: i32) -> Narrative {
     let hours = day.active_us as f64 / 3_600_000_000.0;
-    let top = day.kinds.first().map(|k| k.label.to_lowercase()).unwrap_or_else(|| "nothing measured".into());
+    let top = day
+        .kinds
+        .first()
+        .map(|k| k.label.to_lowercase())
+        .unwrap_or_else(|| "nothing measured".into());
     let mut insights = Vec::new();
-    if let Some(block) = day.focus_blocks.iter().max_by_key(|b| b.end_us - b.start_us) {
+    if let Some(block) = day
+        .focus_blocks
+        .iter()
+        .max_by_key(|b| b.end_us - b.start_us)
+    {
         insights.push(format!(
             "Longest focus: {}–{}, {} in {}.",
             observe::clock(block.start_us, tz_offset_secs),
@@ -532,7 +643,12 @@ fn measured_narrative(day: &day::DayBreakdown, tz_offset_secs: i32) -> Narrative
     if !day.searches.is_empty() {
         insights.push(format!(
             "You searched for {}.",
-            day.searches.iter().take(4).map(|s| format!("\"{}\"", s.query)).collect::<Vec<_>>().join(", ")
+            day.searches
+                .iter()
+                .take(4)
+                .map(|s| format!("\"{}\"", s.query))
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
     Narrative {
@@ -578,22 +694,43 @@ mod tests {
     #[test]
     fn a_cycle_without_the_model_notes_finished_sessions_and_writes_the_day() {
         let dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(SqlCipherBrainStore::new(&dir.path().join("b.sqlite"), &DbKey::from_bytes([3; 32])).unwrap());
+        let store = Arc::new(
+            SqlCipherBrainStore::new(&dir.path().join("b.sqlite"), &DbKey::from_bytes([3; 32]))
+                .unwrap(),
+        );
         let now = 1_800_000_000_000_000u64;
         let min = 60_000_000u64;
         let start = now - 60 * min;
         store
             .put_event_with_source(
-                &event(start, "com.google.Chrome", "Pricing | Stripe", Some("https://www.google.com/search?q=stripe+per+seat"), "results"),
+                &event(
+                    start,
+                    "com.google.Chrome",
+                    "Pricing | Stripe",
+                    Some("https://www.google.com/search?q=stripe+per+seat"),
+                    "results",
+                ),
                 EventSource::BrowserPage,
             )
             .unwrap();
         store
-            .put_event_with_source(&event(start + 4 * min, "com.apple.Notes", "Launch plan", None, "Team: $18/seat"), EventSource::ScreenOcr)
+            .put_event_with_source(
+                &event(
+                    start + 4 * min,
+                    "com.apple.Notes",
+                    "Launch plan",
+                    None,
+                    "Team: $18/seat",
+                ),
+                EventSource::ScreenOcr,
+            )
             .unwrap();
         // A session that is still going must not be noted yet.
         store
-            .put_event_with_source(&event(now - min, "com.apple.Notes", "Launch plan", None, "more"), EventSource::ScreenOcr)
+            .put_event_with_source(
+                &event(now - min, "com.apple.Notes", "Launch plan", None, "more"),
+                EventSource::ScreenOcr,
+            )
             .unwrap();
         let understanding = Understanding::new(
             Arc::clone(&store),
@@ -617,7 +754,11 @@ mod tests {
         let day = understanding.day(&today, now).unwrap();
         assert_eq!(day.breakdown.basis, "estimated");
         assert_eq!(day.written_by.as_deref(), Some("measured"));
-        assert!(day.narrative.unwrap().headline.contains("hours at the computer"));
+        assert!(day
+            .narrative
+            .unwrap()
+            .headline
+            .contains("hours at the computer"));
         assert_eq!(day.breakdown.searches[0].query, "stripe per seat");
     }
 
@@ -635,21 +776,52 @@ mod tests {
     #[test]
     fn a_cycle_applies_only_the_inbox_it_was_given() {
         let dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(SqlCipherBrainStore::new(&dir.path().join("b.sqlite"), &DbKey::from_bytes([3; 32])).unwrap());
-        store.set_understanding_state(PIPELINE_KEY, PIPELINE_VERSION).unwrap();
-        let e = store.put_event_with_source(&event(1, "com.apple.Notes", "Launch plan", None, "Team: $18/seat"), EventSource::ScreenOcr).unwrap();
-        let id = store.insert_proposition(&claim("Sam is pricing the Team plan"), &[i64::try_from(e.0).unwrap()], 1).unwrap();
+        let store = Arc::new(
+            SqlCipherBrainStore::new(&dir.path().join("b.sqlite"), &DbKey::from_bytes([3; 32]))
+                .unwrap(),
+        );
+        store
+            .set_understanding_state(PIPELINE_KEY, PIPELINE_VERSION)
+            .unwrap();
+        let e = store
+            .put_event_with_source(
+                &event(1, "com.apple.Notes", "Launch plan", None, "Team: $18/seat"),
+                EventSource::ScreenOcr,
+            )
+            .unwrap();
+        let id = store
+            .insert_proposition(
+                &claim("Sam is pricing the Team plan"),
+                &[i64::try_from(e.0).unwrap()],
+                1,
+            )
+            .unwrap();
         let inbox = dir.path().join("inbox");
         std::fs::create_dir(&inbox).unwrap();
         let file = inbox.join("1-1.json");
         std::fs::write(&file, format!(r#"{{"id":{id},"verdict":"confirm"}}"#)).unwrap();
         let now = 1_800_000_000_000_000u64;
 
-        let reader = Understanding::new(Arc::clone(&store), Arc::new(MindClient::new(None)), 0, "Amy".into(), None);
+        let reader = Understanding::new(
+            Arc::clone(&store),
+            Arc::new(MindClient::new(None)),
+            0,
+            "Amy".into(),
+            None,
+        );
         assert_eq!(reader.run_cycle(now, 1).unwrap().verdicts, 0);
-        assert!(file.exists(), "without an inbox, no verdict file is touched");
+        assert!(
+            file.exists(),
+            "without an inbox, no verdict file is touched"
+        );
 
-        let worker = Understanding::new(Arc::clone(&store), Arc::new(MindClient::new(None)), 0, "Amy".into(), Some(inbox));
+        let worker = Understanding::new(
+            Arc::clone(&store),
+            Arc::new(MindClient::new(None)),
+            0,
+            "Amy".into(),
+            Some(inbox),
+        );
         assert_eq!(worker.run_cycle(now, 1).unwrap().verdicts, 1);
         assert!(!file.exists());
         assert!(store.confirmed_proposition_ids().unwrap().contains(&id));
@@ -658,20 +830,67 @@ mod tests {
     #[test]
     fn a_confirmation_given_before_a_rebuild_survives_it() {
         let dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(SqlCipherBrainStore::new(&dir.path().join("b.sqlite"), &DbKey::from_bytes([3; 32])).unwrap());
-        store.set_understanding_state(PIPELINE_KEY, "an older pipeline").unwrap();
-        let e = store.put_event_with_source(&event(1, "com.apple.Notes", "Launch plan", None, "Team: $18/seat"), EventSource::ScreenOcr).unwrap();
-        let confirmed = store.insert_proposition(&claim("Sam is pricing the Team plan"), &[i64::try_from(e.0).unwrap()], 1).unwrap();
-        let unjudged = store.insert_proposition(&claim("Sam is writing a launch plan"), &[i64::try_from(e.0).unwrap()], 1).unwrap();
+        let store = Arc::new(
+            SqlCipherBrainStore::new(&dir.path().join("b.sqlite"), &DbKey::from_bytes([3; 32]))
+                .unwrap(),
+        );
+        store
+            .set_understanding_state(PIPELINE_KEY, "an older pipeline")
+            .unwrap();
+        let e = store
+            .put_event_with_source(
+                &event(1, "com.apple.Notes", "Launch plan", None, "Team: $18/seat"),
+                EventSource::ScreenOcr,
+            )
+            .unwrap();
+        let confirmed = store
+            .insert_proposition(
+                &claim("Sam is pricing the Team plan"),
+                &[i64::try_from(e.0).unwrap()],
+                1,
+            )
+            .unwrap();
+        let unjudged = store
+            .insert_proposition(
+                &claim("Sam is writing a launch plan"),
+                &[i64::try_from(e.0).unwrap()],
+                1,
+            )
+            .unwrap();
         let inbox = dir.path().join("inbox");
         std::fs::create_dir(&inbox).unwrap();
-        std::fs::write(inbox.join("1-1.json"), format!(r#"{{"id":{confirmed},"verdict":"confirm"}}"#)).unwrap();
+        std::fs::write(
+            inbox.join("1-1.json"),
+            format!(r#"{{"id":{confirmed},"verdict":"confirm"}}"#),
+        )
+        .unwrap();
 
-        let worker = Understanding::new(Arc::clone(&store), Arc::new(MindClient::new(None)), 0, "Amy".into(), Some(inbox));
-        assert_eq!(worker.run_cycle(1_800_000_000_000_000, 1).unwrap().verdicts, 1);
+        let worker = Understanding::new(
+            Arc::clone(&store),
+            Arc::new(MindClient::new(None)),
+            0,
+            "Amy".into(),
+            Some(inbox),
+        );
+        assert_eq!(
+            worker.run_cycle(1_800_000_000_000_000, 1).unwrap().verdicts,
+            1
+        );
 
-        let left: Vec<i64> = store.propositions_with_status(PropositionStatus::Active, 10).unwrap().into_iter().map(|p| p.id).collect();
-        assert_eq!(left, vec![confirmed], "the rebuild clears the unjudged claim (id {unjudged}) and keeps the confirmed one");
-        assert_eq!(store.understanding_state(PIPELINE_KEY).unwrap().as_deref(), Some(PIPELINE_VERSION));
+        let left: Vec<i64> = store
+            .propositions_with_status(PropositionStatus::Active, 10)
+            .unwrap()
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(
+            left,
+            vec![confirmed],
+            "the rebuild clears the unjudged claim (id {unjudged}) and keeps the confirmed one"
+        );
+        assert_eq!(
+            store.understanding_state(PIPELINE_KEY).unwrap().as_deref(),
+            Some(PIPELINE_VERSION)
+        );
     }
 }

@@ -19,7 +19,8 @@ fn bundle(app: &str) -> [u8; 64] {
 fn context_text_is_stored_under_its_own_window_as_screen_context() {
     let dir = tempfile::tempdir().expect("tempdir");
     let key = DbKey::from_bytes([0xCD; 32]);
-    let store = Arc::new(SqlCipherBrainStore::new(&dir.path().join("ctx.sqlite"), &key).expect("open"));
+    let store =
+        Arc::new(SqlCipherBrainStore::new(&dir.path().join("ctx.sqlite"), &key).expect("open"));
     let pump = BrainPump::new(Arc::clone(&store) as Arc<dyn BrainStore>, None);
 
     let outcome = pump
@@ -37,12 +38,24 @@ fn context_text_is_stored_under_its_own_window_as_screen_context() {
         panic!("context text must be stored");
     };
 
-    assert_eq!(store.event_source(id).expect("source"), EventSource::ScreenContext);
+    assert_eq!(
+        store.event_source(id).expect("source"),
+        EventSource::ScreenContext
+    );
     let event = store.get_event(id).expect("read").expect("present");
     assert_eq!(event.app_bundle_id.as_deref(), Some("com.apple.TextEdit"));
     assert_eq!(event.window_title.as_deref(), Some("Quarterly notes"));
     assert_eq!(event.url, None);
-    assert_eq!(event.keyframe_blob, None, "no screenshot is kept for background windows");
+    assert_eq!(
+        event.keyframe_blob, None,
+        "no screenshot is kept for background windows"
+    );
     assert!(event.text.contains("Budget review moved to Thursday"));
-    assert_eq!(store.capture_storage_stats().expect("stats").stored_frame_count, 1);
+    assert_eq!(
+        store
+            .capture_storage_stats()
+            .expect("stats")
+            .stored_frame_count,
+        1
+    );
 }

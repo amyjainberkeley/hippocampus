@@ -79,14 +79,22 @@ impl WorkKind {
 }
 
 const CATALOG: &[(&str, &str, WorkKind)] = &[
-    ("com.tinyspeck.slackmacgap", "Slack", WorkKind::Communication),
+    (
+        "com.tinyspeck.slackmacgap",
+        "Slack",
+        WorkKind::Communication,
+    ),
     ("com.apple.MobileSMS", "Messages", WorkKind::Communication),
     ("com.apple.mail", "Mail", WorkKind::Communication),
     ("com.microsoft.Outlook", "Outlook", WorkKind::Communication),
     ("com.hnc.Discord", "Discord", WorkKind::Communication),
     ("net.whatsapp.WhatsApp", "WhatsApp", WorkKind::Communication),
     ("ru.keepcoder.Telegram", "Telegram", WorkKind::Communication),
-    ("com.superhuman.electron", "Superhuman", WorkKind::Communication),
+    (
+        "com.superhuman.electron",
+        "Superhuman",
+        WorkKind::Communication,
+    ),
     ("us.zoom.xos", "Zoom", WorkKind::Meetings),
     ("com.microsoft.teams2", "Teams", WorkKind::Meetings),
     ("com.apple.FaceTime", "FaceTime", WorkKind::Meetings),
@@ -116,7 +124,11 @@ const CATALOG: &[(&str, &str, WorkKind)] = &[
     ("org.mozilla.firefox", "Firefox", WorkKind::Research),
     ("company.thebrowser.dia", "Dia", WorkKind::Research),
     ("com.apple.Preview", "Preview", WorkKind::Research),
-    ("com.readdle.PDFExpert-Mac", "PDF Expert", WorkKind::Research),
+    (
+        "com.readdle.PDFExpert-Mac",
+        "PDF Expert",
+        WorkKind::Research,
+    ),
     ("com.figma.Desktop", "Figma", WorkKind::Design),
     ("com.bohemiancoding.sketch3", "Sketch", WorkKind::Design),
     ("com.adobe.Photoshop", "Photoshop", WorkKind::Design),
@@ -169,7 +181,10 @@ pub fn name(bundle_id: &str) -> String {
         .find(|(id, _, _)| id.eq_ignore_ascii_case(bundle_id))
         .map(|(_, name, _)| (*name).to_owned())
         .unwrap_or_else(|| {
-            let last = bundle_id.rsplit('.').find(|part| !part.is_empty()).unwrap_or(bundle_id);
+            let last = bundle_id
+                .rsplit('.')
+                .find(|part| !part.is_empty())
+                .unwrap_or(bundle_id);
             let mut chars = last.chars();
             chars
                 .next()
@@ -208,19 +223,41 @@ pub fn kind_for_host(bundle_id: &str, host: Option<&str>) -> WorkKind {
     };
     let host = host.strip_prefix("www.").unwrap_or(&host);
     let is = |suffix: &str| host == suffix || host.ends_with(&format!(".{suffix}"));
-    if is("mail.google.com") || is("outlook.live.com") || is("outlook.office.com") || is("app.slack.com") || is("discord.com") || is("web.whatsapp.com") {
+    if is("mail.google.com")
+        || is("outlook.live.com")
+        || is("outlook.office.com")
+        || is("app.slack.com")
+        || is("discord.com")
+        || is("web.whatsapp.com")
+    {
         WorkKind::Communication
     } else if is("meet.google.com") || is("zoom.us") || is("teams.microsoft.com") {
         WorkKind::Meetings
-    } else if is("docs.google.com") || is("notion.so") || is("coda.io") || is("quip.com") || is("dropbox.com") {
+    } else if is("docs.google.com")
+        || is("notion.so")
+        || is("coda.io")
+        || is("quip.com")
+        || is("dropbox.com")
+    {
         WorkKind::Writing
-    } else if is("github.com") || is("gitlab.com") || is("vercel.com") || is("localhost") || is("stackblitz.com") {
+    } else if is("github.com")
+        || is("gitlab.com")
+        || is("vercel.com")
+        || is("localhost")
+        || is("stackblitz.com")
+    {
         WorkKind::Code
-    } else if is("chatgpt.com") || is("claude.ai") || is("gemini.google.com") || is("perplexity.ai") {
+    } else if is("chatgpt.com") || is("claude.ai") || is("gemini.google.com") || is("perplexity.ai")
+    {
         WorkKind::Ai
     } else if is("figma.com") || is("canva.com") {
         WorkKind::Design
-    } else if is("calendar.google.com") || is("linear.app") || is("asana.com") || is("trello.com") || is("sheets.google.com") {
+    } else if is("calendar.google.com")
+        || is("linear.app")
+        || is("asana.com")
+        || is("trello.com")
+        || is("sheets.google.com")
+    {
         WorkKind::Planning
     } else if is("youtube.com") || is("netflix.com") || is("spotify.com") {
         WorkKind::Media
@@ -232,8 +269,15 @@ pub fn kind_for_host(bundle_id: &str, host: Option<&str>) -> WorkKind {
 /// Host of an http(s) URL, lowercased, without port or `www.`.
 #[must_use]
 pub fn host_of(url: &str) -> Option<String> {
-    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
-    let host = rest.split(['/', '?', '#']).next()?.split(':').next()?.to_ascii_lowercase();
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let host = rest
+        .split(['/', '?', '#'])
+        .next()?
+        .split(':')
+        .next()?
+        .to_ascii_lowercase();
     let host = host.strip_prefix("www.").unwrap_or(&host).to_owned();
     (!host.is_empty()).then_some(host)
 }
@@ -247,11 +291,35 @@ mod tests {
         assert_eq!(name("com.tinyspeck.slackmacgap"), "Slack");
         assert_eq!(name("com.example.widgetmaker"), "Widgetmaker");
         assert_eq!(kind("com.microsoft.VSCode"), WorkKind::Code);
-        assert_eq!(kind_for("com.google.Chrome", Some("https://mail.google.com/mail/u/0")), WorkKind::Communication);
-        assert_eq!(kind_for("com.google.Chrome", Some("https://docs.google.com/document/d/x")), WorkKind::Writing);
-        assert_eq!(kind_for("com.google.Chrome", Some("https://en.wikipedia.org/wiki/Hippocampus")), WorkKind::Research);
-        assert_eq!(kind_for("com.apple.Notes", Some("https://github.com")), WorkKind::Writing);
-        assert_eq!(host_of("https://www.Example.com:8443/a?b"), Some("example.com".into()));
+        assert_eq!(
+            kind_for(
+                "com.google.Chrome",
+                Some("https://mail.google.com/mail/u/0")
+            ),
+            WorkKind::Communication
+        );
+        assert_eq!(
+            kind_for(
+                "com.google.Chrome",
+                Some("https://docs.google.com/document/d/x")
+            ),
+            WorkKind::Writing
+        );
+        assert_eq!(
+            kind_for(
+                "com.google.Chrome",
+                Some("https://en.wikipedia.org/wiki/Hippocampus")
+            ),
+            WorkKind::Research
+        );
+        assert_eq!(
+            kind_for("com.apple.Notes", Some("https://github.com")),
+            WorkKind::Writing
+        );
+        assert_eq!(
+            host_of("https://www.Example.com:8443/a?b"),
+            Some("example.com".into())
+        );
     }
 
     #[test]
@@ -264,12 +332,22 @@ mod tests {
             "https://github.com/a/b",
         ] {
             let host = host_of(url);
-            assert_eq!(kind_for_host("com.google.Chrome", host.as_deref()), kind_for("com.google.Chrome", Some(url)), "{url}");
+            assert_eq!(
+                kind_for_host("com.google.Chrome", host.as_deref()),
+                kind_for("com.google.Chrome", Some(url)),
+                "{url}"
+            );
         }
         assert_eq!(kind_for_host("com.apple.Safari", None), WorkKind::Research);
-        assert_eq!(kind_for_host("com.apple.Safari", Some("WWW.Figma.com")), WorkKind::Design);
+        assert_eq!(
+            kind_for_host("com.apple.Safari", Some("WWW.Figma.com")),
+            WorkKind::Design
+        );
         assert_eq!(WorkKind::Ai.label(), "AI tools");
         assert_eq!(WorkKind::ALL.len(), 10);
-        assert!(WorkKind::ALL.windows(2).all(|pair| pair[0] < pair[1]), "declaration order");
+        assert!(
+            WorkKind::ALL.windows(2).all(|pair| pair[0] < pair[1]),
+            "declaration order"
+        );
     }
 }

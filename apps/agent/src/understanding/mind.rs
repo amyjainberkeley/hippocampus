@@ -74,7 +74,10 @@ enum State {
     NotStarted,
     Running(Session),
     /// Unavailable until `retry_at`; the reason is kept for callers.
-    Unavailable { reason: String, retry_at: Instant },
+    Unavailable {
+        reason: String,
+        retry_at: Instant,
+    },
 }
 
 /// A lazily started, self-healing connection to the mind process.
@@ -151,7 +154,10 @@ impl MindClient {
     }
 
     fn start(&self) -> Result<Session, String> {
-        let path = self.path.as_ref().ok_or_else(|| "not_installed".to_owned())?;
+        let path = self
+            .path
+            .as_ref()
+            .ok_or_else(|| "not_installed".to_owned())?;
         let mut command = Command::new(path);
         command
             .arg("--serve")
@@ -182,7 +188,12 @@ impl MindClient {
                 }
             })
             .map_err(|_| "cannot_read".to_owned())?;
-        let mut session = Session { child, stdin, lines, engine: DEFAULT_ENGINE.to_owned() };
+        let mut session = Session {
+            child,
+            stdin,
+            lines,
+            engine: DEFAULT_ENGINE.to_owned(),
+        };
         let ready = session
             .lines
             .recv_timeout(Duration::from_secs(20))
@@ -195,7 +206,11 @@ impl MindClient {
         if value["available"] != true {
             return Err(value["reason"].as_str().unwrap_or("unavailable").to_owned());
         }
-        if let Some(engine) = value["engine"].as_str().map(str::trim).filter(|e| !e.is_empty()) {
+        if let Some(engine) = value["engine"]
+            .as_str()
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+        {
             session.engine = engine.to_owned();
         }
         Ok(session)
@@ -227,12 +242,17 @@ impl MindClient {
             .next_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let request = serde_json::json!({ "id": id, "task": task, "input": input });
-        let mut line = serde_json::to_vec(&request)
-            .map_err(|_| MindCallError::Failed("encode".into()))?;
+        let mut line =
+            serde_json::to_vec(&request).map_err(|_| MindCallError::Failed("encode".into()))?;
         line.push(b'\n');
         let mut state = self.state.lock().expect("mind state poisoned");
         let session = self.ensure_running(&mut state)?;
-        if session.stdin.write_all(&line).and_then(|()| session.stdin.flush()).is_err() {
+        if session
+            .stdin
+            .write_all(&line)
+            .and_then(|()| session.stdin.flush())
+            .is_err()
+        {
             *state = State::NotStarted;
             return Err(MindCallError::Failed("the model process exited".into()));
         }
@@ -297,7 +317,10 @@ mod tests {
     #[test]
     fn an_unavailable_model_reports_its_reason() {
         let dir = tempfile::tempdir().unwrap();
-        let path = fake_mind(dir.path(), r#"echo '{"ready":true,"available":false,"reason":"apple_intelligence_off"}'; cat >/dev/null"#);
+        let path = fake_mind(
+            dir.path(),
+            r#"echo '{"ready":true,"available":false,"reason":"apple_intelligence_off"}'; cat >/dev/null"#,
+        );
         let client = MindClient::new(Some(path));
         assert_eq!(
             client.ensure_available(),
@@ -307,23 +330,38 @@ mod tests {
 
     #[test]
     fn a_model_server_is_checked_again_after_a_minute() {
-        assert_eq!(retry_after("needs_apple_intelligence_or_local_model"), Duration::from_secs(60));
-        assert_eq!(retry_after("local_server_unreachable"), Duration::from_secs(60));
-        assert_eq!(retry_after("apple_intelligence_off"), Duration::from_secs(30 * 60));
+        assert_eq!(
+            retry_after("needs_apple_intelligence_or_local_model"),
+            Duration::from_secs(60)
+        );
+        assert_eq!(
+            retry_after("local_server_unreachable"),
+            Duration::from_secs(60)
+        );
+        assert_eq!(
+            retry_after("apple_intelligence_off"),
+            Duration::from_secs(30 * 60)
+        );
         assert_eq!(retry_after("not_installed"), Duration::from_secs(30 * 60));
     }
 
     #[test]
     fn the_writer_is_the_engine_the_ready_line_names() {
         let dir = tempfile::tempdir().unwrap();
-        let local = fake_mind(dir.path(), r#"echo '{"ready":true,"available":true,"engine":"local:qwen3:4b"}'; cat >/dev/null"#);
+        let local = fake_mind(
+            dir.path(),
+            r#"echo '{"ready":true,"available":true,"engine":"local:qwen3:4b"}'; cat >/dev/null"#,
+        );
         let client = MindClient::new(Some(local));
         assert_eq!(client.engine_label(), DEFAULT_ENGINE, "nothing runs yet");
         client.ensure_available().unwrap();
         assert_eq!(client.engine_label(), "local:qwen3:4b");
 
         let older = tempfile::tempdir().unwrap();
-        let unnamed = fake_mind(older.path(), r#"echo '{"ready":true,"available":true}'; cat >/dev/null"#);
+        let unnamed = fake_mind(
+            older.path(),
+            r#"echo '{"ready":true,"available":true}'; cat >/dev/null"#,
+        );
         let client = MindClient::new(Some(unnamed));
         client.ensure_available().unwrap();
         assert_eq!(client.engine_label(), "apple-foundation-models");
@@ -351,7 +389,11 @@ read line; sleep 5"#,
         assert_eq!(err, MindCallError::ContextTooLong);
         let started = Instant::now();
         let err = client
-            .call::<_, serde_json::Value>("episode", &serde_json::json!({}), Duration::from_millis(300))
+            .call::<_, serde_json::Value>(
+                "episode",
+                &serde_json::json!({}),
+                Duration::from_millis(300),
+            )
             .unwrap_err();
         assert_eq!(err, MindCallError::Timeout);
         assert!(started.elapsed() < Duration::from_secs(3));

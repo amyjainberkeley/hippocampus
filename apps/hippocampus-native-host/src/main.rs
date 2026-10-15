@@ -266,7 +266,9 @@ fn process_message(msg: &BrowserMessage, socket: &mut UnixStream) -> io::Result<
         url: wire_url,
         title: wire_title,
         full_text: text.to_string(),
-        source_browser: launching_browser().unwrap_or(&msg.source_browser).to_owned(),
+        source_browser: launching_browser()
+            .unwrap_or(&msg.source_browser)
+            .to_owned(),
         tab_id: msg.tab_id,
     };
     let frame = wire::encode(seq, &wire_msg);
@@ -301,7 +303,10 @@ fn browser_from_path(path: &str) -> Option<&'static str> {
         ("/Chromium.app/", "chromium"),
         ("/Google Chrome", "chrome"),
     ];
-    BROWSERS.iter().find(|(needle, _)| path.contains(needle)).map(|(_, name)| *name)
+    BROWSERS
+        .iter()
+        .find(|(needle, _)| path.contains(needle))
+        .map(|(_, name)| *name)
 }
 
 fn main() {
@@ -350,9 +355,22 @@ fn main() {
 mod tests {
     #[test]
     fn the_launching_browser_is_named_from_its_path() {
-        assert_eq!(super::browser_from_path("/Applications/Arc.app/Contents/MacOS/Arc"), Some("arc"));
-        assert_eq!(super::browser_from_path("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"), Some("brave"));
-        assert_eq!(super::browser_from_path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"), Some("chrome"));
+        assert_eq!(
+            super::browser_from_path("/Applications/Arc.app/Contents/MacOS/Arc"),
+            Some("arc")
+        );
+        assert_eq!(
+            super::browser_from_path(
+                "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+            ),
+            Some("brave")
+        );
+        assert_eq!(
+            super::browser_from_path(
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            ),
+            Some("chrome")
+        );
         assert_eq!(super::browser_from_path("/usr/bin/somethingelse"), None);
     }
 

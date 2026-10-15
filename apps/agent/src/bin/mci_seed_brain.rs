@@ -397,8 +397,13 @@ pub fn canned_events(now_us: u64) -> Vec<Event> {
 mod demo_day {
     use mci_agent::understanding::observe;
     use mci_agent::understanding::overview::ModelStatus;
-    use mci_brain::understanding::{DayReport, NewProposition, ObservedEvent, PropositionKind, SessionNote};
-    use mci_brain::{ActivityInterval, ActivityState, BrainStore, Event, EventId, EventSource, SqlCipherBrainStore};
+    use mci_brain::understanding::{
+        DayReport, NewProposition, ObservedEvent, PropositionKind, SessionNote,
+    };
+    use mci_brain::{
+        ActivityInterval, ActivityState, BrainStore, Event, EventId, EventSource,
+        SqlCipherBrainStore,
+    };
 
     const MIN: u64 = 60_000_000;
     const DAY: u64 = 24 * 60 * MIN;
@@ -422,11 +427,21 @@ mod demo_day {
     }
 
     const fn hold(app: &'static str, title: &'static str, minutes: u64) -> Hold {
-        Hold { app, title, url: None, minutes }
+        Hold {
+            app,
+            title,
+            url: None,
+            minutes,
+        }
     }
 
     const fn page(title: &'static str, url: &'static str, minutes: u64) -> Hold {
-        Hold { app: "com.apple.Safari", title, url: Some(url), minutes }
+        Hold {
+            app: "com.apple.Safari",
+            title,
+            url: Some(url),
+            minutes,
+        }
     }
 
     const NOTES: &str = "com.apple.Notes";
@@ -530,7 +545,13 @@ mod demo_day {
         ]
     }
 
-    fn put(store: &SqlCipherBrainStore, ts_us: u64, app: &str, title: &str, url: Option<&str>) -> Result<i64, String> {
+    fn put(
+        store: &SqlCipherBrainStore,
+        ts_us: u64,
+        app: &str,
+        title: &str,
+        url: Option<&str>,
+    ) -> Result<i64, String> {
         let event = Event {
             id: EventId(0),
             ts_us,
@@ -546,12 +567,23 @@ mod demo_day {
             tab_id: None,
             embedding: None,
         };
-        let source = if url.is_some() { EventSource::BrowserPage } else { EventSource::ScreenOcr };
-        let id = store.put_event_with_source(&event, source).map_err(|e| format!("put event: {e}"))?;
+        let source = if url.is_some() {
+            EventSource::BrowserPage
+        } else {
+            EventSource::ScreenOcr
+        };
+        let id = store
+            .put_event_with_source(&event, source)
+            .map_err(|e| format!("put event: {e}"))?;
         i64::try_from(id.0).map_err(|_| "event id".to_owned())
     }
 
-    fn active(store: &SqlCipherBrainStore, start_us: u64, minutes: u64, app: &str) -> Result<(), String> {
+    fn active(
+        store: &SqlCipherBrainStore,
+        start_us: u64,
+        minutes: u64,
+        app: &str,
+    ) -> Result<(), String> {
         for step in 0..minutes * 12 {
             let interval = ActivityInterval {
                 start_us: start_us + step * 5_000_000,
@@ -560,7 +592,9 @@ mod demo_day {
                 app_bundle_id: Some(app.to_owned()),
                 capture_generation: "demo-day".into(),
             };
-            store.append_activity_interval(&interval).map_err(|e| format!("activity: {e}"))?;
+            store
+                .append_activity_interval(&interval)
+                .map_err(|e| format!("activity: {e}"))?;
         }
         Ok(())
     }
@@ -601,7 +635,12 @@ mod demo_day {
                         window_title: Some(h.title.into()),
                         url: h.url.map(str::to_owned),
                         text: String::new(),
-                        source: if h.url.is_some() { "browser_page" } else { "screen_ocr" }.into(),
+                        source: if h.url.is_some() {
+                            "browser_page"
+                        } else {
+                            "screen_ocr"
+                        }
+                        .into(),
                     });
                     written += 1;
                 }
@@ -613,8 +652,12 @@ mod demo_day {
             let Some((title, surface, beneath, model)) = session.note else {
                 continue;
             };
-            store.backfill_search_queries(0, 10_000).map_err(|e| format!("searches: {e}"))?;
-            let mut searches = store.search_queries_in_range(start, end + 1, 50).map_err(|e| format!("searches: {e}"))?;
+            store
+                .backfill_search_queries(0, 10_000)
+                .map_err(|e| format!("searches: {e}"))?;
+            let mut searches = store
+                .search_queries_in_range(start, end + 1, 50)
+                .map_err(|e| format!("searches: {e}"))?;
             searches.reverse();
             let signals = observe::signals(&events, &segments, &searches);
             let signals_json = serde_json::json!({
@@ -641,42 +684,202 @@ mod demo_day {
                 .map_err(|e| format!("note: {e}"))?;
             noted_through = end + 1;
         }
-        store.backfill_search_queries(0, 10_000).map_err(|e| format!("searches: {e}"))?;
+        store
+            .backfill_search_queries(0, 10_000)
+            .map_err(|e| format!("searches: {e}"))?;
 
         // Earlier days, for items seen on more than one day.
-        let yesterday = put(store, now_us - DAY - 3 * 60 * MIN, FIGMA, "Trailhead pricing v2", None)?;
-        let two_days = put(store, now_us - 2 * DAY - 4 * 60 * MIN, NOTES, "Pricing page ideas", None)?;
-        let last_week = put(store, now_us - 6 * DAY - 5 * 60 * MIN, "com.example.Ledgerly", "September invoices", None)?;
-        let old_a = put(store, now_us - 52 * DAY, "com.apple.Safari", "Payments settings · Paybridge", Some("https://paybridge.example/settings"))?;
-        let old_b = put(store, now_us - 51 * DAY, "com.apple.Safari", "Migration checklist · Paybridge", Some("https://paybridge.example/migrate"))?;
+        let yesterday = put(
+            store,
+            now_us - DAY - 3 * 60 * MIN,
+            FIGMA,
+            "Trailhead pricing v2",
+            None,
+        )?;
+        let two_days = put(
+            store,
+            now_us - 2 * DAY - 4 * 60 * MIN,
+            NOTES,
+            "Pricing page ideas",
+            None,
+        )?;
+        let last_week = put(
+            store,
+            now_us - 6 * DAY - 5 * 60 * MIN,
+            "com.example.Ledgerly",
+            "September invoices",
+            None,
+        )?;
+        let old_a = put(
+            store,
+            now_us - 52 * DAY,
+            "com.apple.Safari",
+            "Payments settings · Paybridge",
+            Some("https://paybridge.example/settings"),
+        )?;
+        let old_b = put(
+            store,
+            now_us - 51 * DAY,
+            "com.apple.Safari",
+            "Migration checklist · Paybridge",
+            Some("https://paybridge.example/migrate"),
+        )?;
         written += 5;
 
         // Spread over the session's windows, the last of each first, as
         // the worker links an item to the session it was learned in.
         let pick = |session: usize| -> Vec<i64> { observe::evidence(&by_session[session], 8) };
         let items: Vec<(NewProposition, Vec<i64>, u64, bool)> = vec![
-            (claim("Sam is redesigning the pricing page for Trailhead Bikes.", PropositionKind::Project, 0.9, 0.3), [pick(6), pick(2), pick(1), vec![yesterday, two_days]].concat(), 20, true),
-            (claim("Sam is fixing how the Trailhead checkout rounds sales tax.", PropositionKind::Project, 0.8, 0.5), [pick(3), pick(4)].concat(), 160, false),
-            (claim("Sam drafts copy in Notes before laying it out in Figma.", PropositionKind::Habit, 0.7, 0.3), [pick(1), pick(2)].concat(), 230, false),
-            (claim("Sam wants the new pricing page live before the October sale.", PropositionKind::Goal, 0.7, 0.5), pick(5), 115, false),
-            (claim("Sam writes Rust and runs tests from the terminal.", PropositionKind::Skill, 0.8, 0.2), pick(4), 160, false),
-            (claim("Sam prefers short plan names over descriptive ones.", PropositionKind::Preference, 0.6, 0.4), pick(1), 260, false),
-            (claim("Sam checks the shop channel in Slack between tasks.", PropositionKind::Habit, 0.4, 0.5), [pick(0), pick(1)].concat(), 260, false),
-            (claim("Sam reviews pricing changes with the design team on Mondays.", PropositionKind::Relationship, 0.7, 0.4), pick(5), 115, false),
-            (claim("Sam took several tries to get the tax rounding tests passing.", PropositionKind::Struggle, 0.7, 0.6), pick(4), 160, false),
-            (claim("Sam took several tries to match supplier invoices to orders.", PropositionKind::Struggle, 0.6, 0.4), [pick(0), vec![last_week]].concat(), 300, false),
-            (claim("Sam is busy with pricing work today.", PropositionKind::State, 0.8, 0.9), pick(6), 60, false),
-            (claim("Sam is moving the shop to a new payment provider.", PropositionKind::Project, 0.8, 0.3), vec![old_b, old_a], 50 * 24 * 60, true),
+            (
+                claim(
+                    "Sam is redesigning the pricing page for Trailhead Bikes.",
+                    PropositionKind::Project,
+                    0.9,
+                    0.3,
+                ),
+                [pick(6), pick(2), pick(1), vec![yesterday, two_days]].concat(),
+                20,
+                true,
+            ),
+            (
+                claim(
+                    "Sam is fixing how the Trailhead checkout rounds sales tax.",
+                    PropositionKind::Project,
+                    0.8,
+                    0.5,
+                ),
+                [pick(3), pick(4)].concat(),
+                160,
+                false,
+            ),
+            (
+                claim(
+                    "Sam drafts copy in Notes before laying it out in Figma.",
+                    PropositionKind::Habit,
+                    0.7,
+                    0.3,
+                ),
+                [pick(1), pick(2)].concat(),
+                230,
+                false,
+            ),
+            (
+                claim(
+                    "Sam wants the new pricing page live before the October sale.",
+                    PropositionKind::Goal,
+                    0.7,
+                    0.5,
+                ),
+                pick(5),
+                115,
+                false,
+            ),
+            (
+                claim(
+                    "Sam writes Rust and runs tests from the terminal.",
+                    PropositionKind::Skill,
+                    0.8,
+                    0.2,
+                ),
+                pick(4),
+                160,
+                false,
+            ),
+            (
+                claim(
+                    "Sam prefers short plan names over descriptive ones.",
+                    PropositionKind::Preference,
+                    0.6,
+                    0.4,
+                ),
+                pick(1),
+                260,
+                false,
+            ),
+            (
+                claim(
+                    "Sam checks the shop channel in Slack between tasks.",
+                    PropositionKind::Habit,
+                    0.4,
+                    0.5,
+                ),
+                [pick(0), pick(1)].concat(),
+                260,
+                false,
+            ),
+            (
+                claim(
+                    "Sam reviews pricing changes with the design team on Mondays.",
+                    PropositionKind::Relationship,
+                    0.7,
+                    0.4,
+                ),
+                pick(5),
+                115,
+                false,
+            ),
+            (
+                claim(
+                    "Sam took several tries to get the tax rounding tests passing.",
+                    PropositionKind::Struggle,
+                    0.7,
+                    0.6,
+                ),
+                pick(4),
+                160,
+                false,
+            ),
+            (
+                claim(
+                    "Sam took several tries to match supplier invoices to orders.",
+                    PropositionKind::Struggle,
+                    0.6,
+                    0.4,
+                ),
+                [pick(0), vec![last_week]].concat(),
+                300,
+                false,
+            ),
+            (
+                claim(
+                    "Sam is busy with pricing work today.",
+                    PropositionKind::State,
+                    0.8,
+                    0.9,
+                ),
+                pick(6),
+                60,
+                false,
+            ),
+            (
+                claim(
+                    "Sam is moving the shop to a new payment provider.",
+                    PropositionKind::Project,
+                    0.8,
+                    0.3,
+                ),
+                vec![old_b, old_a],
+                50 * 24 * 60,
+                true,
+            ),
         ];
         for (item, evidence, minutes_ago, confirmed) in items {
-            let id = store.insert_proposition(&item, &evidence, now_us - minutes_ago * MIN).map_err(|e| format!("item: {e}"))?;
+            let id = store
+                .insert_proposition(&item, &evidence, now_us - minutes_ago * MIN)
+                .map_err(|e| format!("item: {e}"))?;
             if confirmed {
-                store.confirm_proposition(id, now_us - minutes_ago * MIN).map_err(|e| format!("confirm: {e}"))?;
+                store
+                    .confirm_proposition(id, now_us - minutes_ago * MIN)
+                    .map_err(|e| format!("confirm: {e}"))?;
             }
         }
 
-        let date = mci_agent::brief_worker::local_date_string(i64::try_from(now_us / 1_000_000).unwrap_or(0), tz);
-        let (day_start, day_end) = mci_agent::understanding::query::day_bounds(&date, tz).map_err(|e| e.to_string())?;
+        let date = mci_agent::brief_worker::local_date_string(
+            i64::try_from(now_us / 1_000_000).unwrap_or(0),
+            tz,
+        );
+        let (day_start, day_end) =
+            mci_agent::understanding::query::day_bounds(&date, tz).map_err(|e| e.to_string())?;
         store
             .put_day_report(&DayReport {
                 date_local: date,
@@ -693,10 +896,15 @@ mod demo_day {
                 .to_string(),
             })
             .map_err(|e| format!("day report: {e}"))?;
-        ModelStatus { state: "available".into(), reason: None, checked_us: Some(now_us - 20 * MIN) }
-            .write(store)
-            .map_err(|e| format!("model status: {e}"))?;
-        mci_agent::understanding::mark_noted_through(store, noted_through).map_err(|e| format!("state: {e}"))?;
+        ModelStatus {
+            state: "available".into(),
+            reason: None,
+            checked_us: Some(now_us - 20 * MIN),
+        }
+        .write(store)
+        .map_err(|e| format!("model status: {e}"))?;
+        mci_agent::understanding::mark_noted_through(store, noted_through)
+            .map_err(|e| format!("state: {e}"))?;
         Ok(written)
     }
 }

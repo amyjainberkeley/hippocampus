@@ -815,7 +815,11 @@ fn decode_payload(
             let clicks = p.u32_le()?;
             let scrolls = p.u32_le()?;
             let moves = p.u32_le()?;
-            if start_us == 0 || start_us >= end_us || end_us > i64::MAX as u64 || end_us - start_us > 60_000_000 {
+            if start_us == 0
+                || start_us >= end_us
+                || end_us > i64::MAX as u64
+                || end_us - start_us > 60_000_000
+            {
                 return Err(DecodeError::InvalidActivityInterval);
             }
             Message::InteractionCounts {
@@ -1198,7 +1202,14 @@ mod tests {
         for (start_us, end_us) in [(0, 5), (5_000_000, 5_000_000), (1, 70_000_000)] {
             let bad = encode(
                 8,
-                &Message::InteractionCounts { start_us, end_us, keys: 0, clicks: 0, scrolls: 0, moves: 0 },
+                &Message::InteractionCounts {
+                    start_us,
+                    end_us,
+                    keys: 0,
+                    clicks: 0,
+                    scrolls: 0,
+                    moves: 0,
+                },
             );
             assert!(decode(&bad).is_err(), "{start_us}..{end_us}");
         }
@@ -2053,7 +2064,12 @@ mod tests {
     fn context_ocr_event_roundtrips_with_the_ocr_event_payload() {
         let mut app = [0u8; 64];
         app[..18].copy_from_slice(b"com.apple.TextEdit");
-        let fields = (7_u64, 1_700_000_000_000_000_u64, String::from("Notes"), String::from("line one\nline two"));
+        let fields = (
+            7_u64,
+            1_700_000_000_000_000_u64,
+            String::from("Notes"),
+            String::from("line one\nline two"),
+        );
         let context = Message::ContextOCREvent {
             seq: fields.0,
             ts_us: fields.1,
@@ -2077,7 +2093,10 @@ mod tests {
         assert_eq!(a.len(), b.len());
         let differing: Vec<usize> = (0..a.len()).filter(|&i| a[i] != b[i]).collect();
         assert_eq!(differing.len(), 1, "only the message type differs");
-        assert_eq!(MessageType::from_u16(0x0041).unwrap(), MessageType::ContextOCREvent);
+        assert_eq!(
+            MessageType::from_u16(0x0041).unwrap(),
+            MessageType::ContextOCREvent
+        );
     }
 
     #[test]

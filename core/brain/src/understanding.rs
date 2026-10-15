@@ -64,16 +64,31 @@ const ENGINES: &[(&str, &str, &str, Option<&str>)] = &[
     ("github", "github.com", "/search", Some("q")),
     ("stackoverflow", "stackoverflow.com", "/search", Some("q")),
     ("wikipedia", "wikipedia.org", "/w/index.php", Some("search")),
-    ("wikipedia", "wikipedia.org", "/wiki/Special:Search", Some("search")),
+    (
+        "wikipedia",
+        "wikipedia.org",
+        "/wiki/Special:Search",
+        Some("search"),
+    ),
     ("amazon", "amazon.", "/s", Some("k")),
     ("reddit", "reddit.com", "/search", Some("q")),
     ("x", "x.com", "/search", Some("q")),
     ("x", "twitter.com", "/search", Some("q")),
-    ("linkedin", "linkedin.com", "/search/results/", Some("keywords")),
+    (
+        "linkedin",
+        "linkedin.com",
+        "/search/results/",
+        Some("keywords"),
+    ),
     ("arxiv", "arxiv.org", "/search", Some("query")),
     ("npm", "npmjs.com", "/search", Some("q")),
     ("crates", "crates.io", "/search", Some("q")),
-    ("apple_developer", "developer.apple.com", "/search", Some("q")),
+    (
+        "apple_developer",
+        "developer.apple.com",
+        "/search",
+        Some("q"),
+    ),
     ("mdn", "developer.mozilla.org", "/", Some("q")),
 ];
 
@@ -361,7 +376,9 @@ impl NewProposition {
             return Err(StoreError::InvalidInput("proposition text length".into()));
         }
         if self.reasoning.chars().count() > 4000 {
-            return Err(StoreError::InvalidInput("proposition reasoning length".into()));
+            return Err(StoreError::InvalidInput(
+                "proposition reasoning length".into(),
+            ));
         }
         if !(0.0..=1.0).contains(&self.confidence) || !(0.0..=1.0).contains(&self.decay) {
             return Err(StoreError::InvalidInput("proposition score range".into()));
@@ -560,7 +577,11 @@ impl SqlCipherBrainStore {
             .map_err(|e| backend("prepare observed events", e))?;
         let rows = statement
             .query_map(
-                params![sql_i64(start_us), sql_i64(end_us), i64::try_from(limit).unwrap_or(i64::MAX)],
+                params![
+                    sql_i64(start_us),
+                    sql_i64(end_us),
+                    i64::try_from(limit).unwrap_or(i64::MAX)
+                ],
                 |row| {
                     Ok(ObservedEvent {
                         id: row.get(0)?,
@@ -594,7 +615,10 @@ impl SqlCipherBrainStore {
         let select = event_head_select(table_exists(guard.conn(), "event_sources")?);
         let mut heads = Vec::with_capacity(wanted.len());
         for batch in wanted.chunks(EVENT_HEAD_BATCH) {
-            let sql = format!("{select} WHERE e.id IN ({})", vec!["?"; batch.len()].join(", "));
+            let sql = format!(
+                "{select} WHERE e.id IN ({})",
+                vec!["?"; batch.len()].join(", ")
+            );
             let mut statement = guard
                 .conn()
                 .prepare(&sql)
@@ -637,7 +661,11 @@ impl SqlCipherBrainStore {
             .map_err(|e| backend("prepare event heads in range", e))?;
         let rows = statement
             .query_map(
-                params![sql_i64(start_us), sql_i64(end_us), i64::try_from(limit).unwrap_or(i64::MAX)],
+                params![
+                    sql_i64(start_us),
+                    sql_i64(end_us),
+                    i64::try_from(limit).unwrap_or(i64::MAX)
+                ],
                 row_to_event_head,
             )
             .map_err(|e| backend("query event heads in range", e))?;
@@ -701,7 +729,10 @@ impl SqlCipherBrainStore {
     ///
     /// # Errors
     /// Invalid intervals and database failures.
-    pub fn append_interaction_counts(&self, counts: &InteractionCounts) -> Result<bool, StoreError> {
+    pub fn append_interaction_counts(
+        &self,
+        counts: &InteractionCounts,
+    ) -> Result<bool, StoreError> {
         counts.validate()?;
         let guard = self.db.lock().expect("brain store mutex poisoned");
         let changed = guard
@@ -762,7 +793,12 @@ impl SqlCipherBrainStore {
     ///
     /// # Errors
     /// Database failures.
-    pub fn record_search_query(&self, event_id: i64, ts_us: u64, url: &str) -> Result<bool, StoreError> {
+    pub fn record_search_query(
+        &self,
+        event_id: i64,
+        ts_us: u64,
+        url: &str,
+    ) -> Result<bool, StoreError> {
         let Some(search) = search_query_from_url(url) else {
             return Ok(false);
         };
@@ -784,7 +820,11 @@ impl SqlCipherBrainStore {
     ///
     /// # Errors
     /// Database failures.
-    pub fn backfill_search_queries(&self, after_id: i64, limit: usize) -> Result<(usize, i64), StoreError> {
+    pub fn backfill_search_queries(
+        &self,
+        after_id: i64,
+        limit: usize,
+    ) -> Result<(usize, i64), StoreError> {
         let candidates: Vec<(i64, i64, Option<String>)> = {
             let guard = self.db.lock().expect("brain store mutex poisoned");
             let mut statement = guard
@@ -792,9 +832,10 @@ impl SqlCipherBrainStore {
                 .prepare("SELECT id, ts_us, url FROM events WHERE id > ?1 ORDER BY id LIMIT ?2")
                 .map_err(|e| backend("prepare search backfill", e))?;
             let rows = statement
-                .query_map(params![after_id, i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
-                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-                })
+                .query_map(
+                    params![after_id, i64::try_from(limit).unwrap_or(i64::MAX)],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
                 .map_err(|e| backend("query search backfill", e))?;
             rows.collect::<Result<Vec<_>, _>>()
                 .map_err(|e| backend("read search backfill", e))?
@@ -963,7 +1004,8 @@ impl SqlCipherBrainStore {
             )
             .map_err(|e| backend("link proposition evidence", e))?;
         }
-        tx.commit().map_err(|e| backend("commit proposition write", e))?;
+        tx.commit()
+            .map_err(|e| backend("commit proposition write", e))?;
         Ok(id)
     }
 
@@ -990,10 +1032,14 @@ impl SqlCipherBrainStore {
             )
             .map_err(|e| backend("update proposition status", e))?;
         if status == PropositionStatus::Rejected {
-            tx.execute("DELETE FROM proposition_verdicts WHERE proposition_id = ?1", params![id])
-                .map_err(|e| backend("withdraw proposition confirmation", e))?;
+            tx.execute(
+                "DELETE FROM proposition_verdicts WHERE proposition_id = ?1",
+                params![id],
+            )
+            .map_err(|e| backend("withdraw proposition confirmation", e))?;
         }
-        tx.commit().map_err(|e| backend("commit proposition status", e))?;
+        tx.commit()
+            .map_err(|e| backend("commit proposition status", e))?;
         Ok(changed == 1)
     }
 
@@ -1026,7 +1072,8 @@ impl SqlCipherBrainStore {
             )
             .map_err(|e| backend("record proposition confirmation", e))?;
         }
-        tx.commit().map_err(|e| backend("commit proposition confirmation", e))?;
+        tx.commit()
+            .map_err(|e| backend("commit proposition confirmation", e))?;
         Ok(changed == 1)
     }
 
@@ -1077,7 +1124,12 @@ impl SqlCipherBrainStore {
                  ORDER BY p.status = 'active' DESC, p.id DESC
                  LIMIT 1",
                 params![id],
-                |row| Ok((row.get(0)?, PropositionStatus::parse(&row.get::<_, String>(1)?))),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        PropositionStatus::parse(&row.get::<_, String>(1)?),
+                    ))
+                },
             )
             .optional()
             .map_err(|e| backend("resolve proposition revision", e))
@@ -1089,7 +1141,12 @@ impl SqlCipherBrainStore {
     ///
     /// # Errors
     /// Database failures.
-    pub fn add_proposition_evidence(&self, id: i64, evidence: &[i64], now_us: u64) -> Result<usize, StoreError> {
+    pub fn add_proposition_evidence(
+        &self,
+        id: i64,
+        evidence: &[i64],
+        now_us: u64,
+    ) -> Result<usize, StoreError> {
         let mut guard = self.db.lock().expect("brain store mutex poisoned");
         let tx = guard
             .conn_mut()
@@ -1117,7 +1174,8 @@ impl SqlCipherBrainStore {
                 )
                 .map_err(|e| backend("add proposition evidence", e))?;
         }
-        tx.commit().map_err(|e| backend("commit proposition evidence", e))?;
+        tx.commit()
+            .map_err(|e| backend("commit proposition evidence", e))?;
         Ok(added)
     }
 
@@ -1250,7 +1308,11 @@ impl SqlCipherBrainStore {
     ///
     /// # Errors
     /// Database failures.
-    pub fn session_notes_in_range(&self, start_us: u64, end_us: u64) -> Result<Vec<SessionNote>, StoreError> {
+    pub fn session_notes_in_range(
+        &self,
+        start_us: u64,
+        end_us: u64,
+    ) -> Result<Vec<SessionNote>, StoreError> {
         let guard = self.db.lock().expect("brain store mutex poisoned");
         if !table_exists(guard.conn(), "session_notes")? {
             return Ok(Vec::new());
@@ -1263,7 +1325,10 @@ impl SqlCipherBrainStore {
             )
             .map_err(|e| backend("prepare session notes", e))?;
         let rows = statement
-            .query_map(params![sql_i64(start_us), sql_i64(end_us)], row_to_session_note)
+            .query_map(
+                params![sql_i64(start_us), sql_i64(end_us)],
+                row_to_session_note,
+            )
             .map_err(|e| backend("query session notes", e))?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| backend("read session notes", e))
@@ -1273,7 +1338,11 @@ impl SqlCipherBrainStore {
     ///
     /// # Errors
     /// Database failures.
-    pub fn delete_session_notes_in_range(&self, start_us: u64, end_us: u64) -> Result<usize, StoreError> {
+    pub fn delete_session_notes_in_range(
+        &self,
+        start_us: u64,
+        end_us: u64,
+    ) -> Result<usize, StoreError> {
         let guard = self.db.lock().expect("brain store mutex poisoned");
         guard
             .conn()
@@ -1362,7 +1431,8 @@ impl SqlCipherBrainStore {
              DELETE FROM understanding_state WHERE key <> 'searches_through_event_id';",
         )
         .map_err(|e| backend("reset understanding", e))?;
-        tx.commit().map_err(|e| backend("commit understanding reset", e))
+        tx.commit()
+            .map_err(|e| backend("commit understanding reset", e))
     }
 
     /// Read a progress marker.
@@ -1425,9 +1495,14 @@ fn table_exists(conn: &rusqlite::Connection, name: &str) -> Result<bool, StoreEr
     .map_err(|e| backend("probe understanding schema", e))
 }
 
-fn attach_evidence(conn: &rusqlite::Connection, props: &mut [Proposition]) -> Result<(), StoreError> {
+fn attach_evidence(
+    conn: &rusqlite::Connection,
+    props: &mut [Proposition],
+) -> Result<(), StoreError> {
     let mut statement = conn
-        .prepare("SELECT event_id FROM proposition_evidence WHERE proposition_id = ?1 ORDER BY event_id")
+        .prepare(
+            "SELECT event_id FROM proposition_evidence WHERE proposition_id = ?1 ORDER BY event_id",
+        )
         .map_err(|e| backend("prepare proposition evidence", e))?;
     for prop in props {
         let rows = statement
@@ -1591,7 +1666,10 @@ mod tests {
 
     #[test]
     fn or_query_quotes_words() {
-        assert_eq!(or_query("The user prices a team plan!"), "\"plan\" OR \"prices\" OR \"team\" OR \"the\" OR \"user\"");
+        assert_eq!(
+            or_query("The user prices a team plan!"),
+            "\"plan\" OR \"prices\" OR \"team\" OR \"the\" OR \"user\""
+        );
         assert_eq!(or_query("a b"), "");
     }
 }

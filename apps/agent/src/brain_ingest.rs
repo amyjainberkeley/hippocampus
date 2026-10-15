@@ -475,14 +475,16 @@ impl BrainIngestor for BrainPump {
             .activity_store
             .as_ref()
             .ok_or(IngestError::ActivityUnavailable)?;
-        Ok(store.append_interaction_counts(&mci_brain::understanding::InteractionCounts {
-            start_us: *start_us,
-            end_us: *end_us,
-            keys: *keys,
-            clicks: *clicks,
-            scrolls: *scrolls,
-            moves: *moves,
-        })?)
+        Ok(
+            store.append_interaction_counts(&mci_brain::understanding::InteractionCounts {
+                start_us: *start_us,
+                end_us: *end_us,
+                keys: *keys,
+                clicks: *clicks,
+                scrolls: *scrolls,
+                moves: *moves,
+            })?,
+        )
     }
 
     fn ingest_activity_interval(&self, msg: &Message) -> Result<bool, IngestError> {

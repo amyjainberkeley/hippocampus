@@ -1017,9 +1017,7 @@ fn mci_recall_with_no_embedder_returns_typed_lexical_context() {
         .expect("hits array");
     assert_eq!(hits.len(), 1, "FTS5 should find 'hello' in one event");
     assert_eq!(
-        hits[0]
-            .get("text_snippet")
-            .and_then(|v| v.as_str()),
+        hits[0].get("text_snippet").and_then(|v| v.as_str()),
         Some("hello world testing")
     );
 }

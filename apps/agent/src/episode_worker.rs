@@ -73,12 +73,9 @@ pub fn segment_until_drained(
             .map_err(|e| EpisodeWorkerError::Store(e.to_string()))?;
 
         let result = segmenter
-            .segment_with_context(
-                &batch,
-                last.as_ref(),
-                store as &dyn EpisodeWriter,
-                &|id| is_screen_context(store, id),
-            )
+            .segment_with_context(&batch, last.as_ref(), store as &dyn EpisodeWriter, &|id| {
+                is_screen_context(store, id)
+            })
             .map_err(|e| EpisodeWorkerError::Store(e.to_string()))?;
 
         // A batch that assigns nothing would otherwise spin forever: the
@@ -175,9 +172,11 @@ mod tests {
     }
 }
 
-
 /// Text read from a visible window the user was not focused on: context for
 /// search, never a switch of focused work. A failed lookup reads as focused.
 pub(crate) fn is_screen_context(store: &SqlCipherBrainStore, id: mci_brain::EventId) -> bool {
-    matches!(store.event_source(id), Ok(mci_brain::EventSource::ScreenContext))
+    matches!(
+        store.event_source(id),
+        Ok(mci_brain::EventSource::ScreenContext)
+    )
 }

@@ -446,7 +446,12 @@ pub fn render_context_packet_markdown(packet: &ContextPacket) -> String {
             if let Some(url) = &citation.url {
                 parts.push(url.clone());
             }
-            let _ = writeln!(output, "- [event {}] {}", citation.event_id, parts.join(" · "));
+            let _ = writeln!(
+                output,
+                "- [event {}] {}",
+                citation.event_id,
+                parts.join(" · ")
+            );
         }
     }
 
@@ -455,12 +460,23 @@ pub fn render_context_packet_markdown(packet: &ContextPacket) -> String {
 
 /// "Oct 12 14:09" in the person's zone, for a source line an AI reads.
 fn when(ts_us: u64, tz_offset_secs: i32) -> String {
-    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    let date = crate::brief_worker::local_date_string(i64::try_from(ts_us / 1_000_000).unwrap_or(0), tz_offset_secs);
-    let month = date.get(5..7).and_then(|m| m.parse::<usize>().ok()).and_then(|m| MONTHS.get(m.wrapping_sub(1)));
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let date = crate::brief_worker::local_date_string(
+        i64::try_from(ts_us / 1_000_000).unwrap_or(0),
+        tz_offset_secs,
+    );
+    let month = date
+        .get(5..7)
+        .and_then(|m| m.parse::<usize>().ok())
+        .and_then(|m| MONTHS.get(m.wrapping_sub(1)));
     let day = date.get(8..10).and_then(|d| d.parse::<u32>().ok());
     match (month, day) {
-        (Some(month), Some(day)) => format!("{month} {day} {}", crate::understanding::observe::clock(ts_us, tz_offset_secs)),
+        (Some(month), Some(day)) => format!(
+            "{month} {day} {}",
+            crate::understanding::observe::clock(ts_us, tz_offset_secs)
+        ),
         _ => crate::understanding::observe::clock(ts_us, tz_offset_secs),
     }
 }
@@ -1069,7 +1085,10 @@ fn observed_change_text(candidate: &ContextEvidence) -> String {
         candidate.app_bundle_id.as_deref(),
         candidate.window_title.as_deref(),
     ) {
-        (Some(app), Some(title)) => format!("Observed {}: {title}", crate::understanding::apps::name(app)),
+        (Some(app), Some(title)) => format!(
+            "Observed {}: {title}",
+            crate::understanding::apps::name(app)
+        ),
         (Some(app), None) => format!("Used {}", crate::understanding::apps::name(app)),
         (None, Some(title)) => format!("Observed window: {title}"),
         (None, None) => format!("Observed event {}", candidate.event_id),

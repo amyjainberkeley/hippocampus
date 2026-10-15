@@ -66,7 +66,9 @@ fn today(tz: i32, now_us: u64) -> String {
 pub fn day_bounds(date_local: &str, tz: i32) -> Result<(u64, u64), StoreError> {
     let start_secs = crate::brief_worker::local_date_start_secs(date_local, tz)
         .ok_or_else(|| StoreError::InvalidInput("date must be YYYY-MM-DD".into()))?;
-    let start_us = u64::try_from(start_secs).unwrap_or(0).saturating_mul(1_000_000);
+    let start_us = u64::try_from(start_secs)
+        .unwrap_or(0)
+        .saturating_mul(1_000_000);
     Ok((start_us, start_us + 86_400_000_000))
 }
 
@@ -107,8 +109,19 @@ impl From<Proposition> for ModelItem {
 ///
 /// # Errors
 /// Store failures and malformed dates.
-pub fn run(store: &Arc<SqlCipherBrainStore>, tz: i32, now_us: u64, query: &UnderstandingQuery) -> Result<serde_json::Value, StoreError> {
-    let reader = Understanding::new(Arc::clone(store), Arc::new(MindClient::new(None)), tz, String::new(), None);
+pub fn run(
+    store: &Arc<SqlCipherBrainStore>,
+    tz: i32,
+    now_us: u64,
+    query: &UnderstandingQuery,
+) -> Result<serde_json::Value, StoreError> {
+    let reader = Understanding::new(
+        Arc::clone(store),
+        Arc::new(MindClient::new(None)),
+        tz,
+        String::new(),
+        None,
+    );
     Ok(match query {
         UnderstandingQuery::Day { date } => {
             let date = date.clone().unwrap_or_else(|| today(tz, now_us));
@@ -117,20 +130,36 @@ pub fn run(store: &Arc<SqlCipherBrainStore>, tz: i32, now_us: u64, query: &Under
         }
         UnderstandingQuery::Searches { hours, limit } => {
             let hours = hours.unwrap_or(24).clamp(1, 24 * 31);
-            let searches = store.search_queries_in_range(now_us.saturating_sub(hours * 3_600_000_000), now_us + 1, limit.unwrap_or(50).clamp(1, 500))?;
+            let searches = store.search_queries_in_range(
+                now_us.saturating_sub(hours * 3_600_000_000),
+                now_us + 1,
+                limit.unwrap_or(50).clamp(1, 500),
+            )?;
             serde_json::json!({ "searches": searches.iter().map(|s| search_json(s, tz)).collect::<Vec<_>>() })
         }
-        UnderstandingQuery::UserModel { page: Some(true), .. } => model_page(store, tz, now_us)?,
+        UnderstandingQuery::UserModel {
+            page: Some(true), ..
+        } => model_page(store, tz, now_us)?,
         UnderstandingQuery::UserModel { query, limit, .. } => {
             let limit = limit.unwrap_or(20).clamp(1, 200);
-            let candidates: Vec<Proposition> = match query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
-                Some(q) => store.search_propositions(q, limit)?.into_iter().map(|(p, _)| p).collect(),
-                None => {
-                    let mut all = store.propositions_with_status(PropositionStatus::Active, 500)?;
-                    all.sort_by(|a, b| b.confidence.total_cmp(&a.confidence).then(b.updated_us.cmp(&a.updated_us)));
-                    all
-                }
-            };
+            let candidates: Vec<Proposition> =
+                match query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
+                    Some(q) => store
+                        .search_propositions(q, limit)?
+                        .into_iter()
+                        .map(|(p, _)| p)
+                        .collect(),
+                    None => {
+                        let mut all =
+                            store.propositions_with_status(PropositionStatus::Active, 500)?;
+                        all.sort_by(|a, b| {
+                            b.confidence
+                                .total_cmp(&a.confidence)
+                                .then(b.updated_us.cmp(&a.updated_us))
+                        });
+                        all
+                    }
+                };
             let lens = ItemLens::read(store, &candidates, tz, now_us)?;
             let items: Vec<ModelItem> = candidates
                 .into_iter()
@@ -148,8 +177,14 @@ pub fn run(store: &Arc<SqlCipherBrainStore>, tz: i32, now_us: u64, query: &Under
         }
         UnderstandingQuery::Overview { date } => {
             let env = super::overview::OverviewEnv::default();
-            serde_json::to_value(super::overview::overview(store, date.as_deref(), tz, now_us, &env)?)
-                .unwrap_or_default()
+            serde_json::to_value(super::overview::overview(
+                store,
+                date.as_deref(),
+                tz,
+                now_us,
+                &env,
+            )?)
+            .unwrap_or_default()
         }
     })
 }
@@ -163,8 +198,9 @@ fn search_json(s: &SearchRecord, tz: i32) -> serde_json::Value {
 
 fn session_json(n: &SessionNote, tz: i32) -> serde_json::Value {
     let signals: serde_json::Value = serde_json::from_str(&n.signals).unwrap_or_default();
-    let kind = super::overview::stored_segments(n)
-        .map_or(apps::WorkKind::Other, |segments| super::overview::kind_of_segments(&segments).0);
+    let kind = super::overview::stored_segments(n).map_or(apps::WorkKind::Other, |segments| {
+        super::overview::kind_of_segments(&segments).0
+    });
     serde_json::json!({
         "start_us": n.start_us, "end_us": n.end_us,
         "time": format!("{}–{}", observe::clock(n.start_us, tz), observe::clock(n.end_us, tz)),
@@ -204,7 +240,9 @@ pub fn sources_from_hits(hits: Vec<crate::mcp::McpHit>) -> Vec<Source> {
 pub fn hits_of(outcome: crate::mcp::McpRecallOutcome) -> Vec<crate::mcp::McpHit> {
     match outcome {
         crate::mcp::McpRecallOutcome::Matched { hits } => hits,
-        crate::mcp::McpRecallOutcome::Degraded { related_context, .. } => related_context,
+        crate::mcp::McpRecallOutcome::Degraded {
+            related_context, ..
+        } => related_context,
         crate::mcp::McpRecallOutcome::Contradicted { evidence } => evidence,
         crate::mcp::McpRecallOutcome::NothingMatched { .. } => Vec::new(),
     }
@@ -232,7 +270,10 @@ impl Assistant {
 
     fn now_us() -> u64 {
         u64::try_from(
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_micros(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_micros(),
         )
         .unwrap_or(u64::MAX)
     }
@@ -252,17 +293,39 @@ impl Assistant {
         let screen = on_screen(&self.store, now_us, looking_at)?;
         // A window was named but Hippocampus has not read it: say so, or the
         // model answers a question about the screen with the app's name.
-        let unread = (screen.is_none() && looking_at.app.is_some()).then(|| unread_window_note(now));
+        let unread =
+            (screen.is_none() && looking_at.app.is_some()).then(|| unread_window_note(now));
         let now = unread.as_deref().or(now);
-        answer(&self.store, &self.mind, &self.user_name, self.tz, now_us, question, now, screen, memories)
+        answer(
+            &self.store,
+            &self.mind,
+            &self.user_name,
+            self.tz,
+            now_us,
+            question,
+            now,
+            screen,
+            memories,
+        )
     }
 
     /// Suggestions for the current moment.
     ///
     /// # Errors
     /// Store failures.
-    pub fn suggest(&self, now: &NowContext, use_model: bool) -> Result<Vec<Suggestion>, StoreError> {
-        suggest(&self.store, use_model.then_some(&self.mind), &self.user_name, self.tz, Self::now_us(), now)
+    pub fn suggest(
+        &self,
+        now: &NowContext,
+        use_model: bool,
+    ) -> Result<Vec<Suggestion>, StoreError> {
+        suggest(
+            &self.store,
+            use_model.then_some(&self.mind),
+            &self.user_name,
+            self.tz,
+            Self::now_us(),
+            now,
+        )
     }
 }
 
@@ -325,7 +388,11 @@ pub fn on_screen(
     if looking_at.app.is_none() {
         return Ok(None);
     }
-    let recent = store.observed_events_in_range(now_us.saturating_sub(ON_SCREEN_WINDOW_US), now_us + 1, 2_000)?;
+    let recent = store.observed_events_in_range(
+        now_us.saturating_sub(ON_SCREEN_WINDOW_US),
+        now_us + 1,
+        2_000,
+    )?;
     Ok(pick_on_screen(&recent, looking_at, now_us).cloned())
 }
 
@@ -339,7 +406,12 @@ pub fn pick_on_screen<'a>(
     now_us: u64,
 ) -> Option<&'a ObservedEvent> {
     let app = looking_at.app.as_deref()?;
-    let of_app = || recent.iter().rev().filter(move |e| e.app_bundle_id.as_deref() == Some(app) && !e.text.trim().is_empty());
+    let of_app = || {
+        recent
+            .iter()
+            .rev()
+            .filter(move |e| e.app_bundle_id.as_deref() == Some(app) && !e.text.trim().is_empty())
+    };
     looking_at
         .title
         .as_deref()
@@ -375,7 +447,11 @@ fn unread_window_note(now: Option<&str>) -> String {
 /// not the model said it used it. Then the memories it cited; with no screen
 /// and nothing cited, the three best matches.
 fn answer_sources(screen: Option<Source>, memories: Vec<Source>, cited: &[usize]) -> Vec<Source> {
-    let cited_memories: Vec<Source> = memories.iter().filter(|m| cited.contains(&m.n)).cloned().collect();
+    let cited_memories: Vec<Source> = memories
+        .iter()
+        .filter(|m| cited.contains(&m.n))
+        .cloned()
+        .collect();
     match screen {
         Some(screen) => std::iter::once(screen).chain(cited_memories).collect(),
         None if cited_memories.is_empty() => memories.into_iter().take(3).collect(),
@@ -447,7 +523,10 @@ pub fn answer(
     let now_text = match (&screen, &on_screen) {
         (Some(event), Some(source)) => Some(format!(
             "[1] {}\n{}",
-            match &source.title { Some(t) => format!("{} — {t}", source.app), None => source.app.clone() },
+            match &source.title {
+                Some(t) => format!("{} — {t}", source.app),
+                None => source.app.clone(),
+            },
             excerpt(&screen_text(event).main, ON_SCREEN_CHARS)
         )),
         _ => now.map(str::to_owned),
@@ -457,7 +536,10 @@ pub fn answer(
     let propositions: Vec<String> = store
         .search_propositions(question, 6)?
         .into_iter()
-        .filter(|(p, _)| p.status == PropositionStatus::Active && !not_seen_lately(p, confirmed.contains(&p.id), now_us))
+        .filter(|(p, _)| {
+            p.status == PropositionStatus::Active
+                && !not_seen_lately(p, confirmed.contains(&p.id), now_us)
+        })
         .map(|(p, _)| p.text)
         .collect();
     let input = serde_json::json!({
@@ -571,11 +653,28 @@ pub(crate) struct ItemLens {
 
 impl ItemLens {
     /// One confirmed-id read and one batch of event heads for all evidence.
-    pub(crate) fn read(store: &SqlCipherBrainStore, items: &[Proposition], tz: i32, now_us: u64) -> Result<Self, StoreError> {
+    pub(crate) fn read(
+        store: &SqlCipherBrainStore,
+        items: &[Proposition],
+        tz: i32,
+        now_us: u64,
+    ) -> Result<Self, StoreError> {
         let confirmed = store.confirmed_proposition_ids()?;
-        let ids: Vec<i64> = items.iter().flat_map(|p| p.evidence.iter().copied()).collect();
-        let heads = store.event_heads(&ids)?.into_iter().map(|h| (h.id, h)).collect();
-        Ok(Self { confirmed, heads, tz, now_us })
+        let ids: Vec<i64> = items
+            .iter()
+            .flat_map(|p| p.evidence.iter().copied())
+            .collect();
+        let heads = store
+            .event_heads(&ids)?
+            .into_iter()
+            .map(|h| (h.id, h))
+            .collect();
+        Ok(Self {
+            confirmed,
+            heads,
+            tz,
+            now_us,
+        })
     }
 
     pub(crate) fn confirmed(&self, p: &Proposition) -> bool {
@@ -615,7 +714,11 @@ impl RecentWork {
     /// As the packet and the hook send it: `14:02–14:31 · {title}: {detail}`.
     #[must_use]
     pub fn packet_line(&self, tz: i32) -> String {
-        let times = format!("{}–{}", observe::clock(self.start_us, tz), observe::clock(self.end_us, tz));
+        let times = format!(
+            "{}–{}",
+            observe::clock(self.start_us, tz),
+            observe::clock(self.end_us, tz)
+        );
         match &self.detail {
             Some(detail) => format!("{times} · {}: {detail}", self.title),
             None => format!("{times} · {}", self.title),
@@ -627,10 +730,16 @@ impl RecentWork {
     pub fn template(&self) -> super::overview::Template {
         let escape = super::overview::escape_braces;
         let text = match &self.detail {
-            Some(detail) => format!("{{start}}–{{end}} · {}: {}", escape(&self.title), escape(detail)),
+            Some(detail) => format!(
+                "{{start}}–{{end}} · {}: {}",
+                escape(&self.title),
+                escape(detail)
+            ),
             None => format!("{{start}}–{{end}} · {}", escape(&self.title)),
         };
-        super::overview::Template::new(text).time("start", self.start_us).time("end", self.end_us)
+        super::overview::Template::new(text)
+            .time("start", self.start_us)
+            .time("end", self.end_us)
     }
 }
 
@@ -674,7 +783,11 @@ fn session_detail(note: &SessionNote) -> Option<String> {
 /// matching `focus` first. The session hook and the window pass no focus.
 /// Best effort: a store failure yields none.
 #[must_use]
-pub fn about_you(store: &SqlCipherBrainStore, now_us: u64, focus: Option<&str>) -> Vec<Proposition> {
+pub fn about_you(
+    store: &SqlCipherBrainStore,
+    now_us: u64,
+    focus: Option<&str>,
+) -> Vec<Proposition> {
     let confirmed = store.confirmed_proposition_ids().unwrap_or_default();
     let focused: Vec<Proposition> = focus
         .map(str::trim)
@@ -684,7 +797,9 @@ pub fn about_you(store: &SqlCipherBrainStore, now_us: u64, focus: Option<&str>) 
         .into_iter()
         .map(|(p, _)| p)
         .collect();
-    let recent = store.propositions_with_status(PropositionStatus::Active, ABOUT_YOU_CANDIDATES).unwrap_or_default();
+    let recent = store
+        .propositions_with_status(PropositionStatus::Active, ABOUT_YOU_CANDIDATES)
+        .unwrap_or_default();
     shared_claims(focused, recent, &confirmed, now_us)
 }
 
@@ -695,13 +810,19 @@ fn shared_claims(
     confirmed: &std::collections::HashSet<i64>,
     now_us: u64,
 ) -> Vec<Proposition> {
-    recent.sort_by(|a, b| b.confidence.total_cmp(&a.confidence).then(b.updated_us.cmp(&a.updated_us)));
+    recent.sort_by(|a, b| {
+        b.confidence
+            .total_cmp(&a.confidence)
+            .then(b.updated_us.cmp(&a.updated_us))
+    });
     let mut out: Vec<Proposition> = Vec::new();
     for p in focused.into_iter().chain(recent) {
         if out.len() == ABOUT_YOU_LINES {
             break;
         }
-        if is_shared_unasked(&p, confirmed.contains(&p.id), now_us) && !out.iter().any(|kept| kept.id == p.id) {
+        if is_shared_unasked(&p, confirmed.contains(&p.id), now_us)
+            && !out.iter().any(|kept| kept.id == p.id)
+        {
             out.push(p);
         }
     }
@@ -721,10 +842,17 @@ pub fn context_understanding(
     focus: Option<&str>,
 ) -> Option<crate::context_packet::ContextUnderstanding> {
     use crate::context_packet::{ContextUnderstanding, ContextUnderstandingClaim};
-    let sessions = recent_work(store, now_us).iter().map(|line| line.packet_line(tz)).collect();
+    let sessions = recent_work(store, now_us)
+        .iter()
+        .map(|line| line.packet_line(tz))
+        .collect();
     let about = about_you(store, now_us, focus)
         .into_iter()
-        .map(|p| ContextUnderstandingClaim { text: clip(&p.text, STATEMENT_CHARS), confidence: p.confidence, event_ids: p.evidence })
+        .map(|p| ContextUnderstandingClaim {
+            text: clip(&p.text, STATEMENT_CHARS),
+            confidence: p.confidence,
+            event_ids: p.evidence,
+        })
         .collect();
     let understanding = ContextUnderstanding { sessions, about };
     (!understanding.is_empty()).then_some(understanding)
@@ -793,7 +921,11 @@ fn group_of(kind: PropositionKind) -> (usize, &'static str) {
 ///
 /// # Errors
 /// Store failures.
-pub fn model_page(store: &SqlCipherBrainStore, tz: i32, now_us: u64) -> Result<serde_json::Value, StoreError> {
+pub fn model_page(
+    store: &SqlCipherBrainStore,
+    tz: i32,
+    now_us: u64,
+) -> Result<serde_json::Value, StoreError> {
     let all = store.propositions_with_status(PropositionStatus::Active, 500)?;
     let lens = ItemLens::read(store, &all, tz, now_us)?;
     let notes = evidence_notes(store, &lens)?;
@@ -849,7 +981,10 @@ pub fn model_page(store: &SqlCipherBrainStore, tz: i32, now_us: u64) -> Result<s
             })
             .collect()
     };
-    let recent: Vec<_> = recent_work(store, now_us).iter().map(RecentWork::template).collect();
+    let recent: Vec<_> = recent_work(store, now_us)
+        .iter()
+        .map(RecentWork::template)
+        .collect();
     Ok(serde_json::json!({
         "version": 1,
         "now_us": now_us,
@@ -863,7 +998,10 @@ pub fn model_page(store: &SqlCipherBrainStore, tz: i32, now_us: u64) -> Result<s
 
 /// The stored session notes covering any item's moments: one read over the
 /// span the moments cover.
-fn evidence_notes(store: &SqlCipherBrainStore, lens: &ItemLens) -> Result<Vec<SessionNote>, StoreError> {
+fn evidence_notes(
+    store: &SqlCipherBrainStore,
+    lens: &ItemLens,
+) -> Result<Vec<SessionNote>, StoreError> {
     let first = lens.heads.values().map(|h| h.ts_us).min();
     let last = lens.heads.values().map(|h| h.ts_us).max();
     match (first, last) {
@@ -872,15 +1010,26 @@ fn evidence_notes(store: &SqlCipherBrainStore, lens: &ItemLens) -> Result<Vec<Se
     }
 }
 
-fn evidence_sessions(p: &Proposition, lens: &ItemLens, notes: &[SessionNote]) -> Vec<EvidenceSession> {
+fn evidence_sessions(
+    p: &Proposition,
+    lens: &ItemLens,
+    notes: &[SessionNote],
+) -> Vec<EvidenceSession> {
     use mci_brain::understanding::EventHead;
-    let mut moments: Vec<&EventHead> = p.evidence.iter().filter_map(|id| lens.heads.get(id)).collect();
+    let mut moments: Vec<&EventHead> = p
+        .evidence
+        .iter()
+        .filter_map(|id| lens.heads.get(id))
+        .collect();
     moments.sort_by_key(|h| (h.ts_us, h.id));
     let mut rows: Vec<EvidenceSession> = Vec::new();
     let mut loose: Vec<&EventHead> = Vec::new();
     let mut by_note: Vec<(&SessionNote, Vec<&EventHead>)> = Vec::new();
     for head in moments {
-        match notes.iter().find(|n| n.start_us <= head.ts_us && head.ts_us <= n.end_us) {
+        match notes
+            .iter()
+            .find(|n| n.start_us <= head.ts_us && head.ts_us <= n.end_us)
+        {
             Some(note) => match by_note.iter_mut().find(|(n, _)| std::ptr::eq(*n, note)) {
                 Some((_, heads)) => heads.push(head),
                 None => by_note.push((note, vec![head])),
@@ -890,7 +1039,11 @@ fn evidence_sessions(p: &Proposition, lens: &ItemLens, notes: &[SessionNote]) ->
     }
     let row = |start_us: u64, end_us: u64, open: &EventHead| {
         let app = open.app_bundle_id.as_deref().unwrap_or("");
-        let app_name = if app.is_empty() { String::new() } else { apps::name(app) };
+        let app_name = if app.is_empty() {
+            String::new()
+        } else {
+            apps::name(app)
+        };
         EvidenceSession {
             start_us,
             end_us,
@@ -906,15 +1059,26 @@ fn evidence_sessions(p: &Proposition, lens: &ItemLens, notes: &[SessionNote]) ->
     for (note, heads) in by_note {
         let in_longest = super::overview::stored_segments(note).and_then(|segments| {
             let longest = super::overview::longest_window_events(&segments);
-            heads.iter().rev().find(|h| longest.contains(&h.id)).copied()
+            heads
+                .iter()
+                .rev()
+                .find(|h| longest.contains(&h.id))
+                .copied()
         });
         let open = in_longest.unwrap_or_else(|| *heads.last().expect("a note row has a moment"));
         rows.push(row(note.start_us, note.end_us, open));
     }
     let mut group: Vec<&EventHead> = Vec::new();
     for head in loose {
-        if group.last().is_some_and(|last| head.ts_us.saturating_sub(last.ts_us) >= observe::SESSION_GAP_US) {
-            rows.push(row(group[0].ts_us, group[group.len() - 1].ts_us, group[group.len() - 1]));
+        if group
+            .last()
+            .is_some_and(|last| head.ts_us.saturating_sub(last.ts_us) >= observe::SESSION_GAP_US)
+        {
+            rows.push(row(
+                group[0].ts_us,
+                group[group.len() - 1].ts_us,
+                group[group.len() - 1],
+            ));
             group.clear();
         }
         group.push(head);
@@ -989,7 +1153,11 @@ pub fn suggest(
     let mut out = Vec::new();
     let hour = 3_600_000_000u64;
     // What is on screen now, from the latest capture of the frontmost window.
-    let recent = store.observed_events_in_range(now_us.saturating_sub(ON_SCREEN_WINDOW_US), now_us + 1, 2_000)?;
+    let recent = store.observed_events_in_range(
+        now_us.saturating_sub(ON_SCREEN_WINDOW_US),
+        now_us + 1,
+        2_000,
+    )?;
     let current = pick_on_screen(&recent, now, now_us);
     // Ask about what is in front of them: the one thing every screen offers.
     if let Some(event) = current {
@@ -1008,14 +1176,22 @@ pub fn suggest(
     }
     // Resume: the last session that was not in the current window.
     let notes = store.session_notes_in_range(now_us.saturating_sub(12 * hour), now_us + 1)?;
-    if let Some(last) = notes.iter().rev().find(|n| !now.title.as_deref().is_some_and(|t| n.title.contains(t))) {
+    if let Some(last) = notes
+        .iter()
+        .rev()
+        .find(|n| !now.title.as_deref().is_some_and(|t| n.title.contains(t)))
+    {
         let (title, _) = super::overview::note_title(last);
         // A note written from measurements has only input telemetry for a
         // surface, which is never shown: name its main app instead.
         let why = session_detail(last).map_or_else(
             || {
                 super::overview::stored_segments(last)
-                    .and_then(|segments| segments.into_iter().max_by_key(|s| s.end_us.saturating_sub(s.start_us)))
+                    .and_then(|segments| {
+                        segments
+                            .into_iter()
+                            .max_by_key(|s| s.end_us.saturating_sub(s.start_us))
+                    })
                     .map(|s| apps::name(&s.app))
                     .unwrap_or_default()
             },
@@ -1045,7 +1221,12 @@ pub fn suggest(
     // window Hippocampus itself captured counts; a title from an app it
     // never records (a password manager, a private window) is not used.
     if let Some(title) = current.and_then(|e| e.window_title.clone()) {
-        let topic = title.split([' ', '—', '-', '|']).filter(|w| w.len() > 2).take(6).collect::<Vec<_>>().join(" ");
+        let topic = title
+            .split([' ', '—', '-', '|'])
+            .filter(|w| w.len() > 2)
+            .take(6)
+            .collect::<Vec<_>>()
+            .join(" ");
         if !topic.is_empty() {
             out.push(Suggestion {
                 kind: "related".into(),
@@ -1094,7 +1275,14 @@ pub fn suggest(
             .collect();
         let now_text = current.map_or_else(
             || now.app.as_deref().map(apps::name).unwrap_or_default(),
-            |e| format!("{} — {}\n{}", apps::name(e.app_bundle_id.as_deref().unwrap_or("")), e.window_title.clone().unwrap_or_default(), clip(&screen_text(e).main, 1_000)),
+            |e| {
+                format!(
+                    "{} — {}\n{}",
+                    apps::name(e.app_bundle_id.as_deref().unwrap_or("")),
+                    e.window_title.clone().unwrap_or_default(),
+                    clip(&screen_text(e).main, 1_000)
+                )
+            },
         );
         let recent_lines: Vec<String> = notes
             .iter()
@@ -1159,7 +1347,10 @@ mod tests {
     }
 
     fn looking_at(app: &str, title: Option<&str>) -> NowContext {
-        NowContext { app: Some(app.to_owned()), title: title.map(str::to_owned) }
+        NowContext {
+            app: Some(app.to_owned()),
+            title: title.map(str::to_owned),
+        }
     }
 
     const MINUTE: u64 = 60 * 1_000_000;
@@ -1167,39 +1358,131 @@ mod tests {
     #[test]
     fn the_screen_is_the_newest_capture_of_the_window_in_front() {
         let recent = vec![
-            seen(1, 10 * MINUTE, "com.apple.Safari", Some("Pricing"), "old pricing text"),
-            seen(2, 11 * MINUTE, "com.apple.Notes", Some("Launch plan"), "notes text"),
-            seen(3, 12 * MINUTE, "com.apple.Safari", Some("Pricing"), "new pricing text"),
-            seen(4, 13 * MINUTE, "com.apple.Safari", Some("Another tab"), "another tab"),
+            seen(
+                1,
+                10 * MINUTE,
+                "com.apple.Safari",
+                Some("Pricing"),
+                "old pricing text",
+            ),
+            seen(
+                2,
+                11 * MINUTE,
+                "com.apple.Notes",
+                Some("Launch plan"),
+                "notes text",
+            ),
+            seen(
+                3,
+                12 * MINUTE,
+                "com.apple.Safari",
+                Some("Pricing"),
+                "new pricing text",
+            ),
+            seen(
+                4,
+                13 * MINUTE,
+                "com.apple.Safari",
+                Some("Another tab"),
+                "another tab",
+            ),
         ];
-        let picked = pick_on_screen(&recent, &looking_at("com.apple.Safari", Some("Pricing")), 14 * MINUTE);
+        let picked = pick_on_screen(
+            &recent,
+            &looking_at("com.apple.Safari", Some("Pricing")),
+            14 * MINUTE,
+        );
         assert_eq!(picked.map(|e| e.id), Some(3));
     }
 
     #[test]
     fn a_changed_title_falls_back_to_a_capture_of_that_app_from_the_last_two_minutes() {
         let recent = vec![
-            seen(1, 5 * MINUTE, "com.microsoft.VSCode", Some("query.rs"), "old file"),
-            seen(2, 13 * MINUTE, "com.microsoft.VSCode", Some("● query.rs"), "edited file"),
+            seen(
+                1,
+                5 * MINUTE,
+                "com.microsoft.VSCode",
+                Some("query.rs"),
+                "old file",
+            ),
+            seen(
+                2,
+                13 * MINUTE,
+                "com.microsoft.VSCode",
+                Some("● query.rs"),
+                "edited file",
+            ),
         ];
         let now = 14 * MINUTE;
-        assert_eq!(pick_on_screen(&recent, &looking_at("com.microsoft.VSCode", Some("server.rs")), now).map(|e| e.id), Some(2));
-        assert_eq!(pick_on_screen(&recent, &looking_at("com.microsoft.VSCode", None), now).map(|e| e.id), Some(2));
+        assert_eq!(
+            pick_on_screen(
+                &recent,
+                &looking_at("com.microsoft.VSCode", Some("server.rs")),
+                now
+            )
+            .map(|e| e.id),
+            Some(2)
+        );
+        assert_eq!(
+            pick_on_screen(&recent, &looking_at("com.microsoft.VSCode", None), now).map(|e| e.id),
+            Some(2)
+        );
         // Nothing recent enough: an old window is not passed off as the screen.
-        assert_eq!(pick_on_screen(&recent[..1], &looking_at("com.microsoft.VSCode", Some("server.rs")), now), None);
+        assert_eq!(
+            pick_on_screen(
+                &recent[..1],
+                &looking_at("com.microsoft.VSCode", Some("server.rs")),
+                now
+            ),
+            None
+        );
     }
 
     #[test]
     fn an_app_that_was_never_captured_has_no_screen() {
-        let recent = vec![seen(1, 13 * MINUTE, "com.apple.Notes", Some("Launch plan"), "notes text")];
-        assert_eq!(pick_on_screen(&recent, &looking_at("com.1password.1password", Some("Vault")), 14 * MINUTE), None);
-        assert_eq!(pick_on_screen(&recent, &NowContext::default(), 14 * MINUTE), None);
+        let recent = vec![seen(
+            1,
+            13 * MINUTE,
+            "com.apple.Notes",
+            Some("Launch plan"),
+            "notes text",
+        )];
+        assert_eq!(
+            pick_on_screen(
+                &recent,
+                &looking_at("com.1password.1password", Some("Vault")),
+                14 * MINUTE
+            ),
+            None
+        );
+        assert_eq!(
+            pick_on_screen(&recent, &NowContext::default(), 14 * MINUTE),
+            None
+        );
         // A capture with no text is not a screen to answer from.
-        let blank = vec![seen(2, 13 * MINUTE, "com.apple.Safari", Some("Pricing"), "  ")];
-        assert_eq!(pick_on_screen(&blank, &looking_at("com.apple.Safari", Some("Pricing")), 14 * MINUTE), None);
+        let blank = vec![seen(
+            2,
+            13 * MINUTE,
+            "com.apple.Safari",
+            Some("Pricing"),
+            "  ",
+        )];
+        assert_eq!(
+            pick_on_screen(
+                &blank,
+                &looking_at("com.apple.Safari", Some("Pricing")),
+                14 * MINUTE
+            ),
+            None
+        );
     }
 
-    fn held(id: i64, kind: PropositionKind, confidence: f64, status: PropositionStatus) -> Proposition {
+    fn held(
+        id: i64,
+        kind: PropositionKind,
+        confidence: f64,
+        status: PropositionStatus,
+    ) -> Proposition {
         Proposition {
             id,
             text: format!("claim {id}"),
@@ -1228,11 +1511,17 @@ mod tests {
             held(6, Goal, 0.7, PropositionStatus::Active),
         ];
         let none = std::collections::HashSet::new();
-        let shared: Vec<i64> = shared_claims(Vec::new(), recent.clone(), &none, NOW).into_iter().map(|p| p.id).collect();
+        let shared: Vec<i64> = shared_claims(Vec::new(), recent.clone(), &none, NOW)
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
         assert_eq!(shared, vec![1, 6]);
         // A guess the person confirmed is no longer a guess.
         let confirmed: std::collections::HashSet<i64> = [5].into_iter().collect();
-        let shared: Vec<i64> = shared_claims(Vec::new(), recent, &confirmed, NOW).into_iter().map(|p| p.id).collect();
+        let shared: Vec<i64> = shared_claims(Vec::new(), recent, &confirmed, NOW)
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
         assert_eq!(shared, vec![1, 6, 5]);
     }
 
@@ -1241,10 +1530,20 @@ mod tests {
         use PropositionKind::{Habit, Project};
         let focused = vec![held(7, Project, 0.6, PropositionStatus::Active)];
         let recent: Vec<Proposition> = (1..=9)
-            .map(|id| held(id, if id == 7 { Project } else { Habit }, if id == 7 { 0.6 } else { 0.9 }, PropositionStatus::Active))
+            .map(|id| {
+                held(
+                    id,
+                    if id == 7 { Project } else { Habit },
+                    if id == 7 { 0.6 } else { 0.9 },
+                    PropositionStatus::Active,
+                )
+            })
             .collect();
         let shared: Vec<i64> =
-            shared_claims(focused, recent, &std::collections::HashSet::new(), NOW).into_iter().map(|p| p.id).collect();
+            shared_claims(focused, recent, &std::collections::HashSet::new(), NOW)
+                .into_iter()
+                .map(|p| p.id)
+                .collect();
         assert_eq!(shared.len(), ABOUT_YOU_LINES);
         assert_eq!(shared[0], 7);
         assert_eq!(shared.iter().filter(|id| **id == 7).count(), 1);
@@ -1265,13 +1564,32 @@ mod tests {
         let confirmed: std::collections::HashSet<i64> = [3].into_iter().collect();
         assert!(not_seen_lately(&fast, false, NOW));
         assert!(!is_shared_unasked(&fast, false, NOW) && !is_servable(&fast, false, 2, NOW));
-        assert!(is_shared_unasked(&slow, false, NOW), "a slow claim never goes stale");
-        assert!(!not_seen_lately(&finished, false, NOW), "an unconfirmed project ages by its decay only");
-        assert!(not_seen_lately(&finished, true, NOW), "a confirmed project unseen for 45 days is not seen lately");
-        let shared: Vec<i64> =
-            shared_claims(Vec::new(), vec![fast.clone(), slow.clone(), finished.clone()], &confirmed, NOW).into_iter().map(|p| p.id).collect();
+        assert!(
+            is_shared_unasked(&slow, false, NOW),
+            "a slow claim never goes stale"
+        );
+        assert!(
+            !not_seen_lately(&finished, false, NOW),
+            "an unconfirmed project ages by its decay only"
+        );
+        assert!(
+            not_seen_lately(&finished, true, NOW),
+            "a confirmed project unseen for 45 days is not seen lately"
+        );
+        let shared: Vec<i64> = shared_claims(
+            Vec::new(),
+            vec![fast.clone(), slow.clone(), finished.clone()],
+            &confirmed,
+            NOW,
+        )
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
         assert_eq!(shared, vec![2]);
-        let shared: Vec<i64> = shared_claims(Vec::new(), vec![fast, slow, finished], &none, NOW).into_iter().map(|p| p.id).collect();
+        let shared: Vec<i64> = shared_claims(Vec::new(), vec![fast, slow, finished], &none, NOW)
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
         assert_eq!(shared, vec![3, 2], "equally sure: the newer first");
     }
 
@@ -1281,17 +1599,38 @@ mod tests {
         assert!(!is_servable(&struggle, false, 1, NOW));
         assert!(is_servable(&struggle, false, 2, NOW), "seen on two days");
         assert!(is_servable(&struggle, true, 1, NOW), "confirmed");
-        assert!(!is_shared_unasked(&struggle, true, NOW), "never sent unasked");
+        assert!(
+            !is_shared_unasked(&struggle, true, NOW),
+            "never sent unasked"
+        );
         let state = held(2, PropositionKind::State, 0.9, PropositionStatus::Active);
-        assert!(!is_servable(&state, true, 5, NOW), "how they are right now is never shown");
-        let rejected = held(3, PropositionKind::Project, 0.9, PropositionStatus::Rejected);
-        assert!(!is_servable(&rejected, false, 3, NOW) && !is_shared_unasked(&rejected, false, NOW));
+        assert!(
+            !is_servable(&state, true, 5, NOW),
+            "how they are right now is never shown"
+        );
+        let rejected = held(
+            3,
+            PropositionKind::Project,
+            0.9,
+            PropositionStatus::Rejected,
+        );
+        assert!(
+            !is_servable(&rejected, false, 3, NOW) && !is_shared_unasked(&rejected, false, NOW)
+        );
     }
 
     const NOW: u64 = 1_800_000_000_000_000;
 
     fn source(n: usize) -> Source {
-        Source { n, event_id: i64::try_from(n).unwrap_or(0), ts_us: 0, app: "App".into(), title: None, url: None, text: String::new() }
+        Source {
+            n,
+            event_id: i64::try_from(n).unwrap_or(0),
+            ts_us: 0,
+            app: "App".into(),
+            title: None,
+            url: None,
+            text: String::new(),
+        }
     }
 
     #[test]
@@ -1299,8 +1638,14 @@ mod tests {
         let memories = vec![source(2), source(3), source(4), source(5)];
         let n = |sources: Vec<Source>| sources.into_iter().map(|s| s.n).collect::<Vec<_>>();
         // The model rarely cites the screen itself; it is listed regardless.
-        assert_eq!(n(answer_sources(Some(source(1)), memories.clone(), &[3])), vec![1, 3]);
-        assert_eq!(n(answer_sources(Some(source(1)), memories.clone(), &[])), vec![1]);
+        assert_eq!(
+            n(answer_sources(Some(source(1)), memories.clone(), &[3])),
+            vec![1, 3]
+        );
+        assert_eq!(
+            n(answer_sources(Some(source(1)), memories.clone(), &[])),
+            vec![1]
+        );
         // Without a screen: what was cited, or the best three when nothing was.
         assert_eq!(n(answer_sources(None, memories.clone(), &[4])), vec![4]);
         assert_eq!(n(answer_sources(None, memories, &[])), vec![2, 3, 4]);
@@ -1315,11 +1660,14 @@ mod tests {
         assert!(unread_window_note(None).starts_with("Hippocampus has not read"));
     }
 
-    const NOTES_HEADER: &str = "[app=com.apple.Notes | title=Launch plan | url=? | ts=2026-10-12T14:02:00.000Z]\n";
+    const NOTES_HEADER: &str =
+        "[app=com.apple.Notes | title=Launch plan | url=? | ts=2026-10-12T14:02:00.000Z]\n";
 
     #[test]
     fn the_screen_is_shown_and_read_without_its_header_or_chrome() {
-        let stored = format!("{NOTES_HEADER}\u{4e09} The beta opens on October 21.\n\n\u{1e}\nRecently Deleted 3");
+        let stored = format!(
+            "{NOTES_HEADER}\u{4e09} The beta opens on October 21.\n\n\u{1e}\nRecently Deleted 3"
+        );
         let event = seen(1, 0, "com.apple.Notes", Some("Launch plan"), &stored);
         assert_eq!(screen_text(&event).main, "The beta opens on October 21.");
         assert_eq!(screen_source(&event).text, "The beta opens on October 21.");

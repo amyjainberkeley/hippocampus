@@ -156,14 +156,24 @@ pub fn adjusted_relevance(bm25: f64, decay: f64, age_us: u64) -> f64 {
 pub fn mmr(candidates: &[(Proposition, f64)], n: usize) -> Vec<Proposition> {
     let mut chosen: Vec<Proposition> = Vec::new();
     let mut pool: Vec<&(Proposition, f64)> = candidates.iter().collect();
-    let top = pool.iter().map(|(_, r)| *r).fold(0.0_f64, f64::max).max(f64::EPSILON);
+    let top = pool
+        .iter()
+        .map(|(_, r)| *r)
+        .fold(0.0_f64, f64::max)
+        .max(f64::EPSILON);
     while chosen.len() < n && !pool.is_empty() {
         let (index, _) = pool
             .iter()
             .enumerate()
             .map(|(i, (p, relevance))| {
-                let redundancy = chosen.iter().map(|c| similarity(&c.text, &p.text)).fold(0.0, f64::max);
-                (i, MMR_LAMBDA * (relevance / top) - (1.0 - MMR_LAMBDA) * redundancy)
+                let redundancy = chosen
+                    .iter()
+                    .map(|c| similarity(&c.text, &p.text))
+                    .fold(0.0, f64::max);
+                (
+                    i,
+                    MMR_LAMBDA * (relevance / top) - (1.0 - MMR_LAMBDA) * redundancy,
+                )
             })
             .max_by(|a, b| a.1.total_cmp(&b.1))
             .expect("pool is not empty");
@@ -173,12 +183,60 @@ pub fn mmr(candidates: &[(Proposition, f64)], n: usize) -> Vec<Proposition> {
 }
 
 const GENERIC: &[&str] = &[
-    "user", "users", "project", "projects", "work", "working", "works", "task", "tasks", "computer",
-    "screen", "app", "apps", "application", "window", "windows", "document", "documents", "file",
-    "files", "something", "things", "thing", "information", "content", "various", "different",
-    "multiple", "several", "some", "their", "they", "this", "that", "with", "about", "using",
-    "used", "uses", "related", "currently", "actively", "trying", "likely", "seems", "appears",
-    "interested", "interest", "involved", "engaged", "activity", "activities", "time", "while",
+    "user",
+    "users",
+    "project",
+    "projects",
+    "work",
+    "working",
+    "works",
+    "task",
+    "tasks",
+    "computer",
+    "screen",
+    "app",
+    "apps",
+    "application",
+    "window",
+    "windows",
+    "document",
+    "documents",
+    "file",
+    "files",
+    "something",
+    "things",
+    "thing",
+    "information",
+    "content",
+    "various",
+    "different",
+    "multiple",
+    "several",
+    "some",
+    "their",
+    "they",
+    "this",
+    "that",
+    "with",
+    "about",
+    "using",
+    "used",
+    "uses",
+    "related",
+    "currently",
+    "actively",
+    "trying",
+    "likely",
+    "seems",
+    "appears",
+    "interested",
+    "interest",
+    "involved",
+    "engaged",
+    "activity",
+    "activities",
+    "time",
+    "while",
 ];
 
 /// Keep only propositions specific enough to help: each must share at least
@@ -191,7 +249,10 @@ pub fn specific(drafts: Vec<Draft>, observation: &str, user_name: &str) -> Vec<D
     // One claim per batch: a draft that mostly repeats an earlier one adds nothing.
     let mut distinct: Vec<Draft> = Vec::new();
     for draft in drafts {
-        if !distinct.iter().any(|kept| similarity(&kept.text, &draft.text) >= 0.45) {
+        if !distinct
+            .iter()
+            .any(|kept| similarity(&kept.text, &draft.text) >= 0.45)
+        {
             distinct.push(draft);
         }
     }
@@ -200,7 +261,9 @@ pub fn specific(drafts: Vec<Draft>, observation: &str, user_name: &str) -> Vec<D
         .filter(|draft| {
             words(&draft.text)
                 .into_iter()
-                .filter(|w| w.len() >= 4 && *w != name && !GENERIC.contains(&w.as_str()) && seen.contains(w))
+                .filter(|w| {
+                    w.len() >= 4 && *w != name && !GENERIC.contains(&w.as_str()) && seen.contains(w)
+                })
                 .count()
                 >= 2
         })
@@ -221,7 +284,11 @@ fn first_sighting_ceiling(kind: &str) -> i64 {
 /// Refer to the user by name, never by a gendered pronoun the model chose.
 #[must_use]
 pub fn ungender(text: &str, user_name: &str) -> String {
-    let name = if user_name.trim().is_empty() { "They" } else { user_name.trim() };
+    let name = if user_name.trim().is_empty() {
+        "They"
+    } else {
+        user_name.trim()
+    };
     let mut out = Vec::new();
     for word in text.split(' ') {
         let trimmed = word.trim_end_matches(|c: char| !c.is_alphanumeric());
@@ -258,7 +325,11 @@ pub fn prepare(mut draft: Draft, user_name: &str, first_sighting: bool) -> Draft
 ///
 /// # Errors
 /// Store failures.
-pub fn retrieve(store: &SqlCipherBrainStore, text: &str, now_us: u64) -> Result<Vec<Proposition>, StoreError> {
+pub fn retrieve(
+    store: &SqlCipherBrainStore,
+    text: &str,
+    now_us: u64,
+) -> Result<Vec<Proposition>, StoreError> {
     let scored: Vec<(Proposition, f64)> = store
         .search_propositions(text, 24)?
         .into_iter()
@@ -337,10 +408,15 @@ pub fn integrate(
                         .filter(|c| ids.contains(&c.id) && similarity(&c.text, text) >= 0.3)
                         .collect()
                 }
-                Err(MindCallError::Unavailable(reason)) => return Err(MindCallError::Unavailable(reason).into()),
+                Err(MindCallError::Unavailable(reason)) => {
+                    return Err(MindCallError::Unavailable(reason).into())
+                }
                 Err(_) => {
                     // Without a judgement, fall back to near-identical wording.
-                    candidates.into_iter().filter(|c| similarity(&c.text, text) >= 0.7).collect()
+                    candidates
+                        .into_iter()
+                        .filter(|c| similarity(&c.text, text) >= 0.7)
+                        .collect()
                 }
             }
         };
@@ -367,7 +443,9 @@ pub fn integrate(
             CALL_TIMEOUT,
         ) {
             Ok(revised) => revised,
-            Err(MindCallError::Unavailable(reason)) => return Err(MindCallError::Unavailable(reason).into()),
+            Err(MindCallError::Unavailable(reason)) => {
+                return Err(MindCallError::Unavailable(reason).into())
+            }
             Err(_) => {
                 outcome.skipped += 1;
                 continue;
@@ -379,7 +457,12 @@ pub fn integrate(
             store.set_proposition_status(old.id, PropositionStatus::Retired, now_us)?;
         }
         let revised = prepare(revised, user_name, false);
-        store.revise_proposition(related[0].id, &revised.to_new(&mind.engine_label()), &all_evidence, now_us)?;
+        store.revise_proposition(
+            related[0].id,
+            &revised.to_new(&mind.engine_label()),
+            &all_evidence,
+            now_us,
+        )?;
         outcome.revised += 1;
     }
     Ok(outcome)
@@ -400,8 +483,14 @@ mod tests {
         assert!(!is_stale(0.4, now - 44 * day, now));
         assert!(is_stale(0.5, now - 45 * day, now));
         assert!(!is_stale(0.3, 0, now), "slow claims never go stale");
-        assert!(is_stale(9.0 / 10.0, now - 2 * day, now), "a stored score of 9 is 0.9");
-        assert!(!is_stale(0.9, now + day, now), "a clock that went back is not age");
+        assert!(
+            is_stale(9.0 / 10.0, now - 2 * day, now),
+            "a stored score of 9 is 0.9"
+        );
+        assert!(
+            !is_stale(0.9, now + day, now),
+            "a clock that went back is not age"
+        );
     }
 
     fn prop(id: i64, text: &str) -> Proposition {
@@ -428,7 +517,10 @@ mod tests {
         let lasting = adjusted_relevance(-3.0, 0.1, 2 * day);
         let fleeting = adjusted_relevance(-3.0, 0.9, 2 * day);
         assert!((fresh - 3.0).abs() < 1e-9);
-        assert!(lasting > fleeting, "a fast-decaying proposition loses relevance sooner");
+        assert!(
+            lasting > fleeting,
+            "a fast-decaying proposition loses relevance sooner"
+        );
     }
 
     #[test]
@@ -439,7 +531,11 @@ mod tests {
             (prop(3, "Amy works with Ravi on launches"), 2.0),
         ];
         let picked: Vec<i64> = mmr(&candidates, 2).into_iter().map(|p| p.id).collect();
-        assert_eq!(picked, vec![1, 3], "the near-duplicate gives way to a different claim");
+        assert_eq!(
+            picked,
+            vec![1, 3],
+            "the near-duplicate gives way to a different claim"
+        );
     }
 
     #[test]
@@ -453,17 +549,37 @@ mod tests {
         };
         let prepared = prepare(draft, "Amy", true);
         assert_eq!(prepared.confidence, 6);
-        assert_eq!(prepared.text, "Amy watches YouTube often, so Amy takes breaks.");
+        assert_eq!(
+            prepared.text,
+            "Amy watches YouTube often, so Amy takes breaks."
+        );
         assert_eq!(prepared.reasoning, "their typing pauses");
-        let project = Draft { text: "Sam is pricing Team".into(), reasoning: String::new(), kind: "project".into(), confidence: 10, decay: 4 };
+        let project = Draft {
+            text: "Sam is pricing Team".into(),
+            reasoning: String::new(),
+            kind: "project".into(),
+            confidence: 10,
+            decay: 4,
+        };
         assert_eq!(prepare(project.clone(), "Amy", true).confidence, 8);
-        assert_eq!(prepare(project, "Amy", false).confidence, 10, "confirmed claims may rise");
+        assert_eq!(
+            prepare(project, "Amy", false).confidence,
+            10,
+            "confirmed claims may rise"
+        );
     }
 
     #[test]
     fn a_batch_keeps_one_version_of_each_claim() {
-        let draft = |text: &str| Draft { text: text.into(), reasoning: String::new(), kind: "state".into(), confidence: 5, decay: 5 };
-        let observation = "YouTube search: sourdough starter for beginners. Notes: Launch plan for Team pricing.";
+        let draft = |text: &str| Draft {
+            text: text.into(),
+            reasoning: String::new(),
+            kind: "state".into(),
+            confidence: 5,
+            decay: 5,
+        };
+        let observation =
+            "YouTube search: sourdough starter for beginners. Notes: Launch plan for Team pricing.";
         let kept = specific(
             vec![
                 draft("Sam is looking for the movie sourdough on YouTube."),
@@ -473,12 +589,23 @@ mod tests {
             observation,
             "Amy",
         );
-        assert_eq!(kept.len(), 2, "{:?}", kept.iter().map(|d| &d.text).collect::<Vec<_>>());
+        assert_eq!(
+            kept.len(),
+            2,
+            "{:?}",
+            kept.iter().map(|d| &d.text).collect::<Vec<_>>()
+        );
     }
 
     #[test]
     fn generic_propositions_are_dropped() {
-        let draft = |text: &str| Draft { text: text.into(), reasoning: String::new(), kind: "project".into(), confidence: 7, decay: 4 };
+        let draft = |text: &str| Draft {
+            text: text.into(),
+            reasoning: String::new(),
+            kind: "project".into(),
+            confidence: 7,
+            decay: 4,
+        };
         let observation = "Chrome — Pricing | Stripe: per-seat pricing. Notes — Launch plan: Team: $18/seat annual. Slack — #pricing Ravi";
         let kept = specific(
             vec![
@@ -501,7 +628,13 @@ mod tests {
 
     #[test]
     fn drafts_map_scores_to_unit_range() {
-        let d = Draft { text: "Amy ships".into(), reasoning: "r".into(), kind: "goal".into(), confidence: 14, decay: 0 };
+        let d = Draft {
+            text: "Amy ships".into(),
+            reasoning: "r".into(),
+            kind: "goal".into(),
+            confidence: 14,
+            decay: 0,
+        };
         let n = d.to_new(MODEL);
         assert!((n.confidence - 1.0).abs() < 1e-9 && (n.decay - 0.1).abs() < 1e-9);
         assert_eq!(n.kind, PropositionKind::Goal);
@@ -542,22 +675,66 @@ mod tests {
     fn two_claims() -> Merge {
         use mci_brain::{BrainStore, Event, EventId, EventSource};
         let dir = tempfile::tempdir().unwrap();
-        let store = SqlCipherBrainStore::new(&dir.path().join("b.sqlite"), &mci_core::crypto::DbKey::from_bytes([9; 32])).unwrap();
+        let store = SqlCipherBrainStore::new(
+            &dir.path().join("b.sqlite"),
+            &mci_core::crypto::DbKey::from_bytes([9; 32]),
+        )
+        .unwrap();
         let put = |ts_us| {
             let event = Event {
-                id: EventId(0), ts_us, app_bundle_id: Some("com.apple.Notes".into()), window_title: Some("Launch plan".into()),
-                url: None, text: "Team: $18 a seat".into(), summary: None, entities: None, episode_id: None,
-                cascade_reason: 0, keyframe_blob: None, tab_id: None, embedding: None,
+                id: EventId(0),
+                ts_us,
+                app_bundle_id: Some("com.apple.Notes".into()),
+                window_title: Some("Launch plan".into()),
+                url: None,
+                text: "Team: $18 a seat".into(),
+                summary: None,
+                entities: None,
+                episode_id: None,
+                cascade_reason: 0,
+                keyframe_blob: None,
+                tab_id: None,
+                embedding: None,
             };
-            i64::try_from(store.put_event_with_source(&event, EventSource::ScreenOcr).unwrap().0).unwrap()
+            i64::try_from(
+                store
+                    .put_event_with_source(&event, EventSource::ScreenOcr)
+                    .unwrap()
+                    .0,
+            )
+            .unwrap()
         };
         let (old, new) = (put(1), put(2));
         let claim = |text: &str| NewProposition {
-            text: text.into(), reasoning: "seen".into(), kind: PropositionKind::Project, confidence: 0.6, decay: 0.3, model: "t".into(),
+            text: text.into(),
+            reasoning: "seen".into(),
+            kind: PropositionKind::Project,
+            confidence: 0.6,
+            decay: 0.3,
+            model: "t".into(),
         };
-        let a = store.insert_proposition(&claim("Sam is pricing the Team plan for the beta launch"), &[old], 10).unwrap();
-        let b = store.insert_proposition(&claim("Sam is pricing the Team plan for the launch in Notes"), &[old], 10).unwrap();
-        Merge { dir, store, a, b, old, new }
+        let a = store
+            .insert_proposition(
+                &claim("Sam is pricing the Team plan for the beta launch"),
+                &[old],
+                10,
+            )
+            .unwrap();
+        let b = store
+            .insert_proposition(
+                &claim("Sam is pricing the Team plan for the launch in Notes"),
+                &[old],
+                10,
+            )
+            .unwrap();
+        Merge {
+            dir,
+            store,
+            a,
+            b,
+            old,
+            new,
+        }
     }
 
     fn restatement() -> Draft {
@@ -578,16 +755,43 @@ mod tests {
 
         let outcome = integrate(&m.store, &mind, "Amy", &[restatement()], &[m.new], 30).unwrap();
 
-        assert_eq!(outcome, Integration { added: 0, revised: 0, skipped: 1 });
-        let active = m.store.propositions_with_status(PropositionStatus::Active, 10).unwrap();
+        assert_eq!(
+            outcome,
+            Integration {
+                added: 0,
+                revised: 0,
+                skipped: 1
+            }
+        );
+        let active = m
+            .store
+            .propositions_with_status(PropositionStatus::Active, 10)
+            .unwrap();
         assert_eq!(active.len(), 2, "nothing retired, nothing new");
-        let a = active.iter().find(|p| p.id == m.a).expect("the confirmed claim stays in use");
-        assert_eq!(a.text, "Sam is pricing the Team plan for the beta launch", "in the words that were confirmed");
-        assert_eq!(a.evidence, vec![m.old, m.new], "it gains the session as evidence");
+        let a = active
+            .iter()
+            .find(|p| p.id == m.a)
+            .expect("the confirmed claim stays in use");
+        assert_eq!(
+            a.text, "Sam is pricing the Team plan for the beta launch",
+            "in the words that were confirmed"
+        );
+        assert_eq!(
+            a.evidence,
+            vec![m.old, m.new],
+            "it gains the session as evidence"
+        );
         assert_eq!(a.updated_us, 30, "and is marked seen");
-        let b = active.iter().find(|p| p.id == m.b).expect("the other related claim is untouched");
+        let b = active
+            .iter()
+            .find(|p| p.id == m.b)
+            .expect("the other related claim is untouched");
         assert_eq!((b.evidence.clone(), b.updated_us), (vec![m.old], 10));
-        assert!(m.store.propositions_with_status(PropositionStatus::Retired, 10).unwrap().is_empty());
+        assert!(m
+            .store
+            .propositions_with_status(PropositionStatus::Retired, 10)
+            .unwrap()
+            .is_empty());
         assert!(m.store.confirmed_proposition_ids().unwrap().contains(&m.a));
     }
 
@@ -598,11 +802,27 @@ mod tests {
 
         let outcome = integrate(&m.store, &mind, "Amy", &[restatement()], &[m.new], 30).unwrap();
 
-        assert_eq!(outcome, Integration { added: 0, revised: 1, skipped: 0 });
-        let active = m.store.propositions_with_status(PropositionStatus::Active, 10).unwrap();
+        assert_eq!(
+            outcome,
+            Integration {
+                added: 0,
+                revised: 1,
+                skipped: 0
+            }
+        );
+        let active = m
+            .store
+            .propositions_with_status(PropositionStatus::Active, 10)
+            .unwrap();
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].text, "Sam is pricing the Team plan");
         assert_eq!(active[0].evidence, vec![m.old, m.new]);
-        assert_eq!(m.store.propositions_with_status(PropositionStatus::Retired, 10).unwrap().len(), 2);
+        assert_eq!(
+            m.store
+                .propositions_with_status(PropositionStatus::Retired, 10)
+                .unwrap()
+                .len(),
+            2
+        );
     }
 }

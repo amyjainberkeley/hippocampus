@@ -127,7 +127,10 @@ impl Server {
     /// Offer `mci_ask` and `mci_suggest` too. Only the command bar's own
     /// session does this; external clients see the read-only tools.
     #[must_use]
-    pub fn with_assistant(mut self, assistant: Arc<crate::understanding::query::Assistant>) -> Self {
+    pub fn with_assistant(
+        mut self,
+        assistant: Arc<crate::understanding::query::Assistant>,
+    ) -> Self {
         self.assistant = Some(assistant);
         self
     }
@@ -136,7 +139,11 @@ impl Server {
     /// observe the increment behavior).
     #[must_use]
     pub fn new_with_counters(reader: Arc<dyn BrainReader>, counters: Arc<ServerCounters>) -> Self {
-        Self { reader, counters, assistant: None }
+        Self {
+            reader,
+            counters,
+            assistant: None,
+        }
     }
 
     /// Borrow the counters (for tests + the supervisor's wire frame).
@@ -185,7 +192,10 @@ impl Server {
                         all.extend(extra.iter().cloned());
                     }
                 }
-                Some(JsonRpcResponse::ok(id, serde_json::json!({ "tools": tools })))
+                Some(JsonRpcResponse::ok(
+                    id,
+                    serde_json::json!({ "tools": tools }),
+                ))
             }
             "tools/call" => Some(self.handle_tools_call(id, req.params)),
             "ping" => Some(JsonRpcResponse::ok(id, serde_json::json!({}))),
@@ -336,26 +346,52 @@ impl Server {
         let payload = if tool == ToolName::Ask {
             let parsed: AskArgs = match serde_json::from_value(args) {
                 Ok(v) => v,
-                Err(e) => return JsonRpcResponse::err(id, INVALID_PARAMS, format!("mci_ask args: {e}")),
+                Err(e) => {
+                    return JsonRpcResponse::err(id, INVALID_PARAMS, format!("mci_ask args: {e}"))
+                }
             };
             if parsed.question.trim().is_empty() {
-                return JsonRpcResponse::err(id, INVALID_PARAMS, "mci_ask: question must be non-empty");
+                return JsonRpcResponse::err(
+                    id,
+                    INVALID_PARAMS,
+                    "mci_ask: question must be non-empty",
+                );
             }
             let hits = match self.reader.recall(&parsed.question, 10) {
                 Ok(outcome) => hits_of(outcome),
                 Err(e) => return brain_err_to_response(id, &e),
             };
-            let looking_at = NowContext { app: parsed.app, title: parsed.title };
+            let looking_at = NowContext {
+                app: parsed.app,
+                title: parsed.title,
+            };
             assistant
-                .ask(&parsed.question, parsed.now.as_deref(), &looking_at, sources_from_hits(hits))
+                .ask(
+                    &parsed.question,
+                    parsed.now.as_deref(),
+                    &looking_at,
+                    sources_from_hits(hits),
+                )
                 .map(|answer| serde_json::to_value(answer).unwrap_or_default())
         } else {
             let parsed: SuggestArgs = match serde_json::from_value(args) {
                 Ok(v) => v,
-                Err(e) => return JsonRpcResponse::err(id, INVALID_PARAMS, format!("mci_suggest args: {e}")),
+                Err(e) => {
+                    return JsonRpcResponse::err(
+                        id,
+                        INVALID_PARAMS,
+                        format!("mci_suggest args: {e}"),
+                    )
+                }
             };
             assistant
-                .suggest(&NowContext { app: parsed.app, title: parsed.title }, parsed.model)
+                .suggest(
+                    &NowContext {
+                        app: parsed.app,
+                        title: parsed.title,
+                    },
+                    parsed.model,
+                )
                 .map(|suggestions| serde_json::json!({ "suggestions": suggestions }))
         };
         match payload {
@@ -371,7 +407,12 @@ impl Server {
         }
     }
 
-    fn handle_understanding(&self, id: JsonRpcId, tool: ToolName, args: serde_json::Value) -> JsonRpcResponse {
+    fn handle_understanding(
+        &self,
+        id: JsonRpcId,
+        tool: ToolName,
+        args: serde_json::Value,
+    ) -> JsonRpcResponse {
         use crate::understanding::query::UnderstandingQuery;
         let view = match tool {
             ToolName::Day => "day",
@@ -382,16 +423,25 @@ impl Server {
         let mut object = match args {
             serde_json::Value::Object(map) => map,
             serde_json::Value::Null => serde_json::Map::new(),
-            _ => return JsonRpcResponse::err(id, INVALID_PARAMS, format!("{tool} args must be an object")),
+            _ => {
+                return JsonRpcResponse::err(
+                    id,
+                    INVALID_PARAMS,
+                    format!("{tool} args must be an object"),
+                )
+            }
         };
         object.insert("view".into(), serde_json::Value::String(view.into()));
         // The You page's shape (with what is kept back and not seen lately)
         // is for the person's own window, never served to an AI tool.
         object.remove("page");
-        let query: UnderstandingQuery = match serde_json::from_value(serde_json::Value::Object(object)) {
-            Ok(query) => query,
-            Err(e) => return JsonRpcResponse::err(id, INVALID_PARAMS, format!("{tool} args: {e}")),
-        };
+        let query: UnderstandingQuery =
+            match serde_json::from_value(serde_json::Value::Object(object)) {
+                Ok(query) => query,
+                Err(e) => {
+                    return JsonRpcResponse::err(id, INVALID_PARAMS, format!("{tool} args: {e}"))
+                }
+            };
         match self.reader.understanding(&query) {
             Ok(payload) => JsonRpcResponse::ok(
                 id,

@@ -169,6 +169,8 @@ pub trait BrainReader: Send + Sync {
         &self,
         _query: &crate::understanding::query::UnderstandingQuery,
     ) -> Result<serde_json::Value, BrainReaderError> {
-        Err(BrainReaderError::Backend("understanding is not available from this reader".into()))
+        Err(BrainReaderError::Backend(
+            "understanding is not available from this reader".into(),
+        ))
     }
 }

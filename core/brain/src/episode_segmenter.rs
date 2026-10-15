@@ -302,10 +302,15 @@ mod tests {
             make_event(5, 5_000, Some("com.microsoft.VSCode")),
         ];
         let stats = seg
-            .segment_with_context(&events, None, &w, &|id| id == EventId(2) || id == EventId(4))
+            .segment_with_context(&events, None, &w, &|id| {
+                id == EventId(2) || id == EventId(4)
+            })
             .unwrap();
         assert_eq!(stats.events_assigned, 5);
-        assert_eq!(stats.episodes_created, 1, "background text is not a switch of focused work");
+        assert_eq!(
+            stats.episodes_created, 1,
+            "background text is not a switch of focused work"
+        );
         let assigned = w.event_episodes.lock().unwrap();
         assert!(assigned.iter().all(|(_, ep)| *ep == assigned[0].1));
     }
@@ -320,7 +325,10 @@ mod tests {
         let stats = seg
             .segment_with_context(&next, Some(&tail), &w, &|id| id == EventId(9))
             .unwrap();
-        assert_eq!(stats.episodes_created, 1, "focused TextEdit after background TextEdit is a new episode");
+        assert_eq!(
+            stats.episodes_created, 1,
+            "focused TextEdit after background TextEdit is a new episode"
+        );
     }
 
     #[test]

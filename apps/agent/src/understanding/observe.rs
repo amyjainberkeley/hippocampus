@@ -29,7 +29,10 @@ const PAUSE_MAX_US: u64 = 5 * 60 * 1_000_000;
 
 /// Sources that describe the user's focus (not background windows).
 fn is_focus(source: &str) -> bool {
-    !matches!(source, "screen_context" | "transcript_import" | "mcp_resource")
+    !matches!(
+        source,
+        "screen_context" | "transcript_import" | "mcp_resource"
+    )
 }
 
 /// A stretch of activity: indices into the event slice, inclusive start,
@@ -156,16 +159,24 @@ fn read_text(event: &ObservedEvent) -> String {
 
 /// Merge a session's focused events into segments and attach input counts.
 #[must_use]
-pub fn segments(events: &[ObservedEvent], counts: &[InteractionCounts], session_end_us: u64) -> Vec<Segment> {
+pub fn segments(
+    events: &[ObservedEvent],
+    counts: &[InteractionCounts],
+    session_end_us: u64,
+) -> Vec<Segment> {
     let mut out: Vec<Segment> = Vec::new();
     // The capture each segment's text comes from: its longest stored text.
     let mut fullest: Vec<&ObservedEvent> = Vec::new();
     for event in events.iter().filter(|e| is_focus(&e.source)) {
-        let app = event.app_bundle_id.clone().unwrap_or_else(|| "unknown".into());
+        let app = event
+            .app_bundle_id
+            .clone()
+            .unwrap_or_else(|| "unknown".into());
         let same = out.last().is_some_and(|last: &Segment| {
             last.app == app
                 && last.title == event.window_title
-                && last.url.as_deref().and_then(apps::host_of) == event.url.as_deref().and_then(apps::host_of)
+                && last.url.as_deref().and_then(apps::host_of)
+                    == event.url.as_deref().and_then(apps::host_of)
         });
         if same {
             let last = out.last_mut().expect("checked");
@@ -206,10 +217,9 @@ pub fn segments(events: &[ObservedEvent], counts: &[InteractionCounts], session_
     }
     for segment in &mut out {
         let mut quiet_run = 0u64;
-        for sample in counts
-            .iter()
-            .filter(|c| c.start_us >= segment.start_us && c.start_us < segment.end_us.max(segment.start_us + 1))
-        {
+        for sample in counts.iter().filter(|c| {
+            c.start_us >= segment.start_us && c.start_us < segment.end_us.max(segment.start_us + 1)
+        }) {
             segment.keys += u64::from(sample.keys);
             segment.clicks += u64::from(sample.clicks);
             segment.scrolls += u64::from(sample.scrolls);
@@ -255,24 +265,47 @@ pub struct Signals {
 }
 
 const ERROR_MARKERS: &[&str] = &[
-    "error", "failed", "exception", "traceback", "not found", "denied", "cannot ", "can't ", "unable to", "panicked", "fatal:",
+    "error",
+    "failed",
+    "exception",
+    "traceback",
+    "not found",
+    "denied",
+    "cannot ",
+    "can't ",
+    "unable to",
+    "panicked",
+    "fatal:",
 ];
 
 /// Derive the session's signals.
 #[must_use]
-pub fn signals(events: &[ObservedEvent], segments: &[Segment], searches: &[SearchRecord]) -> Signals {
+pub fn signals(
+    events: &[ObservedEvent],
+    segments: &[Segment],
+    searches: &[SearchRecord],
+) -> Signals {
     let mut out = Signals {
         switches: u32::try_from(segments.len().saturating_sub(1)).unwrap_or(u32::MAX),
         ..Signals::default()
     };
-    let label = |s: &Segment| format!("{} — {}", apps::name(&s.app), s.title.clone().unwrap_or_default());
+    let label = |s: &Segment| {
+        format!(
+            "{} — {}",
+            apps::name(&s.app),
+            s.title.clone().unwrap_or_default()
+        )
+    };
     // Back and forth: A B A B … between the same two windows.
     let mut pairs: Vec<(String, String, u32)> = Vec::new();
     for window in segments.windows(3) {
         let (a, b, c) = (label(&window[0]), label(&window[1]), label(&window[2]));
         if a == c && a != b {
             let key = if a < b { (a, b) } else { (b, a) };
-            match pairs.iter_mut().find(|(x, y, _)| *x == key.0 && *y == key.1) {
+            match pairs
+                .iter_mut()
+                .find(|(x, y, _)| *x == key.0 && *y == key.1)
+            {
                 Some(pair) => pair.2 += 1,
                 None => pairs.push((key.0, key.1, 2)),
             }
@@ -288,7 +321,8 @@ pub fn signals(events: &[ObservedEvent], segments: &[Segment], searches: &[Searc
             }
         }
         previous = Some(&search.query);
-        out.searches.push((search.ts_us, search.engine.clone(), search.query.clone()));
+        out.searches
+            .push((search.ts_us, search.engine.clone(), search.query.clone()));
     }
     for segment in segments {
         out.keys += segment.keys;
@@ -299,7 +333,10 @@ pub fn signals(events: &[ObservedEvent], segments: &[Segment], searches: &[Searc
         }
         for line in segment.text.lines() {
             let lower = line.to_lowercase();
-            if line.len() <= 160 && ERROR_MARKERS.iter().any(|m| lower.contains(m)) && out.errors.len() < 3 {
+            if line.len() <= 160
+                && ERROR_MARKERS.iter().any(|m| lower.contains(m))
+                && out.errors.len() < 3
+            {
                 let line = line.trim().to_owned();
                 if !line.is_empty() && !out.errors.contains(&line) {
                     out.errors.push(line);
@@ -361,13 +398,23 @@ fn excerpt(text: &str, limit: usize) -> String {
 /// the input says, an excerpt of what was on screen, then the session's
 /// searches and signals. Bounded to `max_chars`.
 #[must_use]
-pub fn render(segments: &[Segment], signals: &Signals, tz_offset_secs: i32, max_chars: usize) -> String {
+pub fn render(
+    segments: &[Segment],
+    signals: &Signals,
+    tz_offset_secs: i32,
+    max_chars: usize,
+) -> String {
     let mut lines = Vec::new();
     // Give each window a share of the budget, more for longer ones.
-    let total: u64 = segments.iter().map(|s| s.duration_us().max(1)).sum::<u64>().max(1);
+    let total: u64 = segments
+        .iter()
+        .map(|s| s.duration_us().max(1))
+        .sum::<u64>()
+        .max(1);
     let text_budget = max_chars.saturating_sub(1_200);
     for segment in segments {
-        let share = ((segment.duration_us().max(1) as f64 / total as f64) * text_budget as f64) as usize;
+        let share =
+            ((segment.duration_us().max(1) as f64 / total as f64) * text_budget as f64) as usize;
         let mut line = format!(
             "{}–{} {} — \"{}\"",
             clock(segment.start_us, tz_offset_secs),
@@ -378,7 +425,11 @@ pub fn render(segments: &[Segment], signals: &Signals, tz_offset_secs: i32, max_
         if let Some(host) = segment.url.as_deref().and_then(apps::host_of) {
             line.push_str(&format!(" ({host})"));
         }
-        line.push_str(&format!(": {} for {}", segment.activity(), minutes(segment.duration_us())));
+        line.push_str(&format!(
+            ": {} for {}",
+            segment.activity(),
+            minutes(segment.duration_us())
+        ));
         let budget = share.clamp(80, 700);
         if !segment.text.trim().is_empty() {
             line.push_str(&format!(". Text: {}", excerpt(&segment.text, budget)));
@@ -386,19 +437,33 @@ pub fn render(segments: &[Segment], signals: &Signals, tz_offset_secs: i32, max_
         lines.push(line);
     }
     for (ts, engine, query) in &signals.searches {
-        lines.push(format!("{} searched {engine}: \"{}\"", clock(*ts, tz_offset_secs), excerpt(query, 120)));
+        lines.push(format!(
+            "{} searched {engine}: \"{}\"",
+            clock(*ts, tz_offset_secs),
+            excerpt(query, 120)
+        ));
     }
     let mut notes = Vec::new();
     if signals.reworded_searches > 0 {
-        notes.push(format!("reworded a search {} time(s)", signals.reworded_searches));
+        notes.push(format!(
+            "reworded a search {} time(s)",
+            signals.reworded_searches
+        ));
     }
     for (a, b, n) in &signals.back_and_forth {
-        notes.push(format!("switched back and forth between {a} and {b} {n} times"));
+        notes.push(format!(
+            "switched back and forth between {a} and {b} {n} times"
+        ));
     }
     if !signals.errors.is_empty() {
         notes.push(format!(
             "error text on screen: {}",
-            signals.errors.iter().map(|e| format!("\"{}\"", excerpt(e, 100))).collect::<Vec<_>>().join("; ")
+            signals
+                .errors
+                .iter()
+                .map(|e| format!("\"{}\"", excerpt(e, 100)))
+                .collect::<Vec<_>>()
+                .join("; ")
         ));
     }
     if !signals.also_visible.is_empty() {
@@ -430,7 +495,10 @@ pub fn evidence(segments: &[Segment], limit: usize) -> Vec<i64> {
     while out.len() < limit {
         let mut added = false;
         for segment in segments {
-            if let Some(id) = segment.event_ids.get(segment.event_ids.len().saturating_sub(1 + round)) {
+            if let Some(id) = segment
+                .event_ids
+                .get(segment.event_ids.len().saturating_sub(1 + round))
+            {
                 if !out.contains(id) && out.len() < limit {
                     out.push(*id);
                     added = true;
@@ -482,11 +550,22 @@ mod tests {
         let events = vec![
             ev(1, 0, "com.apple.Notes", "Plan", "screen_ocr", "a"),
             ev(2, 3, "com.apple.Notes", "Plan", "screen_ocr", "b"),
-            ev(3, 6, "com.tinyspeck.slackmacgap", "#pricing", "screen_context", "bg"),
+            ev(
+                3,
+                6,
+                "com.tinyspeck.slackmacgap",
+                "#pricing",
+                "screen_context",
+                "bg",
+            ),
             ev(4, 12, "com.apple.Notes", "Plan", "screen_ocr", "c"),
         ];
         let spans = split_sessions(&events);
-        assert_eq!(spans.len(), 2, "a background read does not bridge a 9-minute gap");
+        assert_eq!(
+            spans.len(),
+            2,
+            "a background read does not bridge a 9-minute gap"
+        );
         assert_eq!((spans[0].start, spans[0].end), (0, 3));
         assert_eq!(spans[1].start, 3);
     }
@@ -494,9 +573,30 @@ mod tests {
     #[test]
     fn segments_measure_typing_reading_and_pauses() {
         let events = vec![
-            ev(1, 0, "com.google.Chrome", "Pricing | Stripe", "browser_page", "Per-seat pricing. Tiered pricing."),
-            ev(2, 4, "com.apple.Notes", "Launch plan", "screen_ocr", "Team: $18/seat"),
-            ev(3, 9, "com.apple.Notes", "Launch plan", "screen_ocr", "Team: $18/seat annual"),
+            ev(
+                1,
+                0,
+                "com.google.Chrome",
+                "Pricing | Stripe",
+                "browser_page",
+                "Per-seat pricing. Tiered pricing.",
+            ),
+            ev(
+                2,
+                4,
+                "com.apple.Notes",
+                "Launch plan",
+                "screen_ocr",
+                "Team: $18/seat",
+            ),
+            ev(
+                3,
+                9,
+                "com.apple.Notes",
+                "Launch plan",
+                "screen_ocr",
+                "Team: $18/seat annual",
+            ),
         ];
         let mut c = counts(0, 4, 0, 2);
         c.extend(counts(4, 6, 0, 0)); // two quiet minutes in Notes
@@ -504,7 +604,10 @@ mod tests {
         let segs = segments(&events, &c, events[2].ts_us);
         assert_eq!(segs.len(), 2);
         assert_eq!(segs[0].activity(), "reading");
-        assert_eq!(segs[1].text, "Team: $18/seat annual", "the most complete text wins");
+        assert_eq!(
+            segs[1].text, "Team: $18/seat annual",
+            "the most complete text wins"
+        );
         assert_eq!(segs[1].pauses_us, vec![2 * MIN]);
         assert_eq!(segs[1].activity(), "typing", "144 keys in five minutes");
     }
@@ -513,13 +616,42 @@ mod tests {
     fn signals_find_back_and_forth_reworded_searches_and_errors() {
         let mut events = Vec::new();
         for i in 0..6 {
-            let (app, title) = if i % 2 == 0 { ("com.apple.Notes", "Plan") } else { ("com.tinyspeck.slackmacgap", "#pricing") };
-            events.push(ev(i, i as u64, app, title, "screen_ocr", if i == 5 { "Error: payment failed" } else { "ok" }));
+            let (app, title) = if i % 2 == 0 {
+                ("com.apple.Notes", "Plan")
+            } else {
+                ("com.tinyspeck.slackmacgap", "#pricing")
+            };
+            events.push(ev(
+                i,
+                i as u64,
+                app,
+                title,
+                "screen_ocr",
+                if i == 5 {
+                    "Error: payment failed"
+                } else {
+                    "ok"
+                },
+            ));
         }
         let segs = segments(&events, &[], events[5].ts_us);
         let searches = vec![
-            SearchRecord { event_id: 1, ts_us: 1, engine: "google".into(), query: "stripe per seat pricing".into(), app_bundle_id: None, url: None },
-            SearchRecord { event_id: 2, ts_us: 2, engine: "google".into(), query: "stripe seat pricing annual".into(), app_bundle_id: None, url: None },
+            SearchRecord {
+                event_id: 1,
+                ts_us: 1,
+                engine: "google".into(),
+                query: "stripe per seat pricing".into(),
+                app_bundle_id: None,
+                url: None,
+            },
+            SearchRecord {
+                event_id: 2,
+                ts_us: 2,
+                engine: "google".into(),
+                query: "stripe seat pricing annual".into(),
+                app_bundle_id: None,
+                url: None,
+            },
         ];
         let s = signals(&events, &segs, &searches);
         assert_eq!(s.switches, 5);
@@ -536,11 +668,25 @@ mod tests {
     #[test]
     fn a_segment_reads_what_the_person_read_without_the_header_or_status_bar() {
         let stored = "[app=com.microsoft.VSCode | title=retention_worker.rs | url=? | ts=2026-10-12T14:02:00.000Z]\nfn sweep(store: &Store) -> u64 {\n    store.vacuum()\n}\n\n\u{1e}\n0 errors, 2 warnings Ln 14, Col 37 UTF-8 Rust";
-        let events = vec![ev(1, 0, "com.microsoft.VSCode", "retention_worker.rs", "screen_ocr", stored)];
+        let events = vec![ev(
+            1,
+            0,
+            "com.microsoft.VSCode",
+            "retention_worker.rs",
+            "screen_ocr",
+            stored,
+        )];
         let segs = segments(&events, &[], events[0].ts_us);
-        assert_eq!(segs[0].text, "fn sweep(store: &Store) -> u64 {\n    store.vacuum()\n}");
+        assert_eq!(
+            segs[0].text,
+            "fn sweep(store: &Store) -> u64 {\n    store.vacuum()\n}"
+        );
         let s = signals(&events, &segs, &[]);
-        assert!(s.errors.is_empty(), "a status bar is not an error on screen: {:?}", s.errors);
+        assert!(
+            s.errors.is_empty(),
+            "a status bar is not an error on screen: {:?}",
+            s.errors
+        );
         let observation = render(&segs, &s, 0, 4_000);
         assert!(!observation.contains("[app="), "{observation}");
         assert!(observation.contains("fn sweep(store: &Store)"));
@@ -549,7 +695,14 @@ mod tests {
     #[test]
     fn a_page_read_both_ways_is_read_as_the_part_on_the_screen() {
         let stored = "[app=com.google.Chrome | title=Pricing | url=? | ts=1]\nHome Pricing Docs Blog\nThe whole page, top to bottom\n\n[VISIBLE-OCR]\nWhat was visible\n\n\u{1e}\nTabs";
-        let events = vec![ev(1, 0, "com.google.Chrome", "Pricing", "browser_page_with_ocr", stored)];
+        let events = vec![ev(
+            1,
+            0,
+            "com.google.Chrome",
+            "Pricing",
+            "browser_page_with_ocr",
+            stored,
+        )];
         let segs = segments(&events, &[], events[0].ts_us);
         assert_eq!(segs[0].text, "What was visible");
     }
@@ -570,11 +723,27 @@ mod tests {
     #[test]
     fn evidence_spreads_across_windows() {
         let events: Vec<_> = (0..9)
-            .map(|i| ev(i, i as u64, if i < 6 { "com.apple.Notes" } else { "com.google.Chrome" }, if i < 6 { "A" } else { "B" }, "screen_ocr", "t"))
+            .map(|i| {
+                ev(
+                    i,
+                    i as u64,
+                    if i < 6 {
+                        "com.apple.Notes"
+                    } else {
+                        "com.google.Chrome"
+                    },
+                    if i < 6 { "A" } else { "B" },
+                    "screen_ocr",
+                    "t",
+                )
+            })
             .collect();
         let segs = segments(&events, &[], events[8].ts_us);
         let picked = evidence(&segs, 4);
         assert_eq!(picked.len(), 4);
-        assert!(picked.contains(&5) && picked.contains(&8), "the latest of each window comes first");
+        assert!(
+            picked.contains(&5) && picked.contains(&8),
+            "the latest of each window comes first"
+        );
     }
 }

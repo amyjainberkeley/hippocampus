@@ -125,7 +125,11 @@ impl DayBreakdown {
     /// The longest focus block.
     #[must_use]
     pub fn longest_focus_us(&self) -> u64 {
-        self.focus_blocks.iter().map(|b| b.end_us - b.start_us).max().unwrap_or(0)
+        self.focus_blocks
+            .iter()
+            .map(|b| b.end_us - b.start_us)
+            .max()
+            .unwrap_or(0)
     }
 
     /// Plain-language facts for the model and for AI tools: time, kinds,
@@ -143,21 +147,42 @@ impl DayBreakdown {
             }
         };
         let mut lines = Vec::new();
-        let basis = if self.basis == "measured" { "" } else { " (estimated from captures)" };
-        lines.push(format!("Active at the computer: {}{basis}.", h(self.active_us)));
+        let basis = if self.basis == "measured" {
+            ""
+        } else {
+            " (estimated from captures)"
+        };
+        lines.push(format!(
+            "Active at the computer: {}{basis}.",
+            h(self.active_us)
+        ));
         if let (Some(first), Some(last)) = (self.first_active_us, self.last_active_us) {
-            lines.push(format!("First activity {}, last {}.", clock(first, tz_offset_secs), clock(last, tz_offset_secs)));
+            lines.push(format!(
+                "First activity {}, last {}.",
+                clock(first, tz_offset_secs),
+                clock(last, tz_offset_secs)
+            ));
         }
         if !self.kinds.is_empty() {
             lines.push(format!(
                 "By kind of work: {}.",
-                self.kinds.iter().take(6).map(|k| format!("{} {}", k.label, h(k.active_us))).collect::<Vec<_>>().join(", ")
+                self.kinds
+                    .iter()
+                    .take(6)
+                    .map(|k| format!("{} {}", k.label, h(k.active_us)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
         }
         if !self.apps.is_empty() {
             lines.push(format!(
                 "By app: {}.",
-                self.apps.iter().take(8).map(|a| format!("{} {}", a.name, h(a.active_us))).collect::<Vec<_>>().join(", ")
+                self.apps
+                    .iter()
+                    .take(8)
+                    .map(|a| format!("{} {}", a.name, h(a.active_us)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
         }
         if !self.focus_blocks.is_empty() {
@@ -180,7 +205,12 @@ impl DayBreakdown {
             lines.push(format!(
                 "Searches ({}): {}.",
                 self.searches.len(),
-                self.searches.iter().take(12).map(|s| format!("\"{}\"", s.query)).collect::<Vec<_>>().join(", ")
+                self.searches
+                    .iter()
+                    .take(12)
+                    .map(|s| format!("\"{}\"", s.query))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
         }
         lines.join("\n")
@@ -205,12 +235,27 @@ pub fn breakdown(
     let mut spans: Vec<(u64, u64, String)> = activity
         .iter()
         .filter(|interval| interval.state == ActivityState::InputActive)
-        .filter_map(|interval| Some((interval.start_us, interval.end_us, interval.app_bundle_id.clone()?)))
+        .filter_map(|interval| {
+            Some((
+                interval.start_us,
+                interval.end_us,
+                interval.app_bundle_id.clone()?,
+            ))
+        })
         .collect();
-    let basis = if spans.is_empty() { "estimated" } else { "measured" };
+    let basis = if spans.is_empty() {
+        "estimated"
+    } else {
+        "measured"
+    };
     let focus_events: Vec<&ObservedEvent> = events
         .iter()
-        .filter(|e| !matches!(e.source.as_str(), "screen_context" | "transcript_import" | "mcp_resource"))
+        .filter(|e| {
+            !matches!(
+                e.source.as_str(),
+                "screen_context" | "transcript_import" | "mcp_resource"
+            )
+        })
         .collect();
     if spans.is_empty() {
         for pair in focus_events.windows(2) {
@@ -233,7 +278,11 @@ pub fn breakdown(
         let url = focus_events
             .iter()
             .rev()
-            .find(|e| e.ts_us <= start + 5_000_000 && e.app_bundle_id.as_deref() == Some(app) && start.saturating_sub(e.ts_us) < 15 * 60 * 1_000_000)
+            .find(|e| {
+                e.ts_us <= start + 5_000_000
+                    && e.app_bundle_id.as_deref() == Some(app)
+                    && start.saturating_sub(e.ts_us) < 15 * 60 * 1_000_000
+            })
             .and_then(|e| e.url.as_deref());
         apps::kind_for(app, url)
     };
@@ -245,10 +294,17 @@ pub fn breakdown(
 
     let mut by_app: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
     let mut by_kind: std::collections::BTreeMap<WorkKind, u64> = std::collections::BTreeMap::new();
-    let mut hours: Vec<HourTime> = (0..24).map(|hour| HourTime { hour, ..HourTime::default() }).collect();
-    let mut hour_kinds: Vec<std::collections::BTreeMap<WorkKind, u64>> = vec![Default::default(); 24];
+    let mut hours: Vec<HourTime> = (0..24)
+        .map(|hour| HourTime {
+            hour,
+            ..HourTime::default()
+        })
+        .collect();
+    let mut hour_kinds: Vec<std::collections::BTreeMap<WorkKind, u64>> =
+        vec![Default::default(); 24];
     let slots = usize::try_from((end_us.saturating_sub(start_us)) / SLOT_US + 1).unwrap_or(0);
-    let mut slot_kinds: Vec<std::collections::BTreeMap<(WorkKind, String), u64>> = vec![Default::default(); slots];
+    let mut slot_kinds: Vec<std::collections::BTreeMap<(WorkKind, String), u64>> =
+        vec![Default::default(); slots];
     let mut active_us = 0u64;
     let mut switches = 0u32;
     let mut previous_app: Option<&str> = None;
@@ -276,17 +332,26 @@ pub fn breakdown(
         }
     }
     for (hour, kinds) in hours.iter_mut().zip(&hour_kinds) {
-        hour.top_kind = kinds.iter().max_by_key(|(_, us)| **us).map(|(kind, _)| *kind);
+        hour.top_kind = kinds
+            .iter()
+            .max_by_key(|(_, us)| **us)
+            .map(|(kind, _)| *kind);
     }
 
     // Focus blocks: runs of 5-minute slots, each at least half active, whose
     // dominant kind is the same.
     let mut focus_blocks = Vec::new();
     let mut run: Option<(usize, WorkKind, std::collections::BTreeMap<String, u64>)> = None;
-    let close = |run: &mut Option<(usize, WorkKind, std::collections::BTreeMap<String, u64>)>, end_slot: usize, out: &mut Vec<FocusBlock>| {
+    let close = |run: &mut Option<(usize, WorkKind, std::collections::BTreeMap<String, u64>)>,
+                 end_slot: usize,
+                 out: &mut Vec<FocusBlock>| {
         if let Some((first, kind, apps_in)) = run.take() {
             if end_slot - first >= FOCUS_MIN_SLOTS {
-                let app = apps_in.iter().max_by_key(|(_, us)| **us).map(|(a, _)| apps::name(a)).unwrap_or_default();
+                let app = apps_in
+                    .iter()
+                    .max_by_key(|(_, us)| **us)
+                    .map(|(a, _)| apps::name(a))
+                    .unwrap_or_default();
                 out.push(FocusBlock {
                     start_us: start_us + first as u64 * SLOT_US,
                     end_us: start_us + end_slot as u64 * SLOT_US,
@@ -298,11 +363,15 @@ pub fn breakdown(
     };
     for (index, slot) in slot_kinds.iter().enumerate() {
         let total: u64 = slot.values().sum();
-        let mut per_kind: std::collections::BTreeMap<WorkKind, u64> = std::collections::BTreeMap::new();
+        let mut per_kind: std::collections::BTreeMap<WorkKind, u64> =
+            std::collections::BTreeMap::new();
         for ((kind, _), us) in slot {
             *per_kind.entry(*kind).or_default() += us;
         }
-        let dominant = per_kind.iter().max_by_key(|(_, us)| **us).map(|(kind, _)| *kind);
+        let dominant = per_kind
+            .iter()
+            .max_by_key(|(_, us)| **us)
+            .map(|(kind, _)| *kind);
         let qualifies = total * 2 >= SLOT_US && dominant.is_some();
         match (&mut run, qualifies, dominant) {
             (Some((_, kind, apps_in)), true, Some(d)) if *kind == d => {
@@ -329,13 +398,21 @@ pub fn breakdown(
 
     let mut apps_out: Vec<AppTime> = by_app
         .into_iter()
-        .map(|(bundle_id, active_us)| AppTime { name: apps::name(&bundle_id), bundle_id, active_us })
+        .map(|(bundle_id, active_us)| AppTime {
+            name: apps::name(&bundle_id),
+            bundle_id,
+            active_us,
+        })
         .collect();
     apps_out.sort_by(|a, b| b.active_us.cmp(&a.active_us));
     apps_out.truncate(12);
     let mut kinds: Vec<KindTime> = by_kind
         .into_iter()
-        .map(|(kind, active_us)| KindTime { kind, label: kind.label().to_owned(), active_us })
+        .map(|(kind, active_us)| KindTime {
+            kind,
+            label: kind.label().to_owned(),
+            active_us,
+        })
         .collect();
     kinds.sort_by(|a, b| b.active_us.cmp(&a.active_us));
     let active_hours = (active_us as f64 / 3_600_000_000.0).max(0.25);
@@ -346,17 +423,36 @@ pub fn breakdown(
         end_us,
         basis: basis.into(),
         active_us,
-        first_active_us: spans.iter().map(|s| s.0).find(|ts| *ts >= start_us && *ts < end_us),
-        last_active_us: spans.iter().rev().map(|s| s.1).find(|ts| *ts > start_us && *ts <= end_us),
+        first_active_us: spans
+            .iter()
+            .map(|s| s.0)
+            .find(|ts| *ts >= start_us && *ts < end_us),
+        last_active_us: spans
+            .iter()
+            .rev()
+            .map(|s| s.1)
+            .find(|ts| *ts > start_us && *ts <= end_us),
         hours: hours.into_iter().filter(|h| h.active_us > 0).collect(),
         apps: apps_out,
         kinds,
         focus_blocks,
         switches,
         switches_per_hour: f64::from(switches) / active_hours,
-        keys: counts.iter().filter(in_day).map(|c| u64::from(c.keys)).sum(),
-        clicks: counts.iter().filter(in_day).map(|c| u64::from(c.clicks)).sum(),
-        scrolls: counts.iter().filter(in_day).map(|c| u64::from(c.scrolls)).sum(),
+        keys: counts
+            .iter()
+            .filter(in_day)
+            .map(|c| u64::from(c.keys))
+            .sum(),
+        clicks: counts
+            .iter()
+            .filter(in_day)
+            .map(|c| u64::from(c.clicks))
+            .sum(),
+        scrolls: counts
+            .iter()
+            .filter(in_day)
+            .map(|c| u64::from(c.scrolls))
+            .sum(),
         searches,
         sessions: notes
             .iter()
@@ -366,7 +462,11 @@ pub fn breakdown(
                 start_us: n.start_us,
                 end_us: n.end_us,
                 title: n.title.clone(),
-                beneath: if n.model == "measured" { String::new() } else { n.beneath.clone() },
+                beneath: if n.model == "measured" {
+                    String::new()
+                } else {
+                    n.beneath.clone()
+                },
             })
             .collect(),
     }
@@ -396,15 +496,32 @@ mod tests {
         let mut activity = active(0, 40, "com.microsoft.VSCode");
         activity.extend(active(40, 45, "com.tinyspeck.slackmacgap"));
         activity.extend(active(45, 50, "com.microsoft.VSCode"));
-        let day = breakdown("2027-01-15", DAY0, DAY0 + 24 * 60 * MIN, 0, &activity, &[], &[], Vec::new(), &[]);
+        let day = breakdown(
+            "2027-01-15",
+            DAY0,
+            DAY0 + 24 * 60 * MIN,
+            0,
+            &activity,
+            &[],
+            &[],
+            Vec::new(),
+            &[],
+        );
         assert_eq!(day.basis, "measured");
         assert_eq!(day.active_us, 50 * MIN);
         assert_eq!(day.apps[0].name, "VS Code");
         assert_eq!(day.apps[0].active_us, 45 * MIN);
         assert_eq!(day.kinds[0].kind, WorkKind::Code);
         assert_eq!(day.switches, 2);
-        assert_eq!(day.focus_blocks.len(), 1, "40 minutes of code is one block; Slack breaks it");
-        assert_eq!(day.focus_blocks[0].end_us - day.focus_blocks[0].start_us, 40 * MIN);
+        assert_eq!(
+            day.focus_blocks.len(),
+            1,
+            "40 minutes of code is one block; Slack breaks it"
+        );
+        assert_eq!(
+            day.focus_blocks[0].end_us - day.focus_blocks[0].start_us,
+            40 * MIN
+        );
         assert!(day.facts(0).contains("Code 45 min"), "{}", day.facts(0));
     }
 
@@ -420,7 +537,17 @@ mod tests {
             text: "Inbox".into(),
             source: "browser_page".into(),
         }];
-        let day = breakdown("2027-01-15", DAY0, DAY0 + 24 * 60 * MIN, 0, &activity, &[], &events, Vec::new(), &[]);
+        let day = breakdown(
+            "2027-01-15",
+            DAY0,
+            DAY0 + 24 * 60 * MIN,
+            0,
+            &activity,
+            &[],
+            &events,
+            Vec::new(),
+            &[],
+        );
         assert_eq!(day.kinds[0].kind, WorkKind::Communication);
     }
 
@@ -437,7 +564,17 @@ mod tests {
                 source: "screen_ocr".into(),
             })
             .collect();
-        let day = breakdown("2027-01-15", DAY0, DAY0 + 24 * 60 * MIN, 0, &[], &[], &events, Vec::new(), &[]);
+        let day = breakdown(
+            "2027-01-15",
+            DAY0,
+            DAY0 + 24 * 60 * MIN,
+            0,
+            &[],
+            &[],
+            &events,
+            Vec::new(),
+            &[],
+        );
         assert_eq!(day.basis, "estimated");
         assert_eq!(day.active_us, 3 * MIN);
         assert!(day.facts(0).contains("estimated"));

@@ -1629,23 +1629,36 @@ fn understanding_tools_read_a_real_brain() {
         "tools/call",
         Some(serde_json::json!({ "name": "mci_day", "arguments": { "date": "yesterday" } })),
     ));
-    assert!(bad.expect("response").error.is_some(), "a malformed date is an error, not a guess");
+    assert!(
+        bad.expect("response").error.is_some(),
+        "a malformed date is an error, not a guess"
+    );
 }
 
 #[test]
 fn ask_and_suggest_exist_only_in_an_assistant_session() {
     use mci_agent::understanding::{mind::MindClient, query::Assistant};
     let (_dir, store) = open_temp_store();
-    store.put_event(&make_event("Ravi: Let's land Team at $18 a seat, billed annually.", 1_000_000)).unwrap();
+    store
+        .put_event(&make_event(
+            "Ravi: Let's land Team at $18 a seat, billed annually.",
+            1_000_000,
+        ))
+        .unwrap();
     let plain = server_fts_only(Arc::clone(&store));
     let denied = plain.dispatch(req(
         "tools/call",
         Some(serde_json::json!({ "name": "mci_ask", "arguments": { "question": "team price?" } })),
     ));
-    assert!(denied.expect("response").error.is_some(), "external clients never get mci_ask");
+    assert!(
+        denied.expect("response").error.is_some(),
+        "external clients never get mci_ask"
+    );
 
-    let assistant = server_fts_only(Arc::clone(&store))
-        .with_assistant(Arc::new(Assistant::new(Arc::clone(&store), MindClient::new(None))));
+    let assistant = server_fts_only(Arc::clone(&store)).with_assistant(Arc::new(Assistant::new(
+        Arc::clone(&store),
+        MindClient::new(None),
+    )));
     let listed = extract_result(assistant.dispatch(req("tools/list", None)));
     assert_eq!(listed["tools"].as_array().unwrap().len(), 12);
     let asked = extract_result(assistant.dispatch(req(
@@ -1655,12 +1668,19 @@ fn ask_and_suggest_exist_only_in_an_assistant_session() {
     // No model here: no answer, but the memories that would have been cited.
     assert!(asked["result"]["answer"].is_null());
     assert_eq!(asked["result"]["unavailable"], "not_installed");
-    assert!(asked["result"]["sources"][0]["text"].as_str().unwrap().contains("$18"));
+    assert!(asked["result"]["sources"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("$18"));
     let suggested = extract_result(assistant.dispatch(req(
         "tools/call",
         Some(serde_json::json!({ "name": "mci_suggest", "arguments": {} })),
     )));
-    assert!(suggested["result"]["suggestions"].as_array().unwrap().iter().any(|s| s["kind"] == "day"));
+    assert!(suggested["result"]["suggestions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["kind"] == "day"));
 }
 
 #[test]
@@ -1668,10 +1688,18 @@ fn asking_about_the_screen_answers_from_the_window_in_front() {
     use mci_agent::understanding::{mind::MindClient, query::Assistant};
     let (_dir, store) = open_temp_store();
     let now_us = u64::try_from(
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_micros(),
     )
     .unwrap();
-    store.put_event(&make_event("Ravi: Let's land Team at $18 a seat, billed annually.", 1_000_000)).unwrap();
+    store
+        .put_event(&make_event(
+            "Ravi: Let's land Team at $18 a seat, billed annually.",
+            1_000_000,
+        ))
+        .unwrap();
     store
         .put_event(&make_event_custom(
             "Quarterly invoice 4471. Amount due 2,300 dollars by October 30.",
@@ -1681,8 +1709,10 @@ fn asking_about_the_screen_answers_from_the_window_in_front() {
             None,
         ))
         .unwrap();
-    let assistant = server_fts_only(Arc::clone(&store))
-        .with_assistant(Arc::new(Assistant::new(Arc::clone(&store), MindClient::new(None))));
+    let assistant = server_fts_only(Arc::clone(&store)).with_assistant(Arc::new(Assistant::new(
+        Arc::clone(&store),
+        MindClient::new(None),
+    )));
 
     // The question shares no word with the invoice; the screen is still source 1.
     let asked = extract_result(assistant.dispatch(req(
@@ -1701,7 +1731,11 @@ fn asking_about_the_screen_answers_from_the_window_in_front() {
         Some(serde_json::json!({ "name": "mci_ask", "arguments": {
             "question": "what am I looking at?", "app": "com.1password.1password", "title": "Vault" } })),
     )));
-    assert!(unseen["result"]["sources"].as_array().unwrap().iter().all(|s| s["title"] != "Vault"));
+    assert!(unseen["result"]["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|s| s["title"] != "Vault"));
 
     // And the bar offers it before anything is typed.
     let suggested = extract_result(assistant.dispatch(req(
@@ -1710,5 +1744,8 @@ fn asking_about_the_screen_answers_from_the_window_in_front() {
     )));
     let suggestions = suggested["result"]["suggestions"].as_array().unwrap();
     assert_eq!(suggestions[0]["kind"], "screen");
-    assert!(suggestions[0]["why"].as_str().unwrap().contains("invoice-4471.pdf"));
+    assert!(suggestions[0]["why"]
+        .as_str()
+        .unwrap()
+        .contains("invoice-4471.pdf"));
 }
