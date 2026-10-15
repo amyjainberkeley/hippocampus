@@ -181,6 +181,19 @@ for contact_file in "$REPO_ROOT/SECURITY.md" "$REPO_ROOT/docs/legal/terms-of-ser
     reject_pattern "$contact_file" '@hippocampus\.ai|//hippocampus\.ai' \
         "$(basename "$contact_file") names no address on the parked hippocampus.ai domain"
 done
+require_literal "$INSTALLER" '-volname "Hippocampus" \' \
+    'the disk image volume is named Hippocampus, with no commit in it'
+reject_pattern "$INSTALLER" 'build-note|SOURCE_HEAD:0:|SOURCE_DIGEST:0:' \
+    'nothing a downloader sees carries a build number, commit or source digest'
+require_literal "$INSTALLER" 'STABLE_DMG="$DIST_DIR/Hippocampus.dmg"' \
+    'the installer also writes Hippocampus.dmg for releases/latest/download'
+for stable_asset in 'dist/Hippocampus.dmg' 'dist/Hippocampus.dmg.sha256'; do
+    if [[ "$(rg -c -F -x "            $stable_asset" "$RELEASE" || true)" == 2 ]]; then
+        pass "release workflow hands over and drafts $stable_asset"
+    else
+        fail "release workflow hands over and drafts $stable_asset"
+    fi
+done
 require_pattern "$INSTALLER" 'Release installer requires notarization credentials' \
     'release installer fails closed without notarization credentials'
 require_literal "$INSTALLER" 'python3 "$GENERATE_EULA" --check' \

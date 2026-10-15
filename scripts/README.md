@@ -81,14 +81,22 @@ The script also accepts env vars `NOTARYTOOL_APPLE_ID`, `NOTARYTOOL_TEAM_ID`, `N
 ```
 dist/Hippocampus-0.1.0.dmg         # Compressed DMG installer
 dist/Hippocampus-0.1.0.dmg.sha256  # SHA-256 checksum sidecar
+dist/Hippocampus.dmg               # The same bytes under a name that never changes
+dist/Hippocampus.dmg.sha256        # Its checksum, under its own name
 ```
+
+Upload both names to the release, so
+`https://github.com/amyjainberkeley/hippocampus/releases/latest/download/Hippocampus.dmg`
+always downloads the newest build. The volume is named `Hippocampus`; the
+commit and source digest are in the app's `build-provenance.json`, never in
+the window a downloader sees.
 
 ### Regenerating installer assets
 
 The DMG background and EULA are generated from source files. Committed versions are ready to use; regenerate only when sources change.
 
 ```bash
-# Background (1280x800 Retina PNG from the canonical light brand system)
+# Background (1280x800 Retina PNG: two instructions and an arrow, nothing else)
 python3 assets/installer/generate-background.py
 
 # EULA.rtf (from docs/legal/terms-of-service.md)
@@ -97,7 +105,9 @@ python3 assets/installer/generate-eula.py
 # Volume icon mirror (the build verifies it against the canonical icon)
 cp assets/branding/AppIcon.icns assets/installer/volume-icon.icns
 
-# Verify the installer cannot drift from the canonical app identity
+# Verify the installer cannot drift from the canonical app identity. This also
+# renders the background and reads it back with Apple's text recognition: it
+# fails if the window would show anything but its two instructions.
 ./scripts/build-installer.sh --verify-assets
 ```
 

@@ -25,6 +25,8 @@ INSTALLER_ASSETS="$REPO_ROOT/assets/installer"
 CANONICAL_APP_ICON="$REPO_ROOT/assets/branding/AppIcon.icns"
 VOLUME_ICON="$INSTALLER_ASSETS/volume-icon.icns"
 GENERATE_EULA="$INSTALLER_ASSETS/generate-eula.py"
+GENERATE_BACKGROUND="$INSTALLER_ASSETS/generate-background.py"
+READ_BACKGROUND_TEXT="$INSTALLER_ASSETS/read-background-text.swift"
 DMG_LAYOUT="$INSTALLER_ASSETS/dmg-layout.py"
 INSTALLER_PYTHON="${INSTALLER_PYTHON:-python3}"
 
@@ -97,6 +99,8 @@ Prerequisites:
 Output:
   dist/Hippocampus-<version>.dmg
   dist/Hippocampus-<version>.dmg.sha256
+  dist/Hippocampus.dmg          (the same bytes, for releases/latest/download/)
+  dist/Hippocampus.dmg.sha256
 EOF
 }
 
@@ -137,8 +141,66 @@ verify_legal_assets() {
     python3 "$GENERATE_EULA" --check
 }
 
+# The only words the installer window may show. Build numbers, hashes and
+# other source details belong in build-provenance.json and the release notes.
+BACKGROUND_TEXT=(
+    "Drag Hippocampus to Applications."
+    "Updating? Quit Hippocampus from the menu bar first."
+)
+
+background_text_key() {
+    printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]'
+}
+
+# Render the background as a build does, then read it back with Apple's text
+# recognition: what a person would see, not what the renderer's source says.
+verify_background_assets() {
+    local tool scratch rendered seen line key expected match
+    local -a seen_keys=() unexpected=()
+    for tool in "$GENERATE_BACKGROUND" "$READ_BACKGROUND_TEXT"; do
+        if [[ ! -f "$tool" ]]; then
+            echo "ERROR: Installer background tool not found at $tool" >&2
+            return 1
+        fi
+    done
+    scratch="$(mktemp -d "${TMPDIR:-/tmp}/hippocampus-background.XXXXXX")"
+    rendered="$scratch/background.png"
+    if ! python3 "$GENERATE_BACKGROUND" "$rendered" >/dev/null ||
+        ! seen="$(/usr/bin/xcrun swift "$READ_BACKGROUND_TEXT" "$rendered")"; then
+        rm -rf "$scratch"
+        echo "ERROR: Could not render and read the installer background" >&2
+        return 1
+    fi
+    rm -rf "$scratch"
+    while IFS= read -r line; do
+        key="$(background_text_key "$line")"
+        [[ -n "$key" ]] || continue
+        seen_keys+=("$key")
+        match=0
+        for expected in "${BACKGROUND_TEXT[@]}"; do
+            [[ "$key" == "$(background_text_key "$expected")" ]] && match=1
+        done
+        [[ "$match" -eq 1 ]] || unexpected+=("$line")
+    done <<<"$seen"
+    if [[ ${#unexpected[@]} -gt 0 ]]; then
+        echo "ERROR: The installer background shows text it should not: ${unexpected[*]}" >&2
+        return 1
+    fi
+    for expected in "${BACKGROUND_TEXT[@]}"; do
+        match=0
+        for key in ${seen_keys[@]+"${seen_keys[@]}"}; do
+            [[ "$key" == "$(background_text_key "$expected")" ]] && match=1
+        done
+        if [[ "$match" -eq 0 ]]; then
+            echo "ERROR: The installer background does not read \"$expected\"" >&2
+            return 1
+        fi
+    done
+}
+
 verify_brand_assets
 verify_legal_assets
+verify_background_assets
 
 if [[ "$VERIFY_ASSETS_ONLY" -eq 1 ]]; then
     echo "Installer brand and legal assets match their canonical sources."
@@ -619,10 +681,11 @@ ln -s /Applications "$DMG_STAGING/Applications"
 cp "$CANONICAL_APP_ICON" "$DMG_STAGING/.VolumeIcon.icns"
 
 # Render from current source into staging, never reuse a stale source bitmap.
+# The window shows only its instructions; provenance is in the app's
+# build-provenance.json and the release notes.
 mkdir -p "$DMG_STAGING/.background"
 BACKGROUND_PNG="$DMG_STAGING/.background/background.png"
-python3 "$INSTALLER_ASSETS/generate-background.py" "$BACKGROUND_PNG" \
-    --build-note "Build ${SOURCE_HEAD:0:12} / source ${SOURCE_DIGEST:0:12}"
+python3 "$GENERATE_BACKGROUND" "$BACKGROUND_PNG"
 
 # The legal artifact was verified against its source before any release work.
 # Modern macOS no longer supports the old unflatten/Rez/flatten mount-time SLA
@@ -651,9 +714,14 @@ TEMP_DMG_ROOT="$(mktemp -d "$DIST_DIR/.hippocampus-rw.XXXXXX")"
 TEMP_DMG="$TEMP_DMG_ROOT/image.dmg"
 FINAL_DMG="$DIST_DIR/${DMG_NAME}.dmg"
 FINAL_DMG_PENDING="$FINAL_DMG"
+# The same bytes under a name that never changes, so
+# releases/latest/download/Hippocampus.dmg always finds the newest build.
+STABLE_DMG="$DIST_DIR/Hippocampus.dmg"
+STABLE_DMG_PARTIAL="$DIST_DIR/.Hippocampus.dmg.partial"
 
-# Remove stale outputs
-rm -f "$TEMP_DMG" "$FINAL_DMG" "${FINAL_DMG}.sha256"
+# Remove stale outputs, so an old stable copy never sits beside a new build.
+rm -f "$TEMP_DMG" "$FINAL_DMG" "${FINAL_DMG}.sha256" \
+    "$STABLE_DMG" "${STABLE_DMG}.sha256" "$STABLE_DMG_PARTIAL"
 
 # Size the read-write image to the STAGED content + headroom. The previous
 # hardcoded `-size 200m` overflowed ("No space left on device") once the
@@ -670,7 +738,7 @@ echo "Staged content: ${STAGING_MB} MB → RW image size: ${DMG_RW_SIZE_MB} MB"
 # Create read-write DMG (oversized, will be compacted)
 hdiutil create \
     -srcfolder "$DMG_STAGING" \
-    -volname "Hippocampus ${SOURCE_HEAD:0:12}" \
+    -volname "Hippocampus" \
     -fs HFS+ \
     -fsargs "-c c=64,a=16,e=16" \
     -format UDRW \
@@ -743,6 +811,17 @@ SHASUM=$(shasum -a 256 "$FINAL_DMG" | awk '{print $1}')
 echo "$SHASUM  $(basename "$FINAL_DMG")" > "${FINAL_DMG}.sha256"
 FINAL_DMG_PENDING=""
 
+# The stable copy is made only from the finished DMG, and appears under its
+# name only once its bytes match.
+cp -c "$FINAL_DMG" "$STABLE_DMG_PARTIAL" 2>/dev/null || cp "$FINAL_DMG" "$STABLE_DMG_PARTIAL"
+if ! cmp -s "$FINAL_DMG" "$STABLE_DMG_PARTIAL"; then
+    rm -f "$STABLE_DMG_PARTIAL"
+    echo "ERROR: The copy of $(basename "$FINAL_DMG") as Hippocampus.dmg does not match it." >&2
+    exit 1
+fi
+mv -f "$STABLE_DMG_PARTIAL" "$STABLE_DMG"
+echo "$SHASUM  $(basename "$STABLE_DMG")" > "${STABLE_DMG}.sha256"
+
 # --- Done ---
 
 DMG_SIZE=$(du -h "$FINAL_DMG" | awk '{print $1}')
@@ -750,6 +829,7 @@ DMG_SIZE=$(du -h "$FINAL_DMG" | awk '{print $1}')
 echo ""
 echo "=== Done ==="
 echo "  DMG:    $FINAL_DMG ($DMG_SIZE)"
+echo "  Stable: $STABLE_DMG (the same bytes)"
 echo "  SHA256: ${FINAL_DMG}.sha256"
 echo "  Hash:   $SHASUM"
 echo "  Signed: $SIGNING_MODE"

@@ -260,6 +260,8 @@ jobs:
         run: |
           DMG="dist/Hippocampus-${GITHUB_REF_NAME#v}.dmg"
           (cd dist && shasum -a 256 -c "$(basename "$DMG").sha256")
+          (cd dist && shasum -a 256 -c Hippocampus.dmg.sha256)
+          cmp "$DMG" dist/Hippocampus.dmg
           codesign --verify --strict --verbose=2 "$DMG"
           xcrun stapler validate "$DMG"
           spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
@@ -313,6 +315,8 @@ jobs:
           path: |
             dist/Hippocampus-*.dmg
             dist/Hippocampus-*.dmg.sha256
+            dist/Hippocampus.dmg
+            dist/Hippocampus.dmg.sha256
             dist/install.sh
             dist/appcast.xml
             dist/notary-*.json
@@ -340,6 +344,8 @@ jobs:
           files: |
             dist/Hippocampus-*.dmg
             dist/Hippocampus-*.dmg.sha256
+            dist/Hippocampus.dmg
+            dist/Hippocampus.dmg.sha256
             dist/install.sh
             dist/appcast.xml
             dist/notary-*.json
