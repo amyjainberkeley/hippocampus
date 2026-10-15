@@ -1,3 +1,12 @@
+// Fixture event ids, timestamps and counts are small positive numbers, so
+// the casts between u64, i64 and u32 below cannot wrap, lose a sign or
+// truncate.
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss
+)]
+
 use std::collections::HashSet;
 
 use mci_brain::understanding::{
@@ -341,6 +350,7 @@ fn interaction_counts_round_trip_and_follow_range_deletion_and_wipe() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)] // one reset, then every verdict it must keep
 fn verdicts_survive_a_pipeline_reset() {
     let (_dir, store) = store();
     let e1 = put(&store, 1_000_000, "Launch plan");

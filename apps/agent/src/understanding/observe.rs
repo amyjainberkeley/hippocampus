@@ -12,6 +12,8 @@
 //! - **reworded search**: a search that shares words with the one before it;
 //! - **error on screen**: lines that read like an error message.
 
+use std::fmt::Write as _;
+
 use serde::{Deserialize, Serialize};
 
 use mci_brain::reading::screen_reading;
@@ -128,6 +130,7 @@ impl Segment {
 
     /// What the input says the user was doing.
     #[must_use]
+    #[allow(clippy::cast_precision_loss)] // one window's time and key count
     pub fn activity(&self) -> &'static str {
         let minutes = (self.duration_us() as f64 / 60_000_000.0).max(0.25);
         let keys_per_minute = self.keys as f64 / minutes;
@@ -187,7 +190,7 @@ pub fn segments(
                 *chosen = event;
             }
             if last.url.is_none() {
-                last.url = event.url.clone();
+                last.url.clone_from(&event.url);
             }
         } else {
             if let Some(last) = out.last_mut() {
@@ -376,6 +379,11 @@ pub fn clock(ts_us: u64, tz_offset_secs: i32) -> String {
     format!("{:02}:{:02}", day_secs / 3600, (day_secs % 3600) / 60)
 }
 
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)] // a positive number of minutes, rounded
 fn minutes(us: u64) -> String {
     let m = us as f64 / 60_000_000.0;
     if m < 1.0 {
@@ -413,6 +421,12 @@ pub fn render(
         .max(1);
     let text_budget = max_chars.saturating_sub(1_200);
     for segment in segments {
+        // A window's part of `total`, so between 0 and `text_budget`.
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_precision_loss,
+            clippy::cast_sign_loss
+        )]
         let share =
             ((segment.duration_us().max(1) as f64 / total as f64) * text_budget as f64) as usize;
         let mut line = format!(
@@ -423,16 +437,17 @@ pub fn render(
             excerpt(segment.title.as_deref().unwrap_or("untitled"), 90),
         );
         if let Some(host) = segment.url.as_deref().and_then(apps::host_of) {
-            line.push_str(&format!(" ({host})"));
+            let _ = write!(line, " ({host})");
         }
-        line.push_str(&format!(
+        let _ = write!(
+            line,
             ": {} for {}",
             segment.activity(),
             minutes(segment.duration_us())
-        ));
+        );
         let budget = share.clamp(80, 700);
         if !segment.text.trim().is_empty() {
-            line.push_str(&format!(". Text: {}", excerpt(&segment.text, budget)));
+            let _ = write!(line, ". Text: {}", excerpt(&segment.text, budget));
         }
         lines.push(line);
     }
@@ -623,7 +638,7 @@ mod tests {
             };
             events.push(ev(
                 i,
-                i as u64,
+                u64::try_from(i).unwrap(),
                 app,
                 title,
                 "screen_ocr",
@@ -726,7 +741,7 @@ mod tests {
             .map(|i| {
                 ev(
                     i,
-                    i as u64,
+                    u64::try_from(i).unwrap(),
                     if i < 6 {
                         "com.apple.Notes"
                     } else {

@@ -158,6 +158,7 @@ impl Understanding {
 
     /// Ask the model whether it can be used, and store the answer for the
     /// window ([`overview::ModelStatus`]).
+    #[must_use]
     pub fn check_model(&self, now_us: u64) -> overview::ModelStatus {
         let status = overview::ModelStatus::from_check(&self.mind.ensure_available(), now_us);
         let _ = status.write(&self.store);
@@ -166,13 +167,14 @@ impl Understanding {
 
     /// After a cycle: store what a cycle that asked the model found, and put
     /// back `last` when a rebuild cleared it. Returns the status now stored.
+    #[must_use]
     pub fn record_model_status(
         &self,
         stats: &CycleStats,
         last: overview::ModelStatus,
         now_us: u64,
     ) -> overview::ModelStatus {
-        let status = if stats.model_attempted {
+        let next = if stats.model_attempted {
             match &stats.model_unavailable {
                 Some(reason) => overview::ModelStatus::from_check(
                     &Err(MindCallError::Unavailable(reason.clone())),
@@ -183,10 +185,10 @@ impl Understanding {
         } else {
             last
         };
-        if stats.model_attempted || overview::ModelStatus::read(&self.store) != status {
-            let _ = status.write(&self.store);
+        if stats.model_attempted || overview::ModelStatus::read(&self.store) != next {
+            let _ = next.write(&self.store);
         }
-        status
+        next
     }
 
     /// Run one cycle. `max_sessions` bounds the model work per cycle.
@@ -253,9 +255,10 @@ impl Understanding {
                 i64::try_from(now_us / 1_000_000).unwrap_or(0),
                 self.tz_offset_secs,
             );
-            let stale = self.store.day_report(&today)?.map_or(true, |r| {
-                now_us.saturating_sub(r.generated_us) >= DAY_REFRESH_US
-            });
+            let stale = self
+                .store
+                .day_report(&today)?
+                .is_none_or(|r| now_us.saturating_sub(r.generated_us) >= DAY_REFRESH_US);
             if stale && self.write_day(&today, now_us).is_ok() {
                 stats.days += 1;
             }
@@ -366,7 +369,7 @@ impl Understanding {
                         }
                     }
                     Err(MindCallError::Unavailable(reason)) => {
-                        stats.model_unavailable = Some(reason)
+                        stats.model_unavailable = Some(reason);
                     }
                     Err(_) => {}
                 }
@@ -545,7 +548,7 @@ fn measured_note(
         _ => apps::name(&longest.app),
     };
     let mut by_window: Vec<&observe::Segment> = segments.iter().collect();
-    by_window.sort_by(|a, b| b.duration_us().cmp(&a.duration_us()));
+    by_window.sort_by_key(|s| std::cmp::Reverse(s.duration_us()));
     let surface = by_window
         .iter()
         .take(3)
@@ -620,12 +623,12 @@ fn capitalize(text: &str) -> String {
 }
 
 fn measured_narrative(day: &day::DayBreakdown, tz_offset_secs: i32) -> Narrative {
+    #[allow(clippy::cast_precision_loss)] // a day is under 2^37 microseconds
     let hours = day.active_us as f64 / 3_600_000_000.0;
     let top = day
         .kinds
         .first()
-        .map(|k| k.label.to_lowercase())
-        .unwrap_or_else(|| "nothing measured".into());
+        .map_or_else(|| "nothing measured".into(), |k| k.label.to_lowercase());
     let mut insights = Vec::new();
     if let Some(block) = day
         .focus_blocks

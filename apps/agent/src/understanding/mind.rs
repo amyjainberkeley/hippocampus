@@ -211,7 +211,7 @@ impl MindClient {
             .map(str::trim)
             .filter(|e| !e.is_empty())
         {
-            session.engine = engine.to_owned();
+            engine.clone_into(&mut session.engine);
         }
         Ok(session)
     }

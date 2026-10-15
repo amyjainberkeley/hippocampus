@@ -143,22 +143,20 @@ pub fn run(
         UnderstandingQuery::UserModel { query, limit, .. } => {
             let limit = limit.unwrap_or(20).clamp(1, 200);
             let candidates: Vec<Proposition> =
-                match query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
-                    Some(q) => store
+                if let Some(q) = query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
+                    store
                         .search_propositions(q, limit)?
                         .into_iter()
                         .map(|(p, _)| p)
-                        .collect(),
-                    None => {
-                        let mut all =
-                            store.propositions_with_status(PropositionStatus::Active, 500)?;
-                        all.sort_by(|a, b| {
-                            b.confidence
-                                .total_cmp(&a.confidence)
-                                .then(b.updated_us.cmp(&a.updated_us))
-                        });
-                        all
-                    }
+                        .collect()
+                } else {
+                    let mut all = store.propositions_with_status(PropositionStatus::Active, 500)?;
+                    all.sort_by(|a, b| {
+                        b.confidence
+                            .total_cmp(&a.confidence)
+                            .then(b.updated_us.cmp(&a.updated_us))
+                    });
+                    all
                 };
             let lens = ItemLens::read(store, &candidates, tz, now_us)?;
             let items: Vec<ModelItem> = candidates
@@ -304,7 +302,7 @@ impl Assistant {
             now_us,
             question,
             now,
-            screen,
+            screen.as_ref(),
             memories,
         )
     }
@@ -505,12 +503,12 @@ pub fn answer(
     now_us: u64,
     question: &str,
     now: Option<&str>,
-    screen: Option<ObservedEvent>,
+    screen: Option<&ObservedEvent>,
     memories: Vec<Source>,
 ) -> Result<Answer, StoreError> {
     // The screen is source 1; recalled memories follow it, without the same
     // event twice.
-    let on_screen = screen.as_ref().map(screen_source);
+    let on_screen = screen.map(screen_source);
     let memories: Vec<Source> = match &on_screen {
         Some(screen) => memories
             .into_iter()
@@ -1086,7 +1084,7 @@ fn evidence_sessions(
     if let (Some(first), Some(last)) = (group.first(), group.last()) {
         rows.push(row(first.ts_us, last.ts_us, last));
     }
-    rows.sort_by(|a, b| b.end_us.cmp(&a.end_us));
+    rows.sort_by_key(|r| std::cmp::Reverse(r.end_us));
     rows.truncate(EVIDENCE_SESSIONS);
     rows
 }
@@ -1142,6 +1140,7 @@ pub struct NowContext {
 ///
 /// # Errors
 /// Store failures.
+#[allow(clippy::too_many_lines)] // one block per kind of suggestion
 pub fn suggest(
     store: &SqlCipherBrainStore,
     mind: Option<&MindClient>,
@@ -1313,7 +1312,7 @@ pub fn suggest(
             }
         }
     }
-    out.sort_by(|a, b| b.score.cmp(&a.score));
+    out.sort_by_key(|s| std::cmp::Reverse(s.score));
     out.truncate(7);
     Ok(out)
 }
@@ -1693,6 +1692,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::format_collect)] // 500 short lines, built once
     fn a_long_screen_keeps_its_start_and_its_newest_lines() {
         let text: String = (0..500).map(|i| format!("line {i}\n")).collect();
         let shown = excerpt(&text, 400);

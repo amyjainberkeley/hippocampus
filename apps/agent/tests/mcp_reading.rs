@@ -61,11 +61,13 @@ fn classified_notes() -> String {
 }
 
 fn call(server: &Server, tool: &str, arguments: serde_json::Value) -> serde_json::Value {
+    let mut params = serde_json::json!({ "name": tool });
+    params["arguments"] = arguments;
     let response = server
         .dispatch(JsonRpcRequest {
             jsonrpc: "2.0".into(),
             method: "tools/call".into(),
-            params: Some(serde_json::json!({ "name": tool, "arguments": arguments })),
+            params: Some(params),
             id: Some(JsonRpcId::Number(1)),
         })
         .expect("a response");

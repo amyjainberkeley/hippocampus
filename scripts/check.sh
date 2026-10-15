@@ -25,7 +25,7 @@ QUIET="${CHECK_SH_QUIET:-0}"
 # (command executed verbatim via `bash -c`)
 LANES=(
     "rust-fmt|rust|fmt|cargo fmt --check --all"
-    "rust-clippy|rust|lint|cargo clippy --workspace --all-targets"
+    "rust-clippy|rust|lint|cargo clippy --workspace --all-targets -- -D warnings"
     "rust-test|rust|test|cargo test --workspace"
     "rust-audit|rust|audit|python3 scripts/audit-supply-chain.py"
     "swift-fmt|swift|fmt|__swift_fmt_lane"
@@ -103,7 +103,7 @@ SELECTORS
 
 LANES
     rust-fmt              cargo fmt --check --all
-    rust-clippy           cargo clippy --workspace --all-targets
+    rust-clippy           cargo clippy --workspace --all-targets -- -D warnings (as CI)
     rust-test             cargo test --workspace
     rust-audit            tracked Cargo.lock audits with JSON evidence and explicit waiver
     swift-fmt             swiftformat --lint (SKIP if not installed)

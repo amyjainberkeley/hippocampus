@@ -255,8 +255,7 @@ fn sentences(text: &str) -> Vec<&str> {
     let mut start = 0;
     let mut chars = text.char_indices().peekable();
     while let Some((at, c)) = chars.next() {
-        if matches!(c, '.' | '!' | '?')
-            && chars.peek().map_or(true, |(_, next)| next.is_whitespace())
+        if matches!(c, '.' | '!' | '?') && chars.peek().is_none_or(|(_, next)| next.is_whitespace())
         {
             let end = at + c.len_utf8();
             let sentence = text[start..end].trim();
@@ -428,7 +427,7 @@ fn windows_of(segments: &[StoredSegment]) -> Vec<WindowHeld> {
             }),
         }
     }
-    out.sort_by(|a, b| b.held_us.cmp(&a.held_us));
+    out.sort_by_key(|w| std::cmp::Reverse(w.held_us));
     out
 }
 
@@ -460,7 +459,7 @@ pub fn kind_of_segments(segments: &[StoredSegment]) -> (WorkKind, Vec<(WorkKind,
     }
     let mut kinds: Vec<(WorkKind, u64, u64)> =
         held.into_iter().map(|(k, (h, w))| (k, h, w)).collect();
-    kinds.sort_by(|a, b| b.2.cmp(&a.2));
+    kinds.sort_by_key(|k| std::cmp::Reverse(k.2));
     let kind = kinds.first().map_or(WorkKind::Other, |k| k.0);
     (kind, kinds.into_iter().map(|(k, h, _)| (k, h)).collect())
 }
@@ -650,6 +649,9 @@ pub fn remembering_now(receipt: &Path, now_us: u64) -> bool {
 /// Whether the Hippocampus session hook is installed for Claude Code or
 /// Codex, by the check `mci-agent doctor` uses.
 #[must_use]
+// The `let` ends the borrow of `paths` before `paths` is dropped; returning
+// the expression directly does not compile (E0597).
+#[allow(clippy::let_and_return)]
 pub fn hook_installed(home: &Path, codex_home: Option<&Path>) -> bool {
     use crate::client_hooks::{detect_handoff_hook, HookPaths, HookPresence};
     let paths = HookPaths::for_home(home, codex_home);
@@ -743,6 +745,7 @@ pub struct Span {
 
 /// One session.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[allow(clippy::struct_excessive_bools)] // each flag is its own field for the window
 pub struct Block {
     /// The session's own start; provisional until a note backs it.
     pub id: u64,
@@ -1039,16 +1042,15 @@ fn drafts(
             .filter(|h| note.start_us <= h.ts_us && h.ts_us <= note.end_us)
             .collect();
         let (segments, back_and_forth, reworded_searches) =
-            match serde_json::from_str::<StoredNoteSignals>(&note.signals) {
-                Ok(stored) => (
+            if let Ok(stored) = serde_json::from_str::<StoredNoteSignals>(&note.signals) {
+                (
                     stored.segments,
                     stored.signals.back_and_forth,
                     stored.signals.reworded_searches,
-                ),
-                Err(_) => {
-                    let (segments, signals) = measure(&heads, note.end_us, searches);
-                    (segments, signals.back_and_forth, signals.reworded_searches)
-                }
+                )
+            } else {
+                let (segments, signals) = measure(&heads, note.end_us, searches);
+                (segments, signals.back_and_forth, signals.reworded_searches)
             };
         out.push(Draft {
             own_start_us: note.start_us,
@@ -1136,7 +1138,7 @@ fn block_sentences(draft: &Draft) -> Vec<Sentence> {
     let mut out = Vec::new();
     let mut best: Option<&(String, String, u32)> = None;
     for pair in &draft.back_and_forth {
-        if best.map_or(true, |b| pair.2 > b.2) {
+        if best.is_none_or(|b| pair.2 > b.2) {
             best = Some(pair);
         }
     }
@@ -1229,14 +1231,14 @@ fn screenshot(
         .or_else(|| pick(block_span.start_us, block_span.end_us))
 }
 
+#[allow(clippy::too_many_lines)] // every field of a session, in the order the window shows them
 fn shape(store: &SqlCipherBrainStore, draft: &Draft, searches: &[SearchRecord]) -> Option<Shaped> {
     let windows = windows_of(&draft.segments);
-    let open = match &draft.newest {
-        Some(head) => head.clone(),
-        None => {
-            let id = *draft.segments.iter().rev().find_map(|s| s.events.last())?;
-            store.event_heads(&[id]).ok()?.into_iter().next()?
-        }
+    let open = if let Some(head) = &draft.newest {
+        head.clone()
+    } else {
+        let id = *draft.segments.iter().rev().find_map(|s| s.events.last())?;
+        store.event_heads(&[id]).ok()?.into_iter().next()?
     };
     let (kind, kinds) = kind_of_segments(&draft.segments);
     let total: u64 = kinds.iter().map(|k| k.1).sum();
@@ -1248,7 +1250,7 @@ fn shape(store: &SqlCipherBrainStore, draft: &Draft, searches: &[SearchRecord]) 
             None => app_time.push((segment.app.clone(), segment.held_us())),
         }
     }
-    app_time.sort_by(|a, b| b.1.cmp(&a.1));
+    app_time.sort_by_key(|a| std::cmp::Reverse(a.1));
     let measured = measured_title(&draft.segments).unwrap_or_else(|| {
         open.app_bundle_id
             .as_deref()
@@ -1423,9 +1425,7 @@ fn select(blocks: Vec<u64>) -> Option<Action> {
 fn longest_fact(day: &day::DayBreakdown, blocks: &[Block]) -> Option<Fact> {
     let mut longest: Option<&day::FocusBlock> = None;
     for focus in &day.focus_blocks {
-        if longest.map_or(true, |l| {
-            focus.end_us - focus.start_us > l.end_us - l.start_us
-        }) {
+        if longest.is_none_or(|l| focus.end_us - focus.start_us > l.end_us - l.start_us) {
             longest = Some(focus);
         }
     }
@@ -1479,16 +1479,16 @@ fn returned_fact(shaped: &[Shaped]) -> Option<Fact> {
             if !eligible {
                 continue;
             }
-            let candidate = match candidates.iter_mut().position(|c| c.title == *title) {
-                Some(at) => &mut candidates[at],
-                None => {
-                    candidates.push(Candidate {
-                        title: title.clone(),
-                        runs: Vec::new(),
-                        held_us: 0,
-                    });
-                    candidates.last_mut().expect("just pushed")
-                }
+            let candidate = if let Some(at) = candidates.iter_mut().position(|c| c.title == *title)
+            {
+                &mut candidates[at]
+            } else {
+                candidates.push(Candidate {
+                    title: title.clone(),
+                    runs: Vec::new(),
+                    held_us: 0,
+                });
+                candidates.last_mut().expect("just pushed")
             };
             candidate.held_us += held;
             if seen_here.insert(title.clone()) {
@@ -1571,7 +1571,7 @@ fn account_of(store: &SqlCipherBrainStore, date: &str) -> Result<Option<Account>
     let headline = clip(&text("headline"), HEADLINE_CHARS);
     let narrative = clip(&text("narrative"), NARRATIVE_CHARS);
     Ok(
-        (!headline.is_empty() || !narrative.is_empty()).then(|| Account {
+        (!headline.is_empty() || !narrative.is_empty()).then_some(Account {
             headline,
             narrative,
             written_by: report.model,
@@ -1620,6 +1620,7 @@ fn round_up_hour(ts: u64, day_start: u64) -> u64 {
 ///
 /// # Errors
 /// Store failures, or a malformed date.
+#[allow(clippy::too_many_lines)] // the day, then each part of the page in order
 pub fn overview(
     store: &SqlCipherBrainStore,
     date: Option<&str>,
@@ -2129,7 +2130,7 @@ mod tests {
         assert!(o.blocks[0].noticed.is_none());
     }
 
-    fn draft_with(segments: Vec<(&str, &str)>, reworded: u32) -> Draft {
+    fn draft_with(segments: &[(&str, &str)], reworded: u32) -> Draft {
         let segs: Vec<StoredSegment> = segments
             .iter()
             .enumerate()
@@ -2139,7 +2140,7 @@ mod tests {
                 app: (*app).into(),
                 title: Some((*title).into()),
                 host: None,
-                events: vec![i as i64],
+                events: vec![i64::try_from(i).unwrap()],
             })
             .collect();
         let events: Vec<ObservedEvent> = segs
@@ -2170,6 +2171,9 @@ mod tests {
         }
     }
 
+    /// Windows held in order, searches reworded, and the sentences said.
+    type SentenceCase<'a> = (Vec<(&'a str, &'a str)>, u32, Vec<&'a str>);
+
     #[test]
     fn sentences_follow_thresholds_and_order() {
         let figma = ("com.figma.Desktop", "Trailhead pricing v3");
@@ -2180,7 +2184,7 @@ mod tests {
                 .map(|i| if i % 2 == 0 { a } else { b })
                 .collect::<Vec<_>>()
         };
-        let cases: Vec<(Vec<(&str, &str)>, u32, Vec<&str>)> = vec![
+        let cases: Vec<SentenceCase<'_>> = vec![
             // Four switches between two apps: said; three: not.
             (
                 alternate(4, figma, notes),
@@ -2216,7 +2220,7 @@ mod tests {
             ),
         ];
         for (segments, reworded, expected) in cases {
-            let said: Vec<String> = block_sentences(&draft_with(segments.clone(), reworded))
+            let said: Vec<String> = block_sentences(&draft_with(&segments, reworded))
                 .into_iter()
                 .map(|s| s.text.template)
                 .collect();

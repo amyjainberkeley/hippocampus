@@ -179,18 +179,20 @@ pub fn name(bundle_id: &str) -> String {
     CATALOG
         .iter()
         .find(|(id, _, _)| id.eq_ignore_ascii_case(bundle_id))
-        .map(|(_, name, _)| (*name).to_owned())
-        .unwrap_or_else(|| {
-            let last = bundle_id
-                .rsplit('.')
-                .find(|part| !part.is_empty())
-                .unwrap_or(bundle_id);
-            let mut chars = last.chars();
-            chars
-                .next()
-                .map(|first| first.to_uppercase().collect::<String>() + chars.as_str())
-                .unwrap_or_default()
-        })
+        .map_or_else(
+            || {
+                let last = bundle_id
+                    .rsplit('.')
+                    .find(|part| !part.is_empty())
+                    .unwrap_or(bundle_id);
+                let mut chars = last.chars();
+                chars
+                    .next()
+                    .map(|first| first.to_uppercase().collect::<String>() + chars.as_str())
+                    .unwrap_or_default()
+            },
+            |(_, name, _)| (*name).to_owned(),
+        )
 }
 
 /// The kind of work an app usually means. A browser counts as research

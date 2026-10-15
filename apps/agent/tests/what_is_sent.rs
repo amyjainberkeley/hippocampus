@@ -171,6 +171,7 @@ fn the_hook_packet_carries_the_same_recent_work_and_about_you_block_as_context()
 }
 
 #[test]
+#[allow(clippy::too_many_lines)] // one packet, compared with the page field by field
 fn the_page_shows_everything_context_sends() {
     let (_dir, db, _root, _records) = fixture_brain();
     let now = now_us();

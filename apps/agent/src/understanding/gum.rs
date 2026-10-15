@@ -44,6 +44,7 @@ pub struct Draft {
 
 impl Draft {
     /// `model` is who wrote it, as [`MindClient::engine_label`] names it.
+    #[allow(clippy::cast_precision_loss)] // both are clamped to 1–10
     fn to_new(&self, model: &str) -> NewProposition {
         NewProposition {
             text: self.text.trim().to_owned(),
@@ -55,6 +56,7 @@ impl Draft {
         }
     }
 
+    #[allow(clippy::cast_possible_truncation)] // stored scores are 0–1, so these are 0–10
     fn from_stored(p: &Proposition) -> Self {
         Self {
             text: p.text.clone(),
@@ -135,6 +137,7 @@ pub fn is_stale(decay: f64, updated_us: u64, now_us: u64) -> bool {
 
 /// Jaccard similarity of word sets, 0..=1.
 #[must_use]
+#[allow(clippy::cast_precision_loss)] // word counts of one proposition
 pub fn similarity(a: &str, b: &str) -> f64 {
     let (a, b) = (words(a), words(b));
     if a.is_empty() || b.is_empty() {
@@ -146,6 +149,7 @@ pub fn similarity(a: &str, b: &str) -> f64 {
 /// Recency-adjusted relevance: BM25 (`SQLite` ranks lower-is-better, so the
 /// relevance is its negation) scaled by `exp(-decay · k · age_days)`.
 #[must_use]
+#[allow(clippy::cast_precision_loss)] // 2^52 microseconds is 142 years
 pub fn adjusted_relevance(bm25: f64, decay: f64, age_us: u64) -> f64 {
     let age_days = age_us as f64 / 86_400_000_000.0;
     (-bm25).max(0.0) * (-decay * RECENCY_K * age_days).exp()
@@ -294,8 +298,7 @@ pub fn ungender(text: &str, user_name: &str) -> String {
         let trimmed = word.trim_end_matches(|c: char| !c.is_alphanumeric());
         let tail = &word[trimmed.len()..];
         let replacement = match trimmed {
-            "she" | "he" => Some(name.to_owned()),
-            "She" | "He" => Some(name.to_owned()),
+            "she" | "he" | "She" | "He" => Some(name.to_owned()),
             "her" | "his" => Some("their".to_owned()),
             "Her" | "His" => Some("Their".to_owned()),
             "him" => Some("them".to_owned()),

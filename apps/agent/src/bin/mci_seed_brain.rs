@@ -611,6 +611,7 @@ mod demo_day {
     }
 
     /// Write the day. Returns how many moments were written.
+    #[allow(clippy::too_many_lines)] // the seeded day, written moment by moment
     pub fn seed(store: &SqlCipherBrainStore, now_us: u64, tz: i32) -> Result<usize, String> {
         let mut written = 0;
         // Each session's segments, for picking evidence as the worker does.
@@ -915,6 +916,7 @@ fn now_us() -> u64 {
         .map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX))
 }
 
+#[allow(clippy::too_many_lines)] // each step that can fail exits with its own code
 fn main() -> ExitCode {
     mci_agent::panic_hook::install();
 

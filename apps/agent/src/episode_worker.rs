@@ -157,6 +157,15 @@ pub async fn run_episode_worker(
     Ok(stats)
 }
 
+/// Text read from a visible window the user was not focused on: context for
+/// search, never a switch of focused work. A failed lookup reads as focused.
+pub(crate) fn is_screen_context(store: &SqlCipherBrainStore, id: mci_brain::EventId) -> bool {
+    matches!(
+        store.event_source(id),
+        Ok(mci_brain::EventSource::ScreenContext)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,13 +179,4 @@ mod tests {
         };
         assert_eq!(s.events_assigned, 0);
     }
-}
-
-/// Text read from a visible window the user was not focused on: context for
-/// search, never a switch of focused work. A failed lookup reads as focused.
-pub(crate) fn is_screen_context(store: &SqlCipherBrainStore, id: mci_brain::EventId) -> bool {
-    matches!(
-        store.event_source(id),
-        Ok(mci_brain::EventSource::ScreenContext)
-    )
 }

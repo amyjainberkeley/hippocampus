@@ -2604,6 +2604,7 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
 /// Read-only understanding commands: `day`, `model`, `searches`, `sessions`,
 /// `overview`, `ask` and `suggest`. JSON with `--json`, plain text otherwise.
 /// `None` when argv names some other command.
+#[allow(clippy::too_many_lines)] // one match arm per command, each a few lines
 fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
     use mci_agent::understanding::mind::MindClient;
     use mci_agent::understanding::overview;
@@ -2758,7 +2759,7 @@ fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
                 now_us,
                 &question,
                 flags.get("--now").map(String::as_str),
-                screen,
+                screen.as_ref(),
                 memories,
             )
             .map(|a| serde_json::to_value(a).unwrap_or_default())
@@ -2815,6 +2816,7 @@ fn fill_template(value: &serde_json::Value, tz: i32) -> String {
     .fill(tz)
 }
 
+#[allow(clippy::too_many_lines)] // one block of plain text per command
 fn render_understanding_text(command: &str, value: &serde_json::Value, tz: i32) -> String {
     let mut out = Vec::new();
     let clock = |v: &serde_json::Value| {
@@ -3073,8 +3075,8 @@ fn spawn_understanding_worker(
             })
             .await
             {
-                Ok(Ok((stats, status))) => {
-                    model_status = status;
+                Ok(Ok((stats, latest))) => {
+                    model_status = latest;
                     if stats.sessions > 0
                         || stats.days > 0
                         || stats.searches > 0

@@ -219,7 +219,7 @@ impl DayBreakdown {
 
 /// Compute a day's breakdown from what the brain holds for it.
 #[must_use]
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub fn breakdown(
     date_local: &str,
     start_us: u64,
@@ -301,10 +301,10 @@ pub fn breakdown(
         })
         .collect();
     let mut hour_kinds: Vec<std::collections::BTreeMap<WorkKind, u64>> =
-        vec![Default::default(); 24];
+        vec![std::collections::BTreeMap::new(); 24];
     let slots = usize::try_from((end_us.saturating_sub(start_us)) / SLOT_US + 1).unwrap_or(0);
     let mut slot_kinds: Vec<std::collections::BTreeMap<(WorkKind, String), u64>> =
-        vec![Default::default(); slots];
+        vec![std::collections::BTreeMap::new(); slots];
     let mut active_us = 0u64;
     let mut switches = 0u32;
     let mut previous_app: Option<&str> = None;
@@ -404,7 +404,7 @@ pub fn breakdown(
             active_us,
         })
         .collect();
-    apps_out.sort_by(|a, b| b.active_us.cmp(&a.active_us));
+    apps_out.sort_by_key(|a| std::cmp::Reverse(a.active_us));
     apps_out.truncate(12);
     let mut kinds: Vec<KindTime> = by_kind
         .into_iter()
@@ -414,7 +414,8 @@ pub fn breakdown(
             active_us,
         })
         .collect();
-    kinds.sort_by(|a, b| b.active_us.cmp(&a.active_us));
+    kinds.sort_by_key(|k| std::cmp::Reverse(k.active_us));
+    #[allow(clippy::cast_precision_loss)] // a day is under 2^37 microseconds
     let active_hours = (active_us as f64 / 3_600_000_000.0).max(0.25);
     let in_day = |c: &&InteractionCounts| c.start_us >= start_us && c.start_us < end_us;
     DayBreakdown {
@@ -556,7 +557,7 @@ mod tests {
         let events: Vec<ObservedEvent> = (0..4)
             .map(|i| ObservedEvent {
                 id: i,
-                ts_us: DAY0 + i as u64 * MIN,
+                ts_us: DAY0 + u64::try_from(i).unwrap() * MIN,
                 app_bundle_id: Some("com.apple.Notes".into()),
                 window_title: None,
                 url: None,

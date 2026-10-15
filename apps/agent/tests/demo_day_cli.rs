@@ -92,6 +92,7 @@ fn check_template(t: &serde_json::Value) {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)] // one seeded day, checked the way the window reads it
 fn a_seeded_day_reads_as_the_window_expects() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join("home");
