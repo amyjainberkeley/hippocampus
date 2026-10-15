@@ -105,7 +105,6 @@ struct PreferencesRootView: View {
     /// Fixed AI tool facts for the off-screen renderer.
     var aiToolsPreview: SessionContextPreferencesView.Facts?
 
-    @State private var crashReports = false
     @State private var confirmingReset = false
     @State private var resetResult: (title: String, message: String)?
 
@@ -294,14 +293,9 @@ struct PreferencesRootView: View {
                     .appendingPathComponent("Library/Logs/MCI"))
             }
             Button("Reset Permissions…") { confirmingReset = true }
-            Toggle("Send crash reports", isOn: $crashReports)
-                .onChange(of: crashReports) { _, on in
-                    if on != supervisor.isCrashReportOptedIn { supervisor.setCrashReportOptedIn(on) }
-                }
             Button("Show Setup Again") { actions.showSetup() }
             Button("Restart Hippocampus") { actions.restart() }
         }
-        .onAppear { crashReports = supervisor.isCrashReportOptedIn }
         .alert(PermissionReset.confirmTitle, isPresented: $confirmingReset) {
             Button("Cancel", role: .cancel) {}
             Button(PermissionReset.confirmButton, role: .destructive) { resetPermissions() }

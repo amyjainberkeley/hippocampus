@@ -140,4 +140,11 @@ final class PreferencesRoutingLifecycleTests: XCTestCase {
         XCTAssertFalse(window.contains("enum PreferencesSection:"))
         XCTAssertTrue(window.contains("extension PreferencesSection {"))
     }
+
+    /// The crash-report switch set a flag no build acts on: nothing sends a
+    /// report without an upload address, and the app has none (ui-1).
+    func testPreferencesOffersNoSwitchThatDoesNothing() throws {
+        let preferences = try source("PreferencesWindow.swift")
+        XCTAssertFalse(preferences.lowercased().contains("crash"))
+    }
 }
