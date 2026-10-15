@@ -230,6 +230,12 @@ test_unified_gate_uses_compatibility_wrapper() {
         'unified gate tests hippocampus-mind without Foundation Models'
     assert_contains "$CHECK" '"$python" -B -m unittest discover -s tools/ocr' \
         'unified gate runs the OCR worker tests'
+    for standalone in test-menubar-static.sh test-session-context.sh; do
+        assert_contains "$CHECK" "bash apps/hippocampus/Tests/Standalone/$standalone" \
+            "unified gate runs the standalone $standalone"
+    done
+    assert_contains "$CHECK" 'python3 -B -m unittest discover -s apps/recall-ui/Tests/Presentation' \
+        'unified gate runs the Recall presentation contracts'
 }
 
 test_healthy_toolchain_is_a_no_op

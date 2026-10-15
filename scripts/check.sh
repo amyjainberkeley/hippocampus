@@ -41,8 +41,11 @@ LANES=(
     "recall-state-behavior|swift|test|scripts/swift-package.sh run --package-path apps/recall-ui RecallStateBehavior"
     "recall-refresh-behavior|swift|test|scripts/swift-package.sh run --package-path apps/recall-ui MemoryRefreshBehavior"
     "context-handoff-behavior|swift|test|scripts/swift-package.sh run --package-path apps/recall-ui ContextHandoffBehavior"
+    "recall-presentation-contract|bash|test|python3 -B -m unittest discover -s apps/recall-ui/Tests/Presentation"
     "onboarding-ai-connector|swift|test|scripts/swift-package.sh run --package-path apps/onboarding AIToolConnectorBehavior"
     "menu-ai-connector|swift|test|scripts/swift-package.sh run --package-path apps/hippocampus AIToolConnectorBehavior"
+    "menubar-static-behavior|swift|test|bash apps/hippocampus/Tests/Standalone/test-menubar-static.sh"
+    "session-context-behavior|swift|test|bash apps/hippocampus/Tests/Standalone/test-session-context.sh"
     "capture-consent-behavior|swift|test|scripts/swift-package.sh run --package-path apps/hippocampus CaptureConsentBehavior"
     "child-process-environment|swift|test|scripts/swift-package.sh run --package-path apps/hippocampus ChildProcessEnvironmentBehavior"
     "capture-source-policy-behavior|swift|test|scripts/swift-package.sh run --package-path adapters/macos/MCICaptureHelper CaptureSourcePolicyBehavior"
@@ -125,8 +128,11 @@ LANES
     recall-state-behavior responsive Recall layout and ephemeral query-state fixture
     recall-refresh-behavior real process-local refresh signal and re-query behavior
     context-handoff-behavior bounded child completion and timeout cleanup
+    recall-presentation-contract Recall's command palette, filters and evidence wiring
     onboarding-ai-connector bounded first-run AI-client registration and cleanup
     menu-ai-connector      bounded menu-bar AI-client registration and cleanup
+    menubar-static-behavior menu-bar label and cached icon reads, compiled on their own
+    session-context-behavior session hook config, privacy, argument safety and timeout
     capture-consent-behavior executable capture authority and generation fixture
     child-process-environment prepared file-key authority reaches supervised children
     capture-source-policy-behavior browser pixels stay outside ambient OCR
