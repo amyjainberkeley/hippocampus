@@ -216,14 +216,20 @@ test_retry_exit_code_propagates() {
 test_unified_gate_uses_compatibility_wrapper() {
     for package in \
         adapters/macos/MCICaptureHelper \
+        adapters/macos/MCIKeyframeCodec \
         apps/recall-ui \
         apps/onboarding \
-        apps/hippocampus; do
+        apps/hippocampus \
+        apps/mind; do
         assert_contains \
             "$CHECK" \
             "scripts/swift-package.sh test --package-path $package" \
             "unified gate wraps Swift tests for $package"
     done
+    assert_contains "$CHECK" 'apps/mind/scripts/test-without-foundation-models.sh' \
+        'unified gate tests hippocampus-mind without Foundation Models'
+    assert_contains "$CHECK" '"$python" -B -m unittest discover -s tools/ocr' \
+        'unified gate runs the OCR worker tests'
 }
 
 test_healthy_toolchain_is_a_no_op

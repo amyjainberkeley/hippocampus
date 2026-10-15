@@ -4,7 +4,7 @@ This is a solo project, so the most useful contributions are precise ones: an is
 
 ## Set up
 
-Prerequisites are in the [README](README.md#build-from-source): an Apple silicon Mac, Xcode 26, the Rust toolchain named in `rust-toolchain.toml`, and Python 3.12 with uv for the text reader.
+Prerequisites are in the [README](README.md#build-from-source): an Apple silicon Mac, Xcode 26, the Rust toolchain named in `rust-toolchain.toml`, and Python 3.12 with uv for the text reader. `./scripts/check.sh` also needs ripgrep and SwiftFormat: `brew install ripgrep swiftformat`.
 
 ```bash
 git clone https://github.com/amyjainberkeley/hippocampus.git
@@ -18,7 +18,7 @@ cd hippocampus
 ./scripts/check.sh
 ```
 
-That runs the same lanes CI runs: `cargo fmt`, `cargo clippy`, `cargo test`, `cargo audit`, the Swift tests for the capture helper, recall UI and onboarding packages, and shell syntax checks. `./scripts/check.sh --help` lists selectors if you only want one lane.
+That runs `cargo fmt`, `cargo clippy` with warnings as errors (as CI does), `cargo test`, `cargo audit`, SwiftFormat, the Swift tests for every package, hippocampus-mind built without Foundation Models, the OCR worker's tests when `tools/ocr/.venv` is set up, the release and product contracts, and shell syntax checks. `./scripts/check.sh --help` lists selectors if you only want one lane.
 
 ## Pull request titles
 

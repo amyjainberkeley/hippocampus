@@ -34,6 +34,10 @@ LANES=(
     "swift-test-recall-ui|swift|test|scripts/swift-package.sh test --package-path apps/recall-ui"
     "swift-test-onboarding|swift|test|scripts/swift-package.sh test --package-path apps/onboarding"
     "swift-test-hippocampus|swift|test|scripts/swift-package.sh test --package-path apps/hippocampus"
+    "swift-test-mind|swift|test|scripts/swift-package.sh test --package-path apps/mind"
+    "mind-without-foundation-models|swift|test|apps/mind/scripts/test-without-foundation-models.sh"
+    "swift-test-keyframe-codec|swift|test|scripts/swift-package.sh test --package-path adapters/macos/MCIKeyframeCodec"
+    "keyframe-codec-behavior|swift|test|scripts/swift-package.sh run --package-path adapters/macos/MCIKeyframeCodec KeyframeCodecBehavior"
     "recall-state-behavior|swift|test|scripts/swift-package.sh run --package-path apps/recall-ui RecallStateBehavior"
     "recall-refresh-behavior|swift|test|scripts/swift-package.sh run --package-path apps/recall-ui MemoryRefreshBehavior"
     "context-handoff-behavior|swift|test|scripts/swift-package.sh run --package-path apps/recall-ui ContextHandoffBehavior"
@@ -49,9 +53,11 @@ LANES=(
     "product-source-provenance|bash|test|scripts/test-product-source-provenance.sh"
     "onboarding-route-behavior|swift|test|scripts/swift-package.sh run --package-path apps/onboarding OnboardingRouteBehavior"
     "safari-private-context|bash|test|node --test extensions/safari/__tests__/content.test.cjs"
+    "ocr-worker|bash|test|__ocr_worker_lane"
     "bash-syntax|bash|lint|__bash_syntax_lane"
     "supply-chain-audit-contract|bash|test|python3 -B scripts/test_supply_chain_audit.py"
     "release-safety-contract|bash|test|python3 -B scripts/test_release_safety.py"
+    "check-lanes-contract|bash|test|python3 -B scripts/test_check_lanes.py"
     "release-contract|bash|lint|scripts/test-release-contract.sh"
     "app-group-contract|bash|test|scripts/test-app-group-contract.sh"
     "toml-license-contract|bash|lint|scripts/test-toml-license-contract.sh"
@@ -112,6 +118,10 @@ LANES
     swift-test-recall-ui  swift test in apps/recall-ui
     swift-test-onboarding swift test in apps/onboarding
     swift-test-hippocampus swift test in apps/hippocampus
+    swift-test-mind       swift test in apps/mind (hippocampus-mind)
+    mind-without-foundation-models hippocampus-mind builds and passes with the Apple engine compiled out
+    swift-test-keyframe-codec swift test in adapters/macos/MCIKeyframeCodec
+    keyframe-codec-behavior sealed keyframes open only with their key and reject tampering
     recall-state-behavior responsive Recall layout and ephemeral query-state fixture
     recall-refresh-behavior real process-local refresh signal and re-query behavior
     context-handoff-behavior bounded child completion and timeout cleanup
@@ -127,9 +137,11 @@ LANES
     product-source-provenance signed qualification source and binary binding contract
     onboarding-route-behavior executable route to the durable app-access editor
     safari-private-context structured browser capture fails closed in private tabs
+    ocr-worker            offline OCR worker tests (SKIP without tools/ocr/.venv)
     bash-syntax           bash -n across repo *.sh files
     supply-chain-audit-contract audit coverage, errors, and empty-selector regression tests
     release-safety-contract mandatory model/launch gates and tag-audit failure propagation
+    check-lanes-contract  the ocr-worker lane skips, fails and runs when it should
     release-contract      release graph and artifact identity contract
     toml-license-contract pinned TOML dependency license contract
     task-2-product-truth  legal artifact drift and active product-truth contract
@@ -190,6 +202,22 @@ __swift_fmt_lane() {
         apps/mind/Sources \
         adapters/macos/MCICaptureHelper/Sources \
         adapters/macos/MCIKeyframeCodec/Sources
+}
+
+__ocr_worker_lane() {
+    # The offline OCR worker's tests need its Python environment and models,
+    # which tools/ocr/README.md sets up. Without the environment, SKIP.
+    local python="tools/ocr/.venv/bin/python"
+    if [[ ! -x "$python" ]]; then
+        echo "[skip] tools/ocr/.venv is not set up (see tools/ocr/README.md, Build on macOS)"
+        return 42
+    fi
+    if [[ ! -d tools/ocr/models ]]; then
+        echo "tools/ocr/models is missing: run tools/ocr/prepare.py (see tools/ocr/README.md)"
+        return 1
+    fi
+    env -i HOME="$HOME" PATH=/usr/bin:/bin TMPDIR="${TMPDIR:-/tmp}" \
+        "$python" -B -m unittest discover -s tools/ocr
 }
 
 __changelog_sanity_lane() {
