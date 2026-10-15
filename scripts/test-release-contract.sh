@@ -101,7 +101,7 @@ require_pattern "$RELEASE" 'fetch-depth:[[:space:]]*0' \
     'release checkout includes full history for status provenance'
 require_literal "$RELEASE" 'MACOSX_DEPLOYMENT_TARGET: "14.0"' \
     'release workflow pins Rust binaries to the supported macOS 14 deployment target'
-for package in apps/hippocampus adapters/macos/MCICaptureHelper apps/recall-ui apps/onboarding; do
+for package in apps/hippocampus adapters/macos/MCICaptureHelper apps/recall-ui apps/onboarding apps/mind; do
     require_literal "$RELEASE" "--package-path $package" \
         "release workflow builds ${package}"
 done
@@ -259,6 +259,14 @@ require_literal "$SWIFT_CI" 'swift test --package-path apps/hippocampus' \
     'Swift CI runs the Hippocampus app tests'
 require_literal "$SWIFT_CI" 'swift test --package-path apps/onboarding' \
     'Swift CI runs the onboarding tests'
+require_literal "$SWIFT_CI" 'swift test --package-path apps/mind' \
+    'Swift CI runs the hippocampus-mind tests'
+require_literal "$SWIFT_CI" 'apps/mind/scripts/test-without-foundation-models.sh' \
+    'Swift CI proves hippocampus-mind builds and passes without Foundation Models'
+require_literal "$SWIFT_CI" "'apps/mind/**'" \
+    'Swift CI runs when hippocampus-mind changes'
+require_literal "$SWIFT_CI" 'swift test --package-path adapters/macos/MCIKeyframeCodec' \
+    'Swift CI runs the keyframe codec tests'
 require_literal "$RELEASE_CI" 'scripts/swift-package.sh run --package-path apps/hippocampus CaptureConsentBehavior' \
     'release CI executes the capture-consent behavior fixture'
 require_literal "$RELEASE_CI" 'scripts/swift-package.sh run --package-path apps/hippocampus ChildProcessEnvironmentBehavior' \

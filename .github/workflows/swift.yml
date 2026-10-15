@@ -12,6 +12,7 @@ on:
       - 'apps/hippocampus/**'
       - 'apps/hippocampus-native-host/**'
       - 'apps/onboarding/**'
+      - 'apps/mind/**'
       - 'scripts/build-installer.sh'
       - 'scripts/installer-requirements.txt'
       - 'scripts/test-installer*'
@@ -38,6 +39,7 @@ on:
       - 'apps/hippocampus/**'
       - 'apps/hippocampus-native-host/**'
       - 'apps/onboarding/**'
+      - 'apps/mind/**'
       - 'scripts/build-installer.sh'
       - 'scripts/installer-requirements.txt'
       - 'scripts/test-installer*'
@@ -62,12 +64,21 @@ concurrency:
 permissions:
   contents: read
 
+# The app needs the macOS 26 SDK and Swift 6.2 or later (Xcode 16.4 rejects
+# it), so every job runs on macOS 26 with Xcode 26.6, the toolchain the app
+# is released with. Caches are keyed on it so no older build is restored.
+env:
+  XCODE_APP: /Applications/Xcode_26.6.app
+
 jobs:
   helper:
     name: MCICaptureHelper tests
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Select Xcode
+        run: sudo xcode-select --switch "$XCODE_APP" && xcodebuild -version
 
       - name: Record OCR test environment
         run: |
@@ -81,8 +92,8 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: adapters/macos/MCICaptureHelper/.build
-          key: swift-helper-${{ runner.os }}-${{ hashFiles('adapters/macos/MCICaptureHelper/Package.resolved') }}
-          restore-keys: swift-helper-${{ runner.os }}-
+          key: swift-helper-${{ runner.os }}-${{ env.XCODE_APP }}-${{ hashFiles('adapters/macos/MCICaptureHelper/Package.resolved') }}
+          restore-keys: swift-helper-${{ runner.os }}-${{ env.XCODE_APP }}-
 
       - run: swift test --package-path adapters/macos/MCICaptureHelper
 
@@ -101,9 +112,12 @@ jobs:
 
   recall-ui:
     name: recall-ui tests
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Select Xcode
+        run: sudo xcode-select --switch "$XCODE_APP" && xcodebuild -version
 
       - name: Cache cargo + SwiftPM .build
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -113,8 +127,8 @@ jobs:
             ~/.cargo/git
             target
             apps/recall-ui/.build
-          key: swift-recall-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'apps/recall-ui/Package.resolved') }}
-          restore-keys: swift-recall-${{ runner.os }}-
+          key: swift-recall-${{ runner.os }}-${{ env.XCODE_APP }}-${{ hashFiles('Cargo.lock', 'apps/recall-ui/Package.resolved') }}
+          restore-keys: swift-recall-${{ runner.os }}-${{ env.XCODE_APP }}-
 
       # The wrapper builds and atomically stages the archive in SwiftPM's
       # configured search path with the same macOS minimum deployment target.
@@ -122,24 +136,30 @@ jobs:
 
   hippocampus:
     name: Hippocampus app tests
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Select Xcode
+        run: sudo xcode-select --switch "$XCODE_APP" && xcodebuild -version
 
       - name: Cache SwiftPM .build
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: apps/hippocampus/.build
-          key: swift-hippocampus-${{ runner.os }}-${{ hashFiles('apps/hippocampus/Package.resolved') }}
-          restore-keys: swift-hippocampus-${{ runner.os }}-
+          key: swift-hippocampus-${{ runner.os }}-${{ env.XCODE_APP }}-${{ hashFiles('apps/hippocampus/Package.resolved') }}
+          restore-keys: swift-hippocampus-${{ runner.os }}-${{ env.XCODE_APP }}-
 
       - run: swift test --package-path apps/hippocampus
 
   onboarding:
     name: Onboarding tests
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Select Xcode
+        run: sudo xcode-select --switch "$XCODE_APP" && xcodebuild -version
 
       - name: Record onboarding test environment
         run: |
@@ -151,8 +171,8 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: apps/onboarding/.build
-          key: swift-onboarding-${{ runner.os }}-${{ hashFiles('apps/onboarding/Package.resolved') }}
-          restore-keys: swift-onboarding-${{ runner.os }}-
+          key: swift-onboarding-${{ runner.os }}-${{ env.XCODE_APP }}-${{ hashFiles('apps/onboarding/Package.resolved') }}
+          restore-keys: swift-onboarding-${{ runner.os }}-${{ env.XCODE_APP }}-
 
       - run: swift test --package-path apps/onboarding
 
@@ -170,11 +190,50 @@ jobs:
               "$(xcrun --find xctest)" "$test_bundle"
           fi
 
-  installer-smoke:
-    name: Installer script smoke test
-    runs-on: macos-15
+  mind:
+    name: hippocampus-mind tests
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Select Xcode
+        run: sudo xcode-select --switch "$XCODE_APP" && xcodebuild -version
+
+      - name: Cache SwiftPM .build
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: apps/mind/.build
+          key: swift-mind-${{ runner.os }}-${{ env.XCODE_APP }}-${{ hashFiles('apps/mind/Package.swift') }}
+          restore-keys: swift-mind-${{ runner.os }}-${{ env.XCODE_APP }}-
+
+      - run: swift test --package-path apps/mind
+
+      # As on a Mac without Apple's Foundation Models (macOS 14 or 15): the
+      # Apple engine compiled out, the suite still passing, and the binary
+      # not linking the framework.
+      - name: Test without Foundation Models
+        run: apps/mind/scripts/test-without-foundation-models.sh
+
+  keyframe-codec:
+    name: Keyframe codec tests
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Select Xcode
+        run: sudo xcode-select --switch "$XCODE_APP" && xcodebuild -version
+
+      - run: swift test --package-path adapters/macos/MCIKeyframeCodec
+      - run: swift run --package-path adapters/macos/MCIKeyframeCodec KeyframeCodecBehavior
+
+  installer-smoke:
+    name: Installer script smoke test
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Select Xcode
+        run: sudo xcode-select --switch "$XCODE_APP" && xcodebuild -version
 
       - name: Provision isolated installer build dependencies
         run: |

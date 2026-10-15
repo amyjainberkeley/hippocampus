@@ -286,13 +286,20 @@ on:
 permissions:
   contents: read
 
+# The app needs the macOS 26 SDK and Swift 6.2 or later (Xcode 16.4 rejects
+# it); Xcode 26.6 is the toolchain the app is released with.
+env:
+  XCODE_APP: /Applications/Xcode_26.6.app
+
 jobs:
   contracts:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+      - name: Select Xcode
+        run: sudo xcode-select --switch "$XCODE_APP" && xcodebuild -version
       - name: Install contract dependencies
         run: |
           brew install ripgrep
@@ -422,4 +429,5 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.25.x'
-      - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      # v1.7.8 is the first release that knows the macos-26 runner label.
+      - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12

@@ -28,12 +28,19 @@ concurrency:
 permissions:
   contents: read
 
+# macOS 26 with Xcode 26.6, the toolchain the app is built and released with.
+env:
+  XCODE_APP: /Applications/Xcode_26.6.app
+
 jobs:
   test:
     name: cargo test
-    runs-on: macos-14
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Select Xcode
+        run: sudo xcode-select --switch "$XCODE_APP" && xcodebuild -version
 
       - name: Cache cargo registry + target
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -42,16 +49,19 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-test-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-test-${{ runner.os }}-
+          key: cargo-test-${{ runner.os }}-${{ env.XCODE_APP }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-test-${{ runner.os }}-${{ env.XCODE_APP }}-
 
       - run: cargo test --workspace --all-features
 
   clippy:
     name: cargo clippy
-    runs-on: macos-14
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Select Xcode
+        run: sudo xcode-select --switch "$XCODE_APP" && xcodebuild -version
 
       - name: Cache cargo registry + target
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -60,14 +70,14 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-clippy-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-clippy-${{ runner.os }}-
+          key: cargo-clippy-${{ runner.os }}-${{ env.XCODE_APP }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-clippy-${{ runner.os }}-${{ env.XCODE_APP }}-
 
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   fmt:
     name: cargo fmt
-    runs-on: macos-14
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - run: cargo fmt --check
+      - run: cargo fmt --check --all

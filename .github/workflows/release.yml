@@ -11,10 +11,15 @@ concurrency:
 permissions:
   contents: read
 
+# The app needs the macOS 26 SDK; Xcode 26.6 is the toolchain the app is
+# released with.
+env:
+  XCODE_APP: /Applications/Xcode_26.6.app
+
 jobs:
   build-draft:
     name: Build, verify, and stage owner-inspectable draft
-    runs-on: macos-14
+    runs-on: macos-26
     environment:
       name: release-signing
     permissions:
@@ -25,6 +30,9 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Select Xcode
+        run: sudo xcode-select --switch "$XCODE_APP" && xcodebuild -version
 
       - name: Provision isolated installer build dependencies
         run: |
@@ -90,8 +98,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-release-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: cargo-release-${{ runner.os }}-
+          key: cargo-release-${{ runner.os }}-${{ env.XCODE_APP }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-release-${{ runner.os }}-${{ env.XCODE_APP }}-
 
       - name: Cache SwiftPM
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -101,8 +109,9 @@ jobs:
             adapters/macos/MCICaptureHelper/.build
             apps/recall-ui/.build
             apps/onboarding/.build
-          key: swift-release-${{ runner.os }}-${{ hashFiles('apps/hippocampus/Package.resolved', 'adapters/macos/MCICaptureHelper/Package.resolved', 'apps/recall-ui/Package.resolved', 'apps/onboarding/Package.resolved') }}
-          restore-keys: swift-release-${{ runner.os }}-
+            apps/mind/.build
+          key: swift-release-${{ runner.os }}-${{ env.XCODE_APP }}-${{ hashFiles('apps/hippocampus/Package.resolved', 'adapters/macos/MCICaptureHelper/Package.resolved', 'apps/recall-ui/Package.resolved', 'apps/onboarding/Package.resolved', 'apps/mind/Package.swift') }}
+          restore-keys: swift-release-${{ runner.os }}-${{ env.XCODE_APP }}-
 
       - name: Select OCR build Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -151,6 +160,7 @@ jobs:
           scripts/swift-package.sh build -c release --package-path apps/onboarding
           scripts/swift-package.sh build -c release --package-path adapters/macos/MCICaptureHelper
           scripts/swift-package.sh build -c release --package-path apps/hippocampus
+          scripts/swift-package.sh build -c release --package-path apps/mind
 
       - name: Import Developer ID certificate
         env:
@@ -272,7 +282,7 @@ jobs:
   create-draft:
     name: Create owner-inspectable draft
     needs: build-draft
-    runs-on: macos-14
+    runs-on: macos-26
     permissions:
       contents: write
     steps:

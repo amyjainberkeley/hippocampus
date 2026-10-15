@@ -4,6 +4,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import subprocess
@@ -124,7 +125,7 @@ class WorkflowTests(unittest.TestCase):
     def setUpClass(cls):
         # Use the system Ruby YAML parser, with no downloaded test dependencies.
         cls.workflows = {}
-        for name in ("cargo-audit", "release", "publish-release", "release-contract", "swift"):
+        for name in ("cargo", "cargo-audit", "release", "publish-release", "release-contract", "swift"):
             raw = subprocess.check_output(
                 ["ruby", "-ryaml", "-rjson", "-e", "puts JSON.generate(YAML.load_file(ARGV[0]))",
                  str(ROOT / f".github/workflows/{name}.yml")], text=True
@@ -353,6 +354,28 @@ class WorkflowTests(unittest.TestCase):
                 self.assertNotIn("restore-keys", cache["with"])
                 audit = next(step for step in steps if "scripts/audit-supply-chain.py" in step.get("run", ""))
                 self.assertIn("--require-version 0.22.2", audit["run"])
+
+    def test_macos_jobs_build_with_xcode_26(self):
+        # Xcode 16.4 rejects the app's Swift, and the macOS 14 runners are
+        # retired: every macOS job runs on macOS 26, and a job that builds
+        # selects Xcode 26 before its first build step.
+        build_step = re.compile(r"\b(swift|cargo|xcodebuild|xcrun)\b|scripts/|apps/mind/scripts/")
+        select = 'sudo xcode-select --switch "$XCODE_APP" && xcodebuild -version'
+        for name in ("cargo", "swift", "release-contract", "release", "publish-release"):
+            workflow = self.workflows[name]
+            for job_name, job in workflow["jobs"].items():
+                if not job["runs-on"].startswith("macos"):
+                    continue
+                with self.subTest(workflow=name, job=job_name):
+                    self.assertEqual(job["runs-on"], "macos-26")
+                    runs = [step.get("run", "") for step in job["steps"]]
+                    builds = [i for i, run in enumerate(runs)
+                              if build_step.search(run) and run != select and run != "cargo fmt --check --all"]
+                    if not builds or name == "publish-release":
+                        continue
+                    self.assertRegex(workflow["env"]["XCODE_APP"], r"\A/Applications/Xcode_26(\.\d+){1,2}\.app\Z")
+                    self.assertIn(select, runs)
+                    self.assertLess(runs.index(select), builds[0])
 
 
 if __name__ == "__main__":
