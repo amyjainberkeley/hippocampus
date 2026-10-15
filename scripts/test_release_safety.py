@@ -274,6 +274,35 @@ class WorkflowTests(unittest.TestCase):
             self.assertNotIn("PASS:", result.stdout)
             self.assertNotIn("FAIL:", result.stderr)
 
+    def test_ripgrep_checks_never_pass_without_a_search(self):
+        for script, message in (("scripts/test-no-quarantine-bypass.sh", "quarantine check requires ripgrep"),
+                                ("scripts/test-release-ocr-killswitch.sh", "release OCR check requires ripgrep")):
+            with self.subTest(script=script), tempfile.TemporaryDirectory(prefix="contract-no-rg-") as temporary:
+                binaries = Path(temporary)
+                (binaries / "dirname").symlink_to(shutil.which("dirname"))
+                result = subprocess.run(
+                    ["/bin/bash", str(ROOT / script)],
+                    cwd=ROOT, env={**os.environ, "PATH": str(binaries)},
+                    capture_output=True, text=True, timeout=10,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
+                self.assertNotIn("PASS:", result.stdout)
+        # rg exits 0 on a match and 1 on none; the quarantine check passes
+        # only on 1, never when the search itself failed.
+        for rg_exit, passes in ((0, False), (1, True), (2, False)):
+            with self.subTest(rg_exit=rg_exit), tempfile.TemporaryDirectory(prefix="contract-fake-rg-") as temporary:
+                binaries = Path(temporary)
+                (binaries / "rg").write_text(f"#!/bin/sh\nexit {rg_exit}\n")
+                (binaries / "rg").chmod(0o755)
+                result = subprocess.run(
+                    ["/bin/bash", str(ROOT / "scripts/test-no-quarantine-bypass.sh")],
+                    cwd=ROOT, env={**os.environ, "PATH": f"{binaries}:/usr/bin:/bin"},
+                    capture_output=True, text=True, timeout=10,
+                )
+                self.assertEqual(result.returncode == 0, passes, result.stdout + result.stderr)
+                self.assertEqual("PASS:" in result.stdout, passes)
+
     def test_safety_regressions_run_in_local_and_hosted_gates(self):
         with tempfile.TemporaryDirectory(prefix="release-safety-lane-") as temp:
             root = Path(temp)
