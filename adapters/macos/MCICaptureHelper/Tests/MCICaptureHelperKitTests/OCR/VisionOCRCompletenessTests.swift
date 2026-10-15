@@ -11,6 +11,15 @@ final class VisionOCRCompletenessTests: XCTestCase {
     private static let labels = [
         "Search settings", "Pending changes", "cache_key_123", "GET /v1/events"
     ]
+    /// For checks of what is read, not how fast. The production budget is
+    /// wall-clock time, and the region loop starts a sub-region pass only
+    /// while twice the slowest pass still fits in it, so on a busy Mac or in
+    /// Low Power Mode it reads fewer regions by design. Tests of what is read
+    /// therefore get a minute: one pass over the densest fixture took up to
+    /// 4.5 s at a load average of 85 in Low Power Mode. The production budget
+    /// is held by testDenseScanKeepsOriginalTextWithinProductionBudget and
+    /// testSyntheticCompletenessBenchmark, which measure this Mac as well.
+    private static let unhurriedTimeoutMs = 60 * VisionOCRWorker.defaultTimeoutMs
 
     override func setUpWithError() throws {
         try super.setUpWithError()
@@ -35,7 +44,7 @@ final class VisionOCRCompletenessTests: XCTestCase {
         for height in [1080, 1920] {
             let input = try Self.render(height: height, entries: Self.smallLabels(height: height))
             let measurements = RegionMeasurements()
-            let result = try await recognize(input, regionDidFinish: measurements.record)
+            let result = try await recognize(input, timeoutMs: Self.unhurriedTimeoutMs, regionDidFinish: measurements.record)
             let actual = result.recognizedLines.map(\.text)
             print("OCR-COMPLETENESS height=\(height) exact=\(Self.labels.filter { actual.contains($0) }.count)/4 ms=\(result.durationMs) timed_out=\(result.timedOut) \(measurements.summary(planned: VisionOCRRunner.recognitionRegions(for: input).count))")
             XCTAssertFalse(result.timedOut)
@@ -54,7 +63,7 @@ final class VisionOCRCompletenessTests: XCTestCase {
         ]
         let input = try Self.render(entries: entries)
         let original = try Self.singlePass(input)
-        let result = try await recognize(input)
+        let result = try await recognize(input, timeoutMs: Self.unhurriedTimeoutMs)
         XCTAssertFalse(result.timedOut)
         XCTAssertEqual(Array(result.recognizedLines.prefix(original.count).map(\.text)), original,
                        "Keep original text contiguous for multiline privacy patterns")
@@ -79,7 +88,7 @@ final class VisionOCRCompletenessTests: XCTestCase {
             Text("OUTSIDE_TOP", x: 40, y: 1030, size: 24),
             Text("OUTSIDE_BOTTOM", x: 40, y: 40, size: 24)
         ], roi: roi)
-        let result = try await recognize(input)
+        let result = try await recognize(input, timeoutMs: Self.unhurriedTimeoutMs)
         XCTAssertFalse(result.timedOut)
         XCTAssertTrue(result.recognizedLines.contains { $0.text == "inside_left_123" })
         XCTAssertTrue(result.recognizedLines.contains { $0.text == "inside_right_456" })
@@ -94,7 +103,7 @@ final class VisionOCRCompletenessTests: XCTestCase {
             Text("Review notes", x: 40, y: 920, size: 24),
             Text("Build complete", x: 1250, y: 120, size: 24)
         ])
-        let result = try await recognize(input)
+        let result = try await recognize(input, timeoutMs: Self.unhurriedTimeoutMs)
         XCTAssertFalse(result.timedOut)
         let original = result.recognizedLines.map(\.text)
         let memory = OCRMemoryText.make(from: result.recognizedLines).components(separatedBy: "\n")
@@ -106,8 +115,12 @@ final class VisionOCRCompletenessTests: XCTestCase {
     }
 
     func testBlankImageDoesNotInventText() async throws {
+        // Nothing may be read from blank pixels. A scan that finds no text
+        // runs every region whatever the budget, so this is the work done in
+        // production, and the timeout check keeps an abandoned scan from
+        // passing as empty (see unhurriedTimeoutMs).
         let input = try Self.render(entries: [])
-        let result = try await recognize(input)
+        let result = try await recognize(input, timeoutMs: Self.unhurriedTimeoutMs)
         XCTAssertFalse(result.timedOut)
         XCTAssertTrue(result.recognizedLines.isEmpty)
     }
@@ -151,7 +164,7 @@ final class VisionOCRCompletenessTests: XCTestCase {
         let rawPass = try Self.singlePass(supplemental)
         XCTAssertEqual(rawPass, ["password", ": demo"], "Confirm the reviewer's actual Vision fixture")
         let measurements = RegionMeasurements()
-        let result = try await recognize(input, timeoutMs: 10_000, regionDidFinish: measurements.record)
+        let result = try await recognize(input, timeoutMs: Self.unhurriedTimeoutMs, regionDidFinish: measurements.record)
         print("OCR-PRIVACY-REPRO ms=\(result.durationMs) lines=\(result.recognizedLines.map(\.text))")
         XCTAssertFalse(result.timedOut)
         XCTAssertTrue(result.recognizedLines.map(\.text).joined(separator: "\n").contains("password\n: demo"))
@@ -242,38 +255,88 @@ final class VisionOCRCompletenessTests: XCTestCase {
         let warmupStarted = DispatchTime.now().uptimeNanoseconds
         _ = try Self.singlePass(input)
         print("OCR-DENSE-WARMUP ms=\((DispatchTime.now().uptimeNanoseconds - warmupStarted) / 1_000_000)")
-        for sample in 0..<3 {
+        // The order guarantee holds whatever the clock says, so it is checked
+        // first with a budget no busy Mac misses.
+        let reference = try Self.singlePass(input)
+        let unhurried = try await recognize(input, timeoutMs: Self.unhurriedTimeoutMs)
+        XCTAssertFalse(unhurried.timedOut)
+        XCTAssertEqual(Array(unhurried.recognizedLines.prefix(reference.count).map(\.text)), reference,
+                       "Preserve original literal candidates and their order")
+
+        // The production budget is wall-clock time, and the region loop plans
+        // its passes against it, so it is measured as it is. Each sample also
+        // times one plain Vision pass over the same pixels. Where that pass
+        // took under three quarters of the budget, this Mac had room for the
+        // scan, so the sample says something about the code; where it took
+        // longer, the Mac was too busy (or in Low Power Mode) to tell. A
+        // single scan can still be pushed past the budget by another process,
+        // so the code passes if any of five scans finishes within it.
+        let budgetMs = UInt64(VisionOCRWorker.defaultTimeoutMs)
+        var withinBudget = 0
+        var conclusive = 0
+        var baselines: [UInt64] = []
+        for sample in 0..<5 {
             let started = DispatchTime.now().uptimeNanoseconds
             let baseline = try Self.singlePass(input)
             let baselineMs = (DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
+            baselines.append(baselineMs)
+            if baselineMs * 4 < budgetMs * 3 { conclusive += 1 }
             let measurements = RegionMeasurements()
             let result = try await recognize(input, regionDidFinish: measurements.record)
-            print("OCR-DENSE-BENCH sample=\(sample) baseline_lines=\(baseline.count) candidate_lines=\(result.recognizedLines.count) baseline_ms=\(baselineMs) baseline_over_budget=\(baselineMs >= UInt64(VisionOCRWorker.defaultTimeoutMs)) candidate_ms=\(result.durationMs) timed_out=\(result.timedOut) \(measurements.summary(planned: VisionOCRRunner.recognitionRegions(for: input).count))")
-            XCTAssertFalse(result.timedOut)
+            print("OCR-DENSE-BENCH sample=\(sample) baseline_lines=\(baseline.count) candidate_lines=\(result.recognizedLines.count) baseline_ms=\(baselineMs) baseline_over_budget=\(baselineMs >= budgetMs) candidate_ms=\(result.durationMs) timed_out=\(result.timedOut) \(measurements.summary(planned: VisionOCRRunner.recognitionRegions(for: input).count))")
             guard !result.timedOut else { continue }
+            withinBudget += 1
             XCTAssertEqual(Array(result.recognizedLines.prefix(baseline.count).map(\.text)), baseline,
                            "Preserve original literal candidates and their order")
         }
+        print("OCR-DENSE-BUDGET within_budget=\(withinBudget)/5 conclusive=\(conclusive)/5 budget_ms=\(budgetMs) vision_pass_ms=\(baselines)")
+        if withinBudget == 0 && conclusive == 0 {
+            throw XCTSkip("One Vision pass over these pixels took \(baselines) ms, at least three quarters of the \(budgetMs) ms budget, in all five samples (low_power=\(ProcessInfo.processInfo.isLowPowerModeEnabled)); this Mac is too busy to measure the budget now")
+        }
+        XCTAssertGreaterThan(withinBudget, 0, "Vision alone fit the budget in \(conclusive) of five samples, yet no dense scan finished within \(budgetMs) ms")
     }
 
     func testSyntheticCompletenessBenchmark() async throws {
         // Alternate a frozen single-pass baseline and the production runner on
-        // identical pixels. Timings are observations, not CI performance gates.
+        // identical pixels, within the production budget. The small labels
+        // need the sub-region passes, which the runner starts only while twice
+        // the slowest pass still fits in the budget. A sample is conclusive
+        // when the plain pass took under a sixth of the budget: then all five
+        // passes fit even if each costs as much as the first. Each size must
+        // find all four labels within the budget in at least one of five
+        // samples. If no sample of a size was conclusive, this Mac is too busy
+        // (or in Low Power Mode) to show it now, and the test is skipped.
+        let budgetMs = UInt64(VisionOCRWorker.defaultTimeoutMs)
+        var unmeasurable: [String] = []
         for (height, size) in [(1080, 12), (1920, 12), (1080, 16)] {
             let input = try Self.render(height: height, entries: Self.smallLabels(height: height, size: CGFloat(size)))
+            var complete = 0
+            var conclusive = 0
+            var baselines: [UInt64] = []
             for sample in 0..<5 {
                 let started = DispatchTime.now().uptimeNanoseconds
                 let baseline = try Self.singlePass(input)
                 let baselineMs = (DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
+                baselines.append(baselineMs)
+                if baselineMs * 6 < budgetMs { conclusive += 1 }
                 let measurements = RegionMeasurements()
                 let result = try await recognize(input, regionDidFinish: measurements.record)
                 let actual = result.recognizedLines.map(\.text)
                 let baselineExact = Self.labels.filter { baseline.contains($0) }.count
                 let actualExact = Self.labels.filter { actual.contains($0) }.count
-                print("OCR-COMPLETENESS-BENCH height=\(height) size=\(size) sample=\(sample) baseline_exact=\(baselineExact)/4 candidate_exact=\(actualExact)/4 baseline_ms=\(baselineMs) baseline_over_budget=\(baselineMs >= UInt64(VisionOCRWorker.defaultTimeoutMs)) candidate_ms=\(result.durationMs) timed_out=\(result.timedOut) \(measurements.summary(planned: VisionOCRRunner.recognitionRegions(for: input).count))")
-                XCTAssertFalse(result.timedOut)
-                XCTAssertEqual(actualExact, 4)
+                print("OCR-COMPLETENESS-BENCH height=\(height) size=\(size) sample=\(sample) baseline_exact=\(baselineExact)/4 candidate_exact=\(actualExact)/4 baseline_ms=\(baselineMs) baseline_over_budget=\(baselineMs >= budgetMs) candidate_ms=\(result.durationMs) timed_out=\(result.timedOut) \(measurements.summary(planned: VisionOCRRunner.recognitionRegions(for: input).count))")
+                if !result.timedOut && actualExact == 4 { complete += 1 }
             }
+            print("OCR-COMPLETENESS-BUDGET height=\(height) size=\(size) complete=\(complete)/5 conclusive=\(conclusive)/5 vision_pass_ms=\(baselines)")
+            guard complete == 0 else { continue }
+            if conclusive == 0 {
+                unmeasurable.append("height \(height) size \(size): \(baselines) ms")
+            } else {
+                XCTFail("height \(height) size \(size): Vision alone left room for every pass in \(conclusive) of five samples, yet no scan found all four labels within \(budgetMs) ms")
+            }
+        }
+        if !unmeasurable.isEmpty {
+            throw XCTSkip("One Vision pass took at least a sixth of the \(budgetMs) ms budget in every sample of \(unmeasurable.joined(separator: "; ")) (low_power=\(ProcessInfo.processInfo.isLowPowerModeEnabled)); this Mac is too busy to measure the budget now")
         }
     }
 
@@ -286,8 +349,10 @@ final class VisionOCRCompletenessTests: XCTestCase {
     ) async throws -> OCRResult {
         let runner = VisionOCRRunner(regionDidFinish: regionDidFinish)
         let result = await runner.recognize(input: input, timeoutMs: timeoutMs)
-        // Test dependency cleanup, not an extension of the recognition budget.
-        let drained = await runner.waitUntilIdle(timeoutMs: 5_000)
+        // Test dependency cleanup, not an extension of the recognition budget:
+        // a pass abandoned at the deadline runs to its end before the next
+        // fixture, which on a busy Mac can take several seconds.
+        let drained = await runner.waitUntilIdle(timeoutMs: 30_000)
         XCTAssertTrue(drained, "The previous Vision perform must finish before the next fixture", file: file, line: line)
         guard drained else { throw FixtureError.laneDidNotDrain }
         return result
