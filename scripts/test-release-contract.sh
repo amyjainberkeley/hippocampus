@@ -173,6 +173,14 @@ reject_pattern "$PUBLISH" 'uses:[[:space:]]+[^#[:space:]]+@v[0-9]+([[:space:]]|$
 
 require_pattern "$INFO_PLIST" 'https://amyjainberkeley\.github\.io/hippocampus/appcast\.xml' \
     'shipped Sparkle feed matches the publication target'
+PRIVATE_REPORTING='https://github.com/amyjainberkeley/hippocampus/security/advisories/new'
+for contact_file in "$REPO_ROOT/SECURITY.md" "$REPO_ROOT/docs/legal/terms-of-service.md" \
+    "$REPO_ROOT/assets/installer/EULA.rtf"; do
+    require_literal "$contact_file" "$PRIVATE_REPORTING" \
+        "$(basename "$contact_file") sends private reports to GitHub private reporting"
+    reject_pattern "$contact_file" '@hippocampus\.ai|//hippocampus\.ai' \
+        "$(basename "$contact_file") names no address on the parked hippocampus.ai domain"
+done
 require_pattern "$INSTALLER" 'Release installer requires notarization credentials' \
     'release installer fails closed without notarization credentials'
 require_literal "$INSTALLER" 'python3 "$GENERATE_EULA" --check' \

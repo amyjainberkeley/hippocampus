@@ -8,7 +8,7 @@ security, deletion, sync, or hardware guarantees without release evidence.
 
 **Effective date:** September 1, 2026
 
-**Last updated:** September 1, 2026
+**Last updated:** October 15, 2026
 
 These terms apply to the Hippocampus desktop application. By installing or
 using Hippocampus, you agree to these terms. If you do not agree, do not install
@@ -117,7 +117,9 @@ these terms where applicable law prohibits the transfer restriction.
 
 ## 12. Contact
 
-Questions about these terms may be sent to `legal@hippocampus.ai`.
+Questions about these terms may be sent privately through GitHub's private
+reporting form at
+https://github.com/amyjainberkeley/hippocampus/security/advisories/new.
 
 The engineering codename MCI means Memory Context Interface and refers to the
 same local Hippocampus software covered by these terms.
