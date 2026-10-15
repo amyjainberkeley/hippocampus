@@ -57,11 +57,8 @@ struct OnboardingApp: App {
             consentStore: consentStore,
             initialScreen: initialScreen
         ))
-        // Setup offers no model download.
-        _prepareBrainVM = StateObject(wrappedValue: PrepareBrainViewModel(
-            keyGenerator: LocalKeyGenerator(),
-            modelDownloader: StubModelDownloader()
-        ))
+        // Setup makes the key; it offers no model download.
+        _prepareBrainVM = StateObject(wrappedValue: PrepareBrainViewModel(keyGenerator: LocalKeyGenerator()))
         _extensionVM = StateObject(wrappedValue: BrowserExtensionViewModel(
             detector: RealBrowserDetector()
         ))

@@ -114,7 +114,7 @@ final class OnboardingSourceScanTests: XCTestCase {
             "Onboarding/Slides/ConnectClaudeCodeSlide.swift", "Onboarding/Slides/DoneSlide.swift",
             "Onboarding/SharedComponents/TCCPreflightOverview.swift", "Onboarding/KeyWrapAuditView.swift",
             "Onboarding/RealModelDownloader.swift", "Onboarding/SimulatedModelDownloader.swift",
-            "OnboardingKit/OnboardingStep.swift",
+            "OnboardingKit/ModelDownloader.swift", "OnboardingKit/OnboardingStep.swift",
         ]
         for path in retired {
             XCTAssertFalse(FileManager.default.fileExists(atPath: sourcesRoot.appendingPathComponent(path).path), path)
@@ -138,7 +138,14 @@ final class OnboardingSourceScanTests: XCTestCase {
             XCTAssertFalse(lines.contains { $0.contains("startDownload(") || $0.contains("Download (") },
                            url.lastPathComponent)
         }
-        XCTAssertTrue(try source("Onboarding/OnboardingApp.swift").contains("modelDownloader: StubModelDownloader()"))
+        // No downloader is left to call, in either target (ui-1).
+        for (name, text) in try sources() {
+            for word in ["ModelDownloader", "startDownload", "downloadState"] {
+                XCTAssertFalse(code(text).contains { $0.contains(word) }, "\(name) mentions \(word)")
+            }
+        }
+        XCTAssertTrue(try source("Onboarding/OnboardingApp.swift")
+            .contains("PrepareBrainViewModel(keyGenerator: LocalKeyGenerator())"))
     }
 
     // MARK: - The screens

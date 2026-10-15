@@ -145,10 +145,10 @@ public enum OnboardingCopy {
     /// The first Promise line, after "Stays on this Mac.".
     ///
     /// No upload holds in code (RULINGS O10, product critique finding 13):
-    /// the client's only network calls are the optional model download and
-    /// update check (fetches, with system profiling off), loopback-only MCP
-    /// servers and crash reports, and a feedback link opened in the
-    /// browser. The `server` crate is not a dependency of anything shipped.
+    /// the client's only network calls are the update check (a fetch, with
+    /// system profiling off), a model server on this Mac when the person
+    /// runs one, and a feedback link opened in the browser. MCP servers
+    /// speak over stdio. Nothing is downloaded at setup.
     ///
     /// Sharing waits on the person: an AI tool is connected only from the
     /// menu's Connect AI Tools… and the AI Tools pane, and setup connects

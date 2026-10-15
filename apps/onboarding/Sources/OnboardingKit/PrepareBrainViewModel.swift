@@ -10,20 +10,14 @@ public final class PrepareBrainViewModel: ObservableObject {
     }
 
     @Published public private(set) var keyState: KeyState = .checking
-    @Published public private(set) var downloadState: ModelDownloadState = .notStarted
-    @Published public private(set) var downloadProgress: Double = 0
 
     private let keyGenerator: any KeyGenerator
-    private let modelDownloader: any ModelDownloader
-    private var downloadTask: Task<Void, Never>?
 
-    public init(keyGenerator: any KeyGenerator, modelDownloader: any ModelDownloader) {
+    /// Setup makes the encryption key and nothing else: it downloads no
+    /// model. Answers come from Apple Intelligence or a model the person
+    /// already runs (Ollama, LM Studio).
+    public init(keyGenerator: any KeyGenerator) {
         self.keyGenerator = keyGenerator
-        self.modelDownloader = modelDownloader
-    }
-
-    public var modelDownloaded: Bool {
-        downloadState == .ready
     }
 
     public var canContinue: Bool { keyState == .ready }
@@ -32,14 +26,6 @@ public final class PrepareBrainViewModel: ObservableObject {
     public var keyFailed: Bool {
         if case .failed = keyState { return true }
         return false
-    }
-
-    public var modelDisplayName: String {
-        modelDownloader.displayName
-    }
-
-    public var modelSizeDescription: String {
-        modelDownloader.sizeDescription
     }
 
     /// Start key setup, or return at once when it is running or done. Setup
@@ -58,63 +44,5 @@ public final class PrepareBrainViewModel: ObservableObject {
         } catch {
             keyState = .failed(error.localizedDescription)
         }
-    }
-
-    /// Re-probe the on-disk truth of "is the model installed?". Called
-    /// on slide-appear (`.task` in PrepareBrainSlide) so the slide
-    /// reflects the filesystem, not stale in-memory state. Mirrors the
-    /// RealBrowserDetector pattern used by the browser-extension slide.
-    ///
-    /// Only mutates state from the "no in-flight user intent" buckets
-    /// (`.notStarted` and `.ready`). An active download, a user skip,
-    /// or a surfaced failure all reflect intent the user gave on THIS
-    /// session — we don't overwrite that just because the FS probe
-    /// disagrees right now.
-    public func checkModelAvailability() async {
-        let available = await modelDownloader.isAvailable()
-        switch downloadState {
-        case .notStarted:
-            if available { downloadState = .ready }
-        case .ready:
-            // Catch: model directory was deleted between slide appears
-            // (e.g. user wiped Models/ via the menu-bar Delete action).
-            // Without this branch a stale `.ready` would lie forever.
-            if !available { downloadState = .notStarted }
-        case .downloading, .verifying, .failed, .skipped:
-            break
-        }
-    }
-
-    public func startDownload() {
-        downloadState = .downloading(progress: 0)
-        downloadProgress = 0
-
-        downloadTask = Task {
-            do {
-                try await modelDownloader.download { [weak self] progress in
-                    Task { @MainActor in
-                        self?.downloadProgress = progress
-                        self?.downloadState = .downloading(progress: progress)
-                    }
-                }
-                downloadState = .ready
-            } catch is CancellationError {
-                downloadState = .notStarted
-            } catch {
-                downloadState = .failed(error.localizedDescription)
-            }
-        }
-    }
-
-    public func cancelDownload() {
-        downloadTask?.cancel()
-        downloadTask = nil
-        Task { await modelDownloader.cancel() }
-        downloadState = .notStarted
-    }
-
-    public func skipDownload() {
-        cancelDownload()
-        downloadState = .skipped
     }
 }
