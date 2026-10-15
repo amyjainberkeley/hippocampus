@@ -661,14 +661,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startSupervisorOrDeferUntilOnboarded() {
         if OnboardingSentinel.isComplete {
             firstLaunchLogger.info("first-launch: sentinel present → start supervisor immediately")
-            if launchReason == .user { supervisor.openRecallWhenReady(initialLaunch: true) }
+            if launchReason.opensWindow { supervisor.openRecallWhenReady(initialLaunch: true) }
             supervisor.start()
             return
         }
 
         guard supervisor.hasOnboarding else {
             firstLaunchLogger.warning("first-launch: no Onboarding binary bundled → start supervisor as fallback")
-            if launchReason == .user { supervisor.openRecallWhenReady(initialLaunch: true) }
+            if launchReason.opensWindow { supervisor.openRecallWhenReady(initialLaunch: true) }
             supervisor.start()
             return
         }

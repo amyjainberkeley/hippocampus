@@ -99,6 +99,43 @@ final class LaunchReasonTests: XCTestCase {
         XCTAssertTrue(source.contains("updaterDelegate: relaunchDelegate,"))
     }
 
+    /// The event macOS sends a login item, built as Apple builds it: open
+    /// application, with `keyAELaunchedAsLogInItem` under `keyAEPropData`.
+    /// Read through `read`, as at launch, it never opens the window (07fedaf).
+    @MainActor
+    func testALoginLaunchNeverOpensTheWindow() throws {
+        let suite = "ai.hippocampus.tests.launch.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let loginEvent = NSAppleEventDescriptor(
+            eventClass: AEEventClass(kCoreEventClass), eventID: AEEventID(kAEOpenApplication),
+            targetDescriptor: nil, returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID)
+        )
+        loginEvent.setParam(NSAppleEventDescriptor(enumCode: OSType(keyAELaunchedAsLogInItem)),
+                            forKeyword: AEKeyword(keyAEPropData))
+        let atLogin = LaunchReason.read(preferencesRequested: false, environment: [:], defaults: defaults,
+                                        now: now, currentEvent: loginEvent)
+        XCTAssertEqual(atLogin.reason, .login)
+        XCTAssertEqual(atLogin.event?.logDescription, "aevt/oapp prdt=lgit")
+        XCTAssertFalse(atLogin.reason.opensWindow)
+
+        // The same event without the login marker is the person opening it.
+        let byHand = NSAppleEventDescriptor(
+            eventClass: AEEventClass(kCoreEventClass), eventID: AEEventID(kAEOpenApplication),
+            targetDescriptor: nil, returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID)
+        )
+        let opened = LaunchReason.read(preferencesRequested: false, environment: [:], defaults: defaults,
+                                       now: now, currentEvent: byHand)
+        XCTAssertEqual(opened.reason, .user)
+        XCTAssertTrue(opened.reason.opensWindow)
+    }
+
+    func testOnlyThePersonsOwnLaunchOpensTheWindow() {
+        let all: [LaunchReason] = [.preferences, .quiet, .login, .url, .user]
+        XCTAssertEqual(all.filter(\.opensWindow), [.user])
+    }
+
     private func reason(
         preferences: Bool = false, quiet: Bool = false, quietOnceAt: Date? = nil, event: LaunchReason.Event?
     ) -> LaunchReason {

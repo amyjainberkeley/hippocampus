@@ -51,6 +51,11 @@ public enum LaunchReason: String, Sendable, Equatable {
     /// 'GURL', the class and id of a "get URL" event.
     static let getURL: UInt32 = 0x4755_524C
 
+    /// Whether this launch opens the window. Only the person's own launch
+    /// does: a login, a quiet relaunch, a link and a Preferences request
+    /// keep Hippocampus in the menu bar (spec-shell S7).
+    public var opensWindow: Bool { self == .user }
+
     /// The table in spec-shell S7, in order: a Preferences request, a quiet
     /// launch, a login, a link, and otherwise the person.
     public static func decide(
@@ -79,9 +84,10 @@ public enum LaunchReason: String, Sendable, Equatable {
         preferencesRequested: Bool,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         defaults: UserDefaults = .standard,
-        now: Date = Date()
+        now: Date = Date(),
+        currentEvent: NSAppleEventDescriptor? = NSAppleEventManager.shared().currentAppleEvent
     ) -> (reason: LaunchReason, event: Event?) {
-        let event = Event(NSAppleEventManager.shared().currentAppleEvent)
+        let event = Event(currentEvent)
         let reason = decide(
             preferencesRequested: preferencesRequested,
             quietEnvironment: environment[QuietLaunchNote.environmentKey] == "1",
