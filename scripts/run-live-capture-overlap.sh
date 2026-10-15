@@ -153,8 +153,7 @@ stop_owned_process() {
     fi
 
     kill -TERM "$pid" 2>/dev/null || true
-    local attempt
-    for attempt in {1..30}; do
+    for _ in {1..30}; do
         kill -0 "$pid" 2>/dev/null || return 0
         sleep 0.1
     done
@@ -167,8 +166,8 @@ stop_owned_bundle_process() {
     local expected="$3"
     [[ -n "$expected" ]] || return 0
 
-    local attempt pid
-    for attempt in {1..50}; do
+    local pid
+    for _ in {1..50}; do
         pid="$(app_pid_from_launch_services "$bundle_id" || true)"
         if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
             stop_owned_process "$pid" "$label" "$expected"

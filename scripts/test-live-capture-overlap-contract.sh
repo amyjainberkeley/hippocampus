@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# The require_literal and rg -F patterns below are source text, so the $ in
+# them stays literal on purpose.
+# shellcheck disable=SC2016
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,6 +37,7 @@ require_literal() {
 [[ -x "$SESSION_CHECK" ]] || fail "session preflight checker is missing or not executable"
 [[ -x "$MEMORY_CHECK" ]] || fail "memory response checker is missing or not executable"
 [[ -x "$SOAK_REPORT" ]] || fail "capture soak reporter is missing or not executable"
+[[ -x "$CORPUS_BUILD" ]] || fail "the corpus app builder is missing or not executable"
 rg -Fq 'minimumFrameIntervalMs: 500,' "$STREAM_POLICY" \
     || fail "active capture default must honor the documented 2 fps energy ceiling"
 if rg -Fq 'SCScreenshotManager.captureSampleBuffer(' "$CAPTURE_SESSION"; then
@@ -556,7 +560,7 @@ require_literal 'stop_owned_bundle_process "$CORPUS_BUNDLE_ID"' \
     "cleanup must rediscover the focused corpus when PID discovery was delayed"
 require_literal 'stop_owned_bundle_process "$BACKGROUND_BUNDLE_ID"' \
     "cleanup must rediscover the background corpus when PID discovery was delayed"
-require_literal 'for attempt in {1..50}; do' \
+require_literal 'for _ in {1..50}; do' \
     "cleanup must retry LaunchServices PID discovery for a bounded interval"
 require_literal 'if (( CORPUS_LAUNCH_ATTEMPTED == 1 )); then' \
     "cleanup must rediscover a focused corpus after this run attempts launch"
