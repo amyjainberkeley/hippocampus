@@ -14,6 +14,7 @@
 //! (Phase-1 cycle 3+) but never reach the `HealthLog` JSONL file
 //! (content-free invariant).
 
+use crate::errln;
 use mci_core::ipc::connection::Routed;
 use mci_core::ipc::reader::FrameReader;
 use mci_core::ipc::Message;
@@ -231,7 +232,7 @@ where
                     Ok(inserted) => stats.activity_intervals_stored += u64::from(inserted),
                     Err(IngestError::Store(mci_brain::StoreError::ActivityOverlap)) => {
                         if stats.record_activity_overlap() {
-                            eprintln!("mci-agent: activity interval rejected (overlap); capture continuing");
+                            errln!("mci-agent: activity interval rejected (overlap); capture continuing");
                         }
                     }
                     Err(error) => {

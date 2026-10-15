@@ -27,6 +27,7 @@
 //! store error is recorded in [`RefreshStats::notes`] and the next stage
 //! still runs. The only way to get no result is to not have a store.
 
+use crate::errln;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -536,7 +537,7 @@ pub fn refresh_or_skip_then(
         stats
     });
     if let Err(e) = lock.release() {
-        eprintln!("mci-agent refresh: writer lease clean-release failed: {e}");
+        errln!("mci-agent refresh: writer lease clean-release failed: {e}");
     }
     match result {
         Ok(stats) => RefreshOutcome::Ran(Box::new(stats)),
@@ -705,7 +706,7 @@ pub async fn run_transcript_refresh_worker(
                 }
                 if stats.new_events > 0 {
                     totals.runs_with_writes += 1;
-                    eprintln!(
+                    errln!(
                         "mci-agent: transcript refresh: +{} events (claude-code {}, codex {}) in {} ms{}",
                         stats.new_events,
                         stats.claude.events_written,
@@ -719,7 +720,7 @@ pub async fn run_transcript_refresh_worker(
                     );
                 }
             }
-            Err(e) => eprintln!("mci-agent: transcript refresh: worker task failed: {e}"),
+            Err(e) => errln!("mci-agent: transcript refresh: worker task failed: {e}"),
         }
     }
     totals

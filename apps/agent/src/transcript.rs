@@ -26,6 +26,7 @@
 //! that rare case and logged). A trailing line without a newline that does
 //! not parse is a session still being written and is left for the next run.
 
+use crate::errln;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
 use std::time::{Instant, SystemTime};
@@ -553,7 +554,7 @@ where
         ReadPlan::FromStart { rewound } => {
             if rewound {
                 stats.files_rewound += 1;
-                eprintln!(
+                errln!(
                     "mci-agent import: {} shrank since its last import; re-reading from the start \
                      (some events may repeat)",
                     path.display()

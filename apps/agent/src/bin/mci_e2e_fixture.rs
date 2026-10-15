@@ -9,6 +9,7 @@
 //! an isolated GUI demo database. It never opens or ingests into a database.
 //! These synthetic samples are never Gate 1 capture evidence.
 
+use mci_agent::{errln, outln};
 use std::io::{self, Write as _};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -22,7 +23,7 @@ const CAPTURE_SENTINEL: &str =
     "Hippocampus clean home injected capture remembers the release sentinel";
 
 fn usage() {
-    eprintln!(
+    errln!(
         "Usage: mci-e2e-fixture emit-capture | emit-review-fixture | delete-event EVENT_ID\n\
          Requires MCI_DEVELOPMENT_FILE_KEY=1. delete-event also requires \
          MCI_DB_PATH and MCI_DB_KEY_HEX.\n\
@@ -162,7 +163,7 @@ fn delete_event(raw_id: &str) -> Result<(), String> {
     let deleted = store
         .delete_event(EventId(event_id))
         .map_err(|error| format!("delete event: {error}"))?;
-    println!("{{\"deleted\":{deleted},\"event_id\":{event_id}}}");
+    outln!("{{\"deleted\":{deleted},\"event_id\":{event_id}}}");
     Ok(())
 }
 
@@ -184,7 +185,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("mci-e2e-fixture: {error}");
+            errln!("mci-e2e-fixture: {error}");
             ExitCode::from(2)
         }
     }

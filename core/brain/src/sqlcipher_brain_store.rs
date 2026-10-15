@@ -35,6 +35,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write as _;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
@@ -2078,8 +2079,9 @@ impl SqlCipherBrainStore {
         if rows.len() == 1 && rows[0] == "ok" {
             // Observability signal — the boot path's caller (apps/agent)
             // additionally emits a `helper_health` line via its
-            // structured logger. This crate stays log-framework-free.
-            eprintln!("brain: integrity_check ok");
+            // structured logger. This crate stays log-framework-free, and
+            // a closed stderr (EPIPE) must not panic the caller.
+            let _ = writeln!(std::io::stderr(), "brain: integrity_check ok");
             Ok(())
         } else {
             Err(IntegrityError::Corrupted(rows))

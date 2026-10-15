@@ -20,6 +20,7 @@
 //! first importer lack them, so the parser degrades: the session then falls
 //! back to `<cwd>@<local date>` and the source is reported as unrecorded.
 
+use crate::errln;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write as _;
 use std::io::{IsTerminal, Read, Write};
@@ -1949,7 +1950,7 @@ impl HookWatchdog {
                 let mut stdout = std::io::stdout().lock();
                 let _ = writeln!(stdout, "{}", fallback_envelope());
                 let _ = stdout.flush();
-                eprintln!("mci-agent handoff: deadline passed; printed the fallback envelope");
+                errln!("mci-agent handoff: deadline passed; printed the fallback envelope");
                 std::process::exit(0);
             }
         });
@@ -2003,10 +2004,10 @@ pub fn cwd_from_hook_json(payload: &str) -> Option<PathBuf> {
     }
     let value: serde_json::Value = serde_json::from_str(trimmed).ok()?;
     if let Some(name) = value.get("hook_event_name").and_then(|v| v.as_str()) {
-        eprintln!("mci-agent handoff: hook_event_name={name}");
+        errln!("mci-agent handoff: hook_event_name={name}");
     }
     if let Some(source) = value.get("source").and_then(|v| v.as_str()) {
-        eprintln!("mci-agent handoff: source={source}");
+        errln!("mci-agent handoff: source={source}");
     }
     value
         .get("cwd")

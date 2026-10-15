@@ -33,6 +33,7 @@
 //!
 //! — CSO, 2026-05-21
 
+use crate::errln;
 use std::path::Path;
 
 use thiserror::Error;
@@ -121,7 +122,7 @@ pub async fn drain_pending(uploader: &PanicUploader, path: &Path) -> Result<usiz
         let report: CrashReport = if let Ok(r) = serde_json::from_str(line) {
             r
         } else {
-            eprintln!("mci-agent: panic_uploader: dropping malformed line");
+            errln!("mci-agent: panic_uploader: dropping malformed line");
             continue;
         };
 

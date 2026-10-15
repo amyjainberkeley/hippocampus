@@ -48,6 +48,7 @@
 //!
 //! See `docs/STATE.md` "Path B" for the full demo recipe.
 
+use mci_agent::{errln, outln};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -64,7 +65,7 @@ fn default_db_path() -> PathBuf {
 }
 
 fn print_usage() {
-    println!(
+    outln!(
         "mci-seed-brain {VERSION}\n\
         \n\
         DEMO-ONLY synthetic-event seeder for the encrypted brain. Writes 20\n\
@@ -128,7 +129,7 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
             }
             "--db-path" => {
                 if i + 1 >= argv.len() {
-                    eprintln!("mci-seed-brain: --db-path requires a PATH");
+                    errln!("mci-seed-brain: --db-path requires a PATH");
                     std::process::exit(2);
                 }
                 db_path = Some(PathBuf::from(&argv[i + 1]));
@@ -136,11 +137,11 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
             }
             "--keyframe-digest" => {
                 if i + 1 >= argv.len() {
-                    eprintln!("mci-seed-brain: --keyframe-digest requires a SHA256 digest");
+                    errln!("mci-seed-brain: --keyframe-digest requires a SHA256 digest");
                     std::process::exit(2);
                 }
                 let Some(digest) = normalize_keyframe_digest(&argv[i + 1]) else {
-                    eprintln!(
+                    errln!(
                         "mci-seed-brain: --keyframe-digest must be exactly 64 hexadecimal characters"
                     );
                     std::process::exit(2);
@@ -149,7 +150,7 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
                 i += 2;
             }
             other => {
-                eprintln!("mci-seed-brain: unknown argument: {other}");
+                errln!("mci-seed-brain: unknown argument: {other}");
                 std::process::exit(2);
             }
         }
@@ -927,14 +928,14 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         ParseOutcome::Version => {
-            println!("mci-seed-brain {VERSION}");
+            outln!("mci-seed-brain {VERSION}");
             return ExitCode::SUCCESS;
         }
         ParseOutcome::Run(a) => a,
     };
 
     if std::env::var("MCI_DEVELOPMENT_FILE_KEY").as_deref() != Ok("1") {
-        eprintln!(
+        errln!(
             "mci-seed-brain: this development-only tool requires \
              MCI_DEVELOPMENT_FILE_KEY=1."
         );
@@ -942,7 +943,7 @@ fn main() -> ExitCode {
     }
 
     let Ok(key_hex) = std::env::var("MCI_DB_KEY_HEX") else {
-        eprintln!(
+        errln!(
             "mci-seed-brain: MCI_DB_KEY_HEX not set. Use the same value you \
              pass to `mci-agent mcp-serve` so reads see the seeded rows. \
              See `docs/STATE.md` Path B demo recipe."
@@ -950,7 +951,7 @@ fn main() -> ExitCode {
         return ExitCode::from(10);
     };
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!(
+        errln!(
             "mci-seed-brain: MCI_DB_KEY_HEX must be 64 lowercase-or-uppercase \
              hex characters (32 bytes)."
         );
@@ -961,7 +962,7 @@ fn main() -> ExitCode {
     if let Some(parent) = args.db_path.parent() {
         if !parent.exists() {
             if let Err(e) = std::fs::create_dir_all(parent) {
-                eprintln!("mci-seed-brain: create_dir_all({}): {e}", parent.display());
+                errln!("mci-seed-brain: create_dir_all({}): {e}", parent.display());
                 return ExitCode::from(12);
             }
         }
@@ -970,7 +971,7 @@ fn main() -> ExitCode {
     let store = match SqlCipherBrainStore::new(&args.db_path, &key) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!(
+            errln!(
                 "mci-seed-brain: open brain at {}: {e}",
                 args.db_path.display()
             );
@@ -981,12 +982,12 @@ fn main() -> ExitCode {
     let existing = match store.recent_events(1) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("mci-seed-brain: probe existing events: {e}");
+            errln!("mci-seed-brain: probe existing events: {e}");
             return ExitCode::from(14);
         }
     };
     if !existing.is_empty() && !args.force {
-        eprintln!(
+        errln!(
             "mci-seed-brain: refusing to write into a non-empty brain at {} \
              ({} existing event(s)). Pass --force to override, or delete the \
              file first.",
@@ -1000,7 +1001,7 @@ fn main() -> ExitCode {
         let tz = mci_agent::brief_worker::current_tz_offset_secs();
         return match demo_day::seed(&store, now_us(), tz) {
             Ok(written) => {
-                eprintln!(
+                errln!(
                     "mci-seed-brain: wrote a made-up workday ({written} moments, session notes, \
                      searches, a summary and learned items) to {}.",
                     args.db_path.display()
@@ -1008,7 +1009,7 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(e) => {
-                eprintln!("mci-seed-brain: demo day failed: {e}");
+                errln!("mci-seed-brain: demo day failed: {e}");
                 ExitCode::from(16)
             }
         };
@@ -1021,13 +1022,13 @@ fn main() -> ExitCode {
         match store.put_event(event) {
             Ok(_id) => written += 1,
             Err(e) => {
-                eprintln!("mci-seed-brain: put_event failed: {e}");
+                errln!("mci-seed-brain: put_event failed: {e}");
                 return ExitCode::from(16);
             }
         }
     }
 
-    eprintln!(
+    errln!(
         "mci-seed-brain: wrote {written} synthetic event(s) to {} \
          (app_bundle_id = com.mci.demo.seed.*). Use the same MCI_DB_KEY_HEX \
          to read them back via `mci-agent mcp-serve` or the recall UI.",

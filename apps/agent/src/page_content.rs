@@ -16,6 +16,7 @@
 //!   and reads `PageContentEvent` wire frames, forwarding them to the
 //!   brain ingestor and populating the cache.
 
+use crate::errln;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -174,7 +175,7 @@ impl PageContentListener {
             let (stream, _) = match listener.accept().await {
                 Ok(v) => v,
                 Err(e) => {
-                    eprintln!("page-content-listener: accept error: {e}");
+                    errln!("page-content-listener: accept error: {e}");
                     continue;
                 }
             };
@@ -192,14 +193,14 @@ impl PageContentListener {
                                 }
                                 Ok(IngestOutcome::NotOcrEvent) => {}
                                 Err(e) => {
-                                    eprintln!("page-content-listener: ingest error: {e}");
+                                    errln!("page-content-listener: ingest error: {e}");
                                 }
                             }
                         }
                     }
                     Ok(None) => break,
                     Err(e) => {
-                        eprintln!("page-content-listener: read error: {e}");
+                        errln!("page-content-listener: read error: {e}");
                         break;
                     }
                 }

@@ -24,6 +24,7 @@
 
 #![forbid(unsafe_code)]
 
+use mci_agent::{errln, out, outln};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -650,7 +651,7 @@ enum ModeKind {
 // The help text is one literal per command; splitting it would only hide it.
 #[allow(clippy::too_many_lines)]
 fn print_usage() {
-    println!(
+    outln!(
         "mci-agent {VERSION}\n\
         \n\
         Usage: mci-agent [OPTIONS] MODE\n\
@@ -818,15 +819,15 @@ async fn run_agent(args: Args) -> ExitCode {
         tokio::spawn(async move {
             match panic_uploader::drain_pending(&uploader, &panic_log).await {
                 Ok(0) => {}
-                Ok(n) => eprintln!("mci-agent: uploaded {n} crash report(s)"),
-                Err(e) => eprintln!("mci-agent: crash report upload error: {e}"),
+                Ok(n) => errln!("mci-agent: uploaded {n} crash report(s)"),
+                Err(e) => errln!("mci-agent: crash report upload error: {e}"),
             }
         });
     }
 
     match args.mode {
         Mode::Version => {
-            println!("mci-agent {VERSION}");
+            outln!("mci-agent {VERSION}");
             ExitCode::SUCCESS
         }
         Mode::Help => {
@@ -837,7 +838,7 @@ async fn run_agent(args: Args) -> ExitCode {
             repair_existing_client_registrations(&db_path);
             let capture_ingestion_enabled =
                 capture_ingestion_enabled(std::env::var("MCI_CAPTURE_ENABLED").ok().as_deref());
-            eprintln!(
+            errln!(
                 "mci-agent: observation ingestion {}",
                 if capture_ingestion_enabled {
                     "enabled"
@@ -848,12 +849,12 @@ async fn run_agent(args: Args) -> ExitCode {
             let (device_id, source) = match load_or_generate(args.device_id_path.clone()).await {
                 Ok(v) => v,
                 Err(e) => {
-                    eprintln!("mci-agent: device-id load failed: {e}");
+                    errln!("mci-agent: device-id load failed: {e}");
                     return ExitCode::from(2);
                 }
             };
             if matches!(source, DeviceIdSource::GeneratedAndPersisted) {
-                eprintln!(
+                errln!(
                     "mci-agent: generated new device id at {}",
                     args.device_id_path.display()
                 );
@@ -879,7 +880,7 @@ async fn run_agent(args: Args) -> ExitCode {
             // not yet keyed.
             let mcp_client_boot = {
                 let boot = mci_agent::mcp_client_supervisor::boot_default().await;
-                eprintln!("{}", boot.log_line());
+                errln!("{}", boot.log_line());
                 boot
             };
             // V2-MCP-3 — handle to the registry so the aggregator can
@@ -913,10 +914,7 @@ async fn run_agent(args: Args) -> ExitCode {
                         if let Some(parent) = db_path.parent() {
                             if !parent.exists() {
                                 if let Err(e) = std::fs::create_dir_all(parent) {
-                                    eprintln!(
-                                        "mci-agent: create_dir_all({}): {e}",
-                                        parent.display()
-                                    );
+                                    errln!("mci-agent: create_dir_all({}): {e}", parent.display());
                                     return ExitCode::from(20);
                                 }
                             }
@@ -937,19 +935,19 @@ async fn run_agent(args: Args) -> ExitCode {
                             }
                             Ok((LockAcquireOutcome::UncleanShutdown { stale_pid }, lock)) => {
                                 writer_run_lock = Some(lock);
-                                eprintln!(
+                                errln!(
                                     "mci-agent: unclean prior shutdown detected (stale pid {stale_pid:?}) — will run extra integrity_check",
                                 );
                                 true
                             }
                             Err(LockError::WriterLeaseHeld { owner_pid }) => {
-                                eprintln!(
+                                errln!(
                                     "mci-agent: another writer owns the process-lifetime lease (pid {owner_pid:?}) — refusing to open store (ADR-0008 §1.4 one-writer invariant)",
                                 );
                                 return ExitCode::from(21);
                             }
                             Err(e) => {
-                                eprintln!("mci-agent: crash_recovery::acquire_lock: {e}");
+                                errln!("mci-agent: crash_recovery::acquire_lock: {e}");
                                 return ExitCode::from(21);
                             }
                         };
@@ -975,21 +973,19 @@ async fn run_agent(args: Args) -> ExitCode {
                                 if let Err(e) = store.verify_integrity_on_boot() {
                                     match &e {
                                         IntegrityError::Corrupted(rows) => {
-                                            eprintln!(
+                                            errln!(
                                                 "mci-agent: brain integrity_check FAILED — refusing to serve. rows={rows:?}",
                                             );
                                         }
                                         IntegrityError::Backend(msg) => {
-                                            eprintln!(
+                                            errln!(
                                                 "mci-agent: brain integrity_check backend error — refusing to serve. err={msg}",
                                             );
                                         }
                                     }
                                     // Emit a structured helper_health-adjacent
                                     // line so the launchd log picks it up.
-                                    eprintln!(
-                                        "mci-agent: helper_health integrity_check_failed=true",
-                                    );
+                                    errln!("mci-agent: helper_health integrity_check_failed=true",);
                                     // Release the lock so a follow-up
                                     // repair boot doesn't false-positive
                                     // as "another instance running".
@@ -1006,10 +1002,10 @@ async fn run_agent(args: Args) -> ExitCode {
                                 // treat any failure the same as boot.
                                 if unclean_prior_shutdown {
                                     if let Err(e) = store.verify_integrity_on_boot() {
-                                        eprintln!(
+                                        errln!(
                                             "mci-agent: post-crash integrity_check FAILED — refusing to serve. err={e}",
                                         );
-                                        eprintln!(
+                                        errln!(
                                             "mci-agent: helper_health integrity_check_failed=true (post-crash)",
                                         );
                                         if let Some(lock) = writer_run_lock.take() {
@@ -1045,7 +1041,7 @@ async fn run_agent(args: Args) -> ExitCode {
                                     Some(b) => base_pump.with_ner_sync(Arc::clone(b)),
                                     None => base_pump,
                                 };
-                                eprintln!(
+                                errln!(
                                     "mci-agent: brain ingest + idle-batch enabled. db={} embedder={} sync_ner={}",
                                     db_path.display(),
                                     if embedder.1 { "CoreML" } else { "zero-fallback" },
@@ -1072,14 +1068,14 @@ async fn run_agent(args: Args) -> ExitCode {
                                     .await
                                     {
                                         Ok(stats) => {
-                                            eprintln!(
+                                            errln!(
                                                 "mci-agent: idle-batch exited. embedded={} batches={} embed_errors={} store_errors={}",
                                                 stats.events_embedded, stats.batches_run,
                                                 stats.embed_errors, stats.store_errors,
                                             );
                                         }
                                         Err(e) => {
-                                            eprintln!("mci-agent: idle-batch error: {e}");
+                                            errln!("mci-agent: idle-batch error: {e}");
                                         }
                                     }
                                 });
@@ -1100,14 +1096,14 @@ async fn run_agent(args: Args) -> ExitCode {
                                     .await
                                     {
                                         Ok(stats) => {
-                                            eprintln!(
+                                            errln!(
                                                 "mci-agent: episode-worker exited. assigned={} created={} batches={}",
                                                 stats.events_assigned, stats.episodes_created,
                                                 stats.batches_run,
                                             );
                                         }
                                         Err(e) => {
-                                            eprintln!("mci-agent: episode-worker error: {e}");
+                                            errln!("mci-agent: episode-worker error: {e}");
                                         }
                                     }
                                 });
@@ -1134,7 +1130,7 @@ async fn run_agent(args: Args) -> ExitCode {
                                     .await
                                     {
                                         Ok(stats) => {
-                                            eprintln!(
+                                            errln!(
                                                 "mci-agent: alias-resolver exited. cycles={} memberships_written={} memberships_pruned={} identities_last={} store_errors={}",
                                                 stats.cycles_run, stats.memberships_written,
                                                 stats.memberships_pruned,
@@ -1142,7 +1138,7 @@ async fn run_agent(args: Args) -> ExitCode {
                                             );
                                         }
                                         Err(e) => {
-                                            eprintln!("mci-agent: alias-resolver error: {e}");
+                                            errln!("mci-agent: alias-resolver error: {e}");
                                         }
                                     }
                                 });
@@ -1172,7 +1168,7 @@ async fn run_agent(args: Args) -> ExitCode {
                                     .await
                                     {
                                         Ok(stats) => {
-                                            eprintln!(
+                                            errln!(
                                                 "mci-agent: consolidator exited. cycles={} edges_written={} edges_pruned={} edges_derived_last={} store_errors={}",
                                                 stats.cycles_run, stats.edges_written,
                                                 stats.edges_pruned, stats.edges_derived_last,
@@ -1180,7 +1176,7 @@ async fn run_agent(args: Args) -> ExitCode {
                                             );
                                         }
                                         Err(e) => {
-                                            eprintln!("mci-agent: consolidator error: {e}");
+                                            errln!("mci-agent: consolidator error: {e}");
                                         }
                                     }
                                 });
@@ -1200,7 +1196,7 @@ async fn run_agent(args: Args) -> ExitCode {
                                     .await
                                     {
                                         Ok(stats) => {
-                                            eprintln!(
+                                            errln!(
                                                 "mci-agent: retention worker exited. cycles={} events_deleted={} vectors_deleted={} episodes_deleted={} referenced_blobs_deleted={} orphaned_blobs_deleted={} stale_temps_deleted={} referenced_blobs_missing_last={} blob_cleanup_errors={} errors={}",
                                                 stats.cycles_run, stats.total_events_deleted,
                                                 stats.total_vectors_deleted, stats.total_episodes_deleted,
@@ -1213,7 +1209,7 @@ async fn run_agent(args: Args) -> ExitCode {
                                             );
                                         }
                                         Err(e) => {
-                                            eprintln!("mci-agent: retention worker error: {e}");
+                                            errln!("mci-agent: retention worker error: {e}");
                                         }
                                     }
                                 });
@@ -1313,29 +1309,23 @@ async fn run_agent(args: Args) -> ExitCode {
                                 if let Some(lock) = writer_run_lock.take() {
                                     let _ = lock.release();
                                 }
-                                eprintln!(
+                                errln!(
                                     "\n========================================================"
                                 );
-                                eprintln!(
-                                    "WARNING: BRAIN OPEN FAILED — CAPTURE IS NOT BEING SAVED"
-                                );
-                                eprintln!(
-                                    "========================================================"
-                                );
-                                eprintln!("  Error: {e}");
-                                eprintln!("  Path:  {}", db_path.display());
-                                eprintln!();
-                                eprintln!(
-                                    "  Hippocampus is running but your screen activity is NOT"
-                                );
-                                eprintln!("  being stored in the brain. Possible causes:");
-                                eprintln!("    * Stale brain encrypted with old key");
-                                eprintln!("    * Database and Keychain item do not match");
-                                eprintln!("    * Permissions issue on brain file");
-                                eprintln!();
-                                eprintln!("  Quit and relaunch Hippocampus.app after confirming");
-                                eprintln!("  Keychain access. Do not replace an existing key.");
-                                eprintln!(
+                                errln!("WARNING: BRAIN OPEN FAILED — CAPTURE IS NOT BEING SAVED");
+                                errln!("========================================================");
+                                errln!("  Error: {e}");
+                                errln!("  Path:  {}", db_path.display());
+                                errln!();
+                                errln!("  Hippocampus is running but your screen activity is NOT");
+                                errln!("  being stored in the brain. Possible causes:");
+                                errln!("    * Stale brain encrypted with old key");
+                                errln!("    * Database and Keychain item do not match");
+                                errln!("    * Permissions issue on brain file");
+                                errln!();
+                                errln!("  Quit and relaunch Hippocampus.app after confirming");
+                                errln!("  Keychain access. Do not replace an existing key.");
+                                errln!(
                                     "========================================================\n"
                                 );
                                 if strict {
@@ -1345,7 +1335,7 @@ async fn run_agent(args: Args) -> ExitCode {
                             }
                         }
                     } else {
-                        eprintln!(
+                        errln!(
                             "mci-agent: brain key must be 64 hex chars (32 bytes). Falling back to health-only drain."
                         );
                         if strict {
@@ -1359,7 +1349,7 @@ async fn run_agent(args: Args) -> ExitCode {
                     if !matches!(error, key_resolver::KeyResolutionError::MissingKey { .. }) {
                         return ExitCode::from(23);
                     }
-                    eprintln!(
+                    errln!(
                             "mci-agent: no brain key found in Keychain. \
                              Health-only drain. Launch Hippocampus.app or run `mci-agent init` to initialize."
                         );
@@ -1402,13 +1392,13 @@ async fn run_agent(args: Args) -> ExitCode {
                                 None => pc_base,
                             };
                             let pc_pump: Arc<dyn BrainIngestor> = Arc::new(pc_pump_inner);
-                            eprintln!("mci-agent: page-content listener on {}", sock.display());
+                            errln!("mci-agent: page-content listener on {}", sock.display());
                             Some(tokio::spawn(async move {
                                 listener.run(unix_listener, pc_pump).await;
                             }))
                         }
                         Err(e) => {
-                            eprintln!("mci-agent: page-content listener bind failed: {e}");
+                            errln!("mci-agent: page-content listener bind failed: {e}");
                             None
                         }
                     }
@@ -1451,12 +1441,12 @@ async fn run_agent(args: Args) -> ExitCode {
             // cannot outlive the one-writer lease.
             if let Some(lock) = writer_run_lock.take() {
                 if let Err(e) = lock.release_at_process_exit() {
-                    eprintln!("mci-agent: crash_recovery::release_lock: {e}");
+                    errln!("mci-agent: crash_recovery::release_lock: {e}");
                 }
             }
             match drain_result {
                 Ok(stats) => {
-                    eprintln!(
+                    errln!(
                         "mci-agent: drained {} frame(s); {} logged, {} non-health, {} to brain; {} activity stored, {} activity rejected",
                         stats.frames_seen,
                         stats.frames_logged,
@@ -1465,28 +1455,28 @@ async fn run_agent(args: Args) -> ExitCode {
                         stats.activity_intervals_stored,
                         stats.activity_intervals_rejected
                     );
-                    eprintln!("mci-agent: log = {}", args.log_path.display());
+                    errln!("mci-agent: log = {}", args.log_path.display());
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
-                    eprintln!("mci-agent: drain error: {e}");
+                    errln!("mci-agent: drain error: {e}");
                     ExitCode::from(3)
                 }
             }
         }
         Mode::UnknownCommand { name } => {
-            eprintln!("mci-agent: unknown command `{name}`.\n");
+            errln!("mci-agent: unknown command `{name}`.\n");
             print_usage();
             ExitCode::from(2)
         }
         Mode::InvalidArguments { message } => {
-            eprintln!("mci-agent: {message}");
+            errln!("mci-agent: {message}");
             ExitCode::from(2)
         }
         Mode::RegisterMcp { db_path } => match register_mcp(&db_path) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
-                eprintln!("mci-agent register-mcp: {e}");
+                errln!("mci-agent register-mcp: {e}");
                 ExitCode::from(14)
             }
         },
@@ -1617,11 +1607,11 @@ async fn run_agent(args: Args) -> ExitCode {
 
             match summarize_file(&args.log_path, cutoff_ts).await {
                 Ok(summary) => {
-                    println!("{}", summary.to_human_line());
+                    outln!("{}", summary.to_human_line());
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
-                    eprintln!("mci-agent: health-summary error: {e}");
+                    errln!("mci-agent: health-summary error: {e}");
                     ExitCode::from(4)
                 }
             }
@@ -1669,7 +1659,7 @@ fn bundle_ids_for_source(source: &str) -> Option<Vec<&'static str>> {
 ///       on any non-zero exit)
 fn run_stats(source: &str, since_seconds: u64, db_path: &std::path::Path) -> ExitCode {
     let Some(bundles) = bundle_ids_for_source(source) else {
-        eprintln!(
+        errln!(
             "mci-agent stats: unknown source '{source}'. Expected: safari | chromium-native-host"
         );
         return ExitCode::from(2);
@@ -1679,7 +1669,7 @@ fn run_stats(source: &str, since_seconds: u64, db_path: &std::path::Path) -> Exi
         return ExitCode::from(3);
     };
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!("mci-agent stats: brain key is not a 32-byte hex string");
+        errln!("mci-agent stats: brain key is not a 32-byte hex string");
         return ExitCode::from(3);
     };
     let key = DbKey::from_bytes(key_bytes);
@@ -1687,7 +1677,7 @@ fn run_stats(source: &str, since_seconds: u64, db_path: &std::path::Path) -> Exi
     let store = match SqlCipherBrainStore::open_readonly(db_path, &key) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("mci-agent stats: open_readonly {}: {e}", db_path.display());
+            errln!("mci-agent stats: open_readonly {}: {e}", db_path.display());
             return ExitCode::from(4);
         }
     };
@@ -1706,7 +1696,7 @@ fn run_stats(source: &str, since_seconds: u64, db_path: &std::path::Path) -> Exi
     let rows = match store.observed_apps(4096, Some(since_us)) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("mci-agent stats: observed_apps: {e}");
+            errln!("mci-agent stats: observed_apps: {e}");
             return ExitCode::from(4);
         }
     };
@@ -1716,7 +1706,7 @@ fn run_stats(source: &str, since_seconds: u64, db_path: &std::path::Path) -> Exi
         .map(|(_, n)| n)
         .sum();
 
-    println!("{total}");
+    outln!("{total}");
     ExitCode::SUCCESS
 }
 
@@ -1776,7 +1766,7 @@ fn resolve_key_hex() -> Result<String, key_resolver::KeyResolutionError> {
 }
 
 fn report_key_resolution_error(command: &str, error: &key_resolver::KeyResolutionError) {
-    eprintln!(
+    errln!(
         "mci-agent {command}: cannot resolve the database key from the macOS Keychain: {error}. \
          Launch the bundled Hippocampus.app to initialize or unlock access. \
          MCI_DEVELOPMENT_FILE_KEY=1 enables raw/file keys for development only."
@@ -1837,7 +1827,7 @@ impl Drop for CommandWriterLease {
     fn drop(&mut self) {
         if let Some(lock) = self.lock.take() {
             if let Err(error) = lock.release() {
-                eprintln!(
+                errln!(
                     "mci-agent {}: writer lease clean-release failed: {error}",
                     self.command.label()
                 );
@@ -1857,7 +1847,7 @@ fn acquire_command_writer_lease(
             let unclean_prior_shutdown =
                 matches!(outcome, LockAcquireOutcome::UncleanShutdown { .. });
             if let LockAcquireOutcome::UncleanShutdown { stale_pid } = outcome {
-                eprintln!(
+                errln!(
                     "mci-agent {command_label}: prior writer ended uncleanly (stale pid {stale_pid:?})"
                 );
             }
@@ -1868,13 +1858,13 @@ fn acquire_command_writer_lease(
             })
         }
         Err(LockError::WriterLeaseHeld { owner_pid }) => {
-            eprintln!(
+            errln!(
                 "mci-agent {command_label}: another writer owns the brain lease (pid {owner_pid:?}); refusing to mutate"
             );
             Err(26)
         }
         Err(error) => {
-            eprintln!(
+            errln!(
                 "mci-agent {command_label}: cannot establish exclusive brain writer lease: {error}"
             );
             Err(26)
@@ -1894,7 +1884,7 @@ where
     let pass_count = if lease.unclean_prior_shutdown { 2 } else { 1 };
     for pass in 1..=pass_count {
         if let Err(error) = verify() {
-            eprintln!(
+            errln!(
                 "mci-agent {}: integrity_check failed before mutation (pass {pass}/{pass_count}): {error}",
                 command.label()
             );
@@ -1914,7 +1904,7 @@ fn verify_existing_brain_before_writer_open(
         Ok(false) => return Ok(()),
         Ok(true) => {}
         Err(error) => {
-            eprintln!(
+            errln!(
                 "mci-agent {command_label}: cannot inspect existing brain before writer open: {error}"
             );
             return Err(COMMAND_INTEGRITY_FAILURE_EXIT_CODE);
@@ -1922,7 +1912,7 @@ fn verify_existing_brain_before_writer_open(
     }
 
     let store = SqlCipherBrainStore::open_readonly(db_path, key).map_err(|error| {
-        eprintln!(
+        errln!(
             "mci-agent {command_label}: read-only integrity preflight could not open {}: {error}",
             db_path.display()
         );
@@ -1931,7 +1921,7 @@ fn verify_existing_brain_before_writer_open(
     let pass_count = if unclean_prior_shutdown { 2 } else { 1 };
     for pass in 1..=pass_count {
         if let Err(error) = store.verify_integrity_on_boot() {
-            eprintln!(
+            errln!(
                 "mci-agent {command_label}: read-only integrity preflight failed before writer open (pass {pass}/{pass_count}): {error}"
             );
             return Err(COMMAND_INTEGRITY_FAILURE_EXIT_CODE);
@@ -1954,7 +1944,7 @@ fn open_command_writer(
         lease.unclean_prior_shutdown,
     )?;
     let store = SqlCipherBrainStore::new(db_path, key).map_err(|error| {
-        eprintln!(
+        errln!(
             "mci-agent {command_label}: open brain at {}: {error}",
             db_path.display()
         );
@@ -1981,10 +1971,10 @@ fn register_mcp(db_path: &Path) -> Result<(), String> {
         .map_err(|error| error.to_string())?
     {
         RegistrationChange::Updated => {
-            println!("Hippocampus registered with Claude Code. Restart Claude Code to connect.");
+            outln!("Hippocampus registered with Claude Code. Restart Claude Code to connect.");
         }
         RegistrationChange::AlreadyCurrent => {
-            println!("Hippocampus is already registered with Claude Code.");
+            outln!("Hippocampus is already registered with Claude Code.");
         }
     }
     Ok(())
@@ -1994,7 +1984,7 @@ fn repair_existing_client_registrations(db_path: &Path) {
     let registry = match ClientRegistry::discover() {
         Ok(registry) => registry,
         Err(error) => {
-            eprintln!("mci-agent: existing client registration repair skipped ({error})");
+            errln!("mci-agent: existing client registration repair skipped ({error})");
             return;
         }
     };
@@ -2002,11 +1992,11 @@ fn repair_existing_client_registrations(db_path: &Path) {
     for (name, result) in [("Claude Code", report.claude), ("Codex", report.codex)] {
         match result {
             Ok(RegistrationRepair::Updated) => {
-                eprintln!("mci-agent: repaired existing {name} registration");
+                errln!("mci-agent: repaired existing {name} registration");
             }
             Ok(RegistrationRepair::AlreadyCurrent | RegistrationRepair::NotRegistered) => {}
             Err(error) => {
-                eprintln!(
+                errln!(
                     "mci-agent: existing {name} registration repair skipped ({:?})",
                     error.kind
                 );
@@ -2033,14 +2023,14 @@ fn client_homes() -> (PathBuf, Option<PathBuf>) {
 /// `disableAllHooks` are reported, never changed.
 fn run_connect_all_cmd(db_path: &Path, refresh_agent: bool) -> Result<(), u8> {
     let registry = ClientRegistry::discover().map_err(|error| {
-        eprintln!("mci-agent connect --all: {error}");
+        errln!("mci-agent connect --all: {error}");
         14
     })?;
     let report = registry.connect_all(db_path);
     let (home, codex_home) = client_homes();
     let paths = HookPaths::for_home(&home, codex_home.as_deref());
     let command = HookCommand::resolve(db_path).map_err(|error| {
-        eprintln!("mci-agent connect --all: {error}");
+        errln!("mci-agent connect --all: {error}");
         14
     })?;
 
@@ -2080,7 +2070,7 @@ fn run_connect_all_cmd(db_path: &Path, refresh_agent: bool) -> Result<(), u8> {
     if refresh_agent {
         install_refresh_agent(&home, &command);
     } else {
-        println!("  refresh: LaunchAgent skipped (--no-refresh-agent)");
+        outln!("  refresh: LaunchAgent skipped (--no-refresh-agent)");
     }
 
     if claude_failed || codex_failed {
@@ -2094,7 +2084,7 @@ fn run_connect_all_cmd(db_path: &Path, refresh_agent: bool) -> Result<(), u8> {
 /// `connect`: no hook resolution, transcript import, or launchd operation.
 fn run_register_clients_cmd(db_path: &Path) -> Result<(), u8> {
     let registry = ClientRegistry::discover().map_err(|error| {
-        eprintln!("mci-agent register-clients: {error}");
+        errln!("mci-agent register-clients: {error}");
         14
     })?;
     let report = registry.connect_all(db_path);
@@ -2103,7 +2093,7 @@ fn run_register_clients_cmd(db_path: &Path) -> Result<(), u8> {
     if claude_failed || codex_failed {
         Err(14)
     } else {
-        println!("Session hooks and transcript refresh were not changed. Restart your clients to load the tools; context delivery has not been verified.");
+        outln!("Session hooks and transcript refresh were not changed. Restart your clients to load the tools; context delivery has not been verified.");
         Ok(())
     }
 }
@@ -2123,22 +2113,22 @@ fn run_disconnect_all_cmd(refresh_agent: bool) -> Result<(), u8> {
         ("codex", client_hooks::remove_codex_hook(&paths.codex_hooks)),
     ] {
         match result {
-            Ok(change) => println!(
+            Ok(change) => outln!(
                 "  {name}: {}, MCP registration left in place",
                 hook_change_label(change)
             ),
             Err(error) => {
                 failed = true;
-                eprintln!("  {name}: SessionStart hook removal failed: {error}");
+                errln!("  {name}: SessionStart hook removal failed: {error}");
             }
         }
     }
     if refresh_agent {
         remove_refresh_agent(&home);
     } else {
-        println!("  refresh: LaunchAgent skipped (--no-refresh-agent)");
+        outln!("  refresh: LaunchAgent skipped (--no-refresh-agent)");
     }
-    println!(
+    outln!(
         "  To drop the MCP registrations too: `claude mcp remove hippocampus` and `codex mcp remove hippocampus`."
     );
     if failed {
@@ -2190,9 +2180,9 @@ fn print_connect_receipt(
     }
     let line = format!("  {name}: {}", parts.join(", "));
     if failed {
-        eprintln!("{line}");
+        errln!("{line}");
     } else {
-        println!("{line}");
+        outln!("{line}");
     }
     failed
 }
@@ -2211,15 +2201,15 @@ fn install_refresh_agent(home: &Path, command: &HookCommand) {
         refresh_agent::current_uid(),
         &refresh_agent::system_launchctl,
     ) {
-        Ok(refresh_agent::AgentChange::Installed) => println!(
+        Ok(refresh_agent::AgentChange::Installed) => outln!(
             "  refresh: LaunchAgent {} loaded, runs `mci-agent refresh` every 5 min",
             refresh_agent::LABEL
         ),
-        Ok(_) => println!(
+        Ok(_) => outln!(
             "  refresh: LaunchAgent {} already installed, reloaded",
             refresh_agent::LABEL
         ),
-        Err(error) => eprintln!(
+        Err(error) => errln!(
             "  refresh: {error}; plist kept at {} and loads at next login",
             plist.display()
         ),
@@ -2228,7 +2218,7 @@ fn install_refresh_agent(home: &Path, command: &HookCommand) {
 
 #[cfg(not(target_os = "macos"))]
 fn install_refresh_agent(_home: &Path, _command: &HookCommand) {
-    eprintln!("  refresh: launchd is only available on macOS; background refresh skipped");
+    errln!("  refresh: launchd is only available on macOS; background refresh skipped");
 }
 
 #[cfg(target_os = "macos")]
@@ -2239,26 +2229,26 @@ fn remove_refresh_agent(home: &Path) {
         refresh_agent::current_uid(),
         &refresh_agent::system_launchctl,
     ) {
-        Ok(refresh_agent::AgentChange::Removed) => println!(
+        Ok(refresh_agent::AgentChange::Removed) => outln!(
             "  refresh: LaunchAgent {} unloaded and removed",
             refresh_agent::LABEL
         ),
-        Ok(_) => println!(
+        Ok(_) => outln!(
             "  refresh: LaunchAgent {} not installed",
             refresh_agent::LABEL
         ),
-        Err(error) => eprintln!("  refresh: {error}"),
+        Err(error) => errln!("  refresh: {error}"),
     }
 }
 
 #[cfg(not(target_os = "macos"))]
 fn remove_refresh_agent(_home: &Path) {
-    eprintln!("  refresh: launchd is only available on macOS; nothing to remove");
+    errln!("  refresh: launchd is only available on macOS; nothing to remove");
 }
 
 fn load_read_query_embedder(command: &str) -> Option<Arc<dyn mci_brain::Embedder>> {
     if std::env::var("MCI_EMBEDDER_DISABLED").as_deref() == Ok("1") {
-        eprintln!(
+        errln!(
             "mci-agent {command}: embedder disabled (MCI_EMBEDDER_DISABLED=1). Lexical-only recall."
         );
         return None;
@@ -2268,7 +2258,7 @@ fn load_read_query_embedder(command: &str) -> Option<Arc<dyn mci_brain::Embedder
     if is_real {
         Some(embedder)
     } else {
-        eprintln!(
+        errln!(
             "mci-agent {command}: query embedder unavailable (no ArcticEmbedS model bundled or non-macOS). Lexical-only recall."
         );
         None
@@ -2285,7 +2275,7 @@ fn run_context_cmd(
 ) -> Result<(), u8> {
     let key_hex = resolve_key_for_command("context")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!(
+        errln!(
             "mci-agent context: resolved database key is malformed; refusing to open the brain."
         );
         return Err(11);
@@ -2293,7 +2283,7 @@ fn run_context_cmd(
     let key = DbKey::from_bytes(key_bytes);
     let embedder = load_read_query_embedder("context");
     let reader = LiveBrainReader::open_with_embedder(db_path, &key, embedder).map_err(|error| {
-        eprintln!(
+        errln!(
             "mci-agent context: open brain at {}: {error}",
             db_path.display()
         );
@@ -2305,18 +2295,18 @@ fn run_context_cmd(
             budget,
         )
         .map_err(|error| {
-            eprintln!("mci-agent context: compile packet: {error}");
+            errln!("mci-agent context: compile packet: {error}");
             13
         })?;
 
     match format {
-        ContextOutputFormat::Markdown => print!("{}", render_context_packet_markdown(&packet)),
+        ContextOutputFormat::Markdown => out!("{}", render_context_packet_markdown(&packet)),
         ContextOutputFormat::Json => {
             let output = serde_json::to_string_pretty(&packet).map_err(|error| {
-                eprintln!("mci-agent context: serialize packet: {error}");
+                errln!("mci-agent context: serialize packet: {error}");
                 13
             })?;
-            println!("{output}");
+            outln!("{output}");
         }
     }
     Ok(())
@@ -2353,16 +2343,16 @@ fn run_handoff_cmd(
             Ok(())
         }
         (Err((_, message)), Some(watchdog)) => {
-            eprintln!("mci-agent handoff: {message}");
+            errln!("mci-agent handoff: {message}");
             let _printed = watchdog.deliver(&fallback_envelope());
             Ok(())
         }
         (Ok(text), None) => {
-            print!("{text}");
+            out!("{text}");
             Ok(())
         }
         (Err((code, message)), None) => {
-            eprintln!("mci-agent handoff: {message}");
+            errln!("mci-agent handoff: {message}");
             Err(code)
         }
     }
@@ -2398,16 +2388,16 @@ fn compile_handoff_output(
     // 60 s refresh loop is already doing this work and we skip.
     if !no_refresh {
         match refresh_or_skip(db_path, &key, REFRESH_BUDGET, &RefreshRoots::default()) {
-            RefreshOutcome::Ran(stats) => eprintln!(
+            RefreshOutcome::Ran(stats) => errln!(
                 "mci-agent handoff: refresh ran, {} new events (claude-code {}, codex {})",
                 stats.new_events, stats.claude.events_written, stats.codex.events_written
             ),
-            RefreshOutcome::Skipped { owner_pid } => eprintln!(
+            RefreshOutcome::Skipped { owner_pid } => errln!(
                 "mci-agent handoff: refresh skipped, writer lease held by pid {}; the app refreshes in the background",
                 owner_pid.map_or_else(|| "unknown".to_owned(), |pid| pid.to_string())
             ),
             RefreshOutcome::Failed(error) => {
-                eprintln!("mci-agent handoff: refresh failed: {error}; compiling from what is stored");
+                errln!("mci-agent handoff: refresh failed: {error}; compiling from what is stored");
             }
         }
     }
@@ -2454,12 +2444,12 @@ fn compile_handoff_output(
             u64::try_from(packet.token_estimate).unwrap_or(u64::MAX),
             &packet.cited_ids_json(),
         ) {
-            eprintln!("mci-agent handoff: delivery not recorded: {error}");
+            errln!("mci-agent handoff: delivery not recorded: {error}");
         }
     } else {
-        eprintln!("mci-agent handoff: writer lease unavailable; delivery not recorded");
+        errln!("mci-agent handoff: writer lease unavailable; delivery not recorded");
     }
-    eprintln!(
+    errln!(
         "mci-agent handoff: {} for {} ({} tokens, {} sessions)",
         if packet.has_memory() {
             "packet"
@@ -2496,12 +2486,12 @@ fn compile_handoff_output(
 fn run_today_cmd(db_path: &Path, date: Option<&str>, format: TodayFormat) -> Result<(), u8> {
     let key_hex = resolve_key_for_command("today")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!("mci-agent today: resolved database key is malformed.");
+        errln!("mci-agent today: resolved database key is malformed.");
         return Err(11);
     };
     let key = DbKey::from_bytes(key_bytes);
     let store = SqlCipherBrainStore::open_readonly(db_path, &key).map_err(|error| {
-        eprintln!(
+        errln!(
             "mci-agent today: open brain at {}: {error}",
             db_path.display()
         );
@@ -2509,17 +2499,17 @@ fn run_today_cmd(db_path: &Path, date: Option<&str>, format: TodayFormat) -> Res
     })?;
     let clock = RenderClock::system();
     let report = compile_today(&store, date, &clock).map_err(|error| {
-        eprintln!("mci-agent today: {error}");
+        errln!("mci-agent today: {error}");
         13
     })?;
     match format {
-        TodayFormat::Markdown => print!("{}", render_today(&report)),
+        TodayFormat::Markdown => out!("{}", render_today(&report)),
         TodayFormat::Json => {
             let json = serde_json::to_string_pretty(&report).map_err(|error| {
-                eprintln!("mci-agent today: serialize report: {error}");
+                errln!("mci-agent today: serialize report: {error}");
                 13
             })?;
-            println!("{json}");
+            outln!("{json}");
         }
     }
     Ok(())
@@ -2545,7 +2535,7 @@ fn run_today_cmd(db_path: &Path, date: Option<&str>, format: TodayFormat) -> Res
 async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
     let key_hex = resolve_key_for_command("mcp-serve")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!(
+        errln!(
             "mci-agent mcp-serve: resolved database key is malformed; refusing to open the brain."
         );
         return Err(11);
@@ -2571,7 +2561,7 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
     let reader = match LiveBrainReader::open_with_embedder(&db_path, &key, embedder) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!(
+            errln!(
                 "mci-agent mcp-serve: open brain at {}: {e}",
                 db_path.display()
             );
@@ -2589,13 +2579,13 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
         )));
     }
     let server = Arc::new(server);
-    eprintln!(
+    errln!(
         "mci-agent mcp-serve: ready on stdio. db={} recall={recall_mode}",
         db_path.display()
     );
     let stdout = tokio::io::stdout();
     if let Err(e) = serve_stdio(server, stdout).await {
-        eprintln!("mci-agent mcp-serve: stdio loop error: {e}");
+        errln!("mci-agent mcp-serve: stdio loop error: {e}");
         return Err(13);
     }
     Ok(())
@@ -2630,7 +2620,7 @@ fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
             flag @ ("--date" | "--hours" | "--limit" | "--query" | "--app" | "--title"
             | "--now" | "--db-path" | "--tz-offset-secs") => {
                 let Some(value) = argv.get(i + 1) else {
-                    eprintln!("mci-agent {command}: {flag} requires a value");
+                    errln!("mci-agent {command}: {flag} requires a value");
                     return Some(ExitCode::from(2));
                 };
                 flags.insert(flag, value.clone());
@@ -2650,14 +2640,14 @@ fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
         Err(code) => return Some(ExitCode::from(code)),
     };
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!("mci-agent {command}: resolved database key is malformed.");
+        errln!("mci-agent {command}: resolved database key is malformed.");
         return Some(ExitCode::from(11));
     };
     let key = DbKey::from_bytes(key_bytes);
     let store = match SqlCipherBrainStore::open_readonly(&db_path, &key) {
         Ok(store) => Arc::new(store),
         Err(error) => {
-            eprintln!(
+            errln!(
                 "mci-agent {command}: open brain at {}: {error}",
                 db_path.display()
             );
@@ -2667,7 +2657,7 @@ fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
     let tz = match flags.get("--tz-offset-secs").map(|v| v.parse::<i32>()) {
         Some(Ok(offset)) if (-14 * 3600..=14 * 3600).contains(&offset) => offset,
         Some(_) => {
-            eprintln!("mci-agent {command}: --tz-offset-secs must be seconds east of UTC, within 14 hours");
+            errln!("mci-agent {command}: --tz-offset-secs must be seconds east of UTC, within 14 hours");
             return Some(ExitCode::from(2));
         }
         None => brief_worker::current_tz_offset_secs(),
@@ -2723,7 +2713,7 @@ fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
         "ask" => {
             let question = positional.join(" ");
             if question.trim().is_empty() {
-                eprintln!("mci-agent ask: usage: mci-agent ask \"question\" [--app BUNDLE_ID] [--title TITLE] [--now TEXT] [--json]");
+                errln!("mci-agent ask: usage: mci-agent ask \"question\" [--app BUNDLE_ID] [--title TITLE] [--now TEXT] [--json]");
                 return Some(ExitCode::from(2));
             }
             let embedder = load_read_query_embedder("ask");
@@ -2731,7 +2721,7 @@ fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
             let hits = match reader.recall(&question, 10) {
                 Ok(outcome) => query::hits_of(outcome),
                 Err(error) => {
-                    eprintln!("mci-agent ask: recall failed: {error}");
+                    errln!("mci-agent ask: recall failed: {error}");
                     return Some(ExitCode::from(13));
                 }
             };
@@ -2747,7 +2737,7 @@ fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
             let screen = match query::on_screen(&store, now_us, &looking_at) {
                 Ok(screen) => screen,
                 Err(error) => {
-                    eprintln!("mci-agent ask: reading the screen failed: {error}");
+                    errln!("mci-agent ask: reading the screen failed: {error}");
                     return Some(ExitCode::from(13));
                 }
             };
@@ -2780,17 +2770,17 @@ fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
     match result {
         Ok(value) => {
             if json {
-                println!(
+                outln!(
                     "{}",
                     serde_json::to_string(&value).unwrap_or_else(|_| "{}".into())
                 );
             } else {
-                println!("{}", render_understanding_text(command, &value, tz));
+                outln!("{}", render_understanding_text(command, &value, tz));
             }
             Some(ExitCode::SUCCESS)
         }
         Err(error) => {
-            eprintln!("mci-agent {command}: {error}");
+            errln!("mci-agent {command}: {error}");
             Some(ExitCode::from(13))
         }
     }
@@ -3010,11 +3000,11 @@ fn spawn_understanding_worker(
 ) {
     use mci_agent::understanding::{feedback, mind::MindClient, Understanding};
     if std::env::var("MCI_UNDERSTANDING").as_deref() == Ok("0") {
-        eprintln!("mci-agent: understanding worker disabled (MCI_UNDERSTANDING=0)");
+        errln!("mci-agent: understanding worker disabled (MCI_UNDERSTANDING=0)");
         return;
     }
     let mind = Arc::new(MindClient::locate());
-    eprintln!(
+    errln!(
         "mci-agent: understanding worker started (on-device model: {})",
         if mind.path().is_some() {
             "found"
@@ -3026,7 +3016,7 @@ fn spawn_understanding_worker(
     // opened with the development file key never applies them.
     let inbox = feedback::inbox_for_memory(read_dev_key_hex().is_some());
     if inbox.is_none() {
-        eprintln!("mci-agent: understanding: verdicts from the app are not applied to this memory");
+        errln!("mci-agent: understanding: verdicts from the app are not applied to this memory");
     }
     tokio::spawn(async move {
         let tz = brief_worker::current_tz_offset_secs();
@@ -3082,7 +3072,7 @@ fn spawn_understanding_worker(
                         || stats.searches > 0
                         || stats.verdicts > 0
                     {
-                        eprintln!(
+                        errln!(
                             "mci-agent: understanding: sessions={} by_model={} propositions +{} ~{} days={} searches={} verdicts={} model={}",
                             stats.sessions,
                             stats.sessions_by_model,
@@ -3095,8 +3085,8 @@ fn spawn_understanding_worker(
                         );
                     }
                 }
-                Ok(Err(error)) => eprintln!("mci-agent: understanding cycle failed: {error}"),
-                Err(_) => eprintln!("mci-agent: understanding cycle stopped unexpectedly"),
+                Ok(Err(error)) => errln!("mci-agent: understanding cycle failed: {error}"),
+                Err(_) => errln!("mci-agent: understanding cycle stopped unexpectedly"),
             }
             delay = std::time::Duration::from_secs(120);
         }
@@ -3126,16 +3116,17 @@ fn import_progress(label: &'static str) -> impl FnMut(&mci_agent::import_session
     move |s| {
         if s.files_scanned > 0 && s.files_scanned % 10 == 0 && s.files_scanned != last_reported {
             last_reported = s.files_scanned;
-            eprintln!(
+            errln!(
                 "mci-agent import-sessions: {label}: {} files, {} events",
-                s.files_scanned, s.events_written
+                s.files_scanned,
+                s.events_written
             );
         }
     }
 }
 
 fn report_import_root(label: &str, stats: &mci_agent::import_sessions::ImportStats) {
-    eprintln!(
+    errln!(
         "mci-agent import-sessions: {label}: {} events written ({} tool) from {} file(s) read, \
          {} resumed, {} unchanged, {} rewound, {} subagent skipped; {} records, \
          {} no text, {} injected, {} sidechain, {} meta, {} malformed{}",
@@ -3169,7 +3160,7 @@ fn run_import_sessions_with_lease(
 ) -> Result<(), u8> {
     let key_hex = resolve_key_for_command("import-sessions")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!("mci-agent import-sessions: resolved database key is malformed.");
+        errln!("mci-agent import-sessions: resolved database key is malformed.");
         return Err(11);
     };
     let key = DbKey::from_bytes(key_bytes);
@@ -3180,11 +3171,11 @@ fn run_import_sessions_with_lease(
         for dir in [root, codex_root] {
             let prefix = dir.to_string_lossy();
             match store.clear_import_cursors(&prefix) {
-                Ok(n) => eprintln!(
-                    "mci-agent import-sessions: --full: forgot {n} cursor(s) under {prefix}"
-                ),
+                Ok(n) => {
+                    errln!("mci-agent import-sessions: --full: forgot {n} cursor(s) under {prefix}");
+                }
                 Err(e) => {
-                    eprintln!("mci-agent import-sessions: --full: clear cursors: {e}");
+                    errln!("mci-agent import-sessions: --full: clear cursors: {e}");
                     return Err(24);
                 }
             }
@@ -3193,7 +3184,7 @@ fn run_import_sessions_with_lease(
 
     let mut roots_read = 0;
     if root.is_dir() {
-        eprintln!("mci-agent import-sessions: reading {}", root.display());
+        errln!("mci-agent import-sessions: reading {}", root.display());
         match mci_agent::import_sessions::import_sessions(
             &store,
             root,
@@ -3201,43 +3192,43 @@ fn run_import_sessions_with_lease(
         ) {
             Ok(s) => report_import_root("claude-code", &s),
             Err(e) => {
-                eprintln!("mci-agent import-sessions: claude-code: {e}");
+                errln!("mci-agent import-sessions: claude-code: {e}");
                 return Err(24);
             }
         }
         roots_read += 1;
     } else {
-        eprintln!(
+        errln!(
             "mci-agent import-sessions: claude-code: skipped, no transcripts at {}",
             root.display()
         );
     }
 
     if codex_root.is_dir() {
-        eprintln!(
+        errln!(
             "mci-agent import-sessions: reading {}",
             codex_root.display()
         );
         match mci_agent::import_codex::import_codex(&store, codex_root, import_progress("codex")) {
             Ok(s) => report_import_root("codex", &s),
             Err(e) => {
-                eprintln!("mci-agent import-sessions: codex: {e}");
+                errln!("mci-agent import-sessions: codex: {e}");
                 return Err(24);
             }
         }
         roots_read += 1;
     } else {
-        eprintln!(
+        errln!(
             "mci-agent import-sessions: codex: skipped, no rollouts at {}",
             codex_root.display()
         );
     }
 
     if roots_read == 0 {
-        eprintln!("mci-agent import-sessions: neither transcript root exists; nothing imported.");
+        errln!("mci-agent import-sessions: neither transcript root exists; nothing imported.");
         return Err(24);
     }
-    eprintln!("mci-agent import-sessions: next, run `mci-agent enrich` (or `mci-agent refresh`).");
+    errln!("mci-agent import-sessions: next, run `mci-agent enrich` (or `mci-agent refresh`).");
     Ok(())
 }
 
@@ -3252,7 +3243,7 @@ fn run_import_sessions_with_lease(
 fn run_refresh_cmd(db_path: &std::path::Path, budget_ms: u64) -> Result<(), u8> {
     let key_hex = resolve_key_for_command("refresh")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!("mci-agent refresh: resolved database key is malformed.");
+        errln!("mci-agent refresh: resolved database key is malformed.");
         return Err(11);
     };
     let key = DbKey::from_bytes(key_bytes);
@@ -3299,7 +3290,7 @@ fn run_refresh_cmd(db_path: &std::path::Path, budget_ms: u64) -> Result<(), u8> 
     let stats = match outcome {
         mci_agent::refresh::RefreshOutcome::Ran(stats) => *stats,
         mci_agent::refresh::RefreshOutcome::Skipped { owner_pid } => {
-            println!(
+            outln!(
                 "refresh: skipped, the Hippocampus app is importing in the background \
                  (writer lease held by pid {})",
                 owner_pid.map_or_else(|| "unknown".to_string(), |pid| pid.to_string())
@@ -3307,7 +3298,7 @@ fn run_refresh_cmd(db_path: &std::path::Path, budget_ms: u64) -> Result<(), u8> 
             return Ok(());
         }
         mci_agent::refresh::RefreshOutcome::Failed(message) => {
-            eprintln!(
+            errln!(
                 "mci-agent refresh: open brain at {}: {message}",
                 db_path.display()
             );
@@ -3316,9 +3307,9 @@ fn run_refresh_cmd(db_path: &std::path::Path, budget_ms: u64) -> Result<(), u8> 
     };
 
     for note in &stats.notes {
-        eprintln!("mci-agent refresh: note: {note}");
+        errln!("mci-agent refresh: note: {note}");
     }
-    eprintln!(
+    errln!(
         "mci-agent refresh: claude-code {} events, {} files read, {} unchanged; codex {} events, \
          {} files read, {} unchanged, {} subagent skipped; {embedder_note}; {}",
         stats.claude.events_written,
@@ -3334,7 +3325,7 @@ fn run_refresh_cmd(db_path: &std::path::Path, budget_ms: u64) -> Result<(), u8> 
             "finished within budget"
         },
     );
-    println!("{}", stats.summary_line());
+    outln!("{}", stats.summary_line());
     Ok(())
 }
 
@@ -3389,12 +3380,12 @@ fn run_ensure_key_cmd(db_path: &Path) -> Result<(), u8> {
     let home = if let Ok(home) = std::env::var("HOME") {
         PathBuf::from(home)
     } else {
-        eprintln!("hippocampus ensure-key: HOME is not set.");
+        errln!("hippocampus ensure-key: HOME is not set.");
         return Err(30);
     };
     let support = home.join("Library/Application Support/MCI");
     if let Err(error) = std::fs::create_dir_all(&support) {
-        eprintln!(
+        errln!(
             "hippocampus ensure-key: create {}: {error}",
             support.display()
         );
@@ -3405,7 +3396,7 @@ fn run_ensure_key_cmd(db_path: &Path) -> Result<(), u8> {
     {
         let contract =
             key_resolver::KeychainAclContract::from_current_executable().map_err(|error| {
-                eprintln!("hippocampus ensure-key: {error}. Launch the bundled Hippocampus.app.");
+                errln!("hippocampus ensure-key: {error}. Launch the bundled Hippocampus.app.");
                 33
             })?;
         let outcome = key_resolver::initialize_database_key_with(
@@ -3431,25 +3422,25 @@ fn run_ensure_key_cmd(db_path: &Path) -> Result<(), u8> {
             },
         )
         .map_err(|error| {
-            eprintln!("hippocampus ensure-key: database key unchanged: {error}");
+            errln!("hippocampus ensure-key: database key unchanged: {error}");
             33
         })?;
 
         match outcome {
             key_resolver::KeyInitializationOutcome::AlreadyPresent => {
-                println!("  key      existing Keychain item validated");
+                outln!("  key      existing Keychain item validated");
             }
             key_resolver::KeyInitializationOutcome::Created => {
-                println!("  key      created in macOS Keychain with bundled-executable ACL");
+                outln!("  key      created in macOS Keychain with bundled-executable ACL");
             }
             key_resolver::KeyInitializationOutcome::MigratedLegacyKey => {
-                println!("  key      legacy database key migrated and validated");
+                outln!("  key      legacy database key migrated and validated");
             }
             key_resolver::KeyInitializationOutcome::ConcurrentItemValidated => {
-                println!("  key      concurrent Keychain item re-read and validated");
+                outln!("  key      concurrent Keychain item re-read and validated");
             }
             key_resolver::KeyInitializationOutcome::CompletedInterruptedMigration => {
-                println!("  key      interrupted legacy migration completed and plaintext removed");
+                outln!("  key      interrupted legacy migration completed and plaintext removed");
             }
         }
         Ok(())
@@ -3458,7 +3449,7 @@ fn run_ensure_key_cmd(db_path: &Path) -> Result<(), u8> {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = db_path;
-        eprintln!("hippocampus ensure-key: production Keychain initialization requires macOS");
+        errln!("hippocampus ensure-key: production Keychain initialization requires macOS");
         Err(33)
     }
 }
@@ -3497,7 +3488,7 @@ fn run_init_cmd(
             Err(code) => return Err(code),
         }
     } else {
-        println!(
+        outln!(
             "  import   skipped, no transcripts at {} (nothing to import yet)",
             root.display()
         );
@@ -3510,10 +3501,10 @@ fn run_init_cmd(
     // install the SessionStart hooks, and load the refresh agent.
     run_connect_all_cmd(db_path, refresh_agent)?;
 
-    println!("\nDone. Try it:\n");
-    println!("  mci-brain search \"some phrase you remember\"");
-    println!("\nOr restart Claude Code or Codex and ask what you were working on.");
-    println!("Run `mci-agent doctor` if anything looks wrong.");
+    outln!("\nDone. Try it:\n");
+    outln!("  mci-brain search \"some phrase you remember\"");
+    outln!("\nOr restart Claude Code or Codex and ask what you were working on.");
+    outln!("Run `mci-agent doctor` if anything looks wrong.");
     Ok(())
 }
 
@@ -3525,7 +3516,7 @@ fn run_init_cmd(
 fn run_doctor_cmd(db_path: &std::path::Path) -> Result<(), u8> {
     let key_hex = resolve_key_for_command("doctor")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!("mci-agent doctor: resolved database key is malformed.");
+        errln!("mci-agent doctor: resolved database key is malformed.");
         return Err(11);
     };
     let key = DbKey::from_bytes(key_bytes);
@@ -3533,13 +3524,13 @@ fn run_doctor_cmd(db_path: &std::path::Path) -> Result<(), u8> {
     let checks = match mci_agent::doctor::diagnose(db_path, &key) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("mci-agent doctor: {e}");
+            errln!("mci-agent doctor: {e}");
             return Err(12);
         }
     };
 
-    println!("Hippocampus doctor: {}\n", db_path.display());
-    print!("{}", mci_agent::doctor::render(&checks));
+    outln!("Hippocampus doctor: {}\n", db_path.display());
+    out!("{}", mci_agent::doctor::render(&checks));
 
     let blocked = checks
         .iter()
@@ -3572,7 +3563,7 @@ fn run_enrich_with_lease(
 ) -> Result<(), u8> {
     let key_hex = resolve_key_for_command("enrich")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!("mci-agent enrich: resolved database key is malformed.");
+        errln!("mci-agent enrich: resolved database key is malformed.");
         return Err(11);
     };
     let key = DbKey::from_bytes(key_bytes);
@@ -3588,16 +3579,16 @@ fn run_enrich_with_lease(
 
     let stats =
         match mci_agent::enrich::run_enrich(&store, embedder_ref, batch_size, |stage, msg| {
-            eprintln!("mci-agent enrich: [{}] {msg}", stage.label());
+            errln!("mci-agent enrich: [{}] {msg}", stage.label());
         }) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("mci-agent enrich: {e}");
+                errln!("mci-agent enrich: {e}");
                 return Err(23);
             }
         };
 
-    eprintln!(
+    errln!(
         "mci-agent enrich: done. {} events scanned, {} mentions, {} embedded, \
          {} events in {} episodes, {} identities, {} episode links.",
         stats.events_scanned,
@@ -3609,7 +3600,7 @@ fn run_enrich_with_lease(
         stats.edges_written,
     );
     if !is_real {
-        eprintln!(
+        errln!(
             "mci-agent enrich: note — no embedder, so recall stays keyword-only. \
              See `mci-agent embed-backfill` for how to build the model."
         );
@@ -3655,7 +3646,7 @@ fn run_brief_cmd(
             if let Some(w) = brief_worker::BriefWindow::for_local_date(d, tz_offset) {
                 w
             } else {
-                eprintln!(
+                errln!(
                     "mci-agent brief: --date wants a real calendar date as YYYY-MM-DD, got '{d}'."
                 );
                 return Err(2);
@@ -3668,7 +3659,7 @@ fn run_brief_cmd(
     // whose model is missing should hear that instead of a key complaint.
     let gate = brief_worker::brief_gate(&model_dir, brief_worker::briefs_disabled_via_env());
     if gate != brief_worker::BriefGate::Open {
-        eprintln!(
+        errln!(
             "mci-agent brief: {}",
             brief_worker::gate_block_message(gate, &model_dir)
         );
@@ -3679,7 +3670,7 @@ fn run_brief_cmd(
 
     let key_hex = resolve_key_for_command("brief")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!("mci-agent brief: resolved database key is malformed.");
+        errln!("mci-agent brief: resolved database key is malformed.");
         return Err(11);
     };
     let key = DbKey::from_bytes(key_bytes);
@@ -3693,7 +3684,7 @@ fn run_brief_cmd(
     };
     let (factory, author_id) = preferred_brief_author_factory(&model_dir);
 
-    eprintln!(
+    errln!(
         "mci-agent brief: summarizing {} into a draft for {} with {}",
         match date {
             Some(_) => "that local day",
@@ -3711,18 +3702,18 @@ fn run_brief_cmd(
             id,
             citation_violations,
         }) => {
-            eprintln!(
+            errln!(
                 "mci-agent brief: wrote draft id={id} for {date_local} \
                  ({event_count} events, {word_count} words)."
             );
             if citation_violations > 0 {
-                eprintln!(
+                errln!(
                     "mci-agent brief: the tripwire found {citation_violations} citation \
                      violation(s). The draft was still written — that is what review is \
                      for — but approval stays blocked until they clear (ADR-0018 §4.2)."
                 );
             }
-            eprintln!(
+            errln!(
                 "mci-agent brief: state = Draft. Approving a brief takes a person, so \
                  nothing here advances it (ADR-0018 §4.1). The row is in the `briefs` \
                  table keyed on {date_local}, which is where the Recall UI's Brief tab \
@@ -3731,7 +3722,7 @@ fn run_brief_cmd(
             Ok(())
         }
         Ok(brief_worker::BriefOutcome::SkippedEmpty) => {
-            eprintln!(
+            errln!(
                 "mci-agent brief: no events in {}, so there was nothing to summarize and \
                  no brief was written.\n\
                  \n\
@@ -3746,7 +3737,7 @@ fn run_brief_cmd(
             Err(22)
         }
         Err(e) => {
-            eprintln!("mci-agent brief: {e}");
+            errln!("mci-agent brief: {e}");
             Err(23)
         }
     }
@@ -3776,7 +3767,7 @@ async fn run_mcp_sync_cmd(db_path: &std::path::Path) -> Result<(), u8> {
     let lease = acquire_command_writer_lease(WriterCommand::McpSync, db_path)?;
     let key_hex = resolve_key_for_command("mcp-sync")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!("mci-agent mcp-sync: resolved database key is malformed.");
+        errln!("mci-agent mcp-sync: resolved database key is malformed.");
         return Err(11);
     };
     let key = DbKey::from_bytes(key_bytes);
@@ -3791,17 +3782,17 @@ async fn run_mcp_sync_cmd(db_path: &std::path::Path) -> Result<(), u8> {
     let config_path = default_config_path();
     match run_mcp_sync(&config_path, store).await {
         Ok(SyncOutcome::NoConfig { path }) => {
-            eprintln!("{}", no_config_guidance(&path));
+            errln!("{}", no_config_guidance(&path));
             Ok(())
         }
         Ok(SyncOutcome::NoServers { path }) => {
-            eprintln!("{}", no_servers_guidance(&path));
+            errln!("{}", no_servers_guidance(&path));
             Ok(())
         }
         Ok(SyncOutcome::Ran(stats)) => {
-            eprintln!("mci-agent mcp-sync: done. {}", render_stats(&stats));
+            errln!("mci-agent mcp-sync: done. {}", render_stats(&stats));
             if stats.servers_failed > 0 && stats.servers_ok == 0 {
-                eprintln!(
+                errln!(
                     "mci-agent mcp-sync: every registered server failed to connect. \
                      Check that each one is running and that its url in {} is right.",
                     config_path.display()
@@ -3809,16 +3800,17 @@ async fn run_mcp_sync_cmd(db_path: &std::path::Path) -> Result<(), u8> {
                 return Err(24);
             }
             if stats.servers_failed > 0 {
-                eprintln!(
+                errln!(
                     "mci-agent mcp-sync: note — {} of {} server(s) could not be reached; \
                      the rest were synced.",
-                    stats.servers_failed, stats.servers_contacted,
+                    stats.servers_failed,
+                    stats.servers_contacted,
                 );
             }
             Ok(())
         }
         Err(e) => {
-            eprintln!("mci-agent mcp-sync: {e}");
+            errln!("mci-agent mcp-sync: {e}");
             Err(25)
         }
     }
@@ -3840,14 +3832,14 @@ async fn run_mcp_sync_cmd(db_path: &std::path::Path) -> Result<(), u8> {
 fn run_embed_backfill(db_path: &std::path::Path, batch_size: usize) -> Result<(), u8> {
     let key_hex = resolve_key_for_command("embed-backfill")?;
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!("mci-agent embed-backfill: resolved database key is malformed.");
+        errln!("mci-agent embed-backfill: resolved database key is malformed.");
         return Err(11);
     };
     let key = DbKey::from_bytes(key_bytes);
 
     let (embedder, is_real) = load_embedder_backend();
     if !is_real {
-        eprintln!(
+        errln!(
             "mci-agent embed-backfill: no real embedder available, refusing to run.\n\
              \n\
              Semantic recall needs the ArcticEmbedS Core ML model. It is ~66 MB\n\
@@ -3881,7 +3873,7 @@ fn run_embed_backfill(db_path: &std::path::Path, batch_size: usize) -> Result<()
         embedder.as_ref(),
         batch_size,
         |s| {
-            eprintln!(
+            errln!(
                 "mci-agent embed-backfill: {} embedded so far",
                 s.events_embedded
             );
@@ -3889,24 +3881,27 @@ fn run_embed_backfill(db_path: &std::path::Path, batch_size: usize) -> Result<()
     ) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("mci-agent embed-backfill: {e}");
+            errln!("mci-agent embed-backfill: {e}");
             return Err(13);
         }
     };
 
     let skipped = stats.embed_errors + stats.store_errors;
     if skipped > 0 {
-        eprintln!(
+        errln!(
             "mci-agent embed-backfill: done. {} embedded, {skipped} skipped \
              ({} embed errors, {} store errors).",
-            stats.events_embedded, stats.embed_errors, stats.store_errors
+            stats.events_embedded,
+            stats.embed_errors,
+            stats.store_errors
         );
         return Err(22);
     }
-    eprintln!(
+    errln!(
         "mci-agent embed-backfill: done. {} embedded in {} batch(es). \
          Restart mcp-serve to pick up hybrid recall.",
-        stats.events_embedded, stats.batches_run
+        stats.events_embedded,
+        stats.batches_run
     );
     Ok(())
 }
@@ -3941,14 +3936,14 @@ fn load_ner_sync_backend() -> Option<Arc<dyn mci_brain::NerBackend>> {
     let model_path = candidates.into_iter().find(|p| p.exists())?;
     match NerTier2Backend::load(&model_path) {
         Ok(backend) => {
-            eprintln!(
+            errln!(
                 "mci-agent: sync NER enabled (bert-base-NER, cpu_only). model={}",
                 model_path.display()
             );
             Some(Arc::new(backend) as Arc<dyn mci_brain::NerBackend>)
         }
         Err(e) => {
-            eprintln!("mci-agent: sync NER disabled (model load failed): {e}");
+            errln!("mci-agent: sync NER disabled (model load failed): {e}");
             None
         }
     }
@@ -4022,11 +4017,13 @@ fn spawn_today_brief_worker(
     }
     tokio::spawn(async move {
         match brief_worker::run_today_brief_worker(store, shutdown).await {
-            Ok(stats) => eprintln!(
+            Ok(stats) => errln!(
                 "mci-agent: Today brief worker exited. generated={} skipped_empty={} errors={}",
-                stats.briefs_generated, stats.cycles_skipped_empty, stats.cycle_errors,
+                stats.briefs_generated,
+                stats.cycles_skipped_empty,
+                stats.cycle_errors,
             ),
-            Err(e) => eprintln!("mci-agent: Today brief worker error: {e}"),
+            Err(e) => errln!("mci-agent: Today brief worker error: {e}"),
         }
     });
 }
@@ -4041,7 +4038,7 @@ fn spawn_brief_worker(
     if brief_worker::briefs_disabled_via_env() {
         tokio::spawn(async move {
             let stats = brief_worker::run_disabled_idle("MCI_BRIEFS_DISABLED=1", shutdown).await;
-            eprintln!(
+            errln!(
                 "mci-agent: brief worker exited (disabled). generated={} skipped_empty={} errors={}",
                 stats.briefs_generated, stats.cycles_skipped_empty, stats.cycle_errors,
             );
@@ -4065,7 +4062,7 @@ fn spawn_brief_worker(
         .await
         {
             Ok(stats) => {
-                eprintln!(
+                errln!(
                     "mci-agent: brief worker exited. generated={} skipped_empty={} errors={} disabled={}",
                     stats.briefs_generated,
                     stats.cycles_skipped_empty,
@@ -4074,7 +4071,7 @@ fn spawn_brief_worker(
                 );
             }
             Err(e) => {
-                eprintln!("mci-agent: brief worker fatal: {e}");
+                errln!("mci-agent: brief worker fatal: {e}");
             }
         }
     });
@@ -4099,11 +4096,11 @@ fn spawn_brief_worker(
         )
         .await
         {
-            Ok(stats) => eprintln!(
+            Ok(stats) => errln!(
                 "mci-agent: extractive brief worker exited. generated={} skipped_empty={} errors={}",
                 stats.briefs_generated, stats.cycles_skipped_empty, stats.cycle_errors,
             ),
-            Err(e) => eprintln!("mci-agent: extractive brief worker error: {e}"),
+            Err(e) => errln!("mci-agent: extractive brief worker error: {e}"),
         }
     });
 }
@@ -4147,7 +4144,7 @@ fn spawn_tier2_worker(
     if !brief_worker::qwen3_model_present(&model_dir) {
         tokio::spawn(async move {
             let stats = run_disabled_idle("Qwen3 model not installed", shutdown).await;
-            eprintln!(
+            errln!(
                 "mci-agent: tier2 NER worker exited (no model). scanned={} mentions={} ner_errors={} disabled={}",
                 stats.events_scanned,
                 stats.mentions_inserted,
@@ -4173,7 +4170,7 @@ fn spawn_tier2_worker(
             tokio::spawn(async move {
                 let reason = format!("Qwen3CoreMLBackend::open failed: {e}");
                 let stats = run_disabled_idle(&reason, shutdown).await;
-                eprintln!(
+                errln!(
                     "mci-agent: tier2 NER worker exited (open failed). disabled={}",
                     stats.disabled,
                 );
@@ -4197,7 +4194,7 @@ fn spawn_tier2_worker(
         .await
         {
             Ok(stats) => {
-                eprintln!(
+                errln!(
                     "mci-agent: tier2 NER worker exited. scanned={} mentions={} batches={} ner_errors={} store_errors={} disabled={}",
                     stats.events_scanned,
                     stats.mentions_inserted,
@@ -4208,7 +4205,7 @@ fn spawn_tier2_worker(
                 );
             }
             Err(e) => {
-                eprintln!("mci-agent: tier2 NER worker fatal: {e}");
+                errln!("mci-agent: tier2 NER worker fatal: {e}");
             }
         }
     });
@@ -4226,7 +4223,7 @@ fn spawn_tier2_worker(
     use mci_agent::tier2_worker::run_disabled_idle;
     tokio::spawn(async move {
         let stats = run_disabled_idle("non-macOS platform", shutdown).await;
-        eprintln!(
+        errln!(
             "mci-agent: tier2 NER worker exited (non-macOS). disabled={}",
             stats.disabled,
         );
@@ -4250,13 +4247,13 @@ fn spawn_pump_supervisor(
         Some(embedder),
         default_user_allowlist_path(),
     ));
-    eprintln!(
+    errln!(
         "mci-agent: deep-hook pump supervisor started. allowlist={}",
         default_user_allowlist_path().display(),
     );
     tokio::spawn(async move {
         supervisor.run(shutdown).await;
-        eprintln!("mci-agent: pump supervisor exited cleanly");
+        errln!("mci-agent: pump supervisor exited cleanly");
     });
 }
 
@@ -4295,7 +4292,7 @@ fn spawn_mcp_aggregator(
         Arc::clone(&store) as Arc<dyn mci_brain::BrainStore>,
         embedder,
     );
-    eprintln!(
+    errln!(
         "mci-agent: MCP aggregator started (reconcile every {}s; materialize cap {} bytes)",
         mci_agent::mcp_aggregator::DEFAULT_RECONCILE_INTERVAL.as_secs(),
         mci_agent::mcp_aggregator::DEFAULT_MATERIALIZE_MAX_BYTES,
@@ -4309,11 +4306,11 @@ fn spawn_mcp_aggregator(
         )
         .await
         {
-            eprintln!("mci-agent: MCP aggregator revision seed failed: {error}");
+            errln!("mci-agent: MCP aggregator revision seed failed: {error}");
             return;
         }
         aggregator.run(shutdown).await;
-        eprintln!("mci-agent: MCP aggregator exited cleanly");
+        errln!("mci-agent: MCP aggregator exited cleanly");
     });
 }
 
@@ -4329,11 +4326,11 @@ fn spawn_transcript_refresh_worker(
     shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
     if !mci_agent::refresh::transcript_refresh_enabled_from_env() {
-        eprintln!("mci-agent: transcript refresh off (explicit opt-in required; disable switch takes precedence)");
+        errln!("mci-agent: transcript refresh off (explicit opt-in required; disable switch takes precedence)");
         return;
     }
     let schedule = mci_agent::refresh::RefreshSchedule::default();
-    eprintln!(
+    errln!(
         "mci-agent: transcript refresh started (first run in {}s, then every {}s, {}s budget)",
         schedule.initial_delay.as_secs(),
         schedule.interval.as_secs(),
@@ -4343,9 +4340,12 @@ fn spawn_transcript_refresh_worker(
         let stats =
             mci_agent::refresh::run_transcript_refresh_worker(store, None, schedule, shutdown)
                 .await;
-        eprintln!(
+        errln!(
             "mci-agent: transcript refresh exited. runs={} with_writes={} events={} over_budget={}",
-            stats.runs, stats.runs_with_writes, stats.events_written, stats.runs_over_budget,
+            stats.runs,
+            stats.runs_with_writes,
+            stats.events_written,
+            stats.runs_over_budget,
         );
     });
 }

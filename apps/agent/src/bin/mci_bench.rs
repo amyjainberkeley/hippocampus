@@ -5,6 +5,7 @@
 //! parser and is run by maintainers, not users, so it has no business
 //! adding weight to `mci-agent`.
 
+use mci_agent::{errln, outln};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -30,7 +31,7 @@ const CANONICAL_WORK_MEMORY_BASELINE_SHA256: &str =
 const BENCH_REPO_ROOT_ENV: &str = "MCI_BENCH_REPO_ROOT";
 
 fn usage() {
-    println!(
+    outln!(
         "mci-bench {}\n\
          \n\
          Usage: mci-bench --dataset <longmemeval_s_cleaned.json|synthetic-v1.json> [OPTIONS]\n\
@@ -381,18 +382,21 @@ fn decimal(value: Option<f64>) -> String {
 }
 
 fn print_summary(summary: &Summary, ks: &[usize], elapsed_secs: f64) {
-    println!(
+    outln!(
         "\n=== {} ===  ({} instances, {:.0}s)",
-        summary.arm, summary.instances, elapsed_secs
+        summary.arm,
+        summary.instances,
+        elapsed_secs
     );
-    println!(
+    outln!(
         "  denominators answerable={} unanswerable={}",
-        summary.answerable_instances, summary.unanswerable_instances
+        summary.answerable_instances,
+        summary.unanswerable_instances
     );
-    println!("  hit/recall/MRR/provenance: answerable-only; fp: unanswerable-only");
-    println!("  abstention separation: answerable hit-rate - unanswerable FPR (TPR - FPR)");
+    outln!("  hit/recall/MRR/provenance: answerable-only; fp: unanswerable-only");
+    outln!("  abstention separation: answerable hit-rate - unanswerable FPR (TPR - FPR)");
     for &k in ks {
-        println!(
+        outln!(
             "  hit@{k:<3} {}      recall@{k:<3} {}      provenance@{k:<3} {}      fp@{k:<3} {}      separation@{k:<3} {}",
             percent(summary.hit_rate_at.get(&k).copied().flatten()),
             percent(summary.recall_at.get(&k).copied().flatten()),
@@ -401,7 +405,7 @@ fn print_summary(summary: &Summary, ks: &[usize], elapsed_secs: f64) {
             decimal(summary.abstention_separation_at.get(&k).copied().flatten()),
         );
     }
-    println!(
+    outln!(
         "  MRR      {:>6}       misses {}       outcomes matched={} missed={} abstained={} false_positive={}",
         decimal(summary.mrr),
         summary.complete_misses,
@@ -410,7 +414,7 @@ fn print_summary(summary: &Summary, ks: &[usize], elapsed_secs: f64) {
         summary.outcomes.abstained,
         summary.outcomes.false_positive
     );
-    println!(
+    outln!(
         "  latency  p50={:.1}ms p95={:.1}ms       index p50={:.0}B p95={:.0}B",
         summary.latency_ms.p50,
         summary.latency_ms.p95,
@@ -487,7 +491,7 @@ fn main() -> ExitCode {
             }
             "--baseline" if i + 1 < argv.len() => {
                 if baseline_path.is_some() {
-                    eprintln!("mci-bench: --baseline may be specified only once");
+                    errln!("mci-bench: --baseline may be specified only once");
                     return ExitCode::from(2);
                 }
                 baseline_path = Some(PathBuf::from(&argv[i + 1]));
@@ -503,7 +507,7 @@ fn main() -> ExitCode {
                     "hybrid" => vec![Arm::Hybrid],
                     "both" => vec![Arm::Lexical, Arm::Hybrid],
                     other => {
-                        eprintln!("mci-bench: unknown arm `{other}` (lexical|hybrid|both)");
+                        errln!("mci-bench: unknown arm `{other}` (lexical|hybrid|both)");
                         return ExitCode::from(2);
                     }
                 };
@@ -537,7 +541,7 @@ fn main() -> ExitCode {
                 return ExitCode::SUCCESS;
             }
             other => {
-                eprintln!("mci-bench: unknown argument `{other}`\n");
+                errln!("mci-bench: unknown argument `{other}`\n");
                 usage();
                 return ExitCode::from(2);
             }
@@ -550,7 +554,7 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
     if ks.is_empty() {
-        eprintln!("mci-bench: --k must name at least one cutoff");
+        errln!("mci-bench: --k must name at least one cutoff");
         return ExitCode::from(2);
     }
     ks.sort_unstable();
@@ -558,24 +562,24 @@ fn main() -> ExitCode {
     let scratch_run = match ScratchRun::create(&workdir) {
         Ok(run) => run,
         Err(error) => {
-            eprintln!("mci-bench: {error}");
+            errln!("mci-bench: {error}");
             return ExitCode::from(3);
         }
     };
     let workdir = scratch_run.path();
 
-    eprint!("mci-bench: loading {} ... ", dataset_path.display());
+    errln!("mci-bench: loading {} ...", dataset_path.display());
     let raw = match std::fs::read_to_string(&dataset_path) {
         Ok(raw) => raw,
         Err(e) => {
-            eprintln!("\nmci-bench: read {}: {e}", dataset_path.display());
+            errln!("mci-bench: read {}: {e}", dataset_path.display());
             return ExitCode::from(3);
         }
     };
     let dataset_checksum_sha256 = match sha256_bytes(raw.as_bytes()) {
         Ok(checksum) => checksum,
         Err(error) => {
-            eprintln!("\nmci-bench: dataset checksum: {error}");
+            errln!("mci-bench: dataset checksum: {error}");
             return ExitCode::from(3);
         }
     };
@@ -583,7 +587,7 @@ fn main() -> ExitCode {
     let mut dataset: LoadedDataset = match load_dataset(&raw, &fallback_id) {
         Ok(dataset) => dataset,
         Err(e) => {
-            eprintln!("\nmci-bench: parse {}: {e}", dataset_path.display());
+            errln!("mci-bench: parse {}: {e}", dataset_path.display());
             return ExitCode::from(3);
         }
     };
@@ -593,7 +597,7 @@ fn main() -> ExitCode {
     }
     let evaluated_instances = dataset.instances.len();
     let limited = evaluated_instances < original_instances;
-    eprintln!("{} instances", dataset.instances.len());
+    errln!("mci-bench: {} instances", dataset.instances.len());
 
     let mut metadata = run_metadata(
         &argv,
@@ -613,7 +617,7 @@ fn main() -> ExitCode {
                 metadata.model_checksum_sha256 = match sha256_path(&embedders.model_path) {
                     Ok(checksum) => Some(checksum),
                     Err(error) => {
-                        eprintln!("mci-bench: model checksum: {error}");
+                        errln!("mci-bench: model checksum: {error}");
                         None
                     }
                 };
@@ -648,7 +652,7 @@ fn main() -> ExitCode {
                     };
                     if let Some(path) = out.as_deref() {
                         if let Err(write_error) = write_report(path, &report) {
-                            eprintln!("mci-bench: {write_error}");
+                            errln!("mci-bench: {write_error}");
                             return ExitCode::from(3);
                         }
                     }
@@ -686,11 +690,11 @@ fn main() -> ExitCode {
                 };
                 if let Some(path) = out.as_deref() {
                     if let Err(write_error) = write_report(path, &report) {
-                        eprintln!("mci-bench: {write_error}");
+                        errln!("mci-bench: {write_error}");
                         return ExitCode::from(3);
                     }
                 }
-                eprintln!("mci-bench: {error}");
+                errln!("mci-bench: {error}");
                 return ExitCode::from(4);
             }
         }
@@ -701,7 +705,7 @@ fn main() -> ExitCode {
     if let Some(n) = abstention {
         let n = n.min(dataset.instances.len());
         if n < 2 {
-            eprintln!("mci-bench: --abstention needs at least 2 instances to cross-pair");
+            errln!("mci-bench: --abstention needs at least 2 instances to cross-pair");
             return ExitCode::from(2);
         }
         let started = std::time::Instant::now();
@@ -715,10 +719,10 @@ fn main() -> ExitCode {
                 embedders.as_ref().expect("abstention requires an embedder"),
             ) {
                 Ok(mut sample) => samples.append(&mut sample),
-                Err(error) => eprintln!("mci-bench: [abstention] {error}"),
+                Err(error) => errln!("mci-bench: [abstention] {error}"),
             }
             if (idx + 1) % 5 == 0 || idx + 1 == n {
-                eprintln!(
+                errln!(
                     "mci-bench: [abstention] {}/{} done, {:.0}s elapsed",
                     idx + 1,
                     n,
@@ -751,40 +755,40 @@ fn main() -> ExitCode {
         };
         let (amin, amed, amax) = stat(&answerable);
         let (umin, umed, umax) = stat(&unanswerable);
-        println!(
+        outln!(
             "\n=== abstention probe ===  ({} pairs, {:.0}s)",
             answerable.len(),
             started.elapsed().as_secs_f64()
         );
-        println!("  top raw cosine        min     median     max");
-        println!(
+        outln!("  top raw cosine        min     median     max");
+        outln!(
             "    answerable      {amin:>7.4}  {amed:>9.4}  {amax:>7.4}   n={}",
             answerable.len()
         );
-        println!(
+        outln!(
             "    unanswerable    {umin:>7.4}  {umed:>9.4}  {umax:>7.4}   n={}",
             unanswerable.len()
         );
         match best_threshold(&samples) {
             Some(report) => {
-                println!("\n  best cosine floor: {:.4}", report.threshold);
-                println!(
+                outln!("\n  best cosine floor: {:.4}", report.threshold);
+                outln!(
                     "    answers kept on answerable questions   {:>6.1}%",
                     100.0 * report.answerable_kept
                 );
-                println!(
+                outln!(
                     "    answers kept on unanswerable questions {:>6.1}%   (want low)",
                     100.0 * report.unanswerable_kept
                 );
-                println!(
+                outln!(
                     "    separation (Youden J)                  {:>6.3}",
                     report.youden_j
                 );
                 if report.youden_j < 0.5 {
-                    println!("\n  NOT separable enough to ship a floor on this signal alone.");
+                    outln!("\n  NOT separable enough to ship a floor on this signal alone.");
                 }
             }
-            None => println!("  no samples"),
+            None => outln!("  no samples"),
         }
         return ExitCode::SUCCESS;
     }
@@ -805,7 +809,7 @@ fn main() -> ExitCode {
                 Ok(result) => results.push(result),
                 Err(error) => {
                     arm_failures += 1;
-                    eprintln!("mci-bench: [{}] {error}", arm.label());
+                    errln!("mci-bench: [{}] {error}", arm.label());
                     failures.push(RunFailure {
                         arm: arm.label().to_string(),
                         question_id: Some(instance.question_id.clone()),
@@ -818,7 +822,7 @@ fn main() -> ExitCode {
                     .iter()
                     .filter(|r| r.first_hit_rank.is_some_and(|rank| rank <= 5))
                     .count();
-                eprintln!(
+                errln!(
                     "mci-bench: [{}] {}/{} done, hit@5 so far {:.1}%, {:.0}s elapsed",
                     arm.label(),
                     n + 1,
@@ -830,7 +834,7 @@ fn main() -> ExitCode {
         }
 
         if arm_failures > 0 {
-            eprintln!(
+            errln!(
                 "mci-bench: [{}] WARNING {arm_failures} instance(s) failed",
                 arm.label()
             );
@@ -839,10 +843,10 @@ fn main() -> ExitCode {
         let summary = summarize(&results, arm, &ks);
         print_summary(&summary, &ks, started.elapsed().as_secs_f64());
 
-        println!("  by question type:");
+        outln!("  by question type:");
         for (kind, typed_summary) in summarize_by_type(&results, arm, &ks) {
             let kmax = *ks.last().expect("ks non-empty");
-            println!(
+            outln!(
                 "    {kind:<28} n={:<4} answerable={:<3} unanswerable={:<3} hit@{kmax}={}  MRR={}",
                 typed_summary.instances,
                 typed_summary.answerable_instances,
@@ -855,10 +859,10 @@ fn main() -> ExitCode {
 
         let tag_summaries = summarize_by_tag(&results, arm, &ks);
         if !tag_summaries.is_empty() {
-            println!("  by tag:");
+            outln!("  by tag:");
             for (tag, tag_summary) in tag_summaries {
                 let kmax = *ks.last().expect("ks non-empty");
-                println!(
+                outln!(
                     "    {tag:<28} n={:<4} answerable={:<3} unanswerable={:<3} hit@{kmax}={}  MRR={}",
                     tag_summary.instances,
                     tag_summary.answerable_instances,
@@ -976,10 +980,10 @@ fn main() -> ExitCode {
 
     if let Some(path) = out.as_deref() {
         if let Err(error) = write_report(path, &report) {
-            eprintln!("mci-bench: {error}");
+            errln!("mci-bench: {error}");
             return ExitCode::from(3);
         }
-        eprintln!("mci-bench: report written to {}", path.display());
+        errln!("mci-bench: report written to {}", path.display());
     }
 
     if !complete {

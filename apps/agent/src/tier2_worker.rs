@@ -49,6 +49,7 @@
 //!   GitHub-PAT / Stripe-key / Bitcoin-WIF source bytes that V2-P4
 //!   refused to persist never re-emerge via V2-P5.
 
+use crate::errln;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -211,7 +212,7 @@ pub async fn run_disabled_idle(
     reason: &str,
     mut shutdown: watch::Receiver<bool>,
 ) -> Tier2WorkerStats {
-    eprintln!("mci-agent: tier2 NER worker disabled ({reason}); will sleep until shutdown");
+    errln!("mci-agent: tier2 NER worker disabled ({reason}); will sleep until shutdown");
     let _ = shutdown.changed().await;
     Tier2WorkerStats {
         disabled: true,

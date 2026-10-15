@@ -826,8 +826,9 @@ fn brain_err_to_response(id: JsonRpcId, e: &BrainReaderError) -> JsonRpcResponse
 /// Run the production stdio loop: read newline-delimited JSON-RPC frames
 /// from stdin, dispatch through `server`, write responses to stdout.
 ///
-/// On EOF on stdin, returns `Ok(())`. On any write failure, returns
-/// `Err(io)` — the supervisor logs to stderr and exits non-zero.
+/// On EOF on stdin, or a closed stdout (the client went away), returns
+/// `Ok(())`. On any other write failure, returns `Err(io)` — the caller
+/// logs to stderr and exits non-zero.
 ///
 /// Lines that fail to parse as JSON-RPC return a `PARSE_ERROR` response
 /// with `id: null` (per JSON-RPC 2.0 §5).
@@ -868,7 +869,13 @@ where
             }
         };
         if let Some(resp) = response {
-            write_response(&mut out, &resp).await?;
+            match write_response(&mut out, &resp).await {
+                Ok(()) => {}
+                // The client closed its end of stdout (EPIPE): it has gone,
+                // like EOF on stdin, so the session ends quietly.
+                Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => return Ok(()),
+                Err(error) => return Err(error),
+            }
         }
     }
 }

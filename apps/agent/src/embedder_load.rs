@@ -12,6 +12,7 @@
 //! (ADR-0011 §3). Embedding a query with the document flavour quietly
 //! degrades every result.
 
+use crate::errln;
 use std::sync::Arc;
 
 /// Candidate on-disk paths for the `ArcticEmbedS` Core ML model, in probe
@@ -101,12 +102,12 @@ pub fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
                 let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
                 let healthy = v.len() == 384 && norm.is_finite() && (norm - 1.0).abs() < 1e-2;
                 if healthy {
-                    eprintln!(
+                    errln!(
                         "mci-agent: embedder smoke OK — CoreML (cpu_and_ne pin), dim={} |v|={norm:.4}",
                         v.len(),
                     );
                 } else {
-                    eprintln!(
+                    errln!(
                         "mci-agent: WARNING embedder loaded but smoke vector looks wrong \
                          (dim={} |v|={norm:.4}, expected dim=384 |v|~1.0) — semantic ingest \
                          may be degraded.",
@@ -115,7 +116,7 @@ pub fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
                 }
             }
             (Err(e), true) => {
-                eprintln!(
+                errln!(
                     "mci-agent: WARNING embedder LOADED but smoke embed FAILED — semantic \
                      ingest is DEAD: {e}. Events will accumulate unembedded (embed_errors \
                      will climb). Check the bundled ArcticEmbedS model / compute-unit pin.",
@@ -144,7 +145,7 @@ pub fn load_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
             Ok(vec![0.0_f32; 384])
         }
     }
-    eprintln!("mci-agent: non-macOS platform — using zero-vector embedder fallback");
+    errln!("mci-agent: non-macOS platform — using zero-vector embedder fallback");
     (Arc::new(ZeroEmbedder), false)
 }
 
@@ -186,12 +187,12 @@ pub fn load_query_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
                 let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
                 let healthy = v.len() == 384 && norm.is_finite() && (norm - 1.0).abs() < 1e-2;
                 if healthy {
-                    eprintln!(
+                    errln!(
                         "mci-agent: query embedder smoke OK — CoreML (cpu_and_ne pin), dim={} |v|={norm:.4}",
                         v.len(),
                     );
                 } else {
-                    eprintln!(
+                    errln!(
                         "mci-agent: WARNING query embedder loaded but smoke vector looks wrong \
                          (dim={} |v|={norm:.4}, expected dim=384 |v|~1.0) — hybrid recall may \
                          be degraded.",
@@ -200,7 +201,7 @@ pub fn load_query_embedder_backend() -> (Arc<dyn mci_brain::Embedder>, bool) {
                 }
             }
             Err(e) => {
-                eprintln!(
+                errln!(
                     "mci-agent: WARNING query embedder LOADED but smoke embed FAILED — hybrid \
                      recall is DEAD: {e}. Check the bundled ArcticEmbedS model / compute-unit pin.",
                 );

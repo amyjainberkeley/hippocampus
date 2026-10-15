@@ -95,6 +95,8 @@ pub mod refresh;
 pub mod refresh_agent;
 pub mod retention_worker;
 pub mod runner;
+/// Lines to stdout and stderr that never panic when a reader goes away.
+pub mod stdio;
 pub mod supervisor;
 /// V2-P5+ — `dslim/bert-base-NER`-backed `NerBackend` for the **sync**
 /// Tier-2 NER tier (the CEO-ratified hot-path entity extractor, INT8,
