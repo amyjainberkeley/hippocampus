@@ -338,10 +338,11 @@ class WorkflowTests(unittest.TestCase):
                     self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_all_scanner_installs_and_caches_use_exact_version(self):
-        for name in ("cargo-audit", "release", "publish-release"):
+        scanning_jobs = {"cargo-audit": "audit", "release": "build-draft", "publish-release": "publish"}
+        for name, job in scanning_jobs.items():
             workflow = self.workflows[name]
             with self.subTest(workflow=name):
-                steps = next(iter(workflow["jobs"].values()))["steps"]
+                steps = workflow["jobs"][job]["steps"]
                 installs = [step for step in steps if "cargo install" in step.get("run", "")]
                 self.assertEqual(len(installs), 1)
                 args = shlex.split(installs[0]["run"])
@@ -354,6 +355,48 @@ class WorkflowTests(unittest.TestCase):
                 self.assertNotIn("restore-keys", cache["with"])
                 audit = next(step for step in steps if "scripts/audit-supply-chain.py" in step.get("run", ""))
                 self.assertIn("--require-version 0.22.2", audit["run"])
+
+    RELEASE_SECRETS = ("APPLE_CERTIFICATE_P12", "APPLE_CERTIFICATE_PASSWORD", "NOTARYTOOL_APPLE_ID",
+                       "NOTARYTOOL_TEAM_ID", "NOTARYTOOL_PASSWORD", "SPARKLE_PRIVATE_KEY")
+
+    def test_a_tag_without_release_secrets_builds_nothing(self):
+        jobs = self.workflows["release"]["jobs"]
+        check, build, draft = jobs["release-secrets"], jobs["build-draft"], jobs["create-draft"]
+        # The check sees the signing environment's secrets, and gates the build.
+        self.assertEqual(check["environment"]["name"], build["environment"]["name"])
+        self.assertEqual(check["permissions"], {})
+        self.assertEqual(build["needs"], "release-secrets")
+        self.assertEqual(build["if"], "needs.release-secrets.outputs.configured == 'true'")
+        self.assertEqual(draft["needs"], "build-draft")
+        self.assertNotIn("if", draft)
+        steps = [step for step in check["steps"] if step.get("id") == "secrets"]
+        self.assertEqual(len(steps), 1)
+        step = steps[0]
+        self.assertEqual(check["outputs"]["configured"], "${{ steps.secrets.outputs.configured }}")
+        self.assertEqual(step["env"], {name: f"${{{{ secrets.{name} }}}}" for name in self.RELEASE_SECRETS})
+        # The build keeps its own gate, which requires every secret.
+        gate = next(s for s in build["steps"] if s.get("name") == "Require release secrets and variables")
+        self.assertEqual(sorted(gate["env"]), sorted(self.RELEASE_SECRETS))
+        # Run the check's shell as the runner does: none set, one set, all set.
+        for present, configured in ((set(), "false"), ({"SPARKLE_PRIVATE_KEY"}, "true"),
+                                    ({"APPLE_CERTIFICATE_P12"}, "true"), (set(self.RELEASE_SECRETS), "true")):
+            with self.subTest(present=sorted(present)), tempfile.TemporaryDirectory(
+                prefix="release-secrets-"
+            ) as temporary:
+                output = Path(temporary) / "github-output"
+                env = {"PATH": "/usr/bin:/bin", "GITHUB_OUTPUT": str(output)}
+                env.update({name: ("value" if name in present else "") for name in self.RELEASE_SECRETS})
+                result = subprocess.run(
+                    ["/bin/bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
+                    env=env, capture_output=True, text=True, timeout=10,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(output.read_text(), f"configured={configured}\n")
+                if configured == "false":
+                    self.assertIn("::notice", result.stdout)
+                    self.assertIn("scripts/release-0.3.0.sh", result.stdout)
+                else:
+                    self.assertEqual(result.stdout, "")
 
     def test_macos_jobs_build_with_xcode_26(self):
         # Xcode 16.4 rejects the app's Swift, and the macOS 14 runners are

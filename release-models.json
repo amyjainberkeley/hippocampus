@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "releaseVersion": "0.2.0",
-  "archiveURL": "https://github.com/amyjainberkeley/hippocampus-models/releases/download/v0.2.0/release-models-0.2.0.tar.gz",
+  "releaseVersion": "0.3.0",
+  "archiveURL": "https://github.com/amyjainberkeley/hippocampus-models/releases/download/v0.3.0/release-models-0.3.0.tar.gz",
   "archiveSHA256": "e0d9a98ef6cb793aa539b1719a4546c2de16f9c445c60fe846829928daa5a718",
   "models": [
     {

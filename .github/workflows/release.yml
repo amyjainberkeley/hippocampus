@@ -17,8 +17,46 @@ env:
   XCODE_APP: /Applications/Xcode_26.6.app
 
 jobs:
+  # Hippocampus is released from a Mac with scripts/release-0.3.0.sh, and this
+  # repository may have no release secrets at all. Then a tag would start a
+  # build that can only fail. This job runs in the signing environment, so it
+  # sees the same secrets, and lets the build run only when at least one is
+  # set; the build's own gate then requires all six.
+  release-secrets:
+    name: Check that CI releasing is set up
+    runs-on: ubuntu-latest
+    environment:
+      name: release-signing
+    permissions: {}
+    outputs:
+      configured: ${{ steps.secrets.outputs.configured }}
+    steps:
+      - name: Look for release secrets
+        id: secrets
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          NOTARYTOOL_APPLE_ID: ${{ secrets.NOTARYTOOL_APPLE_ID }}
+          NOTARYTOOL_TEAM_ID: ${{ secrets.NOTARYTOOL_TEAM_ID }}
+          NOTARYTOOL_PASSWORD: ${{ secrets.NOTARYTOOL_PASSWORD }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          configured=false
+          for name in APPLE_CERTIFICATE_P12 APPLE_CERTIFICATE_PASSWORD NOTARYTOOL_APPLE_ID \
+              NOTARYTOOL_TEAM_ID NOTARYTOOL_PASSWORD SPARKLE_PRIVATE_KEY; do
+            if [ -n "${!name}" ]; then
+              configured=true
+            fi
+          done
+          if [ "$configured" = false ]; then
+            echo "::notice title=Nothing was built::No release secret is set, so this tag builds nothing here. Releases are built, signed and notarized on a Mac with scripts/release-0.3.0.sh. To release from CI instead, set all six release secrets."
+          fi
+          echo "configured=$configured" >>"$GITHUB_OUTPUT"
+
   build-draft:
     name: Build, verify, and stage owner-inspectable draft
+    needs: release-secrets
+    if: needs.release-secrets.outputs.configured == 'true'
     runs-on: macos-26
     environment:
       name: release-signing

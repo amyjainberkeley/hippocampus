@@ -445,7 +445,7 @@ preflight() {
     if pgrep -f "$APP/Contents/MacOS/" >/dev/null 2>&1; then
         warn "a copy of apps/hippocampus/dist/Hippocampus.app is running; quit it, since assembly replaces it"
     fi
-    info "release-models.json (0.2.0) is read only by the tag-triggered CI release; a $RELEASE_TAG tag makes that job stop before it builds anything"
+    info "release-models.json is read only by the tag-triggered CI release, which builds nothing while no release secret is set"
     info "the launch check opens the new app for 20 s, twice, under a throwaway home"
 }
 
