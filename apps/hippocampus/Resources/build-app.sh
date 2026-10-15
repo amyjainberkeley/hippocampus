@@ -376,10 +376,10 @@ fi
 validate_changelog_release "$BUNDLE_SHORT_VERSION"
 # The STATUS audit vouches for an app people are given. An ad-hoc signed
 # development build cannot be given to anyone, so it builds from any commit.
-if [[ "$SIGNING_MODE" == "ad-hoc" ]]; then
-    echo "  docs/STATUS.md audit baseline not required for an ad-hoc development build"
-else
+if [[ "$SIGNING_MODE" != "ad-hoc" ]]; then
     validate_status_audit
+else
+    echo "  docs/STATUS.md audit baseline not required for an ad-hoc development build"
 fi
 
 if [[ ! -f "$MODELS_MANIFEST_SRC" ]]; then

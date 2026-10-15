@@ -30,6 +30,13 @@ final class BuildAppScriptTests: XCTestCase {
         let output: String
     }
 
+    /// How the fixture app is signed. The STATUS audit gates Developer ID
+    /// builds, the ones people are given; an ad-hoc development build skips it.
+    private enum Signing {
+        case adHocDevelopment
+        case developerID
+    }
+
     private var scriptPath: String? {
         let testFile = URL(fileURLWithPath: #filePath)
         // Tests/HippocampusKitTests/BuildAppScriptTests.swift
@@ -348,12 +355,27 @@ final class BuildAppScriptTests: XCTestCase {
         }
     }
 
-    private func runFixture(_ fixture: ScriptFixture) throws -> ScriptRunResult {
+    private func runFixture(
+        _ fixture: ScriptFixture,
+        signing: Signing = .adHocDevelopment
+    ) throws -> ScriptRunResult {
+        var arguments = [fixture.scriptURL.path, "--debug"]
+        var environment = ProcessInfo.processInfo.environment
+        switch signing {
+        case .adHocDevelopment:
+            arguments.append("--development-ad-hoc")
+        case .developerID:
+            // A stand-in identity, so no keychain is searched. Every run with
+            // it stops at the STATUS gate, before anything is signed.
+            environment["DEVELOPER_ID"] = "Developer ID Application: Fixture (ABCDE12345)"
+            environment["APPLE_TEAM_ID"] = nil
+            environment["NOTARYTOOL_TEAM_ID"] = nil
+        }
         return try runCommand(
             "/bin/bash",
-            [fixture.scriptURL.path, "--debug", "--development-ad-hoc"],
+            arguments,
             in: fixture.repoRoot,
-            environment: ProcessInfo.processInfo.environment
+            environment: environment
         )
     }
 
@@ -535,7 +557,7 @@ final class BuildAppScriptTests: XCTestCase {
 
     func test_missing_status_audit_sha_exits_with_status_message() throws {
         let fixture = try makeFixture(statusAudit: .missingSHA)
-        let result = try runFixture(fixture)
+        let result = try runFixture(fixture, signing: .developerID)
         XCTAssertTrue(result.status != 0, "missing status audit SHA must fail: \(result.output)")
         XCTAssertTrue(
             result.output.contains("FATAL: docs/STATUS.md has no audited code baseline SHA"),
@@ -545,7 +567,7 @@ final class BuildAppScriptTests: XCTestCase {
 
     func test_status_audit_sha_missing_from_clone_exits_with_status_message() throws {
         let fixture = try makeFixture(statusAudit: .missingCommit)
-        let result = try runFixture(fixture)
+        let result = try runFixture(fixture, signing: .developerID)
         XCTAssertTrue(result.status != 0, "unknown status audit SHA must fail: \(result.output)")
         XCTAssertTrue(
             result.output.contains(
@@ -557,7 +579,7 @@ final class BuildAppScriptTests: XCTestCase {
 
     func test_stale_status_audit_sha_exits_with_refresh_message() throws {
         let fixture = try makeFixture(statusAudit: .stale)
-        let result = try runFixture(fixture)
+        let result = try runFixture(fixture, signing: .developerID)
         XCTAssertTrue(result.status != 0, "stale status audit SHA must fail: \(result.output)")
         XCTAssertTrue(
             result.output.contains("FATAL: docs/STATUS.md audit baseline is 4 commits behind HEAD; maximum is 3"),
@@ -567,12 +589,25 @@ final class BuildAppScriptTests: XCTestCase {
 
     func test_non_ancestor_status_audit_sha_exits_with_status_message() throws {
         let fixture = try makeFixture(statusAudit: .nonAncestor)
-        let result = try runFixture(fixture)
+        let result = try runFixture(fixture, signing: .developerID)
         XCTAssertTrue(result.status != 0, "non-ancestor status audit SHA must fail: \(result.output)")
         XCTAssertTrue(
             result.output.contains("FATAL: docs/STATUS.md audit baseline is not an ancestor of HEAD"),
             "expected non-ancestor status SHA failure, got: \(result.output)"
         )
+    }
+
+    func test_ad_hoc_development_build_needs_no_fresh_status_audit() throws {
+        for audit in [StatusAuditFixture.missingSHA, .missingCommit, .stale, .nonAncestor] {
+            let fixture = try makeFixture(includeEmbedder: true, statusAudit: audit)
+            let result = try runFixture(fixture)
+            XCTAssertEqual(result.status, 0, "\(audit): an ad-hoc development build must assemble: \(result.output)")
+            XCTAssertTrue(
+                result.output.contains("docs/STATUS.md audit baseline not required for an ad-hoc development build"),
+                "\(audit): expected the ad-hoc STATUS note, got: \(result.output)"
+            )
+            XCTAssertFalse(result.output.contains("FATAL: docs/STATUS.md"), "\(audit): \(result.output)")
+        }
     }
 
     func test_missing_pinned_models_manifest_exits_with_restore_command() throws {
