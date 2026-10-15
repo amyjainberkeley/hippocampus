@@ -106,7 +106,7 @@ LANES
     rust-clippy           cargo clippy --workspace --all-targets -- -D warnings (as CI)
     rust-test             cargo test --workspace
     rust-audit            tracked Cargo.lock audits with JSON evidence and explicit waiver
-    swift-fmt             swiftformat --lint (SKIP if not installed)
+    swift-fmt             swiftformat --lint with .swiftformat (SKIP if not installed)
     swift-package-wrapper compatibility-wrapper behavior and unified-gate contract
     swift-test-helper     swift test in adapters/macos/MCICaptureHelper
     swift-test-recall-ui  swift test in apps/recall-ui
@@ -182,12 +182,14 @@ __swift_fmt_lane() {
         echo "[skip] swiftformat not installed (brew install swiftformat)"
         return 42  # sentinel: SKIP
     fi
-    # Lint mode — no writes, just report drift.
+    # Lint mode — no writes, just report drift against the rules in .swiftformat.
     swiftformat --lint \
         apps/hippocampus/Sources \
         apps/recall-ui/Sources \
         apps/onboarding/Sources \
-        adapters/macos/MCICaptureHelper/Sources
+        apps/mind/Sources \
+        adapters/macos/MCICaptureHelper/Sources \
+        adapters/macos/MCIKeyframeCodec/Sources
 }
 
 __changelog_sanity_lane() {

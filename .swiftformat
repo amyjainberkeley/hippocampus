@@ -1,0 +1,61 @@
+# SwiftFormat settings for scripts/check.sh's swift-fmt lane.
+#
+# The Swift code predates the lane. The rules disabled below would rewrite
+# most files (263 of 331 on 2026-10-15), so they stay off until a change
+# formats the code they cover and removes them from this list. Every other
+# default rule is enforced: the code follows them today, and the lane keeps
+# it that way.
+
+--swiftversion 6.0
+
+--disable andOperator
+--disable blankLineAfterImports
+--disable blankLinesAroundMark
+--disable blankLinesAtEndOfScope
+--disable blankLinesAtStartOfScope
+--disable blankLinesBetweenScopes
+--disable braces
+--disable conditionalAssignment
+--disable consecutiveSpaces
+--disable consistentSwitchCaseSpacing
+--disable docComments
+--disable docCommentsBeforeModifiers
+--disable elseOnSameLine
+--disable environmentEntry
+--disable extensionAccessControl
+--disable hoistAwait
+--disable hoistPatternLet
+--disable hoistTry
+--disable indent
+--disable modifierOrder
+--disable numberFormatting
+--disable opaqueGenericParameters
+--disable preferKeyPath
+--disable redundantClosure
+--disable redundantGet
+--disable redundantInternal
+--disable redundantMemberwiseInit
+--disable redundantNilInit
+--disable redundantOptionalBinding
+--disable redundantParens
+--disable redundantReturn
+--disable redundantSelf
+--disable redundantStaticSelf
+--disable redundantType
+--disable redundantVariable
+--disable redundantViewBuilder
+--disable sortImports
+--disable spaceAroundBraces
+--disable spaceAroundOperators
+--disable spaceInsideComments
+--disable trailingClosures
+--disable trailingCommas
+--disable trailingSpace
+--disable unusedArguments
+--disable wrapArguments
+--disable wrapFunctionBodies
+--disable wrapIfExpressionBodies
+--disable wrapIfStatementBodies
+--disable wrapLoopBodies
+--disable wrapMultilineStatementBraces
+--disable wrapPropertyBodies
