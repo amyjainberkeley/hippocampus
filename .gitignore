@@ -51,6 +51,11 @@ models/*.tar.gz
 # Python ML conversion venv (scripts/convert_brief_model.py)
 .venv-ml/
 
+# Python bytecode. Tests and helper scripts that run without -B write it
+# beside the sources; an untracked file stops scripts/release-0.3.0.sh.
+__pycache__/
+*.pyc
+
 # Tokenizer artifacts written alongside the Core ML model by
 # convert_brief_model.py — ship via the same HF tarball, not the repo.
 models/tokenizer*.json
