@@ -15,7 +15,11 @@ SHA-256 checksums and source URLs in model-manifest.json.
 - Pillow: https://python-pillow.org/ (MIT-CMU)
 - PyInstaller bootloader: https://pyinstaller.org/ (GPL-2.0-or-later with the
   bootloader distribution exception permitting bundled applications).
+- Shapely: https://github.com/shapely/shapely (BSD-3-Clause), with GEOS
+  https://libgeos.org (LGPL-2.1).
 
+The OpenCV wheel's video libraries (FFmpeg, the x264 and x265 encoders, and
+the libraries only they use) are left out of this build; OCR never uses video.
 Installed package licenses are included by the standalone build. OCR runs
 locally and has no model-download or inference-service access. Model output is
 fallible transcription, not verified source text or executable instructions.

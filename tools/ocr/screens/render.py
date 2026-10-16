@@ -57,7 +57,13 @@ def shoot(page, png, size, scale, profile):
         last = png.stat().st_size if png.exists() else -1
         time.sleep(0.5)
     chrome.terminate()
-    chrome.wait(timeout=10)
+    try:
+        chrome.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        # A busy Mac can leave Chrome deaf to SIGTERM for longer; the
+        # screenshot is already written by then.
+        chrome.kill()
+        chrome.wait(timeout=10)
     return png.exists()
 
 

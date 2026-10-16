@@ -1,6 +1,6 @@
 # Screen benchmarks
 
-Two benches share these scenes.
+Three benches share these scenes.
 
 - **Transcript bench** (`bench.py`, no arguments): does a window's text read
   the way a person reads it? It scores the assembler that shipped
@@ -8,6 +8,13 @@ Two benches share these scenes.
 - **Engine comparison** (`bench.py OUT --paddle … --engines …`): exact lines,
   words, character error and order over every line of the eight flat scenes,
   per OCR engine.
+- **Reader bake-off** (`bakeoff.py read OUT …`, then `bakeoff.py score OUT`):
+  every scene read by the capture helper's own engines (Apple Vision as
+  `VisionOCRRunner` reads, PP-OCR through `PaddleOCRRunner` and the frozen
+  worker) with the cost of each read, then the launch gate: exact lines and
+  words on the flat screens and the windows, and the transcript bench's hard
+  gates on each engine's reading. Its docstring says how each measure is
+  taken. `eval/ocr-bakeoff-2026-10-15.md` has the results.
 
 ## Scenes
 

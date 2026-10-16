@@ -45,10 +45,10 @@ public struct OCRResult: Sendable, Equatable {
     public let durationMs: UInt64
     public let timedOut: Bool
     /// Pane separators: long straight edges no text box crosses (the Paddle
-    /// worker's `separators`), in the lines' normalized space with a
-    /// bottom-left origin, width 0 for a vertical one and height 0 for a
-    /// horizontal one. Geometry only, never text. Empty when the engine sends
-    /// none (Vision in development builds, or an older worker).
+    /// worker's `separators`, or `PaneSeparators` for a Vision read), in the
+    /// lines' normalized space with a bottom-left origin, width 0 for a
+    /// vertical one and height 0 for a horizontal one. Geometry only, never
+    /// text. Empty when the engine finds none, or for an older worker.
     public let separators: [CGRect]
 
     public init(

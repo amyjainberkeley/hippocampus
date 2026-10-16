@@ -60,9 +60,13 @@ env -i HOME="$HOME" PATH=/usr/bin:/bin tools/ocr/.venv/bin/python tools/ocr/prep
 The complete dependency closure is pinned explicitly. `--no-deps` deliberately
 substitutes `opencv-python-headless` for RapidOCR's GUI OpenCV dependency; both
 provide `cv2`, but desktop GUI/media libraries are unnecessary for OCR.
-`prepare.py` verifies installed versions and model SHA-256 hashes. App assembly
-rejects a missing/stale worker and signs every native library before embedding.
-Run preparation again after changing worker/build inputs.
+`prepare.py` verifies installed versions and model SHA-256 hashes. It also
+leaves out the wheel's video libraries: FFmpeg, the GPL x264 and x265 encoders
+and the libraries only they use, 64 MB in all. OpenCV's links to FFmpeg become
+weak, so it loads without them; the build stops if an encoder is still linked
+from anywhere else. App assembly rejects a missing/stale worker, or one that
+still carries a video library, and signs every native library before
+embedding. Run preparation again after changing worker/build inputs.
 
 ## Verify
 
