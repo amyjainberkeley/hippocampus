@@ -109,11 +109,12 @@ Verify the signing setup:
 
 - [ ] Review the notary log even when Apple returns Accepted.
 - [ ] Create a draft release first; inspect artifacts before making it public.
-- [ ] The tag workflow creates only the draft and performs no Pages deployment
-      or release promotion.
-- [ ] Run the separate `Publish inspected release and appcast` workflow only
-      after every gate above is checked; enter the exact tag and `PUBLISH`.
-- [ ] GitHub Pages serves the same URL committed in `SUFeedURL` after the
-      release asset is public.
+- [ ] The draft carries `appcast.xml` beside the DMGs, and the tag workflow
+      creates only the draft and never promotes it.
+- [ ] Publish only after every gate above is checked, as Latest (`gh release
+      edit <tag> --draft=false --latest`, or the separate `Publish inspected
+      release` workflow with the exact tag and `PUBLISH`). Latest is the feed.
+- [ ] The URL committed in `SUFeedURL` serves this release's `appcast.xml`
+      once it is public.
 - [ ] Record release commit, checksum, notarization submission ID, and smoke-test
       machine/OS in the release record. Never record secret values.

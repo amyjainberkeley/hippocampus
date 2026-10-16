@@ -1,4 +1,9 @@
-name: Publish inspected release and appcast
+name: Publish inspected release
+
+# The app's update feed is the appcast.xml of the newest published release
+# (SUFeedURL .../releases/latest/download/appcast.xml), so promoting the
+# inspected draft to Latest is what publishes the update. Nothing else hosts
+# the feed.
 
 on:
   workflow_dispatch:
@@ -13,21 +18,18 @@ on:
         type: string
 
 concurrency:
-  group: github-pages-release
+  group: publish-release
   cancel-in-progress: false
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 jobs:
   publish:
     if: inputs.confirmation == 'PUBLISH'
     runs-on: macos-26
     environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      name: release-publish
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -80,36 +82,44 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
         run: |
-          mkdir -p inspected public
+          mkdir -p inspected
           gh release download "$TAG" --dir inspected \
             --pattern 'Hippocampus-*.dmg' \
             --pattern 'Hippocampus-*.dmg.sha256' \
+            --pattern 'Hippocampus.dmg' \
+            --pattern 'Hippocampus.dmg.sha256' \
             --pattern 'appcast.xml'
           DMG="inspected/Hippocampus-${TAG#v}.dmg"
           scripts/verify-release-identity.sh --phase staged \
             --tag "$TAG" \
             --dmg "$DMG" \
             --appcast inspected/appcast.xml
+          cmp "$DMG" inspected/Hippocampus.dmg
+          (cd inspected && shasum -a 256 -c Hippocampus.dmg.sha256)
           codesign --verify --strict --verbose=2 "$DMG"
           xcrun stapler validate "$DMG"
           spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
-          cp inspected/appcast.xml public/appcast.xml
-
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
-
-      - name: Stage private Pages artifact
-        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
-        with:
-          path: public
 
       - name: Promote inspected GitHub release
         if: steps.release-state.outputs.is_draft == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
-        run: gh release edit "$TAG" --draft=false
+        run: gh release edit "$TAG" --draft=false --latest
 
-      - name: Deploy appcast after release promotion
-        id: deployment
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+      - name: Confirm installed copies now see this appcast
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          FEED="https://github.com/$REPOSITORY/releases/latest/download/appcast.xml"
+          for attempt in 1 2 3 4 5 6; do
+            if curl --fail --silent --show-error --location --proto '=https' "$FEED" --output published-appcast.xml \
+              && cmp published-appcast.xml inspected/appcast.xml; then
+              echo "The update feed serves the inspected appcast: $FEED"
+              exit 0
+            fi
+            echo "Attempt $attempt: the feed does not serve the inspected appcast yet"
+            sleep 10
+          done
+          echo "::error::$FEED does not serve the inspected appcast. Is this release marked Latest?"
+          exit 1

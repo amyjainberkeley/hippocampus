@@ -8,8 +8,9 @@ set -euo pipefail
 #
 # The release, in order, stopping at the first failure:
 #   1. Preflight: branch, clean tree, release identity, CHANGELOG, Cargo.lock,
-#      models, OCR worker, toolchain, Developer ID, notary profile, installer
-#      assets, installer Python, power and disk. Nothing changes if it fails.
+#      models, OCR worker, toolchain, Developer ID, notary profile, Sparkle
+#      key, installer assets, installer Python, power and disk. Nothing
+#      changes if it fails.
 #   2. Set up the installer's Python (two hashed wheels from PyPI) if needed.
 #   3. Rebuild the offline OCR worker if it no longer matches tools/ocr.
 #   4. Stamp docs/STATUS.md with HEAD and commit "docs(status): release baseline".
@@ -18,6 +19,15 @@ set -euo pipefail
 #   6. Assemble and sign Hippocampus.app (apps/hippocampus/Resources/build-app.sh).
 #   7. Make, sign, notarize and staple the DMG (scripts/build-installer.sh).
 #   8. Verify the DMG and the app inside it; print the DMG path and SHA-256.
+#   9. Sign the DMG for Sparkle and write appcast.xml from the CHANGELOG
+#      section, with the feed itself signed (scripts/sparkle-publish.sh and
+#      Sparkle's sign_update, using the Sparkle key file), then check it with
+#      the release identity gate.
+#
+# The app's update feed (SUFeedURL) is the appcast.xml of the newest
+# published GitHub release. Uploading appcast.xml with the DMG, and
+# publishing that release as Latest, is what shows installed copies the
+# update; no other host is involved.
 #
 # Steps 6 and 7 each open the new app for 20 seconds under a throwaway home
 # (the launch check), so its setup window shows on screen twice. Steps 2, 6
@@ -34,6 +44,8 @@ set -euo pipefail
 #   --notes FILE      Release notes containing {{SHA256}}; a filled copy is
 #                     written beside the DMG as release-notes.md.
 #   --jobs N          Parallel build jobs (default: 4).
+#   --sparkle-key FILE  The Sparkle EdDSA private key file, mode 600
+#                     (default: ~/.hippocampus-sparkle-private.key).
 #   --allow-low-disk  Start even when free disk is below this run's estimate.
 #                     Each heavy stage still stops below 1.5 GB.
 #
@@ -50,6 +62,7 @@ STAMP_SUBJECT="docs(status): release baseline"
 CO_AUTHOR="Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 MIN_FREE_MB=1536
 MINIMUM_MACOS="14.0"
+REPOSITORY="amyjainberkeley/hippocampus"
 SWIFT_PACKAGES="apps/hippocampus adapters/macos/MCICaptureHelper apps/recall-ui apps/onboarding apps/mind"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -61,15 +74,18 @@ INSTALLER_REQUIREMENTS="$REPO_ROOT/scripts/installer-requirements.txt"
 OCR_DIR="$REPO_ROOT/tools/ocr"
 OCR_PYTHON="$OCR_DIR/.venv/bin/python"
 EMBEDDER="$REPO_ROOT/models/ArcticEmbedS_FP16.mlmodelc"
+INFO_PLIST="$REPO_ROOT/apps/hippocampus/Resources/Info.plist"
+SIGN_UPDATE="$REPO_ROOT/apps/hippocampus/.build/artifacts/sparkle/Sparkle/bin/sign_update"
 
 CHECK_ONLY=0
 ALLOW_LOW_DISK=0
 JOBS=4
 OUT_DIR="$HOME/Hippocampus-release-candidates/$RELEASE_VERSION"
 NOTES_FILE=""
+SPARKLE_KEY="$HOME/.hippocampus-sparkle-private.key"
 
 usage() {
-    sed -n '4,42p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '4,55p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -78,6 +94,7 @@ while [[ $# -gt 0 ]]; do
         --out) [[ $# -ge 2 ]] || { usage; exit 2; }; OUT_DIR="$2"; shift 2 ;;
         --notes) [[ $# -ge 2 ]] || { usage; exit 2; }; NOTES_FILE="$2"; shift 2 ;;
         --jobs) [[ $# -ge 2 ]] || { usage; exit 2; }; JOBS="$2"; shift 2 ;;
+        --sparkle-key) [[ $# -ge 2 ]] || { usage; exit 2; }; SPARKLE_KEY="$2"; shift 2 ;;
         --allow-low-disk) ALLOW_LOW_DISK=1; shift ;;
         --help|-h) usage; exit 0 ;;
         *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -86,6 +103,7 @@ done
 
 [[ "$JOBS" =~ ^[1-9][0-9]*$ ]] || { echo "--jobs needs a positive number" >&2; exit 2; }
 [[ "$OUT_DIR" == /* ]] || OUT_DIR="$PWD/$OUT_DIR"
+[[ "$SPARKLE_KEY" == /* ]] || SPARKLE_KEY="$PWD/$SPARKLE_KEY"
 if [[ -n "$NOTES_FILE" ]]; then
     [[ "$NOTES_FILE" == /* ]] || NOTES_FILE="$PWD/$NOTES_FILE"
     [[ -f "$NOTES_FILE" ]] || { echo "No notes file at $NOTES_FILE" >&2; exit 2; }
@@ -95,6 +113,8 @@ LOG_DIR="$OUT_DIR/logs"
 DIST_DIR="$OUT_DIR/installer"
 INSTALLER_VENV="$OUT_DIR/installer-python"
 DMG="$DIST_DIR/Hippocampus-$RELEASE_VERSION.dmg"
+STABLE_DMG="$DIST_DIR/Hippocampus.dmg"
+APPCAST="$DIST_DIR/appcast.xml"
 REPO_GIT_DIR="$(git -C "$REPO_ROOT" rev-parse --absolute-git-dir)"
 
 # Every build step runs in this environment and nothing else: no provider
@@ -212,8 +232,33 @@ print(f"{tag}: bundle {found['version']} build {found['build']}, macOS {found['m
 PY
 }
 
+# The same gate over what will be uploaded: DMG name, checksum, the appcast
+# item, the DMG's Sparkle signature and the feed's own signature, both under
+# the app's SUPublicEDKey.
+release_identity_staged() {
+    clean_env python3 -B - "$REPO_ROOT" "$RELEASE_TAG" "$DMG" "$APPCAST" "$REPOSITORY" <<'PY'
+import sys
+from pathlib import Path
+
+root, tag, dmg, appcast, repository = (
+    Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4]), sys.argv[5])
+sys.path.insert(0, str(root / "scripts"))
+import verify_release_identity as identity
+
+identity.load_and_validate = lambda *args, **kwargs: None
+try:
+    found = identity.validate_prebuild(root, tag)
+    identity.validate_staged(root, tag, found, dmg, appcast, repository)
+except identity.ReleaseIdentityError as error:
+    print(error)
+    sys.exit(1)
+print(f"appcast.xml offers {tag} (build {found['build']}); the DMG's and the feed's signatures verify with SUPublicEDKey")
+PY
+}
+
 status_baseline() {
     [[ -f "$STATUS_FILE" ]] || return 0
+    # shellcheck disable=SC2016  # the backticks are Markdown, matched literally
     sed -nE 's/^Audited code baseline: `([0-9a-fA-F]{7,40})`.*$/\1/p' "$STATUS_FILE" | sed -n 1p
 }
 
@@ -396,6 +441,20 @@ preflight() {
         fail "notary keychain profile '$NOTARY_PROFILE' does not work (or Apple's service is unreachable)"
     fi
 
+    if [[ ! -f "$SPARKLE_KEY" ]]; then
+        fail "no Sparkle private key at $SPARKLE_KEY (pass --sparkle-key FILE; scripts/sparkle-keygen.sh made it)"
+    elif result="$(clean_env "$REPO_ROOT/scripts/verify-sparkle-keypair.sh" \
+        --private-key "$SPARKLE_KEY" --info-plist "$INFO_PLIST" 2>&1)"; then
+        ok "Sparkle key $SPARKLE_KEY: $(printf '%s\n' "$result" | tail -1)"
+    else
+        fail "Sparkle key $SPARKLE_KEY: $(printf '%s\n' "$result" | tail -1)"
+    fi
+    if [[ -x "$SIGN_UPDATE" ]]; then
+        ok "Sparkle's sign_update is in apps/hippocampus/.build, for the appcast"
+    else
+        info "Sparkle's sign_update arrives when the build resolves apps/hippocampus's packages"
+    fi
+
     if result="$(clean_env "$REPO_ROOT/scripts/build-installer.sh" --verify-assets 2>&1)"; then
         ok "installer icon and license match their sources"
     else
@@ -482,8 +541,8 @@ rebuild_ocr_if_stale() {
 }
 
 commit_status_stamp() {
-    local baseline="$1" attempt
-    for attempt in 1 2 3 4 5 6; do
+    local baseline="$1"
+    for _ in 1 2 3 4 5 6; do
         if [[ ! -e "$REPO_GIT_DIR/index.lock" ]] && git -C "$REPO_ROOT" commit --quiet \
             -m "$STAMP_SUBJECT" \
             -m "The audited code baseline is now $baseline, the last commit before the $RELEASE_VERSION release build." \
@@ -626,6 +685,8 @@ verify_release() {
     say "   log: $VERIFY_LOG"
 
     verify "checksum file matches the DMG" /bin/sh -c "cd \"$DIST_DIR\" && /usr/bin/shasum -a 256 -c \"$(basename "$DMG").sha256\""
+    verify "Hippocampus.dmg is the same bytes, with its own checksum file" /bin/sh -c \
+        "/usr/bin/cmp \"$DMG\" \"$STABLE_DMG\" && cd \"$DIST_DIR\" && /usr/bin/shasum -a 256 -c Hippocampus.dmg.sha256"
     verify "hdiutil verify" /usr/bin/hdiutil verify "$DMG"
     verify "DMG signature" /usr/bin/codesign --verify --strict --verbose=2 "$DMG"
     verify "DMG notarization ticket (stapler validate)" /usr/bin/xcrun stapler validate "$DMG"
@@ -651,6 +712,19 @@ verify_release() {
     /usr/bin/hdiutil detach "$mounted" -quiet >/dev/null 2>&1 || /usr/bin/hdiutil detach "$mounted" -force -quiet
     rmdir "$mounted" "$VERIFY_MOUNT_ROOT" 2>/dev/null || true
     VERIFY_MOUNT_ROOT=""
+}
+
+make_appcast() {
+    local result
+    [[ -x "$SIGN_UPDATE" ]] || stop "Sparkle's sign_update is not at $SIGN_UPDATE; the app's packages were not resolved."
+    # One build, one appcast: never merge into a feed left by an earlier run.
+    if [[ -e "$APPCAST" ]]; then mv -f "$APPCAST" "$LOG_DIR/appcast.previous-run.xml"; fi
+    stage "appcast: Sparkle-sign the DMG, write appcast.xml from the CHANGELOG, sign the feed" appcast \
+        SPARKLE_SIGN_UPDATE="$SIGN_UPDATE" "$REPO_ROOT/scripts/sparkle-publish.sh" \
+        --dmg "$DMG" --private-key "$SPARKLE_KEY" --changelog-notes \
+        --release-tag "$RELEASE_TAG" --dist "$DIST_DIR" --appcast "$APPCAST" --no-confirm
+    result="$(release_identity_staged 2>&1)" || stop "appcast.xml failed the release identity gate: $result"
+    say "   $result"
 }
 
 publish_ready_files() {
@@ -699,18 +773,29 @@ verify_release
 SHA256="$(awk '{ print $1; exit }' "$DMG.sha256")"
 [[ "$SHA256" == "$(/usr/bin/shasum -a 256 "$DMG" | awk '{ print $1 }')" ]] || stop "The checksum file does not match the DMG."
 publish_ready_files "$SHA256"
+make_appcast
+
+UPLOADS=("$DMG" "$DMG.sha256" "$STABLE_DMG" "$STABLE_DMG.sha256" "$APPCAST")
+if [[ -f "$DIST_DIR/install.sh" ]]; then UPLOADS+=("$DIST_DIR/install.sh"); fi
 
 say ""
 say "=== Hippocampus $RELEASE_VERSION is built, signed, notarized and verified ==="
 say "  DMG:      $DMG ($(du -h "$DMG" | awk '{ print $1 }'))"
 say "  SHA-256:  $SHA256"
 say "  Commit:   $RELEASE_HEAD ($RELEASE_BRANCH; STATUS baseline $(status_baseline))"
-say "  Upload:   $DMG"
-say "            $DMG.sha256"
-if [[ -f "$DIST_DIR/install.sh" ]]; then
-    say "            $DIST_DIR/install.sh (optional, the Terminal installer)"
-fi
+say "  Upload, all to the $RELEASE_TAG release:"
+for upload in "${UPLOADS[@]}"; do say "            $upload"; done
 if [[ -n "$NOTES_FILE" ]]; then
     say "  Notes:    $DIST_DIR/release-notes.md"
 fi
+say ""
+say "  Installed copies check $(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$INFO_PLIST"),"
+say "  which is this appcast.xml once the release is published as Latest. A draft or"
+say "  a prerelease changes nothing for them. After pushing $RELEASE_BRANCH:"
+say "    gh release create $RELEASE_TAG --draft --target $RELEASE_HEAD --title \"Hippocampus $RELEASE_VERSION\" \\"
+if [[ -n "$NOTES_FILE" ]]; then
+    say "      --notes-file \"$DIST_DIR/release-notes.md\" \\"
+fi
+say "      $(printf '"%s" ' "${UPLOADS[@]}")"
+say "    gh release edit $RELEASE_TAG --draft=false --latest   # once the draft is inspected"
 say "Nothing was pushed, tagged or uploaded."

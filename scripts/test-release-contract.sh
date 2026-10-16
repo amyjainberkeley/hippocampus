@@ -34,7 +34,10 @@ STAGE_RECALL_FFI="$REPO_ROOT/scripts/stage-recall-ffi.sh"
 E2E="$REPO_ROOT/scripts/e2e-clean-home.sh"
 E2E_CONTRACT="$REPO_ROOT/scripts/test-e2e-clean-home-contract.sh"
 APP_GROUP_CONTRACT_TEST="$REPO_ROOT/scripts/test-app-group-contract.sh"
+RELEASE_SCRIPT="$REPO_ROOT/scripts/release-0.3.0.sh"
 SPARKLE_PUBLISH="$REPO_ROOT/scripts/sparkle-publish.sh"
+IDENTITY="$REPO_ROOT/scripts/verify_release_identity.py"
+FEED_URL='https://github.com/amyjainberkeley/hippocampus/releases/latest/download/appcast.xml'
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -156,16 +159,20 @@ require_pattern "$PUBLISH" 'workflow_dispatch:' \
     'publication is an explicit owner-triggered workflow'
 require_pattern "$PUBLISH" 'environment:[[:space:]]*$' \
     'publication uses a protected GitHub environment'
-require_pattern "$PUBLISH" 'name:[[:space:]]*github-pages' \
-    'publication uses the GitHub Pages environment'
-require_pattern "$PUBLISH" 'actions/deploy-pages@' \
-    'publication deploys the inspected appcast through GitHub Pages'
-require_pattern "$PUBLISH" 'gh release edit.*--draft=false' \
-    'publication promotes the inspected draft release'
+require_pattern "$PUBLISH" 'name:[[:space:]]*release-publish' \
+    'publication uses its own protected environment, without signing secrets'
+reject_pattern "$PUBLISH" 'pages|Pages' \
+    'publication needs no GitHub Pages site: the release carries the feed'
+require_pattern "$PUBLISH" 'gh release edit.*--draft=false --latest' \
+    'publication promotes the inspected draft to Latest, which is the feed'
+require_literal "$PUBLISH" 'releases/latest/download/appcast.xml' \
+    'publication confirms the public feed serves the inspected appcast'
 require_pattern "$PUBLISH" 'scripts/verify-release-identity\.sh --phase staged' \
     'publication re-verifies downloaded release identity'
-require_order "$PUBLISH" 'gh release edit.*--draft=false' 'actions/deploy-pages@' \
-    'publication promotes the release before exposing the appcast'
+require_order "$PUBLISH" 'scripts/verify-release-identity\.sh --phase staged' 'gh release edit.*--draft=false' \
+    'publication re-verifies the draft before promoting it'
+require_order "$PUBLISH" 'gh release edit.*--draft=false' 'cmp published-appcast\.xml inspected/appcast\.xml' \
+    'publication checks the live feed only after promotion'
 require_pattern "$PUBLISH" "if:[[:space:]]+steps\\.release-state\\.outputs\\.is_draft == 'true'" \
     'publication promotes only while the inspected release is still a draft'
 reject_pattern "$PUBLISH" 'test "\$\(gh release view.*isDraft.*\)" = true' \
@@ -179,16 +186,34 @@ require_pattern "$PUBLISH" 'persist-credentials:[[:space:]]*false' \
 reject_pattern "$PUBLISH" 'uses:[[:space:]]+[^#[:space:]]+@v[0-9]+([[:space:]]|$)' \
     'publication workflow pins every action to a full commit SHA'
 
-require_pattern "$INFO_PLIST" 'https://amyjainberkeley\.github\.io/hippocampus/appcast\.xml' \
-    'shipped Sparkle feed matches the publication target'
-reject_pattern "$SPARKLE_PUBLISH" 'hippocampus\.ai' \
-    'sparkle-publish names no address on the parked hippocampus.ai domain'
+require_literal "$INFO_PLIST" "<string>$FEED_URL</string>" \
+    'shipped Sparkle feed is the latest GitHub release appcast'
+require_literal "$IDENTITY" "FEED_URL = \"$FEED_URL\"" \
+    'the release identity gate pins the same feed'
+for feed_file in "$INFO_PLIST" "$IDENTITY" "$SPARKLE_PUBLISH" "$RELEASE_SCRIPT" "$PUBLISH" "$RELEASE"; do
+    reject_pattern "$feed_file" 'github\.io|hippocampus\.ai' \
+        "$(basename "$feed_file") names neither a Pages feed nor the parked hippocampus.ai domain"
+done
 require_literal "$SPARKLE_PUBLISH" '"$SIGN_UPDATE" -f "$KEY_PATH" "$TMP_APPCAST"' \
     'sparkle-publish signs the appcast itself with sign_update'
 require_literal "$SPARKLE_PUBLISH" '"$SIGN_UPDATE" --verify -f "$KEY_PATH" "$TMP_APPCAST"' \
     'sparkle-publish verifies the signed appcast before writing it'
 require_literal "$SPARKLE_PUBLISH" 'sparkle:format="markdown"' \
     'sparkle-publish marks Markdown notes the way Sparkle reads them'
+require_literal "$IDENTITY" 'validate_feed_signature(appcast, identity["public_key"])' \
+    'the staged identity gate verifies the feed signature with SUPublicEDKey'
+require_pattern "$RELEASE_SCRIPT" 'verify-sparkle-keypair\.sh' \
+    'release preflight checks the Sparkle key against SUPublicEDKey'
+require_literal "$RELEASE_SCRIPT" '"$REPO_ROOT/scripts/sparkle-publish.sh"' \
+    'release script writes the appcast with sparkle-publish'
+require_literal "$RELEASE_SCRIPT" '--dmg "$DMG" --private-key "$SPARKLE_KEY" --changelog-notes' \
+    'release script signs the notarized DMG with the Sparkle key file'
+require_literal "$RELEASE_SCRIPT" 'identity.validate_staged(root, tag, found, dmg, appcast, repository)' \
+    'release script runs the staged identity gate on its appcast'
+require_order "$RELEASE_SCRIPT" '^verify_release$' '^make_appcast$' \
+    'release script signs the appcast only for a verified DMG'
+require_literal "$RELEASE_SCRIPT" 'UPLOADS=("$DMG" "$DMG.sha256" "$STABLE_DMG" "$STABLE_DMG.sha256" "$APPCAST")' \
+    'release script lists appcast.xml with the DMGs to upload'
 PRIVATE_REPORTING='https://github.com/amyjainberkeley/hippocampus/security/advisories/new'
 for contact_file in "$REPO_ROOT/SECURITY.md" "$REPO_ROOT/docs/legal/terms-of-service.md" \
     "$REPO_ROOT/assets/installer/EULA.rtf"; do
