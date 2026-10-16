@@ -417,7 +417,9 @@ preflight() {
     fi
 
     baseline="$(status_baseline)"
-    if [[ -n "$baseline" ]]; then
+    if [[ -n "$baseline" && "$DRY_RUN" -eq 1 ]]; then
+        ok "docs/STATUS.md baseline line found ($baseline); a dry run leaves it as it is"
+    elif [[ -n "$baseline" ]]; then
         ok "docs/STATUS.md baseline line found ($baseline); it is stamped at HEAD just before the build"
     else
         fail "docs/STATUS.md has no line 'Audited code baseline: \`<sha>\`' to stamp"
@@ -541,7 +543,11 @@ preflight() {
         warn "a copy of apps/hippocampus/dist/Hippocampus.app is running; quit it, since assembly replaces it"
     fi
     info "release-models.json is read only by the tag-triggered CI release, which builds nothing while no release secret is set"
-    info "the launch check opens the new app for 20 s, twice, under a throwaway home"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        info "a dry run never opens the new app: the launch checks are skipped"
+    else
+        info "the launch check opens the new app for 20 s, twice, under a throwaway home"
+    fi
 }
 
 # --- Release steps ---
