@@ -137,6 +137,26 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
     }
 }
 
+/// Requests the app writes on the capture helper's lease, its standard
+/// input, one byte each. Only this app holds the write end.
+enum HelperLeaseCommand {
+    /// One fresh read of the window in front (Ask opened). Equal to the
+    /// helper's `FreshReadRequest.byte`.
+    static let freshRead: UInt8 = 0x72
+
+    /// Writes `byte` without blocking the caller and without SIGPIPE. False
+    /// when the helper is gone or has stopped reading.
+    static func send(_ byte: UInt8, to handle: FileHandle) -> Bool {
+        let descriptor = handle.fileDescriptor
+        _ = fcntl(descriptor, F_SETNOSIGPIPE, 1)
+        let flags = fcntl(descriptor, F_GETFL)
+        guard flags >= 0 else { return false }
+        if flags & O_NONBLOCK == 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) < 0 { return false }
+        var value = byte
+        return Darwin.write(descriptor, &value, 1) == 1
+    }
+}
+
 @MainActor
 public final class ProcessSupervisor: ObservableObject, Sendable {
     @Published public private(set) var state: SupervisorState = .idle {
@@ -1131,6 +1151,20 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         let (health, receipt) = captureStatusReader()
         skipWatch.observe(receipt, at: clock())
         (self.health, captureReceipt) = (health, receipt)
+    }
+
+    /// Ask opened: ask the capture helper for one fresh read of the window in
+    /// front, so "What's on this screen?" is answered from what is there now,
+    /// not from the last read before the reader's rest. Nothing is asked
+    /// while remembering is off, paused, stopping or without a permission;
+    /// the helper skips the read for an excluded app, a password manager, a
+    /// private window or a password field, as for any other.
+    @discardableResult
+    public func requestFreshRead() -> Bool {
+        guard state == .running, captureEnabled, !requestedPauseState, !captureStopLatched,
+              captureStopTask == nil, !shutdownRequested, shutdownTask == nil, tccRevokedSurface == nil
+        else { return false }
+        return topology.requestFocusedRead()
     }
 
     private func stopAncillaryServices(revokeCaptureConsent: Bool = true) {

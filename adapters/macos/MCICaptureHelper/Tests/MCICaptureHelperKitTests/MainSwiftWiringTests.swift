@@ -250,7 +250,7 @@ final class MainSwiftWiringTests: XCTestCase {
                                      "the OCR worker must end with the capture process")
         XCTAssertLessThan(prewarm.lowerBound, register.lowerBound)
 
-        let leaseWait = try XCTUnwrap(src.range(of: "group.addTask { try await ParentLifetimeLease.waitForEOF() }"))
+        let leaseWait = try XCTUnwrap(src.range(of: "group.addTask { try await ParentLifetimeLease.waitForEOF(onByte: leaseCommands) }"))
         let arm = try XCTUnwrap(src.range(of: "defer { parentGoneDeadline.arm() }"),
                                 "nothing may keep the process alive once its parent is gone")
         let next = try XCTUnwrap(src.range(of: "_ = try await group.next()"))

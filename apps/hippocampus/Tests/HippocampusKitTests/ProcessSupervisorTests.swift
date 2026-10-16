@@ -128,6 +128,13 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
         _ = paused
     }
 
+    private(set) var focusedReadRequests = 0
+
+    func requestFocusedRead() -> Bool {
+        focusedReadRequests += 1
+        return isRunning
+    }
+
     func fireUnexpectedExit(forLaunchAt index: Int, label: String = "helper", status: Int32 = 9) {
         unexpectedExitCallbacks[index](label, status)
     }

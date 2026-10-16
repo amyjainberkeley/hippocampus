@@ -689,11 +689,17 @@ do {
 // drain below itself (SIGTERM a second after it closes the lease); a dead one
 // cannot, so once the parent is gone this ends the process within 10 seconds.
 let parentGoneDeadline = ParentGoneDeadline()
+// The app writes `FreshReadRequest.byte` on the lease when Ask opens: one
+// fresh read of the window in front. Without capture there is nothing to read.
+let freshReadSession = captureRuntime?.session
+let leaseCommands: @Sendable (UInt8) -> Void = { byte in
+    if byte == FreshReadRequest.byte { freshReadSession?.requestFreshRead() }
+}
 do {
     if args.parentLeaseStdin {
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask { try await loop.run() }
-            group.addTask { try await ParentLifetimeLease.waitForEOF() }
+            group.addTask { try await ParentLifetimeLease.waitForEOF(onByte: leaseCommands) }
             // Armed on every way out, before the group waits for the heartbeat
             // task: a heartbeat stuck on a full pipe must not keep this
             // process alive once the parent is gone.

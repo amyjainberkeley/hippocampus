@@ -67,6 +67,17 @@ public struct FocusedReadPacing: Sendable, Equatable {
         return true
     }
 
+    /// A read made outside the interval (Ask asked for one): the window's
+    /// interval starts again from it, and a new window counts as read.
+    public mutating func noteRead(generation: UInt64, nowUs: UInt64) {
+        if generation != self.generation {
+            self.generation = generation
+            denseReads = 0
+        }
+        lastReadUs = nowUs
+        waitedSinceRead = false
+    }
+
     public var isInMotion: Bool { denseReads >= Self.motionAfterDenseReads }
 
     /// Whether `generation` is a window this pacing has not read yet.
