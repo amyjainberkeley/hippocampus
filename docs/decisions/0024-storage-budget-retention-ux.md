@@ -8,8 +8,8 @@
 > text. The growth estimates below were not measured on today's implementation.
 > Explicit, bounded storage accounting now covers the database, WAL, SHM and
 > managed blobs, not a scan on every write. See [current status](../STATUS.md)
-> and the [cost and storage audit](../guide/cost-and-storage.md) before making
-> product or capacity claims. No automatic deletion is authorized by this note.
+> before making product or capacity claims. No automatic deletion is
+> authorized by this note.
 
 - Status: Accepted (2026-05-21).
 - Phase: 4 (retention purger already landed, PR #127) + 7 (onboarding UX for initial cap choice)

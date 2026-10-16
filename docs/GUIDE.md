@@ -1,288 +1,212 @@
 # Hippocampus guide
 
-The [README](../README.md) says what Hippocampus is and why it exists. This is the reference: how to inspect a brain, turn on semantic recall, connect other MCP servers, and fix things when they go wrong.
+The [README](../README.md) says what Hippocampus is. This is the reference: the command line, a made-up memory to try things on, search by meaning in a source build, keeping an app out, your own MCP servers, and fixing things.
 
-- [Inspecting a brain](#inspecting-a-brain)
-- [Turning on semantic recall](#turning-on-semantic-recall)
-- [Pulling in your other MCP servers](#pulling-in-your-other-mcp-servers)
-- [Prerequisites](#prerequisites)
-- [Commands](#commands)
+- [The command line](#the-command-line)
+- [Try it on a made-up memory](#try-it-on-a-made-up-memory)
+- [Search by meaning in a source build](#search-by-meaning-in-a-source-build)
+- [Keep an app out](#keep-an-app-out)
+- [Pull in your other MCP servers](#pull-in-your-other-mcp-servers)
+- [Settings without a switch](#settings-without-a-switch)
+- [Build requirements](#build-requirements)
+- [Uninstall](#uninstall)
 - [Troubleshooting](#troubleshooting)
 
----
+## The command line
 
-## Inspecting a brain
+The one-line installer and the Homebrew cask put `mci-agent` on your PATH. It reads the same memory as the app, with the key from your Keychain. `mci-agent --help` lists every command; these are the useful ones.
 
-Real output from `./scripts/try-it.sh` (see the [quickstart](../README.md#build-from-source)), not a mockup.
+| Command | What it does |
+| --- | --- |
+| `mci-agent doctor` | Says why memory is empty, or what is in the way, in plain words. Reads only. |
+| `mci-agent context --focus "a task"` | Prints a short summary of what memory holds about a task, with the moments it comes from. |
+| `mci-agent overview --date 2026-10-15 --json` | The day as the Overview draws it. Reads only. |
+| `mci-agent mcp-serve` | The MCP server an AI tool starts. It speaks over stdio and opens no port. |
+| `mci-agent register-clients` | Adds that server to Claude Code and Codex, as Connect AI Tools… does. |
+| `mci-agent embed-backfill` | Builds search-by-meaning data for moments that have none. Needs the embedding model. |
+| `mci-agent mcp-sync` | Reads once from your own MCP servers ([below](#pull-in-your-other-mcp-servers)). |
+| `mci-agent import-sessions` | Imports your Claude Code and Codex transcripts from `~/.claude/projects` and `~/.codex/sessions`. The app never does this by itself. |
 
-One thing to be straight about before you read it: `mci-brain search` is **keyword search only** (SQLite FTS5). The vector half and the fusion that ranks them together live in `core/brain/src/hybrid_retriever.rs` and are exercised by the test suite, but they need the embedder, which this read-only CLI does not load. So what you see below is the lexical half doing its job, not the full recall path.
+Commands that write to memory (`import-sessions`, `embed-backfill`, `mcp-sync`, `enrich`, `brief`) refuse to run while another program holds the database's one writer lease. While Hippocampus is remembering, its own agent holds it, so quit Hippocampus first.
+
+`mci-agent init` and `mci-agent connect --all` are the older command-line setup. Besides registering the MCP server, they add session-start hooks and load a background job (`ai.hippocampus.refresh`) that imports your Claude Code and Codex transcripts; `init` also imports them at once. The app doesn't need them. `mci-agent disconnect --all` removes the hooks and the refresh job; the MCP registrations stay ([how to remove them](../PRIVACY.md#disconnecting-an-ai-tool)).
+
+## Try it on a made-up memory
+
+```bash
+./scripts/try-it.sh
+```
+
+It builds the command line, makes a throwaway encrypted memory in `./hippocampus-demo` with its own key, adds 20 made-up moments and searches them. It needs Rust and openssl, and no permissions. It doesn't open your real memory or ask your Keychain for its key.
+
+The demo uses `mci-brain`, a read-only command for inspecting a memory file. It comes with a source build, not with the app. This is real output from a run on October 16, 2026:
 
 ```console
 $ mci-brain stats
 Events: 20
-Oldest: 2026-08-02T20:32:59.612Z (1785702779612697)
-Newest: 2026-08-02T22:26:59.612Z (1785709619612697)
+Oldest: 2026-10-16T06:19:21.353Z (1792131561353945)
+Newest: 2026-10-16T08:13:21.353Z (1792138401353945)
 Entities: 0
-```
+Entity mentions: 0
+Identities: 0
+Episode links: 0
 
-Ask for something by an exact term:
-
-```console
-$ mci-brain search "ScreenCaptureKit"
-event:6 | 2026-08-02T21:02:38.651Z | com.mci.demo.seed.safari
-  | ScreenCaptureKit | Apple Developer Documentation
-  | https://developer.apple.com/documentation/screencapturekit
-  | SCStream delivers frames via SCStreamOutput. The MCI helper uses the
-    SCStream path on macOS 14+; cascade runs synchronously in the callback.
-```
-
-Note what came back with it: the app, the window title, the URL, and the moment. That context is the point. A filename would not have helped you.
-
-Pull one moment up in full:
-
-```console
-$ mci-brain show 6
-Event: event:6
-Timestamp: 2026-08-02T21:01:34.593Z (1785704494593762)
+$ mci-brain show 12
+Event: event:12
+Timestamp: 2026-10-16T07:25:21.353Z (1792135521353945)
 App: com.mci.demo.seed.safari
-Window: ScreenCaptureKit | Apple Developer Documentation
-URL: https://developer.apple.com/documentation/screencapturekit
+Window: Snowflake Arctic Embed S — Hugging Face
+URL: https://huggingface.co/Snowflake/snowflake-arctic-embed-s
+Summary: (none)
+Entities: (none)
 Text:
-SCStream delivers frames via SCStreamOutput. The MCI helper uses the SCStream
-path on macOS 14+; cascade runs synchronously in the callback.
+[app=com.mci.demo.seed.safari | title=Snowflake Arctic Embed S — Hugging Face | url=https://huggingface.co/Snowflake/snowflake-arctic-embed-s | ts=2026-10-16T07:25:21.353Z]
+Arctic Embed S produces 384-dimensional local embeddings. Hippocampus combines them with FTS5 lexical ranking; semantic recall remains explicitly unavailable when the model artifact is absent.
 ```
 
-Or take the whole thing with you. It is your file:
-
-```console
-$ mci-brain export --format jsonl | head -1
-{"app_bundle_id":"com.mci.demo.seed.safari","cascade_reason":0,"event_id":1, ...}
-```
-
----
-
-## Turning on semantic recall
-
-Two commands. This whole path has been run end to end on a clean machine.
-
-**1. Build the model.** ArcticEmbedS as Core ML. About 66 MB, so it is not in the repo. Needs Python 3.11 or 3.12 (not 3.14, coremltools does not support it yet) and roughly 2 GB of disk for torch:
+The other commands:
 
 ```bash
-python3.11 -m venv .venv-ml && source .venv-ml/bin/activate
+mci-brain search "SQLCipher" --limit 5   # moments that contain the words
+mci-brain recent --limit 5               # newest first
+mci-brain export --format jsonl          # everything, one moment per line
+mci-brain export --format csv --out memory.csv
+mci-brain stats --json
+```
+
+`mci-brain search` matches words only (SQLite FTS5). Search by meaning needs the embedding model, which this command doesn't load. `mci-brain` opens the file read-only at the SQLite level, so it can't change it.
+
+To point it at the demo yourself, set `MCI_DEVELOPMENT_FILE_KEY=1`, `MCI_DB_KEY_HEX` to the key in `hippocampus-demo/demo.key`, and `MCI_DB_PATH` to `hippocampus-demo/demo.sqlite`; the script prints the lines. `rm -rf ./hippocampus-demo` deletes the demo and its only key.
+
+## Search by meaning in a source build
+
+The app bundles the embedding model, Snowflake Arctic Embed S. A source checkout doesn't: `models/` is empty until you convert it. A source build's `mci-agent` also uses the model inside an installed `/Applications/Hippocampus.app`.
+
+To convert it, follow [the Core ML conversion guide](coreml-conversion-howto.md). In short, with Python 3.12:
+
+```bash
+python3.12 -m venv .venv-ml && source .venv-ml/bin/activate
 pip install -r scripts/requirements-ml.txt
-python scripts/convert_embedder.py \
-  --output models/ArcticEmbedS_INT8.mlpackage --verify
+python scripts/convert_embedder.py --output models/ArcticEmbedS_FP16.mlpackage --verify
 ```
 
-That writes two things: a `.mlpackage` and a compiled `.mlmodelc` beside it. **The `.mlmodelc` is the one that matters.** A raw `.mlpackage` cannot be opened at runtime; Core ML rejects it with "Compile the model with Xcode." The script now compiles it for you, which it did not always do, and that gap was invisible because the loader treats a failed load and a missing file identically.
-
-**2. Fill in the vectors.** Events are stored without embeddings, so something has to go back over them:
+That writes the `.mlpackage` and a compiled `.mlmodelc` beside it. The `.mlmodelc` is the one that runs; Core ML can't open a bare `.mlpackage` at runtime. Then fill in the vectors for moments that have none:
 
 ```bash
+export MCI_ARCTIC_MODEL_PATH=models/ArcticEmbedS_FP16.mlmodelc
 mci-agent embed-backfill
-mci-agent embed-backfill --batch-size 64
 ```
 
-Idempotent, so running it twice is a no-op rather than an error. It refuses to run without a working model instead of writing zero vectors, because a zero vector matches every query equally and would look like a ranking bug rather than a missing model.
+`embed-backfill` refuses to run without a working model rather than write empty vectors, and running it twice does nothing the second time. `mci-agent mcp-serve` picks keyword-only or hybrid search when it starts, so restart your AI tool afterwards.
 
-Then restart `mcp-serve`. It picks the mode once at startup, and the line should now read:
+The model runs on the CPU on purpose; the reasons are in [`adapters/macos/mci-embed-coreml/src/lib.rs`](../adapters/macos/mci-embed-coreml/src/lib.rs). `cargo test -p mci-embed-coreml --test quality` embeds 50 sentences and compares each with a reference from the original weights; every one must reach a cosine of 0.999. Without the model it skips and says so.
 
-```
-recall=hybrid (FTS5 + semantic, ADR-0010 min-max CC)
-```
+## Keep an app out
 
-If the model lives somewhere else, point at it:
+Hippocampus skips six password managers and a few system apps by bundle ID ([PRIVACY.md](../PRIVACY.md#what-is-skipped)). To keep out another app, a website or a window, list it in `~/Library/Application Support/MCI/denylist.toml`:
 
-```bash
-export MCI_ARCTIC_MODEL_PATH=models/ArcticEmbedS_INT8.mlmodelc
-```
+```toml
+# An app, by its exact bundle ID.
+[[denylist]]
+kind = "appBundle"
+pattern = "com.example.app"
 
-### Does it actually help?
+# Any address that starts with this.
+[[denylist]]
+kind = "urlPrefix"
+pattern = "https://bank.example.com/"
 
-Here is the same query against the same 20-event demo brain, once with keyword search and once with hybrid. None of the words in the query appear anywhere in the corpus:
-
-```console
-$ mci_recall "finding things by meaning rather than exact wording"
-
-# lexical-only
-0 hits
-
-# hybrid
-3 hits
-  score=0.645  Notion — MCI / Recall UI Spec
-  score=0.598  Snowflake Arctic Embed S — Hugging Face
-  score=0.594  sqlite-vec — A vector search SQLite extension
+# Any window whose title contains this.
+[[denylist]]
+kind = "windowTitleSubstring"
+pattern = "Payroll"
 ```
 
-Keyword search cannot answer that question, because you did not use any of the words. That difference is the entire reason this project exists.
+Find an app's bundle ID with `osascript -e 'id of app "KeePassXC"'`. Matching is exact and case-sensitive. An address rule also applies to an address Hippocampus reads in a browser's top bar.
 
-### On the Neural Engine message
+The capture helper reads the file when it starts, so restart Hippocampus afterwards (Preferences, Advanced, Restart Hippocampus). If the file has a mistake, the helper refuses to start, so nothing is read until you fix it.
 
-You will see this during conversion, and it is not a problem:
+## Pull in your other MCP servers
 
-```
-MILCompilerForANE error: failed to compile ANE model using ANEF.
-Error=_ANECompiler : ANECCompile() FAILED.
-```
-
-There is no Neural Engine residency for this BERT graph. It cannot run on the ANE, so Core ML tries, fails, and moves on. The Rust loader never goes down that path anyway: it pins compute units to CPU on purpose, which is a measured decision rather than a default. The rationale is written up in `adapters/macos/mci-embed-coreml/src/lib.rs` under the E5RT story, and it is worth reading if you are tempted to change it.
-
-Measured here, Apple Silicon, CPU-only pin:
-
-| | |
-|---|---|
-| Model load | ~340 ms, once at startup |
-| Per embed | ~18 ms |
-
-Embedding happens on an idle loop, not in front of your query, so 18 ms is not a number anyone will feel. CPU+GPU benchmarks faster (~1.9 ms in the notes in that file) and would be the thing to reach for if the embedder ever moved onto a hot path. It has not, so it stays on CPU.
-
-### How I know the vectors are right
-
-Loading is not the same as working. `adapters/macos/mci-embed-coreml/tests/quality.rs` embeds 50 fixture sentences through the Core ML model and compares each one against a Python FP32 reference generated from the original Hugging Face weights. The bar is cosine `>= 0.999` on every sentence.
-
-```bash
-python scripts/convert_embedder.py \
-  --output models/ArcticEmbedS_INT8.mlpackage --verify --fixtures
-cargo test -p mci-embed-coreml --test quality
-```
-
-```
-test cosine_similarity_matches_python_reference ... ok
-test output_is_l2_normalized ... ok
-test output_dimension_is_384 ... ok
-test empty_string_returns_valid_vector ... ok
-test truncation_long_input_does_not_crash ... ok
-```
-
-That test used to skip silently, because it needs a fixture file that was never committed. It runs now.
-
-## Pulling in your other MCP servers
-
-The other direction. The MCP server lets an agent ask Hippocampus what you saw. Here, Hippocampus asks your other MCP servers what they have and keeps it, so a search covers your screen and your connectors at once.
+The MCP server lets an AI tool ask Hippocampus what you saw. This is the other direction: Hippocampus asks your own MCP servers what they have and keeps it, so a search covers your screen and your connectors at once.
 
 ```bash
 mci-agent mcp-sync
 ```
 
-One pass over every server you registered, then it exits. Nothing runs in the background.
-
-Servers are registered in a file, one block each:
-
-```
-~/Library/Application Support/MCI/mcp-servers.toml
-```
+It makes one pass over every server you listed, then exits. List them in `~/Library/Application Support/MCI/mcp-servers.toml`, one block each:
 
 ```toml
 [[server]]
 name = "my-server"                       # required, unique, [a-zA-Z0-9_-]
-url  = "http://127.0.0.1:7890/mcp"       # required, must be loopback
+url  = "http://127.0.0.1:7890/mcp"       # required, on this Mac
 # auth_header = "Bearer sk-..."          # optional, sent as Authorization
-# enabled = true                         # optional, defaults to true
+# enabled = true                         # optional, true by default
 ```
 
-The file has to be mode 0600 and owned by you, or it is refused rather than read, because `auth_header` can hold a real token:
+The file must be yours and mode 0600, or it is refused, because `auth_header` can hold a real token:
 
 ```bash
-mkdir -p ~/Library/Application\ Support/MCI
 touch ~/Library/Application\ Support/MCI/mcp-servers.toml
 chmod 600 ~/Library/Application\ Support/MCI/mcp-servers.toml
 ```
 
-If the file does not exist, `mcp-sync` says so, prints the block above, and exits zero. Having no MCP servers is a normal state, not an error.
+What to know:
 
-Four things worth knowing about what it stores:
+- **The address must be on this Mac:** 127.0.0.1 or localhost. Anything else is refused.
+- **Every moment it stores is tagged `mcp:<name>`** as its app, so you can always tell a connector's moments from your screen's.
+- **Large resources are stored as a pointer.** Anything over 512 KB keeps its URI and details but not its body.
+- **Running it again stores nothing new** for a resource it already has.
+- When Hippocampus is remembering, its agent reads the same list when it starts.
 
-- **The url must be loopback**, 127.0.0.1 or localhost. This project has no outbound network path and is not getting one to fetch your Notion pages. Run the server on your own machine.
-- **Every event it writes is tagged `mcp:<name>`** in `app_bundle_id`, so you can always tell a memory came from a connector rather than from your screen. `mci_events_by_app` scopes to it.
-- **Small resources are stored whole; large ones are stored as a pointer.** Anything over 512 KB becomes a `[CATALOG_ONLY ...]` row carrying the URI and metadata and none of the body. A 100 MB page should not quietly become 100 MB of brain.
-- **Re-running is a no-op.** A resource already ingested is not fetched or written a second time, so this is safe in a cron.
+`apps/agent/tests/mcp_sync.rs` runs the whole path against a local MCP server. It hasn't been tried against third-party servers.
 
-The report is counts, not prose:
+## Settings without a switch
 
-```
-mci-agent mcp-sync: done. 1 server(s) contacted, 0 failed to connect,
-2 resource(s) discovered, 2 materialized, 0 cataloged, 2 event(s) written.
-```
+| Setting | What it does |
+| --- | --- |
+| `defaults write ai.hippocampus WholeScreenCapture -bool NO` | Reads only the window in front. Restart Hippocampus afterwards. |
+| `MCI_DB_PATH` | The memory file the command line opens. Default: `~/Library/Application Support/MCI/mci.sqlite`. |
+| `MCI_ARCTIC_MODEL_PATH` | Where the command line finds the embedding model. |
+| `MCI_EMBEDDER_DISABLED=1` | `mcp-serve` searches by words only. |
+| `MCI_BRIEFS_DISABLED=1` | Turns off the daily briefs the agent writes. Nothing in the window shows them yet. |
+| `MCI_DEVELOPMENT_FILE_KEY=1` | Development builds only: lets the command line use a raw key (`MCI_DB_KEY_HEX`) or the key file `dev.key` in the data folder instead of the Keychain. |
 
-`event(s) written` is measured against the store before and after, so a second run says `0` rather than repeating the first run's number.
+## Build requirements
 
-**What I have and have not run.** The whole path is exercised end to end in `apps/agent/tests/mcp_sync.rs` against a local MCP server: registration, connect, read, write, tagging, the size split, and a re-run writing nothing. I have not pointed it at a third-party MCP server, so I cannot tell you how any particular one behaves.
+| What | Version | Needed for |
+| --- | --- | --- |
+| macOS on Apple silicon | 14 or later | Everything |
+| Xcode | 26 | The Swift apps and helper |
+| Rust | The version in [`rust-toolchain.toml`](../rust-toolchain.toml) (1.96.0) | The agent and the command line |
+| Python and uv | 3.12 | Building the OCR worker ([`tools/ocr/README.md`](../tools/ocr/README.md)) |
+| ripgrep and SwiftFormat | Any recent | `scripts/check.sh` |
+| openssl | Ships with macOS | `scripts/try-it.sh` |
 
----
+The demo needs only Rust and openssl.
 
-## Prerequisites
+## Uninstall
 
-| Requirement | Minimum | Check | Install |
-|---|---|---|---|
-| macOS | 14 (Sonoma) | `sw_vers -productVersion` | Apple Silicon. The macOS-only crates are `cfg`-gated so the CLI should build elsewhere, but I have only run this on macOS |
-| Rust | 1.83 | `rustc --version` | [rustup.rs](https://rustup.rs) |
-| Xcode | 15+ | `xcodebuild -version` | Only needed for the Swift app, not the CLI |
-| openssl | any | `openssl version` | Ships with macOS |
+1. If you want your memory gone, delete everything first: Preferences, Privacy, See or Delete What's Remembered….
+2. Disconnect your AI tools ([PRIVACY.md](../PRIVACY.md#disconnecting-an-ai-tool)).
+3. Quit Hippocampus and move it to the Trash.
 
-The one-minute demo needs only Rust and openssl. Xcode is for building the menu-bar app.
+With Homebrew, `brew uninstall --cask hippocampus` removes the app and keeps your memory. `brew uninstall --zap --cask hippocampus` also deletes your memory, logs and settings, and that can't be undone.
 
----
-
-## Commands
-
-Every command reads the brain at `$MCI_DB_PATH` using the key in `$MCI_DB_KEY_HEX`, or, if that is unset, the `dev.key` file that `mci-agent init` writes to `~/Library/Application Support/MCI/`. `mci-brain` opens the database read-only at the SQLite driver level, so it cannot corrupt or modify your brain no matter what you type.
-
-```bash
-mci-brain stats                          # counts and time range
-mci-brain stats --json                   # same, machine-readable
-
-mci-brain search "sqlite-vec"            # find events by text
-mci-brain search "vector" --limit 20
-mci-brain search "..." --json
-
-mci-brain show 6                         # one event in full
-mci-brain recent --limit 5               # newest first
-
-mci-brain export --format jsonl          # take everything with you
-mci-brain export --format csv --out brain.csv
-mci-brain export --since 1785702779612697
-```
-
-The agent-facing side lives on `mci-agent`:
-
-```bash
-mci-agent init                           # key + import Claude Code history + index + register
-mci-agent doctor                         # say why the brain is empty and what to fix
-mci-agent import-sessions                # import Claude Code transcripts (text blocks only)
-mci-agent enrich                         # entities, embeddings, episodes, identity links
-mci-agent brief --date 2026-10-07        # draft a daily brief (needs the Qwen3 model)
-mci-agent mcp-serve                      # MCP server over stdio
-mci-agent register-mcp                   # add it to Claude Code
-mci-agent mcp-sync                       # pull from your registered MCP servers
-mci-agent embed-backfill                 # fill in missing vectors
-mci-agent embed-backfill --batch-size 64
-mci-agent stats --source safari
-```
-
-`init`, `import-sessions`, `enrich`, `embed-backfill`, `brief` and `mcp-sync` write to the brain. Everything else reads. Each takes `--db-path` and falls back to `$MCI_DB_PATH`.
-
-| Variable | What it does | Required |
-|---|---|---|
-| `MCI_DB_KEY_HEX` | 64-character hex SQLCipher key | No, if `dev.key` exists (`mci-agent init` writes it) |
-| `MCI_DB_PATH` | Path to the brain file | No, defaults to `~/Library/Application Support/MCI/mci.sqlite` |
-| `MCI_EMBEDDER_DISABLED` | `1` forces keyword-only recall in `mcp-serve` | No |
-| `MCI_BRIEFS_DISABLED` | `1` switches daily briefs off | No |
-| `HIPPOCAMPUS_ENABLE_V2P1` | Turns live capture on | No, and leave it off until capture is verified |
-
----
+The database key stays in your login Keychain as `ai.hippocampus.brain`. Delete it in Keychain Access if you won't reinstall.
 
 ## Troubleshooting
 
-Start with `mci-agent doctor`. It opens the brain read-only and says why it is empty, or what is blocking, in plain words.
+Start with `mci-agent doctor`. It opens memory read-only and says what is wrong in plain words.
 
-**`cargo: command not found`**. Install Rust from [rustup.rs](https://rustup.rs), then open a new terminal so `~/.cargo/bin` is on your PATH.
+**`cargo: command not found`.** Install Rust from [rustup.rs](https://rustup.rs), then open a new terminal so `~/.cargo/bin` is on your PATH.
 
-**`try-it.sh` fails on the build step**. The first build compiles the whole workspace and needs a few minutes. If it fails outright, run `cargo build -p mci-agent --bins` on its own to see the real error.
+**`try-it.sh` fails on the build step.** The first build compiles the whole workspace and takes a few minutes. If it fails outright, run `cargo build -p mci-agent --bins` on its own to see the real error.
 
-**`MCI_DB_KEY_HEX` errors**. The key must be exactly 64 hex characters (32 bytes). Generate one with `openssl rand -hex 32`. A wrong key does not produce a helpful error, it produces a file that will not open, because that is what encryption means.
+**Key errors in the demo.** A development key must be exactly 64 hex characters. `openssl rand -hex 32` makes one. A wrong key doesn't give a helpful error; the file just won't open, because that is what encryption means.
 
-**Search returns nothing**. Check `mci-brain stats` first. If it says `Events: 0`, the brain is empty and the seeder did not run. If there are events, your term is probably not in them; the demo corpus is about screen-capture and SQLite topics, so try `sqlite`, `embedding`, or `ScreenCaptureKit`.
+**Search returns nothing.** Check `mci-brain stats` first. `Events: 0` means the demo didn't seed. Otherwise your words may not be in it; the made-up memory is about screen capture and storage, so try `ScreenCaptureKit`, `embedding` or `privacy`.
 
-**I want my demo brain gone**. `rm -rf ./hippocampus-demo`. The key lives only in that folder, so deleting it makes the data unrecoverable.
+**A command says another writer owns the brain lease.** Hippocampus's agent holds it while it remembers. Quit Hippocampus, run the command, and open Hippocampus again.
 
-**The app will not open**. It is not notarized under my own Apple Developer ID yet. Right-click the app and choose Open, or allow it in System Settings under Privacy and Security.
+**Gatekeeper says a build can't be opened.** Releases are signed with a Developer ID and notarized, and open without a warning. A copy you built yourself with `--development-ad-hoc` isn't; open it from Finder with Control-click, Open.
