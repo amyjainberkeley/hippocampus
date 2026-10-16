@@ -176,8 +176,11 @@ $PY tools/ocr/screens/bakeoff.py score OUT --misses vision-1
 Two clones of the installed 0.3.0 candidate (`/Applications/Hippocampus.app`,
 copied and never opened), one with the current worker and one with the
 worker that leaves out video. The disk images were built without mounting
-anything: `hdiutil makehybrid`, then `hdiutil convert`. UDZO at zlib level 9
-is the format `scripts/build-installer.sh` ships; ULMO (LZMA) is plan item 13.
+anything: `hdiutil makehybrid`, then `hdiutil convert`. When this was
+measured, `scripts/build-installer.sh` shipped UDZO at zlib level 9. Since
+the release work for 0.3.0 merged (plan item 13), it ships ULMO (LZMA), so
+the ULMO row is the one for 0.3.0. Both clones keep the candidate's
+unstripped binaries; the release build now strips them (22.5 MB less).
 
 | | Before | After | Change |
 |---|---|---|---|
