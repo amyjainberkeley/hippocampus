@@ -7,16 +7,19 @@ messaging host. Each app is a thin shell — the substance lives in
 
 ## Contents
 
-- `agent/` — `mci-agent`, the Rust binary that supervises the
-  capture helper, owns the per-device id, and runs the IPC select!
-  loop.
+- `agent/` — `mci-agent`, the Rust program that owns the memory: it
+  stores what the capture helper sends, builds search data, sessions
+  and what it learns, deletes what is past its keep date, and serves
+  AI tools (`mci-agent mcp-serve`).
 - `hippocampus/` — the main SwiftUI Mac app shell (menu-bar
   `MenuBarExtra`). Supervises `MCICaptureHelper` + `mci-agent` as
   child processes.
-- `recall-ui/` — the read-only recall SwiftUI app (Phase 3, ADR-0016
-  §6). Links `../adapters/macos/mci-brain-ffi/`.
-- `onboarding/` — SwiftUI 5-step TCC walkthrough + "What MCI Sees"
-  trust panel (Phase 4, ADR-0017).
+- `recall-ui/` — the window: Overview, Ask with its History, You, and
+  the privacy window. Links `../adapters/macos/mci-brain-ffi/`.
+- `onboarding/` — setup's four screens, the two permissions, and
+  Choose Apps.
+- `mind/` — `hippocampus-mind`, which writes answers, notes and what is
+  learned with Apple Intelligence or a model server on the Mac.
 - `hippocampus-native-host/` — Rust native-messaging host for the
   browser extensions in `../extensions/`.
 

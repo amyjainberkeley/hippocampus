@@ -22,8 +22,9 @@ in OS-specific assumptions (ADR-0002).
 
 ## Related
 
-- `../adapters/macos/` — macOS impls of the `CaptureSource` trait; no
-  OS code may leak upward across the seam.
+- `../adapters/macos/` — the macOS code: the capture helper, which
+  speaks the wire format in `src/ipc`, the Keychain, Core ML and the
+  window's FFI. No OS code may leak into `core/`.
 - `../apps/agent/` — Rust binary that links the core.
 - `../BEST_PRACTICES.md` — errors surface, never fall back.
 - `../docs/decisions/0002-stack-split-rust-core-native-adapters.md`.

@@ -10,10 +10,13 @@ and never above the `CaptureSource` trait.
 
 - `MCICaptureHelper/` — the Swift helper process. Owns SCStream,
   runs the ADR-0013 sensitive-surface suppression cascade BEFORE any
-  frame or metadata crosses IPC, and ships HEVC keyframes via
-  VideoToolbox.
+  frame or metadata crosses IPC, has the OCR worker read what passes,
+  and keeps screenshots of the window in front as AES-GCM sealed JPEGs
+  (`MCIKeyframeCodec/`).
 - `mci-brain-ffi/` — Rust C-ABI shim exposing the brain to Swift
-  callers (RecallUI). Read-only against SQLCipher.
+  callers (RecallUI): reads, and the privacy window's deletions.
+- `mci-keychain/` — the file-Keychain item that holds the database key,
+  with its access list.
 - `mci-messages-reader/` — Rust deep-hook for `chat.db`
   (Messages.app). ADR-0032 plugin contract.
 - `mci-mail-reader/` — Rust deep-hook for `.emlx` maildir (Mail.app).

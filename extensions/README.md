@@ -15,7 +15,6 @@ One extension per browser, sharing a minimal common shape.
 - `../apps/hippocampus-native-host/` — the Rust binary these
   extensions talk to. All content is filtered there before it hits
   the agent.
-- `../docs/research/browser-extension-audit.md`.
 - `../scripts/generate-brand-assets.sh` draws the toolbar icons and
   every other hi mark asset.
 
