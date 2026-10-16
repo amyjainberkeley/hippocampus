@@ -81,7 +81,7 @@ seed_log="$DEMO_DIR/seed.log"
 
 bold "4/4  Searching it"
 echo
-for q in "ScreenCaptureKit" "embedding" "allowlist"; do
+for q in "ScreenCaptureKit" "embedding" "privacy"; do
   printf '\033[1m  $ mci-brain search "%s"\033[0m\n' "$q"
   "$BRAIN" search "$q" --limit 2 | sed 's/^/     /' || true
   echo
@@ -98,7 +98,7 @@ Keep going. Point the CLI at the same brain:
   export MCI_DB_KEY_HEX=\$(cat "$KEY_FILE")
   export MCI_DB_PATH="$DB_PATH"
 
-  mci-brain search "sqlite"      # find events by text
+  mci-brain search "SQLCipher"   # find events by text
   mci-brain show 6               # one event in full
   mci-brain recent --limit 5     # newest first
   mci-brain export --format jsonl > brain.jsonl
