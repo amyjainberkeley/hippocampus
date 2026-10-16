@@ -59,13 +59,25 @@ fn development_key_hex() -> Option<String> {
         .and_then(|key| normalized_development_key(&key))
 }
 
+/// Raw and file keys are development-only and, when explicitly enabled,
+/// come first, as they do in `mci-agent`. So `scripts/try-it.sh` opens its
+/// throwaway brain with its own key and never sends this unbundled binary to
+/// the Keychain item of an installed Hippocampus, which would ask the person
+/// for their login password.
 fn resolve_key_hex() -> Result<String, mci_agent::key_resolver::KeyResolutionError> {
-    match mci_agent::key_resolver::resolve_database_key() {
-        Ok(key) => Ok(key),
-        Err(missing @ mci_agent::key_resolver::KeyResolutionError::MissingKey { .. }) => {
-            development_key_hex().ok_or(missing)
-        }
-        Err(error) => Err(error),
+    resolve_key_hex_with(
+        development_key_hex,
+        mci_agent::key_resolver::resolve_database_key,
+    )
+}
+
+fn resolve_key_hex_with(
+    development: impl FnOnce() -> Option<String>,
+    keychain: impl FnOnce() -> Result<String, mci_agent::key_resolver::KeyResolutionError>,
+) -> Result<String, mci_agent::key_resolver::KeyResolutionError> {
+    match development() {
+        Some(key) => Ok(key),
+        None => keychain(),
     }
 }
 
@@ -714,6 +726,30 @@ mod tests {
     fn development_key_accepts_a_newline_terminated_file_value() {
         let key = "ab".repeat(32);
         assert_eq!(normalized_development_key(&format!("{key}\n")), Some(key));
+    }
+
+    #[test]
+    fn an_enabled_development_key_is_used_without_asking_the_keychain() {
+        let key = "ab".repeat(32);
+        let resolved = resolve_key_hex_with(
+            || Some(key.clone()),
+            || panic!("the Keychain was asked although a development key was enabled"),
+        );
+        assert_eq!(resolved.ok(), Some(key));
+    }
+
+    #[test]
+    fn without_a_development_key_the_keychain_decides() {
+        let key = "cd".repeat(32);
+        assert_eq!(
+            resolve_key_hex_with(|| None, || Ok(key.clone())).ok(),
+            Some(key)
+        );
+        assert!(resolve_key_hex_with(
+            || None,
+            || { Err(mci_agent::key_resolver::KeyResolutionError::InvalidKey) }
+        )
+        .is_err());
     }
 
     fn argv(args: &[&str]) -> Vec<String> {
