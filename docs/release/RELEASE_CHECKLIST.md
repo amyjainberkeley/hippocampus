@@ -1,120 +1,66 @@
-# Hippocampus Release Checklist
+# Release checklist
 
-This is the blocking checklist for a public Hippocampus macOS release. A local
-ad-hoc build is a development artifact, never a distributable release.
+The blocking list for a public Hippocampus release. A local ad-hoc build is a development copy, never a release. The steps follow `scripts/release-0.3.0.sh`, which builds, signs, notarizes and checks a release on this Mac; [docs/appcast-hosting.md](../appcast-hosting.md) says how updates reach installed copies.
 
-## Source And Version
+## Before the build
 
-- [ ] Worktree is clean and the release commit is recorded.
-- [ ] Tag, `CFBundleShortVersionString`, changelog, DMG name, appcast version,
-      and download URL agree.
-- [ ] `docs/STATUS.md` names the tested commit and contains no stale shipped
-      claim.
-- [ ] Required models are reconstructed and pass hash/completeness checks.
-- [ ] The committed synthetic benchmark and frozen calibration artifact pass
-      provenance checks; the report states whether launch qualification passed.
+- [ ] On the release branch the script names (`RELEASE_BRANCH`), with a clean tree.
+- [ ] `CHANGELOG.md` has a dated `## [x.y.z]` section. The appcast shows it as the update's notes, and What's New shows it in the app, so every line is for the person using it.
+- [ ] `docs/release/notes-x.y.z.md` exists and holds `{{SHA256}}`.
+- [ ] `docs/STATUS.md` says what was checked, and how, at this commit. The release script stamps its baseline line.
+- [ ] `scripts/check.sh` passes in full on a quiet Mac. Keep the log.
+- [ ] The OCR worker matches `tools/ocr` (`tools/ocr/.venv/bin/python tools/ocr/prepare.py`). The release script rebuilds a stale one by itself.
+- [ ] The copyleft libraries in the OCR worker that NOTICE lists have their source attached to the release, or a written offer in NOTICE. This needs the owner's decision.
 
-## Privacy And Memory
-
-- [ ] A pre-existing legacy brain migrates to Keychain without data loss.
-- [ ] Every migration failure leaves the legacy key available for recovery.
-- [ ] A successful migration removes the reusable legacy plaintext key only
-      after Keychain reread and read-only database validation.
-- [ ] Capture-off starts no `SCStream`, OCR, context provider, or keyframe
-      writer and requests no screen-recording permission.
-- [ ] Capture-on is shown only after the expected helper generation reports
-      successful stream startup.
-- [ ] Protected surfaces never reach condensation, OCR, or persistence.
-- [ ] Screenshot blobs authenticate and decrypt for evidence thumbnails;
-      plaintext, wrong-key, missing, legacy, and corrupt inputs fail neutral.
-- [ ] Retrieval uses typed matched, nothing-matched, and degraded outcomes.
-- [ ] Claims retain source event IDs, confidence/provenance, supersession, and
-      retraction behavior.
-- [ ] Claude and Codex configuration contains Keychain references only, never a
-      database key or legacy-key path.
-
-## Automated Gates
-
-Run on a quiet host and retain command logs:
+## Build, sign and notarize
 
 ```bash
-./scripts/check.sh
-./scripts/test-swift-package.sh
-./scripts/test-release-contract.sh
-./scripts/test-release-identity.sh
-./scripts/test-prepare-release-models.sh
-./scripts/test-release-model-manifest.sh
-./scripts/test-sparkle-keygen.sh
-./scripts/test-sparkle-keypair.sh
-./scripts/test-e2e-clean-home-contract.sh
-./scripts/e2e-clean-home.sh
-cargo fmt --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+scripts/release-0.3.0.sh --check     # every quick gate; changes nothing
+scripts/release-0.3.0.sh --dry-run   # optional: builds and signs here, notarizes nothing
+scripts/release-0.3.0.sh --notes docs/release/notes-0.3.0.md
 ```
 
-- [ ] All functional suites pass.
-- [ ] Performance tests are rerun without competing compilers or benchmark
-      processes; measured failures are not relabeled as passes.
-- [ ] The release-profile insecure-keywrap compile guard fails as designed.
-- [ ] Isolated-home E2E covers init, synthetic import, capture-off, injected
-      capture, search, timeline, episode, brief, MCP context, deletion, and
-      uninstall.
+The script stops at the first failure. It checks, among other things:
 
-## Unsigned Artifact
+- [ ] `codesign --verify --deep --strict` on the app, the app inside the DMG and the DMG.
+- [ ] Gatekeeper and `stapler validate` on the stapled DMG and app.
+- [ ] `syspolicy_check distribution` on the app.
+- [ ] Both notary logs: Accepted, with no issues (`scripts/check-notary-log.py`).
+- [ ] `hippocampus-mind` links Foundation Models weakly, and every binary runs on macOS 14 (`scripts/verify-release-app.sh`).
+- [ ] `appcast.xml` and its signatures, against `SUPublicEDKey` (the staged identity gate).
 
-- [ ] Full Xcode is selected and every Swift package compiles/tests.
-- [ ] Release Rust FFI is rebuilt deterministically; no stale debug archive is
-      linked into Recall.
-- [ ] App bundle launches from a clean home with required models/resources.
-- [ ] App icon, installer background, volume icon, and drag direction pass.
-- [ ] Light and dark screenshots pass at 1440x900, 1024x700, and 760x520.
+Record the DMG and app sizes it prints in `docs/STATUS.md`.
 
-## Owner Signing
+## Before publishing
 
-Verify the signing setup:
+- [ ] On a new macOS user: download, the four setup screens, Shift twice, Stop Sharing, and Quit leaving nothing running (`scripts/verify-quit-leaves-nothing.sh`).
+- [ ] An update from the previous public version keeps the Keychain key and the capture choice.
+- [ ] Gatekeeper accepts a freshly downloaded copy on a second Mac.
+- [ ] On macOS 14 or 15, if one is at hand: the app starts and says answers need Apple Intelligence or a model on the Mac.
 
-```bash
-./scripts/check-signing-prereqs.sh --release
-```
+## Publish
 
-- [ ] Full Xcode is active.
-- [ ] A valid Developer ID Application identity with private key is present.
-- [ ] `notarytool-profile` authenticates successfully.
-- [ ] Sparkle private/public keys match.
-- [ ] GitHub signing secrets exist only in the protected `release-signing`
-      environment; owner review and tag restrictions are enabled.
-- [ ] `release-models.json` names real immutable bytes and has no
-      `UNPROVISIONED` values.
+- [ ] Push the release commit. Create a draft release at it with every file the script lists: `Hippocampus-x.y.z.dmg` and its `.sha256`, `Hippocampus.dmg` and its `.sha256`, `appcast.xml` and `install.sh`, with the filled `release-notes.md` as its notes.
+- [ ] Inspect the draft ([appcast-hosting.md](../appcast-hosting.md#inspect)). Never edit `appcast.xml` by hand: its signature covers its bytes.
+- [ ] Publish it as Latest (`gh release edit vx.y.z --draft=false --latest`, or the Publish inspected release workflow). Latest is the update feed; a draft or a prerelease changes nothing for installed copies.
+- [ ] Check the public state: the appcast URL serves this release's `appcast.xml`, `releases/latest/download/Hippocampus.dmg` downloads it, and the one-line installer installs it on a clean account.
+- [ ] Homebrew: in the `amyjainberkeley/homebrew-tap` repository, run `./update-cask.sh <notarized DMG>`, push, and try `brew install --cask amyjainberkeley/tap/hippocampus` on a clean account.
+- [ ] Record the release commit, the checksums, the notary submission IDs, and the Mac and macOS version of each smoke test. Never record a secret.
 
-## Signed Artifact
+## Privacy and memory
 
-- [ ] Every nested executable/framework is signed before its parent.
-- [ ] Hardened runtime and secure timestamp are present.
-- [ ] `codesign --verify --deep --strict` passes.
-- [ ] `syspolicy_check distribution` passes where available.
-- [ ] The app and outer DMG are notarized as required by the release pipeline.
-- [ ] `codesign --verify --strict` passes on the outer DMG and Gatekeeper
-      accepts it with `--type open --context context:primary-signature`.
-- [ ] `stapler validate` passes for every stapled artifact.
-- [ ] Gatekeeper accepts a freshly downloaded/quarantined copy on a second Mac.
-- [ ] DMG checksum sidecar verifies.
-- [ ] Sparkle appcast XML validates and the enclosure signature verifies.
-- [ ] Both Apple submission result files and notarization logs are retained and
-      reviewed, including accepted submissions.
-- [ ] Update from the previous public version succeeds without losing the
-      Keychain-held database key or capture preference.
+These hold for every release. Each has tests; the last four need a person on a real Mac.
 
-## Publication
+- [ ] Capture off starts no stream, no reading and no screenshot writer, and asks for no screen permission.
+- [ ] Remembering shows only after the helper reports that its streams started.
+- [ ] Skipped windows never reach the reader or the store.
+- [ ] Screenshots open only with their key; plaintext, wrong-key, missing and corrupt files fail closed.
+- [ ] Claude Code and Codex settings hold a Keychain reference, never a key.
+- [ ] A memory from the previous version keeps working after the update, with its key in the Keychain.
+- [ ] Delete the last 24 hours, and delete everything, leave nothing of those moments in the database or the screenshot folder.
+- [ ] Quit, and Stop Sharing, stop everything Hippocampus started.
+- [ ] Private windows in Safari, Chrome, Arc, Firefox, Edge and Brave are skipped when they show they are private.
 
-- [ ] Review the notary log even when Apple returns Accepted.
-- [ ] Create a draft release first; inspect artifacts before making it public.
-- [ ] The draft carries `appcast.xml` beside the DMGs, and the tag workflow
-      creates only the draft and never promotes it.
-- [ ] Publish only after every gate above is checked, as Latest (`gh release
-      edit <tag> --draft=false --latest`, or the separate `Publish inspected
-      release` workflow with the exact tag and `PUBLISH`). Latest is the feed.
-- [ ] The URL committed in `SUFeedURL` serves this release's `appcast.xml`
-      once it is public.
-- [ ] Record release commit, checksum, notarization submission ID, and smoke-test
-      machine/OS in the release record. Never record secret values.
+## From CI instead
+
+A `v*` tag runs `.github/workflows/release.yml`. With no release secret set it builds nothing; with all six it builds, signs, notarizes, writes the appcast and creates a draft. It downloads the model archive named in `release-models.json`, which must then name real bytes. Publication is the same as above. [appcast-hosting.md](../appcast-hosting.md#release-from-ci) has the one-time setup.

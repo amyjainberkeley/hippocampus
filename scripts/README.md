@@ -1,6 +1,30 @@
 # scripts/
 
-Build and packaging scripts for MCI / Hippocampus.
+Build, release and test scripts for Hippocampus. `check.sh` runs every test
+lane (`./scripts/check.sh --help` lists them).
+
+## release-0.3.0.sh
+
+Builds, signs, notarizes and checks a release on this Mac, from the release
+branch, and uploads nothing. `docs/release/RELEASE_CHECKLIST.md` is the full
+list.
+
+```bash
+scripts/release-0.3.0.sh --check     # every quick gate; builds and commits nothing
+scripts/release-0.3.0.sh --dry-run   # builds and signs here; notarizes, commits and opens nothing
+scripts/release-0.3.0.sh --notes docs/release/notes-0.3.0.md
+```
+
+In order, stopping at the first failure: a preflight (branch, clean tree,
+release identity, CHANGELOG, models, OCR worker, toolchain, Developer ID,
+notary profile, Sparkle key, power and disk); a fresh OCR worker if
+`tools/ocr` changed; the `docs/STATUS.md` baseline stamp, committed; release
+binaries, stripped, with their dSYMs kept; the signed app (`build-app.sh`);
+the signed, notarized and stapled DMG (`build-installer.sh`); checks of the
+DMG and the app inside it; and `appcast.xml`, signed with the Sparkle key
+file and checked by the release identity gate. It prints the files to upload
+and the `gh` commands for the draft release. A dry run's files are for
+inspection only; never upload them.
 
 ## build-installer.sh
 
@@ -14,13 +38,14 @@ Missing credentials fail closed before the app is assembled.
 
 ### Prerequisites
 
-- macOS (any recent version)
-- Xcode Command Line Tools (`xcode-select --install`)
-  - Provides: `hdiutil`, `codesign`, `SetFile`, `xcrun notarytool`
+- Xcode 26, selected with `xcode-select` (it provides `hdiutil`, `codesign` and `xcrun notarytool`)
+- A fresh OCR worker in `tools/ocr/dist` (`tools/ocr/README.md`)
 - Pre-built binaries:
   - `scripts/swift-package.sh build -c release --package-path apps/hippocampus`
   - `scripts/swift-package.sh build -c release --package-path adapters/macos/MCICaptureHelper`
   - `scripts/swift-package.sh build -c release --package-path apps/recall-ui`
+  - `scripts/swift-package.sh build -c release --package-path apps/onboarding`
+  - `scripts/swift-package.sh build -c release --package-path apps/mind`
   - `cargo build --workspace --release`
 
 ### Apple Developer ID enrollment (one-time)
@@ -79,8 +104,8 @@ The script also accepts env vars `NOTARYTOOL_APPLE_ID`, `NOTARYTOOL_TEAM_ID`, `N
 ### Output
 
 ```
-dist/Hippocampus-0.1.0.dmg         # Compressed DMG installer
-dist/Hippocampus-0.1.0.dmg.sha256  # SHA-256 checksum sidecar
+dist/Hippocampus-<version>.dmg         # The installer image, LZMA-compressed (ULMO)
+dist/Hippocampus-<version>.dmg.sha256  # SHA-256 checksum sidecar
 dist/Hippocampus.dmg               # The same bytes under a name that never changes
 dist/Hippocampus.dmg.sha256        # Its checksum, under its own name
 ```
@@ -148,23 +173,25 @@ With a Developer ID + notarization, no warning appears.
 
 ```bash
 # Verify DMG integrity
-shasum -a 256 -c dist/Hippocampus-0.1.0.dmg.sha256
+shasum -a 256 -c dist/Hippocampus-<version>.dmg.sha256
 
 # Verify Gatekeeper acceptance (Developer ID builds)
 spctl --assess --type open --context context:primary-signature \
-  --verbose dist/Hippocampus-0.1.0.dmg
+  --verbose dist/Hippocampus-<version>.dmg
 
 # Verify notarization staple
-stapler validate dist/Hippocampus-0.1.0.dmg
+stapler validate dist/Hippocampus-<version>.dmg
 # Expected: "The validate action worked!"
 
 # Inspect codesign details
 codesign -dv --verbose=4 Hippocampus.app
 ```
 
-### CI/CD release workflow
+### CI release workflow
 
-Tagged pushes (`v*`) trigger `.github/workflows/release.yml` which:
+The release normally runs on this Mac (`release-0.3.0.sh`, above). Tagged
+pushes (`v*`) also trigger `.github/workflows/release.yml`; with no release
+secret set it builds nothing. With all six it:
 1. Freezes tag, bundle, changelog, feed, and model identity.
 2. Reconstructs the hash-pinned model archive and builds every Swift/Rust binary.
 3. Imports Developer ID, notarization, and matching Sparkle credentials.
@@ -197,46 +224,26 @@ fails closed.
 
 ## demo.sh
 
-Reproducible E2E pitch demo for Hippocampus / MCI. Automates the full demo pipeline: clean state, seed brain with synthetic data, build + launch app, run queries, exercise MCP server, capture screenshots, tear down.
-
-### Prerequisites
-
-- macOS with Xcode Command Line Tools
-- Rust toolchain (`cargo`)
-- Swift toolchain (invoked through `scripts/swift-package.sh`)
-- `openssl` (ships with macOS)
-
-### Subcommands
+A demo of the whole product on synthetic data, in a disposable folder under
+`$TMPDIR` (or `MCI_DEMO_ROOT`), never the real memory. Its subcommands, from
+the script's header:
 
 | Command | What it does |
 |---|---|
-| `clean` | Kill all MCI processes, delete demo brain + WAL/SHM files, archive logs to `/tmp` |
-| `seed` | Generate ephemeral SQLCipher key at `/tmp/mci-demo-key.hex` (mode 0600), run `mci-seed-brain` to write 20 synthetic events |
-| `boot` | Build Hippocampus.app via `build-app.sh`, requiring the stable Developer ID release identity, then launch |
-| `query` | Run `mci-brain` CLI: stats, recent, search "snowflake", search "Cure53", search "zero-knowledge", show event 1 |
-| `mcp-demo` | Send JSON-RPC 2.0 requests (initialize, tools/list, mci_recall, mci_stats) to `mci-agent mcp-serve` via stdin pipe |
-| `screenshot` | Interactive `screencapture -w` for Hippocampus menu-bar and Recall UI windows; saves to `dist/demo-screenshots/` |
-| `teardown` | Kill processes, archive demo brain to `/tmp`, delete key file |
-| `full` | Run all subcommands in sequence: clean → seed → boot → query → mcp-demo → screenshot → teardown |
-
-### Usage
+| `clean` | Stops the demo's own processes and wipes only the disposable demo folder |
+| `seed` | Makes a throwaway key and seeds 20 synthetic events |
+| `boot` | Builds Hippocampus.app, embeds Sparkle, signs it and opens it |
+| `query` | Runs canned `mci-brain` searches against the seeded memory |
+| `mcp-demo` | Sends `mci_recall` over JSON-RPC to a running `mcp-serve` |
+| `screenshot` | Captures the demo's windows (`screencapture -w`, interactive; `--auto` renders the CLI and tries the windows) |
+| `teardown` | Stops the demo's processes and deletes the demo folder |
+| `full` | All of the above, in order |
 
 ```bash
-# Full end-to-end demo
 ./scripts/demo.sh full
-
-# Individual steps (e.g. iterate on query output)
-./scripts/demo.sh clean
-./scripts/demo.sh seed
-./scripts/demo.sh query
-
-# Just the MCP demo (after seed)
-./scripts/demo.sh mcp-demo
+./scripts/demo.sh seed && ./scripts/demo.sh query
 ```
 
-### Security posture
-
-- **Ephemeral key**: generated per-demo at `/tmp/mci-demo-key.hex`, mode 0600. Never exported to shell history.
-- **Synthetic data only**: all seed events use `app_bundle_id = com.mci.demo.seed.*`. No real user content.
-- **Teardown deletes**: demo brain archived to `/tmp` then removed from `~/Library/Application Support/MCI/`.
-- **No network**: entire demo runs locally. No external calls.
+Every file it makes stays under the demo folder (mode 0700), the key never
+reaches shell history, and the seeded events are made up
+(`com.mci.demo.seed.*`).
