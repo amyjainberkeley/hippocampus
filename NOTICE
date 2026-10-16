@@ -75,18 +75,36 @@ includes third-party components under their own licenses, among them:
     OpenCV (opencv-python-headless)    Apache-2.0
     NumPy                              BSD-3-Clause
     Pillow                             MIT-CMU
+    Shapely 2.1.2                      BSD-3-Clause
     Python                             PSF License
     PyInstaller bootloader             GPL-2.0-or-later, with the
                                        bootloader exception
 
-Some of these components are copyleft. The opencv-python-headless
-wheel brings FFmpeg (LGPL-2.1-or-later) and the x264 and x265 encoders
-(GPL-2.0-or-later), along with other LGPL libraries listed in its
-LICENSE-3RD-PARTY.txt. The license texts that come with each package
-are in the app at
-Hippocampus.app/Contents/Resources/HippocampusOCR/licenses, and the
-worker's own notice is HippocampusOCR/NOTICE.md. Source code for these
-components is available from their projects, and for the libraries
+The opencv-python-headless wheel also carries video libraries: FFmpeg,
+the x264 and x265 encoders, and some seventy libraries that only they
+use. Reading a screenshot needs none of them, so the worker is built
+without them (tools/ocr/prepare.py): Hippocampus does not ship FFmpeg,
+x264 or x265.
+
+A few of the libraries the worker does ship are copyleft. Each is a
+separate dynamic library in HippocampusOCR/_internal that can be
+replaced:
+
+    GEOS 3.13.1 (with Shapely)         LGPL-2.1
+    GLib (libglib-2.0.0)               LGPL-2.1-or-later
+    gettext runtime (libintl.8)        LGPL-2.1-or-later
+    Graphite2 (libgraphite2.3)         MPL-2.0, one of its three
+                                       licenses
+
+GLib, libintl and Graphite2 come with OpenCV's HarfBuzz, which Pillow's
+font module loads. The license texts that come with each package are in
+the app at Hippocampus.app/Contents/Resources/HippocampusOCR/licenses,
+and the worker's own notice is HippocampusOCR/NOTICE.md. Source code is
+available from each project: GEOS at https://libgeos.org, GLib at
+https://gitlab.gnome.org/GNOME/glib, gettext at
+https://www.gnu.org/software/gettext/, Graphite2 at
+https://github.com/silnrsi/graphite, PyInstaller at
+https://github.com/pyinstaller/pyinstaller, and the other libraries
 bundled with OpenCV from https://github.com/opencv/opencv-python.
 
 --------------------------------------------------------------------

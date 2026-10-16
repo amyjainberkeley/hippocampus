@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 from worker import MODELS
@@ -11,6 +12,11 @@ from worker import MODELS
 ROOT = Path(__file__).resolve().parent
 SOURCES = ('worker.py','prepare.py','bundle.py','requirements.in','requirements.txt','NOTICE.md')
 MACHO = {b'\xfe\xed\xfa\xcf',b'\xcf\xfa\xed\xfe',b'\xca\xfe\xba\xbe',b'\xbe\xba\xfe\xca'}
+# FFmpeg's libraries, which OpenCV links for video, and the GPL encoders
+# FFmpeg brings. Reading a screenshot needs none of them; prepare.py leaves
+# them out of the frozen worker, and a worker that still has one is refused.
+VIDEO_LIBRARIES = re.compile(r'^lib(avcodec|avdevice|avfilter|avformat|avutil|postproc|swresample|swscale)\.')
+NEVER_SHIPPED = re.compile(r'^lib(x264|x265)\.')
 
 
 def file_hash(path):
@@ -48,6 +54,10 @@ def verify_runtime(source):
         for name, digest in MODELS.items():
             if file_hash(source/'_internal'/'models'/name) != digest:
                 raise ValueError('invalid bundled OCR model')
+        video=[path.name for path in source.rglob('*')
+               if VIDEO_LIBRARIES.search(path.name) or NEVER_SHIPPED.search(path.name)]
+        if video:
+            raise ValueError('OCR worker carries video libraries: '+', '.join(sorted(video)))
     except (OSError, KeyError, json.JSONDecodeError) as error:
         raise ValueError('missing or invalid OCR worker build') from error
 
