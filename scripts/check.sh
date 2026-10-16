@@ -76,6 +76,7 @@ LANES=(
     "strip-release-binaries|bash|test|scripts/test-strip-release-binaries.sh"
     "release-app-gate|bash|test|scripts/test-verify-release-app.sh"
     "notary-log-contract|bash|test|python3 -B scripts/test_check_notary_log.py"
+    "install-sh-fixtures|bash|test|scripts/test-install-sh.sh"
     "sparkle-keygen-fixtures|bash|test|scripts/test-sparkle-keygen.sh"
     "sparkle-keypair-fixtures|bash|test|scripts/test-sparkle-keypair.sh"
     "sparkle-publish-fixtures|bash|test|__sparkle_publish_lane"
@@ -166,6 +167,7 @@ LANES
     strip-release-binaries  release binaries lose local symbols, keep dSYMs and behave the same
     release-app-gate        hippocampus-mind weak-links FoundationModels; version, team, macOS 14, syspolicy_check
     notary-log-contract     a notarization log passes only when Apple accepted it with no issues
+    install-sh-fixtures     the one-line installer against a local fake release; installs nothing unsigned
     sparkle-keygen-fixtures bundled Sparkle CLI contract fixture
     sparkle-keypair-fixtures Ed25519 private/public matching fixtures
     sparkle-publish-fixtures the appcast a release uploads, judged by the app's Sparkle (SKIP without its tools)

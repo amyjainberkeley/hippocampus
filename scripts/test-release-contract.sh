@@ -316,6 +316,18 @@ require_pattern "$CHECK" 'release-app-gate\|bash\|test\|scripts/test-verify-rele
     'the unified local gate runs the app gate fixtures'
 require_pattern "$CHECK" 'notary-log-contract\|bash\|test\|python3 -B scripts/test_check_notary_log\.py' \
     'the unified local gate runs the notary log fixtures'
+
+# The one-line installer takes the latest release by its fixed asset name,
+# with no GitHub API call, and is tested against a local fake release.
+INSTALL_SH="$REPO_ROOT/scripts/install.sh"
+require_literal "$INSTALL_SH" 'BASE="$RELEASES/latest/download"' \
+    'install.sh downloads the latest release by its fixed asset name'
+reject_pattern "$INSTALL_SH" 'api\.github\.com' \
+    'install.sh needs no rate-limited GitHub API call'
+require_literal "$INSTALL_SH" "--proto-redir '=https'" \
+    'install.sh follows redirects only to HTTPS'
+require_pattern "$CHECK" 'install-sh-fixtures\|bash\|test\|scripts/test-install-sh\.sh' \
+    'the unified local gate runs the installer against a fake release'
 for stable_asset in 'dist/Hippocampus.dmg' 'dist/Hippocampus.dmg.sha256'; do
     if [[ "$(rg -c -F -x "            $stable_asset" "$RELEASE" || true)" == 2 ]]; then
         pass "release workflow hands over and drafts $stable_asset"
@@ -428,7 +440,8 @@ require_literal "$RELEASE_CI" 'scripts/swift-package.sh run --package-path apps/
 for script in test-release-contract.sh test-app-group-contract.sh test-release-identity.sh \
     test-prepare-release-models.sh test-release-model-manifest.sh \
     test-sparkle-keygen.sh test-sparkle-keypair.sh test-sparkle-publish.sh \
-    test-strip-release-binaries.sh test-verify-release-app.sh test_check_notary_log.py; do
+    test-strip-release-binaries.sh test-verify-release-app.sh test_check_notary_log.py \
+    test-install-sh.sh; do
     require_literal "$RELEASE_CI" "scripts/$script" \
         "release CI runs $script"
 done
