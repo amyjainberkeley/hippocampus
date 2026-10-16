@@ -27,7 +27,7 @@ ONBOARDING_COPY="$REPO_ROOT/apps/onboarding/Sources/OnboardingKit/OnboardingCopy
 python3 "$GENERATOR" --check
 
 rg -Fq 'Hippocampus itself has no cloud service.' "$README"
-rg -Fq 'a connected AI client sends only the context it requests to its selected provider' \
+rg -Fq 'What a connected tool reads goes to the company that runs it.' \
     "$README"
 if rg -Fq 'nothing is sent anywhere' "$README"; then
     echo "FAIL: README hides the connected AI provider boundary" >&2
