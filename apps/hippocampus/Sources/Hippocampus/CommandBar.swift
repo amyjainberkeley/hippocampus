@@ -74,6 +74,8 @@ final class CommandBarController: NSObject, NSWindowDelegate {
             if let supervisor {
                 supervisor.refreshCaptureStatus()
                 model.setStatus(supervisor.askPanelStatus())
+                // Read the window in front once now, past the reader's rest.
+                supervisor.requestFreshRead()
             }
             let openID = model.opened()
             present(panel)

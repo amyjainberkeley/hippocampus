@@ -56,6 +56,18 @@ final class AskPanelWiringTests: XCTestCase {
         XCTAssertTrue(bar.contains("Task.detached(priority: .userInitiated)"), "Accessibility is asked off the main thread")
     }
 
+    func testOpeningAskAsksForOneFreshReadOfTheWindowInFront() throws {
+        let bar = try source("CommandBar.swift")
+        let show = try XCTUnwrap(bar.range(of: "func show(asking question: String? = nil, from opening: AskPanelDismissal.Opening = .menu)"))
+        let body = String(bar[show.lowerBound...].prefix(1_600))
+        let opening = try XCTUnwrap(body.range(of: "if !panel.isVisible {"))
+        let request = try XCTUnwrap(body.range(of: "supervisor.requestFreshRead()"))
+        let present = try XCTUnwrap(body.range(of: "present(panel)"))
+        XCTAssertLessThan(opening.lowerBound, request.lowerBound, "only when Ask opens, not when it is up already")
+        XCTAssertLessThan(request.lowerBound, present.lowerBound)
+        XCTAssertEqual(bar.components(separatedBy: "requestFreshRead()").count - 1, 1, "Shift twice and the menu both come here")
+    }
+
     func testTheFooterKnowsWhereSetupStands() throws {
         let bar = try source("CommandBar.swift")
         XCTAssertEqual(bar.components(separatedBy: "askPanelStatus()").count - 1, 2,

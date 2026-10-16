@@ -275,6 +275,8 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     private var focusedReadPacing = FocusedReadPacing()
     private var closedWindowBudget = ClosedWindowBudget()
     private var rebindRetryPacing = RebindRetryPacing()
+    /// Ask opened: one read of the window in front, past the reader's rest.
+    private var freshRead = FreshReadToken()
     private var priorDHashGeneration: UInt64 = 0
     private var priorDHashCaptureOrdinal: UInt64 = 0
     private var retryOCRGeneration: UInt64?
@@ -711,6 +713,11 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
 
     private func admitFocusedRead(generation: UInt64, nowUs: UInt64, textCatchUp: Bool) -> Bool {
         lock.lock(); defer { lock.unlock() }
+        // Ask opened on this window: read it now, once, whatever the rest.
+        if freshRead.consume(generation: generation, nowUs: Self.uptimeUs()) {
+            focusedReadPacing.noteRead(generation: generation, nowUs: nowUs)
+            return true
+        }
         // A new window's first frame is always read: binding to it already
         // waited for the budget, and a still window sends no second frame.
         if !focusedReadPacing.isNewWindow(generation: generation), !CaptureReadBudget.shared.admitsRead() {
@@ -853,15 +860,23 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             while !Task.isCancelled {
                 let snap = store.currentSync()
                 let installed = self?.currentInstalledFocusGeneration() ?? 0
-                if snap.generation != installed,
-                   let focused = snap.focused,
-                   self?.admitRebindAttempt(generation: snap.generation) == true
-                {
-                    try? await self?.rebindFocusedWindow(
-                        focusedWindow: focused,
-                        snapshotGeneration: snap.generation
-                    )
-                    self?.recordRebindAttempt(generation: snap.generation)
+                if let focused = snap.focused {
+                    if snap.generation != installed {
+                        if self?.admitRebindAttempt(generation: snap.generation) == true {
+                            try? await self?.rebindFocusedWindow(
+                                focusedWindow: focused,
+                                snapshotGeneration: snap.generation
+                            )
+                            self?.recordRebindAttempt(generation: snap.generation)
+                        }
+                    } else if self?.takeFreshFrameRequest(generation: snap.generation) == true {
+                        // Ask opened on a bound window. A still window sends
+                        // no new frame, so its stream starts again for one.
+                        try? await self?.rebindFocusedWindow(
+                            focusedWindow: focused,
+                            snapshotGeneration: snap.generation
+                        )
+                    }
                 }
                 try? await Task.sleep(nanoseconds: 200_000_000)
             }
@@ -874,19 +889,59 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
 
     private func admitRebindAttempt(generation: UInt64) -> Bool {
         // A newly focused window is bound, and so read, once the reader has
-        // rested from its last read.
-        guard CaptureReadBudget.shared.admitsRead() else { return false }
+        // rested from its last read; at once when Ask asked for it.
+        let asked = lock.withLock { freshRead.isPending(generation: generation, nowUs: Self.uptimeUs()) }
+        guard asked || CaptureReadBudget.shared.admitsRead() else { return false }
         lock.lock(); defer { lock.unlock() }
         return rebindRetryPacing.admit(generation: generation, nowUs: Self.uptimeUs())
     }
 
     private func recordRebindAttempt(generation: UInt64) {
         lock.lock(); defer { lock.unlock() }
-        rebindRetryPacing.record(
-            generation: generation,
-            installed: installedFocusGeneration == generation,
-            nowUs: Self.uptimeUs()
-        )
+        let installed = installedFocusGeneration == generation
+        rebindRetryPacing.record(generation: generation, installed: installed, nowUs: Self.uptimeUs())
+        // A stream just started for this window: its first frame is the
+        // fresh one Ask asked for, so no second start is needed.
+        if installed { _ = freshRead.takeFrameRequest(generation: generation, nowUs: Self.uptimeUs()) }
+    }
+
+    /// Ask opened (Shift twice or the menu): read the window in front once,
+    /// now. Its stream starts again for a fresh frame, which is read without
+    /// waiting for the reader's rest or the window's read interval. Every
+    /// other rule applies as to any frame: an excluded app, a password
+    /// manager, a private window and a password field are not read. Nothing
+    /// is asked while capture is stopped or paused for a permission, and a
+    /// request within two seconds of the last one adds nothing.
+    public func requestFreshRead() {
+        guard let store = focusedWindowStore, currentActiveCaptureEpoch() != nil else { return }
+        let snapshot = store.currentSync()
+        guard let focused = snapshot.focused,
+              !SCContentFilterFactory.isNeverBound(focused.bundleId, denylist: denylist)
+        else { return }
+        let issued = lock.withLock { freshRead.issue(generation: snapshot.generation, nowUs: Self.uptimeUs()) }
+        guard issued else { return }
+        // Content-free: that a read was asked for, nothing about the window.
+        FileHandle.standardError.write(Data("mci-capture-helper: helper_health: fresh_read_requested\n".utf8))
+    }
+
+    /// True once per fresh-read request, for the window it named, while the
+    /// request stands: start that window's stream again.
+    private func takeFreshFrameRequest(generation: UInt64) -> Bool {
+        lock.withLock { freshRead.takeFrameRequest(generation: generation, nowUs: Self.uptimeUs()) }
+    }
+
+    /// Test seams: whether a fresh read of `generation` is owed, and the
+    /// frame request the rebind task would act on.
+    internal func freshReadPendingForTest(generation: UInt64) -> Bool {
+        lock.withLock { freshRead.isPending(generation: generation, nowUs: Self.uptimeUs()) }
+    }
+
+    internal func takeFreshFrameRequestForTest(generation: UInt64) -> Bool {
+        takeFreshFrameRequest(generation: generation)
+    }
+
+    internal func admitFocusedReadForTest(generation: UInt64, nowUs: UInt64, textCatchUp: Bool = false) -> Bool {
+        admitFocusedRead(generation: generation, nowUs: nowUs, textCatchUp: textCatchUp)
     }
 
     /// Cancel the rebind task (idempotent).

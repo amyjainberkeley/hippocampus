@@ -95,10 +95,14 @@ package protocol SupervisorTopologyControlling: AnyObject {
     /// The running helper and agent, which the orphan sweep leaves alone
     /// outside Quit (spec-shell S6.4).
     var childProcessIDs: Set<pid_t> { get }
+    /// Asks the running capture helper for one fresh read of the window in
+    /// front (Ask opened). False when there is no helper to ask.
+    func requestFocusedRead() -> Bool
 }
 
 extension SupervisorTopologyControlling {
     package var childProcessIDs: Set<pid_t> { [] }
+    package func requestFocusedRead() -> Bool { false }
 }
 
 @MainActor
@@ -131,6 +135,12 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
             guard let process, process.isRunning else { return nil }
             return process.processIdentifier
         })
+    }
+
+    /// One byte on the helper's lease, which only this app holds.
+    func requestFocusedRead() -> Bool {
+        guard !isStopping, helper?.isRunning == true, let lease = parentLeaseWriteHandle else { return false }
+        return HelperLeaseCommand.send(HelperLeaseCommand.freshRead, to: lease)
     }
 
     func launch(
