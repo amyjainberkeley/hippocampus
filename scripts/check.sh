@@ -73,6 +73,7 @@ LANES=(
     "coreml-compiled-contract|bash|test|python3 -B scripts/test_coreml_model_contract.py"
     "coreml-converter-contract|bash|test|python3 -B scripts/test_convert_embedder_contract.py"
     "installer-runtime|bash|test|scripts/test-installer-runtime.sh"
+    "strip-release-binaries|bash|test|scripts/test-strip-release-binaries.sh"
     "sparkle-keygen-fixtures|bash|test|scripts/test-sparkle-keygen.sh"
     "sparkle-keypair-fixtures|bash|test|scripts/test-sparkle-keypair.sh"
     "sparkle-publish-fixtures|bash|test|__sparkle_publish_lane"
@@ -160,6 +161,7 @@ LANES
     coreml-compiled-contract independently inspect compiled model shape and constants
     coreml-converter-contract canonical converted-model provenance fixture
     installer-runtime       bounded layout process and centralized cleanup fixture
+    strip-release-binaries  release binaries lose local symbols, keep dSYMs and behave the same
     sparkle-keygen-fixtures bundled Sparkle CLI contract fixture
     sparkle-keypair-fixtures Ed25519 private/public matching fixtures
     sparkle-publish-fixtures the appcast a release uploads, judged by the app's Sparkle (SKIP without its tools)

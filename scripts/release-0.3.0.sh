@@ -15,7 +15,8 @@ set -euo pipefail
 #   3. Rebuild the offline OCR worker if it no longer matches tools/ocr.
 #   4. Stamp docs/STATUS.md with HEAD and commit "docs(status): release baseline".
 #   5. Build release binaries: cargo, then the five Swift packages, including
-#      hippocampus-mind.
+#      hippocampus-mind. Strip their local symbols, keeping dSYMs in
+#      <out>/symbols for reading crash reports.
 #   6. Assemble and sign Hippocampus.app (apps/hippocampus/Resources/build-app.sh).
 #   7. Make, sign, notarize and staple the DMG (scripts/build-installer.sh).
 #   8. Verify the DMG and the app inside it; print the DMG path and SHA-256.
@@ -85,7 +86,8 @@ NOTES_FILE=""
 SPARKLE_KEY="$HOME/.hippocampus-sparkle-private.key"
 
 usage() {
-    sed -n '4,55p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    # The header comment, from line 4 to the first line that is not one.
+    awk 'NR < 4 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "${BASH_SOURCE[0]}"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -110,6 +112,7 @@ if [[ -n "$NOTES_FILE" ]]; then
 fi
 
 LOG_DIR="$OUT_DIR/logs"
+SYMBOLS_DIR="$OUT_DIR/symbols"
 DIST_DIR="$OUT_DIR/installer"
 INSTALLER_VENV="$OUT_DIR/installer-python"
 DMG="$DIST_DIR/Hippocampus-$RELEASE_VERSION.dmg"
@@ -607,6 +610,7 @@ build_binaries() {
             "$REPO_ROOT/scripts/swift-package.sh" build -c release --jobs "$JOBS" --package-path "$REPO_ROOT/$pkg"
     done
 
+    local -a binaries=()
     for pkg in \
         apps/hippocampus/.build/release/Hippocampus \
         adapters/macos/MCICaptureHelper/.build/release/mci-capture-helper \
@@ -616,7 +620,15 @@ build_binaries() {
         apps/onboarding/.build/release/onboarding \
         apps/mind/.build/release/hippocampus-mind; do
         [[ -x "$REPO_ROOT/$pkg" ]] || stop "The build did not produce $pkg."
+        binaries+=("$REPO_ROOT/$pkg")
     done
+
+    # Smaller binaries, same behaviour: the local symbol table goes (the
+    # Rust ones arrive stripped by [profile.release]), and each binary's
+    # debug information is kept beside the DMG as a dSYM for crash reports.
+    stage "strip local symbols, keeping dSYMs in $SYMBOLS_DIR" strip \
+        "$REPO_ROOT/scripts/strip-release-binaries.sh" --symbols-dir "$SYMBOLS_DIR" "${binaries[@]}"
+    say "   $(tail -1 "$LOG_DIR/strip.log" | sed 's/^ *//')"
     require_clean_tree "After the build."
 }
 

@@ -3,6 +3,7 @@
 import importlib.util
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -20,6 +21,14 @@ ENV["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
 
 def disk(*args):
     subprocess.run(["/usr/bin/hdiutil", *map(str, args)], check=True, stdout=subprocess.DEVNULL, env=ENV)
+
+
+def shipped_dmg_format():
+    """The compression build-installer.sh ships, so the layout is proven on it."""
+    script = (ROOT / "scripts/build-installer.sh").read_text()
+    match = re.search(r'^DMG_FORMAT="([A-Z0-9]+)"$', script, re.MULTILINE)
+    assert match, "build-installer.sh names no DMG_FORMAT"
+    return match.group(1)
 
 
 class InstallerVolumeNameTests(unittest.TestCase):
@@ -163,7 +172,7 @@ class InstallerLayoutTests(unittest.TestCase):
         remount.mkdir()
         disk("detach", self.mount)
         try:
-            disk("convert", self.image, "-format", "UDZO", "-o", compressed)
+            disk("convert", self.image, "-format", shipped_dmg_format(), "-o", compressed)
             disk("attach", "-readonly", "-nobrowse", "-noautoopen", "-mountpoint", remount, compressed)
             try:
                 root = remount / self.root.name

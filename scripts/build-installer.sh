@@ -29,6 +29,10 @@ GENERATE_BACKGROUND="$INSTALLER_ASSETS/generate-background.py"
 READ_BACKGROUND_TEXT="$INSTALLER_ASSETS/read-background-text.swift"
 DMG_LAYOUT="$INSTALLER_ASSETS/dmg-layout.py"
 INSTALLER_PYTHON="${INSTALLER_PYTHON:-python3}"
+# LZMA-compressed UDIF (macOS 10.15 and later; Hippocampus needs 14): the
+# same files, a smaller download than zlib. Signing, notarization, stapling
+# and Gatekeeper treat it like any other UDIF image.
+DMG_FORMAT="ULMO"
 
 if [[ ! -f "$APP_GROUP_CONTRACT" ]]; then
     echo "FATAL: App Group contract helper missing at $APP_GROUP_CONTRACT" >&2
@@ -728,7 +732,7 @@ rm -f "$TEMP_DMG" "$FINAL_DMG" "${FINAL_DMG}.sha256" \
 # bundled Core ML models pushed the .app past 200 MB (embedder ~64 MB + NER
 # ~103 MB → .app ~210 MB). Compute from the actual staging size and add 120 MB
 # of slack for HFS+ metadata overhead and the .DS_Store Finder writes during
-# the layout step. The image is compacted to UDZO afterward, so over-sizing
+# the layout step. The image is compressed to $DMG_FORMAT afterward, so over-sizing
 # the intermediate RW image is free in the final artifact. Robust to future
 # model growth.
 STAGING_MB=$(du -sm "$DMG_STAGING" | awk '{print $1}')
@@ -763,8 +767,7 @@ echo "--- Compressing final DMG ---"
 
 hdiutil convert \
     "$TEMP_DMG" \
-    -format UDZO \
-    -imagekey zlib-level=9 \
+    -format "$DMG_FORMAT" \
     -o "$FINAL_DMG"
 
 rm -f "$TEMP_DMG"

@@ -38,6 +38,7 @@ RELEASE_SCRIPT="$REPO_ROOT/scripts/release-0.3.0.sh"
 SPARKLE_PUBLISH="$REPO_ROOT/scripts/sparkle-publish.sh"
 IDENTITY="$REPO_ROOT/scripts/verify_release_identity.py"
 FEED_URL='https://github.com/amyjainberkeley/hippocampus/releases/latest/download/appcast.xml'
+CARGO_TOML="$REPO_ROOT/Cargo.toml"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -228,6 +229,32 @@ reject_pattern "$INSTALLER" 'build-note|SOURCE_HEAD:0:|SOURCE_DIGEST:0:' \
     'nothing a downloader sees carries a build number, commit or source digest'
 require_literal "$INSTALLER" 'STABLE_DMG="$DIST_DIR/Hippocampus.dmg"' \
     'the installer also writes Hippocampus.dmg for releases/latest/download'
+
+# Size cuts that change no behaviour: LZMA disk image, thin LTO, and binaries
+# without local symbols (dSYMs kept).
+if rg -Uq '^\[profile\.release\]\nlto = "thin"\nstrip = "symbols"\n' "$CARGO_TOML"; then
+    pass 'release Rust binaries use thin LTO and are stripped of local symbols'
+else
+    fail 'release Rust binaries use thin LTO and are stripped of local symbols'
+fi
+require_literal "$INSTALLER" 'DMG_FORMAT="ULMO"' \
+    'the disk image is LZMA-compressed (ULMO)'
+require_literal "$INSTALLER" '-format "$DMG_FORMAT"' \
+    'the finished disk image is converted to that format'
+reject_pattern "$INSTALLER" 'UDZO|zlib-level' \
+    'no zlib disk image remains'
+require_literal "$RELEASE_SCRIPT" '"$REPO_ROOT/scripts/strip-release-binaries.sh" --symbols-dir "$SYMBOLS_DIR"' \
+    'release script strips its binaries and keeps their dSYMs'
+require_order "$RELEASE_SCRIPT" 'strip-release-binaries\.sh" --symbols-dir' '^assemble_app\(\) \{' \
+    'release script strips before it assembles, signs and records provenance'
+require_literal "$RELEASE" 'scripts/strip-release-binaries.sh --symbols-dir "$RUNNER_TEMP/symbols"' \
+    'tag workflow strips its binaries and keeps their dSYMs'
+require_order "$RELEASE" 'name: Build all binaries' 'scripts/strip-release-binaries\.sh' \
+    'tag workflow strips what it built'
+require_order "$RELEASE" 'scripts/strip-release-binaries\.sh' 'name: Build signed and notarized DMG' \
+    'tag workflow strips before it assembles and signs'
+require_pattern "$CHECK" 'strip-release-binaries\|bash\|test\|scripts/test-strip-release-binaries\.sh' \
+    'the unified local gate runs the strip fixture'
 for stable_asset in 'dist/Hippocampus.dmg' 'dist/Hippocampus.dmg.sha256'; do
     if [[ "$(rg -c -F -x "            $stable_asset" "$RELEASE" || true)" == 2 ]]; then
         pass "release workflow hands over and drafts $stable_asset"
@@ -339,7 +366,8 @@ require_literal "$RELEASE_CI" 'scripts/swift-package.sh run --package-path apps/
     'release CI executes the durable app-access route fixture'
 for script in test-release-contract.sh test-app-group-contract.sh test-release-identity.sh \
     test-prepare-release-models.sh test-release-model-manifest.sh \
-    test-sparkle-keygen.sh test-sparkle-keypair.sh test-sparkle-publish.sh; do
+    test-sparkle-keygen.sh test-sparkle-keypair.sh test-sparkle-publish.sh \
+    test-strip-release-binaries.sh; do
     require_literal "$RELEASE_CI" "scripts/$script" \
         "release CI runs $script"
 done

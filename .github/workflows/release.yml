@@ -200,6 +200,25 @@ jobs:
           scripts/swift-package.sh build -c release --package-path apps/hippocampus
           scripts/swift-package.sh build -c release --package-path apps/mind
 
+      - name: Strip local symbols, keeping dSYMs
+        run: |
+          scripts/strip-release-binaries.sh --symbols-dir "$RUNNER_TEMP/symbols" \
+            apps/hippocampus/.build/release/Hippocampus \
+            adapters/macos/MCICaptureHelper/.build/release/mci-capture-helper \
+            target/release/mci-agent \
+            target/release/hippocampus-native-host \
+            apps/recall-ui/.build/release/recall-ui \
+            apps/onboarding/.build/release/onboarding \
+            apps/mind/.build/release/hippocampus-mind
+
+      - name: Keep the dSYMs for reading crash reports
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-symbols-${{ github.ref_name }}
+          path: ${{ runner.temp }}/symbols
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Import Developer ID certificate
         env:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
