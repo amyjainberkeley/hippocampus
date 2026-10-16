@@ -17,7 +17,7 @@ build a disposable bundle in a new directory; do not overwrite an existing
 fixture or change the installed Hippocampus app:
 
 ```sh
-cd /Users/you/hippo-work/hippocampus/.worktrees/hippocampus-v1
+cd path/to/your/hippocampus/checkout
 proof_dir="$(mktemp -d "${TMPDIR:-/tmp}/hippocampus-screen-proof.XXXXXX")"
 proof_app="$proof_dir/Hippocampus Screen Proof.app"
 mkdir -p "$proof_app/Contents/MacOS"
