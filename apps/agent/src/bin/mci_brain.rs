@@ -65,10 +65,12 @@ fn development_key_hex() -> Option<String> {
 /// the Keychain item of an installed Hippocampus, which would ask the person
 /// for their login password.
 fn resolve_key_hex() -> Result<String, mci_agent::key_resolver::KeyResolutionError> {
-    resolve_key_hex_with(
-        development_key_hex,
-        mci_agent::key_resolver::resolve_database_key,
-    )
+    resolve_key_hex_with(development_key_hex, keychain_key_hex)
+}
+
+/// Production custody: the Keychain item the signed app created.
+fn keychain_key_hex() -> Result<String, mci_agent::key_resolver::KeyResolutionError> {
+    mci_agent::key_resolver::resolve_database_key()
 }
 
 fn resolve_key_hex_with(
