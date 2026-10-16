@@ -86,8 +86,8 @@ def all_scenes():
     return out
 
 
-def load_boxes(name):
-    return json.loads((BOXES / f'{name}.json').read_text(encoding='utf-8'))
+def load_boxes(name, folder=BOXES):
+    return json.loads((Path(folder) / f'{name}.json').read_text(encoding='utf-8'))
 
 
 def geometry(scene, boxes):
@@ -286,11 +286,12 @@ def code_check(main, code):
     return not problems, problems
 
 
-def bench(reader=None):
-    """Score every scene. Returns (rows, failures)."""
+def bench(reader=None, folder=BOXES):
+    """Score every scene, read from `folder` (boxes/ by default). Returns
+    (rows, failures)."""
     rows, failures = [], []
     for scene in all_scenes():
-        boxes = load_boxes(scene['name'])
+        boxes = load_boxes(scene['name'], folder)
         texts = transcripts(scene, boxes, reader)
         row = {'scene': scene, 'texts': texts}
         for how in ('old', 'new'):
@@ -483,6 +484,44 @@ def show_page(rows, page, screens):
 
 # ----------------------------------------------------------------- engines (Oct 8 audit)
 
+def edit_distance(a, b):
+    if len(a) < len(b):
+        a, b = b, a
+    previous = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        current = [i]
+        for j, cb in enumerate(b, 1):
+            current.append(min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (ca != cb)))
+        previous = current
+    return previous[-1]
+
+
+def legacy_score(truth_blocks, output_lines):
+    """Exact lines, words (whitespace tokens, order ignored), character error
+    over the screen in reading order, and the share of found lines in reading
+    order: the Oct 8 audit's measures."""
+    truth = [norm(l) for block in truth_blocks for l in block]
+    out = [norm(l) for l in output_lines if norm(l)]
+    out_set = collections.Counter(out)
+    exact = sum(1 for line in truth if out_set[line] > 0) / len(truth)
+    truth_words = collections.Counter(w for line in truth for w in line.split())
+    out_words = collections.Counter(w for line in out for w in line.split())
+    words = sum((truth_words & out_words).values()) / sum(truth_words.values())
+    truth_text, out_text = '\n'.join(truth), '\n'.join(out)
+    cer = edit_distance(truth_text, out_text) / len(truth_text)
+    positions = []
+    for line in truth:
+        best, where = 0.0, None
+        for i, candidate in enumerate(out):
+            ratio = SequenceMatcher(None, line, candidate, autojunk=False).ratio()
+            if ratio > best:
+                best, where = ratio, i
+        if best >= 0.8:
+            positions.append(where)
+    order = longest_increasing(positions) / len(positions) if positions else 0.0
+    return {'exact': exact, 'words': words, 'cer': cer, 'order': order}
+
+
 def engines(args):
     """The OCR engine comparison: exact lines, words, character error and
     order over every truth line of the
@@ -500,39 +539,6 @@ def engines(args):
         if proc.returncode != 0:
             raise RuntimeError(proc.stderr.decode()[-400:])
         return json.loads(proc.stdout)['lines'], time.monotonic() - start
-
-    def edit_distance(a, b):
-        if len(a) < len(b):
-            a, b = b, a
-        previous = list(range(len(b) + 1))
-        for i, ca in enumerate(a, 1):
-            current = [i]
-            for j, cb in enumerate(b, 1):
-                current.append(min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (ca != cb)))
-            previous = current
-        return previous[-1]
-
-    def legacy_score(truth_blocks, output_lines):
-        truth = [norm(l) for block in truth_blocks for l in block]
-        out = [norm(l) for l in output_lines if norm(l)]
-        out_set = collections.Counter(out)
-        exact = sum(1 for line in truth if out_set[line] > 0) / len(truth)
-        truth_words = collections.Counter(w for line in truth for w in line.split())
-        out_words = collections.Counter(w for line in out for w in line.split())
-        words = sum((truth_words & out_words).values()) / sum(truth_words.values())
-        truth_text, out_text = '\n'.join(truth), '\n'.join(out)
-        cer = edit_distance(truth_text, out_text) / len(truth_text)
-        positions = []
-        for line in truth:
-            best, where = 0.0, None
-            for i, candidate in enumerate(out):
-                ratio = SequenceMatcher(None, line, candidate, autojunk=False).ratio()
-                if ratio > best:
-                    best, where = ratio, i
-            if best >= 0.8:
-                positions.append(where)
-        order = longest_increasing(positions) / len(positions) if positions else 0.0
-        return {'exact': exact, 'words': words, 'cer': cer, 'order': order}
 
     names = sorted(scenes.SCENES)
     cache, serve = {}, None
