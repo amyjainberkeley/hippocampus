@@ -43,8 +43,11 @@ public enum BackgroundCapturePolicy {
         return out
     }
 
+    /// Every never-read app is excluded, whatever `excluded` holds, so a
+    /// password manager by any of its identifiers stays out of the pixels.
     static func isExcluded(_ bundleId: String, from excluded: Set<String>) -> Bool {
         excluded.contains(bundleId) || excluded.contains(bundleId.lowercased())
+            || SensitiveCaptureDenylist.isNeverReadApp(bundleId)
     }
 
     /// True when a visible window belongs to an excluded app that the stream's

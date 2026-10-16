@@ -145,7 +145,14 @@ public enum SCContentFilterFactory {
         runningBundleIDs: [String],
         denylist: Denylist
     ) -> [String] {
-        runningBundleIDs.filter { denylist.appIsDenied(bundleId: $0) }
+        runningBundleIDs.filter { isNeverBound($0, denylist: denylist) }
+    }
+
+    /// The owner's exclusions and every never-read app (password managers,
+    /// system authentication, Hippocampus itself): such a window is never
+    /// bound, so its pixels never reach this process.
+    static func isNeverBound(_ bundleId: String, denylist: Denylist) -> Bool {
+        denylist.appIsDenied(bundleId: bundleId) || SensitiveCaptureDenylist.isNeverReadApp(bundleId)
     }
 
     /// Build the display-scoped filter excluding every denylisted
@@ -226,7 +233,7 @@ public enum SCContentFilterFactory {
         guard let owner = scWindow.owningApplication else {
             return nil
         }
-        if denylist.appIsDenied(bundleId: owner.bundleIdentifier) {
+        if isNeverBound(owner.bundleIdentifier, denylist: denylist) {
             return nil
         }
         // `SCContentFilter(desktopIndependentWindow:)` is Apple's
@@ -267,7 +274,7 @@ public enum SCContentFilterFactory {
     ) -> WindowDescriptor? {
         guard let matched = descriptors.first(where: { $0.windowId == windowId })
         else { return nil }
-        if denylist.appIsDenied(bundleId: matched.bundleId) {
+        if isNeverBound(matched.bundleId, denylist: denylist) {
             return nil
         }
         return matched
@@ -354,7 +361,7 @@ public enum SCContentFilterFactory {
             if candidateId == focusedWindowId { continue }
             guard let candidate = descriptors.first(where: { $0.windowId == candidateId })
             else { continue }
-            if denylist.appIsDenied(bundleId: candidate.bundleId) { continue }
+            if isNeverBound(candidate.bundleId, denylist: denylist) { continue }
             result.append(candidate)
         }
         // Post-condition: result is non-empty (contains at least the
