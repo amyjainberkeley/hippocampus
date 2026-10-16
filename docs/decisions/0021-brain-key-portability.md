@@ -67,7 +67,7 @@ No data migration or re-encryption is needed — the key value is identical; onl
 
 For the personal sync tier (ADR-0023), iCloud Keychain provides automatic key availability across Mac, iPad, and iPhone — the key syncs with zero additional protocol.
 
-For the enterprise/workspace tier, the per-workspace key (ADR-0019 §1.2) is separate from the brain key. The brain key protects the LOCAL brain; the workspace key protects UPLOADED briefs. They are independent. A user can have an iCloud-synced brain key for their personal brain AND a workspace key for their team.
+A team tier with its own per-workspace key was planned here. It was withdrawn on 2026-10-15 with ADR-0019: Hippocampus is for individuals and has no team or managed version.
 
 ### 6. What this ADR does NOT do
 
@@ -88,7 +88,7 @@ For the enterprise/workspace tier, the per-workspace key (ADR-0019 §1.2) is sep
 ## Alternatives considered
 
 1. **Custom cloud key sync (our own server).** Rejected: adds server-side key storage, violates zero-knowledge for the personal tier. iCloud Keychain already solves this without us touching the key.
-2. **Hardware key (YubiKey / FIDO2).** Rejected for v1.0: too much friction for a consumer product. Revisit for enterprise tier.
+2. **Hardware key (YubiKey / FIDO2).** Rejected for v1.0: too much friction for a consumer product.
 3. **QR code key transfer (scan from old Mac to new Mac).** Rejected: manual, error-prone, requires both devices online simultaneously. iCloud Keychain is strictly better for Apple users.
 
 ## CSO sign-off (placeholder — owed at first protected-set PR)

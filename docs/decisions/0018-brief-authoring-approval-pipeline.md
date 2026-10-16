@@ -178,7 +178,6 @@ Five PRs across Director-Brain + Director-Context. Each protected-set; CSO sign-
 
 - **Brief upload to workspace server** — ADR-0019.
 - **Cross-team read of briefs** — ADR-0019 + Phase 5.
-- **Workspace identity / SSO / enterprise admin** — Phase 5.
 - **Brief versioning / edit history** — Phase 9 (retention). v1 ships single-version-per-brief.
 - **Multi-author briefs** (one brief authored by multiple users) — out of scope; one author per brief.
 - **Cross-day briefs / weekly summaries** — Phase 5+. v1 ships daily.

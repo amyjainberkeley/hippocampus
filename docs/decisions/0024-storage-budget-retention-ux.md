@@ -106,20 +106,9 @@ You can change this anytime in Settings.
 
 "Choose a different size" offers: 10 GB, 25 GB (default), 50 GB, 100 GB, Unlimited.
 
-### 7. Enterprise: workspace-managed caps
+### 7. Workspace-managed caps (withdrawn)
 
-Workspace admins can set a fleet-wide default cap via workspace policy:
-
-```json
-{
-  "storage_cap_gb": 50,
-  "allow_user_grow": true,
-  "allow_user_shrink_below_fleet": false
-}
-```
-
-- `allow_user_grow`: users can grow above the fleet default locally.
-- `allow_user_shrink_below_fleet`: users cannot set a cap below the fleet minimum (prevents users from accidentally purging data the workspace expects to be available for brief authoring).
+Withdrawn on 2026-10-15: Hippocampus is for individuals and has no team or managed version.
 
 ### 8. Blob cleanup detail
 
@@ -140,7 +129,6 @@ When events are purged:
 - **Positive:** Hysteresis (purge to 80%, warn at 90%, modal at 100%) prevents purge thrashing.
 - **Negative / tradeoff:** 25 GB default may be too small for power users or too large for users on small SSDs. Configurable at onboarding mitigates this.
 - **Negative / tradeoff:** `VACUUM` after bulk purge is expensive (rewrites the entire SQLite file). Mitigated by only running after 100+ event purges and running in background thread.
-- **Negative / tradeoff:** Enterprise fleet caps add configuration complexity. Acceptable for the enterprise tier.
 
 ## Alternatives considered
 

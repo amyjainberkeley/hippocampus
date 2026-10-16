@@ -26,9 +26,8 @@ final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Se
         if NativePreviewConfiguration(arguments: CommandLine.arguments) != nil { return }
         #endif
 
-        // Cycle 8.51 — enterprise audit trail. Record every launch to
-        // the plaintext audit log so the "who touched user data when"
-        // trail is complete for a security-review buyer. Fire-and-forget:
+        // Record every launch in the plain-text audit log, so the trail of
+        // who touched the memory, and when, is complete. Fire-and-forget:
         // AuditLog.record is thread-safe and never throws to the caller.
         AuditLog.shared.record(
             action: .appLaunched,

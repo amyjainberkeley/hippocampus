@@ -3,8 +3,8 @@
 // A grep-lint + coverage-floor pair that catches the class of accessibility
 // regression this cycle's audit found: icon-only Buttons that ship without
 // an `.accessibilityLabel(...)`. VoiceOver hears those as "button" with no
-// context, which is a shipping-blocker for enterprise buyers (Meta, Google
-// require WCAG 2.1 AA + macOS VoiceOver navigation).
+// context, so its users can't tell them apart; WCAG 2.1 asks for a name on
+// every control.
 //
 // Not a snapshot test — the SwiftUI accessibility inspector is not
 // XCTest-scriptable from a Swift package. What we CAN do headlessly:

@@ -1,4 +1,4 @@
-// AuditLogTests.swift — pin the enterprise-audit-log wire shape,
+// AuditLogTests.swift — pin the audit log's wire shape,
 // append + read semantics, rotation policy, and Downloads export.
 //
 // The pure encode/decode surface is exercised without any on-disk

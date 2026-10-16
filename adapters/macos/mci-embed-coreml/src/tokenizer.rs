@@ -24,10 +24,8 @@
 //! filesystem dependency — the tokenizer ships inside `mci-agent` /
 //! `Hippocampus.app` regardless of model bundling state.
 //!
-//! Per the CEO ratification (2026-05-22): tokenizer is bundled in the
-//! binary, NOT first-launch downloaded. Reason: enterprise air-gap +
-//! MDM-deploy customers cannot rely on first-launch network access for
-//! the embedder pipeline to work.
+//! Decided 2026-05-22: the tokenizer is bundled in the binary, not
+//! downloaded at first launch, so search works on a Mac with no network.
 
 use std::path::Path;
 use std::sync::Arc;

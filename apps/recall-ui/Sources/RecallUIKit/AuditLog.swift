@@ -1,13 +1,12 @@
-// AuditLog.swift — enterprise-grade audit trail (cycle 8.51).
+// AuditLog.swift — a plain-text trail of what was done to the memory.
 //
 // Every user-triggered destructive action (delete / wipe / export) and
 // every privacy-sensitive state change (permissions granted/revoked,
 // settings change, app launch) is appended to a plaintext, append-only
 // log at `~/Library/Application Support/Hippocampus/audit.log`.
 //
-// Trust artifact: enterprise buyers ("can I audit what happens to user
-// data?") get a plaintext, user-owned, tamper-visible (append-only)
-// log that lives on the user's machine only.
+// The person gets a plain-text, append-only log of what happened to
+// their data, kept on their own Mac.
 //
 // File format — one line per entry:
 //     <ISO-8601-timestamp> <action-type> <details-json>

@@ -1,8 +1,8 @@
 // PrivacyDashboard.swift — the ⌘7 in-app Privacy Dashboard (cycle 8.46).
 //
 // Amy's directive 2026-07-13: "show the full control, no collection".
-// This dashboard is the enterprise-grade trust artifact: it shows what
-// MCI has captured and gives the user delete + export controls.
+// This dashboard shows what MCI has captured and gives the user delete
+// and export controls.
 //
 // # Two-tier discipline (post cycle 8.47, PR #76 follow-up)
 //
@@ -100,10 +100,9 @@ struct PrivacyDashboard: View {
                 if let err = errorMessage {
                     Text(err).mciFont(.body).foregroundStyle(Color.brandError)
                 }
-                // Cycle 8.51 — enterprise-audit-log surface. Renders the
-                // last 20 audit lines (or the whole log when the user
-                // clicks "Show all") so a security-review buyer sees the
-                // trust artifact live in the product.
+                // The audit log's last 20 lines (or all of it after "Show
+                // all"), so the person sees what was done to their memory,
+                // and when.
                 RecentActivitySection(
                     entries: showAllAudit
                         ? AuditLog.shared.readRecent(count: 10_000)
@@ -150,9 +149,9 @@ struct PrivacyDashboard: View {
                 result = try await mutator.deleteEventsInRange(
                     startTsUs: startUs, endTsUs: endUs
                 )
-                // Cycle 8.51 — audit-log every destructive action so
-                // enterprise buyers have a plaintext trail. Details are
-                // meta-only (count + range); NO brain content.
+                // Every destructive action goes in the audit log, so the
+                // person has a plain-text trail. Details are counts and
+                // ranges only; NO brain content.
                 AuditLog.shared.record(
                     action: .deleteEventsInRange,
                     details: [
@@ -548,7 +547,7 @@ extension JSONEncoder {
 
 // MARK: - Recent activity (audit log)
 
-/// Cycle 8.51 — enterprise audit-log surface in the Privacy Dashboard.
+/// The audit log's surface in the Privacy Dashboard.
 /// Renders a scrollable table of the most-recent `AuditEntry` values.
 /// Toggling "Show all" swaps in the whole log; "Export activity log"
 /// writes a plaintext copy to `~/Downloads/`. Uses `MCIDesignSystem`

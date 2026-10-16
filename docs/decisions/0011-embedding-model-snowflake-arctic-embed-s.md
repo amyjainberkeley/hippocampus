@@ -84,8 +84,8 @@ exporters, all of which use **external tokenization + token-IDs input**.
    `Snowflake/snowflake-arctic-embed-s` `tokenizer.json` (~700 KB) is
    committed at `adapters/macos/mci-embed-coreml/resources/tokenizer.json`
    and embedded into the binary at compile time via `include_bytes!`.
-   No first-launch download — enterprise air-gap + MDM deploy customers
-   must work zero-network.
+   No first-launch download: search has to work on a Mac with no
+   network.
 2. **The Core ML graph accepts Int32 `input_ids` + `attention_mask`**,
    both shape `[1, 128]`. CLS-pool + L2-normalize move *inside* the
    graph (traced as `torch.select(...,1,0)` + `F.normalize(p=2,dim=-1)`,

@@ -2310,7 +2310,7 @@ mod tests {
             ts_us: 1_700_000_000_000_000,
             url: "https://example.com/pricing".to_string(),
             title: "Pricing — Example Corp".to_string(),
-            full_text: "Plans start at $10/mo.\nEnterprise pricing available.".to_string(),
+            full_text: "Plans start at $10/mo.\nTeam pricing available.".to_string(),
             source_browser: "chrome".to_string(),
             tab_id: 42,
         });

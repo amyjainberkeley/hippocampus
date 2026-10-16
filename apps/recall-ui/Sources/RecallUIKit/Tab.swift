@@ -21,10 +21,9 @@ public enum RecallTab: Int, Hashable, Sendable {
     /// Cycle 8.42 — minimal Settings surface hosting the user-dictionary
     /// editor. Future settings can grow into the same scene.
     case settings = 6
-    /// Cycle 8.46 — Privacy Dashboard (⌘7). Enterprise-grade trust
-    /// artifact: shows what MCI has captured + gives the user delete /
-    /// export controls over their brain. Amy's directive 2026-07-13:
-    /// "show the full control, no collection."
+    /// Privacy Dashboard (⌘7): shows what MCI has captured and gives the
+    /// user delete and export controls over their brain. Amy's directive
+    /// 2026-07-13: "show the full control, no collection."
     case privacyDashboard = 7
     /// **V2-P13 (Phase D scaffold)** — Rewind-style visual timeline
     /// strip (⌘8). Horizontally-scrolling row of capture cards with
