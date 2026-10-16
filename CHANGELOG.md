@@ -5,7 +5,7 @@ commits are intentionally omitted from release notes.
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-10-13
+## [0.3.0] - 2026-10-15
 
 ### Ask
 
@@ -19,7 +19,7 @@ commits are intentionally omitted from release notes.
 - The window has three places, Overview, Ask and You, with the hi mark at the top and, at the bottom, whether Hippocampus is remembering.
 - Overview shows your day as a strip of sessions coloured by kind. Hover to see a session’s screenshot, click to see what it held, and use the arrow keys to move between sessions.
 - The Right now card shows what you’re working on, with Copy for your AI and the exact lines a connected AI already has. With no AI tool connected, it offers Connect.
-- The day’s summary, written on this Mac, says what you worked on, in order, and what you looked up. It never guesses how long something took, gives no advice, and never calls you distracted, stuck or productive.
+- The day’s summary, written on this Mac, says what you worked on, in order, and what you looked up when it knows the pages’ addresses. It never guesses how long something took, gives no advice, and never calls you distracted, stuck or productive.
 - Overview works without Apple Intelligence.
 - You shows, in the exact words, what your AI can be told about you. Mark each item Right or Forget, with Undo, and open Why to see where it was learned.
 - Show in History opens a session in Ask, and a session listed under You opens on Overview.
@@ -45,8 +45,8 @@ commits are intentionally omitted from release notes.
 - Under Remembering, the menu says when it last saved, for example “Last saved 8s ago”.
 - Skipping a window for privacy shows “Skipping this window” once the skip has held, not “Not saving”. Only a password field shows the hollow dot.
 - Private browser windows are skipped when they show they are private: a private title, or the private badge in the window’s top bar.
-- Sign-in and bank sites stay never read, even when their address shows only in the address bar.
-- Hippocampus never asks for Automation. It uses Automation only where you already allowed it.
+- Sign-in and bank sites are skipped even when their address shows only in the address bar.
+- Hippocampus doesn’t ask for Automation. It uses Automation only where you already allowed it.
 - Every saved moment passes three checks for passwords and keys: the text as read, the page in reading order, and the exact text saved.
 - Quit stops everything Hippocampus started, including Ask and its windows, and waits until they have exited.
 - Stop Sharing always turns remembering off. Hippocampus stays off, even after a restart, until you turn it on, and says when you stopped it.
@@ -64,12 +64,20 @@ commits are intentionally omitted from release notes.
 - AI tools are no longer sent notes about pauses or input counts.
 - Context copied for your AI has no status lines, and each source says when and where it was seen.
 - Answers and summaries without Apple Intelligence (beta): Hippocampus uses a model you run on this Mac with Ollama or LM Studio, and finds it without setup.
-- Hippocampus talks only to a model server at 127.0.0.1, ::1 or localhost, follows no redirects, and never picks a model that runs in the cloud.
+- Hippocampus talks only to a model server at 127.0.0.1, ::1 or localhost, follows no redirects, and skips Ollama’s cloud models.
 - With your own model, summaries and what Hippocampus learns are written while your Mac is plugged in. Ask answers on battery too.
-- The part that writes answers now starts on macOS 14 and later.
+- The part that writes answers is built to start on macOS 14 and later.
 - Apple Intelligence writes to you as “you”, in short plain sentences.
 - Quitting Hippocampus stops the model at once, even while it is writing an answer.
 - Unusual line breaks on screen no longer stall an answer until it times out.
+
+### Download and updates
+
+- Install with one line: `curl -fsSL https://github.com/amyjainberkeley/hippocampus/releases/latest/download/install.sh | sh`. It checks the download’s checksum, Apple’s notarization and the developer’s signature before it copies the app.
+- Or with Homebrew: `brew install --cask amyjainberkeley/tap/hippocampus`.
+- Check for Updates reads the update feed of the newest GitHub release, and checks an update’s signature before installing it.
+- The download is smaller: the disk image uses LZMA, the programs leave out debugging symbols, and the text reader no longer carries video libraries it never used.
+- The disk image is called Hippocampus and shows only how to install, with no build numbers.
 
 ### Setup
 
@@ -109,9 +117,9 @@ commits are intentionally omitted from release notes.
 
 - Searches from connected AI assistants return their results instead of an
   empty list labelled "degraded".
-- Install with one line, `curl -fsSL https://github.com/amyjainberkeley/hippocampus/releases/latest/download/install.sh | sh`,
-  or with Homebrew. The installer checks Apple's notarization and the
-  developer signature before copying the app.
+- Install with one line, `curl -fsSL https://github.com/amyjainberkeley/hippocampus/releases/latest/download/install.sh | sh`.
+  The installer checks Apple's notarization and the developer signature
+  before copying the app.
 
 ### Recall
 
