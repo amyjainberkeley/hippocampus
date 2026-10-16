@@ -942,4 +942,7 @@ if [[ -n "$NOTES_FILE" ]]; then
 fi
 say "      $(printf '"%s" ' "${UPLOADS[@]}")"
 say "    gh release edit $RELEASE_TAG --draft=false --latest   # once the draft is inspected"
+say "  Then point the Homebrew cask at this DMG, in the amyjainberkeley/homebrew-tap repository"
+say "  (it refuses any DMG that is not notarized):"
+say "    ./update-cask.sh \"$DMG\""
 say "Nothing was pushed, tagged or uploaded."

@@ -215,6 +215,8 @@ require_order "$RELEASE_SCRIPT" '^verify_release$' '^make_appcast$' \
     'release script signs the appcast only for a verified DMG'
 require_literal "$RELEASE_SCRIPT" 'UPLOADS=("$DMG" "$DMG.sha256" "$STABLE_DMG" "$STABLE_DMG.sha256" "$APPCAST")' \
     'release script lists appcast.xml with the DMGs to upload'
+require_literal "$RELEASE_SCRIPT" 'say "    ./update-cask.sh \"$DMG\""' \
+    'release script says how to point the Homebrew cask at the notarized DMG'
 PRIVATE_REPORTING='https://github.com/amyjainberkeley/hippocampus/security/advisories/new'
 for contact_file in "$REPO_ROOT/SECURITY.md" "$REPO_ROOT/docs/legal/terms-of-service.md" \
     "$REPO_ROOT/assets/installer/EULA.rtf"; do
