@@ -86,7 +86,6 @@ pub mod mcp_sync;
 pub mod messages_ingest;
 pub mod page_content;
 pub mod panic_hook;
-pub mod panic_uploader;
 #[cfg(target_os = "macos")]
 pub mod pump_supervisor;
 /// Bounded incremental import plus enrich of new events, for the handoff hook.

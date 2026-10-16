@@ -101,8 +101,6 @@ async fn run_cli(home: &Path, db_path: &Path) -> (i32, String) {
         .env("MCI_DB_KEYCHAIN_STORAGE_MODEL", "file-keychain-acl-v1")
         .env("MCI_DB_KEY_HEX", KEY_HEX)
         .env_remove("MCI_DB_PATH")
-        .env_remove("MCI_CRASH_REPORT_URL")
-        .env_remove("MCI_CRASH_REPORT_OPTED_IN")
         .output()
         .await
         .expect("spawn mci-agent");

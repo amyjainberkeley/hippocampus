@@ -59,7 +59,6 @@ use mci_agent::idle_batch;
 use mci_agent::key_resolver;
 use mci_agent::mcp::{serve_stdio, BrainReader, LiveBrainReader, Server};
 use mci_agent::page_content::PageContentListener;
-use mci_agent::panic_uploader::{self, PanicUploader};
 #[cfg(target_os = "macos")]
 use mci_agent::pump_supervisor::PumpSupervisor;
 use mci_agent::refresh::{refresh_or_skip, RefreshOutcome, RefreshRoots};
@@ -770,11 +769,7 @@ fn print_usage() {
         \x20                            idles; `brief` refuses and says so.\n\
         \x20 MCI_TRANSCRIPT_REFRESH_ENABLED set to 1 to opt a directly launched daemon\n\
         \x20                            into local Claude/Codex transcript imports. Default OFF.\n\
-        \x20 MCI_TRANSCRIPT_REFRESH_DISABLED set to 1 to override that opt-in.\n\
-        \x20 MCI_CRASH_REPORT_URL       HTTP endpoint for crash report uploads (e.g.\n\
-        \x20                            http://127.0.0.1:3100/v1/crash-report).\n\
-        \x20 MCI_CRASH_REPORT_OPTED_IN  set to 1 to enable crash report uploads.\n\
-        \x20                            BOTH URL + OPTED_IN required. Default: OFF.\n"
+        \x20 MCI_TRANSCRIPT_REFRESH_DISABLED set to 1 to override that opt-in.\n"
     );
 }
 
@@ -810,21 +805,8 @@ fn run_with_runtime(
 
 #[allow(clippy::too_many_lines)]
 async fn run_agent(args: Args) -> ExitCode {
-    // Best-effort drain of prior crash reports. Spawned early so it
-    // runs in the background while the main mode proceeds. Default
-    // OFF — both MCI_CRASH_REPORT_URL and MCI_CRASH_REPORT_OPTED_IN=1
-    // must be set.
-    if let Some(uploader) = PanicUploader::from_env() {
-        let panic_log = mci_agent::panic_hook::default_panic_log_path();
-        tokio::spawn(async move {
-            match panic_uploader::drain_pending(&uploader, &panic_log).await {
-                Ok(0) => {}
-                Ok(n) => errln!("mci-agent: uploaded {n} crash report(s)"),
-                Err(e) => errln!("mci-agent: crash report upload error: {e}"),
-            }
-        });
-    }
-
+    // Crash records stay in ~/Library/Logs/MCI/panic.jsonl on this Mac;
+    // nothing sends them anywhere.
     match args.mode {
         Mode::Version => {
             outln!("mci-agent {VERSION}");

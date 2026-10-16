@@ -21,8 +21,8 @@ this is the parent process; the helper is a signed child.
 - `src/mcp/` — inbound MCP *server* surface (MCI exposes tools).
 - `src/mcp_aggregator.rs` — fan-out to external MCP servers via
   `../../core/mcp-client/`.
-- `src/panic_hook.rs`, `panic_uploader.rs`, `crash_recovery.rs` —
-  crash-safety surfaces.
+- `src/panic_hook.rs`, `crash_recovery.rs` — crash-safety surfaces. Crash
+  records stay on this Mac.
 - `src/device_id.rs` — per-device id (never leaves the device).
 - `tests/` — integration + supervisor tests.
 - `Cargo.toml` — the `mci-agent` package manifest.
