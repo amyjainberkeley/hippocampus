@@ -14,6 +14,7 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
+use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use mci_brain::SqlCipherBrainStore;
@@ -33,9 +34,26 @@ fn agent_bin() -> PathBuf {
     path
 }
 
+/// Pipes and child processes are made one at a time. macOS has no
+/// `pipe2`, so std marks a new pipe close-on-exec only after making it; a
+/// child another test starts in that gap inherits the pipe, keeps a reader
+/// open, and the write that must fail succeeds.
+static SPAWNING: Mutex<()> = Mutex::new(());
+
+fn one_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+    SPAWNING.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Start `command`, making no pipe or child while another test does.
+fn spawn(command: &mut Command) -> Child {
+    let _turn = one_at_a_time();
+    command.spawn().expect("spawn mci-agent")
+}
+
 /// The write end of a pipe whose only reader has exited. Writing to it
 /// fails with `EPIPE`; the test checks that before handing it over.
 fn closed_pipe() -> Stdio {
+    let _turn = one_at_a_time();
     let mut reader = Command::new("/usr/bin/true")
         .stdin(Stdio::piped())
         .spawn()
@@ -122,15 +140,14 @@ const MCP_REQUESTS: &str = concat!(
 #[test]
 fn the_mcp_server_answers_and_exits_cleanly_when_stderr_has_no_reader() {
     let home = Home::new();
-    let mut child = home
-        .agent()
-        .args(["mcp-serve", "--db-path"])
-        .arg(home.brain())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(closed_pipe())
-        .spawn()
-        .expect("spawn mcp-serve");
+    let mut child = spawn(
+        home.agent()
+            .args(["mcp-serve", "--db-path"])
+            .arg(home.brain())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(closed_pipe()),
+    );
     child
         .stdin
         .take()
@@ -163,15 +180,14 @@ fn the_mcp_server_answers_and_exits_cleanly_when_stderr_has_no_reader() {
 #[test]
 fn the_mcp_server_ends_quietly_when_its_client_closes_stdout() {
     let home = Home::new();
-    let mut child = home
-        .agent()
-        .args(["mcp-serve", "--db-path"])
-        .arg(home.brain())
-        .stdin(Stdio::piped())
-        .stdout(closed_pipe())
-        .stderr(closed_pipe())
-        .spawn()
-        .expect("spawn mcp-serve");
+    let mut child = spawn(
+        home.agent()
+            .args(["mcp-serve", "--db-path"])
+            .arg(home.brain())
+            .stdin(Stdio::piped())
+            .stdout(closed_pipe())
+            .stderr(closed_pipe()),
+    );
     // The write may fail once the server has gone; that is the point.
     let _ = child
         .stdin
@@ -190,21 +206,20 @@ fn the_mcp_server_ends_quietly_when_its_client_closes_stdout() {
 #[test]
 fn the_capture_daemon_drains_and_exits_cleanly_when_stderr_has_no_reader() {
     let home = Home::new();
-    let child = home
-        .agent()
-        .env("MCI_CAPTURE_ENABLED", "0")
-        .arg("--device-id-path")
-        .arg(home.path().join("device-id"))
-        .arg("--log-path")
-        .arg(home.path().join("helper-health.jsonl"))
-        .arg("--db-path")
-        .arg(home.brain())
-        .arg("--drain-stdin")
-        .stdin(Stdio::null())
-        .stdout(closed_pipe())
-        .stderr(closed_pipe())
-        .spawn()
-        .expect("spawn the daemon");
+    let child = spawn(
+        home.agent()
+            .env("MCI_CAPTURE_ENABLED", "0")
+            .arg("--device-id-path")
+            .arg(home.path().join("device-id"))
+            .arg("--log-path")
+            .arg(home.path().join("helper-health.jsonl"))
+            .arg("--db-path")
+            .arg(home.brain())
+            .arg("--drain-stdin")
+            .stdin(Stdio::null())
+            .stdout(closed_pipe())
+            .stderr(closed_pipe()),
+    );
     let status = wait(child, Duration::from_secs(120));
 
     home.assert_no_panic(status, "the daemon with closed stdout and stderr");
@@ -217,21 +232,20 @@ fn the_capture_daemon_drains_and_exits_cleanly_when_stderr_has_no_reader() {
 #[test]
 fn the_session_hook_exits_zero_when_nobody_reads_its_output() {
     let home = Home::new();
-    let mut child = home
-        .agent()
-        .args([
-            "handoff",
-            "--format",
-            "claude-hook",
-            "--no-refresh",
-            "--db-path",
-        ])
-        .arg(home.brain())
-        .stdin(Stdio::piped())
-        .stdout(closed_pipe())
-        .stderr(closed_pipe())
-        .spawn()
-        .expect("spawn the hook");
+    let mut child = spawn(
+        home.agent()
+            .args([
+                "handoff",
+                "--format",
+                "claude-hook",
+                "--no-refresh",
+                "--db-path",
+            ])
+            .arg(home.brain())
+            .stdin(Stdio::piped())
+            .stdout(closed_pipe())
+            .stderr(closed_pipe()),
+    );
     // Claude Code sends the hook a JSON object; its fields are logged to
     // stderr, which has no reader.
     let _ = child
@@ -248,14 +262,13 @@ fn the_session_hook_exits_zero_when_nobody_reads_its_output() {
 #[test]
 fn a_one_shot_command_exits_zero_when_stdout_has_no_reader() {
     let home = Home::new();
-    let child = home
-        .agent()
-        .arg("--version")
-        .stdin(Stdio::null())
-        .stdout(closed_pipe())
-        .stderr(closed_pipe())
-        .spawn()
-        .expect("spawn --version");
+    let child = spawn(
+        home.agent()
+            .arg("--version")
+            .stdin(Stdio::null())
+            .stdout(closed_pipe())
+            .stderr(closed_pipe()),
+    );
     let status = wait(child, Duration::from_secs(30));
 
     home.assert_no_panic(status, "--version");
