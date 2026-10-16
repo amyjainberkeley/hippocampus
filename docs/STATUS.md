@@ -124,8 +124,8 @@ CPU share.
 
 - `scripts/check.sh` runs every lane CI runs. `scripts/check.sh --help` lists
   them.
-- `scripts/test-public-tree.sh` keeps private paths, old job titles,
-  enterprise and paid-tier text and ruled-out claims out of the tree.
+- `scripts/test-public-tree.sh` keeps private paths, old job titles, paid
+  tiers and ruled-out claims out of the tree.
 - `scripts/verify-quit-leaves-nothing.sh <app>` checks a built app leaves
   nothing running after Quit.
 - `apps/hippocampus/Resources/build-app.sh` refuses to assemble a Developer
