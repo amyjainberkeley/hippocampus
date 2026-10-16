@@ -16,9 +16,13 @@ set -euo pipefail
 #   4. codesign --verify --deep --strict passes, and the team is TEAM.
 #   5. --gatekeeper distribution runs syspolicy_check distribution: the
 #      checks macOS makes before it first opens an app, notarization,
-#      Gatekeeper and XProtect included (launch gate D1).
+#      Gatekeeper and XProtect included (launch gate D1). It must pass
+#      outright.
 #      --gatekeeper notary-submission runs the checks Apple's notary service
-#      makes, for an app that is not notarized yet. The default is none.
+#      makes, for an app that is not notarized yet. An error fails it; a
+#      warning is printed and allowed, because the notary service itself
+#      accepted the same app with no issues (0.2.1, whose OCR worker sits in
+#      Contents/Resources as 0.3.0's does). The default is none.
 #
 # HIPPOCAMPUS_SYSPOLICY_CHECK replaces /usr/bin/syspolicy_check, for the
 # fixture test only.
@@ -112,10 +116,37 @@ SIGNED_TEAM="$(/usr/bin/codesign -dv "$APP" 2>&1 | sed -n 's/^TeamIdentifier=//p
 [[ "$SIGNED_TEAM" == "$TEAM" ]] || refuse "$NAME is signed by team ${SIGNED_TEAM:-none}, not $TEAM."
 ok "signature valid (deep, strict), team $TEAM"
 
+# syspolicy_check --json: {"output": [{"SyspolicyCheckErrorLevel": ...,
+# "SyspolicyCheckShortError": ..., "SyspolicyCheckErrorFile": ...}, ...]}.
+# Prints one "LEVEL<tab>short error: file" line per finding.
+policy_findings() {
+    /usr/bin/python3 -I -c '
+import json, sys
+try:
+    findings = json.loads(sys.stdin.read() or "{}").get("output") or []
+except ValueError:
+    findings = [{"SyspolicyCheckErrorLevel": "Unreadable", "SyspolicyCheckShortError": "output was not JSON"}]
+for item in findings:
+    print("%s\t%s: %s" % (item.get("SyspolicyCheckErrorLevel", "?"),
+                          item.get("SyspolicyCheckShortError", "?"),
+                          item.get("SyspolicyCheckErrorFile", "")))
+'
+}
+
 if [[ "$GATEKEEPER" != "none" ]]; then
-    if ! POLICY="$("$SYSPOLICY_CHECK" "$GATEKEEPER" "$APP" 2>&1)"; then
-        printf '%s\n' "$POLICY" >&2
+    POLICY_STATUS=0
+    POLICY="$("$SYSPOLICY_CHECK" "$GATEKEEPER" --json "$APP" 2>/dev/null)" || POLICY_STATUS=$?
+    FINDINGS="$(printf '%s' "$POLICY" | policy_findings)"
+    if [[ "$POLICY_STATUS" -eq 0 && -z "$FINDINGS" ]]; then
+        ok "syspolicy_check $GATEKEEPER accepts $NAME"
+    elif [[ "$GATEKEEPER" == "notary-submission" && -n "$FINDINGS" ]] \
+        && ! grep -qv '^Warning'$'\t' <<<"$FINDINGS"; then
+        while IFS=$'\t' read -r _ finding; do
+            printf 'warn  syspolicy_check notary-submission: %s\n' "$finding"
+        done <<<"$FINDINGS"
+        ok "syspolicy_check notary-submission finds no errors in $NAME, only the warnings above"
+    else
+        printf '%s\n' "${FINDINGS:-syspolicy_check exited $POLICY_STATUS with no findings}" >&2
         refuse "syspolicy_check $GATEKEEPER rejected $NAME."
     fi
-    ok "syspolicy_check $GATEKEEPER accepts $NAME"
 fi

@@ -684,6 +684,24 @@ check_assembled_app() {
         stop "$app is not a release app: $(printf '%s\n' "$result" | tail -1 | sed 's/^FAIL  //')"
     fi
     if [[ -n "$VERIFY_LOG" ]]; then printf '\n$ verify-release-app.sh %s\n%s\n' "$app" "$result" >>"$VERIFY_LOG"; fi
+    # Warnings it allowed (a dry run's notary-submission check) are shown.
+    printf '%s\n' "$result" | grep '^warn ' | sed 's/^/   /' || true
+}
+
+# One line for what syspolicy_check says of an app: its findings with their
+# levels, or "accepted". Exits as syspolicy_check did.
+syspolicy_verdict() {
+    local mode="$1" app="$2" output="" status=0
+    output="$(/usr/bin/syspolicy_check "$mode" --json "$app" 2>/dev/null)" || status=$?
+    printf '%s' "$output" | /usr/bin/python3 -I -c '
+import json, sys
+try:
+    findings = json.loads(sys.stdin.read() or "{}").get("output") or []
+except ValueError:
+    findings = [{"SyspolicyCheckShortError": "unreadable output", "SyspolicyCheckErrorLevel": "?"}]
+print("; ".join("%s (%s)" % (f.get("SyspolicyCheckShortError"), f.get("SyspolicyCheckErrorLevel"))
+                for f in findings) or "accepted")'
+    return "$status"
 }
 
 assemble_app() {
@@ -784,14 +802,18 @@ verify_release() {
         report "Gatekeeper on the app in the DMG (spctl -t execute), not notarized" \
             /usr/sbin/spctl --assess --type execute --verbose=2 "$app"
         report "syspolicy_check distribution on the app in the DMG, not notarized" \
-            /usr/bin/syspolicy_check distribution "$app"
+            syspolicy_verdict distribution "$app"
     else
         verify "the app in the DMG: notarization ticket (stapler validate)" /usr/bin/xcrun stapler validate "$app"
         verify "the app in the DMG: Gatekeeper accepts it (spctl -t execute)" /usr/sbin/spctl --assess --type execute --verbose=2 "$app"
     fi
     check_assembled_app "$app" "$GATEKEEPER_CHECK"
     say "   ok  the app in the DMG: hippocampus-mind weak-links FoundationModels, every binary runs on macOS $MINIMUM_MACOS, version $RELEASE_VERSION, team $TEAM_ID"
-    say "   ok  the app in the DMG: syspolicy_check $GATEKEEPER_CHECK accepts it"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        say "   ok  the app in the DMG: syspolicy_check notary-submission finds no errors"
+    else
+        say "   ok  the app in the DMG: syspolicy_check distribution accepts it"
+    fi
     digest="$(clean_env python3 -B "$REPO_ROOT/scripts/product-source-digest.py" --repo-root "$REPO_ROOT")"
     verify "the app in the DMG was built from this commit and source" clean_env python3 -B \
         "$REPO_ROOT/scripts/build-provenance.py" verify --app "$app" \

@@ -118,19 +118,29 @@ make_app "$APP" "$TMP_ROOT/mind-weak"
 printf '\n' >>"$APP/Contents/Info.plist"
 expect_refuse 'an app changed after signing is refused' 'codesign --verify --deep --strict failed' "${ARGS[@]}" "$APP"
 
-# syspolicy_check: the subcommand asked for, on the app, and its verdict.
+# syspolicy_check: the subcommand asked for, on the app, with --json, and its
+# verdict. The stand-in answers as the real one does: exit 0 and no findings,
+# or exit 70 and a list with each finding's level (from SYSPOLICY_FINDINGS).
 make_app "$APP" "$TMP_ROOT/mind-weak"
 cat >"$TMP_ROOT/syspolicy_check" <<'FAKE'
 #!/bin/sh
 printf '%s\n' "$*" >>"$SYSPOLICY_CALLS"
-[ "${SYSPOLICY_VERDICT:-0}" = 0 ] || { echo "App has a notarization problem"; exit 1; }
+case "${SYSPOLICY_FINDINGS:-none}" in
+    none) printf '{"output": []}\n'; exit 0 ;;
+    warning) level=Warning; short="Incorrect Bundle Structure" ;;
+    fatal) level=Fatal; short="Notary Ticket Missing" ;;
+esac
+printf '{"output": [{"SyspolicyCheckErrorLevel": "%s", "SyspolicyCheckShortError": "%s", "SyspolicyCheckErrorFile": "%s"}]}\n' \
+    "$level" "$short" "$3"
+exit 70
 FAKE
 chmod +x "$TMP_ROOT/syspolicy_check"
 export HIPPOCAMPUS_SYSPOLICY_CHECK="$TMP_ROOT/syspolicy_check"
 export SYSPOLICY_CALLS="$TMP_ROOT/syspolicy.calls"
+: >"$SYSPOLICY_CALLS"
 expect_accept 'an app syspolicy_check distribution accepts is accepted' \
     "${ARGS[@]}" --gatekeeper distribution "$APP"
-if [[ "$(cat "$SYSPOLICY_CALLS")" == "distribution $APP" ]]; then
+if [[ "$(cat "$SYSPOLICY_CALLS")" == "distribution --json $APP" ]]; then
     pass 'syspolicy_check runs distribution on the app'
 else
     fail 'syspolicy_check runs distribution on the app'
@@ -138,7 +148,7 @@ fi
 : >"$SYSPOLICY_CALLS"
 expect_accept 'a not-yet-notarized app is checked as a notary submission' \
     "${ARGS[@]}" --gatekeeper notary-submission "$APP"
-if [[ "$(cat "$SYSPOLICY_CALLS")" == "notary-submission $APP" ]]; then
+if [[ "$(cat "$SYSPOLICY_CALLS")" == "notary-submission --json $APP" ]]; then
     pass 'syspolicy_check runs notary-submission on the app'
 else
     fail 'syspolicy_check runs notary-submission on the app'
@@ -150,8 +160,20 @@ if [[ -s "$SYSPOLICY_CALLS" ]]; then
 else
     pass 'without --gatekeeper, syspolicy_check stays unused'
 fi
-SYSPOLICY_VERDICT=1 expect_refuse 'an app syspolicy_check rejects is refused, with its reason' \
-    'App has a notarization problem' "${ARGS[@]}" --gatekeeper distribution "$APP"
+SYSPOLICY_FINDINGS=warning expect_accept 'a notary-submission warning is allowed, and shown' \
+    "${ARGS[@]}" --gatekeeper notary-submission "$APP"
+if grep -Fq 'warn  syspolicy_check notary-submission: Incorrect Bundle Structure' "$TMP_ROOT/out.log"; then
+    pass 'the allowed warning is printed'
+else
+    cat "$TMP_ROOT/out.log" >&2
+    fail 'the allowed warning is printed'
+fi
+SYSPOLICY_FINDINGS=fatal expect_refuse 'a notary-submission error is refused, with its reason' \
+    'Fatal'$'\t''Notary Ticket Missing' "${ARGS[@]}" --gatekeeper notary-submission "$APP"
+SYSPOLICY_FINDINGS=warning expect_refuse 'distribution must pass outright: even a warning is refused' \
+    'syspolicy_check distribution rejected' "${ARGS[@]}" --gatekeeper distribution "$APP"
+SYSPOLICY_FINDINGS=fatal expect_refuse 'an app syspolicy_check distribution rejects is refused, with its reason' \
+    'Notary Ticket Missing' "${ARGS[@]}" --gatekeeper distribution "$APP"
 if "$VERIFY" "${ARGS[@]}" --gatekeeper sometimes "$APP" >/dev/null 2>&1; then
     fail 'an unknown --gatekeeper mode is a usage error'
 else
