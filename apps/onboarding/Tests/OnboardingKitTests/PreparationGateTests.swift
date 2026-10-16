@@ -5,7 +5,7 @@ import XCTest
 final class PreparationGateTests: XCTestCase {
     func testFailedKeyPreparationCannotContinueButRetryCanRecover() async {
         let keys = RecoverableKeyGenerator()
-        let model = PrepareBrainViewModel(keyGenerator: keys, modelDownloader: StubModelDownloader())
+        let model = PrepareBrainViewModel(keyGenerator: keys)
         XCTAssertFalse(model.canContinue)
         XCTAssertFalse(model.keyFailed)
         await model.generateKey()

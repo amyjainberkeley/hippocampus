@@ -36,7 +36,7 @@ final class OnboardingE2ETests: XCTestCase {
         let flow = OnboardingFlowViewModel(
             screenRecording: sr, accessibility: ax, stateStore: state, consentStore: consent, now: { clock.now }
         )
-        let key = PrepareBrainViewModel(keyGenerator: StubKeyGenerator(), modelDownloader: StubModelDownloader())
+        let key = PrepareBrainViewModel(keyGenerator: StubKeyGenerator())
 
         // Welcome.
         XCTAssertEqual(flow.screen, .welcome)

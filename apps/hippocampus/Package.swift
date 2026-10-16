@@ -62,6 +62,7 @@ let package = Package(
                 .enableExperimentalFeature("StrictConcurrency"),
             ],
             linkerSettings: [
+                .linkedFramework("DiskArbitration"),
                 .linkedFramework("Security"),
             ]
         ),

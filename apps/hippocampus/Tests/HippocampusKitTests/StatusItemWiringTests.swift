@@ -109,7 +109,7 @@ final class StatusItemWiringTests: XCTestCase {
         for kept in ["Toggle(\"Remember my screen\"", "Button(\"Choose Apps…\")", "Button(\"What Is Never Read…\")",
                      "Picker(\"Keep my memory for\"", "\"Anything older is deleted for good.\"",
                      "Button(\"See or Delete What’s Remembered…\")", "Text(\"Troubleshooting\")",
-                     "Button(\"Show Logs\")", "Button(\"Reset Permissions…\")", "Toggle(\"Send crash reports\"",
+                     "Button(\"Show Logs\")", "Button(\"Reset Permissions…\")",
                      "Button(\"Show Setup Again\")", "Button(\"Restart Hippocampus\")", "Button(\"Check for Updates…\")",
                      "Toggle(\"Check for updates automatically\"", "Text(\"© 2026 Amy Jain\")",
                      "Text(\"Apache License 2.0\")", "PermissionReset.confirmMessage", "item.label = section.label",
@@ -120,7 +120,9 @@ final class StatusItemWiringTests: XCTestCase {
                         "denylist", "allowlist", "Retention policy", "Keep events for", "Custom database path",
                         "Export debug bundle", "Automatic updates (Sparkle)", "Git SHA", "Memory Context Interface", "License: TBD",
                         "total-recall", "Inspect Key Wrap", "KeyWrapAudit", "Refresh Status", "Open Capture Logs",
-                        "audit log", "Open Privacy Dashboard", "Report an issue on GitHub", "License (Apache 2.0)"] {
+                        "audit log", "Open Privacy Dashboard", "Report an issue on GitHub", "License (Apache 2.0)",
+                        // It set a flag nothing acts on (ui-1).
+                        "Send crash reports"] {
             XCTAssertFalse(preferences.contains(retired), retired)
         }
         XCTAssertFalse(FileManager.default.fileExists(

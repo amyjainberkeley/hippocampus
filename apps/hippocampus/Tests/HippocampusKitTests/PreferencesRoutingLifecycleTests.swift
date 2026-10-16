@@ -43,9 +43,32 @@ final class PreferencesRoutingLifecycleTests: XCTestCase {
         // Only a launch by the person opens the window: not Preferences, a
         // quiet relaunch, a login or a link (spec-shell S7).
         XCTAssertEqual(start.components(separatedBy:
-            "if launchReason == .user { supervisor.openRecallWhenReady(initialLaunch: true) }")
+            "if launchReason.opensWindow { supervisor.openRecallWhenReady(initialLaunch: true) }")
             .count - 1, 2)
         XCTAssertEqual(start.components(separatedBy: "openRecallWhenReady(").count - 1, 2)
+    }
+
+    /// At login nothing else opens the window: the only other calls are the
+    /// first window after setup closes, which only setup's sentinel watcher
+    /// starts, and opening the app again while it runs (07fedaf).
+    func testOnlyTheGuardedLaunchSetupAndReopenOpenTheWindow() throws {
+        let app = try source("HippocampusApp.swift")
+        XCTAssertEqual(app.components(separatedBy: "openRecallWhenReady(").count - 1, 4)
+        let finishLaunching = try method("func applicationDidFinishLaunching(", in: app)
+        // Ask's actions name the window in closures; none opens it at launch.
+        XCTAssertFalse(finishLaunching.contains("openRecallWhenReady"))
+        XCTAssertTrue(try method("private func openWindowWhenSetupCloses()", in: app)
+            .contains("openRecallWhenReady(initialLaunch: true)"))
+        XCTAssertTrue(try method("func applicationShouldHandleReopen(", in: app)
+            .contains("supervisor.openRecallWhenReady()"))
+        // Setup closing opens the window only after the sentinel appears,
+        // which the watcher armed on a first run waits for.
+        let afterSetup = try method("private func startCaptureAfterOnboarding()", in: app)
+        XCTAssertTrue(afterSetup.contains("openWindowWhenSetupCloses()"))
+        XCTAssertEqual(app.components(separatedBy: "startCaptureAfterOnboarding()").count - 1, 3,
+                       "declared once, called only by the sentinel watcher and its poll")
+        let start = try method("private func startSupervisorOrDeferUntilOnboarded()", in: app)
+        XCTAssertFalse(start.contains("startCaptureAfterOnboarding"))
     }
 
     private func source(_ name: String) throws -> String {
@@ -116,5 +139,12 @@ final class PreferencesRoutingLifecycleTests: XCTestCase {
         XCTAssertTrue(window.contains("case .sources: SessionContextPreferencesView(supervisor: supervisor,"))
         XCTAssertFalse(window.contains("enum PreferencesSection:"))
         XCTAssertTrue(window.contains("extension PreferencesSection {"))
+    }
+
+    /// The crash-report switch set a flag no build acts on: nothing sends a
+    /// report without an upload address, and the app has none (ui-1).
+    func testPreferencesOffersNoSwitchThatDoesNothing() throws {
+        let preferences = try source("PreferencesWindow.swift")
+        XCTAssertFalse(preferences.lowercased().contains("crash"))
     }
 }

@@ -7,17 +7,17 @@
 // computation in lock-step with:
 //   - `apps/agent/src/brief_worker.rs::default_model_dir()`
 //     + `QWEN3_MODEL_ID` + `QWEN3_MODEL_BASENAME`
-//   - `apps/hippocampus/Sources/HippocampusKit/ModelDownloadManager
-//     .swift::modelsDir` + `modelID` subdir
+//   - `BriefModelProvisioner`, which seeds a custom build's bundled
+//     model into the `modelID` subdir (no build downloads one)
 //   - `apps/recall-ui/Sources/RecallUI/MCIRecallApp.swift
 //     ::ModelPresenceProbe`
 
 import Foundation
 
 public enum BriefModelPresence {
-    /// `modelID` from `apps/hippocampus/Resources/models.json`. The
-    /// download manager unpacks the tarball into a per-`modelID`
-    /// subdirectory; the brief worker reads `<dir>/<id>/<basename>`.
+    /// `modelID` from `apps/hippocampus/Resources/models.json`. The model
+    /// lives in a per-`modelID` subdirectory; the brief worker reads
+    /// `<dir>/<id>/<basename>`.
     public static let qwen3ModelID = "qwen3-1.7b-fp16"
 
     /// `.mlmodelc` directory name inside the per-`modelID` subdir.
