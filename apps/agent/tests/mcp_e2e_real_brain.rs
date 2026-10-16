@@ -166,15 +166,22 @@ fn tools_list_returns_exactly_ten_tools_real_brain() {
         .iter()
         .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
         .collect();
-    assert!(names.contains(&"mci_recall"));
-    assert!(names.contains(&"mci_events_since"));
-    assert!(names.contains(&"mci_stats"));
-    assert!(names.contains(&"mci_episodes"));
-    assert!(names.contains(&"mci_events_by_app"));
-    assert!(names.contains(&"mci_context"));
-    for name in ["mci_day", "mci_searches", "mci_user_model", "mci_sessions"] {
-        assert!(names.contains(&name), "{name}");
-    }
+    assert_eq!(
+        names,
+        [
+            "recall",
+            "events_since",
+            "stats",
+            "episodes",
+            "events_by_app",
+            "context",
+            "day",
+            "searches",
+            "person_model",
+            "sessions"
+        ],
+        "no mci_ prefix: clients add the server's own name"
+    );
 }
 
 #[test]
@@ -191,7 +198,7 @@ fn context_over_recent_real_events_is_typed_and_cited() {
     let result = extract_result(server.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_context",
+            "name": "context",
             "arguments": {"max_tokens": 256, "max_evidence": 8}
         })),
     )));
@@ -217,7 +224,7 @@ fn focused_context_preserves_degraded_retrieval_status_for_agents() {
     let result = extract_result(server.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_context",
+            "name": "context",
             "arguments": {
                 "focus": "bounded context packet",
                 "max_tokens": 256,
@@ -274,7 +281,7 @@ fn context_promotes_only_a_governed_claim_from_the_real_projection() {
     let result = extract_result(server.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_context",
+            "name": "context",
             "arguments": {"focus": "Hippocampus", "max_tokens": 256}
         })),
     )));
@@ -300,7 +307,7 @@ fn stats_empty_brain_returns_zero_counts() {
     let result = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_stats",
+            "name": "stats",
             "arguments": {}
         })),
     )));
@@ -329,7 +336,7 @@ fn stats_matches_actual_row_count_after_seeding() {
     let result = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_stats",
+            "name": "stats",
             "arguments": {}
         })),
     )));
@@ -383,7 +390,7 @@ fn recall_fts5_finds_seeded_event_by_keyword() {
     let result = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_recall",
+            "name": "recall",
             "arguments": {"query": "Rust memory", "limit": 10}
         })),
     )));
@@ -413,7 +420,7 @@ fn recall_fts5_returns_typed_no_match_for_unmatched_query() {
     let result = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_recall",
+            "name": "recall",
             "arguments": {"query": "quantum entanglement", "limit": 10}
         })),
     )));
@@ -439,7 +446,7 @@ fn recall_respects_limit_parameter() {
     let result = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_recall",
+            "name": "recall",
             "arguments": {"query": "keyword search", "limit": 5}
         })),
     )));
@@ -467,7 +474,7 @@ fn recall_default_limit_caps_at_ten() {
     let result = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_recall",
+            "name": "recall",
             "arguments": {"query": "alpha bravo"}
         })),
     )));
@@ -499,7 +506,7 @@ fn recall_hyphen_query_works_end_to_end_with_real_fts5() {
     let result = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_recall",
+            "name": "recall",
             "arguments": {"query": "sqlite-vec", "limit": 10}
         })),
     )));
@@ -533,7 +540,7 @@ fn recall_multiple_hyphens_in_query() {
     let result = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_recall",
+            "name": "recall",
             "arguments": {"query": "all-MiniLM-L6-v2", "limit": 10}
         })),
     )));
@@ -580,7 +587,7 @@ fn recall_hybrid_returns_hits_with_positive_scores() {
     let result = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_recall",
+            "name": "recall",
             "arguments": {"query": "database optimization", "limit": 10}
         })),
     )));
@@ -616,7 +623,7 @@ fn recall_response_carries_content_and_typed_result_arrays() {
     let result = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_recall",
+            "name": "recall",
             "arguments": {"query": "recall shape", "limit": 5}
         })),
     )));
@@ -655,7 +662,7 @@ fn recall_hit_carries_all_event_fields() {
     let result = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_recall",
+            "name": "recall",
             "arguments": {"query": "field presence", "limit": 1}
         })),
     )));
@@ -701,7 +708,7 @@ fn recall_empty_query_returns_invalid_params() {
     let (code, _msg) = extract_error(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_recall",
+            "name": "recall",
             "arguments": {"query": ""}
         })),
     )));
@@ -716,7 +723,7 @@ fn recall_whitespace_only_query_returns_invalid_params() {
     let (code, _msg) = extract_error(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_recall",
+            "name": "recall",
             "arguments": {"query": "   "}
         })),
     )));
@@ -731,7 +738,7 @@ fn recall_missing_query_field_returns_invalid_params() {
     let (code, _msg) = extract_error(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_recall",
+            "name": "recall",
             "arguments": {}
         })),
     )));
@@ -757,7 +764,7 @@ fn events_since_returns_events_after_cursor() {
     let result = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_events_since",
+            "name": "events_since",
             "arguments": {"ts_us": 2_500_000_u64, "limit": 100}
         })),
     )));
@@ -790,7 +797,7 @@ fn events_since_pagination_cursor_advances() {
     let result1 = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_events_since",
+            "name": "events_since",
             "arguments": {"ts_us": 0_u64, "limit": 3}
         })),
     )));
@@ -809,7 +816,7 @@ fn events_since_pagination_cursor_advances() {
     let result2 = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_events_since",
+            "name": "events_since",
             "arguments": {"ts_us": last_ts_page1, "limit": 3}
         })),
     )));
@@ -836,7 +843,7 @@ fn events_since_pagination_cursor_advances() {
     let result3 = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_events_since",
+            "name": "events_since",
             "arguments": {"ts_us": last_ts_page2, "limit": 3}
         })),
     )));
@@ -854,7 +861,7 @@ fn events_since_pagination_cursor_advances() {
     let result4 = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_events_since",
+            "name": "events_since",
             "arguments": {"ts_us": last_ts_page3, "limit": 3}
         })),
     )));
@@ -872,7 +879,7 @@ fn events_since_pagination_cursor_advances() {
     let result5 = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_events_since",
+            "name": "events_since",
             "arguments": {"ts_us": last_ts_page4, "limit": 3}
         })),
     )));
@@ -900,7 +907,7 @@ fn events_since_returns_ascending_order() {
     let result = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_events_since",
+            "name": "events_since",
             "arguments": {"ts_us": 0_u64, "limit": 100}
         })),
     )));
@@ -927,7 +934,7 @@ fn events_since_empty_brain_returns_empty() {
     let result = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_events_since",
+            "name": "events_since",
             "arguments": {"ts_us": 0_u64, "limit": 100}
         })),
     )));
@@ -949,7 +956,7 @@ fn events_since_response_carries_content_array() {
     let result = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_events_since",
+            "name": "events_since",
             "arguments": {"ts_us": 0_u64, "limit": 10}
         })),
     )));
@@ -980,7 +987,7 @@ fn events_since_missing_ts_us_returns_invalid_params() {
     let (code, _msg) = extract_error(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_events_since",
+            "name": "events_since",
             "arguments": {}
         })),
     )));
@@ -1046,7 +1053,7 @@ fn response_ids_match_request_ids() {
             .dispatch(req_with_id(
                 "tools/call",
                 Some(serde_json::json!({
-                    "name": "mci_stats",
+                    "name": "stats",
                     "arguments": {}
                 })),
                 id,
@@ -1078,7 +1085,7 @@ fn counters_track_real_brain_dispatches() {
         let _ = srv.dispatch(req(
             "tools/call",
             Some(serde_json::json!({
-                "name": "mci_recall",
+                "name": "recall",
                 "arguments": {"query": q}
             })),
         ));
@@ -1087,7 +1094,7 @@ fn counters_track_real_brain_dispatches() {
     let _ = srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_events_since",
+            "name": "events_since",
             "arguments": {"ts_us": 0_u64}
         })),
     ));
@@ -1096,7 +1103,7 @@ fn counters_track_real_brain_dispatches() {
         let _ = srv.dispatch(req(
             "tools/call",
             Some(serde_json::json!({
-                "name": "mci_stats",
+                "name": "stats",
                 "arguments": {}
             })),
         ));
@@ -1139,7 +1146,7 @@ fn stats_count_consistent_with_events_since_full_scan() {
     let stats_result = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_stats",
+            "name": "stats",
             "arguments": {}
         })),
     )));
@@ -1152,7 +1159,7 @@ fn stats_count_consistent_with_events_since_full_scan() {
     let events_result = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_events_since",
+            "name": "events_since",
             "arguments": {"ts_us": 0_u64, "limit": 1000}
         })),
     )));
@@ -1226,11 +1233,11 @@ fn two_brains_are_isolated() {
 
     let stats1 = extract_result(srv1.dispatch(req(
         "tools/call",
-        Some(serde_json::json!({"name": "mci_stats", "arguments": {}})),
+        Some(serde_json::json!({"name": "stats", "arguments": {}})),
     )));
     let stats2 = extract_result(srv2.dispatch(req(
         "tools/call",
-        Some(serde_json::json!({"name": "mci_stats", "arguments": {}})),
+        Some(serde_json::json!({"name": "stats", "arguments": {}})),
     )));
 
     assert_eq!(
@@ -1340,7 +1347,7 @@ fn recall_surfaces_entities_and_cross_app_linked_event_ids() {
     let result = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_recall",
+            "name": "recall",
             "arguments": { "query": "pricing", "limit": 10 }
         })),
     )));
@@ -1424,7 +1431,7 @@ fn stats_surfaces_graph_counts_through_server() {
     let srv = server_fts_only(store);
     let result = extract_result(srv.dispatch(req(
         "tools/call",
-        Some(serde_json::json!({"name": "mci_stats", "arguments": {}})),
+        Some(serde_json::json!({"name": "stats", "arguments": {}})),
     )));
     let stats = result.get("stats").expect("stats");
     assert_eq!(
@@ -1556,7 +1563,7 @@ fn w_entity_arm_fires_through_fts_sanitizing_store_in_production_recall() {
     let result = extract_result(srv.dispatch(req(
         "tools/call",
         Some(serde_json::json!({
-            "name": "mci_recall",
+            "name": "recall",
             "arguments": { "query": "Alice pricing discussion", "limit": 10 }
         })),
     )));
@@ -1613,10 +1620,10 @@ fn understanding_tools_read_a_real_brain() {
     let (_dir, store) = open_temp_store();
     let srv = server_fts_only(store);
     for (name, args) in [
-        ("mci_day", serde_json::json!({})),
-        ("mci_searches", serde_json::json!({ "hours": 48 })),
-        ("mci_user_model", serde_json::json!({ "query": "pricing" })),
-        ("mci_sessions", serde_json::json!({ "date": "2026-10-10" })),
+        ("day", serde_json::json!({})),
+        ("searches", serde_json::json!({ "hours": 48 })),
+        ("person_model", serde_json::json!({ "query": "pricing" })),
+        ("sessions", serde_json::json!({ "date": "2026-10-10" })),
     ] {
         let result = extract_result(srv.dispatch(req(
             "tools/call",
@@ -1627,7 +1634,7 @@ fn understanding_tools_read_a_real_brain() {
     }
     let bad = srv.dispatch(req(
         "tools/call",
-        Some(serde_json::json!({ "name": "mci_day", "arguments": { "date": "yesterday" } })),
+        Some(serde_json::json!({ "name": "day", "arguments": { "date": "yesterday" } })),
     ));
     assert!(
         bad.expect("response").error.is_some(),
@@ -1648,7 +1655,7 @@ fn ask_and_suggest_exist_only_in_an_assistant_session() {
     let plain = server_fts_only(Arc::clone(&store));
     let denied = plain.dispatch(req(
         "tools/call",
-        Some(serde_json::json!({ "name": "mci_ask", "arguments": { "question": "team price?" } })),
+        Some(serde_json::json!({ "name": "ask", "arguments": { "question": "team price?" } })),
     ));
     assert!(
         denied.expect("response").error.is_some(),
@@ -1663,7 +1670,7 @@ fn ask_and_suggest_exist_only_in_an_assistant_session() {
     assert_eq!(listed["tools"].as_array().unwrap().len(), 12);
     let asked = extract_result(assistant.dispatch(req(
         "tools/call",
-        Some(serde_json::json!({ "name": "mci_ask", "arguments": { "question": "team seat price" } })),
+        Some(serde_json::json!({ "name": "ask", "arguments": { "question": "team seat price" } })),
     )));
     // No model here: no answer, but the memories that would have been cited.
     assert!(asked["result"]["answer"].is_null());
@@ -1674,7 +1681,7 @@ fn ask_and_suggest_exist_only_in_an_assistant_session() {
         .contains("$18"));
     let suggested = extract_result(assistant.dispatch(req(
         "tools/call",
-        Some(serde_json::json!({ "name": "mci_suggest", "arguments": {} })),
+        Some(serde_json::json!({ "name": "suggest", "arguments": {} })),
     )));
     assert!(suggested["result"]["suggestions"]
         .as_array()
@@ -1717,7 +1724,7 @@ fn asking_about_the_screen_answers_from_the_window_in_front() {
     // The question shares no word with the invoice; the screen is still source 1.
     let asked = extract_result(assistant.dispatch(req(
         "tools/call",
-        Some(serde_json::json!({ "name": "mci_ask", "arguments": {
+        Some(serde_json::json!({ "name": "ask", "arguments": {
             "question": "what am I looking at?", "app": "com.apple.Preview", "title": "invoice-4471.pdf" } })),
     )));
     let first = &asked["result"]["sources"][0];
@@ -1728,7 +1735,7 @@ fn asking_about_the_screen_answers_from_the_window_in_front() {
     // An app with no capture has no screen: nothing of it is offered.
     let unseen = extract_result(assistant.dispatch(req(
         "tools/call",
-        Some(serde_json::json!({ "name": "mci_ask", "arguments": {
+        Some(serde_json::json!({ "name": "ask", "arguments": {
             "question": "what am I looking at?", "app": "com.1password.1password", "title": "Vault" } })),
     )));
     assert!(unseen["result"]["sources"]
@@ -1740,7 +1747,7 @@ fn asking_about_the_screen_answers_from_the_window_in_front() {
     // And the bar offers it before anything is typed.
     let suggested = extract_result(assistant.dispatch(req(
         "tools/call",
-        Some(serde_json::json!({ "name": "mci_suggest", "arguments": { "app": "com.apple.Preview", "title": "invoice-4471.pdf" } })),
+        Some(serde_json::json!({ "name": "suggest", "arguments": { "app": "com.apple.Preview", "title": "invoice-4471.pdf" } })),
     )));
     let suggestions = suggested["result"]["suggestions"].as_array().unwrap();
     assert_eq!(suggestions[0]["kind"], "screen");

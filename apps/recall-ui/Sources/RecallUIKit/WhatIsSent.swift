@@ -38,7 +38,7 @@ public enum WhatIsSent {
     /// Kinds never shown and never sent.
     public static let neverShownKinds = ["state"]
     /// The tools the context names for more, in the order it names them.
-    public static let lookUpTools = ["mci_user_model", "mci_sessions", "mci_day"]
+    public static let lookUpTools = ["person_model", "sessions", "day"]
 
     /// System apps whose windows are never part of a session: the agent drops
     /// them before it makes sessions (`apps::is_noise`,

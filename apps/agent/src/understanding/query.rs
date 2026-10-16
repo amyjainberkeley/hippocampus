@@ -606,7 +606,7 @@ const DAY_US: u64 = 86_400_000_000;
 
 /// The kinds of thing about the user that go into context sent without being
 /// asked for. People they work with, what took them several tries and how
-/// they are right now stay behind `mci_user_model`, which a client has to
+/// they are right now stay behind `person_model`, which a client has to
 /// call.
 const SHARED_UNASKED: [PropositionKind; 5] = [
     PropositionKind::Project,
@@ -638,7 +638,7 @@ pub fn is_servable(p: &Proposition, confirmed: bool, days_seen: usize, now_us: u
         && (p.kind != PropositionKind::Struggle || confirmed || days_seen >= 2)
 }
 
-/// An AI tool is given it when it looks the person up (`mci_user_model`):
+/// An AI tool is given it when it looks the person up (`person_model`):
 /// shown on You, and cleared to go to AI tools ([`super::sending`]).
 #[must_use]
 pub fn is_served(p: &Proposition, sending: Sending, days_seen: usize, now_us: u64) -> bool {

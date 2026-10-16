@@ -141,16 +141,12 @@ fn no_text_an_ai_tool_reads_holds_the_separator_or_a_header() {
     let mut seen = Vec::new();
     for query in ["launch", "tabs", "roadmap"] {
         strings(
-            &call(&server, "mci_recall", serde_json::json!({ "query": query })),
+            &call(&server, "recall", serde_json::json!({ "query": query })),
             &mut seen,
         );
     }
     strings(
-        &call(
-            &server,
-            "mci_events_since",
-            serde_json::json!({ "ts_us": 0 }),
-        ),
+        &call(&server, "events_since", serde_json::json!({ "ts_us": 0 })),
         &mut seen,
     );
     for app in [
@@ -162,24 +158,17 @@ fn no_text_an_ai_tool_reads_holds_the_separator_or_a_header() {
         strings(
             &call(
                 &server,
-                "mci_events_by_app",
+                "events_by_app",
                 serde_json::json!({ "app_bundle_id": app }),
             ),
             &mut seen,
         );
     }
     strings(
-        &call(
-            &server,
-            "mci_context",
-            serde_json::json!({ "focus": "launch" }),
-        ),
+        &call(&server, "context", serde_json::json!({ "focus": "launch" })),
         &mut seen,
     );
-    strings(
-        &call(&server, "mci_context", serde_json::json!({})),
-        &mut seen,
-    );
+    strings(&call(&server, "context", serde_json::json!({})), &mut seen);
     assert!(seen
         .iter()
         .any(|text| text.contains("The beta opens on October 21.")));
@@ -205,7 +194,7 @@ fn a_recalled_window_shows_the_passage_with_the_query_words() {
     )));
     let result = call(
         &server,
-        "mci_recall",
+        "recall",
         serde_json::json!({ "query": "When does the beta open?" }),
     );
     let snippet = result["hits"][0]["text_snippet"].as_str().unwrap();
@@ -217,11 +206,7 @@ fn a_recalled_window_shows_the_passage_with_the_query_words() {
         !snippet.contains("Roadmap"),
         "chrome is not shown when the words are in main"
     );
-    let result = call(
-        &server,
-        "mci_recall",
-        serde_json::json!({ "query": "roadmap" }),
-    );
+    let result = call(&server, "recall", serde_json::json!({ "query": "roadmap" }));
     assert_eq!(
         result["hits"][0]["text_snippet"], "Roadmap\nRecently Deleted 3",
         "the words are only in the chrome"
@@ -252,11 +237,7 @@ fn a_recalled_terminal_shows_its_last_lines() {
     )));
     // "builds" finds "build" through the index's stemming, but is not in the
     // text word for word, so the passage is the terminal's end.
-    let result = call(
-        &server,
-        "mci_recall",
-        serde_json::json!({ "query": "builds" }),
-    );
+    let result = call(&server, "recall", serde_json::json!({ "query": "builds" }));
     let snippet = result["hits"][0]["text_snippet"].as_str().unwrap();
     assert!(
         snippet.ends_with("error: the release build failed"),
@@ -286,14 +267,10 @@ fn listed_rows_start_with_the_window_text_while_the_store_keeps_its_header() {
     );
     let server = Server::new(Arc::new(reader));
     for result in [
+        call(&server, "events_since", serde_json::json!({ "ts_us": 0 })),
         call(
             &server,
-            "mci_events_since",
-            serde_json::json!({ "ts_us": 0 }),
-        ),
-        call(
-            &server,
-            "mci_events_by_app",
+            "events_by_app",
             serde_json::json!({ "app_bundle_id": NOTES }),
         ),
     ] {
@@ -352,14 +329,10 @@ fn a_listed_row_after_a_long_header_starts_with_the_window_text() {
     );
     let server = Server::new(Arc::new(reader));
     for result in [
+        call(&server, "events_since", serde_json::json!({ "ts_us": 0 })),
         call(
             &server,
-            "mci_events_since",
-            serde_json::json!({ "ts_us": 0 }),
-        ),
-        call(
-            &server,
-            "mci_events_by_app",
+            "events_by_app",
             serde_json::json!({ "app_bundle_id": chrome }),
         ),
     ] {
@@ -399,11 +372,7 @@ fn a_listed_chat_row_reads_past_the_stores_512_bytes() {
         Arc::clone(&store),
         None,
     )));
-    let result = call(
-        &server,
-        "mci_events_since",
-        serde_json::json!({ "ts_us": 0 }),
-    );
+    let result = call(&server, "events_since", serde_json::json!({ "ts_us": 0 }));
     let text = result["events"][0]["text_snippet"].as_str().unwrap();
     assert!(
         text.ends_with("    Yes, running five minutes late for number 12"),
@@ -441,7 +410,7 @@ fn a_listed_terminal_row_shows_its_last_lines() {
     )));
     let result = call(
         &server,
-        "mci_events_by_app",
+        "events_by_app",
         serde_json::json!({ "app_bundle_id": "com.apple.Terminal" }),
     );
     let row = result["events"][0]["text_snippet"].as_str().unwrap();

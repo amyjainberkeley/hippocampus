@@ -99,7 +99,7 @@ enum Mode {
     HealthSummary {
         window_seconds: u64,
     },
-    /// P3.10b — localhost MCP server over stdio JSON-RPC 2.0.
+    /// P3.10b — the MCP server over stdio JSON-RPC 2.0. It opens no port.
     /// Resolves `db_path` and the DB key from env at start-up.
     McpServe {
         db_path: PathBuf,
@@ -658,7 +658,7 @@ fn print_usage() {
         Modes:\n\
         \x20 --drain-stdin              read wire frames from stdin and write JSONL\n\
         \x20 --health-summary           print one-line summary of helper-health.jsonl\n\
-        \x20 mcp-serve                  run the localhost MCP server (stdio JSON-RPC 2.0)\n\
+        \x20 mcp-serve                  run the MCP server on stdin and stdout (JSON-RPC 2.0)\n\
         \x20 context                    print a bounded, cited memory packet for the current\n\
         \x20                            task. Markdown by default; JSON for automation.\n\
         \x20 handoff                    print the cited \"where you left off\" packet for the\n\
@@ -711,7 +711,7 @@ fn print_usage() {
         \x20                            into the brain, once, then exit. Safe to re-run:\n\
         \x20                            a resource already ingested is not written twice.\n\
         \x20 embed-backfill             embed every event that has no vector yet, so\n\
-        \x20                            mci_recall runs hybrid instead of keyword-only.\n\
+        \x20                            recall runs hybrid instead of keyword-only.\n\
         \x20                            Needs the ArcticEmbedS model; refuses without it.\n\
         \x20 stats --source SRC         count PageContentEvents from SRC in the last window\n\
         \x20                            (SRC = safari | chromium-native-host). Cycle 8.29\n\
