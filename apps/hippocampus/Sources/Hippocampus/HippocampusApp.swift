@@ -50,6 +50,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let initialPreferencesRequest = PreferencesOpenRequest(arguments: Array(CommandLine.arguments.dropFirst()))
     /// Why this launch happened; only `.user` opens the window (spec-shell S7).
     private var launchReason = LaunchReason.user
+    /// This copy is quitting so the one in Applications can open: nothing
+    /// else opens from here.
+    private var leavingForApplications = false
 
     private let firstLaunchLogger = Logger(
         subsystem: "ai.hippocampus", category: "first-launch"
@@ -239,6 +242,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // process). No env override — Intel is unsupported, period.
         guard MciBootGuards.hostIsAppleSilicon() else {
             Self.presentUnsupportedArchitectureAlert()
+            requestQuit()
+            return
+        }
+
+        // Opened from the disk image or a translocated copy: offer to move to
+        // Applications before anything starts, so no hook, memory server,
+        // browser host or login item points at a path that won't last
+        // (launch plan item 3, D6). This copy quits when the person moves it.
+        if MoveToApplicationsPrompt.run() {
+            leavingForApplications = true
             requestQuit()
             return
         }
@@ -592,6 +605,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
+        guard !leavingForApplications else { return }
         for url in urls {
             guard let route = HippocampusURLRoute.parse(url) else { continue }
             switch route {
@@ -809,6 +823,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if leavingForApplications { return false }
         if !OnboardingSentinel.isComplete && supervisor.hasOnboarding {
             _ = supervisor.openOnboarding()
             return false
