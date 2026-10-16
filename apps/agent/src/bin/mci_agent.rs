@@ -3172,7 +3172,9 @@ fn run_import_sessions_with_lease(
             let prefix = dir.to_string_lossy();
             match store.clear_import_cursors(&prefix) {
                 Ok(n) => {
-                    errln!("mci-agent import-sessions: --full: forgot {n} cursor(s) under {prefix}");
+                    errln!(
+                        "mci-agent import-sessions: --full: forgot {n} cursor(s) under {prefix}"
+                    );
                 }
                 Err(e) => {
                     errln!("mci-agent import-sessions: --full: clear cursors: {e}");
