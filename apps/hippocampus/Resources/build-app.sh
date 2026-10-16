@@ -33,6 +33,7 @@ PROFILE="release"
 DEVELOPMENT_ADHOC=0
 DEVELOPMENT_LITE=0
 CURRENT_SOURCE_QUALIFICATION=0
+RELEASE_DRY_RUN=0
 EXPECTED_QUALIFICATION_TEAM_ID="BV6KGKFKP4"
 DIST_DIR="$PKG_DIR/dist"
 CHANGELOG_SRC="$REPO_ROOT/CHANGELOG.md"
@@ -156,6 +157,9 @@ usage() {
     echo "  --development-ad-hoc  Allow unstable ad-hoc signing with --debug only"
     echo "  --development-lite  Omit unavailable Core ML models for local UI verification"
     echo "  --current-source-qualification  Rebuild every executable before a signed debug qualification"
+    echo "  --release-dry-run  Sign a release build with Developer ID, without the STATUS audit"
+    echo "              and without the launch check, which opens the app. For"
+    echo "              scripts/release-0.3.0.sh --dry-run: nothing it makes is notarized or given out."
     echo "  --dist DIR  Output directory (default: apps/hippocampus/dist/)"
     echo "  --help      Show this help"
     echo ""
@@ -172,6 +176,7 @@ while [[ $# -gt 0 ]]; do
         --development-ad-hoc) DEVELOPMENT_ADHOC=1; shift ;;
         --development-lite) DEVELOPMENT_LITE=1; shift ;;
         --current-source-qualification) CURRENT_SOURCE_QUALIFICATION=1; shift ;;
+        --release-dry-run) RELEASE_DRY_RUN=1; shift ;;
         --dist) DIST_DIR="$2"; shift 2 ;;
         --help|-h) usage; exit 0 ;;
         *) echo "Unknown option: $1"; usage; exit 1 ;;
@@ -192,6 +197,11 @@ if [[ "$CURRENT_SOURCE_QUALIFICATION" -eq 1 && "$PROFILE" != "debug" ]]; then
     fatal \
         "current-source qualification requires --debug" \
         "Release builds use the normal release pipeline and its separate artifact gates."
+fi
+if [[ "$RELEASE_DRY_RUN" -eq 1 ]] && [[ "$PROFILE" != "release" || "$DEVELOPMENT_ADHOC" -eq 1 || "$CURRENT_SOURCE_QUALIFICATION" -eq 1 ]]; then
+    fatal \
+        "--release-dry-run is a release build signed with Developer ID" \
+        "Do not combine it with --debug, --development-ad-hoc or --current-source-qualification."
 fi
 if [[ "$CURRENT_SOURCE_QUALIFICATION" -eq 1 && "$DEVELOPMENT_ADHOC" -eq 1 ]]; then
     fatal \
@@ -375,8 +385,11 @@ if [[ -z "$BUNDLE_SHORT_VERSION" ]]; then
 fi
 validate_changelog_release "$BUNDLE_SHORT_VERSION"
 # The STATUS audit vouches for an app people are given. An ad-hoc signed
-# development build cannot be given to anyone, so it builds from any commit.
-if [[ "$SIGNING_MODE" != "ad-hoc" ]]; then
+# development build cannot be given to anyone, so it builds from any commit;
+# nor is a release dry run's app, which is never notarized.
+if [[ "${RELEASE_DRY_RUN:-0}" -eq 1 ]]; then
+    echo "  docs/STATUS.md audit baseline not checked: release dry run (never notarized or given out)"
+elif [[ "$SIGNING_MODE" != "ad-hoc" ]]; then
     validate_status_audit
 else
     echo "  docs/STATUS.md audit baseline not required for an ad-hoc development build"
@@ -973,7 +986,12 @@ fi
 # missing dyld dep) is wrong. Run after all codesigning so we test the
 # actual on-disk artifact that will be packaged.
 LAUNCH_VERIFY="$REPO_ROOT/scripts/verify-app-launches.sh"
-if [[ -x "$LAUNCH_VERIFY" ]]; then
+if [[ "${RELEASE_DRY_RUN:-0}" -eq 1 ]]; then
+    # A dry run on a working Mac must not open a second Hippocampus. The
+    # real release opens it here and again before notarizing.
+    echo ""
+    echo "=== Launch-verify gate: SKIPPED for a release dry run; this app was never opened ==="
+elif [[ -x "$LAUNCH_VERIFY" ]]; then
     echo ""
     echo "=== Launch-verify gate ==="
     VERIFY_CLEAN_HOME=1 VERIFY_EXPECT_ONBOARDING=1 \

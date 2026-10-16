@@ -12,6 +12,8 @@ set -euo pipefail
 #   --development-ad-hoc  Allow unstable ad-hoc signing with --debug only
 #   --dist DIR      Output directory (default: dist/)
 #   --verify-assets Verify canonical installer brand assets and exit
+#   --dry-run       Sign the app and the DMG with Developer ID, but send nothing
+#                   to Apple's notary service and never open the app
 #   --help          Show this help
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -83,6 +85,7 @@ SKIP_BUILD=0
 BUILD_PROFILE="release"
 DIST_DIR="$REPO_ROOT/dist"
 VERIFY_ASSETS_ONLY=0
+DRY_RUN=0
 DEVELOPMENT_ADHOC=0
 
 usage() {
@@ -97,6 +100,10 @@ Options:
   --development-ad-hoc  Allow unstable ad-hoc signing with --debug only
   --dist DIR      Output directory (default: dist/)
   --verify-assets Verify canonical installer brand assets and exit
+  --dry-run       Release build signed with Developer ID, but not notarized
+                  or stapled, and the app is never opened (no launch check).
+                  For scripts/release-0.3.0.sh --dry-run; the DMG is for
+                  inspection only.
   --help          Show this help
 
 Prerequisites:
@@ -120,6 +127,7 @@ while [[ $# -gt 0 ]]; do
         --development-ad-hoc) DEVELOPMENT_ADHOC=1; shift ;;
         --dist) DIST_DIR="$2"; shift 2 ;;
         --verify-assets) VERIFY_ASSETS_ONLY=1; shift ;;
+        --dry-run) DRY_RUN=1; shift ;;
         --help|-h) usage; exit 0 ;;
         *) echo "ERROR: Unknown option: $1"; usage; exit 1 ;;
     esac
@@ -241,6 +249,10 @@ if [[ -z "${DEVELOPER_ID:-}" ]]; then
         sed 's/.*"\(.*\)"/\1/' || true)
 fi
 
+if [[ "$DRY_RUN" -eq 1 && ( "$BUILD_PROFILE" != "release" || "$DEVELOPMENT_ADHOC" -eq 1 || -z "$DEVELOPER_ID" ) ]]; then
+    echo "FATAL: --dry-run is a release build signed with a Developer ID identity" >&2
+    exit 1
+fi
 if [[ -n "$DEVELOPER_ID" ]]; then
     echo "Developer ID: $DEVELOPER_ID"
     SIGNING_MODE="developer-id"
@@ -260,7 +272,9 @@ fi
 
 NOTARIZE=0
 NOTARY_PROFILE="notarytool-profile"
-if [[ "$SIGNING_MODE" == "developer-id" ]]; then
+if [[ "${DRY_RUN:-0}" -eq 1 ]]; then
+    echo "Notarization: skipped (dry run: nothing is sent to Apple's notary service)"
+elif [[ "$SIGNING_MODE" == "developer-id" ]]; then
     if xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" \
         &>/dev/null; then
         NOTARIZE=1
@@ -428,7 +442,12 @@ fi
 # Catches the cycle 8.16 class of crash-on-launch regression that the
 # Gatekeeper + notary path does not detect (see scripts/verify-app-launches.sh).
 LAUNCH_VERIFY="$REPO_ROOT/scripts/verify-app-launches.sh"
-if [[ -x "$LAUNCH_VERIFY" ]]; then
+if [[ "${DRY_RUN:-0}" -eq 1 ]]; then
+    # A dry run is never notarized, and must not open a second Hippocampus
+    # on a working Mac.
+    echo ""
+    echo "--- Launch-verify gate: SKIPPED for a dry run; the app was never opened ---"
+elif [[ -x "$LAUNCH_VERIFY" ]]; then
     echo ""
     echo "--- Launch-verify gate (pre-notarize) ---"
     VERIFY_CLEAN_HOME=1 VERIFY_EXPECT_ONBOARDING=1 \
@@ -854,6 +873,8 @@ if [[ "$NOTARIZE" -eq 1 ]]; then
     echo "  Notarized: yes (stapled)"
     echo ""
     echo "Verify: spctl --assess --verbose=4 --type open --context context:primary-signature $FINAL_DMG"
+elif [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  Notarized: no (dry run). Inspect it; never give it out."
 elif [[ "$SIGNING_MODE" == "developer-id" ]]; then
     echo "  Notarized: no (credentials not configured)"
     echo ""

@@ -16,6 +16,7 @@ import unittest
 ROOT = Path(__file__).resolve().parent.parent
 APP_SCRIPT = ROOT / "apps/hippocampus/Resources/build-app.sh"
 INSTALLER_SCRIPT = ROOT / "scripts/build-installer.sh"
+RELEASE_SCRIPT = ROOT / "scripts/release-0.3.0.sh"
 
 
 def section(path, start, end):
@@ -24,7 +25,8 @@ def section(path, start, end):
 
 
 class VerifierTests(unittest.TestCase):
-    def run_gate(self, target, *, missing=None, executable=True, model_exit=0, launch_exit=0, lite=False):
+    def run_gate(self, target, *, missing=None, executable=True, model_exit=0, launch_exit=0, lite=False,
+                 dry_run=False):
         with tempfile.TemporaryDirectory(prefix="release-verifiers-") as temporary:
             root = Path(temporary)
             scripts = root / "scripts"
@@ -54,11 +56,15 @@ class VerifierTests(unittest.TestCase):
             else:
                 body = section(INSTALLER_SCRIPT, "# --- Completeness gate:", "# --- Step 2:")
                 body = "#" + body
+            dry_run_env = {}
+            if dry_run:
+                dry_run_env = {"RELEASE_DRY_RUN": "1"} if target == "app" else {"DRY_RUN": "1"}
             result = subprocess.run(
                 ["/bin/bash", "-euc", body], cwd=root, capture_output=True, text=True,
                 env={**os.environ, "REPO_ROOT": str(root), "APP": str(app), "APP_PATH": str(app),
                      "PROFILE": "debug" if lite else "release", "BUILD_PROFILE": "release",
-                     "DEVELOPMENT_LITE": str(int(lite)), "SKIP_BUILD": "1", "VERIFY_LOG": str(log)},
+                     "DEVELOPMENT_LITE": str(int(lite)), "SKIP_BUILD": "1", "VERIFY_LOG": str(log),
+                     **dry_run_env},
                 timeout=10,
             )
             calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
@@ -98,11 +104,101 @@ class VerifierTests(unittest.TestCase):
                 self.assertNotIn("--allow-missing-bundled", calls[0]["args"])
                 self.assertEqual((calls[1]["clean_home"], calls[1]["onboarding"]), ("1", "1"))
 
+    def test_a_release_dry_run_checks_the_models_but_never_opens_the_app(self):
+        for target in ("app", "installer"):
+            with self.subTest(target=target):
+                result, calls = self.run_gate(target, dry_run=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual([call["name"] for call in calls], ["verify-models.sh"])
+                self.assertNotIn("--allow-missing-bundled", calls[0]["args"])
+                self.assertIn("SKIPPED", result.stdout)
+                self.assertIn("never opened", result.stdout)
+
+    def test_a_release_dry_run_still_fails_on_a_model_failure(self):
+        for target in ("app", "installer"):
+            with self.subTest(target=target):
+                result, calls = self.run_gate(target, model_exit=42, dry_run=True)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_development_lite_retains_explicit_model_omission(self):
         result, calls = self.run_gate("app", lite=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("--allow-missing-bundled", calls[0]["args"])
         self.assertEqual(len(calls), 2)
+
+
+class DryRunNotaryTests(unittest.TestCase):
+    """A release dry run sends nothing to Apple's notary service; the release
+    asks it for the profile and stops without one. Runs the scripts' own
+    blocks with a stand-in xcrun that records every call."""
+
+    FAKE_XCRUN = (
+        "import os, sys\n"
+        "with open(os.environ['XCRUN_CALLS'], 'a') as handle:\n"
+        "    handle.write(' '.join(sys.argv[1:]) + '\\n')\n"
+        "sys.exit(int(os.environ.get('XCRUN_EXIT', '0')))\n"
+    )
+
+    def run_block(self, body, env, xcrun_exit=0):
+        with tempfile.TemporaryDirectory(prefix="dry-run-notary-") as temporary:
+            root = Path(temporary)
+            (root / "bin").mkdir()
+            xcrun = root / "bin/xcrun"
+            xcrun.write_text(f"#!{sys.executable}\n" + self.FAKE_XCRUN, encoding="utf-8")
+            xcrun.chmod(0o755)
+            calls = root / "calls"
+            calls.write_text("")
+            result = subprocess.run(
+                ["/bin/bash", "-euo", "pipefail", "-c", body],
+                cwd=root, capture_output=True, text=True, timeout=60,
+                env={"PATH": f"{root / 'bin'}:/usr/bin:/bin", "HOME": temporary,
+                     "XCRUN_CALLS": str(calls), "XCRUN_EXIT": str(xcrun_exit), **env},
+            )
+            return result, calls.read_text().splitlines()
+
+    def installer_block(self):
+        block = section(INSTALLER_SCRIPT, "# --- Detect notarytool credentials ---", "notarize_and_record() {")
+        return block + '\necho "NOTARIZE=$NOTARIZE"\n'
+
+    def release_block(self):
+        helpers = ('ok() { echo "ok $*"; }\ninfo() { echo "info $*"; }\n'
+                   'fail() { echo "FAIL $*"; }\nclean_env() { "$@"; }\nNOTARY_PROFILE=notarytool-profile\n')
+        body = "check_notary_profile() {" + section(RELEASE_SCRIPT, "check_notary_profile() {", "\n}\n") + "\n}\n"
+        return helpers + body + "check_notary_profile\n"
+
+    INSTALLER_ENV = {"SIGNING_MODE": "developer-id", "BUILD_PROFILE": "release"}
+
+    def test_the_installer_dry_run_never_asks_the_notary_service(self):
+        result, calls = self.run_block(self.installer_block(), {**self.INSTALLER_ENV, "DRY_RUN": "1"})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(calls, [])
+        self.assertIn("NOTARIZE=0", result.stdout)
+        self.assertIn("skipped (dry run", result.stdout)
+
+    def test_the_installer_release_stops_without_the_notary_profile(self):
+        result, calls = self.run_block(self.installer_block(), {**self.INSTALLER_ENV, "DRY_RUN": "0"}, xcrun_exit=1)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Release installer requires notarization credentials", result.stderr)
+        self.assertEqual(calls, ["notarytool history --keychain-profile notarytool-profile"])
+
+    def test_the_installer_release_notarizes_with_the_profile(self):
+        result, calls = self.run_block(self.installer_block(), {**self.INSTALLER_ENV, "DRY_RUN": "0"})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("NOTARIZE=1", result.stdout)
+        self.assertEqual(calls, ["notarytool history --keychain-profile notarytool-profile"])
+
+    def test_the_release_script_dry_run_never_asks_the_notary_service(self):
+        result, calls = self.run_block(self.release_block(), {"DRY_RUN": "1"})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(calls, [])
+        self.assertIn("a dry run sends nothing to Apple's notary service", result.stdout)
+
+    def test_the_release_script_release_checks_the_notary_profile(self):
+        for xcrun_exit, verdict in ((0, "ok notary keychain profile"), (1, "FAIL notary keychain profile")):
+            with self.subTest(xcrun_exit=xcrun_exit):
+                result, calls = self.run_block(self.release_block(), {"DRY_RUN": "0"}, xcrun_exit=xcrun_exit)
+                self.assertIn(verdict, result.stdout)
+                self.assertEqual(calls, ["notarytool history --keychain-profile notarytool-profile"])
 
 
 class NotarizationRecordTests(unittest.TestCase):

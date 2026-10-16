@@ -4,6 +4,7 @@ set -euo pipefail
 # release-0.3.0.sh — Build, sign, notarize and verify Hippocampus 0.3.0 on this Mac.
 #
 #   scripts/release-0.3.0.sh --check   # every quick gate; builds and commits nothing
+#   scripts/release-0.3.0.sh --dry-run # build and sign here; notarize, commit, open nothing
 #   scripts/release-0.3.0.sh           # the release
 #
 # The release, in order, stopping at the first failure:
@@ -38,8 +39,18 @@ set -euo pipefail
 # release-models.json is not read here: it names the model archive the
 # tag-triggered CI release downloads. This build bundles models/ from this Mac.
 #
+# A dry run (--dry-run) builds and signs everything as the release does,
+# with the Developer ID and the Sparkle key, from any branch. It sends
+# nothing to Apple's notary service, stamps and commits nothing, and never
+# opens the app (no launch check). It verifies every signature, runs
+# syspolicy_check notary-submission (the notary service's own checks), and
+# reports what Gatekeeper says of an app that is not notarized, then prints
+# the sizes. Its files are for inspection only: never upload them.
+#
 # Options:
 #   --check           Run the preflight only.
+#   --dry-run         The dry run above (default output:
+#                     ~/Hippocampus-release-candidates/0.3.0-dry-run).
 #   --out DIR         Where the DMG, logs and installer Python go
 #                     (default: ~/Hippocampus-release-candidates/0.3.0).
 #   --notes FILE      Release notes containing {{SHA256}}; a filled copy is
@@ -79,9 +90,10 @@ INFO_PLIST="$REPO_ROOT/apps/hippocampus/Resources/Info.plist"
 SIGN_UPDATE="$REPO_ROOT/apps/hippocampus/.build/artifacts/sparkle/Sparkle/bin/sign_update"
 
 CHECK_ONLY=0
+DRY_RUN=0
 ALLOW_LOW_DISK=0
 JOBS=4
-OUT_DIR="$HOME/Hippocampus-release-candidates/$RELEASE_VERSION"
+OUT_DIR=""
 NOTES_FILE=""
 SPARKLE_KEY="$HOME/.hippocampus-sparkle-private.key"
 
@@ -93,6 +105,7 @@ usage() {
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --check) CHECK_ONLY=1; shift ;;
+        --dry-run) DRY_RUN=1; shift ;;
         --out) [[ $# -ge 2 ]] || { usage; exit 2; }; OUT_DIR="$2"; shift 2 ;;
         --notes) [[ $# -ge 2 ]] || { usage; exit 2; }; NOTES_FILE="$2"; shift 2 ;;
         --jobs) [[ $# -ge 2 ]] || { usage; exit 2; }; JOBS="$2"; shift 2 ;;
@@ -104,7 +117,22 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "$JOBS" =~ ^[1-9][0-9]*$ ]] || { echo "--jobs needs a positive number" >&2; exit 2; }
+if [[ -z "$OUT_DIR" ]]; then
+    OUT_DIR="$HOME/Hippocampus-release-candidates/$RELEASE_VERSION"
+    if [[ "$DRY_RUN" -eq 1 ]]; then OUT_DIR="$OUT_DIR-dry-run"; fi
+fi
 [[ "$OUT_DIR" == /* ]] || OUT_DIR="$PWD/$OUT_DIR"
+
+# What a dry run does differently, in one place.
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    ASSEMBLY_MODE=(--release-dry-run)  # build-app.sh: no STATUS audit, no launch check
+    INSTALLER_MODE=(--dry-run)         # build-installer.sh: not notarized, no launch check
+    GATEKEEPER_CHECK="notary-submission"
+else
+    ASSEMBLY_MODE=()
+    INSTALLER_MODE=()
+    GATEKEEPER_CHECK="distribution"
+fi
 [[ "$SPARKLE_KEY" == /* ]] || SPARKLE_KEY="$PWD/$SPARKLE_KEY"
 if [[ -n "$NOTES_FILE" ]]; then
     [[ "$NOTES_FILE" == /* ]] || NOTES_FILE="$PWD/$NOTES_FILE"
@@ -239,16 +267,19 @@ PY
 # item, the DMG's Sparkle signature and the feed's own signature, both under
 # the app's SUPublicEDKey.
 release_identity_staged() {
-    clean_env python3 -B - "$REPO_ROOT" "$RELEASE_TAG" "$DMG" "$APPCAST" "$REPOSITORY" <<'PY'
+    clean_env python3 -B - "$REPO_ROOT" "$RELEASE_TAG" "$DMG" "$APPCAST" "$REPOSITORY" "$DRY_RUN" <<'PY'
 import sys
 from pathlib import Path
 
-root, tag, dmg, appcast, repository = (
-    Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4]), sys.argv[5])
+root, tag, dmg, appcast, repository, dry_run = (
+    Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4]), sys.argv[5], sys.argv[6])
 sys.path.insert(0, str(root / "scripts"))
 import verify_release_identity as identity
 
 identity.load_and_validate = lambda *args, **kwargs: None
+if dry_run == "1":
+    # A dry run stamps nothing, so there is no fresh STATUS baseline to check.
+    identity.validate_status_audit = lambda *args, **kwargs: None
 try:
     found = identity.validate_prebuild(root, tag)
     identity.validate_staged(root, tag, found, dmg, appcast, repository)
@@ -335,16 +366,34 @@ warn() { printf '  warn  %s\n' "$*"; }
 info() { printf '  info  %s\n' "$*"; }
 fail() { printf '  FAIL  %s\n' "$*"; FAILURES=$((FAILURES + 1)); }
 
+# The release asks Apple's notary service for this profile's history; a dry
+# run contacts no Apple service about notarization at all.
+check_notary_profile() {
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        info "notary profile '$NOTARY_PROFILE' not used: a dry run sends nothing to Apple's notary service"
+    elif clean_env xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+        ok "notary keychain profile '$NOTARY_PROFILE' works"
+    else
+        fail "notary keychain profile '$NOTARY_PROFILE' does not work (or Apple's service is unreachable)"
+    fi
+}
+
 preflight() {
     local branch changes count result baseline sdk tool missing identities power percent free need
 
-    say "=== Hippocampus $RELEASE_VERSION release preflight ==="
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        say "=== Hippocampus $RELEASE_VERSION release preflight (dry run) ==="
+    else
+        say "=== Hippocampus $RELEASE_VERSION release preflight ==="
+    fi
     say "Repository: $REPO_ROOT"
     say "Output:     $OUT_DIR"
 
     branch="$(git -C "$REPO_ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
     if [[ "$branch" == "$RELEASE_BRANCH" ]]; then
         ok "branch $RELEASE_BRANCH at $(git -C "$REPO_ROOT" rev-parse --short HEAD)"
+    elif [[ "$DRY_RUN" -eq 1 ]]; then
+        info "branch ${branch:-a detached HEAD} at $(git -C "$REPO_ROOT" rev-parse --short HEAD); a dry run builds any branch, the release only $RELEASE_BRANCH"
     else
         fail "branch is ${branch:-a detached HEAD}, not $RELEASE_BRANCH"
     fi
@@ -426,11 +475,7 @@ preflight() {
         fail "no Developer ID Application identity for team $TEAM_ID in the keychain"
     fi
 
-    if clean_env xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
-        ok "notary keychain profile '$NOTARY_PROFILE' works"
-    else
-        fail "notary keychain profile '$NOTARY_PROFILE' does not work (or Apple's service is unreachable)"
-    fi
+    check_notary_profile
 
     if [[ ! -f "$SPARKLE_KEY" ]]; then
         fail "no Sparkle private key at $SPARKLE_KEY (pass --sparkle-key FILE; scripts/sparkle-keygen.sh made it)"
@@ -638,8 +683,13 @@ check_assembled_app() {
 assemble_app() {
     require_disk "assemble Hippocampus.app"
     [[ "$(head_sha)" == "$RELEASE_HEAD" ]] || stop "HEAD moved during the build. Run this script again."
-    stage "assemble and sign Hippocampus.app (includes the 20 s launch check)" assemble \
-        DEVELOPER_ID="$DEVELOPER_ID" "$REPO_ROOT/apps/hippocampus/Resources/build-app.sh"
+    local title="assemble and sign Hippocampus.app (includes the 20 s launch check)"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        title="assemble and sign Hippocampus.app (dry run: no STATUS audit; the app is not opened)"
+    fi
+    stage "$title" assemble \
+        DEVELOPER_ID="$DEVELOPER_ID" "$REPO_ROOT/apps/hippocampus/Resources/build-app.sh" \
+        ${ASSEMBLY_MODE[@]+"${ASSEMBLY_MODE[@]}"}
     check_assembled_app "$APP"
     say "   hippocampus-mind included (FoundationModels weak), every binary runs on macOS $MINIMUM_MACOS, signed by $TEAM_ID"
 }
@@ -649,13 +699,33 @@ build_dmg() {
     [[ "$(head_sha)" == "$RELEASE_HEAD" ]] || stop "HEAD moved during the build. Run this script again."
     require_clean_tree "Before the DMG."
     mkdir -p "$DIST_DIR"
-    stage "DMG: sign, notarize and staple the app and the DMG (launch check, then Apple's notary service)" installer \
+    local title="DMG: sign, notarize and staple the app and the DMG (launch check, then Apple's notary service)"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        title="DMG: sign the app and the DMG (dry run: not notarized; the app is not opened)"
+    fi
+    stage "$title" installer \
         DEVELOPER_ID="$DEVELOPER_ID" INSTALLER_PYTHON="$INSTALLER_VENV/bin/python" \
-        "$REPO_ROOT/scripts/build-installer.sh" --skip-build --dist "$DIST_DIR"
+        "$REPO_ROOT/scripts/build-installer.sh" --skip-build --dist "$DIST_DIR" \
+        ${INSTALLER_MODE[@]+"${INSTALLER_MODE[@]}"}
     [[ -f "$DMG" && -f "$DMG.sha256" ]] || stop "build-installer.sh finished without $DMG and its .sha256."
 }
 
 VERIFY_LOG=""
+REPORTS=()
+
+# Gatekeeper rejects an app that is not notarized, so a dry run records what
+# it says instead of requiring it to accept.
+report() {
+    local description="$1" output="" status=0 verdict
+    shift
+    printf '\n$ %s\n' "$*" >>"$VERIFY_LOG"
+    output="$("$@" 2>&1)" || status=$?
+    printf '%s\n' "$output" >>"$VERIFY_LOG"
+    verdict="$(printf '%s\n' "$output" | grep -v '^[[:space:]]*$' | tail -1 | sed 's/^[[:space:]]*//')"
+    REPORTS+=("$description: ${verdict:-no output} (exit $status)")
+    say "   report  $description: ${verdict:-no output} (exit $status)"
+}
+
 verify() {
     local description="$1"
     shift
@@ -681,14 +751,21 @@ verify_release() {
         "/usr/bin/cmp \"$DMG\" \"$STABLE_DMG\" && cd \"$DIST_DIR\" && /usr/bin/shasum -a 256 -c Hippocampus.dmg.sha256"
     verify "hdiutil verify" /usr/bin/hdiutil verify "$DMG"
     verify "DMG signature" /usr/bin/codesign --verify --strict --verbose=2 "$DMG"
-    verify "DMG notarization ticket (stapler validate)" /usr/bin/xcrun stapler validate "$DMG"
-    verify "Gatekeeper accepts the DMG (spctl -t open)" \
-        /usr/sbin/spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        report "Gatekeeper on the DMG (spctl -t open), not notarized" \
+            /usr/sbin/spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
+    else
+        verify "DMG notarization ticket (stapler validate)" /usr/bin/xcrun stapler validate "$DMG"
+        verify "Gatekeeper accepts the DMG (spctl -t open)" \
+            /usr/sbin/spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
+    fi
     verify "the assembled app's signature (deep, strict)" /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP"
-    verify "Apple's notary log for the app lists no issues" clean_env python3 -B \
-        "$REPO_ROOT/scripts/check-notary-log.py" --archive "Hippocampus-$RELEASE_VERSION-app.zip" "$DIST_DIR/notary-app-log.json"
-    verify "Apple's notary log for the DMG lists no issues" clean_env python3 -B \
-        "$REPO_ROOT/scripts/check-notary-log.py" --archive "$(basename "$DMG")" "$DIST_DIR/notary-dmg-log.json"
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+        verify "Apple's notary log for the app lists no issues" clean_env python3 -B \
+            "$REPO_ROOT/scripts/check-notary-log.py" --archive "Hippocampus-$RELEASE_VERSION-app.zip" "$DIST_DIR/notary-app-log.json"
+        verify "Apple's notary log for the DMG lists no issues" clean_env python3 -B \
+            "$REPO_ROOT/scripts/check-notary-log.py" --archive "$(basename "$DMG")" "$DIST_DIR/notary-dmg-log.json"
+    fi
 
     VERIFY_MOUNT_ROOT="$(mktemp -d "$BUILD_TMPDIR/hippocampus-release-verify.XXXXXX")"
     mounted="$VERIFY_MOUNT_ROOT/volume"
@@ -697,11 +774,18 @@ verify_release() {
     app="$mounted/Hippocampus.app"
     verify "the DMG holds Hippocampus.app and an Applications link" /bin/sh -c "test -d \"$app\" && test -L \"$mounted/Applications\""
     verify "the app in the DMG: signature (deep, strict)" /usr/bin/codesign --verify --deep --strict --verbose=2 "$app"
-    verify "the app in the DMG: notarization ticket (stapler validate)" /usr/bin/xcrun stapler validate "$app"
-    verify "the app in the DMG: Gatekeeper accepts it (spctl -t execute)" /usr/sbin/spctl --assess --type execute --verbose=2 "$app"
-    check_assembled_app "$app" distribution
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        report "Gatekeeper on the app in the DMG (spctl -t execute), not notarized" \
+            /usr/sbin/spctl --assess --type execute --verbose=2 "$app"
+        report "syspolicy_check distribution on the app in the DMG, not notarized" \
+            /usr/bin/syspolicy_check distribution "$app"
+    else
+        verify "the app in the DMG: notarization ticket (stapler validate)" /usr/bin/xcrun stapler validate "$app"
+        verify "the app in the DMG: Gatekeeper accepts it (spctl -t execute)" /usr/sbin/spctl --assess --type execute --verbose=2 "$app"
+    fi
+    check_assembled_app "$app" "$GATEKEEPER_CHECK"
     say "   ok  the app in the DMG: hippocampus-mind weak-links FoundationModels, every binary runs on macOS $MINIMUM_MACOS, version $RELEASE_VERSION, team $TEAM_ID"
-    say "   ok  the app in the DMG: syspolicy_check distribution accepts it"
+    say "   ok  the app in the DMG: syspolicy_check $GATEKEEPER_CHECK accepts it"
     digest="$(clean_env python3 -B "$REPO_ROOT/scripts/product-source-digest.py" --repo-root "$REPO_ROOT")"
     verify "the app in the DMG was built from this commit and source" clean_env python3 -B \
         "$REPO_ROOT/scripts/build-provenance.py" verify --app "$app" \
@@ -751,16 +835,29 @@ if (( FAILURES > 0 )); then
 fi
 if [[ "$CHECK_ONLY" -eq 1 ]]; then
     say ""
-    say "Preflight passed. To release, run: scripts/release-0.3.0.sh"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        say "Preflight passed. For the dry run, run: scripts/release-0.3.0.sh --dry-run"
+    else
+        say "Preflight passed. To release, run: scripts/release-0.3.0.sh"
+    fi
     exit 0
 fi
 
 mkdir -p "$LOG_DIR" "$DIST_DIR"
 say ""
-say "=== Hippocampus $RELEASE_VERSION release, $(date '+%Y-%m-%d %H:%M') ==="
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    say "=== Hippocampus $RELEASE_VERSION release DRY RUN, $(date '+%Y-%m-%d %H:%M') ==="
+    say "    Signed here; not notarized, stamped, committed or opened. Never upload it."
+else
+    say "=== Hippocampus $RELEASE_VERSION release, $(date '+%Y-%m-%d %H:%M') ==="
+fi
 provision_installer_python
 rebuild_ocr_if_stale
-stamp_status
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    say "== docs/STATUS.md not stamped and nothing committed (dry run)"
+else
+    stamp_status
+fi
 RELEASE_HEAD="$(head_sha)"
 build_binaries
 assemble_app
@@ -775,8 +872,30 @@ make_appcast
 UPLOADS=("$DMG" "$DMG.sha256" "$STABLE_DMG" "$STABLE_DMG.sha256" "$APPCAST")
 if [[ -f "$DIST_DIR/install.sh" ]]; then UPLOADS+=("$DIST_DIR/install.sh"); fi
 
+mb() { awk -v bytes="$1" 'BEGIN { printf "%.1f", bytes / 1048576 }'; }
+DMG_BYTES="$(stat -f%z "$DMG")"
+APP_BYTES="$(find "$APP" -type f -exec stat -f%z {} + | awk '{ total += $1 } END { print total }')"
+BINARY_BYTES="$(stat -f%z "$APP"/Contents/MacOS/* | awk '{ total += $1 } END { print total }')"
+DMG_FORMAT="$(/usr/bin/hdiutil imageinfo -format "$DMG" 2>/dev/null || echo unknown)"
+
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    say ""
+    say "=== Hippocampus $RELEASE_VERSION DRY RUN: built and signed here, and verified ==="
+    say "  DMG:      $DMG"
+    say "  Sizes:    DMG $(mb "$DMG_BYTES") MB ($DMG_BYTES bytes, $DMG_FORMAT); app $(mb "$APP_BYTES") MB, of which its binaries $(mb "$BINARY_BYTES") MB"
+    say "  Symbols:  $SYMBOLS_DIR"
+    say "  Commit:   $RELEASE_HEAD ($(git -C "$REPO_ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null || echo detached))"
+    say "  Gatekeeper on this build, which is not notarized:"
+    for line in ${REPORTS[@]+"${REPORTS[@]}"}; do say "            $line"; done
+    say ""
+    say "DRY RUN: nothing was notarized, stamped, committed, pushed, tagged or uploaded,"
+    say "and the app was never opened. Do not upload anything from $OUT_DIR."
+    exit 0
+fi
+
 say ""
 say "=== Hippocampus $RELEASE_VERSION is built, signed, notarized and verified ==="
+say "  Sizes:    DMG $(mb "$DMG_BYTES") MB ($DMG_FORMAT); app $(mb "$APP_BYTES") MB, of which its binaries $(mb "$BINARY_BYTES") MB"
 say "  DMG:      $DMG ($(du -h "$DMG" | awk '{ print $1 }'))"
 say "  SHA-256:  $SHA256"
 say "  Commit:   $RELEASE_HEAD ($RELEASE_BRANCH; STATUS baseline $(status_baseline))"

@@ -263,8 +263,41 @@ require_literal "$APP_GATE" 'refuse "hippocampus-mind links FoundationModels as 
     'the app gate refuses a mind that does not weak-link FoundationModels'
 require_literal "$RELEASE_SCRIPT" 'clean_env "$REPO_ROOT/scripts/verify-release-app.sh" --version "$RELEASE_VERSION"' \
     'release script checks its app with the shared app gate'
-require_literal "$RELEASE_SCRIPT" 'check_assembled_app "$app" distribution' \
-    'release script runs syspolicy_check distribution on the app in the DMG'
+require_literal "$RELEASE_SCRIPT" 'check_assembled_app "$app" "$GATEKEEPER_CHECK"' \
+    'release script runs syspolicy_check on the app in the DMG'
+require_literal "$RELEASE_SCRIPT" '    GATEKEEPER_CHECK="distribution"' \
+    'the release itself checks the app in the DMG with syspolicy_check distribution'
+
+# The dry run: built and signed here, never notarized, stamped, committed or
+# opened, and never what a release workflow runs.
+require_literal "$RELEASE_SCRIPT" '--dry-run) DRY_RUN=1; shift ;;' \
+    'release script has a dry-run mode'
+require_literal "$RELEASE_SCRIPT" 'ASSEMBLY_MODE=(--release-dry-run)' \
+    'a dry run assembles without the STATUS audit and without opening the app'
+require_literal "$RELEASE_SCRIPT" 'INSTALLER_MODE=(--dry-run)' \
+    'a dry run packages the DMG without notarizing it or opening the app'
+require_literal "$RELEASE_SCRIPT" 'GATEKEEPER_CHECK="notary-submission"' \
+    'a dry run checks the app the way the notary service would'
+require_literal "$RELEASE_SCRIPT" 'say "== docs/STATUS.md not stamped and nothing committed (dry run)"' \
+    'a dry run stamps and commits nothing'
+require_literal "$RELEASE_SCRIPT" 'say "DRY RUN: nothing was notarized, stamped, committed, pushed, tagged or uploaded,"' \
+    'a dry run says what it did not do'
+require_literal "$BUILD_APP" '--release-dry-run) RELEASE_DRY_RUN=1; shift ;;' \
+    'app assembly has a release dry-run mode'
+require_literal "$BUILD_APP" '=== Launch-verify gate: SKIPPED for a release dry run; this app was never opened ===' \
+    'a release dry run never opens the app it assembles'
+require_literal "$BUILD_APP" '"--release-dry-run is a release build signed with Developer ID"' \
+    'a release dry run cannot be combined with debug or ad-hoc assembly'
+require_literal "$INSTALLER" '--dry-run) DRY_RUN=1; shift ;;' \
+    'the installer has a dry-run mode'
+require_literal "$INSTALLER" 'FATAL: --dry-run is a release build signed with a Developer ID identity' \
+    'an installer dry run is a Developer ID release build'
+require_literal "$INSTALLER" 'Notarization: skipped (dry run: nothing is sent to Apple'"'"'s notary service)' \
+    'an installer dry run sends nothing to the notary service'
+for workflow in "$RELEASE" "$PUBLISH" "$RELEASE_CI"; do
+    reject_pattern "$workflow" '--(release-)?dry-run' \
+        "$(basename "$workflow") never runs a dry run"
+done
 for log_name in app dmg; do
     require_literal "$RELEASE_SCRIPT" "\"\$DIST_DIR/notary-$log_name-log.json\"" \
         "release script requires a clean $log_name notary log"
