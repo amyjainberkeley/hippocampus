@@ -56,8 +56,13 @@ load_signature() {
     } 2>/dev/null
 }
 
+# Read dsymutil's whole symbol table before searching it: `grep -q` stops at
+# the first match, and under pipefail dsymutil's SIGPIPE on a large binary
+# would read as "no debug information".
 has_debug_map() {
-    /usr/bin/dsymutil -s "$1" 2>/dev/null | grep -q 'N_OSO'
+    local table
+    table="$(/usr/bin/dsymutil -s "$1" 2>/dev/null || true)"
+    grep -q 'N_OSO' <<<"$table"
 }
 
 size_of() { stat -f%z "$1"; }

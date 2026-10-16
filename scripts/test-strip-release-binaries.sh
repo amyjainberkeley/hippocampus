@@ -24,6 +24,15 @@ refuses() {
     if "$@" >>"$TMP_ROOT/check.log" 2>&1; then fail "$message"; else pass "$message"; fi
 }
 
+# Thousands of functions, as in the real products: dsymutil's symbol table
+# for such a binary is far longer than a pipe holds, so a check that stops
+# reading it early is caught here.
+{
+    printf '#include <stdio.h>\n\n'
+    for index in $(seq 1 3000); do
+        printf 'int filler_function_%d(int v) { return v + %d; }\n' "$index" "$index"
+    done
+} >"$TMP_ROOT/filler.c"
 cat >"$TMP_ROOT/fixture.c" <<'C'
 #include <stdio.h>
 
@@ -42,9 +51,13 @@ C
 build_fixture() {
     local output="$1"
     xcrun clang -g -O0 -mmacosx-version-min=14.0 -c "$TMP_ROOT/fixture.c" -o "$TMP_ROOT/fixture.o"
-    xcrun clang -g -mmacosx-version-min=14.0 "$TMP_ROOT/fixture.o" -o "$output" \
+    xcrun clang -g -O0 -mmacosx-version-min=14.0 -c "$TMP_ROOT/filler.c" -o "$TMP_ROOT/filler.o"
+    xcrun clang -g -mmacosx-version-min=14.0 "$TMP_ROOT/fixture.o" "$TMP_ROOT/filler.o" -o "$output" \
         -Wl,-weak_framework,CoreFoundation -Wl,-rpath,@executable_path/../Frameworks
 }
+
+# Whole outputs are read before they are searched, here as in the stripper.
+has_symbol() { local table; table="$(nm "$1" 2>/dev/null || true)"; grep -q "$2" <<<"$table"; }
 
 linkage() {
     otool -l "$1" | awk '
@@ -62,7 +75,8 @@ build_fixture "$BIN"
 cp -p "$BIN" "$ORIGINAL"
 
 # The fixture is what the test needs it to be.
-nm "$BIN" | grep -q 'local_helper_for_strip_fixture' || { echo 'fixture has no local symbol' >&2; exit 1; }
+has_symbol "$BIN" 'local_helper_for_strip_fixture' || { echo 'fixture has no local symbol' >&2; exit 1; }
+[[ "$(dsymutil -s "$BIN" | wc -c)" -gt 1000000 ]] || { echo 'fixture symbol table is too short to fill a pipe' >&2; exit 1; }
 linkage "$BIN" | grep -q 'LC_LOAD_WEAK_DYLIB .*CoreFoundation' || { echo 'fixture has no weak link' >&2; exit 1; }
 
 check 'the stripper runs on a binary with debug information' \
@@ -73,12 +87,17 @@ if [[ "$(stat -f%z "$BIN")" -lt "$(stat -f%z "$ORIGINAL")" ]]; then
 else
     fail 'the stripped binary is smaller'
 fi
-if nm "$BIN" 2>/dev/null | grep -q 'local_helper_for_strip_fixture'; then
+if has_symbol "$BIN" 'local_helper_for_strip_fixture'; then
     fail 'local symbols are gone'
 else
     pass 'local symbols are gone'
 fi
-check 'exported symbols stay' sh -c "nm -g '$BIN' | grep -q '_exported_for_strip_fixture' && nm -g '$BIN' | grep -q '_main'"
+EXPORTS="$(nm -g "$BIN")"
+if grep -q '_exported_for_strip_fixture' <<<"$EXPORTS" && grep -q '_main' <<<"$EXPORTS"; then
+    pass 'exported symbols stay'
+else
+    fail 'exported symbols stay'
+fi
 if [[ "$(linkage "$BIN")" == "$(linkage "$ORIGINAL")" ]]; then
     pass 'the weak link, rpath and minimum macOS are unchanged'
 else
@@ -100,8 +119,12 @@ if [[ "$(uuid_of "$SYMBOLS/fixture.dSYM")" == "$(uuid_of "$ORIGINAL")" ]]; then
 else
     fail 'the dSYM was written and matches the binary'
 fi
-check 'the dSYM still names the local function, for reading crash reports' \
-    sh -c "dwarfdump --debug-info '$SYMBOLS/fixture.dSYM' | grep -q local_helper_for_strip_fixture"
+DSYM_INFO="$(dwarfdump --debug-info "$SYMBOLS/fixture.dSYM" 2>/dev/null || true)"
+if grep -q local_helper_for_strip_fixture <<<"$DSYM_INFO"; then
+    pass 'the dSYM still names the local function, for reading crash reports'
+else
+    fail 'the dSYM still names the local function, for reading crash reports'
+fi
 
 SIZE="$(stat -f%z "$BIN")"
 check 'stripping again is harmless' "$STRIPPER" "$BIN"
