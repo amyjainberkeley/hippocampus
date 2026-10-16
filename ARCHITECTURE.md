@@ -6,7 +6,7 @@ Everything runs on the Mac. There is no server, no account and no sync between M
 
 ## The processes
 
-Hippocampus.app holds eight programs. The menu-bar app starts and stops the rest.
+Hippocampus.app holds eight programs. The menu-bar app starts the capture helper and the agent, and opens the window and setup when asked; the helper starts the OCR worker, and the agent starts the model process. Quit stops them all. AI tools start their own `mci-agent mcp-serve`, which Quit leaves alone.
 
 | Process | Language, source | What it does |
 | --- | --- | --- |
