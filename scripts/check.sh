@@ -75,6 +75,7 @@ LANES=(
     "installer-runtime|bash|test|scripts/test-installer-runtime.sh"
     "sparkle-keygen-fixtures|bash|test|scripts/test-sparkle-keygen.sh"
     "sparkle-keypair-fixtures|bash|test|scripts/test-sparkle-keypair.sh"
+    "sparkle-publish-fixtures|bash|test|__sparkle_publish_lane"
     "key-custody-runner|bash|test|scripts/test-agent-key-custody-runner.sh"
     "supervisor-stop-policy|bash|test|scripts/test-supervisor-stop-policy.sh"
     "clean-home-contract|bash|lint|scripts/test-e2e-clean-home-contract.sh"
@@ -161,6 +162,7 @@ LANES
     installer-runtime       bounded layout process and centralized cleanup fixture
     sparkle-keygen-fixtures bundled Sparkle CLI contract fixture
     sparkle-keypair-fixtures Ed25519 private/public matching fixtures
+    sparkle-publish-fixtures the appcast a release uploads, judged by the app's Sparkle (SKIP without its tools)
     key-custody-runner    nonblocking bounded child-process diagnostic fixture
     supervisor-stop-policy bounded two-child shutdown fixture
     clean-home-contract     isolated install-to-uninstall product contract
@@ -224,6 +226,16 @@ __ocr_worker_lane() {
     fi
     env -i HOME="$HOME" PATH=/usr/bin:/bin TMPDIR="${TMPDIR:-/tmp}" \
         "$python" -B -m unittest discover -s tools/ocr
+}
+
+__sparkle_publish_lane() {
+    # The appcast test runs the app's own Sparkle, whose tools arrive when
+    # apps/hippocampus resolves its packages. Without them, SKIP.
+    if [[ ! -x apps/hippocampus/.build/artifacts/sparkle/Sparkle/bin/sign_update ]]; then
+        echo "[skip] Sparkle's tools are not resolved (scripts/swift-package.sh build --package-path apps/hippocampus)"
+        return 42
+    fi
+    scripts/test-sparkle-publish.sh
 }
 
 __changelog_sanity_lane() {

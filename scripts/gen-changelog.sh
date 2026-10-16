@@ -4,8 +4,8 @@
 #
 # Parses conventional-commit subjects on the current branch since the last
 # release tag (or a --since ref) and emits categorized Markdown release notes.
-# Usable both to seed CHANGELOG.md and to draft Sparkle appcast release notes
-# (see scripts/publish-appcast.sh / PR #32).
+# Usable to seed CHANGELOG.md, whose section for a version becomes that
+# version's Sparkle release notes (scripts/sparkle-publish.sh --changelog-notes).
 
 set -euo pipefail
 

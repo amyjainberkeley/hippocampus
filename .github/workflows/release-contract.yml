@@ -421,6 +421,10 @@ jobs:
       - run: scripts/test-release-model-manifest.sh
       - run: scripts/test-sparkle-keygen.sh
       - run: scripts/test-sparkle-keypair.sh
+      - name: Appcast publishing, judged by the app's Sparkle
+        env:
+          SPARKLE_PUBLISH_TEST_REQUIRE_TOOLS: '1'
+        run: scripts/test-sparkle-publish.sh
 
   workflows:
     runs-on: ubuntu-latest

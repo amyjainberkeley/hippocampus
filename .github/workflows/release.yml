@@ -282,17 +282,21 @@ jobs:
           hdiutil detach "$MOUNT" -quiet
           trap - EXIT
 
+      # The release's own appcast.xml is the app's feed once the release is
+      # published as Latest (SUFeedURL .../releases/latest/download/appcast.xml).
       - name: Sign staged Sparkle appcast
-        env:
-          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           DMG="dist/Hippocampus-${GITHUB_REF_NAME#v}.dmg"
           DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/$(basename "$DMG")"
-          scripts/publish-appcast.sh \
+          scripts/sparkle-publish.sh \
             --dmg "$DMG" \
+            --private-key "$RUNNER_TEMP/sparkle-private.key" \
+            --changelog-notes \
             --download-url "$DOWNLOAD_URL" \
+            --release-tag "$GITHUB_REF_NAME" \
             --appcast dist/appcast.xml \
-            --dist dist
+            --dist dist \
+            --no-confirm
 
       - name: Verify staged release identity
         run: |

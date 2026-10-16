@@ -34,6 +34,7 @@ STAGE_RECALL_FFI="$REPO_ROOT/scripts/stage-recall-ffi.sh"
 E2E="$REPO_ROOT/scripts/e2e-clean-home.sh"
 E2E_CONTRACT="$REPO_ROOT/scripts/test-e2e-clean-home-contract.sh"
 APP_GROUP_CONTRACT_TEST="$REPO_ROOT/scripts/test-app-group-contract.sh"
+SPARKLE_PUBLISH="$REPO_ROOT/scripts/sparkle-publish.sh"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -95,8 +96,15 @@ require_literal "$RELEASE" '--expected-source-head "$(git rev-parse HEAD)"' \
     'release provenance is bound to the release checkout HEAD'
 require_literal "$RELEASE" '--expected-source-digest "$(python3 scripts/product-source-digest.py --repo-root .)"' \
     'release provenance is bound to the release checkout source digest'
-require_pattern "$RELEASE" 'scripts/publish-appcast\.sh' \
+require_pattern "$RELEASE" 'scripts/sparkle-publish\.sh' \
     'release workflow signs the Sparkle appcast'
+require_literal "$RELEASE" '--private-key "$RUNNER_TEMP/sparkle-private.key"' \
+    'release workflow signs the appcast with the verified Sparkle key file'
+if [[ -e "$REPO_ROOT/scripts/publish-appcast.sh" ]]; then
+    fail 'one appcast writer: the env-key publish-appcast.sh is gone'
+else
+    pass 'one appcast writer: the env-key publish-appcast.sh is gone'
+fi
 require_pattern "$RELEASE" 'fetch-depth:[[:space:]]*0' \
     'release checkout includes full history for status provenance'
 require_literal "$RELEASE" 'MACOSX_DEPLOYMENT_TARGET: "14.0"' \
@@ -173,6 +181,14 @@ reject_pattern "$PUBLISH" 'uses:[[:space:]]+[^#[:space:]]+@v[0-9]+([[:space:]]|$
 
 require_pattern "$INFO_PLIST" 'https://amyjainberkeley\.github\.io/hippocampus/appcast\.xml' \
     'shipped Sparkle feed matches the publication target'
+reject_pattern "$SPARKLE_PUBLISH" 'hippocampus\.ai' \
+    'sparkle-publish names no address on the parked hippocampus.ai domain'
+require_literal "$SPARKLE_PUBLISH" '"$SIGN_UPDATE" -f "$KEY_PATH" "$TMP_APPCAST"' \
+    'sparkle-publish signs the appcast itself with sign_update'
+require_literal "$SPARKLE_PUBLISH" '"$SIGN_UPDATE" --verify -f "$KEY_PATH" "$TMP_APPCAST"' \
+    'sparkle-publish verifies the signed appcast before writing it'
+require_literal "$SPARKLE_PUBLISH" 'sparkle:format="markdown"' \
+    'sparkle-publish marks Markdown notes the way Sparkle reads them'
 PRIVATE_REPORTING='https://github.com/amyjainberkeley/hippocampus/security/advisories/new'
 for contact_file in "$REPO_ROOT/SECURITY.md" "$REPO_ROOT/docs/legal/terms-of-service.md" \
     "$REPO_ROOT/assets/installer/EULA.rtf"; do
@@ -298,10 +314,14 @@ require_literal "$RELEASE_CI" 'scripts/swift-package.sh run --package-path apps/
     'release CI executes the durable app-access route fixture'
 for script in test-release-contract.sh test-app-group-contract.sh test-release-identity.sh \
     test-prepare-release-models.sh test-release-model-manifest.sh \
-    test-sparkle-keygen.sh test-sparkle-keypair.sh; do
+    test-sparkle-keygen.sh test-sparkle-keypair.sh test-sparkle-publish.sh; do
     require_literal "$RELEASE_CI" "scripts/$script" \
         "release CI runs $script"
 done
+require_literal "$RELEASE_CI" "SPARKLE_PUBLISH_TEST_REQUIRE_TOOLS: '1'" \
+    'release CI fails the appcast test, never skips it, without Sparkle tools'
+require_pattern "$CHECK" 'sparkle-publish-fixtures\|bash\|test\|__sparkle_publish_lane' \
+    'the unified local gate runs the appcast test'
 require_literal "$RELEASE_CI" 'scripts/test-task-2-product-truth.sh' \
     'release CI runs the legal drift and product-truth contract'
 require_literal "$RELEASE_CI" 'scripts/test-onboarding-product-truth.sh' \
