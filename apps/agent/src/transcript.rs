@@ -697,16 +697,16 @@ mod tests {
         let ctx = EventContext {
             agent: Agent::ClaudeCode,
             label: "hippocampus",
-            cwd: "/Users/you/hippocampus",
+            cwd: "/Users/me/hippocampus",
             branch: "main",
             session: "abc-123",
-            src_path: "/Users/you/.claude/projects/-Users-amy-hippocampus/abc-123.jsonl",
+            src_path: "/Users/me/.claude/projects/-Users-me-hippocampus/abc-123.jsonl",
             line_no: 17,
         };
         assert_eq!(
             ctx.header(Role::User),
-            "[app=claude-code | title=hippocampus · user | url=/Users/you/hippocampus#main | \
-             session=abc-123 | src=/Users/you/.claude/projects/-Users-amy-hippocampus/abc-123.jsonl:17]"
+            "[app=claude-code | title=hippocampus · user | url=/Users/me/hippocampus#main | \
+             session=abc-123 | src=/Users/me/.claude/projects/-Users-me-hippocampus/abc-123.jsonl:17]"
         );
         let codex = EventContext {
             agent: Agent::Codex,
@@ -715,7 +715,7 @@ mod tests {
         };
         assert!(codex
             .header(Role::Tool)
-            .starts_with("[app=codex | title=hippocampus · tool | url=/Users/you/hippocampus# | "));
+            .starts_with("[app=codex | title=hippocampus · tool | url=/Users/me/hippocampus# | "));
     }
 
     #[test]
@@ -821,8 +821,8 @@ mod tests {
 
     #[test]
     fn basename_takes_the_last_component() {
-        assert_eq!(basename("/Users/you/hippo-work"), "hippo-work");
-        assert_eq!(basename("/Users/you/hippo-work/"), "hippo-work");
+        assert_eq!(basename("/Users/me/hippo-work"), "hippo-work");
+        assert_eq!(basename("/Users/me/hippo-work/"), "hippo-work");
         assert_eq!(basename(""), "");
     }
 }

@@ -198,15 +198,15 @@ mod tests {
     fn plist_names_the_refresh_command_and_interval() {
         let text = render_plist(
             Path::new("/Applications/Hippocampus.app/Contents/MacOS/mci-agent"),
-            Path::new("/Users/you/Library/Application Support/MCI/mci.sqlite"),
-            Path::new("/Users/you/Library/Logs/MCI/refresh-agent.log"),
+            Path::new("/Users/me/Library/Application Support/MCI/mci.sqlite"),
+            Path::new("/Users/me/Library/Logs/MCI/refresh-agent.log"),
         );
         assert!(text.contains("<string>ai.hippocampus.refresh</string>"));
         assert!(text.contains(
-            "\t\t<string>/Applications/Hippocampus.app/Contents/MacOS/mci-agent</string>\n\t\t<string>refresh</string>\n\t\t<string>--budget-ms</string>\n\t\t<string>20000</string>\n\t\t<string>--db-path</string>\n\t\t<string>/Users/you/Library/Application Support/MCI/mci.sqlite</string>\n"
+            "\t\t<string>/Applications/Hippocampus.app/Contents/MacOS/mci-agent</string>\n\t\t<string>refresh</string>\n\t\t<string>--budget-ms</string>\n\t\t<string>20000</string>\n\t\t<string>--db-path</string>\n\t\t<string>/Users/me/Library/Application Support/MCI/mci.sqlite</string>\n"
         ));
         assert!(text.contains("<key>StartInterval</key>\n\t<integer>300</integer>"));
-        assert!(text.contains("<key>StandardErrorPath</key>\n\t<string>/Users/you/Library/Logs/MCI/refresh-agent.log</string>"));
+        assert!(text.contains("<key>StandardErrorPath</key>\n\t<string>/Users/me/Library/Logs/MCI/refresh-agent.log</string>"));
         assert!(text.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
     }
 

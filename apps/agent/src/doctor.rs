@@ -793,7 +793,7 @@ mod tests {
         // Migrations 0011 and 0012 create these on every fresh brain; an older
         // brain opened by a newer reader is the case this test keeps alive.
         execute(&brain, "DROP INDEX IF EXISTS handoff_deliveries_ts; DROP TABLE IF EXISTS handoff_deliveries; DROP TABLE IF EXISTS import_cursors;");
-        write_transcript(&home.join(".claude/projects/-Users-amy-x/one.jsonl"));
+        write_transcript(&home.join(".claude/projects/-Users-me-x/one.jsonl"));
         write_transcript(&home.join(".codex/sessions/2026/09/26/rollout.jsonl"));
         let db = mci_core::store::open_readonly(&brain, &key()).unwrap();
 
@@ -825,9 +825,9 @@ mod tests {
         let home = temp.path().join("home");
         let brain = fresh_brain(temp.path());
         execute(&brain, CONTRACT_TABLES_SQL);
-        let stale = home.join(".claude/projects/-Users-amy-x/stale.jsonl");
-        let fresh = home.join(".claude/projects/-Users-amy-x/fresh.jsonl");
-        let unseen = home.join(".claude/projects/-Users-amy-x/unseen.jsonl");
+        let stale = home.join(".claude/projects/-Users-me-x/stale.jsonl");
+        let fresh = home.join(".claude/projects/-Users-me-x/fresh.jsonl");
+        let unseen = home.join(".claude/projects/-Users-me-x/unseen.jsonl");
         let codex = home.join(".codex/sessions/2026/09/26/rollout.jsonl");
         for path in [&stale, &fresh, &unseen, &codex] {
             write_transcript(path);
@@ -843,9 +843,9 @@ mod tests {
                  INSERT INTO import_cursors (path, byte_offset, file_size, mtime_us, updated_at_us) VALUES ('{}', 10, 10, 1, {imported_at});
                  INSERT INTO import_cursors (path, byte_offset, file_size, mtime_us, updated_at_us) VALUES ('{}', 10, 10, 1, {far_future});
                  INSERT INTO handoff_deliveries (ts_us, client, project_root, packet_sha256, token_estimate, event_ids)
-                 VALUES (1790415667000000, 'claude-code', '/Users/you/hippo-work/hippocampus', 'abc', 583, '[1,2]'),
-                        (1790415000000000, 'claude-code', '/Users/you/older', 'def', 100, '[]'),
-                        (1790415600000000, 'cli', '/Users/you/cli', 'ghi', 50, '[]');",
+                 VALUES (1790415667000000, 'claude-code', '/Users/me/hippo-work/hippocampus', 'abc', 583, '[1,2]'),
+                        (1790415000000000, 'claude-code', '/Users/me/older', 'def', 100, '[]'),
+                        (1790415600000000, 'cli', '/Users/me/cli', 'ghi', 50, '[]');",
                 stale.display(),
                 fresh.display(),
                 codex.display()
@@ -871,7 +871,7 @@ mod tests {
         assert_eq!(
             line(&checks, "delivery"),
             "[warn] claude-code hook installed, last packet 2026-09-26 02:41 for \
-             /Users/you/hippo-work/hippocampus (583 tokens); codex hook NOT installed; \
+             /Users/me/hippo-work/hippocampus (583 tokens); codex hook NOT installed; \
              codex hooks disabled in config.toml"
         );
         let delivery = checks.iter().find(|c| c.name == "delivery").unwrap();
@@ -891,7 +891,7 @@ mod tests {
         assert_eq!(
             line(&checks, "delivery"),
             "[ok  ] claude-code hook installed, last packet 2026-09-26 02:41 for \
-             /Users/you/hippo-work/hippocampus (583 tokens); codex hook installed, \
+             /Users/me/hippo-work/hippocampus (583 tokens); codex hook installed, \
              no packet delivered yet"
         );
         assert_eq!(

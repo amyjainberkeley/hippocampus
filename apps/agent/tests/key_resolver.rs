@@ -242,7 +242,7 @@ fn key_validation_rejects_unicode_hex_digits() {
 
 #[test]
 fn mcp_configuration_uses_keychain_reference_not_reusable_key_material() {
-    let env = mcp_registration_env("/Users/you/Library/Application Support/MCI/mci.sqlite");
+    let env = mcp_registration_env("/Users/me/Library/Application Support/MCI/mci.sqlite");
 
     assert_eq!(
         env.get("MCI_DB_KEYCHAIN_SERVICE").map(String::as_str),

@@ -268,11 +268,11 @@ mod tests {
     fn claude_files_are_top_level_per_project_only() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("projects");
-        touch(&root.join("-Users-amy-a/one.jsonl"));
-        touch(&root.join("-Users-amy-a/two.jsonl"));
-        touch(&root.join("-Users-amy-a/subagents/agent.jsonl"));
-        touch(&root.join("-Users-amy-b/three.jsonl"));
-        touch(&root.join("-Users-amy-b/notes.txt"));
+        touch(&root.join("-Users-me-a/one.jsonl"));
+        touch(&root.join("-Users-me-a/two.jsonl"));
+        touch(&root.join("-Users-me-a/subagents/agent.jsonl"));
+        touch(&root.join("-Users-me-b/three.jsonl"));
+        touch(&root.join("-Users-me-b/notes.txt"));
         touch(&root.join("stray.jsonl"));
         let files = claude_transcript_files(&root);
         let names: Vec<_> = files
@@ -288,9 +288,9 @@ mod tests {
         assert_eq!(
             names,
             vec![
-                "-Users-amy-a/one.jsonl",
-                "-Users-amy-a/two.jsonl",
-                "-Users-amy-b/three.jsonl"
+                "-Users-me-a/one.jsonl",
+                "-Users-me-a/two.jsonl",
+                "-Users-me-b/three.jsonl"
             ]
         );
         assert!(files.iter().all(|f| f.mtime_us > 0));

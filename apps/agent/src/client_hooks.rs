@@ -618,7 +618,7 @@ mod tests {
     fn command() -> HookCommand {
         HookCommand::new(
             PathBuf::from("/Applications/Hippocampus.app/Contents/MacOS/mci-agent"),
-            PathBuf::from("/Users/you/Library/Application Support/MCI/mci.sqlite"),
+            PathBuf::from("/Users/me/Library/Application Support/MCI/mci.sqlite"),
         )
     }
 
@@ -636,7 +636,7 @@ mod tests {
       {
         "hooks": [
           {
-            "command": "'/Applications/Hippocampus.app/Contents/MacOS/mci-agent' handoff --format claude-hook --db-path '/Users/you/Library/Application Support/MCI/mci.sqlite'",
+            "command": "'/Applications/Hippocampus.app/Contents/MacOS/mci-agent' handoff --format claude-hook --db-path '/Users/me/Library/Application Support/MCI/mci.sqlite'",
             "timeout": 10,
             "type": "command"
           }
@@ -655,7 +655,7 @@ mod tests {
         "hooks": [
           {
             "additionalContextLimit": 2500,
-            "command": "'/Applications/Hippocampus.app/Contents/MacOS/mci-agent' handoff --format codex-hook --db-path '/Users/you/Library/Application Support/MCI/mci.sqlite'",
+            "command": "'/Applications/Hippocampus.app/Contents/MacOS/mci-agent' handoff --format codex-hook --db-path '/Users/me/Library/Application Support/MCI/mci.sqlite'",
             "timeout": 10,
             "type": "command"
           }
@@ -698,7 +698,7 @@ mod tests {
         let cmd = command();
         assert_eq!(
             cmd.claude_command(),
-            "'/Applications/Hippocampus.app/Contents/MacOS/mci-agent' handoff --format claude-hook --db-path '/Users/you/Library/Application Support/MCI/mci.sqlite'"
+            "'/Applications/Hippocampus.app/Contents/MacOS/mci-agent' handoff --format claude-hook --db-path '/Users/me/Library/Application Support/MCI/mci.sqlite'"
         );
         let odd = HookCommand::new(PathBuf::from("/it's/mci-agent"), PathBuf::from("/db"));
         assert_eq!(
@@ -755,7 +755,7 @@ mod tests {
         );
 
         let after = read(&paths.claude_settings);
-        let ours = "      {\n        \"hooks\": [\n          {\n            \"command\": \"'/Applications/Hippocampus.app/Contents/MacOS/mci-agent' handoff --format claude-hook --db-path '/Users/you/Library/Application Support/MCI/mci.sqlite'\",\n            \"timeout\": 10,\n            \"type\": \"command\"\n          }\n        ],\n        \"matcher\": \"startup|resume|clear|compact\"\n      }\n";
+        let ours = "      {\n        \"hooks\": [\n          {\n            \"command\": \"'/Applications/Hippocampus.app/Contents/MacOS/mci-agent' handoff --format claude-hook --db-path '/Users/me/Library/Application Support/MCI/mci.sqlite'\",\n            \"timeout\": 10,\n            \"type\": \"command\"\n          }\n        ],\n        \"matcher\": \"startup|resume|clear|compact\"\n      }\n";
         // Our group is appended after the existing SessionStart group; the
         // rest of the file is byte-identical to the original.
         let expected = original.replacen(
@@ -786,7 +786,7 @@ mod tests {
                 {"matcher": "startup", "hooks": [{"type": "command", "command": "echo first"}]},
                 {"matcher": "startup|resume|clear|compact", "hooks": [{
                     "type": "command",
-                    "command": "'/Applications/Hippocampus.app/Contents/MacOS/Hippocampus' '--claude-session-context' '--db-path' '/Users/you/Library/Application Support/MCI/mci.sqlite'",
+                    "command": "'/Applications/Hippocampus.app/Contents/MacOS/Hippocampus' '--claude-session-context' '--db-path' '/Users/me/Library/Application Support/MCI/mci.sqlite'",
                     "timeout": 10
                 }]},
                 {"matcher": "compact", "hooks": [{"type": "command", "command": "echo last"}]}

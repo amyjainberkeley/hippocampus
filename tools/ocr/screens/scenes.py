@@ -130,7 +130,7 @@ SCENES['terminal_dark'] = {
     'blocks': [
         block(20, 16, [
             'sam@studio hippocampus % cargo test -p mci-agent --test handoff_cli',
-            '   Compiling mci-agent v0.2.1 (/Users/you/hippo-work/usable/apps/agent)',
+            '   Compiling mci-agent v0.2.1 (/Users/me/hippo-work/usable/apps/agent)',
             '    Finished `test` profile [unoptimized + debuginfo] target(s) in 41.07s',
             '     Running tests/handoff_cli.rs (target/debug/deps/handoff_cli-73790ef006b0f461)',
             'test today_prints_the_daily_packet ... FAILED',

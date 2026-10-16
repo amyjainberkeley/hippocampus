@@ -1239,7 +1239,7 @@ mod tests {
         assert_eq!(
             select_repo_root(
                 Some(PathBuf::from("/tmp/clean-benchmark-worktree")),
-                PathBuf::from("/Users/you/dirty-compile-checkout"),
+                PathBuf::from("/Users/me/dirty-compile-checkout"),
             ),
             PathBuf::from("/tmp/clean-benchmark-worktree")
         );

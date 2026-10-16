@@ -166,16 +166,16 @@ let request = try SessionContextHook.request(from: input)
 check(request.cwd == hostileCWD, "cwd is parsed as data, not shell")
 check(try SessionContextHook.arguments(dbURL: installer.dbURL, request: request, homeURL: sandbox).suffix(2) == ["--focus", hostileFocus], "Only the last project component is one focus argument")
 let focusCases: [(String, String?)] = [
-    ("/Users/you/hippo-work/hippocampus-v1", "hippocampus-v1"),
-    ("/Users/you/My Project/./", "My Project"),
-    ("/Users/you/My Project/nested/..", "My Project"),
-    ("/Users/you", nil), ("/Users/you/./", nil), ("/", nil), ("////", nil),
-    ("/Users/you-not-home", "amy-not-home"),
-    ("/Users/you/--options;$(touch injected)", "--options;$(touch injected)"),
+    ("/Users/me/hippo-work/hippocampus-v1", "hippocampus-v1"),
+    ("/Users/me/My Project/./", "My Project"),
+    ("/Users/me/My Project/nested/..", "My Project"),
+    ("/Users/me", nil), ("/Users/me/./", nil), ("/", nil), ("////", nil),
+    ("/Users/me-not-home", "me-not-home"),
+    ("/Users/me/--options;$(touch injected)", "--options;$(touch injected)"),
 ]
 for (cwd, expected) in focusCases {
     let arguments = try SessionContextHook.arguments(
-        dbURL: installer.dbURL, request: .init(cwd: cwd), homeURL: URL(fileURLWithPath: "/Users/you")
+        dbURL: installer.dbURL, request: .init(cwd: cwd), homeURL: URL(fileURLWithPath: "/Users/me")
     )
     if let expected {
         check(arguments.suffix(2) == ["--focus", expected], "Project focus: \(cwd)")

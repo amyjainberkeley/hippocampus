@@ -54,7 +54,7 @@ pub fn default_transcript_root() -> PathBuf {
     home.join(".claude/projects")
 }
 
-/// Turn `-Users-amy-hippo-work` into something a human recognizes.
+/// Turn `-Users-me-hippo-work` into something a human recognizes.
 ///
 /// Claude Code encodes the project directory by replacing `/` with `-`, which
 /// is lossy: the original path cannot be recovered, because a directory may
@@ -386,8 +386,8 @@ mod tests {
 
     #[test]
     fn project_label_takes_the_last_segment() {
-        assert_eq!(project_label("-Users-amy-hippo-work"), "work");
-        assert_eq!(project_label("-Users-amy"), "amy");
+        assert_eq!(project_label("-Users-me-hippo-work"), "work");
+        assert_eq!(project_label("-Users-me"), "me");
         assert_eq!(project_label("plain"), "plain");
     }
 }

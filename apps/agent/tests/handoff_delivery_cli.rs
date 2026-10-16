@@ -420,7 +420,7 @@ fn doctor_reports_transcripts_and_delivery_with_and_without_the_tables() {
             .execute_batch("DROP INDEX IF EXISTS handoff_deliveries_ts; DROP TABLE IF EXISTS handoff_deliveries; DROP TABLE IF EXISTS import_cursors;")
             .unwrap();
     }
-    let claude_transcript = home.join(".claude/projects/-Users-amy-proj/session.jsonl");
+    let claude_transcript = home.join(".claude/projects/-Users-me-proj/session.jsonl");
     let codex_transcript = codex_home.join("sessions/2026/09/26/rollout.jsonl");
     for path in [&claude_transcript, &codex_transcript] {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -451,7 +451,7 @@ fn doctor_reports_transcripts_and_delivery_with_and_without_the_tables() {
         .execute_batch(&format!(
             "INSERT INTO import_cursors (path, byte_offset, file_size, mtime_us, updated_at_us) VALUES ('{}', 3, 3, 1, 1790327400000000);
              INSERT INTO handoff_deliveries (ts_us, client, project_root, packet_sha256, token_estimate, event_ids)
-             VALUES (1790415667000000, 'claude-code', '/Users/you/hippo-work/hippocampus', 'abc', 583, '[5012]');",
+             VALUES (1790415667000000, 'claude-code', '/Users/me/hippo-work/hippocampus', 'abc', 583, '[5012]');",
             claude_transcript.display()
         ))
         .unwrap();
@@ -476,7 +476,7 @@ fn doctor_reports_transcripts_and_delivery_with_and_without_the_tables() {
         "{out}"
     );
     assert!(
-        out.contains("  [warn] delivery           claude-code hook installed, last packet 2026-09-26 02:41 for /Users/you/hippo-work/hippocampus (583 tokens); codex hook NOT installed\n"),
+        out.contains("  [warn] delivery           claude-code hook installed, last packet 2026-09-26 02:41 for /Users/me/hippo-work/hippocampus (583 tokens); codex hook NOT installed\n"),
         "{out}"
     );
     assert!(

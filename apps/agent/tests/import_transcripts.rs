@@ -16,7 +16,7 @@ use mci_brain::{Event, SqlCipherBrainStore};
 use mci_core::crypto::DbKey;
 use tempfile::TempDir;
 
-const CLAUDE_FILE: &str = "-Users-amy-demo/11111111-aaaa-bbbb-cccc-000000000001.jsonl";
+const CLAUDE_FILE: &str = "-Users-me-demo/11111111-aaaa-bbbb-cccc-000000000001.jsonl";
 const CODEX_FILE: &str =
     "2026/09/25/rollout-2026-09-25T11-00-00-01a0f000-0000-7000-8000-000000000001.jsonl";
 const CODEX_SESSION: &str = "01a0f000-0000-7000-8000-000000000001";
@@ -144,19 +144,19 @@ fn claude_fixture_yields_exactly_the_contract_events() {
             e.app_bundle_id.as_deref(),
             Some("com.anthropic.claude-code")
         );
-        assert_eq!(e.url.as_deref(), Some("/Users/you/demo"));
+        assert_eq!(e.url.as_deref(), Some("/Users/me/demo"));
     }
 
     let src = sb.claude_file();
     assert_eq!(
         header(&events[0]),
         format!(
-            "[app=claude-code | title=demo · user | url=/Users/you/demo#main | session=sess-1 | src={}:2]",
+            "[app=claude-code | title=demo · user | url=/Users/me/demo#main | session=sess-1 | src={}:2]",
             src.display()
         )
     );
     assert_eq!(body(&events[0]), "Please add an import cursor table.");
-    assert_eq!(body(&events[2]), "Edit /Users/you/demo/src/store.rs");
+    assert_eq!(body(&events[2]), "Edit /Users/me/demo/src/store.rs");
     assert!(header(&events[2]).ends_with(":5]"));
     assert_eq!(
         body(&events[3]),
@@ -210,13 +210,13 @@ fn codex_fixture_yields_exactly_the_contract_events() {
     );
     for e in &events {
         assert_eq!(e.app_bundle_id.as_deref(), Some("com.openai.codex"));
-        assert_eq!(e.url.as_deref(), Some("/Users/you/demo"));
+        assert_eq!(e.url.as_deref(), Some("/Users/me/demo"));
     }
     let src = sb.codex_file();
     assert_eq!(
         header(&events[0]),
         format!(
-            "[app=codex | title=demo · user | url=/Users/you/demo# | session={CODEX_SESSION} | src={}:6]",
+            "[app=codex | title=demo · user | url=/Users/me/demo# | session={CODEX_SESSION} | src={}:6]",
             src.display()
         )
     );
@@ -229,7 +229,7 @@ fn codex_fixture_yields_exactly_the_contract_events() {
     assert!(header(&events[2]).ends_with(":11]"));
     assert_eq!(
         body(&events[3]),
-        "apply_patch /Users/you/demo/apps/agent/src/import_codex.rs\napply_patch /Users/you/demo/docs/notes.md"
+        "apply_patch /Users/me/demo/apps/agent/src/import_codex.rs\napply_patch /Users/me/demo/docs/notes.md"
     );
     assert_eq!(body(&events[4]), "exec_command git push origin main");
     assert_eq!(body(&events[5]), "Pushed. Next: tests.");
@@ -270,7 +270,7 @@ fn appending_lines_imports_exactly_the_new_events() {
 
     Sandbox::append(
         &sb.claude_file(),
-        "{\"type\":\"user\",\"isSidechain\":false,\"cwd\":\"/Users/you/demo\",\"sessionId\":\"sess-1\",\
+        "{\"type\":\"user\",\"isSidechain\":false,\"cwd\":\"/Users/me/demo\",\"sessionId\":\"sess-1\",\
          \"gitBranch\":\"main\",\"timestamp\":\"2026-09-25T10:20:00.000Z\",\
          \"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Now the Codex side.\"}]}}\n",
     );
@@ -314,7 +314,7 @@ fn a_partial_trailing_line_waits_for_the_next_run() {
     let store = sb.store();
     import_sessions(&store, &sb.claude_root, |_| {}).expect("import");
 
-    let head = "{\"type\":\"user\",\"cwd\":\"/Users/you/demo\",\"sessionId\":\"sess-1\",\"gitBranch\":\"main\",\
+    let head = "{\"type\":\"user\",\"cwd\":\"/Users/me/demo\",\"sessionId\":\"sess-1\",\"gitBranch\":\"main\",\
                 \"timestamp\":\"2026-09-25T10:30:00.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",";
     let tail = "\"text\":\"half written\"}]}}\n";
     Sandbox::append(&sb.claude_file(), head);
@@ -388,7 +388,7 @@ fn refresh_enriches_only_the_events_it_just_imported() {
 
     Sandbox::append(
         &sb.claude_file(),
-        "{\"type\":\"assistant\",\"cwd\":\"/Users/you/demo\",\"sessionId\":\"sess-1\",\"gitBranch\":\"main\",\
+        "{\"type\":\"assistant\",\"cwd\":\"/Users/me/demo\",\"sessionId\":\"sess-1\",\"gitBranch\":\"main\",\
          \"timestamp\":\"2026-09-25T10:40:00.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Ask Dana at Harborlane about the invoice.\"}]}}\n",
     );
     let embedder = FixedDimEmbedder::default();
