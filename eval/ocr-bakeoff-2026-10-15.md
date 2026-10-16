@@ -168,3 +168,62 @@ $PY tools/ocr/screens/bakeoff.py read SCREENS OUT --worker tools/ocr/dist/hippoc
     --probe adapters/macos/MCICaptureHelper/.build/release/OCRQualityProbe --panes --runs 3
 $PY tools/ocr/screens/bakeoff.py score OUT --misses vision-1
 ```
+
+## Size, and the cost of a read
+
+### Bundle and disk image
+
+Two clones of the installed 0.3.0 candidate (`/Applications/Hippocampus.app`,
+copied and never opened), one with the current worker and one with the
+worker that leaves out video. The disk images were built without mounting
+anything: `hdiutil makehybrid`, then `hdiutil convert`. UDZO at zlib level 9
+is the format `scripts/build-installer.sh` ships; ULMO (LZMA) is plan item 13.
+
+| | Before | After | Change |
+|---|---|---|---|
+| Installed app (`du`) | 434.1 MiB | 370.2 MiB | −63.9 MiB (−15%) |
+| Of it, the OCR worker | 306.9 MiB | 243.1 MiB | −63.9 MiB (−21%) |
+| Libraries in the worker | 121 | 46 | −75 |
+| DMG, UDZO zlib 9 | 233.6 MB | 205.4 MB | −28.2 MB (−12%) |
+| DMG, ULMO | 201.5 MB | 180.3 MB | −21.2 MB (−11%) |
+
+The codec libraries compress well, so the disk image shrinks less than the
+install. The plan's size targets (D4: DMG 100 MB or less, app 200 MB or
+less) still fail with PP-OCR. Meeting them needs a worker without Python and
+OpenCV (ONNX Runtime called from Swift or Rust), or Vision.
+
+### CPU per read
+
+From the bake-off runs, on the synthetic screens: CPU time of the helper and
+its worker per read, from `proc_pid_rusage`. Three runs of each reader at a
+load average of about 4.
+
+| Reader | CPU s, median | mean | p95 | Wall s, median | CPU energy, median | Peak memory |
+|---|---|---|---|---|---|---|
+| PP-OCR (worker as shipped today) | 3.69 to 4.78 | 4.40 to 5.86 | 7.82 to 12.23 | 1.88 to 2.63 | 3.8 to 4.2 J | 1.3 to 1.7 GB |
+| Vision, as the code is | 0.48 to 0.49 | 0.50 to 0.52 | 0.65 to 0.76 | 0.53 to 0.54 | 0.49 to 0.51 J | 0.30 GB |
+| Vision with pane separators | 0.50 to 0.52 | 0.53 to 0.55 | 0.69 to 0.74 | 0.54 to 0.59 | 0.51 to 0.54 J | 0.29 to 0.30 GB |
+| Vision, one pass per pane | 0.29 to 0.30 | 0.33 to 0.36 | 0.51 to 0.62 | 0.32 to 0.43 | 0.25 to 0.27 J | 0.24 to 0.28 GB |
+
+PP-OCR costs 8 to 10 times Vision's CPU per read at the median, 10 to 19
+times at the 95th percentile, and about 8 times the CPU energy. Vision's
+Neural Engine work is not in these figures.
+
+### The worker without video
+
+The worker as shipped today and the one without video, alternating twice on
+the same screens and probe, with a 120 s deadline so the load could not drop
+a read. The Mac was at a load average of 150 to 250, so every figure in this
+table is pessimistic. What counts is the comparison.
+
+| | Worker as shipped today | Worker without video |
+|---|---|---|
+| Readings of the 21 screens | | the same, byte for byte |
+| CPU s per read, median (mean, p95) | 7.04 (8.01, 14.51) | 6.86 (8.05, 14.31) |
+| CPU energy per read, median | 3.75 J | 3.59 J |
+| Peak memory, helper and worker | 1.55 GB | 1.59 GB |
+| Start to ready (`--serve`), median of 4 | 2.35 s | 1.58 s |
+
+Leaving out video changes neither what the worker reads nor what a read
+costs. It makes the worker 64 MiB smaller, and it starts sooner because dyld
+loads 75 fewer libraries.
