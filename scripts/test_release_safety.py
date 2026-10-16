@@ -105,6 +105,71 @@ class VerifierTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
 
 
+class NotarizationRecordTests(unittest.TestCase):
+    """build-installer.sh's notarize_and_record, run with a stand-in
+    notarytool: Apple's "Accepted" is not enough, its log must be clean."""
+
+    FAKE_XCRUN = (
+        "import json, os, sys\n"
+        "args = sys.argv[1:]\n"
+        "assert args[0] == 'notarytool', args\n"
+        "if args[1] == 'submit':\n"
+        "    print(json.dumps({'id': 'job-1', 'status': os.environ['FAKE_STATUS'], 'message': 'done'}))\n"
+        "    sys.exit(0 if os.environ['FAKE_STATUS'] == 'Accepted' else 1)\n"
+        "if args[1] == 'log':\n"
+        "    issues = json.loads(os.environ['FAKE_ISSUES'])\n"
+        "    log = {'logFormatVersion': 1, 'jobId': args[2], 'status': os.environ['FAKE_STATUS'],\n"
+        "           'statusCode': 0 if os.environ['FAKE_STATUS'] == 'Accepted' else 4000,\n"
+        "           'archiveFilename': os.environ['FAKE_ARCHIVE'], 'issues': issues,\n"
+        "           'ticketContents': [{'path': 'Hippocampus.app/Contents/MacOS/Hippocampus',\n"
+        "                               'digestAlgorithm': 'SHA-256', 'cdhash': '00', 'arch': 'arm64'}]}\n"
+        "    open(args[3], 'w').write(json.dumps(log))\n"
+        "    sys.exit(0)\n"
+        "sys.exit(2)\n"
+    )
+
+    def run_record(self, status, issues):
+        body = "notarize_and_record() {" + section(INSTALLER_SCRIPT, "notarize_and_record() {", "\n}\n") + "\n}\n"
+        with tempfile.TemporaryDirectory(prefix="notarize-record-") as temporary:
+            root = Path(temporary)
+            (root / "bin").mkdir()
+            xcrun = root / "bin/xcrun"
+            xcrun.write_text(f"#!{sys.executable}\n" + self.FAKE_XCRUN, encoding="utf-8")
+            xcrun.chmod(0o755)
+            artifact = root / "Hippocampus-1.2.3.dmg"
+            artifact.write_bytes(b"synthetic disk image")
+            result = subprocess.run(
+                ["/bin/bash", "-euo", "pipefail", "-c", body + 'notarize_and_record "$ARTIFACT" dmg\n'],
+                cwd=root, capture_output=True, text=True, timeout=60,
+                env={"PATH": f"{root / 'bin'}:/usr/bin:/bin", "HOME": temporary,
+                     "DIST_DIR": str(root / "dist"), "NOTARY_PROFILE": "fixture-profile",
+                     "CHECK_NOTARY_LOG": str(ROOT / "scripts/check-notary-log.py"),
+                     "ARTIFACT": str(artifact), "FAKE_STATUS": status,
+                     "FAKE_ISSUES": json.dumps(issues), "FAKE_ARCHIVE": artifact.name},
+            )
+            kept = sorted(path.name for path in (root / "dist").iterdir()) if (root / "dist").exists() else []
+            return result, kept
+
+    def test_accepted_with_a_clean_log_passes_and_keeps_both_records(self):
+        result, kept = self.run_record("Accepted", None)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(kept, ["notary-dmg-log.json", "notary-dmg-submission.json"])
+
+    def test_accepted_with_a_warning_in_the_log_fails(self):
+        warning = {"severity": "warning", "path": "Hippocampus.app/Contents/MacOS/mci-agent",
+                   "message": "The binary uses an SDK older than the 10.9 SDK."}
+        result, kept = self.run_record("Accepted", [warning])
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("log is not clean", result.stderr)
+        self.assertIn("older than the 10.9 SDK", result.stderr)
+        self.assertIn("notary-dmg-log.json", kept)
+
+    def test_a_submission_apple_rejects_fails(self):
+        result, _ = self.run_record("Invalid", [])
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("was not accepted", result.stderr)
+
+
 class WorkflowTests(unittest.TestCase):
     ASSEMBLY_COMMAND = (
         "apps/hippocampus/Resources/build-app.sh --debug --development-ad-hoc --development-lite"

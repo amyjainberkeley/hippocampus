@@ -255,6 +255,34 @@ require_order "$RELEASE" 'scripts/strip-release-binaries\.sh' 'name: Build signe
     'tag workflow strips before it assembles and signs'
 require_pattern "$CHECK" 'strip-release-binaries\|bash\|test\|scripts/test-strip-release-binaries\.sh' \
     'the unified local gate runs the strip fixture'
+
+# Launch gates D1 and D2: the same app checks in the release script and the
+# tag workflow, syspolicy_check, and clean notary logs.
+APP_GATE="$REPO_ROOT/scripts/verify-release-app.sh"
+require_literal "$APP_GATE" 'refuse "hippocampus-mind links FoundationModels as ${LINK:-nothing}, not weakly' \
+    'the app gate refuses a mind that does not weak-link FoundationModels'
+require_literal "$RELEASE_SCRIPT" 'clean_env "$REPO_ROOT/scripts/verify-release-app.sh" --version "$RELEASE_VERSION"' \
+    'release script checks its app with the shared app gate'
+require_literal "$RELEASE_SCRIPT" 'check_assembled_app "$app" distribution' \
+    'release script runs syspolicy_check distribution on the app in the DMG'
+for log_name in app dmg; do
+    require_literal "$RELEASE_SCRIPT" "\"\$DIST_DIR/notary-$log_name-log.json\"" \
+        "release script requires a clean $log_name notary log"
+    require_literal "$RELEASE" "dist/notary-$log_name-log.json" \
+        "tag workflow requires a clean $log_name notary log"
+done
+require_literal "$RELEASE" 'scripts/verify-release-app.sh --version "${GITHUB_REF_NAME#v}" --team "$RELEASE_TEAM_ID"' \
+    'tag workflow checks the mounted app with the shared app gate'
+require_literal "$RELEASE" '--minimum-macos 14.0 --gatekeeper distribution "$MOUNT/Hippocampus.app"' \
+    'tag workflow runs syspolicy_check distribution on the mounted app'
+require_literal "$INSTALLER" 'python3 "$CHECK_NOTARY_LOG" --archive "$(basename "$artifact")" "$log"' \
+    'installer refuses an accepted submission whose log lists issues'
+require_literal "$INSTALLER" 'FATAL: syspolicy_check is missing; a release must pass syspolicy_check distribution' \
+    'installer refuses to ship a release without syspolicy_check'
+require_pattern "$CHECK" 'release-app-gate\|bash\|test\|scripts/test-verify-release-app\.sh' \
+    'the unified local gate runs the app gate fixtures'
+require_pattern "$CHECK" 'notary-log-contract\|bash\|test\|python3 -B scripts/test_check_notary_log\.py' \
+    'the unified local gate runs the notary log fixtures'
 for stable_asset in 'dist/Hippocampus.dmg' 'dist/Hippocampus.dmg.sha256'; do
     if [[ "$(rg -c -F -x "            $stable_asset" "$RELEASE" || true)" == 2 ]]; then
         pass "release workflow hands over and drafts $stable_asset"
@@ -367,7 +395,7 @@ require_literal "$RELEASE_CI" 'scripts/swift-package.sh run --package-path apps/
 for script in test-release-contract.sh test-app-group-contract.sh test-release-identity.sh \
     test-prepare-release-models.sh test-release-model-manifest.sh \
     test-sparkle-keygen.sh test-sparkle-keypair.sh test-sparkle-publish.sh \
-    test-strip-release-binaries.sh; do
+    test-strip-release-binaries.sh test-verify-release-app.sh test_check_notary_log.py; do
     require_literal "$RELEASE_CI" "scripts/$script" \
         "release CI runs $script"
 done

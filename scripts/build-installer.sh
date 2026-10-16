@@ -19,6 +19,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_APP="$REPO_ROOT/apps/hippocampus/Resources/build-app.sh"
 BUILD_PROVENANCE_TOOL="$REPO_ROOT/scripts/build-provenance.py"
 PRODUCT_SOURCE_DIGEST_TOOL="$REPO_ROOT/scripts/product-source-digest.py"
+CHECK_NOTARY_LOG="$REPO_ROOT/scripts/check-notary-log.py"
 APP_GROUP_CONTRACT="$REPO_ROOT/scripts/lib/app-group-contract.sh"
 INSTALLER_RUNTIME="$REPO_ROOT/scripts/lib/installer-runtime.sh"
 INSTALLER_ASSETS="$REPO_ROOT/assets/installer"
@@ -48,6 +49,10 @@ if [[ ! -x "$BUILD_PROVENANCE_TOOL" ]]; then
 fi
 if [[ ! -x "$PRODUCT_SOURCE_DIGEST_TOOL" ]]; then
     echo "FATAL: Product source digest tool missing at $PRODUCT_SOURCE_DIGEST_TOOL" >&2
+    exit 1
+fi
+if [[ ! -x "$CHECK_NOTARY_LOG" ]]; then
+    echo "FATAL: Notary log checker missing at $CHECK_NOTARY_LOG" >&2
     exit 1
 fi
 # shellcheck source=/dev/null
@@ -313,6 +318,13 @@ PY
     if [[ "$submit_status" -ne 0 || "$status" != "Accepted" ]]; then
         echo "ERROR: $label notarization was not accepted (status: $status)." >&2
         echo "  Review: $submission and $log" >&2
+        return 1
+    fi
+
+    # Accepted is not enough: the log must list no issues, warnings included.
+    if ! python3 "$CHECK_NOTARY_LOG" --archive "$(basename "$artifact")" "$log"; then
+        echo "ERROR: Apple accepted the $label, but its notarization log is not clean." >&2
+        echo "  Review: $log" >&2
         return 1
     fi
 }
@@ -641,9 +653,8 @@ if [[ "$NOTARIZE" -eq 1 ]]; then
         # what Gatekeeper actually runs at first launch. It catches
         # entitlement / signing / framework-structure issues that
         # `stapler validate` and `spctl --assess` both miss
-        # (Apple devforum 773271). Skip if the tool isn't installed
-        # (older macOS / Xcode CLT) — we still ship in that case but
-        # log the gap loudly.
+        # (Apple devforum 773271). A release build needs it; only a debug
+        # artifact may go without it on a Mac that lacks the tool.
         if command -v syspolicy_check >/dev/null 2>&1; then
             if ! syspolicy_check distribution "$APP_PATH"; then
                 echo "ERROR: syspolicy_check distribution failed on $APP_PATH"
@@ -651,6 +662,9 @@ if [[ "$NOTARIZE" -eq 1 ]]; then
                 exit 1
             fi
             echo "  syspolicy_check distribution passed"
+        elif [[ "$BUILD_PROFILE" == "release" ]]; then
+            echo "FATAL: syspolicy_check is missing; a release must pass syspolicy_check distribution" >&2
+            exit 1
         else
             echo "WARNING: syspolicy_check not found — Gatekeeper first-launch"
             echo "  predictor unavailable. Install Xcode 16 CLT to enable."

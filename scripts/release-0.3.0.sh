@@ -314,18 +314,6 @@ version_at_most() {
     /usr/bin/python3 -c 'import sys; a, b = ([int(p) for p in (v.split(".") + ["0", "0"])[:3]] for v in sys.argv[1:3]); sys.exit(0 if a <= b else 1)' "$1" "$2"
 }
 
-macho_minos() {
-    { /usr/bin/otool -l "$1" 2>/dev/null || true; } \
-        | awk '/LC_BUILD_VERSION/ { found = 1 } found && $1 == "minos" && !done { print $2; done = 1 }'
-}
-
-# The load command that brings in FoundationModels, if any.
-foundation_models_link() {
-    { /usr/bin/otool -l "$1" 2>/dev/null || true; } | awk '
-        $1 == "cmd" { cmd = $2 }
-        $1 == "name" && $2 ~ /FoundationModels/ && !done { print cmd; done = 1 }'
-}
-
 estimate_mb() {
     local total="$MIN_FREE_MB" pkg
     ocr_is_fresh || total=$((total + 400))
@@ -632,27 +620,19 @@ build_binaries() {
     require_clean_tree "After the build."
 }
 
+# What a release app must be, checked as the tag workflow checks it
+# (scripts/verify-release-app.sh): hippocampus-mind weak-links
+# FoundationModels (otool -l), every binary runs on macOS 14, the version,
+# no development file key, a valid signature from this team and, when asked,
+# syspolicy_check's verdict.
 check_assembled_app() {
-    local app="$1" binary minos link version team
-    [[ -x "$app/Contents/MacOS/hippocampus-mind" ]] \
-        || stop "hippocampus-mind is not in $app; answers would need it."
-    link="$(foundation_models_link "$app/Contents/MacOS/hippocampus-mind")"
-    [[ "$link" == "LC_LOAD_WEAK_DYLIB" ]] \
-        || stop "hippocampus-mind links FoundationModels as ${link:-nothing}, not weakly; it would not start on macOS 14 or 15, or could not use Apple Intelligence."
-    for binary in "$app"/Contents/MacOS/*; do
-        minos="$(macho_minos "$binary")"
-        [[ -z "$minos" ]] || version_at_most "$minos" "$MINIMUM_MACOS" \
-            || stop "$(basename "$binary") needs macOS $minos; Hippocampus promises macOS $MINIMUM_MACOS."
-    done
-    version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" 2>/dev/null || true)"
-    [[ "$version" == "$RELEASE_VERSION" ]] || stop "The app says version ${version:-none}, not $RELEASE_VERSION."
-    if /usr/libexec/PlistBuddy -c 'Print :MCIDevelopmentFileKeyEnabled' "$app/Contents/Info.plist" >/dev/null 2>&1; then
-        stop "The app turns on the development file key. Only an ad-hoc test build may do that."
+    local app="$1" gatekeeper="${2:-none}" result
+    if ! result="$(clean_env "$REPO_ROOT/scripts/verify-release-app.sh" --version "$RELEASE_VERSION" \
+        --team "$TEAM_ID" --minimum-macos "$MINIMUM_MACOS" --gatekeeper "$gatekeeper" "$app" 2>&1)"; then
+        printf '%s\n' "$result" >&2
+        stop "$app is not a release app: $(printf '%s\n' "$result" | tail -1 | sed 's/^FAIL  //')"
     fi
-    /usr/bin/codesign --verify --deep --strict "$app" >/dev/null 2>&1 \
-        || stop "codesign --verify --deep --strict failed for $app."
-    team="$(/usr/bin/codesign -dv "$app" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
-    [[ "$team" == "$TEAM_ID" ]] || stop "The app is signed by team ${team:-none}, not $TEAM_ID."
+    if [[ -n "$VERIFY_LOG" ]]; then printf '\n$ verify-release-app.sh %s\n%s\n' "$app" "$result" >>"$VERIFY_LOG"; fi
 }
 
 assemble_app() {
@@ -705,6 +685,10 @@ verify_release() {
     verify "Gatekeeper accepts the DMG (spctl -t open)" \
         /usr/sbin/spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
     verify "the assembled app's signature (deep, strict)" /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP"
+    verify "Apple's notary log for the app lists no issues" clean_env python3 -B \
+        "$REPO_ROOT/scripts/check-notary-log.py" --archive "Hippocampus-$RELEASE_VERSION-app.zip" "$DIST_DIR/notary-app-log.json"
+    verify "Apple's notary log for the DMG lists no issues" clean_env python3 -B \
+        "$REPO_ROOT/scripts/check-notary-log.py" --archive "$(basename "$DMG")" "$DIST_DIR/notary-dmg-log.json"
 
     VERIFY_MOUNT_ROOT="$(mktemp -d "$BUILD_TMPDIR/hippocampus-release-verify.XXXXXX")"
     mounted="$VERIFY_MOUNT_ROOT/volume"
@@ -715,8 +699,9 @@ verify_release() {
     verify "the app in the DMG: signature (deep, strict)" /usr/bin/codesign --verify --deep --strict --verbose=2 "$app"
     verify "the app in the DMG: notarization ticket (stapler validate)" /usr/bin/xcrun stapler validate "$app"
     verify "the app in the DMG: Gatekeeper accepts it (spctl -t execute)" /usr/sbin/spctl --assess --type execute --verbose=2 "$app"
-    check_assembled_app "$app"
-    say "   ok  the app in the DMG: version $RELEASE_VERSION, hippocampus-mind included, macOS $MINIMUM_MACOS"
+    check_assembled_app "$app" distribution
+    say "   ok  the app in the DMG: hippocampus-mind weak-links FoundationModels, every binary runs on macOS $MINIMUM_MACOS, version $RELEASE_VERSION, team $TEAM_ID"
+    say "   ok  the app in the DMG: syspolicy_check distribution accepts it"
     digest="$(clean_env python3 -B "$REPO_ROOT/scripts/product-source-digest.py" --repo-root "$REPO_ROOT")"
     verify "the app in the DMG was built from this commit and source" clean_env python3 -B \
         "$REPO_ROOT/scripts/build-provenance.py" verify --app "$app" \
