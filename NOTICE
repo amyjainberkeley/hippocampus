@@ -43,8 +43,9 @@ tokenizers
     Apache-2.0
     https://github.com/huggingface/tokenizers
 
-The remaining Rust dependencies are under MIT, Apache-2.0, BSD, ISC,
-Unicode-3.0 or Zlib licenses.
+The other Rust dependencies built into the app are under MIT,
+Apache-2.0, BSD-2-Clause, Zlib, Unicode-3.0 or CC0-1.0 terms; several
+offer a choice among them.
 
 --------------------------------------------------------------------
 MODEL WEIGHTS BUNDLED IN THE APPLICATION
@@ -97,13 +98,22 @@ replaced:
                                        licenses
 
 GLib, libintl and Graphite2 come with OpenCV's HarfBuzz, which Pillow's
-font module loads. The license texts that come with each package are in
+font module loads.
+
+Two Python packages in the worker are under the Mozilla Public License
+2.0 too: tqdm 4.70.1 (MPL-2.0 and MIT), compiled into the worker's
+executable, and certifi 2026.7.22 (MPL-2.0), whose certificate bundle
+ships as the plain file HippocampusOCR/_internal/certifi/cacert.pem.
+
+The license texts that come with each package are in
 the app at Hippocampus.app/Contents/Resources/HippocampusOCR/licenses,
 and the worker's own notice is HippocampusOCR/NOTICE.md. Source code is
 available from each project: GEOS at https://libgeos.org, GLib at
 https://gitlab.gnome.org/GNOME/glib, gettext at
 https://www.gnu.org/software/gettext/, Graphite2 at
-https://github.com/silnrsi/graphite, PyInstaller at
+https://github.com/silnrsi/graphite, tqdm at
+https://github.com/tqdm/tqdm, certifi at
+https://github.com/certifi/python-certifi, PyInstaller at
 https://github.com/pyinstaller/pyinstaller, and the other libraries
 bundled with OpenCV from https://github.com/opencv/opencv-python.
 
