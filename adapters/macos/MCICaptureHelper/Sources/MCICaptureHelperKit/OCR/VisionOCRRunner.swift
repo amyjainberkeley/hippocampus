@@ -39,6 +39,15 @@ import Vision
 /// only the result. Real-machine behavior is verified by the P3.11
 /// live-Mac audit (HUMAN-ONLY per AGENT_PROTOCOL §9).
 public struct VisionOCRRunner: OCREngine {
+    /// How one read divides its region among Vision passes.
+    package enum RegionPlan: Sendable {
+        /// The region, then up to four overlapping quarters of it
+        /// (`recognitionRegions(for:)`).
+        case grid
+        /// One pass per pane, cut where the pane separators divide the region.
+        case panes
+    }
+
     /// Languages to hint the recognizer with. Vision still attempts
     /// auto-detection (`automaticallyDetectsLanguage = true`); this
     /// list biases the language model. Default `["en-US"]` per
@@ -51,7 +60,7 @@ public struct VisionOCRRunner: OCREngine {
     private static let sharedExecutionLane = VisionOCRExecutionLane(
         label: "com.hippocampus.capture.vision-ocr"
     ) { input, languages, deadline in
-        Self.runVisionPerform(input: input, languages: languages, deadline: deadline)
+        Self.runVisionPerform(input: input, languages: languages, deadline: deadline, plan: .grid)
     }
 
     public init(recognitionLanguages: [String] = ["en-US"]) {
@@ -74,12 +83,13 @@ public struct VisionOCRRunner: OCREngine {
 
     /// Real Vision on an isolated lane with content-free per-pass measurements
     /// for synthetic benchmarks. The production initializer remains unchanged.
-    package init(regionDidFinish: @escaping @Sendable (CGRect, UInt64) -> Void) {
+    package init(plan: RegionPlan = .grid, regionDidFinish: @escaping @Sendable (CGRect, UInt64) -> Void) {
         self.recognitionLanguages = ["en-US"]
         self.executionLane = VisionOCRExecutionLane(
             label: "com.hippocampus.capture.vision-ocr.benchmark"
         ) { input, languages, deadline in
-            Self.runVisionPerform(input: input, languages: languages, deadline: deadline, regionDidFinish: regionDidFinish)
+            Self.runVisionPerform(input: input, languages: languages, deadline: deadline, plan: plan,
+                                  regionDidFinish: regionDidFinish)
         }
     }
 
@@ -92,8 +102,8 @@ public struct VisionOCRRunner: OCREngine {
         self.executionLane = VisionOCRExecutionLane(
             label: "com.hippocampus.capture.vision-ocr.fixture-regions"
         ) { input, languages, deadline in
-            Self.runRegionLoop(
-                regions: Self.recognitionRegions(for: input), deadline: deadline, now: regionNow,
+            Self.read(
+                input: input, plan: .grid, deadline: deadline, now: regionNow,
                 perform: { try synchronousRegionPerform(input, languages, $0) },
                 makeLine: { line, _ in line }
             )
@@ -114,11 +124,24 @@ public struct VisionOCRRunner: OCREngine {
         timeoutMs: Int
     ) async -> OCRResult {
         // UNVERIFIED — needs live macOS; do not claim working.
-        return await executionLane.recognize(
+        let result = await executionLane.recognize(
             input: input,
             languages: recognitionLanguages,
             timeoutMs: timeoutMs
         )
+        return Self.withSeparators(result, input: input)
+    }
+
+    /// The pane separators no line crosses, added to a completed read. They
+    /// come from the region's pixels as the OCR worker finds them, so the
+    /// reading order cuts the panes apart whichever engine read them. Found
+    /// after the lane returns: geometry is bounded work, and it must not
+    /// spend the deadline that guards Vision itself.
+    static func withSeparators(_ result: OCRResult, input: OCREngineInput) -> OCRResult {
+        guard !result.timedOut, !result.recognizedLines.isEmpty, result.separators.isEmpty,
+              let panes = PaneLayout(input: input) else { return result }
+        return OCRResult(recognizedLines: result.recognizedLines, durationMs: result.durationMs,
+                         timedOut: false, separators: panes.separators(crossing: result.recognizedLines))
     }
 
     /// Bounded synchronous Vision calls executed by the serial lane. Any
@@ -131,13 +154,10 @@ public struct VisionOCRRunner: OCREngine {
         input: OCREngineInput,
         languages: [String],
         deadline: DispatchTime,
+        plan: RegionPlan,
         regionDidFinish: (@Sendable (CGRect, UInt64) -> Void)? = nil
     ) -> OCRResult {
         // UNVERIFIED — needs live macOS; do not claim working.
-        let regions = recognitionRegions(for: input)
-        guard !regions.isEmpty else {
-            return OCRResult(recognizedLines: [], durationMs: 0, timedOut: false)
-        }
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         // Language correction inserts prose-style spaces into code and identifiers.
@@ -151,8 +171,8 @@ public struct VisionOCRRunner: OCREngine {
             orientation: .up,
             options: [:]
         )
-        return runRegionLoop(
-            regions: regions, deadline: deadline, regionDidFinish: regionDidFinish,
+        return read(
+            input: input, plan: plan, deadline: deadline, regionDidFinish: regionDidFinish,
             perform: { region in
                 request.regionOfInterest = region
                 try handler.perform([request])
@@ -176,6 +196,27 @@ public struct VisionOCRRunner: OCREngine {
                 )
             }
         )
+    }
+
+    /// One read: the regions `plan` chooses, read in order within the
+    /// deadline. Only the pane plan looks at the pixels first, to find its
+    /// regions; the grid plan's lane does what it always did.
+    private static func read<Observation>(
+        input: OCREngineInput,
+        plan: RegionPlan,
+        deadline: DispatchTime,
+        now: () -> DispatchTime = { .now() },
+        regionDidFinish: (@Sendable (CGRect, UInt64) -> Void)? = nil,
+        perform: (CGRect) throws -> [Observation],
+        makeLine: (Observation, CGRect) -> OCRLine?
+    ) -> OCRResult {
+        let grid = recognitionRegions(for: input)
+        guard !grid.isEmpty else {
+            return OCRResult(recognizedLines: [], durationMs: 0, timedOut: false)
+        }
+        let regions = plan == .panes ? (PaneLayout(input: input)?.regions(within: input.roi) ?? grid) : grid
+        return runRegionLoop(regions: regions, deadline: deadline, now: now,
+                             regionDidFinish: regionDidFinish, perform: perform, makeLine: makeLine)
     }
 
     private static func runRegionLoop<Observation>(
