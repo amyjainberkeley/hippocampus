@@ -39,7 +39,7 @@ Nothing you saw leaves your Mac unless you do one of these:
 
 These requests carry nothing you saw:
 
-- The updater (Sparkle) checks `amyjainberkeley.github.io/hippocampus/appcast.xml` for a newer version when you ask, or daily if you turn on automatic checks. It verifies an update’s signature before installing it.
+- The updater (Sparkle) checks `github.com/amyjainberkeley/hippocampus/releases/latest/download/appcast.xml`, which GitHub serves from `release-assets.githubusercontent.com`, for a newer version when you ask, or daily if you turn on automatic checks. It verifies an update’s signature before installing it.
 - A copy that ships without its models downloads them once from a public host.
 - `mci-agent mcp-sync` reads from MCP servers you register yourself, and refuses any address that is not on this Mac.
 

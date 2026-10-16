@@ -15,6 +15,8 @@ permissions:
 # released with.
 env:
   XCODE_APP: /Applications/Xcode_26.6.app
+  # The Developer ID team every release is signed by; install.sh checks it too.
+  RELEASE_TEAM_ID: BV6KGKFKP4
 
 jobs:
   # Hippocampus is released from a Mac with scripts/release-0.3.0.sh, and this
@@ -200,6 +202,25 @@ jobs:
           scripts/swift-package.sh build -c release --package-path apps/hippocampus
           scripts/swift-package.sh build -c release --package-path apps/mind
 
+      - name: Strip local symbols, keeping dSYMs
+        run: |
+          scripts/strip-release-binaries.sh --symbols-dir "$RUNNER_TEMP/symbols" \
+            apps/hippocampus/.build/release/Hippocampus \
+            adapters/macos/MCICaptureHelper/.build/release/mci-capture-helper \
+            target/release/mci-agent \
+            target/release/hippocampus-native-host \
+            apps/recall-ui/.build/release/recall-ui \
+            apps/onboarding/.build/release/onboarding \
+            apps/mind/.build/release/hippocampus-mind
+
+      - name: Keep the dSYMs for reading crash reports
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-symbols-${{ github.ref_name }}
+          path: ${{ runner.temp }}/symbols
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Import Developer ID certificate
         env:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
@@ -260,9 +281,14 @@ jobs:
         run: |
           DMG="dist/Hippocampus-${GITHUB_REF_NAME#v}.dmg"
           (cd dist && shasum -a 256 -c "$(basename "$DMG").sha256")
+          (cd dist && shasum -a 256 -c Hippocampus.dmg.sha256)
+          cmp "$DMG" dist/Hippocampus.dmg
           codesign --verify --strict --verbose=2 "$DMG"
           xcrun stapler validate "$DMG"
           spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
+          # Accepted is not enough: Apple's logs must list no issues at all.
+          python3 scripts/check-notary-log.py --archive "Hippocampus-${GITHUB_REF_NAME#v}-app.zip" dist/notary-app-log.json
+          python3 scripts/check-notary-log.py --archive "$(basename "$DMG")" dist/notary-dmg-log.json
 
           MOUNT="$(hdiutil attach "$DMG" -nobrowse | sed -n 's|^.*\(/Volumes/.*\)$|\1|p' | tail -1)"
           test -n "$MOUNT"
@@ -272,6 +298,10 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$MOUNT/Hippocampus.app"
           xcrun stapler validate "$MOUNT/Hippocampus.app"
           spctl --assess --type execute --verbose=2 "$MOUNT/Hippocampus.app"
+          # hippocampus-mind weak-links FoundationModels (otool -l), every
+          # binary runs on macOS 14, and syspolicy_check distribution passes.
+          scripts/verify-release-app.sh --version "${GITHUB_REF_NAME#v}" --team "$RELEASE_TEAM_ID" \
+            --minimum-macos 14.0 --gatekeeper distribution "$MOUNT/Hippocampus.app"
           scripts/build-provenance.py verify \
             --app "$MOUNT/Hippocampus.app" \
             --expected-source-head "$(git rev-parse HEAD)" \
@@ -280,17 +310,21 @@ jobs:
           hdiutil detach "$MOUNT" -quiet
           trap - EXIT
 
+      # The release's own appcast.xml is the app's feed once the release is
+      # published as Latest (SUFeedURL .../releases/latest/download/appcast.xml).
       - name: Sign staged Sparkle appcast
-        env:
-          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           DMG="dist/Hippocampus-${GITHUB_REF_NAME#v}.dmg"
           DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/$(basename "$DMG")"
-          scripts/publish-appcast.sh \
+          scripts/sparkle-publish.sh \
             --dmg "$DMG" \
+            --private-key "$RUNNER_TEMP/sparkle-private.key" \
+            --changelog-notes \
             --download-url "$DOWNLOAD_URL" \
+            --release-tag "$GITHUB_REF_NAME" \
             --appcast dist/appcast.xml \
-            --dist dist
+            --dist dist \
+            --no-confirm
 
       - name: Verify staged release identity
         run: |
@@ -313,6 +347,8 @@ jobs:
           path: |
             dist/Hippocampus-*.dmg
             dist/Hippocampus-*.dmg.sha256
+            dist/Hippocampus.dmg
+            dist/Hippocampus.dmg.sha256
             dist/install.sh
             dist/appcast.xml
             dist/notary-*.json
@@ -340,6 +376,8 @@ jobs:
           files: |
             dist/Hippocampus-*.dmg
             dist/Hippocampus-*.dmg.sha256
+            dist/Hippocampus.dmg
+            dist/Hippocampus.dmg.sha256
             dist/install.sh
             dist/appcast.xml
             dist/notary-*.json

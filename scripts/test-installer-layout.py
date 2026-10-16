@@ -3,6 +3,7 @@
 import importlib.util
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -22,8 +23,18 @@ def disk(*args):
     subprocess.run(["/usr/bin/hdiutil", *map(str, args)], check=True, stdout=subprocess.DEVNULL, env=ENV)
 
 
+def shipped_dmg_format():
+    """The compression build-installer.sh ships, so the layout is proven on it."""
+    script = (ROOT / "scripts/build-installer.sh").read_text()
+    match = re.search(r'^DMG_FORMAT="([A-Z0-9]+)"$', script, re.MULTILINE)
+    assert match, "build-installer.sh names no DMG_FORMAT"
+    return match.group(1)
+
+
 class InstallerVolumeNameTests(unittest.TestCase):
-    def test_volume_label_distinguishes_source_revisions_without_renaming_public_dmg(self):
+    def test_volume_is_named_hippocampus_whatever_the_source_revision(self):
+        # A downloader sees the volume name in Finder; the commit belongs in
+        # build-provenance.json, not there.
         script = (ROOT / "scripts/build-installer.sh").read_text()
         start = script.index("hdiutil create \\\n")
         create = script[start:script.index("# --- Step 5:", start)]
@@ -36,9 +47,57 @@ class InstallerVolumeNameTests(unittest.TestCase):
                      "TEMP_DMG": "/synthetic/image.dmg"},
             )
             arguments = result.stdout.splitlines()
-            self.assertEqual(arguments[arguments.index("-volname") + 1], f"Hippocampus {revision[:12]}")
+            self.assertEqual(arguments[arguments.index("-volname") + 1], "Hippocampus")
+            self.assertNotIn(revision[:7], result.stdout)
         self.assertIn('DMG_NAME="Hippocampus-${VERSION}"', script)
         self.assertIn('FINAL_DMG="$DIST_DIR/${DMG_NAME}.dmg"', script)
+        self.assertIn('STABLE_DMG="$DIST_DIR/Hippocampus.dmg"', script)
+
+
+class StableDiskImageTests(unittest.TestCase):
+    """Step 9 makes Hippocampus.dmg from the finished, versioned DMG."""
+
+    def run_step(self, dist, *, cp_body=None):
+        script = (ROOT / "scripts/build-installer.sh").read_text()
+        start = script.index("# --- Step 9:")
+        body = script[start:script.index("# --- Done ---", start)]
+        prelude = ""
+        if cp_body is not None:
+            prelude = "cp() { " + cp_body + "; };\n"
+        return subprocess.run(
+            ["/bin/bash", "-euo", "pipefail", "-c", prelude + body],
+            capture_output=True, text=True,
+            env={**ENV, "FINAL_DMG": str(dist / "Hippocampus-0.1.0.dmg"),
+                 "STABLE_DMG": str(dist / "Hippocampus.dmg"),
+                 "STABLE_DMG_PARTIAL": str(dist / ".Hippocampus.dmg.partial"),
+                 "FINAL_DMG_PENDING": str(dist / "Hippocampus-0.1.0.dmg")},
+        )
+
+    def test_stable_copy_has_the_same_bytes_and_its_own_checksum_file(self):
+        with tempfile.TemporaryDirectory(prefix="stable-dmg-") as temporary:
+            dist = Path(temporary)
+            (dist / "Hippocampus-0.1.0.dmg").write_bytes(b"synthetic disk image bytes")
+            result = self.run_step(dist)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual((dist / "Hippocampus.dmg").read_bytes(), b"synthetic disk image bytes")
+            self.assertFalse((dist / ".Hippocampus.dmg.partial").exists())
+            for name in ("Hippocampus-0.1.0.dmg", "Hippocampus.dmg"):
+                sidecar = (dist / f"{name}.sha256").read_text().split()
+                self.assertEqual(sidecar[1], name)
+                check = subprocess.run(["/usr/bin/shasum", "-a", "256", "-c", f"{name}.sha256"],
+                                       cwd=dist, capture_output=True, text=True, env=ENV)
+                self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
+
+    def test_a_copy_that_differs_never_appears_under_the_stable_name(self):
+        with tempfile.TemporaryDirectory(prefix="stable-dmg-") as temporary:
+            dist = Path(temporary)
+            (dist / "Hippocampus-0.1.0.dmg").write_bytes(b"synthetic disk image bytes")
+            result = self.run_step(dist, cp_body='printf "torn" > "${@: -1}"')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("does not match", result.stderr)
+            self.assertFalse((dist / "Hippocampus.dmg").exists())
+            self.assertFalse((dist / "Hippocampus.dmg.sha256").exists())
+            self.assertFalse((dist / ".Hippocampus.dmg.partial").exists())
 
 
 class InstallerLayoutTests(unittest.TestCase):
@@ -113,7 +172,7 @@ class InstallerLayoutTests(unittest.TestCase):
         remount.mkdir()
         disk("detach", self.mount)
         try:
-            disk("convert", self.image, "-format", "UDZO", "-o", compressed)
+            disk("convert", self.image, "-format", shipped_dmg_format(), "-o", compressed)
             disk("attach", "-readonly", "-nobrowse", "-noautoopen", "-mountpoint", remount, compressed)
             try:
                 root = remount / self.root.name
@@ -168,6 +227,17 @@ class InstallerLayoutTests(unittest.TestCase):
         self.assertIn('TEMP_DMG_ROOT="$(mktemp -d "$DIST_DIR/.hippocampus-rw.XXXXXX")"', script)
         self.assertIn('TEMP_DMG="$TEMP_DMG_ROOT/image.dmg"', script)
 
+    def test_background_takes_no_build_note(self):
+        result = subprocess.run(
+            ["/usr/bin/python3", str(ROOT / "assets/installer/generate-background.py"),
+             str(self.root / "noted.png"), "--build-note", "Build abcdef123456"],
+            capture_output=True, text=True, env=ENV,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / "noted.png").exists())
+        script = (ROOT / "scripts/build-installer.sh").read_text()
+        self.assertNotIn("--build-note", script)
+
     def test_update_hint_is_quiet_and_clear_of_icon_and_footer_rows(self):
         renderer = (ROOT / "assets/installer/render-background.swift").read_text()
         self.assertIn('text("Updating? Quit Hippocampus from the menu bar first.", size: 12, baselineFromTop: 290, gray: 0.4)', renderer)
@@ -176,7 +246,7 @@ class InstallerLayoutTests(unittest.TestCase):
         background = self.root / "rendered.png"
         subprocess.run(
             ["/usr/bin/python3", str(ROOT / "assets/installer/generate-background.py"),
-             str(background), "--build-note", "Build abcdef123456 / source 0123456789ab"],
+             str(background)],
             check=True, env=ENV,
         )
         result = subprocess.run(

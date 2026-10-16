@@ -13,12 +13,22 @@ import plistlib
 import re
 import subprocess
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 
 from release_models_manifest import ModelManifestError, load_and_validate
 
 
-FEED_URL = "https://amyjainberkeley.github.io/hippocampus/appcast.xml"
+# Each release carries its own appcast.xml, so the newest published release
+# is the feed. GitHub redirects this address to that release's asset.
+FEED_URL = "https://github.com/amyjainberkeley/hippocampus/releases/latest/download/appcast.xml"
+FEED_SIGNATURE_MARKER = b"<!-- sparkle-signatures:"
+FEED_SIGNATURE_RE = re.compile(
+    rb"<!-- sparkle-signatures:\s*\n"
+    rb"edSignature: ([A-Za-z0-9+/]+={0,2})\s*\n"
+    rb"length: ([0-9]+)\s*\n"
+    rb"-->\s*\Z"
+)
 SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 VERSION_RE = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 STATUS_AUDIT_RE = re.compile(
@@ -195,26 +205,55 @@ def validate_staged(
     except (binascii.Error, ValueError) as error:
         raise ReleaseIdentityError("appcast EdDSA signature is not valid base64") from error
     require(len(decoded_signature) == 64, "appcast EdDSA signature must decode to 64 bytes")
+    require(
+        sparkle_signature_verifies(dmg, signature, identity["public_key"]),
+        "appcast EdDSA signature does not authenticate the exact DMG bytes",
+    )
+    validate_feed_signature(appcast, identity["public_key"])
+
+
+def sparkle_signature_verifies(path: Path, signature: str, public_key: str) -> bool:
     verifier = Path(__file__).with_name("verify-sparkle-signature.sh")
     require(verifier.is_file(), f"Sparkle signature verifier is missing: {verifier}")
     completed = subprocess.run(
         [
             str(verifier),
             "--file",
-            str(dmg),
+            str(path),
             "--signature",
             signature,
             "--public-key",
-            identity["public_key"],
+            public_key,
         ],
         check=False,
         capture_output=True,
         text=True,
     )
+    return completed.returncode == 0
+
+
+def validate_feed_signature(appcast: Path, public_key: str) -> None:
+    """The appcast is signed as Sparkle's sign_update signs a feed: an EdDSA
+    signature over every byte before a closing sparkle-signatures comment."""
+    data = appcast.read_bytes()
     require(
-        completed.returncode == 0,
-        "appcast EdDSA signature does not authenticate the exact DMG bytes",
+        data.count(FEED_SIGNATURE_MARKER) == 1,
+        "appcast must end with exactly one Sparkle feed signature (sign_update)",
     )
+    match = FEED_SIGNATURE_RE.search(data)
+    require(match is not None, "appcast feed signature is malformed or is not at the end of the file")
+    signed_length = int(match.group(2))
+    require(
+        signed_length == match.start(),
+        "appcast feed signature does not cover every byte before it",
+    )
+    with tempfile.TemporaryDirectory(prefix="hippocampus-feed-signature-") as temporary:
+        signed = Path(temporary) / "signed-feed.xml"
+        signed.write_bytes(data[:signed_length])
+        require(
+            sparkle_signature_verifies(signed, match.group(1).decode("ascii"), public_key),
+            "appcast feed signature does not verify with SUPublicEDKey",
+        )
 
 
 def main() -> int:

@@ -4,7 +4,7 @@ This app reads your screen. That means a bug here is worse than a bug in most so
 
 ## Reporting something
 
-Open a [private security advisory](https://github.com/amyjainberkeley/hippocampus/security/advisories/new) on this repo. Please don't open a public issue for anything exploitable.
+Open a [private security advisory](https://github.com/amyjainberkeley/hippocampus/security/advisories/new) on this repo. Please don't open a public issue for anything exploitable. If that form isn't open, open an issue that asks for a private contact and leaves the details out.
 
 I'll acknowledge within a few days. This is a solo project, so I can't promise a fix window, but I'll tell you honestly where it stands.
 

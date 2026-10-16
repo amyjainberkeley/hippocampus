@@ -1,48 +1,84 @@
 # Sparkle Release And Appcast Runbook
 
-This is the canonical Hippocampus update topology:
+How an installed Hippocampus learns about a new version, and how a release
+publishes one.
 
-- GitHub Releases hosts the signed, notarized DMG and SHA-256 sidecar.
-- GitHub Pages for this repository hosts only `appcast.xml`.
+- Each GitHub release carries the signed, notarized DMG, its SHA-256 sidecar,
+  and an `appcast.xml` that describes that DMG.
 - `SUFeedURL` is
-  `https://amyjainberkeley.github.io/hippocampus/appcast.xml`.
-- A tag creates an inspectable draft. It does not publish the release or feed.
-- The separate `Publish inspected release and appcast` workflow promotes the
-  draft, then deploys the inspected appcast.
+  `https://github.com/amyjainberkeley/hippocampus/releases/latest/download/appcast.xml`.
+  GitHub redirects it to the `appcast.xml` of the newest published release
+  that is neither a draft nor a prerelease.
+- So publishing a release as Latest is what publishes its update. A draft or a
+  prerelease changes nothing for installed copies.
 
-There is no Vercel release dependency and no sibling appcast repository.
+There is no Pages site, sibling repository or other host to keep in step.
+Until the first release is published the feed address returns 404, and Check
+for Updates reports that it could not check.
+
+Sparkle 2.9.2, the version the app ships, follows this address's redirects
+(github.com, then the release download, then GitHub's asset host).
+`scripts/sparkle_feed_probe.swift` shows what Sparkle makes of any feed; run
+against a public app that uses the same kind of address, it found that app's
+update through the same redirects.
 
 ## Trust Boundaries
 
-Apple Developer ID and notarization establish the downloaded application's
-publisher and distribution integrity. Sparkle's Ed25519 signature binds the DMG
-bytes referenced by the appcast to `SUPublicEDKey` in the installed app.
-GitHub hosting is therefore a delivery surface, not a signing authority.
+- Apple Developer ID signing and notarization establish who published the app
+  and that Apple scanned it.
+- Sparkle's Ed25519 key signs the DMG's bytes. The signature sits in the
+  appcast's `<enclosure>`, and the installed app checks it against
+  `SUPublicEDKey` before installing.
+- The same key signs `appcast.xml` itself: `sign_update` appends a
+  `sparkle-signatures` comment over every byte before it. 0.3.0 does not
+  require a signed feed, so today the release tooling checks it. An app that
+  also sets `SURequireSignedFeed` and `SUVerifyUpdateBeforeExtraction` refuses
+  an unsigned or edited feed; `scripts/test-sparkle-publish.sh` shows Sparkle
+  doing so.
+- GitHub hosting is a delivery surface, not a signing authority.
 
-The tag workflow verifies all of the following before it creates a draft:
+`scripts/sparkle-publish.sh` writes the appcast. It signs the DMG with
+`sign_update`, embeds that version's `CHANGELOG.md` section as Markdown
+release notes (or the notes you pass), signs the feed, and verifies that
+signature before writing the file. `scripts/verify-release-identity.sh --phase
+staged` then checks the tag, version, build, minimum macOS, enclosure URL and
+length, checksum, and both signatures against `SUPublicEDKey`.
 
-1. Tag, bundle version, build number, changelog, DMG filename, checksum,
-   appcast item, status audit, tag-owned model manifest, minimum macOS version,
-   and GitHub Releases URL agree.
-2. The Sparkle private key derives the `SUPublicEDKey` committed in
-   `Info.plist`, and that public key verifies the appcast signature over the
-   exact DMG bytes.
-3. The app and outer DMG pass signing, notarization-staple, and Gatekeeper
-   checks.
-4. All required model bundles came from one immutable archive with the
-   configured SHA-256 and pass structural checks.
+## Release From This Mac
 
-## One-Time Owner Setup
+1. `scripts/release-0.3.0.sh --check`, then `scripts/release-0.3.0.sh`. It
+   builds, signs, notarizes and verifies the DMG, writes `appcast.xml` with the
+   Sparkle key file (`~/.hippocampus-sparkle-private.key`), and runs the staged
+   identity gate. It uploads nothing, and prints the files and commands for
+   the next steps.
+2. Push the release commit. Create a **draft** release at that commit with
+   every file the script lists: `Hippocampus-<version>.dmg` and its `.sha256`,
+   `Hippocampus.dmg` and its `.sha256`, `appcast.xml`, and `install.sh`.
+3. Inspect the draft (below).
+4. Publish it as Latest: `gh release edit v<version> --draft=false --latest`,
+   or run **Publish inspected release** from GitHub Actions with the exact tag
+   and `PUBLISH`. The workflow first re-verifies the draft's files on a clean
+   Mac, and afterwards checks that the feed address serves the inspected
+   `appcast.xml`.
+
+## Release From CI
+
+A `v*` tag runs `.github/workflows/release.yml`. With no release secret set it
+builds nothing. With all six it builds every binary, signs, notarizes and
+verifies the app and DMG, writes and signs the appcast with
+`sparkle-publish.sh`, runs the staged identity gate, and creates a **draft**
+release. Publication is step 4 above.
+
+One-time owner setup for CI releases:
 
 1. Add the Developer ID, notarization and Sparkle secrets that
    `.github/workflows/release.yml` reads to the `release-signing` environment.
-2. In repository Settings > Pages, choose **GitHub Actions** as the source.
-3. Create protected `release-signing` and `github-pages` environments. Require
-   owner review, prevent self-review, disable bypass where available, and
-   restrict the signing environment to release tags.
-4. Provision the immutable model archive and commit its URL/digest in
+2. Create protected `release-signing` and `release-publish` environments.
+   Require owner review, prevent self-review, disable bypass where available,
+   and restrict the signing environment to release tags.
+3. Provision the immutable model archive and commit its URL/digest in
    `release-models.json`.
-5. Confirm `SUPublicEDKey` matches the CI secret without exposing either key:
+4. Confirm `SUPublicEDKey` matches the Sparkle key without printing either key:
 
    ```bash
    ./scripts/verify-sparkle-keypair.sh \
@@ -50,36 +86,11 @@ The tag workflow verifies all of the following before it creates a draft:
      --info-plist apps/hippocampus/Resources/Info.plist
    ```
 
-The Pages URL returns 404 until the first successful publication. Do not point a
-shipped binary at another feed to hide that setup gap.
-
-## Stage A Draft
-
-Create the exact version tag only after the blocking release checklist passes:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-`.github/workflows/release.yml` performs a clean-history build, reconstructs
-models, builds every Rust and Swift binary, signs and notarizes the app and DMG,
-signs the appcast item, verifies the full identity, and creates a **draft**
-GitHub release containing:
-
-- `Hippocampus-<version>.dmg`
-- `Hippocampus-<version>.dmg.sha256`
-- `appcast.xml`
-- `notary-app-{submission,log}.json`
-- `notary-dmg-{submission,log}.json`
-
-No public update feed changes during this workflow.
-
 ## Inspect
 
 Before publication:
 
-1. Review the generated release notes and Apple notary log.
+1. Review the release notes and Apple's notary logs.
 2. Download the draft DMG and verify its sidecar.
 3. Mount it on a second Mac, drag the app to Applications, launch it from a
    quarantined download, and run the clean-install and upgrade smoke tests.
@@ -88,37 +99,18 @@ Before publication:
 5. Confirm the Keychain-held database key and capture preference survive an
    upgrade from the prior public version.
 
-Do not replace draft assets after inspection. Rebuild from a new commit and tag
-when bytes change.
-
-## Stage B Publish
-
-Run **Publish inspected release and appcast** from GitHub Actions with:
-
-- `tag`: the exact inspected draft tag.
-- `confirmation`: `PUBLISH`.
-
-The workflow:
-
-1. Requires the named release to exist; it records whether it is still a draft.
-2. Downloads and independently re-verifies its checksum, identity, DMG
-   Sparkle signature, notarization staple, and Gatekeeper assessment.
-3. Uploads the appcast as a private Pages deployment artifact.
-4. Promotes the GitHub release only when it is still a draft.
-5. Deploys `appcast.xml` only after promotion succeeds.
-
-That ordering means Sparkle never sees an update whose download asset is still
-private. If Pages fails after promotion, rerunning the same confirmed workflow
-reverifies the immutable public assets and resumes only the Pages deployment.
+Do not replace assets after inspection, and never edit `appcast.xml` by hand:
+its signature covers its bytes. Rebuild from a new commit and tag when bytes
+change.
 
 ## Verify Public State
 
 ```bash
-curl --fail --silent --show-error \
-  https://amyjainberkeley.github.io/hippocampus/appcast.xml \
+curl --fail --silent --show-error --location \
+  https://github.com/amyjainberkeley/hippocampus/releases/latest/download/appcast.xml \
   | xmllint --noout -
 
-gh release view v0.1.0 --repo amyjainberkeley/hippocampus
+gh release view --repo amyjainberkeley/hippocampus
 ```
 
 The appcast has no system-profile reporting, analytics endpoint, or download
@@ -135,6 +127,6 @@ same bridge release.
 Primary references:
 
 - [Sparkle documentation](https://sparkle-project.org/documentation/)
-- [GitHub Pages custom workflows](https://docs.github.com/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)
+- [Linking to the latest release asset](https://docs.github.com/repositories/releasing-projects-on-github/linking-to-releases)
 - [GitHub deployment environments](https://docs.github.com/actions/reference/workflows-and-actions/deployments-and-environments)
 - [Apple code signing in depth](https://developer.apple.com/library/archive/technotes/tn2206/_index.html)

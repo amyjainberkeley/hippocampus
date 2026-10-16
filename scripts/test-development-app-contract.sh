@@ -61,12 +61,14 @@ cp "$BUILD_APP" "$REPO_ROOT/apps/hippocampus/Resources/Info.plist" \
 cp "$REPO_ROOT/scripts/lib/app-group-contract.sh" "$FIXTURE/scripts/lib/"
 cp "$REPO_ROOT/CHANGELOG.md" "$REPO_ROOT/NOTICE" "$FIXTURE/"
 printf 'raise SystemExit(0)\n' > "$FIXTURE/scripts/verify-toml-license-contract.py"
-for binary in apps/hippocampus/.build/debug/Hippocampus \
-    adapters/macos/MCICaptureHelper/.build/debug/mci-capture-helper \
-    apps/recall-ui/.build/debug/recall-ui apps/onboarding/.build/debug/onboarding \
-    target/debug/mci-agent target/debug/hippocampus-native-host; do
-    mkdir -p "$FIXTURE/$(dirname "$binary")"
-    : > "$FIXTURE/$binary"
+for profile in debug release; do
+    for binary in apps/hippocampus/.build/$profile/Hippocampus \
+        adapters/macos/MCICaptureHelper/.build/$profile/mci-capture-helper \
+        apps/recall-ui/.build/$profile/recall-ui apps/onboarding/.build/$profile/onboarding \
+        target/$profile/mci-agent target/$profile/hippocampus-native-host; do
+        mkdir -p "$FIXTURE/$(dirname "$binary")"
+        : > "$FIXTURE/$binary"
+    done
 done
 fixture_git() {
     git -C "$FIXTURE" -c user.name=fixture -c user.email=fixture@example.invalid \
@@ -104,6 +106,23 @@ rg -q 'audit baseline is 4 commits behind HEAD; maximum is 3' "$TEST_ROOT/develo
 if rg -q 'models\.json missing' "$TEST_ROOT/developer-id.out"; then
     fail "a Developer ID build continued past a stale STATUS audit"
 fi
+
+# A release dry run (release-0.3.0.sh --dry-run) signs with Developer ID but
+# skips the STATUS audit, since nothing it makes is notarized or given out.
+# The same release build without the flag still stops at the stale audit.
+fixture_build release-stale
+rg -q 'audit baseline is 4 commits behind HEAD; maximum is 3' "$TEST_ROOT/release-stale.out" \
+    || fail "a release build did not stop at a stale STATUS audit"
+fixture_build release-dry-run --release-dry-run
+rg -q 'audit baseline not checked: release dry run' "$TEST_ROOT/release-dry-run.out" \
+    || fail "a release dry run did not say it skips the STATUS audit"
+rg -q 'FATAL: models\.json missing' "$TEST_ROOT/release-dry-run.out" \
+    || fail "the release dry run fixture did not continue past the STATUS gate"
+for combination in --debug --development-ad-hoc; do
+    fixture_build "dry-run$combination" --release-dry-run "$combination"
+    rg -q -- '--release-dry-run is a release build signed with Developer ID' "$TEST_ROOT/dry-run$combination.out" \
+        || fail "--release-dry-run was accepted with $combination"
+done
 
 printf 'Audited code baseline: `%s`\n' "$(fixture_git rev-parse HEAD~1)" > "$FIXTURE/docs/STATUS.md"
 fixture_build fresh --debug

@@ -81,14 +81,22 @@ The script also accepts env vars `NOTARYTOOL_APPLE_ID`, `NOTARYTOOL_TEAM_ID`, `N
 ```
 dist/Hippocampus-0.1.0.dmg         # Compressed DMG installer
 dist/Hippocampus-0.1.0.dmg.sha256  # SHA-256 checksum sidecar
+dist/Hippocampus.dmg               # The same bytes under a name that never changes
+dist/Hippocampus.dmg.sha256        # Its checksum, under its own name
 ```
+
+Upload both names to the release, so
+`https://github.com/amyjainberkeley/hippocampus/releases/latest/download/Hippocampus.dmg`
+always downloads the newest build. The volume is named `Hippocampus`; the
+commit and source digest are in the app's `build-provenance.json`, never in
+the window a downloader sees.
 
 ### Regenerating installer assets
 
 The DMG background and EULA are generated from source files. Committed versions are ready to use; regenerate only when sources change.
 
 ```bash
-# Background (1280x800 Retina PNG from the canonical light brand system)
+# Background (1280x800 Retina PNG: two instructions and an arrow, nothing else)
 python3 assets/installer/generate-background.py
 
 # EULA.rtf (from docs/legal/terms-of-service.md)
@@ -97,7 +105,9 @@ python3 assets/installer/generate-eula.py
 # Volume icon mirror (the build verifies it against the canonical icon)
 cp assets/branding/AppIcon.icns assets/installer/volume-icon.icns
 
-# Verify the installer cannot drift from the canonical app identity
+# Verify the installer cannot drift from the canonical app identity. This also
+# renders the background and reads it back with Apple's text recognition: it
+# fails if the window would show anything but its two instructions.
 ./scripts/build-installer.sh --verify-assets
 ```
 
@@ -159,11 +169,13 @@ Tagged pushes (`v*`) trigger `.github/workflows/release.yml` which:
 2. Reconstructs the hash-pinned model archive and builds every Swift/Rust binary.
 3. Imports Developer ID, notarization, and matching Sparkle credentials.
 4. Signs, notarizes, staples, and verifies the app and outer DMG.
-5. Signs and verifies the staged appcast.
+5. Writes and signs the release's appcast (`scripts/sparkle-publish.sh`) and
+   verifies it.
 6. Uploads the DMG, checksum, and appcast to a draft GitHub release only.
 
-The separate owner-triggered `.github/workflows/publish-release.yml` promotes
-the inspected draft and then deploys its appcast through GitHub Pages.
+The app's update feed is the newest published release's `appcast.xml`, so the
+separate owner-triggered `.github/workflows/publish-release.yml` re-verifies
+the inspected draft, promotes it to Latest, and checks the live feed.
 
 Required GitHub secrets for signed releases:
 
@@ -176,14 +188,10 @@ Required GitHub secrets for signed releases:
 | `NOTARYTOOL_PASSWORD` | App-Specific Password for notarization |
 | `SPARKLE_PRIVATE_KEY` | Sparkle private seed matching `SUPublicEDKey` |
 
-Required repository variables:
-
-| Variable | Description |
-|---|---|
-| `RELEASE_MODELS_URL` | Immutable HTTPS model-archive URL |
-| `RELEASE_MODELS_SHA256` | Exact SHA-256 for that archive |
-
-If any credential or model variable is absent, release packaging fails closed.
+The model archive's URL and SHA-256 come from the committed
+`release-models.json`, not from repository variables. If any credential is
+absent, or the manifest does not name the tag's version, release packaging
+fails closed.
 
 ---
 

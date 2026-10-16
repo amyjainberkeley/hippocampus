@@ -111,6 +111,14 @@ module_name_repetitions = "allow"
 missing_errors_doc      = "allow"
 missing_panics_doc      = "allow"
 
+# The release binaries ship inside the app. Thin LTO optimises across
+# crates, and `strip = "symbols"` drops the local symbol table (on macOS
+# rustc runs `strip -x`, which keeps exported symbols). Neither changes what
+# the binaries do; they only make them smaller.
+[profile.release]
+lto = "thin"
+strip = "symbols"
+
 # mci-core's `insecure-test-keywrap` feature has a `compile_error!` gated
 # on `not(debug_assertions)` (security: test-only InMemoryKeyWrap must not
 # ship). mci-brain's dev-dep enables that feature for its SqlCipher
@@ -130,6 +138,8 @@ debug-assertions = true
 #   cargo test --profile=perf -p mci-brain -- --ignored recall_perf_100k::run
 [profile.perf]
 inherits = "release"
+# Keep symbols, so a profiler can name the functions it measures.
+strip = "none"
 
 [profile.perf.package.mci-core]
 debug-assertions = true

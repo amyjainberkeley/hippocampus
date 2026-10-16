@@ -6,7 +6,7 @@ import ImageIO
 // Headless bitmap rendering only. Coordinates match the 640x420 Finder layout.
 let width = 640
 let height = 420
-guard CommandLine.arguments.count == 3,
+guard CommandLine.arguments.count == 2,
       let context = CGContext(data: nil, width: width * 2, height: height * 2,
                               bitsPerComponent: 8, bytesPerRow: width * 8,
                               space: CGColorSpaceCreateDeviceRGB(),
@@ -42,7 +42,6 @@ context.addLine(to: CGPoint(x: 348, y: 235))
 context.addLine(to: CGPoint(x: 338, y: 225))
 context.strokePath()
 text("Updating? Quit Hippocampus from the menu bar first.", size: 12, baselineFromTop: 290, gray: 0.4)
-text(CommandLine.arguments[2], size: 11, baselineFromTop: 378, gray: 0.42, left: 36)
 
 guard let image = context.makeImage(),
       let destination = CGImageDestinationCreateWithURL(

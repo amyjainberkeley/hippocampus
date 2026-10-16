@@ -56,7 +56,7 @@
 	<key>SUEnableSystemProfiling</key>
 	<false/>
 	<key>SUFeedURL</key>
-	<string>https://amyjainberkeley.github.io/hippocampus/appcast.xml</string>
+	<string>https://github.com/amyjainberkeley/hippocampus/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>JyMJvusOjdVeoHr5YsyTBywtaNtj5qtWGDH1Kxyi1ng=</string>
 	<key>SUScheduledCheckInterval</key>

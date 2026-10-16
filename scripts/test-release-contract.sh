@@ -34,6 +34,11 @@ STAGE_RECALL_FFI="$REPO_ROOT/scripts/stage-recall-ffi.sh"
 E2E="$REPO_ROOT/scripts/e2e-clean-home.sh"
 E2E_CONTRACT="$REPO_ROOT/scripts/test-e2e-clean-home-contract.sh"
 APP_GROUP_CONTRACT_TEST="$REPO_ROOT/scripts/test-app-group-contract.sh"
+RELEASE_SCRIPT="$REPO_ROOT/scripts/release-0.3.0.sh"
+SPARKLE_PUBLISH="$REPO_ROOT/scripts/sparkle-publish.sh"
+IDENTITY="$REPO_ROOT/scripts/verify_release_identity.py"
+FEED_URL='https://github.com/amyjainberkeley/hippocampus/releases/latest/download/appcast.xml'
+CARGO_TOML="$REPO_ROOT/Cargo.toml"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -95,8 +100,15 @@ require_literal "$RELEASE" '--expected-source-head "$(git rev-parse HEAD)"' \
     'release provenance is bound to the release checkout HEAD'
 require_literal "$RELEASE" '--expected-source-digest "$(python3 scripts/product-source-digest.py --repo-root .)"' \
     'release provenance is bound to the release checkout source digest'
-require_pattern "$RELEASE" 'scripts/publish-appcast\.sh' \
+require_pattern "$RELEASE" 'scripts/sparkle-publish\.sh' \
     'release workflow signs the Sparkle appcast'
+require_literal "$RELEASE" '--private-key "$RUNNER_TEMP/sparkle-private.key"' \
+    'release workflow signs the appcast with the verified Sparkle key file'
+if [[ -e "$REPO_ROOT/scripts/publish-appcast.sh" ]]; then
+    fail 'one appcast writer: the env-key publish-appcast.sh is gone'
+else
+    pass 'one appcast writer: the env-key publish-appcast.sh is gone'
+fi
 require_pattern "$RELEASE" 'fetch-depth:[[:space:]]*0' \
     'release checkout includes full history for status provenance'
 require_literal "$RELEASE" 'MACOSX_DEPLOYMENT_TARGET: "14.0"' \
@@ -148,16 +160,20 @@ require_pattern "$PUBLISH" 'workflow_dispatch:' \
     'publication is an explicit owner-triggered workflow'
 require_pattern "$PUBLISH" 'environment:[[:space:]]*$' \
     'publication uses a protected GitHub environment'
-require_pattern "$PUBLISH" 'name:[[:space:]]*github-pages' \
-    'publication uses the GitHub Pages environment'
-require_pattern "$PUBLISH" 'actions/deploy-pages@' \
-    'publication deploys the inspected appcast through GitHub Pages'
-require_pattern "$PUBLISH" 'gh release edit.*--draft=false' \
-    'publication promotes the inspected draft release'
+require_pattern "$PUBLISH" 'name:[[:space:]]*release-publish' \
+    'publication uses its own protected environment, without signing secrets'
+reject_pattern "$PUBLISH" 'pages|Pages' \
+    'publication needs no GitHub Pages site: the release carries the feed'
+require_pattern "$PUBLISH" 'gh release edit.*--draft=false --latest' \
+    'publication promotes the inspected draft to Latest, which is the feed'
+require_literal "$PUBLISH" 'releases/latest/download/appcast.xml' \
+    'publication confirms the public feed serves the inspected appcast'
 require_pattern "$PUBLISH" 'scripts/verify-release-identity\.sh --phase staged' \
     'publication re-verifies downloaded release identity'
-require_order "$PUBLISH" 'gh release edit.*--draft=false' 'actions/deploy-pages@' \
-    'publication promotes the release before exposing the appcast'
+require_order "$PUBLISH" 'scripts/verify-release-identity\.sh --phase staged' 'gh release edit.*--draft=false' \
+    'publication re-verifies the draft before promoting it'
+require_order "$PUBLISH" 'gh release edit.*--draft=false' 'cmp published-appcast\.xml inspected/appcast\.xml' \
+    'publication checks the live feed only after promotion'
 require_pattern "$PUBLISH" "if:[[:space:]]+steps\\.release-state\\.outputs\\.is_draft == 'true'" \
     'publication promotes only while the inspected release is still a draft'
 reject_pattern "$PUBLISH" 'test "\$\(gh release view.*isDraft.*\)" = true' \
@@ -171,8 +187,156 @@ require_pattern "$PUBLISH" 'persist-credentials:[[:space:]]*false' \
 reject_pattern "$PUBLISH" 'uses:[[:space:]]+[^#[:space:]]+@v[0-9]+([[:space:]]|$)' \
     'publication workflow pins every action to a full commit SHA'
 
-require_pattern "$INFO_PLIST" 'https://amyjainberkeley\.github\.io/hippocampus/appcast\.xml' \
-    'shipped Sparkle feed matches the publication target'
+require_literal "$INFO_PLIST" "<string>$FEED_URL</string>" \
+    'shipped Sparkle feed is the latest GitHub release appcast'
+require_literal "$IDENTITY" "FEED_URL = \"$FEED_URL\"" \
+    'the release identity gate pins the same feed'
+for feed_file in "$INFO_PLIST" "$IDENTITY" "$SPARKLE_PUBLISH" "$RELEASE_SCRIPT" "$PUBLISH" "$RELEASE"; do
+    reject_pattern "$feed_file" 'github\.io|hippocampus\.ai' \
+        "$(basename "$feed_file") names neither a Pages feed nor the parked hippocampus.ai domain"
+done
+require_literal "$SPARKLE_PUBLISH" '"$SIGN_UPDATE" -f "$KEY_PATH" "$TMP_APPCAST"' \
+    'sparkle-publish signs the appcast itself with sign_update'
+require_literal "$SPARKLE_PUBLISH" '"$SIGN_UPDATE" --verify -f "$KEY_PATH" "$TMP_APPCAST"' \
+    'sparkle-publish verifies the signed appcast before writing it'
+require_literal "$SPARKLE_PUBLISH" 'sparkle:format="markdown"' \
+    'sparkle-publish marks Markdown notes the way Sparkle reads them'
+require_literal "$IDENTITY" 'validate_feed_signature(appcast, identity["public_key"])' \
+    'the staged identity gate verifies the feed signature with SUPublicEDKey'
+require_pattern "$RELEASE_SCRIPT" 'verify-sparkle-keypair\.sh' \
+    'release preflight checks the Sparkle key against SUPublicEDKey'
+require_literal "$RELEASE_SCRIPT" '"$REPO_ROOT/scripts/sparkle-publish.sh"' \
+    'release script writes the appcast with sparkle-publish'
+require_literal "$RELEASE_SCRIPT" '--dmg "$DMG" --private-key "$SPARKLE_KEY" --changelog-notes' \
+    'release script signs the notarized DMG with the Sparkle key file'
+require_literal "$RELEASE_SCRIPT" 'identity.validate_staged(root, tag, found, dmg, appcast, repository)' \
+    'release script runs the staged identity gate on its appcast'
+require_order "$RELEASE_SCRIPT" '^verify_release$' '^make_appcast$' \
+    'release script signs the appcast only for a verified DMG'
+require_literal "$RELEASE_SCRIPT" 'UPLOADS=("$DMG" "$DMG.sha256" "$STABLE_DMG" "$STABLE_DMG.sha256" "$APPCAST")' \
+    'release script lists appcast.xml with the DMGs to upload'
+require_literal "$RELEASE_SCRIPT" 'say "    ./update-cask.sh \"$DMG\""' \
+    'release script says how to point the Homebrew cask at the notarized DMG'
+PRIVATE_REPORTING='https://github.com/amyjainberkeley/hippocampus/security/advisories/new'
+for contact_file in "$REPO_ROOT/SECURITY.md" "$REPO_ROOT/docs/legal/terms-of-service.md" \
+    "$REPO_ROOT/assets/installer/EULA.rtf"; do
+    require_literal "$contact_file" "$PRIVATE_REPORTING" \
+        "$(basename "$contact_file") sends private reports to GitHub private reporting"
+    reject_pattern "$contact_file" '@hippocampus\.ai|//hippocampus\.ai' \
+        "$(basename "$contact_file") names no address on the parked hippocampus.ai domain"
+done
+require_literal "$INSTALLER" '-volname "Hippocampus" \' \
+    'the disk image volume is named Hippocampus, with no commit in it'
+reject_pattern "$INSTALLER" 'build-note|SOURCE_HEAD:0:|SOURCE_DIGEST:0:' \
+    'nothing a downloader sees carries a build number, commit or source digest'
+require_literal "$INSTALLER" 'STABLE_DMG="$DIST_DIR/Hippocampus.dmg"' \
+    'the installer also writes Hippocampus.dmg for releases/latest/download'
+
+# Size cuts that change no behaviour: LZMA disk image, thin LTO, and binaries
+# without local symbols (dSYMs kept).
+if rg -Uq '^\[profile\.release\]\nlto = "thin"\nstrip = "symbols"\n' "$CARGO_TOML"; then
+    pass 'release Rust binaries use thin LTO and are stripped of local symbols'
+else
+    fail 'release Rust binaries use thin LTO and are stripped of local symbols'
+fi
+require_literal "$INSTALLER" 'DMG_FORMAT="ULMO"' \
+    'the disk image is LZMA-compressed (ULMO)'
+require_literal "$INSTALLER" '-format "$DMG_FORMAT"' \
+    'the finished disk image is converted to that format'
+reject_pattern "$INSTALLER" 'UDZO|zlib-level' \
+    'no zlib disk image remains'
+require_literal "$RELEASE_SCRIPT" '"$REPO_ROOT/scripts/strip-release-binaries.sh" --symbols-dir "$SYMBOLS_DIR"' \
+    'release script strips its binaries and keeps their dSYMs'
+require_order "$RELEASE_SCRIPT" 'strip-release-binaries\.sh" --symbols-dir' '^assemble_app\(\) \{' \
+    'release script strips before it assembles, signs and records provenance'
+require_literal "$RELEASE" 'scripts/strip-release-binaries.sh --symbols-dir "$RUNNER_TEMP/symbols"' \
+    'tag workflow strips its binaries and keeps their dSYMs'
+require_order "$RELEASE" 'name: Build all binaries' 'scripts/strip-release-binaries\.sh' \
+    'tag workflow strips what it built'
+require_order "$RELEASE" 'scripts/strip-release-binaries\.sh' 'name: Build signed and notarized DMG' \
+    'tag workflow strips before it assembles and signs'
+require_pattern "$CHECK" 'strip-release-binaries\|bash\|test\|scripts/test-strip-release-binaries\.sh' \
+    'the unified local gate runs the strip fixture'
+
+# Launch gates D1 and D2: the same app checks in the release script and the
+# tag workflow, syspolicy_check, and clean notary logs.
+APP_GATE="$REPO_ROOT/scripts/verify-release-app.sh"
+require_literal "$APP_GATE" 'refuse "hippocampus-mind links FoundationModels as ${LINK:-nothing}, not weakly' \
+    'the app gate refuses a mind that does not weak-link FoundationModels'
+require_literal "$RELEASE_SCRIPT" 'clean_env "$REPO_ROOT/scripts/verify-release-app.sh" --version "$RELEASE_VERSION"' \
+    'release script checks its app with the shared app gate'
+require_literal "$RELEASE_SCRIPT" 'check_assembled_app "$app" "$GATEKEEPER_CHECK"' \
+    'release script runs syspolicy_check on the app in the DMG'
+require_literal "$RELEASE_SCRIPT" '    GATEKEEPER_CHECK="distribution"' \
+    'the release itself checks the app in the DMG with syspolicy_check distribution'
+
+# The dry run: built and signed here, never notarized, stamped, committed or
+# opened, and never what a release workflow runs.
+require_literal "$RELEASE_SCRIPT" '--dry-run) DRY_RUN=1; shift ;;' \
+    'release script has a dry-run mode'
+require_literal "$RELEASE_SCRIPT" 'ASSEMBLY_MODE=(--release-dry-run)' \
+    'a dry run assembles without the STATUS audit and without opening the app'
+require_literal "$RELEASE_SCRIPT" 'INSTALLER_MODE=(--dry-run)' \
+    'a dry run packages the DMG without notarizing it or opening the app'
+require_literal "$RELEASE_SCRIPT" 'GATEKEEPER_CHECK="notary-submission"' \
+    'a dry run checks the app the way the notary service would'
+require_literal "$RELEASE_SCRIPT" 'say "== docs/STATUS.md not stamped and nothing committed (dry run)"' \
+    'a dry run stamps and commits nothing'
+require_literal "$RELEASE_SCRIPT" 'say "DRY RUN: nothing was notarized, stamped, committed, pushed, tagged or uploaded,"' \
+    'a dry run says what it did not do'
+require_literal "$BUILD_APP" '--release-dry-run) RELEASE_DRY_RUN=1; shift ;;' \
+    'app assembly has a release dry-run mode'
+require_literal "$BUILD_APP" '=== Launch-verify gate: SKIPPED for a release dry run; this app was never opened ===' \
+    'a release dry run never opens the app it assembles'
+require_literal "$BUILD_APP" '"--release-dry-run is a release build signed with Developer ID"' \
+    'a release dry run cannot be combined with debug or ad-hoc assembly'
+require_literal "$INSTALLER" '--dry-run) DRY_RUN=1; shift ;;' \
+    'the installer has a dry-run mode'
+require_literal "$INSTALLER" 'FATAL: --dry-run is a release build signed with a Developer ID identity' \
+    'an installer dry run is a Developer ID release build'
+require_literal "$INSTALLER" 'Notarization: skipped (dry run: nothing is sent to Apple'"'"'s notary service)' \
+    'an installer dry run sends nothing to the notary service'
+for workflow in "$RELEASE" "$PUBLISH" "$RELEASE_CI"; do
+    reject_pattern "$workflow" '--(release-)?dry-run' \
+        "$(basename "$workflow") never runs a dry run"
+done
+for log_name in app dmg; do
+    require_literal "$RELEASE_SCRIPT" "\"\$DIST_DIR/notary-$log_name-log.json\"" \
+        "release script requires a clean $log_name notary log"
+    require_literal "$RELEASE" "dist/notary-$log_name-log.json" \
+        "tag workflow requires a clean $log_name notary log"
+done
+require_literal "$RELEASE" 'scripts/verify-release-app.sh --version "${GITHUB_REF_NAME#v}" --team "$RELEASE_TEAM_ID"' \
+    'tag workflow checks the mounted app with the shared app gate'
+require_literal "$RELEASE" '--minimum-macos 14.0 --gatekeeper distribution "$MOUNT/Hippocampus.app"' \
+    'tag workflow runs syspolicy_check distribution on the mounted app'
+require_literal "$INSTALLER" 'python3 "$CHECK_NOTARY_LOG" --archive "$(basename "$artifact")" "$log"' \
+    'installer refuses an accepted submission whose log lists issues'
+require_literal "$INSTALLER" 'FATAL: syspolicy_check is missing; a release must pass syspolicy_check distribution' \
+    'installer refuses to ship a release without syspolicy_check'
+require_pattern "$CHECK" 'release-app-gate\|bash\|test\|scripts/test-verify-release-app\.sh' \
+    'the unified local gate runs the app gate fixtures'
+require_pattern "$CHECK" 'notary-log-contract\|bash\|test\|python3 -B scripts/test_check_notary_log\.py' \
+    'the unified local gate runs the notary log fixtures'
+
+# The one-line installer takes the latest release by its fixed asset name,
+# with no GitHub API call, and is tested against a local fake release.
+INSTALL_SH="$REPO_ROOT/scripts/install.sh"
+require_literal "$INSTALL_SH" 'BASE="$RELEASES/latest/download"' \
+    'install.sh downloads the latest release by its fixed asset name'
+reject_pattern "$INSTALL_SH" 'api\.github\.com' \
+    'install.sh needs no rate-limited GitHub API call'
+require_literal "$INSTALL_SH" "--proto-redir '=https'" \
+    'install.sh follows redirects only to HTTPS'
+require_pattern "$CHECK" 'install-sh-fixtures\|bash\|test\|scripts/test-install-sh\.sh' \
+    'the unified local gate runs the installer against a fake release'
+for stable_asset in 'dist/Hippocampus.dmg' 'dist/Hippocampus.dmg.sha256'; do
+    if [[ "$(rg -c -F -x "            $stable_asset" "$RELEASE" || true)" == 2 ]]; then
+        pass "release workflow hands over and drafts $stable_asset"
+    else
+        fail "release workflow hands over and drafts $stable_asset"
+    fi
+done
 require_pattern "$INSTALLER" 'Release installer requires notarization credentials' \
     'release installer fails closed without notarization credentials'
 require_literal "$INSTALLER" 'python3 "$GENERATE_EULA" --check' \
@@ -277,10 +441,16 @@ require_literal "$RELEASE_CI" 'scripts/swift-package.sh run --package-path apps/
     'release CI executes the durable app-access route fixture'
 for script in test-release-contract.sh test-app-group-contract.sh test-release-identity.sh \
     test-prepare-release-models.sh test-release-model-manifest.sh \
-    test-sparkle-keygen.sh test-sparkle-keypair.sh; do
+    test-sparkle-keygen.sh test-sparkle-keypair.sh test-sparkle-publish.sh \
+    test-strip-release-binaries.sh test-verify-release-app.sh test_check_notary_log.py \
+    test-install-sh.sh; do
     require_literal "$RELEASE_CI" "scripts/$script" \
         "release CI runs $script"
 done
+require_literal "$RELEASE_CI" "SPARKLE_PUBLISH_TEST_REQUIRE_TOOLS: '1'" \
+    'release CI fails the appcast test, never skips it, without Sparkle tools'
+require_pattern "$CHECK" 'sparkle-publish-fixtures\|bash\|test\|__sparkle_publish_lane' \
+    'the unified local gate runs the appcast test'
 require_literal "$RELEASE_CI" 'scripts/test-task-2-product-truth.sh' \
     'release CI runs the legal drift and product-truth contract'
 require_literal "$RELEASE_CI" 'scripts/test-onboarding-product-truth.sh' \

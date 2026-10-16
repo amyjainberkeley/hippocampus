@@ -5,7 +5,8 @@
 #
 # What it does, in order, and nothing else:
 #   1. Downloads the notarized Hippocampus DMG from the latest GitHub release
-#      and checks its SHA-256 against the release's checksum file.
+#      (releases/latest/download/Hippocampus.dmg, so no API call and no rate
+#      limit) and checks its SHA-256 against the release's checksum file.
 #   2. Verifies Apple's notarization and the Developer ID signature, then
 #      copies Hippocampus.app into /Applications (or ~/Applications when
 #      /Applications is not writable).
@@ -20,10 +21,15 @@
 #   HIPPOCAMPUS_DMG        install from a local DMG instead of downloading
 #   HIPPOCAMPUS_APPDIR     install directory (default: /Applications)
 #   HIPPOCAMPUS_NO_OPEN=1  install without opening the app
+#   HIPPOCAMPUS_RELEASES_URL  where releases are (default: this repository's
+#                          GitHub releases); a mirror or a local test copy
+#                          must serve the same files. The checks below apply
+#                          whatever the source.
 
 set -eu
 
 REPO="amyjainberkeley/hippocampus"
+RELEASES="${HIPPOCAMPUS_RELEASES_URL:-https://github.com/$REPO/releases}"
 BIN_DIR="$HOME/.hippocampus/bin"
 TEAM_ID="BV6KGKFKP4"
 
@@ -53,19 +59,22 @@ if [ -n "${HIPPOCAMPUS_DMG:-}" ]; then
 else
   if [ -n "${HIPPOCAMPUS_VERSION:-}" ]; then
     TAG="$HIPPOCAMPUS_VERSION"
+    ASSET="Hippocampus-${TAG#v}.dmg"
+    BASE="$RELEASES/download/$TAG"
+    say "Downloading Hippocampus ${TAG#v}"
   else
-    TAG="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
-      | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
-    [ -n "$TAG" ] || die "could not find the latest release; set HIPPOCAMPUS_VERSION"
+    # Every release also carries its DMG under this fixed name.
+    ASSET="Hippocampus.dmg"
+    BASE="$RELEASES/latest/download"
+    say "Downloading the latest Hippocampus"
   fi
-  VERSION="${TAG#v}"
-  ASSET="Hippocampus-$VERSION.dmg"
-  BASE="https://github.com/$REPO/releases/download/$TAG"
   DMG="$TMP/$ASSET"
 
-  say "Downloading Hippocampus $VERSION"
-  curl -fL --progress-bar -o "$DMG" "$BASE/$ASSET"
-  curl -fsSL -o "$TMP/$ASSET.sha256" "$BASE/$ASSET.sha256"
+  # Redirects (GitHub sends downloads to its asset host) stay on HTTPS.
+  curl -fL --proto-redir '=https' --progress-bar -o "$DMG" "$BASE/$ASSET" \
+    || die "could not download $BASE/$ASSET"
+  curl -fsSL --proto-redir '=https' -o "$TMP/$ASSET.sha256" "$BASE/$ASSET.sha256" \
+    || die "could not download $BASE/$ASSET.sha256"
   EXPECTED="$(awk '{print $1; exit}' "$TMP/$ASSET.sha256")"
   ACTUAL="$(shasum -a 256 "$DMG" | awk '{print $1}')"
   [ -n "$EXPECTED" ] && [ "$EXPECTED" = "$ACTUAL" ] \
@@ -79,6 +88,8 @@ hdiutil attach "$DMG" -nobrowse -readonly -noautoopen -mountpoint "$MOUNT" -quie
   || die "could not open the DMG"
 SRC="$MOUNT/Hippocampus.app"
 [ -d "$SRC" ] || die "the DMG does not contain Hippocampus.app"
+APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$SRC/Contents/Info.plist" 2>/dev/null || echo unknown)"
+say "  Hippocampus $APP_VERSION"
 
 # Refuse anything that is not this developer's notarized build.
 codesign --verify --deep --strict "$SRC" 2>/dev/null || die "signature check failed"

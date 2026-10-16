@@ -73,8 +73,13 @@ LANES=(
     "coreml-compiled-contract|bash|test|python3 -B scripts/test_coreml_model_contract.py"
     "coreml-converter-contract|bash|test|python3 -B scripts/test_convert_embedder_contract.py"
     "installer-runtime|bash|test|scripts/test-installer-runtime.sh"
+    "strip-release-binaries|bash|test|scripts/test-strip-release-binaries.sh"
+    "release-app-gate|bash|test|scripts/test-verify-release-app.sh"
+    "notary-log-contract|bash|test|python3 -B scripts/test_check_notary_log.py"
+    "install-sh-fixtures|bash|test|scripts/test-install-sh.sh"
     "sparkle-keygen-fixtures|bash|test|scripts/test-sparkle-keygen.sh"
     "sparkle-keypair-fixtures|bash|test|scripts/test-sparkle-keypair.sh"
+    "sparkle-publish-fixtures|bash|test|__sparkle_publish_lane"
     "key-custody-runner|bash|test|scripts/test-agent-key-custody-runner.sh"
     "supervisor-stop-policy|bash|test|scripts/test-supervisor-stop-policy.sh"
     "clean-home-contract|bash|lint|scripts/test-e2e-clean-home-contract.sh"
@@ -159,8 +164,13 @@ LANES
     coreml-compiled-contract independently inspect compiled model shape and constants
     coreml-converter-contract canonical converted-model provenance fixture
     installer-runtime       bounded layout process and centralized cleanup fixture
+    strip-release-binaries  release binaries lose local symbols, keep dSYMs and behave the same
+    release-app-gate        hippocampus-mind weak-links FoundationModels; version, team, macOS 14, syspolicy_check
+    notary-log-contract     a notarization log passes only when Apple accepted it with no issues
+    install-sh-fixtures     the one-line installer against a local fake release; installs nothing unsigned
     sparkle-keygen-fixtures bundled Sparkle CLI contract fixture
     sparkle-keypair-fixtures Ed25519 private/public matching fixtures
+    sparkle-publish-fixtures the appcast a release uploads, judged by the app's Sparkle (SKIP without its tools)
     key-custody-runner    nonblocking bounded child-process diagnostic fixture
     supervisor-stop-policy bounded two-child shutdown fixture
     clean-home-contract     isolated install-to-uninstall product contract
@@ -224,6 +234,16 @@ __ocr_worker_lane() {
     fi
     env -i HOME="$HOME" PATH=/usr/bin:/bin TMPDIR="${TMPDIR:-/tmp}" \
         "$python" -B -m unittest discover -s tools/ocr
+}
+
+__sparkle_publish_lane() {
+    # The appcast test runs the app's own Sparkle, whose tools arrive when
+    # apps/hippocampus resolves its packages. Without them, SKIP.
+    if [[ ! -x apps/hippocampus/.build/artifacts/sparkle/Sparkle/bin/sign_update ]]; then
+        echo "[skip] Sparkle's tools are not resolved (scripts/swift-package.sh build --package-path apps/hippocampus)"
+        return 42
+    fi
+    scripts/test-sparkle-publish.sh
 }
 
 __changelog_sanity_lane() {
