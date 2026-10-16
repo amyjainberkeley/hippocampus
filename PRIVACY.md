@@ -32,6 +32,7 @@ macOS calls the permission "Screen & System Audio Recording". Hippocampus asks f
 - The key is in your login Keychain and is not synced. AI tools you connect are given a Keychain reference, never the key. A development build can use a file key (`dev.key`, mode 0600) only when `MCI_DEVELOPMENT_FILE_KEY=1` is set.
 - Everything is kept for 90 days, unless you choose otherwise in Preferences, under Privacy. Anything older is deleted for good.
 - Logs and crash records are in `~/Library/Logs/MCI/`.
+- The window keeps a plain-text log of what was done to your memory: launches, deletions and exports, with counts, times and an export's file path, never what you saw. It is `~/Library/Application Support/Hippocampus/audit.log`, and deleting your memory leaves it.
 
 The data folders and two background processes (mci-agent, MCICaptureHelper) carry MCI, the project's early working name.
 
