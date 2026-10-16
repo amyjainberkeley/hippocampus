@@ -1,7 +1,7 @@
 // FilterStateTests.swift — exercises the dynamic per-app filter + the
 // structured DateRangePreset model. v1's hardcoded `appSafari` /
 // `today` / `lastHour` pills were replaced by `appBundleIds` +
-// `dateRange` (Director-Brain audit, dogfood-v1 gaps #1 + #2).
+// `dateRange` (brain track audit, dogfood-v1 gaps #1 + #2).
 
 import XCTest
 @testable import RecallUIKit

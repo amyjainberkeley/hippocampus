@@ -12,7 +12,7 @@
 //! recent / search / show. Adding a write subcommand would muddy the
 //! read-only promise printed in its help text. Keep them separate.
 //!
-//! # CSO note
+//! # Security review note
 //!
 //! This binary writes to the encrypted brain store (`mci.sqlite`) and
 //! is therefore protected-set adjacent. It calls only the new

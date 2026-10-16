@@ -2,7 +2,7 @@
 //
 // SuppressionCascadeAllowlistTests — integration between the bundled
 // `known-safe-apps.toml` seed and `SuppressionCascade`'s §1 source-
-// level allow path. Pins the ADR-0017 §3.1 invariant: the CSO-ratified
+// level allow path. Pins the ADR-0017 §3.1 invariant: the reviewed
 // allowlist STRICTLY ADDS `.allow` decisions and cannot widen past any
 // §2-§7 redaction signal.
 //
@@ -114,9 +114,9 @@ final class SuppressionCascadeAllowlistTests: XCTestCase {
     }
 
     /// §1 user-denylist STILL fires when a bundle is on BOTH the
-    /// user denylist and the CSO allowlist. The user's deny intent
+    /// user denylist and the security review allowlist. The user's deny intent
     /// wins. (This shape is hypothetical — the bundled seed is
-    /// CSO-curated and users in v1 can only ADD to the denylist —
+    /// Reviewed and users in v1 can only ADD to the denylist —
     /// but the cascade order guarantees it.)
     func testDenylistOverridesAllowlist() throws {
         let cascade = try cascadeWithBundledAllowlist(

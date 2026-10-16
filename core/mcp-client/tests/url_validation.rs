@@ -1,6 +1,6 @@
 //! V2-MCP-2 URL validation integration suite. Pinned acceptance
 //! evidence for the ADR-0001 amendment loopback gate per the driver-
-//! CSO audit table (row #1 + the dispatch's ACCEPT/REJECT enumeration).
+//! Security audit table (row #1 + the dispatch's ACCEPT/REJECT enumeration).
 //!
 //! Distinct from the lib-internal tests in
 //! `src/transport/loopback.rs` to keep the acceptance list in a place

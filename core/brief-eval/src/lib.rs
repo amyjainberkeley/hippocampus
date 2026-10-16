@@ -6,7 +6,7 @@
 //! hand-authored gold reference, and reports a structured pass/fail
 //! per metric.
 //!
-//! The eval is the gate behind `DOGFOOD_V1.md` item #20: when the CEO
+//! The eval is the gate behind `DOGFOOD_V1.md` item #20: when the owner
 //! runs the Core ML conversion (`OWNER_TASKS` #17) and points the eval
 //! at the resulting `.mlmodelc`, the report decides whether `Qwen3-1.7B`
 //! INT4 is good enough to ship.

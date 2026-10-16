@@ -2,7 +2,7 @@
 
 Non-protected-set (AGENT_PROTOCOL §5) helpers. They parse/observe; they
 change no `core/**` or `adapters/macos/**` capture/crypto/sync code, so
-this directory carries **no CSO gate**. The *runtime results* they
+this directory carries **no security review gate**. The *runtime results* they
 produce feed the ADR-0013 §7 / Amendment-1 gate decisions, so the
 durable artifact is the committed audit note, not these scripts.
 
@@ -18,7 +18,7 @@ Verifies the merged `// UNVERIFIED` shapes on a real screen:
 
 It does **not** verify PR-3 (`VideoToolboxHEVCEncoder`'s live
 `VTCompressionSession` — `main.swift` uses the no-op
-`DeferredVideoToolboxEncoder`; wiring the real one is a CSO-gated
+`DeferredVideoToolboxEncoder`; wiring the real one is a review-gated
 default flip behind the green §7 corpus). It is **not** the ADR-0013 §7
 secure-surface corpus and **not** the G2 footprint proof.
 

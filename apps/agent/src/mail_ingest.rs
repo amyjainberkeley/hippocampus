@@ -35,7 +35,7 @@
 //! - `tab_id = None`
 //! - `text = "[REDACTED:MAIL_HEADER_MATCH] from=<sender_domain>"` —
 //!   the sender eTLD+1 is the categorical match key that fired the
-//!   cascade (chase.com, paypal.com, …); it is itself a CSO-curated
+//!   cascade (chase.com, paypal.com, …); it is itself a reviewed
 //!   public marketing domain, not user-identifying content. Subject
 //!   is dropped; body is dropped.
 //!
@@ -59,7 +59,7 @@
 //! the pump propagates them — V2-P10's user-curated allowlist UI is
 //! the surface that prompts the user. The pump itself does NOT
 //! auto-enable on agent start in V2-P8b (see [`run_account`] — it
-//! is only invoked from a CEO-attended dispatch path, not the
+//! is only invoked from a owner-attended dispatch path, not the
 //! production supervisor).
 
 #![cfg(target_os = "macos")]
@@ -84,8 +84,8 @@ use crate::brain_ingest::compose_context_header;
 /// 64-slot recommendation in `mci_mail_reader::watch::watch_inbox`.
 pub const DEFAULT_WATCH_CHANNEL_CAPACITY: usize = 64;
 
-/// Content-free counters surfaced for the CRS Telemetry-Gap analyst
-/// and the CSO audit. All values are `u64` totals since the pump
+/// Content-free counters surfaced for research Telemetry-Gap analyst
+/// and the security audit. All values are `u64` totals since the pump
 /// was constructed; identical discipline to
 /// [`crate::brain_ingest::BrainIngestor::events_ingested_count`].
 #[derive(Debug, Default)]
@@ -279,7 +279,7 @@ impl MailIngestPump {
         reason: MailRedactionReason,
     ) -> Result<MailIngestOutcome, MailIngestError> {
         // Content-free audit row. `sender_domain` is the categorical
-        // eTLD+1 that matched a CSO-curated public marketing domain;
+        // eTLD+1 that matched a reviewed public marketing domain;
         // it is NOT the full sender address. Subject + body bytes
         // from the emlx never reach this code path.
         let text = format!("{REDACTED_BODY_MARKER} from={sender_domain}");

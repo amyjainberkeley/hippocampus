@@ -13,7 +13,7 @@
 // `SQLITE_OPEN_READ_ONLY` (see `core/src/store/open.rs::open_readonly`).
 // The C ABI does not export any mutating function — there is no
 // `put` / `delete` / `mutate_*` extern fn — so the recall-ui structurally
-// cannot modify the brain. The CSO load-bearing test
+// cannot modify the brain. The security review load-bearing test
 // `tests/readonly_invariant.rs::ffi_open_yields_a_strictly_read_only_brain`
 // in `mci-brain-ffi` proves the SQLite-driver-level enforcement.
 //

@@ -25,7 +25,7 @@ members = [
     # OS-free per ADR-0003. Stdio transport is process-local IPC — NOT
     # network — so ADR-0001 NG3 zero-network discipline is preserved.
     # The HTTP/SSE transport (V2-MCP-2) carries the ADR-0001 amendment
-    # in a separate, CSO-gated PR.
+    # in a separate, review-gated PR.
     "core/mcp-client",
     # macOS-only Rust adapter: Core ML / ANE backend for the
     # snowflake-arctic-embed-s embedder. Deps + lib body are gated by
@@ -54,7 +54,7 @@ members = [
     # Index SQLite reader + FSEvents watcher) for V2-P8a. READ-ONLY library
     # — no event emit, no brain write, no cascade. The cascade-equivalent
     # + ADR-0030 §3(c)(ii) parsed-header check + corpus + allowlist edit
-    # ship in V2-P8b (CSO-gated). Deps + lib body gated by `cfg(target_os
+    # ship in V2-P8b (review-gated). Deps + lib body gated by `cfg(target_os
     # = "macos")` so a Linux `cargo build --workspace` compiles it empty.
     # See `adapters/macos/mci-mail-reader/Cargo.toml` and
     # `docs/research/mail-envelope-schema-2026-05-29.md`.
@@ -71,7 +71,7 @@ members = [
     # Notes, and Reminders. SCAFFOLD ONLY — types + public API signatures,
     # all reads return empty vecs. Wire-up (real EventKit / AppleScript
     # reads + per-plugin cascade-equivalent + Automation TCC gate) is a
-    # CSO-gated PR in cycle 8.60+. Lib bodies gated `cfg(target_os =
+    # Review-gated PR in cycle 8.60+. Lib bodies gated `cfg(target_os =
     # "macos")` so `cargo build --workspace` on Linux compiles them empty.
     # See `docs/decisions/0037-deep-hook-plugins-calendar-notes-reminders-scaffold.md`.
     "adapters/macos/mci-calendar-reader",
@@ -131,7 +131,7 @@ debug-assertions = true
 # `perf` profile — release-tier optimization for `#[ignore]` perf harnesses
 # like `core/brain/tests/recall_perf_100k.rs`. Inherits `release` codegen
 # but keeps `debug-assertions = true` on mci-core (same reason as the
-# `[profile.bench.package.mci-core]` override above — the CSO tripwire in
+# `[profile.bench.package.mci-core]` override above — the security review tripwire in
 # `mci-core::crypto::key_wrap` refuses to compile without debug-assertions
 # when the `insecure-test-keywrap` dev-dep feature is on). Run:
 #

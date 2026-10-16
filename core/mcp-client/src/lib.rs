@@ -29,8 +29,8 @@
 //! # Not in scope (separate PRs)
 //!
 //! - Materialize-to-brain logic + cascade-equivalent redaction at
-//!   ingest — V2-MCP-3 (cycle 8.30, Director-Brain). Note that per
-//!   CRS Fork-6 = A ratified 2026-05-31, MCP-server response content
+//!   ingest — V2-MCP-3 (cycle 8.30, brain track). Note that per
+//!   Research Fork-6 = A ratified 2026-05-31, MCP-server response content
 //!   ingests as-is into the brain; the cascade-equivalent path here
 //!   refers to the deep-hook surfaces (Messages / Mail) which run
 //!   through a DIFFERENT pipeline.

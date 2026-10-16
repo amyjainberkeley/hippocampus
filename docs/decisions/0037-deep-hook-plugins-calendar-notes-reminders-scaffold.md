@@ -26,13 +26,13 @@ Today MCI has deep-hook read paths for two of the five load-bearing sources:
 
 Three independent gates hold up the wire-up:
 
-1. **CSO veto-gate on Automation TCC per-target surfaces.** Each of Calendar / Reminders / Notes needs a distinct Automation TCC grant (macOS 13+). The user-facing surface (a per-app permission card in V2-P10 onboarding + a deep-link into System Settings → Privacy & Security → the right pane) has not been designed yet, and CSO must sign off on the per-target grant flow before AppleScript / EventKit calls ship in a signed binary.
+1. **security review veto-gate on Automation TCC per-target surfaces.** Each of Calendar / Reminders / Notes needs a distinct Automation TCC grant (macOS 13+). The user-facing surface (a per-app permission card in V2-P10 onboarding + a deep-link into System Settings → Privacy & Security → the right pane) has not been designed yet, and security review must sign off on the per-target grant flow before AppleScript / EventKit calls ship in a signed binary.
 2. **AppleScript engine choice for Notes.** Notes.app has no public framework; the only supported path is AppleScript. The wire-up must pick between spawning `osascript` (simple, subprocess overhead, no long-lived state) and linking `objc2-osakit` (in-process, more capable, larger dep surface). This is a per-plugin cascade-equivalent design decision that belongs on the wire-up PR, not the scaffold.
 3. **Per-plugin cascade-equivalent under ADR-0032 §3(f).** Each source needs its own decision table (analogous to the V2-P7 Messages §3(f) table). Calendar events with private-event flags, Notes in a "Passwords" folder, Reminders synced from a shared list — each carries a distinct sensitive-content threat model. The tables live in the wire-up PR alongside the cascade-equivalent modules in `core/brain/src/redaction/`.
 
 Scaffolding now buys two things:
 
-- **Locks the wire-format shape.** Consumers on the Tier2 pipeline (Director-Brain's V2-P4 regex extractor + V2-P5 Qwen NER + V2-P6 AliasResolver + `episode_edges` writer) can pattern-match against `CalendarEvent` / `Note` / `Reminder` today. When the wire-up lands, only the reader guts change — the consumer code stays put.
+- **Locks the wire-format shape.** Consumers on the Tier2 pipeline (brain track's V2-P4 regex extractor + V2-P5 Qwen NER + V2-P6 AliasResolver + `episode_edges` writer) can pattern-match against `CalendarEvent` / `Note` / `Reminder` today. When the wire-up lands, only the reader guts change — the consumer code stays put.
 - **Locks the workspace membership.** `cargo build --workspace` includes the three new crates; drift between scaffold and wire-up cannot silently accumulate.
 
 ## Decision
@@ -62,15 +62,15 @@ Each crate:
 
 Notes explicitly does NOT use `NoteStore.sqlite` under `~/Group Containers/group.com.apple.notes/`: the schema is undocumented, cross-encrypted with a per-account Keychain key, and Apple can break it at any point release. AppleScript is the only supported path.
 
-### 3. CSO gates required before wire-up PR merges
+### 3. Security review gates required before wire-up PR merges
 
-The wire-up PR (cycle 8.60+) MUST pass CSO review on all of the following before merge:
+The wire-up PR (cycle 8.60+) MUST pass security review on all of the following before merge:
 
 1. **Info.plist strings.** Add `NSCalendarsFullAccessUsageDescription`, `NSRemindersFullAccessUsageDescription`, and (for Notes) confirm the existing `NSAppleEventsUsageDescription` copy covers the Notes automation use case explicitly.
 2. **Per-target Automation TCC probe.** Land a `AEDeterminePermissionToAutomateTarget`-based status probe for Notes (mirrors the browser AppleScript probe already shipped in Phase 2 context join). Land an `EKAuthorizationStatus` probe for Calendar + Reminders.
-3. **Per-plugin cascade-equivalents.** Author `core/brain/src/redaction/calendar_plugin.rs`, `notes_plugin.rs`, `reminders_plugin.rs` — each following the ADR-0032 §3(f) decision-table pattern. First-match-wins predicates + a `drop_reason` enum + a `fired_rules: Vec<&'static str>` telemetry surface. CSO signs off on each table.
+3. **Per-plugin cascade-equivalents.** Author `core/brain/src/redaction/calendar_plugin.rs`, `notes_plugin.rs`, `reminders_plugin.rs` — each following the ADR-0032 §3(f) decision-table pattern. First-match-wins predicates + a `drop_reason` enum + a `fired_rules: Vec<&'static str>` telemetry surface. Security review signs off on each table.
 4. **Default-OFF master switch.** Each config type ships with `plugin_enabled = false`. The V2-P10 onboarding is the only surface that flips it on, and only after the corresponding TCC grant is confirmed present.
-5. **AppleScript sandbox posture for Notes.** If the wire-up chooses `osascript`, CSO must approve the subprocess argv shape (avoid injection risk if any user-controlled string reaches the script body — none should, but the review is binding). If the wire-up chooses `objc2-osakit`, CSO must approve the new dep + its transitive graph.
+5. **AppleScript sandbox posture for Notes.** If the wire-up chooses `osascript`, security review must approve the subprocess argv shape (avoid injection risk if any user-controlled string reaches the script body — none should, but the review is binding). If the wire-up chooses `objc2-osakit`, security review must approve the new dep + its transitive graph.
 6. **Onboarding UI copy.** The permission card wording for each of Calendar / Notes / Reminders must pass the same review as the existing Messages / Mail cards.
 
 ### 4. Wire-format shape (stable now, wired later)
@@ -138,7 +138,7 @@ This is a UI-only change; no runtime path today reads any of the three sources. 
 
 - Locks the wire-format shape early; Tier2 pipeline can develop against the types without waiting on TCC review.
 - Keeps `cargo build --workspace` green with the new crates present (Linux CI stays clean via the `cfg(target_os = "macos")` gate).
-- Makes the CSO-gated wire-up PR a strict superset: it changes reader guts and adds cascade-equivalents, but does not re-open the workspace / type-surface decision.
+- Makes the review-gated wire-up PR a strict superset: it changes reader guts and adds cascade-equivalents, but does not re-open the workspace / type-surface decision.
 - Signals the deferred coverage to users honestly ("Coming soon" tooltip) rather than pretending the toggle is functional.
 
 ### Negative
@@ -153,5 +153,5 @@ This is a UI-only change; no runtime path today reads any of the three sources. 
 ## Status transition
 
 - **Proposed:** on landing of this scaffold PR (cycle 8.5x).
-- **Ratified:** on landing of the wire-up PR (cycle 8.60+) after CSO sign-off on §3(1)–(6).
-- **Superseded:** if a later ADR consolidates all deep-hook readers into a single trait-object contract (Director-Brain has floated this; not scoped here).
+- **Ratified:** on landing of the wire-up PR (cycle 8.60+) after security review on §3(1)–(6).
+- **Superseded:** if a later ADR consolidates all deep-hook readers into a single trait-object contract (brain track has floated this; not scoped here).

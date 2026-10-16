@@ -112,7 +112,7 @@ pub fn watch_path(
 
     // Non-recursive — `~/Library/Messages/` contains the three SQLite
     // files at the top level, plus a `Attachments/` subdirectory which
-    // V2-P7 deliberately does NOT walk into (CSO §5 protected-set:
+    // V2-P7 deliberately does NOT walk into (security review §5 protected-set:
     // attachment content is out-of-scope for the read path).
     watcher
         .watch(root, RecursiveMode::NonRecursive)

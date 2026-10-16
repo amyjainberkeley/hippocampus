@@ -1,7 +1,7 @@
-//! Recall-latency perf harness at 100K events — closes CRS G-perf.
+//! Recall-latency perf harness at 100K events — closes research G-perf.
 //!
 //! Seeds a fresh `SqlCipherBrainStore` with 100 000 synthetic events
-//! (realistic app / content-length / entity distribution per the CRS
+//! (realistic app / content-length / entity distribution per research
 //! telemetry-gap memo), runs a canonical query workload, and reports
 //! P50 / P95 / P99 latency for both cold-cache and steady-state warm-cache
 //! paths. Emits results as JSONL to stdout AND to a machine-readable
@@ -21,7 +21,7 @@
 //!
 //! (The `perf` profile is defined at the workspace root; it inherits
 //! `release` codegen but keeps `debug-assertions = true` on `mci-core`
-//! so the CSO tripwire in `mci_core::crypto::key_wrap` — which refuses
+//! so the security review tripwire in `mci_core::crypto::key_wrap` — which refuses
 //! to compile the `insecure-test-keywrap` dev-dep feature in a real
 //! release build — is satisfied. Same pattern as the `[profile.bench]`
 //! override for `benches/hybrid_recall.rs`.)
@@ -46,7 +46,7 @@
 //!   under `tempfile::tempdir()` so the DB file is on the same filesystem
 //!   as the harness process but its pages are warm from seeding.
 //!
-//! Per ADR-0016 §6 + the CRS G-perf memo, the initial baseline recorded
+//! Per ADR-0016 §6 + research G-perf memo, the initial baseline recorded
 //! by this harness establishes ground truth; subsequent runs compare
 //! against `docs/eval/recall-perf-baseline.json`.
 
@@ -91,7 +91,7 @@ const MICROS_PER_MIN: u64 = 60_000_000;
 const RETRIEVE_LIMIT: usize = 10;
 
 /// Realistic app-bundle distribution (fractions sum to 100).
-/// Source: CRS 2026-07 telemetry-gap memo §3 (extended-dictation cohort).
+/// Source: research 2026-07 telemetry-gap memo §3 (extended-dictation cohort).
 const APP_DISTRIBUTION: &[(&str, u32)] = &[
     ("com.apple.Safari", 30),
     ("com.apple.MobileSMS", 20),
@@ -156,7 +156,7 @@ const WORDS: &[&str] = &[
 ];
 
 /// Rare-entity pool (mixed persons / orgs / topics). 60% of events get one
-/// entity injected per the CRS memo's realistic-distribution row.
+/// entity injected per research memo's realistic-distribution row.
 ///
 /// Historically kept FTS5-safe by construction (no `:` / `"` / `-`); the
 /// `fts_sanitizer` pass (cycle 8.55 URL-panic fix) now handles those

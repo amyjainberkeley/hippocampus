@@ -3,7 +3,7 @@
 #
 # Runs `core/brain/tests/recall_perf_100k.rs` (100K-event seed + 100-query
 # workload, cold + steady-state) and echoes the JSON result to stdout.
-# Closes CRS G-perf: makes the extended-dictation latency check a one-line
+# Closes research G-perf: makes the extended-dictation latency check a one-line
 # command instead of a Cargo incantation.
 #
 # Usage:

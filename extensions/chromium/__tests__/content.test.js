@@ -303,8 +303,8 @@ describe("extractPageContent — per-frame attribution (SH Fork E1)", () => {
     expect(result.text).toBe("Card number: ****  $42.00 USD");
   });
 
-  it("sub-frame in incognito still returns null (CSO defense-in-depth)", () => {
-    // The CSO invariant is FOUR layers — the iframe should bail at
+  it("sub-frame in incognito still returns null (security review defense-in-depth)", () => {
+    // The security review invariant is FOUR layers — the iframe should bail at
     // layer 2 (`inIncognitoContext`) regardless of frame depth.
     globalThis.chrome.extension.inIncognitoContext = true;
     globalThis.window.top = { id: "parent-window" };
@@ -325,7 +325,7 @@ describe("extractPageContent — per-frame attribution (SH Fork E1)", () => {
   });
 });
 
-describe("incognito exclusion (CSO invariant)", () => {
+describe("incognito exclusion (security review invariant)", () => {
   beforeEach(() => {
     setupDOM();
     // Reset to non-incognito between tests so failures are obvious.

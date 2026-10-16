@@ -35,7 +35,7 @@ searchable brain. Phase 3+ per ADR-0016.
 ## When to edit here
 
 Any change to embedding, retrieval, chunking, extraction, redaction,
-or the brain store schema. Schema/migration changes are CSO-gated
+or the brain store schema. Schema/migration changes are review-gated
 (they touch the encrypted store). If the change is OS-specific
 (e.g., a Core ML model wrapper), it belongs in
 `../../adapters/<os>/mci-embed-<os>/`, not here.

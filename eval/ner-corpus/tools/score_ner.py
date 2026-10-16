@@ -31,7 +31,7 @@ Schema (matches build_corpus.py / Tier1Match / Tier2Match):
     set, e.g. '{"PER":"person_name","ORG":"organization","LOC":"location"}'.
 
 KIND set is config-driven (the `--kinds` flag / KINDS default) so that the
-Director-defined `date`/`time` strings can be renamed in one place once the
+Implementer-defined `date`/`time` strings can be renamed in one place once the
 V2-P4 Date/Time regex lands without touching the matcher.
 
 Usage:

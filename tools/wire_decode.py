@@ -48,7 +48,7 @@ import sys
 from collections import Counter
 
 MAGIC = 0x4D
-# wire bumped 0x08->0x09 (Phase 6 PR 6 — PR #226 §5.1 + CTO §4 Phase 6
+# wire bumped 0x08->0x09 (Phase 6 PR 6 — PR #226 §5.1 + plan §4 Phase 6
 # PR 6 + S13 acceptance gate). HelperHealth gained four trailing
 # content-free fields: failsafe_by_app (cap 8 LRU), cpu_pct_micro
 # (u32), rss_bytes (u64), tracker_alive_at_us (u64 — V2-P1 PR 13

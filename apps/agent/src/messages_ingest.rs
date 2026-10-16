@@ -66,7 +66,7 @@
 //! may layer an explicit "backfill since onboarding" surface; until
 //! then, only new messages flow.
 //!
-//! # Cascade-equivalent contract (driver-CSO audit row 4 + 6)
+//! # Cascade-equivalent contract (security audit row 4 + 6)
 //!
 //! Every poll → for-each-row → builds a
 //! [`MessagesPluginEvent`] → invokes
@@ -105,8 +105,8 @@ use crate::brain_ingest::compose_context_header;
 /// [`crate::mail_ingest::DEFAULT_WATCH_CHANNEL_CAPACITY`].
 pub const DEFAULT_WATCH_CHANNEL_CAPACITY: usize = 64;
 
-/// Content-free counters surfaced for the CRS Telemetry-Gap analyst
-/// and the CSO audit. The per-drop-reason counters split the cascade
+/// Content-free counters surfaced for research Telemetry-Gap analyst
+/// and the security audit. The per-drop-reason counters split the cascade
 /// outcome distribution so silent-no-events is distinguishable from
 /// silent-all-dropped-by-cascade.
 #[derive(Debug, Default)]
@@ -213,7 +213,7 @@ pub struct MessagesPluginPump {
     /// extraction at all, so Messages events yielded zero entities.
     tier1: Tier1Extractor,
     /// Cumulative `entity_mentions` rows Tier 1 has inserted on the Allow
-    /// arm. Content-free `u64` CRS Telemetry-Gap counter, identical
+    /// arm. Content-free `u64` research Telemetry-Gap counter, identical
     /// discipline to `BrainPump::tier1_mentions_persisted`.
     tier1_mentions_persisted: AtomicU64,
 }
@@ -257,7 +257,7 @@ impl MessagesPluginPump {
     }
 
     /// Cumulative `entity_mentions` rows the Tier 1 extractor has inserted
-    /// on the Allow arm. Content-free counter for the CRS Telemetry-Gap
+    /// on the Allow arm. Content-free counter for research Telemetry-Gap
     /// analyst (a regression in Messages "who" yield is visible here).
     #[must_use]
     pub fn tier1_mentions_persisted_count(&self) -> u64 {
@@ -666,7 +666,7 @@ mod tests {
         }
     }
 
-    // ----- Decision routing (driver-CSO audit rows 4 + 6) -----
+    // ----- Decision routing (security audit rows 4 + 6) -----
 
     #[test]
     fn allow_outcome_persists_row_with_messages_bundle_id() {
@@ -750,7 +750,7 @@ mod tests {
 
     #[test]
     fn outgoing_to_sensitive_recipient_now_drops() {
-        // PRIVACY IMPROVEMENT (driver-CSO): before this change an outgoing row
+        // PRIVACY IMPROVEMENT (security): before this change an outgoing row
         // carried no participant, so the sensitive-participant-domain gate
         // never saw the recipient — a user texting alerts@chase.com was
         // un-vetted on the SENT direction. Now the resolved recipient feeds
@@ -851,7 +851,7 @@ mod tests {
 
     #[test]
     fn cascade_routes_otp_through_in_place_redaction_before_brain() {
-        // Driver-CSO audit row 4: every persisted Event.text MUST
+        // Security audit row 4: every persisted Event.text MUST
         // carry the §3(a) regex substitutions BEFORE BrainStore sees
         // it. We assert: the raw OTP digits do NOT survive in the
         // persisted row.
@@ -976,7 +976,7 @@ mod tests {
 
     #[test]
     fn ingest_since_watermark_uses_chat_db_fixture_to_ingest_redacted_otp() {
-        // Driver-CSO audit row 12: end-to-end check from a fixture
+        // Security audit row 12: end-to-end check from a fixture
         // chat.db through the cascade to a persisted Event with
         // §3(a) substitutions visible. This is the test that "kills
         // the cascade is dead-code" scenario at unit-level — pair
@@ -1078,7 +1078,7 @@ mod tests {
 
     #[test]
     fn ingest_since_watermark_with_no_new_rows_returns_zero() {
-        // Driver-CSO audit row 11 — fresh install / no new content:
+        // Security audit row 11 — fresh install / no new content:
         // the pump can be running but emit zero events.
         use tempfile::tempdir;
         let tmp = tempdir().unwrap();

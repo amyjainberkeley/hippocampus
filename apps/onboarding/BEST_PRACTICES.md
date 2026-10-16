@@ -55,7 +55,7 @@ consent click, and how permissions are asked.
    (`ScreenRecordingProbe.swift`). Tests use injected stand-ins and
    never touch the real permission database.
 
-6. **Copy is CSO-adjacent.** Permission copy and the Promise set
+6. **Copy is security review-adjacent.** Permission copy and the Promise set
    the person's expectations about what is read and kept. Every
    string lives in `OnboardingCopy`, and every claim there is checked
    in code first (`scripts/test-onboarding-product-truth.sh` holds the

@@ -245,7 +245,7 @@ pub enum FrameStatus {
     /// New content was delivered (the common case).
     Complete,
     /// The OS reported the screen as idle. **Not authoritative on its own** —
-    /// per the CRS scan, `SCFrameStatus.idle` is not trustworthy as the only
+    /// per research scan, `SCFrameStatus.idle` is not trustworthy as the only
     /// change signal; combine with last-input-idle + dirty-rect + dHash.
     Idle,
     /// The OS suspended the stream (low-power, thermal, user pause, etc).

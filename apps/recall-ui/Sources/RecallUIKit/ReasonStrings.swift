@@ -38,7 +38,7 @@ public enum PrivacyReason: UInt8, Sendable, CaseIterable, Equatable {
 public enum ReasonStrings {
     /// The ADR-0017 §5.2 friendly-string table, verbatim. Each entry
     /// is content-free: it talks about the cascade decision, never the
-    /// data the cascade saw. COO copy review is eligible; until that
+    /// data the cascade saw. Copy review is eligible; until that
     /// PR lands these strings ARE the v1 copy.
     public static let table: [UInt8: String] = [
         1: "App was on the denylist.",

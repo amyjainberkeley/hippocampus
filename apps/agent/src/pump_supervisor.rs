@@ -18,7 +18,7 @@
 //!    logged + treated as empty so the agent never refuses to start.
 //! 2. Builds the deep-hook-enabled set (which requires `capture_enabled =
 //!    true` AND `deep_hook_enabled = true` per ADR-0017 §3.4 binding —
-//!    driver-CSO audit row 1).
+//!    Security audit row 1).
 //! 3. For each supported bundle (`com.apple.MobileSMS`, `com.apple.mail`):
 //!    - Target state from allowlist (`Off` or `WantRunning`).
 //!    - Current state from supervisor: `Off`, `AccessDenied`, or
@@ -44,7 +44,7 @@
 //! state at `Off` rather than `AccessDenied` so a user who isn't an
 //! iMessage user doesn't see a permission warning.
 //!
-//! # Driver-CSO audit row 3
+//! # Security audit row 3
 //!
 //! The probe runs INSIDE [`Self::reconcile_bundle`] BEFORE
 //! `tokio::spawn(...)` — there is no code path that constructs a
@@ -284,7 +284,7 @@ impl PumpSupervisor {
         if !want_running {
             // User has not opted in (or has explicitly toggled off).
             // Stop any live pump task and force state → Off. This is
-            // the structural enforcement for driver-CSO audit row 10
+            // the structural enforcement for security audit row 10
             // (deep_hook_enabled=false → no pump).
             if current == PumpState::Running {
                 let task = {
@@ -306,7 +306,7 @@ impl PumpSupervisor {
         }
 
         // The user wants this pump running. If it's already Running,
-        // nothing to do. Otherwise, probe + start. Driver-CSO audit
+        // nothing to do. Otherwise, probe + start. Security audit
         // row 3: the probe runs BEFORE the spawn, every time.
         if current == PumpState::Running {
             return;
@@ -568,11 +568,11 @@ mod tests {
         ))
     }
 
-    // ----- Driver-CSO audit rows -----
+    // ----- Security audit rows -----
 
     #[tokio::test(flavor = "current_thread")]
     async fn audit_row_11_fresh_install_no_allowlist_means_zero_pumps() {
-        // Driver-CSO audit row 11: fresh install with no user-allowlist.toml
+        // Security audit row 11: fresh install with no user-allowlist.toml
         // → zero MessagesPluginPump events; proves the gate works.
         let tmp = tempfile::tempdir().unwrap();
         let allowlist_path = tmp.path().join("user-allowlist.toml");
@@ -594,7 +594,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn audit_row_10_deep_hook_off_keeps_pump_inert() {
-        // Driver-CSO audit row 10: deep_hook_enabled=false → no pump
+        // Security audit row 10: deep_hook_enabled=false → no pump
         // even if capture is on AND even if the cascade allowlist
         // baseline includes the bundle.
         let tmp = tempfile::tempdir().unwrap();
@@ -616,7 +616,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn audit_row_1_both_bits_required() {
-        // Driver-CSO audit row 1: deep_hook_enabled = true AND
+        // Security audit row 1: deep_hook_enabled = true AND
         // capture_enabled = true (BOTH required per ADR-0017 §3.4).
         // Setting deep_hook=true with capture=false MUST NOT start
         // the pump.
@@ -638,7 +638,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn audit_row_3_fda_probe_runs_before_spawn() {
-        // Driver-CSO audit row 3: FDA-grant probe runs BEFORE pump
+        // Security audit row 3: FDA-grant probe runs BEFORE pump
         // start, never after. With Denied probe, state is
         // AccessDenied and no pump task is registered.
         let tmp = tempfile::tempdir().unwrap();
@@ -659,7 +659,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn audit_row_9_access_denied_surfaces_as_state() {
-        // Driver-CSO audit row 9: AccessDenied state does NOT silently
+        // Security audit row 9: AccessDenied state does NOT silently
         // fail. The supervisor surfaces the state via the snapshot
         // accessor (which any future status-icon / Recall-UI consumer
         // reads). Logging is structured tracing::warn! which lands in
@@ -744,7 +744,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn audit_row_8_incognito_does_not_apply_to_messages() {
-        // Driver-CSO audit row 8: incognito-exclusion is a capture-
+        // Security audit row 8: incognito-exclusion is a capture-
         // side mechanism (NSWindow.sharingType=.none / per-browser
         // window-title heuristics per ADR-0017 §3.3). It does NOT
         // apply to the deep-hook plugin path because we are reading

@@ -22,8 +22,8 @@
 //! graph; the runtime hands raw UTF-8 strings to the model." That plan
 //! is **impossible** per the Core ML MIL spec — there are no string ops,
 //! so `coremltools` cannot convert a graph whose input is a `String` and
-//! whose first hidden layer is a tokenizer. CRS Arxiv/OSS scout
-//! (2026-05-22) verified this and the CEO ratified the pivot the same
+//! whose first hidden layer is a tokenizer. Research Arxiv/OSS scout
+//! (2026-05-22) verified this and the owner ratified the pivot the same
 //! day. Industry-standard pattern (Apple ml-stable-diffusion, `WhisperKit`,
 //! `HuggingFace`'s own exporters): tokenize on the host, pass token-IDs
 //! into the graph.

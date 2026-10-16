@@ -29,7 +29,7 @@
 //! # Protected set
 //!
 //! This file is **protected-set** per `AGENT_PROTOCOL` §5 — it writes to
-//! the `mci.sqlite` store and wraps the at-rest crypto seam. The CSO
+//! the `mci.sqlite` store and wraps the at-rest crypto seam. The security review
 //! sign-off block on PR P3.2 asserts the ADR-0008 + ADR-0016 §4
 //! invariants in source (see the PR body).
 
@@ -647,7 +647,7 @@ impl SqlCipherBrainStore {
     /// agent (writer-side) is expected to have applied the brain schema
     /// first via [`SqlCipherBrainStore::new`]. Calling `put_event` on a
     /// store constructed this way fails at the driver level with
-    /// `SQLITE_READONLY` (the CSO invariant in ADR-0017 §5 / ADR-0016 §4.3
+    /// `SQLITE_READONLY` (the security review invariant in ADR-0017 §5 / ADR-0016 §4.3
     /// that the recall UI cannot tamper with the brain).
     ///
     /// # Errors
@@ -1765,7 +1765,7 @@ impl SqlCipherBrainStore {
     /// SELECT-only — no write side. Rows with `app_bundle_id IS NULL` are
     /// excluded so the recall-UI filter pills never carry an unnamed entry.
     ///
-    /// Surface for the recall-UI's dynamic per-app filter pills (`Director-
+    /// Surface for the recall-UI's dynamic per-app filter pills (`lead-
     /// Brain` audit, dogfood-v1 gap #1). Counts come from the `events` table
     /// (post-cascade only — suppressed events never reach the store, per
     /// ADR-0016 §4.3), so the result is content-free aggregate metadata.
@@ -3711,7 +3711,7 @@ fn tab_id_column_present(tx: &rusqlite::Transaction<'_>) -> rusqlite::Result<boo
 /// Map `mci_core::store::StoreError` into the brain's `StoreError`. Wrong
 /// key / driver-level open failure / DDL errors all surface as
 /// `Backend(_)` — callers above the brain trait don't need to distinguish
-/// (they treat the store as opaque); the CSO-protected detail lives in
+/// (they treat the store as opaque); the review-protected detail lives in
 /// the `mci-core` log line.
 fn map_core_err(e: &CoreStoreError) -> StoreError {
     StoreError::Backend(format!("mci-core store: {e}"))
@@ -4376,7 +4376,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
                 r.map_err(|e| StoreError::Backend(format!("row vec scan: {e}")))?;
             if blob.len() != EMBEDDING_BYTES {
                 // Mis-sized blob — skip rather than fail the whole query.
-                // The CRS Telemetry-Gap analyst would catch this as a
+                // Research Telemetry-Gap analyst would catch this as a
                 // schema regression; this branch is the run-time floor.
                 continue;
             }
@@ -4964,7 +4964,7 @@ impl crate::BrainStore for SqlCipherBrainStore {
         // never appears: `entity_identities` only ever holds the resolver's
         // alias allowlist. Ordered for the consolidator's single-pass group.
         //
-        // FORWARD NOTE (CSO): the `episodes` table has no per-episode
+        // FORWARD NOTE (security review): the `episodes` table has no per-episode
         // privacy flag today. When V2-P7+ adds one (incognito / excluded
         // episodes), this WHERE clause MUST gain `AND ep.is_private = 0`
         // (joining `episodes`) so a private episode is never linked. Until

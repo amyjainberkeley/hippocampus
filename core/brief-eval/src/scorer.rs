@@ -16,7 +16,7 @@ use crate::report::{FixtureOutcome, MetricScore};
 ///
 /// ADR-0028 §"Negative / tradeoff" cites ADR-0010 as the eval gate but
 /// is silent on numeric thresholds for INT4 quality. The defaults here
-/// are this PR's proposal; the CEO ratifies (or revises) when running
+/// are this PR's proposal; the owner ratifies (or revises) when running
 /// the eval against the real model after `OWNER_TASKS` #17.
 #[derive(Debug, Clone, Copy)]
 pub struct PassThresholds {

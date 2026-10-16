@@ -2,7 +2,7 @@
 //! `HealthLogRecord::wall_ts` field.
 //!
 //! Hand-rolled formatter — no `chrono` / `time` crate dep, in line
-//! with the CRS Security-Signal stance (iter-7 memo) on minimizing
+//! with research Security-Signal stance (iter-7 memo) on minimizing
 //! the dep surface. The format is a strict subset of RFC-3339:
 //! `YYYY-MM-DDTHH:MM:SS.sssZ` (UTC, millisecond precision, `Z`
 //! suffix). Sufficient for the live-workday measurement protocol +

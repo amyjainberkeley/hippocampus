@@ -9,7 +9,7 @@
 //! events, constructs a `LiveBrainReader`, wraps it in `Server`, and drives
 //! `Server::dispatch` directly. No subprocess, no stdio, no network.
 //!
-//! # CSO sign-off notes
+//! # Security review notes
 //!
 //! (a) No new write paths — tests use existing `BrainStore::put_event`.
 //! (b) Read-only handle via existing `LiveBrainReader::from_store_with_embedder`.

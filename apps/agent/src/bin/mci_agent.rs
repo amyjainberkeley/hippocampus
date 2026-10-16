@@ -871,7 +871,7 @@ async fn run_agent(args: Args) -> ExitCode {
             // ADR-0001 §amendment 2026-05-31. Construction-graph
             // wiring per audit rows #8 + #9: the boot helper builds
             // the registry, the agent holds it for the rest of the
-            // process lifetime, and V2-MCP-3 (cycle 8.30, Director-
+            // process lifetime, and V2-MCP-3 (cycle 8.30, lead-
             // Brain) picks it up. A missing config file is the
             // expected fresh-install state; failures are logged and
             // never abort startup. Runs BEFORE the brain-key check
@@ -1233,7 +1233,7 @@ async fn run_agent(args: Args) -> ExitCode {
                                 );
 
                                 // V2-P5 — Tier 2 Qwen NER idle-batch
-                                // worker (FORK 8 = A; CTO Phase 6 PR 9).
+                                // worker (FORK 8 = A; plan Phase 6 PR 9).
                                 // Reuses the brief author's Qwen3-1.7B
                                 // Core ML model when present on disk.
                                 // Polls
@@ -1264,7 +1264,7 @@ async fn run_agent(args: Args) -> ExitCode {
                                 // bundle, starts MessagesPluginPump +
                                 // MailIngestPump for any allowlist row
                                 // with capture_enabled=true AND
-                                // deep_hook_enabled=true. Driver-CSO
+                                // deep_hook_enabled=true. Security
                                 // audit row 7: construction-graph wiring
                                 // at integration site. Per
                                 // [[project-v2p1-unit-tests-passed-but-never-wired]]
@@ -1289,8 +1289,8 @@ async fn run_agent(args: Args) -> ExitCode {
                                 // `app_bundle_id = "mcp:<name>"` so
                                 // V2-P12 (Phase 7 chat surface) can
                                 // structurally apply prompt-injection
-                                // mitigation per CRS Fork-6 = A.
-                                // Driver-CSO audit row 7
+                                // mitigation per research Fork-6 = A.
+                                // Security audit row 7
                                 // (construction-graph wiring at
                                 // integration site) — per
                                 // [[project-v2p1-unit-tests-passed-but-never-wired]]
@@ -2552,7 +2552,7 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
     };
     let key = DbKey::from_bytes(key_bytes);
 
-    // P3.8 / CRS G3 fix: wire the query-side embedder so `mci_recall` runs
+    // P3.8 / research G3 fix: wire the query-side embedder so `mci_recall` runs
     // full ADR-0010 hybrid (FTS5 + semantic min-max CC), not lexical-only.
     // Mirrors the ingest-side `load_embedder_backend()` pattern (see
     // `run` path around line 391) but constructs `new_query` (adds the
@@ -4281,7 +4281,7 @@ fn spawn_pump_supervisor(
 /// aggregator runs anywhere the agent runs (its inputs are MCP
 /// servers the user registered; no OS-specific source).
 ///
-/// Driver-CSO audit row 7: `git log -S "McpAggregator::new" --
+/// Security audit row 7: `git log -S "McpAggregator::new" --
 /// apps/agent/src/bin/mci_agent.rs` returns this PR's commit per
 /// [[project-v2p1-unit-tests-passed-but-never-wired]] discipline.
 fn spawn_mcp_aggregator(

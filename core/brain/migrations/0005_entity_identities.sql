@@ -5,7 +5,7 @@
 -- SQLCipher-encrypted brain store and holds user-content-derived
 -- attribution (it asserts "alias entity X is the same real-world
 -- Person/Org/Location as the canonical identity Y"). It is a SCHEMA
--- change → the implementing PR (V2-P6) carries a FULLER CSO review
+-- change → the implementing PR (V2-P6) carries a FULLER security review
 -- note (not just a driver mini-audit). No capture-scope change, no new
 -- IPC, no new network surface — the zero-knowledge invariant (ADR-0001
 -- / ADR-0012 / ADR-0031) is preserved by construction; this migration

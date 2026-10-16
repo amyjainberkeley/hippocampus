@@ -312,7 +312,7 @@ final class SafariInboxReaderTests: XCTestCase {
     /// during that window would, without `SO_NOSIGPIPE`, raise
     /// `SIGPIPE` in the main GUI process — whose default disposition
     /// is process termination with a clean exit (no `.ips` report).
-    /// This is exactly the menu-bar-icon-disappears bug the CEO
+    /// This is exactly the menu-bar-icon-disappears bug the owner
     /// reported. `HippocampusApp.applicationDidFinishLaunching` also
     /// installs `SIG_IGN` for `SIGPIPE` process-wide; this socket-
     /// option is the surgical defense at the offending call site.

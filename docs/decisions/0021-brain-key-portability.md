@@ -91,11 +91,11 @@ A team tier with its own per-workspace key was planned here. It was withdrawn on
 2. **Hardware key (YubiKey / FIDO2).** Rejected for v1.0: too much friction for a consumer product.
 3. **QR code key transfer (scan from old Mac to new Mac).** Rejected: manual, error-prone, requires both devices online simultaneously. iCloud Keychain is strictly better for Apple users.
 
-## CSO sign-off (placeholder — owed at first protected-set PR)
+## Security review (placeholder — owed at first protected-set PR)
 
 Key management change. iCloud Keychain with `kSecAttrSynchronizable = true` relies on Apple's ADP E2E encryption. Argon2id parameters follow OWASP 2024 recommendations. Both paths preserve zero-knowledge. Each PR carries the sign-off block.
 
-— CSO, pending
+— Security review, pending
 
 ## References
 

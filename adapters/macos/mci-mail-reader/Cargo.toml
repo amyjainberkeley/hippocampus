@@ -21,7 +21,7 @@ workspace = true
 #
 # It does NOT ingest, does NOT touch the brain, does NOT emit wire-level
 # CaptureEvents. The cascade-equivalent + ADR-0030 §3(c)(ii) parsed-header
-# check + corpus + allowlist edit ship in V2-P8b (CSO-gated).
+# check + corpus + allowlist edit ship in V2-P8b (review-gated).
 #
 # Lib body is gated `#![cfg(target_os = "macos")]`; on non-macOS targets the
 # crate compiles as an empty library so `cargo build --workspace` is clean

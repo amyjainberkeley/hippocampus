@@ -20,7 +20,7 @@
 //! 1. **This PR (Phase D scaffold, cycle 8.5x).** Types + stubs + ADR-0037.
 //!    All reads return empty vecs. Onboarding UI shows a "Coming soon"
 //!    row with the deep-hook toggle disabled.
-//! 2. **CSO-gated wire-up PR (cycle 8.60+).** Real `EventKit` calls, the
+//! 2. **review-gated wire-up PR (cycle 8.60+).** Real `EventKit` calls, the
 //!    per-plugin cascade-equivalent per ADR-0032 §3(f) analogue, the
 //!    Automation TCC per-target grant flow (Calendar), and the brain-ingest
 //!    plumbing. That PR ships behind a `plugin_enabled = false` master

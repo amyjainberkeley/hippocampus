@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Convert Snowflake/snowflake-arctic-embed-s to Core ML .mlpackage.
 
-Wave-17 schema (CEO + CRS ratified 2026-05-22; fixed-shape erratum
+Wave-17 schema (owner ratified 2026-05-22; fixed-shape erratum
 2026-06-06):
 
     Input  input_ids       Int32     [1, 128]   (FIXED, not RangeDim)

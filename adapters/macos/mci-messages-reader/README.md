@@ -33,4 +33,4 @@ the watch/incremental-read strategy. Redaction rules live in
 `../../../core/brain/src/redaction/`, not here. Full Disk Access
 requirements and the TCC prompt copy are Hippocampus-app concerns —
 edit them under `../../../apps/hippocampus/`. Threat-model changes
-are CSO-gated.
+are review-gated.

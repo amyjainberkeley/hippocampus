@@ -3,7 +3,7 @@
 // UserAllowlistTOMLLoader — parse the user-mutable allowlist layer.
 //
 // PROTECTED-SET per AGENT_PROTOCOL §5. ADR-0017 §3.2 (V2-P10) adds a
-// second allowlist layer on top of the CSO-ratified baseline in
+// second allowlist layer on top of the reviewed baseline in
 // `AllowlistTOMLLoader.swift`. The user-layer lives at
 // `~/Library/Application Support/MCI/user-allowlist.toml`, is user-
 // owned + mode 0600, and is mutated by the onboarding UI in
@@ -18,10 +18,10 @@
 //      arms + cascade-twice OCR redaction the baseline does. The
 //      cascade cannot be widened past any §3/§4 redaction signal by a
 //      user-layer entry.
-//   2. The user-layer cannot remove a CSO baseline entry. (A future
-//      CSO baseline `denylist` would gate user-layer entries; the
+//   2. The user-layer cannot remove a built-in baseline entry. (A future
+//      Built-in baseline `denylist` would gate user-layer entries; the
 //      current contract leaves this enforceable but does not implement
-//      it — no CSO baseline denylist exists yet.)
+//      it — no built-in baseline denylist exists yet.)
 //   3. Per-event ADR-0030 §3 redaction (SMS-OTP regex + sensitive-
 //      domain table + Mail-header check) applies identically to user-
 //      layer-allowed bundles. The cascade does not distinguish source.
@@ -111,7 +111,7 @@ public struct UserAllowlist: Sendable, Equatable {
     }
 
     /// Bundle ids the user has opted IN to capture. Unioned with the
-    /// CSO baseline at cascade-construction time.
+    /// Built-in baseline at cascade-construction time.
     public var captureEnabledBundleIds: Set<String> {
         Set(entries.filter { $0.captureEnabled }.map { $0.bundleId })
     }

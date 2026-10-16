@@ -14,7 +14,7 @@ set -euo pipefail
 #   teardown   Stop demo processes and delete the disposable demo root.
 #   full       Run all subcommands in sequence.
 #
-# CSO posture:
+# Security review posture:
 #   - Every artifact lives below MCI_DEMO_ROOT (mode 0700 directory).
 #   - Never writes to shell history (key generated inline, not exported).
 #   - teardown deletes the demo brain (or moves to /tmp).

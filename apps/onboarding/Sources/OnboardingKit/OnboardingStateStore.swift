@@ -4,7 +4,7 @@
 // so that quitting the Onboarding window mid-flow and reopening it
 // resumes at the same slide instead of starting over.
 //
-// CEO dogfood 2026-05-26: "when I quit and reopen the onboarding
+// Owner dogfood 2026-05-26: "when I quit and reopen the onboarding
 // doesn't open again unless I touch the icon. Then when I touch it
 // it starts from scratch not where we left off."
 //

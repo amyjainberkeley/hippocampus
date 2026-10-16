@@ -1,14 +1,14 @@
 # Brief-author quality eval (ADR-0028 gate)
 
 This is the offline, reproducible quality gate behind `docs/DOGFOOD_V1.md` item #20.
-The framework lives in `core/brief-eval/` and exists so that when the CEO runs the
+The framework lives in `core/brief-eval/` and exists so that when the owner runs the
 Core ML conversion (`docs/STATE.md` `OWNER_TASKS` #17), there is a real way to decide
 whether `Qwen3-1.7B` INT4 is good enough to ship.
 
 The framework writes nothing to the protected set
 (`docs/AGENT_PROTOCOL.md` §5). It reads synthetic JSONL fixtures, calls the
 existing `BriefAuthor` surface (`core/brief/`), and emits a structured
-PASS / FAIL report. CI runs the deterministic scripted backend; the CEO points
+PASS / FAIL report. CI runs the deterministic scripted backend; the owner points
 the same driver at the real `.mlmodelc` after the conversion lands.
 
 ## Corpus
@@ -25,9 +25,9 @@ data is synthetic — no real user content.
 | `day_deep_work` | Single-app focus | 10 | VS Code + Terminal stretch; wrote a scorer, fixed one test, shipped a PR |
 | `day_fragmented` | Context-switching | 15 | Planned fixtures work, got pulled into a PR #155 entitlements triage |
 | `day_all_meetings` | Meeting day | 9 | 5 Zoom sessions plus a hiring loop |
-| `day_shipping` | Ship-day | 10 | PR #164 reviewed by CSO and merged same day |
+| `day_shipping` | Ship-day | 10 | PR #164 reviewed by Priya and merged same day |
 | `day_blocked` | Stuck-all-day | 10 | Wrestled a Qwen3 Core ML shape mismatch; never resolved |
-| `day_research` | Reading + notes | 10 | Three arxiv papers, three Notion writeups, handoff to CRS |
+| `day_research` | Reading + notes | 10 | Three arxiv papers, three Notion writeups, handoff to Sam |
 | `day_review_heavy` | Code review | 9 | Reviewed 3 PRs, merged 2, flagged an incognito-exclusion regression |
 
 The corpus deliberately spans the brief-author's failure modes: under-claiming
@@ -70,9 +70,9 @@ specify numeric thresholds for INT4 brief output. The defaults in
   rare digit-corruption fails the run); 0.90 tolerates the occasional model
   glitch while still rejecting wholesale fabrication.
 - `require_real_model = false` — default off, since the scripted-backend CI
-  run still uses the wrapper. The CEO flips it on for the real-model run.
+  run still uses the wrapper. The owner flips it on for the real-model run.
 
-The CEO either ratifies these defaults or proposes revised values in the same
+The owner either ratifies these defaults or proposes revised values in the same
 session as `OWNER_TASKS` #17.
 
 ## How to run it
@@ -97,7 +97,7 @@ cargo run -p mci-brief-eval --bin brief-eval -- --all
 
 Tabular per-fixture, per-metric output. Exit code 0 on pass, 1 on fail.
 
-### Real-model run (CEO mode, after `OWNER_TASKS` #17)
+### Real-model run (owner mode, after `OWNER_TASKS` #17)
 
 ```text
 cargo run -p mci-brief-eval --bin brief-eval --features coreml -- \
@@ -136,7 +136,7 @@ on which fixture. Common failure modes:
 | Failure | Reading |
 |---|---|
 | Low `fact_coverage` on `day_deep_work` or `day_shipping` | Model isn't anchoring on artifacts (PR numbers, scorer name). Try lower temperature or a longer prompt. |
-| Non-zero `forbidden_hits` on `day_blocked` | Model is inventing wins (e.g. "merged PR" on a day where nothing merged). Quantization or prompt issue — escalate to CRS Arxiv/OSS Scout for re-eval. |
+| Non-zero `forbidden_hits` on `day_blocked` | Model is inventing wins (e.g. "merged PR" on a day where nothing merged). Quantization or prompt issue — escalate to research for re-eval. |
 | Low `citation_validity` | Tokenizer drift between the prompt-time event IDs and what the model emits. Re-check `vocab.json` + `merges.txt` are the Qwen3 variant. |
 | Out-of-window `length` on `day_light` | Model padding short days. Acceptable if the proposed thresholds widen `max_words`; otherwise revisit prompt instructions. |
 | `stub_fallback` > 0 with `--require-real-model` | `.mlmodelc` failed to load; the path or tokenizer dir is wrong. |
@@ -210,7 +210,7 @@ accepted result and its limitations are recorded in
   brief quality. ADR-0010 is the retrieval eval (event-as-unit, CC fusion);
   this framework is its brief-author counterpart.
 - ADR-0028 § 7 says `StubLlamaBackend` remains active when the model is
-  not downloaded. The `--require-real-model` flag here gives the CEO a
+  not downloaded. The `--require-real-model` flag here gives the owner a
   way to assert "no, I really did want the real model" — the eval reports
   the stub signature explicitly instead of silently grading stub output.
 - The framework grades the brief-author end-to-end, not just the model.

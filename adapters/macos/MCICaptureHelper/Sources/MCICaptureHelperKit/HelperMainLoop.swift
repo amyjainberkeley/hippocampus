@@ -414,7 +414,7 @@ public struct HelperMainLoop: Sendable {
             await counters.recordSuppressed()
             if reason == .failsafeUnknown {
                 // §7 fail-safe subcount — a strict subset of
-                // framesSuppressed; the CRS Telemetry-Gap privacy-
+                // framesSuppressed; research Telemetry-Gap privacy-
                 // regression sentinel.
                 await counters.recordRedactedByFailsafe()
                 // Phase 6 PR 6 — per-app cascade-silence attribution
@@ -460,7 +460,7 @@ public struct HelperMainLoop: Sendable {
             // mismatched `installedFocusGeneration` at SCStream callback
             // time. Content-free observability counter.
             framesFocusRaceDropped: snap.framesFocusRaceDropped,
-            // Phase 6 PR 6 — wire 0x09 (PR #226 §5.1 + CTO §4 Phase 6
+            // Phase 6 PR 6 — wire 0x09 (PR #226 §5.1 + plan §4 Phase 6
             // PR 6). Four trailing content-free fields. The cap-8 LRU
             // on `failsafeByApp` is enforced by
             // `HelperHealthCounters.recordFailsafeByApp(bundleId:)`;

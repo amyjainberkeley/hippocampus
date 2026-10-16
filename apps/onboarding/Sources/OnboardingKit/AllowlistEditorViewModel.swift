@@ -3,7 +3,7 @@
 // AllowlistEditorViewModel — drives the V2-P10 onboarding slide.
 //
 // Surface contract:
-//   - Display the CSO baseline as immutable capture policy. Supported
+//   - Display the built-in baseline as immutable capture policy. Supported
 //     baseline apps may still store a user-owned deep-hook opt-in.
 //   - List currently-running apps with toggles: capture OFF / capture
 //     ON / capture + deep-hook ON. Deep-hook may only be ON when
@@ -11,7 +11,7 @@
 //   - Allow expert "add custom bundle id" entry for apps not in the
 //     running set.
 //   - Per ADR-0017 §3.2: refuse to add a bundle that's already on the
-//     CSO baseline. Its existing row is the only place to manage the
+//     Built-in baseline. Its existing row is the only place to manage the
 //     optional user-owned deep-hook consent.
 //   - Persist via `UserAllowlistStore` (atomic write + 0600 perms).
 //   - Trigger `FullDiskAccessPermission.requestGrant()` when a deep-
@@ -50,7 +50,7 @@ public struct EditorRow: Sendable, Equatable, Identifiable, Hashable {
     /// no reads wired — the toggle is rendered disabled). Per ADR-0037
     /// (Calendar / Notes / Reminders — Phase D).
     public let deepHookScaffoldOnly: Bool
-    /// True iff the bundle is in the CSO baseline. Its capture state is
+    /// True iff the bundle is in the built-in baseline. Its capture state is
     /// immutable; the user-layer can only record optional deep-hook consent.
     public let isBaselineEntry: Bool
 
@@ -74,7 +74,7 @@ public struct EditorRow: Sendable, Equatable, Identifiable, Hashable {
 public enum AllowlistEditorError: Error, Equatable {
     /// Bundle id is empty or whitespace-only.
     case emptyBundleId
-    /// Bundle id is already on the CSO baseline. Its existing row owns any
+    /// Bundle id is already on the built-in baseline. Its existing row owns any
     /// optional user-layer deep-hook consent.
     case duplicateOfBaseline(bundleId: String)
     /// Bundle id is already in the user-layer (use updatePosture).
@@ -103,7 +103,7 @@ public final class AllowlistEditorViewModel: ObservableObject {
     /// Bundles whose deep-hook plugin is scaffold-only per ADR-0037 —
     /// surface exists (the row appears with the deep-hook toggle
     /// visible-but-disabled) but no reads are wired yet. Wire-up lands
-    /// cycle 8.60+ behind CSO sign-off (see ADR-0037 §3).
+    /// cycle 8.60+ behind security review (see ADR-0037 §3).
     public static let deepHookScaffoldBundles: Set<String> = [
         "com.apple.iCal",
         "com.apple.Notes",

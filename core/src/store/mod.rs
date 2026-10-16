@@ -27,7 +27,7 @@
 //! Anything written under this module is **protected-set** per
 //! `AGENT_PROTOCOL` §5. Modifying any DDL constant — especially the
 //! `event_vectors` dimension or the `sync_log` hash-chain fields —
-//! requires a fresh CSO review.
+//! requires a fresh security review.
 
 pub mod migrations;
 pub mod open;

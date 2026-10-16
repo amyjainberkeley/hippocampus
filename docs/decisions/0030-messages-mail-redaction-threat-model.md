@@ -10,7 +10,9 @@
 
 ### The user need
 
-The CEO's daily workflow includes both Messages and Mail. Messages carries SMS-relayed 2FA codes, banking notifications, password-reset SMS, and personal threads. Mail carries password-reset links, banking statements, and personal correspondence. The cycle 8.13 dogfooding session surfaced (per `docs/research/recall-coverage-gap-2026-05-26.md`) that Recall UI shows Safari events only because the cascade fail-safe drops every frame from non-allowlisted apps. The CEO's stated need: **make Messages and Mail surface in Recall** so the brain has the daily context the CEO actually works in.
+Much of a working day happens in Messages and Mail, and both carry what must never be kept: Messages has two-factor codes relayed from a phone, bank alerts, password-reset texts and personal threads; Mail has password-reset links, bank statements and personal letters. When this record was written, the capture cascade dropped every frame from apps not on the allowlist, so Recall showed little beyond Safari. The need was to let Messages and Mail reach memory without keeping the codes, links and alerts they carry.
+
+> **Note, 2026-10-15.** In 0.3.0 the Mail and Messages readers ship and stay off until the person chooses "Capture + Deep hook" for that app under Choose Apps and grants Full Disk Access. The windows of both apps are read on screen like any other app's, with the four secret checks, and those checks don't look for one-time codes.
 
 ### The sensitivity surface
 
@@ -32,9 +34,9 @@ This ADR-0030 fills that gap. It specifies the additional OCR-time redaction lay
 
 The recall-coverage-gap memo §6 P0 dispatch explicitly excluded `com.apple.MobileSMS` and `com.apple.mail` from the cycle 8.13 PR #215 (Claude Desktop + GitHub Desktop) and recorded:
 
-> ⚠️ **CSO threat-model required before adding Messages or Mail.** … the cascade's `.secureInput` arm only fires during *password-prompt focus*, NOT during plaintext display. Adding either bundle naively would weaken the "sensitive-capture is a launch blocker" invariant (ADR-0013 §4 / AGENT_PROTOCOL §4 R5). … The default-deny posture stays in force for both until CSO issues a written threat-model ratifying them (likely with additional OCR-time redaction rules for SMS-shaped strings and bank-domain mail headers). **Do NOT add Messages or Mail in the P0 dispatch.**
+> ⚠️ **security review threat-model required before adding Messages or Mail.** … the cascade's `.secureInput` arm only fires during *password-prompt focus*, NOT during plaintext display. Adding either bundle naively would weaken the "sensitive-capture is a launch blocker" invariant (ADR-0013 §4 / AGENT_PROTOCOL §4 R5). … The default-deny posture stays in force for both until security review issues a written threat-model ratifying them (likely with additional OCR-time redaction rules for SMS-shaped strings and bank-domain mail headers). **Do NOT add Messages or Mail in the P0 dispatch.**
 
-PR #207 CSO pass-2 backed the hold. This ADR is the threat-model the hold was waiting on. **The CSO §5 sign-off on this ADR does NOT itself authorize the allowlist edit.** Per §3(e) below, the allowlist edit ships only after the implementation PR's corpus run reports ≥99% catch on `docs/research/sms-2fa-test-corpus-shapes.md` plus the consequence requirements in §4 below.
+PR #207 security review pass-2 backed the hold. This ADR is the threat-model the hold was waiting on. **The security review §5 sign-off on this ADR does NOT itself authorize the allowlist edit.** Per §3(e) below, the allowlist edit ships only after the implementation PR's corpus run reports ≥99% catch on `docs/research/sms-2fa-test-corpus-shapes.md` plus the consequence requirements in §4 below.
 
 ## Decision
 
@@ -46,7 +48,7 @@ PR #207 CSO pass-2 backed the hold. This ADR is the threat-model the hold was wa
 2. The §3(b) `sensitive-domains.toml` seed is committed and the OCR-time pipeline reads from it via a single `SensitiveDomainTable` accessor.
 3. The §3(c) Mail header pre-OCR check is wired into the cascade-twice path.
 4. The §3(a) corpus (`docs/research/sms-2fa-test-corpus-shapes.md`) runs against the implementation and achieves ≥99% catch + ≤5% false-positive on the H- (honey) entries. The result is committed as a corpus-run artifact under `docs/audit/2026-XX-XX-messages-mail-redaction-corpus.md`.
-5. The implementing PR carries a CSO sign-off block asserting (a)–(d) above plus the ADR-0013 §5 + Amendment 1 §3 four-condition structural assertions.
+5. The implementing PR carries a security review block asserting (a)–(d) above plus the ADR-0013 §5 + Amendment 1 §3 four-condition structural assertions.
 
 If any of (1)–(5) is absent at PR-review time the PR is rejected. There is no "we will add the corpus run in a follow-up." Per ADR-0013 §5: privacy ships with the capture path, never later.
 
@@ -58,13 +60,13 @@ When §1's gate (1)–(5) holds, the allowlist edit ships as a separate, single-
 [[entries]]
 bundle_id = "com.apple.MobileSMS"
 rationale = "Messages.app. SMS-shape redaction (§3(a)) + bank-domain table (§3(b)) gate the rendered text on every cascade-twice pass per ADR-0030. Per-conversation opt-in is the v2+ posture (§3(d) deferred). Corpus run artifact: docs/audit/2026-XX-XX-messages-mail-redaction-corpus.md."
-cso_ratified_by = "CSO seat (ADR-0030 corpus-run sign-off)"
+cso_ratified_by = "security review (ADR-0030 corpus-run sign-off)"
 ratified_at = "2026-XX-XX"
 
 [[entries]]
 bundle_id = "com.apple.mail"
 rationale = "Mail.app. Mail header pre-OCR check (§3(c)) refuses any frame whose rendered From-header matches §3(b)'s domain set, regardless of body content. SMS-shape redaction (§3(a)) also runs on the body for defense-in-depth. Corpus run artifact: same as above."
-cso_ratified_by = "CSO seat (ADR-0030 corpus-run sign-off)"
+cso_ratified_by = "security review (ADR-0030 corpus-run sign-off)"
 ratified_at = "2026-XX-XX"
 ```
 
@@ -86,7 +88,7 @@ The corpus lives at `docs/research/sms-2fa-test-corpus-shapes.md`. **Catch rate 
 
 When the regex set fires, the cascade emits a `PrivacyTombstone(reason=6)` (the existing OCR-time-regex reason code, per ADR-0013 §4 + ADR-0016 §1.6) and the event is dropped at the helper boundary. No OCR'd text bytes cross IPC; no keyframe blob is written; no brain entry is created. Per ADR-0016 §4.2 cascade-twice mechanics.
 
-The corpus is a living document with a quarterly refresh cadence; each refresh is a PR-of-the-corpus with its own CSO sign-off (mirrors ADR-0017 §3.1 allowlist signed-update discipline).
+The corpus is a living document with a quarterly refresh cadence; each refresh is a PR-of-the-corpus with its own security review (mirrors ADR-0017 §3.1 allowlist signed-update discipline).
 
 #### 3(b) Bank-domain / password-reset URL list
 
@@ -103,7 +105,7 @@ Subdomain match: `domain` matches the eTLD+1 and all subdomains. `url_pattern.re
 
 When any OCR'd text on a Messages or Mail frame contains a URL whose host eTLD+1 matches an entry in `sensitive-domains.toml`, OR contains text matching one of the `url_pattern.regex` entries, the cascade emits a `PrivacyTombstone(reason=6)` and the event is dropped at the helper boundary.
 
-**Update cadence:** quarterly. The CSO seat publishes a refresh PR; each refresh carries a CSO sign-off block asserting no entry has been silently downgraded and no entry has been removed without rationale. The `last_reviewed` field in the TOML tracks the cadence.
+**Update cadence:** quarterly. The security review publishes a refresh PR; each refresh carries a security review block asserting no entry has been silently downgraded and no entry has been removed without rationale. The `last_reviewed` field in the TOML tracks the cadence.
 
 **Source citation:** see the source comments at the head of `sensitive-domains.toml`. FDIC SDI for US banks, SWIFT BIC for international, each vendor's public docs for auth providers, OWASP ASVS + RFC 6749 for URL patterns.
 
@@ -131,7 +133,7 @@ The N=8 line-scan budget is bounded; the check runs in sub-millisecond time on M
 **§3(c)(ii) spec.** For any new emlx flowing through the brain-ingest mail pump (`apps/agent/src/mail_ingest.rs::MailIngestPump`), the cascade-equivalent (`core/brain/src/redaction/parsed_mail_header.rs::cascade_equivalent`) is the **pre-write** check. It runs BEFORE any body byte is materialized into a brain [`Event`] row. Inputs are the typed-RFC-5322 header subset (`mail-parser`-typed accessors); outputs are one of three structural outcomes:
 
 1. **`Allow`** — full body + headers persist as a normal Event row. The pump then runs §3(a) + §3(b) over the body for defense-in-depth (per the chain above).
-2. **`HeaderOnly { sender_domain, reason }`** — body bytes are DROPPED at the pump; only a content-free audit row is persisted. The persisted row has `app_bundle_id="com.apple.mail"`, `window_title="[REDACTED:MAIL_HEADER_MATCH]"` (literal placeholder), `text="[REDACTED:MAIL_HEADER_MATCH] from=<sender_domain>"` (categorical eTLD+1 only — the CSO-curated public marketing domain that fired the cascade, not user-identifying content), `url=None`, `tab_id=None`. Subject text, body bytes, recipient lists, `Message-ID`, attachments — none of these reach `put_event`. The `MailRedactionReason` sub-rule (sensitive-sender-domain / subject-otp-shape) surfaces in `MailIngestCounters` for the CRS Telemetry-Gap analyst, never in a brain-row column.
+2. **`HeaderOnly { sender_domain, reason }`** — body bytes are DROPPED at the pump; only a content-free audit row is persisted. The persisted row has `app_bundle_id="com.apple.mail"`, `window_title="[REDACTED:MAIL_HEADER_MATCH]"` (literal placeholder), `text="[REDACTED:MAIL_HEADER_MATCH] from=<sender_domain>"` (categorical eTLD+1 only — the reviewed public marketing domain that fired the cascade, not user-identifying content), `url=None`, `tab_id=None`. Subject text, body bytes, recipient lists, `Message-ID`, attachments — none of these reach `put_event`. The `MailRedactionReason` sub-rule (sensitive-sender-domain / subject-otp-shape) surfaces in `MailIngestCounters` for research Telemetry-Gap analyst, never in a brain-row column.
 3. **`Refuse { reason: UnparseableEnvelope }`** — fail-safe default (ADR-0013 §7 transposed). When the emlx has no parseable `From:` header, NO row reaches `put_event` at all. The pump bumps its `refused` counter; the user-curated allowlist UI (V2-P10) surfaces an aggregate count, never the file path.
 
 **Decision order inside `cascade_equivalent`:**
@@ -143,9 +145,9 @@ The N=8 line-scan budget is bounded; the check runs in sub-millisecond time on M
 
 Step 2's fan-out beyond `From:` to `Reply-To:` / `Sender:` / `List-ID:` answers the §11 Q4 phishing-shape memo: a bank-impersonation mail with `From: notify@chase.com` but `Reply-To: attacker@example.com` is still dropped on the `From:` match; a mailing-list bridge with friendly `From:` but `List-ID: <chase.com>` is dropped on the `List-ID:` match. DKIM `d=` verification is deferred to v2+ (CPU + complexity).
 
-**Single source of truth.** §3(c)(ii) consults the same `docs/research/sensitive-domains.toml` table and the same `core/brain/src/redaction/sms_otp.rs` regex bank as §3(c) (OCR-path) and §3(a) (SMS-shape). The trust-boundary is one set of CSO-curated artifacts; the two arms differ only in input shape.
+**Single source of truth.** §3(c)(ii) consults the same `docs/research/sensitive-domains.toml` table and the same `core/brain/src/redaction/sms_otp.rs` regex bank as §3(c) (OCR-path) and §3(a) (SMS-shape). The trust-boundary is one set of reviewed artifacts; the two arms differ only in input shape.
 
-**Drop-before-write discipline.** `cascade_equivalent` is structurally guaranteed to run BEFORE any `put_event`. The pump's `ingest_path` calls `read_message(path) → cascade_equivalent → match`; the `HeaderOnly` and `Refuse` arms construct (or do not construct) a row with the body bytes dropped at the cascade decision point. There is no delete-after-write path. CSO sign-off audit verifies this against the diff (see PR body).
+**Drop-before-write discipline.** `cascade_equivalent` is structurally guaranteed to run BEFORE any `put_event`. The pump's `ingest_path` calls `read_message(path) → cascade_equivalent → match`; the `HeaderOnly` and `Refuse` arms construct (or do not construct) a row with the body bytes dropped at the cascade decision point. There is no delete-after-write path. Security review audit verifies this against the diff (see PR body).
 
 **Wire posture.** No wire bump. The cascade-equivalent runs entirely inside `mci-agent`; no helper produces a `MailHeaderMatch` byte. The new sub-rule enum (`MailRedactionReason`) is local to the brain crate — it is NEVER emitted on the helper-to-agent IPC wire, and consequently does NOT extend the wire-protected `mci_core::ipc::RedactionReason` enum (which would otherwise need a wire bump per AGENT_PROTOCOL §5). The conceptual "PrivacyTombstone(reason=mail-header-match)" is the categorical class string returned by `MailRedactionReason::tombstone_reason`; it surfaces in audit/telemetry strings only.
 
@@ -172,18 +174,18 @@ The per-thread opt-in path stays an open design question in `docs/AGENT_QUESTION
 
 #### 3(e) Default-deny posture (binding)
 
-Until all of §3(a)–(d) implement, are tested by the §1 gate-condition (4) corpus run, and the corpus artifact is committed, `com.apple.MobileSMS` and `com.apple.mail` stay OUT of `known-safe-apps.toml`. **This is non-negotiable and is a CSO veto-gate per AGENT_PROTOCOL §5.** Flipping either bundle into the allowlist without §1's five conditions is rejected at PR review regardless of other merits — exactly as ADR-0013 §5 phrases the cascade-without-suppression rejection rule.
+Until all of §3(a)–(d) implement, are tested by the §1 gate-condition (4) corpus run, and the corpus artifact is committed, `com.apple.MobileSMS` and `com.apple.mail` stay OUT of `known-safe-apps.toml`. **This is non-negotiable and is a security review veto-gate per AGENT_PROTOCOL §5.** Flipping either bundle into the allowlist without §1's five conditions is rejected at PR review regardless of other merits — exactly as ADR-0013 §5 phrases the cascade-without-suppression rejection rule.
 
-Equivalent to: per ADR-0013 §3 fail-safe-default-redact + ADR-0016 §4.2 cascade-twice-for-OCR + ADR-0017 §3.1 CSO-gated allowlist, this ADR adds **content-class-specific redaction** as a precondition for the allowlist edit. The default-deny is not a vibes-judgment; it is a defined, checkable mechanism gated on a runnable corpus.
+Equivalent to: per ADR-0013 §3 fail-safe-default-redact + ADR-0016 §4.2 cascade-twice-for-OCR + ADR-0017 §3.1 review-gated allowlist, this ADR adds **content-class-specific redaction** as a precondition for the allowlist edit. The default-deny is not a vibes-judgment; it is a defined, checkable mechanism gated on a runnable corpus.
 
 ## Consequences
 
 ### What changes when this ADR is implemented
 
-- **Director-Recording OCR pipeline gains a new pre-write filter layer.** The cascade-twice OCR-time arm (ADR-0016 §1.6) grows three new sub-arms: (a) SMS-OTP / banking-notification regex set, (b) sensitive-domain / URL-pattern table, (c) Mail-header pre-OCR check. All three are gated by app-bundle: they run only for `com.apple.MobileSMS` and `com.apple.mail` frames (zero-cost on every other app's frames).
-- **The follow-on PR is a joint Director-Recording + CSO PR.** Director-Recording owns the helper-side OCR pipeline; CSO owns (this ADR's) threat-model + the corpus + sign-off. The allowlist edit itself ships as a third, separate PR (per §2 above) after the corpus run is green.
-- **The recall-coverage-gap memo §6 ⚠️ hold is lifted** once §1's five conditions hold. The CEO regains Recall coverage over the two highest-sensitivity bundles, with content-aware OCR-time redaction as the binding trust boundary instead of "Messages is on the allowlist; trust the cascade arms that don't fire on rendered text."
-- **`docs/research/sms-2fa-test-corpus-shapes.md` and `docs/research/sensitive-domains.toml` become living artifacts** with quarterly CSO-signed refreshes. The CRS Telemetry-Gap analyst surfaces `ocr_text_secret_match_count` deltas; sharp moves (a new bank surfaces, a regex starts firing on a normal pattern) trigger a refresh PR.
+- **Capture track OCR pipeline gains a new pre-write filter layer.** The cascade-twice OCR-time arm (ADR-0016 §1.6) grows three new sub-arms: (a) SMS-OTP / banking-notification regex set, (b) sensitive-domain / URL-pattern table, (c) Mail-header pre-OCR check. All three are gated by app-bundle: they run only for `com.apple.MobileSMS` and `com.apple.mail` frames (zero-cost on every other app's frames).
+- **The follow-on PR is a joint capture track + security review PR.** Capture track owns the helper-side OCR pipeline; security review owns (this ADR's) threat-model + the corpus + sign-off. The allowlist edit itself ships as a third, separate PR (per §2 above) after the corpus run is green.
+- **The recall-coverage-gap memo §6 ⚠️ hold is lifted** once §1's five conditions hold. The owner regains Recall coverage over the two highest-sensitivity bundles, with content-aware OCR-time redaction as the binding trust boundary instead of "Messages is on the allowlist; trust the cascade arms that don't fire on rendered text."
+- **`docs/research/sms-2fa-test-corpus-shapes.md` and `docs/research/sensitive-domains.toml` become living artifacts** with quarterly security-reviewed refreshes. Research Telemetry-Gap analyst surfaces `ocr_text_secret_match_count` deltas; sharp moves (a new bank surfaces, a regex starts firing on a normal pattern) trigger a refresh PR.
 - **Phase 4 retention UI inherits the cascade reason code.** ADR-0017 §5.2's reason-code table already lists `6 (OCR-time regex secret/PII)` with friendly string "Text matched a secret/PII pattern." Privacy-Moments cards for redacted Messages/Mail content surface with this reason. No schema change.
 
 ### What stays the same
@@ -198,7 +200,7 @@ Equivalent to: per ADR-0013 §3 fail-safe-default-redact + ADR-0016 §4.2 cascad
 
 ### (i) Ship Messages/Mail capture without OCR-time redaction (rejected)
 
-Add both bundles to `known-safe-apps.toml` and trust the existing cascade. **Rejected — invariant violation.** ADR-0013 §4 / AGENT_PROTOCOL §4 R5: sensitive-capture is a launch blocker. The cascade's `.secureInput` arm fires only during password-prompt focus, not during plaintext display. SMS 2FA codes / banking notifications / password-reset URLs would flow straight through OCR → embedding → brain without redaction. The recall-coverage-gap memo §6 ⚠️ block explicitly rules this out and PR #207 CSO pass-2 backed the hold. This alternative is the failure mode the ADR exists to prevent.
+Add both bundles to `known-safe-apps.toml` and trust the existing cascade. **Rejected — invariant violation.** ADR-0013 §4 / AGENT_PROTOCOL §4 R5: sensitive-capture is a launch blocker. The cascade's `.secureInput` arm fires only during password-prompt focus, not during plaintext display. SMS 2FA codes / banking notifications / password-reset URLs would flow straight through OCR → embedding → brain without redaction. The recall-coverage-gap memo §6 ⚠️ block explicitly rules this out and PR #207 security review pass-2 backed the hold. This alternative is the failure mode the ADR exists to prevent.
 
 ### (ii) Require user-typed allowlist per-conversation / per-sender (rejected for v1)
 
@@ -206,7 +208,7 @@ The user explicitly chooses every Messages thread and every Mail sender that MCI
 
 ### (iii) Defer indefinitely (rejected)
 
-Wait until a future phase to revisit Messages and Mail capture. **Rejected — CEO needs the capability now.** Per the dispatch and the recall-coverage-gap memo: Messages and Mail are core to the CEO's daily workflow; without them, Recall has a hole in the most-used part of the day. The ADR exists to convert "indefinite hold" into "checkable gate" so the capability can ship as soon as the gate passes — which is on the order of one Director-Recording cycle's work plus a CSO-signed corpus run.
+Wait until a future phase to revisit Messages and Mail capture. **Rejected — owner needs the capability now.** Per the dispatch and the recall-coverage-gap memo: Messages and Mail are core to the owner's daily workflow; without them, Recall has a hole in the most-used part of the day. The ADR exists to convert "indefinite hold" into "checkable gate" so the capability can ship as soon as the gate passes — which is on the order of one capture track cycle's work plus a security-reviewed corpus run.
 
 ### (iv) Use a third-party PII detector library instead of a curated corpus (rejected)
 
@@ -217,13 +219,13 @@ E.g., Microsoft Presidio, Google DLP API equivalent on-device, AWS Comprehend's 
 
 ## Open questions
 
-The following are escalated to `docs/AGENT_QUESTIONS.md` per AGENT_PROTOCOL §7 — owed at the implementing PR or at CEO ratification of this ADR:
+The following are escalated to `docs/AGENT_QUESTIONS.md` per AGENT_PROTOCOL §7 — owed at the implementing PR or at owner ratification of this ADR:
 
 1. **Per-thread opt-in surface in v2+.** ADR-0017 P4.6's retention UI is the natural home for a "MCI may not capture this thread" toggle. Concrete design owed at Phase 4 work; this ADR keeps the question open.
-2. **iMessage attachments (images, PDFs).** This ADR specifies redaction over the OCR'd **rendered text** of a Messages frame. Image attachments rendered inside Messages (a photo of a bank card, a screenshot of an OTP) are OCR'd by the same pipeline — the §3(a) regex set catches the SMS-shape text inside them, but a frame consisting of nothing but an image of a credit card (no text rendering OTP shapes) would clear the regex. Q: do we want a Vision-classifier image-content check at OCR-time? Out of scope this ADR; appended to AGENT_QUESTIONS for CRS arxiv-OSS analyst evaluation. Note: ADR-0013 §1 source-level `SCContentFilter` excludes private-window attachments via `NSWindowSharingType.none`; this question concerns attachments displayed in a non-private Messages window.
-3. **Mail-renderer variants beyond Mail.app.** This ADR covers `com.apple.mail` specifically. Spark, Airmail, Mimestream, Apple Mail in iOS-style condensed layout — all have different `From:`-line rendering. Q: do we extend the bundle list, or do we keep this ADR scoped to Mail.app and write a fresh ADR per third-party mail app? Recommendation: scoped to Mail.app v1; per-renderer ADRs as the CEO adds them.
-4. **Bank-domain table maintenance authority.** Currently CSO seat quarterly. Q: should `docs/research/sensitive-domains.toml` accept community-PR additions, or stay CSO-only? Recommendation: CSO-only v1; revisit if the cadence proves too slow.
-5. **What happens when a Messages frame contains an SMS forwarded from a non-iPhone source.** Android-paired-via-iCloud SMS, third-party RCS bridges, mock SMS for testing. Q: do their shapes diverge enough from the corpus that catch rate drops below 99%? Recommendation: track via the CRS Telemetry-Gap analyst's `ocr_text_secret_match_count` per-app counter; treat regressions as a corpus-refresh trigger.
+2. **iMessage attachments (images, PDFs).** This ADR specifies redaction over the OCR'd **rendered text** of a Messages frame. Image attachments rendered inside Messages (a photo of a bank card, a screenshot of an OTP) are OCR'd by the same pipeline — the §3(a) regex set catches the SMS-shape text inside them, but a frame consisting of nothing but an image of a credit card (no text rendering OTP shapes) would clear the regex. Q: do we want a Vision-classifier image-content check at OCR-time? Out of scope this ADR; appended to AGENT_QUESTIONS for research arxiv-OSS analyst evaluation. Note: ADR-0013 §1 source-level `SCContentFilter` excludes private-window attachments via `NSWindowSharingType.none`; this question concerns attachments displayed in a non-private Messages window.
+3. **Mail-renderer variants beyond Mail.app.** This ADR covers `com.apple.mail` specifically. Spark, Airmail, Mimestream, Apple Mail in iOS-style condensed layout — all have different `From:`-line rendering. Q: do we extend the bundle list, or do we keep this ADR scoped to Mail.app and write a fresh ADR per third-party mail app? Recommendation: scoped to Mail.app v1; per-renderer ADRs as the owner adds them.
+4. **Bank-domain table maintenance authority.** Currently security review quarterly. Q: should `docs/research/sensitive-domains.toml` accept community-PR additions, or stay security review-only? Recommendation: security review-only v1; revisit if the cadence proves too slow.
+5. **What happens when a Messages frame contains an SMS forwarded from a non-iPhone source.** Android-paired-via-iCloud SMS, third-party RCS bridges, mock SMS for testing. Q: do their shapes diverge enough from the corpus that catch rate drops below 99%? Recommendation: track via research Telemetry-Gap analyst's `ocr_text_secret_match_count` per-app counter; treat regressions as a corpus-refresh trigger.
 
 ## References
 
@@ -232,42 +234,42 @@ The following are escalated to `docs/AGENT_QUESTIONS.md` per AGENT_PROTOCOL §7 
 - **ADR-0013** + Amendment 1 (the cascade — §1–§7 arms, §4 redaction-before-store, §6 OCR-time regex foundation this ADR builds on, §5 launch-blocker placement).
 - **ADR-0015** (Phase 2 context join — populated `appBundleId` is what gates the §3(a)–(c) sub-arms in this ADR; they only run when `appBundleId in {com.apple.MobileSMS, com.apple.mail}`).
 - **ADR-0016** §1.6 (cascade-twice for OCR — the mechanism this ADR's redaction layer mounts on) + §4.2 (cascade-twice invariant) + §4.4 (no network in any Phase 3 component — binding on the redaction layer).
-- **ADR-0017** §3.1 (allowlist CSO-gated discipline — this ADR's §2 follows the same shape) + §5.2 (cascade-reason-code table — reason=6 for OCR-time secret/PII fires here) + §4.2 (per-event/per-app delete — the v2+ posture for per-thread opt-in).
+- **ADR-0017** §3.1 (allowlist review-gated discipline — this ADR's §2 follows the same shape) + §5.2 (cascade-reason-code table — reason=6 for OCR-time secret/PII fires here) + §4.2 (per-event/per-app delete — the v2+ posture for per-thread opt-in).
 - **ADR-0029** (Phase 1→2 §7 corpus gate criteria — same gate-criteria-as-checkable-standard discipline this ADR borrows).
 - **`docs/research/recall-coverage-gap-2026-05-26.md`** §6 ⚠️ block — the memo that mandated this ADR.
 - **`docs/research/sms-2fa-test-corpus-shapes.md`** — the corpus this ADR's §3(a) catch-rate gate runs against.
 - **`docs/research/sensitive-domains.toml`** — the domain table this ADR's §3(b) and §3(c) consume.
-- **PR #207** (recall-coverage-gap memo merge + CSO pass-2 backing the hold) — the prior-art that mandated this ADR.
-- **PR #215** (Claude Desktop + GitHub Desktop low-sensitivity allowlist additions, cycle 8.13) — the precedent for the per-bundle CSO-signed allowlist edit pattern this ADR's §2 follows.
+- **PR #207** (recall-coverage-gap memo merge + security review pass-2 backing the hold) — the prior-art that mandated this ADR.
+- **PR #215** (Claude Desktop + GitHub Desktop low-sensitivity allowlist additions, cycle 8.13) — the precedent for the per-bundle security-reviewed allowlist edit pattern this ADR's §2 follows.
 - **`adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Resources/known-safe-apps.toml`** — the allowlist this ADR's §2 edits ship into.
 - **`adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Suppression/SuppressionCascade.swift`** — the cascade this ADR's §3(a)–(c) sub-arms mount under cascade §6.
-- **AGENT_PROTOCOL §4** (sensitive-capture launch-blocker invariant), **§5** (CSO protected-set + veto-gate), **§7** (escalation discipline).
+- **AGENT_PROTOCOL §4** (sensitive-capture launch-blocker invariant), **§5** (security review protected-set + veto-gate), **§7** (escalation discipline).
 - **OWASP ASVS v4.0.3 §2** (Authentication) — the threat-model foundation for the SMS-OTP corpus + the §3(b) URL pattern set. <https://owasp.org/www-project-application-security-verification-standard/>
 - **NIST SP 800-63B** §5.1.3 (Out-of-Band Authenticators) — the threat model behind treating SMS-OTP as bearer credentials. <https://pages.nist.gov/800-63-3/sp800-63b.html>
 - **FFIEC Authentication and Access to Financial Institution Services and Systems** (2021) — bank-issued OTP-via-SMS category guidance and the basis for the §3(b) US bank table source. <https://www.ffiec.gov/press/PDF/FFIEC_authentication.pdf>
 - **Apple Privacy / TCC docs** — `developer.apple.com/documentation/security` (Privacy & Data) and `support.apple.com/HT204915` (Apple ID two-factor authentication) underpin the §3(a) Apple-shape corpus entries A-01 through A-05.
 - **Krebs on Security** — the SIM-swap and SMS-OTP threat-actor reporting that motivates treating displayed OTPs as bearer credentials even when the user can see them on their own device (because Recall would index them, the attacker doesn't need to swap the SIM if the brain is exfiltrated).
 
-## CSO §5 sign-off
+## Security review §5 sign-off
 
-This ADR is **protected-set authoring** (AGENT_PROTOCOL §5). I, the CSO seat, have reviewed the threat model, the corpus shape, and the gate conditions in §1, §2, and §3. **The default-deny posture in §3(e) is binding** on every PR opened against `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Resources/known-safe-apps.toml` until the §1 gate-conditions (1)–(5) are all met, the §3(a) corpus catch rate hits ≥99% on the committed corpus run, and a CSO sign-off block on the implementing PR asserts (by reading the diff) that the four ADR-0013 Amendment 1 §3 structural conditions plus this ADR's §1 conditions hold.
+This ADR is **protected-set authoring** (AGENT_PROTOCOL §5). I, the security review, have reviewed the threat model, the corpus shape, and the gate conditions in §1, §2, and §3. **The default-deny posture in §3(e) is binding** on every PR opened against `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Resources/known-safe-apps.toml` until the §1 gate-conditions (1)–(5) are all met, the §3(a) corpus catch rate hits ≥99% on the committed corpus run, and a security review block on the implementing PR asserts (by reading the diff) that the four ADR-0013 Amendment 1 §3 structural conditions plus this ADR's §1 conditions hold.
 
-The implementing PR — the follow-on Director-Recording + CSO joint PR that lands the §3(a)–(c) redaction layer + commits the corpus-run artifact — **MUST cite this ADR by number (ADR-0030)** in its PR title and body, and **MUST NOT bundle the allowlist edit**. The allowlist edit ships as a third, separate PR (per §2 above) after the corpus run is green, mirroring the ADR-0029 §5 "default-ON flip PR is a separate commit from the corpus artifact PR" discipline.
+The implementing PR — the follow-on capture track + security review joint PR that lands the §3(a)–(c) redaction layer + commits the corpus-run artifact — **MUST cite this ADR by number (ADR-0030)** in its PR title and body, and **MUST NOT bundle the allowlist edit**. The allowlist edit ships as a third, separate PR (per §2 above) after the corpus run is green, mirroring the ADR-0029 §5 "default-ON flip PR is a separate commit from the corpus artifact PR" discipline.
 
-Any PR that materializes a path for Messages or Mail OCR'd text to reach storage without passing through the §3(a)–(c) sub-arms is a §5 protected-set violation and is rejected at CSO review regardless of other merits — exactly as ADR-0013 §5 phrases the cascade-without-suppression rejection rule. The CSO veto is final unless the human CEO overrides.
+Any PR that materializes a path for Messages or Mail OCR'd text to reach storage without passing through the §3(a)–(c) sub-arms is a §5 protected-set violation and is rejected at security review regardless of other merits — exactly as ADR-0013 §5 phrases the cascade-without-suppression rejection rule. The security review veto is final unless the owner overrides.
 
-— CSO, 2026-05-28
+— Security review, 2026-05-28
 
-## CSO §5 sign-off (V2-P8b amendment, 2026-05-30)
+## Security review §5 sign-off (V2-P8b amendment, 2026-05-30)
 
 This amendment extends ADR-0030 with **§3(c)(ii) — parsed-header check for the emlx deep-hook path (V2-P8b)**. The §3(c) (OCR-path) arm is unchanged. The §3(c)(ii) arm is the structural place ADR-0030's intent applies to the always-on emlx deep-hook the agent runs via `mci-mail-reader` (V2-P8a, PR #243).
 
-**Four-condition audit (the CSO veto-gate the V2-P8b implementing PR satisfies):**
+**Four-condition audit (the security review veto-gate the V2-P8b implementing PR satisfies):**
 
-1. **ADR-0030 §3(c)(ii) preserves the existing §3(c) OCR-time arm semantics** — only the input shape (typed RFC 5322 vs OCR-rendered lines) differs. The domain table back-end (`sensitive-domains.toml` + `SensitiveDomainTable`) and the OTP regex bank (`sms_otp.rs`) are SHARED. There is one CSO-curated source of truth. I have read the diff and confirm `core/brain/src/redaction/parsed_mail_header.rs` consumes `super::sensitive_domains::matches_sensitive_domain` and `super::sms_otp::redact_sms_shapes`; it does NOT vend a parallel table.
+1. **ADR-0030 §3(c)(ii) preserves the existing §3(c) OCR-time arm semantics** — only the input shape (typed RFC 5322 vs OCR-rendered lines) differs. The domain table back-end (`sensitive-domains.toml` + `SensitiveDomainTable`) and the OTP regex bank (`sms_otp.rs`) are SHARED. There is one reviewed source of truth. I have read the diff and confirm `core/brain/src/redaction/parsed_mail_header.rs` consumes `super::sensitive_domains::matches_sensitive_domain` and `super::sms_otp::redact_sms_shapes`; it does NOT vend a parallel table.
 2. **Sender-domain check happens BEFORE body persist (drop-before-write, not delete-after-write).** I have read `apps/agent/src/mail_ingest.rs::MailIngestPump::ingest_path`. The call order is: `mci_mail_reader::read_message(path) → to_parsed_headers(&parsed) → cascade_equivalent(&headers) → match`. The `HeaderOnly` arm builds a content-free row that contains NO body bytes (the `body_text` / `body_html` fields from the parsed message are never read in this arm). The `Refuse` arm builds no row. There is no `put_event` call on the body-bearing path. The body bytes from the source emlx file structurally cannot reach the brain store.
 3. **Corpus 5/5 GREEN.** Committed at `docs/audit/2026-05-30-mail-cascade-corpus.md`. I have read the artifact and the per-harness threat models. H1 (bank `From:`), H2 (non-sensitive sender, allow), H3 (OTP-shape subject), H4 (no parseable `From:` → fail-safe refuse), H5 (`List-ID:` bridge) all match the expected `MailCascadeDecision`. Determinism: re-running the binary produces a byte-identical artifact (`git diff docs/audit/2026-05-30-mail-cascade-corpus.md` after a second invocation is empty).
-4. **PrivacyTombstone(mailHeaderMatch) is content-free.** The persisted Event row for a `HeaderOnly` outcome contains: `app_bundle_id="com.apple.mail"`, `window_title="[REDACTED:MAIL_HEADER_MATCH]"` (literal), `text="[REDACTED:MAIL_HEADER_MATCH] from=<eTLD+1>"` (categorical eTLD+1 = the CSO-curated public marketing domain that fired the cascade), `ts_us=file mtime`, `url=None`, `tab_id=None`. No subject text, no body bytes, no recipient list, no `Message-ID`, no URL. The sender eTLD+1 is a class signal (you got mail from a bank), not user-identifying content; it is the same signal the user already trusted the CSO to seed into `sensitive-domains.toml`.
+4. **PrivacyTombstone(mailHeaderMatch) is content-free.** The persisted Event row for a `HeaderOnly` outcome contains: `app_bundle_id="com.apple.mail"`, `window_title="[REDACTED:MAIL_HEADER_MATCH]"` (literal), `text="[REDACTED:MAIL_HEADER_MATCH] from=<eTLD+1>"` (categorical eTLD+1 = the reviewed public marketing domain that fired the cascade), `ts_us=file mtime`, `url=None`, `tab_id=None`. No subject text, no body bytes, no recipient list, no `Message-ID`, no URL. The sender eTLD+1 is a class signal (you got mail from a bank), not user-identifying content; it is the same signal the user already trusted the security review to seed into `sensitive-domains.toml`.
 
 **Wire posture confirmation.** The new `MailRedactionReason` enum is LOCAL to `core/brain/src/redaction/parsed_mail_header.rs`. It is NOT exposed on the helper IPC wire and does NOT extend `mci_core::ipc::RedactionReason`. The wire is unchanged at `0x07`. No wire bump.
 
@@ -277,6 +279,6 @@ This amendment extends ADR-0030 with **§3(c)(ii) — parsed-header check for th
 
 **Scope discipline.** This PR does NOT modify the helper capture path, the cascade-twice OCR-time arm, ADR-0031 focused-window logic, the wire protocol, or any other §5 protected-set surface beyond ADR-0030 + the new brain-side / agent-side modules added here.
 
-**Approved.** The V2-P8b implementing PR satisfies the §3(c)(ii) amendment's gate conditions. Production deployment of `MailIngestPump` in `mci-agent`'s supervisor remains gated on V2-P10's user-curated allowlist UI (the CEO must opt-in via the user-visible surface before the pump auto-starts). This PR ships the LIBRARY surface only; the supervisor wire-up is a separate, CEO-attended PR.
+**Approved.** The V2-P8b implementing PR satisfies the §3(c)(ii) amendment's gate conditions. Production deployment of `MailIngestPump` in `mci-agent`'s supervisor remains gated on V2-P10's user-curated allowlist UI (the owner must opt-in via the user-visible surface before the pump auto-starts). This PR ships the LIBRARY surface only; the supervisor wire-up is a separate, owner-attended PR.
 
-— CSO, 2026-05-30
+— Security review, 2026-05-30

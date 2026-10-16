@@ -62,7 +62,7 @@ final class SelectMultiWindowIncludingSetTests: XCTestCase {
     }
 
     func test_returns_seed_plus_coview_candidates_in_order() {
-        // The CEO's canonical "2 windows side-by-side" workflow
+        // The owner's canonical "2 windows side-by-side" workflow
         // (redesign memo §3.2.4 H9′ + PR #236 §0 vision quote):
         // Safari focused, Messages co-viewed. The include-set must
         // contain both, with the seed first.

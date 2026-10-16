@@ -32,7 +32,7 @@ Kind strings (locked in code unless noted):
     person_name   core/brain/src/extraction/tier2.rs::KIND_PERSON_NAME
     organization  core/brain/src/extraction/tier2.rs::KIND_ORGANIZATION
     location      core/brain/src/extraction/tier2.rs::KIND_LOCATION
-    date          Director-defined (see README "Date/Time fork"): NOT yet
+    date          implementer-defined (see README "Date/Time fork"): NOT yet
     time          in code. PR #282 (V2-P4 tier1.rs) ships no date/time
                   regex. The scorer's KIND set is config-driven so a future
                   rename costs one line.
@@ -56,7 +56,7 @@ from pathlib import Path
 
 # The 5 evaluation kinds, in the exact `entities.kind` strings the MCI
 # extractor surface uses. person_name / organization / location are locked
-# in core/brain/src/extraction/tier2.rs; date / time are Director-defined
+# in core/brain/src/extraction/tier2.rs; date / time are implementer-defined
 # (see README) pending the V2-P4 Date/Time regex.
 KINDS = ["person_name", "organization", "location", "date", "time"]
 

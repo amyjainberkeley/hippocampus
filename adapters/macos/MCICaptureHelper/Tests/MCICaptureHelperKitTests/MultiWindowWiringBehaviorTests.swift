@@ -30,7 +30,7 @@ private func denylist(_ deny: Set<String> = []) -> Denylist {
 final class MultiWindowWiringBehaviorTests: XCTestCase {
 
     /// The task's mandated behavior test #1: with a mock 1-window
-    /// scene, the include-list is non-empty. This is the CEO's minimum
+    /// scene, the include-list is non-empty. This is the owner's minimum
     /// bar for FORK 3 = B (the include-set is never empty when a
     /// focused window is observable — cycle 8.27 -3815 antipattern
     /// class defense).

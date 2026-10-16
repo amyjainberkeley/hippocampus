@@ -3,7 +3,7 @@
 // Safari Web Extensions support both chrome.* and browser.* — we use
 // browser.* for consistency with the WebExtension standard.
 //
-// CSO INVARIANTS: identical to extensions/chromium/content.js.
+// SECURITY INVARIANTS: identical to extensions/chromium/content.js.
 
 "use strict";
 

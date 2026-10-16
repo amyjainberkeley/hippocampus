@@ -27,12 +27,12 @@
 //! - **V2-MCP-4** (Phase 7) reads the cataloged tools + catalog rows
 //!   and surfaces them in the chat router.
 //!
-//! # Source-provenance tagging (CSO row 2 — load-bearing)
+//! # Source-provenance tagging (security review row 2 — load-bearing)
 //!
 //! Every Event the aggregator persists carries
 //! `app_bundle_id = Some("mcp:<server-name>")`. The `mcp:` prefix is
 //! the structural discriminator V2-P12 (Phase 7 chat surface) reads to
-//! apply prompt-injection mitigation to MCP-sourced content per CRS
+//! apply prompt-injection mitigation to MCP-sourced content per research
 //! Fork-6 = A (ratified 2026-05-31; see
 //! `docs/research/orchestrator-ratification-state-2026-05-31.md` §SH-6).
 //!
@@ -55,9 +55,9 @@
 //!    — all of which are pending in cycle 8.30. Reusing the existing
 //!    column lands V2-MCP-3 without a schema migration.
 //!
-//! # Fork F6 = A binding (CSO row 3) — NO cascade-equivalent at ingest
+//! # Fork F6 = A binding (security review row 3) — NO cascade-equivalent at ingest
 //!
-//! Per CRS Fork-6 = A ratified 2026-05-31 + the ADR-0001 amendment in
+//! Per research Fork-6 = A ratified 2026-05-31 + the ADR-0001 amendment in
 //! PR #277 §"Operational rules" point 4: content returned by
 //! user-registered MCP servers ingests AS-IS. There is NO
 //! cascade-equivalent redaction at the V2-MCP-3 ingest boundary.
@@ -74,7 +74,7 @@
 //! all MCP-sourced events — they ARE Allow-arm events, just with a
 //! different trust boundary than OCR / browser / deep-hook frames.
 //!
-//! # Fork F7 = A binding (CSO row 1) — loopback-only transport
+//! # Fork F7 = A binding (security review row 1) — loopback-only transport
 //!
 //! The aggregator USES the `ServerRegistry`'s lazy `connect()` API,
 //! which delegates to the V2-MCP-2 `HttpSseTransport` (for HTTP rows)
@@ -98,7 +98,7 @@
 //! traverse MCP content. CATALOG_ONLY rows (large bodies) skip
 //! Tier 1 — the marker text is metadata, not user content.
 //!
-//! # Tool execution scope (CSO row 4)
+//! # Tool execution scope (security review row 4)
 //!
 //! V2-MCP-3 catalogs `tools/list` results in [`AggregatorState::tools`]
 //! per server. It does NOT invoke any tool — no `tools/call` JSON-RPC
@@ -106,7 +106,7 @@
 //! (Phase 7 chat-router PR) when the user issues a chat query that the
 //! router decides to route through an MCP tool.
 //!
-//! # Construction-graph wiring (CSO row 7)
+//! # Construction-graph wiring (security review row 7)
 //!
 //! Per [[project-v2p1-unit-tests-passed-but-never-wired]]: the
 //! aggregator is CONSTRUCTED at
@@ -115,7 +115,7 @@
 //! brain store has been opened. The wiring test in
 //! `apps/agent/tests/mcp_aggregator_wiring.rs` asserts construction
 //! happens; `git log -S "McpAggregator::new" -- apps/agent/src/bin/mci_agent.rs`
-//! returns this PR's commit per CSO row 7.
+//! returns this PR's commit per security review row 7.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -216,7 +216,7 @@ pub struct AggregatorStats {
     pub put_event_errors: AtomicU64,
     /// V2-P4 Tier 1 entity mentions persisted from MCP-sourced
     /// events. Mirrors [`crate::brain_ingest::BrainPump`]'s
-    /// `tier1_mentions_persisted` so the CRS Telemetry-Gap analyst
+    /// `tier1_mentions_persisted` so research Telemetry-Gap analyst
     /// can spot an entity-graph regression on either ingest path.
     pub tier1_mentions_persisted: AtomicU64,
 }
@@ -506,7 +506,7 @@ impl McpAggregator {
         let _init = client.initialize().await?;
 
         // Tools catalog — discover + stash in-memory. NO `tools/call`
-        // is emitted (CSO row 4).
+        // is emitted (security review row 4).
         let tools = match client.tools_list().await {
             Ok(t) => t,
             Err(McpError::Rpc(_) | McpError::SchemaMismatch(_)) => Vec::new(),
@@ -697,7 +697,7 @@ impl McpAggregator {
 
     /// Construct an Event for a materialized MCP resource. The
     /// `app_bundle_id` carries the load-bearing `mcp:<server>` source
-    /// tag (CSO row 2); `text` carries the ADR-0010 §1.3 context
+    /// tag (security review row 2); `text` carries the ADR-0010 §1.3 context
     /// header + the resource body so FTS5 indexes the same content the
     /// embedder (when run) sees. `cascade_reason = 0` per
     /// `BrainStore::put_event`'s belt-and-suspenders check (the events

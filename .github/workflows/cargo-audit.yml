@@ -12,7 +12,7 @@ name: Cargo Audit — RustSec advisory scan
 # Started as `--deny warnings` (every advisory blocks the PR). Ratchet
 # down to a specific ignore list only if we hit a persistent
 # unactionable advisory. Tracking origin: cycle 8.38 security-signal
-# scan (PR #38) CSO recommendation #3.
+# scan (PR #38) security review recommendation #3.
 
 on:
   push:

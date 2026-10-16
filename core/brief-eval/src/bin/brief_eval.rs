@@ -6,7 +6,7 @@
 //! cargo run -p mci-brief-eval --bin brief-eval -- --all
 //! ```
 //!
-//! Real-model mode (CEO runs once `OWNER_TASKS` #17 lands the converted
+//! Real-model mode (owner runs once `OWNER_TASKS` #17 lands the converted
 //! `.mlmodelc`; requires building with `--features coreml`):
 //!
 //! ```text
@@ -67,7 +67,7 @@ enum BackendKind {
     /// The zero-download author used by the shipping agent.
     Extractive,
     /// `LlamaBriefAuthor + Qwen3CoreMLBackend` — real model. Only
-    /// available when built with `--features coreml`. CEO mode.
+    /// available when built with `--features coreml`. Owner mode.
     CoreML,
 }
 

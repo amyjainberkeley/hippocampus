@@ -2,7 +2,7 @@ import SwiftUI
 import OnboardingKit
 
 /// V2-P10 — user-curated allowlist slide. Two-layer per ADR-0017 §3.2:
-/// the CSO baseline keeps capture immutable; supported baseline rows expose
+/// the built-in baseline keeps capture immutable; supported baseline rows expose
 /// only a user-mutable deep-hook opt-in. The user-mutable layer below lets
 /// the user opt in detected running apps or hand-type bundle ids.
 /// Per-app deep-hook opt-in (Messages V2-P7 / Mail V2-P8b) triggers

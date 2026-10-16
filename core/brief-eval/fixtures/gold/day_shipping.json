@@ -1,9 +1,9 @@
 {
-  "notes": "Shipping day. One PR opened, reviewed by CSO, merged same day; started the next item. Brief should call out PR #164 and the CSO sign-off explicitly.",
+  "notes": "Shipping day. One PR opened, reviewed by Priya, merged same day; started the next item. Brief should call out PR #164 and Priya's sign-off explicitly.",
   "required_facts": [
     "PR #164",
     "VideoToolbox",
-    "CSO",
+    "Priya",
     "merged"
   ],
   "forbidden_terms": [

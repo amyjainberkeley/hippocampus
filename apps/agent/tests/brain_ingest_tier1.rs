@@ -5,7 +5,7 @@
 //! extractor wrote the expected `entities` / `entity_mentions` rows
 //! after `put_event` returned.
 //!
-//! This is the **construction-graph wiring proof** for the CSO
+//! This is the **construction-graph wiring proof** for the security review
 //! mini-audit row #3: the extractor is INVOKED by the Allow-arm
 //! dispatch site, not just defined in the library.
 

@@ -216,7 +216,7 @@ final class MainSwiftWiringTests: XCTestCase {
 
         // Negative assertion 2: `main.swift` MUST NOT construct
         // `SCContentFilter(desktopIndependentWindow:)` — the single-
-        // window form REJECTED by FORK 3 = B CEO ratification.
+        // window form REJECTED by FORK 3 = B owner ratification.
         XCTAssertFalse(
             src.contains("desktopIndependentWindow:"),
             "main.swift MUST NOT use SCContentFilter(desktopIndependentWindow:) — FORK 3 = B rejects single-window form."

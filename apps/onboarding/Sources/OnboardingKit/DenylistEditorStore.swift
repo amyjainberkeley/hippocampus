@@ -9,7 +9,7 @@ public protocol DenylistEditorStore: Sendable {
     func removeUserEntry(id: String) async -> Bool
 }
 
-// MARK: - Disk-backed impl (reads CSO TOML + user-deny.toml, unions both)
+// MARK: - Disk-backed impl (reads security review TOML + user-deny.toml, unions both)
 
 public actor DiskDenylistEditorStore: DenylistEditorStore {
     private let csoPath: URL

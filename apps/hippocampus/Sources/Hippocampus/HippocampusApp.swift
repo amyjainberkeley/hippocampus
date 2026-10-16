@@ -35,7 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `@StateObject`) so the launch lifecycle hooks below can drive
     /// it at the right moment — `applicationDidFinishLaunching` fires
     /// on app launch, whereas a `.task` attached to a menu only fires
-    /// when the menu OPENS. The CEO regression of "onboarding doesn't
+    /// when the menu OPENS. The owner regression of "onboarding doesn't
     /// open until I click the menu-bar icon" (2026-05-26) traces
     /// straight to that older shape — the previous code parked the
     /// launch logic in `StatusMenuView.task`.
@@ -138,14 +138,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Mask SIGPIPE before any pipe, socket, or child-process work.
         //
-        // CEO-reported (cycle 8.23, 2026-05-29): even after PR #254 shipped
+        // Owner-reported (cycle 8.23, 2026-05-29): even after PR #254 shipped
         // the `applicationShouldTerminateAfterLastWindowClosed = false`
         // override, the main `Hippocampus` GUI process STILL exited cleanly
         // within minutes of launch on a fresh install of `9fbfe352…`. The
         // helper + agent stayed alive (re-parented to launchd via the
         // supervisor's child re-spawn path), but the menu-bar status item
         // — owned by SwiftUI's `MenuBarExtra` scene inside the main
-        // process — disappeared again. CEO accumulated 5 helper+agent
+        // process — disappeared again. Owner accumulated 5 helper+agent
         // orphan pairs from 5 successive main-GUI deaths. No
         // `DiagnosticReports/*.ips` was generated, confirming the exit
         // was NOT a crash and NOT a signal that the kernel reports as
@@ -178,7 +178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // redaction / sensitive-app denylist / wire framing / known-
         // safe-apps / entitlements / notarization / Gatekeeper /
         // mci.sqlite / blob store. Mirror of PR
-        // #252 + PR #254's no-CSO-sign-off-required pattern. Standard
+        // #252 + PR #254's no-security-review-required pattern. Standard
         // library convention: Rust's `std` masks `SIGPIPE` by default
         // for the same reason.
         signal(SIGPIPE, SIG_IGN)
@@ -547,7 +547,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// last window closed" behavior — the load-bearing reason the
     /// menu-bar `NSStatusItem` survives transient window closes.
     ///
-    /// CEO-reported (cycle 8.22, 2026-05-29): on a fresh install of
+    /// Owner-reported (cycle 8.22, 2026-05-29): on a fresh install of
     /// the cycle 8.22 DMG (`f634b5dc…`), after onboarding completed
     /// and recording started (helper-health.jsonl confirmed 128
     /// frames over 31 s, brain captured 102 events), the main
@@ -584,7 +584,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// §5 audit: pure UX-flow override. Does not touch capture / OCR
     /// cascade / redaction / sensitive-app denylist / wire / known-
     /// safe-apps / entitlements / notarization / Gatekeeper rules.
-    /// Mirror of PR #252's no-CSO-sign-off-required pattern.
+    /// Mirror of PR #252's no-security-review-required pattern.
     func applicationShouldTerminateAfterLastWindowClosed(
         _ sender: NSApplication
     ) -> Bool {

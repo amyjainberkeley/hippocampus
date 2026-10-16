@@ -31,7 +31,7 @@
 #
 # What this script does NOT do:
 #   - It does NOT make any privacy/cascade decision; the decoder
-#     verdict is informational. Phase 1→2 gate is the human CEO's
+#     verdict is informational. Phase 1→2 gate is the owner's
 #     call after reading the wire histogram + actuals (Amendment 1 §2).
 #   - It does NOT auto-pass / auto-flip / auto-merge anything.
 #     `--capture` stays default-OFF in source per Amendment 1 §4.

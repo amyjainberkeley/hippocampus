@@ -171,7 +171,7 @@ final class CascadeAXSubroleTests: XCTestCase {
 final class CascadeFailsafeTests: XCTestCase {
     /// AX could not classify; no other signal fired. Fail-safe MUST
     /// redact, not allow. This is the load-bearing rule per
-    /// ADR-0013 §3 — flipping it requires a fresh CSO ADR amendment.
+    /// ADR-0013 §3 — flipping it requires a fresh security review ADR amendment.
     func testAXSilentAndAppUnknownReturnsFailsafeRedact() {
         let c = cascade(ax: nil)  // empty known-safe list
         let ctx = WorkflowContext(appBundleId: "com.unknown.electron.app")

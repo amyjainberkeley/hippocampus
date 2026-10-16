@@ -623,7 +623,7 @@ final class AXSubroleProbeContainerRolesFinding003Tests: XCTestCase {
     /// Full expected set — pins exactly which roles drive descendant
     /// traversal post-STEP-2-FINDING-003. Any future widening
     /// (re-adding AXWindow, etc.) must update this assertion AND get
-    /// CSO sign-off because it changes the §4 surface.
+    /// Security review because it changes the §4 surface.
     func testContainerRolesIsExactlyTheTightenedSet() {
         XCTAssertEqual(
             AXSubroleProbe.containerRoles,

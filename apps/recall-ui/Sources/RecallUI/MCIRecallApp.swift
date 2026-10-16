@@ -6,7 +6,7 @@ import SwiftUI
 /// Pulls the Recall window to the foreground the instant it appears.
 ///
 /// Without this, opening Recall from the menu-bar "Open Recall…" item
-/// lands the window BEHIND the current foreground app (CEO dogfood
+/// lands the window BEHIND the current foreground app (owner dogfood
 /// feedback 2026-05-26). Same pattern as the OnboardingAppDelegate
 /// fix from PR #195.
 final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {

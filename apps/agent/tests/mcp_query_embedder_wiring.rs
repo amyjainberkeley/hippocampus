@@ -1,4 +1,4 @@
-//! Query-side embedder wiring smoke test (closes TODO P3.8 / CRS
+//! Query-side embedder wiring smoke test (closes TODO P3.8 / research
 //! telemetry-gap G3).
 //!
 //! Before this fix, `run_mcp_serve` hard-coded `embedder = None`, so
@@ -23,7 +23,7 @@
 //!    PR #310 pinned on the ingest side (`ArcticEmbedSEmbedder`
 //!    invariant per ADR-0011 §3).
 //!
-//! # CSO sign-off notes
+//! # Security review notes
 //!
 //! (a) No new write paths — test uses existing `BrainStore::put_event`.
 //! (b) Read-only handle via existing `LiveBrainReader::from_store_with_embedder`.

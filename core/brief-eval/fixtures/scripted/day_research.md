@@ -7,7 +7,7 @@ What changed
 - Skimmed an on-device retrieval survey; captured three embedder comparison follow-ups in Notion [event:78]
 
 What needs follow-up
-- Re-run MTEB on Arctic Embed S vs MiniLM and write up for CRS — DM sent to CRS to expect a memo tomorrow [event:79]
+- Re-run MTEB on Arctic Embed S vs MiniLM and write up for Sam — DM sent to Sam to expect a memo tomorrow [event:79]
 - Posted the research TL;DR in #research so the team has context for the planned experiments [event:76]
 
 ###CITATIONS: [event:71], [event:73], [event:75], [event:76], [event:78], [event:79]

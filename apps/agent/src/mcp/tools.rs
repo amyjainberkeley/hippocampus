@@ -1,6 +1,6 @@
 //! Tool definitions — names + MCP `tools/list` schemas.
 //!
-//! Six **read-only** tools (CSO veto-gate on any addition that mutates):
+//! Six **read-only** tools (security review veto-gate on any addition that mutates):
 //!
 //! - [`ToolName::Recall`] — `mci_recall { query, limit }`.
 //! - [`ToolName::EventsSince`] — `mci_events_since { ts_us, limit }`.
@@ -20,7 +20,7 @@ use std::fmt;
 ///
 /// **Structural read-only invariant** — adding a variant here is the
 /// only way a new tool reaches the wire. Any mutating tool MUST land
-/// behind a separate CSO-signed PR (per ADR-0017 §5).
+/// behind a separate security-reviewed PR (per ADR-0017 §5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolName {
     /// `mci_recall` — lexical (eventually hybrid) recall.

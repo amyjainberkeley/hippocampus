@@ -11,7 +11,7 @@
 //!
 //! - DELETE only — worker never inserts rows.
 //! - `retention.json` is the SOLE source of truth (user's onboarding
-//!   choice, CSO-ratified per ADR-0017 §4).
+//!   choice, reviewed per ADR-0017 §4).
 //! - Safety floor: events younger than 1 hour are never purged
 //!   (enforced in [`purge_once`]).
 

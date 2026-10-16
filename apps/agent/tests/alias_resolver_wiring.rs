@@ -13,7 +13,7 @@
 //! false-merge guard: two distinct people driven through the same worker
 //! must never collapse into one identity.
 //!
-//! # CSO sign-off notes
+//! # Security review notes
 //!
 //! (a) The worker reads only post-cascade alias entities and writes only
 //!     `entity_identities` (migration 0005). No capture-scope change, no

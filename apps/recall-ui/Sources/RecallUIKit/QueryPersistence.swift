@@ -25,7 +25,7 @@
 // If a future change extends persistence to include HITS, SNIPPETS, or
 // any reader-returned content, that IS brain content and MUST NOT live
 // in UserDefaults — it belongs in the SQLCipher store on the reader
-// side. Track A privacy invariant, CSO veto gate.
+// side. Track A privacy invariant, security review veto gate.
 //
 // # Storage schema
 //

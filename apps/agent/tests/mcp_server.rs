@@ -13,7 +13,7 @@
 //! P3.2 store tests already cover `fts5_search` / `get_event` /
 //! `events_since` / `stats` against a real ephemeral `SQLCipher` DB).
 //!
-//! Read-only structural check (per P3.10b PR body CSO sign-off):
+//! Read-only structural check (per P3.10b PR body security review):
 //! `tool_routing_is_three_known_tools_only` enumerates every accepted
 //! tool name; an unknown name MUST return `METHOD_NOT_FOUND`. Adding a
 //! mutating tool would break this test.

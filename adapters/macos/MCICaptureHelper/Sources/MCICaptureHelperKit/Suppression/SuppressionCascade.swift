@@ -7,7 +7,7 @@
 //
 // This file IS the cascade. Every Phase-1 capture-spine PR that lands
 // SCStream lifecycle must wire this orchestrator end-to-end. SCStream
-// without this is rejected at CSO review (no "follow-up" path).
+// without this is rejected at security review (no "follow-up" path).
 //
 // The cascade is OS-API-free by design: it takes the four probe
 // protocols + a `WorkflowContext` + a `BlackedRegionProbe` signal and
@@ -100,7 +100,7 @@ public struct SuppressionCascade: Sendable {
     /// `knownSafeAppBundles` is the curated allowlist from ADR-0013 §3
     /// — bundle IDs whose AX coverage has been positively characterized
     /// by Phase-1 integration tests. Initially empty (no app is
-    /// "known-safe" until earned). Additions are CSO-gated.
+    /// "known-safe" until earned). Additions are review-gated.
     ///
     /// `denylistDrift` is the ADR-0013 §5 source-filter↔live-policy
     /// drift detector. It defaults to `NoDenylistDrift()` (a strict
@@ -269,7 +269,7 @@ public struct SuppressionCascade: Sendable {
         // `.denylistPostCapture` — a reason distinct from §1's
         // `.denylistSource`, so the privacy tombstone records that the
         // post-capture backstop fired (the ADR-0013 §5 §1↔§5
-        // divergence observability surface for the CRS Telemetry-Gap
+        // divergence observability surface for research Telemetry-Gap
         // analyst). Under the default `NoDenylistDrift` sentinel this
         // is a strict no-op (generation parity), so §1–§4/§7 behavior
         // is unchanged.
@@ -343,7 +343,7 @@ public struct SuppressionCascade: Sendable {
     /// regex set. The set is intentionally small + high-precision per
     /// ADR-0013 §6 (Basak et al. arXiv:2307.00714 — best-tool recall
     /// 52–88%, so we lean toward precision and add patterns under
-    /// CSO review only).
+    /// Security review only).
     ///
     /// Patterns covered:
     ///   1. `password|passwd|secret|api[_-]?key|token|bearer

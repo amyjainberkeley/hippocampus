@@ -10,7 +10,7 @@
 // which is USER CONTENT per ADR-0016 §4 invariant 1. They do NOT cross
 // the IPC seam in this PR (P3.5 is helper-internal only); the wire
 // surfacing lands at P3.6 alongside the `0x03 → 0x04` bump + the
-// cascade-twice plumbing. CSO veto-gate on any change that lets these
+// cascade-twice plumbing. Security review veto-gate on any change that lets these
 // values reach the wire without re-running cascade §6 (OCR-time secret
 // /PII regex) over the OCR'd text.
 

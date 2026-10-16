@@ -37,7 +37,7 @@ public enum RuntimeConfigError: LocalizedError, Equatable {
 
 /// Reads/writes `~/.config/hippocampus/runtime.toml`.
 ///
-/// CSO: mode 0644 — non-sensitive settings (capture gate and crash-report opt-in).
+/// Security review: mode 0644 — non-sensitive settings (capture gate and crash-report opt-in).
 /// Capture changes are enforced by the supervisor through a child restart;
 /// this value itself remains a simple atomic on-disk preference.
 public struct RuntimeConfig: RuntimeConfiguring, Sendable {

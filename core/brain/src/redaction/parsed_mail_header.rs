@@ -19,7 +19,7 @@
 //! This module is that second arm. §3(c)(ii) per the Mail-spike
 //! memo §9 (`docs/research/mail-envelope-schema-2026-05-29.md`).
 //!
-//! # Drop-before-write semantics (LOAD-BEARING, CSO audit)
+//! # Drop-before-write semantics (LOAD-BEARING, security audit)
 //!
 //! [`cascade_equivalent`] is the **pre-write** check. It is called by
 //! the brain-ingest mail pump (`apps/agent/src/mail_ingest.rs`) BEFORE
@@ -98,7 +98,7 @@ use super::sms_otp;
 
 /// Placeholder string used in lieu of any rendered subject when the
 /// cascade-equivalent decides the body must be dropped. Surface as a
-/// constant so the corpus harness + CSO audit can grep for it.
+/// constant so the corpus harness + security audit can grep for it.
 pub const REDACTED_SUBJECT: &str = "[REDACTED:MAIL_HEADER_MATCH]";
 
 /// Placeholder used as the brain Event `text` for a header-only audit
@@ -179,7 +179,7 @@ pub enum MailCascadeDecision {
     ///   `Refuse` path was taken upstream and downgraded to a
     ///   sentinel row).
     /// - `reason`: which sub-rule fired (counter discipline for the
-    ///   CRS Telemetry-Gap analyst).
+    ///   Research Telemetry-Gap analyst).
     ///
     /// The pump persists this as an Event row with:
     /// - `text = "[REDACTED:MAIL_HEADER_MATCH] from=<sender_domain>"`
@@ -250,7 +250,7 @@ impl MailRedactionReason {
     /// The top-level `PrivacyTombstone`-reason string the
     /// cascade-equivalent emits to audit logs. All three sub-rules
     /// collapse into the single `mail-header-match` class so the
-    /// CSO sign-off + audit artifact have one stable string to match.
+    /// Security review + audit artifact have one stable string to match.
     #[must_use]
     pub const fn tombstone_reason(self) -> &'static str {
         "mail-header-match"

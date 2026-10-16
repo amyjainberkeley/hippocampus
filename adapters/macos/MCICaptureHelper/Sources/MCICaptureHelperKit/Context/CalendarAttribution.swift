@@ -8,9 +8,9 @@
 // AGENT_QUESTIONS.md F-RATIFICATION-2026-05-31).
 //
 // PROTECTED-SET per AGENT_PROTOCOL §5 (this PR adds the
-// `NSCalendarsUsageDescription` TCC surface; driver-CSO sign-off
+// `NSCalendarsUsageDescription` TCC surface; security sign-off
 // authored inline in the PR body, not via the `cso` sub-agent —
-// CEO-INFRA-001).
+// INFRA-001).
 //
 // # Scope binding
 //

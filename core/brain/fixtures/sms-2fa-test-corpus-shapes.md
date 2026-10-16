@@ -178,13 +178,13 @@ The implementation PR runs the corpus and reports actuals; this projection is in
 
 ## Update cadence
 
-Quarterly refresh (per ADR-0030 §3(b)) — same cycle as `sensitive-domains.toml`. Maintainer (CSO seat) tracks:
+Quarterly refresh (per ADR-0030 §3(b)) — same cycle as `sensitive-domains.toml`. Maintainer (security review) tracks:
 
 - New issuer-prefix shapes (e.g., a new fintech enters Top-50 — add to `B-NN`).
 - New auth-provider shapes (e.g., a new auth0/clerk competitor surfaces).
-- Real-world adversarial false-positives reported by the CRS Telemetry-Gap analyst (`ocr_text_secret_match_count` regressions get triaged into `H-NN`).
+- Real-world adversarial false-positives reported by research Telemetry-Gap analyst (`ocr_text_secret_match_count` regressions get triaged into `H-NN`).
 
-A quarterly PR-of-this-file is the audit trail. CSO sign-off on each refresh asserts: no entry weakens the corpus's coverage promise.
+A quarterly PR-of-this-file is the audit trail. Security review on each refresh asserts: no entry weakens the corpus's coverage promise.
 
 ## References
 

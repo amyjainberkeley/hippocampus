@@ -23,7 +23,7 @@
 //! user-specific entries. This module never opens a network socket,
 //! never reads a file at runtime, never receives a dynamic update.
 //! Refresh is a recompile after editing `sensitive-domains.toml` (a
-//! CSO-signed PR per ADR-0030 §3(b)).
+//! Security-reviewed PR per ADR-0030 §3(b)).
 
 use std::collections::HashSet;
 use std::sync::OnceLock;

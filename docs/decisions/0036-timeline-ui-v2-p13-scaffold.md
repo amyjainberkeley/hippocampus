@@ -43,7 +43,7 @@ Prior ADRs number through 0035. This is ADR-0036.
 ## Alternatives considered
 
 - **(A) Skip the FFI addition; project `recentEvents` in Swift.** Rejected. Would offload downsampling to the Swift side, meaning every zoom/pan pulls up to 10k rows across the FFI boundary and re-buckets them in Swift. Poor perf ceiling; obfuscates the wire-level cap; harder to reason about "what does the strip actually ask for."
-- **(B) Add `events_in_range` to `SqlCipherBrainStore` (protected-set).** Considered. Would push the range predicate into SQL (`WHERE ts_us BETWEEN ? AND ?`) — cleaner + faster + O(range_events) not O(recent_events_hard_cap). Deferred: the scaffold's row budget (10k `recent_events` filtered in-memory) is bounded and correct; a protected-set change on `sqlcipher_brain_store.rs` requires CSO sign-off on the SQL and its migration story. Track as a follow-on optimization once dogfood data shows the scan is a real bottleneck. Amendment path (below) covers the migration.
+- **(B) Add `events_in_range` to `SqlCipherBrainStore` (protected-set).** Considered. Would push the range predicate into SQL (`WHERE ts_us BETWEEN ? AND ?`) — cleaner + faster + O(range_events) not O(recent_events_hard_cap). Deferred: the scaffold's row budget (10k `recent_events` filtered in-memory) is bounded and correct; a protected-set change on `sqlcipher_brain_store.rs` requires security review on the SQL and its migration story. Track as a follow-on optimization once dogfood data shows the scan is a real bottleneck. Amendment path (below) covers the migration.
 - **(C) Merge the strip into the existing `TimelineView` (⌘2) tab.** Considered. Would avoid the tab-count bump. Rejected for the scaffold: the two views have fundamentally different interaction models (list nav vs. horizontal scrub); shipping side-by-side lets dogfood tell us which wins before consolidation. If the strip proves out, Phase D full impl retires the flat list — reversible, one-tab change.
 - **(D) Pinch-to-zoom gestures.** Considered. Rejected for the scaffold — meaningful gesture handling on macOS pushes the LOC budget over the 500 cap. Buttons (segmented picker for Day / Week / Month) + keyboard shortcuts (⌘+ / ⌘−) suffice and are more discoverable. Trackpad gestures land in Phase D full impl.
 
@@ -66,7 +66,7 @@ Prior ADRs number through 0035. This is ADR-0036.
 
 ## Amendment path
 
-If dogfood reveals the `recent_events(10_000)` → in-memory filter is a bottleneck on a 6-month corpus, the follow-on is Alternative B: add `events_in_range` to `SqlCipherBrainStore` (protected-set; CSO sign-off), push the range predicate into SQL, and have `mci_brain_ffi_timeline_events` route through the new method. Zero wire-shape change; drop-in swap on the Rust side. Amendment lands as ADR-0036 v2.
+If dogfood reveals the `recent_events(10_000)` → in-memory filter is a bottleneck on a 6-month corpus, the follow-on is Alternative B: add `events_in_range` to `SqlCipherBrainStore` (protected-set; security review), push the range predicate into SQL, and have `mci_brain_ffi_timeline_events` route through the new method. Zero wire-shape change; drop-in swap on the Rust side. Amendment lands as ADR-0036 v2.
 
 If the two-tab (⌘2 + ⌘8) split proves confusing in dogfood, Phase D full impl retires the flat list and promotes the strip to `RecallTab.timeline`. Reversible; one tab-enum edit + view swap.
 

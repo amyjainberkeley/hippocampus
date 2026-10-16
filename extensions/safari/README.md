@@ -115,7 +115,7 @@ ls "$HOME/Library/Group Containers/$GROUP_ID/safari-inbox/"
 
 Safari disables extensions in Private Browsing windows by default. Users must
 explicitly opt in via Safari → Settings → Extensions → Hippocampus → "Allow
-in Private Browsing". This matches the CSO-required incognito-exclusion
+in Private Browsing". This matches the review-required incognito-exclusion
 invariant from the Chromium extension's `"incognito": "split"` manifest key.
 
 ## Known limitations

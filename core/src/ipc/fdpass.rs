@@ -15,11 +15,11 @@
 //! exposes a **safe** wrapper over exactly these syscalls (returning
 //! `OwnedFd`s, so close-on-drop is automatic), letting us keep
 //! `forbid(unsafe_code)` while still doing fd-passing. The binding
-//! choice (rustix vs nix vs a libc shim) is recorded as a CSO ADR;
+//! choice (rustix vs nix vs a libc shim) is recorded as a security review ADR;
 //! rustix is a PROTECTED-SET dependency gated by the ADR-0008
-//! supply-chain check (CRS Security-Signal audit in `RESEARCH_DIGEST`).
+//! supply-chain check (research Security-Signal audit in `RESEARCH_DIGEST`).
 //!
-//! ## Receive-path hardening (ADR-0014 §, CSO veto-gate)
+//! ## Receive-path hardening (ADR-0014 §, security review veto-gate)
 //!
 //! `recv_with_fds` asserts, on every call:
 //! - **Bounded fd count.** The ancillary buffer is sized for exactly

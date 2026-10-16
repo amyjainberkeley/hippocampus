@@ -29,7 +29,7 @@ thiserror = "1"
 # same feature set (`bundled-sqlcipher-vendored-openssl`). Listing it here
 # does NOT add a new third-party crate to the lockfile — Cargo unifies the
 # version + features across the workspace, so both crates link a SINGLE
-# `SQLCipher` binary. P3.2's CSO sign-off block asserts this. The
+# `SQLCipher` binary. P3.2's security review block asserts this. The
 # `bundled-sqlcipher-vendored-openssl` feature is binding per ADR-0008 —
 # no plaintext `SQLite` fallback path; the store refuses to open an
 # unencrypted DB.
@@ -45,7 +45,7 @@ regex     = "1"
 # — pure-Rust, no network, no plugin loading, no `unsafe`. Read-only at
 # crate-init time; the parsed table is materialized into a
 # `std::sync::OnceLock<…>` (MSRV 1.83 — std-only, no extra crate) and
-# never re-read. CSO §5 sign-off in the PR body covers this addition.
+# never re-read. Security review §5 sign-off in the PR body covers this addition.
 toml      = "0.8"
 # `serde` is already on the workspace lockfile (transitive via several
 # adapters). The `derive` feature is needed for the `RawTable` /
@@ -59,7 +59,7 @@ serde     = { version = "1", features = ["derive"] }
 # of SHA-256 (vs. a faster non-cryptographic hash) is deliberate so
 # the Phase 8 sync model (ADR-0023) can rely on cross-device
 # collision resistance without a separate audit. Pure-Rust, no
-# `unsafe`, no network. CSO §5 sign-off block in the PR body covers
+# `unsafe`, no network. Security review §5 sign-off block in the PR body covers
 # this addition.
 sha2      = "0.10"
 # `tokenizers` is already on the workspace lockfile (v0.20.4) via the
@@ -73,7 +73,7 @@ sha2      = "0.10"
 # (no Core ML, no `unsafe`); the `onig` feature pulls Oniguruma (C) but
 # the BERT WordPiece path does not exercise it — onig is already in the
 # tree via the adapters regardless. ADR-0008 dep-gate satisfied (reuse,
-# not new). CSO §5 sign-off note in the PR body covers this addition:
+# not new). Security review §5 sign-off note in the PR body covers this addition:
 # post-capture, pure-Rust text tokenization, no sensitive-capture surface.
 tokenizers = { version = "0.20", default-features = false, features = ["onig"] }
 # `serde_json` is already on the workspace lockfile (v1.0.149) and was this

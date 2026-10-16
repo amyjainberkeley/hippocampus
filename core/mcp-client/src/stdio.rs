@@ -15,7 +15,7 @@
 //! in-process function call: the subprocess inherits the user's UID
 //! and runs on the same machine. **V2-MCP-1 is non-network — the
 //! ADR-0001 NG3 zero-network invariant is intact.** (HTTP+SSE
-//! transport in V2-MCP-2 is a separate, CSO-gated PR with an explicit
+//! transport in V2-MCP-2 is a separate, review-gated PR with an explicit
 //! ADR-0001 amendment.)
 //!
 //! # Concurrency model

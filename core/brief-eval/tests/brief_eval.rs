@@ -11,7 +11,7 @@
 //! 3. **Stub backend (regression check)** — proves that
 //!    [`StubBriefAuthor`] does NOT pass. This is intentional: the stub
 //!    is supposed to fail the eval so that "still on the stub" is a
-//!    loud, visible signal in any future CEO run.
+//!    loud, visible signal in any future owner run.
 //!
 //! The Core ML backend (`Qwen3CoreMLBackend`) is opt-in via the
 //! `coreml` feature; integration tests do not invoke it because

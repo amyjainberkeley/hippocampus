@@ -36,4 +36,4 @@ ADR-0030 threat model.
 Any change to `.emlx` parsing, mbox enumeration, or the incremental
 watcher. Redaction / sensitive-domain rules live in
 `../../../core/brain/src/redaction/`. Full Disk Access UX lives in
-`../../../apps/onboarding/`. Threat-model changes are CSO-gated.
+`../../../apps/onboarding/`. Threat-model changes are review-gated.

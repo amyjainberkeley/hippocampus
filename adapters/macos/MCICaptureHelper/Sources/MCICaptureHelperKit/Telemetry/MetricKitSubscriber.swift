@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // MetricKitSubscriber — non-content footprint telemetry pipeline
-// (Phase 6 PR 6 deliverable 3, per CTO §4 Phase 6 PR 6 + CEO answer
+// (Phase 6 PR 6 deliverable 3, per plan §4 Phase 6 PR 6 + owner answer
 // D1 ratification "MetricKit as separate non-content footprint
 // telemetry pipeline").
 //
@@ -31,7 +31,7 @@
 // observability against the G2-ratified ≤10-15% CPU / ≤2 GB RAM SLOs
 // (AGENT_PROTOCOL §4 / S4 acceptance gate).
 //
-// # CSO sign-off (binding, AGENT_PROTOCOL §5)
+// # Security review (binding, AGENT_PROTOCOL §5)
 //
 // - MetricKit payloads are content-free by Apple construction. The
 //   payload schema (CPU time, memory, hangs, disk I/O, etc.) is
@@ -47,7 +47,7 @@
 //   created with `intermediateDirectories: true` + default perms; the
 //   file-level 0600 is what binds the trust posture.
 //
-// — CSO sign-off (driver-CSO, dispatch §"NO DRIVER-CSO REQUIRED"
+// — Security review (security, dispatch §"NO SECURITY REVIEW REQUIRED"
 //   3-row mini-audit row 3 in PR body), 2026-06-01
 
 import Foundation
@@ -66,7 +66,7 @@ import Foundation
 // MetricKit — WWDC 2027 or later per Apple's current pattern — remove the
 // guards and re-enable the delegate path.
 //
-// Driver-CSO audit (this fix, PR follow-up to PR #19):
+// Security audit (this fix, PR follow-up to PR #19):
 //   (a) No new telemetry counters added.
 //   (b) No new fields captured.
 //   (c) macOS restored to pre-PR #284 posture — no macOS MetricKit

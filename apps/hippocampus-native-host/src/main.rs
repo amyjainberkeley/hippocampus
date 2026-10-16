@@ -13,7 +13,7 @@
 //!      it to the MCI agent's page-content UNIX socket.
 //!   5. If blocked: drops silently (the content never reaches the brain).
 //!
-//! CSO INVARIANTS:
+//! SECURITY INVARIANTS:
 //! - Denylist applies at the native messaging boundary (before wire).
 //!   With `all_frames: true` (SH Fork E1, ratified 2026-05-31) the
 //!   browser delivers one message per frame; the denylist runs on BOTH
@@ -209,7 +209,7 @@ fn decorate_iframe_title(parent_url: &str, original_title: &str) -> String {
 }
 
 fn process_message(msg: &BrowserMessage, socket: &mut UnixStream) -> io::Result<()> {
-    // CSO invariant: incognito tabs never reach the wire. Checked here
+    // Security review invariant: incognito tabs never reach the wire. Checked here
     // BEFORE denylist / secret filter / socket write so a JS regression
     // (background.js stops forwarding `incognito: true`, content.js
     // stops bailing) still cannot leak content as long as the host is
@@ -509,7 +509,7 @@ mod tests {
     /// pass a closed `UnixStream` pair where the read side is dropped —
     /// any socket write would surface as `io::Error::BrokenPipe`. A
     /// successful `Ok(())` proves no socket write happened, satisfying
-    /// the CSO defense-in-depth requirement.
+    /// The security review defense-in-depth requirement.
     #[test]
     fn process_message_drops_incognito_before_socket_write() {
         use std::os::unix::net::UnixStream;
@@ -609,7 +609,7 @@ mod tests {
             "incognito": false
         }"#;
         let msg: BrowserMessage = serde_json::from_str(json).unwrap();
-        // CSO invariant: an older background.js (no per-frame fields)
+        // Security review invariant: an older background.js (no per-frame fields)
         // must NOT be treated as a sub-frame — that would prefix every
         // title with "[iframe of ] " and corrupt the brain. Defaults
         // are: is_top_frame=true, frame_id=0, frame_url="", parent_url="".

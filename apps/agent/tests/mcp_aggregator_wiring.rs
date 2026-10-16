@@ -124,7 +124,7 @@ async fn reconcile_persists_small_resources_with_mcp_source_tag() {
     assert_eq!(events.len(), 2, "expected 2 events, got {}", events.len());
 
     // Source-provenance tagging — every event from this server carries
-    // `mcp:slack`. CSO row 2.
+    // `mcp:slack`. Security review row 2.
     for ev in &events {
         let tag = ev.app_bundle_id.as_deref().expect("source tag set");
         assert_eq!(tag, "mcp:slack");
@@ -306,7 +306,7 @@ async fn cross_server_isolation_distinct_source_tags() {
 
 #[tokio::test]
 async fn mcp_source_tag_does_not_collide_with_deep_hook_bundle_ids() {
-    // CSO row 2 — the prefix is what V2-P12 (Phase 7) uses to route
+    // Security review row 2 — the prefix is what V2-P12 (Phase 7) uses to route
     // prompt-injection mitigation. It must NOT collide with the
     // deep-hook bundle ids (Messages / Mail) that the V2-P7/P8 cascade
     // routes on.
@@ -348,7 +348,7 @@ async fn tool_catalog_is_populated_per_server() {
     assert!(names.contains(&"slack_search"));
     assert!(names.contains(&"slack_post"));
 
-    // CSO row 4 — tool catalog snapshots tools/list result counter,
+    // Security review row 4 — tool catalog snapshots tools/list result counter,
     // but NO `tools/call` was emitted (nothing produced ToolResult).
     let snap = agg.stats().snapshot();
     assert_eq!(snap.tools_cataloged, 2);
@@ -391,7 +391,7 @@ async fn shutdown_during_long_reconcile_interval_exits_promptly() {
 
 #[tokio::test]
 async fn materialized_event_runs_v2p4_tier1_extraction_against_real_brain_store() {
-    // CSO row 7 + V2-P4 wiring continuity — proves that an MCP-sourced
+    // Security review row 7 + V2-P4 wiring continuity — proves that an MCP-sourced
     // event participates in the entity-graph the same way an OCR /
     // browser / deep-hook event does. Uses a real SqlCipherBrainStore
     // because the InMemoryBrainStore stub does NOT implement the V2-
@@ -437,7 +437,7 @@ async fn materialized_event_runs_v2p4_tier1_extraction_against_real_brain_store(
 
 #[tokio::test]
 async fn n_5_servers_with_idle_loop_holds_steady_state() {
-    // CSO row 11 — footprint sanity. Five servers each holding a
+    // Security review row 11 — footprint sanity. Five servers each holding a
     // long-lived SSE connection PLUS the per-server reconcile loop
     // (catalog + materialize) running on a tight cadence MUST NOT
     // blow the G2 raised SLO (≤10–15% CPU / ≤2 GB RAM). The asserts
@@ -521,7 +521,7 @@ async fn n_5_servers_with_idle_loop_holds_steady_state() {
 
 #[test]
 fn construction_graph_wiring_at_integration_site() {
-    // Driver-CSO audit row 7 — per
+    // Security audit row 7 — per
     // [[project-v2p1-unit-tests-passed-but-never-wired]] the
     // load-bearing wire is `McpAggregator::new` being CONSTRUCTED in
     // `apps/agent/src/bin/mci_agent.rs`. If a future refactor moves

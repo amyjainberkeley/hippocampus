@@ -7,7 +7,7 @@
 //!   3. AWS access key (AKIA/ASIA + 16 alnum)
 //!   4. JWT (eyJ + base64url . base64url . base64url)
 //!
-//! CSO INVARIANT: this filter runs BEFORE any `PageContentEvent` reaches
+//! Security review INVARIANT: this filter runs BEFORE any `PageContentEvent` reaches
 //! the wire. Text that matches ANY pattern is dropped — the event is
 //! never emitted. Same cascade-twice discipline as `OCREvent`.
 

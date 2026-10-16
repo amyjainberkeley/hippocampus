@@ -6,7 +6,7 @@
 //! and the value types they exchange. Nothing in this crate runs OCR, runs an
 //! embedder, opens a `SQLCipher` database, or fuses retrieval scores in
 //! anger — those are the production impls that land in the Phase 3 PR
-//! sequence (P3.x), each individually CSO-reviewable under `AGENT_PROTOCOL`
+//! sequence (P3.x), each individually reviewable under `AGENT_PROTOCOL`
 //! §5. This crate is the trait surface those impls will satisfy, plus stubs
 //! to keep upstream wiring honest while they're being written.
 //!
@@ -27,11 +27,11 @@
 //!   retrieval and index unit is the event**, not the flat chunk; fusion is
 //!   rank-aware Convex Combination with explicit feature weights, not a single
 //!   unweighted Reciprocal Rank Fusion score. Resolved Phase 0
-//!   fork "Director-Brain — Memory unit" (`docs/AGENT_QUESTIONS.md`,
+//!   fork "brain track — Memory unit" (`docs/AGENT_QUESTIONS.md`,
 //!   ACCEPTED 2026-05-18).
 //! - `docs/decisions/0011-embedding-model-snowflake-arctic-embed-s.md` —
 //!   embedder is `snowflake-arctic-embed-s` (Apache-2.0, 384-d). Resolved
-//!   Phase 0 fork "Director-Brain — Embedding model" (`docs/AGENT_QUESTIONS.md`,
+//!   Phase 0 fork "brain track — Embedding model" (`docs/AGENT_QUESTIONS.md`,
 //!   ACCEPTED 2026-05-18).
 //!
 //! ADR-0016 (parallel doc PR currently in flight) is the binding ratification

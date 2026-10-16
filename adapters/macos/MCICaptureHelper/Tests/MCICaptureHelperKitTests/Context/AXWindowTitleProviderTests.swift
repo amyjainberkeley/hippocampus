@@ -243,7 +243,7 @@ final class AXWindowTitleProviderTests: XCTestCase {
 
     /// Timeout cap matches the ADR-0015 P2.2 acceptance brief
     /// (matches the P2.3 `SafariURLProvider.timeoutMs` precedent).
-    /// Changing this is a CSO-protected change — it loosens the
+    /// Changing this is a review-protected change — it loosens the
     /// upper bound on how long a single AX call can stall the
     /// 1 Hz poll.
     func testTimeoutIs250ms() {

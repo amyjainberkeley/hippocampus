@@ -311,7 +311,7 @@ final class ChromiumURLProviderTests: XCTestCase {
 
     /// Per-browser AppleScript sources match the ADR-0015 §1.3
     /// dialect exactly. Pins the wire-level invariant: changing any
-    /// script source is a CSO-protected change (it changes what the
+    /// script source is a review-protected change (it changes what the
     /// user is asked to consent to via the Automation pane).
     func testAppleScriptSourcesMatchADR0015() {
         XCTAssertEqual(

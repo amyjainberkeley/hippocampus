@@ -1,7 +1,7 @@
 //! Integration tests for the FFI wiring against a real ephemeral
 //! `SQLCipher` brain DB.
 //!
-//! # The CSO load-bearing test (`ffi_open_yields_a_strictly_read_only_brain`)
+//! # The security review load-bearing test (`ffi_open_yields_a_strictly_read_only_brain`)
 //!
 //! ADR-0017 §5 + ADR-0016 §4.3 require that the recall UI cannot mutate
 //! the brain — *except* through the enumerated cycle-8.47 mutation
@@ -124,7 +124,7 @@ fn seed_event(
 }
 
 // ---------------------------------------------------------------------------
-// 1. CSO load-bearing — FFI hands the recall UI a strictly read-only brain
+// 1. Security review load-bearing — FFI hands the recall UI a strictly read-only brain
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -609,7 +609,7 @@ fn ffi_exports_no_mutating_surface_beyond_allowlist() {
     ];
     // Mutation-tier surface. Every method here is user-gated by the
     // Swift Privacy Dashboard's typed-word confirmation UI (and, for
-    // wipe, the two-step token flow). Adding to this list requires CSO
+    // wipe, the two-step token flow). Adding to this list requires security review
     // sign-off + an ADR amendment; the allow-list assertion below
     // enforces the size bound so a silent addition breaks CI.
     let allowed_mutations: &[&str] = &[

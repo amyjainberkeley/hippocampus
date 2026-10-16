@@ -31,7 +31,7 @@
 //! bytes through the same `drain_to_log_with_brain` path the
 //! production agent uses.
 //!
-//! # CSO sign-off notes (matches PR body)
+//! # Security review notes (matches PR body)
 //!
 //! - No store schema change — writes go through the existing
 //!   `SqlCipherBrainStore.put_event` API.

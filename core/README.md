@@ -33,4 +33,4 @@ in OS-specific assumptions (ADR-0002).
 Any change to the portable pipeline, dedupe, store schema, crypto, or
 IPC wire format lands here. If a change requires OS-specific system
 calls, STOP — it belongs in an adapter under `../adapters/<os>/`.
-Changes to crypto/sync/store are CSO-gated per AGENT_PROTOCOL §4.
+Changes to crypto/sync/store are review-gated per AGENT_PROTOCOL §4.

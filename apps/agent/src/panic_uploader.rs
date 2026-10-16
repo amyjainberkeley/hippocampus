@@ -20,7 +20,7 @@
 //! (e.g. via a config template), no data leaves without the explicit
 //! opt-in flag.
 //!
-//! # CSO sign-off (binding, `AGENT_PROTOCOL` §5)
+//! # Security review (binding, `AGENT_PROTOCOL` §5)
 //!
 //! - Schema validation at boundary: only lines that deserialize to
 //!   `CrashReport { ts, thread, location, message }` are uploaded.
@@ -31,7 +31,7 @@
 //! - No authentication in this skeleton. PR body notes this as a
 //!   P5 follow-up risk.
 //!
-//! — CSO, 2026-05-21
+//! — Security review, 2026-05-21
 
 use std::path::Path;
 

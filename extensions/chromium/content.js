@@ -9,7 +9,7 @@
 // distinguish a sub-frame so the brain can attribute the iframe
 // content to its parent page without a binary-wire schema bump.
 //
-// CSO INVARIANTS:
+// SECURITY INVARIANTS:
 // - NEVER reads input.value / textarea.value / contenteditable
 // - NEVER runs on data: / chrome: / chrome-extension: / about: URLs
 //   (re-checked PER FRAME in `isBlockedURL` — a blocked iframe URL

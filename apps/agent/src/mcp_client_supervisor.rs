@@ -5,7 +5,7 @@
 //! HTTP entry per enabled `[[server]]` block, and logs each
 //! registration. The registry is returned to the caller so the agent
 //! process owns it for its lifetime — V2-MCP-3's aggregator (cycle
-//! 8.30, Director-Brain) consumes it without a re-init.
+//! 8.30, brain track) consumes it without a re-init.
 //!
 //! v1 posture (intentional scope cap):
 //!

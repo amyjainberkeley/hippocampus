@@ -34,7 +34,7 @@
 //! Messages dot-connect is Messages ⇄ another app sharing the same handle —
 //! exactly the "I texted them, then looked them up in Safari" path.
 //!
-//! # CSO sign-off notes
+//! # Security review notes
 //!
 //! (a) Every brain lives in a `tempfile::TempDir`; no real chat.db is read.
 //! (b) The persisted handle is the user's own contact id, written ONLY into

@@ -12,9 +12,9 @@
 //! lets adapter code reference the table/column names by string without
 //! pulling in a database driver. Phase 1 wires the executor.
 //!
-//! **CSO sign-off (binding):** any change to the column shapes below —
+//! **Security review (binding):** any change to the column shapes below —
 //! especially `event_vectors.embedding`, the `sync_log` hash-chain columns,
-//! or the `meta.schema_version` discipline — requires a fresh CSO review.
+//! or the `meta.schema_version` discipline — requires a fresh security review.
 //! `AGENT_PROTOCOL` §5 protected-set scope applies (ADRs 0008 + 0012).
 
 /// Monotonic schema version. Bumped on any DDL change (with a paired
@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn event_vectors_dimension_is_pinned_at_384() {
         // ADR-0009 binding invariant. Changing this is a protected-set
-        // change requiring a fresh CSO review + a schema-version bump +
+        // change requiring a fresh security review + a schema-version bump +
         // a re-embed migration.
         assert!(
             CREATE_EVENT_VECTORS.contains("float[384]"),

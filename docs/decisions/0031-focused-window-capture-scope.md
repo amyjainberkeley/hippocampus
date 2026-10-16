@@ -20,7 +20,7 @@ When the dirty-rect bounding rect spans multiple windows (the common case during
 
 ### Why no prior ADR addressed the OCR-input scope
 
-Memo §3 audited every protected-set ADR. The privacy model has always rested on the implicit assumption that an OCREvent's `app_bundle_id` is the bundle that *produced* the OCR'd pixel bytes. The current pre-V2-P1 implementation makes that assumption true *only* when (a) the focused app's windows occupy the entire dirty-rect bounding rect, or (b) the dirty-rect array is non-empty and tight. Neither holds on a normal multi-window display. This ADR makes the assumption *explicit*, makes it *load-bearing*, and CSO-protects it going forward.
+Memo §3 audited every protected-set ADR. The privacy model has always rested on the implicit assumption that an OCREvent's `app_bundle_id` is the bundle that *produced* the OCR'd pixel bytes. The current pre-V2-P1 implementation makes that assumption true *only* when (a) the focused app's windows occupy the entire dirty-rect bounding rect, or (b) the dirty-rect array is non-empty and tight. Neither holds on a normal multi-window display. This ADR makes the assumption *explicit*, makes it *load-bearing*, and security review-protects it going forward.
 
 ### What changed under cycle 8.18
 
@@ -86,9 +86,9 @@ Read the focused window's AX-reported rect via `AXUIElementCopyAttributeValue(wi
 
 Run the cascade and OCR pass independently *per visible window*: each visible non-denylisted window's pixels get their own Vision OCR run, each emits its own OCREvent tagged with its own bundle id. **Rejected for v1; deferred.** ScreenCaptureKit does not deliver a per-window pixel buffer in a multi-window capture; per-window OCR would require either (i) one `SCStream` per window — quadratic SCStream count on a busy desktop — or (ii) display capture + per-window AX rect crop + per-window Vision call (Option (b)'s problems × N). The footprint blowup risk is real (N × Vision-OCR cost per frame). Defer to v2+ when a multi-window observability case is built and the OnboardingTier surface (brain-v2 §7.4) is available to gate the cost.
 
-### 6. CSO sign-off (binding)
+### 6. Security review (binding)
 
-The CSO seat hereby attests the following on behalf of the V2-P1 PR:
+The security review hereby attests the following on behalf of the V2-P1 PR:
 
 1. **OCR-input scope is focused-window-only.** The captured pixel surface produced by `SCContentFilterFactory.makeFocusedWindowFilter(...)` IS the focused window, per `SCContentFilter(desktopIndependentWindow:)`. Verified by the Swift-side unit tests + the §7 corpus artifact + (post-merge) the §11 live-Mac audit.
 2. **Race-consistency gate fails closed.** The (frame_ts, focus_ts) consistency check at the top of `SCStreamCaptureSession.stream(_:didOutputSampleBuffer:of:)` emits `PrivacyTombstone(reason=focusRaceDropped)` and SKIPS cascade + encode + OCR on any focus-generation mismatch. The new `framesFocusRaceDropped` counter on the wire (0x07 → 0x08) is the observability surface.
@@ -97,7 +97,7 @@ The CSO seat hereby attests the following on behalf of the V2-P1 PR:
 5. **§7 corpus artifact GREEN.** The 5-harness committed artifact at `docs/audit/2026-05-29-focused-window-corpus.md` is the lift condition for the M4 OCR-emit kill-switch. The runner is deterministic: re-running `cargo run -p mci-brain --bin focused_window_corpus --release` reproduces the artifact byte-for-byte.
 6. **M4 kill-switch lifts as the FINAL commit of V2-P1.** Verifying §7 corpus GREEN + this sign-off are the gate. The lift commit is a single-line edit at `OCRPostAllowEmitter.swift:104` (`killOcrEmit = false`). The existing `testKillSwitchEmitsTombstoneForAllowFrames` test continues to pin the kill-switch branch via scope override so the emergency-kill capability remains.
 
-— CSO + Director-Recording (joint), 2026-05-29
+— Security and capture review (joint), 2026-05-29
 
 ## Consequences
 
@@ -113,18 +113,18 @@ The CSO seat hereby attests the following on behalf of the V2-P1 PR:
 
 - One `SCStream.updateContentFilter(...)` call per focus change. Target latency budget: ≤8 ms p95 (to be measured on the §11 live-Mac audit; the helper's `frames_focus_race_dropped` counter is the observability surface — a sustained non-zero delta indicates focus-change cadence exceeding the rebind task's 200 ms poll cadence).
 - The cascade-twice OCR emitter goes dark for ~1–2 frames during every focus transition (the race-gate window). Trade-off acknowledged: fail-closed under attribution uncertainty is the right direction per ADR-0013 §3 + Amendment 1 §3(b).
-- Apps that never produce a focused-window AX answer (intermittent Electron) yield `axRect = nil` from the FocusTracker; this is observability-only inside V2-P1 (the SCStream filter binds against `SCWindow.windowID`, not the AX rect) but a sustained "no rect" condition is a CRS Telemetry-Gap monitoring signal for future Electron-specific work.
+- Apps that never produce a focused-window AX answer (intermittent Electron) yield `axRect = nil` from the FocusTracker; this is observability-only inside V2-P1 (the SCStream filter binds against `SCWindow.windowID`, not the AX rect) but a sustained "no rect" condition is a research Telemetry-Gap monitoring signal for future Electron-specific work.
 - Multi-window observability (the user's intent on Window B while focused on Window A) is lost. Deferred to v2+ Option (c) per §5.2.
 
 ### Footprint discipline
 
-The cycle 8.17 footprint envelope (≤ ~1–2% of one CPU core / ≤ ~250 MB RAM on an all-day session, AGENT_PROTOCOL §4 R2) is preserved on the SCStream + OCR path. The FocusTracker is a 1 Hz NSWorkspace + AX poll on a dedicated `DispatchQueue` — same shape and cost class as `NSWorkspaceContextProvider`. The rebind task is a 200 ms async loop; cost is bounded by `SCStream.updateContentFilter` (Apple-documented as cheap; CSO-asserted measurable at ≤8 ms p95 in the live-Mac audit). Net OCR cost is expected to *decrease* (smaller pixel area).
+The cycle 8.17 footprint envelope (≤ ~1–2% of one CPU core / ≤ ~250 MB RAM on an all-day session, AGENT_PROTOCOL §4 R2) is preserved on the SCStream + OCR path. The FocusTracker is a 1 Hz NSWorkspace + AX poll on a dedicated `DispatchQueue` — same shape and cost class as `NSWorkspaceContextProvider`. The rebind task is a 200 ms async loop; cost is bounded by `SCStream.updateContentFilter` (Apple-documented as cheap; security review-asserted measurable at ≤8 ms p95 in the live-Mac audit). Net OCR cost is expected to *decrease* (smaller pixel area).
 
 ### Compliance with existing invariants
 
 - **AGENT_PROTOCOL §4 R5 sensitive-capture launch-blocker**: this ADR is the spec for the gate. The implementing PR ships with the §7 corpus artifact; M4 lifts as the final commit.
-- **AGENT_PROTOCOL §5 protected-set**: this ADR + each commit in the implementing PR carry CSO sign-off blocks.
-- **AGENT_PROTOCOL §9 unattended-autonomous mode**: the M4-lift commit is autonomously executable per CEO ratification — the corpus is a Rust binary producing a deterministic artifact, not a live-Mac harness. The §11 live-Mac audit is the post-merge CEO-attended verification.
+- **AGENT_PROTOCOL §5 protected-set**: this ADR + each commit in the implementing PR carry security review blocks.
+- **AGENT_PROTOCOL §9 unattended-autonomous mode**: the M4-lift commit is autonomously executable per owner ratification — the corpus is a Rust binary producing a deterministic artifact, not a live-Mac harness. The §11 live-Mac audit is the post-merge owner-attended verification.
 
 ## Status — M4 kill-switch is RE-ENGAGED (2026-05-30 cycle 8.27 emergency revert of PR #264)
 
@@ -154,23 +154,23 @@ The §7 corpus passed 5/5 GREEN in dev (`docs/audit/2026-05-29-focused-window-co
 - The race-consistency gate (`(frame_ts, focus_ts)`) is letting in-flight pre-rebind frames through under conditions the corpus did not exercise; or
 - A third structural gap exists in the SCStream-to-Vision path that the audit did not surface.
 
-The root-cause diagnostic is a separate Director-Recording + CSO joint dispatch (`v2-p1-production-leak-diag`) — out of scope for this emergency re-flip PR.
+The root-cause diagnostic is a separate capture track + security review joint dispatch (`v2-p1-production-leak-diag`) — out of scope for this emergency re-flip PR.
 
 ### Lift condition (the second time)
 
 M4 lifts the second time when ALL of the following hold:
 
-1. The `v2-p1-production-leak-diag` diagnostic finds the structural gap that the cycle 8.25 production probe surfaced, and an implementing PR closes it (CSO sign-off on the protected-set surface).
+1. The `v2-p1-production-leak-diag` diagnostic finds the structural gap that the cycle 8.25 production probe surfaced, and an implementing PR closes it (security review on the protected-set surface).
 2. A **production-realistic** §7-equivalent corpus runs 5/5 GREEN with **explicit coverage** of: (a) overlapping non-frontmost-window scenarios on the same display, (b) focus-rebind race under realistic system load, (c) the same Messages-behind-System-Preferences shape that the production probe surfaced.
-3. CEO ratifies the second lift on a re-ship + live-Mac smoke test that includes the production-probe replay shape (Messages window open and visible while System Preferences is frontmost; assert no Messages tokens land in any System Preferences OCREvent).
+3. Owner ratifies the second lift on a re-ship + live-Mac smoke test that includes the production-probe replay shape (Messages window open and visible while System Preferences is frontmost; assert no Messages tokens land in any System Preferences OCREvent).
 
 While `killOcrEmit == true`, V2-P1's focused-window `SCContentFilter` stays installed (defense in depth — the OCR-emit arm is a no-op, but the filter still narrows the captured surface). All other V2 work products on the brain v2 phase plan continue to land; only the OCR-emit gate is closed.
 
-### CSO sign-off block (2026-05-30 emergency re-flip)
+### Security review block (2026-05-30 emergency re-flip)
 
-This RE-FLIP is the second exercise of the same emergency-mitigation discipline that PR #232 established and PR #239 lifted from. It is exactly what the M4 kill-switch was designed for: a single-line revert that closes the OCR-emit cross-window leak class while the architectural fix's gap is diagnosed and re-closed. CSO authority cited: ADR-0031 §"Status" lift condition (this clause); AGENT_PROTOCOL §4 R5 (sensitive-capture launch-blocker); §5 (CSO veto-gate on protected-set); §7 (escalation discipline). The PR amending this section also flips the single-line source default at `OCRPostAllowEmitter.swift:120` from `false` to `true`. ADR-0013 §3 fail-safe-default-redact + Amendment 1 §3(b) fail-closed posture are PRESERVED — the re-flip strengthens fail-closed, not weakens it.
+This RE-FLIP is the second exercise of the same emergency-mitigation discipline that PR #232 established and PR #239 lifted from. It is exactly what the M4 kill-switch was designed for: a single-line revert that closes the OCR-emit cross-window leak class while the architectural fix's gap is diagnosed and re-closed. Security review authority cited: ADR-0031 §"Status" lift condition (this clause); AGENT_PROTOCOL §4 R5 (sensitive-capture launch-blocker); §5 (security review veto-gate on protected-set); §7 (escalation discipline). The PR amending this section also flips the single-line source default at `OCRPostAllowEmitter.swift:120` from `false` to `true`. ADR-0013 §3 fail-safe-default-redact + Amendment 1 §3(b) fail-closed posture are PRESERVED — the re-flip strengthens fail-closed, not weakens it.
 
-— CSO + Director-Recording (joint), 2026-05-30
+— Security and capture review (joint), 2026-05-30
 
 ### 2026-05-30 — M4 SECOND LIFT (V2-P1 production wiring + sentinel fail-close)
 
@@ -180,26 +180,26 @@ This PR (#TBD) lands the §5.1 wiring (10 LOC `main.swift` edit constructing the
 
 A new `MainSwiftWiringTests.swift` test reads the production `main.swift` source at test time and asserts the construction graph contains the two kwargs that activate V2-P1 (H6 wire-up assertion per memo §4.1). Five additional logic tests pin the §5.2 race-gate sentinel fail-close decision matrix. A future refactor that drops the wiring fails CI before merge.
 
-M4 lifts again (`killOcrEmit = false`) as the LAST commit of this PR — gated on the cycle 8.27 reship + the CEO-attended live-Mac audit (memo §11) confirming H6′/H7′/H8′ harnesses (vibrancy / NotificationCenter banners / multi-window-per-app focus) pass on a real Mac with `HelperHealth.frames_focus_race_dropped` non-zero (proof the race gate is actually running — currently zero in production for the structural reason the memo §3.1 measurement #4 identifies). CRS Telemetry-Gap is tracking the missing `frames_focus_race_dropped` non-zero condition flagged in memo §8.
+M4 lifts again (`killOcrEmit = false`) as the LAST commit of this PR — gated on the cycle 8.27 reship + the owner-attended live-Mac audit (memo §11) confirming H6′/H7′/H8′ harnesses (vibrancy / NotificationCenter banners / multi-window-per-app focus) pass on a real Mac with `HelperHealth.frames_focus_race_dropped` non-zero (proof the race gate is actually running — currently zero in production for the structural reason the memo §3.1 measurement #4 identifies). Research Telemetry-Gap is tracking the missing `frames_focus_race_dropped` non-zero condition flagged in memo §8.
 
 This second lift supersedes the original 2026-05-29 V2-P1 lift in spirit: ADR-0031 §6.6 ("M4 lifts as the final commit of V2-P1") underestimated the audit gap and is amended by reference to memo §6. The new lift condition is binding from this entry forward.
 
-### CSO sign-off block (2026-05-30 M4 SECOND LIFT)
+### Security review block (2026-05-30 M4 SECOND LIFT)
 
-The CSO seat hereby re-attests ADR-0031 §6.1–§6.6, joint with Director-Recording, against the now-wired construction graph:
+The security review hereby re-attests ADR-0031 §6.1–§6.6, joint with capture track, against the now-wired construction graph:
 
 1. **OCR-input scope is focused-window-only IN PRODUCTION.** The factory at `SCContentFilterFactory.makeFocusedWindowFilter(...)` is now reachable from the production `SCStreamCaptureSession.start()` path because `focusedWindowStore != nil` in shipped builds. Pinned by `MainSwiftWiringTests.test_main_passes_focusedWindowStore_to_SCStreamCaptureSession`.
 2. **Race-consistency gate fails closed AT THE BOOT EDGE.** §5.2's `installedGen == 0` sentinel closes the previously-trivially-passing `0 == 0` predicate. Pinned by `MainSwiftWiringTests.test_race_gate_fails_closed_on_installed_generation_zero_with_observed_*` (3 cases).
 3. **ADR-0013 §1 denylist composition preserved.** Unchanged from V2-P1; this PR adds NO denylist path. `SelectFocusedWindowTests::test_returns_nil_when_owning_app_is_denylisted` continues to pin the composition.
 4. **Amendment 1 §3(a)–(d) preserved.** (a) cascade-before-encode unchanged; (b) fail-closed STRENGTHENED on the §5.2 sentinel; (c) no stored/emitted suppressed event unchanged; (d) surface-lease exactly-once preserved via `defer { lease.release() }` in `emitFocusRaceDropped(...)` unchanged.
 5. **Construction-graph wiring at main.swift:503 verified.** `git grep -n "FocusedWindowStore()" adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift` returns a line; `git grep -n "FocusTracker(store:" adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift` returns a line; both non-empty post-PR. The H6 wire-up assertion test pins this as a structural CI gate going forward; mandatory on every future §5 protected-set PR per the new `project-v2p1-unit-tests-passed-but-never-wired` discipline.
-6. **M4 second lift conditioned on the live-Mac audit.** The single-line edit at `OCRPostAllowEmitter.swift:135` (`killOcrEmit = true → false`) is the LAST commit; it is gated on the cycle 8.27 reship's CEO-attended live-Mac audit per memo §6. `testKillSwitchEmitsTombstoneForAllowFrames` continues to scope-override `killOcrEmit = true` for the kill-switch branch test so the emergency-kill capability remains.
+6. **M4 second lift conditioned on the live-Mac audit.** The single-line edit at `OCRPostAllowEmitter.swift:135` (`killOcrEmit = true → false`) is the LAST commit; it is gated on the cycle 8.27 reship's owner-attended live-Mac audit per memo §6. `testKillSwitchEmitsTombstoneForAllowFrames` continues to scope-override `killOcrEmit = true` for the kill-switch branch test so the emergency-kill capability remains.
 
-— CSO + Director-Recording (joint), 2026-05-30
+— Security and capture review (joint), 2026-05-30
 
 ### 2026-05-30 — M4 SECOND LIFT REVERTED (V2-P1 `exceptingWindows` API misuse breaks SCStream)
 
-PR #264 wired `FocusedWindowStore` + `FocusTracker` into `main.swift` (§5.1) and lifted M4 a second time. The cycle 8.27 DMG built off PR #264 (not merged) was installed to `/Applications` and a CEO production probe ran. Helper.stderr showed, on a ~30s restart loop:
+PR #264 wired `FocusedWindowStore` + `FocusTracker` into `main.swift` (§5.1) and lifted M4 a second time. The cycle 8.27 DMG built off PR #264 (not merged) was installed to `/Applications` and a owner production probe ran. Helper.stderr showed, on a ~30s restart loop:
 
 ```
 SCStream callback alive: first sample received.
@@ -233,14 +233,14 @@ Any future M4 lift requires ALL of the following:
 
 1. A V2-P1 redesign that uses `SCContentFilter(desktopIndependentWindow:)` (single-window form) or `SCContentFilter(display:including:exceptingWindows:)` (display + non-empty include list) — i.e. an `includingWindows`-correct API. The implementing PR must include a unit test that constructs the filter against a real-Apple-API stand-in and verifies it does NOT trigger `-3815` semantics. Tracked: follow-on memo `v2-p1-redesign-includingwindows`.
 2. A production-realistic §7-equivalent corpus that exercises the real Apple SCStream API end-to-end on a live macOS host (not a mock), with explicit coverage of: (a) the cycle 8.27 `-3815` shape that PR #264 surfaced, (b) overlapping non-frontmost-window scenarios on the same display, (c) focus-rebind race under realistic system load, (d) the Messages-behind-System-Preferences attribution shape that the cycle 8.25 production probe surfaced.
-3. CEO ratification on a cycle DMG live-Mac smoke test that includes a 5+ minute interactive use exercise. `helper.stderr` MUST contain no `-3815` errors across the exercise; `frames_focus_race_dropped` MUST be a small fraction of `frames_delivered` (e.g. <5%, not the 73% PR #264's wiring produced).
-4. CSO sign-off on the protected-set surface (`SCContentFilter` factory, `SCStreamCaptureSession`, the rebind task, the race gate, the wire-up at `main.swift`).
+3. Owner ratification on a cycle DMG live-Mac smoke test that includes a 5+ minute interactive use exercise. `helper.stderr` MUST contain no `-3815` errors across the exercise; `frames_focus_race_dropped` MUST be a small fraction of `frames_delivered` (e.g. <5%, not the 73% PR #264's wiring produced).
+4. Security review on the protected-set surface (`SCContentFilter` factory, `SCStreamCaptureSession`, the rebind task, the race gate, the wire-up at `main.swift`).
 
 ADR-0031 §6.6 ("M4 lifts as the final commit of V2-P1") is amended in spirit by reference to this revert: that clause underestimated the operational risk of lifting M4 on the same PR that lands the wiring change. Future lifts ship as standalone PRs, after the live-Mac evidence required by (1)–(3) above is in hand, and never compounded with a wiring or capture-API change in the same PR.
 
-### CSO sign-off block (2026-05-30 cycle 8.27 emergency revert — DRIVER-CSO)
+### Security review block (2026-05-30 cycle 8.27 emergency revert — SECURITY)
 
-Authored by Director-Recording acting as driver-CSO per CEO-INFRA-001 (the `cso` sub-agent dispatch was previously observed to hallucinate audit tables — memory entry `feedback-cso-subagent-hallucinates`; driver-CSO authorship is the corrective discipline).
+Authored by capture track acting as security per INFRA-001 (the `cso` sub-agent dispatch was previously observed to hallucinate audit tables — memory entry `feedback-cso-subagent-hallucinates`; security authorship is the corrective discipline).
 
 | Assertion | Verdict | Evidence |
 |---|---|---|
@@ -252,15 +252,15 @@ Authored by Director-Recording acting as driver-CSO per CEO-INFRA-001 (the `cso`
 | ADR-0013 §1 source-level denylist composition preserved | PASS | `Denylist` composition at the SCStream session construction site is unchanged. `makeDisplayFilter(...)`'s denylist behavior is the same fallback the helper has been running with for 11+ cycles. |
 | ADR-0013 §3 fail-safe-default-redact preserved | PASS | The revert strengthens the default by re-engaging M4 — every `.allow` frame fail-closes to `PrivacyTombstone(failsafeUnknown)` at the cascade-twice emit gate. |
 | ADR-0030 §3(a)–(c) Messages/Mail per-app redaction posture | DEGRADED-AS-DESIGNED | With M4 RE-ENGAGED, the per-app redaction at `core/brain/src/redaction/mod.rs` `bundle_is_in_scope` does not need to be load-bearing because OCR-text emit is structurally closed on `.allow` frames. The redaction layer regains load-bearing status when M4 lifts (third time) under the new lift conditions above. |
-| Construction-graph wiring discipline (per `project-v2p1-unit-tests-passed-but-never-wired`) is preserved | PASS | The `project-v2p1-unit-tests-passed-but-never-wired` memory entry's discipline — "construction-graph wiring at integration sites must be in CSO sign-off audit table going forward" — is honored here. This audit table explicitly cites the `main.swift` wiring state (now reverted to nil defaults). |
+| Construction-graph wiring discipline (per `project-v2p1-unit-tests-passed-but-never-wired`) is preserved | PASS | The `project-v2p1-unit-tests-passed-but-never-wired` memory entry's discipline — "construction-graph wiring at integration sites must be in security review audit table going forward" — is honored here. This audit table explicitly cites the `main.swift` wiring state (now reverted to nil defaults). |
 
-**Verdict: APPROVED for emergency merge.** The revert is a strict narrowing of the production surface: it removes a wiring change that broke SCStream end-to-end, preserves the M4 mitigation, and re-extends the wire dual-accept to close the browser context capture regression. No new attack surface; no new redaction bypass; no new permission. ADR-0013, ADR-0015 §4, ADR-0016 §1.6/§4.2, ADR-0030 §3, ADR-0031 §6.1–§6.5 invariants are preserved or strengthened. CSO authority cited: AGENT_PROTOCOL §4 R5 (sensitive-capture launch-blocker — production was capture-down on PR #264), §5 (CSO veto-gate on protected-set), §7 (escalation discipline). The third-lift condition above is binding from this entry forward.
+**Verdict: APPROVED for emergency merge.** The revert is a strict narrowing of the production surface: it removes a wiring change that broke SCStream end-to-end, preserves the M4 mitigation, and re-extends the wire dual-accept to close the browser context capture regression. No new attack surface; no new redaction bypass; no new permission. ADR-0013, ADR-0015 §4, ADR-0016 §1.6/§4.2, ADR-0030 §3, ADR-0031 §6.1–§6.5 invariants are preserved or strengthened. Security review authority cited: AGENT_PROTOCOL §4 R5 (sensitive-capture launch-blocker — production was capture-down on PR #264), §5 (security review veto-gate on protected-set), §7 (escalation discipline). The third-lift condition above is binding from this entry forward.
 
-— Director-Recording (driver-CSO per CEO-INFRA-001), 2026-05-30
+— Capture track (security per INFRA-001), 2026-05-30
 
 ## Cross-references
 
-- **Memo:** `docs/research/capture-scope-window-vs-display-2026-05-29.md` (merged PR #233). §3 ADR audit, §5 recommendation, §7 falsifiability corpus spec, §9 CSO sign-off scaffolding.
+- **Memo:** `docs/research/capture-scope-window-vs-display-2026-05-29.md` (merged PR #233). §3 ADR audit, §5 recommendation, §7 falsifiability corpus spec, §9 security review scaffolding.
 - **Brain v2 vision:** `docs/research/brain-architecture-v2-vision-2026-05-29.md` §7.1 (V2-P1 spec) + §6.1 E8 (protected-set escalation list).
 - **M4 interim mitigation:** PR #232. Lift commit shipped in this PR's commit 6.
 - **§7 corpus runner:** `core/brain/src/bin/focused_window_corpus.rs`. Committed artifact: `docs/audit/2026-05-29-focused-window-corpus.md`.
@@ -282,39 +282,39 @@ Authored by Director-Recording acting as driver-CSO per CEO-INFRA-001 (the `cso`
   - Replaces `MainSwiftWiringTests` H6 wiring assertions with the §5.2 decision-matrix tests only (pure logic).
   - Re-flips M4 (`killOcrEmit = true`).
   - Adds `ACCEPTED_FRAME_VERSIONS` `0x06` re-extension + new `decode_accepts_legacy_0x06_page_content_payload` test to fix the cycle 8.27 `unsupported wire version: got 0x06` browser-context-capture regression on `page_content.sock`.
-  - Amends this ADR §"Status" with the M4 SECOND LIFT REVERTED entry + driver-CSO sign-off block.
+  - Amends this ADR §"Status" with the M4 SECOND LIFT REVERTED entry + security sign-off block.
 
-### 2026-05-31 — V2-P1 redesign discipline + CEO ratifications (PR #271 + Track 1 doc-PR)
+### 2026-05-31 — V2-P1 redesign discipline + owner ratifications (PR #271 + Track 1 doc-PR)
 
-CEO ratified the fully-working-product roadmap across PRs #269 + #270 + #272 in a single orchestrator session 2026-05-31. The persisted state is `docs/research/orchestrator-ratification-state-2026-05-31.md` (PR #271). The decisions that bind future V2-P1 redesign work:
+Owner ratified the fully-working-product roadmap across PRs #269 + #270 + #272 in a single orchestrator session 2026-05-31. The persisted state is `docs/research/orchestrator-ratification-state-2026-05-31.md` (PR #271). The decisions that bind future V2-P1 redesign work:
 
-1. **FORK 3 (original CTO §5 fork) = B multi-window form.** The V2-P1 redesign MUST use `SCContentFilter(display:including:exceptingWindows:)` with a non-empty `including:` list, NOT `SCContentFilter(desktopIndependentWindow:)` (the single-window form CRS/CTO originally recommended). CEO override preserves the "2 windows side-by-side" workflow in PR #236 §0 vision quote verbatim. This narrows the redesign space: the single-window form is rejected; the multi-window form is binding.
+1. **FORK 3 (original §5 fork) = B multi-window form.** The V2-P1 redesign MUST use `SCContentFilter(display:including:exceptingWindows:)` with a non-empty `including:` list, NOT `SCContentFilter(desktopIndependentWindow:)` (the single-window form research/plan originally recommended). Owner override preserves the "2 windows side-by-side" workflow in PR #236 §0 vision quote verbatim. This narrows the redesign space: the single-window form is rejected; the multi-window form is binding.
 
-2. **SH Fork A1 (source-hierarchy memo PR #272 §6) = V2-P1 stays on the v1.0 critical path.** CEO override of CRS rec A3 (hybrid OnboardingTier.Fidelity opt-in). The "every app on the user's computer" CEO vision quote is treated as a hard guarantee for v1.0; the V2-P1 third-lift is launch-blocker even though structurally it carries only the value-dense 15–22% residual per CRS PR #272 §4.3. The third-lift discipline below stays binding.
+2. **SH Fork A1 (source-hierarchy memo PR #272 §6) = V2-P1 stays on the v1.0 critical path.** Owner override of research rec A3 (hybrid OnboardingTier.Fidelity opt-in). The "every app on the user's computer" owner vision quote is treated as a hard guarantee for v1.0; the V2-P1 third-lift is launch-blocker even though structurally it carries only the value-dense 15–22% residual per research PR #272 §4.3. The third-lift discipline below stays binding.
 
-3. **SH Fork F1 (source-hierarchy memo PR #272 §6) = parallel sequencing.** V2-P1 redesign is sequenced LAST in the v1.0 cycle queue per CRS §5.2 priority order (Chromium P0 → V2-MCP-2/3 → V2-P10 → EventKit/Contacts/MPNowPlayingInfoCenter → App Intents → Spotlight → Cocoa-AX → **V2-P1 third-lift**). Director-Recording owns; runs in parallel with Director-Brain (MCP track) + Director-Context (cascade additions).
+3. **SH Fork F1 (source-hierarchy memo PR #272 §6) = parallel sequencing.** V2-P1 redesign is sequenced LAST in the v1.0 cycle queue per research §5.2 priority order (Chromium P0 → V2-MCP-2/3 → V2-P10 → EventKit/Contacts/MPNowPlayingInfoCenter → App Intents → Spotlight → Cocoa-AX → **V2-P1 third-lift**). Capture track owns; runs in parallel with brain track (MCP track) + context track (cascade additions).
 
-4. **The third-lift conditions in this section ABOVE stay binding** (live-Mac corpus; CEO-attended smoke; CSO sign-off; standalone PR with no compounded wiring per the cycle 8.27 incident pattern), EXTENDED by:
-   - The API form is constrained to `SCContentFilter(display:including:exceptingWindows:)` with a non-empty include list (FORK 3 ratification above). Future V2-P1 redesign memo (Phase 6 PR 12 in the CTO roadmap) MUST spec this form and the live-Mac corpus MUST exercise the real Apple API (not a mock).
-   - The redesign memo lands BEFORE the implementing PR; implementing PR lands BEFORE the M4 lift PR; M4 lift is a SEPARATE standalone PR (Phase 7 PR 14 in the CTO roadmap). No compounding under any circumstance.
-   - The construction-graph wiring at integration site is a MANDATORY row in the CSO sign-off audit table per [[project-v2p1-unit-tests-passed-but-never-wired]] + [[project-v2p1-exceptingwindows-misuse]] discipline.
+4. **The third-lift conditions in this section ABOVE stay binding** (live-Mac corpus; owner-attended smoke; security review; standalone PR with no compounded wiring per the cycle 8.27 incident pattern), EXTENDED by:
+   - The API form is constrained to `SCContentFilter(display:including:exceptingWindows:)` with a non-empty include list (FORK 3 ratification above). Future V2-P1 redesign memo (Phase 6 PR 12 in the roadmap) MUST spec this form and the live-Mac corpus MUST exercise the real Apple API (not a mock).
+   - The redesign memo lands BEFORE the implementing PR; implementing PR lands BEFORE the M4 lift PR; M4 lift is a SEPARATE standalone PR (Phase 7 PR 14 in the roadmap). No compounding under any circumstance.
+   - The construction-graph wiring at integration site is a MANDATORY row in the security review audit table per [[project-v2p1-unit-tests-passed-but-never-wired]] + [[project-v2p1-exceptingwindows-misuse]] discipline.
 
 5. **The Footprint SLO has been raised** to ≤10–15% CPU / ≤2 GB RAM default per ratified G2 (see CLAUDE.md `## Hard Rules` + AGENT_PROTOCOL.md §4 amendments, this Track 1 doc-PR). The V2-P1 third-lift footprint check is against the raised bar; the prior tight bar is the opt-in Performance tier.
 
-### Driver-CSO sign-off (2026-05-31 — Track 1 amendment)
+### Security sign-off (2026-05-31 — Track 1 amendment)
 
-Orchestrator (role-play as driver-CSO per CEO-INFRA-001; the `cso` sub-agent has hallucinated audit tables before — `feedback-cso-subagent-hallucinates` generalized; 4+ sub-agent kinds have stalled/sandbox-failed in the last 48h) attests against the canonical ratifications in PR #271 §1:
+Orchestrator (role-play as security per INFRA-001; the `cso` sub-agent has hallucinated audit tables before — `feedback-cso-subagent-hallucinates` generalized; 4+ sub-agent kinds have stalled/sandbox-failed in the last 48h) attests against the canonical ratifications in PR #271 §1:
 
 | # | Surface | Evidence |
 |---|---|---|
 | 1 | FORK 3 = B multi-window form ratified; no V2-P1 work may use `desktopIndependentWindow:` form | PR #271 `docs/research/orchestrator-ratification-state-2026-05-31.md` §1 FORK 3 row |
 | 2 | SH Fork A1 V2-P1-on-v1.0-critical-path ratified; M4 lift IS required for v1.0 launch | PR #271 §1 SH Fork A row |
-| 3 | SH Fork F1 parallel sequencing ratified; V2-P1 redesign is LAST in cycle queue | PR #271 §1 SH Fork F row + CRS PR #272 §5.2 priority order |
+| 3 | SH Fork F1 parallel sequencing ratified; V2-P1 redesign is LAST in cycle queue | PR #271 §1 SH Fork F row + research PR #272 §5.2 priority order |
 | 4 | Third-lift conditions §"Lift condition (the second time)" remain binding + extended by the API-form constraint above | this section text + PR #271 §1 FORK 3 |
 | 5 | Footprint SLO raised to ≤10–15% / ≤2 GB; SLO check is against the raised default tier | this Track 1 PR's CLAUDE.md + AGENT_PROTOCOL.md edits + PR #271 §2 |
 | 6 | Construction-graph wiring row is MANDATORY in any future V2-P1 §5 sign-off | [[project-v2p1-unit-tests-passed-but-never-wired]] + [[project-v2p1-exceptingwindows-misuse]] |
 
-— Orchestrator (driver-CSO per CEO-INFRA-001), 2026-05-31
+— Orchestrator (security per INFRA-001), 2026-05-31
 
 ### 2026-09-04 — M4 THIRD LIFT
 
@@ -344,5 +344,5 @@ must remain disclosed; it does not reopen pixel attribution after a valid
 grant. Any later focused-window filter, generation, or cascade change reopens
 this review and may re-engage M4.
 
-— Principal Engineer acting as driver-CSO under the repository's existing
-driver-CSO discipline, 2026-09-04
+— Principal Engineer acting as security under the repository's existing
+Security discipline, 2026-09-04

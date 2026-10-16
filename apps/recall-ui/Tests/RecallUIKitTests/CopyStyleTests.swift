@@ -194,7 +194,7 @@ final class CopyStyleTests: XCTestCase {
     }
 
     /// The validator itself must catch the load-bearing "-3815"
-    /// example the CEO called out.
+    /// example the owner called out.
     func testValidatorCatchesSCStreamStyleErrorCode() {
         XCTAssertTrue(
             CopyStyleValidator.containsRawErrorCode("SCStream failed with -3815")

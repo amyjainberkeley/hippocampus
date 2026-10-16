@@ -8,7 +8,7 @@
 
 When a user watches a streaming app (Apple TV, Netflix, Disney+, etc.), MCI enters a degenerate steady state: the rendered surface is FairPlay-protected, ScreenCaptureKit delivers a black rectangle, the §2 `PixelGridBlackedRegionProbe` fires, and the cascade emits `.suppress(reason=2)` tombstones every tick. No useful frame ever reaches encode.
 
-This is privacy-correct (ADR-0013 §2 + §7 fail-closed; structurally cannot leak DRM content because Apple does not permit screen-recording of it — CRS research 2026-05-20: Daring Fireball + Apple Developer Forums #63725 + Screenify Studio 2026-04-23).
+This is privacy-correct (ADR-0013 §2 + §7 fail-closed; structurally cannot leak DRM content because Apple does not permit screen-recording of it — research, 2026-05-20: Daring Fireball + Apple Developer Forums #63725 + Screenify Studio 2026-04-23).
 
 Three options were considered in AGENT_QUESTIONS (PR #55):
 
@@ -16,7 +16,7 @@ Three options were considered in AGENT_QUESTIONS (PR #55):
 - **B) Pause SCStream when frontmost is a streaming app.** Saves negligible CPU; adds SCStream lifecycle complexity.
 - **C) General "media-consumption mode" detection.** Phase 3+ heuristic; too broad for now.
 
-**CEO rejected all three** and reframed: the valuable signal during media consumption is the **title + URL** of what's being watched. Pixels are useless for DRM content. MCI should capture the metadata as a bibliographic event so users can later ask "what movie was that" or "what episode covered X."
+**Owner rejected all three** and reframed: the valuable signal during media consumption is the **title + URL** of what's being watched. Pixels are useless for DRM content. MCI should capture the metadata as a bibliographic event so users can later ask "what movie was that" or "what episode covered X."
 
 ## Decision
 
@@ -41,7 +41,7 @@ Behavior when `.mediaConsumption` fires:
 
 ### 2. Curated streaming-app list
 
-A curated `streaming-apps.toml` config file (CSO-reviewed, lives alongside `known-safe-apps.toml`):
+A curated `streaming-apps.toml` config file (security-reviewed, lives alongside `known-safe-apps.toml`):
 
 **Native apps (DRM-only — FairPlay/Widevine; §2 probe will fire):**
 - `com.apple.TV` (Apple TV)
@@ -81,42 +81,42 @@ The two-condition gate prevents false positives on apps that MIGHT play DRM but 
 
 ### 6. PR sequence (Phase 3.x)
 
-Owned jointly by Director-Recording (cascade side) + Director-Brain (brain side). Each PR CSO-gated.
+Owned jointly by capture track (cascade side) + brain track (brain side). Each PR review-gated.
 
-1. **P3.x.1 — `streaming-apps.toml` + cascade decision impl.** Wire schema bump; `MediaConsumptionEvent` message type; two-condition gate in the Swift helper cascade; tombstone `reason=10`. Director-Recording.
-2. **P3.x.2 — synthetic-text event writer + retrieval test.** Brain-side: `MediaConsumptionEvent` → `events` row with synthesized bibliographic text → embed → index. Recall query "what did I watch last Tuesday" returns the right hit. Director-Brain.
-3. **P3.x.3 — recall UI rendering.** `MediaConsumptionEvent` rendered as a normal timeline entry with a "Watched" badge. Director-Brain.
+1. **P3.x.1 — `streaming-apps.toml` + cascade decision impl.** Wire schema bump; `MediaConsumptionEvent` message type; two-condition gate in the Swift helper cascade; tombstone `reason=10`. Capture track.
+2. **P3.x.2 — synthetic-text event writer + retrieval test.** Brain-side: `MediaConsumptionEvent` → `events` row with synthesized bibliographic text → embed → index. Recall query "what did I watch last Tuesday" returns the right hit. Brain track.
+3. **P3.x.3 — recall UI rendering.** `MediaConsumptionEvent` rendered as a normal timeline entry with a "Watched" badge. Brain track.
 
-## §4 LOAD-BEARING invariants (CSO veto-gate; binding on every implementer)
+## §4 LOAD-BEARING invariants (security review veto-gate; binding on every implementer)
 
-1. **`.mediaConsumption` captures LESS than `.allow`.** No pixel keyframe. No OCR. Only `windowTitle` + `url` + `appBundleId` + synthesized bibliographic text. Any future PR that adds pixel storage or OCR output to this path requires a fresh CSO ADR amendment.
-2. **The curated streaming-app list is CSO-reviewed.** Additions require CSO sign-off. The list is NOT user-extensible in v1 (user extension is a Phase 4 question gated on the denylist UI per ADR-0017 §3.2).
+1. **`.mediaConsumption` captures LESS than `.allow`.** No pixel keyframe. No OCR. Only `windowTitle` + `url` + `appBundleId` + synthesized bibliographic text. Any future PR that adds pixel storage or OCR output to this path requires a fresh security review ADR amendment.
+2. **The curated streaming-app list is security-reviewed.** Additions require security review. The list is NOT user-extensible in v1 (user extension is a Phase 4 question gated on the denylist UI per ADR-0017 §3.2).
 3. **Per-app denylist wins.** If a user denylists a streaming app's `bundleId` via ADR-0017 §3.2, `.mediaConsumption` for that bundle NEVER fires. Denylist is absolute; `.mediaConsumption` is a policy layer below it.
-4. **Two-condition gate is mandatory.** BundleId match alone is insufficient — §2 probe must have fired ≥3× in 10s. A PR that removes the debounce or weakens the threshold requires CSO sign-off.
-5. **`windowTitle` stored by this path IS user content.** The cascade-twice pattern from ADR-0016 §1.6 does NOT apply here (no OCR involved), but the stored text is not opaque — it contains the show/episode name. This is intentional and CEO-directed (bibliographic value > privacy cost for media titles).
+4. **Two-condition gate is mandatory.** BundleId match alone is insufficient — §2 probe must have fired ≥3× in 10s. A PR that removes the debounce or weakens the threshold requires security review.
+5. **`windowTitle` stored by this path IS user content.** The cascade-twice pattern from ADR-0016 §1.6 does NOT apply here (no OCR involved), but the stored text is not opaque — it contains the show/episode name. This is intentional and owner-directed (bibliographic value > privacy cost for media titles).
 6. **No network calls.** The `streaming-apps.toml` file is bundled locally. No remote list fetch, no "phone home to check if this app is a streaming app." Zero-network thesis (ADR-0016 §4.4) extends to this path.
 
 ## Consequences
 
 - **Positive:** Users can search "what did I watch last Tuesday" and get a real answer, even for DRM-protected content where pixel capture is structurally impossible.
 - **Positive:** `.suppress(reason=2)` tombstones during streaming sessions become `.mediaConsumption` events with actual bibliographic value — the brain grows instead of emitting opaque privacy moments.
-- **Positive:** `.mediaConsumption` captures strictly LESS than `.allow` — this is a narrower data path, not a wider one. CSO sign-off is straightforward.
-- **Negative / tradeoff:** `windowTitle` for streaming apps is user content (reveals viewing habits). CEO explicitly accepted this tradeoff — bibliographic search value outweighs the marginal privacy cost for media titles.
-- **Negative / tradeoff:** The curated list requires maintenance. New streaming services require a CSO-reviewed list update. Acceptable for v1 scope (~8-10 entries); revisit if the list grows past ~20.
+- **Positive:** `.mediaConsumption` captures strictly LESS than `.allow` — this is a narrower data path, not a wider one. Security review is straightforward.
+- **Negative / tradeoff:** `windowTitle` for streaming apps is user content (reveals viewing habits). Owner explicitly accepted this tradeoff — bibliographic search value outweighs the marginal privacy cost for media titles.
+- **Negative / tradeoff:** The curated list requires maintenance. New streaming services require a security-reviewed list update. Acceptable for v1 scope (~8-10 entries); revisit if the list grows past ~20.
 - **Negative / tradeoff:** Web-based streaming (YouTube in Chrome) is NOT covered by `.mediaConsumption` — those paths already get `.allow` + URL capture. The asymmetry (native DRM apps get `.mediaConsumption`, web apps get `.allow`) may confuse users expecting uniform behavior. Recall UI should present both uniformly as "media you watched."
 
-## CSO sign-off (placeholder — owed at first protected-set PR)
+## Security review (placeholder — owed at first protected-set PR)
 
-§4 invariants binding. `.mediaConsumption` captures strictly LESS than `.allow` — no pixel keyframe, no OCR. The new path carries `windowTitle` to disk, which is user content, but CEO directed this explicitly for bibliographic value. Each PR carries the sign-off block.
+§4 invariants binding. `.mediaConsumption` captures strictly LESS than `.allow` — no pixel keyframe, no OCR. The new path carries `windowTitle` to disk, which is user content, but owner directed this explicitly for bibliographic value. Each PR carries the sign-off block.
 
-— CSO, pending (owed at PR P3.x.1)
+— Security review, pending (owed at PR P3.x.1)
 
 ## References
 
-- **AGENT_QUESTIONS** PR #55 — CEO answer (2026-05-20 afternoon): "don't pause; capture bibliographic metadata via `.mediaConsumption`."
+- **AGENT_QUESTIONS** PR #55 — owner answer (2026-05-20 afternoon): "don't pause; capture bibliographic metadata via `.mediaConsumption`."
 - **ADR-0013** §2 (DRM black-region detection) + §7 (fail-closed catchall) — the existing cascade behavior `.mediaConsumption` sits alongside.
 - **ADR-0015** §4 (context-join LOAD-BEARING invariants) — P2.1/P2.3/P2.4/P2.5 provide the `appBundleId` + `windowTitle` + `url` this path consumes.
 - **ADR-0016** §1.6 (wire schema) — `.mediaConsumption` extends the wire with a new message type.
 - **ADR-0017** §3.2 (per-app denylist) — denylist takes absolute precedence over `.mediaConsumption`.
 - **F-STRAT-002** — allocated DERIVED-FORK-001 to ADR-0020 (this ADR) when F-STRAT-002 took ADR-0018 + ADR-0019.
-- CRS research 2026-05-20: Daring Fireball, Apple Developer Forums #63725, Screenify Studio 2026-04-23 — Apple does not permit screen recording of FairPlay-protected content.
+- Research, 2026-05-20: Daring Fireball, Apple Developer Forums #63725, Screenify Studio 2026-04-23 — Apple does not permit screen recording of FairPlay-protected content.

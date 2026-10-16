@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// AllowlistTOMLLoader — parse the CSO-ratified known-safe-apps allowlist
+// AllowlistTOMLLoader — parse the reviewed known-safe-apps allowlist
 // from a small TOML document into `AllowlistEntry` values.
 //
 // PROTECTED-SET per AGENT_PROTOCOL §5. The allowlist is the SECOND
 // load-bearing privacy primitive (ADR-0013 §3 + §6; ADR-0015 §5;
-// ADR-0017 §3.1). It is the per-bundle CSO trust gate that turns the
+// ADR-0017 §3.1). It is the per-bundle security review trust gate that turns the
 // cascade's §7 fail-closed default into a `.allow` for explicitly
 // ratified app surfaces. Each entry is a deliberate trust decision —
 // the loader's job is to refuse anything that smells like a smuggled
@@ -16,7 +16,7 @@
 // per entry), the helper has no other TOML use case, and pulling in a
 // third-party parser inflates the audit surface for a one-file config.
 // The parser below accepts a deliberately strict subset of TOML; any
-// fancier surface requires a CSO ADR amendment.
+// fancier surface requires a security review ADR amendment.
 //
 // Subset grammar (formal):
 //
@@ -36,7 +36,7 @@
 // returns an [`AllowlistTOMLError`] — never a partial parse, never a
 // `precondition` panic.
 //
-// CSO-protected invariants (ADR-0017 §3.1):
+// Review-protected invariants (ADR-0017 §3.1):
 //   1. Empty allowlist ⇒ cascade behavior unchanged (every app falls
 //      to §7 fail-closed). The loader returns `[]` for an empty
 //      document; the cascade's `knownSafeAppBundles` Set stays empty.
@@ -49,22 +49,22 @@
 
 import Foundation
 
-/// A single allowlist entry — one CSO-ratified app surface.
+/// A single allowlist entry — one reviewed app surface.
 ///
 /// Every field is REQUIRED. The loader refuses any `[[entries]]` table
 /// missing any of the four. The non-`bundleId` fields exist for human
 /// auditability of the trust decision; the cascade only consumes
-/// `bundleId`. `rationale` is the CSO's stated reason; `csoRatifiedBy`
+/// `bundleId`. `rationale` is the security review's stated reason; `csoRatifiedBy`
 /// records the ratifier identity; `ratifiedAt` is the ISO-8601-style
 /// date the entry was added. ADR-0017 §3.1 v2+ will surface this in
 /// the recall-UI's "What MCI Sees" panel; v1 keeps it loader-internal.
 public struct AllowlistEntry: Sendable, Equatable {
     /// CFBundleIdentifier of the ratified app. Used by the cascade.
     public let bundleId: String
-    /// Why the CSO considers this surface safe. Human-readable; not
+    /// Why the security review considers this surface safe. Human-readable; not
     /// machine-consumed by the cascade.
     public let rationale: String
-    /// Identity (role-mask) of the CSO/orchestrator-seat that ratified.
+    /// Identity (role-mask) of the review seat that ratified.
     public let csoRatifiedBy: String
     /// ISO-8601 date (yyyy-mm-dd) the entry was ratified.
     public let ratifiedAt: String
@@ -113,7 +113,7 @@ public enum AllowlistTOMLError: Error, Equatable {
     case duplicateKey(line: Int, key: String)
 }
 
-/// In-memory snapshot of the CSO-ratified allowlist.
+/// In-memory snapshot of the reviewed allowlist.
 ///
 /// Constructed from `[AllowlistEntry]` values (parsed by
 /// `AllowlistTOMLLoader`). `Sendable` because the underlying state is
@@ -160,7 +160,7 @@ public struct AllowlistTOMLLoader: Sendable {
     ///
     /// On success returns the parsed entries in document order. On any
     /// failure returns an `AllowlistTOMLError` with a 1-based line
-    /// number. CSO-ratified config files MUST round-trip cleanly; any
+    /// number. Reviewed config files MUST round-trip cleanly; any
     /// error indicates either a hand-edit (which the loader refuses by
     /// design — see ADR-0017 §3.1) or a damaged bundle resource.
     public func parse(_ source: String) throws -> [AllowlistEntry] {
@@ -303,7 +303,7 @@ extension AllowlistTOMLLoader {
     /// `swift build`. Used by the sibling-bundle fallback (path 3).
     static let spmResourceBundleName = "MCICaptureHelper_MCICaptureHelperKit.bundle"
 
-    /// Load the CSO-ratified known-safe-apps allowlist from the first
+    /// Load the reviewed known-safe-apps allowlist from the first
     /// resolver that locates the TOML resource.
     ///
     /// Resolver fallback order (intentional — covers both SPM dev

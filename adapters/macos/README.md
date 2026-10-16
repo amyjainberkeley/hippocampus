@@ -41,4 +41,4 @@ and never above the `CaptureSource` trait.
 Any macOS-specific system call, entitlement, sandbox boundary,
 Core ML wrapper, or TCC surface. If the change is *not* OS-specific,
 push it up into `../../core/` instead. Capture/crypto/sensitive-
-surface changes are CSO-gated (AGENT_PROTOCOL §4).
+surface changes are review-gated (AGENT_PROTOCOL §4).

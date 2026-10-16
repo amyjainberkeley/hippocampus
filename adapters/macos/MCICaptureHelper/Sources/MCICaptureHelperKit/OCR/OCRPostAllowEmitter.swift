@@ -144,7 +144,7 @@ public extension OCRPostAllowEmitter {
 /// `SuppressionCascade` + `FrameSink` + `FrameSequence` together per
 /// ADR-0016 §1.6 + §4.2.
 public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
-    /// CSO escalation 2026-05-29 — capture-scope cross-window leak
+    /// Security review escalation 2026-05-29 — capture-scope cross-window leak
     /// kill-switch (Phase A interim mitigation, option M4 in
     /// `docs/research/capture-scope-window-vs-display-2026-05-29.md`).
     ///
@@ -165,7 +165,7 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     ///     FocusTracker + `(frame_ts, focus_ts)` race-consistency gate
     ///     shipped in Commits 1–3; the §7 falsifiability corpus
     ///     (`docs/audit/2026-05-29-focused-window-corpus.md`) passed
-    ///     5/5 GREEN (Commit 4); ADR-0031 §6 CSO sign-off was authored
+    ///     5/5 GREEN (Commit 4); ADR-0031 §6 security review was authored
     ///     (Commit 5); the lift was Commit 6.
     ///   - **2026-05-30 EMERGENCY RE-FLIP back to `true`.** Production
     ///     probe of the cycle 8.25 DMG (live SHA
@@ -352,7 +352,7 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
             "ocr-post-allow-entry",
             "kill_ocr_emit=\(Self.killOcrEmit)"
         )
-        // CSO escalation 2026-05-29 — capture-scope cross-window leak
+        // Security review escalation 2026-05-29 — capture-scope cross-window leak
         // (see `Self.killOcrEmit` + `docs/research/capture-scope-
         // window-vs-display-2026-05-29.md`). Short-circuit the OCR
         // worker submission and emit a fail-safe tombstone instead.

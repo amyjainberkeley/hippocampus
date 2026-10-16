@@ -68,7 +68,7 @@ public protocol DenylistProbe: Sendable {
 /// with `.denylistPostCapture` (a reason distinct from §1's
 /// `.denylistSource`, so the privacy tombstone records that the
 /// post-capture backstop fired — not the source filter). ADR-0013 §5
-/// also requires this §1↔§5 divergence to be observable to the CRS
+/// also requires this §1↔§5 divergence to be observable to research
 /// Telemetry-Gap analyst; the distinct `redaction_reason` is that
 /// observability surface.
 ///
@@ -142,7 +142,7 @@ public protocol BlackedRegionProbe: Sendable {
 /// `appBundleId` / `windowTitle` / `url` / `pageText` for suppress /
 /// allow. Providers return `nil` on TCC denial; absence is graceful.
 ///
-/// Privacy posture (CSO sign-off rows 3-7 in PR body):
+/// Privacy posture (security review rows 3-7 in PR body):
 ///   - Calendar: subject + start/end only. NO body, NO attendee
 ///     lists, NO location (Phase 7 full-deep-hook scope per
 ///     ADR-0032).

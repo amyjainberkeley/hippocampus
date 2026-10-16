@@ -15,7 +15,7 @@
 // │ actually verifies it (ADR-0013 §7 / Amendment 1 §2).             │
 // └──────────────────────────────────────────────────────────────────┘
 //
-// STRUCTURAL GUARANTEES THIS PR (Amendment 1 §3, asserted at CSO
+// STRUCTURAL GUARANTEES THIS PR (Amendment 1 §3, asserted at security review
 // sign-off from this diff):
 //
 //   (a) cascade-before-encode — the callback's ONLY sink is
@@ -1508,7 +1508,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
                 // V2-P1 third-lift (Phase 7 PR 13 wiring): throttled
                 // stderr breadcrumb for `frames_focus_race_dropped`
                 // counter increments. Log the first drop + every 100
-                // drops thereafter so the CEO's live-Mac smoke can see
+                // drops thereafter so the owner's live-Mac smoke can see
                 // the race path is being exercised without stderr
                 // saturation under a sustained race storm (the cycle
                 // 8.27 shape hit 73 % — one line per drop would be

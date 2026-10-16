@@ -262,7 +262,7 @@ final class SafariURLProviderTests: XCTestCase {
 
     /// AppleScript source is the ADR-0015 §1.3 one-liner exactly.
     /// Pins the wire-level invariant: changing the script source is
-    /// a CSO-protected change (it changes what the user is asked to
+    /// a review-protected change (it changes what the user is asked to
     /// consent to via the Automation pane).
     func testAppleScriptSourceMatchesADR0015() {
         XCTAssertEqual(

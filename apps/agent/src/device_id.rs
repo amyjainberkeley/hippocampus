@@ -14,7 +14,7 @@
 //! relabels prior `events.device_id` rows — Phase 5 work). For Phase 1
 //! the id is generate-once + persist.
 //!
-//! # CSO sign-off (binding, `AGENT_PROTOCOL` §5)
+//! # Security review (binding, `AGENT_PROTOCOL` §5)
 //!
 //! - The id is generated from `getrandom`-backed OS entropy. Never
 //!   derive from MAC address, machine serial, or hostname.
@@ -27,7 +27,7 @@
 //!   audit any code path that surfaces the id in logs (it's
 //!   content-free per ADR-0001 NG3 but still worth keeping explicit).
 //!
-//! — CSO, 2026-05-19
+//! — Security review, 2026-05-19
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -63,7 +63,7 @@ impl DeviceId {
     ///
     /// Uses `getrandom` via std lib's `OsRng`-equivalent: on macOS this
     /// is `getentropy(2)` under the hood. We avoid the `rand` crate to
-    /// keep the dep surface minimal (CRS Security-Signal memo Q's any
+    /// keep the dep surface minimal (research Security-Signal memo Q's any
     /// crypto-adjacent dep).
     fn generate() -> Result<Self, DeviceIdError> {
         let mut bytes = [0_u8; 16];
@@ -171,7 +171,7 @@ async fn write_with_restrictive_mode(path: &std::path::Path, body: &str) -> std:
 /// `/dev/urandom` is the safe equivalent with no observable difference
 /// in entropy quality for a one-shot 128-bit generation.
 ///
-/// Why not the `rand` / `getrandom` crate? CRS Security-Signal memo
+/// Why not the `rand` / `getrandom` crate? Research Security-Signal memo
 /// (2026-05-19) recommends keeping the dep surface tiny; the std lib
 /// `File::read_exact("/dev/urandom")` path covers the use case without
 /// a new dep.

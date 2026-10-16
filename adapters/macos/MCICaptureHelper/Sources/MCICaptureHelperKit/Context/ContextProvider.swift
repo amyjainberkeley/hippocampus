@@ -18,7 +18,7 @@
 //     only, 1 Hz poll, not yet wired into the SCStream callback.
 //   - P2.2 — `AXWindowTitleProvider` lands `windowTitle`.
 //   - P2.3 / P2.4 — per-browser `URLProvider`s land `url`.
-//   - P2.5 — CSO-gated wiring into `SCStreamCaptureSession.swift`.
+//   - P2.5 — review-gated wiring into `SCStreamCaptureSession.swift`.
 //   - P2.6 — live-Mac audit doc.
 //
 // The trait itself is OS-API-free. Stub impls in tests cover the

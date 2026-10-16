@@ -8,10 +8,10 @@
 //!
 //! Output path: `~/Library/Logs/MCI/panic.jsonl`, mode 0600.
 //!
-//! # CSO sign-off (binding, `AGENT_PROTOCOL` §5)
+//! # Security review (binding, `AGENT_PROTOCOL` §5)
 //!
 //! - Schema is fixed at `PanicRecord`. Adding a field that could
-//!   carry user content requires a fresh CSO ADR amendment.
+//!   carry user content requires a fresh security review ADR amendment.
 //! - `message` is the panic payload string (typically a static
 //!   `&str` or formatted assertion message from MCI source). It
 //!   MUST NOT contain user-visible content; the only callers are
@@ -25,7 +25,7 @@
 //! `panic_hook::install()`). If Hippocampus spawns Rust in-process
 //! via FFI, call `install()` from the FFI init path.
 //!
-//! - CSO, 2026-05-21
+//! - Security review, 2026-05-21
 
 use std::fmt::Write as _;
 use std::io::Write;

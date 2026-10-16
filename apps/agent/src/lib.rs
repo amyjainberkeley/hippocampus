@@ -68,13 +68,13 @@ pub mod mcp;
 /// policy on `resources/list` results. Persists Events with
 /// `app_bundle_id = "mcp:<server-name>"` so V2-P12 (Phase 7 chat
 /// surface) can structurally apply prompt-injection mitigation per
-/// CRS Fork-6 = A.
+/// Research Fork-6 = A.
 pub mod mcp_aggregator;
 /// V2-MCP-2 — boot-time MCP-client registry builder. Reads
 /// `~/Library/Application Support/MCI/mcp-servers.toml`, constructs a
 /// `ServerRegistry`, and surfaces a log-friendly status struct. Held
 /// by the agent for the process lifetime; V2-MCP-3 aggregator (cycle
-/// 8.30, Director-Brain) consumes the registry without a re-init.
+/// 8.30, brain track) consumes the registry without a re-init.
 pub mod mcp_client_supervisor;
 /// One-shot MCP sync. Drives [`mcp_aggregator`] for a single reconcile
 /// pass over every server in `mcp-servers.toml` and exits. The
@@ -97,7 +97,7 @@ pub mod retention_worker;
 pub mod runner;
 pub mod supervisor;
 /// V2-P5+ — `dslim/bert-base-NER`-backed `NerBackend` for the **sync**
-/// Tier-2 NER tier (the CEO-ratified hot-path entity extractor, INT8,
+/// Tier-2 NER tier (the owner-ratified hot-path entity extractor, INT8,
 /// `cpu_only`). Runs the committed P2′ tokenizer + `decode_bio` through
 /// `mci_coreml_bridge`. Injected into `BrainPump` via `with_ner_sync`
 /// and run inline after Tier 1 on the ingest Allow arm.

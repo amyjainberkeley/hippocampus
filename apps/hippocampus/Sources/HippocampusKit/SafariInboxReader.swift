@@ -236,7 +236,7 @@ public final class SafariInboxReader: Sendable {
     /// process-wide `signal(SIGPIPE, SIG_IGN)` mask, the SIGPIPE's
     /// default disposition is process termination with a clean exit
     /// (no `.ips` crash report) — which is exactly the menu-bar-icon-
-    /// disappears bug the CEO reported across cycles 8.22 and 8.23.
+    /// disappears bug the owner reported across cycles 8.22 and 8.23.
     /// `HippocampusApp.applicationDidFinishLaunching` also installs
     /// `SIG_IGN` for `SIGPIPE` process-wide; this socket-option is the
     /// surgical defense at the offending call site (belt + suspenders).

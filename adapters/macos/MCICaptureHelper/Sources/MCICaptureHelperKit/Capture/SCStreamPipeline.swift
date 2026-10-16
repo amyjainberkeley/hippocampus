@@ -277,7 +277,7 @@ public enum SCContentFilterFactory {
     //         `SCContentFilter(display:including:exceptingWindows:)`
     //
     // Per ADR-0031 §Status "Lift condition (third time)" + the
-    // 2026-05-31 CEO ratification (FORK 3 = B) + the 2026-06-01
+    // 2026-05-31 owner ratification (FORK 3 = B) + the 2026-06-01
     // redesign memo (`docs/research/v2-p1-redesign-architecture-
     // 2026-06-01.md`) §1.1 the include-set form is BINDING: the
     // captured surface is the union of a non-empty include-set of
@@ -924,7 +924,7 @@ public struct SCStreamPipeline: Sendable {
     /// `bundleId` exists at the SCStream sample timestamp, so the safe
     /// direction is to fail closed before the cascade is even asked.
     ///
-    /// Amendment 1 §3 audit (the §5 protected-set CSO sign-off
+    /// Amendment 1 §3 audit (the §5 protected-set security review
     /// asserts on every commit that touches the pipeline):
     ///   (a) cascade-before-encode — unchanged. The race gate fires
     ///       BEFORE this method is called; there is no encode on this

@@ -10,7 +10,7 @@
 
 ### The cycle 8.18 lesson
 
-Cycle 8.16's PR #228 added `com.apple.MobileSMS` and `com.apple.mail` to the cascade allowlist, with ADR-0030 §3(a)–(c) as the OCR-time redaction floor. That path covers ONE shape of access: SCStream pixels → Vision OCR → text → cascade-twice → brain ingest. The CEO's vision (brain-v2 memo §5.5) requires a SECOND shape: read the source store directly. Messages.app stores every message in a SQLite database at `~/Library/Messages/chat.db`; reading that database under Full Disk Access is faster, more accurate, and carries per-row metadata (sender handle, service, thread guid, timestamps) the OCR path never recovers.
+Cycle 8.16's PR #228 added `com.apple.MobileSMS` and `com.apple.mail` to the cascade allowlist, with ADR-0030 §3(a)–(c) as the OCR-time redaction floor. That path covers ONE shape of access: SCStream pixels → Vision OCR → text → cascade-twice → brain ingest. The owner's vision (brain-v2 memo §5.5) requires a SECOND shape: read the source store directly. Messages.app stores every message in a SQLite database at `~/Library/Messages/chat.db`; reading that database under Full Disk Access is faster, more accurate, and carries per-row metadata (sender handle, service, thread guid, timestamps) the OCR path never recovers.
 
 The risk: the SQLite read path bypasses the cascade entirely. Every defense ADR-0013 / 0015 / 0016 / 0017 / 0030 / 0031 mounts on SCStream is **structurally inert** on a plugin-emitted event. Naively ingesting chat.db rows would put SMS-OTP codes, banking notifications, and password-reset URLs into the brain even with the OCR-path cascade running.
 
@@ -47,7 +47,7 @@ A plugin event MUST NOT reach the brain store, the encrypted blob store, or any 
 
 1. **Defense-in-depth reuse.** The cascade-equivalent reuses the same `sms_otp` regex set and the same `sensitive_domains` table the OCR-time arm uses. Plugin-emitted text MUST receive the same OTP/banking-shape scrubbing the OCR path does. No new redactor class is invented; only the trigger is new.
 2. **Per-event drop / redact decision.** Each event's cascade-equivalent returns either `drop_event = true` (with a stable, content-free `drop_reason`) or `drop_event = false` plus a `redacted_body` where every §3(a) regex match is replaced in place with the rule-class replacement token. The drop / redact decision is final at the cascade-equivalent boundary; brain ingest never re-decides.
-3. **Surfacing for telemetry.** The decision yields a `fired_rules: Vec<&'static str>` and a stable enum `drop_reason`. The agent emits `plugin_redactions_count{plugin_id, drop_reason}` and `plugin_redactions_count{plugin_id, rule}` content-free counters via the CRS Telemetry-Gap analyst's existing surface.
+3. **Surfacing for telemetry.** The decision yields a `fired_rules: Vec<&'static str>` and a stable enum `drop_reason`. The agent emits `plugin_redactions_count{plugin_id, drop_reason}` and `plugin_redactions_count{plugin_id, rule}` content-free counters via research Telemetry-Gap analyst's existing surface.
 4. **Zero-cost on the hot path.** The cascade-equivalent is invoked exactly once per plugin event, on the plugin's polling thread, after the source read. The helper's hot path (SCStream / OCR) is untouched.
 5. **No additional content surface.** The cascade-equivalent has access only to fields the plugin already exposes. It does NOT open a second source-read, does NOT escalate to remote endpoints, does NOT consult any out-of-band signal.
 
@@ -108,13 +108,13 @@ Future plugins (V2-P8 MailAppPlugin, V2-P9 KeystrokeIngestPlugin) follow the sam
 - A per-plugin `XxxConfig` struct that ships `DEFAULT` with `plugin_enabled = false`.
 - A per-plugin `redact_<plugin>_event(evt, cfg) -> Decision` entry point.
 - A per-plugin corpus + committed artifact + per-class catch/FP gate.
-- The CSO sign-off block on each implementing PR asserts the four ADR-0013 Amendment 1 §3 structural conditions + the ADR-0030 §1 / §3(f) gate conditions.
+- The security review block on each implementing PR asserts the four ADR-0013 Amendment 1 §3 structural conditions + the ADR-0030 §1 / §3(f) gate conditions.
 
 This ADR is the contract; each per-plugin PR is the bound implementation.
 
-### 6. CSO sign-off (binding)
+### 6. Security review (binding)
 
-The CSO seat hereby attests on behalf of the V2-P7 PR:
+The security review hereby attests on behalf of the V2-P7 PR:
 
 1. **The cascade-equivalent reuses §3(a) + §3(b) without modification.** `messages_plugin::redact_messages_plugin_event` calls `sms_otp::redact_sms_shapes` and `sensitive_domains::matches_sensitive_domain` directly. No new regex, no new domain, no shortened decision path.
 2. **Drop / redact decisions are final at the cascade-equivalent boundary.** Brain ingest in V2-P10's plumbing consumes `MessagesPluginDecision::drop_event` and `MessagesPluginDecision::redacted_body` without re-deciding.
@@ -125,13 +125,13 @@ The CSO seat hereby attests on behalf of the V2-P7 PR:
 7. **ADR-0030 §3(f) is additive.** §3(a)/(b)/(c) semantics are unchanged; §3(f) layers on top with the same redactors. No relaxation of any existing arm.
 8. **No edit to `known-safe-apps.toml`.** `com.apple.MobileSMS` is already on the allowlist (PR #228); V2-P7 is a NEW ingest path for that bundle, not a new bundle.
 
-— CSO + Director-Recording (joint), 2026-05-29
+— Security and capture review (joint), 2026-05-29
 
 ## Consequences
 
 ### Positive
 
-- A new ingest source class (deep-hook plugins) becomes safe to add behind a per-plugin CSO-signed corpus gate.
+- A new ingest source class (deep-hook plugins) becomes safe to add behind a per-plugin security-reviewed corpus gate.
 - The V2-P7 / V2-P8 / V2-P9 PRs can land sequentially with the same shape — the contract is the template.
 - The same redactors serve both the OCR-time and plugin-time paths; one set of regexes to maintain.
 - V2-P10's onboarding flow gets a clean default-OFF surface to wrap: a permission card + a master-switch UI element, both backed by structural defaults.
@@ -149,7 +149,7 @@ The cascade-equivalent is a pure-Rust regex + static-table lookup. No new alloca
 ### Compliance with existing invariants
 
 - **AGENT_PROTOCOL §4 R5 sensitive-capture launch-blocker**: preserved. Plugin-emitted content cannot reach the brain without passing the cascade-equivalent.
-- **AGENT_PROTOCOL §5 protected-set**: this ADR + the V2-P7 PR carry CSO sign-off blocks.
+- **AGENT_PROTOCOL §5 protected-set**: this ADR + the V2-P7 PR carry security review blocks.
 - **ADR-0001 zero-network thesis**: preserved. The plugin reads a local SQLite file; the cascade-equivalent is pure-Rust regex + static lookup; no network.
 - **ADR-0030 §3(e) default-deny**: preserved. The cascade-equivalent ships default-OFF; V2-P10 is the explicit opt-in.
 - **ADR-0031 focused-window scope**: orthogonal. ADR-0031 governs the pixel/OCR path; this ADR governs every plugin path. The two arms are independent.
@@ -170,7 +170,7 @@ See §3(d). ADR-0030 §3(d) already rejected this for the OCR-time arm; the same
 
 ### (iv) Ship V2-P7 with brain-ingest plumbing wired (rejected for v1)
 
-Wire the cascade-equivalent's output to the brain store in the V2-P7 PR. **Rejected — too much surface for one PR.** V2-P7 is the read library + the cascade-equivalent + the corpus. V2-P10 is the brain-ingest plumbing + the onboarding UI. Splitting the work is consistent with the AGENT_PROTOCOL §1 "one logical change per branch" discipline and lets the CSO veto-gate on V2-P10 focus on the ingest plumbing without re-reviewing the cascade-equivalent.
+Wire the cascade-equivalent's output to the brain store in the V2-P7 PR. **Rejected — too much surface for one PR.** V2-P7 is the read library + the cascade-equivalent + the corpus. V2-P10 is the brain-ingest plumbing + the onboarding UI. Splitting the work is consistent with the AGENT_PROTOCOL §1 "one logical change per branch" discipline and lets the security review veto-gate on V2-P10 focus on the ingest plumbing without re-reviewing the cascade-equivalent.
 
 ## Status — V2-P7 PR is the implementing PR for this ADR
 
@@ -181,9 +181,9 @@ The V2-P7 implementing PR (`claude/director-recording/v2-p7-messages-plugin`) la
 3. `core/brain/src/bin/messages_plugin_corpus.rs` (the corpus runner — this ADR §4).
 4. `docs/audit/2026-05-30-messages-plugin-corpus.md` (the committed GREEN artifact).
 5. This ADR.
-6. The CSO sign-off block in the PR body asserting the §6 conditions.
+6. The security review block in the PR body asserting the §6 conditions.
 
-V2-P10 (the brain-ingest plumbing + onboarding UI) is the follow-on PR that lifts the `plugin_enabled = false` default; that PR carries its own CSO sign-off block per AGENT_PROTOCOL §5.
+V2-P10 (the brain-ingest plumbing + onboarding UI) is the follow-on PR that lifts the `plugin_enabled = false` default; that PR carries its own security review block per AGENT_PROTOCOL §5.
 
 ## Cross-references
 

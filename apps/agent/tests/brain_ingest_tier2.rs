@@ -29,7 +29,7 @@
 //!    `events_pending_tier2`.
 //!
 //! This is the **construction-graph wiring proof** for the
-//! V2-P5 PR #9 CSO mini-audit row #4 — the load-bearing test the
+//! V2-P5 PR #9 security mini-audit row #4 — the load-bearing test the
 //! [[project-v2p1-unit-tests-passed-but-never-wired]] lesson
 //! mandates for any new extraction layer.
 //!
@@ -142,7 +142,7 @@ fn full_pipeline_brain_pump_tier1_then_tier2_populates_entity_mentions() {
     // - a legitimate Org ("the Brain team") — kept
     // - a legitimate Topic ("footprint regression") — kept
     // - a HALLUCINATED Org classification on the JWT bytes — must
-    //   be dropped by the token-REDACT downstream filter (CSO
+    //   be dropped by the token-REDACT downstream filter (security review
     //   mini-audit row #3)
     // - a HALLUCINATED Topic on the cascade marker — must be
     //   dropped by the cascade-marker SKIP filter

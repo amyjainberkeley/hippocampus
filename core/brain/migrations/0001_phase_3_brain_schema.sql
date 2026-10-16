@@ -1,7 +1,7 @@
 -- mci-brain · migration 0001 · Phase 3 brain schema (ADR-0016 §1.4 verbatim).
 --
 -- PROTECTED-SET per AGENT_PROTOCOL §5 — touches the encrypted store and
--- materializes the first tables that hold user-readable content. CSO
+-- materializes the first tables that hold user-readable content. Security review
 -- sign-off on this DDL is binding (PR P3.2).
 --
 -- The migration runs inside one transaction. Order matters where

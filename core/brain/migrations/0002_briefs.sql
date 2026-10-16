@@ -26,7 +26,7 @@
 --   network call. The retention purger (`retention_purger.rs`) gains a
 --   second DELETE pass that honors the user's existing retention window
 --   on briefs, so the user's "30 / 90 / Forever" choice continues to be
---   the SOLE source of truth for what disappears. CSO sign-off block in
+--   the SOLE source of truth for what disappears. Security review block in
 --   the PR body covers this addition.
 --
 -- Reversibility:

@@ -30,6 +30,6 @@ and retains only condensed encrypted JPEG evidence after OCR privacy approval.
 
 Any change to SCStream wiring, the sensitive-surface cascade, post-OCR
 evidence retention, or IPC serialization on the Swift side.
-Cascade / capture-scope changes are CSO-gated. If the change is
+Cascade / capture-scope changes are review-gated. If the change is
 platform-independent (dedupe, wire schema shape), it belongs in
 `../../../core/` — do NOT duplicate it here.

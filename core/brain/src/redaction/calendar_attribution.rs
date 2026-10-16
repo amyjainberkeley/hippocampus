@@ -24,7 +24,7 @@
 //!
 //! The `current_contact.identifier` field is opaque (no name / phone /
 //! email survives on the snapshot), so its cascade-equivalent is a
-//! documented no-op per CSO sign-off row 7. The function signature
+//! documented no-op per security review row 7. The function signature
 //! still takes a `&mut ContactRef` so the call site is uniform and
 //! future fields (if any) flow through here.
 //!
@@ -33,7 +33,7 @@
 //! Mirrors the per-plugin contract from
 //! [`super::messages_plugin::redact_messages_plugin_event`] (ADR-0032
 //! §3) — re-uses [`super::sms_otp::redact_sms_shapes`] as defense-in-
-//! depth + emits a `fired_rules` tally for the CRS Telemetry-Gap
+//! depth + emits a `fired_rules` tally for research Telemetry-Gap
 //! analyst's `attribution_redactions_count{field=…}` counter. Drop /
 //! redact decision is per-field; one field's match never collapses a
 //! sibling field's data.
@@ -78,7 +78,7 @@ impl AttributionCascadeDecision {
 /// the [`RedactionResult`] so the caller can route the per-rule
 /// telemetry counter.
 ///
-/// Per CSO sign-off row 5 (PR body): this function MUST be called on
+/// Per security review row 5 (PR body): this function MUST be called on
 /// every populated calendar subject before brain persistence. The
 /// integration site at `mci_agent.rs` calls this on the IPC-received
 /// `WorkflowContext.current_calendar_event` before forwarding the
@@ -98,7 +98,7 @@ pub fn redact_calendar_subject(subject: &mut String) -> RedactionResult {
 /// `current_listening_track.title` field. Rewrites in place per the
 /// same discipline as [`redact_calendar_subject`].
 ///
-/// Per CSO sign-off row 6 (PR body).
+/// Per security review row 6 (PR body).
 #[must_use]
 pub fn redact_track_title(title: &mut String) -> RedactionResult {
     let result = sms_otp::redact_sms_shapes(title);
@@ -112,7 +112,7 @@ pub fn redact_track_title(title: &mut String) -> RedactionResult {
 /// `current_listening_track.artist` field. Rewrites in place per the
 /// same discipline as [`redact_calendar_subject`].
 ///
-/// Per CSO sign-off row 6 (PR body).
+/// Per security review row 6 (PR body).
 #[must_use]
 pub fn redact_track_artist(artist: &mut String) -> RedactionResult {
     let result = sms_otp::redact_sms_shapes(artist);
@@ -129,7 +129,7 @@ pub fn redact_track_artist(artist: &mut String) -> RedactionResult {
 ///
 /// - `calendar_subject` — rewritten in place via §3(a) regex bank.
 /// - `track_title` / `track_artist` — same treatment.
-/// - `contact_identifier` — documented no-op (CSO sign-off row 7).
+/// - `contact_identifier` — documented no-op (security review row 7).
 ///   The argument is accepted for API uniformity; the function does
 ///   not inspect the bytes.
 ///
@@ -167,7 +167,7 @@ pub fn redact_attribution_fields(
             decision.fired_rules.extend(r.fired_rules);
         }
     }
-    // Contact identifier is opaque — documented no-op per CSO
+    // Contact identifier is opaque — documented no-op per security review
     // sign-off row 7. Accepted for API uniformity.
     let _ = contact_identifier;
 
@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn contact_identifier_is_documented_no_op() {
-        // The opaque-identifier no-op contract per CSO sign-off
+        // The opaque-identifier no-op contract per security review
         // row 7: even when the identifier contains a digit run that
         // would otherwise look OTP-shaped, the function does NOT
         // inspect or alter the identifier bytes.

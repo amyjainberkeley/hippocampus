@@ -2141,7 +2141,7 @@ fn reconcile_keyframe_blobs_counts_missing_live_references_without_creating_file
 // ---------------------------------------------------------------------------
 // Retriever end-to-end: ADR-0011 §5 pre-filter produces identical top-K
 // to the pre-existing "full-KNN + row-level filter" contract.
-// This is the Driver-CSO audit-table correctness assertion: pre-filter is
+// This is the security audit-table correctness assertion: pre-filter is
 // a *candidate narrowing*, NOT a scoring / ranking change. Same input,
 // same output — the store-level lever is opaque to the retriever's
 // scored-rank contract.

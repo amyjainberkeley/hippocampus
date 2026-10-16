@@ -9,28 +9,28 @@
 //! from `mci_core::ipc::Message::HelperHealth` and writes a fixed JSON
 //! shape. There is no overload for "log user-visible text."
 //!
-//! Per the CRS telemetry-gap memo (2026-05-19 + iter-7 refresh), the
+//! Per research telemetry-gap memo (2026-05-19 + iter-7 refresh), the
 //! sink writes to `~/Library/Logs/MCI/helper-health.jsonl` by default.
 //! Rotation: size-based at 10 MiB, atomic rename chain retaining 5
 //! archived copies (`.1` through `.5`). Oldest archive (`.5`) is
 //! discarded on each rotation. `fsync` on the active file before
 //! rename ensures the last batch of records is durable.
 //!
-//! # CSO sign-off (binding, `AGENT_PROTOCOL` §5)
+//! # Security review (binding, `AGENT_PROTOCOL` §5)
 //!
 //! - The JSON shape is fixed at struct level (`HealthLogRecord`).
 //!   Adding a field that could carry user content (e.g.
-//!   `last_window_title`) requires a fresh CSO ADR amendment.
+//!   `last_window_title`) requires a fresh security review ADR amendment.
 //! - The `device_id` field carries the opaque per-device id; never
 //!   the user's name, hostname, or any other identifier.
 //! - Rotated archives inherit 0600 from the active file. Fresh
 //!   active file is re-created at 0600.
 //!
-//! — CSO, 2026-05-19
+//! — Security review, 2026-05-19
 //!
 //! ## Amendment 2026-06-01 (Phase 6 PR 6 — `MetricKit` + per-app failsafe)
 //!
-//! Four new fields surfaced from wire 0x09 (PR #226 §5.1 + CTO §4
+//! Four new fields surfaced from wire 0x09 (PR #226 §5.1 + plan §4
 //! Phase 6 PR 6, S13 acceptance gate):
 //!
 //! - `failsafe_by_app`: per-bundle `.failsafeUnknown` tombstone
@@ -56,7 +56,7 @@
 //! existing wire-0x03..0x08 counters. The cap-8 cardinality bound
 //! is the structural argument that satisfies §9.3.
 //!
-//! — CSO sign-off (driver-CSO, dispatch §"NO DRIVER-CSO REQUIRED"
+//! — Security review (security, dispatch §"NO SECURITY REVIEW REQUIRED"
 //! 3-row mini-audit in PR body), 2026-06-01
 
 use std::path::PathBuf;
@@ -79,7 +79,7 @@ pub enum HealthLogError {
 /// One line of the helper-health JSONL log.
 ///
 /// Stable on-disk shape. New fields are append-only (older lines stay
-/// readable). Removing or renaming a field is a CSO-protected change.
+/// readable). Removing or renaming a field is a review-protected change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HealthLogRecord {
     /// RFC-3339 wall-clock timestamp the record was written. Wall-
@@ -99,7 +99,7 @@ pub struct HealthLogRecord {
     pub frames_suppressed: u64,
     /// Cumulative count of suppressions via the ADR-0013 §7 fail-safe
     /// path specifically — a **subset** of `frames_suppressed`. The
-    /// CRS Telemetry-Gap privacy-regression sentinel (a fail-safe
+    /// Research Telemetry-Gap privacy-regression sentinel (a fail-safe
     /// spike = the cascade lost positive-classification ability).
     pub frames_redacted_by_failsafe: u64,
     /// Cumulative count of cascade evaluations that ran because the
@@ -135,7 +135,7 @@ pub struct HealthLogRecord {
     pub frames_focus_race_dropped: u64,
     /// Per-app `.failsafeUnknown` tombstone counter map (cap 8 entries,
     /// least-recent-bump eviction). Promoted to the wire by the
-    /// `0x08 → 0x09` bump (PR #226 §5.1 + CTO Phase 6 PR 6). The
+    /// `0x08 → 0x09` bump (PR #226 §5.1 + plan Phase 6 PR 6). The
     /// load-bearing addition for the S13 acceptance gate: surfaces
     /// `failsafe-by-app: com.example.app=124, …` shape per
     /// `mci-agent --health-summary`, attributing cascade silence to
@@ -166,7 +166,7 @@ pub struct HealthLogRecord {
 impl HealthLogRecord {
     /// Manually serialize to a single JSON line (no trailing newline).
     /// Hand-rolled to avoid pulling `serde` / `serde_json` into the
-    /// agent crate (CRS Security-Signal stance: minimize the dep
+    /// agent crate (research Security-Signal stance: minimize the dep
     /// surface; the JSON shape is small + fixed).
     #[must_use]
     pub fn to_json_line(&self) -> String {
@@ -430,7 +430,7 @@ mod tests {
         // like they might carry user content. There must be NO
         // app_bundle / window_title / url / text field in the shape.
         // The wire-0x09 `failsafe_by_app` map enumerates bundle ids
-        // ALREADY cascade-attributed (see CSO Amendment 2026-06-01)
+        // ALREADY cascade-attributed (see security review Amendment 2026-06-01)
         // and is bounded at 8 entries by least-recent-bump eviction —
         // this is not a user-visible-text field in the §9.3 sense.
         for r in [sample_record(), sample_record_with_failsafe_by_app()] {
@@ -453,7 +453,7 @@ mod tests {
             ] {
                 assert!(
                     !line.contains(forbidden),
-                    "health-log line must not contain {forbidden} — CSO sign-off in mod docstring"
+                    "health-log line must not contain {forbidden} — security review in mod docstring"
                 );
             }
         }

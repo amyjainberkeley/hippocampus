@@ -104,7 +104,7 @@ final class TrustPanelViewModelTests: XCTestCase {
     ///
     /// This test asserts the VM contract that TrustSlide now depends on:
     /// a `load()` call populates `denylistEntries` with the store's
-    /// baseline CSO entries. If a future refactor breaks that
+    /// baseline security review entries. If a future refactor breaks that
     /// invariant, the RetentionSlide preview will silently regress
     /// again — the test guards the exact call site.
     func testLoadPopulatesDenylistFromCSOBaseline() async {

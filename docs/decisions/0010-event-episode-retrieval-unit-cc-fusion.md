@@ -13,7 +13,7 @@ Verification-pass errata to apply verbatim:
 - **Late Chunking arXiv:2409.04701** gain is **~2.7–3.6% relative / 1.5–1.9% absolute** (not the earlier "+5–15%" misquote). Not load-bearing for the decision, but ADR must cite the correct figure.
 - **NEMORI arXiv:2508.03341** cognitive basis = **Predictive Coding / Free Energy Principle**, NOT "Event Segmentation Theory." Use only as flavor; the time-gap + content-shift episode-segmentation heuristic stands on its own.
 
-CEO ratified 2026-05-18.
+Owner ratified 2026-05-18.
 
 ## Decision
 
@@ -47,14 +47,14 @@ CEO ratified 2026-05-18.
    - **Anchor-then-window** for "right before X" / "right after X" queries: locate X via the standard hybrid, then walk the timeline ±N minutes.
    - **LLM time-range extraction** for natural-language temporal queries ("last Tuesday afternoon", "yesterday around 3pm"). On-device LLM only (see ADR-0001 NG3).
    - **Plain hybrid recall** for everything else.
-7. **Eval gate.** Before locking the embedder choice (ADR-0011) in production code, Director-Brain builds a LongMemEval / ScreenshotVQA-style retrieval eval on consented real capture, with **Recall@k and NDCG@k as primary metrics** plus an LLM-judge secondary and a forgetting-aware check. The eval is the source of truth for tuning the fusion weights in step 5.
+7. **Eval gate.** Before locking the embedder choice (ADR-0011) in production code, brain track builds a LongMemEval / ScreenshotVQA-style retrieval eval on consented real capture, with **Recall@k and NDCG@k as primary metrics** plus an LLM-judge secondary and a forgetting-aware check. The eval is the source of truth for tuning the fusion weights in step 5.
 
 ## Consequences
 
 - Positive: ~15-point absolute-recall lift on the closest published analog (MIRIX). The single highest-leverage retrieval decision in MCI; dominates any embedder-tuning or chunk-size tuning gain.
 - Positive: the hybrid-store architecture (SQLite + FTS5 + sqlite-vec) is unchanged; this is a schema + indexing-discipline change, not an engine swap. ADR-0008's store choice is unaffected.
 - Negative / tradeoffs: `summary` and `entities` require an on-device LLM in the brain pipeline (idle-time, batched). Cost: bytes per event (small), occasional idle CPU bursts. Acceptable under the footprint SLO because everything is deferred to idle/charging (DESIGN.md §7, §10).
-- Negative / tradeoffs: the eval is not free — it requires consented real-capture corpora. CRS Telemetry-Gap analyst owns measurement infra (AGENT_PROTOCOL §6: research agents propose; do not edit production code).
+- Negative / tradeoffs: the eval is not free — it requires consented real-capture corpora. Research Telemetry-Gap analyst owns measurement infra (AGENT_PROTOCOL §6: research agents propose; do not edit production code).
 - Forces: ADR-0009's `event_vectors` schema is unchanged; embedding the *event text with context header* uses the same 384-d column. ADR-0011's embedder swap is unaffected.
 
 ## Alternatives considered

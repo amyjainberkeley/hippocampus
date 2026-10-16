@@ -8,7 +8,7 @@
 //!
 //! # Trust contract (ADR-0017 §3.4 binding, restated)
 //!
-//! 1. The user-layer STRICTLY ADDS bundle ids — cannot remove a CSO
+//! 1. The user-layer STRICTLY ADDS bundle ids — cannot remove a security review
 //!    baseline entry.
 //! 2. Per-entry `deep_hook_enabled` flips the agent-side per-plugin
 //!    master switch (`MessagesPluginConfig::plugin_enabled` for
@@ -113,7 +113,7 @@ impl UserAllowlist {
     /// but `capture_enabled = false` is a contradiction; this accessor
     /// drops such rows so the supervisor never starts a pump for an
     /// implicitly-not-opted-in bundle. The strictness is binding —
-    /// driver-CSO audit row 1.
+    /// Security audit row 1.
     #[must_use]
     pub fn deep_hook_enabled_bundle_ids(&self) -> HashSet<String> {
         self.entries
@@ -638,7 +638,7 @@ mod tests {
 
     #[test]
     fn deep_hook_set_requires_both_bits_per_adr0017_3_4() {
-        // Driver-CSO audit row 1: deep_hook_enabled=true AND
+        // Security audit row 1: deep_hook_enabled=true AND
         // capture_enabled=true are BOTH required.
         let list = UserAllowlist {
             entries: vec![
@@ -706,7 +706,7 @@ mod tests {
             .is_empty());
     }
 
-    // ----- File-permission gate (driver-CSO audit row 2) -----
+    // ----- File-permission gate (security audit row 2) -----
 
     #[test]
     fn missing_file_returns_empty_not_error() {

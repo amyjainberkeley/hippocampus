@@ -12,7 +12,7 @@ Drives N concurrent `put_event` + recall queries against an ephemeral
 seconds. Samples RSS + CPU every 5 s. Writes JSONL to stdout. Exits 1
 if any sample exceeds the SLO.
 
-## 2. Agent-process harness — `agent-soak.sh` + `analyze.py` (CRS G6 interim)
+## 2. Agent-process harness — `agent-soak.sh` + `analyze.py` (research G6 interim)
 
 Spawns `mci-agent --drain-stdin` with a `/dev/null` stdin (warm-agent
 baseline; no live capture pipeline — that is V2-P1-blocked), samples
@@ -20,7 +20,7 @@ CPU + RSS at 1 Hz via `ps(1)`, emits JSONL, then hands off to
 `analyze.py` which scores against the pinned `expected-baseline.json`
 (cycle 8.30 posture: 0.25% CPU / ~37 MB RSS).
 
-Purpose per CRS telemetry-gap 2026-07-07 scan §G6: measure MCI's
+Purpose per research telemetry-gap 2026-07-07 scan §G6: measure MCI's
 real-world footprint under a reproducible synthetic load without
 requiring the V2-P1 M4-lift (PR #28-blocked, awaits Amy's Mac). Closes
 G1 partially — we cannot yet measure "M4-lifted state", but we CAN
@@ -105,7 +105,7 @@ and PASS/FAIL verdict.
 - `errors_total` should stay 0. Non-zero means the store hit an
   unexpected failure under load.
 
-## CSO sign-off checklist
+## Security review checklist
 
 - Synthetic-only workload (no real user content).
 - Tempfile-backed brain, disposed after run.

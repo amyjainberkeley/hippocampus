@@ -7,7 +7,7 @@
 //! [`crate::ipc::RedactionReason::as_db_str`] for the stable string
 //! values).
 //!
-//! ## CSO sign-off (binding, `AGENT_PROTOCOL` §5)
+//! ## Security review (binding, `AGENT_PROTOCOL` §5)
 //!
 //! The column is `TEXT` (not an enum) so the store layer does not need
 //! to validate values on insert — the wire-protocol decoder
@@ -22,7 +22,7 @@
 //! application time. `SQLCipher` inherits this; no plaintext touches
 //! disk during the migration.
 //!
-//! — CSO, 2026-05-19
+//! — Security review, 2026-05-19
 
 use super::Migration;
 

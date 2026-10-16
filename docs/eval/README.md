@@ -39,6 +39,6 @@ the eval story. Paired with `../../scripts/eval/` (the runners) and
 
 Adding or revising a quality-measurement rubric. Any change that
 alters what "passing" means for a shipping gate (brief-quality,
-recall-quality, NER-corpus) is CEO-ratified — do NOT quietly
+recall-quality, NER-corpus) is owner-ratified — do NOT quietly
 weaken a bar. Corpus data + runner code belong under
 `../../scripts/eval/` or `../../eval/`, not here.

@@ -25,7 +25,7 @@
 //! - Dedicated measured intervals use `ingest_activity_interval` and the
 //!   concrete activity store. They never enter OCR, embedding, or event counts.
 //!
-//! # Privacy invariants (CSO sign-off block on the PR body)
+//! # Privacy invariants (security review block on the PR body)
 //!
 //! - **§4.1** OCR'd text reaching this module already cleared cascade-twice
 //!   on the helper side (pixel-time §1–§5/§7 + OCR-time §6). This module
@@ -159,7 +159,7 @@ pub trait BrainIngestor: Send + Sync {
 
     /// Number of `OCREvent` frames that reached `put_event` successfully
     /// since this ingestor was constructed. Content-free counter for
-    /// the CRS Telemetry-Gap analyst (ADR-0016 §4.7).
+    /// Research Telemetry-Gap analyst (ADR-0016 §4.7).
     fn events_ingested_count(&self) -> u64;
 }
 
@@ -280,7 +280,7 @@ pub struct BrainPump {
     tier1: Tier1Extractor,
     /// Cumulative `entity_mentions` rows the Tier 1 extractor has
     /// attempted to write. Content-free counter (`u64`) — identical
-    /// discipline to `counter` above, surfaces as a CRS Telemetry-Gap
+    /// discipline to `counter` above, surfaces as a research Telemetry-Gap
     /// signal so a regression in Tier 1 yield is visible.
     tier1_mentions_persisted: AtomicU64,
     /// V2-P5+ — SYNC Tier-2 BERT NER extractor, run inline on the Allow
@@ -293,7 +293,7 @@ pub struct BrainPump {
     /// tier marks `(extractor_status, qwen_tier2_processed)`.
     ner_sync: Option<Tier2Extractor>,
     /// Cumulative `entity_mentions` rows the sync NER tier has inserted.
-    /// Content-free CRS Telemetry-Gap counter, mirroring
+    /// Content-free research Telemetry-Gap counter, mirroring
     /// `tier1_mentions_persisted`.
     ner_sync_mentions_persisted: AtomicU64,
 }
@@ -381,7 +381,7 @@ impl BrainPump {
 
     /// Cumulative number of `entity_mentions` writes the V2-P4 Tier 1
     /// extractor has attempted on the Allow arm of `ingest_ocr_event`.
-    /// Content-free counter — useful for the CRS Telemetry-Gap
+    /// Content-free counter — useful for research Telemetry-Gap
     /// analyst to spot a Tier 1 yield regression.
     #[must_use]
     pub fn tier1_mentions_persisted_count(&self) -> u64 {
@@ -407,7 +407,7 @@ impl BrainPump {
     }
 
     /// Cumulative number of `entity_mentions` rows the sync NER tier has
-    /// inserted on the Allow arm. Content-free CRS Telemetry-Gap counter.
+    /// inserted on the Allow arm. Content-free research Telemetry-Gap counter.
     #[must_use]
     pub fn ner_sync_mentions_persisted_count(&self) -> u64 {
         self.ner_sync_mentions_persisted.load(Ordering::Relaxed)
@@ -704,7 +704,7 @@ impl BrainIngestor for BrainPump {
             }
         }
 
-        // V2-P5+ — SYNC Tier-2 BERT NER (CEO-ratified hot-path extractor,
+        // V2-P5+ — SYNC Tier-2 BERT NER (owner-ratified hot-path extractor,
         // dslim/bert-base-NER INT8, cpu_only). Runs inline after Tier 1 on
         // the same Allow-arm event when the model is installed (else
         // `ner_sync` is None and this is a no-op — Tier 1 still flows).

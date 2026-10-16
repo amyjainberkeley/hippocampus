@@ -31,7 +31,7 @@
 //! the test process. The `§4 capture-default-OFF` gate is unchanged —
 //! no live capture is invoked.
 //!
-//! ## CSO sign-off notes (matches PR body)
+//! ## Security review notes (matches PR body)
 //!
 //! - No production wire schema or emission-site change — this test
 //!   only exercises the **consumer** side with bytes the encoder

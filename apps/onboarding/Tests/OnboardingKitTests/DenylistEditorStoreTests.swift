@@ -105,7 +105,7 @@ final class DenylistEditorStoreTests: XCTestCase {
         XCTAssertEqual(user[0].type, .windowTitle)
     }
 
-    // MARK: - NEVER-REMOVE invariant (CSO entries immutable)
+    // MARK: - NEVER-REMOVE invariant (security review entries immutable)
 
     func testCannotRemoveCSOEntry() async {
         let store = DiskDenylistEditorStore(csoPath: csoFixture, userDirectory: tmpDir)

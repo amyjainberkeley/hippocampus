@@ -27,11 +27,11 @@
 //! 4. Logs operational lines to stderr (never to stdout — stdout is
 //!    reserved for protocol frames).
 //!
-//! # Privacy invariants (CSO veto-gate per ADR-0017 §5)
+//! # Privacy invariants (security review veto-gate per ADR-0017 §5)
 //!
 //! - **Read-only by construction** — there is no tools/call route that
 //!   mutates the store. Adding a write tool requires a separate
-//!   CSO-signed PR. The dispatcher in [`server`] structurally enumerates
+//!   Security-reviewed PR. The dispatcher in [`server`] structurally enumerates
 //!   the six read tools; an unknown tool name returns a JSON-RPC error,
 //!   never falls through to a write path.
 //! - **Privacy moments (`PrivacyTombstone`) are NOT exposed by P3.10b.**

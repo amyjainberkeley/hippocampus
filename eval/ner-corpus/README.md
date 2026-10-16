@@ -20,11 +20,11 @@ synthetic set is also a candidate **publishable artifact**
 record: generation method, per-kind label guidelines, the hardness
 taxonomy, and the measured annotation consistency.
 
-> **Scope note — this is the FABRICATED SYNTHETIC BULK only.** The CEO
+> **Scope note — this is the FABRICATED SYNTHETIC BULK only.** The owner
 > ratified a *hybrid* corpus: this synthetic bulk (committable / shareable)
 > **plus** a separate, later, **local-only hand-labeled REAL slice** of the
-> CEO's own captured OCR text. The real slice touches `mci.sqlite` (a §5
-> protected store) and the CEO's real screen content — it **must stay
+> Owner's own captured OCR text. The real slice touches `mci.sqlite` (a §5
+> protected store) and the owner's real screen content — it **must stay
 > local-only / gitignored, never committed**, and is a deliberately
 > separate task. **Nothing in this directory touches `mci.sqlite` or any
 > real capture.**
@@ -97,10 +97,10 @@ classification**, keyed on `(kind, span_start, span_end)`.
 | Person          | `person_name`       | `core/brain/src/extraction/tier2.rs::KIND_PERSON_NAME` (**locked in code**) |
 | Organization    | `organization`      | `core/brain/src/extraction/tier2.rs::KIND_ORGANIZATION` (**locked in code**) |
 | Location        | `location`          | `core/brain/src/extraction/tier2.rs::KIND_LOCATION` (**locked in code**) |
-| Date            | `date`              | **Director-defined** (see fork below) |
-| Time            | `time`              | **Director-defined** (see fork below) |
+| Date            | `date`              | **implementer-defined** (see fork below) |
+| Time            | `time`              | **implementer-defined** (see fork below) |
 
-> ### ⚠️ Date/Time schema fork (verify-audit finding, surface to CTO/CEO)
+> ### ⚠️ Date/Time schema fork (verify-audit finding, surface to owner)
 >
 > The ratification memo ([`project-gliner-variant-pin`]) states Date/Time
 > come from "the **shipped** V2-P4 Tier-1 regex". **Verify-audit against
@@ -110,7 +110,7 @@ classification**, keyed on `(kind, span_start, span_end)`.
 > and **no `date` or `time` kind**. There is no Date/Time `kind` string
 > anywhere in `core/`.
 >
-> So `date` / `time` here are **Director-chosen**, following the existing
+> So `date` / `time` here are **implementer-chosen**, following the existing
 > lowercase-snake convention (`person_name`, `organization`, `location`,
 > `url`, `email`, …). When the V2-P4 Date/Time regex actually lands, if it
 > picks different strings, **only one line changes**: `KINDS` in
@@ -306,7 +306,7 @@ documented above; the residual is reported here.
 100 % fabricated — invented-but-realistic names, orgs, places, dates,
 times. **Zero** real people, companies, products, addresses, or data from
 any real source or machine. No `mci.sqlite` access, no real capture, no
-network. Safe to commit, share, and publish. See the PR's driver-CSO
+network. Safe to commit, share, and publish. See the PR's security
 mini-audit note.
 
 [`project-gliner-variant-pin`]: docs/research/2026-06-03-ner-backbone-convertibility-scan.md

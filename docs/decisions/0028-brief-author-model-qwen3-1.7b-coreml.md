@@ -11,7 +11,7 @@
 
 MCI's Agent Shell generates daily briefs summarizing user activity from captured episodes (ADR-0018). This requires a small on-device LLM. The model must run 100% on-device — user's screen activity data never leaves the machine (ADR-0001 local-first, zero-knowledge invariant).
 
-The CRS Arxiv/OSS Scout evaluated candidate models (2026-05-21 scan). Recommendation was Qwen2.5-1.5B for maturity. CEO overrode: Qwen3-1.7B is one generation newer (April 2025), marginal size increase (~200M more params), Apache 2.0, and includes a "thinking mode" toggle that allows direct (no chain-of-thought) generation for structured summarization — faster, more concise briefs.
+The research evaluated candidate models (2026-05-21 scan). Recommendation was Qwen2.5-1.5B for maturity. Owner overrode: Qwen3-1.7B is one generation newer (April 2025), marginal size increase (~200M more params), Apache 2.0, and includes a "thinking mode" toggle that allows direct (no chain-of-thought) generation for structured summarization — faster, more concise briefs.
 
 The embedder is a separate concern: Arctic Embed S (ADR-0011) is bundled in the app (~33 MB). This ADR covers only the brief-author LLM.
 
@@ -67,9 +67,9 @@ If model download fails or user declines, `StubLlamaBackend` remains active (ret
 
 New Qwen generations can be published to the HuggingFace repo. App checks for model updates during idle (compare `models.json` bundled version vs remote). User confirms before downloading a new version. Old model is retained until new one is verified.
 
-### 9. CSO advisory: download path
+### 9. Security review advisory: download path
 
-The model download is a network fetch of a large binary. CSO reviews:
+The model download is a network fetch of a large binary. A security review checks:
 
 - Download URL is pinned to the HuggingFace repo in `models.json`. No dynamic URL resolution.
 - SHA-256 checksum verified post-download. Mismatch = reject.
@@ -89,7 +89,7 @@ The model download is a network fetch of a large binary. CSO reviews:
 
 ## Alternatives considered
 
-- **A — Qwen2.5-1.5B (CRS recommendation).** Rejected by CEO. One generation older, marginally smaller (200M fewer params), lacks the thinking-mode toggle. Qwen3 generation preferred.
+- **A — Qwen2.5-1.5B (research recommendation).** Rejected by owner. One generation older, marginally smaller (200M fewer params), lacks the thinking-mode toggle. Qwen3 generation preferred.
 - **B — Llama 3.2 1B / 3B.** 1B is too small for coherent multi-paragraph briefs. 3B exceeds the transient memory budget on 8 GB machines and doubles inference time. License (Meta Community License) has usage thresholds; Apache 2.0 is cleaner.
 - **C — Apple Intelligence / on-device foundation model.** Not available as a developer API. Apple's on-device models are locked to system features (Writing Tools, Siri). Cannot be called programmatically for custom summarization tasks.
 - **D — Cloud LLM (GPT-4o, Claude, etc.).** Rejected outright — violates ADR-0001 (local-first) and the zero-knowledge invariant. User's screen activity data must never leave the machine.
@@ -103,7 +103,7 @@ The model download is a network fetch of a large binary. CSO reviews:
 - **ADR-0018** — Brief authoring + approval pipeline. Defines the brief generation flow that this model powers.
 - **DESIGN.md §3** — footprint budget. GPU/ANE idle except during search or inference.
 - **DESIGN.md §8** — Brain architecture. Brief author is a component of the Agent Shell.
-- **CRS scan 2026-05-21** — Arxiv/OSS Scout model evaluation. Recommended Qwen2.5-1.5B; CEO overrode to Qwen3-1.7B.
+- **Research scan 2026-05-21** — Arxiv/OSS Scout model evaluation. Recommended Qwen2.5-1.5B; owner overrode to Qwen3-1.7B.
 - HuggingFace model card: `Qwen/Qwen3-1.7B`
 - `coremltools` 8.x documentation: stateful model APIs, INT4 palettization.
 
@@ -142,7 +142,7 @@ Author time: ~71 s/brief on M-series (within §5 budget)
 
 Failure modes (see `/tmp/brief-eval-result.txt` for full report):
 
-- `fact_coverage` dips on harder days (model occasionally misses 1-2 of 4-5 required facts — e.g., "arxiv", "CRS", "Linear", "Slack").
+- `fact_coverage` dips on harder days (model occasionally misses 1-2 of 4-5 required facts — e.g., "arxiv", "research", "Linear", "Slack").
 - `forbidden_hits` fires when the model leaks raw artifacts like "PR #" into prose instead of citation-marker form.
 - `structure` + `length` fail together on `day_fragmented` (43 words, 3 citations vs 70/4 floors) — the synthetic day is intentionally sparse and the model under-fills the structured template.
 
@@ -150,7 +150,7 @@ Failure modes (see `/tmp/brief-eval-result.txt` for full report):
 
 This is a real model producing real briefs that hit structure, length, and citation constraints reliably, but factual coverage on sparse / multi-topic days is alpha-quality. ADR-0028 §6 ("inference profile") and §8 ("upgrade path") anticipated this; the strict gate language in core/brief-eval needs interpretation, not amendment:
 
-- **v0.1 strict gate:** `4/8` is the floor we ship at. The eval still runs in CI in default (scripted) backend mode; the coreml mode is a CEO-runnable smoke gate, not a blocking CI check.
+- **v0.1 strict gate:** `4/8` is the floor we ship at. The eval still runs in CI in default (scripted) backend mode; the coreml mode is a owner-runnable smoke gate, not a blocking CI check.
 - **User-facing language:** the Brief tab in Recall UI surfaces "Daily Brief quality is alpha — the on-device model occasionally misses facts on light or sparse days. Briefs are generated entirely on-device and never sent to any server." (Wording change tracked separately if not already in `BriefView.swift`.)
 - **Upgrade triggers:** if cycle 8.x+ scan adds fact-coverage instrumentation from real user activity (not synthetic fixtures) and the dogfood corpus stabilizes ≥6/8 on these same eight fixtures with a different model, swap. Candidates: Qwen3-4B (3x size, memory-budget check on 8 GB SKUs), or LoRA fine-tune on the four failing-day fixture shapes.
 

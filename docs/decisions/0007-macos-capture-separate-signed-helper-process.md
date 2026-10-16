@@ -7,9 +7,9 @@
 
 `docs/AGENT_QUESTIONS.md` fork #3 (verbatim): "*Research: no clean Rust bindings to ScreenCaptureKit/VideoToolbox/Vision. Phase 1 needs the capture spine; the language boundary is decided in Phase 0 because the IPC/marshalling protocol shapes the trait impl.*"
 
-Recommendation (verbatim): "*A. Crash isolation is worth a lot for an always-on daemon; clean seam; matches DESIGN.md §11. The surface-handle-over-IPC timing constraint must be designed into the protocol now (CTO arbitrates the seam).*"
+Recommendation (verbatim): "*A. Crash isolation is worth a lot for an always-on daemon; clean seam; matches DESIGN.md §11. The surface-handle-over-IPC timing constraint must be designed into the protocol now (plan arbitrates the seam).*"
 
-CEO ratified 2026-05-18.
+Owner ratified 2026-05-18.
 
 ## Decision
 
@@ -24,7 +24,7 @@ CEO ratified 2026-05-18.
      - **Backpressure across IPC = drop**, identical to the in-process trait contract (ADR-0006). The Swift helper drops the frame and emits a counter rather than blocking.
    - The Phase 1 PR that lands the protocol must include a test that injects a stalled core consumer and confirms the helper drops within the deadline + emits the drop-counter — not just that the stream "still works."
 6. **Process supervision.** The Rust core launches the helper as a child process via `posix_spawn` with explicit fd setup. Crash-relaunch with exponential backoff. Helper exit status is logged but non-fatal to the agent (a brief recording gap is acceptable; user-visible state goes to **Paused** while the helper is down).
-7. **Entitlements and signing.** The helper carries the Screen Recording / Accessibility entitlements separately from any future UI process; the menu-bar agent in `apps/agent/` carries the UI permissions. Both are signed with the same Developer ID and notarized as a co-bundle. CSO reviews the entitlement set in the Phase 1 PR (AGENT_PROTOCOL §5: entitlements are protected-set).
+7. **Entitlements and signing.** The helper carries the Screen Recording / Accessibility entitlements separately from any future UI process; the menu-bar agent in `apps/agent/` carries the UI permissions. Both are signed with the same Developer ID and notarized as a co-bundle. A security review checks the entitlement set in the Phase 1 PR (AGENT_PROTOCOL §5: entitlements are protected-set).
 
 ## Consequences
 
@@ -32,8 +32,8 @@ CEO ratified 2026-05-18.
 - Positive: **clean language boundary.** No Swift+Rust+ARC in one address space. objc2 / swift-bridge stay out of `core/`. Only the IPC framing code knows the helper exists.
 - Positive: **entitlements are isolated.** The helper has Screen Recording; the recall UI process does not. If the recall UI is exploited, it cannot directly capture the screen.
 - Negative / tradeoffs: **IPC adds latency and a serialization step.** The surface-handle timing contract (ADR-0006) must survive crossing the process boundary, which forces the per-frame ack + bounded-in-flight protocol above. This is the single highest-risk thing about Option A; the Phase 1 protocol PR is where it's earned.
-- Negative / tradeoffs: **two signed binaries**, two entitlements files, two notarization steps. Build/release complexity is real; CTO + CSO own that lane.
-- Forces: CSO must sign off on the entitlement set, the IPC framing (which deserialization library; we will not parse untrusted bytes with a non-fuzzed parser), and any change to the helper's privilege surface. AGENT_PROTOCOL §5 applies.
+- Negative / tradeoffs: **two signed binaries**, two entitlements files, two notarization steps. Build/release complexity is real; the release work owns that lane.
+- Forces: security review must sign off on the entitlement set, the IPC framing (which deserialization library; we will not parse untrusted bytes with a non-fuzzed parser), and any change to the helper's privilege surface. AGENT_PROTOCOL §5 applies.
 
 ## Alternatives considered
 
@@ -44,5 +44,5 @@ CEO ratified 2026-05-18.
 
 - DESIGN.md §5 (capture pipeline), §10 (process model), §11 (cross-platform), §14 (repo layout)
 - docs/AGENT_QUESTIONS.md fork #3 (2026-05-18, ratified `accept recommendation`)
-- docs/AGENT_PROTOCOL.md §5 (CSO protected-set: entitlements, notarization, signing)
+- docs/AGENT_PROTOCOL.md §5 (security review protected-set: entitlements, notarization, signing)
 - ADR-0002 (stack split), ADR-0003 (seam discipline), ADR-0006 (trait shape + in-process timing contract that this ADR carries across IPC)

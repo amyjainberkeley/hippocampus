@@ -209,7 +209,7 @@ public enum OCREventEncodeError: Error, Equatable {
 ///
 /// PROTECTED-SET per AGENT_PROTOCOL §5. The bytes carry USER CONTENT
 /// (the OCR'd text). Any change to how this struct reaches the wire
-/// requires CSO review per ADR-0016 §4 invariants.
+/// requires security review per ADR-0016 §4 invariants.
 public struct OCREvent: Sendable, Equatable {
     /// Event-level sequence; in production matches the wire-frame seq.
     public let seq: UInt64

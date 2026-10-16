@@ -9,7 +9,7 @@
 //! with an `InMemoryKeyWrap`-derived `DbKey` (test-only key wrap), mirroring
 //! `tests/graph_store.rs`.
 //!
-//! # CSO sign-off notes (driver-authored mini-audit; schema escalation
+//! # Security review notes (driver-authored mini-audit; schema escalation
 //!   carried in the PR body)
 //!
 //! (a) The new table `entity_identities` (migration 0005) holds only

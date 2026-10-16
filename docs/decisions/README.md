@@ -4,12 +4,17 @@ Architecture decision records. Each locked decision has a numbered file
 here. Supersede an old record with a new one; do not rewrite it.
 
 > **A note on dead links.** Some records cite working notes, design drafts
-> and audit logs (`docs/business/…`, `docs/DESIGN.md`, `docs/audit/…`,
-> nightly logs) that are not part of this repository. The records are
-> unedited apart from their headers, so the reasoning is intact even where a
-> citation does not resolve. Where a cited document was a real build input,
-> such as the redaction corpora and the sensitive-domain list, it lives in
-> `core/brain/fixtures/` and `core/brain/src/redaction/` instead.
+> and audit logs (`docs/business/…`, `docs/research/…`, `docs/DESIGN.md`,
+> `docs/audit/…`, nightly logs) that are not part of this repository. Where a
+> cited document was a real build input, such as the redaction corpora and
+> the sensitive-domain list, it lives in `core/brain/fixtures/` and
+> `core/brain/src/redaction/` instead.
+>
+> **Edits for publication, 2026-10-15.** The records' reasoning is unchanged,
+> with three exceptions. Team, enterprise and paid-tier sections are marked
+> withdrawn, because Hippocampus is for individuals. Job titles from the
+> project's early process are replaced by what they did ("the owner", "a
+> security review"). ADR-0030's context is rewritten in plain terms.
 
 ## File naming
 
@@ -19,10 +24,11 @@ next number.
 
 ## Contents
 
-Records run from ADR-0001 (privacy posture) to ADR-0040 (whole-screen
-reading). Numbers 0019, 0022, 0023, 0027 and 0034 were withdrawn. They
-described team and server features this app does not have. The ones cited
-most often:
+Records run from ADR-0001 (privacy posture) to ADR-0041 (browsers and how
+often windows are read). Numbers 0019, 0022, 0023, 0027 and 0034 were
+withdrawn: they described team and server features this app does not have.
+Number 0025 was withdrawn on 2026-10-15: it planned opt-in usage analytics,
+and Hippocampus has none. The ones cited most often:
 
 - `0001-privacy-posture-local-first-e2e.md`: the privacy thesis.
 - `0002-stack-split-rust-core-native-adapters.md`: the trait seam.
@@ -38,11 +44,13 @@ most often:
 - `0039-zero-download-evidence-briefs.md`: the default brief and release
   model boundary.
 - `0040-whole-screen-background-capture.md`: whole-screen reading.
+- `0041-browsers-and-reading-cadence.md`: browsers, and how often each
+  window is read.
 
 ## Related
 
 - `../../ARCHITECTURE.md`: the system map.
-- `../research/`: research memos that fed the decisions.
+- `../STATUS.md`: what works today, and how it was checked.
 
 ## When to edit here
 

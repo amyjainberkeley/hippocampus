@@ -32,7 +32,7 @@
 //   4. real `appBundleId` in tombstone — vacuous this PR (cascade
 //      wiring at P2.5).
 //
-// ## Script-injection safety (CRS security-signal scan, 2026-05-20)
+// ## Script-injection safety (research security-signal scan, 2026-05-20)
 //
 // The AppleScript source is a `static let` string literal. The
 // provider NEVER interpolates the returned URL (or any runtime

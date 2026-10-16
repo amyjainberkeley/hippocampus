@@ -15,7 +15,7 @@
 //!   — the helper / core trust boundary; the wire decoder has already
 //!   classified `reason` before we materialize it here.
 //!
-//! **CSO sign-off (binding).** The materializer DOES NOT validate
+//! **Security review (binding).** The materializer DOES NOT validate
 //! `app_bundle` strings — they are arbitrary UTF-8 from the helper, and
 //! the wire decoder is the trust boundary. The store-write layer must
 //! parameterize the SQL insert so the bundle string is treated as data,
@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn empty_app_bundle_is_preserved_not_validated() {
-        // Per CSO sign-off, the materializer does NOT validate
+        // Per security review, the materializer does NOT validate
         // app_bundle strings — they're arbitrary UTF-8 from the helper.
         // SQL safety lives in the parameterized-insert layer.
         let f = frame(0, "", RedactionReason::FailsafeUnknown);

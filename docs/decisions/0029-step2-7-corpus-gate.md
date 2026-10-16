@@ -16,7 +16,7 @@ ADR-0013 Amendment 1 §2 sharpened the scope: the corpus is not a per-PR blocker
 
 The prior Step-2 audit (2026-05-19, `docs/audit/2026-05-19-step2-sec-7-corpus.md`) achieved PARTIAL PASS: §3 verified live, §7 verified, §2 stubbed (now implemented by PR #36 `PixelGridBlackedRegionProbe`), §4 failed (STEP-2-FINDING-001, now closed by PR #38 + PR #40). No full corpus run has been completed since those fixes.
 
-This ADR formalizes the gate criteria so the CSO sign-off is not a judgment call on ad-hoc evidence, but a checkable pass/fail against a defined standard.
+This ADR formalizes the gate criteria so the security review is not a judgment call on ad-hoc evidence, but a checkable pass/fail against a defined standard.
 
 ## Decision
 
@@ -26,7 +26,7 @@ The corpus is defined in `docs/audit/2026-05-23-step2-7-corpus-plan.md`. It spec
 
 ### 2. Gate criteria (all must hold)
 
-The CSO signs off on flipping `CaptureLaunchOptions.swift` default-ON when ALL of the following hold, evidenced by the committed corpus artifact:
+The security review signs off on flipping `CaptureLaunchOptions.swift` default-ON when ALL of the following hold, evidenced by the committed corpus artifact:
 
 #### 2.1 Cascade layer coverage
 
@@ -84,17 +84,17 @@ Both files are committed to `main` (via PR, not direct push). Raw wire binaries 
 
 ### 5. Sign-off protocol
 
-1. Director-Recording executes the corpus on a real Mac per the runner protocol in the corpus plan §4.
-2. Director-Recording commits the artifacts and opens a PR.
-3. CSO reviews the artifacts against the gate criteria in §2 above.
-4. If all §2 criteria hold: CSO signs off on this ADR (status → Accepted) and authorizes the `CaptureLaunchOptions.swift` default-ON flip as a separate, CSO-reviewed PR.
-5. If any §2 criterion fails: CSO rejects. Findings drive fix PRs. Re-run the corpus. Repeat.
+1. Capture track executes the corpus on a real Mac per the runner protocol in the corpus plan §4.
+2. Capture track commits the artifacts and opens a PR.
+3. A security review checks the artifacts against the gate criteria in §2 above.
+4. If all §2 criteria hold: security review signs off on this ADR (status → Accepted) and authorizes the `CaptureLaunchOptions.swift` default-ON flip as a separate, security-reviewed PR.
+5. If any §2 criterion fails: security review rejects. Findings drive fix PRs. Re-run the corpus. Repeat.
 
 The default-ON flip PR is a separate commit from the corpus artifact PR. It is never bundled.
 
 ## Consequences
 
-- **Positive:** The Phase 1→2 gate becomes a checkable standard, not an ad-hoc judgment call. The CSO can verify pass/fail mechanically against the criteria.
+- **Positive:** The Phase 1→2 gate becomes a checkable standard, not an ad-hoc judgment call. The security review can verify pass/fail mechanically against the criteria.
 - **Positive:** The corpus artifact gives F-STRAT-001b's third-party security audit a concrete, re-runnable test suite.
 - **Positive:** The allowlist regression suite (AL-*) prevents false suppression on apps users expect to capture — a product-breaking bug that isn't a privacy issue but is equally important for trust.
 - **Negative / tradeoff:** The corpus is ~40 entries run manually. A 15–30 minute operator session. Acceptable for a one-time Phase 1→2 gate; if the corpus needs to be re-run frequently (e.g., after every cascade change), automation should be considered.
@@ -110,14 +110,14 @@ The corpus plan identifies several uncertainties (marked in the inventory). The 
 4. **Slack workspace sign-in (MS-5, AX-3):** Does the PR #38 backstop reach the password field inside Slack's Electron shell? Does §3 fire (unlikely)?
 5. **Chrome password fields (BF-2):** Does Chrome expose `AXSecureTextField` subrole on `<input type=password>` on macOS 26? Or does it use a custom AX role?
 
-## CSO sign-off (placeholder)
+## Security review (placeholder)
 
-This ADR is proposed. CSO sign-off is owed:
+This ADR is proposed. Security review is owed:
 
-1. **Now (methodology validation):** CSO validates that the corpus plan + gate criteria in this ADR are sufficient evidence for a sign-off. If not, CSO amends the criteria before the corpus is run.
-2. **After the corpus run:** CSO reviews the committed artifacts against §2 and either accepts (status → Accepted) or rejects with specific findings.
+1. **Now (methodology validation):** security review validates that the corpus plan + gate criteria in this ADR are sufficient evidence for a sign-off. If not, security review amends the criteria before the corpus is run.
+2. **After the corpus run:** a security review checks the committed artifacts against §2 and either accepts (status → Accepted) or rejects with specific findings.
 
-— CSO, pending
+— Security review, pending
 
 ## References
 
@@ -127,6 +127,6 @@ This ADR is proposed. CSO sign-off is owed:
 - `docs/audit/2026-05-20-step3-g2-1-footprint-preliminary.md` — G2.1 preliminary footprint PASS.
 - ADR-0013 §7 + Amendment 1 §2/§4 — the binding cascade contract + enabler-PR gating boundary.
 - ADR-0020 — `.mediaConsumption` cascade outcome (relevant if wired before corpus run).
-- AGENT_PROTOCOL §4 (footprint SLO), §5 (CSO veto-gate), §9 (footprint-never-faked discipline).
+- AGENT_PROTOCOL §4 (footprint SLO), §5 (security review veto-gate), §9 (footprint-never-faked discipline).
 - `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Resources/known-safe-apps.toml` — the 10-entry allowlist.
 - PR #38 (STEP-2-FINDING-001 close), PR #39 (cascade floor), PR #40 (Safari URL FP fix).

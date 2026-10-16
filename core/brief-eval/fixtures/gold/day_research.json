@@ -1,11 +1,11 @@
 {
-  "notes": "Research day: 3 arxiv papers, 3 Notion writeups, one Slack handoff to CRS. No code, no shipping. Brief should be about the takeaways and the follow-ups.",
+  "notes": "Research day: 3 arxiv papers, 3 Notion writeups, one Slack handoff to Sam. No code, no shipping. Brief should be about the takeaways and the follow-ups.",
   "required_facts": [
     "arxiv",
     "Notion",
     "NEMORI",
     "embedder",
-    "CRS"
+    "Sam"
   ],
   "forbidden_terms": [
     "merged",

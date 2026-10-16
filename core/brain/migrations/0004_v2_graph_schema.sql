@@ -3,7 +3,7 @@
 --
 -- PROTECTED-SET per AGENT_PROTOCOL §5 — every new table lands in the
 -- SQLCipher-encrypted brain store and holds user-content-derived
--- attribution. CSO sign-off block on the implementing PR (V2-P3)
+-- attribution. Security review block on the implementing PR (V2-P3)
 -- carries the audit. No capture-scope change, no new IPC, no new
 -- network surface (zero-knowledge invariant per ADR-0001 / ADR-0012 /
 -- ADR-0031 preserved by construction — this migration is pure

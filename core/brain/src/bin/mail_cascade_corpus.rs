@@ -16,7 +16,7 @@
 //!   table entry (chase.com mailing-list bridge) → must DROP to
 //!   `HeaderOnly { reason = SensitiveSenderDomain }`.
 //!
-//! Per the dispatch (V2-P8b CSO audit gate), the committed audit
+//! Per the dispatch (V2-P8b security audit gate), the committed audit
 //! artifact at `docs/audit/2026-05-30-mail-cascade-corpus.md` MUST
 //! show 5/5 GREEN. This binary is the generator; running it should
 //! reproduce that artifact byte-for-byte.
@@ -29,7 +29,7 @@
 //! ```
 //!
 //! Exit code:
-//! - `0` when ALL 5 harnesses pass (the gate the CSO sign-off needs).
+//! - `0` when ALL 5 harnesses pass (the gate the security review needs).
 //! - `2` when any harness fails — surfaces the failure for CI / a
 //!   gating script.
 
@@ -56,7 +56,7 @@ struct Harness {
     headers: ParsedMailHeaders,
     expected: ExpectedOutcome,
     /// Human-readable summary of the threat model this harness pins
-    /// (rendered into the audit artifact for the CSO reviewer).
+    /// (rendered into the audit artifact for the security reviewer).
     threat_model: &'static str,
 }
 
@@ -92,7 +92,7 @@ fn harnesses() -> Vec<Harness> {
             },
             expected: ExpectedOutcome::Allow,
             threat_model: "Baseline non-sensitive mail. Cascade-equivalent MUST allow it through so the brain's Recall covers \
-                the CEO's everyday workflow. False-positive on H2 would break the V2-P8b user value (Mail surfaces in Recall).",
+                the owner's everyday workflow. False-positive on H2 would break the V2-P8b user value (Mail surfaces in Recall).",
         },
         Harness {
             id: "H3",
@@ -293,7 +293,7 @@ fn main() {
     println!();
     println!("- **Pass:** {total_pass}/{total}");
     println!("- **Fail:** {total_fail}/{total}");
-    println!("- **Overall gate (CSO audit V2-P8b):** {overall}");
+    println!("- **Overall gate (security audit V2-P8b):** {overall}");
     println!();
     println!("## Per-harness outcomes");
     println!();
@@ -320,7 +320,7 @@ fn main() {
         println!("**Actual outcome:** `{}`", fmt_decision(&actual));
         println!();
     }
-    println!("## CSO audit checklist (per V2-P8b dispatch)");
+    println!("## Security audit checklist (per V2-P8b dispatch)");
     println!();
     println!("- [x] ADR-0030 §3(c)(ii) parsed-header arm preserves the existing §3(c) OCR-time arm semantics — only the input shape (typed RFC 5322 vs OCR-rendered lines) differs. The domain table + OTP regex back-ends are shared.");
     println!("- [x] Sender-domain check happens BEFORE body persist (drop-before-write, not delete-after-write). See `apps/agent/src/mail_ingest.rs::MailIngestPump::ingest_path` — `cascade_equivalent` is called BEFORE any `put_event`. Body bytes from the emlx are dropped at `persist_header_only` / `Refused` without ever being passed to the brain store.");

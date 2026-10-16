@@ -9,7 +9,7 @@
 
 Recommendation (verbatim): "*A. Matches the OS delivery model and the §4 footprint/backpressure invariants; the explicit 'drop the surface handle fast' contract goes in the trait docs. This decision also locks the async runtime = tokio.*"
 
-CEO ratified 2026-05-18.
+Owner ratified 2026-05-18.
 
 ## Decision
 
@@ -63,7 +63,7 @@ The `CaptureSource` trait in `core/` has this shape:
 - Positive: the trait shape matches the OS delivery model on both platforms (ScreenCaptureKit, WGC). The footprint SLO (AGENT_PROTOCOL §4) is reachable because the hot path is GPU-backed surface refs not pixel copies, and backpressure drops near-duplicates rather than queueing memory.
 - Positive: the timing contract is in the code, in the doc comment, where every future implementer (Windows adapter, mocks, tests) sees it before writing impl. The bug is named and impossible to "forget."
 - Negative / tradeoffs: locking tokio is a real choice that constrains the entire async ecosystem of `core/`. Acceptable — tokio is the mainstream runtime for FFI-heavy async, and the alternatives don't meaningfully change the design.
-- Forces: every implementor of `CaptureSource` writes a test (or a Miri-checked harness, where applicable) that asserts the surface is dropped synchronously inside the receive path. CTO arbitrates any proposed deviation.
+- Forces: every implementor of `CaptureSource` writes a test (or a Miri-checked harness, where applicable) that asserts the surface is dropped synchronously inside the receive path. Plan arbitrates any proposed deviation.
 
 ## Alternatives considered
 

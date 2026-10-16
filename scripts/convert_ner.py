@@ -2,7 +2,7 @@
 """Convert a supervised NER token-classifier to Core ML for MCI's V2-P5+
 sync-hot-path entity extraction (Person/Org/Location).
 
-This is the CEO-ratified V2-P5+ NER path (2026-06-03): GLiNER was dropped
+This is the owner-ratified V2-P5+ NER path (2026-06-03): GLiNER was dropped
 (every strong variant is DeBERTa-v3, which does not convert — see
 docs/research/2026-06-03-ner-backbone-convertibility-scan.md). MCI's 5
 kinds are FIXED, so zero-shot is unnecessary; a standard supervised NER

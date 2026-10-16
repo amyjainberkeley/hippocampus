@@ -179,7 +179,7 @@ final class CascadeSection6RegexTests: XCTestCase {
 // MARK: - CascadeTwiceOCREmitter wire-emission tests
 
 final class CascadeTwiceOCREmitterTests: XCTestCase {
-    /// CSO escalation 2026-05-29 — the cascade-twice §6 mechanics
+    /// Security review escalation 2026-05-29 — the cascade-twice §6 mechanics
     /// (this file's purpose) require `killOcrEmit == false`. The
     /// kill-switch is `false` after live qualification; the dedicated
     /// `testKillSwitchEmitsTombstoneForAllowFrames` test below still pins
@@ -360,7 +360,7 @@ final class CascadeTwiceOCREmitterTests: XCTestCase {
                        "fail-closed reason on over-cap")
     }
 
-    /// CSO escalation 2026-05-29 — Phase A interim mitigation (option
+    /// Security review escalation 2026-05-29 — Phase A interim mitigation (option
     /// M4 in `docs/research/capture-scope-window-vs-display-2026-05-29.md`).
     /// With the emergency kill-switch ON, every cleared-
     /// pixel-time `.allow` frame must emit a `PrivacyTombstone(

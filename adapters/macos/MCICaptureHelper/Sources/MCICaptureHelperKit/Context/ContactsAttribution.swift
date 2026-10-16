@@ -8,13 +8,13 @@
 // AGENT_QUESTIONS.md F-RATIFICATION-2026-05-31).
 //
 // PROTECTED-SET per AGENT_PROTOCOL §5 (this PR adds the
-// `NSContactsUsageDescription` TCC surface; driver-CSO sign-off
+// `NSContactsUsageDescription` TCC surface; security sign-off
 // authored inline in the PR body, not via the `cso` sub-agent —
-// CEO-INFRA-001).
+// INFRA-001).
 //
 // # Scope binding — opaque identifier, ZERO content on the snapshot
 //
-// Per CSO sign-off row 7 (PR body): the snapshot carries
+// Per security review row 7 (PR body): the snapshot carries
 // `CNContact.identifier` ONLY. NO name, NO phone, NO email, NO
 // photo. Recall-time UI resolves the identifier back to a name by
 // re-fetching from the user's local `CNContactStore` — that
@@ -29,13 +29,13 @@
 //   - `CNContactEmailAddressesKey` — for email-substring matching.
 //   - `CNContactPhoneNumbersKey` — for phone-substring matching.
 //
-// NOT fetched (CSO sign-off row 4): `CNContactImageDataKey`,
+// NOT fetched (security review row 4): `CNContactImageDataKey`,
 // `CNContactInstantMessageAddressesKey`,
 // `CNContactSocialProfilesKey`, `CNContactRelationsKey`,
 // `CNContactNotesKey`, etc. — anything we do not strictly need to
 // resolve an identifier.
 //
-// # TCC denial path (CSO sign-off row 2)
+// # TCC denial path (security review row 2)
 //
 // `CNContactStore.requestAccess(for: .contacts)` is called once at
 // `start()`. On denial we record the denial state, emit ONE
@@ -256,7 +256,7 @@ private final class SystemContactsAttributionStore: ContactsAttributionStore, @u
             let phone = CNPhoneNumber(stringValue: normalized)
             predicate = CNContact.predicateForContacts(matching: phone)
         }
-        // Minimal key set per CSO sign-off row 4 — identifier +
+        // Minimal key set per security review row 4 — identifier +
         // the two contact-method keys we need for matching.
         let keys: [CNKeyDescriptor] = [
             CNContactIdentifierKey as CNKeyDescriptor,

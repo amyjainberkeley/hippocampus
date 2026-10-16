@@ -33,4 +33,4 @@ Sparkle appcast wiring, and the entitlements/Info.plist that the
 Developer-ID-signed release depends on. If the change is about
 capture, brain, or crypto, it belongs in `../../core/` or
 `../../adapters/macos/` — not here. Entitlement changes are
-CSO-gated.
+Review-gated.

@@ -26,7 +26,7 @@ public enum UserAllowlistTOMLDocument {
             "# MCI user-allowlist v1",
             "# User-curated allowlist layer per ADR-0017 §3.2 (V2-P10).",
             "# Each entry is a user opt-in; the capture-side cascade unions",
-            "# this set with the CSO baseline (known-safe-apps.toml). All",
+            "# this set with the built-in baseline (known-safe-apps.toml). All",
             "# entries flow through the SAME §2–§7 cascade arms + cascade-",
             "# twice OCR redaction as the baseline — user-layer cannot",
             "# widen `.allow` past any redaction signal.",

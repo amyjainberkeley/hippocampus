@@ -27,9 +27,9 @@ MCI's scope is **capture + brain**:
 ## Consequences
 
 - Positive: a sharp scope keeps the footprint SLO (AGENT_PROTOCOL §4) reachable — every feature that doesn't earn its way into the capture+brain hot path is rejected at design time, not at performance-tuning time.
-- Positive: scope clarity is also positioning. The COO's narrative — "Rewind, but local-first; Recall, but the privacy story is real" — only holds if MCI does not drift into adjacent product spaces.
+- Positive: scope clarity is also positioning. The positioning narrative — "Rewind, but local-first; Recall, but the privacy story is real" — only holds if MCI does not drift into adjacent product spaces.
 - Negative / tradeoffs: legitimate adjacent features (e.g., meeting capture, automated agent action) are tempting and explicitly deferred. ADRs proposing scope changes must amend this ADR first, not slip in via a feature PR.
-- Forces: the COO's positioning work and the CRS competitor scans are gated on this scope; product/feature drift is a CEO-level decision, not a Director-level one.
+- Forces: the positioning work and research competitor scans are gated on this scope; product/feature drift is a owner-level decision, not a team-level one.
 
 ## Alternatives considered
 

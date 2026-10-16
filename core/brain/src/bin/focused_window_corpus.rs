@@ -9,7 +9,7 @@
 //!
 //! The architectural fix in ADR-0031 is at the OS API boundary
 //! (`SCContentFilter(desktopIndependentWindow:)`). `ScreenCaptureKit`'s
-//! single-window capture surface is documented and CSO-protected; the
+//! single-window capture surface is documented and review-protected; the
 //! `// UNVERIFIED — needs live macOS` shapes in the helper are exercised
 //! by `§11 live-Mac audit`. What is auditable headlessly — and what this
 //! corpus pins — is the *attribution logic* that the focused-window
@@ -347,7 +347,7 @@ fn harnesses() -> Vec<Harness> {
             required_tokens: vec!["SAFARI_BANK_BALANCE_TOKEN"],
             forbidden_tokens: vec!["TEXTEDIT_NOTES_TOKEN"],
         },
-        // (4) The original CEO repro: allowlisted + Messages.app
+        // (4) The original owner repro: allowlisted + Messages.app
         // side-by-side. Messages-OTP-shape text MUST be absent from
         // the Safari OCREvent.
         Harness {
@@ -585,7 +585,7 @@ fn main() {
     println!("## ADR-0030 §3 redaction layer in retrospect");
     println!();
     println!(
-        "Harness 4 (the cycle 8.17 CEO repro) is the most operationally \
+        "Harness 4 (the cycle 8.17 owner repro) is the most operationally \
         relevant: Messages-OTP-shape text behind a Safari frontmost no longer \
         smears into the Safari OCREvent under V2-P1, so the ADR-0030 \
         §3(a)–(c) Messages/Mail redaction layer (PR #222) now operates on the \

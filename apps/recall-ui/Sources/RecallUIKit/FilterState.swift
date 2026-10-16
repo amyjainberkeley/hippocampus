@@ -4,7 +4,7 @@
 // dimensions + a single boolean pill:
 //
 //   - `appBundleIds: Set<String>` — dynamic per-app filter (gap #1 in
-//     the Director-Brain recall-UI audit). Populated from the
+//     the brain track recall-UI audit). Populated from the
 //     `listObservedApps` reader endpoint.
 //   - `dateRange: DateRangePreset` — discrete preset {none, today,
 //     yesterday, last7Days, custom(from, to)}.

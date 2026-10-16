@@ -19,7 +19,7 @@ pub const FRAME_MAGIC: u8 = 0x4D; // 'M'
 ///
 /// `0x01 → 0x02` (2026-05-19): `HelperHealth` gained the
 /// `frames_redacted_by_failsafe` counter (a §7 fail-safe privacy-
-/// regression sentinel for the CRS Telemetry-Gap analyst).
+/// regression sentinel for research Telemetry-Gap analyst).
 ///
 /// `0x02 → 0x03` (2026-05-20): `HelperHealth` gained the
 /// `cascade_forced_count` counter — monotonically-increasing total of
@@ -70,7 +70,7 @@ pub const FRAME_MAGIC: u8 = 0x4D; // 'M'
 /// `frames_redacted_by_failsafe`. **Decoder dual-accept**: this is the
 /// first bump that softens the strict version-lock — the decoder
 /// accepts both `0x06` and `0x07` so a `0x06`-era helper alive on a
-/// CEO machine across an agent restart cannot mute the brain (the
+/// Owner machine across an agent restart cannot mute the brain (the
 /// exact failure mode of the live `b0496130…` DMG that motivated this
 /// fix). When the helper emits a `0x06` frame, the `HelperHealth`
 /// decoder reads seven `u64`s and defaults `frames_encode_failed` to
@@ -101,7 +101,7 @@ pub const FRAME_MAGIC: u8 = 0x4D; // 'M'
 ///
 /// `0x08 → 0x09` (2026-06-01, Phase 6 PR 6 — `MetricKit` non-content
 /// footprint telemetry pipeline + per-app failsafe counter map;
-/// `docs/research/ocr-emit-silence-v2-2026-05-29.md` §5.1 + CTO
+/// `docs/research/ocr-emit-silence-v2-2026-05-29.md` §5.1 + plan
 /// fully-working-product plan §4 Phase 6 PR 6 + S13 acceptance gate).
 /// `HelperHealth` gained FOUR trailing fields, all content-free:
 ///   1. `failsafe_by_app: Vec<(bundle_id, u64 counter)>` — fixed-
@@ -561,7 +561,7 @@ fn encode_payload(msg: &Message, out: &mut Vec<u8>) {
             // mismatch, a 0x08 decoder reading a 0x07 payload defaults
             // this field to 0 by consuming only 8 u64s.
             out.extend_from_slice(&frames_focus_race_dropped.to_le_bytes());
-            // wire 0x09 (Phase 6 PR 6 — PR #226 §5.1 + CTO §4 Phase 6
+            // wire 0x09 (Phase 6 PR 6 — PR #226 §5.1 + plan §4 Phase 6
             // PR 6): four new content-free fields appended in this
             // order: failsafe_by_app map (cap 8) → cpu_pct_micro →
             // rss_bytes → tracker_alive_at_us. The map is encoded as
@@ -1632,7 +1632,7 @@ mod tests {
 
     #[test]
     fn decode_accepts_legacy_0x08_helper_health_payload() {
-        // Rolling-restart contract: an 0x08-era helper alive on a CEO
+        // Rolling-restart contract: an 0x08-era helper alive on a owner
         // machine across an agent restart can still emit valid
         // HelperHealth frames; the v0x09 decoder reads them with the
         // four trailing fields defaulted (empty Vec, 0, 0, 0).

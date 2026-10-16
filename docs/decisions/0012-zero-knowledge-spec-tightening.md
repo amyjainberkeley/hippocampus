@@ -6,15 +6,15 @@
 
 ## Context
 
-`docs/AGENT_QUESTIONS.md` fork #8 (verbatim Recommendation): "*A. CSO owns and signs this into the Phase 0 crypto ADR before `core/` crypto/sync code is written (AGENT_PROTOCOL §5). Store engine fork #4 (Option A) is unaffected and confirmed.*"
+`docs/AGENT_QUESTIONS.md` fork #8 (verbatim Recommendation): "*A. Security review owns and signs this into the Phase 0 crypto ADR before `core/` crypto/sync code is written (AGENT_PROTOCOL §5). Store engine fork #4 (Option A) is unaffected and confirmed.*"
 
-The motivating finding (CRS Stream E, verified primary-source in the Verification pass): **Microsoft Recall is MCI's risk register; it failed publicly twice.**
+The motivating finding (research Stream E, verified primary-source in the Verification pass): **Microsoft Recall is MCI's risk register; it failed publicly twice.**
 - **2024:** plaintext SQLite + screenshots + no content filtering (captured passwords / CVVs; Krebs / Beaumont disclosures).
 - **2025/26 redesign** (TotalRecall Reloaded, CSO Online 2026-04-16): vault sound but decrypted data handed to an **unprotected same-user process** (`AIXHost.exe`); same-user malware exfiltrates everything. The DB-at-rest model alone is insufficient.
 
-DESIGN.md §9.2 ("*A user master key (derived from a passphrase + per-device keys; recovery-code backed)*") is too vague to implement safely. This ADR specifies the model concretely **before any `core/` crypto/sync code is written** (AGENT_PROTOCOL §5: protected-set; CSO-signed).
+DESIGN.md §9.2 ("*A user master key (derived from a passphrase + per-device keys; recovery-code backed)*") is too vague to implement safely. This ADR specifies the model concretely **before any `core/` crypto/sync code is written** (AGENT_PROTOCOL §5: protected-set; security-reviewed).
 
-CEO ratified 2026-05-18.
+Owner ratified 2026-05-18.
 
 ## Decision
 
@@ -36,7 +36,7 @@ When the user adds a second device:
 4. The new device, on receiving the cross-signature, derives the **shared user master key** by combining its own SE-backed key with the existing device's contribution and the enrollment secret. Recovery of past memory follows §4.
 5. The server **never sees** the enrollment secret, the cross-signature payload in plaintext, or the user master key. It sees ciphertext blobs and a delta log sequence.
 
-The verified production precedents for this shape are **WhatsApp / Meta Encrypted Backups (engineering.fb.com 2026-05-01)** and **Apple Advanced Data Protection** — server-never-vouches device trust with HSM-backed recovery. Both confirmed in the CRS Verification pass.
+The verified production precedents for this shape are **WhatsApp / Meta Encrypted Backups (engineering.fb.com 2026-05-01)** and **Apple Advanced Data Protection** — server-never-vouches device trust with HSM-backed recovery. Both confirmed in research Verification pass.
 
 ### 3. Hash-chained, append-only, encrypted delta log
 
@@ -88,7 +88,7 @@ The on-device redaction pass (DESIGN.md §9.3) is **defense-in-depth, never the 
 
 ### 10. The Recall "4-digit PIN" claim is intentionally not load-bearing
 
-CRS Verification erratum (applied): the claim that Microsoft Recall's biometric gate degrades to a 4-digit PIN is **weakly sourced** (not in the authoritative CSO Online / Computerworld coverage of TotalRecall Reloaded). It is intentionally not cited in this ADR. The **unprotected-same-user-process** argument (§5–§6 above) fully carries the process-hardening rationale on its own.
+Research Verification erratum (applied): the claim that Microsoft Recall's biometric gate degrades to a 4-digit PIN is **weakly sourced** (not in the authoritative CSO Online / Computerworld coverage of TotalRecall Reloaded). It is intentionally not cited in this ADR. The **unprotected-same-user-process** argument (§5–§6 above) fully carries the process-hardening rationale on its own.
 
 ## DESIGN.md edits required by this ADR
 
@@ -99,19 +99,19 @@ Surgical edits in the same PR as this ADR:
 - **§9.3 (Sensitive-content controls)** — note that the redaction pass is defense-in-depth (≈52–88% recall, Basak et al. arXiv:2307.00714); source-level capture suppression is the load-bearing primitive.
 - **§10 (Runtime architecture)** — append the process-hardening list (hardened runtime + library validation; notarization-pinned; re-auth on recall-UI open; zeroization; minimal plaintext residency).
 
-(These edits land on `claude/cso/phase0-adrs` together with this ADR. The non-CSO-touching edits to §8/§12/§13 belong to ADR-0010/0011 on the sibling CTO branch and do not overlap.)
+(These edits land on `claude/cso/phase0-adrs` together with this ADR. The non-security edits to §8/§12/§13 belong to ADR-0010/0011 on the sibling branch and do not overlap.)
 
 ## Consequences
 
 - Positive: every named Microsoft Recall failure mode now has a concrete mitigation written down before any code is authored. The "trust is the product" thesis becomes auditable, not aspirational.
 - Positive: the cryptographic shape (per-device SE keys, authenticated enrollment, hash-chained log, HSM-rate-limited recovery) matches the two strongest production analogs (Apple ADP, WhatsApp Encrypted Backups) — both verified primary sources.
 - Positive: crypto-shredding deletion makes "delete" a real guarantee, not a server promise.
-- Negative / tradeoffs: process-hardening is a real engineering cost — the agent, the recall UI, and the Swift helper each carry signing + entitlements + notarization-pinned launch checks. CSO + CTO own that lane in the Phase-1 implementation PRs.
+- Negative / tradeoffs: process-hardening is a real engineering cost — the agent, the recall UI, and the Swift helper each carry signing + entitlements + notarization-pinned launch checks. Security review + plan own that lane in the Phase-1 implementation PRs.
 - Negative / tradeoffs: single-device recovery via an HSM vault is real infrastructure to operate. Phase 5 (sync) implementation may stage as multi-device-only first, with the recovery vault following.
 - Forces (binding on every future `core/**` + `apps/**` + `server/**` change):
   - No code path bulk-decrypts beyond the active recall window.
-  - No `Vec<u8>` of decrypted plaintext escapes a recall-API call without an explicit CSO note.
-  - Any addition or change to entitlements, hardened-runtime flags, or notarization config is protected-set (AGENT_PROTOCOL §5) and requires fresh CSO review.
+  - No `Vec<u8>` of decrypted plaintext escapes a recall-API call without an explicit security review note.
+  - Any addition or change to entitlements, hardened-runtime flags, or notarization config is protected-set (AGENT_PROTOCOL §5) and requires fresh security review.
   - SSE may not be introduced; PRs proposing it are rejected at design.
   - Any "soft delete" path that does not destroy a per-segment key is rejected as not actually being delete.
 
@@ -119,17 +119,17 @@ Surgical edits in the same PR as this ADR:
 
 - **B — leave DESIGN §9 as-is and resolve during implementation.** Rejected. This is exactly the failure mode of Recall: cryptography designed ad hoc as code is written, with no spec to test against. Once `core/**` crypto code lands, restructuring the model is a forklift — unrecoverable cost.
 
-## CSO sign-off
+## Security review
 
-This ADR (and ADR-0008) are protected-set authorings owned by the CSO under AGENT_PROTOCOL §5. They are **binding on every future `core/**` crypto, key-management, sync, store, and entitlements / notarization change.** Any deviation by an implementer — a Director, an IC, or a future agent — requires a fresh CSO review and an amending ADR. The CSO veto on protected-set PRs is final unless the human CEO overrides.
+This ADR (and ADR-0008) are protected-set authorings owned by the security review under AGENT_PROTOCOL §5. They are **binding on every future `core/**` crypto, key-management, sync, store, and entitlements / notarization change.** Any deviation by an implementer or a future agent requires a fresh security review and an amending ADR. The security review veto on protected-set PRs is final unless the owner overrides.
 
-— CSO, 2026-05-18
+— Security review, 2026-05-18
 
 ## References
 
 - DESIGN.md §4 (architecture), §9 (threat model, encryption, sensitive controls), §10 (runtime + process model)
-- docs/AGENT_PROTOCOL.md §4 (zero-knowledge invariant, sensitive-capture launch-blocker), §5 (CSO protected-set with veto)
-- docs/AGENT_QUESTIONS.md fork #8 (2026-05-18, ratified `accept recommendation`) + CRS Verification verdict
+- docs/AGENT_PROTOCOL.md §4 (zero-knowledge invariant, sensitive-capture launch-blocker), §5 (security review protected-set with veto)
+- docs/AGENT_QUESTIONS.md fork #8 (2026-05-18, ratified `accept recommendation`) + research Verification verdict
 - docs/RESEARCH_DIGEST.md Stream E + Verification pass items 13 (SecretBench citation), 14 (Backendal attribution), 15 (Recall PIN hedge)
 - Backendal et al., CRYPTO 2024 (paper body + ACM CCS 2024 companion) — rollback / truncation / key-substitution taxonomy
 - WhatsApp / Meta Encrypted Backups (engineering.fb.com, 2026-05-01) — HSM-rate-limited recovery vault precedent

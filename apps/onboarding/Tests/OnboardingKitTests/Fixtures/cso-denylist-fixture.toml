@@ -1,4 +1,4 @@
-# Test fixture — CSO-ratified deny entries (immutable in production).
+# Test fixture — reviewed deny entries (immutable in production).
 # Tests assert these cannot be removed via the editor store.
 
 [[entries]]

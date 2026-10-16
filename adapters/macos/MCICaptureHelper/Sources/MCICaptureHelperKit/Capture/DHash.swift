@@ -4,7 +4,7 @@
 // tie-break decision logic from RESEARCH_DIGEST.md Stream A (capture
 // hardening).
 //
-// Per the CRS scan (verified McKeown & Buchanan DFRWS EU 2023, arXiv
+// Per research scan (verified McKeown & Buchanan DFRWS EU 2023, arXiv
 // 2212.08035): a single dHash threshold fails on spatial shift =
 // scrolling. Tight threshold = false-split (storage bloat); loose
 // threshold = false-merge. The dual-threshold approach:
@@ -48,7 +48,7 @@ public enum DHashDecision: Sendable, Equatable {
 /// Threshold pair for the dual-threshold filter.
 ///
 /// Calibrate from real scroll / cursor / typing traces during Phase-1
-/// integration. The defaults below are the CRS scan's reasonable
+/// integration. The defaults below are research scan's reasonable
 /// starting band; the Phase-1 capture-spine PR re-calibrates against
 /// the integration corpus.
 public struct DHashThresholds: Sendable, Equatable {

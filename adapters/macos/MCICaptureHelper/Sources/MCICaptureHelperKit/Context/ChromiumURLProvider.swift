@@ -31,7 +31,7 @@
 //   4. real `appBundleId` in tombstone — vacuous this PR (cascade
 //      wiring at P2.5).
 //
-// ## Script-injection safety (CRS security-signal scan, 2026-05-20)
+// ## Script-injection safety (research security-signal scan, 2026-05-20)
 //
 // The AppleScript source for each supported browser is held as a
 // string-literal table value (`scripts` static-let). The provider

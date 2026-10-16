@@ -22,8 +22,8 @@ iframe — i.e. the parts of the page the user is actually working with:
 
 This closes the slot identified in
 `docs/research/orchestrator-ratification-state-2026-05-31.md` §SH Fork E
-(ratified 2026-05-31 — CEO override of CRS rec E3 joint structural
-review; CSO sign-off required on the implementing PR per
+(ratified 2026-05-31 — owner override of research rec E3 joint structural
+review; security review required on the implementing PR per
 `docs/AGENT_PROTOCOL.md` §5).
 
 ### Trade-off
@@ -31,7 +31,7 @@ review; CSO sign-off required on the implementing PR per
 `all_frames: true` expands the content-script attack surface from one
 frame per tab to N frames per tab. The trade-off was documented in
 `docs/research/browser-extension-audit.md` §"P1 — privacy parity" and
-accepted by the CEO. Mitigations that keep the surface bounded:
+accepted by the owner. Mitigations that keep the surface bounded:
 
 1. **No origin broadening.** `matches: ["<all_urls>"]` is unchanged —
    we only enable injection into iframes whose top-level page is
@@ -75,7 +75,7 @@ recognise the new fields fall through their `#[serde(default)]`):
 | `ts_us` | u64 | wall-clock timestamp |
 | `tab_id` | u32 | Chrome tab ID |
 | `source_browser` | string | `"chrome"` / `"arc"` / `"brave"` / `"edge"` |
-| `incognito` | bool | `sender.tab.incognito` (propagated for the CSO defense-in-depth check) |
+| `incognito` | bool | `sender.tab.incognito` (propagated for the security review defense-in-depth check) |
 
 The downstream binary wire (`core/src/ipc/wire.rs::PageContentEvent`,
 discriminant `0x0050`) is **unchanged** — the native host emits one

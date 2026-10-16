@@ -16,7 +16,7 @@ workspace = true
 # This crate ships the Calendar.app deep-hook SURFACE (types + public API
 # shape) so the FORK 8 = A Tier2 entity-extraction pipeline can be reasoned
 # about end-to-end. It does NOT wire the actual EventKit read — that PR is
-# CSO-gated on the Automation TCC per-target surface (Calendar target) and
+# Review-gated on the Automation TCC per-target surface (Calendar target) and
 # lands in cycle 8.60+.
 #
 # Public API:

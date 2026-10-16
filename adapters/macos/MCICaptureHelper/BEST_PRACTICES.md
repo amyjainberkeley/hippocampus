@@ -40,9 +40,9 @@ mode in MCI.
    switch; a frame captured in that window is a leak. Check bundle
    ID on every frame, not just on focus change.
 
-5. **Protected-set touch requires driver-CSO.** Changing the
+5. **Protected-set touch requires security.** Changing the
    sensitive-surface list, the incognito heuristic, or the
-   focused-window scope (ADR-0031) requires an explicit CSO note
+   focused-window scope (ADR-0031) requires an explicit security review note
    in the PR body per top-level rule 8.
 
 6. **Wire format lives in `../../core/src/ipc/`.** Do NOT define a

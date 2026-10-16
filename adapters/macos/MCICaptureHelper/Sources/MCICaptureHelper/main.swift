@@ -28,7 +28,7 @@ struct Args {
     /// on AX-silent / unknown apps per ADR-0013 §7).
     var denylistPath: String
 
-    /// Heartbeat interval seconds. Default 30 per CRS telemetry-gap
+    /// Heartbeat interval seconds. Default 30 per research telemetry-gap
     /// memo (2026-05-19).
     var heartbeatSeconds: Int
 
@@ -245,7 +245,7 @@ if let toml = try? String(contentsOfFile: args.denylistPath, encoding: .utf8) {
     denylistEntries = []
 }
 
-// Allowlist load — CSO-ratified known-safe-apps (ADR-0013 §3 + §6;
+// Allowlist load — reviewed known-safe-apps (ADR-0013 §3 + §6;
 // ADR-0015 §5; ADR-0017 §3.1). Lives in the signed bundle's Resources
 // (NOT user-writable v1) and is parsed at startup. Missing resource ⇒
 // empty allowlist ⇒ cascade fail-closes on every app (the safe
@@ -267,7 +267,7 @@ do {
 // layer at `~/Library/Application Support/MCI/user-allowlist.toml`
 // adds bundle ids the user opted in to via the onboarding UI. The
 // helper unions the user-layer's `captureEnabledBundleIds` with the
-// CSO baseline; the cascade does not distinguish source — every user-
+// Built-in baseline; the cascade does not distinguish source — every user-
 // layer bundle still flows through the same §2–§7 arms + cascade-twice
 // OCR redaction. Per ADR-0017 §3.2 binding:
 //   - Missing file ⇒ empty layer (fresh install — no opt-ins yet).
@@ -330,7 +330,7 @@ if args.probeDebug {
     axProbeDebugSink = nil
 }
 
-// Cascade-eligible bundle ids — union of CSO-ratified baseline (§3.1)
+// Cascade-eligible bundle ids — union of reviewed baseline (§3.1)
 // and the user-mutable layer (§3.2 / V2-P10). Both layers feed the
 // SAME `knownSafeAppBundles` Set; the cascade's §2-§7 arms apply
 // identically to every entry — user-layer entries STRICTLY ADD `.allow`
@@ -380,7 +380,7 @@ await loop.counters.installFootprintSampler(footprintSampler)
 // Apple aggregates daily; each payload lands at
 // `~/Library/Application Support/MCI/metrickit/<uuid>.json` (mode 0600).
 // Content-free by Apple construction — see MetricKitSubscriber.swift
-// CSO sign-off block. Installed unconditionally (no --capture gate);
+// Security review block. Installed unconditionally (no --capture gate);
 // MetricKit's per-process posture is "always on, lightweight".
 let metricKitSink = MetricKitFileSink()
 _ = MetricKitSubscriber.install(sink: metricKitSink)
@@ -651,7 +651,7 @@ if let captureRuntime {
     // sets up the read path (MPNowPlayingInfoCenter — no prompt).
     // All three are idempotent + non-blocking; the auth callback
     // resolves asynchronously, until which point the providers
-    // return `nil` (graceful absence). See CSO sign-off rows 1-2.
+    // return `nil` (graceful absence). See security review rows 1-2.
     captureRuntime.calendarAttribution.start()
     captureRuntime.nowPlayingAttribution.start()
     captureRuntime.contactsAttribution.start()

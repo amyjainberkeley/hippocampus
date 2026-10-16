@@ -19,7 +19,7 @@ Verification-pass errata to apply verbatim:
 - **MLX "no ANE" is a true engineering fact, but it is NOT a claim of arXiv:2510.18921.** That paper's verified contribution is sublinear batch scaling (8.02 → 70.48 ms for batch 1 → 32). The MLX-rejection rationale stands on the engineering fact; don't cite that paper for it.
 - **sqlite-vec brute-force + 124 ms/1M-binary** is verified.
 
-CEO ratified 2026-05-18.
+Owner ratified 2026-05-18.
 
 ## Decision
 
@@ -37,7 +37,7 @@ CEO ratified 2026-05-18.
 ## Consequences
 
 - Positive: +23.9% relative MTEB-R lift on MCI's exact noisy-corpus profile, with **zero schema cost** (ADR-0009).
-- Positive: Apache-2.0 license is permissive enough to ship inside a notarized macOS app without separate licensing concerns. CSO confirms (protected-set adjacent).
+- Positive: Apache-2.0 license is permissive enough to ship inside a notarized macOS app without separate licensing concerns. Security review confirms (protected-set adjacent).
 - Positive: ANE on macOS keeps the footprint SLO (AGENT_PROTOCOL §4) reachable on long batches.
 - Negative / tradeoffs: arctic-embed-s is ~50% larger in params (33M vs 22.7M). The verified FP16 deployment artifact is ~66 MB; resident-memory impact remains within the app's measured release envelope.
 - Negative / tradeoffs: query/document prefixes must be **always-on** in the embedder wrapper. A future contributor who forgets the prefix silently degrades retrieval; a test asserts the prefix is present at insert and query time.
@@ -71,11 +71,11 @@ the Core ML graph; the runtime hands raw UTF-8 strings to the model."
 That plan is **architecturally impossible**. The Core ML MIL (Model
 Intermediate Language) spec has no string ops — `coremltools` will not
 convert a graph whose input is a `String` and whose first hidden layer
-is a tokenizer. Verified by CRS Arxiv/OSS scout pass on 2026-05-22 and
+is a tokenizer. Verified by research Arxiv/OSS scout pass on 2026-05-22 and
 by Apple's own ml-stable-diffusion / WhisperKit / HuggingFace Core ML
 exporters, all of which use **external tokenization + token-IDs input**.
 
-**Resolution (CEO ratified 2026-05-22).**
+**Resolution (owner ratified 2026-05-22).**
 
 1. **Tokenizer moves out of the Core ML graph and into Rust.** The
    `adapters/macos/mci-embed-coreml` crate links the HuggingFace
@@ -185,7 +185,7 @@ under it.
 | After — scoped (pre-filter) | **106 ms** | **153 ms** | **102 ms** | **127 ms** |
 | After — unscoped (fallback) | 388 ms   | 4820 ms  | 342 ms   | 377 ms   |
 
-Scoped queries (the common case per the CRS 2026-07 telemetry-gap
+Scoped queries (the common case per research 2026-07 telemetry-gap
 memo — "in Safari" / "last 24 hours" / "yesterday") clear all three
 advisory budgets. Unscoped queries still ride the brute-force path;
 closing that requires binary quantization (the second lever in §5).
@@ -193,4 +193,4 @@ closing that requires binary quantization (the second lever in §5).
 **Follow-on work.** Binary quantization (~10× brute-force speedup)
 remains the next scaling-ladder step for unbounded queries. That is
 a separate PR — this cycle deliberately picked one lever at a time
-to keep the change ≤ 350 LOC per the CSO protected-set diff bar.
+to keep the change ≤ 350 LOC per the security review protected-set diff bar.

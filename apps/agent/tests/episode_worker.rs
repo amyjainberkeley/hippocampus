@@ -4,7 +4,7 @@
 //! via `put_event`, runs the episode worker for one cycle (immediate shutdown),
 //! and asserts episode assignments.
 //!
-//! # CSO sign-off notes
+//! # Security review notes
 //!
 //! (a) Worker only UPDATEs `events.episode_id` on existing rows; never INSERTs
 //!     events. `cascade_reason=0` wall preserved.

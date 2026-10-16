@@ -6,13 +6,13 @@
 
 ## Context
 
-`docs/AGENT_QUESTIONS.md` fork #4 (verbatim Recommendation): "*A. Proven page encryption, native FTS5, sqlite-vec loadable, clean Keychain key-wrap. CSO signs the key-custody model in ADR-000X before the store module is written.*"
+`docs/AGENT_QUESTIONS.md` fork #4 (verbatim Recommendation): "*A. Proven page encryption, native FTS5, sqlite-vec loadable, clean Keychain key-wrap. Security review signs the key-custody model in ADR-000X before the store module is written.*"
 
-CRS Verification verdict (verbatim from `docs/AGENT_QUESTIONS.md` and `docs/RESEARCH_DIGEST.md` Stream D): "*Option A **CONFIRMED** — sqlite-vec is the **only** store that preserves the single-encrypted-file / zero-knowledge invariant (LanceDB/DuckDB/usearch break it; DuckDB-VSS persistence is crash-unsafe for an always-on daemon). Harden the key model: Secure-Enclave-gated, biometric-access-controlled, **non-exportable**, `…ThisDeviceOnly`.*"
+Research Verification verdict (verbatim from `docs/AGENT_QUESTIONS.md` and `docs/RESEARCH_DIGEST.md` Stream D): "*Option A **CONFIRMED** — sqlite-vec is the **only** store that preserves the single-encrypted-file / zero-knowledge invariant (LanceDB/DuckDB/usearch break it; DuckDB-VSS persistence is crash-unsafe for an always-on daemon). Harden the key model: Secure-Enclave-gated, biometric-access-controlled, **non-exportable**, `…ThisDeviceOnly`.*"
 
 DESIGN.md §9.2 (at-rest): "*the SQLite store + blob store encrypted with a device-held key (SQLCipher / OS keystore-backed key — Keychain on macOS, DPAPI/Credential Manager on Windows). Memory store is never plaintext on disk.*"
 
-CEO ratified 2026-05-18.
+Owner ratified 2026-05-18.
 
 ## Decision
 
@@ -24,7 +24,7 @@ CEO ratified 2026-05-18.
 4. **One file, one writer.** SQLite WAL mode; a single writer connection inside the agent process; readers (recall UI, agent loopback API) use separate read-only connections to the same encrypted file. Connection-open requires the unwrapped DB key (see below) and the bundled sqlite-vec extension path.
 5. **Blob store.** Keyframe / segment blobs are content-addressed on disk under the user's app-support directory. Blob files are **separately encrypted** with a per-blob key derived from the DB master key (HKDF, per-blob salt = content hash). The `blobs` table holds only the hash + ciphertext path + metadata, never plaintext. This keeps the page-encryption story coherent for both the DB and the blob bucket.
 
-### Key custody (the CSO-owned model)
+### Key custody (the security review-owned model)
 
 1. **DB master key** = a random 256-bit key, generated at first run inside the Rust core's CSPRNG (the OS RNG via `getrandom`).
 2. **At-rest wrapping:** the DB master key is **wrapped by a Keychain-stored wrapping key** with the following attributes (binding on the implementation):
@@ -37,30 +37,30 @@ CEO ratified 2026-05-18.
 
 ### What this ADR does NOT cover
 
-This ADR is **at-rest only**. Transport-layer end-to-end encryption, the per-device keypair, device-to-device authenticated enrollment, recovery-vault design, the hash-chained delta log, the same-user-process threat model, and the process-hardening mitigations are all in **ADR-0012**. Both ADRs are protected-set; both are CSO-owned; they are written in concert and reference each other.
+This ADR is **at-rest only**. Transport-layer end-to-end encryption, the per-device keypair, device-to-device authenticated enrollment, recovery-vault design, the hash-chained delta log, the same-user-process threat model, and the process-hardening mitigations are all in **ADR-0012**. Both ADRs are protected-set; both are security review-owned; they are written in concert and reference each other.
 
 ## Consequences
 
 - Positive: page-level encryption on the **only** vector-store choice that keeps everything in one SQLCipher file. The zero-knowledge invariant for cloud sync (ADR-0001, ADR-0012) is preserved because the syncable artifact is a single ciphertext stream — no out-of-band index file to leak.
-- Positive: the Secure-Enclave wrap with biometry-current-set and `ThisDeviceOnly` matches Apple ADP / WhatsApp HSM patterns (CRS Verification). A device-level attacker that steals the disk image cannot decrypt without the SE; a same-user attacker cannot exfiltrate the wrapping key (non-exportable).
+- Positive: the Secure-Enclave wrap with biometry-current-set and `ThisDeviceOnly` matches Apple ADP / WhatsApp HSM patterns (research Verification). A device-level attacker that steals the disk image cannot decrypt without the SE; a same-user attacker cannot exfiltrate the wrapping key (non-exportable).
 - Positive: rotation is a real primitive, not just a wish. Crypto-shredding deletion (ADR-0012) becomes per-segment-key destruction backed by the same key model.
-- Negative / tradeoffs: SQLCipher's bundled C build adds binary size + a non-trivial build configuration; CRS Security-Signal analyst auto-reviews any SQLCipher version bump (CVE adjacent). sqlite-vec is brute-force only — performance discipline lives in ADR-0011's scaling ladder.
+- Negative / tradeoffs: SQLCipher's bundled C build adds binary size + a non-trivial build configuration; research Security-Signal analyst auto-reviews any SQLCipher version bump (CVE adjacent). sqlite-vec is brute-force only — performance discipline lives in ADR-0011's scaling ladder.
 - Negative / tradeoffs: SQLite WAL + a single writer + the bundled-SQLCipher build means tests cannot use an in-memory SQLite as a stand-in trivially; the test harness opens an ephemeral encrypted file with a test key, never an unencrypted memory DB.
 - Forces (binding on every future `core/**` change):
   - The store module never opens a database with extension loading enabled for arbitrary paths.
   - The store module never accepts a DB key from argv, env, or a config file.
-  - Any change to the Keychain access-control flags, the in-memory key buffer, the rotation path, or the blob-key derivation is a protected-set PR requiring CSO re-review (AGENT_PROTOCOL §5).
-  - Any new dependency added to the `core/store/` or `core/crypto/` crates triggers a CRS Security-Signal CVE / supply-chain check before merge.
+  - Any change to the Keychain access-control flags, the in-memory key buffer, the rotation path, or the blob-key derivation is a protected-set PR requiring security review re-review (AGENT_PROTOCOL §5).
+  - Any new dependency added to the `core/store/` or `core/crypto/` crates triggers a research Security-Signal CVE / supply-chain check before merge.
 
 ## Alternatives considered
 
 - **B (`libsql` embedded with built-in encryption, future Turso sync path).** Rejected — sqlite-vec + FTS5 extension story is less proven on libsql; future Turso sync is irrelevant under MCI's zero-knowledge thesis (the sync server cannot be a feature provider). The Verification pass confirmed sqlite-vec on rusqlite+SQLCipher is the only option preserving the single-encrypted-file invariant.
-- **C (plain `rusqlite` + app-layer field encryption).** Rejected — page-level cipher is the whole point; field-level leaks structure, indexes, FTS internals, and row counts. CRS Privacy stream's failure-mode analysis (Recall 2024) is a direct argument against this shape.
+- **C (plain `rusqlite` + app-layer field encryption).** Rejected — page-level cipher is the whole point; field-level leaks structure, indexes, FTS internals, and row counts. Research Privacy stream's failure-mode analysis (Recall 2024) is a direct argument against this shape.
 
 ## References
 
 - DESIGN.md §4 (architecture), §9 (privacy/encryption), §10 (runtime), §12 (data model), §13 (tech stack)
-- docs/AGENT_PROTOCOL.md §4 (zero-knowledge invariant), §5 (CSO protected-set)
-- docs/AGENT_QUESTIONS.md fork #4 (2026-05-18, ratified `accept recommendation`) + CRS Verification verdict
+- docs/AGENT_PROTOCOL.md §4 (zero-knowledge invariant), §5 (security review protected-set)
+- docs/AGENT_QUESTIONS.md fork #4 (2026-05-18, ratified `accept recommendation`) + research Verification verdict
 - docs/RESEARCH_DIGEST.md Stream D + Stream E + Verification pass
 - ADR-0001 (privacy posture), ADR-0009 (384-d schema pin), ADR-0012 (transport-layer crypto + threat model + process-hardening + recovery)

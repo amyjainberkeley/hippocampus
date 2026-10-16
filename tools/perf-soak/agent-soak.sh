@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tools/perf-soak/agent-soak.sh — CRS G6 interim mci-agent footprint harness.
+# tools/perf-soak/agent-soak.sh — research G6 interim mci-agent footprint harness.
 #
 # Spawns `mci-agent --drain-stdin` (warm-agent baseline; no live capture
 # pipeline — that is V2-P1-blocked) with a synthetic stdin event stream,
@@ -69,7 +69,7 @@ echo "agent-soak: bin=$AGENT_BIN duration=${DURATION}s out=$JSONL" >&2
 
 # Isolated HOME + unset MCI_DB_KEY_HEX keeps the agent in the WARM-IDLE
 # posture (no brain-key → drain-stdin no-op loop, no embedder / NER /
-# idle-batch workers, no CEO dev.key pickup, no live-production store
+# idle-batch workers, no owner dev.key pickup, no live-production store
 # reads). This is the "cycle 8.30 posture" the harness measures against.
 SOAK_HOME="$OUT_DIR/fake-home-$RUN_ID"
 SOAK_DB="$SOAK_HOME/mci.sqlite"

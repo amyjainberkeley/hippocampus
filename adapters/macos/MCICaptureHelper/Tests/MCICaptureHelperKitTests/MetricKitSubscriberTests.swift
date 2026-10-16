@@ -37,7 +37,7 @@ final class MetricKitSubscriberTests: XCTestCase {
         XCTAssertEqual(written, payload, "written bytes must equal source payload")
 
         // Mode is 0600 — uid-matched, group/other denied (same posture
-        // as helper-health.jsonl per CSO sign-off block in
+        // as helper-health.jsonl per security review block in
         // MetricKitSubscriber.swift).
         let attrs = try FileManager.default.attributesOfItem(atPath: unwrapped.path)
         let mode = (attrs[.posixPermissions] as? NSNumber)?.intValue ?? 0

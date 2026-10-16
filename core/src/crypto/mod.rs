@@ -25,10 +25,10 @@
 //! - never put the unwrapped key in a third place beyond (a) the
 //!   OS keystore wrap and (b) the locked in-memory buffer.
 //!
-//! # CSO sign-off (binding, `AGENT_PROTOCOL` §5)
+//! # Security review (binding, `AGENT_PROTOCOL` §5)
 //!
 //! The portable key type + wrap trait below were authored under the
-//! CSO role-mask against ADR-0008. The Keychain/Secure-Enclave
+//! Security review role-mask against ADR-0008. The Keychain/Secure-Enclave
 //! production wrap is explicitly deferred to the macOS adapter (it is
 //! OS-specific by construction); `InMemoryKeyWrap` is a **test-only**
 //! wrap and is documented as such — it provides NO at-rest
@@ -41,9 +41,9 @@
 //! tripwire fails any optimized, non-`cfg(test)` build that enables
 //! it. The shipped agent binary cannot name or construct it. Any
 //! change to `DbKey`'s zeroization, the `KeyWrap` contract, the
-//! raw-key PRAGMA derivation, or this gating is a fresh CSO review.
+//! raw-key PRAGMA derivation, or this gating is a fresh security review.
 //!
-//! — CSO role-mask, 2026-05-19
+//! — Security review role-mask, 2026-05-19
 
 pub mod db_key;
 pub mod key_wrap;

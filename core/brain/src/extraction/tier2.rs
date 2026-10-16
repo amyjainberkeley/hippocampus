@@ -46,7 +46,7 @@
 //!    organization-like, persisting the JWT bytes via V2-P5 would
 //!    defeat V2-P4's discipline. So Tier 2 computes the Tier 1
 //!    redacted-token span set first and DROPS any NER match whose
-//!    span overlaps. CSO mini-audit row #3 pins this.
+//!    span overlaps. Security mini-audit row #3 pins this.
 //!
 //! Both checks run inside [`Tier2Extractor::extract`] — the
 //! [`NerBackend`] just sees the raw event text and produces raw

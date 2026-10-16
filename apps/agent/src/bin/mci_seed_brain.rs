@@ -20,7 +20,7 @@
 //!   (ADR-0016 §4.3) is enforced by the store itself, so this binary
 //!   cannot bypass it.
 //!
-//! # Privacy / CSO posture
+//! # Privacy / security review posture
 //!
 //! - The seed events contain no user content. The OCR `text`, window
 //!   titles, and URLs are hand-authored fixture strings.

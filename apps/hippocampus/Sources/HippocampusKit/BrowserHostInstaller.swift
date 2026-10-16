@@ -215,7 +215,7 @@ public final class BrowserHostInstaller: Sendable {
     public static func renderManifest(binaryPath: String) -> String {
         // Hand-rolled rather than JSONSerialization so the on-disk file
         // is deterministic (key order, two-space indent) — easier for a
-        // CEO/CSO triaging "what got installed".
+        // Owner triaging "what got installed".
         let origin = "chrome-extension://\(chromiumExtensionID)/"
         let lines = [
             "{",

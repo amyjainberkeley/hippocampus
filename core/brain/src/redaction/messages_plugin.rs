@@ -28,7 +28,7 @@
 //!
 //! 1. Reuse the existing §3(a)/(b) redactors as defense-in-depth.
 //! 2. Make a per-event drop / redact decision **before** brain ingest.
-//! 3. Surface a `fired_rules` tally for the CRS Telemetry-Gap analyst.
+//! 3. Surface a `fired_rules` tally for research Telemetry-Gap analyst.
 //! 4. Be zero-cost on every non-plugin frame (the helper's hot path).
 //! 5. Carry NO additional content surface beyond what the plugin already
 //!    has access to.
@@ -122,7 +122,7 @@ impl MessagesPluginConfig {
 /// order — the first applicable reason wins).
 ///
 /// `DropReason` distinct values surface in the per-class telemetry
-/// counter the CRS Telemetry-Gap analyst consumes; the values are
+/// counter research Telemetry-Gap analyst consumes; the values are
 /// content-free.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessagesPluginDropReason {

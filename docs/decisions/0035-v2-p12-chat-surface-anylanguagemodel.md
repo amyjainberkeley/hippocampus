@@ -22,7 +22,7 @@ Prior ADRs number through 0034 (per cycle 8.35 PR #8 — the fleet-authored-PR m
 
 2. **MLX-Swift as the local provider.** Chat model = `mlx-community/Qwen3-4B-4bit` (via `MLXLanguageModel(modelId:)`). Apple's on-device provider is *allowed* as a fallback path where available, but MLX is the primary and the target of the footprint/latency SLOs.
 
-3. **Compile-time exclusion of cloud providers (zero-network invariant enforcement).** The Swift package's `Package.swift` enumerates *only* `[MLX, Apple]` traits. `ClaudeProvider`, `GeminiProvider`, `ChatCompletionsProvider`, and any other network-remote provider trait are excluded at compile time. A stray import of a remote-provider symbol MUST fail to build. This is the CSO veto-gate surface.
+3. **Compile-time exclusion of cloud providers (zero-network invariant enforcement).** The Swift package's `Package.swift` enumerates *only* `[MLX, Apple]` traits. `ClaudeProvider`, `GeminiProvider`, `ChatCompletionsProvider`, and any other network-remote provider trait are excluded at compile time. A stray import of a remote-provider symbol MUST fail to build. This is the security review veto-gate surface.
 
 4. **`apple/foundation-models-utilities` for Skills / transcript primitives.** Adopt the Skills API as the injection point for MCI-side context (recall context, brief context, retrieved episodes). Transcript-history modifiers are consumed directly.
 
@@ -50,7 +50,7 @@ Prior ADRs number through 0034 (per cycle 8.35 PR #8 — the fleet-authored-PR m
 
 ### Negative
 
-- **New Swift dependency (`AnyLanguageModel` + `foundation-models-utilities`).** ADR-0008's dependency-addition gate applies at Phase 7. CSO reviews the provider-trait surface; CTO reviews the version-pin discipline (pre-1.0 package — pin exact, do not track main).
+- **New Swift dependency (`AnyLanguageModel` + `foundation-models-utilities`).** ADR-0008's dependency-addition gate applies at Phase 7. A security review checks the provider-trait surface; plan reviews the version-pin discipline (pre-1.0 package — pin exact, do not track main).
 - **Bundle size ~+2.4 GB.** Qwen3-4B-4bit MLX. Mitigated by the future consolidation option (retire the 1.7B if 4B proves out as brief-author too — later ADR, not this one). Interim: net bundle grows.
 - **Compile-time discipline requires vigilance.** A future contributor could accidentally add a cloud-provider trait to `Package.swift`. Mitigation: CI guard (item 7 above) fails the build. Belt and braces.
 - **Two on-device runtimes co-resident (Core ML + MLX).** Core ML for embedder / NER / brief author; MLX for chat. Two allocators, two model loaders, two footprint profiles. Instrumented in `docs/PERF_LOG.md`. Chat model unloads on idle per Phase-7 unload policy.

@@ -110,7 +110,7 @@ final class WireFixturesTests: XCTestCase {
             framesEncodeFailed: 17,
             framesFocusRaceDropped: 23
         )
-        // wire 0x09 (Phase 6 PR 6 — PR #226 §5.1 + CTO §4 Phase 6 PR
+        // wire 0x09 (Phase 6 PR 6 — PR #226 §5.1 + plan §4 Phase 6 PR
         // 6): with default-zero new fields the payload is
         // 9 × u64(72) + u8(1) entry_count(0) + u32(4) cpu_pct_micro
         // + u64(8) rss_bytes + u64(8) tracker_alive_at_us = 93.

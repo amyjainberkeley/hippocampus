@@ -42,7 +42,7 @@ pub enum Routed {
     /// for now the connection passes the raw frame back so callers
     /// can no-op or stub it.
     StateTransition(Frame),
-    /// Helper emitted health counters. The CRS Telemetry-Gap analyst's
+    /// Helper emitted health counters. Research Telemetry-Gap analyst's
     /// `frames_delivered` / `frames_suppressed` / drop-counters live
     /// here; the caller forwards them to whatever sink the agent shell
     /// has wired (`tracing` + a rotating log file, per the
@@ -59,7 +59,7 @@ pub enum Routed {
     /// Helper emitted a twice-cleared `OCREvent` (ADR-0016 P3.6). The
     /// brain-ingestor consumer lands at P3.7+; until then the
     /// connection passes the frame through for caller no-op or
-    /// structural assertion. **CSO-protected**: this variant is the
+    /// structural assertion. **review-protected**: this variant is the
     /// IPC-seam evidence that `OCREvent` and `PrivacyTombstone` are
     /// disjoint dispatch targets — an enum-match dispatcher cannot
     /// deliver a `PrivacyTombstone` to the brain by construction

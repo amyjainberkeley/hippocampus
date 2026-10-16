@@ -10,13 +10,13 @@
 
 ### The verify-audit finding (2026-06-01)
 
-The V2-P5+ GLiNER spike dispatch assumed the `mci-llama-coreml` crate already exposed a *generic* `MLModel.prediction(from:)` wrapper that a GLiNER backend could reuse (CRS scout claim, reproduced in the dispatch as ratification #3). A pre-Phase-1 source audit refuted this:
+The V2-P5+ GLiNER spike dispatch assumed the `mci-llama-coreml` crate already exposed a *generic* `MLModel.prediction(from:)` wrapper that a GLiNER backend could reuse (research scout claim, reproduced in the dispatch as ratification #3). A pre-Phase-1 source audit refuted this:
 
 - `Qwen3CoreMLBackend::open(model_path, tokenizer_dir)` was Qwen-specific: it loaded a byte-level BPE tokenizer (`vocab.json` + `merges.txt` → `tokenizer.json`) and ran `verify_schema()` that *required* exactly the inputs `input_ids` + `attention_mask` and the output `logits`.
 - `forward_pass()` hardcoded a two-input feature dict, `Int32` dtype, shape `[1, 2048]`, and last-position logit extraction.
 - `LlamaBackend::generate()` was an autoregressive sample-then-feedback loop. There was no flexible-IO `predict(feature_dict)` method.
 
-GLiNER (`knowledgator/gliner-multitask-large-v0.5`, the CEO-ratified variant — see `[[project-gliner-variant-pin]]`) needs a different IO contract entirely: a DeBERTa-v3 SentencePiece tokenizer, multi-tensor inputs (`input_ids`, `attention_mask`, `words_mask`, `text_lengths`, `span_idx`, `span_mask`), and a span-score-grid output decoded by a span decoder — a single forward pass, not autoregressive sampling.
+GLiNER (`knowledgator/gliner-multitask-large-v0.5`, the owner-ratified variant — see `[[project-gliner-variant-pin]]`) needs a different IO contract entirely: a DeBERTa-v3 SentencePiece tokenizer, multi-tensor inputs (`input_ids`, `attention_mask`, `words_mask`, `text_lengths`, `span_idx`, `span_mask`), and a span-score-grid output decoded by a span decoder — a single forward pass, not autoregressive sampling.
 
 There was therefore no way to drive a GLiNER `.mlmodelc` through the Qwen-only surface. The spike halted before Phase 1 and escalated for a material-fork ratification. (The stale "generic FFI" claim is recorded in `[[project-mci-llama-coreml-is-generic]]`; the scout-claim-verification discipline that caught it is `[[feedback-crs-scout-subagent-hallucinates]]`.)
 
@@ -26,7 +26,7 @@ There was therefore no way to drive a GLiNER `.mlmodelc` through the Qwen-only s
 
 ## Decision
 
-**Path A (CEO-ratified):** refactor the crate into a generic core plus per-model shims, and rename it.
+**Path A (owner-ratified):** refactor the crate into a generic core plus per-model shims, and rename it.
 
 1. **Generic core** — `mci_coreml_bridge::model::CoreMLModel`: loads a compiled `.mlmodelc`, introspects its IO schema (`has_input`, `output_is_multi_array`), and runs an N-input feature-dict `predict(&[(&str, &MLMultiArray)])` returning a `Prediction` from which named `MLMultiArray` outputs are read. Plus `MLMultiArray` builders/readers (`multi_array_i32`, `read_f32_slice`, `f16_to_f32`) and a generic `CoreMLError`. No model-specific assumptions. (Int64 builders + a compute-unit-pinned loader + a full-array reader are added in later phases as the GLiNER shim needs them.)
 2. **Qwen3 shim** — `mci_coreml_bridge::qwen3::Qwen3CoreMLBackend`: the existing `LlamaBackend` impl, now holding a `CoreMLModel` and routing load/predict/read through the generic core. The autoregressive `generate()` loop, temperature/top-p sampling, and repetition penalty are preserved verbatim. `CoreMLError` is mapped into `GenerateError::Backend` by display string, preserving every human-readable message (including the "model not found" path the unit tests assert).
@@ -44,7 +44,7 @@ Prose references to `mci-llama-coreml` survive in files outside the spike's touc
 ## Alternatives considered
 
 - **(B) New `gliner` module inside the existing crate, no shared core.** Rejected: duplicates the `objc2` plumbing and bakes a same-crate-two-purposes smell; the worst of A and C.
-- **(C) New sibling crate `mci-gliner-coreml`.** Viable and respected the original (pre-expansion) touch-set, but leaves ~150–200 LoC of `objc2` plumbing duplicated against the Qwen backend until a future consolidation. Was the recommended *minimal* path before the CEO expanded the touch-set; superseded by A, which the CEO ratified as the best long-term shape (one Core ML adapter for all on-device models, zero duplication).
+- **(C) New sibling crate `mci-gliner-coreml`.** Viable and respected the original (pre-expansion) touch-set, but leaves ~150–200 LoC of `objc2` plumbing duplicated against the Qwen backend until a future consolidation. Was the recommended *minimal* path before the owner expanded the touch-set; superseded by A, which the owner ratified as the best long-term shape (one Core ML adapter for all on-device models, zero duplication).
 - **(D) Inline FFI in `apps/agent`.** Dead: blocked by `#![forbid(unsafe_code)]` and the adapter-tier discipline.
 
 ## Consequences

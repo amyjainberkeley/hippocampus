@@ -121,7 +121,7 @@ public protocol WindowTitleProvider: Sendable {
 ///
 /// Four distinct outcomes (not just `String?`) so the cascade /
 /// telemetry can account for `.timeout` separately from clean
-/// `.noTitle` / `.error` if future CRS telemetry needs to (today all
+/// `.noTitle` / `.error` if future research telemetry needs to (today all
 /// three collapse to `nil` at the `WindowTitleProvider` boundary).
 internal enum WindowTitleOutcome: Sendable, Equatable {
     /// AX returned a focused window with a non-empty title.

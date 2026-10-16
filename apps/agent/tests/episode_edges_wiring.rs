@@ -22,7 +22,7 @@
 //! over the unchanged store writes ZERO new edges and leaves the rows
 //! byte-identical (content-stable PK + `INSERT OR IGNORE`).
 //!
-//! # CSO sign-off notes
+//! # Security review notes
 //!
 //! (a) The workers read only post-cascade, segmented events + already-
 //!     resolved identities and write only `episode_edges` (migration 0004,

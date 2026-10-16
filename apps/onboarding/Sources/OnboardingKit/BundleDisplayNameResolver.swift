@@ -41,7 +41,7 @@ public enum BundleDisplayNameResolver {
         return prettifyLastComponent(bundleId: bundleId)
     }
 
-    /// Static lookup for the common shipping bundles the CSO baseline
+    /// Static lookup for the common shipping bundles the built-in baseline
     /// tends to reference. Kept small on purpose — the NSWorkspace path
     /// covers everything installed, so this only backfills bundles that
     /// might resolve to a URL but whose Info.plist doesn't carry a

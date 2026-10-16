@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // AllowlistTOMLLoaderTests — ADR-0013 §3 + ADR-0015 §5 + ADR-0017 §3.1
-// CSO-ratified known-safe-apps allowlist loader.
+// Reviewed known-safe-apps allowlist loader.
 //
 // PROTECTED-SET per AGENT_PROTOCOL §5. These tests pin both the parser
 // surface (strict TOML subset; refuse anything malformed) AND the
@@ -31,7 +31,7 @@ final class AllowlistTOMLLoaderHappyPathTests: XCTestCase {
         let loader = AllowlistTOMLLoader()
         let entries = try loader.parse("""
         # MCI known-safe-apps
-        # CSO-ratified bundles
+        # Reviewed bundles
 
         # add entries below
         """)
@@ -233,7 +233,7 @@ final class AllowlistTOMLLoaderRejectsHostileInputTests: XCTestCase {
 
 // MARK: - Bundled seed contract
 
-/// The CSO-ratified bundle ids that MUST round-trip through the
+/// The reviewed bundle ids that MUST round-trip through the
 /// bundled seed file. Hard-coding them here is deliberate — a silent
 /// drop or rename of any of these in `known-safe-apps.toml` requires
 /// either updating this list (with an ADR amendment) or failing this
@@ -269,7 +269,7 @@ private let expectedBundledSeedBundles: Set<String> = [
 
 final class AllowlistBundledSeedTests: XCTestCase {
     /// The bundled `known-safe-apps.toml` MUST load without throwing —
-    /// it's the CSO-ratified trust artifact and any parse failure is a
+    /// it's the reviewed trust artifact and any parse failure is a
     /// signed-bundle defect.
     func testBundledSeedLoadsCleanly() throws {
         let allowlist = try AllowlistTOMLLoader.loadBundled()

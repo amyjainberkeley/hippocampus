@@ -21,7 +21,7 @@
 //! **Protected-set scope (`AGENT_PROTOCOL` §5).** This module defines the
 //! exact bytes that cross a process boundary carrying capture-derived
 //! payloads. Any change to a message variant, a field's byte layout, or
-//! the framing envelope requires a fresh CSO review.
+//! the framing envelope requires a fresh security review.
 //!
 //! Wire format (binary, little-endian):
 //!
@@ -273,7 +273,7 @@ pub enum Message {
         tab_id: u32,
     },
 
-    /// Helper → core. Periodic counters for the CRS Telemetry-Gap analyst.
+    /// Helper → core. Periodic counters for research Telemetry-Gap analyst.
     /// Content-free (`AGENT_PROTOCOL` §9.3 / ADR-0001 NG3).
     HelperHealth {
         /// Helper uptime since `SCStream` start, milliseconds.
@@ -289,7 +289,7 @@ pub enum Message {
         /// **subset** of `frames_suppressed`, not subtracted from it.
         ///
         /// Split out as its own counter because it is a *privacy-
-        /// regression sentinel* for the CRS Telemetry-Gap analyst: a
+        /// regression sentinel* for research Telemetry-Gap analyst: a
         /// spike means the cascade is failing to positively classify
         /// (AX broke / Electron AX silence / denylist-filter drift)
         /// and is bulk-redacting via fail-safe. That is privacy-*safe*
@@ -348,7 +348,7 @@ pub enum Message {
         /// [`crate::ipc::wire::MAX_FAILSAFE_BY_APP_ENTRIES`] = 8 entries,
         /// least-recent-bump eviction enforced by the helper-side
         /// `HelperHealthCounters` actor). Promoted to the wire by the
-        /// `0x08 → 0x09` bump (PR #226 §5.1 (1); CTO Phase 6 PR 6).
+        /// `0x08 → 0x09` bump (PR #226 §5.1 (1); plan Phase 6 PR 6).
         /// Content-free: bundle ids (already cascade-eligible —
         /// `.failsafeUnknown` is the §7 outcome, NEVER OCR text) and
         /// a `u64` counter per entry. The load-bearing addition:
@@ -366,7 +366,7 @@ pub enum Message {
         /// take a sample this tick (first flush in a process — no
         /// prior `getrusage` snapshot to compute a delta against, or
         /// `getrusage` syscall failure). Promoted to the wire by the
-        /// `0x08 → 0x09` bump (CTO Phase 6 PR 6, S4 acceptance gate:
+        /// `0x08 → 0x09` bump (plan Phase 6 PR 6, S4 acceptance gate:
         /// steady-state ≤10–15% of one CPU core / ≤2 GB RAM per
         /// G2 ratification 2026-05-31). Content-free. Pairs with the
         /// `MetricKit` non-content footprint telemetry pipeline (also
@@ -378,7 +378,7 @@ pub enum Message {
         /// in bytes. Sampled via Mach
         /// `task_info(MACH_TASK_BASIC_INFO)`. `0` = sampler failed
         /// (extremely rare; would indicate a Mach kernel error).
-        /// Promoted to the wire by the `0x08 → 0x09` bump (CTO Phase
+        /// Promoted to the wire by the `0x08 → 0x09` bump (plan Phase
         /// 6 PR 6, S4 acceptance gate ≤2 GB RAM). Content-free.
         /// Pairs with `MetricKit` (`MetricKit` aggregates daily; this
         /// counter samples per `HelperHealth` flush).
@@ -544,7 +544,7 @@ impl FrameStatusFlags {
     /// New content was delivered (the common case).
     pub const COMPLETE: u8 = 0b0000_0001;
     /// The OS reported the screen as idle (untrustworthy on its own; see
-    /// CRS scan + ADR-0013 cascade).
+    /// Research scan + ADR-0013 cascade).
     pub const IDLE: u8 = 0b0000_0010;
     /// The OS suspended the stream (low-power / thermal / user pause).
     pub const SUSPENDED: u8 = 0b0000_0100;

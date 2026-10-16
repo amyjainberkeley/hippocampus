@@ -11,10 +11,10 @@
 //! needed for a fresh DB). Phase-1 introduces V0002 to carry the
 //! ADR-0013 §4 `events.redaction_reason` column.
 //!
-//! **CSO sign-off (binding):** adding a migration that ALTERs a
+//! **Security review (binding):** adding a migration that ALTERs a
 //! protected-set table (events, episodes, `event_text`, `event_vectors`,
 //! chunks, blobs, `sync_log`, denylist, redactions, deletions, meta)
-//! requires a fresh CSO review. The migrations below are the audit
+//! requires a fresh security review. The migrations below are the audit
 //! record of every schema change ever applied to a live MCI store.
 
 pub mod v0002_events_redaction_reason;

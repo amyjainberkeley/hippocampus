@@ -27,7 +27,7 @@ a total-privacy failure. Rules below are load-bearing.
 
 3. **Read-only default via FFI.** `mci-brain-ffi/` opens the store
    with `SQLITE_OPEN_READ_ONLY`. Any mutation surface consumed by
-   Swift must be explicitly added to the FFI allow-list and CSO-
+   Swift must be explicitly added to the FFI allow-list and security review-
    reviewed. Do NOT add a write path "just for tests" — use a
    test-only cfg-gated helper instead.
 

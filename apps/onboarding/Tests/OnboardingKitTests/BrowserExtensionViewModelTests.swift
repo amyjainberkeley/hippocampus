@@ -112,7 +112,7 @@ final class BrowserExtensionViewModelTests: XCTestCase {
         XCTAssertEqual(detector.checkCallCount, 2)
     }
 
-    // MARK: - Chromium install flow (added 2026-05-24 after CEO
+    // MARK: - Chromium install flow (added 2026-05-24 after owner
     // reported the chrome:// URL scheme silently failing).
 
     func testInstallChromiumSpawnsBrowserAtExtensionsPage() {

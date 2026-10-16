@@ -20,14 +20,14 @@
 //!   `?`-placeholders). String-formatted SQL values are a
 //!   protected-set regression.
 //!
-//! # CSO sign-off (binding, `AGENT_PROTOCOL` §5)
+//! # Security review (binding, `AGENT_PROTOCOL` §5)
 //!
-//! Authored under the CSO role-mask against ADR-0008. New crate deps
+//! Authored under the security review role-mask against ADR-0008. New crate deps
 //! introduced for this unit — `rusqlite` (bundled `SQLCipher` +
 //! vendored OpenSSL), `zeroize`, `getrandom` — trip ADR-0008's "any
 //! new dependency added to `core/store/` or `core/crypto/` triggers a
-//! CRS Security-Signal CVE / supply-chain check before merge"; that
-//! check is owed before the human-CEO merge of this branch and is
+//! Research Security-Signal CVE / supply-chain check before merge"; that
+//! check is owed before the owner merge of this branch and is
 //! noted in the cycle log. The wrong-key path is proven by a headless
 //! round-trip test (encrypt → close → reopen-with-key asserts rows →
 //! reopen-with-wrong-key + reopen-with-no-key assert failure). The
@@ -36,7 +36,7 @@
 //! and a dlopen cannot be headlessly verified regardless); only the
 //! arbitrary-path *rejection* is wired + tested.
 //!
-//! — CSO role-mask, 2026-05-19
+//! — Security review role-mask, 2026-05-19
 
 use std::path::{Path, PathBuf};
 
@@ -186,7 +186,7 @@ pub fn open(path: &Path, key: &DbKey) -> Result<Db, StoreError> {
 /// is a writer-side concern and would itself attempt a write.
 ///
 /// This is the structural enforcement of ADR-0017 §5 / ADR-0016 §4.3
-/// "recall UI cannot modify the brain". The CSO read-only verification
+/// "recall UI cannot modify the brain". The security review read-only verification
 /// test in `mci-brain-ffi` is the load-bearing assertion.
 ///
 /// # Errors
@@ -515,7 +515,7 @@ mod tests {
         //   1. the seeded row is readable (read path OK);
         //   2. an `INSERT` through the read-only connection fails at the
         //      driver level with the `SQLITE_READONLY` extended error code.
-        // The latter is the structural CSO invariant the recall-UI relies on
+        // The latter is the structural security review invariant the recall-UI relies on
         // (ADR-0017 §5 / ADR-0016 §4.3): a read-only handle CANNOT mutate
         // the brain, full stop.
         let (_dir, path) = tmp("ro.sqlite");

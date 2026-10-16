@@ -230,7 +230,7 @@ public struct SearchOptions: Sendable, Equatable {
 /// One row of the dynamic per-app filter pop-up — a bundle id observed
 /// in the brain together with how many events it has produced (within
 /// the requested time window). Surface for the recall-UI per-app filter
-/// pills (Director-Brain audit, dogfood-v1 gap #1).
+/// pills (brain track audit, dogfood-v1 gap #1).
 public struct ObservedApp: Sendable, Equatable, Identifiable, Codable {
     public var id: String { appBundleId }
     public let appBundleId: String

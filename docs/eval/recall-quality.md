@@ -61,7 +61,7 @@ No seed module (cycle 8.44+). No scorecard, no CI release gate.
 ## Latency at scale
 
 Recall quality is one axis; **latency at 100K events** is the other.
-The extended-dictation cohort (CRS 2026-07 telemetry-gap G-perf memo,
+The extended-dictation cohort (research 2026-07 telemetry-gap G-perf memo,
 §3) is the load-bearing user story: a power user who has been running
 MCI for ~2 months hits the "does search still feel instant?" wall
 long before they hit the "are the right hits surfacing?" wall.

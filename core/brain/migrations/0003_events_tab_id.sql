@@ -1,7 +1,7 @@
 -- mci-brain · migration 0003 · V2-P2 tab attribution: `events.tab_id`.
 --
 -- PROTECTED-SET per AGENT_PROTOCOL §5 — schema change to the `events`
--- table that holds user-readable content. CSO sign-off block on the
+-- table that holds user-readable content. Security review block on the
 -- implementing PR (V2-P2) carries the audit. New column is `tab_id
 -- INTEGER NULL` — same trust class as the existing `url` column per
 -- ADR-0015 §4.1 (context-as-content). A `tab_id` value is meaningful

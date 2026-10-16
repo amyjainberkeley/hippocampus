@@ -1,4 +1,4 @@
-# Test fixture matching the 10 CSO-ratified bundles from PR #80 v1 seed.
+# Test fixture matching the 10 reviewed bundles from PR #80 v1 seed.
 # Hermetic — not the production .toml. Tests assert against these 10 ids.
 
 [[entries]]

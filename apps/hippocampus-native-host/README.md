@@ -27,4 +27,4 @@ Native-messaging framing changes, secret-filter rules, and the
 extension ↔ agent wire schema. Anything that changes what the
 browser extensions actually capture (DOM selectors, page-content
 extraction) belongs in `../../extensions/<browser>/`, not here.
-Secret-filter changes are CSO-gated (they gate exfiltration risk).
+Secret-filter changes are review-gated (they gate exfiltration risk).

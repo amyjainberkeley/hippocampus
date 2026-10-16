@@ -61,7 +61,7 @@ identifier-like, then persist the JWT bytes as `mention_text =
 
 So Tier 2 derives the V2-P4 redacted-token span set on the same
 text (no DB roundtrip, just rerun the Tier 1 regex bank) and drops
-any NER match whose span overlaps. CSO mini-audit row #3 pins this.
+any NER match whose span overlaps. Security mini-audit row #3 pins this.
 
 The redacted-token-shape kinds Tier 1 covers are: `jwt`,
 `aws_access_key`, `github_pat`, `stripe_api_key`, `bitcoin_wif`,

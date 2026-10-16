@@ -7,9 +7,9 @@
 
 `docs/AGENT_QUESTIONS.md` fork #5 (verbatim Recommendation): "*A. DESIGN.md already commits MiniLM/384; re-embedding is a bounded, known migration. Simplicity in P0 beats a hypothetical model swap.*"
 
-CRS Verification verdict (verbatim from `docs/AGENT_QUESTIONS.md`): "*Pin-384 CONFIRMED and stronger — the recommended embedder `snowflake-arctic-embed-s` is also 384-d, so the schema is unchanged while retrieval improves ~24%. Add a zero-cost Matryoshka hedge to the ADR: store vectors L2-normalized; prefer MRL-capable models for any future swap so a dimension change is a truncation, not a re-train.*"
+Research Verification verdict (verbatim from `docs/AGENT_QUESTIONS.md`): "*Pin-384 CONFIRMED and stronger — the recommended embedder `snowflake-arctic-embed-s` is also 384-d, so the schema is unchanged while retrieval improves ~24%. Add a zero-cost Matryoshka hedge to the ADR: store vectors L2-normalized; prefer MRL-capable models for any future swap so a dimension change is a truncation, not a re-train.*"
 
-CEO ratified 2026-05-18.
+Owner ratified 2026-05-18.
 
 ## Decision
 
@@ -20,7 +20,7 @@ CEO ratified 2026-05-18.
 
 ## Consequences
 
-- Positive: zero schema churn at the moment of the ADR-0011 embedder swap. The retrieval-quality lift (~+24% MTEB-R per CRS Stream D) lands without a migration.
+- Positive: zero schema churn at the moment of the ADR-0011 embedder swap. The retrieval-quality lift (~+24% MTEB-R per research Stream D) lands without a migration.
 - Positive: L2-normalization is free at embed time and unlocks a future Matryoshka truncation path without a re-embed.
 - Positive: the migration recipe makes the "model swap" risk bounded and known — not a one-way door.
 - Negative / tradeoffs: pinning 384 at P0 is a soft commitment. Any future model exceeding 384 forces a migration (which we now know how to run; see above). The Matryoshka hedge mitigates this for MRL-capable swaps.
@@ -33,6 +33,6 @@ CEO ratified 2026-05-18.
 ## References
 
 - DESIGN.md §8 (brain), §12 (data model — `event_vectors` + `meta` rows), §13 (tech stack)
-- docs/AGENT_QUESTIONS.md fork #5 (2026-05-18, ratified `accept recommendation`) + CRS Verification verdict
+- docs/AGENT_QUESTIONS.md fork #5 (2026-05-18, ratified `accept recommendation`) + research Verification verdict
 - docs/RESEARCH_DIGEST.md Stream D (sqlite-vec confirmation), Verification pass item 7
 - ADR-0011 (embedder = snowflake-arctic-embed-s, 384-d)

@@ -8,7 +8,7 @@
 
 Earlier design discussions considered whether Recall and Onboarding should be separate app bundles or integrated into a single Hippocampus.app. Separate apps would mean separate Dock icons, separate launch, separate update paths — added complexity for the user and for the build system.
 
-The CEO ratified: single app on Mac, multiple Xcode targets on iOS/Watch. This ADR documents that decision and the architecture already in place.
+The owner ratified: single app on Mac, multiple Xcode targets on iOS/Watch. This ADR documents that decision and the architecture already in place.
 
 ## Decision
 
@@ -84,7 +84,7 @@ HippocampusWatch is a separate Xcode target:
 
 ### 4. App icon
 
-The current app icon is a placeholder. A real designer pass is owner-blocked (requires the CEO to commission or approve design work). The placeholder is acceptable for development and testing.
+The current app icon is a placeholder. A real designer pass is owner-blocked (requires the owner to commission or approve design work). The placeholder is acceptable for development and testing.
 
 ### 5. What this ADR does NOT do
 

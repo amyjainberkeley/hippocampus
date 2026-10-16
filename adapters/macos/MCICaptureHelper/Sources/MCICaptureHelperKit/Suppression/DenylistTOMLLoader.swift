@@ -13,7 +13,7 @@
 // helper has no other TOML use case, and pulling in `TOMLDecoder` or
 // `swift-toml` adds an audit-surface for a one-file config. The
 // parser below accepts a deliberately strict subset of TOML so the
-// surface stays small. Anything fancier requires a CSO ADR amendment.
+// surface stays small. Anything fancier requires a security review ADR amendment.
 //
 // Subset grammar (formal):
 //

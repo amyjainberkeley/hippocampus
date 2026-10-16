@@ -92,7 +92,7 @@ pub fn bundle_is_in_scope(app_bundle_id: &str) -> bool {
 /// `fired_rules` is a list of stable rule ids (e.g. `"apple-id-otp"`,
 /// `"bank-issuer-prefix"`, `"otp-proximity"`) carried separately from
 /// the redacted text so the caller can route a telemetry counter
-/// (`ocr_text_secret_match_count` per CRS Telemetry-Gap analyst) without
+/// (`ocr_text_secret_match_count` per research Telemetry-Gap analyst) without
 /// re-running the regex set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RedactionResult {

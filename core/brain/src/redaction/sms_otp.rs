@@ -34,7 +34,7 @@
 //! the rule class — the cascade-twice caller uses neither in its
 //! suppression decision (any match drops the event) but the
 //! distinction surfaces in [`RedactionResult::fired_rules`] for the
-//! CRS Telemetry-Gap analyst's per-class counter
+//! Research Telemetry-Gap analyst's per-class counter
 //! (`ocr_text_secret_match_count`).
 
 use std::sync::LazyLock;

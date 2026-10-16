@@ -31,7 +31,7 @@
 //! ingest or arbitrary mutation API. Adding another write entry point is an
 //! `AGENT_PROTOCOL` §5 protected-set change.
 //!
-//! The CSO read-only verification is load-bearing: it lives in
+//! The security review read-only verification is load-bearing: it lives in
 //! `core/src/store/open.rs::tests::open_readonly_round_trips_then_refuses_writes`
 //! (driver-level proof of `SQLITE_READONLY`) and in
 //! `tests/readonly_invariant.rs` (this crate's integration test that opens
@@ -1523,7 +1523,7 @@ pub unsafe extern "C" fn mci_brain_ffi_timeline_events(
 /// the tombstone log directly from the shim, or (b) the agent's daemon
 /// process maintaining a derived `privacy_moments` table inside the brain
 /// store from the wire-frame stream. The trust-boundary choice between
-/// (a) and (b) is CSO-gated and is the P3.9c PR's scope. Until then this
+/// (a) and (b) is review-gated and is the P3.9c PR's scope. Until then this
 /// function returns an empty list and the Swift `PrivacyMomentsView`
 /// renders the empty-state copy. Returning canned data here would be a
 /// trust-boundary violation (ADR-0017 §5.1 — privacy moments carry no
@@ -1552,7 +1552,7 @@ pub unsafe extern "C" fn mci_brain_ffi_recent_privacy_moments(
 /// Returns a UTF-8 JSON array of [`ObservedAppJson`] rows. Sorted by
 /// count DESC, then bundle id ASC. Rows where `events.app_bundle_id IS
 /// NULL` are excluded. Surface for the recall-UI dynamic per-app filter
-/// pills (Director-Brain audit, dogfood-v1 gap #1).
+/// pills (brain track audit, dogfood-v1 gap #1).
 ///
 /// Allocator discipline matches the other read entry points: the
 /// returned pointer is owned by Rust and MUST be freed via

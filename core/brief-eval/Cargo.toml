@@ -30,7 +30,7 @@ mci-coreml-bridge = { path = "../../adapters/macos/mci-coreml-bridge", optional 
 [features]
 default = []
 # Enables the Core ML backend wire-up in the `brief-eval` binary so the
-# CEO can point the eval at the converted `.mlmodelc` after OWNER_TASKS
+# Owner can point the eval at the converted `.mlmodelc` after OWNER_TASKS
 # #17 lands. Off by default — CI uses the deterministic scripted backend.
 coreml = ["dep:mci-coreml-bridge"]
 

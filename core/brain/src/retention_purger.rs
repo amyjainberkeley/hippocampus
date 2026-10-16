@@ -15,7 +15,7 @@
 //! - DELETE only — this module never inserts rows.
 //! - `RetentionStore` (Swift onboarding) is the SOLE source of truth
 //!   for the retention policy. The purger reads; never writes.
-//! - CSO sign-off required on any change per ADR-0017 §7.4.
+//! - Security review required on any change per ADR-0017 §7.4.
 
 use crate::sqlcipher_brain_store::delete_projected_memory_for_events;
 use crate::{SqlCipherBrainStore, StoreError};

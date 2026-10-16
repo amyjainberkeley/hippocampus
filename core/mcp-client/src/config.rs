@@ -241,7 +241,7 @@ fn validate_permissions(meta: &std::fs::Metadata) -> Result<(), ConfigError> {
 /// Real uid (not effective) matches the Swift onboarding writer's
 /// `getuid()` call inside `apps/onboarding/Sources/OnboardingKit/
 /// McpServersStore.swift` and is consistent with the
-/// `apps/agent/src/user_allowlist.rs` reader from Director-Brain V2-P10
+/// `apps/agent/src/user_allowlist.rs` reader from brain track V2-P10
 /// (PR #276), which validates `user-allowlist.toml` against `getuid()`
 /// rather than `geteuid()`. For `mci-agent` the two are equal (the
 /// agent never changes uid), but aligning the discipline across both

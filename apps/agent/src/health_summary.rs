@@ -6,15 +6,15 @@
 //! the human runs `mci-agent --health-summary` after a G2 measurement
 //! window and gets a one-line picture of helper behavior.
 //!
-//! Per the CRS production-telemetry & gap memo (iter 10, 2026-05-19),
+//! Per research production-telemetry & gap memo (iter 10, 2026-05-19),
 //! this is the analyst-flagged recommendation #3. The sibling
 //! recommendation #1 — the `frames_redacted_by_failsafe` wire-bump
-//! (CSO-gated, wire `0x01 → 0x02`) — is now **landed**: the summary
+//! (review-gated, wire `0x01 → 0x02`) — is now **landed**: the summary
 //! surfaces it as the `failsafe=Δ<delta>/<latest>` segment, the
 //! privacy-regression sentinel a fail-safe spike trips. The cycle-3
 //! `tracing` event taps remain separately owed.
 //!
-//! # CSO sign-off (binding, `AGENT_PROTOCOL` §5)
+//! # Security review (binding, `AGENT_PROTOCOL` §5)
 //!
 //! The summary path is **read-only** against the existing `HealthLog`
 //! JSONL file. It does **not** introduce new fields, does **not**
@@ -29,7 +29,7 @@
 //! The parser intentionally accepts only the fixed-shape lines this
 //! crate writes; arbitrary JSON is **not** supported.
 //!
-//! — CSO, 2026-05-19
+//! — Security review, 2026-05-19
 
 use std::path::Path;
 
@@ -92,7 +92,7 @@ pub struct HealthSummary {
     pub frames_suppressed_latest: u64,
     /// Sum of per-step positive deltas for `frames_redacted_by_failsafe`
     /// — the ADR-0013 §7 fail-safe subset. A non-trivial delta here
-    /// (especially relative to `frames_suppressed_delta`) is the CRS
+    /// (especially relative to `frames_suppressed_delta`) is research
     /// Telemetry-Gap privacy-regression sentinel.
     pub frames_redacted_by_failsafe_delta: u64,
     /// Absolute `frames_redacted_by_failsafe` from the latest sample.
@@ -106,7 +106,7 @@ pub struct HealthSummary {
     /// Absolute `frames_dropped_late_ack` from the latest sample.
     pub frames_dropped_late_ack_latest: u64,
     /// Sum of per-step positive deltas for `frames_encode_failed`. The
-    /// CRS Telemetry-Gap trip-wire that the ocr-emit-silence fix
+    /// Research Telemetry-Gap trip-wire that the ocr-emit-silence fix
     /// installed: a non-zero delta means `VideoToolbox` HEVC throws are
     /// reaching the cascade `.allow` branch, which historically silently
     /// muted the OCR brain.
@@ -129,7 +129,7 @@ pub struct HealthSummary {
     /// Per-app `.failsafeUnknown` tombstone counter map from the
     /// latest in-window sample (cap 8 entries, least-recent-bump
     /// eviction enforced by the helper-side actor). Promoted to the
-    /// wire by the `0x08 → 0x09` bump (PR #226 §5.1 + CTO Phase 6
+    /// wire by the `0x08 → 0x09` bump (PR #226 §5.1 + plan Phase 6
     /// PR 6). Surfaced by `to_human_line` as the
     /// `failsafe-by-app: com.example.app=124, …` segment per the
     /// canonical spec — the load-bearing live measurement that turns
@@ -152,7 +152,7 @@ pub struct HealthSummary {
 
 impl HealthSummary {
     /// Render a single human-readable line. Intended for stdout of
-    /// `mci-agent --health-summary`; the live-workday human-CEO
+    /// `mci-agent --health-summary`; the live-workday owner
     /// debrief tool.
     ///
     /// Shape is deliberately compact and grep-friendly. Each delta is

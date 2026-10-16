@@ -2,7 +2,7 @@
 //!
 //! # Why this lives in Rust, not in the Core ML graph
 //!
-//! The Wave-17 erratum to ADR-0011 (CEO + CRS ratified 2026-05-22) records
+//! The Wave-17 erratum to ADR-0011 (owner ratified 2026-05-22) records
 //! the architectural pivot here: **Core ML cannot express `WordPiece`
 //! tokenization as tensor ops.** The MIL (Model Intermediate Language) spec
 //! has no string ops — `coremltools` will not convert a graph whose input

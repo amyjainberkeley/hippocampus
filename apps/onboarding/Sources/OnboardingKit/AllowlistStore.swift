@@ -15,7 +15,7 @@ public protocol AllowlistStore: Sendable {
     func entries() async -> [AllowlistEntry]
 }
 
-/// Read-only view of the CSO baseline sealed into the signed app bundle.
+/// Read-only view of the built-in baseline sealed into the signed app bundle.
 ///
 /// The onboarding process runs from `Hippocampus.app/Contents/MacOS`, so
 /// `Bundle.main` resolves the same `Contents/Resources/known-safe-apps.toml`

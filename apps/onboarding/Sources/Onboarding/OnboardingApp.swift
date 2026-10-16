@@ -10,7 +10,7 @@ import OnboardingKit
 /// appear, then a few seconds of nothing, with the Onboarding window
 /// silently behind their browser/Finder. Calling `NSApp.activate` on
 /// `applicationDidFinishLaunching` makes the window grab focus the
-/// moment it's ready (CEO dogfood feedback, 2026-05-26).
+/// moment it's ready (owner dogfood feedback, 2026-05-26).
 final class OnboardingAppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)

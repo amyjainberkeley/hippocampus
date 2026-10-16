@@ -1,5 +1,5 @@
 # MCI known-safe-apps allowlist v1
-# CSO-ratified bundles. Cascade §1 source-level allow path activates per-bundle here.
+# Reviewed bundles. Cascade §1 source-level allow path activates per-bundle here.
 # Each entry is a deliberate trust decision per ADR-0013 §3 + ADR-0015 §5 + ADR-0017 §3.1.
 # User-mutable allowlist is v2+ (open question in ADR-0017 §3.1).
 
@@ -66,23 +66,23 @@ ratified_at = "2026-05-20"
 [[entries]]
 bundle_id = "com.anthropic.claudefordesktop"
 rationale = "Claude Desktop. Electron AI chat surface; OCR-captured. Cascade §4 + §6 OCR-time regex catch any embedded secrets. No payment surface; no inherent secure-input concerns. Per docs/research/recall-coverage-gap-2026-05-26.md §6 P0."
-cso_ratified_by = "CSO seat (PR review)"
+cso_ratified_by = "PR review"
 ratified_at = "2026-05-27"
 
 [[entries]]
 bundle_id = "com.github.GitHubClient"
 rationale = "GitHub Desktop. Code/PR workflows; no secure-input surface. Per docs/research/recall-coverage-gap-2026-05-26.md §6 P0."
-cso_ratified_by = "CSO seat (PR review)"
+cso_ratified_by = "PR review"
 ratified_at = "2026-05-27"
 
 [[entries]]
 bundle_id = "com.apple.MobileSMS"
 rationale = "Messages.app. SMS-shape redaction (§3(a)) + bank-domain table (§3(b)) gate the rendered text on every cascade-twice pass per ADR-0030. Per-conversation opt-in is the v2+ posture (§3(d) deferred). Corpus run artifact: docs/audit/2026-05-28-messages-mail-redaction-corpus.md (catch 100% / FP 0% on 76 entries)."
-cso_ratified_by = "CSO seat (PR review)"
+cso_ratified_by = "PR review"
 ratified_at = "2026-05-29"
 
 [[entries]]
 bundle_id = "com.apple.mail"
 rationale = "Mail.app. SMS-shape regex + sensitive-domain table + Mail-header pre-OCR check per ADR-0030 §3(a)–(c). Mail-header sender-domain match drops the OCR event before body bytes hit storage. Corpus run artifact: docs/audit/2026-05-28-messages-mail-redaction-corpus.md (catch 100% / FP 0% on 76 entries)."
-cso_ratified_by = "CSO seat (PR review)"
+cso_ratified_by = "PR review"
 ratified_at = "2026-05-29"

@@ -5,7 +5,7 @@
 //! [`mci_mcp_client::StdioTransport`] against it. The wire shape
 //! mirrors the production MCP framing at
 //! `apps/agent/src/mcp/jsonrpc.rs` + `server.rs` so byte-compatibility
-//! with the CEO's gbrain (the §2.2 immediate test target) is
+//! with the owner's gbrain (the §2.2 immediate test target) is
 //! covered by the same code path.
 //!
 //! Supported methods:

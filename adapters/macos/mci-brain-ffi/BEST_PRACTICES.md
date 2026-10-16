@@ -20,9 +20,9 @@ or wire-format drift that corrupts every subsequent query.
    toggle that relaxes this. Any mutation surface belongs in the
    agent binary, not here.
 
-2. **Mutation allow-list requires CSO.** If a legitimate write
+2. **Mutation allow-list requires security review.** If a legitimate write
    path is needed (e.g., a bookmark, a feedback signal), it MUST
-   be added to a named allow-list with an ADR entry and CSO sign-
+   be added to a named allow-list with an ADR entry and security review sign-
    off. Never smuggle a write behind a "query" verb.
 
 3. **Capped-input discipline.** Every `*const c_char` and slice

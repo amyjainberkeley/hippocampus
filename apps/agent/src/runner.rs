@@ -175,7 +175,7 @@ where
 /// **§4.3 LOAD-BEARING**: `Message::PrivacyTombstone { .. }` falls into
 /// the catch-all arm with the same `frames_non_health` counter as
 /// every other non-health/non-OCR variant — `brain.ingest_ocr_event`
-/// is NEVER called for it. CSO-sign-off block on the PR body asserts
+/// is NEVER called for it. Security-review block on the PR body asserts
 /// this in the diff.
 ///
 /// # Errors

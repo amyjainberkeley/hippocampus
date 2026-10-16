@@ -54,7 +54,7 @@ pub struct HelperSpawnConfig {
     pub denylist_path: PathBuf,
 
     /// Heartbeat interval the helper uses for `HelperHealth` emission.
-    /// Default 30 s per the CRS telemetry-gap memo.
+    /// Default 30 s per research telemetry-gap memo.
     pub heartbeat_seconds: u32,
 
     /// Path the helper should write IPC frames into. In cycle 3 this

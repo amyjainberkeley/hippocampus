@@ -112,7 +112,7 @@ pub enum LoopbackError {
     UnsupportedScheme,
     /// The URL embeds `user:password@host` in its authority. Rejected
     /// to prevent credential-in-URL leakage and to keep the auth-
-    /// header surface as the single auth path. CSO sign-off item.
+    /// header surface as the single auth path. Security review item.
     #[error("URL must not embed userinfo (user:password@)")]
     UserinfoNotAllowed,
     /// The URL had no authority / no host (e.g., `http:///mcp`).

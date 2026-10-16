@@ -5,7 +5,7 @@
 
 ## Context
 
-`docs/AGENT_QUESTIONS.md` fork #1 (verbatim Recommendation): "*Single Cargo **workspace** at repo root; members added per phase (`core/` only in P0); **edition 2021**; MSRV pinned to the stable toolchain at P0 start.*" CEO ratified 2026-05-18 (`accept recommendation`).
+`docs/AGENT_QUESTIONS.md` fork #1 (verbatim Recommendation): "*Single Cargo **workspace** at repo root; members added per phase (`core/` only in P0); **edition 2021**; MSRV pinned to the stable toolchain at P0 start.*" Owner ratified 2026-05-18 (`accept recommendation`).
 
 Background: no code can land until the Cargo topology is fixed. DESIGN.md §14 proposes `core/ adapters/ apps/ server/`. Edition + MSRV pin constrains every dependency (crypto, sqlite, objc2/swift-bridge crates).
 
@@ -26,16 +26,16 @@ Background: no code can land until the Cargo topology is fixed. DESIGN.md §14 p
 - Positive: one lockfile, one resolver. Every component upgrades together; no version drift between `core/` and the adapters. AGENT_PROTOCOL §5 protected-set review on `core/**` crypto deps is meaningful because dep versions are workspace-uniform.
 - Positive: lazy workspace members keep Phase 0 small — only `core/` exists. Adding `adapters/macos/` in Phase 1 is a one-line workspace edit.
 - Negative / tradeoffs: workspace-wide builds touch every crate when a shared dep updates. Acceptable cost for the dep-coherence guarantee.
-- Forces: every PR touching `core/Cargo.toml` or the workspace `Cargo.toml` updates `Cargo.lock` and is reviewed for unintended transitive bumps. CRS Security-Signal analyst auto-reviews any new crate added to `core/**` crypto/sync/store dependencies.
+- Forces: every PR touching `core/Cargo.toml` or the workspace `Cargo.toml` updates `Cargo.lock` and is reviewed for unintended transitive bumps. Research Security-Signal analyst auto-reviews any new crate added to `core/**` crypto/sync/store dependencies.
 
 ## Alternatives considered
 
 - **Edition 2024.** Rejected — newer language features, but some ecosystem and crate lag exists on the FFI and crypto side (objc2 family, swift-bridge, SQLCipher-bundled features). The Phase 0 win is shipping the seam, not the latest edition.
-- **Multi-repo per component.** Rejected — destroys the "core written once" thesis (ADR-0002), forces dep-version drift, makes the CSO protected-set review boundary mushy.
+- **Multi-repo per component.** Rejected — destroys the "core written once" thesis (ADR-0002), forces dep-version drift, makes the security review protected-set review boundary mushy.
 
 ## References
 
 - DESIGN.md §14 (repo layout)
 - docs/AGENT_QUESTIONS.md fork #1 (2026-05-18, ratified `accept recommendation`)
-- docs/AGENT_PROTOCOL.md §5 (CSO protected-set on `core/**`)
+- docs/AGENT_PROTOCOL.md §5 (security review protected-set on `core/**`)
 - ADR-0002 (stack split), ADR-0006 (trait shape)

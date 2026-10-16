@@ -162,7 +162,7 @@ public final class RealScreenRecordingPermission: TCCPermission, @unchecked Send
         //
         // When the person allows Screen Recording, macOS may end the
         // process that asked, and the onboarding window would vanish from
-        // under them ("I clicked Grant and the app died", CEO-reported
+        // under them ("I clicked Grant and the app died", owner-reported
         // 2026-05-24). A separate copy of this binary asks instead
         // (`--tcc-request`), once per session, so macOS lists Hippocampus
         // and shows its prompt from a process that then exits. The pane

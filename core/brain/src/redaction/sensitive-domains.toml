@@ -18,8 +18,8 @@
 #     password-management requirements + RFC 6749 OAuth 2.0 §4.1.2 redirect
 #     conventions.
 #
-# Update cadence: quarterly. The CSO seat refreshes via a PR-of-this-file.
-# Each refresh PR carries a CSO sign-off block asserting: no entry has been
+# Update cadence: quarterly. The security review refreshes via a PR-of-this-file.
+# Each refresh PR carries a security review block asserting: no entry has been
 # silently downgraded, no entry has been removed without a written rationale.
 #
 # Matching semantics:
@@ -35,7 +35,7 @@
 
 version = 1
 last_reviewed = "2026-05-28"
-last_reviewed_by = "CSO seat (ADR-0030 seed PR)"
+last_reviewed_by = "security review (ADR-0030 seed PR)"
 
 # =============================================================================
 # U.S. banks — top 50 by assets (FDIC SDI Q4-2025 snapshot)

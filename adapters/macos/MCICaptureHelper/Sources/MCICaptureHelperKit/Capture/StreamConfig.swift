@@ -9,14 +9,14 @@
 // is the single highest-leverage footprint regression in the project.
 //
 // The cursor signal (position, click state) is captured separately by
-// the Context Director (Phase 2) via NSWorkspace / AX — decoupled from
+// the Context lead (Phase 2) via NSWorkspace / AX — decoupled from
 // the frame pipeline so it cannot bust the §4 footprint SLO.
 //
 // This file is OS-API-adjacent but does NOT import ScreenCaptureKit —
 // the actual SCStreamConfiguration construction happens in Phase-1
 // cycle 2+. We expose the policy values as typed constants so
 // (a) the policy is reviewable in one place and (b) the cycle-2
-// PR cannot accidentally flip `showsCursor` to true without a CSO note.
+// PR cannot accidentally flip `showsCursor` to true without a security review note.
 
 import Foundation
 

@@ -68,7 +68,7 @@ def render(s: dict, baseline: dict) -> tuple[str, bool]:
     """Format the score card. Returns (text, within_envelope)."""
     lines: list[str] = []
     lines.append("=" * 68)
-    lines.append("perf-soak agent scorecard (CRS G6 interim baseline)")
+    lines.append("perf-soak agent scorecard (research G6 interim baseline)")
     lines.append("=" * 68)
     lines.append(f"samples: {s['n']}   duration: {s['duration_s']}s")
     lines.append("")

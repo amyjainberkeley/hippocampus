@@ -24,7 +24,7 @@
 // │ 3. DEFAULT-OFF (Amendment 1 §4). This encoder is wired into the  │
 // │    `--capture` dev path only (`main.swift`). Flipping            │
 // │    `CaptureLaunchOptions.captureEnabled` to default-ON requires  │
-// │    the §7 corpus + CSO sign-off — that is NOT this PR.           │
+// │    the §7 corpus + security review — that is NOT this PR.           │
 // │                                                                  │
 // │ 4. Encoded `CMSampleBuffer`s are handed to `EncodedSampleSink`   │
 // │    (in-memory queue in DOGFOOD #3) — they are NOT persisted to   │
@@ -40,7 +40,7 @@
 //     neighbour can leak via a P/B reference.
 //   - `AllowFrameReordering = false`: bounded latency + reinforces the
 //     no-cross-frame-reference property above.
-//   - `MaxFrameDelayCount = 0` (CRS arxiv/OSS scout, cycle 8.8): the
+//   - `MaxFrameDelayCount = 0` (research arxiv/OSS scout, cycle 8.8): the
 //     encoder may not buffer frames before emitting — required for the
 //     "encode → sink within one async hop" lifecycle the pipeline
 //     `defer` lease release depends on.

@@ -17,7 +17,7 @@
 //!   bytes in process memory and provides **no at-rest
 //!   confidentiality whatsoever**. It exists so the encrypted-store
 //!   round-trip can be proven headlessly on a non-macOS CI runner.
-//!   Shipping it in a release build is a CSO-blocking defect, so it
+//!   Shipping it in a release build is a release-blocking defect, so it
 //!   is **physically uncompilable in a shipped build**:
 //!     - the type, its `KeyWrap` impl, and its tests are behind
 //!       `#[cfg(any(test, feature = "insecure-test-keywrap"))]`;
@@ -111,7 +111,7 @@ pub trait KeyWrap {
     fn unwrap_key(&self, wrapped: &WrappedKey) -> Result<DbKey, KeyWrapError>;
 }
 
-// ── Release tripwire (CSO, AGENT_PROTOCOL §5 / ADR-0008) ────────────
+// ── Release tripwire (security review, AGENT_PROTOCOL §5 / ADR-0008) ────────────
 // The insecure in-memory wrap is gated to `cfg(test)` OR the explicit
 // opt-in `insecure-test-keywrap` feature (for downstream integration
 // test crates that cannot see this crate's `cfg(test)`). It must NEVER
@@ -125,7 +125,7 @@ pub trait KeyWrap {
 compile_error!(
     "InMemoryKeyWrap is TEST-ONLY and provides no at-rest confidentiality. \
      The `insecure-test-keywrap` feature must never be enabled in a release \
-     build. This is a CSO-blocking misconfiguration (ADR-0008, AGENT_PROTOCOL §5)."
+     build. This is a release-blocking misconfiguration (ADR-0008, AGENT_PROTOCOL §5)."
 );
 
 /// **TEST-ONLY** in-memory wrap. Stores the key bytes verbatim.
@@ -133,7 +133,7 @@ compile_error!(
 /// Provides NO confidentiality. Its only purpose is to let the
 /// encrypted-store round-trip be proven on a headless / non-macOS
 /// runner where the Secure-Enclave adapter is unavailable. A release
-/// build that constructs this is a CSO-blocking defect; the agent
+/// build that constructs this is a release-blocking defect; the agent
 /// shell wires the macOS adapter's `KeyWrap`, never this.
 ///
 /// Compiled only under `#[cfg(any(test, feature =

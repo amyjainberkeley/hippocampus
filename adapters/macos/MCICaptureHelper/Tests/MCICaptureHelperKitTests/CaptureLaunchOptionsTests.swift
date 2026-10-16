@@ -3,7 +3,7 @@
 // CaptureLaunchOptionsTests — OS-FREE proof of ADR-0013 Amendment 1 §4:
 // the live-capture path is DEFAULT-OFF and only the explicit,
 // non-default `--capture` token can flip it on. This is the test that
-// backs the §4 default-OFF assertion in the CSO sign-off block.
+// backs the §4 default-OFF assertion in the security review block.
 
 import XCTest
 

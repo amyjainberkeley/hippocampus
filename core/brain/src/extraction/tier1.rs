@@ -20,7 +20,7 @@
 //!   `INSERT OR IGNORE` on `entity_mentions` makes the second pass a
 //!   no-op.
 //!
-//! # Token-shape REDACT discipline (CSO mini-audit row #2)
+//! # Token-shape REDACT discipline (security mini-audit row #2)
 //!
 //! For every match whose kind is `redacted_token`, the
 //! [`Tier1Match::canonical_name`] is the **subkind label** (`"jwt"`,
@@ -44,7 +44,7 @@
 //! consumers (V2-P11 privacy-moments) a cross-app-edge anchor without
 //! re-implementing the cascade.
 //!
-//! # Idempotency (CSO mini-audit row #3 — content-stable ULIDs)
+//! # Idempotency (security mini-audit row #3 — content-stable ULIDs)
 //!
 //! Per [`crate::graph`] module doc:
 //! - `Entity::derive_id(kind, canonical_name)` — same `(kind,
@@ -274,7 +274,7 @@ pub struct Tier1Match {
 impl Tier1Match {
     /// True iff this match's source bytes were redacted at extraction
     /// time — i.e. neither `canonical_name` nor `mention_text` carries
-    /// the literal source span. Used by the CSO audit test
+    /// the literal source span. Used by the security audit test
     /// `redacted_tokens_never_carry_source_bytes`.
     #[must_use]
     pub fn is_redacted(&self) -> bool {
@@ -1015,7 +1015,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // CSO-audit: redacted-token bytes never leak via any field
+    // Security-audit: redacted-token bytes never leak via any field
     // -----------------------------------------------------------------------
 
     #[test]

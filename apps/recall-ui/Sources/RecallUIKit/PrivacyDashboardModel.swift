@@ -7,7 +7,7 @@
 // mutation entry points. The destructive-action UI stubs in the
 // executable target route through this file's `DestructivePrivacyAction`
 // enum only to render text — the actual wipe pathway is deferred to
-// the follow-up cycle-8.47 PR (mutation FFI + CSO sign-off).
+// the follow-up cycle-8.47 PR (mutation FFI + security review).
 
 import Foundation
 

@@ -13,7 +13,7 @@ AGENT_PROTOCOL §4 lists this as an invariant: "*Cross-platform seam: nothing ab
 
 ## Decision
 
-1. **The cross-platform seam is the `CaptureSource` Rust trait**, owned by Director-Sync-Core, defined in `core/`. Its concrete shape (async + push, opaque borrowed surface handle + dirty-rects, bounded channel, tokio, drop-on-backpressure) is locked in ADR-0006.
+1. **The cross-platform seam is the `CaptureSource` Rust trait**, owned by sync-core track, defined in `core/`. Its concrete shape (async + push, opaque borrowed surface handle + dirty-rects, bounded channel, tokio, drop-on-backpressure) is locked in ADR-0006.
 2. **macOS-first.** Phase 0 lands `core/` skeleton + the trait. Phase 1 lands the macOS adapter (`adapters/macos/`) implementing the trait against ScreenCaptureKit / VideoToolbox / Vision / NSWorkspace / AX / AppleScript, via the mechanism in ADR-0007. The Windows adapter (`adapters/windows/`) is DESIGN.md Phase 8 and reuses the core unchanged.
 3. **No OS-specific code above the trait.** No `#[cfg(target_os = …)]` blocks, no `objc2::*` imports, no `windows::*` imports, and no Swift type bindings in `core/**` except the trait wiring itself. Reviewers reject violations during PR review. This is the cross-platform seam invariant from AGENT_PROTOCOL §4.
 
@@ -27,7 +27,7 @@ AGENT_PROTOCOL §4 lists this as an invariant: "*Cross-platform seam: nothing ab
 ## Alternatives considered
 
 - **No trait — direct platform builds, separate crates per OS.** Rejected — same failure mode as the alternative in ADR-0002 (brain written twice).
-- **Trait shape decided per-platform at Phase 1 time.** Rejected — Director-Sync-Core ratified fork #2 in cycle 1; trait shape is in ADR-0006 now because the pipeline above it cannot be designed without it, and ScreenCaptureKit's `interval × (queueDepth − 1)` surface-release timing is a binding seam constraint (DESIGN.md §5.1, R8).
+- **Trait shape decided per-platform at Phase 1 time.** Rejected — sync-core track ratified fork #2 in cycle 1; trait shape is in ADR-0006 now because the pipeline above it cannot be designed without it, and ScreenCaptureKit's `interval × (queueDepth − 1)` surface-release timing is a binding seam constraint (DESIGN.md §5.1, R8).
 
 ## References
 

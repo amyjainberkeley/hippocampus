@@ -7,13 +7,13 @@
 
 ## Context
 
-DESIGN.md §15 Phase 4 is the one-line spec: *"Denylists, pause rules, redaction pass, delete/forget/export, at-rest encryption hardened."* This ADR locks the user-facing UX + the technical surfaces the UX commands; the COO GTM doc (`docs/business/2026-05-20-gtm-positioning.md`) locks the user-facing **copy**.
+DESIGN.md §15 Phase 4 is the one-line spec: *"Denylists, pause rules, redaction pass, delete/forget/export, at-rest encryption hardened."* This ADR locks the user-facing UX + the technical surfaces the UX commands; the go-to-market doc (`docs/business/2026-05-20-gtm-positioning.md`) locks the user-facing **copy**.
 
 The biggest user-side friction (DESIGN.md §16 R1) is the **permission grant flow**. Three TCC permissions are required (Screen Recording / Accessibility / per-browser Automation); each is a separate dialog the OS — not MCI — fires. MCI's job is to make the sequence legible, recoverable, and non-coercive.
 
 The biggest user-side **trust** surface is **what MCI captures vs ignores**. Phase 1 + Phase 2 + Phase 3 wire the cascade end-to-end with §1 source-level denylist, §3 secure-event-input detection, §4 AX subrole backstop, §6 OCR-time regex, and §7 fail-closed catchall. Phase 4 ships the user-facing controls over those layers:
 
-- **Allowlist** (`known-safe-apps.toml`) — CSO-gated; users can request additions, CSO ratifies per-bundle.
+- **Allowlist** (`known-safe-apps.toml`) — review-gated; users can request additions, security review ratifies per-bundle.
 - **Denylist** — user-controlled; bundle ids + window-title patterns + URL patterns the user wants MCI to refuse.
 - **Incognito / private-window exclusion** — automatic per-browser detection (`NSWindowSharingType.none` heuristic + browser-specific signals) flowing into the cascade.
 - **Per-app pause** — instant menu-bar toggle and keyboard shortcut.
@@ -25,13 +25,13 @@ The biggest user-side **doubt** surface is **"did MCI redact this?"** The recall
 
 ### 1. Onboarding flow + TCC walkthrough (binding on agent-shell first-launch)
 
-The 5-step flow specified in the COO GTM doc (`docs/business/2026-05-20-gtm-positioning.md` §"Onboarding script") is the canonical script. This ADR locks the **technical** decisions:
+The 5-step flow specified in the go-to-market doc (`docs/business/2026-05-20-gtm-positioning.md` §"Onboarding script") is the canonical script. This ADR locks the **technical** decisions:
 
 #### 1.1 Order of TCC asks: Screen Recording → Accessibility → Automation (per-browser)
 
 - **Why this order:** Screen Recording is most-blocking (cannot use product without it); Accessibility is required for §4 backstop (refuse-by-default if not granted is acceptable degradation); Automation is per-browser opt-in with graceful per-browser nil fallback.
 - **Why not Accessibility first:** the user has just installed an app and is being asked for OS permissions. Asking for the most-blocking one first means "say no" exits the product cleanly; asking for AX first means we burn a yes on a non-blocking ask and then re-ask for Screen Recording.
-- **Why all three at once via a single screen with buttons (not sequential):** the COO GTM doc's screen 4 lists all three with separate `[Grant ...]` buttons. Each opens the corresponding TCC pane URL. User can grant any order. No coercion.
+- **Why all three at once via a single screen with buttons (not sequential):** the go-to-market doc's screen 4 lists all three with separate `[Grant ...]` buttons. Each opens the corresponding TCC pane URL. User can grant any order. No coercion.
 
 #### 1.2 TCC denial fallbacks
 
@@ -86,13 +86,13 @@ Quit MCI
 
 ### 3. Allowlist + denylist UI
 
-#### 3.1 Allowlist (`known-safe-apps.toml`) — CSO-gated per ADR-0013 §3
+#### 3.1 Allowlist (`known-safe-apps.toml`) — review-gated per ADR-0013 §3
 
-The allowlist file lives at `~/Library/Application Support/MCI/known-safe-apps.toml`. It is **NOT** user-writable in v1. The settings UI shows the current allowlist read-only; a "Request app addition" button opens a `mailto:` or in-app feedback channel that routes to CSO review. CSO publishes a signed update bundle that bumps the local allowlist via Sparkle (Phase 5 packaging — auto-update channel).
+The allowlist file lives at `~/Library/Application Support/MCI/known-safe-apps.toml`. It is **NOT** user-writable in v1. The settings UI shows the current allowlist read-only; a "Request app addition" button opens a `mailto:` or in-app feedback channel that routes to security review. Security review publishes a signed update bundle that bumps the local allowlist via Sparkle (Phase 5 packaging — auto-update channel).
 
-**Why CSO-gated, not user-controlled (v1):** ADR-0013 §3 + ADR-0015 §5 + ADR-0016 §5 all rest on the allowlist being the moment `--capture` flips per-app from default-OFF to default-ON for a known-safe surface. A user-mutable allowlist would let a malicious script (or a confused user) silently relax the suppression. CSO sign-off per-bundle is the trust boundary.
+**Why review-gated, not user-controlled (v1):** ADR-0013 §3 + ADR-0015 §5 + ADR-0016 §5 all rest on the allowlist being the moment `--capture` flips per-app from default-OFF to default-ON for a known-safe surface. A user-mutable allowlist would let a malicious script (or a confused user) silently relax the suppression. Security review per-bundle is the trust boundary.
 
-**v2+ open question (resolved 2026-05-29 by V2-P10 / §3.4 below):** the user-curated allowlist with strong UI friction now ships as the two-layer model in §3.4. The §3.1 CSO-baseline trust contract is unchanged; §3.4 adds a peer user-mutable layer whose entries are cascade-gated identically.
+**v2+ open question (resolved 2026-05-29 by V2-P10 / §3.4 below):** the user-curated allowlist with strong UI friction now ships as the two-layer model in §3.4. The §3.1 security review-baseline trust contract is unchanged; §3.4 adds a peer user-mutable layer whose entries are cascade-gated identically.
 
 #### 3.2 Denylist UI — user-controlled (strictly tightens, never widens)
 
@@ -117,11 +117,11 @@ The `NSWindow.sharingType` path is the primary defense — incognito windows lit
 
 #### 3.4 User-mutable allowlist layer (V2-P10) — added 2026-05-29
 
-V2-P10 lands the user-curated allowlist surface as a SECOND layer ON TOP of §3.1's CSO baseline. The cascade-construction call site in `MCICaptureHelper/main.swift` unions the baseline `bundleIdSet` with the user-layer's `captureEnabledBundleIds` and passes the result to `SuppressionCascade(knownSafeAppBundles:)`. Every layer's entry flows through the SAME §2–§7 cascade arms + cascade-twice OCR redaction (ADR-0016 P3.6) + ADR-0030 §3(a)–(c) sensitive-content redaction. The cascade does not distinguish source.
+V2-P10 lands the user-curated allowlist surface as a SECOND layer ON TOP of §3.1's built-in baseline. The cascade-construction call site in `MCICaptureHelper/main.swift` unions the baseline `bundleIdSet` with the user-layer's `captureEnabledBundleIds` and passes the result to `SuppressionCascade(knownSafeAppBundles:)`. Every layer's entry flows through the SAME §2–§7 cascade arms + cascade-twice OCR redaction (ADR-0016 P3.6) + ADR-0030 §3(a)–(c) sensitive-content redaction. The cascade does not distinguish source.
 
 **3.4.1 Two-layer architecture (binding)**
 
-- **Baseline layer (§3.1)** — `known-safe-apps.toml` bundled inside the signed `.app`. NOT user-writable. CSO sign-off per entry. Mutation only via Sparkle-signed app updates. UNCHANGED by V2-P10.
+- **Baseline layer (§3.1)** — `known-safe-apps.toml` bundled inside the signed `.app`. NOT user-writable. Security review per entry. Mutation only via Sparkle-signed app updates. UNCHANGED by V2-P10.
 - **User-mutable layer (§3.4)** — `~/Library/Application Support/MCI/user-allowlist.toml`. Owned by the current user (uid == `getuid()`). File mode 0600 (user-rw only). Schema documented in `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Suppression/UserAllowlistTOMLLoader.swift`; each entry carries `bundle_id`, `capture_enabled: bool`, `deep_hook_enabled: bool`, `added_at`, optional `rationale`. Onboarding UI in `apps/onboarding/` is the canonical writer; `FileUserAllowlistStore` re-tightens the file to 0600 on every save.
 - **Refusals on read (helper-side)** — the helper's `UserAllowlistTOMLLoader.validatePermissions` MUST refuse a file with any group/world bits set (`mode & 0o077 != 0`) or a foreign owner (`ownerAccountID != getuid()`). The cascade falls back to the baseline-only set on any error and logs a content-free stderr line; the helper never refuses to start because the user-layer is corrupt.
 
@@ -132,13 +132,13 @@ V2-P10 lands the user-curated allowlist surface as a SECOND layer ON TOP of §3.
 - **§3.4.2(c) ADR-0030 §3(c) Mail header / §3(c)(ii) parsed-envelope check.** Bundle-keyed redaction (`bundle_is_in_scope`) checks on `OCREvent.app_bundle_id` apply identically whether the bundle came from baseline or user-layer; the redactor never reads the source layer.
 - **§3.4.2(d) Per-app deep-hook opt-in.** The `deep_hook_enabled: bool` per-entry bit is read by the agent-side per-plugin master switch (V2-P7b wires Messages; V2-P8b wires Mail). Per ADR-0032 §3(a) `MessagesPluginConfig::DEFAULT::plugin_enabled = false`; V2-P10's UI is what flips that bit. The helper does NOT consume the bit (helper-side capture path is bundle-keyed on the union; deep-hook is an additional non-OCR ingest path that the cascade-equivalent in ADR-0032 §2 gates separately).
 - **§3.4.2(e) FDA grant flow on deep-hook toggle.** Per ADR-0017 §1.3 + ADR-0032 §3(b), toggling deep-hook ON for a supported plugin (Messages, Mail) triggers `FullDiskAccessPermission.requestGrant()` which deep-links to `System Settings → Privacy & Security → Full Disk Access` via `x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles`. No `tccutil`, no private API, no click-through bypass — the OS dialog firing IS the consent.
-- **§3.4.2(f) Future CSO denylist gate (enforceable, not yet implemented).** The contract reserves room for a CSO-published denylist that the user-layer cannot override (a bundle on a CSO denylist is non-trustable even if a user opts it in). No CSO denylist exists today; the AllowlistEditorViewModel's `addCustomBundle` enforces "not duplicate of baseline" but does not yet enforce "not in CSO denylist." Codifying the denylist is a follow-on PR — the gating shape is enforceable in `UserAllowlistTOMLLoader` + `AllowlistEditorViewModel` at the same call sites.
+- **§3.4.2(f) Future security review denylist gate (enforceable, not yet implemented).** The contract reserves room for a reviewed denylist that the user-layer cannot override (a bundle on a security review denylist is non-trustable even if a user opts it in). No security review denylist exists today; the AllowlistEditorViewModel's `addCustomBundle` enforces "not duplicate of baseline" but does not yet enforce "not in security review denylist." Codifying the denylist is a follow-on PR — the gating shape is enforceable in `UserAllowlistTOMLLoader` + `AllowlistEditorViewModel` at the same call sites.
 
 **3.4.3 Onboarding UI surface (binding)**
 
 The V2-P10 slide between `.permissions` and `.browserExtension` lists:
 
-1. Built-in trusted apps (CSO baseline, read-only).
+1. Built-in trusted apps (built-in baseline, read-only).
 2. Currently-running apps (via `RunningAppsDetector`), each with a 3-position posture picker: `off` / `captureOnly` / `captureAndDeepHook`. The third option appears only for bundles V2-P7/V2-P8b supports (`com.apple.MobileSMS`, `com.apple.mail`).
 3. Expert "add by bundle id" UI for apps not in the running set.
 
@@ -146,7 +146,7 @@ Persistence is immediate (per-toggle write). The slide refuses an `addCustomBund
 
 **3.4.4 What V2-P10 does NOT do**
 
-- Does NOT modify the §3.1 CSO baseline (`known-safe-apps.toml`).
+- Does NOT modify the §3.1 built-in baseline (`known-safe-apps.toml`).
 - Does NOT widen the cascade — every user-layer entry is gated by AX + cascade-twice + redaction identically to baseline.
 - Does NOT itself enable deep-hook ingest plumbing — V2-P7b (Messages) and V2-P8b (Mail) wire the agent-side reads. V2-P10 records the consent + UI; V2-P7b/V2-P8b flip the per-plugin master switch from that consent at agent startup.
 - Does NOT propagate the user-layer across devices — Phase 8 sync (zero-knowledge encrypted delta) is the cross-device surface; V2-P10's file is per-device by construction.
@@ -210,7 +210,7 @@ The card carries **only the post-cascade-decision metadata** — `appBundleId` +
 
 #### 5.2 The mapped strings
 
-Per-reason friendly strings (final copy lives in `apps/recall-ui/Resources/Localizable.strings`, eligible for COO copy review):
+Per-reason friendly strings (final copy lives in `apps/recall-ui/Resources/Localizable.strings`, eligible for copy review):
 
 | Reason code | Friendly string |
 |---|---|
@@ -228,29 +228,29 @@ Per-reason friendly strings (final copy lives in `apps/recall-ui/Resources/Local
 
 A power-user mode that shows the cascade input deltas (just the bundleId / windowTitle hash / URL hash that the cascade actually evaluated, not the content) might land Phase 4.5+. Out of scope for v1; mentioned here to avoid scope creep.
 
-### 6. PR sequence — Director-Brain + Director-Context + Director-Recording own per their scope
+### 6. PR sequence — brain track + context track + capture track own per their scope
 
-Phase 4 lands as a 7-PR sequence, comparable in cadence to Phase 2 (6 PRs) and lighter than Phase 3 (11 PRs). Each PR carries a CSO sign-off block asserting §4 invariants.
+Phase 4 lands as a 7-PR sequence, comparable in cadence to Phase 2 (6 PRs) and lighter than Phase 3 (11 PRs). Each PR carries a security review block asserting §4 invariants.
 
-- **P4.1 — Menu-bar shell + pause button + Cmd-Shift-P** (Director-Recording, `apps/agent/` or new `apps/menu-bar/` if SwiftUI separation needed). 1 cycle.
-- **P4.2 — Onboarding flow + TCC walkthrough UI** (Director-Recording, lives in `apps/agent/` or new `apps/onboarding/`). Implements the COO GTM doc's 5-step script. 1 cycle.
-- **P4.3 — Allowlist read-only UI + "request addition" feedback channel** (Director-Brain, recall-UI settings panel). CSO-gated; the allowlist file itself is bumped via signed updates (Phase 5 packaging). 1 cycle.
-- **P4.4 — Denylist UI + cascade `reason=8` + wire bump** (Director-Context for UI + Director-Recording for cascade integration). CSO-gated wire bump. 1 cycle.
-- **P4.5 — Incognito + private-window exclusion** (Director-Recording for the `NSWindow.sharingType` exclusion test + the `BrowserIncognitoProbe`; Director-Brain for the cascade `reason=9` plumbing). 1 cycle.
-- **P4.6 — Retention controls + crypto-shred scheduler** (Director-Brain + CSO co-owned — touches the encrypted store + key destruction). 1 cycle.
-- **P4.7 — Recall-UI privacy moments view** (Director-Brain). Read-only timeline of `PrivacyTombstone` rows. 1 cycle.
+- **P4.1 — Menu-bar shell + pause button + Cmd-Shift-P** (capture track, `apps/agent/` or new `apps/menu-bar/` if SwiftUI separation needed). 1 cycle.
+- **P4.2 — Onboarding flow + TCC walkthrough UI** (capture track, lives in `apps/agent/` or new `apps/onboarding/`). Implements the go-to-market doc's 5-step script. 1 cycle.
+- **P4.3 — Allowlist read-only UI + "request addition" feedback channel** (brain track, recall-UI settings panel). Review-gated; the allowlist file itself is bumped via signed updates (Phase 5 packaging). 1 cycle.
+- **P4.4 — Denylist UI + cascade `reason=8` + wire bump** (context track for UI + capture track for cascade integration). Review-gated wire bump. 1 cycle.
+- **P4.5 — Incognito + private-window exclusion** (capture track for the `NSWindow.sharingType` exclusion test + the `BrowserIncognitoProbe`; brain track for the cascade `reason=9` plumbing). 1 cycle.
+- **P4.6 — Retention controls + crypto-shred scheduler** (brain track + security review co-owned — touches the encrypted store + key destruction). 1 cycle.
+- **P4.7 — Recall-UI privacy moments view** (brain track). Read-only timeline of `PrivacyTombstone` rows. 1 cycle.
 
-### 7. Privacy invariants — LOAD-BEARING (CSO veto-gate per ADR-0013 §5)
+### 7. Privacy invariants — LOAD-BEARING (security review veto-gate per ADR-0013 §5)
 
 These invariants are why this ADR is protected-set:
 
-1. **Allowlist baseline (§3.1) is CSO-gated, not user-writable.** The signed `known-safe-apps.toml` is the per-bundle CSO trust gate. A change weakening this is a §7.1 violation.
+1. **Allowlist baseline (§3.1) is review-gated, not user-writable.** The signed `known-safe-apps.toml` is the per-bundle security review trust gate. A change weakening this is a §7.1 violation.
 2. **Denylist is strictly-tightening** (§3.2). It can only add `.suppress` decisions; can never widen `.allow`. Tripwire test: every `userDenylist` cascade decision is `.suppress` by construction.
 3. **Incognito exclusion fires BEFORE storage** (§3.3). Same trust boundary as ADR-0013 §2 cascade-before-storage.
-4. **User-layer allowlist (§3.4) is strictly-additive on bundle ids** (NEW 2026-05-29). The cascade union of (baseline ∪ user-layer) feeds `knownSafeAppBundles`; §2–§7 cascade arms + cascade-twice OCR redaction + ADR-0030 §3(a)–(c) gates apply identically to every layer's entry. The user-layer cannot remove a baseline entry. The user-layer file MUST be mode 0600 + owned by current uid; insecure perms / foreign owner ⇒ fall back to baseline-only set. A future CSO denylist (when codified) MUST be enforceable at `UserAllowlistTOMLLoader` + `AllowlistEditorViewModel.addCustomBundle`. CSO veto on any code path that widens the user-layer's effective decision past `.allow` gating.
-5. **Delete = crypto-shred** (§4.1). A `DELETE` that doesn't destroy the per-segment key is a §4 protected-set violation. CSO veto on any change to the deletion code path.
-6. **Privacy moment cards carry NO user content** (§5.1). `appBundleId` + `ts` + reason-string only. Never OCR'd text, never keyframe, never windowTitle/url. CSO veto.
-7. **Export is user-initiated only** (§4.4). No automatic upload, no telemetry, no scheduled export. CSO veto on any change to the export code path.
+4. **User-layer allowlist (§3.4) is strictly-additive on bundle ids** (NEW 2026-05-29). The cascade union of (baseline ∪ user-layer) feeds `knownSafeAppBundles`; §2–§7 cascade arms + cascade-twice OCR redaction + ADR-0030 §3(a)–(c) gates apply identically to every layer's entry. The user-layer cannot remove a baseline entry. The user-layer file MUST be mode 0600 + owned by current uid; insecure perms / foreign owner ⇒ fall back to baseline-only set. A future security review denylist (when codified) MUST be enforceable at `UserAllowlistTOMLLoader` + `AllowlistEditorViewModel.addCustomBundle`. Security review veto on any code path that widens the user-layer's effective decision past `.allow` gating.
+5. **Delete = crypto-shred** (§4.1). A `DELETE` that doesn't destroy the per-segment key is a §4 protected-set violation. Security review veto on any change to the deletion code path.
+6. **Privacy moment cards carry NO user content** (§5.1). `appBundleId` + `ts` + reason-string only. Never OCR'd text, never keyframe, never windowTitle/url. Security review veto.
+7. **Export is user-initiated only** (§4.4). No automatic upload, no telemetry, no scheduled export. Security review veto on any change to the export code path.
 8. **TCC denials never block the agent from running** (§1.2). MCI runs with reduced functionality, never refuses to launch. Coerced consent is not consent.
 9. **No auto-grant of TCC permissions** (§1.3 / §3.4.2(e)). Re-asserts ADR-0015 §4.4. Banned: `tccutil`, private APIs, any "click-through" UX bypassing the OS dialog. Per-app deep-hook FDA grant MUST deep-link to System Settings via the documented `x-apple.systempreferences:` scheme; the OS dialog firing IS the consent.
 
@@ -268,19 +268,19 @@ These invariants are why this ADR is protected-set:
 - Positive: users have direct, legible control over what MCI captures and what it remembers. The trust surface from F-STRAT-001b ("third-party audit + demonstrable behavior") gains its user-facing half.
 - Positive: the cascade reason codes (1-9) are now fully exercised post-Phase 4. `userDenylist` + `incognitoExclusion` are the two new ones; Phase 4 wires them into the existing cascade discipline (strictly-tightening, never widens `.allow`).
 - Positive: delete-by-crypto-shred makes Phase 5 sync safer — a delete on device A reaches device B as a tombstone, and any backup of the pre-delete ciphertext is unreadable because the segment key was destroyed.
-- Negative / tradeoff: per-browser incognito heuristics are fragile. Each browser update can change the window-title pattern. CRS Telemetry-Gap analyst tracks `incognito_probe_match_rate` (content-free count) and flags regressions.
+- Negative / tradeoff: per-browser incognito heuristics are fragile. Each browser update can change the window-title pattern. Research Telemetry-Gap analyst tracks `incognito_probe_match_rate` (content-free count) and flags regressions.
 - Negative / tradeoff: the 7-PR sequence is large. Phase 4 takes ~3 attended sprints minimum.
 - Forces (binding on every Phase 4+ PR):
-  - **Any change weakening the allowlist's CSO-gate is a §7.1 violation.**
+  - **Any change weakening the allowlist's security review-gate is a §7.1 violation.**
   - **Any new cascade reason code that widens `.allow` instead of adding `.suppress` is a §7.2 violation.**
   - **Any retention/delete path that does not crypto-shred is a §7.4 violation.**
   - **Any privacy-moment surface that carries user content is a §7.5 violation.**
 
-## CSO sign-off (placeholder — owed at first protected-set PR in §6)
+## Security review (placeholder — owed at first protected-set PR in §6)
 
-Protected-set authoring (AGENT_PROTOCOL §5). The §7 privacy invariants are binding. CSO sign-off blocks are owed on every PR in §6 asserting (by reading the diff) that the invariants hold. CSO veto is final unless the human CEO overrides.
+Protected-set authoring (AGENT_PROTOCOL §5). The §7 privacy invariants are binding. Security review blocks are owed on every PR in §6 asserting (by reading the diff) that the invariants hold. Security review veto is final unless the owner overrides.
 
-— CSO, pending (this ADR is a CEO ratification gate; CSO sign-off is owed at PR P4.1)
+— Security review, pending (this ADR is a owner ratification gate; security review is owed at PR P4.1)
 
 ## References
 
