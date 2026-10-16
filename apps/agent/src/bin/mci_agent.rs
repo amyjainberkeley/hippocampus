@@ -59,14 +59,14 @@ use mci_agent::idle_batch;
 use mci_agent::key_resolver;
 use mci_agent::mcp::{serve_stdio, BrainReader, LiveBrainReader, Server};
 use mci_agent::page_content::PageContentListener;
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "deep-hooks"))]
 use mci_agent::pump_supervisor::PumpSupervisor;
 use mci_agent::refresh::{refresh_or_skip, RefreshOutcome, RefreshRoots};
 use mci_agent::refresh_agent;
 use mci_agent::retention_worker;
 use mci_agent::runner::drain_with_capture_status;
 use mci_agent::today::{compile_today, render_today, TodayFormat};
-#[cfg(unix)]
+#[cfg(all(target_os = "macos", feature = "deep-hooks"))]
 use mci_agent::user_allowlist::default_user_allowlist_path;
 use mci_agent::wall_clock::{format_unix_ms, SystemWallClock};
 use mci_brain::{IntegrityError, IntegrityScheduler, SqlCipherBrainStore};
@@ -1033,9 +1033,10 @@ async fn run_agent(args: Args) -> ExitCode {
                                 let worker_store = Arc::clone(&store);
                                 // Clone the embedder Arc BEFORE moving
                                 // it into the idle-batch task — the
-                                // V2-P10 pump supervisor shares the
-                                // same embedder for the deep-hook
-                                // Allow path.
+                                // V2-P10 pump supervisor (`deep-hooks`
+                                // builds only) shares the same embedder
+                                // for the deep-hook Allow path.
+                                #[cfg(all(target_os = "macos", feature = "deep-hooks"))]
                                 let supervisor_embedder = Arc::clone(&embedder.0);
                                 let worker_embedder = embedder.0;
                                 let worker_shutdown = shutdown_rx.clone();
@@ -1236,19 +1237,17 @@ async fn run_agent(args: Args) -> ExitCode {
                                 // this is the load-bearing wire.
                                 spawn_tier2_worker(Arc::clone(&store), shutdown_rx.clone());
 
-                                // V2-P10 — deep-hook pump supervisor.
-                                // Reads ~/Library/Application Support/MCI/
+                                // V2-P10 — deep-hook pump supervisor, in
+                                // `deep-hooks` builds only (never a
+                                // release: Hippocampus reads the screen,
+                                // not mail or message databases). Reads
+                                // ~/Library/Application Support/MCI/
                                 // user-allowlist.toml, probes FDA per
                                 // bundle, starts MessagesPluginPump +
                                 // MailIngestPump for any allowlist row
                                 // with capture_enabled=true AND
-                                // deep_hook_enabled=true. Driver-CSO
-                                // audit row 7: construction-graph wiring
-                                // at integration site. Per
-                                // [[project-v2p1-unit-tests-passed-but-never-wired]]
-                                // this is the load-bearing wire — without
-                                // it the V2-P7 + V2-P8 cascade-equivalents
-                                // never see production input.
+                                // deep_hook_enabled=true.
+                                #[cfg(all(target_os = "macos", feature = "deep-hooks"))]
                                 if capture_ingestion_enabled {
                                     spawn_pump_supervisor(
                                         Arc::clone(&store),
@@ -4214,13 +4213,13 @@ fn spawn_tier2_worker(
     });
 }
 
-/// V2-P10 — spawn the deep-hook pump supervisor.
+/// V2-P10 — spawn the deep-hook pump supervisor (`deep-hooks` builds only).
 ///
 /// Constructs a [`PumpSupervisor`] over the same `SqlCipherBrainStore`
 /// + embedder the wire-frame brain pump uses, points it at the
 ///   canonical user-allowlist path, and runs the reconcile loop until
 ///   shutdown.
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "deep-hooks"))]
 fn spawn_pump_supervisor(
     store: Arc<mci_brain::SqlCipherBrainStore>,
     embedder: Arc<dyn mci_brain::Embedder>,
@@ -4241,24 +4240,13 @@ fn spawn_pump_supervisor(
     });
 }
 
-/// Non-macOS: deep-hook pumps are macOS-only (chat.db + emlx are
-/// macOS surfaces). No-op on Linux / Windows so the workspace
-/// compiles uniformly.
-#[cfg(not(target_os = "macos"))]
-fn spawn_pump_supervisor(
-    _store: Arc<mci_brain::SqlCipherBrainStore>,
-    _embedder: Arc<dyn mci_brain::Embedder>,
-    _shutdown: tokio::sync::watch::Receiver<bool>,
-) {
-}
-
 /// V2-MCP-3 wiring point. Constructs the
 /// [`mci_agent::mcp_aggregator::McpAggregator`] over the V2-MCP-2
 /// `ServerRegistry` + the shared brain store, then spawns its
 /// reconcile loop on the tokio runtime with the shared shutdown
 /// channel.
 ///
-/// Cross-platform — unlike `spawn_pump_supervisor` above, the MCP
+/// Cross-platform — unlike the deep-hook pump supervisor, the MCP
 /// aggregator runs anywhere the agent runs (its inputs are MCP
 /// servers the user registered; no OS-specific source).
 ///

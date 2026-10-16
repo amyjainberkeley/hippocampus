@@ -59,7 +59,9 @@ pub mod idle_batch;
 pub mod import_codex;
 pub mod import_sessions;
 pub mod key_resolver;
-#[cfg(target_os = "macos")]
+/// Mail.app reader pump. Only with the `deep-hooks` feature, off in every
+/// release.
+#[cfg(all(target_os = "macos", feature = "deep-hooks"))]
 pub mod mail_ingest;
 pub mod mcp;
 /// V2-MCP-3 — MCP aggregator: consumes the registry built by
@@ -82,11 +84,15 @@ pub mod mcp_client_supervisor;
 /// live-capture arm, which ships off, so before this the connector
 /// path never ran for a real user.
 pub mod mcp_sync;
-#[cfg(target_os = "macos")]
+/// Messages.app reader pump. Only with the `deep-hooks` feature, off in
+/// every release.
+#[cfg(all(target_os = "macos", feature = "deep-hooks"))]
 pub mod messages_ingest;
 pub mod page_content;
 pub mod panic_hook;
-#[cfg(target_os = "macos")]
+/// Starts the Mail and Messages pumps. Only with the `deep-hooks` feature,
+/// off in every release.
+#[cfg(all(target_os = "macos", feature = "deep-hooks"))]
 pub mod pump_supervisor;
 /// Bounded incremental import plus enrich of new events, for the handoff hook.
 pub mod refresh;
@@ -124,7 +130,9 @@ pub mod today;
 /// shared by the two transcript importers.
 pub mod transcript;
 pub mod understanding;
-#[cfg(unix)]
+/// The allowlist rows that switch the deep hooks on. Only with the
+/// `deep-hooks` feature.
+#[cfg(all(unix, feature = "deep-hooks"))]
 pub mod user_allowlist;
 pub mod wall_clock;
 

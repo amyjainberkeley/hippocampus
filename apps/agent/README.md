@@ -13,11 +13,16 @@ this is the parent process; the helper is a signed child.
 - `src/bin/mci_seed_brain.rs`, `mci_seed_brief.rs` — demo-only
   seeders (documented in-file; refuse to overwrite a non-empty
   brain).
-- `src/supervisor.rs`, `pump_supervisor.rs`,
-  `mcp_client_supervisor.rs` — child-process supervision trees.
-- `src/*_worker.rs`, `*_ingest.rs`, `idle_batch.rs` — the async
-  workers (episode, consolidator, retention, brief, alias_resolver,
-  tier2 NER/Qwen, health, page_content, mail/messages ingest).
+- `src/supervisor.rs`, `mcp_client_supervisor.rs` — child-process
+  supervision trees.
+- `src/*_worker.rs`, `idle_batch.rs` — the async workers (episode,
+  consolidator, retention, brief, alias_resolver, tier2 NER/Qwen,
+  health, page_content).
+- `src/mail_ingest.rs`, `messages_ingest.rs`, `pump_supervisor.rs`,
+  `user_allowlist.rs` — the Mail and Messages readers and the
+  supervisor that starts them. Built only with the `deep-hooks`
+  feature, which no release turns on; `tests/shipped_readers.rs`
+  checks the built binary.
 - `src/mcp/` — inbound MCP *server* surface (MCI exposes tools).
 - `src/mcp_aggregator.rs` — fan-out to external MCP servers via
   `../../core/mcp-client/`.

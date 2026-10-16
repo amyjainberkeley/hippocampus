@@ -58,6 +58,15 @@ path = "src/bin/mci_e2e_fixture.rs"
 [lints]
 workspace = true
 
+[features]
+default = []
+# The Mail.app and Messages.app readers, and the deep-hook supervisor that
+# starts them when the user allowlist asks and Full Disk Access is granted.
+# Off by default and in every release: Hippocampus reads what is on the
+# screen, and these read mail and message databases (launch plan item 10).
+# `tests/shipped_readers.rs` checks the built binary either way.
+deep-hooks = ["dep:mci-mail-reader", "dep:mci-messages-reader"]
+
 [dependencies]
 mci-core    = { path = "../../core" }
 # Phase 3 P3.6.6 + P3.10b — the agent shell is both the wire-to-brain
@@ -105,21 +114,15 @@ mci-keychain = { path = "../../adapters/macos/mci-keychain" }
 # elsewhere. No net-new third-party crate (objc2 family already on the
 # lockfile from P3.3). Renamed from mci-llama-coreml.
 mci-coreml-bridge = { path = "../../adapters/macos/mci-coreml-bridge" }
-# V2-P8b — Mail.app emlx read path (PR #243). macOS-only: the crate
-# compiles to an empty lib elsewhere. apps/agent consumes the READ
-# surface (read_message / watch_inbox) inside `mail_ingest.rs`; no
-# new third-party crate is added at the agent boundary (mail-parser
-# / plist / rusqlite / notify / tokio enter only via the
-# mci-mail-reader path, which already shipped them on the workspace
-# lockfile via PR #243).
-mci-mail-reader  = { path = "../../adapters/macos/mci-mail-reader" }
-# V2-P10 — Messages.app chat.db read path (PR #248). macOS-only: the
-# crate compiles to an empty lib elsewhere. apps/agent consumes the
-# READ surface (list_recent_messages / read_thread / watch_inbox)
-# inside `messages_ingest.rs`; no new third-party crate is added at
-# the agent boundary (rusqlite / notify / tokio already on the
-# workspace lockfile via PRs #82 + #243).
-mci-messages-reader = { path = "../../adapters/macos/mci-messages-reader" }
+# V2-P8b — Mail.app emlx read path (PR #243), linked only with the
+# `deep-hooks` feature. apps/agent consumes the READ surface
+# (read_message / watch_inbox) inside `mail_ingest.rs`.
+mci-mail-reader  = { path = "../../adapters/macos/mci-mail-reader", optional = true }
+# V2-P10 — Messages.app chat.db read path (PR #248), linked only with the
+# `deep-hooks` feature. apps/agent consumes the READ surface
+# (list_recent_messages / read_thread / watch_inbox) inside
+# `messages_ingest.rs`.
+mci-messages-reader = { path = "../../adapters/macos/mci-messages-reader", optional = true }
 
 # V2-P10 — `rustix::process::getuid()` for the user-allowlist file-
 # permission gate (the `mode & 0o077` + `owner uid` check that mirrors
@@ -162,14 +165,14 @@ http           = "1"
 http-body-util = "0.1"
 bytes          = "1"
 
-# V2-P8b — tests in `mail_ingest.rs` exercise the typed-header
+# V2-P8b — tests in `mail_ingest.rs` (`deep-hooks` builds) exercise the typed-header
 # translator (`to_parsed_headers`) by re-parsing synthesized emlx
 # fixtures via `mail_parser::MessageParser`. Already on the lockfile
 # via the V2-P8a `mci-mail-reader` macOS-target dep; listed in
 # dev-dependencies so non-macOS workspace `cargo test --workspace`
 # does not pick it up.
 #
-# V2-P10 — `messages_ingest.rs` tests synthesize a fixture chat.db
+# V2-P10 — `messages_ingest.rs` tests (`deep-hooks` builds) synthesize a fixture chat.db
 # via `rusqlite::Connection::open` + `execute_batch`. Already on the
 # workspace lockfile via `mci-core` / `mci-brain`; listed here so
 # `cargo test -p mci-agent` picks it up without re-vendoring SQLCipher.
