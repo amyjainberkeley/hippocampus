@@ -42,7 +42,9 @@
 //!     entity graph). No new schema, no capture-scope change, no IPC, no
 //!     network — the zero-knowledge invariant is preserved by construction.
 
-#![cfg(target_os = "macos")]
+// The Messages reader is linked only with the `deep-hooks` feature, which no
+// release turns on (tests/shipped_readers.rs).
+#![cfg(all(target_os = "macos", feature = "deep-hooks"))]
 // The module-doc ASCII pipeline diagram intentionally uses bare code-like
 // tokens (window_title, entity_mention, …) for readability; backticking
 // every token would wreck the diagram.

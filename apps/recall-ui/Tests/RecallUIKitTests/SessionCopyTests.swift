@@ -73,6 +73,77 @@ final class SessionCopyTests: XCTestCase {
         }
     }
 
+    private func reading(for hit: Hit, main: String, rest: String = "", truncated: Bool = false) throws -> EventReading {
+        try EventReading(eventId: hit.eventId, tsUs: hit.tsUs, appBundleId: hit.appBundleId,
+                         sourceKind: "screen_ocr", main: main, rest: rest, isTruncated: truncated)
+    }
+
+    /// Audit product-9: the copy pasted each moment's 280-character list
+    /// excerpt, with ":" and fourteen other characters as "&#58;"-style codes.
+    func testEachMomentIsCopiedWithItsWholeReadingAsItReads() async throws {
+        let excerpt = String(repeating: "Annual plans save two months. ", count: 9)
+        let page = Hit(eventId: 7, tsUs: 1_791_837_700_000_000, appBundleId: "com.apple.Safari",
+                       windowTitle: "Pricing · Velo Cycles", url: "https://www.velocycles.example/pricing",
+                       ocrTextSnippet: String(excerpt.prefix(280)), source: "timeline", score: nil,
+                       sourceKind: "browser_page")
+        let whole = excerpt + "\nRide: $9/month\nTour: $19/month (best value!)\nClub: $49/month, billed annually: save 2 months"
+        let reader = RecordingBrainReader(hits: [page], readings: [7: try reading(for: page, main: whole, rest: "Sign in · Cart")])
+        let text = try await SessionCopy.markdown(title: "Competitor pricing tables",
+                                                  range: 1_791_837_660_000_000...1_791_839_120_000_000,
+                                                  reader: reader)
+        XCTAssertTrue(text.contains("```text\n" + whole + "\n```\n"), text)
+        XCTAssertTrue(text.contains("Link: `https://www.velocycles.example/pricing`"))
+        XCTAssertTrue(text.contains("Window: Pricing · Velo Cycles\n"))
+        XCTAssertFalse(text.contains("&#"), "no character codes")
+        XCTAssertFalse(text.contains("Sign in · Cart"), "the rest of the window is left out")
+        XCTAssertFalse(text.contains("Shortened."))
+        let asked = await reader.readingsAsked
+        XCTAssertEqual(asked, [7])
+    }
+
+    func testAReadingOfAnotherMomentIsNeverCopiedUnderThisOne() async throws {
+        let note = hit(8, 1_791_838_000_000_000, title: "Pricing page draft", text: "Ride, Tour and Club.")
+        let stale = try EventReading(eventId: 8, tsUs: note.tsUs + 1, appBundleId: note.appBundleId,
+                                     sourceKind: "screen_ocr", main: "a deleted moment's words", rest: "",
+                                     isTruncated: false)
+        let reader = RecordingBrainReader(hits: [note], readings: [8: stale])
+        let text = try await SessionCopy.markdown(title: "Pricing page copy",
+                                                  range: 1_791_837_660_000_000...1_791_839_120_000_000,
+                                                  reader: reader)
+        XCTAssertFalse(text.contains("a deleted moment's words"))
+        XCTAssertTrue(text.contains("```text\nRide, Tour and Club.\n```"), "its excerpt instead")
+    }
+
+    func testALongSessionSharesOneBudgetSoEveryMomentIsInIt() throws {
+        let hits = (1...24).map { hit(UInt64($0), UInt64($0) * 1_000, title: "Window \($0)", text: "excerpt \($0)") }
+        var readings: [UInt64: EventReading] = [:]
+        for hit in hits {
+            // Every third window is short; the others hold 20 KB each.
+            let main = hit.eventId % 3 == 0 ? "short window \(hit.eventId)"
+                : String(repeating: "line of window \(hit.eventId)\n", count: 1_000)
+            readings[hit.eventId] = try reading(for: hit, main: main)
+        }
+        let text = SessionCopy.markdown(title: "Busy session", moments: hits, readings: readings)
+        XCTAssertLessThanOrEqual(text.utf8.count, VisualMemoryExport.maxBytes)
+        XCTAssertGreaterThan(text.utf8.count, VisualMemoryExport.maxBytes * 9 / 10, "the budget is used")
+        for id in [3, 6, 9, 12, 15, 18, 21, 24] {
+            XCTAssertTrue(text.contains("```text\nshort window \(id)\n```"), "short window \(id) is whole")
+        }
+        for id in [1, 2, 23] {
+            XCTAssertTrue(text.contains("line of window \(id)\n"), "window \(id) is in the copy")
+        }
+        XCTAssertEqual(text.components(separatedBy: "\nShortened.\n").count - 1, 16, "the 16 long windows are cut")
+        XCTAssertFalse(text.contains("Only the first"))
+    }
+
+    func testABudgetIsSharedEvenlyAndWhatAShortTextLeavesGoesToTheLongOnes() {
+        XCTAssertEqual(VisualMemoryExport.shares([10, 1_000, 1_000], budget: 610), [10, 300, 300])
+        XCTAssertEqual(VisualMemoryExport.shares([10, 20], budget: 1_000), [10, 20])
+        XCTAssertEqual(VisualMemoryExport.shares([0, 500], budget: 100), [0, 100])
+        XCTAssertEqual(VisualMemoryExport.shares([5, 5, 5], budget: 2), [0, 0, 0])
+        XCTAssertEqual(VisualMemoryExport.shares([], budget: 100), [])
+    }
+
     func testTheDetailSaysWhatTheSessionHeldInThePersonsFormat() throws {
         let overview = try UnderstandingFixture.overview()
         let block = try XCTUnwrap(overview.blocks.first { $0.title == "Competitor pricing tables" })
@@ -134,10 +205,18 @@ final class SessionCopyTests: XCTestCase {
 /// A brain reader that answers a browse from a list and records what it was asked.
 actor RecordingBrainReader: BrainReader {
     private let hits: [Hit]
+    private let readings: [UInt64: EventReading]
     private(set) var options: [SearchOptions] = []
+    private(set) var readingsAsked: [UInt64] = []
 
-    init(hits: [Hit]) {
+    init(hits: [Hit], readings: [UInt64: EventReading] = [:]) {
         self.hits = hits
+        self.readings = readings
+    }
+
+    func eventReading(eventId: UInt64, query: String?) async throws -> EventReading? {
+        readingsAsked.append(eventId)
+        return readings[eventId]
     }
 
     func search(_ opts: SearchOptions) async throws -> [Hit] {

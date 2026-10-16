@@ -6,14 +6,16 @@ import Foundation
 ///
 /// The moments are read by time from this Mac's memory (a browse of the
 /// session's own range), so the copy holds what was on screen in that
-/// session and nothing learned about the person. It is the same Markdown the
+/// session and nothing learned about the person. Each moment carries its
+/// whole reading, what the person was reading in that window, not the
+/// list's short excerpt (audit product-9). It is the same Markdown the
 /// window's other exports write (`VisualMemoryExport`): a title, the plain
 /// warning, then each moment's time, app, window and text, with no "Truth
 /// status", "Retrieval" or "Generated at" lines.
 public enum SessionCopy {
     /// At most this many moments go into one copy (`VisualMemoryExport` caps
     /// an export at the same number).
-    public static let maxMoments = 24
+    public static let maxMoments = VisualMemoryExport.maxMoments
     /// How many moments of the session are read to choose from, newest
     /// first. A session is at most 30 minutes, so this holds a whole one at
     /// a moment a second; fewer would drop the start of a busy session. The
@@ -27,11 +29,19 @@ public enum SessionCopy {
                                     timeFromUs: UInt64(range.lowerBound), timeToUs: UInt64(range.upperBound),
                                     mode: .text, browse: true)
         let hits = try await reader.search(options)
-        return markdown(title: title, moments: moments(hits, in: range))
+        let chosen = moments(hits, in: range)
+        var readings: [UInt64: EventReading] = [:]
+        for hit in chosen {
+            // A moment whose reading cannot be read keeps its excerpt.
+            if let reading = try? await reader.eventReading(eventId: hit.id), reading.matches(hit) {
+                readings[hit.id] = reading
+            }
+        }
+        return markdown(title: title, moments: chosen, readings: readings)
     }
 
-    public static func markdown(title: String, moments: [Hit]) -> String {
-        VisualMemoryExport.markdown(title: title, hits: moments)
+    public static func markdown(title: String, moments: [Hit], readings: [UInt64: EventReading] = [:]) -> String {
+        VisualMemoryExport.markdown(title: title, hits: moments, readings: readings)
     }
 
     /// The moments a copy holds, oldest first: those inside `range`, without

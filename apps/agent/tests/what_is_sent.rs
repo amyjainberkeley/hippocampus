@@ -6,7 +6,7 @@ mod handoff_fixture;
 
 use std::collections::HashSet;
 
-use handoff_fixture::{clock, fixture_brain, key, ts_us};
+use handoff_fixture::{clock, fixture_brain, key, put_screen, ts_us};
 use mci_agent::context_packet::{
     compile_context_packet, render_context_packet_markdown, render_understanding_block,
     ContextBudget, ContextSources,
@@ -37,9 +37,56 @@ fn claim(text: &str, kind: PropositionKind, confidence: f64) -> NewProposition {
     }
 }
 
-/// A model note two hours ago whose `beneath` says nothing, a measured note
-/// before it, and items of every kind.
-fn learn(store: &SqlCipherBrainStore, now: u64) -> Vec<i64> {
+const DAY: u64 = 24 * 60 * MIN;
+
+/// A window as the store keeps it: the header, what the window said, and,
+/// after the separator, its labels (`mci_brain::reading`).
+fn window(app: &str, title: &str, said: &str, labels: &str) -> String {
+    format!("[app={app} | title={title} | url=? | ts=2026-09-24T16:00:00.000Z]\n{said}\n\n\u{1e}\n{labels}")
+}
+
+/// Moments of one window at `times`, all saying the same.
+fn moments(
+    store: &SqlCipherBrainStore,
+    times: &[u64],
+    app: &str,
+    title: &str,
+    said: &str,
+    labels: &str,
+) -> Vec<i64> {
+    times
+        .iter()
+        .map(|ts| {
+            i64::try_from(put_screen(
+                store,
+                *ts,
+                app,
+                title,
+                &window(app, title, said, labels),
+            ))
+            .unwrap()
+        })
+        .collect()
+}
+
+/// A mail client's inbox on three days: other people's messages, under the
+/// account's label "Northwind Travel" (audit product-4).
+fn inbox(store: &SqlCipherBrainStore, now: u64) -> Vec<i64> {
+    moments(
+        store,
+        &[now - 3 * DAY, now - 2 * DAY, now - DAY],
+        "com.apple.mail",
+        "Inbox – Northwind Travel",
+        "Career Center: Spring internship fair, Thursday in the ballroom\n\
+         Priya Shah: Re: checkout tax rounding\n\
+         Trailhead Bikes: Your order has shipped",
+        "Mailboxes\nInbox\nNorthwind Travel\nDrafts\nSent",
+    )
+}
+
+/// A model note two hours ago whose `beneath` says nothing, and a measured
+/// note before it.
+fn note_sessions(store: &SqlCipherBrainStore, now: u64) {
     store
         .put_session_note(&SessionNote {
             start_us: now - 120 * MIN,
@@ -66,41 +113,127 @@ fn learn(store: &SqlCipherBrainStore, now: u64) -> Vec<i64> {
             model: "measured".into(),
         })
         .unwrap();
+}
+
+/// Pricing notes on two days, a terminal on three and a checkout file on
+/// two, each saying what one line claims.
+fn work(store: &SqlCipherBrainStore, now: u64) -> (Vec<i64>, Vec<i64>, Vec<i64>) {
+    let pricing = moments(
+        store,
+        &[now - 2 * DAY, now - 2 * DAY + 2 * MIN, now - DAY],
+        "com.apple.Notes",
+        "Pricing page",
+        "Trailhead Bikes pricing page: redesigning the plan table. Team $18 a seat.",
+        "Notes\nPricing page",
+    );
+    let terminal = moments(
+        store,
+        &[
+            now - 3 * DAY,
+            now - 2 * DAY + 30 * MIN,
+            now - DAY + 30 * MIN,
+        ],
+        "com.apple.Terminal",
+        "trailhead — zsh",
+        "$ cat rust-toolchain.toml\nchannel = \"1.89\"\n$ cargo test\ntest result: ok. 12 passed",
+        "zsh",
+    );
+    let checkout = moments(
+        store,
+        &[now - 2 * DAY + 60 * MIN, now - 2 * DAY + 62 * MIN, now - DAY + 60 * MIN],
+        "com.microsoft.VSCode",
+        "checkout.rs — trailhead",
+        "fn tax_rounding(cents: i64) -> i64 {\n    // Trailhead checkout: tax rounding, third try\n}",
+        "EXPLORER\ncheckout.rs",
+    );
+    (pricing, terminal, checkout)
+}
+
+/// The lines learned about Sam, in the order returned:
+/// 0. a project three moments on two days show (sent);
+/// 1. a skill the terminal shows on three days (sent);
+/// 2. a preference the model is unsure of (only Sam sees it);
+/// 3. someone Sam works with (a relationship: only Sam sees it);
+/// 4. a struggle seen once (not shown);
+/// 5. how Sam is right now (never shown);
+/// 6. a job application read off the inbox (sensitive: only Sam sees it);
+/// 7. a project made from the inbox's label (only Sam sees it);
+/// 8. a preference Sam confirmed (sent, though the model was unsure);
+/// 9. a struggle the checkout shows on two days (sent when looked up).
+fn learn(store: &SqlCipherBrainStore, now: u64) -> Vec<i64> {
+    note_sessions(store, now);
+    let (pricing, terminal, checkout) = work(store, now);
+    let mail = inbox(store, now);
     let mut ids = Vec::new();
-    for (text, kind, confidence) in [
+    for (text, kind, confidence, evidence) in [
         (
             "Sam is redesigning the pricing page for Trailhead Bikes.",
             PropositionKind::Project,
             0.8,
+            &pricing,
         ),
         (
             "Sam writes Rust and runs tests from the terminal.",
             PropositionKind::Skill,
-            0.7,
+            0.9,
+            &terminal,
         ),
         (
             "Sam prefers short plan names over descriptive ones.",
             PropositionKind::Preference,
             0.4,
+            &pricing,
         ),
         (
             "Sam works with Priya on the checkout.",
             PropositionKind::Relationship,
             0.9,
+            &checkout,
         ),
         (
             "Sam took several tries to get the tax rounding right.",
             PropositionKind::Struggle,
             0.9,
+            &Vec::new(),
         ),
-        ("Sam is tired this afternoon.", PropositionKind::State, 0.9),
+        (
+            "Sam is tired this afternoon.",
+            PropositionKind::State,
+            0.9,
+            &Vec::new(),
+        ),
+        (
+            "Sam is applying for a position at Northwind Travel.",
+            PropositionKind::Goal,
+            0.9,
+            &mail,
+        ),
+        (
+            "Sam is organizing the Northwind Travel inbox folders.",
+            PropositionKind::Project,
+            0.9,
+            &mail,
+        ),
+        (
+            "Sam keeps plan names to one word.",
+            PropositionKind::Preference,
+            0.4,
+            &pricing,
+        ),
+        (
+            "Sam took several tries to get the Trailhead checkout tax rounding right.",
+            PropositionKind::Struggle,
+            0.9,
+            &checkout,
+        ),
     ] {
         ids.push(
             store
-                .insert_proposition(&claim(text, kind, confidence), &[], now - 10 * MIN)
+                .insert_proposition(&claim(text, kind, confidence), evidence, now - 10 * MIN)
                 .unwrap(),
         );
     }
+    assert!(store.confirm_proposition(ids[8], now - 5 * MIN).unwrap());
     ids
 }
 
@@ -128,7 +261,18 @@ fn the_hook_packet_carries_the_same_recent_work_and_about_you_block_as_context()
     );
     assert!(block.contains("- Sam is redesigning the pricing page for Trailhead Bikes."));
     assert!(block.contains("- Sam writes Rust and runs tests from the terminal."));
-    for never in ["short plan names", "Priya", "tax rounding", "tired"] {
+    assert!(
+        block.contains("- Sam keeps plan names to one word."),
+        "confirmed: {block}"
+    );
+    for never in [
+        "short plan names",
+        "Priya",
+        "tax rounding",
+        "tired",
+        "Northwind Travel",
+        "applying",
+    ] {
         assert!(
             !block.contains(never),
             "{never} is not sent unasked: {block}"
@@ -170,6 +314,26 @@ fn the_hook_packet_carries_the_same_recent_work_and_about_you_block_as_context()
     assert_eq!(no_project_memory_envelope(""), fallback_envelope());
 }
 
+fn served(store: SqlCipherBrainStore, now: u64, topic: Option<&str>) -> HashSet<i64> {
+    let served = query::run(
+        &std::sync::Arc::new(store),
+        PDT,
+        now,
+        &query::UnderstandingQuery::UserModel {
+            query: topic.map(str::to_owned),
+            limit: None,
+            page: None,
+        },
+    )
+    .unwrap();
+    served["propositions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_i64().unwrap())
+        .collect()
+}
+
 #[test]
 #[allow(clippy::too_many_lines)] // one packet, compared with the page field by field
 fn the_page_shows_everything_context_sends() {
@@ -193,9 +357,10 @@ fn the_page_shows_everything_context_sends() {
         Some("pricing page"),
         Some("rust terminal"),
         Some("Priya checkout"),
+        Some("Northwind Travel position"),
         Some("tired"),
     ] {
-        for p in about_you(&store, now, focus) {
+        for p in about_you(&store, PDT, now, focus) {
             assert!(
                 shared.contains(&p.id),
                 "{} is sent with focus {focus:?} but not on the page",
@@ -205,15 +370,20 @@ fn the_page_shows_everything_context_sends() {
     }
     assert_eq!(
         listed("shared"),
-        vec![ids[0], ids[1]],
-        "working on, then skills"
+        vec![ids[0], ids[8], ids[1]],
+        "working on, how you work, then skills"
     );
     assert_eq!(
         listed("kept_back"),
-        vec![ids[2], ids[3]],
-        "a guess and a person can be looked up"
+        vec![ids[9]],
+        "a struggle the checkout shows on two days can be looked up"
     );
-    let everywhere: Vec<i64> = ["shared", "kept_back", "not_seen_lately"]
+    assert_eq!(
+        listed("not_sent").into_iter().collect::<HashSet<_>>(),
+        [ids[2], ids[3], ids[6], ids[7]].into_iter().collect(),
+        "an unsure guess, a person, a sensitive guess and a label: only Sam sees them"
+    );
+    let everywhere: Vec<i64> = ["shared", "kept_back", "not_sent", "not_seen_lately"]
         .iter()
         .flat_map(|k| listed(k))
         .collect();
@@ -230,17 +400,25 @@ fn the_page_shows_everything_context_sends() {
         !text.contains("confidence") && !text.contains('%'),
         "no scores on the page"
     );
-    for item in page["shared"].as_array().unwrap() {
-        assert_eq!(item["basis"], "seen_once");
-        assert_eq!(
-            item["group"],
-            if item["kind"] == "project" {
-                "working_on"
-            } else {
-                "skills"
-            }
-        );
-    }
+    let basis: Vec<(&str, &str)> = page["shared"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| {
+            (
+                item["group"].as_str().unwrap(),
+                item["basis"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        basis,
+        vec![
+            ("working_on", "seen_on_days"),
+            ("how_you_work", "confirmed"),
+            ("skills", "seen_on_days"),
+        ]
+    );
 
     // The page's recent work is what the Overview says a new session gets.
     let day = overview::overview(&store, None, PDT, now, &OverviewEnv::default()).unwrap();
@@ -254,7 +432,8 @@ fn the_page_shows_everything_context_sends() {
             .iter()
             .map(|a| a["id"].as_i64().unwrap())
             .collect::<Vec<_>>(),
-        vec![ids[0], ids[1]]
+        vec![ids[8], ids[1], ids[0]],
+        "the surest first: confirmed, then by confidence"
     );
     assert_eq!(
         page["recent_work"][0]["template"],
@@ -262,26 +441,103 @@ fn the_page_shows_everything_context_sends() {
     );
     assert!(page["recent_work"][0]["times"]["start"].is_u64());
 
-    // `mci_user_model` serves what the page shows, and nothing else.
-    let served = query::run(
-        &std::sync::Arc::new(store),
-        PDT,
-        now,
-        &query::UnderstandingQuery::UserModel {
-            query: None,
-            limit: None,
-            page: None,
-        },
-    )
-    .unwrap();
-    let served: HashSet<i64> = served["propositions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|p| p["id"].as_i64().unwrap())
-        .collect();
+    // `mci_user_model` serves what the page says may go to AI tools, and
+    // nothing else.
     assert_eq!(
-        served,
-        [ids[0], ids[1], ids[2], ids[3]].into_iter().collect()
+        served(store, now, None),
+        [ids[0], ids[1], ids[8], ids[9]].into_iter().collect()
     );
+}
+
+/// Audit product-4 and live-5: the on-device model read a mail client's
+/// inbox, whose account is labelled "Northwind Travel", and wrote that the
+/// person was applying for a position there. It reached every AI session.
+/// However sure the model is, and on however many days the inbox was open,
+/// no wording of it goes to an AI tool unless the person confirms it.
+#[test]
+fn a_mailbox_label_never_becomes_a_job_application_claim() {
+    let (_dir, db, _root, _records) = fixture_brain();
+    let now = now_us();
+    let ids = {
+        let store = SqlCipherBrainStore::new(&db, &key()).unwrap();
+        let mail = inbox(&store, now);
+        [
+            (
+                "Sam is applying for a position at Northwind Travel.",
+                PropositionKind::Goal,
+            ),
+            (
+                "Sam is pursuing a role at Northwind Travel.",
+                PropositionKind::Goal,
+            ),
+            (
+                "Sam is organizing the Northwind Travel inbox folders.",
+                PropositionKind::Project,
+            ),
+        ]
+        .into_iter()
+        .map(|(text, kind)| {
+            store
+                .insert_proposition(&claim(text, kind, 1.0), &mail, now - 10 * MIN)
+                .unwrap()
+        })
+        .collect::<Vec<_>>()
+    };
+    let store = SqlCipherBrainStore::open_readonly(&db, &key()).unwrap();
+
+    // Before this rule, any of them was sent: a kind sent unasked, the
+    // model sure of it, seen on three days.
+    let page = model_page(&store, PDT, now).unwrap();
+    for item in page["not_sent"].as_array().unwrap() {
+        assert_eq!(item["basis"], "seen_on_days");
+        assert_eq!(item["days_seen"], 3);
+    }
+    let listed = |key: &str| -> HashSet<i64> {
+        page[key]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["id"].as_i64().unwrap())
+            .collect()
+    };
+    assert_eq!(
+        listed("not_sent"),
+        ids.iter().copied().collect(),
+        "Sam sees them on You, to confirm or forget"
+    );
+    assert!(listed("shared").is_empty() && listed("kept_back").is_empty());
+
+    for focus in [None, Some("Northwind Travel"), Some("position application")] {
+        assert!(
+            about_you(&store, PDT, now, focus).is_empty(),
+            "nothing about the inbox is sent with focus {focus:?}"
+        );
+        assert!(context_understanding(&store, PDT, now, focus).is_none_or(|u| u.about.is_empty()));
+    }
+    let overview = overview::overview(&store, None, PDT, now, &OverviewEnv::default()).unwrap();
+    assert!(
+        serde_json::to_value(overview).unwrap()["ai_knows"]["about_you"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(served(store, now, Some("Northwind Travel")).is_empty());
+    assert!(served(
+        SqlCipherBrainStore::open_readonly(&db, &key()).unwrap(),
+        now,
+        None
+    )
+    .is_empty());
+
+    // Sam says the label line is right: then, and only then, it is sent.
+    {
+        let writer = SqlCipherBrainStore::new(&db, &key()).unwrap();
+        assert!(writer.confirm_proposition(ids[2], now).unwrap());
+    }
+    let store = SqlCipherBrainStore::open_readonly(&db, &key()).unwrap();
+    let sent: Vec<i64> = about_you(&store, PDT, now, None)
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    assert_eq!(sent, vec![ids[2]]);
 }

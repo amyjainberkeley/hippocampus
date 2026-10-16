@@ -227,7 +227,27 @@ fn a_seeded_day_reads_as_the_window_expects() {
         .is_some_and(|h| !h.is_empty()));
     let knows = &overview["ai_knows"];
     assert_eq!(knows["hook_installed"], true);
-    assert_eq!(knows["about_you"].as_array().unwrap().len(), 6);
+    // Only what Sam confirmed, or what moments on two days or more show,
+    // goes to an AI (`understanding::sending`).
+    let sent: Vec<&str> = knows["about_you"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|line| line["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        sent[0], "Sam is redesigning the pricing page for Trailhead Bikes.",
+        "confirmed, so the surest"
+    );
+    let mut rest = sent[1..].to_vec();
+    rest.sort_unstable();
+    assert_eq!(
+        rest,
+        [
+            "Sam is fixing how the Trailhead checkout rounds sales tax.",
+            "Sam writes Rust and runs tests from the terminal.",
+        ]
+    );
     let recent = knows["recent_work"].as_array().unwrap();
     assert_eq!(recent.len(), 4);
     recent.iter().for_each(check_template);
@@ -263,7 +283,7 @@ fn a_seeded_day_reads_as_the_window_expects() {
             "what is sent is on the page"
         );
     }
-    let all: Vec<serde_json::Value> = ["shared", "kept_back", "not_seen_lately"]
+    let all: Vec<serde_json::Value> = ["shared", "kept_back", "not_sent", "not_seen_lately"]
         .into_iter()
         .flat_map(items)
         .collect();
@@ -281,6 +301,22 @@ fn a_seeded_day_reads_as_the_window_expects() {
     assert!(items("kept_back")
         .iter()
         .any(|i| i["kind"] == "struggle" && i["basis"] == "seen_on_days"));
+    let not_sent = items("not_sent");
+    let waiting: Vec<&str> = not_sent
+        .iter()
+        .map(|i| i["text"].as_str().unwrap())
+        .collect();
+    for guess in [
+        "Sam wants the new pricing page live before the October sale.",
+        "Sam drafts copy in Notes before laying it out in Figma.",
+        "Sam reviews pricing changes with the design team on Mondays.",
+    ] {
+        assert!(
+            waiting.contains(&guess),
+            "{guess} waits on You until it is corroborated or confirmed: {waiting:?}"
+        );
+        assert!(!sent.contains(&guess));
+    }
     assert!(items("not_seen_lately")
         .iter()
         .any(|i| i["basis"] == "confirmed"));

@@ -15,6 +15,7 @@
 //! - Safety floor: events younger than 1 hour are never purged
 //!   (enforced in [`purge_once`]).
 
+use crate::errln;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -285,7 +286,7 @@ pub async fn run_retention_worker_with_status(
                     || blobs.referenced_blobs_missing > 0
                     || blobs.cleanup_errors > 0
                 {
-                    eprintln!(
+                    errln!(
                         "mci-agent: retention purge: events={} vectors={} episodes={} referenced_blobs_deleted={} orphaned_blobs_deleted={} stale_temps_deleted={} referenced_blobs_missing={} blob_cleanup_errors={}",
                         ps.events_deleted,
                         ps.vectors_deleted,
@@ -300,7 +301,7 @@ pub async fn run_retention_worker_with_status(
             }
             Err(e) => {
                 stats.cycle_errors += 1;
-                eprintln!("mci-agent: retention cycle skipped: {e}");
+                errln!("mci-agent: retention cycle skipped: {e}");
             }
         }
 

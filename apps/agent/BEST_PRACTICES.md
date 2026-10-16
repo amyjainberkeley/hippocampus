@@ -36,8 +36,8 @@ consumed by the SwiftUI shell and by external MCP clients.
    `supervisor.rs` / `pump_supervisor.rs` decide whether to restart.
    A worker that self-heals hides supervision signal from the tree.
 
-5. **Panic hook is load-bearing.** `panic_hook.rs` +
-   `panic_uploader.rs` MUST be installed before any worker spawns;
+5. **Panic hook is load-bearing.** `panic_hook.rs` MUST be
+   installed before any worker spawns;
    a panic that bypasses the hook produces an unrecoverable
    crash-loop with no diagnostic. Do not disable panic capture in
    release builds "to reduce noise."

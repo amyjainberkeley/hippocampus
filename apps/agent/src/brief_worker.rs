@@ -41,6 +41,7 @@
 //! path after comparing its bounded evidence snapshot. It refuses citation
 //! violations instead of publishing an invalid ambient draft.
 
+use crate::errln;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -355,7 +356,7 @@ async fn run_today_brief_worker_with_clock(
             Ok(None) => {}
             Err(e) => {
                 stats.cycle_errors += 1;
-                eprintln!("mci-agent: Today brief cycle skipped: {e}");
+                errln!("mci-agent: Today brief cycle skipped: {e}");
             }
         }
         tokio::select! {
@@ -416,17 +417,17 @@ pub async fn run_brief_worker(
                 citation_violations,
             }) => {
                 stats.briefs_generated += 1;
-                eprintln!(
+                errln!(
                     "mci-agent: brief generated for {date_local} (id={id}, {event_count} events, {word_count} words, {citation_violations} citation violations)"
                 );
             }
             Ok(BriefOutcome::SkippedEmpty) => {
                 stats.cycles_skipped_empty += 1;
-                eprintln!("mci-agent: brief skipped (no useful events in previous local day)");
+                errln!("mci-agent: brief skipped (no useful events in previous local day)");
             }
             Err(e) => {
                 stats.cycle_errors += 1;
-                eprintln!("mci-agent: brief cycle error: {e}");
+                errln!("mci-agent: brief cycle error: {e}");
             }
         }
     }
@@ -443,7 +444,7 @@ pub async fn run_disabled_idle(
     reason: &str,
     mut shutdown: watch::Receiver<bool>,
 ) -> BriefWorkerStats {
-    eprintln!("mci-agent: brief worker disabled ({reason}); will sleep until shutdown");
+    errln!("mci-agent: brief worker disabled ({reason}); will sleep until shutdown");
     let _ = shutdown.changed().await;
     BriefWorkerStats {
         disabled: true,
@@ -951,6 +952,7 @@ fn unix_now_us() -> u64 {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_macros)] // corpus counts, captured by the test harness
 mod today_tests {
     use super::*;
     use mci_brain::{Event, EventId, EventSource};

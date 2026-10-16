@@ -21,6 +21,7 @@
 //! either the Undo wins and the verdict is never applied, or the Undo finds
 //! the file gone and the verdict is being applied.
 
+use crate::errln;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -135,7 +136,7 @@ fn apply_files(
             match store.newest_revision(verdict.id)? {
                 Some((_, PropositionStatus::Retired)) => {
                     outcome.merged_away += 1;
-                    eprintln!("mci-agent: understanding: removed a verdict on an item that was merged into another");
+                    errln!("mci-agent: understanding: removed a verdict on an item that was merged into another");
                 }
                 Some((id, _)) => {
                     let done = if reject {
@@ -149,7 +150,7 @@ fn apply_files(
                 }
                 None => {
                     outcome.unknown += 1;
-                    eprintln!("mci-agent: understanding: removed a verdict on an item that no longer exists");
+                    errln!("mci-agent: understanding: removed a verdict on an item that no longer exists");
                 }
             }
         }

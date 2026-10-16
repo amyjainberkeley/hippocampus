@@ -1,5 +1,6 @@
 //! Atomic, content-free capture receipts for the desktop UI.
 
+use crate::errln;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -126,7 +127,7 @@ impl CaptureStatusWriter {
                     .map(|ts| format_unix_ms(u128::from(ts) / 1_000));
             } else {
                 if !self.has_counts.load(Ordering::Relaxed) {
-                    eprintln!(
+                    errln!(
                         "mci-agent: capture status unavailable; retained counts could not be read"
                     );
                     return;
@@ -136,7 +137,7 @@ impl CaptureStatusWriter {
         }
         state.updated_at = clock.now_rfc3339();
         if self.write_atomic(&state).is_err() {
-            eprintln!("mci-agent: capture status write failed");
+            errln!("mci-agent: capture status write failed");
         }
     }
 

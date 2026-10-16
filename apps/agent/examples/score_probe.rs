@@ -47,6 +47,8 @@
 //!   cargo run --release -p mci-agent --example score_probe
 //! ```
 
+#![allow(clippy::disallowed_macros)] // a maintainer probe that prints a table to a terminal
+
 use std::sync::Arc;
 
 use mci_brain::{BrainStore, SqlCipherBrainStore};

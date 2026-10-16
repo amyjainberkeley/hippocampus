@@ -26,6 +26,7 @@
 //!   --db-path PATH or `MCI_DB_PATH` env — brain file path.
 //!   Default: ~/Library/Application Support/MCI/mci.sqlite
 
+use mci_agent::{errln, out, outln};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -366,7 +367,7 @@ fn hex_nibble(b: u8) -> Option<u8> {
 // ---------------------------------------------------------------------------
 
 fn print_usage() {
-    println!(
+    outln!(
         "mci-brain {VERSION}\n\
         \n\
         Read-only CLI for the encrypted brain store.\n\
@@ -409,14 +410,14 @@ fn run_stats(store: &SqlCipherBrainStore, json: bool) -> ExitCode {
     match store.stats() {
         Ok(s) => {
             if json {
-                println!("{}", brain_cli::format_stats_json(&s));
+                outln!("{}", brain_cli::format_stats_json(&s));
             } else {
-                print!("{}", brain_cli::format_stats_human(&s));
+                out!("{}", brain_cli::format_stats_human(&s));
             }
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("mci-brain stats: {e}");
+            errln!("mci-brain stats: {e}");
             ExitCode::from(20)
         }
     }
@@ -435,15 +436,15 @@ fn run_recent(store: &SqlCipherBrainStore, limit: usize, json: bool) -> ExitCode
                     text_snippet: EventRecord::truncate_snippet(&event.text),
                 };
                 if json {
-                    println!("{}", brain_cli::format_event_record_jsonl(&rec));
+                    outln!("{}", brain_cli::format_event_record_jsonl(&rec));
                 } else {
-                    println!("{}", brain_cli::format_event_record_human(&rec));
+                    outln!("{}", brain_cli::format_event_record_human(&rec));
                 }
             }
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("mci-brain recent: {e}");
+            errln!("mci-brain recent: {e}");
             ExitCode::from(21)
         }
     }
@@ -452,13 +453,13 @@ fn run_recent(store: &SqlCipherBrainStore, limit: usize, json: bool) -> ExitCode
 fn run_search(store: &SqlCipherBrainStore, query: &str, limit: usize, json: bool) -> ExitCode {
     let sanitized = brain_cli::sanitize_fts5_query(query);
     if sanitized.is_empty() {
-        eprintln!("mci-brain search: empty query");
+        errln!("mci-brain search: empty query");
         return ExitCode::from(22);
     }
     let hits = match store.fts5_search(&sanitized, limit) {
         Ok(h) => h,
         Err(e) => {
-            eprintln!("mci-brain search: {e}");
+            errln!("mci-brain search: {e}");
             return ExitCode::from(22);
         }
     };
@@ -467,7 +468,7 @@ fn run_search(store: &SqlCipherBrainStore, query: &str, limit: usize, json: bool
             Ok(Some(ev)) => ev,
             Ok(None) => continue,
             Err(e) => {
-                eprintln!("mci-brain search: get_event({event_id}): {e}");
+                errln!("mci-brain search: get_event({event_id}): {e}");
                 continue;
             }
         };
@@ -480,9 +481,9 @@ fn run_search(store: &SqlCipherBrainStore, query: &str, limit: usize, json: bool
             text_snippet: EventRecord::truncate_snippet(&event.text),
         };
         if json {
-            println!("{}", brain_cli::format_event_record_jsonl(&rec));
+            outln!("{}", brain_cli::format_event_record_jsonl(&rec));
         } else {
-            println!("{}", brain_cli::format_event_record_human(&rec));
+            outln!("{}", brain_cli::format_event_record_human(&rec));
         }
     }
     ExitCode::SUCCESS
@@ -492,18 +493,18 @@ fn run_show(store: &SqlCipherBrainStore, event_id: u64, json: bool) -> ExitCode 
     match store.get_event(EventId(event_id)) {
         Ok(Some(event)) => {
             if json {
-                println!("{}", brain_cli::format_event_jsonl(&event));
+                outln!("{}", brain_cli::format_event_jsonl(&event));
             } else {
-                print!("{}", brain_cli::format_event_human(&event));
+                out!("{}", brain_cli::format_event_human(&event));
             }
             ExitCode::SUCCESS
         }
         Ok(None) => {
-            eprintln!("mci-brain show: event {event_id} not found");
+            errln!("mci-brain show: event {event_id} not found");
             ExitCode::from(23)
         }
         Err(e) => {
-            eprintln!("mci-brain show: {e}");
+            errln!("mci-brain show: {e}");
             ExitCode::from(23)
         }
     }
@@ -520,7 +521,7 @@ fn run_export(
         Some(path) => match std::fs::File::create(path) {
             Ok(f) => Box::new(std::io::BufWriter::new(f)),
             Err(e) => {
-                eprintln!("mci-brain export: create {}: {e}", path.display());
+                errln!("mci-brain export: create {}: {e}", path.display());
                 return ExitCode::from(24);
             }
         },
@@ -529,7 +530,7 @@ fn run_export(
 
     if matches!(format, ExportFormat::Csv) {
         if let Err(e) = writeln!(writer, "{}", brain_cli::format_event_csv_header()) {
-            eprintln!("mci-brain export: write: {e}");
+            errln!("mci-brain export: write: {e}");
             return ExitCode::from(24);
         }
     }
@@ -541,7 +542,7 @@ fn run_export(
         let batch = match store.paged_events_since(cursor_ts, cursor_id, BATCH) {
             Ok(b) => b,
             Err(e) => {
-                eprintln!("mci-brain export: {e}");
+                errln!("mci-brain export: {e}");
                 return ExitCode::from(24);
             }
         };
@@ -556,7 +557,7 @@ fn run_export(
                 ExportFormat::Csv => brain_cli::format_event_csv_row(event),
             };
             if let Err(e) = writeln!(writer, "{line}") {
-                eprintln!("mci-brain export: write: {e}");
+                errln!("mci-brain export: write: {e}");
                 return ExitCode::from(24);
             }
             total += 1;
@@ -566,10 +567,10 @@ fn run_export(
         }
     }
     if let Err(e) = writer.flush() {
-        eprintln!("mci-brain export: flush: {e}");
+        errln!("mci-brain export: flush: {e}");
         return ExitCode::from(24);
     }
-    eprintln!("mci-brain export: wrote {total} event(s)");
+    errln!("mci-brain export: wrote {total} event(s)");
     ExitCode::SUCCESS
 }
 
@@ -587,11 +588,11 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         ParseOutcome::Version => {
-            println!("mci-brain {VERSION}");
+            outln!("mci-brain {VERSION}");
             return ExitCode::SUCCESS;
         }
         ParseOutcome::Error(msg) => {
-            eprintln!("mci-brain: {msg}");
+            errln!("mci-brain: {msg}");
             return ExitCode::from(2);
         }
         ParseOutcome::Run(a) => a,
@@ -600,7 +601,7 @@ fn main() -> ExitCode {
     let key_hex = match resolve_key_hex() {
         Ok(key) => key,
         Err(error) => {
-            eprintln!(
+            errln!(
                 "mci-brain: cannot resolve the database key from the macOS Keychain: {error}. \
              Launch the bundled Hippocampus.app to initialize or unlock access. \
              MCI_DEVELOPMENT_FILE_KEY=1 enables raw/file keys for development only."
@@ -609,7 +610,7 @@ fn main() -> ExitCode {
         }
     };
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!("mci-brain: database key must be exactly 64 ASCII hex characters.");
+        errln!("mci-brain: database key must be exactly 64 ASCII hex characters.");
         return ExitCode::from(11);
     };
     let key = DbKey::from_bytes(key_bytes);
@@ -622,7 +623,7 @@ fn main() -> ExitCode {
     let store = match SqlCipherBrainStore::open_readonly(&args.db_path, &key) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("mci-brain: open brain at {}: {e}", args.db_path.display());
+            errln!("mci-brain: open brain at {}: {e}", args.db_path.display());
             return ExitCode::from(12);
         }
     };
@@ -650,27 +651,27 @@ fn run_backup(
         match store.integrity_check() {
             Ok(v) if v == vec!["ok".to_string()] => {}
             Ok(v) => {
-                eprintln!("mci-brain backup: integrity_check failed: {v:?}");
+                errln!("mci-brain backup: integrity_check failed: {v:?}");
                 return ExitCode::from(31);
             }
             Err(e) => {
-                eprintln!("mci-brain backup: integrity_check error: {e}");
+                errln!("mci-brain backup: integrity_check error: {e}");
                 return ExitCode::from(32);
             }
         }
     }
     if out.exists() {
-        eprintln!(
+        errln!(
             "mci-brain backup: --out path already exists: {}",
             out.display()
         );
         return ExitCode::from(33);
     }
     if let Err(e) = store.vacuum_into(out) {
-        eprintln!("mci-brain backup: vacuum_into failed: {e}");
+        errln!("mci-brain backup: vacuum_into failed: {e}");
         return ExitCode::from(34);
     }
-    eprintln!(
+    errln!(
         "mci-brain backup: wrote {} (encrypted with same key)",
         out.display()
     );
@@ -679,7 +680,7 @@ fn run_backup(
 
 fn run_restore(from: &std::path::Path, to: &std::path::Path, force: bool, key: &DbKey) -> ExitCode {
     if !from.exists() {
-        eprintln!(
+        errln!(
             "mci-brain restore: --from does not exist: {}",
             from.display()
         );
@@ -690,24 +691,24 @@ fn run_restore(from: &std::path::Path, to: &std::path::Path, force: bool, key: &
         Ok(s) => match s.stats() {
             Ok(_) => {}
             Err(e) => {
-                eprintln!("mci-brain restore: source open OK but stats failed: {e}");
+                errln!("mci-brain restore: source open OK but stats failed: {e}");
                 return ExitCode::from(41);
             }
         },
         Err(e) => {
-            eprintln!("mci-brain restore: source not decryptable with current key: {e}");
+            errln!("mci-brain restore: source not decryptable with current key: {e}");
             return ExitCode::from(42);
         }
     }
     if to.exists() && !force {
-        eprintln!("mci-brain restore: --to already exists. Pass --force to overwrite.");
+        errln!("mci-brain restore: --to already exists. Pass --force to overwrite.");
         return ExitCode::from(43);
     }
     if let Err(e) = std::fs::copy(from, to) {
-        eprintln!("mci-brain restore: copy failed: {e}");
+        errln!("mci-brain restore: copy failed: {e}");
         return ExitCode::from(44);
     }
-    eprintln!(
+    errln!(
         "mci-brain restore: restored {} → {}",
         from.display(),
         to.display()

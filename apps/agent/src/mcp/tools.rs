@@ -1,58 +1,95 @@
 //! Tool definitions — names + MCP `tools/list` schemas.
 //!
-//! Six **read-only** tools (security review veto-gate on any addition that mutates):
+//! Every tool is **read-only** (security review veto-gate on any addition that mutates):
+//! `recall`, `events_since`, `stats`, `episodes`, `events_by_app`, `context`,
+//! `day`, `searches`, `person_model` and `sessions`, and in the command bar's
+//! assistant session `ask` and `suggest`.
 //!
-//! - [`ToolName::Recall`] — `mci_recall { query, limit }`.
-//! - [`ToolName::EventsSince`] — `mci_events_since { ts_us, limit }`.
-//! - [`ToolName::Stats`] — `mci_stats {}`.
-//! - [`ToolName::Episodes`] — `mci_episodes { limit }`.
-//! - [`ToolName::EventsByApp`] — `mci_events_by_app { app_bundle_id, limit }`.
-//! - [`ToolName::Context`] — `mci_context { focus, max_tokens, max_evidence }`.
+//! Names carry no prefix: clients already add the server's, so Claude Code
+//! shows `mcp__hippocampus__recall`. The names these tools had before 0.3
+//! (`mci_recall`, …, `mci_user_model`) still work as hidden aliases, so a
+//! client's saved allow rules and older callers keep working, but
+//! `tools/list` never offers them.
 //!
-//! The dispatcher in `super::server` enumerates exactly these six by
-//! matching `ToolName::from_str`; an unknown name returns
-//! `METHOD_NOT_FOUND`, never falls through to a write surface.
+//! The dispatcher in `super::server` routes only names [`ToolName::from_wire`]
+//! knows; an unknown name returns `METHOD_NOT_FOUND`, never falls through to
+//! a write surface.
 
 use std::fmt;
 
-/// The five tool names. Used by the dispatcher to route `tools/call`
-/// and by `tool_definitions` to assemble the `tools/list` response.
+/// The tools. Used by the dispatcher to route `tools/call` and by
+/// `tool_definitions` to assemble the `tools/list` response.
 ///
 /// **Structural read-only invariant** — adding a variant here is the
 /// only way a new tool reaches the wire. Any mutating tool MUST land
-/// behind a separate security-reviewed PR (per ADR-0017 §5).
+/// behind a separate CSO-signed PR (per ADR-0017 §5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolName {
-    /// `mci_recall` — lexical (eventually hybrid) recall.
+    /// `recall` — lexical (eventually hybrid) recall.
     Recall,
-    /// `mci_events_since` — timeline cursor.
+    /// `events_since` — timeline cursor.
     EventsSince,
-    /// `mci_stats` — content-free aggregate.
+    /// `stats` — content-free aggregate.
     Stats,
-    /// `mci_episodes` — recent episodes with event counts.
+    /// `episodes` — recent episodes with event counts.
     Episodes,
-    /// `mci_events_by_app` — events filtered by exact app bundle id.
+    /// `events_by_app` — events filtered by exact app bundle id.
     EventsByApp,
-    /// `mci_context` — bounded, cited context for local agent handoff.
+    /// `context` — bounded, cited context for local agent handoff.
     Context,
-    /// `mci_day` — a day's measured breakdown and written account.
+    /// `day` — a day's measured breakdown and written account.
     Day,
-    /// `mci_searches` — searches read from captured pages.
+    /// `searches` — searches read from captured pages.
     Searches,
-    /// `mci_user_model` — what Hippocampus understands about the user.
+    /// `person_model` — what Hippocampus has learned about the user.
     UserModel,
-    /// `mci_sessions` — a day's work sessions, surface and beneath.
+    /// `sessions` — a day's work sessions, surface and beneath.
     Sessions,
-    /// `mci_ask` — answer from memory (assistant sessions only).
+    /// `ask` — answer from memory (assistant sessions only).
     Ask,
-    /// `mci_suggest` — suggestions for now (assistant sessions only).
+    /// `suggest` — suggestions for now (assistant sessions only).
     Suggest,
 }
 
 impl ToolName {
+    /// Every tool, in the order `tools/list` and the assistant list them.
+    pub const ALL: [Self; 12] = [
+        Self::Recall,
+        Self::EventsSince,
+        Self::Stats,
+        Self::Episodes,
+        Self::EventsByApp,
+        Self::Context,
+        Self::Day,
+        Self::Searches,
+        Self::UserModel,
+        Self::Sessions,
+        Self::Ask,
+        Self::Suggest,
+    ];
+
     /// Wire name (the string an MCP client passes in `tools/call`).
     #[must_use]
     pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Recall => "recall",
+            Self::EventsSince => "events_since",
+            Self::Stats => "stats",
+            Self::Episodes => "episodes",
+            Self::EventsByApp => "events_by_app",
+            Self::Context => "context",
+            Self::Day => "day",
+            Self::Searches => "searches",
+            Self::UserModel => "person_model",
+            Self::Sessions => "sessions",
+            Self::Ask => "ask",
+            Self::Suggest => "suggest",
+        }
+    }
+
+    /// The name the tool had before 0.3, still accepted and never listed.
+    #[must_use]
+    pub const fn hidden_alias(self) -> &'static str {
         match self {
             Self::Recall => "mci_recall",
             Self::EventsSince => "mci_events_since",
@@ -69,25 +106,13 @@ impl ToolName {
         }
     }
 
-    /// Parse the wire name. Unknown names return `None` so the
-    /// dispatcher can emit `METHOD_NOT_FOUND` without panicking.
+    /// Parse the wire name, or a hidden alias. Unknown names return `None`
+    /// so the dispatcher can emit `METHOD_NOT_FOUND` without panicking.
     #[must_use]
     pub fn from_wire(s: &str) -> Option<Self> {
-        match s {
-            "mci_recall" => Some(Self::Recall),
-            "mci_events_since" => Some(Self::EventsSince),
-            "mci_stats" => Some(Self::Stats),
-            "mci_episodes" => Some(Self::Episodes),
-            "mci_events_by_app" => Some(Self::EventsByApp),
-            "mci_context" => Some(Self::Context),
-            "mci_day" => Some(Self::Day),
-            "mci_searches" => Some(Self::Searches),
-            "mci_user_model" => Some(Self::UserModel),
-            "mci_sessions" => Some(Self::Sessions),
-            "mci_ask" => Some(Self::Ask),
-            "mci_suggest" => Some(Self::Suggest),
-            _ => None,
-        }
+        Self::ALL
+            .into_iter()
+            .find(|tool| tool.as_str() == s || tool.hidden_alias() == s)
     }
 }
 
@@ -268,10 +293,7 @@ pub fn tool_definitions() -> serde_json::Value {
         },
         {
             "name": ToolName::UserModel.as_str(),
-            "description": "What Hippocampus understands about the user: projects, goals, habits, \
-                             preferences, skills, collaborators and what took them several tries, each with \
-                             a confidence and the evidence it rests on. Read this first to avoid \
-                             asking the user to re-explain themselves.",
+            "description": "What Hippocampus has learned about the user, with sources.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -333,46 +355,104 @@ pub fn assistant_tool_definitions() -> serde_json::Value {
 mod tests {
     use super::*;
 
+    fn listed(definitions: &serde_json::Value) -> Vec<String> {
+        definitions
+            .as_array()
+            .expect("tools is an array")
+            .iter()
+            .map(|t| t["name"].as_str().unwrap_or("").to_owned())
+            .collect()
+    }
+
     #[test]
     fn round_trip_tool_names() {
-        for t in [
-            ToolName::Recall,
-            ToolName::EventsSince,
-            ToolName::Stats,
-            ToolName::Episodes,
-            ToolName::EventsByApp,
-            ToolName::Context,
-            ToolName::Day,
-            ToolName::Searches,
-            ToolName::UserModel,
-            ToolName::Sessions,
-        ] {
+        for t in ToolName::ALL {
             assert_eq!(ToolName::from_wire(t.as_str()), Some(t));
+            assert_eq!(t.to_string(), t.as_str());
         }
+    }
+
+    #[test]
+    fn the_names_before_0_3_still_work_but_are_never_listed() {
+        let offered: Vec<String> = [tool_definitions(), assistant_tool_definitions()]
+            .iter()
+            .flat_map(listed)
+            .collect();
+        for t in ToolName::ALL {
+            assert_eq!(ToolName::from_wire(t.hidden_alias()), Some(t));
+            assert_eq!(
+                t.hidden_alias(),
+                format!(
+                    "mci_{}",
+                    if t == ToolName::UserModel {
+                        "user_model"
+                    } else {
+                        t.as_str()
+                    }
+                )
+            );
+            assert!(!offered.contains(&t.hidden_alias().to_owned()));
+        }
+        assert!(
+            offered.iter().all(|name| !name.starts_with("mci_")),
+            "{offered:?}"
+        );
+        assert_eq!(
+            ToolName::from_wire("mci_user_model"),
+            Some(ToolName::UserModel)
+        );
+        assert_eq!(
+            ToolName::from_wire("person_model"),
+            Some(ToolName::UserModel)
+        );
+        assert_eq!(
+            ToolName::from_wire("user_model"),
+            None,
+            "only the two names"
+        );
     }
 
     #[test]
     fn unknown_tool_name_returns_none() {
         assert!(ToolName::from_wire("mci_put_event").is_none());
+        assert!(ToolName::from_wire("put_event").is_none());
         assert!(ToolName::from_wire("mci_delete").is_none());
         assert!(ToolName::from_wire("").is_none());
     }
 
     #[test]
-    fn tool_definitions_has_ten_entries() {
-        let defs = tool_definitions();
-        let arr = defs.as_array().expect("tools is an array");
-        assert_eq!(arr.len(), 10);
-        let names: Vec<&str> = arr
+    fn tools_list_offers_the_ten_read_tools_and_the_assistant_two_more() {
+        assert_eq!(
+            listed(&tool_definitions()),
+            [
+                "recall",
+                "events_since",
+                "stats",
+                "episodes",
+                "events_by_app",
+                "context",
+                "day",
+                "searches",
+                "person_model",
+                "sessions"
+            ]
+        );
+        assert_eq!(listed(&assistant_tool_definitions()), ["ask", "suggest"]);
+    }
+
+    #[test]
+    fn the_person_model_says_what_it_is() {
+        let definitions = tool_definitions();
+        let model = definitions
+            .as_array()
+            .expect("array")
             .iter()
-            .map(|t| t.get("name").and_then(|n| n.as_str()).unwrap_or(""))
-            .collect();
-        assert!(names.contains(&"mci_recall"));
-        assert!(names.contains(&"mci_events_since"));
-        assert!(names.contains(&"mci_stats"));
-        assert!(names.contains(&"mci_episodes"));
-        assert!(names.contains(&"mci_events_by_app"));
-        assert!(names.contains(&"mci_context"));
+            .find(|tool| tool["name"] == "person_model")
+            .expect("person_model");
+        assert_eq!(
+            model["description"],
+            "What Hippocampus has learned about the user, with sources."
+        );
     }
 
     #[test]
@@ -391,7 +471,7 @@ mod tests {
             .as_array()
             .expect("array")
             .iter()
-            .find(|tool| tool.get("name").and_then(|name| name.as_str()) == Some("mci_recall"))
+            .find(|tool| tool.get("name").and_then(|name| name.as_str()) == Some("recall"))
             .expect("recall definition");
         let description = recall
             .get("description")

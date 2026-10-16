@@ -122,6 +122,22 @@ final class MindServerTests: XCTestCase {
         XCTAssertTrue(Prompts.instructions(userName: "Amy").contains("Other people named on screen are not the user"))
     }
 
+    /// Audit product-4: a mailbox's name and other people's subject lines
+    /// were read as the user's job application.
+    func testProposalsReadAnInboxAndATitleAsOtherPeoplesWords() {
+        let prompt = Prompts.propose(ProposeInput(
+            userName: "Amy",
+            observation: "09:12–09:20 Mail — \"Inbox – Northwind Travel\": reading for 8 min. Text: Career Center: spring positions",
+            known: []
+        ))
+        XCTAssertTrue(prompt.contains(
+            "An inbox, a feed or a page of results shows what other people wrote: its senders, subjects and headlines are theirs, not Amy's plans."
+        ))
+        XCTAssertTrue(prompt.contains("A window's title or an app's name says where Amy was, not what they did there."))
+        XCTAssertTrue(prompt.contains("Make no guess about Amy's job search, health, money or relationships."))
+        XCTAssertTrue(prompt.contains("Start each with \"Amy\"."))
+    }
+
     func testTheInstructionsSetTheVoiceAndKeepTheirOwnStyle() {
         let instructions = Prompts.instructions(userName: "Amy")
         XCTAssertTrue(instructions.contains("When you write to the user, say \"you\". When you write a claim about them, start with their name. Never assume anyone's gender."))

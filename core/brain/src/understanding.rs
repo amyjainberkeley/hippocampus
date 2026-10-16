@@ -634,6 +634,60 @@ impl SqlCipherBrainStore {
         Ok(heads)
     }
 
+    /// The given events with their text and source, oldest first: what a
+    /// proposition's evidence said, to check that it says what the
+    /// proposition claims. Ids that no longer exist are left out, and repeats
+    /// are read once.
+    ///
+    /// # Errors
+    /// Database failures.
+    pub fn observed_events_by_id(&self, ids: &[i64]) -> Result<Vec<ObservedEvent>, StoreError> {
+        let mut wanted = ids.to_vec();
+        wanted.sort_unstable();
+        wanted.dedup();
+        if wanted.is_empty() {
+            return Ok(Vec::new());
+        }
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let select = if table_exists(guard.conn(), "event_sources")? {
+            "SELECT e.id, e.ts_us, e.app_bundle_id, e.window_title, e.url, e.text,
+                    COALESCE(s.source_kind, 'unknown')
+             FROM events e LEFT JOIN event_sources s ON s.event_id = e.id"
+        } else {
+            "SELECT e.id, e.ts_us, e.app_bundle_id, e.window_title, e.url, e.text, 'unknown'
+             FROM events e"
+        };
+        let mut events = Vec::with_capacity(wanted.len());
+        for batch in wanted.chunks(EVENT_HEAD_BATCH) {
+            let sql = format!(
+                "{select} WHERE e.id IN ({})",
+                vec!["?"; batch.len()].join(", ")
+            );
+            let mut statement = guard
+                .conn()
+                .prepare(&sql)
+                .map_err(|e| backend("prepare observed events by id", e))?;
+            let rows = statement
+                .query_map(rusqlite::params_from_iter(batch), |row| {
+                    Ok(ObservedEvent {
+                        id: row.get(0)?,
+                        ts_us: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(0),
+                        app_bundle_id: row.get(2)?,
+                        window_title: row.get(3)?,
+                        url: row.get(4)?,
+                        text: row.get(5)?,
+                        source: row.get(6)?,
+                    })
+                })
+                .map_err(|e| backend("query observed events by id", e))?;
+            for row in rows {
+                events.push(row.map_err(|e| backend("read observed events by id", e))?);
+            }
+        }
+        events.sort_by(|a, b| a.ts_us.cmp(&b.ts_us).then(a.id.cmp(&b.id)));
+        Ok(events)
+    }
+
     /// The heads of the events in `[start_us, end_us)` (never their text),
     /// oldest first: a day's events without loading what they say. At most
     /// `limit`; when there are more, the newest are kept, so the present is

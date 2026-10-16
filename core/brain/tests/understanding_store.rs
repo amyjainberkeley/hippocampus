@@ -10,8 +10,8 @@
 use std::collections::HashSet;
 
 use mci_brain::understanding::{
-    DayReport, EventHead, InteractionCounts, NewProposition, PropositionKind, PropositionStatus,
-    SessionNote,
+    DayReport, EventHead, InteractionCounts, NewProposition, ObservedEvent, PropositionKind,
+    PropositionStatus, SessionNote,
 };
 use mci_brain::{BrainStore, Event, EventId, EventSource, SqlCipherBrainStore};
 use mci_core::crypto::DbKey;
@@ -819,6 +819,46 @@ fn event_heads_carry_no_text() {
         ),
         vec![note_id, page_id]
     );
+}
+
+#[test]
+fn evidence_is_read_back_by_id_with_its_text_and_source() {
+    let (_dir, store) = store();
+    let mut page = event(2_000_000, "BODY-TEXT one", Some("https://stripe.com/docs"));
+    page.window_title = Some("Billing | Stripe".into());
+    let page_id = store
+        .put_event_with_source(&page, EventSource::BrowserPage)
+        .unwrap()
+        .0 as i64;
+    let mut note = event(1_000_000, "BODY-TEXT two", None);
+    note.app_bundle_id = Some("com.apple.Notes".into());
+    let note_id = store
+        .put_event_with_source(&note, EventSource::ScreenOcr)
+        .unwrap()
+        .0 as i64;
+
+    let events = store
+        .observed_events_by_id(&[page_id, note_id, page_id, 4242])
+        .unwrap();
+    assert_eq!(
+        events.iter().map(|e| e.id).collect::<Vec<_>>(),
+        vec![note_id, page_id],
+        "oldest first, repeats once, unknown ids left out"
+    );
+    assert_eq!(
+        events[1],
+        ObservedEvent {
+            id: page_id,
+            ts_us: 2_000_000,
+            app_bundle_id: Some("com.google.Chrome".into()),
+            window_title: Some("Billing | Stripe".into()),
+            url: Some("https://stripe.com/docs".into()),
+            text: "BODY-TEXT one".into(),
+            source: "browser_page".into(),
+        }
+    );
+    assert_eq!(events[0].source, "screen_ocr");
+    assert!(store.observed_events_by_id(&[]).unwrap().is_empty());
 }
 
 #[test]

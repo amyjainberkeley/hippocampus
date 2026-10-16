@@ -22,6 +22,7 @@ pub mod mind;
 pub mod observe;
 pub mod overview;
 pub mod query;
+pub mod sending;
 
 use std::path::PathBuf;
 use std::sync::Arc;

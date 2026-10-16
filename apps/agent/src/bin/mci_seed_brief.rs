@@ -33,6 +33,7 @@
 //!   --body "$(cat /tmp/sample_brief.md)"
 //! ```
 
+use mci_agent::{errln, outln};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -204,7 +205,7 @@ fn hex_nibble(b: u8) -> Option<u8> {
 }
 
 fn print_usage() {
-    println!(
+    outln!(
         "mci-seed-brief {VERSION}\n\
         \n\
         DEMO / smoke-test inserter for the daily-briefs surface (Recall UI Brief tab).\n\
@@ -245,18 +246,18 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         ParseOutcome::Version => {
-            println!("mci-seed-brief {VERSION}");
+            outln!("mci-seed-brief {VERSION}");
             return ExitCode::SUCCESS;
         }
         ParseOutcome::Error(msg) => {
-            eprintln!("mci-seed-brief: {msg}");
+            errln!("mci-seed-brief: {msg}");
             return ExitCode::from(2);
         }
         ParseOutcome::Run(a) => a,
     };
 
     if std::env::var("MCI_DEVELOPMENT_FILE_KEY").as_deref() != Ok("1") {
-        eprintln!(
+        errln!(
             "mci-seed-brief: this development-only tool requires \
              MCI_DEVELOPMENT_FILE_KEY=1."
         );
@@ -264,14 +265,14 @@ fn main() -> ExitCode {
     }
 
     let Ok(key_hex) = std::env::var("MCI_DB_KEY_HEX") else {
-        eprintln!(
+        errln!(
             "mci-seed-brief: MCI_DB_KEY_HEX not set. Use the same value you \
              pass to `mci-agent` so the recall UI can read the brief back."
         );
         return ExitCode::from(10);
     };
     let Some(key_bytes) = decode_hex32(&key_hex) else {
-        eprintln!("mci-seed-brief: MCI_DB_KEY_HEX must be 64 hex characters (32 bytes).");
+        errln!("mci-seed-brief: MCI_DB_KEY_HEX must be 64 hex characters (32 bytes).");
         return ExitCode::from(11);
     };
     let key = DbKey::from_bytes(key_bytes);
@@ -279,7 +280,7 @@ fn main() -> ExitCode {
     if let Some(parent) = args.db_path.parent() {
         if !parent.exists() {
             if let Err(e) = std::fs::create_dir_all(parent) {
-                eprintln!("mci-seed-brief: create_dir_all({}): {e}", parent.display());
+                errln!("mci-seed-brief: create_dir_all({}): {e}", parent.display());
                 return ExitCode::from(12);
             }
         }
@@ -288,7 +289,7 @@ fn main() -> ExitCode {
     let store = match SqlCipherBrainStore::new(&args.db_path, &key) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!(
+            errln!(
                 "mci-seed-brief: open brain at {}: {e}",
                 args.db_path.display()
             );
@@ -299,7 +300,7 @@ fn main() -> ExitCode {
     // Refuse to clobber an existing brief unless --force.
     match store.brief_for_date(&args.date_local) {
         Ok(Some(_)) if !args.force => {
-            eprintln!(
+            errln!(
                 "mci-seed-brief: a brief already exists for {} (pass --force to overwrite).",
                 args.date_local
             );
@@ -307,7 +308,7 @@ fn main() -> ExitCode {
         }
         Ok(_) => {}
         Err(e) => {
-            eprintln!("mci-seed-brief: probe existing brief: {e}");
+            errln!("mci-seed-brief: probe existing brief: {e}");
             return ExitCode::from(14);
         }
     }
@@ -327,7 +328,7 @@ fn main() -> ExitCode {
 
     match store.put_brief(&row) {
         Ok(id) => {
-            eprintln!(
+            errln!(
                 "mci-seed-brief: wrote brief id={id} date_local={} word_count={} to {}",
                 args.date_local,
                 word_count,
@@ -336,7 +337,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("mci-seed-brief: put_brief failed: {e}");
+            errln!("mci-seed-brief: put_brief failed: {e}");
             ExitCode::from(16)
         }
     }

@@ -145,8 +145,8 @@ pub trait BrainReader: Send + Sync {
         limit: usize,
     ) -> Result<Vec<EventRecord>, BrainReaderError>;
 
-    /// What an AI tool reads of one listed event (`mci_events_since`,
-    /// `mci_events_by_app`): a passage of its reading, the first lines or,
+    /// What an AI tool reads of one listed event (`events_since`,
+    /// `events_by_app`): a passage of its reading, the first lines or,
     /// for a terminal or chat app, the last (RULINGS T8, T9), never the
     /// stored header or U+001E (T14), at most
     /// [`EventRecord::SNIPPET_MAX_CHARS`] bytes. Readers that hold the

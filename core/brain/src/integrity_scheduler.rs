@@ -34,6 +34,7 @@
 //! The thread is joined on shutdown so the caller can rely on it
 //! having exited before the store's `Arc` refcount drops to zero.
 
+use std::io::Write as _;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -176,7 +177,10 @@ fn run<C: SchedulerClock>(
             Ok(()) => stats.checks_ok += 1,
             Err(IntegrityError::Corrupted(rows)) => {
                 stats.checks_corrupted += 1;
-                eprintln!(
+                // A closed stderr must not panic the agent's background
+                // thread (EPIPE); the line is best effort.
+                let _ = writeln!(
+                    std::io::stderr(),
                     "brain: WEEKLY integrity_check CORRUPTED — {} row(s): {:?}",
                     rows.len(),
                     rows
@@ -190,7 +194,10 @@ fn run<C: SchedulerClock>(
             }
             Err(IntegrityError::Backend(msg)) => {
                 stats.checks_backend_err += 1;
-                eprintln!("brain: weekly integrity_check backend error: {msg}");
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "brain: weekly integrity_check backend error: {msg}"
+                );
                 // Fall through — a transient driver error (locking,
                 // etc.) shouldn't disable weekly checks forever.
             }

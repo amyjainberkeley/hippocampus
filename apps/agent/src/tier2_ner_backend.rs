@@ -189,6 +189,7 @@ impl NerBackend for NerTier2Backend {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_macros)] // skip notes and timings, captured by the test harness
 mod tests {
     use super::*;
     use std::path::PathBuf;

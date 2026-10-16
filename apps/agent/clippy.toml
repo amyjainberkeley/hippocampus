@@ -1,0 +1,9 @@
+# mci-agent prints through `outln!`, `out!` and `errln!` (src/stdio.rs): the
+# std macros panic when the reader of stdout or stderr has gone away (EPIPE),
+# which crashed long-running modes such as `mcp-serve`.
+disallowed-macros = [
+    { path = "std::println", reason = "panics on a closed stdout; use mci_agent::outln!" },
+    { path = "std::print", reason = "panics on a closed stdout; use mci_agent::out!" },
+    { path = "std::eprintln", reason = "panics on a closed stderr; use mci_agent::errln!" },
+    { path = "std::eprint", reason = "panics on a closed stderr; use mci_agent::errln!" },
+]

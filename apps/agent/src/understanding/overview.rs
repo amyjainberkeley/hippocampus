@@ -1583,13 +1583,18 @@ fn account_of(store: &SqlCipherBrainStore, date: &str) -> Result<Option<Account>
 /// The lines a connected AI is given at the start of a session right now:
 /// the same functions the context packet uses, with no focus.
 #[must_use]
-pub fn ai_knows(store: &SqlCipherBrainStore, now_us: u64, hook_installed: bool) -> AiKnows {
+pub fn ai_knows(
+    store: &SqlCipherBrainStore,
+    tz: i32,
+    now_us: u64,
+    hook_installed: bool,
+) -> AiKnows {
     AiKnows {
         recent_work: query::recent_work(store, now_us)
             .iter()
             .map(query::RecentWork::template)
             .collect(),
-        about_you: query::about_you(store, now_us, None)
+        about_you: query::about_you(store, tz, now_us, None)
             .into_iter()
             .map(|p| AboutLine {
                 id: p.id,
@@ -1800,7 +1805,7 @@ pub fn overview(
             .map(Search::from)
             .collect(),
         account: account_of(store, &date)?,
-        ai_knows: ai_knows(store, now_us, env.hook_installed),
+        ai_knows: ai_knows(store, tz, now_us, env.hook_installed),
     })
 }
 
@@ -2463,13 +2468,20 @@ mod tests {
             .sentences
             .iter()
             .any(|s| s.id == "switched_between"));
+        assert!(
+            o.ai_knows.about_you.is_empty(),
+            "a line seen in one session goes to no AI tool"
+        );
+        assert!(store.confirm_proposition(id, start).unwrap());
+        let o = day(&store, start + 3 * 60 * MIN, false);
         assert_eq!(
             o.ai_knows
                 .about_you
                 .iter()
                 .map(|a| a.id)
                 .collect::<Vec<_>>(),
-            vec![id]
+            vec![id],
+            "once confirmed, it does"
         );
         assert!(!o.ai_knows.hook_installed);
         for text in texts(&o) {

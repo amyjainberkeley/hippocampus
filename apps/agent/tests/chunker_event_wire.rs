@@ -289,7 +289,7 @@ async fn n_synthetic_ocr_events_become_n_rows_and_typed_recall_context() {
         None,
     )));
     let resp = server
-        .dispatch(req_call("mci_stats", &serde_json::json!({})))
+        .dispatch(req_call("stats", &serde_json::json!({})))
         .expect("response");
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
     let result = resp.result.expect("result");

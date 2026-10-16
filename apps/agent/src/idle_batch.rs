@@ -20,6 +20,7 @@
 //!   a suppressed event because suppressed events don't have rows in
 //!   `events`.
 
+use crate::errln;
 use std::sync::Arc;
 
 use mci_brain::{Embedder, SqlCipherBrainStore};
@@ -184,9 +185,10 @@ pub async fn run_idle_batch_worker(
                     // diagnostic text and `event.id` is a row id, never
                     // event content.
                     if stats.embed_errors == 1 || stats.embed_errors % 64 == 0 {
-                        eprintln!(
+                        errln!(
                             "mci-agent: idle-batch embed error #{} (event {}): {e}",
-                            stats.embed_errors, event.id,
+                            stats.embed_errors,
+                            event.id,
                         );
                     }
                     continue;

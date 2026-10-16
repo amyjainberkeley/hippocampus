@@ -145,7 +145,7 @@ impl BrainStore for FtsSanitizingStore {
         self.inner.identity_members(identity_id)
     }
 
-    // The two enrichment reads `mci_recall`'s `entities[]` / `linked_event_ids[]`
+    // The two enrichment reads `recall`'s `entities[]` / `linked_event_ids[]`
     // use. The production reader currently calls these on the concrete store
     // (`enrich_hit`), so they already reach real data — but a faithful read
     // decorator must forward them too, so the same inert-seam class can never

@@ -530,8 +530,6 @@ export MCI_DB_PATH="$DB_PATH"
 export MCI_DEVELOPMENT_FILE_KEY=1
 export MCI_DB_KEY_FILE="$KEY_FILE"
 unset MCI_DB_KEY_HEX
-unset MCI_CRASH_REPORT_URL
-unset MCI_CRASH_REPORT_OPTED_IN
 export MCI_CAPTURE_ENABLED=1
 # This run qualifies the focused-window stream: its background token must not
 # appear at all. Whole-screen capture (ADR-0040) files background text under

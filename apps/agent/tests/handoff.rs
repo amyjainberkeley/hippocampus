@@ -2,6 +2,8 @@
 //! synthetic fixture (two projects, three sessions, user/assistant/tool
 //! roles, decision and avoid phrases, questions, two days).
 
+#![allow(clippy::disallowed_macros)] // the packets print for review; the test harness captures them
+
 mod handoff_fixture;
 
 use std::process::Command;

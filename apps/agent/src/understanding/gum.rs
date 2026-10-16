@@ -186,7 +186,8 @@ pub fn mmr(candidates: &[(Proposition, f64)], n: usize) -> Vec<Proposition> {
     chosen
 }
 
-const GENERIC: &[&str] = &[
+/// Words that fit any claim about anyone, so they say nothing about this one.
+pub(crate) const GENERIC: &[&str] = &[
     "user",
     "users",
     "project",
@@ -378,13 +379,23 @@ pub fn integrate(
     now_us: u64,
 ) -> Result<Integration, GumError> {
     let rejected = store.propositions_with_status(PropositionStatus::Rejected, 500)?;
+    let forgotten: Vec<BTreeSet<String>> = rejected
+        .iter()
+        .map(|r| super::sending::keywords(&r.text))
+        .collect();
+    // What the person forgot never comes back, in its words or others.
+    let says_forgotten = |text: &str| {
+        let words = super::sending::keywords(text);
+        rejected.iter().any(|r| similarity(&r.text, text) >= 0.6)
+            || forgotten
+                .iter()
+                .any(|f| super::sending::restates(&words, f))
+    };
     let confirmed = store.confirmed_proposition_ids()?;
     let mut outcome = Integration::default();
     for draft in drafts {
         let text = draft.text.trim();
-        if text.split_whitespace().count() < 4
-            || rejected.iter().any(|r| similarity(&r.text, text) >= 0.6)
-        {
+        if text.split_whitespace().count() < 4 || says_forgotten(text) {
             outcome.skipped += 1;
             continue;
         }
@@ -454,12 +465,18 @@ pub fn integrate(
                 continue;
             }
         };
+        let revised = prepare(revised, user_name, false);
+        if says_forgotten(revised.text.trim()) {
+            // A merge that would bring a forgotten line back leaves the
+            // stored claims as they are.
+            outcome.skipped += 1;
+            continue;
+        }
         let mut all_evidence: Vec<i64> = evidence.to_vec();
         for old in &related[1..] {
             all_evidence.extend(old.evidence.iter().copied());
             store.set_proposition_status(old.id, PropositionStatus::Retired, now_us)?;
         }
-        let revised = prepare(revised, user_name, false);
         store.revise_proposition(
             related[0].id,
             &revised.to_new(&mind.engine_label()),
@@ -646,12 +663,17 @@ mod tests {
     /// A model that judges both stored claims identical to the draft and
     /// then, if asked, writes one merged revision of them.
     fn merging_mind(dir: &std::path::Path, a: i64, b: i64) -> MindClient {
+        merging_mind_writing(dir, a, b, "Sam is pricing the Team plan")
+    }
+
+    /// [`merging_mind`], with the merged revision saying `merged`.
+    fn merging_mind_writing(dir: &std::path::Path, a: i64, b: i64, merged: &str) -> MindClient {
         use std::os::unix::fs::PermissionsExt;
         let relate = serde_json::json!({"id": 1, "ok": true, "output": {"relations": [
             {"id": a, "relation": "identical"}, {"id": b, "relation": "identical"},
         ]}});
         let revise = serde_json::json!({"id": 2, "ok": true, "output": {
-            "text": "Sam is pricing the Team plan", "reasoning": "merged", "kind": "project", "confidence": 7, "decay": 3,
+            "text": merged, "reasoning": "merged", "kind": "project", "confidence": 7, "decay": 3,
         }});
         let path = dir.join("fake-mind");
         std::fs::write(
@@ -827,5 +849,116 @@ mod tests {
                 .len(),
             2
         );
+    }
+
+    /// The line the person forgot in the audit (product-4): a mailbox's name
+    /// read as a job application.
+    const FORGOTTEN: &str = "Sam is planning a trip through the Northwind Travel account";
+
+    fn forget(m: &Merge, text: &str) -> i64 {
+        let id = m
+            .store
+            .insert_proposition(
+                &NewProposition {
+                    text: text.into(),
+                    reasoning: "seen".into(),
+                    kind: PropositionKind::Goal,
+                    confidence: 0.8,
+                    decay: 0.3,
+                    model: "t".into(),
+                },
+                &[m.old],
+                5,
+            )
+            .unwrap();
+        m.store
+            .set_proposition_status(id, PropositionStatus::Rejected, 6)
+            .unwrap();
+        id
+    }
+
+    #[test]
+    fn a_forgotten_line_is_not_stored_again_in_other_words() {
+        let m = two_claims();
+        forget(&m, FORGOTTEN);
+        let reworded = Draft {
+            text: "Sam is booking trips with the Northwind Travel account".into(),
+            reasoning: "inbox".into(),
+            kind: "goal".into(),
+            confidence: 8,
+            decay: 3,
+        };
+        assert!(
+            similarity(FORGOTTEN, &reworded.text) < 0.6,
+            "the old word-overlap check alone let this through"
+        );
+
+        let outcome = integrate(
+            &m.store,
+            &MindClient::new(None),
+            "Amy",
+            &[reworded],
+            &[m.new],
+            30,
+        )
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            Integration {
+                added: 0,
+                revised: 0,
+                skipped: 1
+            }
+        );
+        let active: Vec<i64> = m
+            .store
+            .propositions_with_status(PropositionStatus::Active, 10)
+            .unwrap()
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(active.len(), 2, "only the two pricing claims: {active:?}");
+    }
+
+    #[test]
+    fn a_merge_never_writes_a_forgotten_line_back() {
+        let m = two_claims();
+        forget(&m, FORGOTTEN);
+        let mind = merging_mind_writing(
+            m.dir.path(),
+            m.a,
+            m.b,
+            "Sam is planning a trip with Northwind Travel",
+        );
+
+        let outcome = integrate(&m.store, &mind, "Amy", &[restatement()], &[m.new], 30).unwrap();
+
+        assert_eq!(
+            outcome,
+            Integration {
+                added: 0,
+                revised: 0,
+                skipped: 1
+            }
+        );
+        let mut active: Vec<i64> = m
+            .store
+            .propositions_with_status(PropositionStatus::Active, 10)
+            .unwrap()
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        active.sort_unstable();
+        assert_eq!(
+            active,
+            vec![m.a, m.b],
+            "the stored claims stay as they were"
+        );
+        assert!(m
+            .store
+            .propositions_with_status(PropositionStatus::Retired, 10)
+            .unwrap()
+            .is_empty());
     }
 }

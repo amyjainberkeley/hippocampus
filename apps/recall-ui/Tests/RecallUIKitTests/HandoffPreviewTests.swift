@@ -30,7 +30,8 @@ final class HandoffPreviewTests: XCTestCase {
                 XCTAssertFalse(run.inlinePresentationIntent?.contains(.stronglyEmphasized) == true)
             }
         }
-        XCTAssertTrue(packet.contains("&#58;"), "Display parsing must not modify the export packet.")
+        XCTAssertTrue(packet.contains(hostile), "the packet carries the captured text as it was, in a code block")
+        XCTAssertFalse(packet.contains("&#"), "and no character codes")
     }
 
     func testEvenExplicitLinksAndImagesHaveNoActiveAttributes() {

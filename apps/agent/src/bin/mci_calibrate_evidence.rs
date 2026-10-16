@@ -4,6 +4,7 @@
 //! fixture's `fit` split, chooses a lower-tail threshold using only positive
 //! `calibration` examples, and reports the untouched `validation` split.
 
+use mci_agent::{errln, outln};
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -392,14 +393,14 @@ fn run(fixture_path: &Path, output_path: &Path) -> Result<(), String> {
         .map_err(|error| format!("serialize calibration report: {error}"))?;
     fs::write(output_path, encoded)
         .map_err(|error| format!("write {}: {error}", output_path.display()))?;
-    println!("calibration report: {}", output_path.display());
-    println!("fixture sha256: {}", report.fixture_sha256);
-    println!("means: {:?}", report.means);
-    println!("scales: {:?}", report.scales);
-    println!("weights: {:?}", report.weights);
-    println!("intercept: {:.9}", report.intercept);
-    println!("threshold: {:.9}", report.threshold);
-    println!(
+    outln!("calibration report: {}", output_path.display());
+    outln!("fixture sha256: {}", report.fixture_sha256);
+    outln!("means: {:?}", report.means);
+    outln!("scales: {:?}", report.scales);
+    outln!("weights: {:?}", report.weights);
+    outln!("intercept: {:.9}", report.intercept);
+    outln!("threshold: {:.9}", report.threshold);
+    outln!(
         "calibration coverage={:.3} fpr={:.3}; validation coverage={:.3} fpr={:.3}",
         report.calibration.positive_coverage,
         report.calibration.negative_false_positive_rate,
@@ -422,7 +423,7 @@ fn main() -> ExitCode {
     match run(&fixture, &output) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("mci-calibrate-evidence: {error}");
+            errln!("mci-calibrate-evidence: {error}");
             ExitCode::FAILURE
         }
     }
