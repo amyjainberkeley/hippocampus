@@ -1,141 +1,99 @@
 # Architecture
 
-Hippocampus is a local-first "total recall" desktop app. It continuously records what you see on screen and the structured context around it (frontmost app, focused window, active browser tab URL, page text), turns that stream into a private, encrypted, searchable memory, and lets you — or an agent acting for you — recall any past moment by natural-language query: *"what was that pricing page I looked at last Tuesday?"*
+Hippocampus reads what is on a Mac's screen, keeps it in an encrypted database on that Mac, learns from it what the person works on, and lets them and their AI tools search it. This page is the map: the processes, how a moment travels from the screen to an answer, and the rules a change must keep. What works today, and how each part was checked, is in [docs/STATUS.md](docs/STATUS.md). Why things are the way they are is in [docs/decisions/](docs/decisions/).
 
-This document is for an engineer reading the codebase cold. It describes what the system is, how data flows through it, why the load-bearing decisions were made, and — honestly — what is actually working versus what is built but unproven. The exhaustive design rationale lives in the ADRs under [`docs/decisions/`](docs/decisions/); this is the map.
+Everything runs on the Mac. There is no server, no account and no sync between Macs.
 
-Platform scope: macOS ships first. Windows is a defined-but-unbuilt later phase. The whole architecture exists to make the second one cheap.
+## The processes
 
----
+Hippocampus.app holds eight programs. The menu-bar app starts and stops the rest.
 
-## The core idea: a portable Rust core behind one capture seam
+| Process | Language, source | What it does |
+| --- | --- | --- |
+| `Hippocampus` | Swift, [`apps/hippocampus`](apps/hippocampus) | The menu bar, Ask, Preferences and the updater. Starts the helper and the agent, and stops everything it started on Quit. |
+| `MCICaptureHelper` | Swift, [`adapters/macos/MCICaptureHelper`](adapters/macos/MCICaptureHelper) | Captures the screen with ScreenCaptureKit, decides what may be read, has it read, and sends the text to the agent. Keeps screenshots of the window in front, encrypted. |
+| `hippocampus-ocr` | Python, frozen, [`tools/ocr`](tools/ocr) | The text reader: RapidOCR with the PaddleOCR PP-OCRv6 small models on ONNX Runtime. A warm child of the helper, in `Contents/Resources/HippocampusOCR`. |
+| `mci-agent` | Rust, [`apps/agent`](apps/agent) | Owns the memory. Stores what the helper sends, builds search data, works out sessions and what it learns about the person, deletes what is past its keep date, and serves memory to AI tools (`mci-agent mcp-serve`). |
+| `hippocampus-mind` | Swift, [`apps/mind`](apps/mind) | Writes answers, session notes, the day's summary and what is learned, with Apple Intelligence or a model server on the Mac. A child of the agent; it gets only `PATH` and `HOME`. |
+| `recall-ui` | Swift, [`apps/recall-ui`](apps/recall-ui) | The window: Overview, Ask with its History, You, and the privacy window. Reads memory through [`mci-brain-ffi`](adapters/macos/mci-brain-ffi). |
+| `onboarding` | Swift, [`apps/onboarding`](apps/onboarding) | Setup's four screens, the two permissions, and Choose Apps. |
+| `hippocampus-native-host` | Rust, [`apps/hippocampus-native-host`](apps/hippocampus-native-host) | Passes page text from the optional browser extension ([`extensions/`](extensions)) to the agent. |
 
-Screen capture, hardware encode, and OCR are irreducibly OS-specific. The intelligence — dedupe, indexing, embedding, retrieval, encryption, sync — is not. If we wrote the intelligence natively per platform we would write the hard part twice.
-
-So the whole system is split along a single Rust trait, `CaptureSource` (`core/src/capture.rs`):
-
-- **Below the seam** — a thin, native, per-OS *adapter* that knows how to grab frames and read window/app/URL context and hand them across an FFI boundary. On macOS this is a Swift helper.
-- **Above the seam** — everything else, written once in Rust: the pipeline, the "brain," crypto, the store, sync, the local query API.
-
-Nothing above `CaptureSource` may contain OS-specific code. Adding Windows later means implementing one adapter, not touching the brain. That is the entire cross-platform bet, and it is the first thing to internalize before reading any module.
-
-One deliberate constraint shapes the FFI: **pixels never cross the seam as an owned buffer.** The adapter hands the core an opaque, borrowed `SurfaceHandle` (a macOS `IOSurface` / Windows D3D texture) with a strict release-timing contract; the core copies-out or encodes from GPU memory and drops it immediately. This keeps an all-day recorder off the CPU, which is the difference between "invisible" and "laptop is hot."
-
----
-
-## Data flow: capture → OCR → extract/embed → encrypted store → recall
+## From the screen to an answer
 
 ```
- screen + context           Rust core (mci-core)              brain (mci-brain)          recall
-┌───────────────┐   frames  ┌────────────────────┐   event   ┌──────────────────┐      ┌─────────┐
-│ macOS Swift   │  +events  │ capture pipeline    │  ───────▶ │ segment/summarize│  ◀── │ local   │
-│ capture helper│ ────────▶ │  · idle/status gate │           │ embed (Arctic-S) │      │ UI /    │
-│ (CaptureSource│           │  · dirty-rect triage│           │ FTS5 + Rust scan │      │ agent   │
-│  impl)        │           │  · dHash dedupe     │           │ hybrid retrieval │      │ (RAG)   │
-└───────────────┘           │  · OCR orchestration│           └────────┬─────────┘      └─────────┘
-                            └─────────┬───────────┘                    │
-                                      │  one SQLCipher-encrypted SQLite file
-                                      ▼           (events · text/FTS5 · vectors · blobs-ref)
-                            encrypted delta log ───▶ sync scaffold (not shipped or verified)
+ ScreenCaptureKit                         MCICaptureHelper                                   mci-agent
+┌──────────────────────┐   pixels   ┌─────────────────────────────────┐   framed text   ┌──────────────────────────────┐
+│ the window in front  │ ─────────▶ │ skip rules, then the reader     │ ──────────────▶ │ encrypted store (SQLCipher)  │
+│ every display        │            │ (hippocampus-ocr), secret scans │   over a pipe    │ search data, sessions,       │
+└──────────────────────┘            │ reading order, screenshot (AES) │                  │ what it learns, retention    │
+                                    └─────────────────────────────────┘                  └──────┬───────────┬──────────┘
+                                                                                                │           │ JSON lines
+                                                                 Ask, the window, AI tools ◀────┘           ▼
+                                                                 (mcp-serve, mci-brain-ffi)         hippocampus-mind
 ```
 
-1. **Capture.** The adapter delivers frames only at *meaningful state transitions*, not at a fixed frame rate. A filter chain — cheapest first — decides what survives: an idle gate (no input → stop), the platform "did anything change" signal, dirty-rect triage, and a 64-bit **dHash** perceptual dedupe to drop scroll jitter and near-duplicates. An 8-hour day collapses to a few thousand events, not millions of frames. This filter chain is the entire energy budget; a mistuned dHash threshold floods everything downstream.
+1. **Capture.** The helper runs two kinds of ScreenCaptureKit stream. One follows the window in front, at up to two frames a second. One per display covers everything else, at one frame every two seconds. Hippocampus's own windows, the skipped apps, notification banners and the Dock are filtered out of the display streams before any pixel exists ([ADR-0040](docs/decisions/0040-whole-screen-background-capture.md)).
+2. **Decide.** Before a frame is read, the suppression cascade checks it: a skipped app, a private browser window, a sign-in or bank site, a blacked-out region, an active password field ([`SuppressionCascade.swift`](adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Suppression/SuppressionCascade.swift), [ADR-0013](docs/decisions/0013-native-grade-sensitive-surface-suppression.md)). A frame that fails any check is not read.
+3. **Pace.** A frame is read only when its text changed. The window in front is read at most every 3 seconds; the displays at most every 30 seconds plugged in, 60 on battery, and not in Low Power Mode. After each read the reader rests three times as long as the read took, more on battery ([ADR-0041](docs/decisions/0041-browsers-and-reading-cadence.md)).
+4. **Read.** The worker returns lines with their boxes and the pane separators it finds. The helper puts the lines in reading order and sets the window's tabs, sidebars and bars apart from what was being read. It checks the text against four secret patterns three times, as read, in reading order and exactly as it will be stored, and drops the moment if any matches. The reader's choice, and its measured accuracy and cost, are in the [bake-off](eval/ocr-bakeoff-2026-10-15.md).
+5. **Store.** The helper sends each moment over a pipe to `mci-agent --drain-stdin`, in the framed wire format of [`core/src/ipc`](core/src/ipc). Text from other windows is stored under its own app and title. The agent writes it to one SQLCipher database, `~/Library/Application Support/MCI/mci.sqlite`. Screenshots are JPEGs sealed with AES-GCM in `MCI/blobs/`.
+6. **Index.** In the background the agent embeds new moments with Snowflake Arctic Embed S on Core ML (384 dimensions, run on the CPU) and indexes their text with FTS5. A search mixes the two scores with recency and source ([ADR-0010](docs/decisions/0010-event-episode-retrieval-unit-cc-fusion.md)).
+7. **Learn.** Every cycle the agent splits recent activity into sessions, writes a note for each, and folds what the notes say about the person into short statements with the moments behind them. The method follows Shaikh et al. (2025), who call it a general user model; Hippocampus keeps the result as a personal context model: plain statements, each linked to its evidence, in the words AI tools receive ([`apps/agent/src/understanding`](apps/agent/src/understanding)). The writing is done by `hippocampus-mind`. Without a model, sessions and the day are written from measurements alone, and nothing new is learned.
+8. **Answer.** Ask, in the menu-bar app, keeps two `mci-agent mcp-serve` processes warm: one searches, the other answers through `hippocampus-mind`, with this window as the first source. The window reads the same memory through `mci-brain-ffi`.
 
-2. **OCR + context join.** For each surviving transition the adapter runs on-device OCR (macOS Vision, `.accurate`, scoped to dirty rects only) and joins the workflow context: app bundle, window title, active browser URL, and — when the optional browser extension is present — clean DOM page text. OCR is the heaviest step; it runs only on transition keyframes and only on changed sub-regions.
+## AI tools
 
-3. **Extract + embed.** In the brain, each event is segmented into episodes (time-gap + content-shift, no LLM), optionally key-expanded with an on-device LLM-written summary and entities, then embedded. The retrieval unit is the **event**, not a flat chunk (ADR-0010); over-long events are sub-chunked on semantic boundaries. Embedding and summarization are deferred to idle/charging time — never the hot path.
+Connect AI Tools… registers `mci-agent mcp-serve` as an MCP server named `hippocampus` in Claude Code (`~/.claude.json`) and Codex (`~/.codex/config.toml`). The server speaks JSON-RPC over stdio, opens no port, and is read-only: `mci_recall`, `mci_events_since`, `mci_stats`, `mci_episodes`, `mci_events_by_app`, `mci_context`, `mci_day`, `mci_searches`, `mci_user_model` and `mci_sessions` ([`apps/agent/src/mcp`](apps/agent/src/mcp)). Ask's own session adds `mci_ask` and `mci_suggest`.
 
-4. **Store.** Everything lands in **one SQLCipher-encrypted SQLite file**: relational `events`/`episodes`, `event_text` with an FTS5 virtual table, and stored 384-d vectors. Keyframe blobs live in a content-addressed on-disk store; the DB holds references. One database, one encryption boundary. The current retriever performs its cosine scan in Rust; sqlite-vec is not a shipped runtime dependency.
+If the person agrees, a session-start hook (`mci-agent handoff --format claude-hook`) gives each new Claude Code session up to four lines of recent work and up to six things learned about the person, with sources; Codex is told to ask for the same ([`SessionContextInstaller.swift`](apps/hippocampus/Sources/HippocampusKit/SessionContextInstaller.swift)). The tool starts its own `mcp-serve`, which reads the key from the Keychain, so it can read memory while Hippocampus is quit.
 
-5. **Recall.** A query runs **hybrid retrieval**: FTS5 lexical + vector KNN semantic, fused by a min-max convex combination that also weights recency and source. A query router handles "right before X" (anchor-then-window) and "last Tuesday" (time-range extraction). Results surface through a local UI and an authenticated loopback API so an agent can answer from your memory.
+## Models
 
----
+| Model | Where | Used for |
+| --- | --- | --- |
+| PaddleOCR PP-OCRv6 small, through RapidOCR | Bundled in the OCR worker | Reading the screen |
+| Snowflake Arctic Embed S, FP16 Core ML | Bundled in the app | Search by meaning |
+| Apple Intelligence (Foundation Models) | macOS 26, on the Mac | Answers, notes, the day, what is learned |
+| A model on Ollama or LM Studio | The person's own server at 127.0.0.1, ::1 or localhost | The same, when Apple Intelligence isn't there |
 
-## Why these specific choices
+`hippocampus-mind` links Foundation Models weakly, so it is built to start on macOS 14 and 15, where it reports answers as unavailable unless a model server is running. Background writing with a model server waits for mains power; answers to Ask don't.
 
-- **SQLCipher, one database.** Relational data, FTS5 text, and vectors stay inside the encrypted SQLite database instead of a separate vector service. The database key is a non-synchronizable generic-password item in the macOS file Keychain with a `SecAccess` trusted-application list. The current read audit proves readability only; it does not prove the access object or non-exportability.
+## Keys and encryption
 
-- **FTS5 + Rust cosine hybrid.** Screen text is heterogeneous — code, UI fragments, prose, error strings. Lexical search nails exact tokens (a filename, an error code); semantic search nails intent ("that pricing discussion"). The current implementation scans stored vectors in Rust and fuses lexical and semantic scores. sqlite-vec remains deferred.
+The database key is a generic-password item in the login Keychain, not synced, with an access list of Hippocampus's own signed programs ([`adapters/macos/mci-keychain`](adapters/macos/mci-keychain)). Child processes and AI tools get a Keychain reference, never the key. Screenshots are sealed with a key derived from it. A Developer ID signature that stays the same across updates keeps the Keychain's access list valid; an ad-hoc development build can't show that. [PRIVACY.md](PRIVACY.md#threat-model) says what this protects against and what it doesn't.
 
-- **On-device `snowflake-arctic-embed-s`.** 33M params, 384-d, Apache-2.0, run through Core ML with compute units pinned to CPU. The current BERT graph does not reside on the Neural Engine. The model card's required query/document prefixes are applied inside the embedder wrapper.
+## Optional paths, off by default
 
-- **Native capture, not Electron.** The footprint budget (steady-state ≤10–15% of one core, ≤2 GB RAM at default settings) depends on native ScreenCaptureKit surfaces and Vision OCR. That is the whole reason the capture/OCR layer is a native Swift helper and not a cross-platform GUI runtime.
+- **Mail and Messages.** With "Capture + Deep hook" chosen in Choose Apps and Full Disk Access granted, the agent reads new messages from `chat.db` and Mail's files ([`mci-messages-reader`](adapters/macos/mci-messages-reader), [`mci-mail-reader`](adapters/macos/mci-mail-reader)). One-time codes, bank alerts and mail from banks are taken out before anything is stored.
+- **The browser extension.** A Chromium extension, from source in [`extensions/chromium`](extensions/chromium), sends each page's address and the text not on screen through the native host to a Unix socket in the data folder. The Safari extension is a scaffold.
+- **Your own MCP servers.** `mci-agent mcp-sync` reads from servers listed in `mcp-servers.toml`, at addresses on this Mac only.
+- **Transcripts.** `mci-agent init` and `import-sessions` import Claude Code and Codex transcripts. The app never does.
 
-- **Swift adapter, not pure objc2 FFI.** ScreenCaptureKit / VideoToolbox / Vision are cleanest from Swift. We accept a small Rust↔Swift bridge cost to get one shared brain instead of a second native implementation.
+## Not built
 
----
+- Sync between Macs. Earlier server and sync code was removed, and nothing sends memory anywhere.
+- Windows. [`adapters/windows`](adapters/windows) is a scaffold of the `CaptureSource` trait in [`core/src/capture.rs`](core/src/capture.rs); the macOS helper speaks the wire format directly.
+- Calendar, Notes and Reminders readers: scaffolds that return nothing.
 
-## Crate / module map
+## Code map
 
-### Rust workspace (`Cargo.toml`)
+| Path | What is there |
+| --- | --- |
+| `core/` (`mci-core`) | The wire format between helper and agent, the `CaptureSource` trait, and key handling. No macOS code. |
+| `core/brain/` (`mci-brain`) | The encrypted store, search, sessions, what is learned, deletion and retention, redaction and entity extraction. No macOS code. |
+| `core/brief/`, `core/brief-eval/` | Daily briefs, written from the day's moments with citations, and their scoring harness. |
+| `core/mcp-client/` | The client `mcp-sync` uses for the person's own MCP servers. |
+| `adapters/macos/` | The capture helper, the screenshot codec, the Keychain, Core ML, the window's FFI, and the Mail and Messages readers. |
+| `apps/` | The programs in the table above. |
+| `tools/ocr/` | The OCR worker, its build (`prepare.py`, `bundle.py`), and the reading bench in `screens/`. |
+| `eval/`, `docs/eval/` | Evaluations: the reader bake-off, search, briefs and handoff. |
+| `scripts/` | Builds, the release, and `check.sh`, which runs every test lane. |
 
-| Crate | Responsibility |
-|---|---|
-| `core/` (`mci-core`) | The portable core: the `CaptureSource` trait/seam, the capture pipeline skeleton, crypto (`crypto/` — DB key + Keychain key-wrap), the SQLite store (`store/` — schema, migrations, open, tombstones), and the IPC layer (`ipc/` — framed wire protocol + fd-passing to the helper). OS-free. |
-| `core/brain/` (`mci-brain`) | The memory layer. `sqlcipher_brain_store.rs` (the encrypted store), `hybrid_retriever.rs` (FTS5 + vector fusion), `arctic_embed_s.rs` (embedder wrapper), `episode_segmenter.rs`, `event_chunker.rs`, `consolidator.rs`, `alias_resolver.rs`, `retention_purger.rs`, `extraction/` (Tier-1 regex + Tier-2 NER entity extraction), and `redaction/` (per-source sensitive-content plugins). |
-| `core/brief/` | On-device "brief" (per-event summary) authoring: model lifecycle, the Qwen-based author backend, and a security tripwire. |
-| `core/brief-eval/` | Offline scoring harness for brief quality (gold fixtures + scorer). |
-| `core/mcp-client/` | Pure-Rust MCP client + stdio transport. Foundation for aggregating third-party MCP servers into the recall pipeline. Stdio only = process-local IPC, so the zero-network discipline holds. |
+## Rules a change must keep
 
-### macOS adapters (`adapters/macos/`)
-
-| Crate | Responsibility |
-|---|---|
-| `MCICaptureHelper/` | The Swift capture helper — the real `CaptureSource` implementation. ScreenCaptureKit capture, Vision OCR, NSWorkspace/Accessibility/AppleScript context, sensitive-surface suppression, TCC handling, and the IPC bridge back to the Rust core. |
-| `mci-embed-coreml/` | Core ML backend for the Arctic-Embed-S embedder, currently CPU-pinned. `cfg`-gated to macOS. |
-| `mci-coreml-bridge/` | Generic Core ML model wrapper + per-model shims (Qwen brief generation; NER). |
-| `mci-brain-ffi/` | Read-only C-ABI view of the brain, consumed by the SwiftUI recall UI. |
-| `mci-mail-reader`, `mci-messages-reader` | Read-only "deep hook" read paths (Mail `.emlx` + Envelope Index; Messages `chat.db`) feeding entity extraction. Paired with `redaction/` plugins on ingest. |
-| `mci-calendar-reader`, `mci-notes-reader`, `mci-reminders-reader` | Phase-D deep-hook adapters — **scaffold only**: public types + stubbed reads returning empty. |
-
-### Apps (`apps/`)
-
-| Crate | Responsibility |
-|---|---|
-| `apps/agent/` | The headless orchestrator/daemon. Owns the ingest pipeline and the background workers (embed, brief, episode, consolidator, Tier-2 NER, mail/messages ingest, retention, MCP aggregation), the supervisor/crash-recovery, health telemetry, and the `v2p1_gate` that gates live capture. |
-| `apps/hippocampus/` | The shipping macOS app (Swift): menu-bar shell, launch/update (Sparkle/LoginItems), DMG packaging, model bundling. |
-| `apps/recall-ui/` | SwiftUI recall + settings UI. Talks to the brain through `mci-brain-ffi`. |
-| `apps/onboarding/` | First-run onboarding + TCC permission flow (Screen Recording / Accessibility / Automation). |
-| `apps/hippocampus-native-host/` | Browser-extension native-messaging host; forwards clean page text into the pipeline with a secret filter. |
-
-### Other
-
-| Path | Responsibility |
-|---|---|
-| `adapters/windows/` | Windows `CaptureSource` adapter (WGC / Media Foundation / Windows.Media.Ocr / UIA). Scaffold, all methods stubbed. |
-| `extensions/` | Optional per-browser page-text extensions (`chromium/` working; `safari/` scaffold). |
-| `tools/`, `eval/` | Perf-soak harness, NER bake-off, retrieval eval corpora. |
-
----
-
-## Component status — honest
-
-| Component | Status |
-|---|---|
-| **Encrypted store + hybrid recall** | **Working and tested.** The SQLCipher store, FTS5 + Rust-side cosine hybrid retriever, episode segmentation, retention, and the read-only FFI to the recall UI are implemented and exercised end-to-end. sqlite-vec is not shipped. |
-| **On-device semantic search (Arctic-Embed-S)** | **Working.** Core ML embedding pipeline (external Rust tokenization, FP16 weights, CLS-pool + L2-norm in-graph) with a quality regression test asserting cosine parity. |
-| **Live screen capture (Swift helper)** | **Built but not yet verified on release hardware, and default-OFF.** Capture is controlled only by the persisted root `capture_enabled` preference after TOMLKit validates the entire runtime document. Malformed syntax, wrong types, duplicate semantic keys, and ambiguous authority fail closed; writes are reparsed before atomic replacement. A change restarts the topology and is committed only after the matching generation reports readiness following `SCStream.startCapture()`. The removed `HIPPOCAMPUS_ENABLE_V2P1` variable has no authority. Full TCC denial/recovery and sustained on-device capture still require owner verification. |
-| **Context join (app / window / URL / page text)** | **Implemented.** NSWorkspace + Accessibility + AppleScript URL providers landed; browser extension (Chromium MV3 + native messaging) working, Safari appex scaffold-only. |
-| **Privacy controls** | **Mostly landed** (retention purger, denylist/suppression, file-Keychain database-key custody, and legacy plaintext migration). Delete is local row deletion plus `VACUUM`; crypto-shredded range deletion is not implemented. Production children receive content-free Keychain references and scrub reusable key variables. Real ACL inspection across all four signed consumers, cross-version continuity, and physical-Mac capture verification remain owner/API gates. |
-| **On-device brief author (Qwen)** | **Partial.** Rust backend complete; historically blocked on Core ML `.mlpackage` conversion. The shipping DMG bakes in the models (embedder, NER, brief) to make first-run fully offline. |
-| **Encrypted cloud sync** | **Skeleton.** Server + client-side crypto + device-enrollment tests exist; cross-device convergence and the end-to-end privacy claim are not proven. |
-| **Deep hooks (Mail/Messages)** | **Read paths landed, read-only.** No brain write on the ingest cascade until the per-plugin redaction path is wired. Calendar/Notes/Reminders are scaffold only. |
-| **Windows adapter** | **Not built.** Scaffold crate, stubbed methods. |
-
-Stable Developer ID signing is required for release so file-Keychain ACL trust can remain continuous across app updates. Ad-hoc development builds do not prove that continuity.
-
-AppKit quit and quit-and-restart use an awaited termination coordinator. It
-publishes `.stopped` only after helper and agent PIDs have passed TERM grace,
-KILL escalation when needed, and process-table death checks. Restart scheduling,
-lifecycle cleanup, and a positive AppKit termination reply occur after that
-verified state. `applicationWillTerminate` performs idempotent cleanup only.
-
----
-
-## Invariants a new contributor must not break
-
-- **Nothing above `CaptureSource` may contain OS-specific code.** The seam is the whole cross-platform strategy.
-- **One encrypted SQLite file.** Don't add a store that lives outside the SQLCipher boundary.
-- **The sync server never sees plaintext.** Any crypto/sync/key change is review-gated.
-- **Sensitive-capture controls ship with capture, not after** — source-level suppression (denylist / incognito / pause) is the load-bearing privacy primitive; OCR-time redaction is only defense-in-depth.
-- **Nothing leaves the machine by default.** Capture, OCR, embedding, and understanding are all on-device; cloud is opt-in and encrypted.
+- **Read nothing before the skip rules run.** The cascade decides before any read, and the secret checks run before text leaves the helper. They may be extended, never weakened, and their tests must pass.
+- **One encrypted database.** Nothing the person saw is stored outside SQLCipher and the sealed screenshots.
+- **No macOS code in `core/`.** It stays portable, so a second platform means a new adapter.
+- **Nothing leaves without the person's choice.** No network path carries what was on screen, except to the AI tools and the model server on this Mac the person chose. A change to that is a new decision record.
+- **Errors surface.** Nothing falls back silently to a worse answer.

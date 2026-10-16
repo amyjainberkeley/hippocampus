@@ -27,8 +27,7 @@ CI lints titles as [Conventional Commits](https://www.conventionalcommits.org): 
 ## What a good change looks like
 
 - One change per pull request, with a test.
-- Nothing above the `CaptureSource` seam may contain OS-specific code. [ARCHITECTURE.md](ARCHITECTURE.md) lists the four invariants; breaking any of them breaks the product.
-- Errors surface. Nothing falls back silently to a worse answer.
+- Keep the rules at the end of [ARCHITECTURE.md](ARCHITECTURE.md): the skip rules run before any read, one encrypted database, no macOS code in `core/`, nothing leaves without the person's choice, and errors surface.
 - A change to an invariant or a load-bearing choice gets a record under [`docs/decisions/`](docs/decisions/).
 
 ## Security
