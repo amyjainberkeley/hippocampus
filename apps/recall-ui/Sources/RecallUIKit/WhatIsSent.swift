@@ -15,9 +15,10 @@ public enum WhatIsSent {
     public static let recentWorkHours = 12
     /// Things about the person sent with each session, at most this many.
     public static let aboutYouLines = 6
-    /// Below this the agent is not sure enough to send a thing unasked,
-    /// unless the person confirmed it.
-    public static let aboutYouMinConfidence = 0.5
+    /// Below this the agent sends nothing it inferred to any AI, unless the
+    /// person confirmed it. Above it a thing still goes only once three
+    /// moments on two days show it (`apps/agent/src/understanding/sending.rs`).
+    public static let aboutYouMinConfidence = 0.75
     /// The most recently updated things the six are chosen from.
     public static let aboutYouCandidates = 60
     /// Things matching an AI's task that go first, at most this many.

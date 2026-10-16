@@ -553,13 +553,32 @@ mod demo_day {
         title: &str,
         url: Option<&str>,
     ) -> Result<i64, String> {
+        put_said(
+            store,
+            ts_us,
+            app,
+            title,
+            url,
+            "Made-up text for a demo memory.",
+        )
+    }
+
+    /// A moment whose window shows its title, then `said`.
+    fn put_said(
+        store: &SqlCipherBrainStore,
+        ts_us: u64,
+        app: &str,
+        title: &str,
+        url: Option<&str>,
+        said: &str,
+    ) -> Result<i64, String> {
         let event = Event {
             id: EventId(0),
             ts_us,
             app_bundle_id: Some(app.to_owned()),
             window_title: Some(title.to_owned()),
             url: url.map(str::to_owned),
-            text: format!("{title}\nMade-up text for a demo memory."),
+            text: format!("{title}\n{said}"),
             summary: None,
             entities: None,
             episode_id: None,
@@ -727,6 +746,63 @@ mod demo_day {
             Some("https://paybridge.example/migrate"),
         )?;
         written += 5;
+        // The same work on the days before, so the lines it shows are
+        // corroborated and may go to AI tools (`understanding::sending`):
+        // three moments on two days or more that say them.
+        let mut said = |days: u64, hour: u64, app: &str, title: &str, text: &str| {
+            written += 1;
+            put_said(
+                store,
+                now_us - days * DAY - hour * 60 * MIN,
+                app,
+                title,
+                None,
+                text,
+            )
+        };
+        let rounding = vec![
+            said(
+                1,
+                5,
+                CODE,
+                "tax.rs — trailhead-shop",
+                "// The Trailhead checkout rounds sales tax on each line. Round the order total instead.",
+            )?,
+            said(
+                1,
+                4,
+                NOTES,
+                "Checkout fixes",
+                "Trailhead checkout: sales tax rounds per line, so totals are off by a cent.",
+            )?,
+            said(
+                2,
+                2,
+                NOTES,
+                "Checkout fixes",
+                "Bug: the Trailhead checkout rounds sales tax on every line.",
+            )?,
+        ];
+        let mut rust = Vec::new();
+        for days in 1..=3 {
+            rust.push(said(
+                days,
+                6,
+                TERMINAL,
+                "trailhead-shop — cargo test",
+                "$ cat rust-toolchain.toml\n[toolchain]\nchannel = \"1.89\"\n$ cargo test\ntest tax::rounds_the_order_total ... ok\ntest result: ok. 24 passed",
+            )?);
+        }
+        let mut invoices = Vec::new();
+        for days in [6, 5, 2] {
+            invoices.push(said(
+                days,
+                7,
+                "com.example.Ledgerly",
+                "September invoices",
+                "Match supplier invoices to orders. Four invoices have no matching order.",
+            )?);
+        }
 
         // Spread over the session's windows, the last of each first, as
         // the worker links an item to the session it was learned in.
@@ -750,7 +826,7 @@ mod demo_day {
                     0.8,
                     0.5,
                 ),
-                [pick(3), pick(4)].concat(),
+                [pick(3), pick(4), rounding].concat(),
                 160,
                 false,
             ),
@@ -783,7 +859,7 @@ mod demo_day {
                     0.8,
                     0.2,
                 ),
-                pick(4),
+                [pick(4), rust].concat(),
                 160,
                 false,
             ),
@@ -835,10 +911,10 @@ mod demo_day {
                 claim(
                     "Sam took several tries to match supplier invoices to orders.",
                     PropositionKind::Struggle,
-                    0.6,
+                    0.8,
                     0.4,
                 ),
-                [pick(0), vec![last_week]].concat(),
+                [pick(0), vec![last_week], invoices].concat(),
                 300,
                 false,
             ),

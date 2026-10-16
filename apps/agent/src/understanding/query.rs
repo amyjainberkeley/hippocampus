@@ -13,6 +13,7 @@ use mci_brain::understanding::{
 use mci_brain::{EventRecord, EventSource, SqlCipherBrainStore, StoreError};
 
 use super::mind::{MindCallError, MindClient};
+use super::sending::{self, Gate, Sending};
 use super::{apps, observe, Understanding};
 use crate::brief_worker::local_date_string;
 
@@ -158,13 +159,17 @@ pub fn run(
                     });
                     all
                 };
+            // Only what may go to AI tools: confirmed, or corroborated.
             let lens = ItemLens::read(store, &candidates, tz, now_us)?;
-            let items: Vec<ModelItem> = candidates
-                .into_iter()
-                .filter(|p| lens.servable(p))
-                .take(limit)
-                .map(ModelItem::from)
-                .collect();
+            let mut items: Vec<ModelItem> = Vec::new();
+            for p in candidates {
+                if items.len() == limit {
+                    break;
+                }
+                if lens.served(store, &p)? {
+                    items.push(ModelItem::from(p));
+                }
+            }
             serde_json::json!({ "propositions": items })
         }
         UnderstandingQuery::Sessions { date } => {
@@ -581,8 +586,9 @@ pub const RECENT_WORK_LINES: usize = 4;
 pub const RECENT_WORK_WINDOW_US: u64 = 12 * 3_600_000_000;
 /// Items about the person sent with each request.
 pub const ABOUT_YOU_LINES: usize = 6;
-/// Below this an item is sent only once the person confirmed it.
-pub const ABOUT_YOU_MIN_CONFIDENCE: f64 = 0.5;
+/// Below this an item goes to no AI tool unless the person confirmed it;
+/// above it, only once corroborated ([`super::sending`]).
+pub const ABOUT_YOU_MIN_CONFIDENCE: f64 = 0.75;
 /// The most recently updated items the six are chosen from.
 pub const ABOUT_YOU_CANDIDATES: usize = 60;
 /// Items matching the focus, tried first.
@@ -620,9 +626,10 @@ pub fn not_seen_lately(p: &Proposition, confirmed: bool, now_us: u64) -> bool {
             && now_us.saturating_sub(p.updated_us) >= NOT_SEEN_LATELY_DAYS * DAY_US)
 }
 
-/// An AI may be given it when it asks (`mci_user_model`), and the You page
-/// shows it. How a person is right now is never shown or served, and what
-/// took them several tries only once it was seen on two days or confirmed.
+/// The You page shows it, so the person can confirm or forget it. How a
+/// person is right now is never shown, and what took them several tries only
+/// once it was seen on two days or confirmed. Whether an AI tool may be given
+/// it is [`is_served`] and [`is_shared_unasked`].
 #[must_use]
 pub fn is_servable(p: &Proposition, confirmed: bool, days_seen: usize, now_us: u64) -> bool {
     p.status == PropositionStatus::Active
@@ -631,33 +638,42 @@ pub fn is_servable(p: &Proposition, confirmed: bool, days_seen: usize, now_us: u
         && (p.kind != PropositionKind::Struggle || confirmed || days_seen >= 2)
 }
 
-/// Sent with each request without being asked (the six are chosen from these).
+/// An AI tool is given it when it looks the person up (`mci_user_model`):
+/// shown on You, and cleared to go to AI tools ([`super::sending`]).
 #[must_use]
-pub fn is_shared_unasked(p: &Proposition, confirmed: bool, now_us: u64) -> bool {
+pub fn is_served(p: &Proposition, sending: Sending, days_seen: usize, now_us: u64) -> bool {
+    sending.allowed() && is_servable(p, sending.confirmed(), days_seen, now_us)
+}
+
+/// Sent with each request without being asked (the six are chosen from
+/// these): a kind sent unasked, in use, seen lately, and cleared to go to AI
+/// tools ([`super::sending`]).
+#[must_use]
+pub fn is_shared_unasked(p: &Proposition, sending: Sending, now_us: u64) -> bool {
     p.status == PropositionStatus::Active
         && SHARED_UNASKED.contains(&p.kind)
-        && (p.confidence >= ABOUT_YOU_MIN_CONFIDENCE || confirmed)
-        && !not_seen_lately(p, confirmed, now_us)
+        && sending.allowed()
+        && !not_seen_lately(p, sending.confirmed(), now_us)
 }
 
 /// What is known about a set of propositions besides themselves: which the
-/// person confirmed, and on how many local dates each was seen.
+/// person confirmed or forgot, on how many local dates each was seen, and
+/// whether each may go to AI tools.
 pub(crate) struct ItemLens {
-    pub(crate) confirmed: std::collections::HashSet<i64>,
+    gate: Gate,
     pub(crate) heads: std::collections::HashMap<i64, mci_brain::understanding::EventHead>,
     tz: i32,
     now_us: u64,
 }
 
 impl ItemLens {
-    /// One confirmed-id read and one batch of event heads for all evidence.
+    /// The person's verdicts and one batch of event heads for all evidence.
     pub(crate) fn read(
         store: &SqlCipherBrainStore,
         items: &[Proposition],
         tz: i32,
         now_us: u64,
     ) -> Result<Self, StoreError> {
-        let confirmed = store.confirmed_proposition_ids()?;
         let ids: Vec<i64> = items
             .iter()
             .flat_map(|p| p.evidence.iter().copied())
@@ -668,7 +684,7 @@ impl ItemLens {
             .map(|h| (h.id, h))
             .collect();
         Ok(Self {
-            confirmed,
+            gate: Gate::read(store, tz)?,
             heads,
             tz,
             now_us,
@@ -676,7 +692,40 @@ impl ItemLens {
     }
 
     pub(crate) fn confirmed(&self, p: &Proposition) -> bool {
-        self.confirmed.contains(&p.id)
+        self.gate.is_confirmed(p)
+    }
+
+    /// Whether `p` may go to AI tools ([`super::sending`]). Reads the moments
+    /// it rests on only when its scores, words and days leave it open.
+    pub(crate) fn sending(
+        &self,
+        store: &SqlCipherBrainStore,
+        p: &Proposition,
+    ) -> Result<Sending, StoreError> {
+        let heads = p
+            .evidence
+            .iter()
+            .filter_map(|id| self.heads.get(id))
+            .cloned()
+            .collect();
+        self.gate.sending_from_heads(store, p, heads)
+    }
+
+    /// Whether an AI tool that looks the person up is given `p`.
+    pub(crate) fn served(
+        &self,
+        store: &SqlCipherBrainStore,
+        p: &Proposition,
+    ) -> Result<bool, StoreError> {
+        if !self.servable(p) {
+            return Ok(false);
+        }
+        Ok(is_served(
+            p,
+            self.sending(store, p)?,
+            self.days_seen(p),
+            self.now_us,
+        ))
     }
 
     /// Distinct local dates among the moments the item rests on.
@@ -778,15 +827,19 @@ fn session_detail(note: &SessionNote) -> Option<String> {
 
 /// What an AI client is told about the person, the surest first: up to
 /// [`ABOUT_YOU_LINES`] items sent unasked ([`is_shared_unasked`]), those
-/// matching `focus` first. The session hook and the window pass no focus.
-/// Best effort: a store failure yields none.
+/// matching `focus` first. Only a line the person confirmed, or one
+/// corroborated ([`super::sending`]), is ever sent. The session hook and the
+/// window pass no focus. Best effort: a store failure yields none.
 #[must_use]
 pub fn about_you(
     store: &SqlCipherBrainStore,
+    tz: i32,
     now_us: u64,
     focus: Option<&str>,
 ) -> Vec<Proposition> {
-    let confirmed = store.confirmed_proposition_ids().unwrap_or_default();
+    let Ok(gate) = Gate::read(store, tz) else {
+        return Vec::new();
+    };
     let focused: Vec<Proposition> = focus
         .map(str::trim)
         .filter(|f| !f.is_empty())
@@ -798,15 +851,20 @@ pub fn about_you(
     let recent = store
         .propositions_with_status(PropositionStatus::Active, ABOUT_YOU_CANDIDATES)
         .unwrap_or_default();
-    shared_claims(focused, recent, &confirmed, now_us)
+    shared_claims(focused, recent, now_us, |p| {
+        gate.sending(store, p)
+            .unwrap_or(Sending::Held(sending::Held::TooFewMoments))
+    })
 }
 
 /// The items sent unasked, `focused` first, then the surest of `recent`.
+/// `sending` decides whether each may go to AI tools; it is asked only about
+/// items that could otherwise be sent, in the order they are tried.
 fn shared_claims(
     focused: Vec<Proposition>,
     mut recent: Vec<Proposition>,
-    confirmed: &std::collections::HashSet<i64>,
     now_us: u64,
+    mut sending: impl FnMut(&Proposition) -> Sending,
 ) -> Vec<Proposition> {
     recent.sort_by(|a, b| {
         b.confidence
@@ -818,9 +876,13 @@ fn shared_claims(
         if out.len() == ABOUT_YOU_LINES {
             break;
         }
-        if is_shared_unasked(&p, confirmed.contains(&p.id), now_us)
-            && !out.iter().any(|kept| kept.id == p.id)
+        if out.iter().any(|kept| kept.id == p.id)
+            || p.status != PropositionStatus::Active
+            || !SHARED_UNASKED.contains(&p.kind)
         {
+            continue;
+        }
+        if is_shared_unasked(&p, sending(&p), now_us) {
             out.push(p);
         }
     }
@@ -844,7 +906,7 @@ pub fn context_understanding(
         .iter()
         .map(|line| line.packet_line(tz))
         .collect();
-    let about = about_you(store, now_us, focus)
+    let about = about_you(store, tz, now_us, focus)
         .into_iter()
         .map(|p| ContextUnderstandingClaim {
             text: clip(&p.text, STATEMENT_CHARS),
@@ -914,8 +976,11 @@ fn group_of(kind: PropositionKind) -> (usize, &'static str) {
 }
 
 /// The You page (`mci-agent model --page --json`): the recent work lines as
-/// sent, what an AI can be told about the person, what it gets only when it
-/// looks it up, and what has not been seen lately. No counts, no scores.
+/// sent, what an AI can be told about the person (`shared`), what it gets
+/// only when it looks it up (`kept_back`), what goes to no AI tool until it
+/// is corroborated or the person confirms it (`not_sent`,
+/// [`super::sending`]), and what has not been seen lately. No counts, no
+/// scores.
 ///
 /// # Errors
 /// Store failures.
@@ -929,14 +994,20 @@ pub fn model_page(
     let notes = evidence_notes(store, &lens)?;
     let mut shared = Vec::new();
     let mut kept_back = Vec::new();
+    let mut not_sent = Vec::new();
     let mut not_seen = Vec::new();
     for p in &all {
         let confirmed = lens.confirmed(p);
         let days_seen = lens.days_seen(p);
-        let list = if is_shared_unasked(p, confirmed, now_us) {
-            &mut shared
-        } else if is_servable(p, confirmed, days_seen, now_us) {
-            &mut kept_back
+        let list = if is_servable(p, confirmed, days_seen, now_us) {
+            let sending = lens.sending(store, p)?;
+            if is_shared_unasked(p, sending, now_us) {
+                &mut shared
+            } else if is_served(p, sending, days_seen, now_us) {
+                &mut kept_back
+            } else {
+                &mut not_sent
+            }
         } else if p.kind != PropositionKind::State
             && (p.kind != PropositionKind::Struggle || confirmed || days_seen >= 2)
             && not_seen_lately(p, confirmed, now_us)
@@ -990,6 +1061,7 @@ pub fn model_page(
         "recent_work": recent,
         "shared": shape(shared),
         "kept_back": shape(kept_back),
+        "not_sent": shape(not_sent),
         "not_seen_lately": shape(not_seen),
     }))
 }
@@ -1484,7 +1556,7 @@ mod tests {
     ) -> Proposition {
         Proposition {
             id,
-            text: format!("claim {id}"),
+            text: format!("Sam drafts the launch checklist number {id}"),
             reasoning: String::new(),
             kind,
             confidence,
@@ -1494,8 +1566,19 @@ mod tests {
             updated_us: u64::try_from(id).unwrap_or(0),
             revised_from: None,
             model: "test".into(),
-            evidence: vec![id],
+            evidence: vec![id, id + 100, id + 200],
         }
+    }
+
+    /// The gate's verdict on lines whose moments show them on two days: what
+    /// the line alone decides, otherwise corroborated.
+    fn verdicts(confirmed: &[i64]) -> impl FnMut(&Proposition) -> Sending {
+        let gate = Gate::new(confirmed.iter().copied().collect(), Vec::new(), 0);
+        move |p| gate.without_moments(p).unwrap_or(Sending::Corroborated)
+    }
+
+    fn ids(lines: Vec<Proposition>) -> Vec<i64> {
+        lines.into_iter().map(|p| p.id).collect()
     }
 
     #[test]
@@ -1509,40 +1592,76 @@ mod tests {
             held(5, Habit, 0.4, PropositionStatus::Active),
             held(6, Goal, 0.7, PropositionStatus::Active),
         ];
-        let none = std::collections::HashSet::new();
-        let shared: Vec<i64> = shared_claims(Vec::new(), recent.clone(), &none, NOW)
-            .into_iter()
-            .map(|p| p.id)
-            .collect();
-        assert_eq!(shared, vec![1, 6]);
+        assert_eq!(
+            ids(shared_claims(
+                Vec::new(),
+                recent.clone(),
+                NOW,
+                verdicts(&[])
+            )),
+            vec![1],
+            "a goal at 0.7 is still a guess"
+        );
         // A guess the person confirmed is no longer a guess.
-        let confirmed: std::collections::HashSet<i64> = [5].into_iter().collect();
-        let shared: Vec<i64> = shared_claims(Vec::new(), recent, &confirmed, NOW)
-            .into_iter()
-            .map(|p| p.id)
-            .collect();
-        assert_eq!(shared, vec![1, 6, 5]);
+        assert_eq!(
+            ids(shared_claims(
+                Vec::new(),
+                recent.clone(),
+                NOW,
+                verdicts(&[5])
+            )),
+            vec![1, 5]
+        );
+        let mut fresh = recent;
+        fresh[5].updated_us = NOW - DAY_US;
+        assert_eq!(
+            ids(shared_claims(Vec::new(), fresh, NOW, verdicts(&[6]))),
+            vec![1, 6]
+        );
+    }
+
+    #[test]
+    fn only_lines_cleared_to_go_are_sent_and_the_gate_is_asked_only_about_them() {
+        use PropositionKind::{Project, Relationship, State};
+        let recent = vec![
+            held(1, Project, 0.9, PropositionStatus::Active),
+            held(2, Project, 0.9, PropositionStatus::Active),
+            held(3, Relationship, 0.9, PropositionStatus::Active),
+            held(4, State, 0.9, PropositionStatus::Active),
+        ];
+        let mut asked = Vec::new();
+        let shared = shared_claims(Vec::new(), recent, NOW, |p| {
+            asked.push(p.id);
+            if p.id == 2 {
+                Sending::Held(sending::Held::OneDay)
+            } else {
+                Sending::Corroborated
+            }
+        });
+        assert_eq!(ids(shared), vec![1]);
+        asked.sort_unstable();
+        assert_eq!(
+            asked,
+            vec![1, 2],
+            "people and states are never sent unasked"
+        );
     }
 
     #[test]
     fn what_matches_the_project_comes_first_and_nothing_is_listed_twice() {
         use PropositionKind::{Habit, Project};
-        let focused = vec![held(7, Project, 0.6, PropositionStatus::Active)];
+        let focused = vec![held(7, Project, 0.8, PropositionStatus::Active)];
         let recent: Vec<Proposition> = (1..=9)
             .map(|id| {
                 held(
                     id,
                     if id == 7 { Project } else { Habit },
-                    if id == 7 { 0.6 } else { 0.9 },
+                    if id == 7 { 0.8 } else { 0.9 },
                     PropositionStatus::Active,
                 )
             })
             .collect();
-        let shared: Vec<i64> =
-            shared_claims(focused, recent, &std::collections::HashSet::new(), NOW)
-                .into_iter()
-                .map(|p| p.id)
-                .collect();
+        let shared = ids(shared_claims(focused, recent, NOW, verdicts(&[])));
         assert_eq!(shared.len(), ABOUT_YOU_LINES);
         assert_eq!(shared[0], 7);
         assert_eq!(shared.iter().filter(|id| **id == 7).count(), 1);
@@ -1559,12 +1678,13 @@ mod tests {
         slow.updated_us = NOW - 400 * DAY_US;
         let mut finished = held(3, Project, 0.9, PropositionStatus::Active);
         finished.updated_us = NOW - 46 * DAY_US;
-        let none = std::collections::HashSet::new();
-        let confirmed: std::collections::HashSet<i64> = [3].into_iter().collect();
         assert!(not_seen_lately(&fast, false, NOW));
-        assert!(!is_shared_unasked(&fast, false, NOW) && !is_servable(&fast, false, 2, NOW));
         assert!(
-            is_shared_unasked(&slow, false, NOW),
+            !is_shared_unasked(&fast, Sending::Corroborated, NOW)
+                && !is_servable(&fast, false, 2, NOW)
+        );
+        assert!(
+            is_shared_unasked(&slow, Sending::Corroborated, NOW),
             "a slow claim never goes stale"
         );
         assert!(
@@ -1575,21 +1695,16 @@ mod tests {
             not_seen_lately(&finished, true, NOW),
             "a confirmed project unseen for 45 days is not seen lately"
         );
-        let shared: Vec<i64> = shared_claims(
-            Vec::new(),
-            vec![fast.clone(), slow.clone(), finished.clone()],
-            &confirmed,
-            NOW,
-        )
-        .into_iter()
-        .map(|p| p.id)
-        .collect();
-        assert_eq!(shared, vec![2]);
-        let shared: Vec<i64> = shared_claims(Vec::new(), vec![fast, slow, finished], &none, NOW)
-            .into_iter()
-            .map(|p| p.id)
-            .collect();
-        assert_eq!(shared, vec![3, 2], "equally sure: the newer first");
+        let all = vec![fast, slow, finished];
+        assert_eq!(
+            ids(shared_claims(Vec::new(), all.clone(), NOW, verdicts(&[3]))),
+            vec![2]
+        );
+        assert_eq!(
+            ids(shared_claims(Vec::new(), all, NOW, verdicts(&[]))),
+            vec![3, 2],
+            "equally sure: the newer first"
+        );
     }
 
     #[test]
@@ -1599,14 +1714,21 @@ mod tests {
         assert!(is_servable(&struggle, false, 2, NOW), "seen on two days");
         assert!(is_servable(&struggle, true, 1, NOW), "confirmed");
         assert!(
-            !is_shared_unasked(&struggle, true, NOW),
+            !is_shared_unasked(&struggle, Sending::Confirmed, NOW),
             "never sent unasked"
+        );
+        assert!(is_served(&struggle, Sending::Confirmed, 1, NOW));
+        assert!(is_served(&struggle, Sending::Corroborated, 2, NOW));
+        assert!(
+            !is_served(&struggle, Sending::Held(sending::Held::NotSure), 2, NOW),
+            "shown on You, but no AI tool is given it"
         );
         let state = held(2, PropositionKind::State, 0.9, PropositionStatus::Active);
         assert!(
             !is_servable(&state, true, 5, NOW),
             "how they are right now is never shown"
         );
+        assert!(!is_served(&state, Sending::Confirmed, 5, NOW));
         let rejected = held(
             3,
             PropositionKind::Project,
@@ -1614,7 +1736,9 @@ mod tests {
             PropositionStatus::Rejected,
         );
         assert!(
-            !is_servable(&rejected, false, 3, NOW) && !is_shared_unasked(&rejected, false, NOW)
+            !is_servable(&rejected, false, 3, NOW)
+                && !is_shared_unasked(&rejected, Sending::Corroborated, NOW)
+                && !is_served(&rejected, Sending::Corroborated, 3, NOW)
         );
     }
 

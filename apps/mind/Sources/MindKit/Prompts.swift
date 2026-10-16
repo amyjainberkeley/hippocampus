@@ -50,7 +50,12 @@ public enum Prompts {
         of person they are. Leave out pauses and counts of keys, clicks and \
         scrolls. Not everything is work: watching, \
         shopping, personal errands and browsing for fun are interests or \
-        states, never projects. Start each with "\(user)".
+        states, never projects. An inbox, a feed or a page of results shows \
+        what other people wrote: its senders, subjects and headlines are \
+        theirs, not \(user)'s plans. A window's title or an app's name says \
+        where \(user) was, not what they did there. Make no guess about \
+        \(user)'s job search, health, money or relationships. Start each \
+        with "\(user)".
 
         Kinds: project (named work in progress), goal (an outcome they want), \
         state (true of them right now), habit (a repeated way of working), \
