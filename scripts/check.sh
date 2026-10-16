@@ -65,6 +65,7 @@ LANES=(
     "app-group-contract|bash|test|scripts/test-app-group-contract.sh"
     "toml-license-contract|bash|lint|scripts/test-toml-license-contract.sh"
     "task-2-product-truth|bash|lint|scripts/test-task-2-product-truth.sh"
+    "public-tree-contract|bash|lint|scripts/test-public-tree.sh"
     "retention-policy-contract|bash|test|scripts/test-retention-policy-contract.sh"
     "release-identity-fixtures|bash|test|scripts/test-release-identity.sh"
     "release-model-fixtures|bash|test|scripts/test-prepare-release-models.sh"
@@ -156,6 +157,7 @@ LANES
     release-contract      release graph and artifact identity contract
     toml-license-contract pinned TOML dependency license contract
     task-2-product-truth  legal artifact drift and active product-truth contract
+    public-tree-contract  no private paths, old job titles, paid tiers or ruled-out claims
     retention-policy-contract Swift picker to Rust purge-worker contract
     release-identity-fixtures release tag, DMG, checksum, and appcast fixtures
     release-model-fixtures immutable model archive integrity fixtures
