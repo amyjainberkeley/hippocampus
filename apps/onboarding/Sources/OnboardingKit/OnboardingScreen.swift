@@ -1,24 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// The four-screen setup (Welcome, Permissions, Promise, Try it) and the
-// panels that open on their own. A route is the name the app passes in
+// The five-screen setup (Welcome, What you get, Permissions, Promise, Try
+// it) and the panels that open on their own. A route is the name the app passes in
 // `MCI_ONBOARDING_STEP` (`hippocampus://setup/<panel>` becomes the panel's
 // route) and the name the resume file holds.
 
 import Foundation
 
-/// One screen of the four-screen setup, in order.
+/// One screen of the five-screen setup, in order.
 public enum OnboardingScreen: Int, Sendable, Equatable, CaseIterable, Identifiable {
     case welcome = 0
-    case permissions = 1
-    case promise = 2
-    case tryIt = 3
+    /// What Hippocampus does for the person, before it asks for anything.
+    case whatYouGet = 1
+    case permissions = 2
+    case promise = 3
+    case tryIt = 4
 
     /// A flow route. "done" was the old last step and means Try it; panel
     /// routes and the retired steps are not screens.
     public init?(launchRoute: String) {
         switch OnboardingLaunch.normalized(launchRoute) {
         case "welcome": self = .welcome
+        case "what-you-get": self = .whatYouGet
         case "permissions": self = .permissions
         case "promise": self = .promise
         case "try-it", "done": self = .tryIt
@@ -32,6 +35,7 @@ public enum OnboardingScreen: Int, Sendable, Equatable, CaseIterable, Identifiab
     public var routeName: String {
         switch self {
         case .welcome: "welcome"
+        case .whatYouGet: "what-you-get"
         case .permissions: "permissions"
         case .promise: "promise"
         case .tryIt: "try-it"

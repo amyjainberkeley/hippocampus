@@ -2,9 +2,10 @@ import SwiftUI
 import AppKit
 import OnboardingKit
 
-/// Setup in four screens: Welcome, Permissions, Promise, Try it. Back on
-/// Permissions and Promise only, four dots, one primary button. Start
-/// Remembering on Promise is the only thing that records consent.
+/// Setup in five screens: Welcome, What you get, Permissions, Promise, Try
+/// it. Back on What you get, Permissions and Promise only, five dots, one
+/// primary button. Start Remembering on Promise is the only thing that
+/// records consent.
 struct OnboardingFlowView: View {
     @EnvironmentObject var flowVM: OnboardingFlowViewModel
     @EnvironmentObject var prepareBrainVM: PrepareBrainViewModel
@@ -47,6 +48,8 @@ struct OnboardingFlowView: View {
         switch flowVM.screen {
         case .welcome:
             WelcomeSlide()
+        case .whatYouGet:
+            WhatYouGetSlide()
         case .permissions:
             PermissionsSlide()
         case .promise:
@@ -66,7 +69,7 @@ struct OnboardingFlowView: View {
     private var primaryLabel: String {
         switch flowVM.screen {
         case .welcome: OnboardingCopy.getStarted
-        case .permissions: OnboardingCopy.continueLabel
+        case .whatYouGet, .permissions: OnboardingCopy.continueLabel
         case .promise: OnboardingCopy.promisePrimary(isReview: flowVM.isReview, keyState: prepareBrainVM.keyState)
         case .tryIt: OnboardingCopy.done
         }
@@ -80,7 +83,7 @@ struct OnboardingFlowView: View {
 
     private var primaryEnabled: Bool {
         switch flowVM.screen {
-        case .welcome, .tryIt: true
+        case .welcome, .whatYouGet, .tryIt: true
         case .permissions: flowVM.canAdvance
         case .promise: flowVM.isReview ? flowVM.canAdvance : canStart
         }
@@ -88,7 +91,7 @@ struct OnboardingFlowView: View {
 
     private func primary() {
         switch flowVM.screen {
-        case .welcome, .permissions:
+        case .welcome, .whatYouGet, .permissions:
             flowVM.advance()
         case .promise where flowVM.isReview:
             flowVM.advance()

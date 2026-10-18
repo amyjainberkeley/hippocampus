@@ -3,7 +3,7 @@ import Foundation
 /// Every string setup shows, in one place, so the tests can hold them.
 /// The views in the `Onboarding` target read from here.
 public enum OnboardingCopy {
-    // MARK: - The four screens
+    // MARK: - The five screens
     //
     // Words follow spec-copy S1 to S3 and RULINGS V and O: Hippocampus
     // "reads" a window, "remembers" as a product, and text is "kept" on
@@ -12,20 +12,71 @@ public enum OnboardingCopy {
 
     // Welcome
 
-    public static let welcomeTitle = "Hippocampus remembers what you see."
+    public static let welcomeTitle = "Your Mac, with a memory."
     /// Follows the keycaps: "Press ⇧ ⇧ and ask about your screen, now or earlier."
     public static let welcomeBodyAfterKeys = "and ask about your screen, now or earlier."
     public static let getStarted = "Get Started"
 
-    /// The body as one sentence, keycaps written out.
+    /// The line under the demo, keycaps written out.
     public static func welcomeBody(_ key: AskKeyHint) -> String {
         "\(key.verb) \(key.keycaps.joined(separator: " ")) \(welcomeBodyAfterKeys)"
     }
 
-    /// The body as VoiceOver reads it: the key in words, not symbols.
+    /// The line as VoiceOver reads it: the key in words, not symbols.
     public static func welcomeBodySpoken(_ key: AskKeyHint) -> String {
         "\(key.phrase) \(welcomeBodyAfterKeys)"
     }
+
+    /// What VoiceOver says for the demo, which is drawn, not read.
+    public static let welcomeDemoLabel =
+        "A short demo. Ask finds a pricing link and its source. Overview fills in the day. Your AI starts with your recent work."
+
+    /// The words inside Welcome's demo. Everything here is made up: no
+    /// person's memory is ever shown in setup.
+    public enum Demo {
+        // Ask, dropped from the top of the screen.
+        public static let askQuestion = "what was that pricing link?"
+        public static let askAnswer = "The Stripe pricing page you read this afternoon."
+        public static let sourcesLabel = "Sources"
+        public static let sourceApp = "Safari"
+        public static let source = "stripe.com/pricing · 2:14 PM"
+        /// The page behind Ask, in Safari.
+        public static let sourceAddress = "stripe.com/pricing"
+        public static let pageTitle = "Pricing"
+        public static let onThisMac = "On this Mac"
+        public static let copyAnswerKeys = "⌘C"
+        public static let copyAnswer = "Copy Answer"
+        public static let menuBarClock = "2:41 PM"
+
+        // Overview, in the window.
+        public static let places = ["Overview", "Ask", "You"]
+        public static let remembering = "Remembering"
+        public static let today = "Today"
+        public static let hours = ["9 AM", "12 PM", "3 PM"]
+        public static let legend = ["Writing", "Code", "Meetings"]
+        public static let sessionTitle = "Team pricing"
+        public static let sessionTime = "2:12 – 2:36 PM · 24m"
+        public static let sessionLine = "You compared Stripe’s tiers and drafted the Team plan."
+
+        // Your AI, starting a session.
+        public static let aiWindowTitle = "pricing-site"
+        public static let aiContextTitle = "From Hippocampus"
+        public static let aiContextLines = ["2:12 – 2:36 PM · Team pricing", "You’re redesigning the pricing page."]
+        public static let aiPrompt = "where did I leave off?"
+        public static let aiReply = "You were drafting the Team plan, with Stripe’s pricing open."
+    }
+
+    // What you get
+
+    public static let whatYouGetTitle = "What you get"
+    public static let findTitle = "Find anything you’ve seen."
+    public static let findLine = "Ask in plain words. See where each answer came from."
+    public static let dayTitle = "Your day, written for you."
+    public static let dayLine = "Overview turns today into sessions you can scan."
+    /// Setup connects no AI tool (RULINGS O10): the person connects one
+    /// later, from the menu, so the line says "once connected".
+    public static let aiTitle = "Your AI starts with your context."
+    public static let aiLine = "Once connected, your AI starts with your recent work."
 
     // Permissions
 
@@ -33,14 +84,16 @@ public enum OnboardingCopy {
     /// First run only: until consent the app does not start reading.
     public static let permissionsNothingYet = "Nothing is read until you click Start Remembering."
     public static let screenRecordingName = "Screen Recording"
-    public static let screenRecordingWhy = "So it can read what’s on your screen."
+    /// What Screen Recording lets Hippocampus do, one line per thing.
+    public static let screenRecordingBenefits = ["Remembers what’s on your screen"]
     /// macOS 15 and later. Nothing in Hippocampus takes in sound: every
     /// screen stream adds a screen output only, none sets `capturesAudio`,
     /// and nothing opens the microphone. (It does play sounds, so "doesn’t
     /// use sound" would not be true.)
     public static let screenRecordingSoundNote = "macOS calls this Screen & System Audio Recording. Hippocampus doesn’t listen."
     public static let accessibilityName = "Accessibility"
-    public static let accessibilityWhyBase = "So it knows which window you’re in and skips password fields."
+    /// What Accessibility lets Hippocampus do, before the key's line.
+    public static let accessibilityBenefitsBase = ["Knows the window you’re in", "Skips password fields"]
     public static let allow = "Allow"
     public static let waitingForSettings = "Waiting for System Settings…"
     /// "Allow" raises macOS's prompt only, whose button is Open System
@@ -58,10 +111,15 @@ public enum OnboardingCopy {
     public static let continueLabel = "Continue"
     public static let back = "Back"
 
-    /// The Accessibility row's second line: a single key or Shift twice
+    /// The Accessibility row's last line: a single key or Shift twice
     /// needs it too. The chord does not, so it has none.
-    public static func accessibilityKeyNote(_ key: AskKeyHint) -> String? {
-        key.noun.map { "It also lets \($0) open Ask." }
+    public static func accessibilityKeyBenefit(_ key: AskKeyHint) -> String? {
+        key.noun.map { "Opens Ask with \($0)" }
+    }
+
+    /// Everything the Accessibility row says it does, the key's line last.
+    public static func accessibilityBenefits(_ key: AskKeyHint) -> [String] {
+        accessibilityBenefitsBase + [accessibilityKeyBenefit(key)].compactMap { $0 }
     }
 
     /// Under the title. In review remembering may already be on, so the
@@ -70,7 +128,7 @@ public enum OnboardingCopy {
         isReview ? nil : permissionsNothingYet
     }
 
-    /// The Screen Recording row's second line: macOS 15 renamed the
+    /// The Screen Recording row's last line: macOS 15 renamed the
     /// permission, and the new name mentions audio.
     public static func screenRecordingNote(macOSMajorVersion: Int) -> String? {
         macOSMajorVersion >= 15 ? screenRecordingSoundNote : nil
@@ -84,7 +142,7 @@ public enum OnboardingCopy {
         }
     }
 
-    // Promise
+    // Promise: privacy at a glance, then consent
 
     public static let promiseTitle = "Before it starts"
     /// In review remembering has started, so "Before it starts" would not
@@ -103,13 +161,16 @@ public enum OnboardingCopy {
     public static let promiseNeverReadLead = "Never read."
     /// Password fields: the focused-window path drops the frame during
     /// secure input or on a secure field, whole-screen reading stops during
-    /// secure input, and the extension never reads input values. Password
-    /// managers are left out of this line on purpose: the helper never reads a
-    /// broad, enumerated set of password managers and authenticators (see
-    /// `FrontAppNote.neverReadPasswordManagerFamilies`), but no list can name
-    /// every one that exists, so the promise stays at what is always true.
+    /// secure input, and the extension never reads input values.
+    ///
+    /// Password apps: the helper never reads a broad, enumerated set of
+    /// password managers and authenticators (see
+    /// `ReadRules.neverReadPasswordManagerFamilies`, held to the helper's
+    /// list by `CaptureListParityTests`). No list can name every one that
+    /// exists, so the line promises the known ones only, never all of them.
+    ///
     /// Private windows are not "never read": see `privateWindowsSkipped`.
-    public static let promiseNeverRead = "Password fields. \(privateWindowsSkipped)"
+    public static let promiseNeverRead = "Password fields and known password apps. \(privateWindowsSkipped)"
     /// Browsers are read like every other window (RULINGS G8). A private
     /// window is skipped only when Hippocampus can tell without asking: a
     /// private marker in its title or top bar, the extension's private
@@ -117,10 +178,16 @@ public enum OnboardingCopy {
     /// none of these is read, so the sentence promises no more than that.
     public static let privateWindowsSkipped = "Private browser windows are skipped when they show they are private."
     public static let promiseStopLead = "You can stop it."
-    public static let promiseStop = "Pause from the menu bar. Quit ends it."
+    /// Pausing stops the capture helper, and quitting stops the helper and
+    /// the agent and waits until both have exited, so reading stops either way.
+    public static let promiseStop = "Pause or quit from the menu bar, and reading stops."
     /// The menu-bar mark's promise (RULINGS B1), word for word. Every state
-    /// in which the screen may be read shows the solid dot.
+    /// in which the screen may be read shows the solid dot. The legend
+    /// draws it and VoiceOver reads it.
     public static let dotPromise = "A solid dot means it is remembering. No solid dot means it is not."
+    /// The legend's two marks: the solid dot, and none.
+    public static let dotLegendOn = "Remembering"
+    public static let dotLegendOff = "Not remembering"
     public static let openAtLogin = "Open Hippocampus at login"
     /// The panel Preferences opens with "What is never read…": the
     /// Promise's lines, read-only.
@@ -191,7 +258,24 @@ public enum OnboardingCopy {
 
     public static let tryItTitle = "Try it"
     public static let tryItStarting = "Turning on…"
-    public static let tryItWaiting = "Nothing read yet. Open a document, note or chat, then come back."
+    /// Over what was read: the screen's title once a proof shows.
+    public static func tryItReadFrom(_ app: String) -> String {
+        "Here’s what I read from \(app)"
+    }
+    /// The window in front is being read.
+    public static func tryItReading(_ app: String) -> String {
+        "Reading \(app)…"
+    }
+    /// No window but setup's own is open.
+    public static let tryItNoWindow = "No window to read yet."
+    /// The window in front was read and holds no sentence worth showing:
+    /// a Finder window, a photo.
+    public static func tryItNothingToShow(_ app: String) -> String {
+        "Nothing to read in \(app) yet."
+    }
+    public static let tryItOpenSomething = "Open a page, a document or a chat."
+    /// Under every skipped window: reading another one shows it works.
+    public static let tryItSwitchWindows = "Switch to another window to try it."
     /// The stalled card with no cause it can name. Its button is
     /// `tryAgain`: the app restarts remembering in place
     /// (`hippocampus://restart`, the menu's own Try Again), and this
@@ -225,12 +309,15 @@ public enum OnboardingCopy {
     /// Ask opened, but not by a key that works now.
     public static let askFromMenuBar = "That’s Ask. Open it from the menu bar."
 
-    /// The waiting card, by the app in front. A browser is read like any
-    /// other window (RULINGS G8), so it gets the ordinary card.
-    public static func waitingText(_ note: FrontAppNote) -> String {
-        switch note {
-        case .ordinary: tryItWaiting
-        case .neverRead(let app): "\(app) is never read. Try a document, note or chat."
+    /// Why the window in front is not read, in one sentence. A browser is
+    /// read like any other window (RULINGS G8): only a window that shows
+    /// it is private is skipped.
+    public static func skippedText(_ reason: SkipReason, app: String?) -> String {
+        switch reason {
+        case .neverRead: "\(app ?? "This app") is never read."
+        case .excluded: "\(app ?? "This app") is skipped, as you asked."
+        case .privateWindow: "This private window is skipped."
+        case .passwordField: "Nothing is read while a password field is in use."
         }
     }
 
@@ -239,15 +326,15 @@ public enum OnboardingCopy {
         switch cause {
         case .permissionOff(let surface):
             "\(surface == .accessibility ? accessibilityName : screenRecordingName) is off. Turn it on in System Settings."
-        case .frontApp(let note): waitingText(note)
         case .unknown: tryItStillNothing
         }
     }
 
-    /// The card's heading: "Notes · Launch plan".
+    /// The proof card's heading: the window's title, or the app's name
+    /// when the window has none. The screen's title names the app.
     public static func proofHeading(_ proof: ReadProof) -> String {
         guard let title = proof.windowTitle, !title.isEmpty else { return proof.appName }
-        return "\(proof.appName) · \(title)"
+        return title
     }
 
     /// "Read 12 seconds ago", in the person's language.
@@ -267,10 +354,9 @@ public enum OnboardingCopy {
     /// for me".
     public static func tryItNext(_ key: AskKeyNow, answersAvailable: Bool) -> String? {
         guard let phrase = key.phrase else { return nil }
-        let press = phrase.prefix(1).lowercased() + phrase.dropFirst()
         return answersAvailable
-            ? "Now \(press) and ask about it."
-            : "Now \(press) and type a word from that window."
+            ? "\(phrase) and ask about it."
+            : "\(phrase) and type a word from that window."
     }
 
     /// When Ask opens. After the key: "That’s it. Shift twice works

@@ -64,6 +64,10 @@ enum OnboardingDesign {
         /// screen (`onboardingSolidFills`).
         static let windowSolid = Color(red: 0.965, green: 0.965, blue: 0.972)
 
+        /// A permission that is on: the window's calm green (`MCI.Color.success`).
+        static let on = Color(red: 0x24 / 255, green: 0x7A / 255, blue: 0x47 / 255)
+        static let onSoft = on.opacity(0.12)
+
         /// Semantic status hues (kept sparse — success/attention/danger).
         static let success = Color.green
         static let attention = Color.orange

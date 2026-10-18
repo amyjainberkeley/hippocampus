@@ -3,7 +3,8 @@ import XCTest
 
 final class OnboardingLaunchTests: XCTestCase {
     func testEveryScreenOpensFromItsOwnRoute() {
-        XCTAssertEqual(OnboardingScreen.allCases.map(\.routeName), ["welcome", "permissions", "promise", "try-it"])
+        XCTAssertEqual(OnboardingScreen.allCases.map(\.routeName),
+                       ["welcome", "what-you-get", "permissions", "promise", "try-it"])
         for screen in OnboardingScreen.allCases {
             XCTAssertEqual(OnboardingScreen(launchRoute: screen.routeName), screen)
             XCTAssertEqual(OnboardingLaunch.parse(screen.routeName), .flow(screen))
@@ -36,6 +37,7 @@ final class OnboardingLaunchTests: XCTestCase {
 
     func testRoutesIgnoreCaseAndSurroundingSpace() {
         XCTAssertEqual(OnboardingLaunch.parse("  Try-It \n"), .flow(.tryIt))
+        XCTAssertEqual(OnboardingLaunch.parse("What-You-Get"), .flow(.whatYouGet))
         XCTAssertEqual(OnboardingLaunch.parse("TRUST"), .panel(.neverRead))
     }
 
@@ -75,7 +77,7 @@ final class OnboardingLaunchTests: XCTestCase {
     func testAnOldNumericResumeFileLoadsAsNothing() throws {
         let file = try temporaryDirectory().appendingPathComponent(".onboarding-state")
         let store = FileOnboardingStateStore(path: file)
-        // "3" was Permissions in the thirteen-step flow and is Try it's index now.
+        // "3" was Permissions in the thirteen-step flow and is Promise's index now.
         for legacy in ["3\n", "12", " 0 \n"] {
             try legacy.write(to: file, atomically: true, encoding: .utf8)
             XCTAssertNil(store.loadRoute(), legacy)

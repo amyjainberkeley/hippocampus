@@ -13,15 +13,19 @@ final class OnboardingCopyTests: XCTestCase {
         // Setup connects no AI tool, so sharing waits on the person.
         XCTAssertEqual(OnboardingCopy.promiseStays(kept: "kept 90 days"),
                        "Text and screenshots, encrypted, kept 90 days. Nothing is uploaded by Hippocampus. It shares them with your AI only if you connect it. What your AI reads goes to the company that runs it.")
-        // Password managers are left out of this line on purpose: the helper
-        // never reads a broad, enumerated set of them, but no list names every
-        // one, so the promise stays at what is always true. Private windows
-        // are skipped only when they show it (RULINGS G8).
+        // The helper never reads a broad, enumerated set of password apps,
+        // but no list names every one, so the line says "known" and never
+        // promises every password manager. Private windows are skipped only
+        // when they show it (RULINGS G8).
         XCTAssertEqual(OnboardingCopy.promiseNeverRead,
-                       "Password fields. Private browser windows are skipped when they show they are private.")
-        XCTAssertEqual(OnboardingCopy.promiseStop, "Pause from the menu bar. Quit ends it.")
-        // The menu-bar mark's promise, word for word (RULINGS B1).
+                       "Password fields and known password apps. Private browser windows are skipped when they show they are private.")
+        // Pausing stops the capture helper; quitting stops it and the agent.
+        XCTAssertEqual(OnboardingCopy.promiseStop, "Pause or quit from the menu bar, and reading stops.")
+        // The menu-bar mark's promise, word for word (RULINGS B1), read by
+        // VoiceOver on the legend that draws it.
         XCTAssertEqual(OnboardingCopy.dotPromise, "A solid dot means it is remembering. No solid dot means it is not.")
+        XCTAssertEqual(OnboardingCopy.dotLegendOn, "Remembering")
+        XCTAssertEqual(OnboardingCopy.dotLegendOff, "Not remembering")
         XCTAssertEqual(OnboardingCopy.openAtLogin, "Open Hippocampus at login")
         XCTAssertEqual(OnboardingCopy.startRemembering, "Start Remembering")
         XCTAssertTrue(OnboardingCopy.promiseBody.contains(OnboardingCopy.startRemembering))
@@ -45,6 +49,8 @@ final class OnboardingCopyTests: XCTestCase {
 
     func testThePromiseNeverPromisesEveryPasswordManager() {
         XCTAssertFalse(OnboardingCopy.promiseNeverRead.lowercased().contains("password manager"))
+        XCTAssertTrue(OnboardingCopy.promiseNeverRead.hasPrefix("Password fields and known password apps."),
+                      "only the apps the helper knows are promised")
     }
 
     func testPrivateBrowserWindowsArePromisedOnlyWhenTheyShowIt() {
@@ -110,17 +116,59 @@ final class OnboardingCopyTests: XCTestCase {
     // MARK: - The other screens
 
     func testWelcomeAndPermissionsFollowTheKey() {
-        XCTAssertEqual(OnboardingCopy.welcomeTitle, "Hippocampus remembers what you see.")
+        XCTAssertEqual(OnboardingCopy.welcomeTitle, "Your Mac, with a memory.")
         XCTAssertEqual(OnboardingCopy.welcomeBody(.shiftTwice), "Press ⇧ ⇧ and ask about your screen, now or earlier.")
         XCTAssertEqual(OnboardingCopy.welcomeBody(.rightOption), "Tap right ⌥ and ask about your screen, now or earlier.")
         XCTAssertEqual(OnboardingCopy.welcomeBody(.chord), "Press ⌃ ⇧ Space and ask about your screen, now or earlier.")
         XCTAssertEqual(OnboardingCopy.welcomeBodySpoken(.shiftTwice),
                        "Press Shift twice and ask about your screen, now or earlier.", "VoiceOver hears words, not symbols")
-        XCTAssertEqual(OnboardingCopy.accessibilityWhyBase,
-                       "So it knows which window you’re in and skips password fields.")
-        XCTAssertEqual(OnboardingCopy.accessibilityKeyNote(.shiftTwice), "It also lets Shift twice open Ask.")
-        XCTAssertEqual(OnboardingCopy.accessibilityKeyNote(.rightShift), "It also lets right Shift open Ask.")
-        XCTAssertNil(OnboardingCopy.accessibilityKeyNote(.chord), "the chord needs no Accessibility")
+        // Each permission is framed by what it lets Hippocampus do.
+        XCTAssertEqual(OnboardingCopy.screenRecordingBenefits, ["Remembers what’s on your screen"])
+        XCTAssertEqual(OnboardingCopy.accessibilityBenefits(.shiftTwice),
+                       ["Knows the window you’re in", "Skips password fields", "Opens Ask with Shift twice"])
+        XCTAssertEqual(OnboardingCopy.accessibilityKeyBenefit(.rightShift), "Opens Ask with right Shift")
+        XCTAssertNil(OnboardingCopy.accessibilityKeyBenefit(.chord), "the chord needs no Accessibility")
+        XCTAssertEqual(OnboardingCopy.accessibilityBenefits(.chord), ["Knows the window you’re in", "Skips password fields"])
+    }
+
+    func testWhatYouGetNamesThreeThingsTheAppDoes() {
+        XCTAssertEqual(OnboardingCopy.whatYouGetTitle, "What you get")
+        XCTAssertEqual(OnboardingCopy.findTitle, "Find anything you’ve seen.")
+        XCTAssertEqual(OnboardingCopy.findLine, "Ask in plain words. See where each answer came from.")
+        XCTAssertEqual(OnboardingCopy.dayTitle, "Your day, written for you.")
+        XCTAssertEqual(OnboardingCopy.dayLine, "Overview turns today into sessions you can scan.")
+        XCTAssertEqual(OnboardingCopy.aiTitle, "Your AI starts with your context.")
+        // Setup connects no AI tool: the person does, later, from the menu.
+        XCTAssertEqual(OnboardingCopy.aiLine, "Once connected, your AI starts with your recent work.")
+    }
+
+    func testTheWelcomeDemoIsMadeUpAndTellsOneStory() {
+        XCTAssertEqual(OnboardingCopy.Demo.askQuestion, "what was that pricing link?")
+        XCTAssertEqual(OnboardingCopy.Demo.source, "stripe.com/pricing · 2:14 PM")
+        XCTAssertTrue(OnboardingCopy.Demo.source.hasPrefix(OnboardingCopy.Demo.sourceAddress))
+        // The day it fills in ends on the session Ask and the AI talk about.
+        XCTAssertEqual(OnboardingCopy.Demo.sessionTitle, "Team pricing")
+        XCTAssertTrue(OnboardingCopy.Demo.aiContextLines[0].hasSuffix(OnboardingCopy.Demo.sessionTitle))
+        XCTAssertTrue(OnboardingCopy.Demo.aiContextLines[0].hasPrefix("2:12 – 2:36 PM"))
+        XCTAssertTrue(OnboardingCopy.Demo.sessionTime.hasPrefix("2:12 – 2:36 PM"))
+        XCTAssertEqual(OnboardingCopy.Demo.places, ["Overview", "Ask", "You"], "the window's three places")
+        XCTAssertEqual(OnboardingCopy.welcomeDemoLabel,
+                       "A short demo. Ask finds a pricing link and its source. Overview fills in the day. Your AI starts with your recent work.")
+    }
+
+    func testTryItSaysWhatItReadAndWhyAWindowIsSkipped() {
+        XCTAssertEqual(OnboardingCopy.tryItReadFrom("Safari"), "Here’s what I read from Safari")
+        XCTAssertEqual(OnboardingCopy.tryItReading("Safari"), "Reading Safari…")
+        XCTAssertEqual(OnboardingCopy.tryItNoWindow, "No window to read yet.")
+        XCTAssertEqual(OnboardingCopy.tryItNothingToShow("Finder"), "Nothing to read in Finder yet.")
+        XCTAssertEqual(OnboardingCopy.tryItOpenSomething, "Open a page, a document or a chat.")
+        XCTAssertEqual(OnboardingCopy.tryItSwitchWindows, "Switch to another window to try it.")
+        XCTAssertEqual(OnboardingCopy.skippedText(.neverRead, app: "Passwords"), "Passwords is never read.")
+        XCTAssertEqual(OnboardingCopy.skippedText(.excluded, app: "Messages"), "Messages is skipped, as you asked.")
+        XCTAssertEqual(OnboardingCopy.skippedText(.privateWindow, app: "Google Chrome"), "This private window is skipped.")
+        XCTAssertEqual(OnboardingCopy.skippedText(.passwordField, app: "Safari"),
+                       "Nothing is read while a password field is in use.")
+        XCTAssertEqual(OnboardingCopy.skippedText(.neverRead, app: nil), "This app is never read.")
     }
 
     func testPermissionsSaysNothingIsReadOnlyBeforeConsent() {
@@ -230,13 +278,16 @@ final class OnboardingCopyTests: XCTestCase {
 
     // MARK: - Style (spec-copy S2, RULINGS V)
 
-    /// Every string the four screens add, with the key-dependent ones for
+    /// Every string the five screens add, with the key-dependent ones for
     /// each key.
     private var newStrings: [String] {
         var strings = [
             OnboardingCopy.welcomeTitle, OnboardingCopy.welcomeBodyAfterKeys, OnboardingCopy.getStarted,
+            OnboardingCopy.welcomeDemoLabel,
+            OnboardingCopy.whatYouGetTitle, OnboardingCopy.findTitle, OnboardingCopy.findLine,
+            OnboardingCopy.dayTitle, OnboardingCopy.dayLine, OnboardingCopy.aiTitle, OnboardingCopy.aiLine,
             OnboardingCopy.permissionsTitle, OnboardingCopy.permissionsNothingYet, OnboardingCopy.back,
-            OnboardingCopy.screenRecordingName, OnboardingCopy.screenRecordingWhy, OnboardingCopy.screenRecordingSoundNote,
+            OnboardingCopy.screenRecordingName, OnboardingCopy.screenRecordingSoundNote,
             OnboardingCopy.accessibilityName, OnboardingCopy.allow, OnboardingCopy.waitingForSettings,
             OnboardingCopy.screenRecordingWaitingHint, OnboardingCopy.accessibilityWaitingHint, OnboardingCopy.notOnYet,
             OnboardingCopy.needsHelpHint, OnboardingCopy.openSettings, OnboardingCopy.askAgain, OnboardingCopy.permissionOn,
@@ -245,6 +296,7 @@ final class OnboardingCopyTests: XCTestCase {
             OnboardingCopy.promiseNeverReadLead, OnboardingCopy.promiseNeverRead, OnboardingCopy.promiseStopLead,
             OnboardingCopy.promiseStop, OnboardingCopy.dotPromise, OnboardingCopy.openAtLogin,
             OnboardingCopy.startRemembering, OnboardingCopy.neverReadTitle,
+            OnboardingCopy.dotLegendOn, OnboardingCopy.dotLegendOff,
             OnboardingCopy.settingUpEncryption, OnboardingCopy.encryptionFailed, OnboardingCopy.tryAgain,
             OnboardingCopy.consentFailedTitle, OnboardingCopy.consentFailedMessage,
             OnboardingCopy.promiseStays(kept: "kept until you delete it"),
@@ -256,9 +308,22 @@ final class OnboardingCopyTests: XCTestCase {
             OnboardingCopy.answersNeedAppleIntelligence, OnboardingCopy.appleIntelligencePreparing,
             OnboardingCopy.answersUnsupported, OnboardingCopy.done,
             OnboardingCopy.stalledText(.permissionOff(.screenRecording)), OnboardingCopy.stalledText(.unknown),
+            OnboardingCopy.tryItReadFrom("Safari"), OnboardingCopy.tryItReading("Safari"),
+            OnboardingCopy.tryItNoWindow, OnboardingCopy.tryItNothingToShow("Finder"),
+            OnboardingCopy.tryItOpenSomething, OnboardingCopy.tryItSwitchWindows,
         ]
-        let notes: [FrontAppNote] = [.ordinary, .neverRead(app: "System Settings")]
-        strings += notes.map(OnboardingCopy.waitingText)
+        strings += OnboardingCopy.screenRecordingBenefits
+        let reasons: [SkipReason] = [.neverRead, .excluded, .privateWindow, .passwordField]
+        strings += reasons.map { OnboardingCopy.skippedText($0, app: "System Settings") }
+        // Welcome's demo: made up, but on screen, so held to the same rules.
+        let demo = OnboardingCopy.Demo.self
+        strings += [
+            demo.askQuestion, demo.askAnswer, demo.sourcesLabel, demo.sourceApp, demo.source, demo.sourceAddress,
+            demo.pageTitle, demo.onThisMac, demo.copyAnswerKeys, demo.copyAnswer, demo.menuBarClock, demo.remembering,
+            demo.today, demo.sessionTitle, demo.sessionTime, demo.sessionLine, demo.aiWindowTitle, demo.aiContextTitle,
+            demo.aiPrompt, demo.aiReply,
+        ]
+        strings += demo.places + demo.hours + demo.legend + demo.aiContextLines
         strings += [14, 15, 26].map(OnboardingCopy.noModelNote)
         // The panels, and the Promise in review.
         strings += [
@@ -275,7 +340,7 @@ final class OnboardingCopyTests: XCTestCase {
         ]
         for key in AskKeyHint.allCases {
             strings += [OnboardingCopy.welcomeBody(key), OnboardingCopy.welcomeBodySpoken(key)]
-            strings += [OnboardingCopy.accessibilityKeyNote(key)].compactMap { $0 }
+            strings += OnboardingCopy.accessibilityBenefits(key)
         }
         strings += PermissionSurface.allCases.map(OnboardingCopy.waitingHint)
         for key in Self.keysThatWorkNow {

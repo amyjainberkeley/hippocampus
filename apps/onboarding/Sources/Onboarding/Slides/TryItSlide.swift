@@ -2,9 +2,10 @@ import SwiftUI
 import AppKit
 import OnboardingKit
 
-/// Screen 4. Remembering is on. The card shows the first thing it read,
-/// or says what to do until it has; the screen ends when Ask opens.
-/// `TryItPresentation` decides what each card says.
+/// Screen 5. Remembering is on. Hippocampus reads the person's real window
+/// in front, the one behind setup, and the screen shows what it read from
+/// it, or says plainly why that window is skipped. It ends when Ask opens.
+/// `TryItPresentation` decides what each state says.
 struct TryItSlide: View {
     @StateObject private var tryIt: TryItViewModel
     /// Whether answers work on this Mac; nil until the check answers.
@@ -22,13 +23,18 @@ struct TryItSlide: View {
         openSettings: @escaping (PermissionSurface) -> Void
     ) {
         let now = Date()
+        let windows = WindowServerFrontWindowSource()
         _tryIt = StateObject(wrappedValue: TryItViewModel(
             probe: AgentLastReadProbe(launcher: AgentReaderLauncher()),
             startedAt: consentGivenAtUs.map { Date(timeIntervalSince1970: TimeInterval($0) / 1_000_000) } ?? now,
             cursorTsUs: TryItViewModel.cursor(consentGivenAtUs: consentGivenAtUs, now: now),
             remembering: remembering,
             turningOn: consentGivenAtUs != nil,
-            permissionsOn: permissionsOn
+            permissionsOn: permissionsOn,
+            frontWindow: { windows.frontWindow() },
+            rules: ReadRules(excludedApps: PersonExclusions.load()),
+            passwordFieldInUse: { SecureTextEntry.isOn() },
+            requestFreshRead: { SetupReadRequest.post() }
         ))
         self.openSettings = openSettings
     }
@@ -79,19 +85,24 @@ struct TryItScreen: View {
     var locale: Locale = .current
     let perform: (Action) -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         SlideContainer {
             VStack(spacing: OnboardingDesign.Space.xl) {
-                ScreenHeader(title: OnboardingCopy.tryItTitle)
+                ScreenHeader(title: presentation.title)
 
                 if let proof = presentation.proof {
                     ProofCard(proof: proof, now: now, locale: locale)
+                        .transition(OnboardingDesign.Motion.entrance(reduceMotion: reduceMotion))
                     underProof
                 } else {
                     status
                         .frame(maxWidth: .infinity, minHeight: Self.statusHeight)
                 }
             }
+            .animation(OnboardingDesign.Motion.resolve(OnboardingDesign.Motion.standard, reduceMotion: reduceMotion),
+                       value: presentation)
         }
     }
 
@@ -106,7 +117,7 @@ struct TryItScreen: View {
             VStack(spacing: OnboardingDesign.Space.md) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 40))
-                    .foregroundStyle(OnboardingDesign.Palette.success)
+                    .foregroundStyle(OnboardingDesign.Palette.on)
                     .accessibilityHidden(true)
                 Text(finished)
                     .font(.system(size: 17, weight: .semibold))
@@ -114,30 +125,26 @@ struct TryItScreen: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        } else if let message = presentation.messageParts {
+        } else if let heading = presentation.heading {
             VStack(spacing: OnboardingDesign.Space.lg) {
-                if presentation.isWorking {
-                    ProgressView()
-                } else {
-                    Image(systemName: "text.viewfinder")
-                        .font(.system(size: 30, weight: .light))
-                        .foregroundStyle(OnboardingDesign.Palette.accent)
-                        .accessibilityHidden(true)
-                }
+                StatusIcon(icon: presentation.icon, working: presentation.isWorking)
                 VStack(spacing: OnboardingDesign.Space.xs + 2) {
-                    Text(message.heading)
-                        .font(.system(size: 16, weight: .semibold))
+                    Text(heading)
+                        .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(OnboardingDesign.Palette.ink)
-                    if let detail = message.detail {
+                    if let detail = presentation.detail {
                         Text(detail)
                             .font(.system(size: 14))
                             .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
                     }
                 }
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 440)
-                .accessibilityElement(children: .combine)
+                .frame(maxWidth: 460)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(presentation.spoken ?? heading)
                 if let action = presentation.screenAction {
                     Button(label(action)) { perform(action) }
                         .buttonStyle(RowButtonStyle(filled: false))
@@ -155,7 +162,7 @@ struct TryItScreen: View {
                         KeycapRow(keycaps: presentation.keycaps, size: 13)
                     }
                     Text(next)
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(OnboardingDesign.Palette.ink)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: OnboardingDesign.Space.sm)
@@ -212,7 +219,60 @@ private extension TryItPresentation {
     var screenAction: TryItScreen.Action? { action.map(TryItScreen.Action.init) }
 }
 
-/// What was read: the app and window, when, and up to three lines.
+/// Beside a status: the app it is about, crossed out when its window is
+/// skipped, or a symbol. A small spinner while it reads.
+private struct StatusIcon: View {
+    let icon: TryItPresentation.Icon?
+    let working: Bool
+
+    var body: some View {
+        Group {
+            switch icon {
+            case .app(let bundleId, let skipped):
+                AppIconImage(bundleId: bundleId, side: 56)
+                    .opacity(skipped ? 0.55 : 1)
+                    .saturation(skipped ? 0 : 1)
+                    .overlay(alignment: .bottomTrailing) {
+                        if skipped {
+                            badge("eye.slash")
+                        } else if working {
+                            ProgressView().controlSize(.small)
+                                .padding(4)
+                                .background(Circle().fill(Color(nsColor: .windowBackgroundColor)))
+                                .offset(x: 6, y: 6)
+                        }
+                    }
+            case .symbol(let name):
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(OnboardingDesign.Palette.accentSoft)
+                    .frame(width: 56, height: 56)
+                    .overlay(
+                        Image(systemName: name)
+                            .font(.system(size: 24, weight: .regular))
+                            .foregroundStyle(OnboardingDesign.Palette.accent)
+                    )
+            case nil:
+                if working {
+                    ProgressView()
+                        .frame(width: 56, height: 56)
+                }
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func badge(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 22, height: 22)
+            .background(Circle().fill(OnboardingDesign.Palette.ink.opacity(0.85)))
+            .offset(x: 6, y: 6)
+    }
+}
+
+/// What was read: the window, when, and up to three of its lines, drawn as
+/// Hippocampus draws a moment it remembers.
 struct ProofCard: View {
     let proof: ReadProof
     /// A fixed clock for the preview renderer; nil counts the seconds.
@@ -220,16 +280,12 @@ struct ProofCard: View {
     var locale: Locale = .current
 
     var body: some View {
-        VStack(alignment: .leading, spacing: OnboardingDesign.Space.md) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: OnboardingDesign.Space.md) {
-                Image(nsImage: Self.icon(for: proof.appBundleId))
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: 32, height: 32)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
+                AppIconImage(bundleId: proof.appBundleId, side: 30)
+                VStack(alignment: .leading, spacing: 1) {
                     Text(OnboardingCopy.proofHeading(proof))
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(OnboardingDesign.Palette.ink)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -237,20 +293,29 @@ struct ProofCard: View {
                 }
                 Spacer(minLength: 0)
             }
+            .padding(.horizontal, OnboardingDesign.Space.lg + 2)
+            .padding(.vertical, OnboardingDesign.Space.md + 2)
             if !proof.lines.isEmpty {
-                VStack(alignment: .leading, spacing: OnboardingDesign.Space.xs + 2) {
+                Divider()
+                VStack(alignment: .leading, spacing: OnboardingDesign.Space.sm) {
                     ForEach(Array(proof.lines.enumerated()), id: \.offset) { _, line in
-                        Text(line)
-                            .font(.system(size: 13.5))
-                            .foregroundStyle(.primary)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
+                        HStack(alignment: .top, spacing: OnboardingDesign.Space.sm + 2) {
+                            RoundedRectangle(cornerRadius: 1)
+                                .fill(MiniPalette.border)
+                                .frame(width: 2.5)
+                            Text(line)
+                                .font(.system(size: 14))
+                                .foregroundStyle(.primary)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(.leading, 44)
+                .padding(.horizontal, OnboardingDesign.Space.lg + 2)
+                .padding(.vertical, OnboardingDesign.Space.lg)
             }
         }
-        .padding(OnboardingDesign.Space.xl)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassCard(padding: 0)
         .accessibilityElement(children: .combine)
@@ -272,18 +337,5 @@ struct ProofCard: View {
         Text(OnboardingCopy.readAgo(proof.at, now: now, locale: locale))
             .font(.system(size: 12))
             .foregroundStyle(.secondary)
-    }
-
-    /// Icons already looked up, by app.
-    @MainActor private static var icons: [String: NSImage] = [:]
-
-    /// The app's own icon, or the generic one when it is not installed.
-    static func icon(for bundleId: String) -> NSImage {
-        if let known = icons[bundleId] { return known }
-        let icon = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)
-            .map { NSWorkspace.shared.icon(forFile: $0.path) }
-            ?? NSWorkspace.shared.icon(for: .applicationBundle)
-        icons[bundleId] = icon
-        return icon
     }
 }

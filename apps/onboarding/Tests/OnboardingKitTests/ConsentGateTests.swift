@@ -201,6 +201,9 @@ final class ConsentGateTests: XCTestCase {
         XCTAssertEqual(state.loadRoute(), "permissions")
         XCTAssertFalse(vm.canAdvance, "Permissions needs both permissions")
         vm.back()
+        XCTAssertEqual(vm.screen, .whatYouGet)
+        XCTAssertEqual(state.loadRoute(), "what-you-get")
+        vm.back()
         XCTAssertEqual(vm.screen, .welcome)
         XCTAssertFalse(vm.canGoBack)
     }
@@ -236,6 +239,7 @@ final class ConsentGateTests: XCTestCase {
         XCTAssertTrue(again.isReview)
         XCTAssertEqual(again.screen, .welcome)
         XCTAssertNil(leftOver.loadRoute())
+        again.advance()
         again.advance()
         again.advance()
         XCTAssertEqual(again.screen, .promise)

@@ -1,7 +1,7 @@
 import XCTest
 @testable import OnboardingKit
 
-/// The four screens: their order, the moves between them, and what the
+/// The five screens: their order, the moves between them, and what the
 /// resume file keeps. Consent itself is `ConsentGateTests`; the permission
 /// rows are `PermissionRowStateTests`.
 @MainActor
@@ -22,19 +22,21 @@ final class OnboardingFlowViewModelTests: XCTestCase {
         )
     }
 
-    func testThereAreFourScreensInThisOrder() {
-        XCTAssertEqual(OnboardingScreen.allCases, [.welcome, .permissions, .promise, .tryIt])
-        XCTAssertEqual(OnboardingScreen.allCases.count, 4)
-        XCTAssertEqual(OnboardingScreen.allCases.map(\.rawValue), [0, 1, 2, 3])
+    func testThereAreFiveScreensInThisOrder() {
+        XCTAssertEqual(OnboardingScreen.allCases, [.welcome, .whatYouGet, .permissions, .promise, .tryIt])
+        XCTAssertEqual(OnboardingScreen.allCases.count, 5)
+        XCTAssertEqual(OnboardingScreen.allCases.map(\.rawValue), [0, 1, 2, 3, 4])
     }
 
     func testAFreshRunStartsAtWelcome() {
         XCTAssertEqual(makeVM().screen, .welcome)
     }
 
-    func testAFirstRunTakesThreeStepsAndTheThirdIsConsent() async {
+    func testAFirstRunTakesFourStepsAndTheFourthIsConsent() async {
         let consent = InMemoryOnboardingConsentStore()
         let vm = makeVM(consent: consent)
+        vm.advance()
+        XCTAssertEqual(vm.screen, .whatYouGet)
         vm.advance()
         XCTAssertEqual(vm.screen, .permissions)
         vm.advance()
@@ -46,8 +48,12 @@ final class OnboardingFlowViewModelTests: XCTestCase {
         XCTAssertEqual(consent.writeCount, 1)
     }
 
-    func testWelcomeAlwaysContinuesAndPermissionsOnlyWithBoth() {
+    func testWelcomeAndWhatYouGetAlwaysContinueAndPermissionsOnlyWithBoth() {
         XCTAssertTrue(makeVM(screenRecording: .notRequested, accessibility: .denied).canAdvance)
+        let whatYouGet = makeVM(screenRecording: .notRequested, accessibility: .denied, at: .whatYouGet)
+        XCTAssertTrue(whatYouGet.canAdvance, "it asks for nothing")
+        whatYouGet.advance()
+        XCTAssertEqual(whatYouGet.screen, .permissions)
         for (sr, ax) in [(TCCStatus.notRequested, TCCStatus.granted), (.granted, .denied), (.denied, .notRequested)] {
             let vm = makeVM(screenRecording: sr, accessibility: ax, at: .permissions)
             XCTAssertFalse(vm.canAdvance)
@@ -65,7 +71,7 @@ final class OnboardingFlowViewModelTests: XCTestCase {
         XCTAssertEqual(vm.screen, .tryIt)
     }
 
-    func testBackIsOnPermissionsAndPromiseOnly() {
+    func testBackIsOnWhatYouGetPermissionsAndPromiseOnly() {
         let consent = InMemoryOnboardingConsentStore(given: true)
         XCTAssertFalse(makeVM(at: .welcome).canGoBack)
         XCTAssertFalse(makeVM(consent: consent, at: .tryIt).canGoBack)
@@ -74,6 +80,9 @@ final class OnboardingFlowViewModelTests: XCTestCase {
         XCTAssertTrue(vm.canGoBack)
         vm.back()
         XCTAssertEqual(vm.screen, .permissions)
+        XCTAssertTrue(vm.canGoBack)
+        vm.back()
+        XCTAssertEqual(vm.screen, .whatYouGet)
         XCTAssertTrue(vm.canGoBack)
         vm.back()
         XCTAssertEqual(vm.screen, .welcome)
@@ -89,6 +98,8 @@ final class OnboardingFlowViewModelTests: XCTestCase {
         let store = InMemoryOnboardingStateStore()
         let vm = makeVM(stateStore: store)
         vm.advance()
+        XCTAssertEqual(store.loadRoute(), "what-you-get")
+        vm.advance()
         XCTAssertEqual(store.loadRoute(), "permissions")
         vm.advance()
         XCTAssertEqual(store.loadRoute(), "promise")
@@ -99,7 +110,7 @@ final class OnboardingFlowViewModelTests: XCTestCase {
     }
 
     func testSetupResumesAtTheSavedScreenWithinTheClamp() {
-        for screen in [OnboardingScreen.welcome, .permissions, .promise] {
+        for screen in [OnboardingScreen.welcome, .whatYouGet, .permissions, .promise] {
             let vm = makeVM(stateStore: InMemoryOnboardingStateStore(route: screen.routeName))
             XCTAssertEqual(vm.screen, screen, screen.routeName)
         }

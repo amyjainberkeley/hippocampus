@@ -4,10 +4,11 @@ import OnboardingKit
 import SwiftUI
 
 /// Debug only: `HIPPOCAMPUS_RENDER_ONBOARDING=<dir>` draws every screen of
-/// setup, each permission row state and the tallest pairs of them, each
-/// Promise button state, each Try it card, the never-read panel and the
-/// browser extension panel, from fixture state, to `<dir>/<name>.png` at
-/// 2x, then returns from `main` before setup starts.
+/// setup, Welcome's demo at each of its moments and on the way through them,
+/// each permission row state and the tallest pairs of them, each Promise
+/// button state, each Try it state, the never-read panel and the browser
+/// extension panel, from fixture state, to `<dir>/<name>.png` at 2x, then
+/// returns from `main` before setup starts.
 ///
 /// Nothing reaches the screen. `OnboardingEntryPoint.main` calls this
 /// first, before the parent watch and `OnboardingApp.main()`, so no scene,
@@ -18,9 +19,10 @@ import SwiftUI
 /// window's size, with solid fills where the materials would be.
 ///
 /// Nothing is read from this Mac: the renderer draws the screens' pure
-/// views, never the ones that check permissions, read memory, read the
-/// retention file or ask about Apple Intelligence. The key, the clock, the
-/// locale and every line of text are fixed below.
+/// views, never the ones that check permissions, read memory, list windows,
+/// read the retention file or ask about Apple Intelligence. The key, the
+/// clock, the locale, every window and every line of text are fixed below
+/// and made up.
 @MainActor
 enum OnboardingPreviewRenderer {
     static let environmentKey = "HIPPOCAMPUS_RENDER_ONBOARDING"
@@ -55,72 +57,95 @@ enum OnboardingPreviewRenderer {
         var states: [(String, AnyView)] = []
         func add<V: View>(_ name: String, _ view: V) { states.append((name, AnyView(view))) }
 
-        // Welcome
-        add("1-welcome", welcome(.shiftTwice))
-        add("1-welcome-right-command", welcome(.rightCommand))
-        add("1-welcome-chord", welcome(.chord))
+        // Welcome: each moment whole, and on the way through it.
+        add("1-welcome", welcome(.shiftTwice, WelcomeDemoScript.finalFrame(.ask)))
+        add("1-welcome-ask-key-down", welcome(.shiftTwice, WelcomeDemoScript.frame(.ask, at: 0.15)))
+        add("1-welcome-ask-typing", welcome(.shiftTwice, WelcomeDemoScript.frame(.ask, at: 1.5)))
+        add("1-welcome-overview-filling", welcome(.shiftTwice, WelcomeDemoScript.frame(.overview, at: 0.9)))
+        add("1-welcome-overview", welcome(.shiftTwice, WelcomeDemoScript.finalFrame(.overview)))
+        add("1-welcome-ai-starting", welcome(.shiftTwice, WelcomeDemoScript.frame(.ai, at: 1.9)))
+        add("1-welcome-ai", welcome(.shiftTwice, WelcomeDemoScript.finalFrame(.ai)))
+        add("1-welcome-right-command", welcome(.rightCommand, WelcomeDemoScript.finalFrame(.ask)))
+        add("1-welcome-chord", welcome(.chord, WelcomeDemoScript.finalFrame(.ask)))
+
+        // What you get
+        add("2-what-you-get", OnboardingWindow {
+            WhatYouGetSlide()
+        } bar: {
+            BottomBar(screen: .whatYouGet, back: {}, primaryLabel: OnboardingCopy.continueLabel, primary: {})
+        })
 
         // Permissions
         let srOn = row(.screenRecording, .granted)
         let axOn = row(.accessibility, .granted)
-        add("2-permissions", permissions([row(.screenRecording, .idle), row(.accessibility, .idle)]))
-        add("2-permissions-screen-waiting", permissions([
+        add("3-permissions", permissions([row(.screenRecording, .idle), row(.accessibility, .idle)]))
+        add("3-permissions-screen-on", permissions([srOn, row(.accessibility, .idle)]))
+        add("3-permissions-screen-waiting", permissions([
             row(.screenRecording, .waiting), row(.accessibility, .idle, canAllow: false),
         ]))
-        add("2-permissions-screen-needs-help", permissions([
+        add("3-permissions-screen-needs-help", permissions([
             row(.screenRecording, .needsHelp), row(.accessibility, .idle),
         ]))
-        add("2-permissions-screen-ask-again", permissions([
+        add("3-permissions-screen-ask-again", permissions([
             row(.screenRecording, .needsHelp, offersAskAgain: true), row(.accessibility, .idle),
         ]))
-        add("2-permissions-accessibility-waiting", permissions([srOn, row(.accessibility, .waiting)]))
+        add("3-permissions-accessibility-waiting", permissions([srOn, row(.accessibility, .waiting)]))
         // The tallest pairs: one row turned down, then the other tried.
-        add("2-permissions-screen-needs-help-accessibility-waiting", permissions([
+        add("3-permissions-screen-needs-help-accessibility-waiting", permissions([
             row(.screenRecording, .needsHelp), row(.accessibility, .waiting),
         ]))
-        add("2-permissions-screen-waiting-accessibility-needs-help", permissions([
+        add("3-permissions-screen-waiting-accessibility-needs-help", permissions([
             row(.screenRecording, .waiting), row(.accessibility, .needsHelp),
         ]))
-        add("2-permissions-both-need-help", permissions([
+        add("3-permissions-both-need-help", permissions([
             row(.screenRecording, .needsHelp, offersAskAgain: true), row(.accessibility, .needsHelp, offersAskAgain: true),
         ]))
-        add("2-permissions-both-on", permissions([srOn, axOn]))
-        add("2-permissions-review", permissions([srOn, axOn], review: true))
-        add("2-permissions-macos-14", permissions([
+        add("3-permissions-both-on", permissions([srOn, axOn]))
+        add("3-permissions-review", permissions([srOn, axOn], review: true))
+        add("3-permissions-macos-14", permissions([
             row(.screenRecording, .idle, macOS: 14), row(.accessibility, .idle),
         ]))
-        add("2-permissions-chord", permissions([
+        add("3-permissions-chord", permissions([
             row(.screenRecording, .idle), row(.accessibility, .idle, key: .chord),
         ]))
 
-        // Promise
-        add("3-promise", promise(keyState: .ready))
-        add("3-promise-setting-up", promise(keyState: .generating))
-        add("3-promise-key-failed", promise(keyState: .failed("")))
-        add("3-promise-review", promise(keyState: .ready, review: true))
+        // Promise: privacy at a glance, then consent
+        add("4-promise", promise(keyState: .ready))
+        add("4-promise-setting-up", promise(keyState: .generating))
+        add("4-promise-key-failed", promise(keyState: .failed("")))
+        add("4-promise-review", promise(keyState: .ready, review: true))
 
-        // Try it
-        let notes = proof()
-        add("4-try-it-turning-on", tryIt(.starting))
-        // A browser in front is read like any window: the ordinary card.
-        add("4-try-it-waiting", tryIt(.waiting(FrontAppNote(bundleId: "com.apple.Safari", name: "Safari"))))
-        add("4-try-it-waiting-system-settings", tryIt(.waiting(.neverRead(app: "System Settings"))))
-        add("4-try-it-stalled", tryIt(.stalled(.unknown)))
-        add("4-try-it-stalled-permission", tryIt(.stalled(.permissionOff(.screenRecording))))
-        add("4-try-it-proof", tryIt(.proof(notes), understanding: .available))
+        // Try it: the window in front, read or skipped.
+        let pricing = FrontWindow(bundleId: "com.apple.Safari", appName: "Safari", title: "Pricing | Stripe")
+        let finder = FrontWindow(bundleId: "com.apple.finder", appName: "Finder", title: "Applications")
+        // Apps every Mac has, or that this one does, so their own icons show.
+        let passwords = FrontWindow(bundleId: "com.apple.Passwords", appName: "Passwords", title: "All")
+        let incognito = FrontWindow(bundleId: "com.google.Chrome", appName: "Google Chrome", title: "New Incognito Tab")
+        let messages = FrontWindow(bundleId: "com.apple.MobileSMS", appName: "Messages", title: nil)
+        let read = proof()
+        add("5-try-it-turning-on", tryIt(.starting))
+        add("5-try-it-reading", tryIt(.reading(pricing)))
+        add("5-try-it-proof", tryIt(.proof(read), understanding: .available))
+        add("5-try-it-skipped-password-app", tryIt(.skipped(.neverRead, passwords)))
+        add("5-try-it-skipped-private", tryIt(.skipped(.privateWindow, incognito)))
+        add("5-try-it-skipped-excluded", tryIt(.skipped(.excluded, messages)))
+        add("5-try-it-skipped-password-field", tryIt(.skipped(.passwordField, pricing)))
+        add("5-try-it-nothing-to-show", tryIt(.nothingToShow(finder)))
+        add("5-try-it-no-window", tryIt(.noWindow))
+        add("5-try-it-stalled", tryIt(.stalled(.unknown)))
+        add("5-try-it-stalled-permission", tryIt(.stalled(.permissionOff(.screenRecording))))
         // No Apple Intelligence and no model on this Mac, before and on macOS 26.
-        add("4-try-it-proof-no-model", tryIt(.proof(notes), understanding: .noModel, macOS: 15))
-        add("4-try-it-proof-no-model-macos-26", tryIt(.proof(notes), understanding: .noModel, macOS: 26))
-        add("4-try-it-proof-preparing", tryIt(.proof(notes), understanding: .preparing))
+        add("5-try-it-proof-no-model", tryIt(.proof(read), understanding: .noModel, macOS: 15))
+        add("5-try-it-proof-no-model-macos-26", tryIt(.proof(read), understanding: .noModel, macOS: 26))
+        add("5-try-it-proof-preparing", tryIt(.proof(read), understanding: .preparing))
         // Set to use Apple Intelligence alone.
-        add("4-try-it-proof-no-answers", tryIt(.proof(notes), understanding: .turnedOff))
-        add("4-try-it-proof-unsupported", tryIt(.proof(notes), understanding: .unsupported))
-        add("4-try-it-proof-no-key", tryIt(.proof(notes), keyNow: nothingOpensAsk, understanding: .available))
-        add("4-try-it-proof-title-only", tryIt(.proof(proof(lines: false)), understanding: .available))
-        add("4-try-it-finished", tryIt(.finished(openedForThem: false)))
-        add("4-try-it-finished-for-them", tryIt(.finished(openedForThem: true)))
-        add("4-try-it-paused", tryIt(.notRemembering(.paused)))
-        add("4-try-it-off", tryIt(.notRemembering(.off)))
+        add("5-try-it-proof-no-answers", tryIt(.proof(read), understanding: .turnedOff))
+        add("5-try-it-proof-unsupported", tryIt(.proof(read), understanding: .unsupported))
+        add("5-try-it-proof-no-key", tryIt(.proof(read), keyNow: nothingOpensAsk, understanding: .available))
+        add("5-try-it-finished", tryIt(.finished(openedForThem: false)))
+        add("5-try-it-finished-for-them", tryIt(.finished(openedForThem: true)))
+        add("5-try-it-paused", tryIt(.notRemembering(.paused)))
+        add("5-try-it-off", tryIt(.notRemembering(.off)))
 
         // The panel Preferences opens for what is never read.
         add("panel-never-read", OnboardingPanelView(panel: .neverRead, keptForPreview: kept) {})
@@ -175,9 +200,9 @@ enum OnboardingPreviewRenderer {
         }
     }
 
-    private static func welcome(_ key: AskKeyHint) -> some View {
+    private static func welcome(_ key: AskKeyHint, _ frame: DemoFrame) -> some View {
         OnboardingWindow {
-            WelcomeSlide(key: key, animates: false)
+            WelcomeSlide(key: key, animates: false, demoFrame: frame)
         } bar: {
             BottomBar(screen: .welcome, primaryLabel: OnboardingCopy.getStarted, primary: {})
         }
@@ -248,21 +273,19 @@ enum OnboardingPreviewRenderer {
         }
     }
 
-    /// A note read twelve seconds ago, as `ReadProof.choose` makes it from
-    /// a stored row. Synthetic text, no real moment.
-    private static func proof(lines: Bool = true) -> ReadProof {
-        let text = lines
-            ? "Launch plan\nBeta ships to forty design partners on October 21.\nOpen question: what does the Team plan cost?\nKeep the pricing page short and plain.\nEdit"
-            : "Launch plan\nEdit\nShare"
+    /// A pricing page read twelve seconds ago, as `ReadProof.choose` makes
+    /// it from a stored row. Synthetic text, no real moment.
+    private static func proof() -> ReadProof {
+        let text = "Pricing | Stripe\nStart with per-seat pricing for each user on your team.\nVolume pricing charges the same price for every unit.\nTiered pricing lowers the price as more seats are added.\nContact sales"
         let row = ReadRow(
             tsUs: UInt64((now.timeIntervalSince1970 - 12) * 1_000_000),
-            appBundleId: "com.apple.Notes",
-            windowTitle: "Launch plan",
+            appBundleId: "com.apple.Safari",
+            windowTitle: "Pricing | Stripe",
             text: text,
-            sourceKind: "screen_ocr"
+            sourceKind: "screen_context"
         )
         // swiftlint:disable:next force_unwrapping
-        return ReadProof.choose(from: [row], lastActivatedApp: "com.apple.Notes", nameFor: { _ in "Notes" })!
+        return ReadProof.choose(from: [row], lastActivatedApp: "com.apple.Safari", nameFor: { _ in "Safari" })!
     }
 
     // MARK: - Drawing

@@ -97,11 +97,11 @@ final class OnboardingSourceScanTests: XCTestCase {
         }
     }
 
-    func testBackShowsOnPermissionsAndPromiseOnly() throws {
+    func testBackShowsOnWhatYouGetPermissionsAndPromiseOnly() throws {
         let flow = try source("Onboarding/OnboardingFlowView.swift")
         XCTAssertTrue(flow.contains("back: flowVM.canGoBack ? { flowVM.back() } : nil"))
         XCTAssertTrue(try source("OnboardingKit/OnboardingFlowViewModel.swift")
-            .contains("screen == .permissions || screen == .promise"))
+            .contains("screen == .whatYouGet || screen == .permissions || screen == .promise"))
     }
 
     // MARK: - What the switch removed
@@ -150,13 +150,62 @@ final class OnboardingSourceScanTests: XCTestCase {
 
     // MARK: - The screens
 
-    func testWelcomeHasNoAppIcon() throws {
+    func testWelcomeDrawsTheHiMarkAndPlaysTheDemoFromItsScript() throws {
         let welcome = try source("Onboarding/Slides/WelcomeSlide.swift")
-        XCTAssertFalse(welcome.contains("AppIcon"), "the title names the product")
+        // The mark is drawn from the icon's own geometry, never a bitmap.
+        XCTAssertTrue(welcome.contains("HiMarkTile("), "the hi mark at the top")
+        XCTAssertFalse(welcome.contains("AppIcon"))
         XCTAssertFalse(welcome.contains("Image(nsImage:"))
-        XCTAssertTrue(welcome.contains("KeycapRow(keycaps: key.keycaps, pressed: pressed)"), "keycaps in the sentence")
-        XCTAssertTrue(welcome.contains("for time in key.pulseTimes"))
-        XCTAssertTrue(welcome.contains("guard animates, !reduceMotion else { return }"))
+        // The keycaps are in the sentence and press as Ask opens in the demo,
+        // as many times as the key is pressed.
+        XCTAssertTrue(welcome.contains("KeycapRow(keycaps: key.keycaps, pressed: pressed"), "keycaps in the sentence")
+        XCTAssertTrue(welcome.contains("let presses = key.pulseTimes.count"))
+        XCTAssertTrue(welcome.contains("WelcomeDemoScript.frame(at: Date().timeIntervalSince(start), presses: presses)"))
+        // Under Reduce Motion nothing moves: each moment whole, then the next.
+        XCTAssertTrue(welcome.contains("guard !reduceMotion else {\n            await playStill()"))
+        XCTAssertTrue(welcome.contains("WelcomeDemoScript.finalFrame("))
+        XCTAssertTrue(welcome.contains("guard animates, demoFrame == nil else { return }"), "the renderer draws one frame")
+    }
+
+    func testTheDemoAndTheRendersShowOnlyMadeUpData() throws {
+        // Welcome's demo and What you get draw `OnboardingCopy.Demo` only:
+        // they read no memory and list no window.
+        var files = ["Onboarding/Slides/WelcomeSlide.swift", "Onboarding/Slides/WhatYouGetSlide.swift",
+                     "Onboarding/OnboardingPreviewRenderer.swift"]
+        let demo = sourcesRoot.appendingPathComponent("Onboarding/Demo")
+        let names = try FileManager.default.contentsOfDirectory(atPath: demo.path).filter { $0.hasSuffix(".swift") }
+        XCTAssertFalse(names.isEmpty)
+        files += names.map { "Onboarding/Demo/\($0)" }
+        for file in files {
+            let lines = code(try source(file))
+            for call in ["LastReadProbe", "AgentReaderLauncher", "WindowServerFrontWindowSource", "CGWindowList",
+                         "PersonExclusions.load", "SecureTextEntry.isOn", "UnderstandingProbe", "DiskRetentionStore"] {
+                XCTAssertFalse(lines.contains { $0.contains(call) }, "\(file) uses \(call)")
+            }
+        }
+    }
+
+    func testTryItReadsTheRealWindowInFrontUnderTheSameRules() throws {
+        let tryIt = code(try source("Onboarding/Slides/TryItSlide.swift")).joined(separator: "\n")
+        XCTAssertTrue(tryIt.contains("let windows = WindowServerFrontWindowSource()"))
+        XCTAssertTrue(tryIt.contains("frontWindow: { windows.frontWindow() }"))
+        XCTAssertTrue(tryIt.contains("rules: ReadRules(excludedApps: PersonExclusions.load())"))
+        XCTAssertTrue(tryIt.contains("passwordFieldInUse: { SecureTextEntry.isOn() }"))
+        // A window brought forward is read at once, as opening Ask reads it.
+        XCTAssertTrue(tryIt.contains("requestFreshRead: { SetupReadRequest.post() }"))
+        XCTAssertTrue(tryIt.contains("probe: AgentLastReadProbe(launcher: AgentReaderLauncher())"))
+    }
+
+    func testTheOnlyGradientIsTheAppIconsTile() throws {
+        // Backdrops stay the native material; the hi mark's tile carries the
+        // icon's own white-to-grey fall.
+        for (name, text) in try sources() where name != "HiMarkTile.swift" {
+            XCTAssertFalse(code(text).contains { $0.range(of: "gradient", options: .caseInsensitive) != nil },
+                           "\(name) draws a gradient")
+        }
+        let tile = try source("Onboarding/SharedComponents/HiMarkTile.swift")
+        XCTAssertTrue(tile.contains("OnboardingHiMark.tileTopRGB"))
+        XCTAssertTrue(tile.contains("OnboardingHiMark.tileBottomRGB"))
     }
 
     func testOpenItForMeIsALink() throws {

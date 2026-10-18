@@ -1,16 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// TryItViewModel — the last setup screen. It shows the first thing
-// Hippocampus read, speaks to the app in front when nothing was read yet,
-// and ends when the person opens Ask.
+// TryItViewModel — the last setup screen. It reads the person's real window
+// in front, shows what was read from it, says plainly when that window is
+// skipped, and ends when the person opens Ask.
+//
+// The window in front is the frontmost window that is not Hippocampus's own
+// (`FrontWindow`): right after consent, the one behind setup's window. It is
+// read by the app like any other window, under the same rules: never-read
+// apps, the person's exclusions, private browser windows and password fields
+// are skipped (`ReadRules`, `SkipReason`). When the person brings another
+// window forward, setup asks the app for one fresh read of it, past the
+// reader's rest (`requestFreshRead`).
 //
 // Timeline, from consent: "Turning on…" for 3 s; the first read about 2 s
-// in, then every 2 s; a proof as soon as one exists (a newer one replaces
-// it); "Still nothing read" after 45 s with none. Reading stops 30 s after
-// the first proof, or 3 minutes in, whichever comes first. When the app
-// posts `ai.hippocampus.ask.didShow` the card ends on "That’s it.", or on
-// "That’s Ask." when Ask opened because the person clicked "Open it for
-// me", which proves nothing about the key.
+// in, then every 2 s; a proof as soon as one with a sentence exists (a newer
+// one replaces it); "Still nothing read" after 45 s with none. Reading stops
+// 30 s after the first proof, or 3 minutes in, whichever comes first. When
+// the app posts `ai.hippocampus.ask.didShow` the card ends on "That’s it.",
+// or on "That’s Ask." when Ask opened because the person clicked "Open it
+// for me", which proves nothing about the key.
 //
 // In review (Show Setup Again) remembering was already on, so there is no
 // "Turning on…". "Try Again" on a stalled card has the app restart
@@ -40,134 +48,10 @@ public enum RememberingState: String, Sendable, Equatable {
     }
 }
 
-/// What the waiting card says about the app in front. A browser is read
-/// like every other window (RULINGS G8), so it is `ordinary`.
-public enum FrontAppNote: Equatable, Sendable {
-    /// "Nothing read yet. Open a document, note or chat, then come back."
-    case ordinary
-    /// System Settings, a password manager: "{App} is never read."
-    case neverRead(app: String)
-
-    /// System agents whose windows the capture helper never reads, matched by
-    /// exact identifier. Mirrors `SensitiveCaptureDenylist.appBundles` minus
-    /// Hippocampus's own apps (those are `ReadProof.ownBundleIds`, never read
-    /// because they are memory viewers). Onboarding does not link the helper,
-    /// so a parity test holds this to the helper's source.
-    static let neverReadApps: Set<String> = [
-        // System Settings, which held the Passwords pane before macOS 15.
-        "com.apple.systempreferences",
-        // System consent and sign-in dialogs: the permission prompt, the
-        // administrator password prompt, the Touch ID or password sheet, a
-        // file server's sign-in and iCloud Keychain's approval prompt.
-        "com.apple.usernotificationcenter", "com.apple.securityagent",
-        "com.apple.localauthentication.uiagent", "com.apple.netauthagent",
-        "com.apple.security.keychain-circle-notification",
-        // The lock screen and screen saver, and the login window.
-        "com.apple.loginwindow", "com.apple.screensaver.engine", "com.apple.screensaver",
-    ]
-
-    /// Password managers and authenticators the helper never reads, matched by
-    /// identifier family: a family covers its own identifier and every
-    /// identifier beneath it, a whole dot-separated label at a time (so
-    /// "com.1password" covers "com.1password.1password" but not
-    /// "com.1passwordfan"). Mirrors
-    /// `SensitiveCaptureDenylist.passwordManagerFamilies` exactly; the same
-    /// parity test holds this to the helper's source.
-    static let neverReadPasswordManagerFamilies: Set<String> = [
-        // Apple Passwords and its menu bar extra, and Keychain Access.
-        "com.apple.passwords", "com.apple.keychainaccess",
-        // 1Password 8 and 7, the browser helper, and 1Password for Safari.
-        "com.1password", "2bua8c4s2c.com.1password", "com.agilebits",
-        "com.bitwarden", // Bitwarden and its helper
-        "com.dashlane",
-        "com.lastpass", // the app, the earlier App Store app, LastPass for Safari
-        "org.keepassxc", "org.keepassx", // KeePassXC, and the identifier older builds used
-        // Keeper, direct and from the App Store, and Keeper for Safari.
-        "com.keepersecurity.passwordmanager", "com.callpod.keepermac", "com.keepersecurity.safari",
-        "com.nordsec.nordpass", "com.nordpass", // NordPass, direct and from the App Store
-        "me.proton.pass", "me.proton.authenticator", // Proton Pass and Proton Authenticator
-        "in.sinew.enpass-desktop", // Enpass
-        "com.sibersystems.roboform", "com.sibersystems.roboformmac", // RoboForm, direct and App Store
-        "com.markmcguill.strongbox", // Strongbox, every edition
-        "com.hicknhacksoftware.macpass", // MacPass
-        "com.outercorner.secrets", "com.outercorner.secrets-safari", // Secrets, and Secrets for Safari
-        "com.keepassium", // KeePassium and KeePassium Pro
-        "net.zetetic.strip", // Codebook
-        "com.safeincloud", // SafeInCloud
-        "com.mseven.msecuremac", // mSecure
-        "pw.buttercup", // Buttercup
-        "net.antelle.keeweb", // KeeWeb
-        "com.app77.pwsafemac", // pwSafe
-        "com.zoho.vault", // Zoho Vault
-        "com.bitdefender.securepass", // Bitdefender SecurePass
-        "com.symantec.nortonpasswordmanager", // Norton's password manager for Safari
-        "com.avira.passwordmanager", // Avira Password Manager
-        "com.eset.passwordmanager", // ESET Password Manager
-        "com.keepsolid.passwarden", // Passwarden
-        "com.pcloud.pcloudpass", // pCloud Pass
-        "com.synology.c2.password", // Synology C2 Password
-        "net.devolutions.authenticator", // Devolutions Password Manager
-        "com.lockitsolutions.lockit", // Lockit
-        "design.codeux.authpass", // AuthPass
-        "com.onekeepass", // OneKeePass
-        "com.2stable.passwords", // Password Manager by 2Stable
-        "app.elpass.macos", // Elpass
-        "app.bramble.desktop", // Bramble
-        "app.rowel.desktop", // Rowel
-        "com.jumpcloud.pwm", // JumpCloud Password Manager
-        "org.qtpass", // QtPass
-        "app.padloc", // Padloc
-        "com.ascendo.datavaultmac", // Data Vault
-        "com.logmeonce", // LogMeOnce
-        "com.softwareops.myeyesonlyprouniversal", // My Eyes Only
-        "com.saaspass.password-manager-authenticator", // SAASPASS
-        // Authenticator apps, which show sign-in codes.
-        "com.neilsardesai.step-two-mac", // Step Two
-        "maccatalyst.de.cooperrs.authenticator", // OTP Auth
-        "com.2stable.2fa", // Authenticator App by 2Stable
-        "com.zoho.iamlogin", // Zoho OneAuth
-        "com.yubico.yubioath", // Yubico Authenticator
-        "io.ente.auth", // Ente Auth
-        "com.twofas.org", // 2FAS Auth and 2FAS Pass
-        "me.tij.raivo-macos", // Raivo
-        "com.okta.mobile", // Okta Verify
-        "com.symantec.vip-access", // Symantec VIP Access
-        "com.pingidentity.pingid", // PingID
-        "com.secureauth.secureauth-otp", // SecureAuth Passcode
-    ]
-
-    /// Whether the helper never reads this app, by the same rule the helper
-    /// uses (`SensitiveCaptureDenylist.isNeverReadApp`): an exact
-    /// `neverReadApps` identifier, or one in or under a
-    /// `neverReadPasswordManagerFamilies` family. Case-insensitive. Own apps
-    /// are excluded here because they are never the app in front
-    /// (`appActivated` drops `ReadProof.ownBundleIds`).
-    static func isNeverRead(_ bundleId: String) -> Bool {
-        let id = bundleId.lowercased()
-        if neverReadApps.contains(id) { return true }
-        var family = Substring(id)
-        while !family.isEmpty {
-            if neverReadPasswordManagerFamilies.contains(String(family)) { return true }
-            guard let dot = family.lastIndex(of: ".") else { return false }
-            family = family[..<dot]
-        }
-        return false
-    }
-
-    public init(bundleId: String?, name: String?) {
-        guard let bundleId, Self.isNeverRead(bundleId) else {
-            self = .ordinary
-            return
-        }
-        self = .neverRead(app: name.flatMap { $0.isEmpty ? nil : $0 }
-            ?? BundleDisplayNameResolver.displayName(for: bundleId))
-    }
-}
-
-/// Why nothing was read after 45 s, when that can be told.
+/// Why nothing was read after 45 s, when that can be told. A skipped window
+/// is not a stall: its card says why from the start.
 public enum StallCause: Equatable, Sendable {
     case permissionOff(PermissionSurface)
-    case frontApp(FrontAppNote)
     /// "Still nothing read." with "Try Again".
     case unknown
 }
@@ -175,9 +59,17 @@ public enum StallCause: Equatable, Sendable {
 @MainActor
 public final class TryItViewModel: ObservableObject {
     public enum Card: Equatable, Sendable {
-        /// "Turning on…"
+        /// "Turning on…": consent just started remembering.
         case starting
-        case waiting(FrontAppNote)
+        /// The window in front is being read, and nothing from it shows yet.
+        case reading(FrontWindow)
+        /// No window is open but setup's own.
+        case noWindow
+        /// The window in front was read and holds no sentence worth showing.
+        case nothingToShow(FrontWindow)
+        /// The window in front is not read, and why. Nil when secure text
+        /// entry is on and no window is in front.
+        case skipped(SkipReason, FrontWindow?)
         case proof(ReadProof)
         case stalled(StallCause)
         case notRemembering(RememberingState)
@@ -208,6 +100,8 @@ public final class TryItViewModel: ObservableObject {
     @Published public private(set) var latestProof: ReadProof?
     /// The last app the person brought forward that is not Hippocampus.
     @Published public private(set) var frontApp: (bundleId: String, name: String?)?
+    /// The window Try it reads now: the window in front.
+    @Published public private(set) var target: FrontWindow?
     public private(set) var isReading = true
 
     private let probe: any LastReadProbe
@@ -220,6 +114,10 @@ public final class TryItViewModel: ObservableObject {
     private let now: () -> Date
     private let permissionsOn: @MainActor () async -> (screenRecording: Bool, accessibility: Bool)
     private let nameFor: (String) -> String
+    private let frontWindow: @MainActor () -> FrontWindow?
+    private let rules: ReadRules
+    private let passwordFieldInUse: @MainActor () -> Bool
+    private let requestFreshRead: @MainActor () -> Void
     private var lastReadAt: Date?
     private var firstProofAt: Date?
     private var openedForThemAt: Date?
@@ -235,6 +133,12 @@ public final class TryItViewModel: ObservableObject {
     ///     remembering; false in review, where it was already on.
     ///   - permissionsOn: checks both permissions now. Asked only when
     ///     nothing was read for 45 s, to name the cause.
+    ///   - frontWindow: the window in front now (`WindowServerFrontWindowSource`).
+    ///     Nil falls back to the last app the person brought forward.
+    ///   - rules: which windows the app skips.
+    ///   - passwordFieldInUse: secure text entry is on (`SecureTextEntry`).
+    ///   - requestFreshRead: asks the app to read the window in front once,
+    ///     now, as opening Ask does.
     public init(
         probe: any LastReadProbe,
         startedAt: Date,
@@ -243,7 +147,11 @@ public final class TryItViewModel: ObservableObject {
         turningOn: Bool = true,
         now: @escaping () -> Date = Date.init,
         permissionsOn: @escaping @MainActor () async -> (screenRecording: Bool, accessibility: Bool) = { (true, true) },
-        nameFor: @escaping (String) -> String = BundleDisplayNameResolver.displayName(for:)
+        nameFor: @escaping (String) -> String = BundleDisplayNameResolver.displayName(for:),
+        frontWindow: @escaping @MainActor () -> FrontWindow? = { nil },
+        rules: ReadRules = ReadRules(),
+        passwordFieldInUse: @escaping @MainActor () -> Bool = { false },
+        requestFreshRead: @escaping @MainActor () -> Void = {}
     ) {
         self.probe = probe
         self.startedAt = startedAt
@@ -253,11 +161,18 @@ public final class TryItViewModel: ObservableObject {
         self.now = now
         self.permissionsOn = permissionsOn
         self.nameFor = nameFor
+        self.frontWindow = frontWindow
+        self.rules = rules
+        self.passwordFieldInUse = passwordFieldInUse
+        self.requestFreshRead = requestFreshRead
         if remembering != .on {
             card = .notRemembering(remembering)
             isReading = false
         } else if !turningOn {
-            card = .waiting(.ordinary)
+            // Remembering was already on: the card speaks to the window in
+            // front from the start.
+            target = currentTarget()
+            card = target.map(Card.reading) ?? .noWindow
         }
     }
 
@@ -272,12 +187,15 @@ public final class TryItViewModel: ObservableObject {
         await stopReading()
     }
 
-    /// One step: read when due, stop reading when it is time, choose the card.
+    /// One step: find the window in front, read when due, stop reading when
+    /// it is time, choose the card.
     public func tick() async {
         if case .finished = card { return }
         if case .notRemembering = card { return }
         let timeline = self.timeline
         let elapsed = now().timeIntervalSince(startedAt)
+        let window = currentTarget()
+        if window != target { target = window }
         if isReading, elapsed >= Self.firstReadAfter, readIsDue() {
             lastReadAt = now()
             if case .rows(let rows, let newest) = await probe.rows(after: cursor) {
@@ -301,10 +219,17 @@ public final class TryItViewModel: ObservableObject {
         card = next
     }
 
-    /// The person brought an app forward.
+    /// The person brought an app forward. Its window is the one in front
+    /// now; unless it is skipped, the app is asked to read it once, now,
+    /// rather than after the reader's rest.
     public func appActivated(bundleId: String?, name: String?) {
         guard let bundleId, !ReadProof.ownBundleIds.contains(bundleId.lowercased()) else { return }
         frontApp = (bundleId, name)
+        guard isReading, remembering == .on, !hasProofToShow else { return }
+        if case .finished = card { return }
+        let window = FrontWindow(bundleId: bundleId, appName: name ?? nameFor(bundleId), title: nil)
+        guard rules.skipReason(for: window) == nil, !passwordFieldInUse() else { return }
+        requestFreshRead()
     }
 
     /// "Open it for me" is about to open `hippocampus://ask`. Ask showing
@@ -378,6 +303,19 @@ public final class TryItViewModel: ObservableObject {
 
     // MARK: - Choosing
 
+    /// A proof with a sentence in it: the screen has done its job.
+    private var hasProofToShow: Bool {
+        latestProof.map { !$0.lines.isEmpty } ?? false
+    }
+
+    /// The window in front, or the last app brought forward when the window
+    /// list says nothing.
+    private func currentTarget() -> FrontWindow? {
+        if let window = frontWindow() { return window }
+        guard let app = frontApp else { return nil }
+        return FrontWindow(bundleId: app.bundleId, appName: app.name ?? nameFor(app.bundleId), title: nil)
+    }
+
     private func readIsDue() -> Bool {
         guard let lastReadAt else { return true }
         return now().timeIntervalSince(lastReadAt) >= Self.readEvery
@@ -391,30 +329,35 @@ public final class TryItViewModel: ObservableObject {
 
     private func consider(_ rows: [ReadRow]) {
         guard let proof = ReadProof.choose(
-            from: rows, lastActivatedApp: frontApp?.bundleId, nameFor: nameFor
+            from: rows, lastActivatedApp: target?.bundleId, nameFor: nameFor
         ) else { return }
-        // Each read starts after the newest row already seen, so a proof
-        // from it is newer and replaces the card.
-        if let shown = latestProof, proof.tsUs <= shown.tsUs { return }
+        if let shown = latestProof {
+            // Each read starts after the newest row already seen, so a proof
+            // from it is newer; it replaces the card unless it would take a
+            // sentence away.
+            if proof.tsUs <= shown.tsUs { return }
+            if !shown.lines.isEmpty, proof.lines.isEmpty { return }
+        }
         latestProof = proof
-        if firstProofAt == nil { firstProofAt = now() }
+        if !proof.lines.isEmpty, firstProofAt == nil { firstProofAt = now() }
     }
 
     private func chooseCard(elapsed: TimeInterval) async -> Card {
-        if let latestProof { return .proof(latestProof) }
+        if let latestProof, !latestProof.lines.isEmpty { return .proof(latestProof) }
         if turningOn, elapsed < Self.startingFor { return .starting }
-        let note = FrontAppNote(bundleId: frontApp?.bundleId, name: frontApp?.name)
-        if elapsed >= Self.stalledAfter { return .stalled(await stallCause(note)) }
-        return .waiting(note)
-    }
-
-    /// Checked now, not taken from consent: a permission turned off since
-    /// is the cause most worth naming.
-    private func stallCause(_ note: FrontAppNote) async -> StallCause {
-        let on = await permissionsOn()
-        if !on.screenRecording { return .permissionOff(.screenRecording) }
-        if !on.accessibility { return .permissionOff(.accessibility) }
-        if note != .ordinary { return .frontApp(note) }
-        return .unknown
+        let window = target
+        if elapsed >= Self.stalledAfter {
+            // Checked now, not taken from consent: a permission turned off
+            // since is the cause most worth naming.
+            let on = await permissionsOn()
+            if !on.screenRecording { return .stalled(.permissionOff(.screenRecording)) }
+            if !on.accessibility { return .stalled(.permissionOff(.accessibility)) }
+        }
+        if passwordFieldInUse() { return .skipped(.passwordField, window) }
+        if let window, let reason = rules.skipReason(for: window) { return .skipped(reason, window) }
+        guard let window else { return .noWindow }
+        if let latestProof, latestProof.appBundleId == window.bundleId { return .nothingToShow(window) }
+        if elapsed >= Self.stalledAfter { return .stalled(.unknown) }
+        return .reading(window)
     }
 }
