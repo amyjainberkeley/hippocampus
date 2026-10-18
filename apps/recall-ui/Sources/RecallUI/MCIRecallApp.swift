@@ -59,6 +59,15 @@ final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Se
         ChildProcesses.shared.terminateAll()
     }
 
+    /// The window is all this process is for, so it ends with the window.
+    /// Opening it again (the menu, Ask, opening Hippocampus) then starts a
+    /// fresh one on the place asked for. A process left running without a
+    /// window took those requests with nothing to show them in, so opening
+    /// Hippocampus looked like it did nothing (Oct 18).
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
+    }
+
     @objc
     private func receiveRecallCommand(_ notification: Notification) {
         guard let request = RecallLaunchRequest(userInfo: notification.userInfo) else { return }
