@@ -229,9 +229,8 @@ private struct StatusIcon: View {
         Group {
             switch icon {
             case .app(let bundleId, let skipped):
-                AppIconImage(bundleId: bundleId, side: 56)
-                    .opacity(skipped ? 0.55 : 1)
-                    .saturation(skipped ? 0 : 1)
+                AppIconImage(bundleId: bundleId, side: 56, grey: skipped)
+                    .opacity(skipped ? 0.7 : 1)
                     .overlay(alignment: .bottomTrailing) {
                         if skipped {
                             badge("eye.slash")

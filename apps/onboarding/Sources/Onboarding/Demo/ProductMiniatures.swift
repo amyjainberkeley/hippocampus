@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage
 import OnboardingKit
 import SwiftUI
 
@@ -34,14 +35,17 @@ enum MiniPalette {
     }
 }
 
-/// An app's own icon, or a plain glyph when it is not installed.
+/// An app's own icon, or a plain glyph when it is not installed. Grey
+/// when the app's window is skipped: the grey is in the picture itself, so
+/// it shows the same on screen and in a render.
 struct AppIconImage: View {
     let bundleId: String
     var side: CGFloat = 16
+    var grey = false
 
     var body: some View {
         Group {
-            if let icon = Self.icon(for: bundleId) {
+            if let icon = Self.icon(for: bundleId, grey: grey) {
                 Image(nsImage: icon).resizable().interpolation(.high)
             } else {
                 Image(systemName: "app.dashed").resizable().scaledToFit().foregroundStyle(MiniPalette.muted)
@@ -53,12 +57,26 @@ struct AppIconImage: View {
 
     @MainActor private static var cache: [String: NSImage] = [:]
 
-    @MainActor static func icon(for bundleId: String) -> NSImage? {
-        if let known = cache[bundleId] { return known }
+    @MainActor static func icon(for bundleId: String, grey: Bool = false) -> NSImage? {
+        let key = grey ? "grey:" + bundleId : bundleId
+        if let known = cache[key] { return known }
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else { return nil }
-        let icon = NSWorkspace.shared.icon(forFile: url.path)
-        cache[bundleId] = icon
+        var icon = NSWorkspace.shared.icon(forFile: url.path)
+        if grey, let greyed = Self.greyed(icon) { icon = greyed }
+        cache[key] = icon
         return icon
+    }
+
+    /// The icon without its colour, at 256 pixels.
+    private static func greyed(_ icon: NSImage) -> NSImage? {
+        var rect = CGRect(x: 0, y: 0, width: 256, height: 256)
+        guard let source = icon.cgImage(forProposedRect: &rect, context: nil, hints: nil),
+              let filter = CIFilter(name: "CIColorControls") else { return nil }
+        filter.setValue(CIImage(cgImage: source), forKey: kCIInputImageKey)
+        filter.setValue(0, forKey: kCIInputSaturationKey)
+        guard let output = filter.outputImage,
+              let greyed = CIContext().createCGImage(output, from: output.extent) else { return nil }
+        return NSImage(cgImage: greyed, size: icon.size)
     }
 }
 
