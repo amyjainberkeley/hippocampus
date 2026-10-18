@@ -340,12 +340,13 @@ public struct SuppressionCascade: Sendable {
     }
 
     /// Returns true iff `text` contains any pattern in the §6 OCR-time
-    /// regex set. The set is intentionally small + high-precision per
-    /// ADR-0013 §6 (Basak et al. arXiv:2307.00714 — best-tool recall
-    /// 52–88%, so we lean toward precision and add patterns under
-    /// Security review only).
+    /// regex set, a Luhn-valid credit-card number, or a one-time code next
+    /// to an OTP keyword. The set is intentionally small + high-precision
+    /// per ADR-0013 §6 (Basak et al. arXiv:2307.00714 — best-tool recall
+    /// 52–88%, so we lean toward precision and add shapes under Security
+    /// review only).
     ///
-    /// Patterns covered:
+    /// Shapes covered:
     ///   1. `password|passwd|secret|api[_-]?key|token|bearer
     ///       |access[_-]?token` followed by `:` or `=` and a non-empty
     ///       value (covers `password: hunter2` shape).
@@ -353,16 +354,172 @@ public struct SuppressionCascade: Sendable {
     ///       + 36 hex/alphanumeric chars).
     ///   3. AWS access key id (20-char `AKIA` / `ASIA` prefix).
     ///   4. JWT shape `eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`.
+    ///   5. Credit-card number — 13–19 digits (single space/hyphen groups)
+    ///       that pass the Luhn checksum (`containsCreditCard`).
+    ///   6. One-time code — a 4–8 digit run within ~40 bytes of an OTP
+    ///       keyword (`containsOTP`).
     ///
-    /// Static / immutable so the regex compile cost is paid once per
-    /// process, not per OCR'd frame.
+    /// Shapes 1–4 are static regex (compiled once per process); 5 and 6 are
+    /// hand-rolled byte scans kept identical to the Rust reader
+    /// (`core/brain/src/redaction/ocr_secrets.rs`), proven by the shared
+    /// corpus. Credit card needs a checksum and OTP needs keyword context,
+    /// so neither is a pure regex: a bare `RegexSet` would over-redact.
     static func containsSecretOrPII(_ text: String) -> Bool {
         for pattern in ocrSecretPatterns {
             if pattern.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil {
                 return true
             }
         }
+        if containsCreditCard(text) { return true }
+        if containsOTP(text) { return true }
         return false
+    }
+
+    // MARK: - Credit card (Luhn) and one-time code (OTP), ADR-0013 §6
+
+    /// Phrases that mark a nearby 4–8 digit run as a one-time code, lower-cased.
+    /// MUST stay identical to Rust `ocr_secrets::OTP_KEYWORDS`; the shared
+    /// corpus is the cross-engine check. Matched case-insensitively and only on
+    /// a word boundary. `confirm(ation) code` is spelled out as both forms.
+    static let otpKeywords: [[UInt8]] = [
+        "one-time",
+        "one time",
+        "verification code",
+        "security code",
+        "passcode",
+        "otp",
+        "2fa",
+        "two-factor",
+        "authentication code",
+        "login code",
+        "confirmation code",
+        "confirm code",
+        "your code is",
+    ].map { Array($0.utf8) }
+
+    /// How near (in UTF-8 bytes) a 4–8 digit run must sit to an OTP keyword.
+    /// MUST equal Rust `ocr_secrets::OTP_WINDOW_BYTES`.
+    static let otpWindowBytes = 40
+
+    /// Whether `text` holds a credit-card number: a maximal run of 13–19 digits,
+    /// with single spaces or hyphens allowed between digits, that passes the
+    /// Luhn checksum. Precision-first — the run is maximal, so a 20-digit blob is
+    /// one over-long candidate, never a 16-digit card hidden inside it. Mirrors
+    /// Rust `ocr_secrets::contains_credit_card`.
+    static func containsCreditCard(_ text: String) -> Bool {
+        let bytes = Array(text.utf8)
+        var i = 0
+        while i < bytes.count {
+            if !isDigit(bytes[i]) {
+                i += 1
+                continue
+            }
+            let start = i
+            var digits = 0
+            while true {
+                while i < bytes.count, isDigit(bytes[i]) {
+                    digits += 1
+                    i += 1
+                }
+                if i + 1 < bytes.count,
+                   bytes[i] == 0x20 || bytes[i] == 0x2D,
+                   isDigit(bytes[i + 1]) {
+                    i += 1 // a single separator between two digits stays in the run
+                } else {
+                    break
+                }
+            }
+            if (13...19).contains(digits), luhnValid(bytes[start..<i]) {
+                return true
+            }
+            // `i` already sits past this run; the maximal run is never re-entered.
+        }
+        return false
+    }
+
+    /// The Luhn checksum over the ASCII digits in `run`; any other byte (a space
+    /// or hyphen separator) is skipped. Mirrors Rust `ocr_secrets::luhn_valid`.
+    static func luhnValid(_ run: ArraySlice<UInt8>) -> Bool {
+        var sum = 0
+        var position = 0 // 0 for the rightmost digit, then 1, 2, …
+        for byte in run.reversed() {
+            guard isDigit(byte) else { continue }
+            var digit = Int(byte - 0x30)
+            if position % 2 == 1 {
+                digit *= 2
+                if digit > 9 { digit -= 9 }
+            }
+            sum += digit
+            position += 1
+        }
+        return sum % 10 == 0
+    }
+
+    /// Whether `text` holds a one-time code: a maximal run of 4–8 digits within
+    /// `otpWindowBytes` of an OTP keyword (case-insensitive, on a word
+    /// boundary). A bare number with no such keyword never matches. Mirrors Rust
+    /// `ocr_secrets::contains_otp`.
+    static func containsOTP(_ text: String) -> Bool {
+        let bytes = Array(text.utf8)
+
+        // Maximal runs of 4–8 ASCII digits. A longer run (a card, a long id) is
+        // not an OTP, so runs of 9+ digits are left out.
+        var runs: [(Int, Int)] = []
+        var i = 0
+        while i < bytes.count {
+            if isDigit(bytes[i]) {
+                let start = i
+                while i < bytes.count, isDigit(bytes[i]) { i += 1 }
+                let length = i - start
+                if (4...8).contains(length) { runs.append((start, i)) }
+            } else {
+                i += 1
+            }
+        }
+        if runs.isEmpty { return false }
+
+        // Lower-case the ASCII so the keyword search is case-insensitive without
+        // moving any byte offset (OTP keywords and digits are all ASCII).
+        let lower = bytes.map { (0x41...0x5A).contains($0) ? $0 + 0x20 : $0 }
+        for keyword in otpKeywords {
+            if keyword.count > lower.count { continue }
+            var start = 0
+            while start <= lower.count - keyword.count {
+                if !lower[start..<start + keyword.count].elementsEqual(keyword) {
+                    start += 1
+                    continue
+                }
+                let end = start + keyword.count
+                let bounded = (start == 0 || !isWordByte(lower[start - 1]))
+                    && (end == lower.count || !isWordByte(lower[end]))
+                if bounded {
+                    for (runStart, runEnd) in runs {
+                        let gap: Int
+                        if runStart >= end {
+                            gap = runStart - end
+                        } else if start >= runEnd {
+                            gap = start - runEnd
+                        } else {
+                            gap = 0
+                        }
+                        if gap <= otpWindowBytes { return true }
+                    }
+                }
+                start += 1
+            }
+        }
+        return false
+    }
+
+    /// An ASCII digit byte, `0`–`9`.
+    private static func isDigit(_ byte: UInt8) -> Bool {
+        (0x30...0x39).contains(byte)
+    }
+
+    /// A byte that can be part of a word, for the OTP keyword boundary test:
+    /// an ASCII letter or digit.
+    private static func isWordByte(_ byte: UInt8) -> Bool {
+        (0x30...0x39).contains(byte) || (0x41...0x5A).contains(byte) || (0x61...0x7A).contains(byte)
     }
 
     /// Compiled regex set used by `containsSecretOrPII`. ADR-0013 §6.
