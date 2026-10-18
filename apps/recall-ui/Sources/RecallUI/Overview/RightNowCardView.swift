@@ -57,7 +57,7 @@ struct RightNowCardView: View {
             let folds = recent.count + about.count > Self.foldedRecent + Self.foldedAbout
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(UserFacingCopy.yourAIAlreadyKnows)
+                    Text(UserFacingCopy.aiStartsWith)
                         .font(MCI.Font.bodyStrong)
                         .foregroundStyle(MCI.Color.foreground)
                     Spacer(minLength: 8)
@@ -99,8 +99,8 @@ struct RightNowCardView: View {
     }
 }
 
-/// One line and "Connect", shown instead of "Your AI already knows" while no
-/// AI tool starts its sessions with Hippocampus (RULINGS W5).
+/// One line and "Connect", shown instead of "What your AI starts with" while
+/// no AI tool starts its sessions with Hippocampus (RULINGS W5).
 struct ConnectAIToolsRow: View {
     @Environment(\.isSyntheticPreview) private var isSyntheticPreview
 

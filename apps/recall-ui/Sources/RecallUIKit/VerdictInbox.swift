@@ -205,7 +205,7 @@ public extension ModelPage {
 }
 
 public extension DayOverview {
-    /// A forgotten item is not shown among what your AI already knows.
+    /// A forgotten item is not shown among what your AI starts with.
     func overlaying(_ verdicts: PendingVerdicts) -> DayOverview {
         guard !verdicts.rejected.isEmpty else { return self }
         var overview = self

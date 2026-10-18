@@ -5,7 +5,7 @@ import SwiftUI
 /// by both recall critiques and the insights product critique).
 ///
 /// Top to bottom: the Right now card (today only) with what a connected AI
-/// already knows; the day with its date control; the day strip and its
+/// starts with; the day with its date control; the day strip and its
 /// legend; the selected session; up to four facts; the day's summary when a
 /// model wrote one. Nothing here shows keys, clicks, scrolls or switch counts
 /// (RULINGS W4).

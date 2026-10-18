@@ -45,8 +45,8 @@ public struct RightNowCard: Equatable, Sendable {
 
     /// What sits under the card.
     public enum AIKnowsSection: Equatable, Sendable {
-        /// "Your AI already knows": the lines a new session of a connected AI
-        /// is given, exactly as sent. Either list may be empty.
+        /// "What your AI starts with": the lines a new session of a connected
+        /// AI is given, exactly as sent. Either list may be empty.
         case lines(recentWork: [TemplateText], aboutYou: [AboutYouLine])
         /// No session hook is installed, so nothing is sent when a session
         /// starts: one line and "Connect" instead.

@@ -46,9 +46,9 @@ final class PrivacyDashboardTests: XCTestCase {
         )
         let line = PrivacyDashboardSummary.line(summary: stats)
         // ByteCountFormatter is locale-dependent; assert the structure.
-        // Cycle 8.54 copy audit — "MCI has captured" → "Hippocampus
-        // has captured" (product name matches the landing page).
-        XCTAssertTrue(line.contains("Hippocampus has captured 3 events"))
+        // Launch copy — "captured … events" → "saved … moments", the
+        // product's own words (no "captures"/"events" jargon).
+        XCTAssertTrue(line.contains("Hippocampus has saved 3 moments"))
         XCTAssertTrue(line.contains("across 1 day"))
         XCTAssertFalse(line.contains("of encrypted storage"))
         XCTAssertTrue(PrivacyDashboardSummary.storageTotal(summary: stats).contains("unavailable"))
@@ -69,12 +69,11 @@ final class PrivacyDashboardTests: XCTestCase {
         XCTAssertEqual(
             PrivacyDashboardSummary.line(summary: nil, isLoading: true), "Loading…"
         )
-        // Cycle 8.54 copy audit — the previous "No brain data yet."
-        // string was replaced with plain-English "No captures yet."
-        // (see docs/design/copy-style-guide.md §3, "brain" is banned).
+        // Launch copy — plain English on a fresh install, matching the
+        // window's "Nothing saved yet" ("brain"/"captures" are banned).
         XCTAssertEqual(
             PrivacyDashboardSummary.line(summary: nil, isLoading: false),
-            "No captures yet."
+            "Nothing saved yet."
         )
     }
 
