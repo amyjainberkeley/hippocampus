@@ -1,0 +1,11 @@
+{
+  "window": {"x": 420, "y": 270, "width": 640, "height": 432},
+  "titleBarHeight": 32,
+  "iconSize": 112,
+  "textSize": 13,
+  "items": {
+    "Hippocampus.app": [180, 176],
+    "Applications": [460, 176],
+    "Legal": [568, 300]
+  }
+}

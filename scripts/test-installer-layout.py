@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Headless fixtures only: no Finder, app launch, or mounted user images."""
+import contextlib
 import importlib.util
+import json
 import os
 from pathlib import Path
 import re
@@ -12,11 +14,20 @@ from ds_store import DSStore
 from mac_alias import Alias
 
 ROOT = Path(__file__).resolve().parent.parent
-WRITER = ROOT / "assets/installer/dmg-layout.py"
+INSTALLER = ROOT / "assets/installer"
+WRITER = INSTALLER / "dmg-layout.py"
+LAYOUT = json.loads((INSTALLER / "layout.json").read_text())
 ENV = {key: value for key, value in os.environ.items() if key in (
     "HOME", "TMPDIR", "CLANG_MODULE_CACHE_PATH", "SWIFT_MODULECACHE_PATH", "DEVELOPER_DIR",
 )}
 ENV["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+
+# What a person sees below the title bar. Finder's title bar is 32 points on
+# macOS 26 and 28 on 14 and 15, so nothing may rely on the last 32 points.
+WINDOW_WIDTH = LAYOUT["window"]["width"]
+VISIBLE_HEIGHT = LAYOUT["window"]["height"] - LAYOUT["titleBarHeight"]
+# Room left around every item, so Finder never shows scroll bars.
+EDGE = 12
 
 
 def disk(*args):
@@ -29,6 +40,46 @@ def shipped_dmg_format():
     match = re.search(r'^DMG_FORMAT="([A-Z0-9]+)"$', script, re.MULTILINE)
     assert match, "build-installer.sh names no DMG_FORMAT"
     return match.group(1)
+
+
+def item_boxes():
+    """Every item's icon and name as (left, top, right, bottom) in window points.
+
+    Finder centres the icon on the saved position and writes the name under
+    it. The name's width is over-estimated at 0.62 em a character, and its
+    line at twice the text size, so a pass here leaves real room."""
+    size = LAYOUT["iconSize"]
+    text = LAYOUT["textSize"]
+    boxes = {}
+    for name, (x, y) in LAYOUT["items"].items():
+        label = name[:-len(".app")] if name.endswith(".app") else name
+        half = len(label) * text * 0.62 / 2
+        boxes[name] = [
+            (x - size / 2, y - size / 2, x + size / 2, y + size / 2),
+            (x - half, y + size / 2, x + half, y + size / 2 + text * 2),
+        ]
+    return boxes
+
+
+def overlaps(first, second):
+    return first[0] < second[2] and second[0] < first[2] and first[1] < second[3] and second[1] < first[3]
+
+
+def inside_visible_window(box):
+    return box[0] >= EDGE and box[1] >= EDGE and box[2] <= WINDOW_WIDTH - EDGE and box[3] <= VISIBLE_HEIGHT - EDGE
+
+
+def render_background(path):
+    subprocess.run(["/usr/bin/python3", str(INSTALLER / "generate-background.py"), str(path)],
+                   check=True, env=ENV, stdout=subprocess.DEVNULL)
+
+
+def words_with_boxes(image):
+    result = subprocess.run(
+        ["/usr/bin/xcrun", "swift", str(INSTALLER / "read-background-text.swift"), "--boxes", str(image)],
+        check=True, capture_output=True, text=True, env=ENV,
+    )
+    return [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
 
 
 class InstallerVolumeNameTests(unittest.TestCase):
@@ -100,6 +151,68 @@ class StableDiskImageTests(unittest.TestCase):
             self.assertFalse((dist / ".Hippocampus.dmg.partial").exists())
 
 
+class WindowDesignTests(unittest.TestCase):
+    """The window a downloader sees, checked from layout.json and the rendered picture."""
+
+    def test_window_and_icons_are_the_designed_size(self):
+        self.assertEqual(LAYOUT["window"], {"x": 420, "y": 270, "width": 640, "height": 432})
+        self.assertEqual(LAYOUT["titleBarHeight"], 32)
+        self.assertEqual(LAYOUT["iconSize"], 112)
+        self.assertEqual(LAYOUT["textSize"], 13)
+        self.assertEqual(LAYOUT["items"], {
+            "Hippocampus.app": [180, 176], "Applications": [460, 176], "Legal": [568, 300],
+        })
+
+    def test_app_and_applications_face_each_other_across_the_middle(self):
+        (app_x, app_y), (target_x, target_y) = LAYOUT["items"]["Hippocampus.app"], LAYOUT["items"]["Applications"]
+        self.assertEqual(app_y, target_y)
+        self.assertLess(app_x, target_x)
+        self.assertEqual(app_x + target_x, WINDOW_WIDTH)
+
+    def test_every_icon_and_name_fits_the_window_below_the_title_bar(self):
+        for name, boxes in item_boxes().items():
+            for box in boxes:
+                self.assertTrue(inside_visible_window(box), f"{name} reaches outside the window: {box}")
+
+    def test_no_item_covers_another_or_its_name(self):
+        boxes = item_boxes()
+        names = sorted(boxes)
+        for index, first in enumerate(names):
+            for second in names[index + 1:]:
+                for one in boxes[first]:
+                    for other in boxes[second]:
+                        self.assertFalse(overlaps(one, other), f"{first} {one} overlaps {second} {other}")
+
+    def test_background_words_sit_clear_of_every_icon_and_name(self):
+        with tempfile.TemporaryDirectory(prefix="hippocampus-background-") as temporary:
+            image = Path(temporary) / "background.png"
+            render_background(image)
+            words = words_with_boxes(image)
+        self.assertEqual([word["text"] for word in words],
+                         ["Drag to Applications", "Updating? Quit Hippocampus from the menu bar first."])
+        for word in words:
+            box = (word["x"], word["y"], word["x"] + word["width"], word["y"] + word["height"])
+            self.assertTrue(inside_visible_window(box), f"{word['text']!r} reaches outside the window: {box}")
+            for name, item in item_boxes().items():
+                for other in item:
+                    self.assertFalse(overlaps(box, other), f"{word['text']!r} {box} overlaps {name} {other}")
+        cue = words[0]
+        (app_x, row), (target_x, _) = LAYOUT["items"]["Hippocampus.app"], LAYOUT["items"]["Applications"]
+        size = LAYOUT["iconSize"]
+        # Between the two icons, just above their centre line, where the arrow is.
+        self.assertGreater(cue["x"], app_x + size / 2)
+        self.assertLess(cue["x"] + cue["width"], target_x - size / 2)
+        self.assertLess(cue["y"] + cue["height"], row)
+        self.assertGreater(cue["y"], row - size / 2)
+
+    def test_update_hint_is_quiet_and_sits_at_the_foot_of_the_window(self):
+        renderer = (INSTALLER / "render-background.swift").read_text()
+        self.assertIn('let updateNote = "Updating? Quit Hippocampus from the menu bar first."', renderer)
+        self.assertIn("text(updateNote, size: 11, color: graphite, centerX: width / 2, "
+                      "baselineFromTop: visibleHeight - 28)", renderer)
+        self.assertIn("let graphite = srgb(0x6E6E73)", renderer)
+
+
 class InstallerLayoutTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -129,25 +242,54 @@ class InstallerLayoutTests(unittest.TestCase):
         (self.root / ".background").mkdir()
         (self.root / ".background/background.png").write_bytes(b"synthetic image fixture")
 
+    @contextlib.contextmanager
+    def compressed_and_remounted(self, label):
+        """The fixture image as a downloader gets it: compressed, read-only, mounted elsewhere."""
+        compressed = self.image_root / f"{label}.dmg"
+        remount = self.image_root / f"{label}-remount"
+        remount.mkdir()
+        disk("detach", self.mount)
+        try:
+            disk("convert", self.image, "-format", shipped_dmg_format(), "-o", compressed)
+            disk("attach", "-readonly", "-nobrowse", "-noautoopen", "-mountpoint", remount, compressed)
+            try:
+                yield remount / self.root.name
+            finally:
+                disk("detach", remount)
+        finally:
+            disk("attach", "-nobrowse", "-noautoopen", "-mountpoint", self.mount, self.image)
+
     def test_compact_persisted_layout_and_relative_background(self):
         self.layout.write_layout(self.root)
         with DSStore.open(str(self.root / ".DS_Store"), "r") as store:
             window = store["."]["bwsp"]
-            self.assertEqual(window["WindowBounds"], "{{200, 200}, {640, 420}}")
+            self.assertEqual(window["WindowBounds"], "{{420, 270}, {640, 432}}")
             for key in ("ShowToolbar", "ShowSidebar", "ShowStatusBar", "ShowPathbar", "ShowTabView"):
                 self.assertFalse(window[key])
             icons = store["."]["icvp"]
-            self.assertEqual(icons["iconSize"], 80.0)
+            self.assertEqual(icons["iconSize"], 112.0)
+            self.assertEqual(icons["textSize"], 13.0)
             self.assertEqual(icons["arrangeBy"], "none")
             self.assertEqual(icons["backgroundType"], 2)
             self.assertEqual(store["."]["icvl"], (b"type", b"icnv"))
-            self.assertEqual(store["Hippocampus.app"]["Iloc"], (170, 185))
-            self.assertEqual(store["Applications"]["Iloc"], (470, 185))
-            self.assertEqual(store["Legal"]["Iloc"], (550, 325))
+            self.assertEqual(store["Hippocampus.app"]["Iloc"], (180, 176))
+            self.assertEqual(store["Applications"]["Iloc"], (460, 176))
+            self.assertEqual(store["Legal"]["Iloc"], (568, 300))
             alias = Alias.from_bytes(icons["backgroundImageAlias"])
             self.assertEqual(alias.target.filename, "background.png")
             self.assertTrue(alias.target.posix_path.endswith("/.background/background.png"))
         self.assertEqual((self.root / "Legal/License.rtf").read_bytes(), b"synthetic legal fixture")
+
+    def test_finder_metadata_comes_from_the_layout_file(self):
+        self.layout.write_layout(self.root)
+        window = LAYOUT["window"]
+        with DSStore.open(str(self.root / ".DS_Store"), "r") as store:
+            self.assertEqual(store["."]["bwsp"]["WindowBounds"], "{{%d, %d}, {%d, %d}}" % (
+                window["x"], window["y"], window["width"], window["height"]))
+            self.assertEqual(store["."]["icvp"]["iconSize"], float(LAYOUT["iconSize"]))
+            self.assertEqual(store["."]["icvp"]["textSize"], float(LAYOUT["textSize"]))
+            for name, position in LAYOUT["items"].items():
+                self.assertEqual(store[name]["Iloc"], tuple(position))
 
     def test_image_view_includes_complete_neutral_rgb_fields(self):
         self.layout.write_layout(self.root)
@@ -167,28 +309,16 @@ class InstallerLayoutTests(unittest.TestCase):
         self.layout.write_layout(self.root)
         with DSStore.open(str(self.root / ".DS_Store"), "r") as store:
             original = Alias.from_bytes(store["."]["icvp"]["backgroundImageAlias"])
-        compressed = self.image_root / "compressed.dmg"
-        remount = self.image_root / "remount"
-        remount.mkdir()
-        disk("detach", self.mount)
-        try:
-            disk("convert", self.image, "-format", shipped_dmg_format(), "-o", compressed)
-            disk("attach", "-readonly", "-nobrowse", "-noautoopen", "-mountpoint", remount, compressed)
-            try:
-                root = remount / self.root.name
-                current = Alias.from_bytes(Alias.for_file(str((root / ".background/background.png").resolve())).to_bytes())
-                self.assertEqual(original.target.cnid, current.target.cnid)
-                self.assertEqual(original.target.posix_path, current.target.posix_path)
-                self.assertEqual(original.volume.creation_date, current.volume.creation_date)
-                self.assertEqual(original.volume.name, current.volume.name)
-                self.assertNotEqual(original.volume.posix_path, current.volume.posix_path)
-                with DSStore.open(str(root / ".DS_Store"), "r") as store:
-                    self.assertEqual(store["Applications"]["Iloc"], (470, 185))
-                    self.assertEqual(store["."]["bwsp"]["WindowBounds"], "{{200, 200}, {640, 420}}")
-            finally:
-                disk("detach", remount)
-        finally:
-            disk("attach", "-nobrowse", "-noautoopen", "-mountpoint", self.mount, self.image)
+        with self.compressed_and_remounted("layout") as root:
+            current = Alias.from_bytes(Alias.for_file(str((root / ".background/background.png").resolve())).to_bytes())
+            self.assertEqual(original.target.cnid, current.target.cnid)
+            self.assertEqual(original.target.posix_path, current.target.posix_path)
+            self.assertEqual(original.volume.creation_date, current.volume.creation_date)
+            self.assertEqual(original.volume.name, current.volume.name)
+            self.assertNotEqual(original.volume.posix_path, current.volume.posix_path)
+            with DSStore.open(str(root / ".DS_Store"), "r") as store:
+                self.assertEqual(store["Applications"]["Iloc"], (460, 176))
+                self.assertEqual(store["."]["bwsp"]["WindowBounds"], "{{420, 270}, {640, 432}}")
 
     def test_missing_required_asset_fails_before_writing_layout(self):
         (self.root / ".background/background.png").unlink()
@@ -229,7 +359,7 @@ class InstallerLayoutTests(unittest.TestCase):
 
     def test_background_takes_no_build_note(self):
         result = subprocess.run(
-            ["/usr/bin/python3", str(ROOT / "assets/installer/generate-background.py"),
+            ["/usr/bin/python3", str(INSTALLER / "generate-background.py"),
              str(self.root / "noted.png"), "--build-note", "Build abcdef123456"],
             capture_output=True, text=True, env=ENV,
         )
@@ -238,22 +368,17 @@ class InstallerLayoutTests(unittest.TestCase):
         script = (ROOT / "scripts/build-installer.sh").read_text()
         self.assertNotIn("--build-note", script)
 
-    def test_update_hint_is_quiet_and_clear_of_icon_and_footer_rows(self):
-        renderer = (ROOT / "assets/installer/render-background.swift").read_text()
-        self.assertIn('text("Updating? Quit Hippocampus from the menu bar first.", size: 12, baselineFromTop: 290, gray: 0.4)', renderer)
-
-    def test_background_has_matching_retina_logical_dimensions(self):
+    def test_background_fills_the_window_at_retina_scale(self):
         background = self.root / "rendered.png"
-        subprocess.run(
-            ["/usr/bin/python3", str(ROOT / "assets/installer/generate-background.py"),
-             str(background)],
-            check=True, env=ENV,
-        )
+        render_background(background)
         result = subprocess.run(
             ["/usr/bin/sips", "-g", "pixelWidth", "-g", "pixelHeight", "-g", "dpiWidth", "-g", "dpiHeight", str(background)],
             check=True, capture_output=True, text=True, env=ENV,
         ).stdout
-        for expected in ("pixelWidth: 1280", "pixelHeight: 840", "dpiWidth: 144.000", "dpiHeight: 144.000"):
+        # Twice the window's points at 144 dpi: crisp on Retina, the same size elsewhere.
+        window = LAYOUT["window"]
+        for expected in (f"pixelWidth: {window['width'] * 2}", f"pixelHeight: {window['height'] * 2}",
+                         "pixelWidth: 1280", "pixelHeight: 864", "dpiWidth: 144.000", "dpiHeight: 144.000"):
             self.assertIn(expected, result)
 
 

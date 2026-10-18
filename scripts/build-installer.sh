@@ -30,6 +30,7 @@ VOLUME_ICON="$INSTALLER_ASSETS/volume-icon.icns"
 GENERATE_EULA="$INSTALLER_ASSETS/generate-eula.py"
 GENERATE_BACKGROUND="$INSTALLER_ASSETS/generate-background.py"
 READ_BACKGROUND_TEXT="$INSTALLER_ASSETS/read-background-text.swift"
+WINDOW_LAYOUT="$INSTALLER_ASSETS/layout.json"
 DMG_LAYOUT="$INSTALLER_ASSETS/dmg-layout.py"
 INSTALLER_PYTHON="${INSTALLER_PYTHON:-python3}"
 # LZMA-compressed UDIF (macOS 10.15 and later; Hippocampus needs 14): the
@@ -161,7 +162,7 @@ verify_legal_assets() {
 # The only words the installer window may show. Build numbers, hashes and
 # other source details belong in build-provenance.json and the release notes.
 BACKGROUND_TEXT=(
-    "Drag Hippocampus to Applications."
+    "Drag to Applications"
     "Updating? Quit Hippocampus from the menu bar first."
 )
 
@@ -174,7 +175,7 @@ background_text_key() {
 verify_background_assets() {
     local tool scratch rendered seen line key expected match
     local -a seen_keys=() unexpected=()
-    for tool in "$GENERATE_BACKGROUND" "$READ_BACKGROUND_TEXT"; do
+    for tool in "$GENERATE_BACKGROUND" "$READ_BACKGROUND_TEXT" "$WINDOW_LAYOUT"; do
         if [[ ! -f "$tool" ]]; then
             echo "ERROR: Installer background tool not found at $tool" >&2
             return 1

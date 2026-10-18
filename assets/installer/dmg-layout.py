@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
-"""Write Finder metadata headlessly on the build's mounted writable image."""
+"""Write Finder metadata headlessly on the build's mounted writable image.
+
+The window's size and position, the icon size and every item's position come
+from layout.json, the file the background is drawn from, so the picture and
+the icons cannot drift apart.
+"""
 import argparse
 from importlib.metadata import PackageNotFoundError, version
+import json
 from pathlib import Path
+
+LAYOUT = Path(__file__).resolve().with_name("layout.json")
 
 
 def check_dependencies():
@@ -20,6 +28,19 @@ def check_dependencies():
             )
 
 
+def load_layout(path=LAYOUT):
+    layout = json.loads(Path(path).read_text())
+    window = layout["window"]
+    return {
+        # Finder's "{{x, y}, {width, height}}": the whole window, title bar
+        # included. The background is drawn at this size.
+        "bounds": "{{%d, %d}, {%d, %d}}" % (window["x"], window["y"], window["width"], window["height"]),
+        "icon_size": float(layout["iconSize"]),
+        "text_size": float(layout["textSize"]),
+        "locations": {name: tuple(position) for name, position in layout["items"].items()},
+    }
+
+
 def write_layout(mount):
     check_dependencies()
     from ds_store import DSStore
@@ -31,17 +52,20 @@ def write_layout(mount):
         raise ValueError("Installer requires its app and Applications link")
     if not background.is_file() or not (mount / "Legal/License.rtf").is_file():
         raise ValueError("Installer requires its background and visible Legal/License.rtf")
+    layout = load_layout()
 
     # Follow dmgbuild's public DSStore/Alias API, never serialize these formats
     # ourselves. Resolve the alias on the image, not the host staging volume.
     # https://github.com/dmgbuild/dmgbuild/blob/main/src/dmgbuild/core.py
     window = {
-        "WindowBounds": "{{200, 200}, {640, 420}}",
+        "WindowBounds": layout["bounds"],
         "ShowToolbar": False, "ShowSidebar": False, "ShowStatusBar": False,
         "ShowPathbar": False, "ShowTabView": False,
         "ContainerShowSidebar": False, "PreviewPaneVisibility": False,
         "SidebarWidth": 0,
     }
+    # Finder ignores this whole view unless all three colour fields are
+    # present (docs/audits/2026-09-09-installer-experience.md).
     icons = {
         "viewOptionsVersion": 1, "backgroundType": 2,
         "backgroundColorRed": 1.0,
@@ -50,10 +74,10 @@ def write_layout(mount):
         "backgroundImageAlias": Alias.for_file(str(background)).to_bytes(),
         "gridOffsetX": 0.0, "gridOffsetY": 0.0, "gridSpacing": 100.0,
         "arrangeBy": "none", "showIconPreview": False, "showItemInfo": False,
-        "labelOnBottom": True, "textSize": 13.0, "iconSize": 80.0,
+        "labelOnBottom": True, "textSize": layout["text_size"], "iconSize": layout["icon_size"],
         "scrollPositionX": 0.0, "scrollPositionY": 0.0,
     }
-    locations = {"Hippocampus.app": (170, 185), "Applications": (470, 185), "Legal": (550, 325)}
+    locations = layout["locations"]
     with DSStore.open(str(mount / ".DS_Store"), "w+") as store:
         store["."]["vSrn"] = ("long", 1)
         store["."]["bwsp"] = window
@@ -82,5 +106,5 @@ if __name__ == "__main__":
             write_layout(args.mount)
         else:
             parser.error("mount is required")
-    except (RuntimeError, ValueError, OSError) as error:
+    except (RuntimeError, ValueError, OSError, KeyError) as error:
         parser.exit(1, f"ERROR: {error}\n")
