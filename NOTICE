@@ -67,7 +67,7 @@ BUNDLED IN THE OCR WORKER
 --------------------------------------------------------------------
 
 The app reads screen text with a separate OCR worker, a frozen Python
-program in Hippocampus.app/Contents/Resources/HippocampusOCR. It
+program in Hippocampus.app/Contents/OCR/HippocampusOCR. It
 includes third-party components under their own licenses, among them:
 
     RapidOCR 3.9.2                     Apache-2.0
@@ -106,7 +106,7 @@ executable, and certifi 2026.7.22 (MPL-2.0), whose certificate bundle
 ships as the plain file HippocampusOCR/_internal/certifi/cacert.pem.
 
 The license texts that come with each package are in
-the app at Hippocampus.app/Contents/Resources/HippocampusOCR/licenses,
+the app at Hippocampus.app/Contents/OCR/HippocampusOCR/licenses,
 and the worker's own notice is HippocampusOCR/NOTICE.md. Source code is
 available from each project: GEOS at https://libgeos.org, GLib at
 https://gitlab.gnome.org/GNOME/glib, gettext at
