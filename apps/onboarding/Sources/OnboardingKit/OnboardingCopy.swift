@@ -104,10 +104,11 @@ public enum OnboardingCopy {
     /// Password fields: the focused-window path drops the frame during
     /// secure input or on a secure field, whole-screen reading stops during
     /// secure input, and the extension never reads input values. Password
-    /// managers are left out: the helper skips a fixed list of them
-    /// (1Password, Bitwarden, Dashlane, LastPass, Keychain Access,
-    /// Passwords), not every one. Private windows are not "never read":
-    /// see `privateWindowsSkipped`.
+    /// managers are left out of this line on purpose: the helper never reads a
+    /// broad, enumerated set of password managers and authenticators (see
+    /// `FrontAppNote.neverReadPasswordManagerFamilies`), but no list can name
+    /// every one that exists, so the promise stays at what is always true.
+    /// Private windows are not "never read": see `privateWindowsSkipped`.
     public static let promiseNeverRead = "Password fields. \(privateWindowsSkipped)"
     /// Browsers are read like every other window (RULINGS G8). A private
     /// window is skipped only when Hippocampus can tell without asking: a

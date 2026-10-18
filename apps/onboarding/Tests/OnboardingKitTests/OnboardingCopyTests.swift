@@ -13,9 +13,10 @@ final class OnboardingCopyTests: XCTestCase {
         // Setup connects no AI tool, so sharing waits on the person.
         XCTAssertEqual(OnboardingCopy.promiseStays(kept: "kept 90 days"),
                        "Text and screenshots, encrypted, kept 90 days. Nothing is uploaded by Hippocampus. It shares them with your AI only if you connect it. What your AI reads goes to the company that runs it.")
-        // Password managers are left out: the helper skips a fixed list of
-        // them, not every one. Private windows are skipped only when they
-        // show it (RULINGS G8).
+        // Password managers are left out of this line on purpose: the helper
+        // never reads a broad, enumerated set of them, but no list names every
+        // one, so the promise stays at what is always true. Private windows
+        // are skipped only when they show it (RULINGS G8).
         XCTAssertEqual(OnboardingCopy.promiseNeverRead,
                        "Password fields. Private browser windows are skipped when they show they are private.")
         XCTAssertEqual(OnboardingCopy.promiseStop, "Pause from the menu bar. Quit ends it.")
