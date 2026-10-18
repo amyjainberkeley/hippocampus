@@ -16,6 +16,7 @@ from mac_alias import Alias
 ROOT = Path(__file__).resolve().parent.parent
 INSTALLER = ROOT / "assets/installer"
 WRITER = INSTALLER / "dmg-layout.py"
+LEGAL_ICON = INSTALLER / "render-legal-icon.swift"
 LAYOUT = json.loads((INSTALLER / "layout.json").read_text())
 ENV = {key: value for key, value in os.environ.items() if key in (
     "HOME", "TMPDIR", "CLANG_MODULE_CACHE_PATH", "SWIFT_MODULECACHE_PATH", "DEVELOPER_DIR",
@@ -28,6 +29,8 @@ WINDOW_WIDTH = LAYOUT["window"]["width"]
 VISIBLE_HEIGHT = LAYOUT["window"]["height"] - LAYOUT["titleBarHeight"]
 # Room left around every item, so Finder never shows scroll bars.
 EDGE = 12
+HAS_CUSTOM_ICON = 0x0400
+IS_INVISIBLE = 0x4000
 
 
 def disk(*args):
@@ -80,6 +83,16 @@ def words_with_boxes(image):
         check=True, capture_output=True, text=True, env=ENV,
     )
     return [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+
+
+def extended_attribute(path, name):
+    result = subprocess.run(["/usr/bin/xattr", "-px", name, str(path)], capture_output=True, text=True, env=ENV)
+    return bytes.fromhex("".join(result.stdout.split())) if result.returncode == 0 else b""
+
+
+def finder_flags(path):
+    info = extended_attribute(path, "com.apple.FinderInfo")
+    return int.from_bytes(info[8:10], "big") if len(info) >= 10 else 0
 
 
 class InstallerVolumeNameTests(unittest.TestCase):
@@ -319,6 +332,36 @@ class InstallerLayoutTests(unittest.TestCase):
             with DSStore.open(str(root / ".DS_Store"), "r") as store:
                 self.assertEqual(store["Applications"]["Iloc"], (460, 176))
                 self.assertEqual(store["."]["bwsp"]["WindowBounds"], "{{420, 270}, {640, 432}}")
+
+    def test_legal_folder_shows_a_page_icon_that_survives_compression_and_remount(self):
+        result = subprocess.run(["/usr/bin/xcrun", "swift", str(LEGAL_ICON), "apply", str(self.root / "Legal")],
+                                capture_output=True, text=True, env=ENV)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.layout.write_layout(self.root)
+        with self.compressed_and_remounted("legal") as root:
+            self.assertTrue(finder_flags(root / "Legal") & HAS_CUSTOM_ICON)
+            icon_file = root / "Legal/Icon\r"
+            self.assertGreater(len(extended_attribute(icon_file, "com.apple.ResourceFork")), 0)
+            # Opening Legal shows the license and nothing else.
+            self.assertTrue(finder_flags(icon_file) & IS_INVISIBLE)
+            self.assertEqual((root / "Legal/License.rtf").read_bytes(), b"synthetic legal fixture")
+
+    def test_legal_icon_refuses_a_missing_folder(self):
+        result = subprocess.run(["/usr/bin/xcrun", "swift", str(LEGAL_ICON), "apply", str(self.root / "Missing")],
+                                capture_output=True, text=True, env=ENV)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no folder at", result.stderr)
+
+    def test_installer_gives_legal_its_icon_on_the_mounted_image(self):
+        script = (ROOT / "scripts/build-installer.sh").read_text()
+        mount = script.index('hippocampus_installer_mount "$TEMP_DMG"')
+        apply = script.index('/usr/bin/xcrun swift "$LEGAL_ICON" apply "$MOUNT_DIR/Legal"')
+        layout = script.index('"$INSTALLER_PYTHON" "$DMG_LAYOUT" "$MOUNT_DIR"')
+        unmount = script.index("hippocampus_installer_unmount", mount)
+        self.assertLess(mount, apply)
+        self.assertLess(apply, layout)
+        self.assertLess(layout, unmount)
+        self.assertIn("verify_legal_icon\n", script)
 
     def test_missing_required_asset_fails_before_writing_layout(self):
         (self.root / ".background/background.png").unlink()

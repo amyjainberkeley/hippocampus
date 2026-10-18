@@ -31,6 +31,7 @@ GENERATE_EULA="$INSTALLER_ASSETS/generate-eula.py"
 GENERATE_BACKGROUND="$INSTALLER_ASSETS/generate-background.py"
 READ_BACKGROUND_TEXT="$INSTALLER_ASSETS/read-background-text.swift"
 WINDOW_LAYOUT="$INSTALLER_ASSETS/layout.json"
+LEGAL_ICON="$INSTALLER_ASSETS/render-legal-icon.swift"
 DMG_LAYOUT="$INSTALLER_ASSETS/dmg-layout.py"
 INSTALLER_PYTHON="${INSTALLER_PYTHON:-python3}"
 # LZMA-compressed UDIF (macOS 10.15 and later; Hippocampus needs 14): the
@@ -216,9 +217,28 @@ verify_background_assets() {
     done
 }
 
+# Give a scratch folder the Legal folder's icon exactly as a build does, so a
+# broken icon fails here and not after the app is signed and notarized.
+verify_legal_icon() {
+    local scratch
+    if [[ ! -f "$LEGAL_ICON" ]]; then
+        echo "ERROR: Legal folder icon tool not found at $LEGAL_ICON" >&2
+        return 1
+    fi
+    scratch="$(mktemp -d "${TMPDIR:-/tmp}/hippocampus-legal-icon.XXXXXX")"
+    mkdir "$scratch/Legal"
+    if ! /usr/bin/xcrun swift "$LEGAL_ICON" apply "$scratch/Legal"; then
+        rm -rf "$scratch"
+        echo "ERROR: Could not give the Legal folder its icon" >&2
+        return 1
+    fi
+    rm -rf "$scratch"
+}
+
 verify_brand_assets
 verify_legal_assets
 verify_background_assets
+verify_legal_icon
 
 if [[ "$VERIFY_ASSETS_ONLY" -eq 1 ]]; then
     echo "Installer brand and legal assets match their canonical sources."
@@ -788,6 +808,9 @@ hdiutil create \
 echo ""
 echo "--- Applying headless DMG window layout ---"
 hippocampus_installer_mount "$TEMP_DMG"
+# Legal reads as fine print: a small page, not a second folder beside the
+# Applications drop target.
+/usr/bin/xcrun swift "$LEGAL_ICON" apply "$MOUNT_DIR/Legal"
 "$INSTALLER_PYTHON" "$DMG_LAYOUT" "$MOUNT_DIR"
 SetFile -c icnC "$MOUNT_DIR/.VolumeIcon.icns"
 SetFile -a C "$MOUNT_DIR"

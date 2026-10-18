@@ -29,7 +29,7 @@ make_fixture() {
     cp "$REPO_ROOT/assets/installer/generate-eula.py" "$REPO_ROOT/assets/installer/EULA.rtf" "$fixture/assets/installer/"
     cp "$REPO_ROOT/assets/installer/generate-background.py" "$REPO_ROOT/assets/installer/render-background.swift" \
         "$REPO_ROOT/assets/installer/read-background-text.swift" "$REPO_ROOT/assets/installer/layout.json" \
-        "$fixture/assets/installer/"
+        "$REPO_ROOT/assets/installer/render-legal-icon.swift" "$fixture/assets/installer/"
     cp "$REPO_ROOT/docs/legal/terms-of-service.md" "$fixture/docs/legal/"
     cp "$REPO_ROOT/assets/branding/AppIcon.icns" "$fixture/assets/branding/AppIcon.icns"
     cp "$REPO_ROOT/assets/installer/volume-icon.icns" "$fixture/assets/installer/volume-icon.icns"
@@ -86,6 +86,20 @@ elif grep -Fq 'does not read "Drag to Applications"' "$blank_fixture/stderr"; th
     pass "a background missing its instruction is rejected"
 else
     fail "a background missing its instruction failed without the expected diagnostic"
+fi
+
+# The Legal folder's icon is applied at build time; --verify-assets proves the
+# tool works before any signing starts.
+iconless_fixture="$TEST_ROOT/iconless"
+make_fixture "$iconless_fixture"
+rm "$iconless_fixture/assets/installer/render-legal-icon.swift"
+if "$iconless_fixture/scripts/build-installer.sh" --verify-assets \
+    >"$iconless_fixture/stdout" 2>"$iconless_fixture/stderr"; then
+    fail "a missing Legal folder icon tool should be rejected"
+elif grep -Fq 'Legal folder icon tool not found' "$iconless_fixture/stderr"; then
+    pass "a missing Legal folder icon tool is rejected"
+else
+    fail "a missing Legal folder icon tool failed without the expected diagnostic"
 fi
 
 printf '%s passed, %s failed\n' "$PASS_COUNT" "$FAIL_COUNT"
