@@ -160,17 +160,26 @@ struct PermissionRowView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(OnboardingDesign.Palette.ink)
                     .padding(.bottom, 1)
-                ForEach(row.benefits) { benefit in
-                    HStack(alignment: .firstTextBaseline, spacing: OnboardingDesign.Space.sm) {
-                        Image(systemName: benefit.symbol)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 15)
-                            .accessibilityHidden(true)
-                        Text(benefit.text)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                if row.state.showsGuidance {
+                    // While the row says what to do in System Settings, what
+                    // it is for takes one line, so both rows fit the window.
+                    Text(row.benefits.map(\.text).joined(separator: " · "))
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ForEach(row.benefits) { benefit in
+                        HStack(alignment: .firstTextBaseline, spacing: OnboardingDesign.Space.sm) {
+                            Image(systemName: benefit.symbol)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 15)
+                                .accessibilityHidden(true)
+                            Text(benefit.text)
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
                 if let note = row.note {
