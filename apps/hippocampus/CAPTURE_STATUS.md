@@ -37,11 +37,17 @@ migration of legacy UserDefaults preserves the selection without adding
 version 2. Capture is independent of retention review. Existing `forever`
 does not need review.
 
-Normal launch and onboarding completion request Recall's Today (`now`)
-view once. `activateTopology` consumes the request after key custody,
-readiness, and capture consent have committed. Reopen requests coalesce
-during startup and use the existing Recall activation path when ready or
-paused; no sleep is used to guess readiness.
+A launch by the person, the end of setup and every reopen ask for the
+window, on Overview; a login, a quiet relaunch, a link or a Preferences
+request asks for nothing (`AppOpening`). The window opens as soon as there
+is memory it can read: the database is on disk and this launch has checked
+its key. So a reopen shows it at once in any state of remembering (on, off,
+paused, starting or failed), and a launch waits only for the key check, not
+for the helper. On a first run, before the agent has made the database, the
+request waits until remembering is running, paused or stopped. A start that
+fails before there is memory to read hands the request to Preferences. No
+sleep is used to guess readiness. The window's process ends with its window,
+so the next request starts a fresh one.
 
 ## Verification
 
@@ -52,8 +58,9 @@ remain to be run there. Focused suites:
 
 - Hippocampus: `CaptureStatusReceiptTests`, `HealthSnapshotTests`,
   `MenuBarStatusTests`, `MenuBarQuickActionsTests`, `PreferencesStoreTests`,
-  `TCCRevokedRecoveryTests`, `CapturePreferenceControllerTests`, and
-  `RecallPresentationGateTests`.
+  `TCCRevokedRecoveryTests`, `CapturePreferenceControllerTests`,
+  `RecallPresentationGateTests`, `SupervisorWindowOpeningTests` and
+  `AppOpeningTests`.
 - Onboarding: `DiskRetentionStoreTests` and `RetentionViewModelTests`.
 - Retention fixtures: `RetentionPreferencesBehavior` and
   `RetentionPersistenceBehavior`, each with a fresh temporary directory.
