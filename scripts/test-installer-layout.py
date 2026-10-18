@@ -225,6 +225,30 @@ class WindowDesignTests(unittest.TestCase):
                       "baselineFromTop: visibleHeight - 28)", renderer)
         self.assertIn("let graphite = srgb(0x6E6E73)", renderer)
 
+    def test_preview_renders_the_window_for_review(self):
+        with tempfile.TemporaryDirectory(prefix="hippocampus-preview-") as temporary:
+            out = Path(temporary) / "review"
+            subprocess.run(["/usr/bin/python3", str(INSTALLER / "preview-window.py"), str(out)],
+                           check=True, env=ENV, stdout=subprocess.DEVNULL)
+            sizes = {}
+            for name in ("background.png", "legal-icon.png", "window.png"):
+                result = subprocess.run(["/usr/bin/sips", "-g", "pixelWidth", "-g", "pixelHeight", str(out / name)],
+                                        check=True, capture_output=True, text=True, env=ENV).stdout
+                sizes[name] = tuple(int(value) for value in re.findall(r"pixel(?:Width|Height): (\d+)", result))
+            self.assertEqual(sorted(path.name for path in out.iterdir()),
+                             ["background.png", "legal-icon.png", "window.png"])
+        window = LAYOUT["window"]
+        self.assertEqual(sizes["background.png"], (window["width"] * 2, window["height"] * 2))
+        self.assertEqual(sizes["legal-icon.png"], (1024, 1024))
+        # The mock-up is the whole window on a margin of desk, at 2x.
+        self.assertGreater(sizes["window.png"][0], window["width"] * 2)
+        self.assertGreater(sizes["window.png"][1], window["height"] * 2)
+        script = (ROOT / "scripts/build-installer.sh").read_text()
+        self.assertIn('--preview) [[ $# -ge 2 ]] || { usage; exit 1; }; PREVIEW_DIR="$2"; shift 2 ;;', script)
+        self.assertLess(script.index("verify_legal_icon\n"), script.index('python3 "$PREVIEW_WINDOW" "$PREVIEW_DIR"'))
+        self.assertLess(script.index('python3 "$PREVIEW_WINDOW" "$PREVIEW_DIR"'),
+                        script.index('"$DMG_LAYOUT" --check-dependencies'))
+
 
 class InstallerLayoutTests(unittest.TestCase):
     @classmethod
