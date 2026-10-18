@@ -26,8 +26,9 @@ row failed.
   `.ordinaryApplications` admission (the production posture from
   `Sources/MCICaptureHelper/main.swift`).
 - **Rust** (`core/brain` redaction crate + `tests/reading.rs`): the Messages/Mail
-  ingest redaction (`sms_otp`, `messages_plugin`, `sensitive_domains`), the four
-  OCR secret shapes (`ocr_secrets`), and the Swift↔Rust parity guard.
+  ingest redaction (`sms_otp`, `messages_plugin`, `sensitive_domains`), the OCR
+  secret shapes (`ocr_secrets`: the four key/token patterns, the Luhn credit-card
+  check, and the keyword-context OTP check), and the Swift↔Rust parity guard.
 
 ## Files
 

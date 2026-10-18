@@ -26,7 +26,7 @@ I try not to waste your time on things I've already written down:
 - Any program running as you can start `mci-agent` and read your memory the way a connected tool does. The [threat model](PRIVACY.md#threat-model) says what encryption covers and what it doesn't.
 - Six password managers are skipped by bundle ID. Others are read like any other app, with the secret checks still applied.
 - Private browser windows are skipped when they show they are private, by a title marker or the private badge in the window's top bar. A private window that shows neither is read.
-- Screen text is checked for four secret shapes. A one-time code or a bank alert shown in a window is not one of them and can be stored.
+- Screen text is checked for several secret shapes: the key/token patterns, a credit-card number that passes the Luhn check, and a one-time code shown next to a keyword (verification code, one-time, passcode, OTP, 2FA, …). These are precision-first, so some things still get through: a lone code with no nearby keyword, a one-time code in a format the keywords don't name, a high-entropy token that fits no pattern, or a bank alert shown on screen (the Messages/Mail deep hook removes bank alerts on its own path).
 - Search results reach a connected AI tool as plain text, with nothing marking them as not to be obeyed. Session-start text does carry that line.
 - The database key is kept in your login Keychain. Wrapping it with the Secure Enclave is designed but not built.
 
