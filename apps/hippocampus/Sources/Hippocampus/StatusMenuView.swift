@@ -52,6 +52,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         super.init()
         // Keeps its place in the menu bar. Removing it never quits the app.
         statusItem.autosaveName = "ai.hippocampus.status"
+        // The icon is this menu-bar-only app's only control surface, so it is
+        // always shown: a stale "hidden" visibility (from a crash or a
+        // background launch) must never leave the app running with no way to
+        // open or quit it.
+        statusItem.isVisible = true
         menu.autoenablesItems = false
         menu.delegate = self
         statusItem.menu = menu
