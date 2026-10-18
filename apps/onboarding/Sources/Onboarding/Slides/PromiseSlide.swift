@@ -123,6 +123,9 @@ struct PromiseLines: View {
 struct DotLegend: View {
     var body: some View {
         HStack(spacing: OnboardingDesign.Space.xl) {
+            Text(OnboardingCopy.dotLegendTitle)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
             entry(remembering: true, OnboardingCopy.dotLegendOn)
             entry(remembering: false, OnboardingCopy.dotLegendOff)
             Spacer(minLength: 0)

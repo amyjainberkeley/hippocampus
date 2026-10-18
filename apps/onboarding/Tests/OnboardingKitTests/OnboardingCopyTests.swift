@@ -24,6 +24,7 @@ final class OnboardingCopyTests: XCTestCase {
         // The menu-bar mark's promise, word for word (RULINGS B1), read by
         // VoiceOver on the legend that draws it.
         XCTAssertEqual(OnboardingCopy.dotPromise, "A solid dot means it is remembering. No solid dot means it is not.")
+        XCTAssertEqual(OnboardingCopy.dotLegendTitle, "In the menu bar")
         XCTAssertEqual(OnboardingCopy.dotLegendOn, "Remembering")
         XCTAssertEqual(OnboardingCopy.dotLegendOff, "Not remembering")
         XCTAssertEqual(OnboardingCopy.openAtLogin, "Open Hippocampus at login")
@@ -296,7 +297,7 @@ final class OnboardingCopyTests: XCTestCase {
             OnboardingCopy.promiseNeverReadLead, OnboardingCopy.promiseNeverRead, OnboardingCopy.promiseStopLead,
             OnboardingCopy.promiseStop, OnboardingCopy.dotPromise, OnboardingCopy.openAtLogin,
             OnboardingCopy.startRemembering, OnboardingCopy.neverReadTitle,
-            OnboardingCopy.dotLegendOn, OnboardingCopy.dotLegendOff,
+            OnboardingCopy.dotLegendTitle, OnboardingCopy.dotLegendOn, OnboardingCopy.dotLegendOff,
             OnboardingCopy.settingUpEncryption, OnboardingCopy.encryptionFailed, OnboardingCopy.tryAgain,
             OnboardingCopy.consentFailedTitle, OnboardingCopy.consentFailedMessage,
             OnboardingCopy.promiseStays(kept: "kept until you delete it"),

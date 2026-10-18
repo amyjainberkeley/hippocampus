@@ -185,7 +185,9 @@ public enum OnboardingCopy {
     /// in which the screen may be read shows the solid dot. The legend
     /// draws it and VoiceOver reads it.
     public static let dotPromise = "A solid dot means it is remembering. No solid dot means it is not."
-    /// The legend's two marks: the solid dot, and none.
+    /// The legend: where the mark is, then its two pictures, the solid dot
+    /// and none.
+    public static let dotLegendTitle = "In the menu bar"
     public static let dotLegendOn = "Remembering"
     public static let dotLegendOff = "Not remembering"
     public static let openAtLogin = "Open Hippocampus at login"
