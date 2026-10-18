@@ -258,6 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         configurePreferencesController()
         installPreferencesReceiver()
+        installSetupReadReceiver()
         if let request = initialPreferencesRequest {
             PreferencesWindowController.shared.show(section: request.section)
         }
@@ -361,6 +362,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self, selector: #selector(receivePreferencesRequest(_:)),
             name: PreferencesOpenRequest.notificationName,
             object: executable.resolvingSymlinksInPath().path, suspensionBehavior: .deliverImmediately)
+    }
+
+    /// Setup's Try it asks for one fresh read of the window the person
+    /// brought forward, as opening Ask does (`SetupReadRequest`). Honoured
+    /// only after consent and while setup is open; the supervisor asks the
+    /// helper only while remembering, and the helper reads under every rule.
+    private func installSetupReadReceiver() {
+        DistributedNotificationCenter.default().addObserver(
+            self, selector: #selector(receiveSetupReadRequest(_:)),
+            name: SetupReadRequest.notificationName, object: nil, suspensionBehavior: .deliverImmediately)
+    }
+
+    @objc private func receiveSetupReadRequest(_ notification: Notification) {
+        guard SetupReadRequest.honours(
+            consentGiven: OnboardingSentinel.isComplete, setupOpen: supervisor.onboardingIsRunning
+        ) else { return }
+        supervisor.requestFreshRead()
     }
 
     @objc private func receivePreferencesRequest(_ notification: Notification) {
