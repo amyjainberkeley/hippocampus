@@ -39,7 +39,13 @@ struct WelcomeSlide: View {
                 sentence
             }
         }
-        .task(id: key) { await play() }
+        // Starts over when the key or Reduce Motion changes.
+        .task(id: DemoTaskID(key: key, reduceMotion: reduceMotion)) { await play() }
+    }
+
+    private struct DemoTaskID: Equatable {
+        let key: AskKeyHint
+        let reduceMotion: Bool
     }
 
     private var sentence: some View {
