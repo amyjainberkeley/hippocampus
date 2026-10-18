@@ -140,7 +140,7 @@ final class OnboardingCopyTests: XCTestCase {
         XCTAssertEqual(OnboardingCopy.dayLine, "Overview turns today into sessions you can scan.")
         XCTAssertEqual(OnboardingCopy.aiTitle, "Your AI starts with your context.")
         // Setup connects no AI tool: the person does, later, from the menu.
-        XCTAssertEqual(OnboardingCopy.aiLine, "Once connected, your AI starts with your recent work.")
+        XCTAssertEqual(OnboardingCopy.aiLine, "Connect it once, and each session opens with your recent work.")
     }
 
     func testTheWelcomeDemoIsMadeUpAndTellsOneStory() {

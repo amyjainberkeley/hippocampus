@@ -74,9 +74,10 @@ public enum OnboardingCopy {
     public static let dayTitle = "Your day, written for you."
     public static let dayLine = "Overview turns today into sessions you can scan."
     /// Setup connects no AI tool (RULINGS O10): the person connects one
-    /// later, from the menu, so the line says "once connected".
+    /// later, from the menu's Connect AI Tools…, and then each session it
+    /// starts is given the last few sessions of work (`WhatIsSent`).
     public static let aiTitle = "Your AI starts with your context."
-    public static let aiLine = "Once connected, your AI starts with your recent work."
+    public static let aiLine = "Connect it once, and each session opens with your recent work."
 
     // Permissions
 
