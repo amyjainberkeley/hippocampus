@@ -22,7 +22,7 @@ use std::fmt;
 ///
 /// **Structural read-only invariant** — adding a variant here is the
 /// only way a new tool reaches the wire. Any mutating tool MUST land
-/// behind a separate CSO-signed PR (per ADR-0017 §5).
+/// behind a separate security-reviewed PR (per ADR-0017 §5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolName {
     /// `recall` — lexical (eventually hybrid) recall.
