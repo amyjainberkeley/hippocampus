@@ -123,9 +123,8 @@ public extension MCIEmptyState {
         MCIEmptyState(
             icon: "brain.head.profile",
             title: "Hippocampus is warming up",
-            message: "Keep using your Mac normally — captures start "
-                + "appearing as MCI observes your workflow. Come back "
-                + "in a few hours for your first recall."
+            message: "Keep using your Mac normally. Your day fills in "
+                + "as you work. Come back in a little while to see it."
         )
     }
 
@@ -137,8 +136,8 @@ public extension MCIEmptyState {
             icon: "sparkle.magnifyingglass",
             title: "No memories match \u{201C}\(query)\u{201D}",
             message: "Try broader terms, check spelling, or add "
-                + "custom names in Settings so MCI recognizes your "
-                + "shorthand."
+                + "custom names in Settings so your shorthand is "
+                + "recognized."
         )
     }
 
@@ -176,7 +175,7 @@ public extension MCIEmptyState {
                 icon: "line.3.horizontal.decrease.circle",
                 title: "Nothing in the current filter",
                 message: "Widen the app or time filter above to see "
-                    + "captured events."
+                    + "more."
             )
         }
         // Cycle 8.54 copy audit — "brain" → "memory". Same referent;
@@ -184,9 +183,8 @@ public extension MCIEmptyState {
         return MCIEmptyState(
             icon: "lock.shield",
             title: "Your memory is empty",
-            message: "Everything Hippocampus captures stays here, on "
-                + "this Mac, encrypted end-to-end. You are always in "
-                + "control."
+            message: "Everything Hippocampus remembers stays on this "
+                + "Mac, encrypted. It fills in as you work."
         )
     }
 
@@ -196,8 +194,8 @@ public extension MCIEmptyState {
         MCIEmptyState(
             icon: "link",
             title: "No cross-app connections yet",
-            message: "Related memories appear here as MCI links "
-                + "events across your apps."
+            message: "Related moments from your other apps will "
+                + "appear here."
         )
     }
 
@@ -207,7 +205,7 @@ public extension MCIEmptyState {
         MCIEmptyState(
             icon: "eye.slash",
             title: "No privacy moments yet",
-            message: "MCI redacts sensitive captures automatically. "
+            message: "Hippocampus redacts sensitive text on its own. "
                 + "When it does, you\u{2019}ll see the record here."
         )
     }
@@ -219,7 +217,7 @@ public extension MCIEmptyState {
             icon: "rectangle.stack",
             title: "No episodes yet",
             message: "Episodes group a few minutes of continuous work "
-                + "in one app. Keep using your Mac — they\u{2019}ll "
+                + "in one app. Keep using your Mac, and they\u{2019}ll "
                 + "appear soon."
         )
     }
@@ -229,9 +227,8 @@ public extension MCIEmptyState {
         MCIEmptyState(
             icon: "clock",
             title: "No events yet",
-            message: "Start using your Mac normally. Hippocampus is "
-                + "recording in the background and events will appear "
-                + "here as they\u{2019}re captured."
+            message: "Start using your Mac normally. Your work appears "
+                + "here in the background as it is saved."
         )
     }
 }

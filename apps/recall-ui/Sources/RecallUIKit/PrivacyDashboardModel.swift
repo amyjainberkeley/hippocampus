@@ -97,14 +97,14 @@ public enum PrivacyDashboardSummary {
         isLoading: Bool = false
     ) -> String {
         guard let s = summary else {
-            // Cycle 8.54 copy audit — "No brain data yet" was jargon;
-            // the new copy reads as normal English on a fresh install.
-            return isLoading ? "Loading…" : "No captures yet."
+            // Plain English on a fresh install: "memory" and "moments" are
+            // the product's own words, not "brain"/"captures" (launch copy).
+            return isLoading ? "Loading…" : "Nothing saved yet."
         }
         let days = s.daysCovered
         let dayLabel = days == 1 ? "1 day" : "\(days) days"
         return
-            "Hippocampus has captured \(s.totalEvents) events across "
+            "Hippocampus has saved \(s.totalEvents) moments across "
             + "\(dayLabel)."
     }
 
