@@ -191,13 +191,13 @@ pub fn contains_otp(text: &str) -> bool {
                 continue;
             }
             for &(run_start, run_end) in &runs {
-                let gap = if run_start >= end {
-                    run_start - end
-                } else if start >= run_end {
-                    start - run_end
-                } else {
-                    0
-                };
+                // Distance between the keyword span [start, end) and the digit
+                // run [run_start, run_end); 0 when they overlap. saturating_sub
+                // makes the non-touching side vanish, so this equals the old
+                // if/else and clippy accepts it.
+                let gap = run_start
+                    .saturating_sub(end)
+                    .max(start.saturating_sub(run_end));
                 if gap <= OTP_WINDOW_BYTES {
                     return true;
                 }
@@ -230,10 +230,10 @@ mod tests {
         assert!(contains_credit_card("4111111111111111"));
         assert!(contains_credit_card("5500 0000 0000 0004"));
         assert!(contains_credit_card("3400 0000 0000 009")); // 15-digit Amex
-        // A 16-digit number that fails Luhn, and ordinary numbers in range.
+                                                             // A 16-digit number that fails Luhn, and ordinary numbers in range.
         assert!(!contains_credit_card("1234 1234 1234 1234"));
         assert!(!contains_credit_card("4111 1111 1111 1112")); // last digit off
-        // Out of the 13–19 range: a phone number, a 20-digit blob, an order id.
+                                                               // Out of the 13–19 range: a phone number, a 20-digit blob, an order id.
         assert!(!contains_credit_card("415-555-0132"));
         assert!(!contains_credit_card("12345678901234567890"));
         assert!(!contains_credit_card("Order #40281773"));
