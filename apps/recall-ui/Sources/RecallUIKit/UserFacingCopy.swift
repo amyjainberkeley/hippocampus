@@ -30,12 +30,11 @@ public enum UserFacingCopy {
     public static let openHippocampusAction = "Open Hippocampus"
 
     // Brief / timeline / event-detail load failures. Reassuring body
-    // ("Your captures are safe") replaces the prior raw `\(error)`.
+    // ("Nothing is lost") replaces the prior raw `\(error)`.
     public static let briefLoadFailedTitle = "This brief didn\u{2019}t load"
     public static let timelineLoadFailedTitle = "Your timeline didn\u{2019}t load"
     public static let loadFailedBody =
-        "Your captures are safe — this was a display hiccup. "
-        + "Try again in a moment."
+        "Nothing is lost. Try again in a moment."
     public static let eventDetailFailedTitle =
         "This event\u{2019}s details didn\u{2019}t load"
 
@@ -48,8 +47,8 @@ public enum UserFacingCopy {
 
     // Privacy Dashboard mutations — reassuring copy + next action.
     public static let deleteFailedBanner =
-        "Delete didn\u{2019}t go through. Nothing was removed — "
-        + "your captures are unchanged. Try again in a moment."
+        "Delete didn\u{2019}t go through. Nothing was removed. "
+        + "Try again in a moment."
     public static let deleteBlockedBanner =
         "Hippocampus is updating your memory. Quit Hippocampus, leave "
         + "this window open, then try deleting again."
@@ -183,8 +182,10 @@ public enum UserFacingCopy {
         "Open \(name)"
     }
 
-    /// Over the lines a connected AI is given when a session starts.
-    public static let yourAIAlreadyKnows = "Your AI already knows"
+    /// Over the lines a connected AI is given when a session starts. Leads
+    /// with how your AI starts, not what it "already knows": the latter
+    /// echoes a competitor's launch headline (launch decisions, 2026-10-15).
+    public static let aiStartsWith = "What your AI starts with"
     /// No AI tool starts its sessions with these lines yet.
     public static let connectAction = "Connect"
     /// History on a session's own time (RULINGS W8).
@@ -449,29 +450,6 @@ public enum UserFacingCopy {
     }
 }
 
-// MARK: - Copy-style validators (referenced by CopyStyleTests)
-
-public enum CopyStyleValidator {
-    /// Matches `-3815`-style codes, `errno=NNN`, `code=NNN`, and
-    /// hex ids like `0x2A`. See copy-style-guide §2.
-    public static func containsRawErrorCode(_ text: String) -> Bool {
-        let patterns = [
-            #"\B-\d{3,}\b"#,
-            #"\berrno\s*[=:]\s*-?\d+"#,
-            #"\bcode\s*[=:]\s*-?\d+"#,
-            #"\b0x[0-9A-Fa-f]{2,}\b"#,
-        ]
-        return patterns.contains { text.range(of: $0, options: .regularExpression) != nil }
-    }
-
-    /// Jargon banned from user-facing copy. See copy-style-guide §3.
-    public static let bannedJargon: [String] = [
-        "SCStream", "TCC", "MCP", "FFI", "denylist",
-        "cascade", "helper", "SQLCipher", "sentinel",
-    ]
-
-    public static func containsJargon(_ text: String) -> String? {
-        let lower = text.lowercased()
-        return bannedJargon.first { lower.contains($0.lowercased()) }
-    }
-}
+// The copy-style validators `CopyStyleTests` references now live in
+// `CopyStyleValidator.swift`, kept apart so this file holds only copy and the
+// launch-copy checker never mistakes a banned-word list for display text.

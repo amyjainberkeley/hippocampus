@@ -1,7 +1,7 @@
 import Foundation
 
 // The words on Overview (RULINGS W5 to W7, I11, V; spec-copy S4.11). The
-// Right now card's caption and buttons, "Your AI already knows", "Connect",
+// Right now card's caption and buttons, "What your AI starts with", "Connect",
 // "Show in History" and the writer caption are shared with other places and
 // live in `UserFacingCopy` itself. `OverviewCopyTests` holds every string
 // here to the style rules.
@@ -25,7 +25,7 @@ public extension UserFacingCopy {
         /// Under the Right now card when no AI tool starts its sessions with
         /// what Hippocampus knows (RULINGS W5, onboarding product critique 4).
         public static let connectLine = "Claude Code and Codex can start with what you\u{2019}re working on."
-        /// "Your AI already knows", with nothing to send yet.
+        /// "What your AI starts with", with nothing to send yet.
         public static let aiKnowsNothingYet = "Nothing yet. A session is added a few minutes after it ends."
         /// Unfolds every line a connected AI is given, and folds them again.
         public static let showAll = "Show All"
