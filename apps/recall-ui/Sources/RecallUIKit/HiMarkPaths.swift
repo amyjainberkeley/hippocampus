@@ -23,6 +23,9 @@ public enum WindowHiMark {
     /// Letters navy, dot blue (RULINGS G2).
     public static let lettersRGB: UInt32 = 0x0F1B3D
     public static let dotRGB: UInt32 = 0x2F6BFF
+    /// The icon's tile, top to bottom: the Lab colours.
+    public static let tileTopRGB: UInt32 = 0xFFFFFF
+    public static let tileBottomRGB: UInt32 = 0xE9EEF6
 
     /// Parses SVG path data with absolute M, L, H, V, C, Q and Z commands, one
     /// set of numbers each, as the app's parser does. Nil for anything else.
@@ -120,6 +123,42 @@ public struct WindowHiMarkView: View {
             }
         }
         .aspectRatio(WindowHiMark.inkBounds.width / WindowHiMark.inkBounds.height, contentMode: .fit)
+        .accessibilityHidden(true)
+    }
+}
+
+/// The hi mark on its tile, as the app's icon draws it (`AppIcon.svg`): the
+/// Lab colours, tile #FFFFFF to #E9EEF6, letters #0F1B3D, dot #2F6BFF, a
+/// hairline edge and continuous corners. An icon, so the same in dark mode.
+/// The dot means remembering, as everywhere: with `remembering` false it
+/// goes and the letters dim, as the menu bar's off picture does (RULINGS B1).
+public struct HiTileView: View {
+    public let size: CGFloat
+    public let remembering: Bool
+
+    public init(size: CGFloat, remembering: Bool = true) {
+        self.size = size
+        self.remembering = remembering
+    }
+
+    public var body: some View {
+        let tile = RoundedRectangle(cornerRadius: size * 0.2237, style: .continuous)
+        ZStack {
+            tile.fill(LinearGradient(colors: [WindowHiMark.color(WindowHiMark.tileTopRGB),
+                                              WindowHiMark.color(WindowHiMark.tileBottomRGB)],
+                                     startPoint: .top, endPoint: .bottom))
+            tile.strokeBorder(Color.black.opacity(0.1), lineWidth: max(0.5, size * 0.006))
+            ZStack {
+                WindowHiMarkShape(part: .letters)
+                    .fill(WindowHiMark.color(WindowHiMark.lettersRGB).opacity(remembering ? 1 : 0.55))
+                if remembering {
+                    WindowHiMarkShape(part: .dot).fill(WindowHiMark.color(WindowHiMark.dotRGB))
+                }
+            }
+            // The icon's proportions: the mark is 58% of the tile wide.
+            .frame(width: size * 0.58, height: size * 0.635)
+        }
+        .frame(width: size, height: size)
         .accessibilityHidden(true)
     }
 }

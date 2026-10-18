@@ -124,7 +124,8 @@ struct MemoryWorkspaceView: View {
         _ask = StateObject(wrappedValue: ask ?? Self.makeAsk(
             reader: reader, understanding: understanding, calendar: calendar, now: now))
         _overview = StateObject(wrappedValue: overview ?? OverviewViewModel(
-            understanding: understanding, calendar: calendar, healthLoader: healthLoader, now: now))
+            understanding: understanding, calendar: calendar, healthLoader: healthLoader, now: now,
+            savedBefore: { try await reader.isAnythingSaved(before: $0) }))
         // The preview's verdicts go nowhere: "Right" and "Forget" there must
         // never reach the folder the agent applies to the person's memory.
         _you = StateObject(wrappedValue: you ?? UserModelViewModel(

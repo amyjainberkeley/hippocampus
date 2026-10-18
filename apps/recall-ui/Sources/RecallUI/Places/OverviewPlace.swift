@@ -55,14 +55,21 @@ struct OverviewPlace: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                if let card = model.rightNow {
+                // The first day's welcome holds the Right now card's place
+                // until the first session is saved (first landing, Oct 18).
+                if model.showsFirstDay {
+                    FirstDayCard(remembering: model.isRemembering, offersConnect: model.offersConnectOnEmptyDay)
+                        .transition(.opacity)
+                } else if let card = model.rightNow {
                     RightNowCardView(card: card, reader: reader)
+                        .transition(.opacity)
                 }
                 VStack(alignment: .leading, spacing: 18) {
                     dayHeader
                     content
                 }
             }
+            .animation(MCI.Motion.deliberate, value: model.showsFirstDay)
             .frame(maxWidth: 880, alignment: .leading)
             .padding(.horizontal, 32)
             .padding(.vertical, 28)
@@ -121,7 +128,9 @@ struct OverviewPlace: View {
     @ViewBuilder
     private var content: some View {
         if let overview = model.overview {
-            if overview.blocks.isEmpty {
+            if model.showsFirstDay {
+                firstDay(overview)
+            } else if overview.blocks.isEmpty {
                 emptyDay(overview)
             } else {
                 day(overview)
@@ -162,6 +171,19 @@ struct OverviewPlace: View {
         }
         .padding(.vertical, 24)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The first day's strip, empty, with now marked: the first session
+    /// appears there.
+    private func firstDay(_ overview: DayOverview) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if let layout = model.firstDayStrip {
+                FirstDayStripView(layout: layout, remembering: model.isRemembering)
+            }
+            modelLine(overview)
+        }
+        .padding(.top, 4)
+        .transition(.opacity)
     }
 
     private func day(_ overview: DayOverview) -> some View {

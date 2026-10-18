@@ -54,6 +54,8 @@ enum WindowRenderer {
         var understanding: PreviewUnderstandingReader.Scenario = .populated
         var size = CGSize(width: 1100, height: 720)
         var scale: CGFloat = 2
+        /// Nothing is saved before today: the first day's welcome.
+        var firstDay = false
         var prepare: @MainActor (AskViewModel) async -> Void = { _ in }
     }
 
@@ -119,6 +121,10 @@ enum WindowRenderer {
             Scene(name: "full-overview-dark", place: .overview, dark: true),
             Scene(name: "full-ask-dark", dark: true) { await $0.history.reload() },
             Scene(name: "full-you-dark", place: .you, dark: true),
+            // Where the person lands after setup: the first day, nothing
+            // saved yet, remembering, no AI tool connected (Oct 18).
+            Scene(name: "first-landing-light", place: .overview, understanding: .firstDay, firstDay: true),
+            Scene(name: "first-landing-dark", place: .overview, dark: true, understanding: .firstDay, firstDay: true),
         ]
     }
 
@@ -164,10 +170,16 @@ enum WindowRenderer {
             """.utf8))
         let remembering = SidebarStatus(receipt: receipt, now: now)
         // Overview and You, read before drawing. Their deletion signals are
-        // their own, so nothing from the app reaches them.
+        // their own, so nothing from the app reaches them. On the first day
+        // nothing is saved before today.
+        let firstDay = scene.firstDay
         let overview = OverviewViewModel(understanding: understanding, selectedDate: now, calendar: calendar,
                                          healthLoader: { receipt }, now: { now },
-                                         deletions: MemoryDeletionSignal(center: NotificationCenter()))
+                                         deletions: MemoryDeletionSignal(center: NotificationCenter()),
+                                         savedBefore: { _ in
+                                             guard firstDay else { throw UnderstandingError.unavailable }
+                                             return false
+                                         })
         await overview.reload()
         let you = UserModelViewModel(understanding: understanding, verdicts: VerdictInbox(directory: nil),
                                      deletions: MemoryDeletionSignal(center: NotificationCenter()))

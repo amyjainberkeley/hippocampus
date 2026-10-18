@@ -37,7 +37,23 @@ public final class OverviewViewModel: ObservableObject {
     public let calendar: Calendar
     private let healthLoader: @Sendable () async -> CaptureHealthReceipt?
     private let now: @Sendable () -> Date
+    private let savedBefore: @Sendable (Date) async throws -> Bool
+    private let deletions: MemoryDeletionSignal
     private var feedChanges: AnyCancellable?
+
+    /// What is saved from before today, as far as the window knows.
+    private enum EarlierMemory: Equatable {
+        /// Not read, or it could not be read.
+        case unknown
+        /// Nothing is saved from before the day that starts at this time.
+        case nothingBefore(Date)
+        /// Something is. That holds for every later day too, so it is kept
+        /// until a delete moves `deletions` on.
+        case something
+    }
+
+    @Published private var earlierMemory = EarlierMemory.unknown
+    private var earlierMemoryGeneration: UInt64 = 0
 
     private enum Selection: Equatable {
         /// The day's last session: what the day ended with, or what is
@@ -48,19 +64,25 @@ public final class OverviewViewModel: ObservableObject {
     }
 
     /// `healthLoader` reads the saved status (`CaptureHealthReceipt.load` in
-    /// the app, nothing in the preview); `now` is the clock.
+    /// the app, nothing in the preview); `now` is the clock. `savedBefore`
+    /// says whether any moment is saved from before a time, or throws when
+    /// it cannot say. Left out, it cannot say, and Overview never treats a
+    /// day as the first.
     public init(
         understanding: UnderstandingReader,
         selectedDate: Date? = nil,
         calendar: Calendar = .current,
         healthLoader: @escaping @Sendable () async -> CaptureHealthReceipt?,
         now: @escaping @Sendable () -> Date,
-        deletions: MemoryDeletionSignal = .shared
+        deletions: MemoryDeletionSignal = .shared,
+        savedBefore: @escaping @Sendable (Date) async throws -> Bool = { _ in throw UnderstandingError.unavailable }
     ) {
         _selectedDate = Published(initialValue: selectedDate ?? now())
         self.calendar = calendar
         self.healthLoader = healthLoader
         self.now = now
+        self.savedBefore = savedBefore
+        self.deletions = deletions
         feed = UnderstandingFeed(deletions: deletions) { day in
             try await understanding.overview(day)
         }
@@ -96,12 +118,32 @@ public final class OverviewViewModel: ObservableObject {
         return calendar.startOfDay(for: next) <= calendar.startOfDay(for: now())
     }
 
-    /// Read the day, and the saved status.
+    /// Read the saved status and, for today, whether anything is saved from
+    /// before it; then the day. The first two are quick local reads, done
+    /// first so the day is never drawn with an old answer to either (the
+    /// first day's welcome).
     public func reload() async {
         let requested = day
         async let receipt = healthLoader()
-        await feed.load(requested)
+        if isToday { await readEarlierMemory() }
         captureHealth = await receipt
+        await feed.load(requested)
+    }
+
+    /// Asks whether anything is saved from before today, unless something
+    /// already was and nothing has been deleted since. One moment at most is
+    /// read, newest first, through the time index; only whether there is one
+    /// is kept.
+    private func readEarlierMemory() async {
+        let generation = deletions.generation
+        if earlierMemory == .something, earlierMemoryGeneration == generation { return }
+        let today = calendar.startOfDay(for: now())
+        do {
+            earlierMemory = try await savedBefore(today) ? .something : .nothingBefore(today)
+            earlierMemoryGeneration = generation
+        } catch {
+            earlierMemory = .unknown
+        }
     }
 
     /// The day before or after; never past today.
@@ -236,5 +278,47 @@ public final class OverviewViewModel: ObservableObject {
     public var offersConnectOnEmptyDay: Bool {
         guard isToday, let overview, overview.blocks.isEmpty, rightNow == nil else { return false }
         return !overview.aiKnows.hookInstalled
+    }
+
+    // MARK: The first day
+
+    /// Today is the first day of the person's memory: nothing is saved from
+    /// before it. False while that is unknown.
+    public var isFirstDay: Bool {
+        guard isToday, case let .nothingBefore(day) = earlierMemory else { return false }
+        return day == calendar.startOfDay(for: now())
+    }
+
+    /// The first day, before its first session: where the person lands after
+    /// setup. Overview welcomes them, says what comes next, and keeps the
+    /// day's place, empty, with now marked (first landing, Oct 18). Any
+    /// other empty day stays as it was.
+    public var showsFirstDay: Bool {
+        guard isFirstDay, let overview, overview.blocks.isEmpty, rightNow == nil else { return false }
+        return true
+    }
+
+    /// Whether Hippocampus is remembering, by the rule of the sidebar's
+    /// footer, so the welcome and the footer never disagree.
+    public var isRemembering: Bool {
+        SidebarStatus(receipt: captureHealth, now: now()).remembering
+    }
+
+    /// The first day's strip: the hours around now, with now marked.
+    public var firstDayStrip: FirstDayStripLayout? {
+        FirstDayStripLayout(now: now(), calendar: calendar)
+    }
+}
+
+public extension BrainReader {
+    /// Whether any moment is saved from before `date`, for Overview's first
+    /// day: the newest such moment, one at most, found through the time
+    /// index. Only whether there is one is kept. Privacy markers are not
+    /// moments, and browsing never returns them.
+    func isAnythingSaved(before date: Date) async throws -> Bool {
+        let start = (date.timeIntervalSince1970 * 1_000_000).rounded()
+        guard start > 0 else { return false }
+        let hits = try await search(SearchOptions(text: "", limit: 1, timeToUs: UInt64(start) - 1, browse: true))
+        return !hits.isEmpty
     }
 }

@@ -22,6 +22,31 @@ public extension UserFacingCopy {
         /// Hovering time with nothing saved on the strip (RULINGS W6).
         public static let nothingSaved = "Nothing saved"
 
+        // The first day of the person's memory, before its first session:
+        // where they land after setup (Oct 18).
+
+        /// Over the first day while Hippocampus is remembering.
+        public static let firstDayTitle = "Your memory starts now."
+        public static let firstDayBody = "Your day fills in here as you work. It stays on this Mac."
+        /// The first day while Hippocampus is not remembering: off, paused or
+        /// waiting for a permission. The sidebar's footer says the same.
+        public static let firstDayOffTitle = "Hippocampus isn\u{2019}t remembering right now."
+        public static let firstDayOffBody = "Your day fills in here once it is. It stays on this Mac."
+        /// Opens Preferences, where remembering is turned on.
+        public static let openPreferences = "Open Preferences"
+
+        /// The first thing to try: "Press Shift twice in any app to ask about
+        /// something you saw." `phrase` is the Ask key as the app names it;
+        /// empty when nothing opens Ask.
+        public static func firstDayAsk(_ phrase: String) -> String {
+            phrase.isEmpty
+                ? "Choose a key for Ask in Preferences."
+                : "\(phrase) in any app to ask about something you saw."
+        }
+
+        /// The mark for now on the first day's strip, for VoiceOver.
+        public static let now = "Now"
+
         /// Under the Right now card when no AI tool starts its sessions with
         /// what Hippocampus knows (RULINGS W5, onboarding product critique 4).
         public static let connectLine = "Claude Code and Codex can start with what you\u{2019}re working on."

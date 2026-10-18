@@ -69,13 +69,21 @@ enum RecallPreviewRenderer {
         func overview(_ name: String, _ state: OverviewPreviewUnderstanding.State, height: CGFloat = 1_250,
                       today: Bool = true, dark: Bool = false, select: Int64? = nil,
                       hover: StripHover? = nil, noticedOpen: Bool = false, showSearches: Bool = false,
-                      fact: DayFact.Kind? = nil, legend: WorkKind? = nil) async throws {
+                      fact: DayFact.Kind? = nil, legend: WorkKind? = nil,
+                      firstDay: FirstDayFixture? = nil) async throws {
             let now = today ? PreviewUnderstandingReader.sampleNow
                 : PreviewUnderstandingReader.sampleNow.addingTimeInterval(86_400)
+            // The first day: nothing saved before today, and the saved status
+            // as Hippocampus writes it, remembering or turned off.
+            let receipt = firstDay.flatMap { Self.receipt(at: now, remembering: $0 == .remembering) }
             let model = OverviewViewModel(understanding: OverviewPreviewUnderstanding(state),
                                           selectedDate: PreviewUnderstandingReader.sampleNow,
                                           calendar: PreviewUnderstandingReader.sampleCalendar,
-                                          healthLoader: { nil }, now: { now })
+                                          healthLoader: { receipt }, now: { now },
+                                          savedBefore: { _ in
+                                              guard firstDay != nil else { throw UnderstandingError.unavailable }
+                                              return false
+                                          })
             await model.reload()
             if let select, let block = model.blocks.first(where: { $0.id == select }) {
                 model.select(block)
@@ -122,7 +130,11 @@ enum RecallPreviewRenderer {
         try await overview("overview-today-fact", .today, height: firstScreen, fact: .returned)
         try await overview("overview-today-legend", .today, height: firstScreen, legend: .code)
         try await overview("overview-today-empty", .todayEmpty, height: firstScreen)
-        try await overview("overview-first-day", .firstDay, height: firstScreen)
+        try await overview("overview-first-day", .firstDay, height: firstScreen, firstDay: .remembering)
+        try await overview("overview-first-day-connected", .todayEmpty, height: firstScreen, firstDay: .remembering)
+        try await overview("overview-first-day-not-remembering", .firstDay, height: firstScreen, firstDay: .off)
+        try await overview("overview-first-day-dark", .firstDay, height: firstScreen, dark: true,
+                           firstDay: .remembering)
         try await overview("overview-past-day", .pastDay, today: false)
         try await overview("overview-past-day-hover", .pastDay, height: firstScreen, today: false,
                            hover: .session(taxRounding))
@@ -143,6 +155,25 @@ enum RecallPreviewRenderer {
         try await you("you-nothing-sent-yet", .nothingSentYet, height: firstScreen, open: true)
         try await you("you-dark", .today, dark: true)
         return written
+    }
+
+    /// The first day's saved status.
+    enum FirstDayFixture: Equatable {
+        /// Fresh, nothing blocking: Hippocampus is remembering.
+        case remembering
+        /// Remembering is turned off.
+        case off
+    }
+
+    /// The saved status as the agent writes it at start, with nothing saved
+    /// yet: fresh, and blocked only when remembering is off.
+    static func receipt(at now: Date, remembering: Bool) -> CaptureHealthReceipt? {
+        let stamp = ISO8601DateFormatter().string(from: now)
+        let blocked = remembering ? "null" : "\"capture_disabled\""
+        return try? CaptureHealthReceipt.decode(Data("""
+            {"schema_version": 1, "updated_at": "\(stamp)", "last_stored_frame_at": null,
+             "stored_frame_count": 0, "stored_screenshot_count": 0, "blocked_reason": \(blocked)}
+            """.utf8))
     }
 
     /// A verdict inbox in a new temporary folder: "Forget" writes there, never
