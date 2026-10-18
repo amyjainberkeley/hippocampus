@@ -360,8 +360,10 @@ final class SupervisorStopAndPauseTests: XCTestCase {
         XCTAssertNil(tab)
     }
 
-    /// A start that failed cannot show the window: the app shows
-    /// Preferences, where the reason and the fix are.
+    /// A start that failed before there was memory to read (here, nothing on
+    /// disk yet) cannot show the window: the app shows Preferences, where the
+    /// reason and the fix are. With memory to read, the window shows instead
+    /// (`SupervisorWindowOpeningTests`).
     func test_a_failed_start_hands_the_request_to_preferences() async throws {
         let (supervisor, locator, topology) = make(config: FakeRuntimeConfig(captureEnabled: true))
         let marker = try watchWindow(locator)
