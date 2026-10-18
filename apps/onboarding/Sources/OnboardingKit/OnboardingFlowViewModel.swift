@@ -82,7 +82,7 @@ public final class OnboardingFlowViewModel: ObservableObject {
     public let isReview: Bool
     public let screenRecordingPermission: any TCCPermission
     public let accessibilityPermission: any TCCPermission
-    /// Kept for the panels; the four screens never ask for it.
+    /// Kept for the panels; the five screens never ask for it.
     public let automationPermission: any TCCPermission
 
     /// The two rows, in the order they are shown.

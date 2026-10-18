@@ -257,7 +257,7 @@ final class OnboardingSourceScanTests: XCTestCase {
 
     func testTheBrowserExtensionPanelTakesEveryWordFromTheCopyFile() throws {
         // Preferences opens it, so its words are held by the copy tests
-        // like the four screens'.
+        // like the five screens'.
         let panel = code(try source("Onboarding/Slides/BrowserExtensionSlide.swift"))
         let literalWords = try NSRegularExpression(pattern: #"(Text|Button|title:|body:)\(?\s*"[A-Za-z]"#)
         for line in panel {
