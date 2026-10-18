@@ -851,11 +851,10 @@ async fn run_agent(args: Args) -> ExitCode {
 
             // V2-MCP-2 — boot the MCP-client registry from
             // `~/Library/Application Support/MCI/mcp-servers.toml`.
-            // ADR-0001 §amendment 2026-05-31. Construction-graph
-            // wiring per audit rows #8 + #9: the boot helper builds
+            // ADR-0001 §amendment 2026-05-31. The boot helper builds
             // the registry, the agent holds it for the rest of the
-            // process lifetime, and V2-MCP-3 (cycle 8.30, Director-
-            // Brain) picks it up. A missing config file is the
+            // process lifetime, and the MCP aggregator picks it up.
+            // A missing config file is the
             // expected fresh-install state; failures are logged and
             // never abort startup. Runs BEFORE the brain-key check
             // so the registry status appears even if the brain is
@@ -1005,14 +1004,13 @@ async fn run_agent(args: Args) -> ExitCode {
                                 capture_receipt.refresh(&clock);
                                 capture_status = Some(capture_receipt);
                                 let embedder = load_embedder_backend();
-                                // V2-P5+ construction-graph wire: build
-                                // the sync BERT NER backend and inject it
-                                // into the ingest pump. THIS is the
-                                // production caller `git grep
-                                // NerTier2Backend` must surface on the
-                                // live ingest path (per
-                                // [[project-v2p1-unit-tests-passed-but-never-wired]]
-                                // — without this the backend is dead code).
+                                // Construction-graph wire: build the sync
+                                // BERT NER backend and inject it into the
+                                // ingest pump. THIS is the production caller
+                                // `git grep NerTier2Backend` must surface on
+                                // the live ingest path; without this call the
+                                // backend is dead code (a passing unit test
+                                // does not prove the path is reached).
                                 ner_sync_backend = load_ner_sync_backend();
                                 let base_pump = BrainPump::new(
                                     Arc::clone(&store) as Arc<dyn mci_brain::BrainStore>,
@@ -1091,14 +1089,13 @@ async fn run_agent(args: Args) -> ExitCode {
                                     }
                                 });
 
-                                // V2-P6 construction-graph wire: the
-                                // AliasResolver idle worker. THIS is the
-                                // production caller `git grep
-                                // run_alias_resolver_worker` must surface
-                                // on the live agent path — without it the
-                                // resolver is dead code (the
-                                // [[project-v2p1-unit-tests-passed-but-never-wired]]
-                                // lesson). Runs off the hot path: a cheap
+                                // Construction-graph wire: the AliasResolver
+                                // idle worker. THIS is the production caller
+                                // `git grep run_alias_resolver_worker` must
+                                // surface on the live agent path — without it
+                                // the resolver is dead code (a passing unit
+                                // test does not prove the path is reached).
+                                // Runs off the hot path: a cheap
                                 // watermark gates the full resolve, so a
                                 // steady-state session does one watermark
                                 // query per interval and no more.
@@ -1126,16 +1123,15 @@ async fn run_agent(args: Args) -> ExitCode {
                                     }
                                 });
 
-                                // V2-P6 construction-graph wire: the
-                                // episode-edge Consolidator idle worker
-                                // — the LAST graph-construction step
-                                // before the Phase-6 dot-connect demo.
-                                // THIS is the production caller `git grep
+                                // Construction-graph wire: the episode-edge
+                                // Consolidator idle worker — the last
+                                // graph-construction step. THIS is the
+                                // production caller `git grep
                                 // run_consolidator_worker` must surface on
                                 // the live agent path; without it the
-                                // consolidator is dead code (the
-                                // [[project-v2p1-unit-tests-passed-but-never-wired]]
-                                // lesson). Runs AFTER identities resolve
+                                // consolidator is dead code (a passing unit
+                                // test does not prove the path is reached).
+                                // Runs AFTER identities resolve
                                 // (it reads `entity_identities`), off the
                                 // hot path: a cheap watermark gates the
                                 // derive, so a steady-state session does
@@ -1211,8 +1207,7 @@ async fn run_agent(args: Args) -> ExitCode {
                                     shutdown_rx.clone(),
                                 );
 
-                                // V2-P5 — Tier 2 Qwen NER idle-batch
-                                // worker (FORK 8 = A; CTO Phase 6 PR 9).
+                                // Tier 2 Qwen NER idle-batch worker.
                                 // Reuses the brief author's Qwen3-1.7B
                                 // Core ML model when present on disk.
                                 // Polls
@@ -1222,22 +1217,20 @@ async fn run_agent(args: Args) -> ExitCode {
                                 // qwen_tier2_processed) sentinel
                                 // mention, runs each through a
                                 // `Tier2Extractor` (cascade-marker SKIP
-                                // + V2-P4 token-REDACT downstream SKIP
+                                // + token-REDACT downstream SKIP
                                 // filters applied above the Qwen
                                 // backend), writes
                                 // (extractor_kind = "qwen") mentions to
                                 // `entity_mentions`. Disabled-idle unless
                                 // MCI_QWEN_NER_ENABLED=1 and the Qwen
-                                // .mlmodelc is installed; V2-P4
-                                // Tier 1 regex mentions continue on the
-                                // hot path regardless. Construction-
-                                // graph wiring at integration site —
-                                // per
-                                // [[project-v2p1-unit-tests-passed-but-never-wired]]
-                                // this is the load-bearing wire.
+                                // .mlmodelc is installed; Tier 1 regex
+                                // mentions continue on the hot path
+                                // regardless. This is the load-bearing
+                                // construction-graph wire at the
+                                // integration site.
                                 spawn_tier2_worker(Arc::clone(&store), shutdown_rx.clone());
 
-                                // V2-P10 — deep-hook pump supervisor, in
+                                // Deep-hook pump supervisor, in
                                 // `deep-hooks` builds only (never a
                                 // release: Hippocampus reads the screen,
                                 // not mail or message databases). Reads
@@ -1256,23 +1249,19 @@ async fn run_agent(args: Args) -> ExitCode {
                                     );
                                 }
 
-                                // V2-MCP-3 — MCP aggregator.
+                                // MCP aggregator.
                                 // Consumes the registry built by
                                 // `mcp_client_supervisor::boot_default()`
                                 // above; runs the hybrid materialize-
                                 // or-catalog policy against each
                                 // registered server's resources.
                                 // Persists Events with
-                                // `app_bundle_id = "mcp:<name>"` so
-                                // V2-P12 (Phase 7 chat surface) can
-                                // structurally apply prompt-injection
-                                // mitigation per CRS Fork-6 = A.
-                                // Driver-CSO audit row 7
-                                // (construction-graph wiring at
-                                // integration site) — per
-                                // [[project-v2p1-unit-tests-passed-but-never-wired]]
-                                // this is the load-bearing wire for
-                                // V2-MCP-3: without it the
+                                // `app_bundle_id = "mcp:<name>"` so the
+                                // chat surface can structurally apply
+                                // prompt-injection mitigation.
+                                // This is the load-bearing
+                                // construction-graph wire at the
+                                // integration site: without it the
                                 // aggregator module would never run
                                 // against production input.
                                 if capture_ingestion_enabled {
@@ -2523,7 +2512,7 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
     };
     let key = DbKey::from_bytes(key_bytes);
 
-    // P3.8 / CRS G3 fix: wire the query-side embedder so `mci_recall` runs
+    // Wire the query-side embedder so `mci_recall` runs
     // full ADR-0010 hybrid (FTS5 + semantic min-max CC), not lexical-only.
     // Mirrors the ingest-side `load_embedder_backend()` pattern (see
     // `run` path around line 391) but constructs `new_query` (adds the
@@ -4088,15 +4077,13 @@ fn spawn_brief_worker(
     });
 }
 
-/// V2-P5 — spawn the Tier 2 Qwen NER idle-batch worker (FORK 8 = A;
-/// Phase 6 PR 9). Reuses the brief author's Qwen3-1.7B Core ML
-/// `LlamaBackend`; selects between the production Qwen-backed path
-/// and disabled-idle based on explicit opt-in, model presence and host OS.
-/// Construction-graph wiring at integration site — this is the
-/// load-bearing call site that turns the V2-P5 module + worker into
-/// production behaviour. Per
-/// [[project-v2p1-unit-tests-passed-but-never-wired]] the wire is
-/// the lift; without this call the Tier 2 worker would never run.
+/// Spawn the Tier 2 Qwen NER idle-batch worker. Reuses the brief
+/// author's Qwen3-1.7B Core ML `LlamaBackend`; selects between the
+/// production Qwen-backed path and disabled-idle based on explicit
+/// opt-in, model presence and host OS. This is the load-bearing
+/// construction-graph call site that turns the module + worker into
+/// production behaviour; without this call the Tier 2 worker would
+/// never run.
 #[cfg(target_os = "macos")]
 fn spawn_tier2_worker(
     store: Arc<mci_brain::SqlCipherBrainStore>,
@@ -4250,9 +4237,9 @@ fn spawn_pump_supervisor(
 /// aggregator runs anywhere the agent runs (its inputs are MCP
 /// servers the user registered; no OS-specific source).
 ///
-/// Driver-CSO audit row 7: `git log -S "McpAggregator::new" --
-/// apps/agent/src/bin/mci_agent.rs` returns this PR's commit per
-/// [[project-v2p1-unit-tests-passed-but-never-wired]] discipline.
+/// Its wiring is verified structurally: `git log -S "McpAggregator::new"
+/// -- apps/agent/src/bin/mci_agent.rs` surfaces the call site, so a
+/// refactor that drops the wire is caught in review.
 fn spawn_mcp_aggregator(
     registry: Arc<mci_mcp_client::ServerRegistry>,
     store: Arc<mci_brain::SqlCipherBrainStore>,

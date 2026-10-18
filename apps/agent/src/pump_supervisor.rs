@@ -1,12 +1,12 @@
-//! V2-P10 — Deep-hook pump supervisor.
+//! Deep-hook pump supervisor.
 //!
 //! Owns the reconcile loop that reads the user-mutable allowlist
 //! ([`crate::user_allowlist`]), probes Full Disk Access for each
 //! supported deep-hook bundle, and starts / stops the per-bundle
 //! pump tasks accordingly. This is the construction-graph
-//! integration site for [[project-v2p1-unit-tests-passed-but-never-wired]]
-//! — the load-bearing place the V2-P7 + V2-P8 cascade-equivalents
-//! actually get exercised on production input.
+//! integration site — the load-bearing place the deep-hook
+//! cascade-equivalents actually get exercised on production
+//! input.
 //!
 //! # Reconcile loop
 //!

@@ -31,10 +31,8 @@
 //!
 //! Every Event the aggregator persists carries
 //! `app_bundle_id = Some("mcp:<server-name>")`. The `mcp:` prefix is
-//! the structural discriminator V2-P12 (Phase 7 chat surface) reads to
-//! apply prompt-injection mitigation to MCP-sourced content per research
-//! Fork-6 = A (ratified 2026-05-31; see
-//! `docs/research/orchestrator-ratification-state-2026-05-31.md` §SH-6).
+//! the structural discriminator the chat surface reads to apply
+//! prompt-injection mitigation to MCP-sourced content.
 //!
 //! We REUSE the existing `events.app_bundle_id` column rather than
 //! adding a new `source` column because:
@@ -106,9 +104,9 @@
 //! (Phase 7 chat-router PR) when the user issues a chat query that the
 //! router decides to route through an MCP tool.
 //!
-//! # Construction-graph wiring (security review row 7)
+//! # Construction-graph wiring
 //!
-//! Per [[project-v2p1-unit-tests-passed-but-never-wired]]: the
+//! A passing unit test does not prove the path is reached, so the
 //! aggregator is CONSTRUCTED at
 //! `apps/agent/src/bin/mci_agent.rs::spawn_mcp_aggregator` immediately
 //! after [`crate::mcp_client_supervisor::boot_default`] returns and the

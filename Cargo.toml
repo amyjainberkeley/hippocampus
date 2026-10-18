@@ -56,8 +56,7 @@ members = [
     # + ADR-0030 §3(c)(ii) parsed-header check + corpus + allowlist edit
     # ship in V2-P8b (review-gated). Deps + lib body gated by `cfg(target_os
     # = "macos")` so a Linux `cargo build --workspace` compiles it empty.
-    # See `adapters/macos/mci-mail-reader/Cargo.toml` and
-    # `docs/research/mail-envelope-schema-2026-05-29.md`.
+    # See `adapters/macos/mci-mail-reader/Cargo.toml`.
     "adapters/macos/mci-mail-reader",
     # macOS-only Rust adapter: Messages.app read path (chat.db SQLite
     # reader + FSEvents watcher) for V2-P7. READ-ONLY library — no event
@@ -90,7 +89,7 @@ members = [
     # compute-unit residency + footprint. Deps gated `cfg(target_os =
     # "macos")` (Core ML); a non-macOS `cargo build --workspace` compiles
     # the bin to a no-op main. Measurement-only — no brain/BrainPump
-    # wiring. See docs/research/2026-06-03-ner-bakeoff-results.md.
+    # wiring.
     "tools/ner-bakeoff",
 ]
 
