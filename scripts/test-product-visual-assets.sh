@@ -54,6 +54,11 @@ rg -q '\.fill\(\.ultraThinMaterial\)' \
 if rg -q 'RadialGradient|LinearGradient' "$ONBOARDING"; then
     fail "onboarding must not restore a decorative gradient backdrop"
 fi
+# The hi mark's tile on Welcome is the only gradient setup draws: the app
+# icon's own white-to-grey fall. Any other gradient, in any spelling, fails.
+if rg -q -i '(radial|linear|angular|elliptical|mesh)gradient' "$ONBOARDING" --glob '!HiMarkTile.swift'; then
+    fail "onboarding draws a gradient outside the hi mark's tile"
+fi
 
 for root in "$RECALL_APP" "$ONBOARDING_APP" "$PREFERENCES_APP"; do
     rg -q '\.preferredColorScheme\(\.light\)' "$root" \
