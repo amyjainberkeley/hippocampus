@@ -33,6 +33,17 @@ final class FrontWindowTests: XCTestCase {
                        FrontWindow(bundleId: "com.apple.Safari", appName: "Safari", title: "Pricing | Stripe"))
     }
 
+    func testMacOSsOwnSurfacesAreNeverTheWindowInFront() {
+        let list = [
+            window("com.apple.WindowManager", "WindowManager", title: "Stage strip"),
+            window("com.apple.dock", "Dock"),
+            window("com.apple.Spotlight", "Spotlight", title: "Spotlight"),
+            window("com.apple.notificationcenterui", "Notification Center"),
+            window("com.apple.TextEdit", "TextEdit", title: "Draft"),
+        ]
+        XCTAssertEqual(FrontWindow.pick(from: list, ownPid: ownPid)?.bundleId, "com.apple.TextEdit")
+    }
+
     func testAnUntitledWindowAndAnUnnamedAppStillRead() {
         let picked = FrontWindow.pick(from: [window("com.apple.TextEdit", nil, title: "  ")], ownPid: ownPid,
                                       nameFor: { _ in "TextEdit" })

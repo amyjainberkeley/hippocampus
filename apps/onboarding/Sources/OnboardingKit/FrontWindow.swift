@@ -63,6 +63,15 @@ public struct FrontWindow: Equatable, Sendable {
     /// `BackgroundCapturePolicy.minimumWindowSide`).
     public static let minimumSide: CGFloat = 80
 
+    /// macOS's own surfaces, which can sit among ordinary windows but are
+    /// never the window a person works in: Stage Manager's strip, the Dock,
+    /// Control Center, notifications, Spotlight and the screenshot tools.
+    static let systemSurfaces: Set<String> = [
+        "com.apple.windowmanager", "com.apple.dock", "com.apple.controlcenter",
+        "com.apple.notificationcenterui", "com.apple.spotlight", "com.apple.systemuiserver",
+        "com.apple.screencaptureui", "com.apple.wallpaper.agent",
+    ]
+
     /// The frontmost ordinary window that belongs to neither this process
     /// nor Hippocampus. Nil when there is none: an empty desktop.
     public static func pick(
@@ -75,7 +84,8 @@ public struct FrontWindow: Equatable, Sendable {
                   window.bounds.width >= minimumSide, window.bounds.height >= minimumSide,
                   window.ownerPid != ownPid,
                   let bundleId = window.bundleId?.trimmingCharacters(in: .whitespaces), !bundleId.isEmpty,
-                  !ReadProof.ownBundleIds.contains(bundleId.lowercased())
+                  !ReadProof.ownBundleIds.contains(bundleId.lowercased()),
+                  !systemSurfaces.contains(bundleId.lowercased())
             else { continue }
             let name = window.appName?.trimmingCharacters(in: .whitespaces)
             let title = window.title?.trimmingCharacters(in: .whitespacesAndNewlines)
