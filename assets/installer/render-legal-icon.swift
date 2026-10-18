@@ -80,9 +80,12 @@ func renderIcon() -> CGImage {
                         control: CGPoint(x: page.maxX - fold, y: page.minY + fold))
     corner.addLine(to: CGPoint(x: page.maxX, y: page.minY + fold))
     corner.closeSubpath()
-    context.addPath(corner)
-    context.setFillColor(srgb(0xDCE3EE))
-    context.fillPath()
+    // The fold's underside: the tile's mist under a faint wash of the letters' navy.
+    for colour in [srgb(0xE9EEF6), srgb(0x0F1B3D, alpha: 0.06)] {
+        context.addPath(corner)
+        context.setFillColor(colour)
+        context.fillPath()
+    }
     context.addPath(corner)
     context.setStrokeColor(srgb(0x0F1B3D, alpha: 0.16))
     context.setLineWidth(6)

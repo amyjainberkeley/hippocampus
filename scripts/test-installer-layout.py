@@ -226,6 +226,24 @@ class WindowDesignTests(unittest.TestCase):
                       "baselineFromTop: visibleHeight - 28)", renderer)
         self.assertIn("let graphite = srgb(0x6E6E73)", renderer)
 
+    def test_window_colours_are_the_hi_marks(self):
+        geometry = (ROOT / "apps/hippocampus/Sources/HippocampusKit/Brand/HiMarkGeometry.swift").read_text()
+        mark = {name: re.search(rf"static let {name}RGB: UInt32 = (0x[0-9A-F]{{6}})", geometry).group(1)
+                for name in ("tileTop", "tileBottom", "letters", "dot")}
+        graphite = json.loads((ROOT / "assets/branding/colors.json").read_text())["brand"]["approvedPalette"]["graphite"]
+        background = (INSTALLER / "render-background.swift").read_text()
+        self.assertIn(f"let labTop = srgb({mark['tileTop']})", background)
+        self.assertIn(f"let labBottom = srgb({mark['tileBottom']})", background)
+        self.assertIn(f"let dot = srgb({mark['dot']})", background)
+        self.assertIn(f"let graphite = srgb(0x{graphite[1:].upper()})", background)
+        legal = (INSTALLER / "render-legal-icon.swift").read_text()
+        for colour in (mark["tileTop"], mark["tileBottom"], mark["letters"]):
+            self.assertIn(f"srgb({colour}", legal)
+        # Every colour either picture draws is one of these, or black for shadows.
+        allowed = set(mark.values()) | {f"0x{graphite[1:].upper()}", "0x000000"}
+        for source in (background, legal):
+            self.assertLessEqual(set(re.findall(r"srgb\((0x[0-9A-Fa-f]{6})", source)), allowed)
+
     def test_preview_renders_the_window_for_review(self):
         with tempfile.TemporaryDirectory(prefix="hippocampus-preview-") as temporary:
             out = Path(temporary) / "review"

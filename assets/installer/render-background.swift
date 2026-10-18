@@ -97,7 +97,7 @@ shaft.addLine(to: CGPoint(x: arrowEnd.x - stroke / 2, y: row))
 context.saveGState()
 context.addPath(shaft.copy(strokingWithWidth: stroke, lineCap: .round, lineJoin: .round, miterLimit: 4))
 context.clip()
-linear([srgb(0x2F6BFF, alpha: 0), dot], [0, 1], from: arrowStart, to: arrowEnd)
+linear([dot.copy(alpha: 0) ?? dot, dot], [0, 1], from: arrowStart, to: arrowEnd)
 context.restoreGState()
 let arm: CGFloat = 8
 context.setStrokeColor(dot)
