@@ -975,14 +975,22 @@ echo "  Signed App Group contract valid."
 # Contents/Resources/ as "Incorrect Bundle Structure" ("Resources directory
 # contains Mach-o binaries"; advice: "Move this Mach-o to a location that is not
 # Resources/."). The frozen OCR worker is the only bundled tree of Mach-O code,
-# and it is assembled under Contents/Helpers/ above. Nothing in the signing or
-# notary path rejects Mach-O-in-Resources locally (syspolicy_check reports it
-# only as a Warning), so a regression that put code back under Resources/ could
-# ship and later surface as a notary-log issue. Refuse to continue if any
-# Mach-O is found under Resources/, and require the worker where the launcher
-# and the orphan sweep look for it.
+# and it is assembled under Contents/OCR/ above (see OCR_HOME). Nothing in the
+# signing or notary path rejects Mach-O-in-Resources locally (syspolicy_check
+# reports it only as a Warning), so a regression that put code back under
+# Resources/ could ship and later surface as a notary-log issue. Refuse to
+# continue if any Mach-O is found under Resources/, and require the worker where
+# the launcher and the orphan sweep look for it.
 echo "Verifying bundle structure (no Mach-O under Resources/)..."
-RESOURCES_MACHO="$(
+# Print the bundle-relative path of every Mach-O file under Contents/Resources/.
+# This is a function, not an inline command substitution, on purpose: the
+# per-file magic probe is itself a $(…), and nesting that (plus the `case`
+# below) inside another $(…) makes macOS's bash 3.2 abort at RUN TIME with
+# "syntax error near unexpected token `newline'" — a parse quirk `bash -n`
+# does not catch. A function body is parsed in a normal context, so the nested
+# $(…) and `case` are safe and the gate actually runs. Behaviour is unchanged.
+scan_resources_macho() {
+    local candidate magic
     find "$RESOURCES" -type f -print0 2>/dev/null \
     | while IFS= read -r -d '' candidate; do
         magic="$(LC_ALL=C od -An -N4 -tx1 "$candidate" 2>/dev/null | tr -d ' \n')"
@@ -991,7 +999,8 @@ RESOURCES_MACHO="$(
                 printf '%s\n' "${candidate#"$APP/"}" ;;
         esac
     done
-)"
+}
+RESOURCES_MACHO="$(scan_resources_macho)"
 if [[ -n "$RESOURCES_MACHO" ]]; then
     echo "FATAL: Mach-O binaries found under Contents/Resources/:" >&2
     printf '         %s\n' $RESOURCES_MACHO >&2

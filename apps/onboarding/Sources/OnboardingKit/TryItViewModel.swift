@@ -48,20 +48,114 @@ public enum FrontAppNote: Equatable, Sendable {
     /// System Settings, a password manager: "{App} is never read."
     case neverRead(app: String)
 
-    /// The apps whose windows are never read, mirrored from the capture
-    /// helper's list (a parity test holds it to the helper's source).
+    /// System agents whose windows the capture helper never reads, matched by
+    /// exact identifier. Mirrors `SensitiveCaptureDenylist.appBundles` minus
+    /// Hippocampus's own apps (those are `ReadProof.ownBundleIds`, never read
+    /// because they are memory viewers). Onboarding does not link the helper,
+    /// so a parity test holds this to the helper's source.
     static let neverReadApps: Set<String> = [
-        "com.1password.1password", "com.1password.1password7",
-        "com.agilebits.onepassword7", "com.agilebits.onepassword-osx",
-        "com.bitwarden.desktop", "com.dashlane.dashlane",
-        "com.lastpass.lastpass", "com.apple.keychainaccess",
-        "com.apple.passwords", "com.apple.systempreferences",
+        // System Settings, which held the Passwords pane before macOS 15.
+        "com.apple.systempreferences",
+        // System consent and sign-in dialogs: the permission prompt, the
+        // administrator password prompt, the Touch ID or password sheet, a
+        // file server's sign-in and iCloud Keychain's approval prompt.
         "com.apple.usernotificationcenter", "com.apple.securityagent",
+        "com.apple.localauthentication.uiagent", "com.apple.netauthagent",
+        "com.apple.security.keychain-circle-notification",
+        // The lock screen and screen saver, and the login window.
         "com.apple.loginwindow", "com.apple.screensaver.engine", "com.apple.screensaver",
     ]
 
+    /// Password managers and authenticators the helper never reads, matched by
+    /// identifier family: a family covers its own identifier and every
+    /// identifier beneath it, a whole dot-separated label at a time (so
+    /// "com.1password" covers "com.1password.1password" but not
+    /// "com.1passwordfan"). Mirrors
+    /// `SensitiveCaptureDenylist.passwordManagerFamilies` exactly; the same
+    /// parity test holds this to the helper's source.
+    static let neverReadPasswordManagerFamilies: Set<String> = [
+        // Apple Passwords and its menu bar extra, and Keychain Access.
+        "com.apple.passwords", "com.apple.keychainaccess",
+        // 1Password 8 and 7, the browser helper, and 1Password for Safari.
+        "com.1password", "2bua8c4s2c.com.1password", "com.agilebits",
+        "com.bitwarden", // Bitwarden and its helper
+        "com.dashlane",
+        "com.lastpass", // the app, the earlier App Store app, LastPass for Safari
+        "org.keepassxc", "org.keepassx", // KeePassXC, and the identifier older builds used
+        // Keeper, direct and from the App Store, and Keeper for Safari.
+        "com.keepersecurity.passwordmanager", "com.callpod.keepermac", "com.keepersecurity.safari",
+        "com.nordsec.nordpass", "com.nordpass", // NordPass, direct and from the App Store
+        "me.proton.pass", "me.proton.authenticator", // Proton Pass and Proton Authenticator
+        "in.sinew.enpass-desktop", // Enpass
+        "com.sibersystems.roboform", "com.sibersystems.roboformmac", // RoboForm, direct and App Store
+        "com.markmcguill.strongbox", // Strongbox, every edition
+        "com.hicknhacksoftware.macpass", // MacPass
+        "com.outercorner.secrets", "com.outercorner.secrets-safari", // Secrets, and Secrets for Safari
+        "com.keepassium", // KeePassium and KeePassium Pro
+        "net.zetetic.strip", // Codebook
+        "com.safeincloud", // SafeInCloud
+        "com.mseven.msecuremac", // mSecure
+        "pw.buttercup", // Buttercup
+        "net.antelle.keeweb", // KeeWeb
+        "com.app77.pwsafemac", // pwSafe
+        "com.zoho.vault", // Zoho Vault
+        "com.bitdefender.securepass", // Bitdefender SecurePass
+        "com.symantec.nortonpasswordmanager", // Norton's password manager for Safari
+        "com.avira.passwordmanager", // Avira Password Manager
+        "com.eset.passwordmanager", // ESET Password Manager
+        "com.keepsolid.passwarden", // Passwarden
+        "com.pcloud.pcloudpass", // pCloud Pass
+        "com.synology.c2.password", // Synology C2 Password
+        "net.devolutions.authenticator", // Devolutions Password Manager
+        "com.lockitsolutions.lockit", // Lockit
+        "design.codeux.authpass", // AuthPass
+        "com.onekeepass", // OneKeePass
+        "com.2stable.passwords", // Password Manager by 2Stable
+        "app.elpass.macos", // Elpass
+        "app.bramble.desktop", // Bramble
+        "app.rowel.desktop", // Rowel
+        "com.jumpcloud.pwm", // JumpCloud Password Manager
+        "org.qtpass", // QtPass
+        "app.padloc", // Padloc
+        "com.ascendo.datavaultmac", // Data Vault
+        "com.logmeonce", // LogMeOnce
+        "com.softwareops.myeyesonlyprouniversal", // My Eyes Only
+        "com.saaspass.password-manager-authenticator", // SAASPASS
+        // Authenticator apps, which show sign-in codes.
+        "com.neilsardesai.step-two-mac", // Step Two
+        "maccatalyst.de.cooperrs.authenticator", // OTP Auth
+        "com.2stable.2fa", // Authenticator App by 2Stable
+        "com.zoho.iamlogin", // Zoho OneAuth
+        "com.yubico.yubioath", // Yubico Authenticator
+        "io.ente.auth", // Ente Auth
+        "com.twofas.org", // 2FAS Auth and 2FAS Pass
+        "me.tij.raivo-macos", // Raivo
+        "com.okta.mobile", // Okta Verify
+        "com.symantec.vip-access", // Symantec VIP Access
+        "com.pingidentity.pingid", // PingID
+        "com.secureauth.secureauth-otp", // SecureAuth Passcode
+    ]
+
+    /// Whether the helper never reads this app, by the same rule the helper
+    /// uses (`SensitiveCaptureDenylist.isNeverReadApp`): an exact
+    /// `neverReadApps` identifier, or one in or under a
+    /// `neverReadPasswordManagerFamilies` family. Case-insensitive. Own apps
+    /// are excluded here because they are never the app in front
+    /// (`appActivated` drops `ReadProof.ownBundleIds`).
+    static func isNeverRead(_ bundleId: String) -> Bool {
+        let id = bundleId.lowercased()
+        if neverReadApps.contains(id) { return true }
+        var family = Substring(id)
+        while !family.isEmpty {
+            if neverReadPasswordManagerFamilies.contains(String(family)) { return true }
+            guard let dot = family.lastIndex(of: ".") else { return false }
+            family = family[..<dot]
+        }
+        return false
+    }
+
     public init(bundleId: String?, name: String?) {
-        guard let bundleId, Self.neverReadApps.contains(bundleId.lowercased()) else {
+        guard let bundleId, Self.isNeverRead(bundleId) else {
             self = .ordinary
             return
         }

@@ -30,9 +30,37 @@ final class CaptureListParityTests: XCTestCase {
     }
 
     func testNeverReadAppsMatchTheHelpersList() throws {
-        let helper = try quotedStrings(after: "public static let appBundles: Set<String> =", in: "CaptureAdmissionPolicy.swift")
+        // The helper splits its never-read identifiers into two constants:
+        // `appBundles` (system agents, matched exactly) and
+        // `passwordManagerFamilies` (password managers and authenticators,
+        // matched by identifier family). Onboarding's waiting card copies both,
+        // and these assertions hold the copies to the helper's source.
+        let appBundles = try quotedStrings(
+            after: "public static let appBundles: Set<String> =", in: "CaptureAdmissionPolicy.swift")
+        let families = try quotedStrings(
+            after: "public static let passwordManagerFamilies: Set<String> =", in: "CaptureAdmissionPolicy.swift")
         let own: Set<String> = ["ai.hippocampus", "recall-ui", "onboarding"]
-        XCTAssertEqual(FrontAppNote.neverReadApps, helper.subtracting(own))
-        XCTAssertEqual(ReadProof.ownBundleIds, helper.intersection(own))
+
+        // Hippocampus's own apps are never read because they are memory
+        // viewers, not system agents; `ReadProof` owns that list, and it is
+        // exactly the overlap between `own` and the helper's `appBundles`.
+        XCTAssertEqual(ReadProof.ownBundleIds, own)
+        XCTAssertEqual(ReadProof.ownBundleIds, appBundles.intersection(own))
+
+        // The system agents the card names (exact match) are the helper's
+        // `appBundles` minus Hippocampus's own apps — no more, no less.
+        XCTAssertEqual(FrontAppNote.neverReadApps, appBundles.subtracting(own))
+
+        // The password-manager families the card matches by prefix are the
+        // helper's `passwordManagerFamilies`, exactly, so the "never read"
+        // note covers every password manager and authenticator the helper
+        // drops rather than a hand-picked subset.
+        XCTAssertEqual(FrontAppNote.neverReadPasswordManagerFamilies, families)
+
+        // The two helper constants partition its never-read set (they never
+        // double-list an identifier); onboarding checks both the same way the
+        // helper does (`FrontAppNote.isNeverRead` mirrors
+        // `SensitiveCaptureDenylist.isNeverReadApp`).
+        XCTAssertTrue(appBundles.isDisjoint(with: families))
     }
 }
