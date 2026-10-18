@@ -24,7 +24,8 @@ make_fixture() {
     mkdir -p "$fixture/scripts/lib" "$fixture/assets/branding" "$fixture/assets/installer" "$fixture/docs/legal"
     cp "$REPO_ROOT/scripts/build-installer.sh" "$fixture/scripts/build-installer.sh"
     cp "$REPO_ROOT/scripts/lib/app-group-contract.sh" "$REPO_ROOT/scripts/lib/installer-runtime.sh" "$fixture/scripts/lib/"
-    cp "$REPO_ROOT/scripts/build-provenance.py" "$REPO_ROOT/scripts/product-source-digest.py" "$fixture/scripts/"
+    cp "$REPO_ROOT/scripts/build-provenance.py" "$REPO_ROOT/scripts/product-source-digest.py" \
+        "$REPO_ROOT/scripts/check-notary-log.py" "$fixture/scripts/"
     cp "$REPO_ROOT/assets/installer/generate-eula.py" "$REPO_ROOT/assets/installer/EULA.rtf" "$fixture/assets/installer/"
     cp "$REPO_ROOT/assets/installer/generate-background.py" "$REPO_ROOT/assets/installer/render-background.swift" \
         "$REPO_ROOT/assets/installer/read-background-text.swift" "$fixture/assets/installer/"
