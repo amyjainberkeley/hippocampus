@@ -213,6 +213,23 @@ APP="$DIST_DIR/Hippocampus.app"
 CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
+# Where the frozen OCR worker tree lives. It is a PyInstaller --onedir build (a
+# Mach-O `hippocampus-ocr` next to an `_internal/` of dylibs and .so modules),
+# and its directory is chosen to satisfy BOTH codesign and Apple's notary
+# service:
+#   - NOT Contents/Resources/: the notary service flags any Mach-O under a
+#     Resources/ directory as "Incorrect Bundle Structure" (syspolicy_check
+#     advice: "Move this Mach-o to a location that is not Resources/.").
+#   - NOT a code location (Contents/MacOS, Frameworks, PlugIns, Helpers, ...):
+#     there codesign tries to seal the onedir as nested code and fails on its
+#     `.dylibs/` and `*.dist-info/` folders ("bundle format unrecognized,
+#     invalid, or unsuitable"), because a PyInstaller onedir is not a bundle.
+# Contents/OCR/ is neither, so codesign seals it as opaque data (it signs
+# exactly as it did under Resources/) while the directory name is not
+# "Resources" (so the notary structure check is clean). Verified with
+# syspolicy_check on the real worker tree; a post-assembly gate below refuses
+# to ship if any Mach-O is ever found back under Resources/.
+OCR_HOME="$CONTENTS/OCR"
 
 # Locate binaries
 HIPPOCAMPUS_BIN="$PKG_DIR/.build/$PROFILE/Hippocampus"
@@ -410,7 +427,7 @@ fi
 
 # Clean and create structure
 rm -rf "$APP"
-mkdir -p "$MACOS" "$RESOURCES" "$FRAMEWORKS"
+mkdir -p "$MACOS" "$RESOURCES" "$FRAMEWORKS" "$OCR_HOME"
 
 # Copy binaries
 cp "$HIPPOCAMPUS_BIN" "$MACOS/Hippocampus"
@@ -427,10 +444,15 @@ fi
 
 # Embed verified offline OCR before sealing app provenance. Release and debug
 # app bundles must be self-contained; only an unbundled helper uses Vision.
+# The worker goes under Contents/OCR/ (see OCR_HOME above): out of Resources/
+# so the notary service does not flag it, and out of a code location so codesign
+# can still seal it as data. `hippocampus-ocr` finds `_internal` as its sibling
+# regardless of where the tree sits; the Swift launcher path and the orphan
+# sweep look under Contents/OCR/HippocampusOCR/ to match.
 OCR_SIGNING_IDENTITY="$DEVELOPER_ID"
 if [[ "$SIGNING_MODE" == "ad-hoc" ]]; then OCR_SIGNING_IDENTITY="-"; fi
 python3 "$REPO_ROOT/tools/ocr/bundle.py" \
-    --destination "$RESOURCES/HippocampusOCR" \
+    --destination "$OCR_HOME/HippocampusOCR" \
     --identity "$OCR_SIGNING_IDENTITY" \
     || fatal "Offline OCR worker is missing, stale, or could not be signed. See tools/ocr/README.md."
 
@@ -947,6 +969,43 @@ if [[ -d "$APPEX_BUNDLE" ]] && ! hippocampus_verify_signed_app_group \
     fatal "Signed Safari extension App Group does not match its host/signing identity."
 fi
 echo "  Signed App Group contract valid."
+
+# Bundle-structure gate — FATAL.
+# Apple's notary service and syspolicy_check flag any Mach-O binary under
+# Contents/Resources/ as "Incorrect Bundle Structure" ("Resources directory
+# contains Mach-o binaries"; advice: "Move this Mach-o to a location that is not
+# Resources/."). The frozen OCR worker is the only bundled tree of Mach-O code,
+# and it is assembled under Contents/Helpers/ above. Nothing in the signing or
+# notary path rejects Mach-O-in-Resources locally (syspolicy_check reports it
+# only as a Warning), so a regression that put code back under Resources/ could
+# ship and later surface as a notary-log issue. Refuse to continue if any
+# Mach-O is found under Resources/, and require the worker where the launcher
+# and the orphan sweep look for it.
+echo "Verifying bundle structure (no Mach-O under Resources/)..."
+RESOURCES_MACHO="$(
+    find "$RESOURCES" -type f -print0 2>/dev/null \
+    | while IFS= read -r -d '' candidate; do
+        magic="$(LC_ALL=C od -An -N4 -tx1 "$candidate" 2>/dev/null | tr -d ' \n')"
+        case "$magic" in
+            feedfacf|cffaedfe|cefaedfe|cafebabe|bebafeca)
+                printf '%s\n' "${candidate#"$APP/"}" ;;
+        esac
+    done
+)"
+if [[ -n "$RESOURCES_MACHO" ]]; then
+    echo "FATAL: Mach-O binaries found under Contents/Resources/:" >&2
+    printf '         %s\n' $RESOURCES_MACHO >&2
+    echo "       Apple's notary service calls this an Incorrect Bundle Structure." >&2
+    echo "       Move this code under Contents/OCR/ (see the OCR worker)." >&2
+    exit 1
+fi
+OCR_WORKER="$OCR_HOME/HippocampusOCR/hippocampus-ocr"
+if [[ ! -x "$OCR_WORKER" ]]; then
+    echo "FATAL: OCR worker missing or not executable at $OCR_WORKER." >&2
+    echo "       The launcher and orphan sweep expect it under Contents/OCR/." >&2
+    exit 1
+fi
+echo "  Bundle structure OK: no Mach-O under Resources/; OCR worker under OCR/."
 
 # Verify rpath was added correctly
 echo "Verifying rpath..."

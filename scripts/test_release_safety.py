@@ -611,5 +611,105 @@ class WorkflowTests(unittest.TestCase):
                     self.assertLess(runs.index(select), builds[0])
 
 
+class OCRWorkerLayoutTests(unittest.TestCase):
+    """The frozen OCR worker is a PyInstaller --onedir Mach-O tree (an executable
+    next to an _internal/ of dylibs and .so modules). It must ship under
+    Contents/OCR/, never under Contents/Resources/ (Apple's notary service flags
+    Mach-O there as "Incorrect Bundle Structure") and never under a code location
+    such as Contents/MacOS, Frameworks, PlugIns or Helpers (there codesign tries
+    to seal the onedir as nested code and fails on its .dylibs/ and *.dist-info/
+    folders with "bundle format unrecognized"). build-app.sh, the Swift launcher
+    and the orphan sweep must agree on the location, and a post-assembly gate
+    must refuse any Mach-O left under Resources/."""
+
+    PADDLE = ROOT / "adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/OCR/PaddleOCRRunner.swift"
+    SWEEP = ROOT / "apps/hippocampus/Sources/HippocampusKit/CaptureOrphanSweep.swift"
+    WORKER_SUBPATH = "Contents/OCR/HippocampusOCR"
+
+    def test_build_app_embeds_the_worker_under_contents_ocr(self):
+        script = APP_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('OCR_HOME="$CONTENTS/OCR"', script)
+        self.assertIn('--destination "$OCR_HOME/HippocampusOCR"', script)
+        # Never back under Resources/, which is what triggers the notary flag.
+        self.assertNotIn("$RESOURCES/HippocampusOCR", script)
+
+    def test_build_app_gates_mach_o_out_of_resources(self):
+        script = APP_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("Mach-O binaries found under Contents/Resources/", script)
+        # The gate reads each file's Mach-O magic rather than trusting names.
+        for magic in ("feedfacf", "cffaedfe", "cefaedfe", "cafebabe"):
+            self.assertIn(magic, script)
+        # And it requires the worker where the launcher and sweep look for it.
+        self.assertIn('OCR_WORKER="$OCR_HOME/HippocampusOCR/hippocampus-ocr"', script)
+
+    def test_launcher_and_sweep_agree_with_build_app(self):
+        self.assertIn(self.WORKER_SUBPATH + "/hippocampus-ocr",
+                      self.PADDLE.read_text(encoding="utf-8"))
+        self.assertIn("/" + self.WORKER_SUBPATH + "/",
+                      self.SWEEP.read_text(encoding="utf-8"))
+
+    def test_no_production_source_uses_a_rejected_location(self):
+        # Guard against the old location (Resources) and the tempting-but-broken
+        # "fix" of a code location (Helpers). Tokens are split so this assertion
+        # never matches itself.
+        rejected = ["Resources/" + "HippocampusOCR", "Helpers/" + "HippocampusOCR"]
+        for path in (APP_SCRIPT, self.PADDLE, self.SWEEP,
+                     ROOT / "NOTICE", ROOT / "ARCHITECTURE.md"):
+            text = path.read_text(encoding="utf-8")
+            for token in rejected:
+                self.assertNotIn(token, text, f"{path.name} references {token}")
+
+    # --- functional outside judge: the real syspolicy_check verdict ---
+
+    def _make_signed_probe_app(self, root, worker_parent):
+        import plistlib
+        app = root / "Probe.app"
+        (app / "Contents/MacOS").mkdir(parents=True)
+        worker_dir = app / "Contents" / worker_parent / "HippocampusOCR"
+        worker_dir.mkdir(parents=True)
+        # copy (not copy2): /bin/echo carries SIP file flags that cannot be
+        # reproduced on the copy; we only need the Mach-O bytes and exec bit.
+        shutil.copy("/bin/echo", app / "Contents/MacOS/Probe")
+        shutil.copy("/bin/echo", worker_dir / "hippocampus-ocr")
+        with open(app / "Contents/Info.plist", "wb") as handle:
+            plistlib.dump({
+                "CFBundleExecutable": "Probe",
+                "CFBundleIdentifier": "com.example.probe",
+                "CFBundleName": "Probe",
+                "CFBundlePackageType": "APPL",
+                "CFBundleShortVersionString": "1.0",
+                "CFBundleVersion": "1",
+            }, handle)
+        # Inside-out, then the outer bundle non-deep, exactly as build-app.sh
+        # seals the real app.
+        for target in (worker_dir / "hippocampus-ocr", app / "Contents/MacOS/Probe", app):
+            subprocess.run(["/usr/bin/codesign", "--force", "--options=runtime", "--sign", "-",
+                            str(target)], check=True, capture_output=True)
+        return app
+
+    def _incorrect_bundle_structure_findings(self, app):
+        proc = subprocess.run(["/usr/bin/syspolicy_check", "notary-submission", "--json", str(app)],
+                              capture_output=True, text=True)
+        try:
+            findings = json.loads(proc.stdout or "{}").get("output") or []
+        except ValueError:
+            self.skipTest("syspolicy_check did not return JSON on this host")
+        return [f for f in findings if f.get("SyspolicyCheckShortError") == "Incorrect Bundle Structure"]
+
+    @unittest.skipUnless(os.path.exists("/usr/bin/syspolicy_check"),
+                         "syspolicy_check (macOS 15+) is not available")
+    def test_syspolicy_flags_resources_but_accepts_contents_ocr(self):
+        # Negative control: a Mach-O under Resources/ must be flagged.
+        with tempfile.TemporaryDirectory(prefix="ocr-layout-res-") as temporary:
+            app = self._make_signed_probe_app(Path(temporary), "Resources")
+            self.assertTrue(self._incorrect_bundle_structure_findings(app),
+                            "syspolicy_check must flag a Mach-O under Resources/")
+        # The real location: a Mach-O under Contents/OCR/ must be clean.
+        with tempfile.TemporaryDirectory(prefix="ocr-layout-ocr-") as temporary:
+            app = self._make_signed_probe_app(Path(temporary), "OCR")
+            self.assertEqual(self._incorrect_bundle_structure_findings(app), [],
+                             "syspolicy_check must accept a Mach-O under Contents/OCR/")
+
+
 if __name__ == "__main__":
     unittest.main()

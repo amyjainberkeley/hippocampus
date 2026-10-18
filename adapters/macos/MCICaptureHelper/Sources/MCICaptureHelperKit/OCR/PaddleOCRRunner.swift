@@ -13,7 +13,7 @@ public struct PaddleOCRRunner: OCREngine {
     private let server: PaddleOCRServer?
 
     public static var bundledExecutableURL: URL? {
-        let url = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/HippocampusOCR/hippocampus-ocr")
+        let url = Bundle.main.bundleURL.appendingPathComponent("Contents/OCR/HippocampusOCR/hippocampus-ocr")
         return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
     }
 

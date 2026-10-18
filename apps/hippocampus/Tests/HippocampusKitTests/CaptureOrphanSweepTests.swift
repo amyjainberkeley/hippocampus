@@ -111,7 +111,7 @@ final class CaptureOrphanSweepTests: XCTestCase {
         let bundle = root.appendingPathComponent("Hippocampus.app")
         let helper = try copy("/bin/sleep", to: bundle.appendingPathComponent("Contents/MacOS/MCICaptureHelper"))
         let worker = try copy(
-            "/bin/sleep", to: bundle.appendingPathComponent("Contents/Resources/HippocampusOCR/hippocampus-ocr")
+            "/bin/sleep", to: bundle.appendingPathComponent("Contents/OCR/HippocampusOCR/hippocampus-ocr")
         )
         let otherHelper = try copy(
             "/bin/sleep", to: root.appendingPathComponent("Other.app/Contents/MacOS/MCICaptureHelper")
