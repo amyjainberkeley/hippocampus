@@ -613,34 +613,43 @@ class WorkflowTests(unittest.TestCase):
 
 class OCRWorkerLayoutTests(unittest.TestCase):
     """The frozen OCR worker is a PyInstaller --onedir Mach-O tree (an executable
-    next to an _internal/ of dylibs and .so modules). It must ship under
-    Contents/OCR/, never under Contents/Resources/ (Apple's notary service flags
-    Mach-O there as "Incorrect Bundle Structure") and never under a code location
-    such as Contents/MacOS, Frameworks, PlugIns or Helpers (there codesign tries
-    to seal the onedir as nested code and fails on its .dylibs/ and *.dist-info/
-    folders with "bundle format unrecognized"). build-app.sh, the Swift launcher
+    next to an _internal/ of dylibs and .so modules). It ships under
+    Contents/Resources/HippocampusOCR/ (as 0.2.1 did). It must NOT go under a
+    code location such as Contents/MacOS, Frameworks, PlugIns or Helpers (there
+    codesign tries to seal the onedir as nested code and fails on its .dylibs/
+    and *.dist-info/ folders with "bundle format unrecognized"), nor under a
+    non-standard top-level directory such as Contents/OCR/ (codesign seals it as
+    data and `codesign --verify` passes, but on a Developer-ID-signed, not-yet-
+    notarized app `syspolicy_check notary-submission` then returns a FATAL
+    generic "Codesign Error" against a Contents/MacOS/ executable — its catch-all
+    for unnotarized nested code, which fails the release dry run). Under
+    Resources/, the notary pre-check instead reports one advisory "Incorrect
+    Bundle Structure" WARNING, which verify-release-app.sh tolerates and which
+    Apple's notary service accepted for 0.2.1. build-app.sh, the Swift launcher
     and the orphan sweep must agree on the location, and a post-assembly gate
-    must refuse any Mach-O left under Resources/."""
+    must require the worker there and refuse stray Mach-O elsewhere in
+    Resources/."""
 
     PADDLE = ROOT / "adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/OCR/PaddleOCRRunner.swift"
     SWEEP = ROOT / "apps/hippocampus/Sources/HippocampusKit/CaptureOrphanSweep.swift"
-    WORKER_SUBPATH = "Contents/OCR/HippocampusOCR"
+    WORKER_SUBPATH = "Contents/Resources/HippocampusOCR"
 
-    def test_build_app_embeds_the_worker_under_contents_ocr(self):
+    def test_build_app_embeds_the_worker_under_resources(self):
         script = APP_SCRIPT.read_text(encoding="utf-8")
-        self.assertIn('OCR_HOME="$CONTENTS/OCR"', script)
-        self.assertIn('--destination "$OCR_HOME/HippocampusOCR"', script)
-        # Never back under Resources/, which is what triggers the notary flag.
-        self.assertNotIn("$RESOURCES/HippocampusOCR", script)
+        self.assertIn('--destination "$RESOURCES/HippocampusOCR"', script)
+        # The abandoned Contents/OCR/ location must be gone.
+        self.assertNotIn('OCR_HOME="$CONTENTS/OCR"', script)
+        self.assertNotIn('--destination "$OCR_HOME/HippocampusOCR"', script)
 
-    def test_build_app_gates_mach_o_out_of_resources(self):
+    def test_build_app_gates_structure(self):
         script = APP_SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("Mach-O binaries found under Contents/Resources/", script)
-        # The gate reads each file's Mach-O magic rather than trusting names.
+        # The gate requires the worker where the launcher and sweep look for it.
+        self.assertIn('OCR_WORKER="$RESOURCES/HippocampusOCR/hippocampus-ocr"', script)
+        # And it refuses stray Mach-O left loose in Resources/ OUTSIDE the worker
+        # tree, reading each file's Mach-O magic rather than trusting names.
+        self.assertIn('-not -path "$RESOURCES/HippocampusOCR/*"', script)
         for magic in ("feedfacf", "cffaedfe", "cefaedfe", "cafebabe"):
             self.assertIn(magic, script)
-        # And it requires the worker where the launcher and sweep look for it.
-        self.assertIn('OCR_WORKER="$OCR_HOME/HippocampusOCR/hippocampus-ocr"', script)
 
     def test_launcher_and_sweep_agree_with_build_app(self):
         self.assertIn(self.WORKER_SUBPATH + "/hippocampus-ocr",
@@ -649,10 +658,10 @@ class OCRWorkerLayoutTests(unittest.TestCase):
                       self.SWEEP.read_text(encoding="utf-8"))
 
     def test_no_production_source_uses_a_rejected_location(self):
-        # Guard against the old location (Resources) and the tempting-but-broken
-        # "fix" of a code location (Helpers). Tokens are split so this assertion
-        # never matches itself.
-        rejected = ["Resources/" + "HippocampusOCR", "Helpers/" + "HippocampusOCR"]
+        # Guard against the abandoned Contents/OCR/ location and the tempting-
+        # but-broken "fix" of a code location (Helpers). Tokens are split so this
+        # assertion never matches itself.
+        rejected = ["OCR/" + "HippocampusOCR", "Helpers/" + "HippocampusOCR"]
         for path in (APP_SCRIPT, self.PADDLE, self.SWEEP,
                      ROOT / "NOTICE", ROOT / "ARCHITECTURE.md"):
             text = path.read_text(encoding="utf-8")
