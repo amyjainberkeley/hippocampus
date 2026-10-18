@@ -696,28 +696,33 @@ class OCRWorkerLayoutTests(unittest.TestCase):
                             str(target)], check=True, capture_output=True)
         return app
 
-    def _incorrect_bundle_structure_findings(self, app):
+    def _notary_submission_findings(self, app):
         proc = subprocess.run(["/usr/bin/syspolicy_check", "notary-submission", "--json", str(app)],
                               capture_output=True, text=True)
         try:
-            findings = json.loads(proc.stdout or "{}").get("output") or []
+            return json.loads(proc.stdout or "{}").get("output") or []
         except ValueError:
             self.skipTest("syspolicy_check did not return JSON on this host")
-        return [f for f in findings if f.get("SyspolicyCheckShortError") == "Incorrect Bundle Structure"]
 
     @unittest.skipUnless(os.path.exists("/usr/bin/syspolicy_check"),
                          "syspolicy_check (macOS 15+) is not available")
-    def test_syspolicy_flags_resources_but_accepts_contents_ocr(self):
-        # Negative control: a Mach-O under Resources/ must be flagged.
+    def test_syspolicy_reports_resources_worker_as_an_advisory_warning(self):
+        # Option B's contract: a Mach-O under Contents/Resources/ is reported by
+        # the notary pre-check as "Incorrect Bundle Structure" — but at WARNING
+        # level, never an error. verify-release-app.sh tolerates a warning-only
+        # notary-submission result (scripts/test-verify-release-app.sh covers
+        # that), so the release dry run completes. The probe is ad-hoc signed so
+        # it runs anywhere; an ad-hoc app also carries an "Adhoc Signed App"
+        # warning, which is why this asserts on levels, not on finding count.
         with tempfile.TemporaryDirectory(prefix="ocr-layout-res-") as temporary:
             app = self._make_signed_probe_app(Path(temporary), "Resources")
-            self.assertTrue(self._incorrect_bundle_structure_findings(app),
-                            "syspolicy_check must flag a Mach-O under Resources/")
-        # The real location: a Mach-O under Contents/OCR/ must be clean.
-        with tempfile.TemporaryDirectory(prefix="ocr-layout-ocr-") as temporary:
-            app = self._make_signed_probe_app(Path(temporary), "OCR")
-            self.assertEqual(self._incorrect_bundle_structure_findings(app), [],
-                             "syspolicy_check must accept a Mach-O under Contents/OCR/")
+            findings = self._notary_submission_findings(app)
+            shorts = [f.get("SyspolicyCheckShortError") for f in findings]
+            self.assertIn("Incorrect Bundle Structure", shorts,
+                          "a Mach-O under Resources/ must be flagged as Incorrect Bundle Structure")
+            levels = {f.get("SyspolicyCheckErrorLevel") for f in findings}
+            self.assertEqual(levels, {"Warning"},
+                             f"every Resources-layout notary-submission finding must be an advisory Warning, got {sorted(levels)}")
 
 
 if __name__ == "__main__":
