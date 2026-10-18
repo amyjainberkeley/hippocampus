@@ -2,7 +2,7 @@
 
 _Updated October 17, 2026, for 0.3.0._
 
-Audited code baseline: `dd65652`
+Audited code baseline: `99bc8b7`
 
 The release build checks that this commit is an ancestor of `HEAD` and at most
 three commits behind it, so this page is refreshed with every release. It says
