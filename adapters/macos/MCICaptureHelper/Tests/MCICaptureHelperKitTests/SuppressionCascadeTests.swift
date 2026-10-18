@@ -353,3 +353,43 @@ final class CascadeDenylistDriftTests: XCTestCase {
         XCTAssertEqual(c.decide(context: ctx), .allow)
     }
 }
+
+// MARK: - ADR-0013 §6 — OCR-time credit-card (Luhn) and one-time-code (OTP)
+
+/// Direct tests of the two §6 detectors that are not pure regex. The shared
+/// corpus (OCRReadingPrivacyTests.testSecretPatternsAnswerTheSharedCorpus)
+/// proves these agree with the Rust reader; this file locks the Swift logic on
+/// its own and documents the precision boundary. All strings are invented; the
+/// card numbers are the standard public test PANs.
+final class SuppressionCascadeOCRSecretTests: XCTestCase {
+    func testLuhnChecksumMatchesTextbookValues() {
+        XCTAssertTrue(SuppressionCascade.luhnValid(ArraySlice(Array("79927398713".utf8))))
+        XCTAssertFalse(SuppressionCascade.luhnValid(ArraySlice(Array("79927398710".utf8))))
+    }
+
+    func testRealTestCardsAreCaughtAndLookAlikesAreNot() {
+        for card in ["4111 1111 1111 1111", "4111-1111-1111-1111", "4111111111111111",
+                     "5500 0000 0000 0004", "3400 0000 0000 009", "Card on file: 4111111111111111"] {
+            XCTAssertTrue(SuppressionCascade.containsCreditCard(card), "card: \(card)")
+            XCTAssertTrue(SuppressionCascade.containsSecretOrPII(card), "card via §6: \(card)")
+        }
+        for notCard in ["1234 1234 1234 1234", "4111 1111 1111 1112", "415-555-0132",
+                        "Order #40281773", "$1,299.00", "2026-10-17", "41111111111111110000"] {
+            XCTAssertFalse(SuppressionCascade.containsCreditCard(notCard), "not a card: \(notCard)")
+        }
+    }
+
+    func testOtpNeedsBothAKeywordAndANearbyRun() {
+        for otp in ["Your verification code is 283910", "one-time passcode: 55012", "OTP: 4821",
+                    "Your login code is 90210", "Enter 135790 to finish 2FA setup",
+                    "security code 55123 expires soon"] {
+            XCTAssertTrue(SuppressionCascade.containsOTP(otp), "otp: \(otp)")
+            XCTAssertTrue(SuppressionCascade.containsSecretOrPII(otp), "otp via §6: \(otp)")
+        }
+        for notOtp in ["283910", "The total came to 1299 dollars", "Call us at 1-800-555-0199",
+                       "someone timer showed 283910", "max_tokens: 4096",
+                       "Your verification code will be emailed to the address we have on file 283910"] {
+            XCTAssertFalse(SuppressionCascade.containsOTP(notOtp), "not an otp: \(notOtp)")
+        }
+    }
+}

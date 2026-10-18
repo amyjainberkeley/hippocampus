@@ -93,16 +93,19 @@ def main():
         },
         {
             "id": "X1",
-            "scenario": "Cross-engine parity: the Swift helper (ICU/NSRegularExpression) and the Rust "
-            "reader (regex crate) agree on the four §6 secret shapes, so cleaning the text for recall "
-            "can never reveal a secret the helper let through.",
+            "scenario": "Cross-engine parity: the Swift helper (ICU/NSRegularExpression + hand-rolled "
+            "Luhn/OTP scans) and the Rust reader (regex crate + the same scans) agree on every §6 secret "
+            "shape, so cleaning the text for recall can never reveal a secret the helper let through. The "
+            "86-case shared corpus now includes the credit-card and OTP cases.",
             "expected": "same verdict on the shared corpus; the four pattern strings appear verbatim "
             "in SuppressionCascade.swift",
             "observed": "parity holds" if rust_parity_v == "PASS" else "test failure",
             "verdict": rust_parity_v,
-            "rule": "Shared corpus core/brain/fixtures/ocr-secret-corpus.json + verbatim-string guard",
+            "rule": "Shared corpus core/brain/fixtures/ocr-secret-corpus.json (86 cases) + "
+            "verbatim-string guard",
             "proof": "reading.rs::the_guard_answers_the_shared_corpus_like_the_capture_helper, "
-            "the_guard_uses_the_capture_helpers_four_pattern_strings_verbatim",
+            "the_guard_uses_the_capture_helpers_four_pattern_strings_verbatim; "
+            "OCRReadingPrivacyTests.testSecretPatternsAnswerTheSharedCorpus",
         },
     ]
 
@@ -172,7 +175,8 @@ def main():
       "a vault unlock, anywhere in the login session).")
     w("4. **§4 ax-secure-subrole** — the focused element is an `AXSecureTextField`.")
     w("5. **§5 denylist-postcapture** — a denylist edit the live filter has not caught up to.")
-    w("6. **§6 ocr-time-secret** — the OCR'd text matches one of four secret shapes; checked on the "
+    w("6. **§6 ocr-time-secret** — the OCR'd text matches one of the secret shapes (the four key/token "
+      "regexes, a Luhn-valid credit-card number, or a one-time code next to a keyword); checked on the "
       "raw read, the reading-order text, and the exact stored text.")
     w("7. **§7 failsafe-unknown** — anything the cascade cannot positively classify as non-secure is "
       "dropped (AX must *affirmatively* say non-secure to allow; `nil` is a drop).")
@@ -224,42 +228,49 @@ def main():
     w("4. Wait ~60s, then in the window (Ask) search for a unique word you can see on that page.")
     w("5. **Pass** = the page is not found (window was skipped). **Gap** = it is found. If it is a "
       "gap, that private window was read; file it per SECURITY.md and add its marker to the top-bar "
-      "reader. Note: the four secret shapes (§6) still apply to whatever was on it.")
+      "reader. Note: the §6 secret shapes still apply to whatever was on it.")
     w("")
     w("### N2 — A one-time code shown on screen in an ordinary chat app (OCR path)")
     w("")
-    w("Row 11 proves the OCR gate does **not** catch a bare numeric code; the Messages/Mail "
-      "deep-hook ingest (row O2) does. Confirm the on-screen behaviour and decide if it is acceptable "
-      "for launch.")
+    w("Row 11 proves, headlessly, that the OCR gate now drops a one-time code shown next to a keyword. "
+      "This step confirms it end-to-end on a real Mac and shows the precision boundary.")
     w("")
     w("1. In a chat app that is **not** Apple Messages (e.g. a web Gmail, Slack, Discord), display a "
       "fake message \"Your verification code is 123456\".")
     w("2. Wait ~60s. In Ask, search \"123456\".")
-    w("3. Expected (documented): it **can** be found — an on-screen OTP is not one of the four secret "
-      "shapes (PRIVACY.md:72, SECURITY.md:29). Decide whether to broaden §6 or accept the "
-      "documented limitation.")
+    w("3. **Pass** = it is **not** found: the frame was dropped by §6 (`containsOTP`).")
+    w("4. Now display a bare \"123456\" with no nearby keyword, wait ~60s, and search it. Expected: it "
+      "**can** be found — precision-first, a lone number is kept. An OTP in a format the keywords don't "
+      "name (e.g. a non-US bank's wording) may also be kept; that is G5, not a regression.")
     w("")
     w("### N3 — A credit-card number typed into an ordinary app (OCR path)")
     w("")
-    w("Row 12 proves there is no card-number detector on the OCR path.")
+    w("Row 12 proves, headlessly, that a Luhn-valid card number is now dropped on the OCR path. This "
+      "step confirms it end-to-end on a real Mac and shows the precision boundary.")
     w("")
     w("1. In TextEdit, type a **fake** card-shaped number: `4111 1111 1111 1111`.")
     w("2. Wait ~60s. In Ask, search `4111`.")
-    w("3. Expected (documented gap): it **can** be found. Decide whether a Luhn/PAN redactor is a "
-      "launch blocker; today only a soft prompt instruction to the local model discourages recording "
-      "it (not a hard filter).")
+    w("3. **Pass** = it is **not** found: the frame was dropped by §6 (`containsCreditCard`, "
+      "Luhn-valid).")
+    w("4. Now type a 16-digit number that fails Luhn (e.g. `1234 1234 1234 1234`), wait ~60s, and "
+      "search it. Expected: it **can** be found — precision-first, only Luhn-valid runs are dropped. "
+      "The soft model instruction in `apps/mind/.../Prompts.swift:27` remains as a second layer.")
     w("")
     w("## Concerns / gaps (nothing hidden)")
     w("")
-    w("- **G1 — On-screen OTP (OCR path) is not redacted.** Real, documented (PRIVACY.md:72, "
-      "SECURITY.md:29). A bare numeric code is not one of the four §6 shapes. Covered on the "
-      "Messages/Mail ingest path only. Tracked by the ignored test "
-      "`SecretMatrixTests.testGAP_onScreenOtpOnOcrPathIsNotRedacted` (skipped with a note; remove "
-      "the skip when coverage lands).")
-    w("- **G2 — Credit-card numbers are not redacted on any storage path.** Real, documented "
-      "(PRIVACY.md:96). No Luhn/PAN detector exists; only `apps/mind/.../Prompts.swift:27` asks the "
-      "local model not to record card numbers, which is not a hard filter. Tracked by the ignored "
-      "test `SecretMatrixTests.testGAP_creditCardOnOcrPathIsNotRedacted`.")
+    w("- **G1 — On-screen OTP (OCR path): CLOSED since this audit.** The OCR gate now drops a one-time "
+      "code shown within ~40 bytes of an OTP keyword, in both engines (`containsOTP` / `contains_otp`). "
+      "Precision-first, so a bare code with no keyword, or an OTP in a format the keywords don't name "
+      "(e.g. a non-US bank's wording), can still be stored — see G5. Proven by "
+      "`SecretMatrixTests.testOnScreenOtpOnOcrPathIsRedacted` (was the skipped GAP test) and the "
+      "shared corpus.")
+    w("- **G2 — Credit-card numbers (OCR path): CLOSED since this audit.** A maximal 13–19 digit run "
+      "that passes the Luhn checksum is now dropped by the OCR gate, in both engines "
+      "(`containsCreditCard` / `contains_credit_card`). Luhn keeps precision high: phone numbers, order "
+      "ids, dates and timestamps rarely pass. A card OCR'd into double-spaced or letter-broken groups "
+      "may be missed — see G5. Proven by `SecretMatrixTests.testCreditCardOnOcrPathIsRedacted` (was the "
+      "skipped GAP test) and the shared corpus. The soft model instruction in "
+      "`apps/mind/.../Prompts.swift:27` remains as a second layer.")
     w("- **G3 — Launch copy understates the app denylist.** PRIVACY.md:67 and SECURITY.md:27 say "
       "\"six password managers\" are skipped and \"others are read like any other app,\" but the code "
       "(`CaptureAdmissionPolicy.swift`) never-reads 66 password-manager/authenticator bundle-id "
@@ -269,26 +280,31 @@ def main():
       "A person should decide the wording (this harness does not edit launch copy).")
     w("- **G4 — A stale rationale string in the allowlist.** `known-safe-apps.toml`'s "
       "`com.apple.MobileSMS` entry claims \"§3(a) … gate the rendered text on every cascade-twice "
-      "pass,\" but the Swift OCR pass runs only the four §6 patterns, not the SMS-OTP bank (that runs "
-      "in the Rust ingest path). Under `.ordinaryApplications` the allowlist is dormant, so this is a "
-      "documentation accuracy issue, not a behaviour gap. Flag for a person.")
+      "pass,\" but the Swift OCR pass runs only the §6 OCR-time checks (the four patterns plus the "
+      "Luhn-card and keyword-OTP rules), not the SMS-OTP bank (that runs in the Rust ingest path). "
+      "Under `.ordinaryApplications` the allowlist is dormant, so this is a documentation accuracy "
+      "issue, not a behaviour gap. Flag for a person.")
     w("- **G5 — §6 is a backstop, not a guarantee.** By design (SecretBench, Basak et al. "
-      "arXiv:2307.00714 — best detectors 52–88% recall) the four shapes lean to precision. A secret "
-      "in a shape they do not match (a bare high-entropy token with no keyword, a non-US OTP format, "
-      "a card number) can be stored. This is stated in PRIVACY.md:96 and is why the denylist / "
-      "secure-input / private-window rules (which are not pattern-recall-limited) carry the load.")
+      "arXiv:2307.00714 — best detectors 52–88% recall) the shapes lean to precision. A secret in a "
+      "shape they do not match can still be stored: a bare high-entropy token with no keyword, a "
+      "one-time code in a format the keywords don't name (e.g. a non-US bank's wording), or a card "
+      "whose digits OCR'd too poorly to form a clean 13–19 run. This is stated in PRIVACY.md and is "
+      "why the denylist / secure-input / private-window rules (which are not pattern-recall-limited) "
+      "carry the load.")
     w("")
     w("## What this proves, and what it does not")
     w("")
     w("Proves (headless, repeatable, asserted): password fields (two ways), 66 password-manager and "
       "authenticator bundle-id families (76 verified identifiers), private browser windows that show a "
-      "marker, bank/sign-in sites by URL and by address, and API keys/tokens/JWTs in a terminal or "
-      "editor are each dropped by a named rule, and the Swift and Rust secret checks agree. The "
-      "Messages/Mail ingest path redacts OTPs and bank alerts.")
+      "marker, bank/sign-in sites by URL and by address, API keys/tokens/JWTs in a terminal or editor, "
+      "Luhn-valid credit-card numbers, and one-time codes shown next to a keyword are each dropped by a "
+      "named rule, and the Swift and Rust secret checks agree on the 86-case corpus. The Messages/Mail "
+      "ingest path redacts OTPs and bank alerts.")
     w("")
     w("Does not prove (needs a person / out of scope here): the live Carbon/AX/ScreenCaptureKit "
-      "pipeline on a real Mac (N1–N3), on-screen OTPs and card numbers (documented gaps G1–G2), and "
-      "any secret in a shape §6 does not match (G5). None of these is hidden; each is a row or a "
+      "pipeline on a real Mac (N1–N3 are now end-to-end confirmations, not gaps), and any secret in a "
+      "shape §6 does not match — a bare high-entropy token with no keyword, a one-time code in a wording "
+      "the keywords don't name, a badly-OCR'd card (G5). None of these is hidden; each is a row or a "
       "concern above.")
     w("")
 

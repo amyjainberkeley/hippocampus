@@ -327,78 +327,94 @@ final class SecretMatrixTests: XCTestCase {
                     + "BrowserPrivateWindowTests.testPasswordFieldsPasswordManagersAndSignInSitesStayNeverRead"))
         }
 
-        // -- Case 11: one-time code in a chat, SEEN ON SCREEN (OCR path). LIMITATION. --
-        // A bare numeric OTP is not one of the four §6 shapes. Documented in
-        // PRIVACY.md:72 and SECURITY.md:29. Recorded honestly (asserted .allow)
-        // so the limitation is visible, not hidden. The Messages/Mail deep-hook
-        // INGEST path redacts OTPs — that is Case O2 (Rust), a different path.
+        // -- Case 11: one-time code in a chat, SEEN ON SCREEN (OCR path). §6. --
+        // Now REDACTED: a 4–8 digit run within ~40 bytes of an OTP keyword is
+        // dropped by §6 (SuppressionCascade.containsOTP). Precision-first: a bare
+        // number with no keyword is still kept, so ordinary numbers survive.
         do {
             let ctx = WorkflowContext(appBundleId: "com.hnc.Discord", windowTitle: "direct message")
             let d = cascade().decideOcr(text: Fixture.otpChat, context: ctx)
-            XCTAssertEqual(d, .allow, "on-screen OTP via OCR is NOT redacted by §6 (documented limitation)")
+            let bare = cascade().decideOcr(text: "123456", context: ctx)
+            let ok = d == .suppress(reason: .ocrTimeSecret) && bare == .allow
+            XCTAssertEqual(d, .suppress(reason: .ocrTimeSecret), "on-screen OTP via OCR is redacted by §6")
+            XCTAssertEqual(bare, .allow, "a bare number with no keyword is kept (precision-first)")
             rows.append(Row(
                 id: "11", scenario: "One-time code shown on screen in a chat app and captured by OCR "
                     + "(e.g. \"Your verification code is 123456\")",
-                expected: "no §6 shape matches — the frame is stored",
-                observed: Self.label(d),
-                verdict: "NEEDS-A-PERSON",
-                rule: "NOT covered on the OCR path — a bare numeric OTP is not one of the four §6 shapes "
-                    + "(PRIVACY.md:72, SECURITY.md:29). Covered only on the Messages/Mail deep-hook INGEST path (Case O2).",
-                proof: "SecretMatrixTests.testSecretMatrix (asserts the current, documented behavior); "
-                    + "see ignored test testGAP_onScreenOtpOnOcrPathIsNotRedacted"))
+                expected: "decideOcr suppress(ocr-time-secret); a bare number is allowed",
+                observed: "otp=\(Self.label(d)); bare=\(Self.label(bare))",
+                verdict: ok ? "PASS" : "FAIL",
+                rule: "Cascade §6 — OCR-time OTP rule (SuppressionCascade.containsOTP): a 4–8 digit run "
+                    + "within ~40 bytes of an OTP keyword (one-time, verification/security/login/"
+                    + "authentication/confirmation code, passcode, OTP, 2FA, …). Keyword required, so a "
+                    + "bare number is kept. Cross-engine with the Rust reader.",
+                proof: "SecretMatrixTests.testSecretMatrix, testOnScreenOtpOnOcrPathIsRedacted; "
+                    + "ocr_secrets::tests::an_otp_needs_both_a_keyword_and_a_nearby_run; shared corpus"))
         }
 
-        // -- Case 12: credit-card number in a text editor (OCR path). GAP. --
-        // No Luhn/PAN detector exists on any storage path. Documented in
-        // PRIVACY.md:96 ("a secret in a shape the checks don't catch can be
-        // stored"). Recorded honestly (asserted .allow) so the gap is visible.
+        // -- Case 12: credit-card number in a text editor (OCR path). §6. --
+        // Now REDACTED: a 13–19 digit run (single space/hyphen groups) that passes
+        // the Luhn checksum is dropped by §6 (SuppressionCascade.containsCreditCard).
+        // Precision-first: a non-Luhn look-alike is kept.
         do {
             let ctx = WorkflowContext(appBundleId: "com.apple.TextEdit", windowTitle: "notes.txt")
             let d = cascade().decideOcr(text: Fixture.creditCard, context: ctx)
-            XCTAssertEqual(d, .allow, "credit-card number via OCR is NOT redacted (documented gap)")
+            let nonLuhn = cascade().decideOcr(text: "1234 1234 1234 1234", context: ctx)
+            let ok = d == .suppress(reason: .ocrTimeSecret) && nonLuhn == .allow
+            XCTAssertEqual(d, .suppress(reason: .ocrTimeSecret), "credit-card number via OCR is redacted by §6")
+            XCTAssertEqual(nonLuhn, .allow, "a 16-digit non-Luhn number is kept (precision-first)")
             rows.append(Row(
                 id: "12", scenario: "Credit-card number typed in a plain text editor and captured by OCR "
                     + "(\"4111 1111 1111 1111 …\")",
-                expected: "no §6 shape matches — the frame is stored",
-                observed: Self.label(d),
-                verdict: "NEEDS-A-PERSON",
-                rule: "NOT covered — there is no credit-card / Luhn / PAN detector on any storage path. "
-                    + "Only a soft instruction to the local model (apps/mind/.../Prompts.swift:27) asks it not "
-                    + "to record card numbers; that is not a hard filter. Documented in PRIVACY.md:96.",
-                proof: "SecretMatrixTests.testSecretMatrix (asserts the current, documented behavior); "
-                    + "see ignored test testGAP_creditCardOnOcrPathIsNotRedacted"))
+                expected: "decideOcr suppress(ocr-time-secret); a non-Luhn look-alike is allowed",
+                observed: "card=\(Self.label(d)); nonLuhn=\(Self.label(nonLuhn))",
+                verdict: ok ? "PASS" : "FAIL",
+                rule: "Cascade §6 — OCR-time card rule (SuppressionCascade.containsCreditCard): a maximal "
+                    + "13–19 digit run (single space/hyphen groups) that passes the Luhn checksum. Luhn drops "
+                    + "almost all ordinary numbers, so phone numbers / order ids / dates are kept. "
+                    + "Cross-engine with the Rust reader.",
+                proof: "SecretMatrixTests.testSecretMatrix, testCreditCardOnOcrPathIsRedacted; "
+                    + "ocr_secrets::tests::real_test_cards_pass_luhn_and_look_alikes_do_not; shared corpus"))
         }
 
         writeMatrix(rows)
     }
 
-    // MARK: - Ignored failing tests for the two real OCR-path gaps.
+    // MARK: - OCR-path OTP and card regression gates (were the two GAP skips).
     //
-    // These are deliberately kept as source so they are not hidden. Each is
-    // SKIPPED (so the suite stays green) but the assertion underneath is the
-    // behavior we would want if the gap were closed. Remove the XCTSkip line
-    // to turn each into a live regression gate once a fix lands.
+    // G1 (OTP) and G2 (credit card) are now closed on the OCR path. These were
+    // `XCTSkip`ped assertions of the behavior we wanted; they are now live
+    // regression gates. Each also checks the precision side so a future change
+    // that over-redacts ordinary numbers is caught too.
 
-    /// GAP: an OTP shown on screen in an ordinary app is not redacted on the
-    /// OCR path. The INGEST path (Case O2) redacts it; the OCR path does not.
-    func testGAP_onScreenOtpOnOcrPathIsNotRedacted() throws {
-        throw XCTSkip("KNOWN GAP (documented PRIVACY.md:72). On-screen OTP via OCR is not one of the four "
-            + "§6 shapes, so it is stored. The deep-hook INGEST path covers Messages/Mail OTPs "
-            + "(messages_plugin + sms_otp). Remove this skip when OCR-path OTP coverage lands.")
+    /// G1 closed: an OTP shown on screen in an ordinary app is dropped on the
+    /// OCR path, while a bare number with no keyword is kept.
+    func testOnScreenOtpOnOcrPathIsRedacted() {
         let ctx = WorkflowContext(appBundleId: "com.hnc.Discord")
-        let d = cascade().decideOcr(text: "Your verification code is 123456", context: ctx)
-        XCTAssertEqual(d, .suppress(reason: .ocrTimeSecret),
-                       "desired: on-screen OTP dropped on the OCR path")
+        XCTAssertEqual(cascade().decideOcr(text: "Your verification code is 123456", context: ctx),
+                       .suppress(reason: .ocrTimeSecret),
+                       "on-screen OTP dropped on the OCR path")
+        XCTAssertEqual(cascade().decideOcr(text: "one-time passcode: 55012", context: ctx),
+                       .suppress(reason: .ocrTimeSecret))
+        XCTAssertEqual(cascade().decideOcr(text: "Order #40281773", context: ctx), .allow,
+                       "a bare order number with no OTP keyword is kept")
+        XCTAssertEqual(cascade().decideOcr(text: "123456", context: ctx), .allow,
+                       "a bare code with no keyword is kept")
     }
 
-    /// GAP: a credit-card number is not redacted on any storage path.
-    func testGAP_creditCardOnOcrPathIsNotRedacted() throws {
-        throw XCTSkip("KNOWN GAP (documented PRIVACY.md:96). No Luhn/PAN detector exists. A card number in "
-            + "a non-secure field is stored. Remove this skip when a card-number redactor lands.")
+    /// G2 closed: a Luhn-valid credit-card number is dropped on the OCR path,
+    /// while a non-Luhn look-alike and a phone number are kept.
+    func testCreditCardOnOcrPathIsRedacted() {
         let ctx = WorkflowContext(appBundleId: "com.apple.TextEdit")
-        let d = cascade().decideOcr(text: "4111 1111 1111 1111", context: ctx)
-        XCTAssertEqual(d, .suppress(reason: .ocrTimeSecret),
-                       "desired: credit-card number dropped on the OCR path")
+        for card in ["4111 1111 1111 1111", "5500 0000 0000 0004", "3400 0000 0000 009",
+                     "4111-1111-1111-1111"] {
+            XCTAssertEqual(cascade().decideOcr(text: card, context: ctx),
+                           .suppress(reason: .ocrTimeSecret), "card dropped: \(card)")
+        }
+        XCTAssertEqual(cascade().decideOcr(text: "1234 1234 1234 1234", context: ctx), .allow,
+                       "a 16-digit non-Luhn number is kept")
+        XCTAssertEqual(cascade().decideOcr(text: "Call 415-555-0132", context: ctx), .allow,
+                       "a phone number is kept")
     }
 
     // MARK: - TSV emission for the shell harness
