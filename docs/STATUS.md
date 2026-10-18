@@ -1,8 +1,8 @@
 # Hippocampus Status
 
-_Updated October 16, 2026, for 0.3.0._
+_Updated October 17, 2026, for 0.3.0._
 
-Audited code baseline: `b58b48b`
+Audited code baseline: `dd65652`
 
 The release build checks that this commit is an ancestor of `HEAD` and at most
 three commits behind it, so this page is refreshed with every release. It says
@@ -12,12 +12,14 @@ and the app claim no more than this page.
 
 ## What works
 
-At the baseline, on October 16, `scripts/check.sh` passed all 71 lanes, with
-none skipped: 2,371 Rust tests; the capture helper's 967 Swift tests (one
-opt-in live probe skipped), the window's 684, setup's 390, the menu-bar app's
-612 and the model process's 54; and the OCR worker's 155. The commits after
-the baseline change only ARCHITECTURE.md and this page. Each row names the
-tests that cover it.
+`scripts/check.sh` last passed in full at `b58b48b` on October 16 — all 71
+lanes, none skipped: 2,371 Rust tests; the capture helper's 967 Swift tests
+(one opt-in live probe skipped), the window's 684, setup's 390, the menu-bar
+app's 612 and the model process's 54; and the OCR worker's 155. The baseline
+above is stamped to the commit this release builds, which is ahead of that run;
+before a signed build `scripts/check.sh` must pass in full again at the stamped
+commit (see [the release checklist](release/RELEASE_CHECKLIST.md)), and this
+page is refreshed with each release. Each row names the tests that cover it.
 
 | Part | Today | How it was checked |
 | --- | --- | --- |
@@ -43,7 +45,7 @@ tests that cover it.
 
 Reading quality, from `tools/ocr/screens/bench.py` on the recorded reads of
 seven realistic windows and six decoys with made-up text, run on Oct 16 at
-the baseline:
+`b58b48b`:
 
 | | Before 0.3 | 0.3.0 |
 | --- | --- | --- |
