@@ -178,6 +178,26 @@ final class CopyStyleTests: XCTestCase {
         ("mentions", UserFacingCopy.mentions("Jordan Lee")),
         ("moreNames", UserFacingCopy.moreNames(2)),
         ("names", UserFacingCopy.names(["Jordan Lee", "JL"])),
+        // Overview's AI heading (positioning, launch decisions 2026-10-15),
+        // and more of the window's own words, so the launch guard covers them.
+        ("aiStartsWith", UserFacingCopy.aiStartsWith),
+        ("openPage", UserFacingCopy.openPage),
+        ("connectAction", UserFacingCopy.connectAction),
+        ("showInHistory", UserFacingCopy.showInHistory),
+        ("showEarlierTop", UserFacingCopy.showEarlier),
+        ("groupWorkingOn", UserFacingCopy.groupWorkingOn),
+        ("groupHowYouWork", UserFacingCopy.groupHowYouWork),
+        ("groupSkills", UserFacingCopy.groupSkills),
+        ("groupPeople", UserFacingCopy.groupPeople),
+        ("groupStruggles", UserFacingCopy.groupStruggles),
+        ("namesTitle", UserFacingCopy.namesTitle),
+        ("namesBody", UserFacingCopy.namesBody),
+        ("namesExample", UserFacingCopy.namesExample),
+        ("folderTitle", UserFacingCopy.folderTitle),
+        ("folderSubtitle", UserFacingCopy.folderSubtitle),
+        ("folderEmptyBody", UserFacingCopy.folderEmptyBody),
+        ("folderNothingSent", UserFacingCopy.folderNothingSent),
+        ("folderScope", UserFacingCopy.folderScope),
     ] + UserFacingCopy.askKeyNames.sorted { $0.key < $1.key }.flatMap { entry -> [(name: String, text: String)] in
         [(name: "askKeyNames.\(entry.key).label", text: entry.value.label),
          (name: "askKeyNames.\(entry.key).phrase", text: entry.value.phrase)]
@@ -263,5 +283,59 @@ final class CopyStyleTests: XCTestCase {
         let stale = UserFacingCopy.eventNoLongerAvailable.lowercased()
         XCTAssertFalse(stale.contains("brain"))
         XCTAssertFalse(stale.contains("suppressed"))
+    }
+
+    // MARK: - Launch copy guard (professional, trustworthy tone)
+
+    /// Rule 4 — no marketing or machine-written words.
+    func testUserFacingCopyHasNoMarketingSpeak() {
+        for entry in Self.allUserFacingStrings {
+            if let word = CopyStyleValidator.containsMarketingSpeak(entry.text) {
+                XCTFail("\(entry.name) uses marketing/machine word \u{201C}\(word)\u{201D}: \(entry.text)")
+            }
+        }
+    }
+
+    /// Rule 5 — status, help and empty-state copy never shouts.
+    func testUserFacingCopyHasNoExclamationMarks() {
+        for entry in Self.allUserFacingStrings {
+            XCTAssertFalse(
+                CopyStyleValidator.containsExclamation(entry.text),
+                "\(entry.name) shouts with an exclamation mark: \(entry.text)"
+            )
+        }
+    }
+
+    /// Rule 6 — no em-dash pileups (one spaced em-dash is still fine).
+    func testUserFacingCopyHasNoEmDashPileups() {
+        for entry in Self.allUserFacingStrings {
+            XCTAssertFalse(
+                CopyStyleValidator.hasEmDashPileup(entry.text),
+                "\(entry.name) stacks em-dashes: \(entry.text)"
+            )
+        }
+    }
+
+    /// The marketing validator catches the words it exists to catch, and
+    /// clears clean copy.
+    func testMarketingValidatorCatchesItsExamples() {
+        XCTAssertEqual(CopyStyleValidator.containsMarketingSpeak("Seamlessly unlock your flow"), "seamlessly")
+        XCTAssertEqual(CopyStyleValidator.containsMarketingSpeak("An AI-powered assistant"), "ai-powered")
+        XCTAssertNotNil(CopyStyleValidator.containsMarketingSpeak("Supercharge your Mac"))
+        XCTAssertNil(CopyStyleValidator.containsMarketingSpeak("Nothing is lost. Try again in a moment."))
+        XCTAssertTrue(CopyStyleValidator.containsExclamation("All set!"))
+        XCTAssertFalse(CopyStyleValidator.containsExclamation("All set."))
+        XCTAssertTrue(CopyStyleValidator.hasEmDashPileup("one \u{2014} two \u{2014} three"))
+        XCTAssertFalse(CopyStyleValidator.hasEmDashPileup("safe \u{2014} then stop"))
+        // "AI" on its own is fine; only the hype compound is banned.
+        XCTAssertNil(CopyStyleValidator.containsMarketingSpeak("Copy for your AI"))
+    }
+
+    /// Positioning (launch decisions, 2026-10-15): the window leads with how
+    /// your AI starts, not what it \u{201C}already knows\u{201D} — the latter
+    /// echoes a competitor's launch headline.
+    func testAIHeadingLeadsWithHowYourAIStarts() {
+        XCTAssertEqual(UserFacingCopy.aiStartsWith, "What your AI starts with")
+        XCTAssertFalse(UserFacingCopy.aiStartsWith.lowercased().contains("already knows"))
     }
 }
