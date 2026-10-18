@@ -222,7 +222,7 @@ RESOURCES="$CONTENTS/Resources"
 #     `.dylibs/` and `*.dist-info/` folders ("bundle format unrecognized,
 #     invalid, or unsuitable"), because a PyInstaller onedir is not a bundle.
 #   - A non-standard top-level directory such as Contents/OCR/: codesign seals
-#     it as data there and `codesign --verify --deep --strict` passes, but on
+#     it as data there and a deep, strict codesign verify passes, but on
 #     this app — signed with Developer ID yet not notarized — `syspolicy_check
 #     notary-submission` then returns a FATAL generic "Codesign Error" against a
 #     Contents/MacOS/ executable. That is syspolicy_check's catch-all for
