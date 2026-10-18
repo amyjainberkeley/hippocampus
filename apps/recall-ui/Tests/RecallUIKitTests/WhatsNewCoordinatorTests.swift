@@ -45,9 +45,47 @@ final class WhatsNewCoordinatorTests: XCTestCase {
 
     // MARK: - shouldShow decision
 
-    func test_shouldShow_true_on_first_boot() {
+    /// A first launch has nothing new to tell: release notes would cover the
+    /// person's first window (Oct 18).
+    func test_shouldShow_false_on_first_boot() {
         let coord = WhatsNewCoordinator(defaults: defaults)
-        XCTAssertTrue(coord.shouldShow(currentVersion: "1.0.0"))
+        XCTAssertFalse(coord.shouldShow(currentVersion: "1.0.0"))
+    }
+
+    func test_first_boot_records_the_version_quietly() {
+        let coord = WhatsNewCoordinator(defaults: defaults)
+        coord.maybeShow(onBootOf: "0.3.0")
+        XCTAssertFalse(coord.isVisible)
+        XCTAssertEqual(defaults.string(forKey: WhatsNewCoordinator.lastShownKey), "0.3.0")
+
+        // The next launch of the same version stays quiet too.
+        let again = WhatsNewCoordinator(defaults: defaults)
+        again.maybeShow(onBootOf: "0.3.0")
+        XCTAssertFalse(again.isVisible)
+    }
+
+    func test_an_update_shows_what_changed_once() {
+        let before = WhatsNewCoordinator(defaults: defaults)
+        before.maybeShow(onBootOf: "0.2.1")
+        XCTAssertFalse(before.isVisible)
+
+        let updated = WhatsNewCoordinator(defaults: defaults)
+        updated.maybeShow(onBootOf: "0.3.0")
+        XCTAssertTrue(updated.isVisible)
+        updated.dismiss()
+        XCTAssertFalse(updated.isVisible)
+        XCTAssertEqual(defaults.string(forKey: WhatsNewCoordinator.lastShownKey), "0.3.0")
+
+        let next = WhatsNewCoordinator(defaults: defaults)
+        next.maybeShow(onBootOf: "0.3.0")
+        XCTAssertFalse(next.isVisible, "once per version")
+    }
+
+    func test_boot_with_no_version_records_nothing() {
+        let coord = WhatsNewCoordinator(defaults: defaults)
+        coord.maybeShow(onBootOf: "")
+        XCTAssertFalse(coord.isVisible)
+        XCTAssertNil(defaults.object(forKey: WhatsNewCoordinator.lastShownKey))
     }
 
     func test_shouldShow_false_after_markShown_same_version() {
@@ -103,7 +141,7 @@ final class WhatsNewCoordinatorTests: XCTestCase {
 
     func test_show_once_per_version_across_instances() {
         let c1 = WhatsNewCoordinator(defaults: defaults)
-        XCTAssertTrue(c1.shouldShow(currentVersion: "1.0.0"))
+        XCTAssertFalse(c1.shouldShow(currentVersion: "1.0.0"), "a first launch is quiet")
         c1.markShown(version: "1.0.0")
 
         // Fresh instance = fresh app launch. Should still be silent.

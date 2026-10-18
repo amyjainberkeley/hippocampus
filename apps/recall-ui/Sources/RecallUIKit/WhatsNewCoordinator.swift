@@ -6,7 +6,10 @@
 //
 //   - On app boot, `shouldShow(currentVersion:)` compares the current
 //     `CFBundleShortVersionString` with `lastShownVersion` in
-//     UserDefaults. If they differ (or the key is unset), we show.
+//     UserDefaults. If they differ, we show. With the key unset this is
+//     the first launch: nothing is new to the person yet, and a modal of
+//     release notes would cover their first window, so the boot records
+//     the version quietly and the next update shows what changed (Oct 18).
 //   - `markShown(version:)` writes the current version back. Called
 //     by the modal when the user closes it — NOT when the modal is
 //     merely presented, so a startup crash mid-modal-render doesn't
@@ -46,6 +49,8 @@ public final class WhatsNewCoordinator: ObservableObject {
 
     private let defaults: UserDefaults
     private let bundle: Bundle
+    /// The version the modal was presented for, recorded when it closes.
+    private var presentedVersion: String?
 
     public init(
         defaults: UserDefaults = .standard,
@@ -57,12 +62,12 @@ public final class WhatsNewCoordinator: ObservableObject {
 
     // MARK: - Decision logic (pure, headless-testable)
 
-    /// True when the caller should show the modal for `currentVersion`.
-    /// Split from side-effects so tests can pin the decision without
-    /// touching UserDefaults directly.
+    /// True when the caller should show the modal for `currentVersion`: only
+    /// after an update, when another version was seen before. Split from
+    /// side-effects so tests can pin the decision without touching
+    /// UserDefaults directly.
     public func shouldShow(currentVersion: String) -> Bool {
-        guard !currentVersion.isEmpty else { return false }
-        let last = defaults.string(forKey: Self.lastShownKey)
+        guard !currentVersion.isEmpty, let last = defaults.string(forKey: Self.lastShownKey) else { return false }
         return last != currentVersion
     }
 
@@ -79,8 +84,18 @@ public final class WhatsNewCoordinator: ObservableObject {
     /// `.task` closure. Safe to call multiple times — idempotent while
     /// `isVisible` is already true.
     public func maybeShowOnBoot() {
-        guard !isVisible else { return }
-        let version = currentBundleVersion()
+        maybeShow(onBootOf: currentBundleVersion())
+    }
+
+    /// The boot decision for `version`. The first launch records it and
+    /// shows nothing, so the first window is never covered; a later launch
+    /// of another version shows what changed, once.
+    public func maybeShow(onBootOf version: String) {
+        guard !isVisible, !version.isEmpty else { return }
+        guard defaults.string(forKey: Self.lastShownKey) != nil else {
+            markShown(version: version)
+            return
+        }
         guard shouldShow(currentVersion: version) else { return }
         present(forVersion: version)
     }
@@ -100,14 +115,16 @@ public final class WhatsNewCoordinator: ObservableObject {
             // Dev build path — still record the bundle version so we
             // don't nag on every launch just because the bundled
             // CHANGELOG lags a step.
-            markShown(version: currentBundleVersion())
+            markShown(version: presentedVersion ?? currentBundleVersion())
         }
+        presentedVersion = nil
         isVisible = false
     }
 
     // MARK: - Private
 
     private func present(forVersion version: String) {
+        presentedVersion = version
         let source = loadChangelogSource()
         if let source, let release = ChangelogParser.release(forVersion: version, in: source) {
             currentRelease = release
