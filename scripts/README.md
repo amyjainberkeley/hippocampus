@@ -118,10 +118,13 @@ the window a downloader sees.
 
 ### Regenerating installer assets
 
-The DMG background and EULA are generated from source files. Committed versions are ready to use; regenerate only when sources change.
+The DMG background, the Legal folder's icon and the EULA are generated from
+source files. Committed versions are ready to use; regenerate only when
+sources change.
 
 ```bash
-# Background (1280x800 Retina PNG: two instructions and an arrow, nothing else)
+# Background: 1280x864 at 144 dpi, the window's 640x432 points. The words
+# "Drag to Applications" over an arrow, a one-line update note, nothing else.
 python3 assets/installer/generate-background.py
 
 # EULA.rtf (from docs/legal/terms-of-service.md)
@@ -132,24 +135,47 @@ cp assets/branding/AppIcon.icns assets/installer/volume-icon.icns
 
 # Verify the installer cannot drift from the canonical app identity. This also
 # renders the background and reads it back with Apple's text recognition: it
-# fails if the window would show anything but its two instructions.
+# fails if the window would show anything but its two lines of words. It
+# gives a scratch folder the Legal folder's icon, as a build does.
 ./scripts/build-installer.sh --verify-assets
+
+# See the window: background.png, legal-icon.png and window.png, a mock-up
+# of the whole window laid out from layout.json. Nothing opens in Finder.
+./scripts/build-installer.sh --preview /tmp/installer-window
 ```
 
-Both generators are pure Python stdlib (no Pillow, no external deps). The build script auto-regenerates missing assets.
+The generators use the Python standard library and macOS's own frameworks
+through `xcrun swift`; nothing else is installed. Every build renders the
+background into the image from current source.
 
 | Asset | Source | Generator |
 |---|---|---|
-| `assets/installer/background.png` | Text and an arrow, drawn by `render-background.swift` | `generate-background.py` |
+| `assets/installer/layout.json` | The window: its frame, the title bar's height, the icon and text sizes and each item's position | edited by hand; read by everything below |
+| `assets/installer/background.png` | The hi mark's tile gradient, the words and the arrow, drawn by `render-background.swift` from `layout.json` | `generate-background.py` |
+| Legal folder icon | A small page in the tile's colours, drawn by `render-legal-icon.swift` | applied by the build on the mounted image |
 | `assets/installer/EULA.rtf` | `docs/legal/terms-of-service.md` | `generate-eula.py` |
 | `assets/installer/volume-icon.icns` | `assets/branding/AppIcon.icns` | verified mirror; the build stages the canonical file directly |
+
+### The installer window
+
+The window's saved size is its frame, and the title bar (32 points on
+macOS 26, 28 on 14 and 15) can take part of it. So the background is drawn
+at the full 640x432 frame and everything a person reads sits in the 400
+points below the title bar: whichever way Finder counts, there is no blank
+strip and no word is cut off. The app is on the left and Applications on
+the right, 112-point icons facing each other across the middle, with "Drag
+to Applications" and the arrow between them. `dmg-layout.py` writes
+Finder's metadata from `layout.json`, and `scripts/test-installer-layout.py`
+checks that every icon and name fits that area, that nothing overlaps, and
+that every rendered word sits clear of the icons and their names.
 
 ### What the DMG contains
 
 - `Hippocampus.app` — the application bundle
 - `Applications` symlink — drag-target for installation
-- `License.rtf` — the canonical software license terms
-- `.background/background.png` — branded Finder background (hidden, 1280x800 Retina)
+- `Legal/License.rtf` — the canonical software license terms; the folder
+  shows as a small page, so the only folder in the window is Applications
+- `.background/background.png` — branded Finder background (hidden, 1280x864 at 144 dpi)
 - `.VolumeIcon.icns` — volume icon (hidden)
 
 ### Installing from the DMG
