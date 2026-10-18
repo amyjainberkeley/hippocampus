@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -250,6 +251,73 @@ class WindowDesignTests(unittest.TestCase):
                         script.index('"$DMG_LAYOUT" --check-dependencies'))
 
 
+class BuiltDiskImageWindowTests(unittest.TestCase):
+    """Steps 3 to 6 of build-installer.sh, run for real on a stand-in app.
+
+    They stage the image, create it, mount it privately, give Legal its icon,
+    write Finder's layout and compress it. Nothing is signed, notarized or
+    opened; the stand-in app is an empty bundle folder."""
+
+    def test_the_built_image_carries_the_window_a_downloader_sees(self):
+        script = (ROOT / "scripts/build-installer.sh").read_text()
+        steps = script[script.index("# --- Step 3: Prepare DMG staging directory ---"):
+                       script.index("# --- Step 7: Sign the outer disk image ---")]
+        prelude = (f'source "{ROOT / "scripts/lib/installer-runtime.sh"}"\n'
+                   'MOUNT_DIR=""\n'
+                   "trap 'hippocampus_installer_cleanup $?' EXIT\n")
+        with tempfile.TemporaryDirectory(prefix="hippocampus-dmg-steps-") as temporary:
+            work = Path(temporary)
+            app = work / "Hippocampus.app"
+            (app / "Contents").mkdir(parents=True)
+            (app / "Contents/Info.plist").write_text("<plist version=\"1.0\"><dict/></plist>\n")
+            result = subprocess.run(
+                ["/bin/bash", "-euo", "pipefail", "-c", prelude + steps],
+                capture_output=True, text=True,
+                env={**ENV, "VERSION": "0.0.0-test", "APP_PATH": str(app), "DIST_DIR": str(work / "dist"),
+                     "CANONICAL_APP_ICON": str(ROOT / "assets/branding/AppIcon.icns"),
+                     "GENERATE_BACKGROUND": str(INSTALLER / "generate-background.py"),
+                     "INSTALLER_ASSETS": str(INSTALLER), "DMG_FORMAT": shipped_dmg_format(),
+                     "INSTALLER_PYTHON": sys.executable, "DMG_LAYOUT": str(WRITER),
+                     "LEGAL_ICON": str(LEGAL_ICON)},
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            mount = work / "mount"
+            mount.mkdir()
+            disk("attach", "-readonly", "-nobrowse", "-noautoopen", "-mountpoint", mount,
+                 work / "dist/Hippocampus-0.0.0-test.dmg")
+            try:
+                self.assertTrue((mount / "Hippocampus.app").is_dir())
+                self.assertEqual(os.readlink(mount / "Applications"), "/Applications")
+                self.assertTrue((mount / "Legal/License.rtf").is_file())
+                self.assertTrue((mount / ".VolumeIcon.icns").is_file())
+                self.assertTrue(finder_flags(mount) & HAS_CUSTOM_ICON, "the volume shows no hi mark icon")
+                window = LAYOUT["window"]
+                with DSStore.open(str(mount / ".DS_Store"), "r") as store:
+                    self.assertEqual(store["."]["bwsp"]["WindowBounds"], "{{%d, %d}, {%d, %d}}" % (
+                        window["x"], window["y"], window["width"], window["height"]))
+                    icons = store["."]["icvp"]
+                    self.assertEqual(icons["iconSize"], float(LAYOUT["iconSize"]))
+                    self.assertEqual(icons["textSize"], float(LAYOUT["textSize"]))
+                    self.assertTrue(Alias.from_bytes(icons["backgroundImageAlias"]).target.posix_path
+                                    .endswith("/.background/background.png"))
+                    for name, position in LAYOUT["items"].items():
+                        self.assertEqual(store[name]["Iloc"], tuple(position))
+                size = subprocess.run(
+                    ["/usr/bin/sips", "-g", "pixelWidth", "-g", "pixelHeight", "-g", "dpiWidth",
+                     str(mount / ".background/background.png")],
+                    check=True, capture_output=True, text=True, env=ENV).stdout
+                for expected in (f"pixelWidth: {window['width'] * 2}", f"pixelHeight: {window['height'] * 2}",
+                                 "dpiWidth: 144.000"):
+                    self.assertIn(expected, size)
+                self.assertTrue(finder_flags(mount / "Legal") & HAS_CUSTOM_ICON,
+                                "Legal shows as a plain folder on the built image")
+                self.assertGreater(len(extended_attribute(mount / "Legal/Icon\r", "com.apple.ResourceFork")), 0)
+                self.assertTrue(finder_flags(mount / "Legal/Icon\r") & IS_INVISIBLE,
+                                "Legal shows its Icon file next to the license")
+            finally:
+                disk("detach", mount)
+
+
 class InstallerLayoutTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -363,11 +431,11 @@ class InstallerLayoutTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.layout.write_layout(self.root)
         with self.compressed_and_remounted("legal") as root:
-            self.assertTrue(finder_flags(root / "Legal") & HAS_CUSTOM_ICON)
+            self.assertTrue(finder_flags(root / "Legal") & HAS_CUSTOM_ICON, "Legal lost its icon")
             icon_file = root / "Legal/Icon\r"
             self.assertGreater(len(extended_attribute(icon_file, "com.apple.ResourceFork")), 0)
             # Opening Legal shows the license and nothing else.
-            self.assertTrue(finder_flags(icon_file) & IS_INVISIBLE)
+            self.assertTrue(finder_flags(icon_file) & IS_INVISIBLE, "Legal shows its Icon file")
             self.assertEqual((root / "Legal/License.rtf").read_bytes(), b"synthetic legal fixture")
 
     def test_legal_icon_refuses_a_missing_folder(self):
