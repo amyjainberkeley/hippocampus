@@ -613,34 +613,43 @@ class WorkflowTests(unittest.TestCase):
 
 class OCRWorkerLayoutTests(unittest.TestCase):
     """The frozen OCR worker is a PyInstaller --onedir Mach-O tree (an executable
-    next to an _internal/ of dylibs and .so modules). It must ship under
-    Contents/OCR/, never under Contents/Resources/ (Apple's notary service flags
-    Mach-O there as "Incorrect Bundle Structure") and never under a code location
-    such as Contents/MacOS, Frameworks, PlugIns or Helpers (there codesign tries
-    to seal the onedir as nested code and fails on its .dylibs/ and *.dist-info/
-    folders with "bundle format unrecognized"). build-app.sh, the Swift launcher
+    next to an _internal/ of dylibs and .so modules). It ships under
+    Contents/Resources/HippocampusOCR/ (as 0.2.1 did). It must NOT go under a
+    code location such as Contents/MacOS, Frameworks, PlugIns or Helpers (there
+    codesign tries to seal the onedir as nested code and fails on its .dylibs/
+    and *.dist-info/ folders with "bundle format unrecognized"), nor under a
+    non-standard top-level directory such as Contents/OCR/ (codesign seals it as
+    data and `codesign --verify` passes, but on a Developer-ID-signed, not-yet-
+    notarized app `syspolicy_check notary-submission` then returns a FATAL
+    generic "Codesign Error" against a Contents/MacOS/ executable — its catch-all
+    for unnotarized nested code, which fails the release dry run). Under
+    Resources/, the notary pre-check instead reports one advisory "Incorrect
+    Bundle Structure" WARNING, which verify-release-app.sh tolerates and which
+    Apple's notary service accepted for 0.2.1. build-app.sh, the Swift launcher
     and the orphan sweep must agree on the location, and a post-assembly gate
-    must refuse any Mach-O left under Resources/."""
+    must require the worker there and refuse stray Mach-O elsewhere in
+    Resources/."""
 
     PADDLE = ROOT / "adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/OCR/PaddleOCRRunner.swift"
     SWEEP = ROOT / "apps/hippocampus/Sources/HippocampusKit/CaptureOrphanSweep.swift"
-    WORKER_SUBPATH = "Contents/OCR/HippocampusOCR"
+    WORKER_SUBPATH = "Contents/Resources/HippocampusOCR"
 
-    def test_build_app_embeds_the_worker_under_contents_ocr(self):
+    def test_build_app_embeds_the_worker_under_resources(self):
         script = APP_SCRIPT.read_text(encoding="utf-8")
-        self.assertIn('OCR_HOME="$CONTENTS/OCR"', script)
-        self.assertIn('--destination "$OCR_HOME/HippocampusOCR"', script)
-        # Never back under Resources/, which is what triggers the notary flag.
-        self.assertNotIn("$RESOURCES/HippocampusOCR", script)
+        self.assertIn('--destination "$RESOURCES/HippocampusOCR"', script)
+        # The abandoned Contents/OCR/ location must be gone.
+        self.assertNotIn('OCR_HOME="$CONTENTS/OCR"', script)
+        self.assertNotIn('--destination "$OCR_HOME/HippocampusOCR"', script)
 
-    def test_build_app_gates_mach_o_out_of_resources(self):
+    def test_build_app_gates_structure(self):
         script = APP_SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("Mach-O binaries found under Contents/Resources/", script)
-        # The gate reads each file's Mach-O magic rather than trusting names.
+        # The gate requires the worker where the launcher and sweep look for it.
+        self.assertIn('OCR_WORKER="$RESOURCES/HippocampusOCR/hippocampus-ocr"', script)
+        # And it refuses stray Mach-O left loose in Resources/ OUTSIDE the worker
+        # tree, reading each file's Mach-O magic rather than trusting names.
+        self.assertIn('-not -path "$RESOURCES/HippocampusOCR/*"', script)
         for magic in ("feedfacf", "cffaedfe", "cefaedfe", "cafebabe"):
             self.assertIn(magic, script)
-        # And it requires the worker where the launcher and sweep look for it.
-        self.assertIn('OCR_WORKER="$OCR_HOME/HippocampusOCR/hippocampus-ocr"', script)
 
     def test_launcher_and_sweep_agree_with_build_app(self):
         self.assertIn(self.WORKER_SUBPATH + "/hippocampus-ocr",
@@ -649,10 +658,10 @@ class OCRWorkerLayoutTests(unittest.TestCase):
                       self.SWEEP.read_text(encoding="utf-8"))
 
     def test_no_production_source_uses_a_rejected_location(self):
-        # Guard against the old location (Resources) and the tempting-but-broken
-        # "fix" of a code location (Helpers). Tokens are split so this assertion
-        # never matches itself.
-        rejected = ["Resources/" + "HippocampusOCR", "Helpers/" + "HippocampusOCR"]
+        # Guard against the abandoned Contents/OCR/ location and the tempting-
+        # but-broken "fix" of a code location (Helpers). Tokens are split so this
+        # assertion never matches itself.
+        rejected = ["OCR/" + "HippocampusOCR", "Helpers/" + "HippocampusOCR"]
         for path in (APP_SCRIPT, self.PADDLE, self.SWEEP,
                      ROOT / "NOTICE", ROOT / "ARCHITECTURE.md"):
             text = path.read_text(encoding="utf-8")
@@ -687,28 +696,33 @@ class OCRWorkerLayoutTests(unittest.TestCase):
                             str(target)], check=True, capture_output=True)
         return app
 
-    def _incorrect_bundle_structure_findings(self, app):
+    def _notary_submission_findings(self, app):
         proc = subprocess.run(["/usr/bin/syspolicy_check", "notary-submission", "--json", str(app)],
                               capture_output=True, text=True)
         try:
-            findings = json.loads(proc.stdout or "{}").get("output") or []
+            return json.loads(proc.stdout or "{}").get("output") or []
         except ValueError:
             self.skipTest("syspolicy_check did not return JSON on this host")
-        return [f for f in findings if f.get("SyspolicyCheckShortError") == "Incorrect Bundle Structure"]
 
     @unittest.skipUnless(os.path.exists("/usr/bin/syspolicy_check"),
                          "syspolicy_check (macOS 15+) is not available")
-    def test_syspolicy_flags_resources_but_accepts_contents_ocr(self):
-        # Negative control: a Mach-O under Resources/ must be flagged.
+    def test_syspolicy_reports_resources_worker_as_an_advisory_warning(self):
+        # Option B's contract: a Mach-O under Contents/Resources/ is reported by
+        # the notary pre-check as "Incorrect Bundle Structure" — but at WARNING
+        # level, never an error. verify-release-app.sh tolerates a warning-only
+        # notary-submission result (scripts/test-verify-release-app.sh covers
+        # that), so the release dry run completes. The probe is ad-hoc signed so
+        # it runs anywhere; an ad-hoc app also carries an "Adhoc Signed App"
+        # warning, which is why this asserts on levels, not on finding count.
         with tempfile.TemporaryDirectory(prefix="ocr-layout-res-") as temporary:
             app = self._make_signed_probe_app(Path(temporary), "Resources")
-            self.assertTrue(self._incorrect_bundle_structure_findings(app),
-                            "syspolicy_check must flag a Mach-O under Resources/")
-        # The real location: a Mach-O under Contents/OCR/ must be clean.
-        with tempfile.TemporaryDirectory(prefix="ocr-layout-ocr-") as temporary:
-            app = self._make_signed_probe_app(Path(temporary), "OCR")
-            self.assertEqual(self._incorrect_bundle_structure_findings(app), [],
-                             "syspolicy_check must accept a Mach-O under Contents/OCR/")
+            findings = self._notary_submission_findings(app)
+            shorts = [f.get("SyspolicyCheckShortError") for f in findings]
+            self.assertIn("Incorrect Bundle Structure", shorts,
+                          "a Mach-O under Resources/ must be flagged as Incorrect Bundle Structure")
+            levels = {f.get("SyspolicyCheckErrorLevel") for f in findings}
+            self.assertEqual(levels, {"Warning"},
+                             f"every Resources-layout notary-submission finding must be an advisory Warning, got {sorted(levels)}")
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ Hippocampus.app holds eight programs. The menu-bar app starts the capture helper
 | --- | --- | --- |
 | `Hippocampus` | Swift, [`apps/hippocampus`](apps/hippocampus) | The menu bar, Ask, Preferences and the updater. Starts the helper and the agent, and stops everything it started on Quit. |
 | `MCICaptureHelper` | Swift, [`adapters/macos/MCICaptureHelper`](adapters/macos/MCICaptureHelper) | Captures the screen with ScreenCaptureKit, decides what may be read, has it read, and sends the text to the agent. Keeps screenshots of the window in front, encrypted. |
-| `hippocampus-ocr` | Python, frozen, [`tools/ocr`](tools/ocr) | The text reader: RapidOCR with the PaddleOCR PP-OCRv6 small models on ONNX Runtime. A warm child of the helper, in `Contents/OCR/HippocampusOCR`. |
+| `hippocampus-ocr` | Python, frozen, [`tools/ocr`](tools/ocr) | The text reader: RapidOCR with the PaddleOCR PP-OCRv6 small models on ONNX Runtime. A warm child of the helper, in `Contents/Resources/HippocampusOCR`. |
 | `mci-agent` | Rust, [`apps/agent`](apps/agent) | Owns the memory. Stores what the helper sends, builds search data, works out sessions and what it learns about the person, deletes what is past its keep date, and serves memory to AI tools (`mci-agent mcp-serve`). |
 | `hippocampus-mind` | Swift, [`apps/mind`](apps/mind) | Writes answers, session notes, the day's summary and what is learned, with Apple Intelligence or a model server on the Mac. A child of the agent; it gets only `PATH` and `HOME`. |
 | `recall-ui` | Swift, [`apps/recall-ui`](apps/recall-ui) | The window: Overview, Ask with its History, You, and the privacy window. Reads memory through [`mci-brain-ffi`](adapters/macos/mci-brain-ffi). |

@@ -12,7 +12,7 @@
 // - Only this user's processes, and only from inside a `.app` bundle: a
 //   development build's helper may be run by hand.
 // - Real paths on both sides. The helper matches its exact path; an OCR
-//   worker matches anything under `Contents/OCR/HippocampusOCR/`.
+//   worker matches anything under `Contents/Resources/HippocampusOCR/`.
 // - `mci-agent` is never touched, except an orphaned writer
 //   (`--drain-stdin` with parent 1), which holds the memory's writer lock
 //   while it drains: wait for it to exit, then SIGTERM. Never SIGKILL a
@@ -64,7 +64,7 @@ public struct CaptureOrphanSweep: CaptureOrphanSweeping {
                   let bundle = CaptureOrphanSweep.realPath(bundleURL.path)
             else { return nil }
             helper = bundle + "/Contents/MacOS/MCICaptureHelper"
-            ocrDirectory = bundle + "/Contents/OCR/HippocampusOCR/"
+            ocrDirectory = bundle + "/Contents/Resources/HippocampusOCR/"
             agent = bundle + "/Contents/MacOS/mci-agent"
         }
     }
