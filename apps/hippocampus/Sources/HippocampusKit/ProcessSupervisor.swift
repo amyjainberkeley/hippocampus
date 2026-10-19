@@ -272,6 +272,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private var mayHoldCaptureHelper = false
     /// The launch's orphan sweep is still ending what an earlier run left.
     private var launchSweepRunning = false
+    /// `start()` has asked for a start that has not begun yet.
+    private var startPending = false
     private var captureStopLatched = false
     private var captureStopTask: Task<Void, Error>?
     private var shutdownTask: Task<Void, Error>?
@@ -469,9 +471,16 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
               !shutdownRequested, shutdownTask == nil, !state.isActive, state != .starting else {
             return
         }
+        // One start at a time: opening the app twice, or opening it and
+        // pressing Turn On, asks twice before the first has run. Cancelling
+        // it made it fail with CancellationError, a crash that on a first
+        // run ended the window request and showed Preferences instead.
+        guard !startPending else { return }
         cancelPendingRetry()
+        startPending = true
         retryTask = Task { @MainActor [weak self] in
             guard let self else { return }
+            self.startPending = false
             do {
                 try await self.startAndWaitForReadiness()
             } catch {

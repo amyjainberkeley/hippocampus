@@ -381,6 +381,29 @@ final class SupervisorWindowOpeningTests: XCTestCase {
         try await h.supervisor.shutdownAndWait()
     }
 
+    /// Opening the app twice quickly, or opening it and pressing Turn On,
+    /// asks to start twice before the first start has run. The second
+    /// cancelled the first, which then failed with CancellationError: a
+    /// brief crash that, on a first run, ended the window request as a
+    /// failed start and showed Preferences instead.
+    func test_two_starts_in_a_row_start_once_and_keep_the_window_request() async throws {
+        let h = try make(captureEnabled: true, memoryOnDisk: false)
+        var blocked = 0
+        h.supervisor.onPresentationBlocked = { blocked += 1 }
+        h.supervisor.openRecallWhenReady(initialLaunch: true)
+
+        h.supervisor.reopenWindow()
+        h.supervisor.turnOn()
+
+        await eventually { h.supervisor.state == .running }
+        XCTAssertEqual(h.supervisor.state, .running)
+        XCTAssertEqual(blocked, 0)
+        XCTAssertEqual(h.topology.launchPlans.count, 1)
+        let places = await opened(h.windows)
+        XCTAssertEqual(places, ["overview"])
+        try await h.supervisor.shutdownAndWait()
+    }
+
     // MARK: The launch's orphan sweep
 
     /// The launch sweep can wait up to 15 s for an orphaned writer. Opening
