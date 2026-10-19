@@ -349,6 +349,10 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// internal accessor without exporting the enum outside the kit.
     private var revokedSurfaces: Set<TCCSurface> = []
 
+    /// Whole-screen reading, which starts, pauses and resumes with this
+    /// session's permission pause. Guarded by `lock`.
+    private var permissionGatedCapture: (any PermissionGatedCapture)?
+
     public init(
         pipeline: SCStreamPipeline,
         denylist: Denylist,
@@ -501,6 +505,20 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         storeIncludeListSize(initialIncludeListSize)
         startRebindTaskIfNeeded()
         startMeasuredActivityIfNeeded()
+        // Every permission was on and the focused stream is up: whole-screen
+        // reading may start. A start paused on a permission returned above.
+        gatedCapture()?.start()
+    }
+
+    /// Hands over reading that must follow this session's permission pause
+    /// (whole-screen reading). Call before `start()`: it starts once this
+    /// session's stream is up, never while a permission is off.
+    public func attachPermissionGatedCapture(_ capture: any PermissionGatedCapture) {
+        lock.withLock { permissionGatedCapture = capture }
+    }
+
+    private func gatedCapture() -> (any PermissionGatedCapture)? {
+        lock.withLock { permissionGatedCapture }
     }
 
     /// Stop the live capture stream (idempotent).
@@ -1351,6 +1369,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
 
         guard !wasPaused else { return }
 
+        // Whole-screen reading pauses with the focused stream.
+        await gatedCapture()?.pause()
+
         let activity = cancelMeasuredActivity()
         await activity?.value
 
@@ -1403,6 +1424,7 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
             try await bringUpSCStreamOnly(lifecycleEpoch: lifecycleEpoch)
             startRebindTaskIfNeeded()
             startMeasuredActivityIfNeeded()
+            gatedCapture()?.start()
         } catch {
             if isShutdownRequested() { return }
             // The OS hasn't caught up on the grant yet — go back to
@@ -1434,8 +1456,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     }
 
     /// The permissions this session is paused on, by surface name, for the
-    /// readiness receipt: the app must not take a turn-on for done while
-    /// one is off. Content-free, as the stderr breadcrumbs.
+    /// readiness receipt: the app must not take a start for done while one
+    /// is off. While any is, the whole helper reads nothing, whole-screen
+    /// reading included. Content-free, as the stderr breadcrumbs.
     public func permissionsOff() -> [String] {
         lock.lock(); defer { lock.unlock() }
         return revokedSurfaces.map(\.rawValue).sorted()

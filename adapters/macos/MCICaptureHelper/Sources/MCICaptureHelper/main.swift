@@ -657,6 +657,14 @@ if let captureRuntime {
     captureRuntime.contactsAttribution.start()
     captureRuntime.contextProvider.start()
 
+    // Whole-screen reading follows the session's permission pause: the
+    // session starts it once its own stream is up, never while a permission
+    // is off, and pauses and resumes it with that permission. So the
+    // readiness receipt's "paused on" holds for the whole helper.
+    if let background = captureRuntime.background {
+        captureRuntime.session.attachPermissionGatedCapture(background)
+    }
+
     // Synchronous `start()` inline — no `Task.detached`. The session
     // is retained by the top-level `captureSession` binding for the
     // process lifetime, so SCStream's weak delegate/output refs to
@@ -671,13 +679,12 @@ if let captureRuntime {
         HelperExit.runBeforeExit()
         exit(79)
     }
-    captureRuntime.background?.start()
 }
 
 do {
     // The permissions this generation found off as it started go in the
-    // receipt: until they are allowed it is paused on them, and would start
-    // reading by itself after, so the app must not take a turn-on for done.
+    // receipt: until they are allowed it reads nothing (whole-screen reading
+    // included), and the app must not take the start for done.
     try readiness?.publish(permissionsOff: captureRuntime?.session.permissionsOff() ?? [])
 } catch {
     FileHandle.standardError.write(

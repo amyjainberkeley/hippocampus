@@ -14,7 +14,9 @@ import ScreenCaptureKit
 /// dropped after recognition. A display is read at most every `minimumReadInterval`,
 /// only when its text visibly changed, never while secure text entry is
 /// active, and not while the user is idle. No screenshot is kept.
-public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate, PermissionGatedCapture,
+    @unchecked Sendable
+{
     public static let minimumReadInterval: TimeInterval = 15
     static let frameIntervalSeconds: Int64 = 2
     static let idleAfterSeconds: TimeInterval = 60
@@ -55,6 +57,10 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
     private var lastSentText: [CGWindowID: Int] = [:]
     private var watcher: Task<Void, Never>?
     private var stopped = false
+    /// Between `start()` and `pause()` or `stop()`. Whole-screen reading
+    /// follows the focused session's permission pause, so it is started and
+    /// paused by that session (`PermissionGatedCapture`), never by main.
+    private var reading = false
 
     public init(
         emitter: CascadeTwiceOCREmitter,
@@ -78,31 +84,58 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
 
     /// Starts a stream per display and keeps the set current as displays come
     /// and go. Failures are reported and retried; the focused stream is never
-    /// affected.
+    /// affected. A no-op while it reads, and after `stop()`.
     public func start() {
-        watcher = Task { [weak self] in
-            while let self, !Task.isCancelled {
+        let begins: Bool = lock.withLock {
+            guard !stopped, !reading else { return false }
+            reading = true
+            return true
+        }
+        guard begins else { return }
+        let task = Task { [weak self] in
+            while let self, !Task.isCancelled, self.isReading {
                 await self.reconcileDisplays()
                 try? await Task.sleep(for: .seconds(60))
             }
         }
+        lock.withLock { watcher = task }
+    }
+
+    /// Stops every display stream until `start()` again: a permission the
+    /// focused session needs went off.
+    public func pause() async {
+        await endReading(stopping: false)
     }
 
     public func stop() async {
-        let current: [SCStream] = lock.withLock {
-            stopped = true
-            defer { streams.removeAll(); entries.removeAll() }
-            return Array(streams.values)
+        await endReading(stopping: true)
+    }
+
+    private var isReading: Bool { lock.withLock { reading && !stopped } }
+
+    private func endReading(stopping: Bool) async {
+        let (current, task): ([SCStream], Task<Void, Never>?) = lock.withLock {
+            if stopping { stopped = true }
+            reading = false
+            defer {
+                streams.removeAll()
+                entries.removeAll()
+                lastRead.removeAll()
+                watcher = nil
+            }
+            return (Array(streams.values), watcher)
         }
-        watcher?.cancel()
+        task?.cancel()
         for stream in current { try? await stream.stopCapture() }
     }
 
     private func reconcileDisplays() async {
-        guard let content = try? await SCShareableContent.current else { return }
+        guard isReading, let content = try? await SCShareableContent.current else { return }
         let wanted = Dictionary(uniqueKeysWithValues: content.displays.map { ($0.displayID, $0) })
-        let (running, isStopped): (Set<CGDirectDisplayID>, Bool) = lock.withLock { (Set(streams.keys), stopped) }
-        guard !isStopped else { return }
+        let (running, active): (Set<CGDirectDisplayID>, Bool) = lock.withLock {
+            (Set(streams.keys), reading && !stopped)
+        }
+        guard active else { return }
         for id in running.subtracting(wanted.keys) {
             let gone: SCStream? = lock.withLock { streams.removeValue(forKey: id) }
             if let gone { try? await gone.stopCapture() }
@@ -120,7 +153,7 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
                 continue
             }
             let keep = lock.withLock { () -> Bool in
-                guard !stopped else { return false }
+                guard reading, !stopped else { return false }
                 streams[id] = stream
                 entries[ObjectIdentifier(stream)] = Entry(
                     id: id, bounds: display.frame, filteredPids: Set(excludedApps.map(\.processID)))

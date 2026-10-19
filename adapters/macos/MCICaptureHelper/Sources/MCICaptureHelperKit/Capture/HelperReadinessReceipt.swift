@@ -26,10 +26,12 @@ public struct HelperReadinessReceipt: Sendable, Equatable {
     public let generation: String
     public let captureEnabled: Bool
     /// The permissions macOS had off as this generation started, by surface
-    /// name ("screenRecording", "accessibility"). The session is paused on
-    /// them and starts reading by itself once they are allowed, so the app
-    /// does not take a turn-on for done while one is off. Content-free, like
-    /// the `helper_health tcc_revoked=` breadcrumbs; empty without capture.
+    /// name ("screenRecording", "accessibility"). While one is off the whole
+    /// helper reads nothing: the focused session and whole-screen reading are
+    /// paused on it. Accessibility can come back by itself; Screen Recording
+    /// usually cannot, since this process's own answer stays "no". So the app
+    /// never takes a start for done while one is off. Content-free, like the
+    /// `helper_health tcc_revoked=` breadcrumbs; empty without capture.
     public let permissionsOff: [String]
 
     private struct Payload: Codable {

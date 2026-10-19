@@ -277,6 +277,21 @@ final class MainSwiftWiringTests: XCTestCase {
         }
     }
 
+    /// Whole-screen reading starts and pauses with the focused session, so
+    /// "paused on a permission" holds for the whole helper: it is handed to
+    /// the session before the session starts, and main never starts it.
+    func test_main_swift_starts_whole_screen_reading_only_through_the_session() throws {
+        let src = try Self.readMainSwift()
+
+        let attach = try XCTUnwrap(
+            src.range(of: "captureRuntime.session.attachPermissionGatedCapture(background)"),
+            "main.swift must hand whole-screen reading to the capture session"
+        )
+        let start = try XCTUnwrap(src.range(of: "try await captureSession.start()"))
+        XCTAssertLessThan(attach.lowerBound, start.lowerBound)
+        XCTAssertFalse(src.contains("background?.start()"), "nothing but the session starts whole-screen reading")
+    }
+
     func test_main_swift_wires_tcc_monitor_into_capture_session() throws {
         let src = try Self.readMainSwift()
 
