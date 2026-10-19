@@ -1701,6 +1701,73 @@ final class ProcessSupervisorTests: XCTestCase {
         XCTAssertEqual(environment["UNRELATED"], "kept")
         XCTAssertNil(environment["MCI_DB_KEY_HEX"])
     }
+
+    /// Setup shown again (Show Setup, Never Read, Choose Apps, a link) is
+    /// told whether remembering is on, paused or off, which its Try it reads
+    /// in review; without it Try it took remembering as on, read nothing,
+    /// stalled and offered a Try Again the app then dropped or refused.
+    func test_setup_is_told_whether_remembering_is_on_paused_or_off() async throws {
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("setup-env-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let told = scratch.appendingPathComponent("told")
+        let script = scratch.appendingPathComponent("onboarding")
+        try "#!/bin/sh\nprintf '%s\\n' \"$MCI_ONBOARDING_REMEMBERING\" >> '\(told.path)'\n"
+            .write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        func setupWasTold(_ count: Int) async -> [String] {
+            let deadline = Date().addingTimeInterval(5)
+            var lines: [String] = []
+            repeat {
+                lines = ((try? String(contentsOf: told, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+                if lines.count >= count { break }
+                try? await Task.sleep(for: .milliseconds(20))
+            } while Date() < deadline
+            return lines
+        }
+
+        let (supervisor, locator, _, _, _, _) = makeSupervisor(captureEnabled: true)
+        locator.onboardingURL = script
+        try await supervisor.startAndWaitForReadiness()
+        XCTAssertTrue(supervisor.openOnboarding())
+        let afterOn = await setupWasTold(1)
+        XCTAssertEqual(afterOn, ["on"])
+
+        try await supervisor.setPausedAndWait(true)
+        XCTAssertTrue(supervisor.openOnboarding())
+        let afterPause = await setupWasTold(2)
+        XCTAssertEqual(afterPause, ["on", "paused"])
+
+        try await supervisor.applyCaptureEnabled(false)
+        XCTAssertTrue(supervisor.openOnboarding())
+        let afterOff = await setupWasTold(3)
+        XCTAssertEqual(afterOff, ["on", "paused", "off"])
+        await supervisor.stopWindowsForQuit(timeout: 1)
+    }
+
+    /// The words are the ones setup reads (OnboardingKit's RememberingState).
+    func test_the_remembering_words_are_the_ones_setup_reads() throws {
+        let onboarding = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("../onboarding/Sources/OnboardingKit/TryItViewModel.swift").standardizedFileURL,
+            encoding: .utf8
+        )
+        XCTAssertTrue(onboarding.contains("public static let environmentKey = \"\(SetupRemembering.environmentKey)\""))
+        let start = try XCTUnwrap(onboarding.range(of: "public enum RememberingState: String, Sendable, Equatable {"))
+        let cases = onboarding[start.upperBound...]
+            .split(separator: "\n").prefix(while: { !$0.contains("environmentKey") })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.hasPrefix("case ") }
+            .map { String($0.dropFirst("case ".count)) }
+        XCTAssertEqual(cases, SetupRemembering.allCases.map(\.rawValue))
+        // A value inherited from the app's own environment never reaches setup.
+        let environment = ProcessSupervisorLaunchPlan.onboardingEnvironment(
+            baseEnvironment: [SetupRemembering.environmentKey: "on"], dbPath: URL(fileURLWithPath: "/tmp/mci.sqlite"),
+            keyReference: .defaultDatabaseKey, initialStep: nil, remembering: nil
+        )
+        XCTAssertNil(environment[SetupRemembering.environmentKey])
+    }
 }
 
 @MainActor

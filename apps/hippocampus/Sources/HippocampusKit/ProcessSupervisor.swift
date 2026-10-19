@@ -35,7 +35,8 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
         dbPath: URL,
         keyReference: KeychainKeyReference,
         developmentKeyMode: DevelopmentFileKeyMode? = nil,
-        initialStep: String?
+        initialStep: String?,
+        remembering: SetupRemembering? = nil
     ) -> [String: String] {
         var environment = sanitizedEnvironment(
             baseEnvironment: baseEnvironment,
@@ -48,6 +49,7 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
         } else {
             environment.removeValue(forKey: "MCI_ONBOARDING_STEP")
         }
+        environment[SetupRemembering.environmentKey] = remembering?.rawValue
         return environment
     }
 
@@ -135,6 +137,19 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
             agentEnvironment: agentEnvironment
         )
     }
+}
+
+/// Whether remembering is on, paused or off, as setup is told when the app
+/// opens it (`MCI_ONBOARDING_REMEMBERING`, OnboardingKit's
+/// `RememberingState`). Setup shown again reads it on Try it: off or paused
+/// says so and how to turn it on, instead of reading nothing and stalling. A
+/// first run ignores it, since consent in that run turns remembering on.
+public enum SetupRemembering: String, CaseIterable, Sendable {
+    case on
+    case paused
+    case off
+
+    public static let environmentKey = "MCI_ONBOARDING_REMEMBERING"
 }
 
 /// Requests the app writes on the capture helper's lease, its standard
@@ -1829,6 +1844,14 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         self.recallProcess = nil
     }
 
+    /// What setup is told about remembering when it opens: paused for a
+    /// kept pause, off when the setting is off and no turn-on is under way,
+    /// otherwise on.
+    var rememberingForSetup: SetupRemembering {
+        if requestedPauseState || state == .paused { return .paused }
+        return captureEnabled || turningOn ? .on : .off
+    }
+
     public func openOnboarding(initialStep: String? = nil) -> Bool {
         guard let path = locator.onboardingPath() else { return false }
         let task = ChildProcessEnvironment.makeProcess(
@@ -1837,7 +1860,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 dbPath: dbPath,
                 keyReference: currentKeyReference,
                 developmentKeyMode: developmentKeyMode,
-                initialStep: initialStep
+                initialStep: initialStep,
+                remembering: rememberingForSetup
             )
         )
         task.executableURL = path
