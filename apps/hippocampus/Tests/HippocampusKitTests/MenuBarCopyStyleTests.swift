@@ -44,7 +44,7 @@ final class MenuBarCopyStyleTests: XCTestCase {
             .blocked(reason: "storage_error"), .blocked(reason: "helper_disconnected"),
             .blocked(reason: "capture_failed"), .blocked(reason: "capture_disabled"),
             .blocked(reason: "a-future-code"), .stale(reason: "x"), .error(reason: "x"),
-            .stopFailed(reason: "x"),
+            .stopFailed(reason: "x"), .turnOnFailed(reason: "x"),
         ]
         for status in statuses {
             out.append(("displayText(\(status))", status.displayText))
@@ -105,6 +105,8 @@ final class MenuBarCopyStyleTests: XCTestCase {
         XCTAssertTrue(titles.contains("Open Hippocampus"))
         XCTAssertTrue(titles.contains("Quit Hippocampus"))
         XCTAssertTrue(titles.contains("This is a private window."))
+        XCTAssertTrue(titles.contains("Couldn’t turn on"))
+        XCTAssertTrue(titles.contains("It didn’t start, so remembering is still off."))
         XCTAssertGreaterThan(menuStrings.count, 30)
     }
 }

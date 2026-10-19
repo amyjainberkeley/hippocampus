@@ -165,13 +165,31 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     @Published public private(set) var health: HealthSnapshot?
     @Published public private(set) var captureReceipt: CaptureStatusReceipt?
     public private(set) var captureStartedAt: Date?
-    /// The person asked it to stop, pause or turn off, and that failed, so it
-    /// may still be reading the screen. Cleared by the next committed
-    /// transition (product critique 3, RULINGS S10).
+    /// The person asked it to stop, pause or turn off, or a turn-on that
+    /// failed could not stop what it started, so it may still be reading the
+    /// screen. Cleared by the next committed transition (product critique 3,
+    /// RULINGS S10).
     @Published public private(set) var stopFailed = false
     /// When the person pressed macOS's Stop Sharing; nil once remembering is
     /// turned back on. Kept across launches (spec-shell S5).
     @Published public private(set) var stoppedSharingAt: Date?
+    /// Why the last Turn On did not take, while remembering stays off, so the
+    /// status says so instead of a silent "Off". Cleared by the next Turn On,
+    /// a turn-off or Quit.
+    @Published public private(set) var turnOnFailure: TurnOnFailure?
+    /// Turn On was pressed and has not landed; it may be waiting out a change
+    /// under way, since a press is never dropped.
+    @Published private var pendingTurnOn: UUID?
+    /// The turn-on under way, from taking the transition gate to its commit
+    /// or failure.
+    @Published private var enablingAttempt: UUID?
+    private var turnOnAttempts = 0
+    /// Pause presses, so a turn-on a pause stopped is not called a failure.
+    private var pauseRequests = 0
+    private var pauseRequestsAtAttempt = 0
+
+    /// A turn-on is under way: pressed or switching on, and not landed yet.
+    public var turningOn: Bool { pendingTurnOn != nil || enablingAttempt != nil }
     /// Called when the window was asked for and a failed start ended the
     /// request: the app shows Preferences, where the reason and the fix are
     /// (spec-shell S5, D9).
@@ -183,6 +201,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             tccRevokedSurface: tccRevokedSurface, receipt: captureReceipt,
             helperHealth: health, captureStartedAt: captureStartedAt,
             stopFailed: stopFailed, stopping: captureStopTask != nil,
+            turningOn: turningOn, turnOnFailure: turnOnFailure,
             skipSeenSince: skipWatch.since, now: clock()
         )
     }
@@ -486,6 +505,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// Stop helper and agent completely before publishing `.stopped`.
     /// Concurrent callers await the same shutdown operation.
     public func shutdownAndWait(timeout: TimeInterval = 2) async throws {
+        supersedeTurnOn()
         if let shutdownTask {
             try await shutdownTask.value
             return
@@ -522,6 +542,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// `.stopped`. Only `ApplicationTerminationCoordinator` calls this, and
     /// only for a quit; a restart still requires the verified stop.
     public func forceStopForQuit(timeout: TimeInterval) async {
+        supersedeTurnOn()
         shutdownRequested = true
         cancelPendingRetry()
         transitionGate.reset()
@@ -554,6 +575,13 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// Pause or resume. The pause and its time are kept, so it outlives a
     /// relaunch (spec-shell S5).
     public func setPaused(_ paused: Bool) {
+        if paused {
+            // The newer word: a press still waiting is dropped. A turn-on
+            // already starting lands unless the pause stops it, and one the
+            // pause stopped says nothing about failing.
+            pendingTurnOn = nil
+            pauseRequests += 1
+        }
         pauses.setPaused(paused)
         requestedPauseState = paused
         guard !shutdownRequested, shutdownTask == nil else { return }
@@ -684,6 +712,21 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             throw SupervisorError.transitionInProgress
         }
         defer { inFlightTransitions.remove(transitionID) }
+        let attempt = beginTurnOnAttempt()
+        defer { endTurnOnAttempt(attempt) }
+        do {
+            try await turnCaptureOn(transitionID: transitionID)
+        } catch {
+            noteTurnOnFailure(error, attempt: attempt)
+            throw error
+        }
+    }
+
+    /// The verified change to on: stop what runs, start and verify the
+    /// capture generation, save the setting, commit. On failure the prior
+    /// topology is restarted and verified before the error is rethrown, so
+    /// remembering stays off.
+    private func turnCaptureOn(transitionID: UUID) async throws {
         let prior = captureEnabled
 
         do {
@@ -699,22 +742,22 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
         do {
             let generationID = try await startTopology(
-                captureEnabled: enabled,
+                captureEnabled: true,
                 transitionID: transitionID
             )
             try ensureTransitionIsActive(transitionID)
             try prepareCaptureBoundary(
-                captureEnabled: enabled,
+                captureEnabled: true,
                 generationID: generationID
             )
-            try runtimeConfig.setCaptureEnabled(enabled)
+            try runtimeConfig.setCaptureEnabled(true)
             guard transitionGate.commit(
                 generationID: generationID,
                 transitionID: transitionID
             ) else {
                 throw SupervisorError.transitionInProgress
             }
-            captureEnabled = enabled
+            captureEnabled = true
             captureStopLatched = false
             // Turned back on: the Stop Sharing note and any pause are over
             // (spec-shell S5, D10).
@@ -722,16 +765,20 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             captureStopNote.clear()
             requestedPauseState = false
             pauses.setPaused(false)
-            activateTopology(captureEnabled: enabled, generationID: generationID)
+            activateTopology(captureEnabled: true, generationID: generationID)
         } catch {
             let requestedError = error
             guard transitionGate.ownsTransition(transitionID) else {
-                await stopUncommittedTopologyIfNeeded()
+                await stopUncommittedTurnOn()
                 throw requestedError
             }
+            // What the failed start launched may still be reading until it
+            // is stopped (RULINGS B1).
+            var launchedTopologyStopped = !topology.isRunning
             do {
                 if topology.isRunning {
                     try await topology.stop(timeout: 5)
+                    launchedTopologyStopped = true
                     try ensureTransitionIsActive(transitionID)
                 }
                 stopAncillaryServices()
@@ -756,6 +803,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 if transitionGate.ownsTransition(transitionID) {
                     transitionGate.fail(transitionID: transitionID)
                     captureEnabled = prior
+                    // A capture helper that would not stop may still be
+                    // reading: say "Couldn’t stop", never Off (RULINGS B1).
+                    if !launchedTopologyStopped
+                        || (error as? SupervisorProcessRuntimeError) == .partialStop {
+                        stopFailed = true
+                    }
                     state = .crashed(
                         reason: "Capture change failed and prior topology could not be restored: \(error.localizedDescription)"
                     )
@@ -765,6 +818,121 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             }
             throw requestedError
         }
+    }
+
+    // MARK: - Turning on (never a silent Off)
+
+    /// Turn On, from the menu, Ask's footer or Preferences' status row. A
+    /// press during another change (a start, a stop, a pause) waits for it
+    /// and is never dropped. Starting… shows until remembering is on; if it
+    /// cannot turn on, the status says why while remembering stays off: a
+    /// permission macOS has off, with Open System Settings…, or that it
+    /// didn't start, with Try Again.
+    public func turnOn() {
+        guard !shutdownRequested, shutdownTask == nil else { return }
+        if captureEnabled {
+            // On but not running: start it. Turning on ends a pause
+            // (spec-shell S5).
+            setPaused(false)
+            start()
+            return
+        }
+        // A new press is a new try: Starting…, not the old reason.
+        turnOnFailure = nil
+        guard pendingTurnOn == nil else { return }
+        let press = UUID()
+        pendingTurnOn = press
+        Task { @MainActor [weak self] in await self?.carryOutTurnOn(press) }
+    }
+
+    /// How long a press waits for a change under way before saying it
+    /// couldn't turn on. Every start and stop is bounded well inside it.
+    private static let turnOnWait: Duration = .seconds(60)
+
+    private func carryOutTurnOn(_ press: UUID) async {
+        defer { if pendingTurnOn == press { pendingTurnOn = nil } }
+        let giveUpAt = recoveryNow().advanced(by: Self.turnOnWait)
+        while pendingTurnOn == press, !captureEnabled, !shutdownRequested, shutdownTask == nil {
+            if !changeUnderWay {
+                let tried = turnOnAttempts
+                do {
+                    try await applyCaptureEnabled(true)
+                    return
+                } catch {
+                    // An attempt that ran has said why it failed, or was
+                    // overtaken by a turn-off, a pause or Quit.
+                    if turnOnAttempts != tried { return }
+                    // None ran: another change took the gate first.
+                }
+            }
+            guard recoveryNow() < giveUpAt else {
+                guard pendingTurnOn == press, !captureEnabled else { return }
+                logger.error("supervisor: Turn On waited too long for another change to finish")
+                turnOnFailure = .didNotStart(reason: SupervisorError.transitionInProgress.localizedDescription)
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+    }
+
+    /// A start, a stop, a pause or a capture change holds the transition gate.
+    private var changeUnderWay: Bool {
+        !inFlightTransitions.isEmpty || captureStopTask != nil || pauseTask != nil
+    }
+
+    private func beginTurnOnAttempt() -> UUID {
+        let attempt = UUID()
+        turnOnAttempts += 1
+        pauseRequestsAtAttempt = pauseRequests
+        enablingAttempt = attempt
+        turnOnFailure = nil
+        // Nothing reports permissions while remembering is off, so one an
+        // earlier run reported off cannot be told current. The fresh helper
+        // this attempt starts reports it again if it still is, as for Try
+        // Again (critique-shell-engineering 6).
+        tccRevokedSurface = nil
+        return attempt
+    }
+
+    private func endTurnOnAttempt(_ attempt: UUID) {
+        if enablingAttempt == attempt { enablingAttempt = nil }
+    }
+
+    /// Why a turn-on did not take, kept while remembering stays off, unless
+    /// a turn-off, a pause or Quit overtook it.
+    private func noteTurnOnFailure(_ error: Error, attempt: UUID) {
+        guard enablingAttempt == attempt, !captureEnabled, !shutdownRequested,
+              pauseRequests == pauseRequestsAtAttempt else { return }
+        logger.error("supervisor: turning remembering on failed: \(error.localizedDescription)")
+        turnOnFailure = tccRevokedSurface.map(TurnOnFailure.permission)
+            ?? .didNotStart(reason: error.localizedDescription)
+    }
+
+    /// A turn-off or Quit is the newer word, and each stops what runs: a
+    /// turn-on waiting or under way ends without a reason to show, and an old
+    /// reason goes.
+    private func supersedeTurnOn() {
+        pendingTurnOn = nil
+        enablingAttempt = nil
+        turnOnFailure = nil
+    }
+
+    /// Stops what a turn-on launched and could not commit, unless a turn-off,
+    /// a pause or Quit under way owns the teardown. A latch left by an
+    /// earlier turn-off is not one: honoring it would leave a helper waiting
+    /// on a permission, to start reading on its own once it is allowed.
+    private func stopUncommittedTurnOn() async {
+        guard captureStopTask == nil, pauseTask == nil,
+              !shutdownRequested, shutdownTask == nil else { return }
+        if topology.isRunning {
+            do {
+                try await topology.stop(timeout: 2)
+            } catch {
+                // It would not stop, so it may still read (RULINGS B1).
+                stopFailed = true
+            }
+        }
+        stopAncillaryServices()
     }
 
     private func startTopology(
@@ -882,6 +1050,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// User intent is latched before any suspension. Persistence, consent and
     /// shutdown are all attempted independently; none can roll capture back on.
     private func requestCaptureStop() -> Task<Void, Error> {
+        supersedeTurnOn()
         if let captureStopTask { return captureStopTask }
         captureStopLatched = true
         captureEnabled = false
@@ -1064,8 +1233,15 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// While "Needs permission" shows after remembering stopped, nothing is
     /// left running to notice the permission coming back, so look again when
     /// the person may have changed it: when the menu opens or the app becomes
-    /// active (RULINGS S10).
+    /// active (RULINGS S10). After Turn On found a permission off, remembering
+    /// stayed off, so the look is Turn On again: a fresh helper is the only
+    /// reliable judge, since this process's own answer can stay "no" after
+    /// the person allows it.
     public func retryIfPermissionMayBeBack() {
+        if !captureEnabled, !stopFailed, case .permission = turnOnFailure {
+            turnOn()
+            return
+        }
         guard case .crashed = state, captureEnabled, tccRevokedSurface != nil, !stopFailed else { return }
         retryNow()
     }

@@ -795,6 +795,45 @@ final class ProcessSupervisorTests: XCTestCase {
         XCTAssertFalse(config.captureEnabled)
     }
 
+    /// A failed enable whose capture helper will not stop may still be
+    /// reading, so it says Couldn’t stop, never Off (RULINGS B1).
+    func test_failed_enable_whose_capture_helper_will_not_stop_says_couldnt_stop() async throws {
+        let (supervisor, _, _, config, topology, _) = makeSupervisor()
+        topology.readinessResults = [.success(()), .failure(TestError.timeout)]
+        try await supervisor.startAndWaitForReadiness()
+        // The off topology stops; the capture helper then will not, twice.
+        topology.stopResults = [.success(()), .failure(TestError.partialStop), .failure(TestError.partialStop)]
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.applyCaptureEnabled(true))
+
+        XCTAssertTrue(supervisor.stopFailed)
+        guard case .stopFailed = supervisor.menuBarStatus else {
+            return XCTFail("expected Couldn’t stop, got \(supervisor.menuBarStatus)")
+        }
+        XCTAssertEqual(supervisor.menuBarStatus.markState, .remembering)
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [])
+    }
+
+    /// After a turn-off, its latch kept cleanup away from a later enable that
+    /// a revoked permission stopped. Its helper, waiting on the permission,
+    /// would start reading on its own once the permission was allowed.
+    func test_enable_stopped_by_a_revocation_after_a_turn_off_leaves_no_helper_running() async throws {
+        let (supervisor, _, _, config, topology, _) = makeSupervisor(captureEnabled: true)
+        try await supervisor.startAndWaitForReadiness()
+        try await supervisor.applyCaptureEnabled(false)
+        topology.onReadinessWait = { [weak supervisor] plan in
+            if plan.helperArguments.contains("--capture") { supervisor?.tccRevokedSurface = .screenRecording }
+        }
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.applyCaptureEnabled(true))
+
+        XCTAssertFalse(topology.isRunning)
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [false])
+        try await supervisor.shutdownAndWait()
+    }
+
     func test_start_runs_shared_key_custody_before_launch() async throws {
         let (supervisor, _, _, _, topology, custody) = makeSupervisor()
         topology.readinessResults = [.success(())]

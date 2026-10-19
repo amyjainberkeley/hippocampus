@@ -59,6 +59,21 @@ final class StatusMenuModelTests: XCTestCase {
         XCTAssertEqual(titles(.noMemory), ["Nothing saved yet", "Pause"] + tail)
     }
 
+    /// While Turn On is under way nothing is on yet, so there is no Pause: it
+    /// lands, or says why not, by itself. A fix it found stays in reach.
+    func testWhileTurningOnStartingOffersNothingToPause() {
+        let row = StatusRow(StatusFacts(status: .starting, turningOn: true), now: now, calendar: calendar)
+        XCTAssertEqual(row.title, "Starting…")
+        XCTAssertNil(row.action)
+        XCTAssertEqual(
+            StatusMenuModel.items(row: row, setupComplete: true, askLabel: "⇧⇧", aiToolsConnected: false)
+                .map { $0.role == .separator ? "-" : $0.title },
+            ["Starting…"] + tail
+        )
+        let permission = StatusRow(StatusFacts(status: .needsPermission(.screenRecording), turningOn: true), now: now)
+        XCTAssertEqual(permission.action, .openSystemSettings(.screenRecording))
+    }
+
     func testSkippingSaysWhy() {
         XCTAssertEqual(titles(.skipping(reason: "private_browsing")),
                        ["Skipping this window", "This is a private window.", "Pause"] + tail)
@@ -111,6 +126,16 @@ final class StatusMenuModelTests: XCTestCase {
         XCTAssertEqual(items(.stopFailed(reason: "x"))[2].role, .action(.quit))
         XCTAssertEqual(MenuBarStatus.stopFailed(reason: "x").action, .quit,
                        "Ask's footer and Preferences offer Quit Hippocampus")
+    }
+
+    /// Turn On that did not take is never a silent "Off": it says so, says
+    /// remembering is still off, and offers Try Again.
+    func testACouldntTurnOnSaysItIsStillOffAndOffersTryAgain() {
+        XCTAssertEqual(titles(.turnOnFailed(reason: "Capture helper exited during startup (79).")),
+                       ["Couldn’t turn on", "It didn’t start, so remembering is still off.", "Try Again"] + tail)
+        XCTAssertEqual(items(.turnOnFailed(reason: "x"))[2].role, .action(.tryAgain))
+        XCTAssertFalse(titles(.turnOnFailed(reason: "x")).contains("Off"), "never reads as a plain Off")
+        XCTAssertFalse(titles(.turnOnFailed(reason: "exited (79)")).joined().contains("79"), "no raw error text")
     }
 
     /// Before setup, nothing turns remembering on and Ask is off in the menu
@@ -170,7 +195,7 @@ final class StatusMenuModelTests: XCTestCase {
         let statuses: [MenuBarStatus] = [
             .idle, .starting, .recording, .unchanged, .noMemory, .paused, .skipping(reason: "private_browsing"),
             .needsPermission(.screenRecording), .blocked(reason: "storage_error"), .stale(reason: "x"),
-            .error(reason: "x"), .stopFailed(reason: "x"),
+            .error(reason: "x"), .stopFailed(reason: "x"), .turnOnFailed(reason: "x"),
         ]
         for status in statuses {
             let row = StatusRow(StatusFacts(status: status), now: now, calendar: calendar)

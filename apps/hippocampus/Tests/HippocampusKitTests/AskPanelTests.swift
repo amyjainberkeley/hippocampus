@@ -790,6 +790,8 @@ final class AskPanelTests: XCTestCase {
             (.skipping(reason: "secure_input"), "Skipping this window", nil, .skipping),
             // It may still be reading, so the dot stays solid (RULINGS B1).
             (.stopFailed(reason: "x"), "Couldn’t stop", .quit, .remembering),
+            // Turn On did not take: Try Again turns it on (never a silent Off).
+            (.turnOnFailed(reason: "x"), "Couldn’t turn on", .tryAgain, .needsYou),
         ]
         for (status, text, action, mark) in expected {
             let footer = AskPanelStatus(status)
@@ -803,9 +805,10 @@ final class AskPanelTests: XCTestCase {
                 .map(\.title),
             ["Resume", "Turn On", "Open System Settings…", "Try Again", "Quit Hippocampus", "Finish Setup…"]
         )
-        // Nothing is read in this window while it is skipped or stopped.
+        // Nothing is read in this window while it is skipped, stopped or off.
         XCTAssertFalse(AskPanelStatus(.skipping(reason: "private_browsing")).readsThisWindow)
         XCTAssertFalse(AskPanelStatus(.stopFailed(reason: "x")).readsThisWindow)
+        XCTAssertFalse(AskPanelStatus(.turnOnFailed(reason: "x")).readsThisWindow)
     }
 
     /// Start Remembering in onboarding is the only consent, so before setup
@@ -814,7 +817,7 @@ final class AskPanelTests: XCTestCase {
         let statuses: [MenuBarStatus] = [
             .idle, .starting, .recording, .unchanged, .noMemory, .paused, .needsPermission(.screenRecording),
             .error(reason: "x"), .blocked(reason: "x"), .stale(reason: "x"), .skipping(reason: "secure_input"),
-            .stopFailed(reason: "x"),
+            .stopFailed(reason: "x"), .turnOnFailed(reason: "x"),
         ]
         for status in statuses {
             let closed = AskPanelStatus(status, setup: .notFinished)
