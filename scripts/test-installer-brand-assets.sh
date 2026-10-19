@@ -24,10 +24,12 @@ make_fixture() {
     mkdir -p "$fixture/scripts/lib" "$fixture/assets/branding" "$fixture/assets/installer" "$fixture/docs/legal"
     cp "$REPO_ROOT/scripts/build-installer.sh" "$fixture/scripts/build-installer.sh"
     cp "$REPO_ROOT/scripts/lib/app-group-contract.sh" "$REPO_ROOT/scripts/lib/installer-runtime.sh" "$fixture/scripts/lib/"
-    cp "$REPO_ROOT/scripts/build-provenance.py" "$REPO_ROOT/scripts/product-source-digest.py" "$fixture/scripts/"
+    cp "$REPO_ROOT/scripts/build-provenance.py" "$REPO_ROOT/scripts/product-source-digest.py" \
+        "$REPO_ROOT/scripts/check-notary-log.py" "$fixture/scripts/"
     cp "$REPO_ROOT/assets/installer/generate-eula.py" "$REPO_ROOT/assets/installer/EULA.rtf" "$fixture/assets/installer/"
     cp "$REPO_ROOT/assets/installer/generate-background.py" "$REPO_ROOT/assets/installer/render-background.swift" \
-        "$REPO_ROOT/assets/installer/read-background-text.swift" "$fixture/assets/installer/"
+        "$REPO_ROOT/assets/installer/read-background-text.swift" "$REPO_ROOT/assets/installer/layout.json" \
+        "$REPO_ROOT/assets/installer/render-legal-icon.swift" "$fixture/assets/installer/"
     cp "$REPO_ROOT/docs/legal/terms-of-service.md" "$fixture/docs/legal/"
     cp "$REPO_ROOT/assets/branding/AppIcon.icns" "$fixture/assets/branding/AppIcon.icns"
     cp "$REPO_ROOT/assets/installer/volume-icon.icns" "$fixture/assets/installer/volume-icon.icns"
@@ -58,7 +60,7 @@ fi
 # build number, commit or source digest. Apple's text recognition is the judge.
 noted_fixture="$TEST_ROOT/noted"
 make_fixture "$noted_fixture"
-sed -i '' 's|^guard let image = context.makeImage(),|text("Build 4270a3264f5d / source 0123456789ab", size: 11, baselineFromTop: 378, gray: 0.42)\
+sed -i '' 's|^guard let image = context.makeImage(),|text("Build 4270a3264f5d / source 0123456789ab", size: 11, color: graphite, centerX: width / 2, baselineFromTop: 300)\
 \
 guard let image = context.makeImage(),|' "$noted_fixture/assets/installer/render-background.swift"
 if "$noted_fixture/scripts/build-installer.sh" --verify-assets \
@@ -73,15 +75,31 @@ fi
 
 blank_fixture="$TEST_ROOT/blank"
 make_fixture "$blank_fixture"
-sed -i '' 's|^text("Drag Hippocampus to Applications.".*$|// instruction removed by the fixture|' \
+sed -i '' 's|^let dragCue = "Drag to Applications"$|let dragCue = ""|' \
     "$blank_fixture/assets/installer/render-background.swift"
-if "$blank_fixture/scripts/build-installer.sh" --verify-assets \
+if ! grep -Fxq 'let dragCue = ""' "$blank_fixture/assets/installer/render-background.swift"; then
+    fail "the fixture could not remove the instruction; the renderer changed shape"
+elif "$blank_fixture/scripts/build-installer.sh" --verify-assets \
     >"$blank_fixture/stdout" 2>"$blank_fixture/stderr"; then
     fail "a background missing its instruction should be rejected"
-elif grep -Fq 'does not read "Drag Hippocampus to Applications."' "$blank_fixture/stderr"; then
+elif grep -Fq 'does not read "Drag to Applications"' "$blank_fixture/stderr"; then
     pass "a background missing its instruction is rejected"
 else
     fail "a background missing its instruction failed without the expected diagnostic"
+fi
+
+# The Legal folder's icon is applied at build time; --verify-assets proves the
+# tool works before any signing starts.
+iconless_fixture="$TEST_ROOT/iconless"
+make_fixture "$iconless_fixture"
+rm "$iconless_fixture/assets/installer/render-legal-icon.swift"
+if "$iconless_fixture/scripts/build-installer.sh" --verify-assets \
+    >"$iconless_fixture/stdout" 2>"$iconless_fixture/stderr"; then
+    fail "a missing Legal folder icon tool should be rejected"
+elif grep -Fq 'Legal folder icon tool not found' "$iconless_fixture/stderr"; then
+    pass "a missing Legal folder icon tool is rejected"
+else
+    fail "a missing Legal folder icon tool failed without the expected diagnostic"
 fi
 
 printf '%s passed, %s failed\n' "$PASS_COUNT" "$FAIL_COUNT"

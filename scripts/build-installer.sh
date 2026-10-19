@@ -12,6 +12,8 @@ set -euo pipefail
 #   --development-ad-hoc  Allow unstable ad-hoc signing with --debug only
 #   --dist DIR      Output directory (default: dist/)
 #   --verify-assets Verify canonical installer brand assets and exit
+#   --preview DIR   Verify the assets, render the installer window for review
+#                   into DIR, and exit
 #   --dry-run       Sign the app and the DMG with Developer ID, but send nothing
 #                   to Apple's notary service and never open the app
 #   --help          Show this help
@@ -30,6 +32,9 @@ VOLUME_ICON="$INSTALLER_ASSETS/volume-icon.icns"
 GENERATE_EULA="$INSTALLER_ASSETS/generate-eula.py"
 GENERATE_BACKGROUND="$INSTALLER_ASSETS/generate-background.py"
 READ_BACKGROUND_TEXT="$INSTALLER_ASSETS/read-background-text.swift"
+WINDOW_LAYOUT="$INSTALLER_ASSETS/layout.json"
+LEGAL_ICON="$INSTALLER_ASSETS/render-legal-icon.swift"
+PREVIEW_WINDOW="$INSTALLER_ASSETS/preview-window.py"
 DMG_LAYOUT="$INSTALLER_ASSETS/dmg-layout.py"
 INSTALLER_PYTHON="${INSTALLER_PYTHON:-python3}"
 # LZMA-compressed UDIF (macOS 10.15 and later; Hippocampus needs 14): the
@@ -85,6 +90,7 @@ SKIP_BUILD=0
 BUILD_PROFILE="release"
 DIST_DIR="$REPO_ROOT/dist"
 VERIFY_ASSETS_ONLY=0
+PREVIEW_DIR=""
 DRY_RUN=0
 DEVELOPMENT_ADHOC=0
 
@@ -100,6 +106,9 @@ Options:
   --development-ad-hoc  Allow unstable ad-hoc signing with --debug only
   --dist DIR      Output directory (default: dist/)
   --verify-assets Verify canonical installer brand assets and exit
+  --preview DIR   Verify the assets, then render the installer window for
+                  review into DIR (background.png, legal-icon.png and a
+                  window.png mock-up) and exit. Opens nothing in Finder.
   --dry-run       Release build signed with Developer ID, but not notarized
                   or stapled, and the app is never opened (no launch check).
                   For scripts/release-0.3.0.sh --dry-run; the DMG is for
@@ -127,6 +136,7 @@ while [[ $# -gt 0 ]]; do
         --development-ad-hoc) DEVELOPMENT_ADHOC=1; shift ;;
         --dist) DIST_DIR="$2"; shift 2 ;;
         --verify-assets) VERIFY_ASSETS_ONLY=1; shift ;;
+        --preview) [[ $# -ge 2 ]] || { usage; exit 1; }; PREVIEW_DIR="$2"; shift 2 ;;
         --dry-run) DRY_RUN=1; shift ;;
         --help|-h) usage; exit 0 ;;
         *) echo "ERROR: Unknown option: $1"; usage; exit 1 ;;
@@ -161,7 +171,7 @@ verify_legal_assets() {
 # The only words the installer window may show. Build numbers, hashes and
 # other source details belong in build-provenance.json and the release notes.
 BACKGROUND_TEXT=(
-    "Drag Hippocampus to Applications."
+    "Drag to Applications"
     "Updating? Quit Hippocampus from the menu bar first."
 )
 
@@ -174,7 +184,7 @@ background_text_key() {
 verify_background_assets() {
     local tool scratch rendered seen line key expected match
     local -a seen_keys=() unexpected=()
-    for tool in "$GENERATE_BACKGROUND" "$READ_BACKGROUND_TEXT"; do
+    for tool in "$GENERATE_BACKGROUND" "$READ_BACKGROUND_TEXT" "$WINDOW_LAYOUT"; do
         if [[ ! -f "$tool" ]]; then
             echo "ERROR: Installer background tool not found at $tool" >&2
             return 1
@@ -215,9 +225,33 @@ verify_background_assets() {
     done
 }
 
+# Give a scratch folder the Legal folder's icon exactly as a build does, so a
+# broken icon fails here and not after the app is signed and notarized.
+verify_legal_icon() {
+    local scratch
+    if [[ ! -f "$LEGAL_ICON" ]]; then
+        echo "ERROR: Legal folder icon tool not found at $LEGAL_ICON" >&2
+        return 1
+    fi
+    scratch="$(mktemp -d "${TMPDIR:-/tmp}/hippocampus-legal-icon.XXXXXX")"
+    mkdir "$scratch/Legal"
+    if ! /usr/bin/xcrun swift "$LEGAL_ICON" apply "$scratch/Legal"; then
+        rm -rf "$scratch"
+        echo "ERROR: Could not give the Legal folder its icon" >&2
+        return 1
+    fi
+    rm -rf "$scratch"
+}
+
 verify_brand_assets
 verify_legal_assets
 verify_background_assets
+verify_legal_icon
+
+if [[ -n "$PREVIEW_DIR" ]]; then
+    python3 "$PREVIEW_WINDOW" "$PREVIEW_DIR"
+    exit 0
+fi
 
 if [[ "$VERIFY_ASSETS_ONLY" -eq 1 ]]; then
     echo "Installer brand and legal assets match their canonical sources."
@@ -787,6 +821,9 @@ hdiutil create \
 echo ""
 echo "--- Applying headless DMG window layout ---"
 hippocampus_installer_mount "$TEMP_DMG"
+# Legal reads as fine print: a small page, not a second folder beside the
+# Applications drop target.
+/usr/bin/xcrun swift "$LEGAL_ICON" apply "$MOUNT_DIR/Legal"
 "$INSTALLER_PYTHON" "$DMG_LAYOUT" "$MOUNT_DIR"
 SetFile -c icnC "$MOUNT_DIR/.VolumeIcon.icns"
 SetFile -a C "$MOUNT_DIR"

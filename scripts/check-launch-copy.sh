@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # check-launch-copy.sh — an outside judge for Hippocampus's launch copy.
 #
-# Runs over the words a stranger actually reads — the menu-bar panel, the
-# window (Overview / Ask / You), onboarding, and the README / website — and
-# fails if any of them slips below a professional, trustworthy, Apple-quality
-# bar. It is deliberately a plain grep gate (no build, no Swift) so it runs in
-# a second, in CI or by hand, and passes or fails on its own, not on anyone's
-# say-so.
+# Runs over the words a stranger actually reads — the installer window, the
+# menu-bar panel, the window (Overview / Ask / You), onboarding, and the
+# README / website — and fails if any of them slips below a professional,
+# trustworthy, Apple-quality bar. It is deliberately a plain grep gate (no
+# build, no Swift) so it runs in a second, in CI or by hand, and passes or
+# fails on its own, not on anyone's say-so.
 #
 # What it checks:
 #   1. No marketing or machine-written words (seamless, supercharge, delve, …).
@@ -41,6 +41,7 @@ COPY_FILES=(
   "apps/hippocampus/Sources/HippocampusKit/MenuBarStatus.swift"
   "apps/hippocampus/Sources/HippocampusKit/StatusMenuModel.swift"
   "apps/hippocampus/Sources/HippocampusKit/CommandBar/AskPanelStatus.swift"
+  "assets/installer/render-background.swift"
 )
 
 # Marketing / machine-written words (whole word, case-insensitive).
