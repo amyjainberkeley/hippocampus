@@ -33,7 +33,7 @@ brew install --cask amyjainberkeley/tap/hippocampus
 
 Or [download the disk image](https://github.com/amyjainberkeley/hippocampus/releases/latest/download/Hippocampus.dmg) and drag Hippocampus to Applications.
 
-Setup is four screens. It asks for two permissions, Screen Recording and Accessibility, and reads nothing until you click Start Remembering.
+Setup is five short screens. It shows what you get first, then asks for two permissions, Screen Recording and Accessibility, and reads nothing until you click Start Remembering.
 
 ## What it does
 
