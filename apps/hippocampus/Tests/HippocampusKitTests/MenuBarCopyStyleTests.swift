@@ -53,6 +53,9 @@ final class MenuBarCopyStyleTests: XCTestCase {
             let row = StatusRow(StatusFacts(status: status), now: now)
             out.append(("footer(\(status))", AskPanelStatus(status, row: row, setup: .complete).text))
         }
+        // A turn-on under way offers Turn Off.
+        let turningOn = StatusRow(StatusFacts(status: .starting, turningOn: true), now: now)
+        if let action = turningOn.action { out.append(("action(turningOn)", action.title)) }
         // The menu items, across setup and connected states.
         for setup in [AskPanelStatus.Setup.complete, .notFinished, .inProgress] {
             for connected in [true, false] {
@@ -107,6 +110,7 @@ final class MenuBarCopyStyleTests: XCTestCase {
         XCTAssertTrue(titles.contains("This is a private window."))
         XCTAssertTrue(titles.contains("Couldn’t turn on"))
         XCTAssertTrue(titles.contains("It didn’t start, so remembering is still off."))
+        XCTAssertTrue(titles.contains("Turn Off"))
         XCTAssertGreaterThan(menuStrings.count, 30)
     }
 }

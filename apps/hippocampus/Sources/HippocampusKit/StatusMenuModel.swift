@@ -17,8 +17,12 @@ public struct StatusFacts: Equatable, Sendable {
     public var pausedSince: Date?
     /// When the person pressed Stop Sharing, for "You stopped it at {time}."
     public var stoppedSharingAt: Date?
-    /// Turn On is under way: nothing is on yet, so there is nothing to pause.
+    /// Turn On is under way: nothing is on yet, so there is nothing to pause,
+    /// but it can be turned off.
     public var turningOn: Bool
+    /// A stop is under way: Off shows once it is done, and nothing is
+    /// offered until then.
+    public var stopping: Bool
 
     public init(
         status: MenuBarStatus,
@@ -26,7 +30,8 @@ public struct StatusFacts: Equatable, Sendable {
         lastSavedAt: Date? = nil,
         pausedSince: Date? = nil,
         stoppedSharingAt: Date? = nil,
-        turningOn: Bool = false
+        turningOn: Bool = false,
+        stopping: Bool = false
     ) {
         self.status = status
         self.setup = setup
@@ -34,6 +39,7 @@ public struct StatusFacts: Equatable, Sendable {
         self.pausedSince = pausedSince
         self.stoppedSharingAt = stoppedSharingAt
         self.turningOn = turningOn
+        self.stopping = stopping
     }
 }
 
@@ -72,8 +78,17 @@ public struct StatusRow: Equatable, Sendable {
         default: detail = status.detailText
         }
         // A turn-on under way lands, or says why not, by itself; until then
-        // nothing is on to pause.
-        let action = facts.turningOn && status.action == .pause ? nil : status.action
+        // nothing is on to pause, and Turn Off drops it, as the newer word.
+        // A stop under way offers nothing: Pause would record a pause the
+        // person did not mean, and Off shows once the stop is done.
+        let action: CaptureStatusAction?
+        if facts.turningOn, status.action == .pause {
+            action = .turnOff
+        } else if facts.stopping, status.action == .pause {
+            action = nil
+        } else {
+            action = status.action
+        }
         self.init(title: status.displayText, detail: detail, action: action)
     }
 }

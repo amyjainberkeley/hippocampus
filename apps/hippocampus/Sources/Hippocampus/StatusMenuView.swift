@@ -102,7 +102,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         modelProvisioner.refreshIfMissing()
         askKey.recheck()
         // A permission may have been turned back on in System Settings. Look
-        // first, so the menu shows what the look started, as the icon does.
+        // first, so the menu shows what the look started (Starting…, with
+        // Turn Off), as the icon does.
         supervisor.retryIfPermissionMayBeBack()
         let setupFinished = OnboardingSentinel.isComplete
         items = StatusMenuModel.items(

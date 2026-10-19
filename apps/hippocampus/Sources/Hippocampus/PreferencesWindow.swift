@@ -194,8 +194,10 @@ struct PreferencesRootView: View {
 
             Divider()
 
+            // On while a turn-on is under way, since its helper may read
+            // before the setting is: turning the switch off then drops it.
             Toggle("Remember my screen", isOn: Binding(
-                get: { supervisor.captureEnabled },
+                get: { supervisor.captureEnabled || supervisor.turningOn },
                 set: { on in
                     Task { @MainActor in
                         await captureController.setCaptureEnabled(on)

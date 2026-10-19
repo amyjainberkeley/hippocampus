@@ -67,6 +67,8 @@ public enum CaptureStatusAction: Equatable, Sendable {
     case pause
     case resume
     case turnOn
+    /// A turn-on under way, turned off before it lands: the newer word wins.
+    case turnOff
     case openSystemSettings(TCCRevokedReason)
     /// Restart remembering now (`ProcessSupervisor.retryNow()`).
     case tryAgain
@@ -80,6 +82,7 @@ public enum CaptureStatusAction: Equatable, Sendable {
         case .pause: return "Pause"
         case .resume: return "Resume"
         case .turnOn: return "Turn On"
+        case .turnOff: return "Turn Off"
         case .openSystemSettings: return "Open System Settings…"
         case .tryAgain: return "Try Again"
         case .quit: return "Quit Hippocampus"

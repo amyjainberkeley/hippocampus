@@ -199,6 +199,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     /// A turn-on is under way: pressed or switching on, and not landed yet.
     public var turningOn: Bool { pendingTurnOn != nil || enablingAttempt != nil }
+    /// A turn-off is under way: the setting is off, but the screen may be
+    /// read until the stop is done (RULINGS B1 and S7).
+    var stoppingCapture: Bool { captureStopTask != nil }
     /// Called when the window was asked for and a failed start ended the
     /// request: the app shows Preferences, where the reason and the fix are
     /// (spec-shell S5, D9).
@@ -209,7 +212,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             from: state, captureEnabled: captureEnabled,
             tccRevokedSurface: tccRevokedSurface, receipt: captureReceipt,
             helperHealth: health, captureStartedAt: captureStartedAt,
-            stopFailed: stopFailed, stopping: captureStopTask != nil,
+            stopFailed: stopFailed, stopping: stoppingCapture,
             turningOn: turningOn, turnOnFailure: turnOnFailure,
             skipSeenSince: skipWatch.since, now: clock()
         )
@@ -1316,7 +1319,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// - A turn-on found the permission off, so remembering stayed off: a look
     ///   is Turn On again, which is consent. It is pressed again once per Open
     ///   System Settings… the person chose for it, never by a menu opened to
-    ///   quit, and the menu it opens shows it as Starting….
+    ///   quit, and the menu it opens shows it as Starting… with Turn Off, so
+    ///   it can be dropped.
     /// - Remembering is on and its helper waits on the permission: after Open
     ///   System Settings…, a fresh helper replaces it once.
     public func retryIfPermissionMayBeBack() {
@@ -1346,6 +1350,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         var turnOnFoundItOff = false
         if case .permission = turnOnFailure, !captureEnabled { turnOnFoundItOff = true }
         permissionFixChosen = turnOnFoundItOff || (captureEnabled && tccRevokedSurface != nil)
+    }
+
+    /// A status button whose change failed: the status row says where things
+    /// stand, so only the log needs the error.
+    func logStatusActionFailure(_ what: String, _ error: Error) {
+        logger.error("supervisor: \(what, privacy: .public) failed: \(error.localizedDescription)")
     }
 
     /// Stop Sharing was pressed: remember when, here and across launches.

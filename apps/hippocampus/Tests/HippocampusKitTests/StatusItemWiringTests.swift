@@ -135,6 +135,13 @@ final class StatusItemWiringTests: XCTestCase {
         ), "no key-custody inspector in the interface this round")
     }
 
+    /// The switch reads On while a turn-on is under way, since its helper
+    /// may read before the setting is; turning it off then drops the turn-on.
+    func testTheSwitchReadsOnWhileTurningOn() throws {
+        let preferences = try source("PreferencesWindow.swift")
+        XCTAssertTrue(preferences.contains("get: { supervisor.captureEnabled || supervisor.turningOn }"))
+    }
+
     /// One row feeds Preferences too (product critique 11).
     func testPreferencesShowTheMenusStatusRow() throws {
         let health = try source("CaptureHealthView.swift")

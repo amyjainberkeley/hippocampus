@@ -103,7 +103,7 @@ final class TurnOnTests: XCTestCase {
         XCTAssertFalse(rig.supervisor.captureEnabled, "not on until verified")
         XCTAssertEqual(rig.supervisor.menuBarStatus, .starting)
         XCTAssertEqual(row(rig.supervisor).title, "Starting…")
-        XCTAssertNil(row(rig.supervisor).action, "nothing is on to pause yet")
+        XCTAssertEqual(row(rig.supervisor).action, .turnOff, "nothing is on to pause yet, but it can be turned off")
         XCTAssertEqual(rig.supervisor.menuBarStatus.markState, .remembering)
 
         rig.topology.readinessSuspension = nil
@@ -517,6 +517,88 @@ final class TurnOnTests: XCTestCase {
         XCTAssertFalse(rig.topology.isRunning)
         XCTAssertEqual(rig.config.captureWrites, [false])
         try await rig.supervisor.shutdownAndWait()
+    }
+
+    /// While a turn-on is under way its helper may read, and the switch in
+    /// Preferences used to read Off with nothing anywhere to turn it off but
+    /// Quit. The row offers Turn Off, wired to the turn-off that supersedes.
+    func test_turn_off_while_turning_on_drops_it() async throws {
+        let rig = rig()
+        try await rig.supervisor.startAndWaitForReadiness()
+        let readiness = TestSuspension()
+        rig.topology.readinessSuspension = readiness
+        press(.turnOn, on: rig.supervisor)
+        await readiness.waitUntilEntered()
+        XCTAssertEqual(row(rig.supervisor).action, .turnOff)
+        XCTAssertEqual(rig.supervisor.askPanelStatus(setupFinished: true).action, .turnOff)
+
+        press(.turnOff, on: rig.supervisor)
+        await eventually { rig.supervisor.state == .stopped }
+        rig.topology.readinessSuspension = nil
+        readiness.resume()
+        await eventually { !rig.supervisor.turningOn }
+        try await Task.sleep(for: .milliseconds(50))
+
+        XCTAssertNil(rig.supervisor.turnOnFailure, "the person's word, not a failure")
+        XCTAssertEqual(row(rig.supervisor).title, "Off")
+        XCTAssertFalse(rig.supervisor.captureEnabled)
+        XCTAssertFalse(rig.topology.captureHelperAlive)
+        XCTAssertFalse(rig.topology.holdsProcesses)
+        XCTAssertEqual(rig.config.captureWrites, [false])
+        try await rig.supervisor.shutdownAndWait()
+    }
+
+    /// A press still waiting out another change drops the same way.
+    func test_turn_off_drops_a_press_still_waiting() async throws {
+        let rig = rig()
+        let readiness = TestSuspension()
+        rig.topology.readinessSuspension = readiness
+        let launch = Task { try await rig.supervisor.startAndWaitForReadiness() }
+        await readiness.waitUntilEntered()
+        press(.turnOn, on: rig.supervisor)
+        XCTAssertTrue(rig.supervisor.turningOn)
+        XCTAssertEqual(row(rig.supervisor).action, .turnOff)
+
+        press(.turnOff, on: rig.supervisor)
+        await eventually { !rig.supervisor.turningOn }
+        rig.topology.readinessSuspension = nil
+        readiness.resume()
+        _ = try? await launch.value
+        await eventually { rig.supervisor.state == .stopped }
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertFalse(rig.supervisor.captureEnabled)
+        XCTAssertEqual(rig.topology.launchPlans.count, 1, "the waiting press never launched")
+        XCTAssertNil(rig.supervisor.turnOnFailure)
+        try await rig.supervisor.shutdownAndWait()
+    }
+
+    /// Stop Sharing during a turn-on: the stop is under way, so the row still
+    /// reads Starting…, with nothing to press. It offered Pause, which would
+    /// record a pause the person did not mean.
+    func test_stop_sharing_during_a_turn_on_offers_nothing_until_off() async throws {
+        let rig = rig()
+        try await rig.supervisor.startAndWaitForReadiness()
+        let readiness = TestSuspension()
+        rig.topology.readinessSuspension = readiness
+        press(.turnOn, on: rig.supervisor)
+        await readiness.waitUntilEntered()
+        let stopping = TestSuspension()
+        rig.topology.stopSuspensionOnCall = rig.topology.stopCalls + 1
+        rig.topology.stopSuspension = stopping
+
+        rig.topology.fireUnexpectedExit(forLaunchAt: rig.topology.launchPlans.count - 1, label: "helper", status: 82)
+        await stopping.waitUntilEntered()
+
+        XCTAssertEqual(row(rig.supervisor).title, "Starting…")
+        XCTAssertNil(row(rig.supervisor).action)
+        XCTAssertEqual(rig.supervisor.menuBarStatus.markState, .remembering)
+        stopping.resume()
+        rig.topology.readinessSuspension = nil
+        readiness.resume()
+        await eventually { rig.supervisor.state == .stopped }
+        XCTAssertEqual(row(rig.supervisor).title, "Off")
+        XCTAssertEqual(row(rig.supervisor).action, .turnOn)
     }
 
     /// A pause that stops a turn-on is the person's word, not a failure.
