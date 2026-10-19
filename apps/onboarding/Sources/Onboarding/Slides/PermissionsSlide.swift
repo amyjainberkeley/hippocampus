@@ -227,10 +227,16 @@ struct PermissionRowView: View {
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.primary)
                 }
-                Text(OnboardingCopy.waitingHint(row.surface))
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                // One step a line, so neither wraps a word or two alone.
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(OnboardingCopy.sentences(OnboardingCopy.waitingHint(row.surface)), id: \.self) { step in
+                        Text(step)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .accessibilityElement(children: .combine)
                 // For when macOS showed no prompt: the words the hint names.
                 Button(OnboardingCopy.openSettings) { perform(.openSettings) }
                     .onboardingText(color: OnboardingDesign.Palette.accentText)

@@ -257,6 +257,14 @@ final class OnboardingSourceScanTests: XCTestCase {
         XCTAssertTrue(promise.contains("ForEach(OnboardingCopy.sentences(text), id: \\.self)"))
     }
 
+    func testAWaitingPermissionRowShowsOneStepALine() throws {
+        let row = code(try source("Onboarding/Slides/PermissionsSlide.swift")).joined(separator: "\n")
+        XCTAssertTrue(row.contains("ForEach(OnboardingCopy.sentences(OnboardingCopy.waitingHint(row.surface)), id: \\.self)"))
+        XCTAssertEqual(OnboardingCopy.sentences(OnboardingCopy.waitingHint(.screenRecording)), [
+            "Choose Open System Settings, then turn on Hippocampus.", "If macOS offers Quit & Reopen, choose Later.",
+        ])
+    }
+
     func testThePromiseIsTitledByMode() throws {
         let promise = code(try source("Onboarding/Slides/PromiseSlide.swift")).joined(separator: "\n")
         XCTAssertTrue(promise.contains("title: OnboardingCopy.promiseTitle(isReview: flowVM.isReview)"))
