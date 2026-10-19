@@ -114,7 +114,7 @@ final class SCStreamCaptureSessionTCCTests: XCTestCase {
         try await session.start()
 
         XCTAssertTrue(session.isPausedForTCCForTest())
-        XCTAssertEqual(session.permissionsOff(), ["accessibility"])
+        XCTAssertEqual(session.permissionsOff(), [.accessibility])
         XCTAssertEqual(wholeScreen.starts, 0, "whole-screen reading started under a paused session")
         try? await session.stop()
     }
@@ -146,7 +146,7 @@ final class SCStreamCaptureSessionTCCTests: XCTestCase {
 
         XCTAssertTrue(session.isPausedForTCCForTest())
         XCTAssertEqual(session.revokedSurfacesForTest(), [.accessibility])
-        XCTAssertEqual(session.permissionsOff(), ["accessibility"], "what the readiness receipt reports")
+        XCTAssertEqual(session.permissionsOff(), [.accessibility], "what the readiness receipt reports")
         try? await session.stop()
     }
 
@@ -164,7 +164,7 @@ final class SCStreamCaptureSessionTCCTests: XCTestCase {
             .accessibility: .denied,
         ])
         await denied.activateTCCMonitoring()
-        XCTAssertEqual(denied.permissionsOff(), ["accessibility", "screenRecording"])
+        XCTAssertEqual(denied.permissionsOff(), [.accessibility, .screenRecording])
         try? await denied.stop()
     }
 

@@ -47,11 +47,22 @@ public struct HelperReadinessReceipt: Sendable, Equatable {
         }
     }
 
-    public init(fileURL: URL, generation: String, captureEnabled: Bool, permissionsOff: [String] = []) {
+    /// Only a permission's name can be written: the list is typed, so the
+    /// receipt stays content-free whoever builds it.
+    public init(fileURL: URL, generation: String, captureEnabled: Bool, permissionsOff: [TCCSurface] = []) {
+        self.init(
+            fileURL: fileURL, generation: generation, captureEnabled: captureEnabled,
+            names: permissionsOff.map(\.rawValue)
+        )
+    }
+
+    /// As read back from a file, which may name a surface this build does
+    /// not know.
+    private init(fileURL: URL, generation: String, captureEnabled: Bool, names: [String]) {
         self.fileURL = fileURL
         self.generation = generation
         self.captureEnabled = captureEnabled
-        self.permissionsOff = permissionsOff
+        self.permissionsOff = names
     }
 
     public static func parse(arguments: [String]) throws -> HelperReadinessReceipt? {
@@ -74,12 +85,16 @@ public struct HelperReadinessReceipt: Sendable, Equatable {
     }
 
     public func publish() throws {
-        try publish(permissionsOff: permissionsOff)
+        try write(permissionsOff: permissionsOff)
     }
 
     /// Publishes the receipt with the permissions the session found off as
     /// it started (`SCStreamCaptureSession.permissionsOff()`).
-    public func publish(permissionsOff: [String]) throws {
+    public func publish(permissionsOff: [TCCSurface]) throws {
+        try write(permissionsOff: permissionsOff.map(\.rawValue))
+    }
+
+    private func write(permissionsOff: [String]) throws {
         guard Self.isValidGeneration(generation) else { throw HelperReadinessError.invalidGeneration }
         guard !FileManager.default.fileExists(atPath: fileURL.path) else {
             throw HelperReadinessError.existingReceipt
@@ -126,7 +141,7 @@ public struct HelperReadinessReceipt: Sendable, Equatable {
             fileURL: fileURL,
             generation: decoded.generation,
             captureEnabled: decoded.captureEnabled,
-            permissionsOff: decoded.permissionsOff ?? []
+            names: decoded.permissionsOff ?? []
         )
     }
 

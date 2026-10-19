@@ -1459,9 +1459,9 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
     /// readiness receipt: the app must not take a start for done while one
     /// is off. While any is, the whole helper reads nothing, whole-screen
     /// reading included. Content-free, as the stderr breadcrumbs.
-    public func permissionsOff() -> [String] {
+    public func permissionsOff() -> [TCCSurface] {
         lock.lock(); defer { lock.unlock() }
-        return revokedSurfaces.map(\.rawValue).sorted()
+        return revokedSurfaces.sorted { $0.rawValue < $1.rawValue }
     }
 
     // MARK: - SCStreamOutput

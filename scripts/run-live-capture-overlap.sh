@@ -711,6 +711,22 @@ PY
 then
     runtime_fail "capture helper published an invalid readiness receipt"
 fi
+# A helper that found a permission off reads nothing until it is allowed:
+# stop here, by name, rather than fail later for a reason that looks unrelated.
+if ! permissions_off="$(python3 - "$READINESS_FILE" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    receipt = json.load(handle)
+off = receipt.get("permissions_off") or []
+if off:
+    print(", ".join(str(name) for name in off))
+    raise SystemExit(1)
+PY
+)"; then
+    runtime_fail "capture helper started paused on permissions macOS has off: $permissions_off"
+fi
 [[ "$(stat -f '%Lp' "$READINESS_FILE")" == "600" ]] \
     || runtime_fail "capture helper readiness receipt is not mode 0600"
 
