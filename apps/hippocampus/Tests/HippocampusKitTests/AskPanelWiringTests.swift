@@ -109,7 +109,8 @@ final class AskPanelWiringTests: XCTestCase {
         let app = try source("HippocampusApp.swift")
         XCTAssertTrue(app.contains("AskPanelNotice.announceShown(onboardingRunning: supervisor.onboardingIsRunning)"))
         XCTAssertTrue(app.contains("name, object: nil, userInfo: nil, deliverImmediately: true"))
-        XCTAssertTrue(app.contains("openWindow: { tab in supervisor.openRecallUI(initialTab: tab) }"))
+        // Through the app's one way to the window (`WindowRequestRoutingTests`).
+        XCTAssertTrue(app.contains("openWindow: { [weak self] tab in self?.openWindow(tab: tab) }"))
         // The footer's buttons run the tested HippocampusKit code, not a copy.
         XCTAssertTrue(app.contains("supervisor.performAskStatusAction(action) { NSWorkspace.shared.open($0) }"))
         XCTAssertFalse(app.contains("private func performAskStatusAction("))

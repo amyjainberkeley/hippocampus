@@ -85,7 +85,57 @@ private enum TCCFixtures {
     }
 }
 
+/// Stands in for whole-screen reading (`BackgroundCaptureSession`): counts
+/// what the session asks of it, and reads nothing.
+private final class RecordingGatedCapture: PermissionGatedCapture, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _starts = 0
+    private var _pauses = 0
+    func start() { lock.withLock { _starts += 1 } }
+    func pause() async { lock.withLock { _pauses += 1 } }
+    var starts: Int { lock.withLock { _starts } }
+    var pauses: Int { lock.withLock { _pauses } }
+}
+
 final class SCStreamCaptureSessionTCCTests: XCTestCase {
+    /// The readiness receipt says the generation is paused on the
+    /// permissions it names. Only the focused stream used to pause: main
+    /// started whole-screen reading anyway, and with Accessibility off the
+    /// focused window's id is unknown, so it read every visible window,
+    /// the focused one too.
+    func testWholeScreenReadingNeverStartsWhileAPermissionIsOff() async throws {
+        let session = TCCFixtures.makeSession(initialTCCStatuses: [
+            .screenRecording: .granted,
+            .accessibility: .denied,
+        ])
+        let wholeScreen = RecordingGatedCapture()
+        session.attachPermissionGatedCapture(wholeScreen)
+
+        try await session.start()
+
+        XCTAssertTrue(session.isPausedForTCCForTest())
+        XCTAssertEqual(session.permissionsOff(), [.accessibility])
+        XCTAssertEqual(wholeScreen.starts, 0, "whole-screen reading started under a paused session")
+        try? await session.stop()
+    }
+
+    /// A permission turned off while it runs pauses whole-screen reading with
+    /// the focused stream, once.
+    func testAPermissionTurnedOffMidRunPausesWholeScreenReading() async {
+        let session = TCCFixtures.makeSession()
+        let wholeScreen = RecordingGatedCapture()
+        session.attachPermissionGatedCapture(wholeScreen)
+
+        await session.pauseForTCC(surface: .accessibility)
+        await session.pauseForTCC(surface: .screenRecording)
+
+        XCTAssertEqual(wholeScreen.pauses, 1)
+        XCTAssertEqual(wholeScreen.starts, 0)
+        // One permission back while the other is still off: still paused.
+        try? await session.resumeFromTCC(surface: .accessibility)
+        XCTAssertEqual(wholeScreen.starts, 0)
+    }
+
     func testInitialDeniedSnapshotPausesBeforeHealthyRuntime() async {
         let session = TCCFixtures.makeSession(initialTCCStatuses: [
             .screenRecording: .granted,
@@ -96,7 +146,7 @@ final class SCStreamCaptureSessionTCCTests: XCTestCase {
 
         XCTAssertTrue(session.isPausedForTCCForTest())
         XCTAssertEqual(session.revokedSurfacesForTest(), [.accessibility])
-        XCTAssertEqual(session.permissionsOff(), ["accessibility"], "what the readiness receipt reports")
+        XCTAssertEqual(session.permissionsOff(), [.accessibility], "what the readiness receipt reports")
         try? await session.stop()
     }
 
@@ -114,7 +164,7 @@ final class SCStreamCaptureSessionTCCTests: XCTestCase {
             .accessibility: .denied,
         ])
         await denied.activateTCCMonitoring()
-        XCTAssertEqual(denied.permissionsOff(), ["accessibility", "screenRecording"])
+        XCTAssertEqual(denied.permissionsOff(), [.accessibility, .screenRecording])
         try? await denied.stop()
     }
 

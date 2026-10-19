@@ -104,6 +104,28 @@ final class TCCRevokedRecoveryTests: XCTestCase {
         }
     }
 
+    /// The helper names permissions by its `TCCSurface` (readiness receipt,
+    /// stderr breadcrumbs) and the app reads them as `TCCRevokedReason`. A
+    /// surface added to one and not the other is a permission the app cannot
+    /// name: the two lists are the same, in the same spelling.
+    func testTheHelpersSurfacesAndTheAppsReasonsShareTheirNames() throws {
+        let package = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let monitor = package.appendingPathComponent(
+            "../../adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/TCC/TCCStatusMonitor.swift"
+        ).standardizedFileURL
+        let source = try String(contentsOf: monitor, encoding: .utf8)
+        let start = try XCTUnwrap(source.range(of: "public enum TCCSurface: String, Sendable, CaseIterable {"))
+        let end = try XCTUnwrap(source.range(of: "}", range: start.upperBound..<source.endIndex))
+        let surfaces = source[start.upperBound..<end.lowerBound]
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.hasPrefix("case ") }
+            .map { String($0.dropFirst("case ".count)) }
+        XCTAssertFalse(surfaces.isEmpty)
+        XCTAssertEqual(surfaces, TCCRevokedReason.allCases.map(\.rawValue))
+    }
+
     func testFromHealthLogSurface_unknownReturnsNil() {
         XCTAssertNil(TCCRevokedReason.fromHealthLogSurface("bogus"))
         XCTAssertNil(TCCRevokedReason.fromHealthLogSurface(""))

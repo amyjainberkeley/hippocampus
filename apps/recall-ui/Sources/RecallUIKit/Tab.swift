@@ -256,6 +256,28 @@ public struct RecallLaunchRequest: Equatable, Sendable {
     public static let localCommandName = Notification.Name(
         "ai.hippocampus.recall.command.received.v1"
     )
+    /// The window's answer to a command: it shows itself. A process quitting
+    /// after its last window closed never answers, so the app opens a fresh
+    /// window once it has ended.
+    public static let acknowledgementName = Notification.Name(
+        "ai.hippocampus.recall.command.shown.v1"
+    )
+    /// The command's id, which the answer repeats. An older app sends none.
+    public static let requestIDKey = "request_id"
+
+    /// What the answer to the command `userInfo` carries: its id, nothing
+    /// else. Nil when the command asked for no answer.
+    public static func acknowledgement(for userInfo: [AnyHashable: Any]?) -> [String: String]? {
+        guard let id = userInfo?[requestIDKey] as? String, !id.isEmpty else { return nil }
+        return [requestIDKey: id]
+    }
+
+    /// Every command brings the window forward (from behind other windows,
+    /// out of the Dock when minimized) but one for the old popup alone,
+    /// which leaves it where it is.
+    public var bringsWindowForward: Bool {
+        navigationTab != nil || !openPopup
+    }
 
     public let tab: RecallTab?
     public let focusEventId: UInt64?
@@ -317,6 +339,33 @@ public struct RecallLaunchRequest: Equatable, Sendable {
         let openPopup = (userInfo["open_popup"] as? Bool) == true
             || (userInfo["open_popup"] as? NSNumber)?.boolValue == true
         self.init(tab: tab, focusEventId: focus, openPopup: openPopup)
+    }
+}
+
+/// A window as a command finds it.
+public struct RecallWindowState: Equatable, Sendable {
+    public let isVisible: Bool
+    public let isMiniaturized: Bool
+
+    public init(isVisible: Bool, isMiniaturized: Bool) {
+        self.isVisible = isVisible
+        self.isMiniaturized = isMiniaturized
+    }
+}
+
+/// How the window's process answers a command from the app.
+public enum RecallCommandAnswer: Equatable, Sendable {
+    /// It shows its window, minimized or not, and says so: the app opens
+    /// nothing else.
+    case show
+    /// It is quitting, or has no window to show (its last one just closed,
+    /// and it quits with it): no answer, so the app waits for it to end and
+    /// opens a fresh window on the place asked for.
+    case none
+
+    public static func decide(terminating: Bool, windows: [RecallWindowState]) -> RecallCommandAnswer {
+        guard !terminating, windows.contains(where: { $0.isVisible || $0.isMiniaturized }) else { return .none }
+        return .show
     }
 }
 

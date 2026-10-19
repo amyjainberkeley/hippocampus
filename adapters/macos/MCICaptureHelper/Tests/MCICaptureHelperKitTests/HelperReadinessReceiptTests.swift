@@ -43,9 +43,11 @@ final class HelperReadinessReceiptTests: XCTestCase {
         XCTAssertThrowsError(try receipt.publish(), "readiness must not overwrite an existing receipt")
     }
 
-    /// A capture generation that started with a permission off is paused on
-    /// it and would start reading by itself once it is allowed. Its receipt
-    /// says so, so the app never takes a turn-on for done while one is off.
+    /// A capture generation that started with a permission off reads
+    /// nothing while it is off. Its receipt says so, so the app never takes a
+    /// start for done while one is off. Only a permission's name can be
+    /// written there: the list is typed, so nothing else (a window title,
+    /// say) can reach the file.
     func test_publish_names_the_permissions_found_off_at_startup() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("helper-readiness-\(UUID().uuidString)")
@@ -54,7 +56,7 @@ final class HelperReadinessReceiptTests: XCTestCase {
         let file = directory.appendingPathComponent("ready.json")
         let receipt = HelperReadinessReceipt(fileURL: file, generation: "generation-43", captureEnabled: true)
 
-        try receipt.publish(permissionsOff: ["screenRecording", "accessibility", "screenRecording"])
+        try receipt.publish(permissionsOff: [TCCSurface.screenRecording, .accessibility, .screenRecording])
 
         let read = try HelperReadinessReceipt.read(from: file)
         XCTAssertEqual(read.permissionsOff, ["accessibility", "screenRecording"])

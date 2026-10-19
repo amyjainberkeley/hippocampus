@@ -39,17 +39,21 @@ final class PreferencesRoutingLifecycleTests: XCTestCase {
 
     func testPreferencesLaunchDoesNotOpenASecondRecallWindowAtStartup() throws {
         let app = try source("HippocampusApp.swift")
-        let start = try method("private func startSupervisorOrDeferUntilOnboarded()", in: app)
+        // Asked for before the launch's orphan sweep, so it opens as soon as
+        // the key is checked.
+        let ask = try method("private func requestTheWindowIfThePersonOpenedHippocampus()", in: app)
         // Only a launch by the person opens the window: not Preferences, a
         // quiet relaunch, a login or a link (spec-shell S7). `AppOpening`
         // decides from the launch's reason; `AppOpeningTests` holds every
         // reason to it.
-        XCTAssertTrue(start.contains("AppOpening.atLaunch("))
-        XCTAssertTrue(start.contains("launchReason, setupFinished: OnboardingSentinel.isComplete"))
-        XCTAssertEqual(start.components(separatedBy:
+        XCTAssertTrue(ask.contains("AppOpening.atLaunch("))
+        XCTAssertTrue(ask.contains("launchReason, setupFinished: OnboardingSentinel.isComplete"))
+        XCTAssertEqual(ask.components(separatedBy:
             "if opening == .window { supervisor.openRecallWhenReady(initialLaunch: true) }")
             .count - 1, 1)
-        XCTAssertEqual(start.components(separatedBy: "openRecallWhenReady(").count - 1, 1)
+        XCTAssertEqual(ask.components(separatedBy: "openRecallWhenReady(").count - 1, 1)
+        let start = try method("private func startSupervisorOrDeferUntilOnboarded()", in: app)
+        XCTAssertFalse(start.contains("openRecallWhenReady("))
     }
 
     /// At login nothing else opens the window: the only other calls are the

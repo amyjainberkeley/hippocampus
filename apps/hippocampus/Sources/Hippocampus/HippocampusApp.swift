@@ -2,6 +2,7 @@
 import Combine
 import SwiftUI
 import HippocampusKit
+import UserNotifications
 import os
 #if canImport(AppKit)
 import AppKit
@@ -22,7 +23,7 @@ struct HippocampusApp: App {
                         .keyboardShortcut(",", modifiers: [.command])
                 }
                 CommandGroup(replacing: .appTermination) {
-                    Button("Quit Hippocampus") { appDelegate.requestQuit() }
+                    Button("Quit Hippocampus") { appDelegate.requestQuit(fromHippocampus: true) }
                         .keyboardShortcut("q", modifiers: [.command])
                 }
             }
@@ -50,6 +51,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let initialPreferencesRequest = PreferencesOpenRequest(arguments: Array(CommandLine.arguments.dropFirst()))
     /// Why this launch happened; only `.user` opens the window (spec-shell S7).
     private var launchReason = LaunchReason.user
+    /// A link was handed to the app before it read why it launched: the link
+    /// launched it. Such a link arrives before `applicationDidFinishLaunching`.
+    private var linkOpenedAtLaunch = false
+    private var launchReasonRead = false
     /// This copy is quitting so the one in Applications can open: nothing
     /// else opens from here.
     private var leavingForApplications = false
@@ -103,6 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             locator: BundleBinaryLocator(),
             keyStore: KeychainKeyStore.defaultDatabaseKey,
             captureStopNote: UserDefaultsCaptureStopNote(),
+            turnOnWaitNote: UserDefaultsTurnOnWaitNote(),
             pauses: .shared,
             orphanSweeper: CaptureOrphanSweep(bundleURL: Bundle.main.bundleURL)
         )
@@ -122,7 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             supervisor: supervisor,
             actions: PreferencesActions(
                 statusAction: { [weak self] action in self?.performStatusAction(action) },
-                openWindow: { tab in supervisor.openRecallUI(initialTab: tab) },
+                openWindow: { [weak self] tab in self?.openWindow(tab: tab) },
                 neverRead: { _ = supervisor.openOnboarding(initialStep: "never-read") },
                 chooseApps: { _ = supervisor.openOnboarding(initialStep: "app-access") },
                 connectAITools: { done in
@@ -133,6 +139,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         )
         preferencesControllerConfigured = true
+    }
+
+    /// A click on a permission notification can be what launches the app,
+    /// and macOS hands that click over only to a delegate set before the app
+    /// finishes launching.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        UNUserNotificationCenter.current().delegate = self
     }
 
     /// Called by AppKit immediately after the app finishes launching —
@@ -189,8 +202,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Why Hippocampus was opened, read while the launch's Apple event is
         // still the current one (spec-shell S7). The raw event is logged so a
         // login can be told from a launch with no event at all.
-        let launch = LaunchReason.read(preferencesRequested: initialPreferencesRequest != nil)
+        let launch = LaunchReason.read(preferencesRequested: initialPreferencesRequest != nil, linkOpened: linkOpenedAtLaunch)
         launchReason = launch.reason
+        launchReasonRead = true
         firstLaunchLogger.info(
             "launch: reason=\(launch.reason.rawValue, privacy: .public) event=\(launch.event?.logDescription ?? "none", privacy: .public)"
         )
@@ -274,8 +288,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             CommandBarController.shared.configure(
                 model: CommandBarModel(launch: { assist in supervisor.memorySessionLaunch(assist: assist) }),
                 supervisor: supervisor,
-                openEvent: { eventId in supervisor.openRecallUI(initialTab: "search", focusEventId: eventId) },
-                openWindow: { tab in supervisor.openRecallUI(initialTab: tab) },
+                openEvent: { [weak self] eventId in self?.openWindow(tab: "search", focusEventId: eventId) },
+                openWindow: { [weak self] tab in self?.openWindow(tab: tab) },
                 statusAction: { [weak self] action in self?.performStatusAction(action) },
                 announceShown: {
                     AskPanelNotice.announceShown(onboardingRunning: supervisor.onboardingIsRunning) { name in
@@ -299,6 +313,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.watchAskKey()
             self.installBrowserHostManifests()
             self.armTCCStderrTail()
+            // The person's own launch asks for the window first: it opens as
+            // soon as there is memory to read, while the sweep below runs.
+            self.requestTheWindowIfThePersonOpenedHippocampus()
             // A helper left by a crash or Force Quit may still be reading the
             // screen; end it before starting (spec-shell S6.4). Off the main
             // thread, and quick when there is nothing to end.
@@ -325,7 +342,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             actions: StatusItemController.Actions(
                 perform: { [weak self] action in self?.performStatusAction(action) },
                 ask: { CommandBarController.shared.show() },
-                openWindow: { supervisor.openRecallUI() },
+                openWindow: { [weak self] in self?.openWindow(tab: nil) },
                 aiTools: { [weak self] connected in
                     if connected {
                         self?.showPreferences(section: .sources)
@@ -336,7 +353,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 },
                 preferences: { [weak self] in self?.showPreferences() },
-                quit: { [weak self] in self?.requestQuit() }
+                quit: { [weak self] in self?.requestQuit(fromHippocampus: true) }
             )
         )
     }
@@ -345,10 +362,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Quit is the app's; everything else is the supervisor's.
     func performStatusAction(_ action: CaptureStatusAction) {
         if action == .quit {
-            requestQuit()
+            requestQuit(fromHippocampus: true)
             return
         }
         supervisor.performAskStatusAction(action) { NSWorkspace.shared.open($0) }
+    }
+
+    /// Every way to the window but a reopen: the menu's Open Hippocampus,
+    /// Ask's open-window and its results, Preferences and a
+    /// hippocampus://recall link. Until setup is done the memory has no key,
+    /// and a window opened then built its reader once without one, so even
+    /// the window setup's end asked for could not read the memory: setup
+    /// comes forward instead, as a reopen does.
+    private func openWindow(tab: String?, focusEventId: UInt64? = nil, openPopup: Bool = false) {
+        switch AppOpening.atReopen(setupFinished: OnboardingSentinel.isComplete, hasSetup: supervisor.hasOnboarding) {
+        case .setup: supervisor.showOnboarding()
+        case .window, .nothing: supervisor.openRecallUI(initialTab: tab, focusEventId: focusEventId, openPopup: openPopup)
+        }
     }
 
     func showPreferences(section: PreferencesSection? = nil) {
@@ -454,7 +484,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
-    func requestQuit() {
+    /// `fromHippocampus`: the person quit from the menu, ⌘Q or the status
+    /// row. A quit from outside (an Apple event, as System Settings' Quit &
+    /// Reopen sends, SIGTERM, logout) keeps a Turn On a permission refused,
+    /// for the relaunch.
+    func requestQuit(fromHippocampus: Bool = false) {
+        if fromHippocampus { supervisor.forgetTurnOnWaitingOnPermission() }
         requestTermination(.quit)
     }
 
@@ -629,6 +664,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
+        // A link that launches the app comes first: the launch is the link's,
+        // and keeps Hippocampus in the menu bar (spec-shell S7).
+        if !launchReasonRead { linkOpenedAtLaunch = true }
         guard !leavingForApplications else { return }
         for url in urls {
             guard let route = HippocampusURLRoute.parse(url) else { continue }
@@ -638,11 +676,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // deep-links the Brief tab. Unknown tab values fall
                 // through to the recall-ui's default tab.
                 Task { @MainActor in
-                    supervisor.openRecallUI(
-                        initialTab: tab,
-                        focusEventId: focusEventId,
-                        openPopup: openPopup
-                    )
+                    openWindow(tab: tab, focusEventId: focusEventId, openPopup: openPopup)
                 }
             case .openPreferences(let section):
                 configurePreferencesController()
@@ -663,15 +697,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // question (RULINGS S12).
                 CommandBarController.shared.show(asking: question, from: .link)
             case .restartRemembering:
-                // Setup's "Try Again": the menu's Try Again, in place. Not
-                // before consent or while turned off; `retryNow` itself
-                // yields to a stop, a pause or a quit.
-                guard OnboardingSentinel.isComplete, supervisor.captureEnabled else { continue }
-                supervisor.retryNow()
+                // Setup's "Try Again": the menu's Try Again, in place, which
+                // presses a Turn On that did not take again. Not before
+                // consent, and that press only for the setup that is open.
+                supervisor.restartFromSetup(setupFinished: OnboardingSentinel.isComplete, setupOpen: supervisor.onboardingIsRunning)
             case .unknown:
                 continue
             }
         }
+    }
+
+    /// Only the person's own launch, once setup is done, opens the window:
+    /// not a login, a quiet relaunch, a link or Preferences (spec-shell S7,
+    /// 07fedaf). Asking before the launch's orphan sweep lets it open as soon
+    /// as the key is checked, alongside the sweep, which can wait up to 15 s
+    /// on a writer a crash left; opening the window starts no capture.
+    @MainActor
+    private func requestTheWindowIfThePersonOpenedHippocampus() {
+        let opening = AppOpening.atLaunch(
+            launchReason, setupFinished: OnboardingSentinel.isComplete, hasSetup: supervisor.hasOnboarding
+        )
+        if opening == .window { supervisor.openRecallWhenReady(initialLaunch: true) }
     }
 
     /// First-launch contract — TCC ordering:
@@ -715,9 +761,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             firstLaunchLogger.warning("first-launch: no Onboarding binary bundled → start supervisor as fallback")
         }
-        // Only the person's own launch opens the window: not a login, a quiet
-        // relaunch, a link or Preferences (spec-shell S7, 07fedaf).
-        if opening == .window { supervisor.openRecallWhenReady(initialLaunch: true) }
+        // The person's own launch asked for the window before the sweep
+        // (`requestTheWindowIfThePersonOpenedHippocampus`).
         supervisor.start()
     }
 
@@ -857,5 +902,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .window: supervisor.reopenWindow()
         }
         return false
+    }
+}
+
+/// The permission notifications ("Click to open System Settings."): a click
+/// on one, or on its Open System Settings button, is the status row's Open
+/// System Settings… (`TCCRevokedNotificationActionHandler`).
+extension AppDelegate: UNUserNotificationCenterDelegate {
+    /// Shown while Hippocampus is the active app too.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .list, .sound]
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
+    ) async {
+        let content = response.notification.request.content
+        let category = content.categoryIdentifier
+        let action = response.actionIdentifier
+        let surface = content.userInfo[TCCRevokedNotifierRequestBuilder.userInfoSurfaceKey] as? String
+        _ = await MainActor.run {
+            TCCRevokedNotificationActionHandler.handle(
+                categoryIdentifier: category, actionIdentifier: action, surface: surface,
+                supervisor: supervisor, setupFinished: OnboardingSentinel.isComplete
+            ) { NSWorkspace.shared.open($0) }
+        }
     }
 }

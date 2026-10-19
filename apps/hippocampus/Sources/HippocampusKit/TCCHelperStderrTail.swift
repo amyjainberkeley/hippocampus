@@ -159,20 +159,41 @@ public final class TCCNotifierAndSupervisorSink: TCCRevokedEventSink {
         if let existing = supervisor.tccRevokedSurface { revoked.insert(existing) }
     }
 
+    /// The status changes at once; the notification follows on its own. The
+    /// app's first permission notification waits on macOS's "allow
+    /// notifications" prompt for as long as the person leaves it, and the
+    /// tail hands over one event at a time: awaited here, it held every
+    /// later line back, so a permission that came back still read "Needs
+    /// permission" while the helper read again.
     public func handleRevoked(_ reason: TCCRevokedReason) async {
         forgetIfCleared()
         revoked.insert(reason)
         updateVisibleReason()
         // Remembering is off when a turn-on found the permission off: nothing
         // stopped remembering, so the notification says what is needed.
-        await notifier.notifyRevoked(reason, whileRemembering: supervisor?.captureEnabled ?? true)
+        let whileRemembering = supervisor?.captureEnabled ?? true
+        notify(reason) { await $0.notifyRevoked(reason, whileRemembering: whileRemembering) }
     }
 
     public func handleRestored(_ reason: TCCRevokedReason) async {
         forgetIfCleared()
         revoked.remove(reason)
         updateVisibleReason()
-        await notifier.notifyRestored(reason)
+        // A notification for it still waiting on the prompt never shows.
+        notifications[reason]?.cancel()
+        notify(reason) { await $0.notifyRestored(reason) }
+    }
+
+    /// Each permission's notifications, in the order its lines came.
+    private var notifications: [TCCRevokedReason: Task<Void, Never>] = [:]
+
+    private func notify(_ reason: TCCRevokedReason, _ operation: @escaping @Sendable (TCCRevokedNotifier) async -> Void) {
+        let previous = notifications[reason]
+        let notifier = notifier
+        notifications[reason] = Task {
+            await previous?.value
+            await operation(notifier)
+        }
     }
 
     /// Try Again clears the supervisor's surface before a restart, since no
@@ -185,7 +206,7 @@ public final class TCCNotifierAndSupervisorSink: TCCRevokedEventSink {
     private func updateVisibleReason() {
         // Screen capture has priority; restoring another permission must not
         // hide a permission that is still revoked.
-        supervisor?.tccRevokedSurface = TCCRevokedReason.allCases.first { revoked.contains($0) }
+        supervisor?.helperReportedPermission(TCCRevokedReason.allCases.first { revoked.contains($0) })
     }
 }
 

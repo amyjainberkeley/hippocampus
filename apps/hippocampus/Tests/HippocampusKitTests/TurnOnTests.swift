@@ -235,10 +235,15 @@ final class TurnOnTests: XCTestCase {
         await eventually { rig.supervisor.captureEnabled && !rig.supervisor.turningOn }
         XCTAssertEqual(started, 1)
 
+        // A restart whose helper finds the permission off again does not
+        // run, and the notification it brings stays.
         screenRecording.off = true
         rig.supervisor.retryNow()
-        await eventually { rig.topology.launchPlans.count == 4 && rig.supervisor.state == .running }
-        XCTAssertEqual(started, 1, "a restart paused on the permission keeps it")
+        await eventually {
+            rig.topology.launchPlans.count == 4
+                && rig.supervisor.menuBarStatus == .needsPermission(.screenRecording)
+        }
+        XCTAssertEqual(started, 1, "a restart that met the permission keeps the notification")
         try await rig.supervisor.shutdownAndWait()
     }
 
@@ -274,6 +279,48 @@ final class TurnOnTests: XCTestCase {
         XCTAssertEqual(row(rig.supervisor).detail, "Accessibility is off for Hippocampus.")
         XCTAssertEqual(row(rig.supervisor).action, .openSystemSettings(.accessibility))
         XCTAssertFalse(rig.supervisor.captureEnabled)
+        try await rig.supervisor.shutdownAndWait()
+    }
+
+    /// The helper is paused on a permission this app has no name for (a
+    /// newer helper's, or a respelled one). It used to read as none off, so
+    /// Turn On saved remembering on, turned consent on and kept a helper
+    /// that would start reading by itself once that permission came back.
+    func test_a_permission_the_app_cannot_name_never_commits_a_turn_on() async throws {
+        let rig = rig()
+        try await rig.supervisor.startAndWaitForReadiness()
+        rig.topology.permissionsOffInReceipt = { plan in
+            plan.helperArguments.contains("--capture") ? ["inputMonitoring"] : []
+        }
+
+        press(.turnOn, on: rig.supervisor)
+        await eventually { !rig.supervisor.turningOn }
+
+        XCTAssertFalse(rig.supervisor.captureEnabled)
+        XCTAssertEqual(rig.config.captureWrites, [])
+        XCTAssertTrue(rig.consent.enabledGenerations.isEmpty)
+        XCTAssertFalse(rig.topology.captureHelperAlive, "no helper waits on the permission")
+        XCTAssertEqual(row(rig.supervisor).title, "Couldn’t turn on")
+        XCTAssertEqual(row(rig.supervisor).action, .tryAgain)
+        try await rig.supervisor.shutdownAndWait()
+    }
+
+    /// The same helper at an ordinary start (remembering on): it does not run
+    /// on, waiting on a permission nobody can see.
+    func test_a_start_whose_helper_names_a_permission_the_app_cannot_name_does_not_run() async throws {
+        let rig = rig(captureEnabled: true)
+        rig.topology.permissionsOffInReceipt = { plan in
+            plan.helperArguments.contains("--capture") ? ["inputMonitoring"] : []
+        }
+
+        try? await rig.supervisor.startAndWaitForReadiness()
+
+        guard case .crashed = rig.supervisor.state else {
+            return XCTFail("expected a failed start, got \(rig.supervisor.state)")
+        }
+        XCTAssertTrue(rig.consent.enabledGenerations.isEmpty)
+        XCTAssertFalse(rig.topology.holdsProcesses)
+        XCTAssertEqual(row(rig.supervisor).action, .tryAgain)
         try await rig.supervisor.shutdownAndWait()
     }
 
@@ -321,6 +368,8 @@ final class TurnOnTests: XCTestCase {
         press(.openSystemSettings(.screenRecording), on: rig.supervisor)
         rig.supervisor.retryIfPermissionMayBeBack()
         XCTAssertTrue(rig.supervisor.turningOn, "the look shows as Starting…")
+        XCTAssertEqual(row(rig.supervisor).title, "Starting…", "the menu the look opens says what it started")
+        XCTAssertEqual(row(rig.supervisor).action, .turnOff, "and it can be dropped")
         await eventually { !rig.supervisor.turningOn }
         XCTAssertEqual(rig.supervisor.menuBarStatus, .needsPermission(.screenRecording))
         XCTAssertEqual(captureLaunches(rig), 2)
@@ -337,6 +386,43 @@ final class TurnOnTests: XCTestCase {
         XCTAssertNil(rig.supervisor.tccRevokedSurface)
         XCTAssertNil(rig.supervisor.turnOnFailure)
         XCTAssertEqual(rig.config.captureWrites, [true])
+        try await rig.supervisor.shutdownAndWait()
+    }
+
+    /// The menu builds its items right after the look (menuNeedsUpdate). The
+    /// permission the last turn-on found off stayed in the status until the
+    /// new attempt began, a turn later, so the menu the look opened read
+    /// "Needs permission / Open System Settings…" while its turn-on launched
+    /// and landed, with no way to drop it.
+    func test_the_menu_a_look_opens_shows_the_turn_on_it_started_with_turn_off() async throws {
+        let rig = rig()
+        try await rig.supervisor.startAndWaitForReadiness()
+        let screenRecording = PermissionSwitch()
+        helperReports(.screenRecording, to: rig, while: screenRecording)
+        press(.turnOn, on: rig.supervisor)
+        await eventually { !rig.supervisor.turningOn }
+        press(.openSystemSettings(.screenRecording), on: rig.supervisor)
+        screenRecording.off = false
+        let readiness = TestSuspension()
+        rig.topology.readinessSuspension = readiness
+
+        rig.supervisor.retryIfPermissionMayBeBack()
+        let menu = StatusMenuModel.items(
+            row: row(rig.supervisor), setupComplete: true, askLabel: nil, aiToolsConnected: false
+        )
+        XCTAssertEqual(menu.first?.title, "Starting…", "\(menu.map(\.title))")
+        XCTAssertTrue(menu.contains { $0.role == .action(.turnOff) }, "\(menu.map(\.title))")
+        XCTAssertEqual(rig.supervisor.menuBarStatus.markState, .remembering)
+
+        // While that menu is open the turn-on launches; Turn Off drops it.
+        await readiness.waitUntilEntered()
+        press(.turnOff, on: rig.supervisor)
+        rig.topology.readinessSuspension = nil
+        readiness.resume()
+        await eventually { rig.supervisor.state == .stopped && !rig.supervisor.turningOn }
+        XCTAssertFalse(rig.supervisor.captureEnabled)
+        XCTAssertFalse(rig.topology.captureHelperAlive)
+        XCTAssertEqual(rig.config.captureWrites, [false])
         try await rig.supervisor.shutdownAndWait()
     }
 
@@ -848,4 +934,119 @@ private func XCTAssertThrowsErrorAsync<T: Sendable>(
         _ = try await expression()
         XCTFail("expected error", file: file, line: line)
     } catch {}
+}
+
+/// Setup's Try Again (`hippocampus://restart`), from Try it's stalled card.
+/// The app dropped it unless remembering was on, so after setup's own Start
+/// Remembering failed to turn on (a helper exit, a timeout, a permission),
+/// Try it said "Turning on…", stalled again at 45 s and offered Try Again
+/// again, with no end. It is the menu's Try Again now.
+@MainActor
+final class SetupTryAgainTests: XCTestCase {
+    private func make(captureEnabled: Bool = false) -> (ProcessSupervisor, FakeSupervisorTopology, FakeRuntimeConfig) {
+        let locator = FakeBinaryLocator()
+        locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
+        locator.agentURL = URL(fileURLWithPath: "/bundle/mci-agent")
+        let keyStore = FakeKeyStore()
+        keyStore.storedKey = String(repeating: "ab", count: 32)
+        let topology = FakeSupervisorTopology()
+        let config = FakeRuntimeConfig(captureEnabled: captureEnabled)
+        let supervisor = ProcessSupervisor(
+            locator: locator, keyStore: keyStore, runtimeConfig: config, topology: topology,
+            keyCustodyPreparer: FakeKeyCustodyPreparer(), readinessTimeout: 0.1, captureStatusReader: { (nil, nil) }
+        )
+        return (supervisor, topology, config)
+    }
+
+    private func eventually(_ condition: @MainActor () -> Bool, within seconds: TimeInterval = 3) async {
+        let deadline = Date().addingTimeInterval(seconds)
+        while !condition() && Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    /// First run: Start Remembering wrote consent, and the turn-on it asked
+    /// for did not start. Setup's Try Again turns remembering on, as the
+    /// menu's Try Again does in the same state.
+    func test_setups_try_again_after_its_turn_on_did_not_start_turns_it_on() async throws {
+        let (supervisor, topology, config) = make()
+        topology.readinessResults = [.failure(SupervisorProcessRuntimeError.helperExited(79))]
+        try? await supervisor.applyCaptureEnabled(true)
+        XCTAssertEqual(supervisor.statusRow(setupFinished: true).title, "Couldn’t turn on")
+
+        supervisor.restartFromSetup(setupFinished: true, setupOpen: true)
+        await eventually { supervisor.captureEnabled && !supervisor.turningOn }
+
+        XCTAssertTrue(supervisor.captureEnabled)
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertEqual(config.captureWrites, [true])
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// The turn-on found Screen Recording off; the person allowed it from
+    /// setup's own Open Settings, which never tells the app, and pressed Try
+    /// Again: a fresh helper, which sees the grant.
+    func test_setups_try_again_after_a_permission_turn_on_tries_a_fresh_helper() async throws {
+        let (supervisor, topology, _) = make()
+        var off = true
+        topology.permissionOffInReceipt = { off && $0.helperArguments.contains("--capture") ? .screenRecording : nil }
+        try? await supervisor.applyCaptureEnabled(true)
+        XCTAssertEqual(supervisor.menuBarStatus, .needsPermission(.screenRecording))
+
+        off = false
+        supervisor.restartFromSetup(setupFinished: true, setupOpen: true)
+        await eventually { supervisor.captureEnabled && !supervisor.turningOn }
+
+        XCTAssertTrue(supervisor.captureEnabled)
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// Only the setup that is open asks: the same link from anywhere else
+    /// never turns remembering on, and nothing before consent.
+    func test_the_link_turns_nothing_on_without_setup_open_or_before_consent() async throws {
+        let (supervisor, topology, config) = make()
+        topology.readinessResults = [.failure(SupervisorProcessRuntimeError.helperExited(79))]
+        try? await supervisor.applyCaptureEnabled(true)
+        let launches = topology.launchPlans.count
+
+        supervisor.restartFromSetup(setupFinished: true, setupOpen: false)
+        supervisor.restartFromSetup(setupFinished: false, setupOpen: true)
+        try await Task.sleep(for: .milliseconds(150))
+
+        XCTAssertEqual(topology.launchPlans.count, launches)
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [])
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// Remembering is on and not saving: the link restarts it now.
+    func test_with_remembering_on_the_link_restarts_it() async throws {
+        let (supervisor, topology, _) = make(captureEnabled: true)
+        topology.readinessResults = [.failure(SupervisorProcessRuntimeError.readinessTimedOut)]
+        try? await supervisor.startAndWaitForReadiness()
+
+        supervisor.restartFromSetup(setupFinished: true, setupOpen: false)
+        await eventually { supervisor.state == .running }
+
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertEqual(topology.launchPlans.count, 2)
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// The app's link handler is this one path.
+    func test_the_apps_restart_link_goes_through_it() throws {
+        let app = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Sources/Hippocampus/HippocampusApp.swift"),
+            encoding: .utf8
+        )
+        let start = try XCTUnwrap(app.range(of: "case .restartRemembering:"))
+        let end = try XCTUnwrap(app.range(of: "case .unknown:", range: start.upperBound..<app.endIndex))
+        let branch = app[start.upperBound..<end.lowerBound]
+        XCTAssertTrue(branch.contains(
+            "supervisor.restartFromSetup(setupFinished: OnboardingSentinel.isComplete, setupOpen: supervisor.onboardingIsRunning)"
+        ))
+        XCTAssertFalse(branch.contains("retryNow"))
+    }
 }

@@ -131,16 +131,59 @@ final class LaunchReasonTests: XCTestCase {
         XCTAssertTrue(opened.reason.opensWindow)
     }
 
+    /// A link that launches Hippocampus (`open hippocampus://ask?q=…`)
+    /// reaches `application(_:open:)` before `applicationDidFinishLaunching`,
+    /// and by then no Apple event is current: it read as the person's own
+    /// launch, so the window opened over what the link asked for.
+    @MainActor
+    func testALinkThatLaunchedTheAppIsALinkLaunch() throws {
+        let suite = "ai.hippocampus.tests.launch.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let launched = LaunchReason.read(
+            preferencesRequested: false, linkOpened: true, environment: [:], defaults: defaults, now: now, currentEvent: nil
+        )
+        XCTAssertEqual(launched.reason, .url)
+        XCTAssertFalse(launched.reason.opensWindow)
+        XCTAssertEqual(reason(link: true, event: nil), .url)
+        XCTAssertEqual(reason(link: true, event: open), .url)
+        XCTAssertEqual(reason(preferences: true, link: true, event: nil), .preferences, "Preferences still comes first")
+    }
+
+    /// The app records the link as it arrives, before it reads the reason,
+    /// and Ask keeps a link that comes before it is set up.
+    func testTheAppRecordsALinkBeforeItReadsTheReasonAndAskKeepsIt() throws {
+        let sources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/Hippocampus")
+        let app = try String(contentsOf: sources.appendingPathComponent("HippocampusApp.swift"), encoding: .utf8)
+        let open = try XCTUnwrap(app.range(of: "func application(_ application: NSApplication, open urls: [URL]) {"))
+        let openBody = app[open.upperBound...].prefix(400)
+        XCTAssertTrue(openBody.contains("if !launchReasonRead { linkOpenedAtLaunch = true }"))
+        XCTAssertTrue(app.contains("LaunchReason.read(preferencesRequested: initialPreferencesRequest != nil, linkOpened: linkOpenedAtLaunch)"))
+        XCTAssertTrue(app.contains("launchReasonRead = true"))
+
+        let bar = try String(contentsOf: sources.appendingPathComponent("CommandBar.swift"), encoding: .utf8)
+        XCTAssertTrue(bar.contains("guard let model else {\n            heldShow = (question, opening)\n            return\n        }"))
+        let configure = try XCTUnwrap(bar.range(of: "func configure("))
+        let configureBody = bar[configure.upperBound...].prefix(1200)
+        XCTAssertTrue(configureBody.contains("if let held = heldShow {"))
+        XCTAssertTrue(configureBody.contains("show(asking: held.question, from: held.opening)"))
+    }
+
     func testOnlyThePersonsOwnLaunchOpensTheWindow() {
         let all: [LaunchReason] = [.preferences, .quiet, .login, .url, .user]
         XCTAssertEqual(all.filter(\.opensWindow), [.user])
     }
 
     private func reason(
-        preferences: Bool = false, quiet: Bool = false, quietOnceAt: Date? = nil, event: LaunchReason.Event?
+        preferences: Bool = false, quiet: Bool = false, quietOnceAt: Date? = nil, link: Bool = false,
+        event: LaunchReason.Event?
     ) -> LaunchReason {
         LaunchReason.decide(
-            preferencesRequested: preferences, quietEnvironment: quiet, quietOnceAt: quietOnceAt, now: now, event: event
+            preferencesRequested: preferences, quietEnvironment: quiet, quietOnceAt: quietOnceAt, now: now,
+            linkOpened: link, event: event
         )
     }
 }

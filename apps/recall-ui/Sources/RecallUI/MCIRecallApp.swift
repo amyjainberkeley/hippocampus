@@ -13,6 +13,9 @@ final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Se
     /// The window ends with the app that opened it, and stops its children
     /// first (RULINGS G7, G7a).
     private var lifetime: ProcessLifetime?
+    /// This process is quitting (its last window closed, or the app asked):
+    /// a command finds nothing to show, so it is not answered. Main thread.
+    private var terminating = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         lifetime = ProcessLifetime { _ in
@@ -44,14 +47,23 @@ final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Se
         // The always-running Hippocampus shell owns the system-wide key and
         // the Ask panel. This window has no popup of its own: a request for
         // one opens hippocampus://ask (RULINGS W3).
+        //
+        // Delivered at once, even while this window is in the background:
+        // the app waits for the answer before it brings the window forward.
         MainActor.assumeIsolated {
             DistributedNotificationCenter.default().addObserver(
                 self,
                 selector: #selector(receiveRecallCommand(_:)),
                 name: RecallLaunchRequest.distributedCommandName,
-                object: nil
+                object: nil,
+                suspensionBehavior: .deliverImmediately
             )
         }
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        terminating = true
+        return .terminateNow
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -68,18 +80,41 @@ final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Se
         true
     }
 
+    /// A command from the app (opening Hippocampus, the menu, Ask). It is
+    /// answered only when the window shows itself: a process that is
+    /// quitting, or whose last window just closed, stays silent, and the app
+    /// opens a fresh window once this one has ended. A minimized window comes
+    /// back out of the Dock first: the app can bring this process forward,
+    /// but only the process can deminiaturize its window.
     @objc
     private func receiveRecallCommand(_ notification: Notification) {
         guard let request = RecallLaunchRequest(userInfo: notification.userInfo) else { return }
+        let answer = RecallLaunchRequest.acknowledgement(for: notification.userInfo)
         Task { @MainActor in
+            let windows = NSApp.windows.filter(\.canBecomeMain)
+            let states = windows.map { RecallWindowState(isVisible: $0.isVisible, isMiniaturized: $0.isMiniaturized) }
+            guard RecallCommandAnswer.decide(terminating: self.terminating, windows: states) == .show else { return }
             // A request for the old popup alone leaves the window where it is.
-            if request.navigationTab != nil || request.focusEventId != nil {
+            if request.bringsWindowForward {
+                for window in windows where window.isMiniaturized {
+                    window.deminiaturize(nil)
+                }
+                NSApp.unhide(nil)
+                windows.first(where: { $0.isVisible })?.makeKeyAndOrderFront(nil)
                 NSApp.activate(ignoringOtherApps: true)
             }
             NotificationCenter.default.post(
                 name: RecallLaunchRequest.localCommandName,
                 object: request
             )
+            if let answer {
+                DistributedNotificationCenter.default().postNotificationName(
+                    RecallLaunchRequest.acknowledgementName,
+                    object: String(ProcessInfo.processInfo.processIdentifier),
+                    userInfo: answer,
+                    deliverImmediately: true
+                )
+            }
         }
     }
 }

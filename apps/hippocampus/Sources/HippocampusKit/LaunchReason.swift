@@ -57,12 +57,17 @@ public enum LaunchReason: String, Sendable, Equatable {
     public var opensWindow: Bool { self == .user }
 
     /// The table in spec-shell S7, in order: a Preferences request, a quiet
-    /// launch, a login, a link, and otherwise the person.
+    /// launch, a login, a link, and otherwise the person. `linkOpened` is a
+    /// link the app was handed before it read the reason: a link that
+    /// launches the app arrives before `applicationDidFinishLaunching`, and
+    /// by then no Apple event is current, so the event alone read as the
+    /// person's own launch.
     public static func decide(
         preferencesRequested: Bool,
         quietEnvironment: Bool,
         quietOnceAt: Date?,
         now: Date,
+        linkOpened: Bool = false,
         event: Event?
     ) -> LaunchReason {
         if preferencesRequested { return .preferences }
@@ -72,6 +77,7 @@ public enum LaunchReason: String, Sendable, Equatable {
            event.propData == OSType(keyAELaunchedAsLogInItem) {
             return .login
         }
+        if linkOpened { return .url }
         if let event, event.eventClass == getURL, event.eventID == getURL { return .url }
         return .user
     }
@@ -82,6 +88,7 @@ public enum LaunchReason: String, Sendable, Equatable {
     @MainActor
     public static func read(
         preferencesRequested: Bool,
+        linkOpened: Bool = false,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         defaults: UserDefaults = .standard,
         now: Date = Date(),
@@ -93,6 +100,7 @@ public enum LaunchReason: String, Sendable, Equatable {
             quietEnvironment: environment[QuietLaunchNote.environmentKey] == "1",
             quietOnceAt: QuietLaunchNote.take(from: defaults),
             now: now,
+            linkOpened: linkOpened,
             event: event
         )
         return (reason, event)

@@ -77,6 +77,11 @@ if baseline < privacy:
     raise SystemExit("privacy-suppressed frames must not mutate the accepted-frame dHash baseline")
 PY
 
+require_literal 'off = receipt.get("permissions_off") or []' \
+    "the live run must stop on a helper paused on a permission, by name"
+require_literal 'runtime_fail "capture helper started paused on permissions macOS has off: $permissions_off"' \
+    "the live run must say which permission paused the helper"
+
 bash -n "$RUNNER"
 PYTHONPYCACHEPREFIX="$TMP_ROOT/pycache" python3 -m py_compile "$SESSION_CHECK"
 PYTHONPYCACHEPREFIX="$TMP_ROOT/pycache" python3 -m py_compile "$MEMORY_CHECK"

@@ -249,6 +249,14 @@ final class TCCHelperStderrParserTests: XCTestCase {
 // MARK: - Integration tests
 
 final class TCCHelperStderrTailIntegrationTests: XCTestCase {
+    /// Notifications go out on their own, after the status changed.
+    @MainActor
+    private func waitFor(_ condition: () -> Bool, within seconds: TimeInterval = 3) async {
+        let deadline = Date().addingTimeInterval(seconds)
+        while !condition() && Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
 
     @MainActor
     func testRestoringOneSurfaceKeepsOtherRevokedSurfaceVisible() async {
@@ -304,7 +312,8 @@ final class TCCHelperStderrTailIntegrationTests: XCTestCase {
 
         await sink.handleRevoked(.screenRecording)
 
-        // Notifier fired.
+        // Notifier fired, on its own after the status changed.
+        await waitFor { center.added.count == 1 }
         XCTAssertEqual(center.added.count, 1)
         XCTAssertEqual(
             center.added[0].identifier,
@@ -340,9 +349,11 @@ final class TCCHelperStderrTailIntegrationTests: XCTestCase {
 
         await sink.handleRevoked(.accessibility)
         XCTAssertEqual(supervisor.tccRevokedSurface, .accessibility)
+        await waitFor { center.added.count == 1 }
 
         await sink.handleRestored(.accessibility)
         XCTAssertNil(supervisor.tccRevokedSurface)
+        await waitFor { !center.removedPending.isEmpty }
         XCTAssertFalse(
             center.removedPending.isEmpty,
             "restore must clear pending notification"
@@ -424,6 +435,7 @@ final class TCCHelperStderrTailIntegrationTests: XCTestCase {
             "mci-capture-helper: helper_health tcc_revoked=fullDiskAccess\n"
         )
         XCTAssertEqual(supervisor.tccRevokedSurface, .fullDiskAccess)
+        await waitFor { center.added.count == 1 }
         XCTAssertEqual(center.added.count, 1)
     }
 }

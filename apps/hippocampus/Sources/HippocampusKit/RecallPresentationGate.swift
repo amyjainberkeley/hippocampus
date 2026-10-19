@@ -16,6 +16,9 @@ public struct RecallPresentationGate {
 
     public init() {}
 
+    /// A request is waiting to be shown.
+    public var isPending: Bool { pending }
+
     public mutating func request(initialLaunch: Bool, state: SupervisorState, memoryReady: Bool = false) -> Bool {
         if initialLaunch {
             guard !initialLaunchRequested else { return false }

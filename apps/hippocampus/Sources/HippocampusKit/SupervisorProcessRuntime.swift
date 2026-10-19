@@ -31,6 +31,8 @@ enum SupervisorProcessRuntimeError: LocalizedError, Equatable {
     case readinessTimedOut
     case invalidReadiness
     case partialStop
+    /// The helper is paused on a permission this app cannot name.
+    case unknownPermissionOff
 
     var errorDescription: String? {
         switch self {
@@ -41,6 +43,7 @@ enum SupervisorProcessRuntimeError: LocalizedError, Equatable {
         case .readinessTimedOut: return "Capture helper readiness timed out."
         case .invalidReadiness: return "Capture helper returned a stale or invalid readiness receipt."
         case .partialStop: return "The prior helper topology did not stop completely."
+        case .unknownPermissionOff: return "The capture helper is waiting on a permission this app does not know."
         }
     }
 }
@@ -99,8 +102,10 @@ package protocol SupervisorTopologyControlling: AnyObject {
     func stop(timeout: TimeInterval) async throws
     /// The permission the last ready helper found off as it started, from
     /// its readiness receipt, Screen Recording first. A capture helper
-    /// started with one off is paused on it, and starts reading by itself
-    /// once it is allowed.
+    /// started with one off is paused on it. It may resume by itself once
+    /// the permission is allowed (Accessibility), or never see the grant at
+    /// all (Screen Recording: the process's own answer stays "no"), so the
+    /// supervisor never keeps it: the start ends, and a fresh helper judges.
     var permissionOffAtReadiness: TCCRevokedReason? { get }
     /// The running helper and agent, which the orphan sweep leaves alone
     /// outside Quit (spec-shell S6.4).
@@ -134,8 +139,11 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
 
     /// Reads a readiness receipt, which must be `generation`'s, with its
     /// capture setting, and returns the permission it says the helper found
-    /// off as it started, Screen Recording first. A name this app does not
-    /// know is not one it can offer to fix, so it is left to the helper.
+    /// off as it started, Screen Recording first. Any name in the list means
+    /// the helper is paused and would start reading by itself once that
+    /// permission is allowed, so a name this app does not know (a newer
+    /// helper's surface, a respelling) is never read as "none off": the
+    /// start did not land, and it fails rather than commit.
     static func permissionOff(
         inReadiness data: Data,
         for generation: SupervisorProcessGeneration
@@ -147,7 +155,11 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
             throw SupervisorProcessRuntimeError.invalidReadiness
         }
         let off = Set(payload.permissionsOff ?? [])
-        return TCCRevokedReason.allCases.first { off.contains($0.rawValue) }
+        guard !off.isEmpty else { return nil }
+        guard let named = TCCRevokedReason.allCases.first(where: { off.contains($0.rawValue) }) else {
+            throw SupervisorProcessRuntimeError.unknownPermissionOff
+        }
+        return named
     }
 
     private var helper: Process?
@@ -303,7 +315,9 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
         while Date() < gracefulDeadline,
               helper?.isRunning == true || agent?.isRunning == true
         {
-            try await Task.sleep(for: .milliseconds(25))
+            // Never cancelled: a stop asked for by a cancelled change must
+            // still signal and let go of what it holds.
+            await Self.pause(for: .milliseconds(25))
         }
         do {
             let survivors = [helper, agent].compactMap { process in
@@ -319,6 +333,12 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
             throw SupervisorProcessRuntimeError.partialStop
         }
         cleanup()
+    }
+
+    /// Sleeps the whole `duration` even in a cancelled task, which a bare
+    /// `Task.sleep` refuses to do.
+    static func pause(for duration: Duration) async {
+        await Task { try? await Task.sleep(for: duration) }.value
     }
 
     private func cleanup() {

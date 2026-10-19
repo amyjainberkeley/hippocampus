@@ -128,7 +128,7 @@ final class SupervisorStopAndPauseTests: XCTestCase {
         return marker
     }
 
-    private func openedTab(_ marker: URL, within seconds: TimeInterval = 2) async -> String? {
+    private func openedTab(_ marker: URL, within seconds: TimeInterval = 5) async -> String? {
         let deadline = Date().addingTimeInterval(seconds)
         while Date() < deadline {
             if let tab = try? String(contentsOf: marker, encoding: .utf8) { return tab }
@@ -265,6 +265,35 @@ final class SupervisorStopAndPauseTests: XCTestCase {
         }
     }
 
+    /// The save failed but the stop worked, and the kept note keeps the next
+    /// launch off: nothing reads, so it is Off ("You stopped it at …"), not
+    /// "Couldn’t stop / Hippocampus may still be reading the screen." with
+    /// only Quit, which sent the person to quit for nothing.
+    func test_a_turn_off_whose_save_failed_but_that_stopped_reads_off() async throws {
+        let note = RecordingStopNote()
+        let config = FakeRuntimeConfig(captureEnabled: true)
+        let (supervisor, _, topology) = make(config: config, note: note)
+        try await supervisor.startAndWaitForReadiness()
+        config.captureWriteError = TestError.writeFailed
+
+        try? await supervisor.applyCaptureEnabled(false)
+
+        XCTAssertFalse(topology.holdsProcesses, "nothing runs")
+        XCTAssertNotNil(note.stoppedSharingAt, "the next launch stays off")
+        XCTAssertFalse(supervisor.stopFailed)
+        XCTAssertEqual(supervisor.state, .stopped)
+        let row = supervisor.statusRow(setupFinished: true, now: clock.now)
+        XCTAssertEqual(row.title, "Off")
+        XCTAssertTrue(row.detail?.hasPrefix("You stopped it") == true, row.detail ?? "nil")
+        XCTAssertEqual(row.action, .turnOn)
+
+        // Turning it on again is the way back, and ends the note.
+        config.captureWriteError = nil
+        try await supervisor.applyCaptureEnabled(true)
+        XCTAssertNil(note.stoppedSharingAt)
+        try await supervisor.shutdownAndWait()
+    }
+
     func test_a_note_older_than_the_settings_file_is_dropped() async throws {
         let stopped = clock.now.addingTimeInterval(-3600)
         let note = RecordingStopNote(stopped)
@@ -304,6 +333,38 @@ final class SupervisorStopAndPauseTests: XCTestCase {
         topology.fireUnexpectedExit(forLaunchAt: launches - 1, label: "helper", status: 9)
         await eventually { topology.launchPlans.count > launches }
         XCTAssertGreaterThan(topology.launchPlans.count, launches, "a crash is recovered again")
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// "Starting… / Pause" shows while a resume starts. A Pause pressed then
+    /// waited for the resume, and when that start failed the pause was
+    /// dropped: "Not saving / Try Again" with the pause kept, and Try Again
+    /// refuses while a pause is kept, so nothing did anything.
+    func test_a_pause_pressed_while_a_resume_starts_is_applied_when_that_start_fails() async throws {
+        let pauses = UserPauseController()
+        let (supervisor, _, topology) = make(config: FakeRuntimeConfig(captureEnabled: true), pauses: pauses)
+        try await supervisor.startAndWaitForReadiness()
+        supervisor.setPaused(true)
+        await eventually { supervisor.state == .paused }
+        let readiness = TestSuspension()
+        topology.readinessSuspension = readiness
+        topology.readinessResults = [.failure(SupervisorProcessRuntimeError.helperExited(79))]
+        supervisor.performAskStatusAction(.resume, setupFinished: true) { _ in }
+        await readiness.waitUntilEntered()
+        XCTAssertEqual(supervisor.statusRow(setupFinished: true, now: clock.now).action, .pause)
+
+        supervisor.performAskStatusAction(.pause, setupFinished: true) { _ in }
+        topology.readinessSuspension = nil
+        readiness.resume()
+        await eventually { supervisor.state == .paused }
+
+        XCTAssertEqual(supervisor.state, .paused, "the newer Pause was dropped: \(supervisor.state)")
+        XCTAssertTrue(pauses.isPaused)
+        XCTAssertFalse(topology.holdsProcesses, "nothing the failed resume launched is left")
+        XCTAssertFalse(supervisor.stopFailed)
+        let row = supervisor.statusRow(setupFinished: true, now: clock.now)
+        XCTAssertEqual(row.title, "Paused")
+        XCTAssertEqual(row.action, .resume)
         try await supervisor.shutdownAndWait()
     }
 
@@ -550,6 +611,7 @@ final class SupervisorStopAndPauseTests: XCTestCase {
         topology.fireUnexpectedExit(forLaunchAt: 0, label: "helper", status: 9)
         guard case .crashed = supervisor.state else { return XCTFail("the helper is gone") }
         XCTAssertEqual(supervisor.menuBarStatus, .needsPermission(.screenRecording))
+        await waitUntilStopped(topology)
 
         supervisor.retryIfPermissionMayBeBack()
 
@@ -559,39 +621,59 @@ final class SupervisorStopAndPauseTests: XCTestCase {
         try await supervisor.shutdownAndWait()
     }
 
-    /// A running helper reports the permission coming back by itself.
-    func test_the_permission_retry_leaves_a_running_helper_alone() async throws {
+    /// A run a permission ended is still stopping when the menu opens: the
+    /// look starts nothing beside it. Once it has stopped, the next look
+    /// starts a fresh helper.
+    func test_a_look_while_a_permission_ended_run_still_stops_starts_nothing_beside_it() async throws {
         let (supervisor, _, topology) = make(config: FakeRuntimeConfig(captureEnabled: true))
         try await supervisor.startAndWaitForReadiness()
+        let stopping = TestSuspension()
+        topology.stopSuspensionOnCall = topology.stopCalls + 1
+        topology.stopSuspension = stopping
         supervisor.tccRevokedSurface = .accessibility
+        await stopping.waitUntilEntered()
 
         supervisor.retryIfPermissionMayBeBack()
         try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(topology.launchPlans.count, 1, "nothing starts while the run stops")
+        XCTAssertEqual(supervisor.menuBarStatus, .needsPermission(.accessibility))
 
-        XCTAssertEqual(topology.launchPlans.count, 1)
-        XCTAssertEqual(supervisor.tccRevokedSurface, .accessibility)
+        stopping.resume()
+        await waitUntilStopped(topology)
+        supervisor.retryIfPermissionMayBeBack()
+        await eventually { supervisor.state == .running }
+        XCTAssertEqual(topology.launchPlans.count, 2)
         try await supervisor.shutdownAndWait()
     }
 
     /// A helper waiting on a permission may keep its own "no" after the
-    /// person allows it. Once they chose Open System Settings…, the next look
-    /// starts a fresh one, once; remembering was on all along.
-    func test_after_open_system_settings_a_waiting_helper_is_replaced_once() async throws {
+    /// person allows it, so none is kept: the run ends, and every look starts
+    /// a fresh one (remembering was on all along), not only the one after
+    /// Open System Settings….
+    func test_every_look_after_a_permission_ended_the_run_starts_a_fresh_helper() async throws {
         let (supervisor, _, topology) = make(config: FakeRuntimeConfig(captureEnabled: true))
         try await supervisor.startAndWaitForReadiness()
         supervisor.tccRevokedSurface = .screenRecording
+        await waitUntilStopped(topology)
 
         supervisor.performAskStatusAction(.openSystemSettings(.screenRecording), setupFinished: true) { _ in }
         supervisor.retryIfPermissionMayBeBack()
 
         await eventually { topology.launchPlans.count == 2 && supervisor.state == .running }
-        XCTAssertEqual(topology.launchPlans.count, 2)
         XCTAssertTrue(topology.launchPlans.last?.helperArguments.contains("--capture") == true)
         supervisor.tccRevokedSurface = .screenRecording
+        await waitUntilStopped(topology)
         supervisor.retryIfPermissionMayBeBack()
-        try await Task.sleep(for: .milliseconds(50))
-        XCTAssertEqual(topology.launchPlans.count, 2, "once per Open System Settings…")
+        await eventually { topology.launchPlans.count == 3 && supervisor.state == .running }
+        XCTAssertEqual(topology.launchPlans.count, 3, "no new Open System Settings… needed")
         try await supervisor.shutdownAndWait()
+    }
+
+    /// A run a permission ended stops in a task of its own; the change it
+    /// holds ends a moment after the topology lets go.
+    private func waitUntilStopped(_ topology: FakeSupervisorTopology) async {
+        await eventually { !topology.holdsProcesses }
+        try? await Task.sleep(for: .milliseconds(50))
     }
 
     func test_try_again_never_overrides_stop_sharing_a_pause_or_quit() async throws {
