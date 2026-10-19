@@ -545,6 +545,27 @@ final class SupervisorStopAndPauseTests: XCTestCase {
         try await supervisor.shutdownAndWait()
     }
 
+    /// A helper waiting on a permission may keep its own "no" after the
+    /// person allows it. Once they chose Open System Settings…, the next look
+    /// starts a fresh one, once; remembering was on all along.
+    func test_after_open_system_settings_a_waiting_helper_is_replaced_once() async throws {
+        let (supervisor, _, topology) = make(config: FakeRuntimeConfig(captureEnabled: true))
+        try await supervisor.startAndWaitForReadiness()
+        supervisor.tccRevokedSurface = .screenRecording
+
+        supervisor.performAskStatusAction(.openSystemSettings(.screenRecording), setupFinished: true) { _ in }
+        supervisor.retryIfPermissionMayBeBack()
+
+        await eventually { topology.launchPlans.count == 2 && supervisor.state == .running }
+        XCTAssertEqual(topology.launchPlans.count, 2)
+        XCTAssertTrue(topology.launchPlans.last?.helperArguments.contains("--capture") == true)
+        supervisor.tccRevokedSurface = .screenRecording
+        supervisor.retryIfPermissionMayBeBack()
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(topology.launchPlans.count, 2, "once per Open System Settings…")
+        try await supervisor.shutdownAndWait()
+    }
+
     func test_try_again_never_overrides_stop_sharing_a_pause_or_quit() async throws {
         let (stopped, _, stoppedTopology) = make(config: FakeRuntimeConfig(captureEnabled: true))
         try await stopped.startAndWaitForReadiness()

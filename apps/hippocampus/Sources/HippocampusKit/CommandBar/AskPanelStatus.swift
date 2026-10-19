@@ -108,6 +108,9 @@ extension ProcessSupervisor {
             // never fails silently: the status says why it didn't take.
             turnOn()
         case .openSystemSettings(let permission):
+            // Coming back may mean it is allowed now: the next look tries
+            // again, once (`retryIfPermissionMayBeBack`).
+            notePermissionFixChosen()
             if let url = URL(string: permission.settingsPaneURLString) { openURL(url) }
         case .tryAgain:
             // Try Again tries what failed: a turn-on that didn't take, or

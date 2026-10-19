@@ -190,6 +190,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// or failure.
     @Published private var enablingAttempt: UUID?
     private var turnOnAttempts = 0
+    /// The person chose Open System Settings… for the permission the status
+    /// names, so the next look tries again, once.
+    private var permissionFixChosen = false
     /// Pause presses, so a turn-on a pause stopped is not called a failure.
     private var pauseRequests = 0
     private var pauseRequestsAtAttempt = 0
@@ -940,6 +943,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         pauseRequestsAtAttempt = pauseRequests
         enablingAttempt = attempt
         turnOnFailure = nil
+        // This attempt is the look a chosen Open System Settings… asked for.
+        permissionFixChosen = false
         // Nothing reports permissions while remembering is off, so one an
         // earlier run reported off cannot be told current. The fresh helper
         // this attempt starts reports it again if it still is, as for Try
@@ -969,6 +974,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         pendingTurnOn = nil
         enablingAttempt = nil
         turnOnFailure = nil
+        permissionFixChosen = false
     }
 
     /// Stops what a turn-on launched and could not commit, unless a turn-off,
@@ -1300,20 +1306,46 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
     }
 
-    /// While "Needs permission" shows after remembering stopped, nothing is
-    /// left running to notice the permission coming back, so look again when
-    /// the person may have changed it: when the menu opens or the app becomes
-    /// active (RULINGS S10). After Turn On found a permission off, remembering
-    /// stayed off, so the look is Turn On again: a fresh helper is the only
-    /// reliable judge, since this process's own answer can stay "no" after
-    /// the person allows it.
+    /// While "Needs permission" shows, look again when the person may have
+    /// changed it: when the menu opens or the app becomes active (RULINGS
+    /// S10). A fresh helper is the only reliable judge, since a process's own
+    /// answer can stay "no" after the person allows it.
+    ///
+    /// - Remembering is on and stopped on the permission: nothing is left
+    ///   running to notice it coming back, so every look restarts it.
+    /// - A turn-on found the permission off, so remembering stayed off: a look
+    ///   is Turn On again, which is consent. It is pressed again once per Open
+    ///   System Settings… the person chose for it, never by a menu opened to
+    ///   quit, and the menu it opens shows it as Starting….
+    /// - Remembering is on and its helper waits on the permission: after Open
+    ///   System Settings…, a fresh helper replaces it once.
     public func retryIfPermissionMayBeBack() {
-        if !captureEnabled, !stopFailed, case .permission = turnOnFailure {
+        guard !stopFailed else { return }
+        if !captureEnabled, case .permission = turnOnFailure {
+            guard permissionFixChosen else { return }
+            permissionFixChosen = false
             turnOn()
             return
         }
-        guard case .crashed = state, captureEnabled, tccRevokedSurface != nil, !stopFailed else { return }
-        retryNow()
+        guard captureEnabled, tccRevokedSurface != nil else { return }
+        switch state {
+        case .crashed:
+            permissionFixChosen = false
+            retryNow()
+        case .running where permissionFixChosen:
+            permissionFixChosen = false
+            retryNow()
+        default:
+            break
+        }
+    }
+
+    /// The person chose Open System Settings… for a permission the status
+    /// says is off: the next look tries again (`retryIfPermissionMayBeBack`).
+    func notePermissionFixChosen() {
+        var turnOnFoundItOff = false
+        if case .permission = turnOnFailure, !captureEnabled { turnOnFoundItOff = true }
+        permissionFixChosen = turnOnFoundItOff || (captureEnabled && tccRevokedSurface != nil)
     }
 
     /// Stop Sharing was pressed: remember when, here and across launches.

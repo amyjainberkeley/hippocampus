@@ -41,6 +41,11 @@ final class StatusItemWiringTests: XCTestCase {
                       "supervisor.retryIfPermissionMayBeBack()"] {
             XCTAssertTrue(open.contains(chore), chore)
         }
+        // The look comes first, so the menu shows what it started, as the
+        // icon does, never "Needs permission" over a helper starting.
+        let look = try XCTUnwrap(open.range(of: "supervisor.retryIfPermissionMayBeBack()"))
+        let build = try XCTUnwrap(open.range(of: "StatusMenuModel.items("))
+        XCTAssertLessThan(look.lowerBound, build.lowerBound)
         for retired in ["Open Recall", "Open Timeline", "Open Daily Brief", "Start Recording", "Stop Recording",
                         "Open Onboarding", "Troubleshoot", "Inspect Key Wrap", "Send Feedback", "MCP Registration",
                         "markPrompted", "startUpdater"] {

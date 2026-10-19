@@ -241,10 +241,15 @@ final class TurnOnTests: XCTestCase {
         try await rig.supervisor.shutdownAndWait()
     }
 
-    /// Nothing is left running to see the permission come back, and this
-    /// process's own answer can stay "no" after the person allows it, so the
-    /// menu opening tries Turn On again with a fresh helper (RULINGS S10).
-    func test_after_a_permission_stops_turn_on_the_menu_opening_tries_again() async throws {
+    private func captureLaunches(_ rig: Rig) -> Int {
+        rig.topology.launchPlans.filter { $0.helperArguments.contains("--capture") }.count
+    }
+
+    /// A look at the menu or the app is not a press. After a turn-on stopped
+    /// on a permission, opening the menu (to quit, say) once the permission
+    /// is allowed for some other reason used to press Turn On again, and
+    /// could save remembering on.
+    func test_a_failed_permission_turn_on_is_not_pressed_again_by_opening_the_menu() async throws {
         let rig = rig()
         try await rig.supervisor.startAndWaitForReadiness()
         let screenRecording = PermissionSwitch()
@@ -253,13 +258,42 @@ final class TurnOnTests: XCTestCase {
         await eventually { !rig.supervisor.turningOn }
         XCTAssertEqual(rig.supervisor.menuBarStatus, .needsPermission(.screenRecording))
 
-        // Still off: it looks again and still says so.
+        screenRecording.off = false
         rig.supervisor.retryIfPermissionMayBeBack()
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertEqual(captureLaunches(rig), 1)
+        XCTAssertFalse(rig.supervisor.turningOn)
+        XCTAssertFalse(rig.supervisor.captureEnabled)
+        XCTAssertEqual(rig.config.captureWrites, [])
+        XCTAssertEqual(rig.supervisor.menuBarStatus, .needsPermission(.screenRecording))
+        try await rig.supervisor.shutdownAndWait()
+    }
+
+    /// Choosing Open System Settings… is a step toward turning on: the next
+    /// look (the menu opening, the app becoming active) tries Turn On again
+    /// with a fresh helper, the only reliable judge, once per choice.
+    func test_after_open_system_settings_the_next_look_tries_turn_on_once() async throws {
+        let rig = rig()
+        try await rig.supervisor.startAndWaitForReadiness()
+        let screenRecording = PermissionSwitch()
+        helperReports(.screenRecording, to: rig, while: screenRecording)
+        press(.turnOn, on: rig.supervisor)
+        await eventually { !rig.supervisor.turningOn }
+
+        // Still off when the person comes back: one look, which still says so.
+        press(.openSystemSettings(.screenRecording), on: rig.supervisor)
+        rig.supervisor.retryIfPermissionMayBeBack()
+        XCTAssertTrue(rig.supervisor.turningOn, "the look shows as Starting…")
         await eventually { !rig.supervisor.turningOn }
         XCTAssertEqual(rig.supervisor.menuBarStatus, .needsPermission(.screenRecording))
-        XCTAssertEqual(rig.topology.launchPlans.filter { $0.helperArguments.contains("--capture") }.count, 2)
+        XCTAssertEqual(captureLaunches(rig), 2)
+        rig.supervisor.retryIfPermissionMayBeBack()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(captureLaunches(rig), 2, "one look per Open System Settings…")
 
-        // The person allows it in System Settings.
+        // The person allows it in System Settings and comes back.
+        press(.openSystemSettings(.screenRecording), on: rig.supervisor)
         screenRecording.off = false
         rig.supervisor.retryIfPermissionMayBeBack()
         await eventually { rig.supervisor.captureEnabled && !rig.supervisor.turningOn }
