@@ -289,13 +289,22 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     public var menuBarStatus: MenuBarStatus {
         MenuBarStatus.derive(
-            from: state, captureEnabled: captureEnabled,
+            from: shownState, captureEnabled: captureEnabled,
             tccRevokedSurface: tccRevokedSurface, receipt: captureReceipt,
             helperHealth: health, captureStartedAt: captureStartedAt,
             stopFailed: stopFailed, stopping: stoppingCapture,
             turningOn: turningOn, turnOnFailure: turnOnFailure,
             skipSeenSince: skipWatch.since, now: clock()
         )
+    }
+
+    /// The state the status is read from. Before the launch's first start,
+    /// while its orphan sweep runs (up to about 15 s, waiting out a writer a
+    /// crash left) or that start is about to begin, nothing has started but
+    /// one is coming: Starting…, or Paused for a kept pause, never Off.
+    private var shownState: SupervisorState {
+        guard state == .idle, launchSweepRunning || startRunning else { return state }
+        return requestedPauseState ? .paused : .starting
     }
 
     /// When the person paused; nil when not paused. Kept across launches.
@@ -368,9 +377,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// what the topology holds may be reading the screen.
     private var mayHoldCaptureHelper = false
     /// The launch's orphan sweep is still ending what an earlier run left.
-    private var launchSweepRunning = false
+    @Published private var launchSweepRunning = false
     /// A start `start()` asked for is under way, from the ask until it ends.
-    private var startRunning = false
+    @Published private var startRunning = false
+    /// The memory's key, checked for a window asked for while the launch's
+    /// orphan sweep runs, when no start can.
+    private var windowKeyCheck: Task<Void, Never>?
     private var captureStopLatched = false
     private var captureStopTask: Task<Void, Error>?
     private var shutdownTask: Task<Void, Error>?
@@ -580,9 +592,52 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         let children: @Sendable () async -> Set<pid_t> = { [weak self] in
             await self?.captureProcessIDs ?? []
         }
-        if moment == .launch { launchSweepRunning = true }
+        if moment == .launch {
+            launchSweepRunning = true
+            checkKeyForWindowDuringSweep()
+        }
         defer { if moment == .launch { launchSweepRunning = false } }
         return await orphanSweeper.run(moment, liveChildren: moment == .quit ? nil : children)
+    }
+
+    /// A window asked for while the launch's orphan sweep runs waited for
+    /// the sweep and the start after it, up to about 15 s. Opening the window
+    /// starts no capture, so the memory's key is checked alongside the sweep
+    /// for it, and the window opens as soon as that is done. A start waits
+    /// for this check, so the two never ask the Keychain at once.
+    private func checkKeyForWindowDuringSweep() {
+        guard launchSweepRunning, !memoryKeyChecked, windowKeyCheck == nil, recallPresentationGate.isPending,
+              !shutdownRequested, let agentURL = locator.agentPath() else { return }
+        let reference = keyReference
+        windowKeyCheck = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.windowKeyCheck = nil }
+            do {
+                try await self.prepareKey(agentURL: agentURL, reference: reference)
+                _ = try await KeyStoreAccess.readValidatedKey(from: self.keyStore)
+                self.currentKeyReference = reference
+                self.memoryKeyChecked = true
+                self.showWindowIfMemoryReady()
+            } catch {
+                self.logger.error("supervisor: checking the memory's key for the window failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// The Keychain item, or the development file, that holds the memory's key.
+    private var keyReference: KeychainKeyReference {
+        (keyStore as? FileKeyStore)?.keychainReference
+            ?? (keyStore as? KeychainKeyStore)?.reference
+            ?? .defaultDatabaseKey
+    }
+
+    /// Makes sure the memory's key exists where the agent reads it.
+    private func prepareKey(agentURL: URL, reference: KeychainKeyReference) async throws {
+        if let developmentKeyMode {
+            try FileKeyStore(path: developmentKeyMode.keyURL).ensureDevelopmentKey()
+        } else {
+            try await keyCustodyPreparer.prepare(agentURL: agentURL, databaseURL: dbPath, keyReference: reference)
+        }
     }
 
     /// Start remembering as the setting says. Never while a stop failed: what
@@ -1255,20 +1310,13 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             try failStart(SupervisorError.binaryNotFound("mci-agent"), publishing: publishesFailure)
         }
 
-        let reference = (keyStore as? FileKeyStore)?.keychainReference
-            ?? (keyStore as? KeychainKeyStore)?.reference
-            ?? .defaultDatabaseKey
+        let reference = keyReference
         var launchingGenerationID: String?
         do {
-            if let developmentKeyMode {
-                try FileKeyStore(path: developmentKeyMode.keyURL).ensureDevelopmentKey()
-            } else {
-                try await keyCustodyPreparer.prepare(
-                    agentURL: agentURL,
-                    databaseURL: dbPath,
-                    keyReference: reference
-                )
-            }
+            // Never two Keychain requests at once: a check for the window
+            // during the launch's sweep finishes first.
+            if let windowKeyCheck { await windowKeyCheck.value }
+            try await prepareKey(agentURL: agentURL, reference: reference)
             try ensureTransitionIsActive(transitionID)
             _ = try await KeyStoreAccess.readValidatedKey(from: keyStore)
             try ensureTransitionIsActive(transitionID)
@@ -1799,6 +1847,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             openRecallUI(initialTab: Self.windowTab)
         } else if recallPresentationGate.consumeIfBlocked(state: state, memoryReady: memoryReady) {
             onPresentationBlocked?()
+        } else {
+            checkKeyForWindowDuringSweep()
         }
     }
 

@@ -307,6 +307,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.watchAskKey()
             self.installBrowserHostManifests()
             self.armTCCStderrTail()
+            // The person's own launch asks for the window first: it opens as
+            // soon as there is memory to read, while the sweep below runs.
+            self.requestTheWindowIfThePersonOpenedHippocampus()
             // A helper left by a crash or Force Quit may still be reading the
             // screen; end it before starting (spec-shell S6.4). Off the main
             // thread, and quick when there is nothing to end.
@@ -681,6 +684,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Only the person's own launch, once setup is done, opens the window:
+    /// not a login, a quiet relaunch, a link or Preferences (spec-shell S7,
+    /// 07fedaf). Asking before the launch's orphan sweep lets it open as soon
+    /// as the key is checked, alongside the sweep, which can wait up to 15 s
+    /// on a writer a crash left; opening the window starts no capture.
+    @MainActor
+    private func requestTheWindowIfThePersonOpenedHippocampus() {
+        let opening = AppOpening.atLaunch(
+            launchReason, setupFinished: OnboardingSentinel.isComplete, hasSetup: supervisor.hasOnboarding
+        )
+        if opening == .window { supervisor.openRecallWhenReady(initialLaunch: true) }
+    }
+
     /// First-launch contract — TCC ordering:
     ///
     /// On a fresh install the user double-clicks the .app BEFORE they've
@@ -722,9 +738,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             firstLaunchLogger.warning("first-launch: no Onboarding binary bundled → start supervisor as fallback")
         }
-        // Only the person's own launch opens the window: not a login, a quiet
-        // relaunch, a link or Preferences (spec-shell S7, 07fedaf).
-        if opening == .window { supervisor.openRecallWhenReady(initialLaunch: true) }
+        // The person's own launch asked for the window before the sweep
+        // (`requestTheWindowIfThePersonOpenedHippocampus`).
         supervisor.start()
     }
 
