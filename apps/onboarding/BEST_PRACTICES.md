@@ -67,6 +67,8 @@ consent click, and how permissions are asked.
    person sees. After a change, render every screen off screen and look
    at it: `HIPPOCAMPUS_RENDER_ONBOARDING=<dir>` on a debug build writes
    each screen and state to a PNG and exits before any window exists.
+   Add `HIPPOCAMPUS_RENDER_DEMO_STEP=<seconds>` to also write Welcome's
+   demo frame by frame, to check its pace.
 
 8. **Demos are made up; Try it is real.** Welcome's demo and What you
    get draw `OnboardingCopy.Demo` only: they never read memory, list a
