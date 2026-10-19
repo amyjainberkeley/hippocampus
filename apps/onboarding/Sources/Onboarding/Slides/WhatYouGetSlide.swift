@@ -57,7 +57,7 @@ private struct BenefitCard<Preview: View>: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Text(line)
                     .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(OnboardingDesign.Palette.secondaryText)
                     .lineSpacing(1.5)
                     .fixedSize(horizontal: false, vertical: true)
             }

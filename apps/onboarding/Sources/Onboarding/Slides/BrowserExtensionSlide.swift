@@ -90,7 +90,7 @@ struct BrowserExtensionScreen: View {
                 if rows.isEmpty {
                     Text(OnboardingCopy.noBrowserFound)
                         .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(OnboardingDesign.Palette.secondaryText)
                 } else {
                     VStack(alignment: .leading, spacing: OnboardingDesign.Space.md) {
                         automationNote
@@ -148,7 +148,7 @@ struct BrowserExtensionScreen: View {
                     .foregroundStyle(OnboardingDesign.Palette.ink)
                 Text(body)
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(OnboardingDesign.Palette.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
                 if offersRecovery {
                     HStack(spacing: OnboardingDesign.Space.lg) {
@@ -190,7 +190,7 @@ struct BrowserExtensionScreen: View {
                     if row.browser.kind == .safari {
                         Text(OnboardingCopy.safariExtensionHint)
                             .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(OnboardingDesign.Palette.secondaryText)
                     }
                 }
                 Spacer(minLength: OnboardingDesign.Space.sm)
@@ -239,7 +239,7 @@ struct BrowserExtensionScreen: View {
                         browser: instructions.browserName, didOpenBrowser: instructions.didOpenBrowser
                     ))
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(OnboardingDesign.Palette.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
                     // The address that sentence names, to paste.
                     if !instructions.didOpenBrowser {
@@ -298,7 +298,7 @@ struct CheckingBadge: View {
 
     var body: some View {
         Image(systemName: "hourglass")
-            .foregroundStyle(.secondary)
+            .foregroundStyle(OnboardingDesign.Palette.secondaryText)
             .font(.system(size: 14))
             .rotationEffect(.degrees(isRotating ? 360 : 0))
             .animation(

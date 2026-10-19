@@ -21,7 +21,7 @@ struct McpServersSlide: View {
                 }
 
                 OnboardingDesign.TypeRamp.body("If you have any local MCP servers running (e.g. gchat, Slack, Linear), paste the URL here. Hippocampus only connects to localhost — never to the internet.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(OnboardingDesign.Palette.secondaryText)
                     .frame(maxWidth: 520, alignment: .leading)
 
                 addServerCard
@@ -125,7 +125,7 @@ struct McpServersSlide: View {
     private func registeredRow(entry: McpServerEntry) -> some View {
         HStack(spacing: OnboardingDesign.Space.md) {
             Image(systemName: entry.enabled ? "checkmark.circle.fill" : "pause.circle")
-                .foregroundStyle(entry.enabled ? OnboardingDesign.Palette.success : Color.secondary)
+                .foregroundStyle(entry.enabled ? OnboardingDesign.Palette.success : OnboardingDesign.Palette.secondaryText)
             VStack(alignment: .leading, spacing: 1) {
                 Text(entry.name)
                     .font(.system(size: 13, weight: .medium, design: .monospaced))
@@ -160,14 +160,14 @@ struct McpServersSlide: View {
         VStack(alignment: .leading, spacing: 2) {
             OnboardingDesign.TypeRamp.headline(title)
             OnboardingDesign.TypeRamp.caption(subtitle)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(OnboardingDesign.Palette.secondaryText)
         }
     }
 
     private func fieldLabel(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(OnboardingDesign.Palette.secondaryText)
     }
 
     private var addDisabled: Bool {

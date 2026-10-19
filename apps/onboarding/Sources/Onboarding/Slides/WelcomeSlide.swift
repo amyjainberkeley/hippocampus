@@ -55,7 +55,7 @@ struct WelcomeSlide: View {
             Text(OnboardingCopy.welcomeBodyAfterKeys)
         }
         .font(.system(size: 15))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(OnboardingDesign.Palette.secondaryText)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(OnboardingCopy.welcomeBodySpoken(key))
     }

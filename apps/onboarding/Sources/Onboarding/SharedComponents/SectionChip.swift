@@ -8,7 +8,7 @@ struct SectionChip: View {
     var body: some View {
         Text(text)
             .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(OnboardingDesign.Palette.secondaryText)
             .accessibilityAddTraits(.isHeader)
     }
 }

@@ -216,6 +216,17 @@ final class OnboardingSourceScanTests: XCTestCase {
         XCTAssertTrue(tryIt.contains("probe: AgentLastReadProbe(launcher: AgentReaderLauncher())"))
     }
 
+    func testGreyTextIsTheWindowsOwnGreyNotMacOSsLighterOne() throws {
+        // `OnboardingDesign.Palette.secondaryText` keeps 4.5:1; macOS's
+        // secondary label renders under 4:1 on setup's surfaces.
+        for (name, text) in try sources() {
+            let lines = code(text)
+            XCTAssertFalse(lines.contains { $0.contains("foregroundStyle(.secondary)") }, "\(name) uses .secondary")
+            XCTAssertFalse(lines.contains { $0.contains("Color.secondary)") || $0.contains("= .secondary") },
+                           "\(name) uses .secondary")
+        }
+    }
+
     func testTheOnlyGradientIsTheAppIconsTile() throws {
         // Backdrops stay the native material; the hi mark's tile carries the
         // icon's own white-to-grey fall.

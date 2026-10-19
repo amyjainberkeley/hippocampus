@@ -164,7 +164,7 @@ struct TryItScreen: View {
                     if let detail = presentation.detail {
                         Text(detail)
                             .font(.system(size: 14))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(OnboardingDesign.Palette.secondaryText)
                             .lineLimit(2)
                             .truncationMode(.middle)
                     }
@@ -211,7 +211,7 @@ struct TryItScreen: View {
                 }
             }
             .font(.system(size: 12))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(OnboardingDesign.Palette.secondaryText)
             .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -364,6 +364,6 @@ struct ProofCard: View {
     private func readAgo(at now: Date) -> some View {
         Text(OnboardingCopy.readAgo(proof.at, now: now, locale: locale))
             .font(.system(size: 12))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(OnboardingDesign.Palette.secondaryText)
     }
 }

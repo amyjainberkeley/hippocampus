@@ -38,6 +38,10 @@ enum OnboardingDesign {
         /// Titles: the mark's navy letters.
         static let ink = color(OnboardingPalette.ink)
 
+        /// Grey text: the window's own secondary grey, at 4.5:1 or better
+        /// where macOS's secondary label falls under 4:1.
+        static let secondaryText = color(OnboardingPalette.secondaryText)
+
         private static func color(_ hex: UInt32) -> Color {
             let rgb = OnboardingPalette.components(hex)
             return Color(red: rgb.red, green: rgb.green, blue: rgb.blue)
@@ -62,7 +66,7 @@ enum OnboardingDesign {
 
         /// What the light window material looks like, for drawing off
         /// screen (`onboardingSolidFills`).
-        static let windowSolid = Color(red: 0.965, green: 0.965, blue: 0.972)
+        static let windowSolid = color(OnboardingPalette.windowSurface)
 
         /// A permission that is on: the window's calm green (`MCI.Color.success`).
         static let on = Color(red: 0x24 / 255, green: 0x7A / 255, blue: 0x47 / 255)

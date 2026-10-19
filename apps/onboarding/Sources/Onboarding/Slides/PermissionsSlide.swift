@@ -136,7 +136,7 @@ struct PermissionsScreen: View {
                 if !rows.contains(where: { $0.state.showsGuidance }) {
                     Text(OnboardingCopy.permissionsFooter)
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(OnboardingDesign.Palette.secondaryText)
                 }
             }
         }
@@ -165,19 +165,19 @@ struct PermissionRowView: View {
                     // it is for takes one line, so both rows fit the window.
                     Text(row.benefits.map(\.text).joined(separator: " · "))
                         .font(.system(size: 12.5))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(OnboardingDesign.Palette.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
                     ForEach(row.benefits) { benefit in
                         HStack(alignment: .firstTextBaseline, spacing: OnboardingDesign.Space.sm) {
                             Image(systemName: benefit.symbol)
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(OnboardingDesign.Palette.secondaryText)
                                 .frame(width: 15)
                                 .accessibilityHidden(true)
                             Text(benefit.text)
                                 .font(.system(size: 13))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(OnboardingDesign.Palette.secondaryText)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -185,7 +185,7 @@ struct PermissionRowView: View {
                 if let note = row.note {
                     Text(note)
                         .font(.system(size: 11.5))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(OnboardingDesign.Palette.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 2)
                 }
@@ -232,7 +232,7 @@ struct PermissionRowView: View {
                     ForEach(OnboardingCopy.sentences(OnboardingCopy.waitingHint(row.surface)), id: \.self) { step in
                         Text(step)
                             .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(OnboardingDesign.Palette.secondaryText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -249,7 +249,7 @@ struct PermissionRowView: View {
                 (Text(OnboardingCopy.notOnYet).fontWeight(.semibold).foregroundStyle(.primary)
                     + Text(" " + OnboardingCopy.needsHelpHint))
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(OnboardingDesign.Palette.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: OnboardingDesign.Space.lg) {
                     Button(OnboardingCopy.openSettings) { perform(.openSettings) }

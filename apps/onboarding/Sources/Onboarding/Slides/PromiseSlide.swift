@@ -114,7 +114,7 @@ struct PromiseLines: View {
                     ForEach(OnboardingCopy.sentences(text), id: \.self) { sentence in
                         Text(sentence)
                             .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(OnboardingDesign.Palette.secondaryText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -135,7 +135,7 @@ struct DotLegend: View {
         HStack(spacing: OnboardingDesign.Space.xl) {
             Text(OnboardingCopy.dotLegendTitle)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(OnboardingDesign.Palette.secondaryText)
             entry(remembering: true, OnboardingCopy.dotLegendOn)
             entry(remembering: false, OnboardingCopy.dotLegendOff)
             Spacer(minLength: 0)
@@ -155,7 +155,7 @@ struct DotLegend: View {
                 .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             Text(label)
                 .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(OnboardingDesign.Palette.secondaryText)
         }
     }
 }
