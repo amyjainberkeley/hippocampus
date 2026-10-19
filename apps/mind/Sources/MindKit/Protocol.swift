@@ -13,7 +13,7 @@ import Foundation
 
 /// The tasks the mind performs.
 public enum MindTask: String, Codable, Sendable, CaseIterable {
-    case propose, relate, revise, episode, day, answer, suggest
+    case propose, relate, revise, episode, day, answer, suggest, caption
 }
 
 /// Error codes a caller can act on.
@@ -147,6 +147,26 @@ public struct SuggestInput: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey { case userName = "user_name", now, recent, propositions }
 }
 
+/// One moment to caption: its app, window title and the start of its
+/// cleaned text (no window chrome).
+public struct CaptionMoment: Codable, Sendable, Equatable {
+    /// The number its caption comes back with.
+    public var n: Int
+    public var app: String
+    public var title: String
+    public var text: String
+    public init(n: Int, app: String, title: String, text: String) {
+        self.n = n; self.app = app; self.title = title; self.text = text
+    }
+}
+
+/// Moments to caption, a few at a time. The agent checks every line it gets
+/// back against that moment's own text before it keeps it.
+public struct CaptionInput: Codable, Sendable, Equatable {
+    public var moments: [CaptionMoment]
+    public init(moments: [CaptionMoment]) { self.moments = moments }
+}
+
 // MARK: Outputs
 
 public struct ProposeOutput: Codable, Sendable, Equatable {
@@ -210,6 +230,18 @@ public struct SuggestOutput: Codable, Sendable, Equatable {
     public init(suggestions: [SuggestionItem]) { self.suggestions = suggestions }
 }
 
+public struct CaptionLine: Codable, Sendable, Equatable {
+    /// The moment's number.
+    public var n: Int
+    public var caption: String
+    public init(n: Int, caption: String) { self.n = n; self.caption = caption }
+}
+
+public struct CaptionOutput: Codable, Sendable, Equatable {
+    public var captions: [CaptionLine]
+    public init(captions: [CaptionLine]) { self.captions = captions }
+}
+
 // MARK: Engine seam
 
 /// What answers the tasks: Apple's Foundation Models or a model server on
@@ -228,6 +260,9 @@ public protocol MindEngine: Sendable {
     func day(_ input: DayInput) async throws -> DayOutput
     func answer(_ input: AnswerInput) async throws -> AnswerOutput
     func suggest(_ input: SuggestInput) async throws -> SuggestOutput
+    /// One short caption per moment, for History. Work nobody asked for: a
+    /// model server does it only on mains power.
+    func caption(_ input: CaptionInput) async throws -> CaptionOutput
 }
 
 // MARK: Serving
@@ -275,6 +310,7 @@ public struct MindServer: Sendable {
             case .day: output = try encoder.encode(try await engine.day(decoder.decode(DayInput.self, from: input)))
             case .answer: output = try encoder.encode(try await engine.answer(decoder.decode(AnswerInput.self, from: input)))
             case .suggest: output = try encoder.encode(try await engine.suggest(decoder.decode(SuggestInput.self, from: input)))
+            case .caption: output = try encoder.encode(try await engine.caption(decoder.decode(CaptionInput.self, from: input)))
             }
             let outputObject = try JSONSerialization.jsonObject(with: output)
             return line(["id": id, "ok": true, "output": outputObject])

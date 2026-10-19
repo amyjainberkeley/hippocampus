@@ -465,7 +465,7 @@ fn related_snippet_without_literal_match_preserves_source_and_body_prefix() {
     ] {
         let event = brain.store.get_event(id).unwrap().unwrap();
         let handle = unsafe { &*brain.handle };
-        let hit = hit_json(handle, id, event, source, Some(0.75), Some(&query));
+        let hit = hit_json(handle, id, event, source, Some(0.75), Some(&query), None);
         assert_eq!(hit.event_id, id.0);
         assert_eq!(hit.source, source);
         assert_eq!(hit.score, Some(0.75));

@@ -113,6 +113,22 @@ struct GSuggestions {
     var suggestions: [GSuggestion]
 }
 
+@available(macOS 26.0, *)
+@Generable
+struct GCaptionLine {
+    @Guide(description: "The moment's number")
+    var n: Int
+    @Guide(description: "Three to eight words on what the moment was about, starting with a verb ending in -ing, in words from that moment's title and text")
+    var caption: String
+}
+
+@available(macOS 26.0, *)
+@Generable
+struct GCaptions {
+    @Guide(description: "One caption for each moment", .maximumCount(8))
+    var captions: [GCaptionLine]
+}
+
 /// Apple's on-device language model.
 @available(macOS 26.0, *)
 public struct FoundationEngine: MindEngine {
@@ -223,6 +239,14 @@ public struct FoundationEngine: MindEngine {
         return SuggestOutput(suggestions: result.suggestions.map {
             SuggestionItem(title: $0.title, why: $0.why, usefulness: min(10, max(1, $0.usefulness)))
         })
+    }
+
+    public func caption(_ input: CaptionInput) async throws -> CaptionOutput {
+        let input = CaptionInputs.bounded(input, textCharacters: 600)
+        guard !input.moments.isEmpty else { return CaptionOutput(captions: []) }
+        let result = try await generate(GCaptions.self, userName: "", prompt: Prompts.caption(input), temperature: 0.2,
+                                        maximumResponseTokens: 40 * input.moments.count + 40)
+        return CaptionInputs.answered(result.captions.map { CaptionLine(n: $0.n, caption: $0.caption) }, for: input)
     }
 
     private func draft(_ g: GProposition) -> PropositionDraft {

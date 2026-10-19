@@ -542,6 +542,12 @@ struct HitWire: Decodable {
     /// `adapters/macos/mci-brain-ffi/tests/hit_entities_wire.rs`.
     let thumbnail_path: String?
     let source_kind: String?
+    /// When the screenshot was taken: the moment's own time, or the earlier
+    /// moment's whose screenshot its window still showed. Optional, so an
+    /// older FFI build that omits it still decodes.
+    let thumbnail_ts_us: UInt64?
+    /// What the moment was about, one short line; absent from older builds.
+    let caption: String?
 
     /// List snippets reach a person: never with a header or U+001E (RULINGS T14).
     func toHit() -> Hit {
@@ -557,7 +563,9 @@ struct HitWire: Decodable {
             entities: entities ?? [],
             linkedEventIds: linked_event_ids ?? [],
             thumbnailPath: thumbnail_path,
-            sourceKind: source_kind
+            sourceKind: source_kind,
+            thumbnailTsUs: thumbnail_path == nil ? nil : thumbnail_ts_us,
+            caption: MomentRowText.caption(caption)
         )
     }
 }

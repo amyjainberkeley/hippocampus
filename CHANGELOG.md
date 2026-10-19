@@ -26,6 +26,22 @@ commits are intentionally omitted from release notes.
 - Try it reads the window you were working in and shows what it just read, in the window’s order. When that window is skipped, a password app, an app you excluded, a private browser window or a password field in use, it says so and suggests another window. A window you bring forward is read at once.
 - Setup’s grey text is darker, so small lines read clearly.
 
+### Ask
+
+- History shows a screenshot for every moment that has one, including moments read after a screenshot was kept in the same window. The moment’s detail says when that screenshot was taken.
+- A moment saved as text only, or whose screenshot can no longer be opened, shows its app’s icon on a plain tile instead of an empty picture. An app that is not on this Mac shows its first letter.
+- Screenshots you have opened stay in memory while the window is open, so scrolling back shows them at once.
+- Each History row says what the moment was about, in one short line above its text: “Looking up how to type accents”, “Working on tax.rs in trailhead-shop”. It is written on this Mac by Apple Intelligence or your own model server when one is there, and otherwise made from the window’s title, with a window’s own name in quotes: Reading “Rounding half to even”. It makes no guess about your work, health, money or relationships, and a window that was only open beside the one you used says where it was: “#launch, open in Slack”.
+- A row’s screenshot is larger, so screens are easy to tell apart, and shows the top of a tall window. A terminal or code shows its first lines as they were read.
+- The line under a row names the app and what the caption does not already say. Rows keep one height, and a screenshot that did not open offers Try Again.
+
+### Reading
+
+- Memories saved before 0.3 no longer open on a browser’s tab strip and address bar, however the strip was read. A site’s menu, a web app’s menus and side bar, a search page’s tabs, Slack’s sidebar and Messages’ receipts move under “Also in this window”, and search still finds them. What you read stays where it was, even a line that looks like a menu.
+- Memories saved before 0.3 read in paragraphs, not in the lines a page was cut into.
+- Older memories are cleaned again in the background, newest first, only while the Mac is plugged in and no one is using it.
+- A 3.2 GB writing model an earlier version downloaded, and no longer uses, is removed once.
+
 ## [0.3.0] - 2026-10-15
 
 ### Ask

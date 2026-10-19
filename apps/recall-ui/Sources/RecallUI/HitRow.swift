@@ -8,9 +8,9 @@
 //
 // Keyframes use the shared authenticated `EvidenceThumbnail` renderer.
 // Invalid, missing, escaped, oversized, or tampered blobs fail closed to
-// a neutral placeholder rather than being opened directly by AppKit. A
-// moment saved without a screenshot (most are) shows its app's icon, so
-// a list of them never looks like a list of missing pictures.
+// the moment's app icon rather than being opened directly by AppKit. A
+// moment saved without a screenshot shows its app's icon on the same calm
+// tile, so a list of them never looks like a list of missing pictures.
 
 import RecallUIKit
 import SwiftUI
@@ -21,19 +21,30 @@ struct HitRow: View {
     var showsClockTime = false
     /// Moments in a row from the same window, shown as one row.
     var count = 1
+    /// The row's picture when it is not `hit`'s own: History's row of one
+    /// window shows the newest screenshot of its moments.
+    var screenshot: Hit? = nil
 
-    private var title: String {
-        if let title = hit.windowTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
-            return title
-        }
-        if let url = hit.url, !url.isEmpty { return url }
-        return Formatters.appDisplayName(hit.appBundleId)
+    /// A moment's picture in a list: the screen's own shape (16:10), large
+    /// enough to tell one screen from another at a glance and about as tall
+    /// as the row's caption and its first lines of text.
+    static let pictureSize = CGSize(width: 96, height: 60)
+
+    /// What the moment was about ("Looking up how to type accents"), or
+    /// the window's name when there is no caption.
+    private var headline: String {
+        MomentRowText.headline(hit)
     }
 
-    /// One line of what the window said, without the stored header or a
-    /// first line that only repeats the title.
-    private var line: String {
-        Formatters.rowLine(hit.ocrTextSnippet, title: hit.windowTitle, maxLen: 160)
+    /// One or two lines of what the window said, without the stored header
+    /// or a first line that only repeats the title.
+    private var preview: String {
+        MomentRowText.preview(hit)
+    }
+
+    /// A terminal's or code's first lines, one to a line as they were read.
+    private var codeLines: [String]? {
+        MomentRowText.codeLines(hit)
     }
 
     /// History has the day above it, so a row shows the clock time; a match
@@ -51,35 +62,33 @@ struct HitRow: View {
         return Formatters.matchReason(hit.source)
     }
 
-    /// "Safari · Web page", and how many moments the row holds.
-    private var origin: String {
-        let source = "\(Formatters.appDisplayName(hit.appBundleId)) \u{00B7} "
-            + UserFacingCopy.momentSource(sourceKind: hit.sourceKind)
-        return count > 1 ? "\(source), \(UserFacingCopy.momentCount(count))" : source
+    /// Where the moment was: the app and what of the window's title the
+    /// caption does not say ("Slack · Northwind Studio"), or "Safari · Web
+    /// page" without a caption; and how many moments the row holds.
+    private var origin: (place: String, count: String?) {
+        MomentRowText.originParts(hit, count: count)
     }
 
     var body: some View {
         // Spacing tokens (cycle 8.48 MCIDesignSystem): row internal
         // rhythm is on the 8pt grid.
         HStack(alignment: .top, spacing: MCI.Spacing.m - 2) {
-            if hit.thumbnailURL == nil {
-                AppIcon(bundleId: hit.appBundleId ?? "")
-                    .frame(width: 32, height: 32)
-                    .frame(width: 64, height: 40)
-            } else {
-                EvidenceThumbnail(
-                    url: hit.thumbnailURL,
-                    size: CGSize(width: 64, height: 40),
-                    maxPixelSize: 160
-                )
-            }
+            // A tall window's heading is at its top: the picture keeps it.
+            EvidenceThumbnail(
+                url: hit.thumbnailURL ?? screenshot?.thumbnailURL,
+                appBundleId: hit.appBundleId,
+                size: Self.pictureSize,
+                maxPixelSize: 240,
+                contentMode: .fill,
+                alignment: .top
+            )
             VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
                 HStack(alignment: .firstTextBaseline, spacing: MCI.Spacing.s) {
-                    Text(verbatim: title)
+                    Text(verbatim: headline)
                         .mciFont(.bodyStrong)
                         .foregroundStyle(Color.brandFgPrimary)
                         .lineLimit(1)
-                        .truncationMode(.middle)
+                        .truncationMode(hit.caption == nil ? .middle : .tail)
                     Spacer(minLength: 0)
                     Text(verbatim: when)
                         .mciFont(.caption)
@@ -87,16 +96,31 @@ struct HitRow: View {
                         .foregroundStyle(Color.brandFgSecondary)
                         .help(Formatters.dayAndTime(us: hit.tsUs))
                 }
-                if !line.isEmpty {
-                    Text(verbatim: line)
+                // Every row keeps two lines for its text, so the list keeps
+                // one rhythm whether a moment said one line or many.
+                if let codeLines {
+                    VStack(alignment: .leading, spacing: MCI.Spacing.xxs) {
+                        ForEach(0..<2, id: \.self) { index in
+                            Text(verbatim: index < codeLines.count ? codeLines[index] : " ")
+                                .font(.system(size: 12.5, design: .monospaced))
+                                .foregroundStyle(Color.brandFgSecondary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                    }
+                } else {
+                    Text(verbatim: preview)
                         .mciFont(.body)
                         .foregroundStyle(Color.brandFgSecondary)
-                        .lineLimit(1)
+                        .lineLimit(2, reservesSpace: true)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack(alignment: .firstTextBaseline, spacing: MCI.Spacing.s) {
-                    Text(verbatim: origin)
+                    // The place reads at full secondary contrast: under a
+                    // general caption it is the only place the window's name is.
+                    (Text(verbatim: origin.place).foregroundStyle(Color.brandFgSecondary)
+                        + Text(verbatim: origin.count.map { ", \($0)" } ?? "").foregroundStyle(Color.brandFgMuted))
                         .font(.caption)
-                        .foregroundStyle(Color.brandFgMuted)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                     if let reason {

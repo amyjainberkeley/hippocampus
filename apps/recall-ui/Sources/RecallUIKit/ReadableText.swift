@@ -115,7 +115,9 @@ public struct EventReading: Sendable, Equatable {
 
     /// Both parts come from the same bounded read as `EventText`.
     public static let maxUTF8Bytes = EventText.maxUTF8Bytes + 1024
-    static let maxJSONBytes = (EventText.maxUTF8Bytes + 1024) * 6 + 512
+    /// The two parts escaped at worst, the other fields, and a caption (at
+    /// most 200 characters on one line, so at most 2 KiB as JSON).
+    static let maxJSONBytes = (EventText.maxUTF8Bytes + 1024) * 6 + 512 + 2048
 
     public let eventId: UInt64
     public let tsUs: UInt64
@@ -129,10 +131,13 @@ public struct EventReading: Sendable, Equatable {
     public let matchIn: Match?
     /// The stored text was longer than the read limit, so its end is missing.
     public let isTruncated: Bool
+    /// What the moment was about, one short line, when there is one.
+    public let caption: String?
 
     public init(
         eventId: UInt64, tsUs: UInt64, appBundleId: String?, sourceKind: String?,
-        main: String, rest: String, matchIn: Match? = nil, isTruncated: Bool
+        main: String, rest: String, matchIn: Match? = nil, isTruncated: Bool,
+        caption: String? = nil
     ) throws {
         let main = ReadableText.guarded(main)
         let rest = ReadableText.guarded(rest)
@@ -149,6 +154,7 @@ public struct EventReading: Sendable, Equatable {
         self.rest = rest
         self.matchIn = matchIn
         self.isTruncated = isTruncated
+        self.caption = MomentRowText.caption(caption)
     }
 
     /// The reading of stored text from a reader without the FFI's reading:
@@ -163,6 +169,7 @@ public struct EventReading: Sendable, Equatable {
         self.rest = parts.rest
         self.matchIn = nil
         self.isTruncated = text.isTruncated
+        self.caption = nil
     }
 
     /// Ids can be reused after a delete: use a reading only for the moment it was read for.
@@ -191,6 +198,7 @@ extension EventReading: Decodable {
         case main, rest
         case matchIn = "match_in"
         case isTruncated = "truncated"
+        case caption
     }
 
     public init(from decoder: Decoder) throws {
@@ -203,7 +211,8 @@ extension EventReading: Decodable {
             main: values.decode(String.self, forKey: .main),
             rest: values.decodeIfPresent(String.self, forKey: .rest) ?? "",
             matchIn: (try? values.decodeIfPresent(String.self, forKey: .matchIn)).flatMap(Match.init(rawValue:)),
-            isTruncated: values.decodeIfPresent(Bool.self, forKey: .isTruncated) ?? false
+            isTruncated: values.decodeIfPresent(Bool.self, forKey: .isTruncated) ?? false,
+            caption: try? values.decodeIfPresent(String.self, forKey: .caption)
         )
     }
 }

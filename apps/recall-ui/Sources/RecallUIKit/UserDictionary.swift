@@ -1,7 +1,7 @@
 // UserDictionary.swift — user-defined entity aliases (cycle 8.42).
 //
 // Inspired by EnviousWispr's "custom words with confidence-aware matching"
-// pattern. Lets the user teach the recall UI that "AJ" = "Amy Jain" or
+// pattern. Lets the user teach the recall UI that "AJ" = "Ana Jung" or
 // "MCI" = "Hippocampus" so searches understand their own private
 // vocabulary. Real UX win + a differentiator vs Rewind (which had no
 // such feature).
@@ -16,8 +16,8 @@
 //     version = 1
 //
 //     [[aliases]]
-//     canonical = "Amy Jain"
-//     aliases = ["Amy", "@amyjainberkeley", "AJ"]
+//     canonical = "Ana Jung"
+//     aliases = ["Ana", "@anajung", "AJ"]
 //
 //     [[aliases]]
 //     canonical = "Hippocampus"
@@ -28,7 +28,7 @@
 // At query time, `SearchViewModel` (or any recall pipeline) reads the
 // dictionary and passes the alias map to the reader. The FFI expands
 // the FTS5 query by ORing in the canonical + alias tokens so a search
-// for "AJ email" also matches events that mention "Amy Jain email" —
+// for "AJ email" also matches events that mention "Ana Jung email" —
 // without touching the entity graph or the resolver (both protected-set).
 //
 // # What lives here
@@ -58,11 +58,11 @@ import Foundation
 public struct UserDictionaryEntry: Sendable, Equatable, Identifiable, Codable {
     public var id: String { canonical }
     /// The primary spelling the user wants results to align to. e.g.
-    /// `"Amy Jain"`. Case-preserved; the FFI treats FTS5 as
-    /// case-insensitive so `"amy jain"` and `"Amy Jain"` both match.
+    /// `"Ana Jung"`. Case-preserved; the FFI treats FTS5 as
+    /// case-insensitive so `"ana jung"` and `"Ana Jung"` both match.
     public let canonical: String
     /// Alternate spellings the user wants to treat as the same person /
-    /// org / topic. e.g. `["AJ", "Amy", "@amyjainberkeley"]`. Order is
+    /// org / topic. e.g. `["AJ", "Ana", "@anajung"]`. Order is
     /// preserved for stable file writes and stable editor rendering.
     public let aliases: [String]
     /// Optional creation timestamp for "recently added" UI. Nil-tolerant

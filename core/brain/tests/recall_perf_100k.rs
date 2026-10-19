@@ -179,7 +179,7 @@ const RARE_ENTITIES: &[&str] = &[
 
 /// Common-entity pool. Injected roughly 10x more often than rare entities.
 const COMMON_ENTITIES: &[&str] = &[
-    "Amy",
+    "Sam",
     "Dave",
     "Anthropic",
     "Rust",

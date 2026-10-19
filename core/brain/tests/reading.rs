@@ -3,7 +3,8 @@
 //! Fixtures under `tests/fixtures/reading/` are synthetic windows:
 //! - `<name>.old.txt` is text the shipping assembler stored before windows
 //!   were classified (copied from the realistic mock windows), and
-//!   `<name>.old.main.txt` is its reading;
+//!   `<name>.old.main.txt` is its reading, with `<name>.old.rest.txt` the
+//!   chrome the one-frame rules set apart (none for Mail and Notes);
 //! - `<name>.stored.txt` is a classified window as the store keeps it
 //!   (header, content, U+001E separator, chrome), and `<name>.main.txt` and
 //!   `<name>.rest.txt` are its reading.
@@ -64,7 +65,7 @@ fn separated(content: &str, chrome: &str) -> String {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn old_windows_lose_only_the_header_and_junk_tokens() {
+fn old_windows_lose_only_the_header_and_junk_tokens_and_set_their_chrome_apart() {
     for name in ["article", "chat", "editor", "mail", "notes", "video"] {
         let body = fixture(&format!("{name}.old.txt"));
         let stored = format!("{}{body}", header(app_of(name)));
@@ -74,9 +75,60 @@ fn old_windows_lose_only_the_header_and_junk_tokens() {
             fixture(&format!("{name}.old.main.txt")),
             "{name}"
         );
+        // Old text has no separator: its `rest` is only the chrome the
+        // one-frame rules set apart (a tab strip, an address bar, Slack's
+        // message box, an editor's status bar), and none for Mail and Notes.
         assert_eq!(
-            read.rest, "",
-            "{name}: old text has nothing after a separator"
+            read.rest,
+            fixture_or_empty(&format!("{name}.old.rest.txt")),
+            "{name}: the chrome set apart"
+        );
+        assert_no_word_lost(&body, &read, name);
+    }
+}
+
+fn fixture_or_empty(name: &str) -> String {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/reading")
+        .join(name);
+    std::fs::read_to_string(&path).unwrap_or_default()
+}
+
+/// Every token of `body` with a letter or a digit that is not junk is in
+/// `main` or `rest` as often as `body` has it: setting chrome apart moves
+/// lines, it never deletes one.
+fn assert_no_word_lost(body: &str, read: &Reading, label: &str) {
+    use std::collections::HashMap;
+    // A lone CJK, kana or hangul character can be junk (N1); the reader
+    // decides by the share of such letters, so these are left out here.
+    let lone_cjk = |token: &str| {
+        let mut chars = token.chars();
+        chars.next().is_some_and(|ch| {
+            matches!(ch, '\u{1100}'..='\u{11FF}' | '\u{3040}'..='\u{30FF}' | '\u{3130}'..='\u{318F}'
+                | '\u{31F0}'..='\u{31FF}' | '\u{3400}'..='\u{4DBF}' | '\u{4E00}'..='\u{9FFF}'
+                | '\u{A960}'..='\u{A97F}' | '\u{AC00}'..='\u{D7FF}' | '\u{F900}'..='\u{FAFF}'
+                | '\u{FF66}'..='\u{FFDC}' | '\u{20000}'..='\u{323AF}')
+        }) && chars.next().is_none()
+    };
+    let rare = cjk_rare(body);
+    let mut want: HashMap<&str, usize> = HashMap::new();
+    for token in body.split_whitespace() {
+        if token.chars().any(char::is_alphanumeric)
+            && !is_junk_token(token, rare)
+            && !lone_cjk(token)
+        {
+            *want.entry(token).or_default() += 1;
+        }
+    }
+    let shown = format!("{}\n{}", read.main, read.rest);
+    let mut have: HashMap<&str, usize> = HashMap::new();
+    for token in shown.split_whitespace() {
+        *have.entry(token).or_default() += 1;
+    }
+    for (token, count) in want {
+        assert!(
+            have.get(token).copied().unwrap_or(0) >= count,
+            "{label}: {token:?} was lost\n{read:?}"
         );
     }
 }
@@ -355,14 +407,35 @@ fn a_terminal_keeps_its_lines_and_indents_even_where_prose_would_join() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn wrapped_lines_join_only_in_text_that_carries_the_separator() {
+fn wrapped_lines_join_in_classified_text_and_in_older_pages_and_documents() {
     let prose = "Most teams choose between charging for every seat and charging by tier. Per-seat\npricing is easy to explain and grows with the customer, but it punishes the well-\nconnected teams the most.";
     let joined = "Most teams choose between charging for every seat and charging by tier. Per-seat pricing is easy to explain and grows with the customer, but it punishes the well-connected teams the most.";
     assert_eq!(read(&separated(prose, ""), NOTES).main, joined);
+    // Older text of a document or a page reads in paragraphs too.
     assert_eq!(
         read(&format!("{}{prose}", header("com.apple.Notes")), NOTES).main,
-        prose
+        joined
     );
+    assert_eq!(
+        read(
+            &format!("{}{prose}", header("com.google.Chrome")),
+            Some("com.google.Chrome")
+        )
+        .main,
+        joined
+    );
+    // Older text of a chat app, a terminal or a code editor keeps its lines.
+    for app in [
+        "com.tinyspeck.slackmacgap",
+        "com.apple.Terminal",
+        "com.microsoft.VSCode",
+    ] {
+        assert_eq!(
+            read(&format!("{}{prose}", header(app)), Some(app)).main,
+            prose,
+            "{app}"
+        );
+    }
 }
 
 #[test]
@@ -782,22 +855,28 @@ fn list_prefixes_of_a_thousand_64_kb_windows_stop_early() {
     // debug build. A prefix reads only the blocks it shows, in pieces of at
     // most 64 lines, plus one count of letters when a lone CJK character
     // appears. The best of three runs keeps a busy machine from failing it.
-    let best = (0..3)
-        .map(|_| {
-            let started = Instant::now();
-            let mut total = 0;
-            for index in 0..1_000 {
-                total += reading_prefix(&windows[index % windows.len()], SCREEN, NOTES, 280).len();
-            }
-            assert!(total > 0);
-            started.elapsed()
-        })
-        .min()
-        .unwrap();
-    assert!(
-        best < Duration::from_secs(4),
-        "1,000 prefixes took {best:?}"
-    );
+    // Notes, and the apps whose rules look at more than a window's edges:
+    // Slack and a code editor (their sidebar headings and status bars can
+    // sit anywhere) must stop as early.
+    for app in [NOTES, SLACK, VSCODE] {
+        let best = (0..3)
+            .map(|_| {
+                let started = Instant::now();
+                let mut total = 0;
+                for index in 0..1_000 {
+                    total +=
+                        reading_prefix(&windows[index % windows.len()], SCREEN, app, 280).len();
+                }
+                assert!(total > 0);
+                started.elapsed()
+            })
+            .min()
+            .unwrap();
+        assert!(
+            best < Duration::from_secs(4),
+            "1,000 prefixes of {app:?} took {best:?}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

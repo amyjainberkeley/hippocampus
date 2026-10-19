@@ -260,13 +260,18 @@ fn text_never_stored_reads_by_the_same_rules() {
         Some(NOTES),
         None,
     );
-    assert_eq!(value, json!({"main": expected.main, "rest": expected.rest}));
+    // The same reading, and a caption made from it: no title here, so the
+    // document's own first line names it.
+    assert_eq!(
+        value,
+        json!({"main": expected.main, "rest": expected.rest, "caption": "Working on \u{201c}Launch plan\u{201d}"})
+    );
 
     let plain = CString::new(json!({"stored": "Re-read text \u{25cf}"}).to_string()).unwrap();
     assert_eq!(
         take_json(unsafe { mci_brain_ffi_reading(plain.as_ptr()) }),
-        json!({"main": "Re-read text \u{25cf}", "rest": ""}),
-        "with no source the text is shown as given"
+        json!({"main": "Re-read text \u{25cf}", "rest": "", "caption": null}),
+        "with no source the text is shown as given, and with no app there is no caption"
     );
     let bad = CString::new("not json").unwrap();
     assert!(unsafe { mci_brain_ffi_reading(bad.as_ptr()) }.is_null());

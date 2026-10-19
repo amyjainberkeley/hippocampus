@@ -36,16 +36,21 @@ struct SessionScreenshot: View {
     let size: CGSize
     @Environment(\.overviewThumbnails) private var provider
     @State private var url: URL?
+    @State private var app: String?
 
     var body: some View {
-        EvidenceThumbnail(url: url, size: size, maxPixelSize: Int(max(size.width, size.height) * 2),
+        EvidenceThumbnail(url: url, appBundleId: app, size: size,
+                          maxPixelSize: Int(max(size.width, size.height) * 2),
                           contentMode: .fill, provider: provider)
             .task(id: eventId) {
                 url = nil
                 guard let eventId, let id = UInt64(exactly: eventId),
                       let hit = try? await reader.fetchEventsByIds([id]).first(where: { $0.eventId == id }),
-                      let path = hit.thumbnailPath?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty,
                       !Task.isCancelled
+                else { return }
+                app = hit.appBundleId
+                guard let path = hit.thumbnailPath?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !path.isEmpty
                 else { return }
                 url = URL(fileURLWithPath: path)
             }

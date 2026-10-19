@@ -24,8 +24,8 @@ next number.
 
 ## Contents
 
-Records run from ADR-0001 (privacy posture) to ADR-0042 (the capture
-helper's readiness receipt). Numbers 0019, 0022, 0023, 0027 and 0034 were
+Records run from ADR-0001 (privacy posture) to ADR-0043 (clean moments
+and captions). Numbers 0019, 0022, 0023, 0027 and 0034 were
 withdrawn: they described team and server features this app does not have.
 Number 0025 was withdrawn on 2026-10-15: it planned opt-in usage analytics,
 and Hippocampus has none. The ones cited most often:
@@ -48,6 +48,8 @@ and Hippocampus has none. The ones cited most often:
   window is read.
 - `0042-helper-readiness-receipt.md`: how the helper says it is ready, and
   which permissions it found off.
+- `0043-clean-moments-and-captions.md`: window chrome set apart, a
+  caption for each moment, and old memories re-cleaned.
 
 ## Related
 

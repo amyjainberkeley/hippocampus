@@ -61,7 +61,9 @@ void mci_brain_ffi_close(McibrainHandle *h);
  * Caller must mci_brain_ffi_string_free the return value. */
 char *mci_brain_ffi_search(McibrainHandle *h, const char *query_json);
 
-/* Fetch the `limit` most-recent events as a JSON array of HitJson. */
+/* Fetch the `limit` most-recent events as a JSON array of HitJson. Each row
+ * carries "caption": one short plain line saying what the moment was about
+ * (stored by the re-clean job, or made from the title), or null. */
 char *mci_brain_ffi_recent_events(McibrainHandle *h, uint32_t limit);
 
 /* Half-open measured-activity window, max two days and 50,000 rows.
@@ -102,12 +104,13 @@ char *mci_brain_ffi_event_text(McibrainHandle *h, uint64_t event_id);
 /* The readable text of one selected event, for the detail view. Returns
  *   {"event_id":N,"ts_us":N,"app_bundle_id":<string|null>,
  *    "source_kind":"screen_ocr","main":"...","rest":"...",
- *    "match_in":"main"|"rest"|null,"truncated":false}
+ *    "match_in":"main"|"rest"|null,"truncated":false,"caption":<string|null>}
  * or JSON null for a missing/deleted/suppressed/invalid id. main is what the
  * person was reading; rest is everything else in the window (tabs, sidebars,
  * menus, status bars), and for a browser page read both ways the text read
  * off the screen; empty when there is nothing else. Neither holds the stored
- * header or U+001E. `query` is NULL or a search's UTF-8 text; match_in says
+ * header or U+001E. When the re-clean job stored a cleaned reading of the
+ * current rules, main and rest are that one. `query` is NULL or a search's UTF-8 text; match_in says
  * whether its words are in main or only in rest (null without a query, or
  * when neither holds them; words such as "the" count only when the search has
  * no other). Reads the same 128 KiB prefix as mci_brain_ffi_event_text;
@@ -121,12 +124,18 @@ char *mci_brain_ffi_event_reading(McibrainHandle *h, uint64_t event_id,
  * again), by the same rules as stored text. No handle: nothing is read from
  * memory.
  *   input_json: {"stored":"...","source":"screen_ocr"?,"app":"..."?,
- *                "title":"..."?}
- *   returns: {"main":"...","rest":"..."}
+ *                "title":"..."?,"url":"..."?}
+ *   returns: {"main":"...","rest":"...","caption":<string|null>}
  * A missing or unknown source is shown as given. NULL on bad input or input
  * over 256 KiB.
  * Free non-NULL with mci_brain_ffi_string_free. */
 char *mci_brain_ffi_reading(const char *input_json);
+
+/* The readable name of an app from its bundle id: the one table of app
+ * names, so the app under a row and in its caption agree. No handle.
+ * Returns "Unknown app" for an empty id, NULL on a NULL or non-UTF8 id.
+ * Free non-NULL with mci_brain_ffi_string_free. */
+char *mci_brain_ffi_app_name(const char *bundle_id);
 
 /* V2-P13 (Phase D scaffold) — Return a lightweight event summary for a
  * time range, downsampled to at most ~1000 rows per call.

@@ -127,22 +127,21 @@ struct AppTimeLabel: View {
     }
 }
 
-/// The app's own icon when it is on this Mac, else the plain app icon Finder
-/// shows for an app it cannot find.
+/// The app's own icon when it is on this Mac, else the first letter of its
+/// name on a soft tile (`AppMonogram`). Never the system's blank placeholder,
+/// which reads as a missing picture.
 struct AppIcon: View {
     let bundleId: String
 
     var body: some View {
-        Image(nsImage: icon)
-            .resizable()
-            .accessibilityHidden(true)
-    }
-
-    private var icon: NSImage {
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
-            return NSWorkspace.shared.icon(forFile: url.path)
+        if let icon = AppIconCache.shared.icon(for: bundleId) {
+            Image(nsImage: icon)
+                .resizable()
+                .interpolation(.high)
+                .accessibilityHidden(true)
+        } else {
+            AppMonogram(bundleId: bundleId)
         }
-        return NSWorkspace.shared.icon(for: .applicationBundle)
     }
 }
 

@@ -32,8 +32,8 @@ final class UserDictionaryTests: XCTestCase {
     func testCanonicalAndAliasesRoundTrip() throws {
         let d = UserDictionary(entries: [
             UserDictionaryEntry(
-                canonical: "Amy Jain",
-                aliases: ["AJ", "Amy", "@amyjainberkeley"],
+                canonical: "Ana Jung",
+                aliases: ["AJ", "Ana", "@anajung"],
                 createdAtUs: 1_700_000_000_000_000
             ),
             UserDictionaryEntry(
@@ -44,8 +44,8 @@ final class UserDictionaryTests: XCTestCase {
         let toml = d.toTOML()
         let back = try UserDictionary.parseTOML(toml)
         XCTAssertEqual(back.entries.count, 2)
-        XCTAssertEqual(back.entries[0].canonical, "Amy Jain")
-        XCTAssertEqual(back.entries[0].aliases, ["AJ", "Amy", "@amyjainberkeley"])
+        XCTAssertEqual(back.entries[0].canonical, "Ana Jung")
+        XCTAssertEqual(back.entries[0].aliases, ["AJ", "Ana", "@anajung"])
         XCTAssertEqual(back.entries[0].createdAtUs, 1_700_000_000_000_000)
         XCTAssertEqual(back.entries[1].canonical, "Hippocampus")
         XCTAssertEqual(back.entries[1].aliases, ["MCI", "the memory app"])
@@ -82,14 +82,14 @@ final class UserDictionaryTests: XCTestCase {
 
     func testValidationRejectsEmptyAlias() {
         let d = UserDictionary(entries: [
-            UserDictionaryEntry(canonical: "Amy Jain", aliases: ["AJ", "  "])
+            UserDictionaryEntry(canonical: "Ana Jung", aliases: ["AJ", "  "])
         ])
         XCTAssertThrowsError(try d.validated())
     }
 
     func testValidationRejectsSelfReferentialAlias() {
         let d = UserDictionary(entries: [
-            UserDictionaryEntry(canonical: "Amy Jain", aliases: ["amy jain"])
+            UserDictionaryEntry(canonical: "Ana Jung", aliases: ["ana jung"])
         ])
         XCTAssertThrowsError(try d.validated()) { err in
             guard case UserDictionaryError.validationFailed(let msg) = err else {
@@ -101,8 +101,8 @@ final class UserDictionaryTests: XCTestCase {
 
     func testValidationRejectsDuplicateCanonicalCaseInsensitive() {
         let d = UserDictionary(entries: [
-            UserDictionaryEntry(canonical: "Amy Jain", aliases: ["AJ"]),
-            UserDictionaryEntry(canonical: "amy jain", aliases: ["A"]),
+            UserDictionaryEntry(canonical: "Ana Jung", aliases: ["AJ"]),
+            UserDictionaryEntry(canonical: "ana jung", aliases: ["A"]),
         ])
         XCTAssertThrowsError(try d.validated()) { err in
             guard case UserDictionaryError.validationFailed(let msg) = err else {
@@ -117,11 +117,11 @@ final class UserDictionaryTests: XCTestCase {
     // -----------------------------------------------------------------
     func testToAliasMapProjectsCanonicalToAliases() {
         let d = UserDictionary(entries: [
-            UserDictionaryEntry(canonical: "Amy Jain", aliases: ["AJ", "Amy"]),
+            UserDictionaryEntry(canonical: "Ana Jung", aliases: ["AJ", "Ana"]),
             UserDictionaryEntry(canonical: "Hippocampus", aliases: ["MCI"]),
         ])
         let m = d.toAliasMap()
-        XCTAssertEqual(m["Amy Jain"], ["AJ", "Amy"])
+        XCTAssertEqual(m["Ana Jung"], ["AJ", "Ana"])
         XCTAssertEqual(m["Hippocampus"], ["MCI"])
         XCTAssertEqual(m.count, 2)
     }
@@ -155,12 +155,12 @@ final class UserDictionaryTests: XCTestCase {
             .appendingPathComponent("mci-userdict-\(UUID().uuidString).toml")
         defer { try? FileManager.default.removeItem(at: tmp) }
         let d = UserDictionary(entries: [
-            UserDictionaryEntry(canonical: "Amy Jain", aliases: ["AJ"])
+            UserDictionaryEntry(canonical: "Ana Jung", aliases: ["AJ"])
         ])
         try saveUserDictionary(d, to: tmp)
         let back = try loadUserDictionary(from: tmp)
         XCTAssertEqual(back.entries.count, 1)
-        XCTAssertEqual(back.entries[0].canonical, "Amy Jain")
+        XCTAssertEqual(back.entries[0].canonical, "Ana Jung")
         XCTAssertEqual(back.entries[0].aliases, ["AJ"])
     }
 }

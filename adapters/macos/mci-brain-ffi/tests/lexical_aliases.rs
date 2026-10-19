@@ -92,20 +92,20 @@ fn ids(hits: &[HitJson]) -> Vec<u64> {
 fn aliases_reach_sqlite_as_exact_phrases_and_preserve_source() {
     let brain = TestBrain::new();
     let canonical = brain.seed(
-        "Review Amy Jain budget.",
+        "Review Ana Jung budget.",
         100,
         None,
         EventSource::TranscriptImport,
     );
     let short = brain.seed("AJ notes.", 101, None, EventSource::ScreenOcr);
     let sibling = brain.seed("A Jay check.", 102, None, EventSource::Unknown);
-    brain.seed("Review Amy budget Jain.", 103, None, EventSource::ScreenOcr);
-    brain.seed("Review Jain Amy budget.", 104, None, EventSource::ScreenOcr);
+    brain.seed("Review Ana budget Jung.", 103, None, EventSource::ScreenOcr);
+    brain.seed("Review Jung Ana budget.", 104, None, EventSource::ScreenOcr);
     brain.seed("A careful Jay check.", 105, None, EventSource::ScreenOcr);
 
     let hits = brain.search(&json!({
         "text": "aj email", "limit": 20,
-        "user_aliases": {"Amy Jain": ["AJ", "A Jay"]},
+        "user_aliases": {"Ana Jung": ["AJ", "A Jay"]},
     }));
     assert_eq!(ids(&hits), vec![canonical.0, short.0, sibling.0]);
     assert!(hits
@@ -113,7 +113,7 @@ fn aliases_reach_sqlite_as_exact_phrases_and_preserve_source() {
         .all(|hit| hit.source == "lexical" && hit.score.is_some()));
     let imported = hits.iter().find(|hit| hit.event_id == canonical.0).unwrap();
     assert_eq!(imported.source_kind, "transcript_import");
-    assert_eq!(imported.ocr_text_snippet, "Review Amy Jain budget.");
+    assert_eq!(imported.ocr_text_snippet, "Review Ana Jung budget.");
 }
 
 #[test]
@@ -146,20 +146,20 @@ fn alias_hits_obey_inclusive_time_bounds_and_exact_app_filter() {
     let brain = TestBrain::new();
     let mut expected = Vec::new();
     for ts in [99, 100, 200, 300, 301] {
-        let id = brain.seed("Amy Jain", ts, Some("test.allowed"), EventSource::ScreenOcr);
+        let id = brain.seed("Ana Jung", ts, Some("test.allowed"), EventSource::ScreenOcr);
         if (100..=300).contains(&ts) {
             expected.push(id.0);
         }
     }
     brain.seed(
-        "Amy Jain",
+        "Ana Jung",
         200,
         Some("test.allowed.other"),
         EventSource::ScreenOcr,
     );
-    brain.seed("Amy Jain", 200, None, EventSource::ScreenOcr);
+    brain.seed("Ana Jung", 200, None, EventSource::ScreenOcr);
     let mut query = json!({
-        "text": "AJ", "limit": 20, "user_aliases": {"Amy Jain": ["AJ"]},
+        "text": "AJ", "limit": 20, "user_aliases": {"Ana Jung": ["AJ"]},
         "time_from_us": 100, "time_to_us": 300, "app_filter": "test.allowed",
     });
     assert_eq!(ids(&brain.search(&query)), expected);
@@ -269,7 +269,7 @@ fn no_alias_match_preserves_original_ranking_scores_and_empty_search() {
             .collect::<Vec<_>>(),
         ranked,
     );
-    for aliases in [json!({}), json!({"Amy Jain": ["AJ"]})] {
+    for aliases in [json!({}), json!({"Ana Jung": ["AJ"]})] {
         query["user_aliases"] = aliases;
         assert_eq!(brain.search(&query), baseline);
     }
@@ -280,12 +280,12 @@ fn no_alias_match_preserves_original_ranking_scores_and_empty_search() {
 #[test]
 fn aliases_do_not_resurrect_deleted_or_suppressed_events() {
     let brain = TestBrain::new();
-    let deleted = brain.seed("Amy Jain", 100, None, EventSource::ScreenOcr);
+    let deleted = brain.seed("Ana Jung", 100, None, EventSource::ScreenOcr);
     let retained = brain.seed("AJ", 101, None, EventSource::ScreenOcr);
-    let mut suppressed = event("Amy Jain private text", 102, None);
+    let mut suppressed = event("Ana Jung private text", 102, None);
     suppressed.cascade_reason = 1;
     assert!(brain.store.put_event(&suppressed).is_err());
-    let query = json!({"text": "AJ", "limit": 20, "user_aliases": {"Amy Jain": ["AJ"]}});
+    let query = json!({"text": "AJ", "limit": 20, "user_aliases": {"Ana Jung": ["AJ"]}});
     assert_eq!(ids(&brain.search(&query)), vec![deleted.0, retained.0]);
 
     let delete_query = CString::new(json!({"event_id": deleted.0}).to_string()).unwrap();

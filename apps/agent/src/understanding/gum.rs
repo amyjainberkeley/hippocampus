@@ -548,7 +548,7 @@ mod tests {
         let candidates = vec![
             (prop(1, "Sam is pricing the team plan"), 3.0),
             (prop(2, "Sam is pricing the team plan for beta"), 2.9),
-            (prop(3, "Amy works with Ravi on launches"), 2.0),
+            (prop(3, "Sam drafts launch notes in Notes"), 2.0),
         ];
         let picked: Vec<i64> = mmr(&candidates, 2).into_iter().map(|p| p.id).collect();
         assert_eq!(
@@ -561,17 +561,17 @@ mod tests {
     #[test]
     fn a_first_sighting_cannot_be_a_confident_habit_and_pronouns_become_the_name() {
         let draft = Draft {
-            text: "Amy watches YouTube often, so she takes breaks.".into(),
+            text: "Sam watches YouTube often, so she takes breaks.".into(),
             reasoning: "her typing pauses".into(),
             kind: "habit".into(),
             confidence: 9,
             decay: 3,
         };
-        let prepared = prepare(draft, "Amy", true);
+        let prepared = prepare(draft, "Sam", true);
         assert_eq!(prepared.confidence, 6);
         assert_eq!(
             prepared.text,
-            "Amy watches YouTube often, so Amy takes breaks."
+            "Sam watches YouTube often, so Sam takes breaks."
         );
         assert_eq!(prepared.reasoning, "their typing pauses");
         let project = Draft {
@@ -581,9 +581,9 @@ mod tests {
             confidence: 10,
             decay: 4,
         };
-        assert_eq!(prepare(project.clone(), "Amy", true).confidence, 8);
+        assert_eq!(prepare(project.clone(), "Sam", true).confidence, 8);
         assert_eq!(
-            prepare(project, "Amy", false).confidence,
+            prepare(project, "Sam", false).confidence,
             10,
             "confirmed claims may rise"
         );
@@ -602,12 +602,12 @@ mod tests {
             "YouTube search: sourdough starter for beginners. Notes: Launch plan for Team pricing.";
         let kept = specific(
             vec![
-                draft("Sam is looking for the movie sourdough on YouTube."),
-                draft("Sam is searching YouTube for the movie sourdough."),
+                draft("Sam is looking for sourdough starter videos on YouTube."),
+                draft("Sam is searching YouTube for sourdough starter videos."),
                 draft("Sam is drafting the Team pricing launch plan in Notes."),
             ],
             observation,
-            "Amy",
+            "Sam",
         );
         assert_eq!(
             kept.len(),
@@ -634,7 +634,7 @@ mod tests {
                 draft("Sam is interested in various things."),
             ],
             observation,
-            "Amy",
+            "Sam",
         );
         assert_eq!(kept.len(), 1);
         assert!(kept[0].text.contains("per-seat"));
@@ -642,14 +642,14 @@ mod tests {
 
     #[test]
     fn similarity_is_word_overlap() {
-        assert!(similarity("Sam is pricing the team plan", "amy pricing team plan") > 0.6);
-        assert!(similarity("Amy writes Rust", "Amy cooks pasta") < 0.3);
+        assert!(similarity("Sam is pricing the team plan", "sam pricing team plan") > 0.6);
+        assert!(similarity("Sam writes Rust", "Sam cooks pasta") < 0.3);
     }
 
     #[test]
     fn drafts_map_scores_to_unit_range() {
         let d = Draft {
-            text: "Amy ships".into(),
+            text: "Sam ships".into(),
             reasoning: "r".into(),
             kind: "goal".into(),
             confidence: 14,
@@ -778,7 +778,7 @@ mod tests {
         assert!(m.store.confirm_proposition(m.a, 20).unwrap());
         let mind = merging_mind(m.dir.path(), m.a, m.b);
 
-        let outcome = integrate(&m.store, &mind, "Amy", &[restatement()], &[m.new], 30).unwrap();
+        let outcome = integrate(&m.store, &mind, "Sam", &[restatement()], &[m.new], 30).unwrap();
 
         assert_eq!(
             outcome,
@@ -825,7 +825,7 @@ mod tests {
         let m = two_claims();
         let mind = merging_mind(m.dir.path(), m.a, m.b);
 
-        let outcome = integrate(&m.store, &mind, "Amy", &[restatement()], &[m.new], 30).unwrap();
+        let outcome = integrate(&m.store, &mind, "Sam", &[restatement()], &[m.new], 30).unwrap();
 
         assert_eq!(
             outcome,
@@ -851,8 +851,8 @@ mod tests {
         );
     }
 
-    /// The line the person forgot in the audit (product-4): a mailbox's name
-    /// read as a job application.
+    /// A line the person forgot, made from a mailbox's name as in the audit
+    /// (product-4).
     const FORGOTTEN: &str = "Sam is planning a trip through the Northwind Travel account";
 
     fn forget(m: &Merge, text: &str) -> i64 {
@@ -896,7 +896,7 @@ mod tests {
         let outcome = integrate(
             &m.store,
             &MindClient::new(None),
-            "Amy",
+            "Sam",
             &[reworded],
             &[m.new],
             30,
@@ -932,7 +932,7 @@ mod tests {
             "Sam is planning a trip with Northwind Travel",
         );
 
-        let outcome = integrate(&m.store, &mind, "Amy", &[restatement()], &[m.new], 30).unwrap();
+        let outcome = integrate(&m.store, &mind, "Sam", &[restatement()], &[m.new], 30).unwrap();
 
         assert_eq!(
             outcome,

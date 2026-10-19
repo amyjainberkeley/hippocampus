@@ -30,6 +30,10 @@ private struct FakeEngine: MindEngine {
     func suggest(_ input: SuggestInput) async throws -> SuggestOutput {
         SuggestOutput(suggestions: [SuggestionItem(title: "Resume", why: "w", usefulness: 8)])
     }
+    func caption(_ input: CaptionInput) async throws -> CaptionOutput {
+        if let failWith { throw failWith }
+        return CaptionOutput(captions: input.moments.map { CaptionLine(n: $0.n, caption: "Reading \($0.title)") })
+    }
 }
 
 final class MindServerTests: XCTestCase {
@@ -54,7 +58,7 @@ final class MindServerTests: XCTestCase {
 
     func testProposeRoundTripsWithSnakeCaseInput() async throws {
         let reply = try object(await MindServer(engine: FakeEngine()).handle(
-            try request(3, "propose", ["user_name": "Amy", "observation": "searched pricing", "known": []])))
+            try request(3, "propose", ["user_name": "Sam", "observation": "searched pricing", "known": []])))
         XCTAssertEqual(reply["id"] as? Int, 3)
         XCTAssertEqual(reply["ok"] as? Bool, true)
         let output = try XCTUnwrap(reply["output"] as? [String: Any])
@@ -72,6 +76,7 @@ final class MindServerTests: XCTestCase {
             ("day", ["user_name": "A", "facts": "f", "episodes": [], "propositions": []]),
             ("answer", ["user_name": "A", "question": "q", "memories": [["n": 1, "when": "w", "source": "s", "text": "t"]], "propositions": [], "today": "Friday"]),
             ("suggest", ["user_name": "A", "now": "n", "recent": [], "propositions": []]),
+            ("caption", ["moments": [["n": 1, "app": "Chrome", "title": "Accent menu", "text": "t"]]]),
         ]
         for (index, (task, input)) in inputs.enumerated() {
             let reply = try object(await server.handle(try request(index, task, input)))
@@ -94,19 +99,62 @@ final class MindServerTests: XCTestCase {
         XCTAssertEqual(long["id"] as? Int, 5)
     }
 
+    func testCaptionsComeBackByNumber() async throws {
+        let reply = try object(await MindServer(engine: FakeEngine()).handle(try request(9, "caption", ["moments": [
+            ["n": 1, "app": "Chrome", "title": "Accent menu", "text": "Press and hold a letter key, then choose an accent."],
+            ["n": 2, "app": "Figma", "title": "Checkout redesign", "text": "Hero, three columns"],
+        ]])))
+        XCTAssertEqual(reply["ok"] as? Bool, true)
+        let lines = try XCTUnwrap((reply["output"] as? [String: Any])?["captions"] as? [[String: Any]])
+        XCTAssertEqual(lines.map { $0["n"] as? Int }, [1, 2])
+        XCTAssertEqual(lines.first?["caption"] as? String, "Reading Accent menu")
+    }
+
+    func testTheCaptionPromptAsksForTheScreenNotThePerson() {
+        let prompt = Prompts.caption(CaptionInput(moments: [
+            CaptionMoment(n: 1, app: "Chrome", title: "How to type accents on a Mac", text: "Press and hold a letter key, then choose an accent."),
+            CaptionMoment(n: 2, app: "Figma", title: "Checkout redesign", text: String(repeating: "x", count: 5_000)),
+        ]))
+        XCTAssertTrue(prompt.contains("1. Chrome, How to type accents on a Mac\nPress and hold a letter key, then choose an accent."))
+        XCTAssertTrue(prompt.contains("verb ending in -ing"))
+        XCTAssertTrue(prompt.contains("nothing it does not show"))
+        XCTAssertTrue(prompt.contains("no guesses about their job, health, money, relationships or identity"))
+        XCTAssertLessThan(prompt.count, 2_000, "each text is cut short")
+    }
+
+    func testCaptionAnswersKeepToTheMomentsAskedAbout() {
+        let input = CaptionInput(moments: [
+            CaptionMoment(n: 1, app: "Chrome", title: "t", text: "x"),
+            CaptionMoment(n: 2, app: "Chrome", title: "t", text: "x"),
+        ])
+        let output = CaptionInputs.answered([
+            CaptionLine(n: 2, caption: "Reading the plan\nand more"),
+            CaptionLine(n: 2, caption: "A second line for two"),
+            CaptionLine(n: 7, caption: "Nobody asked"),
+            CaptionLine(n: 1, caption: "   "),
+        ], for: input)
+        XCTAssertEqual(output.captions, [CaptionLine(n: 2, caption: "Reading the plan")])
+        let bounded = CaptionInputs.bounded(CaptionInput(moments: (1...10).map {
+            CaptionMoment(n: $0, app: "App", title: String(repeating: "t", count: 300), text: String(repeating: "x", count: 900))
+        }), textCharacters: 400, moments: 6)
+        XCTAssertEqual(bounded.moments.count, 6)
+        XCTAssertLessThanOrEqual(bounded.moments[0].text.count, 401)
+        XCTAssertLessThanOrEqual(bounded.moments[0].title.count, 201)
+    }
+
     func testWhatIsOnScreenIsSourceOneAndLeavesRoomForFewerMemories() {
         let memories = (2...12).map { Memory(n: $0, when: "Tue 3:12 PM", source: "Slack", text: String(repeating: "m", count: 480)) }
         let screen = "[1] Preview — invoice-4471.pdf\nAmount due 2,300 dollars by October 30."
-        let asked = Prompts.answer(AnswerInput(userName: "Amy", question: "what am I looking at?", now: screen,
+        let asked = Prompts.answer(AnswerInput(userName: "Sam", question: "what am I looking at?", now: screen,
                                               memories: memories, propositions: [], today: "Monday"))
         XCTAssertTrue(asked.contains("[1] On screen right now, Preview — invoice-4471.pdf:\nAmount due 2,300 dollars by October 30."))
-        XCTAssertTrue(asked.contains("Source 1 is what is on Amy's screen right now."))
+        XCTAssertTrue(asked.contains("Source 1 is what is on Sam's screen right now."))
         XCTAssertTrue(asked.contains("write \"you\" and \"your\""))
         XCTAssertTrue(asked.contains("[8] ") && !asked.contains("[9] "), "seven memories follow the screen")
         XCTAssertFalse(asked.contains(String(repeating: "m", count: 401)), "and each is shorter")
 
         // Only the app's name is known: nothing is called the screen, and all ten memories fit.
-        let plain = Prompts.answer(AnswerInput(userName: "Amy", question: "team price?", now: "Using Slack",
+        let plain = Prompts.answer(AnswerInput(userName: "Sam", question: "team price?", now: "Using Slack",
                                               memories: memories, propositions: [], today: "Monday"))
         XCTAssertFalse(plain.contains("Source 1 is what is on"))
         XCTAssertTrue(plain.contains("On screen right now:\nUsing Slack"))
@@ -114,32 +162,32 @@ final class MindServerTests: XCTestCase {
     }
 
     func testPromptsFrameTheUserAndBoundInput() {
-        let prompt = Prompts.propose(ProposeInput(userName: "Amy", observation: String(repeating: "x", count: 20_000), known: ["Amy writes Rust"]))
-        XCTAssertTrue(prompt.contains("Start each with \"Amy\""))
-        XCTAssertTrue(prompt.contains("- Amy writes Rust"))
+        let prompt = Prompts.propose(ProposeInput(userName: "Sam", observation: String(repeating: "x", count: 20_000), known: ["Sam writes Rust"]))
+        XCTAssertTrue(prompt.contains("Start each with \"Sam\""))
+        XCTAssertTrue(prompt.contains("- Sam writes Rust"))
         XCTAssertLessThan(prompt.count, 8_000, "the observation is clipped to fit the model's window")
         XCTAssertTrue(Prompts.instructions(userName: "").contains("The user is the user."))
-        XCTAssertTrue(Prompts.instructions(userName: "Amy").contains("Other people named on screen are not the user"))
+        XCTAssertTrue(Prompts.instructions(userName: "Sam").contains("Other people named on screen are not the user"))
     }
 
     /// Audit product-4: a mailbox's name and other people's subject lines
-    /// were read as the user's job application.
+    /// were read as the user's own plans.
     func testProposalsReadAnInboxAndATitleAsOtherPeoplesWords() {
         let prompt = Prompts.propose(ProposeInput(
-            userName: "Amy",
-            observation: "09:12–09:20 Mail — \"Inbox – Northwind Travel\": reading for 8 min. Text: Career Center: spring positions",
+            userName: "Sam",
+            observation: "09:12–09:20 Mail — \"Inbox – Northwind Travel\": reading for 8 min. Text: Harbor Ferries: spring timetable",
             known: []
         ))
         XCTAssertTrue(prompt.contains(
-            "An inbox, a feed or a page of results shows what other people wrote: its senders, subjects and headlines are theirs, not Amy's plans."
+            "An inbox, a feed or a page of results shows what other people wrote: its senders, subjects and headlines are theirs, not Sam's plans."
         ))
-        XCTAssertTrue(prompt.contains("A window's title or an app's name says where Amy was, not what they did there."))
-        XCTAssertTrue(prompt.contains("Make no guess about Amy's job search, health, money or relationships."))
-        XCTAssertTrue(prompt.contains("Start each with \"Amy\"."))
+        XCTAssertTrue(prompt.contains("A window's title or an app's name says where Sam was, not what they did there."))
+        XCTAssertTrue(prompt.contains("Make no guess about Sam's job search, health, money or relationships."))
+        XCTAssertTrue(prompt.contains("Start each with \"Sam\"."))
     }
 
     func testTheInstructionsSetTheVoiceAndKeepTheirOwnStyle() {
-        let instructions = Prompts.instructions(userName: "Amy")
+        let instructions = Prompts.instructions(userName: "Sam")
         XCTAssertTrue(instructions.contains("When you write to the user, say \"you\". When you write a claim about them, start with their name. Never assume anyone's gender."))
         XCTAssertFalse(instructions.contains("by name or as \"they\""))
         XCTAssertTrue(instructions.contains("productive, unproductive, distracted, stuck, good or bad. Give advice only when asked."))
@@ -150,7 +198,7 @@ final class MindServerTests: XCTestCase {
     }
 
     func testTheDayPromptAsksForTheWorkInOrderAndNothingCut() {
-        let input = DayInput(userName: "Amy", facts: "Active at the computer: 5 h 30 min.\nSearches (1): \"team plan pricing\".",
+        let input = DayInput(userName: "Sam", facts: "Active at the computer: 5 h 30 min.\nSearches (1): \"team plan pricing\".",
                              episodes: ["14:02–14:31 Pricing the Team plan"], propositions: [])
         for prompt in [Prompts.day(input), Prompts.dayFacts(input)] {
             for cut in ["suggest", "advice", "tomorrow", "broke", "fragmented", "hesitat"] {
@@ -158,7 +206,7 @@ final class MindServerTests: XCTestCase {
             }
         }
         let prompt = Prompts.day(input)
-        XCTAssertTrue(prompt.contains("Write every sentence to Amy as \"you\", and refer to anyone else by name."))
+        XCTAssertTrue(prompt.contains("Write every sentence to Sam as \"you\", and refer to anyone else by name."))
         XCTAssertTrue(prompt.contains("Use only the sessions and facts below"))
         XCTAssertTrue(prompt.contains("Say what they worked on, in order, using the session titles and their times, and what they looked up."))
         XCTAssertTrue(prompt.contains("Sessions:\n- 14:02–14:31 Pricing the Team plan\n"))
@@ -272,10 +320,10 @@ final class MindServerTests: XCTestCase {
     func testNoPromptForWrittenTextInvitesAJudgement() throws {
         let observation = "Notes, Launch plan: typed the beta date."
         let prompts = [
-            Prompts.propose(ProposeInput(userName: "Amy", observation: observation, known: [])),
-            Prompts.episode(EpisodeInput(userName: "Amy", observation: observation)),
-            Prompts.day(DayInput(userName: "Amy", facts: observation, episodes: [], propositions: [])),
-            Prompts.dayFacts(DayInput(userName: "Amy", facts: observation, episodes: [], propositions: [])),
+            Prompts.propose(ProposeInput(userName: "Sam", observation: observation, known: [])),
+            Prompts.episode(EpisodeInput(userName: "Sam", observation: observation)),
+            Prompts.day(DayInput(userName: "Sam", facts: observation, episodes: [], propositions: [])),
+            Prompts.dayFacts(DayInput(userName: "Sam", facts: observation, episodes: [], propositions: [])),
         ]
         for prompt in prompts {
             for word in ["stuck", "hesitat", "attention", "focus"] {
@@ -284,7 +332,7 @@ final class MindServerTests: XCTestCase {
         }
         XCTAssertTrue(prompts[0].contains("struggle (something that took them several tries)"))
         // Claims once read "Sam is a multitasker" and "Sam is a
-        // self-motivated worker who likes to research on her own".
+        // self-motivated worker who likes to research on their own".
         XCTAssertTrue(prompts[0].contains("Say what they do, not what kind of person they are."))
         XCTAssertEqual(try Shape.proposition.properties["text"]?["description"] as? String,
                        "One sentence about the user, starting with their name and never using he or she")
@@ -364,14 +412,14 @@ final class FoundationEngineLiveProbe: XCTestCase {
         Signals: switched back and forth between Notes — Launch plan and Slack — #pricing 5 times.
         """
         let start = Date()
-        let proposed = try await engine.propose(ProposeInput(userName: "Amy", observation: observation, known: []))
+        let proposed = try await engine.propose(ProposeInput(userName: "Sam", observation: observation, known: []))
         print("PROPOSE (\(String(format: "%.1f", Date().timeIntervalSince(start)))s)")
         for p in proposed.propositions { print(" -", p.kind, p.confidence, p.decay, p.text, "|", p.reasoning) }
         XCTAssertFalse(proposed.propositions.isEmpty)
-        let episode = try await engine.episode(EpisodeInput(userName: "Amy", observation: observation))
+        let episode = try await engine.episode(EpisodeInput(userName: "Sam", observation: observation))
         print("EPISODE", episode.title, "|", episode.surface, "|", episode.beneath)
         let answer = try await engine.answer(AnswerInput(
-            userName: "Amy", question: "what did we decide for team pricing?", now: nil,
+            userName: "Sam", question: "what did we decide for team pricing?", now: nil,
             memories: [Memory(n: 1, when: "Tue 2:16 PM", source: "Slack #pricing", text: "Ravi: Let's land Team at $18 a seat, billed annually. Maya: Agreed."),
                        Memory(n: 2, when: "Tue 2:09 PM", source: "Notes Launch plan", text: "Open question: Team plan price before the beta?")],
             propositions: proposed.propositions.map(\.text), today: "Friday, October 10"))

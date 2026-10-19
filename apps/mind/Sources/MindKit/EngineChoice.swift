@@ -52,4 +52,5 @@ public struct UnavailableEngine: MindEngine {
     public func day(_ input: DayInput) async throws -> DayOutput { throw MindError.unavailable }
     public func answer(_ input: AnswerInput) async throws -> AnswerOutput { throw MindError.unavailable }
     public func suggest(_ input: SuggestInput) async throws -> SuggestOutput { throw MindError.unavailable }
+    public func caption(_ input: CaptionInput) async throws -> CaptionOutput { throw MindError.unavailable }
 }

@@ -29,6 +29,7 @@ page is refreshed with each release. Each row names the tests that cover it.
 | What is skipped | Password fields; six password managers, System Settings, sign-in dialogs, the lock screen and Hippocampus itself, by bundle ID; private browser windows that show it; 18 bank and sign-in addresses; four secret shapes, checked three times. | `SuppressionCascadeTests`, `BrowserPrivateWindowTests`, `BrowserWindowPrivacyTests`, `DenylistTests`, and the secret corpus `core/brain/fixtures/ocr-secret-corpus.json`, which the Swift and Rust checks both read. Real browsers' private windows: needs a person. |
 | Encrypted memory | One SQLCipher database with its key in the login Keychain; screenshots sealed with AES-GCM. | `mci-brain` store tests, `KeychainDatabaseKeyResolverTests`, the `keyframe-codec-behavior` lane, `keychain_packaging_contract`. |
 | Deleting | The last 24 hours or everything, with what was learned from it; the database is rewritten afterwards. | `delete_events_in_range_*` and `delete_event_*` in `core/brain/tests/sqlcipher_brain_store.rs`, `memory_projection.rs`, `understanding_store.rs`. In the app: needs a person. |
+| History | Each moment leads with one short line saying what it was about, written on this Mac by Apple Intelligence or a model server, or made from its title, then its text without the window's tabs, address bar, bookmarks and side bars, which stay under Also in this window and in search. Older moments are cleaned and captioned in the background, only on a power cable while the Mac is idle. | `core/brain/tests/chrome.rs`, `caption.rs`, `reclean.rs` and `reading.rs`; `moment_readings_ffi.rs`; the `reclean_worker` tests in `apps/agent`; `MomentCaptionTests`; the mind's caption tests; renders of made-up windows. On a real memory: needs a person. |
 | Search | Exact words (FTS5) and meaning (Arctic Embed S on Core ML). | `hybrid_retriever.rs`, `recall_fusion.rs` and `retrieval_outcomes.rs` in `core/brain/tests`; the evaluations in [`docs/eval/`](eval/); `scripts/try-it.sh` run on Oct 16 (words only). |
 | Ask | Shift twice or ⌃⇧Space opens it over any app. Matches appear as you type; Return asks for an answer with sources, this window first. | `AskPanelTests`, `AskShortcutTests`, `SoloKeyDetectorTests`, `CommandBarTests`. With a real keyboard: needs a person. |
 | Answers and summaries | Apple Intelligence (macOS 26) or a model server on this Mac (Ollama, LM Studio). Without one, search still works. | `apps/mind` tests against a stand-in server (`LocalServerEngineTests`, `FakeModelServer`), and the `mind-without-foundation-models` lane. A real Ollama or LM Studio: not checked. |
@@ -117,8 +118,10 @@ CPU share.
   as HTML codes.
 - The Overview lists searches only when it knows the pages' addresses:
   where Automation was already allowed, or with the browser extension.
-- Memories saved before 0.3 keep the transcripts the old reader made.
-  Read Again re-reads one moment that kept a screenshot.
+- Memories saved before 0.3 were read before windows were classified. Their
+  tab strips, bars and side bars are set apart, but text the old reader ran
+  together across columns is only partly separated. Read Again re-reads one
+  moment that kept a screenshot.
 - The agent still writes daily briefs that nothing in the window shows.
 - No sync between Macs, and no Windows version.
 

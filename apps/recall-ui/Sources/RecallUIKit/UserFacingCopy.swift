@@ -320,6 +320,12 @@ public enum UserFacingCopy {
 
     public static let noScreenshot = "No screenshot"
     public static let screenshotMissing = "Screenshot missing"
+    /// A moment saved with its text and no screenshot.
+    public static let textOnly = "Text only"
+    /// Under a screenshot an earlier moment of the same window kept.
+    public static func screenshotFrom(_ time: String) -> String {
+        "Screenshot from \(time)"
+    }
     public static let openInApp = "Open in App"
     public static let openLink = "Open Link"
     public static let showRelated = "Show Related"

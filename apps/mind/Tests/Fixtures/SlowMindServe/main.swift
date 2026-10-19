@@ -15,6 +15,7 @@ struct SlowEngine: MindEngine {
     func day(_ input: DayInput) async throws -> DayOutput { try await slowly() }
     func answer(_ input: AnswerInput) async throws -> AnswerOutput { try await slowly() }
     func suggest(_ input: SuggestInput) async throws -> SuggestOutput { try await slowly() }
+    func caption(_ input: CaptionInput) async throws -> CaptionOutput { try await slowly() }
 
     private func slowly<Output>() async throws -> Output {
         FileHandle.standardError.write(Data("answering\n".utf8))

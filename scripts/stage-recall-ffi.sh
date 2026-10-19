@@ -33,6 +33,15 @@ if [[ ! -f "$SOURCE" ]]; then
 fi
 
 mkdir -p "$DESTINATION_DIR"
+# SwiftPM never sees the archive as an input: when only the Rust code changed,
+# it keeps every product linked against the old archive, and the window and
+# its tests run the old reader. So when the archive changes, the products
+# linked from it go too (never the compiled objects), and the next build
+# links them again against this one.
+CHANGED=1
+if [[ -f "$DESTINATION" ]] && cmp -s "$SOURCE" "$DESTINATION"; then
+    CHANGED=0
+fi
 TEMP_ARCHIVE="$DESTINATION.tmp.$$"
 trap 'rm -f "$TEMP_ARCHIVE"' EXIT
 install -m 0644 "$SOURCE" "$TEMP_ARCHIVE"
@@ -41,3 +50,9 @@ cmp -s "$SOURCE" "$DESTINATION" || {
     printf 'stage-recall-ffi.sh: staged archive verification failed\n' >&2
     exit 1
 }
+if [[ "$CHANGED" == 1 ]]; then
+    for products in "$REPO_ROOT"/apps/recall-ui/.build/*-apple-macosx*/"$PROFILE"; do
+        [[ -d "$products" ]] || continue
+        find "$products" -maxdepth 1 \( -type f -perm -0100 -o -type d -name '*.xctest' \) -exec rm -rf {} +
+    done
+fi

@@ -97,7 +97,8 @@ final class WhatIsSentContractTests: XCTestCase {
     }
 
     func testTheWindowIgnoresTheSystemAppsTheAgentIgnores() throws {
-        let apps = try source("apps/agent/src/understanding/apps.rs")
+        // The catalog lives in mci-brain, which the agent re-exports.
+        let apps = try source("core/brain/src/apps.rs")
         guard let start = apps.range(of: "const NOISE: &[&str] = &["),
               let end = apps.range(of: "];", range: start.upperBound..<apps.endIndex)
         else { return XCTFail("apps.rs has no NOISE list") }

@@ -249,10 +249,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (store, e) = memory(dir.path());
         let wrong = store
-            .insert_proposition(&new("Amy dislikes meetings on Fridays"), &[e], 1)
+            .insert_proposition(&new("Sam dislikes meetings on Fridays"), &[e], 1)
             .unwrap();
         let right = store
-            .insert_proposition(&new("Amy writes Rust in the mornings"), &[e], 1)
+            .insert_proposition(&new("Sam writes Rust in the mornings"), &[e], 1)
             .unwrap();
         let inbox = inbox(dir.path());
         give(&inbox, "1", wrong, "reject");
@@ -284,26 +284,26 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (store, e) = memory(dir.path());
         let first = store
-            .insert_proposition(&new("Amy writes Rust in the mornings"), &[e], 1)
+            .insert_proposition(&new("Sam writes Rust in the mornings"), &[e], 1)
             .unwrap();
         let second = store
-            .revise_proposition(first, &new("Amy writes Rust most mornings"), &[e], 2)
+            .revise_proposition(first, &new("Sam writes Rust most mornings"), &[e], 2)
             .unwrap();
         let newest = store
             .revise_proposition(
                 second,
-                &new("Amy writes Rust most mornings before ten"),
+                &new("Sam writes Rust most mornings before ten"),
                 &[e],
                 3,
             )
             .unwrap();
         let shown = store
-            .insert_proposition(&new("Amy dislikes meetings on Fridays"), &[e], 4)
+            .insert_proposition(&new("Sam dislikes meetings on Fridays"), &[e], 4)
             .unwrap();
         let live = store
             .revise_proposition(
                 shown,
-                &new("Amy dislikes long meetings on Fridays"),
+                &new("Sam dislikes long meetings on Fridays"),
                 &[e],
                 5,
             )
@@ -338,7 +338,7 @@ mod tests {
         let (store, e) = memory(dir.path());
         // Merged into another claim, so nothing revised it.
         let merged = store
-            .insert_proposition(&new("Amy writes Rust in the mornings"), &[e], 1)
+            .insert_proposition(&new("Sam writes Rust in the mornings"), &[e], 1)
             .unwrap();
         store
             .set_proposition_status(merged, PropositionStatus::Retired, 2)
@@ -366,16 +366,16 @@ mod tests {
         // What a merge leaves: `kept` revised into `merged`, and `absorbed`
         // retired with no link to `merged`.
         let kept = store
-            .insert_proposition(&new("Amy dislikes meetings on Fridays"), &[e], 1)
+            .insert_proposition(&new("Sam dislikes meetings on Fridays"), &[e], 1)
             .unwrap();
         let absorbed = store
-            .insert_proposition(&new("Amy avoids meetings on Friday afternoons"), &[e], 1)
+            .insert_proposition(&new("Sam avoids meetings on Friday afternoons"), &[e], 1)
             .unwrap();
         store
             .set_proposition_status(absorbed, PropositionStatus::Retired, 2)
             .unwrap();
         let merged = store
-            .revise_proposition(kept, &new("Amy avoids meetings on Fridays"), &[e], 2)
+            .revise_proposition(kept, &new("Sam avoids meetings on Fridays"), &[e], 2)
             .unwrap();
         let inbox = inbox(dir.path());
         give(&inbox, "1", absorbed, "reject");
@@ -402,7 +402,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (store, e) = memory(dir.path());
         let id = store
-            .insert_proposition(&new("Amy writes Rust in the mornings"), &[e], 1)
+            .insert_proposition(&new("Sam writes Rust in the mornings"), &[e], 1)
             .unwrap();
         let inbox = inbox(dir.path());
         give(&inbox, "1", id, "confirm");
@@ -445,10 +445,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (store, e) = memory(dir.path());
         let kept = store
-            .insert_proposition(&new("Amy writes Rust in the mornings"), &[e], 1)
+            .insert_proposition(&new("Sam writes Rust in the mornings"), &[e], 1)
             .unwrap();
         let forgotten = store
-            .insert_proposition(&new("Amy dislikes meetings on Fridays"), &[e], 1)
+            .insert_proposition(&new("Sam dislikes meetings on Fridays"), &[e], 1)
             .unwrap();
         let inbox = inbox(dir.path());
         give(&inbox, "1", kept, "reject");
@@ -468,7 +468,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (store, e) = memory(dir.path());
         let id = store
-            .insert_proposition(&new("Amy writes Rust in the mornings"), &[e], 1)
+            .insert_proposition(&new("Sam writes Rust in the mornings"), &[e], 1)
             .unwrap();
         let inbox = inbox(dir.path());
         give(&inbox, "1000-1", id, "confirm");
@@ -498,7 +498,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (store, e) = memory(dir.path());
         let id = store
-            .insert_proposition(&new("Amy writes Rust in the mornings"), &[e], 1)
+            .insert_proposition(&new("Sam writes Rust in the mornings"), &[e], 1)
             .unwrap();
         let inbox = inbox(dir.path());
         give(&inbox, "1", id, "reject");

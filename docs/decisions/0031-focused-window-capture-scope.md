@@ -10,13 +10,13 @@
 
 ### The cycle 8.17 finding
 
-The orchestrator's MCP probe on the live cycle 8.17 install surfaced an OCREvent tagged `com.apple.Safari` whose `text_snippet` contained text drawn from at least three other applications' windows visible on the same display (Activity Monitor, Railway dashboard, Zoho Inbox). The cycle 8.17 + cycle 8.18 STATE.md paragraphs document the empirical leak; memo `docs/research/capture-scope-window-vs-display-2026-05-29.md` §1–§3 is the structural explanation. The root cause is at the OS API boundary:
+The orchestrator's MCP probe on the live cycle 8.17 install surfaced an OCREvent tagged `com.apple.Safari` whose `text_snippet` contained text drawn from at least three other applications' windows visible on the same display (Activity Monitor, a hosting dashboard, a mail inbox). The cycle 8.17 + cycle 8.18 STATE.md paragraphs document the empirical leak; memo `docs/research/capture-scope-window-vs-display-2026-05-29.md` §1–§3 is the structural explanation. The root cause is at the OS API boundary:
 
 - `adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/SCStreamPipeline.swift:92-110` (pre-V2-P1) builds an `SCContentFilter` scoped to the entire display: `SCContentFilter(display:, excludingApplications:, exceptingWindows: [])`. `exceptingWindows` is hard-coded empty. The captured pixel surface is the whole display minus ADR-0013 §1 source-level denylisted apps' windows.
 - The OCR input is the full display-composite `CVPixelBuffer` (`SCStreamCaptureSession.swift:422-432`); the region-of-interest is the dirty-rect bounding rect (`OCRPostAllowEmitter.swift:277-311`) — a *footprint* optimisation per ADR-0016 §1.1, not a privacy-scope decision.
 - The OCREvent's `app_bundle_id` is the polled-frontmost-app id (`SCStreamCaptureSession.swift:290` + `OCRPostAllowEmitter.swift:207-216`). Frontmost-app + display-composite pixels are not the same thing; the cascade's bundle-keyed gate assumes they are.
 
-When the dirty-rect bounding rect spans multiple windows (the common case during normal scrolling activity on a single display), the OCREvent carries text from multiple bundles tagged with one bundle's id. The cycle 8.17 finding is the worst-case shape: Activity Monitor / Railway / Zoho text under `com.apple.Safari`.
+When the dirty-rect bounding rect spans multiple windows (the common case during normal scrolling activity on a single display), the OCREvent carries text from multiple bundles tagged with one bundle's id. The cycle 8.17 finding is the worst-case shape: Activity Monitor, dashboard and inbox text under `com.apple.Safari`.
 
 ### Why no prior ADR addressed the OCR-input scope
 
@@ -141,8 +141,8 @@ The V2-P1 implementing PR (`claude/director-recording/v2-p1-focused-window`, PR 
 
 **The premise above no longer holds.** Production probe of the cycle 8.25 DMG (live SHA `abd06f540c52d4e2924b6e6a54ebe7fd0abef3a44ab390c2a59d9dd392230303`, V2-P1 in shipped source) surfaced an OCREvent tagged `app_bundle_id=com.apple.systempreferences, title=Full Disk Access` whose `text_snippet` contained:
 
-- A `+1 (555) 010` phone number, AND
-- The prefix of a personal message (`From my side:`).
+- Part of a phone number, AND
+- The first words of a personal message.
 
 Both signals are Messages.app content. The event's `app_bundle_id` is `com.apple.systempreferences`. Messages content landed inside a System Preferences event despite V2-P1's focused-window `SCContentFilter`. This is the same class of cross-window pixel-attribution leak that ADR-0031 + the §7 corpus were authored to close.
 

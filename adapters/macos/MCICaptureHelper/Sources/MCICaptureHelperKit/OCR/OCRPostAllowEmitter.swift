@@ -172,9 +172,9 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     ///     `abd06f540c52d4e2924b6e6a54ebe7fd0abef3a44ab390c2a59d9dd392230303`)
     ///     surfaced an OCREvent tagged
     ///     `app_bundle_id=com.apple.systempreferences, title=Full Disk
-    ///     Access` whose `text_snippet` contained a `+1 (555) 010`
-    ///     phone number plus the prefix of a personal message
-    ///     (`From my side:`) — i.e. Messages.app content leaking into a
+    ///     Access` whose `text_snippet` contained part of a phone
+    ///     number plus the first words of a personal message — i.e.
+    ///     Messages.app content leaking into a
     ///     System Preferences event despite V2-P1's focused-window
     ///     `SCContentFilter`. PR #222's `bundle_is_in_scope` per-app
     ///     redaction gates on the EVENT-level `app_bundle_id` and is

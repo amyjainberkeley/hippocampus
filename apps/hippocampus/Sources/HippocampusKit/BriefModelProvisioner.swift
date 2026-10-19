@@ -30,7 +30,11 @@ public final class BriefModelProvisioner: ObservableObject {
 
     public init(
         provision: @escaping @Sendable () async -> BriefModelPresence.SeedOutcome = {
-            BriefModelPresence.seedBundledQwen3IfNeeded()
+            // A standard build first removes the copy an earlier version
+            // downloaded and nothing uses; a custom build that bundles the
+            // model keeps it and seeds it.
+            BriefModelPresence.removeUnusedQwen3IfNeeded()
+            return BriefModelPresence.seedBundledQwen3IfNeeded()
         }
     ) {
         self.isInstalled = { BriefModelPresence.isQwen3Installed() }

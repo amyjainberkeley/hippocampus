@@ -122,7 +122,30 @@ pub mod fts_sanitizer;
 /// store. The stored text is never changed.
 pub mod reading;
 
+/// Sensitive areas of a person's life no line Hippocampus writes may guess
+/// about: one list for the agent's inferred lines and for captions.
+pub mod sensitive;
+
+/// Window chrome (tab strips, address bars, side bars) the reader sets apart
+/// from what the person was reading.
+pub mod chrome;
+
+/// One short plain line saying what a moment was about, grounded in the
+/// moment's own text.
+pub mod caption;
+
+/// A moment's cleaned text and caption, stored beside its text (migration
+/// 0015) and deleted with it.
+pub mod moment_readings;
+pub use moment_readings::{MomentReading, ReadingProgress, StoredMoment, READING_VERSION};
+
+/// The re-clean job's batch: the chrome rules and captions applied to moments
+/// already stored, without touching their text.
+pub mod reclean;
+
 pub mod activity;
+/// App names and the kind of work an app usually means.
+pub mod apps;
 pub mod understanding;
 pub use activity::{ActivityInterval, ActivityState};
 pub mod memory_delta;
@@ -138,7 +161,7 @@ pub use memory_projector::{project_event, retract_event};
 pub use retention_purger::{PurgeStats, RetentionConfig};
 pub use sqlcipher_brain_store::{
     DeletionCleanupStage, DeletionCleanupWarning, DeletionOutcome, ImportCursor, IntegrityError,
-    SqlCipherBrainStore,
+    MomentScreenshot, SqlCipherBrainStore,
 };
 
 pub mod event_source;

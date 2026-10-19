@@ -31,9 +31,24 @@
 //!   it. Every other byte stays.
 //! - N3: outside preformatted blocks, a line with no letter or digit is
 //!   dropped.
-//! - Only text that carries the separator, which the helper classified, has
-//!   its wrapped lines joined into paragraphs and its indents set to none or
-//!   four spaces, outside preformatted blocks. Older text keeps its lines.
+//! - Outside preformatted blocks, wrapped lines are joined into paragraphs:
+//!   in text that carries the separator, which the helper classified, whose
+//!   indents are also set to none or four spaces; and in older text of a
+//!   browser or a document, whose indents stay. Older text of a terminal, a
+//!   code editor or a chat app keeps its lines.
+//! - C1: in older text only (a classified window's content is what the
+//!   helper kept as content, and stays whole), the window chrome at the
+//!   edges of the content moves to `rest`: the run of lines at its top and
+//!   the run at its bottom that are chrome by their own shape, place and
+//!   window (a browser's tab strip, address bar or bookmarks bar, a web app's
+//!   menus and side navigation, a search page's tabs, a site's menu; an
+//!   editor's tabs, headings, breadcrumbs or status bar; Slack's sidebar
+//!   headings or message box; Messages' receipt and message box; see
+//!   [`crate::chrome`]). So do the lines the re-clean job learned from many
+//!   frames, when it passes them ([`reading_with`]). The window's title and
+//!   address come from the stored header when the caller gives none. A line
+//!   that moves is never deleted. If moving would make a secret pattern
+//!   appear, nothing moves.
 //!
 //! A block (the lines between blank lines) is preformatted, and kept byte for
 //! byte but for junk tokens, in a terminal, when it reads like code, a table
@@ -63,6 +78,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
+use crate::chrome::{self, Apart, RepeatedChrome, Window};
 use crate::event_source::EventSource;
 use crate::fts_sanitizer::{sanitize_fts5_query, LexicalAlternative};
 use crate::redaction::ocr_secrets::contains_secret;
@@ -162,6 +178,51 @@ fn is_header(line: &str) -> bool {
         .is_some_and(|(_, after_title)| after_title.contains(" | url="))
 }
 
+/// The window title and page address the stored header names, when the
+/// text has a whole header ([`body`]). An address of `?` is none.
+#[must_use]
+pub fn header_fields(stored: &str) -> (Option<&str>, Option<&str>) {
+    let after_revision = stored
+        .strip_prefix(MCP_REVISION_PREFIX)
+        .and_then(|rest| rest.split_once("]\n"))
+        .filter(|(digest, _)| digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit()))
+        .map_or(stored, |(_, rest)| rest);
+    let header = match after_revision.split_once('\n') {
+        Some((first, _)) if is_header(first) => first,
+        _ => match wrapped_header_len(after_revision) {
+            Some(len) => after_revision[..len].trim_end_matches('\n'),
+            None => return (None, None),
+        },
+    };
+    let Some((_, after_title)) = header
+        .strip_prefix("[app=")
+        .and_then(|fields| fields.strip_suffix(']'))
+        .and_then(|fields| fields.split_once(" | title="))
+    else {
+        return (None, None);
+    };
+    let Some((title, after_url)) = after_title.rsplit_once(" | url=") else {
+        return (None, None);
+    };
+    let url = after_url
+        .split(" | ")
+        .next()
+        .filter(|url| !url.is_empty() && *url != "?");
+    let title = Some(title.trim()).filter(|title| !title.is_empty());
+    (title, url)
+}
+
+/// The window a stored text was read from: its app, the title the caller
+/// gives or else the header's, and the header's address.
+fn window_of<'a>(stored: &'a str, app: Option<&'a str>, title: Option<&'a str>) -> Window<'a> {
+    let (header_title, url) = header_fields(stored);
+    Window {
+        app,
+        title: title.or(header_title),
+        url,
+    }
+}
+
 /// The byte length, newline included, of a header whose title holds a line
 /// break: its first line opens it with the app and the title, and a later
 /// line closes it with ` | url=` and `]`.
@@ -208,22 +269,36 @@ pub fn audit_text(stored: &str) -> String {
 
 /// The reading of one stored event.
 ///
-/// `app` is the event's bundle id. `_title` is the window's title; no rule
-/// uses it this round.
+/// `app` is the event's bundle id. `title` is the window's title; without
+/// one, the stored header's is used, as is its page address.
 #[must_use]
 pub fn reading(
     stored: &str,
     source: EventSource,
     app: Option<&str>,
-    _title: Option<&str>,
+    title: Option<&str>,
+) -> Reading {
+    reading_with(stored, source, app, title, None)
+}
+
+/// [`reading`], with the chrome lines the re-clean job learned from the
+/// moments around this one ([`RepeatedChrome`]) set apart too.
+#[must_use]
+pub fn reading_with(
+    stored: &str,
+    source: EventSource,
+    app: Option<&str>,
+    title: Option<&str>,
+    learned: Option<&RepeatedChrome>,
 ) -> Reading {
     let text = body(stored);
+    let window = window_of(stored, app, title);
     match source {
-        EventSource::ScreenOcr | EventSource::ScreenContext => read_screen(text, app),
+        EventSource::ScreenOcr | EventSource::ScreenContext => read_screen(text, &window, learned),
         EventSource::BrowserPageWithOcr => match text.split_once(VISIBLE_OCR_SEPARATOR) {
             Some((page, seen)) => apart(Reading {
                 main: shown(page).into_owned(),
-                rest: joined(&read_screen(seen, app)),
+                rest: joined(&read_screen(seen, &window, learned)),
             }),
             None => as_stored(text),
         },
@@ -242,7 +317,7 @@ pub fn screen_reading(
 ) -> Reading {
     if source == EventSource::BrowserPageWithOcr {
         if let Some((_, seen)) = body(stored).split_once(VISIBLE_OCR_SEPARATOR) {
-            return read_screen(seen, app);
+            return read_screen(seen, &window_of(stored, app, title), None);
         }
     }
     reading(stored, source, app, title)
@@ -268,7 +343,9 @@ pub fn reading_prefix(
     match source {
         EventSource::ScreenOcr | EventSource::ScreenContext => {
             let (content, chrome, classified) = split_chrome(text);
-            let rules = Rules::new(text, classified);
+            let rules = Rules::new(text, classified, app);
+            let set_aside = old_chrome_apart(content, classified, &window_of(stored, app, None));
+            let (content, chrome) = parts_after(content, chrome, set_aside.as_ref());
             let main = part_prefix(content, &rules, is_terminal(app), max_chars);
             if main.is_empty() {
                 part_prefix(chrome, &rules, false, max_chars)
@@ -297,6 +374,20 @@ pub fn reading_prefix(
         }
         _ => first_chars(&shown(text), max_chars).to_owned(),
     }
+}
+
+/// The first `max_chars` characters of a reading's `main`, or of its `rest`
+/// when `main` is empty: what [`reading_prefix`] gives for stored text, made
+/// from a reading already cleaned (a stored one). A cut never makes a secret
+/// pattern appear: when it would, the words it split are left out.
+#[must_use]
+pub fn reading_start(read: &Reading, max_chars: usize) -> String {
+    let part = if read.main.is_empty() {
+        &read.rest
+    } else {
+        &read.main
+    };
+    cut_clean(part, 0, first_chars(part, max_chars).len())
 }
 
 /// The words of a search, to find in a passage.
@@ -528,7 +619,7 @@ pub fn passage(
     let text = body(stored);
     match source {
         EventSource::ScreenOcr | EventSource::ScreenContext => {
-            screen_passage(text, app, query, max_bytes)
+            screen_passage(text, &window_of(stored, app, None), query, max_bytes)
         }
         EventSource::BrowserPageWithOcr => match text.split_once(VISIBLE_OCR_SEPARATOR) {
             Some((page, seen)) => {
@@ -562,14 +653,21 @@ struct Rules<'t> {
     cjk_rare: OnceCell<bool>,
     /// The text carries the separator: paragraphs join, indents are set.
     classified: bool,
+    /// Older text of a browser or a document: paragraphs join, indents stay.
+    paragraphs: bool,
 }
 
 impl<'t> Rules<'t> {
-    fn new(text: &'t str, classified: bool) -> Self {
+    fn new(text: &'t str, classified: bool, app: Option<&str>) -> Self {
+        let paragraphs = !classified
+            && !is_terminal(app)
+            && !chrome::is_editor(app)
+            && !app.is_some_and(|app| CHAT_APPS.contains(&app));
         Self {
             text,
             cjk_rare: OnceCell::new(),
             classified,
+            paragraphs,
         }
     }
 
@@ -589,24 +687,95 @@ fn newest_last(app: Option<&str>) -> bool {
     app.is_some_and(|app| TERMINAL_APPS.contains(&app) || CHAT_APPS.contains(&app))
 }
 
-fn read_screen(text: &str, app: Option<&str>) -> Reading {
+fn read_screen(text: &str, window: &Window<'_>, learned: Option<&RepeatedChrome>) -> Reading {
+    let app = window.app;
     let (content, chrome, classified) = split_chrome(text);
-    let rules = Rules::new(text, classified);
+    let rules = Rules::new(text, classified, app);
+    let set_aside = if classified {
+        None
+    } else {
+        chrome_apart(content, window, learned)
+    };
+    let (kept, moved) = parts_after(content, chrome, set_aside.as_ref());
     // A terminal's own text is kept as read; its tabs and title are not
     // terminal output.
     let cleaned = Reading {
-        main: clean(content, &rules, is_terminal(app)),
-        rest: clean(chrome, &rules, false),
+        main: clean(kept, &rules, is_terminal(app)),
+        rest: clean(moved, &rules, false),
     };
     if contains_secret(&cleaned.main) || contains_secret(&cleaned.rest) {
-        // Cleaning made a pattern appear, or the stored text holds one: show
-        // the stored parts with no other cleaning.
+        // Cleaning or moving chrome made a pattern appear, or the stored text
+        // holds one: show the stored parts with no other cleaning.
         return apart(Reading {
             main: shown(content).into_owned(),
             rest: shown(chrome).into_owned(),
         });
     }
     apart(cleaned)
+}
+
+/// The lines [`chrome::set_apart`] sets apart in older (unclassified) text,
+/// with no lines learned from many frames: the list rows' and passages'
+/// reading. A classified window's content stays whole.
+fn old_chrome_apart<'t>(
+    content: &'t str,
+    classified: bool,
+    window: &Window<'_>,
+) -> Option<Apart<'t>> {
+    if classified {
+        None
+    } else {
+        chrome_apart(content, window, None)
+    }
+}
+
+/// The lines [`chrome::set_apart`] sets apart, unless moving them puts
+/// together a secret pattern that the stored text keeps apart (a key on one
+/// side of a removed line, its value on the other): then nothing moves.
+/// Checked only when a line moves, and only where it makes a difference:
+/// what moved, and the text around each place where two kept pieces now
+/// meet. What stays is otherwise the content's own text in order.
+fn chrome_apart<'t>(
+    content: &'t str,
+    window: &Window<'_>,
+    learned: Option<&RepeatedChrome>,
+) -> Option<Apart<'t>> {
+    chrome::set_apart(content, window, learned).filter(|found| {
+        !contains_secret(&found.moved)
+            && !found
+                .holes
+                .iter()
+                .any(|&hole| secret_where_pieces_meet(&found.kept, hole))
+    })
+}
+
+/// Whether the text around byte `at` of `text` holds a secret pattern that
+/// neither side of `at` holds alone: one that the two pieces meeting there
+/// made. Every pattern spans far less than [`MEET_REACH`] bytes.
+fn secret_where_pieces_meet(text: &str, at: usize) -> bool {
+    let start = ceil_char_boundary(text, at.saturating_sub(MEET_REACH));
+    let end = floor_char_boundary(text, at.saturating_add(MEET_REACH));
+    let at = floor_char_boundary(text, at);
+    contains_secret(&text[start..end])
+        && !contains_secret(&text[start..at])
+        && !contains_secret(&text[at..end])
+}
+
+/// How far around a place where two kept pieces meet the secret check reads.
+const MEET_REACH: usize = 512;
+
+/// The content and the chrome once [`chrome_apart`] has run on older text,
+/// which carries no chrome the helper set apart: the content without the
+/// lines it set apart, and those lines.
+fn parts_after<'t>(
+    content: &'t str,
+    chrome: &'t str,
+    set_aside: Option<&'t Apart<'t>>,
+) -> (&'t str, &'t str) {
+    match set_aside {
+        None => (content, chrome),
+        Some(found) => (&found.kept, &found.moved),
+    }
 }
 
 /// The content before the separator, the chrome after it, and whether the
@@ -955,9 +1124,17 @@ fn query_passage(
 }
 
 /// [`passage`] for screen text.
-fn screen_passage(text: &str, app: Option<&str>, query: &ExcerptQuery, max_bytes: usize) -> String {
+fn screen_passage(
+    text: &str,
+    window: &Window<'_>,
+    query: &ExcerptQuery,
+    max_bytes: usize,
+) -> String {
+    let app = window.app;
     let (content, chrome, classified) = split_chrome(text);
-    let rules = Rules::new(text, classified);
+    let rules = Rules::new(text, classified, app);
+    let set_aside = old_chrome_apart(content, classified, window);
+    let (content, chrome) = parts_after(content, chrome, set_aside.as_ref());
     let content = shown(content);
     let chrome = shown(chrome);
     let parts = [(&*content, is_terminal(app)), (&*chrome, false)];
@@ -996,7 +1173,7 @@ fn screen_passage(text: &str, app: Option<&str>, query: &ExcerptQuery, max_bytes
     if contains_secret(&piece) {
         // Cleaned on its own, the passage holds a pattern: read the window
         // whole, which knows what the stored text holds.
-        return excerpt(&read_screen(text, app), app, query, max_bytes);
+        return excerpt(&read_screen(text, window, None), app, query, max_bytes);
     }
     piece
 }
@@ -1014,6 +1191,9 @@ fn clean_block(lines: &[&str], rules: &Rules<'_>, terminal: bool, budget: usize)
         // Junk tokens go; every line keeps its place.
         return joined_lines(lines.iter().map(|line| without_junk(line, rules)), budget);
     }
+    if rules.paragraphs {
+        return joined_paragraphs(lines, rules, budget);
+    }
     let kept = lines
         .iter()
         .map(|line| without_junk(line, rules))
@@ -1023,6 +1203,46 @@ fn clean_block(lines: &[&str], rules: &Rules<'_>, terminal: bool, budget: usize)
     } else {
         joined_lines(kept, budget)
     }
+}
+
+/// Older text of a browser or a document: its lines without junk, wrapped
+/// lines joined into paragraphs by the rule classified text gets
+/// ([`joins`]), indents as read, until `budget` characters stand before the
+/// trailing whitespace. The longest line is measured as read.
+fn joined_paragraphs(lines: &[&str], rules: &Rules<'_>, budget: usize) -> String {
+    let longest = lines
+        .iter()
+        .map(|line| line.trim_end().chars().count())
+        .max()
+        .unwrap_or(0);
+    let mut out = String::new();
+    let mut previous: Option<Cow<'_, str>> = None;
+    for line in lines {
+        let line = without_junk(line, rules);
+        if !line.chars().any(char::is_alphanumeric) {
+            continue;
+        }
+        match &previous {
+            Some(before) if joins(before, &line, longest) => {
+                out.truncate(out.trim_end().len());
+                if !ends_in_hyphenated_word(before) {
+                    out.push(' ');
+                }
+                out.push_str(line.trim_start());
+            }
+            _ => {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(&line);
+            }
+        }
+        previous = Some(line);
+        if budget != usize::MAX && out.trim_end().chars().count() >= budget {
+            break;
+        }
+    }
+    out
 }
 
 /// `lines` joined by line breaks, stopping once `budget` characters stand
@@ -1125,7 +1345,7 @@ fn indent(line: &str) -> &str {
 /// holds a tab or starts with a shell prompt, or when 60% of its lines carry
 /// two numbers. The whole block is judged: each count only grows, so the
 /// answer is known as soon as one of them is reached.
-fn is_preformatted(lines: &[&str]) -> bool {
+pub(crate) fn is_preformatted(lines: &[&str]) -> bool {
     let count = lines.len();
     let (mut code, mut indented, mut numeric) = (0usize, 0usize, 0usize);
     let mut levels: Vec<usize> = Vec::with_capacity(3);
@@ -1165,7 +1385,9 @@ struct LineFacts {
     /// one), so the prompt pattern is worth trying.
     prompt_mark: bool,
     /// It reads like code: one of `{}();=<>[]`, or `::`, or it ends in `,`
-    /// or `:`. (`->` and `=>` hold `>` and `=`.)
+    /// or `:`. (`->` and `=>` hold `>` and `=`.) A sentence's semicolon,
+    /// followed by a space, and the angle brackets around an email address
+    /// ("Dana Whitfield <dana@northwind.example>") are not code.
     code: bool,
     /// It holds an ASCII digit, so it may carry numbers.
     digit: bool,
@@ -1178,9 +1400,14 @@ impl LineFacts {
             code: false,
             digit: false,
         };
+        let bytes = line.as_bytes();
+        let address = email_in_brackets(line);
         let mut previous = 0u8;
-        for &byte in line.as_bytes() {
+        for (at, &byte) in bytes.iter().enumerate() {
+            let in_address = address.is_some_and(|(open, close)| at == open || at == close);
             match byte {
+                b';' if bytes.get(at + 1) == Some(&b' ') => {}
+                b'<' | b'>' if in_address => {}
                 b'{' | b'}' | b'(' | b')' | b';' | b'=' | b'<' | b'[' | b']' => facts.code = true,
                 b'>' => {
                     facts.code = true;
@@ -1196,6 +1423,16 @@ impl LineFacts {
         facts.code = facts.code || line.trim_end().ends_with([',', ':']);
         facts
     }
+}
+
+/// The byte offsets of the `<` and `>` around an email address in `line`,
+/// as mail shows a sender: "Dana Whitfield <dana@northwind.example>".
+fn email_in_brackets(line: &str) -> Option<(usize, usize)> {
+    let at = line.find('@')?;
+    let open = line[..at].rfind('<')?;
+    let close = at + line[at..].find('>')?;
+    let address = &line[open + 1..close];
+    (!address.contains(char::is_whitespace) && address.contains('.')).then_some((open, close))
 }
 
 fn is_number(token: &str) -> bool {
@@ -1472,7 +1709,7 @@ mod tests {
 
     #[test]
     fn a_junk_token_goes_with_the_space_before_it() {
-        let latin = Rules::new("Docs Pricing and some more words to count", false);
+        let latin = Rules::new("Docs Pricing and some more words to count", false, None);
         assert_eq!(
             without_junk("Docs \u{25a1} Pricing", &latin),
             "Docs Pricing"
@@ -1485,13 +1722,13 @@ mod tests {
         );
         assert_eq!(without_junk("a \u{53e3} \u{53e3}", &latin), "a");
         assert_eq!(without_junk("\u{53e3} \u{53e3} b", &latin), "b");
-        let cjk = Rules::new("\u{53e3} b", false);
+        let cjk = Rules::new("\u{53e3} b", false, None);
         assert_eq!(without_junk("\u{53e3} b", &cjk), "\u{53e3} b");
     }
 
     #[test]
     fn letters_are_counted_only_when_a_lone_cjk_character_turns_up() {
-        let rules = Rules::new("Docs \u{25a1} Pricing", false);
+        let rules = Rules::new("Docs \u{25a1} Pricing", false, None);
         assert_eq!(
             without_junk("Docs \u{25a1} Pricing", &rules),
             "Docs Pricing"
@@ -1510,17 +1747,48 @@ mod tests {
         let prose =
             "the plan grows with every seat the customer adds and the price follows it\n".repeat(4);
         let text = format!("{code}{comments}{prose}");
-        let rules = Rules::new(&text, true);
+        let rules = Rules::new(&text, true, None);
         assert_eq!(clean(text.trim_end(), &rules, false), text.trim_end());
+    }
+
+    #[test]
+    fn a_senders_address_and_a_sentences_semicolon_are_not_code() {
+        let mail = [
+            "Re: Invoice 1042",
+            "Dana Whitfield <dana@northwind.example>",
+            "to me",
+            "Thanks for sending this over. The October invoice is attached; the amount due is $1,240.00",
+            "by October 30, and the purchase order number has not changed.",
+        ];
+        assert!(!is_preformatted(&mail));
+        let rules = Rules::new("", false, Some("com.google.Chrome"));
+        assert!(clean_block(&mail, &rules, false, usize::MAX)
+            .contains("the amount due is $1,240.00 by October 30, and"));
+        assert!(is_preformatted(&[
+            "let x = 1;",
+            "let y = vec![x];",
+            "fn main() {}"
+        ]));
+        assert!(LineFacts::of("for (i = 0;i < n;i++)").code);
+        assert!(LineFacts::of("Vec<String>").code);
     }
 
     #[test]
     fn a_list_prefix_stops_inside_a_long_block() {
         let text = "the plan grows with every seat the customer adds\n".repeat(2_000);
-        let rules = Rules::new(&text, false);
+        // Lines kept as read (a chat app's older text).
+        let rules = Rules::new(&text, false, Some("com.tinyspeck.slackmacgap"));
         let head = clean_blocks(&text, &rules, false, 100);
         assert!(head.len() < 200, "{}", head.len());
         assert_eq!(head, text[..head.len()]);
+        // Lines joined into a paragraph (a page's older text) stop as soon.
+        let rules = Rules::new(&text, false, None);
+        let head = clean_blocks(&text, &rules, false, 100);
+        assert!(head.len() < 200, "{}", head.len());
+        assert!(
+            head.starts_with("the plan grows with every seat the customer adds the plan grows"),
+            "{head}"
+        );
     }
 
     #[test]

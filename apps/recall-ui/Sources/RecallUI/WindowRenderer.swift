@@ -21,6 +21,10 @@ import SwiftUI
 @MainActor
 enum WindowRenderer {
     static let flag = "--render-window="
+    /// `--render-scenes=history,ask-`: only the scenes whose names start so.
+    static let scenesFlag = "--render-scenes="
+    /// `--render-only=history-meaning`: the same, for one prefix.
+    static let onlyFlag = "--render-only="
 
     static func renderIfRequested(arguments: [String] = CommandLine.arguments) -> Bool {
         guard arguments.contains("--synthetic-preview"),
@@ -30,9 +34,14 @@ enum WindowRenderer {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let directory = URL(fileURLWithPath: String(value), isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let prefixes = arguments.filter { $0.hasPrefix(scenesFlag) || $0.hasPrefix(onlyFlag) }
+            .flatMap { argument in
+                argument.dropFirst(argument.hasPrefix(scenesFlag) ? scenesFlag.count : onlyFlag.count)
+                    .split(separator: ",").map(String.init)
+            }
         let done = Flag()
         Task { @MainActor in
-            for scene in scenes() {
+            for scene in scenes() where prefixes.isEmpty || prefixes.contains(where: scene.name.hasPrefix) {
                 await render(scene, to: directory)
             }
             done.value = true
@@ -56,6 +65,17 @@ enum WindowRenderer {
         var scale: CGFloat = 2
         /// Nothing is saved before today: the first day's welcome.
         var firstDay = false
+        /// History reads the synthetic afternoon (`HistoryRenderFixture`),
+        /// whose screenshots are drawn, sealed and opened as the app opens
+        /// the person's own.
+        var history = false
+        /// Draw from `MeaningFixtureReader`: a made-up afternoon of windows
+        /// read with their chrome, cleaned and captioned.
+        var meaning = false
+        /// Draw from `ReviewRenderFixture`: ten windows stored with their
+        /// chrome, read and captioned as the FFI reads them, some with the
+        /// screenshot their window kept.
+        var review = false
         var prepare: @MainActor (AskViewModel) async -> Void = { _ in }
     }
 
@@ -125,6 +145,112 @@ enum WindowRenderer {
             // saved yet, remembering, no AI tool connected (Oct 18).
             Scene(name: "first-landing-light", place: .overview, understanding: .firstDay, firstDay: true),
             Scene(name: "first-landing-dark", place: .overview, dark: true, understanding: .firstDay, firstDay: true),
+            // History's screenshots: the list, a moment showing the screenshot
+            // its window kept a few minutes before, a moment with its own, a
+            // text-only moment and one whose screenshot is gone.
+            Scene(name: "history-list", history: true) { await $0.history.reload() },
+            Scene(name: "history-list-all-rows", size: CGSize(width: 1100, height: 1180), history: true) {
+                await $0.history.reload()
+            },
+            Scene(name: "history-moment", history: true) { ask in
+                await ask.history.reload()
+                selectInHistory(HistoryRenderFixture.editorId, in: ask)
+            },
+            Scene(name: "history-moment-own-screenshot", history: true) { ask in
+                await ask.history.reload()
+                selectInHistory(HistoryRenderFixture.chatId, in: ask)
+            },
+            Scene(name: "history-moment-text-only", history: true) { ask in
+                await ask.history.reload()
+                selectInHistory(HistoryRenderFixture.mailId, in: ask)
+            },
+            Scene(name: "history-moment-screenshot-gone", history: true) { ask in
+                await ask.history.reload()
+                selectInHistory(HistoryRenderFixture.notesId, in: ask)
+            },
+            Scene(name: "history-list-dark", dark: true, history: true) { await $0.history.reload() },
+            Scene(name: "history-moment-dark", dark: true, history: true) { ask in
+                await ask.history.reload()
+                selectInHistory(HistoryRenderFixture.editorId, in: ask)
+            },
+            // History says what each moment was about, over clean text; the
+            // moment shows its whole cleaned text, and the window's tabs and
+            // bars under "Also in this window".
+            Scene(name: "history-meaning-light", meaning: true) { ask in
+                await ask.history.reload()
+                selectInHistory(MeaningFixtureReader.accentsId, in: ask)
+            },
+            Scene(name: "history-meaning-dark", dark: true, meaning: true) { ask in
+                await ask.history.reload()
+                selectInHistory(MeaningFixtureReader.accentsId, in: ask)
+            },
+            Scene(name: "history-meaning-code-light", meaning: true) { ask in
+                await ask.history.reload()
+                selectInHistory(MeaningFixtureReader.codeId, in: ask)
+            },
+            // A tab title still finds the moment: the match is in the rest of
+            // the window, which opens by itself.
+            Scene(name: "history-meaning-search-tab-light", meaning: true) { ask in
+                ask.query = "Trailhead"
+                await ask.search.runSearch()
+                select(MeaningFixtureReader.accentsId, in: ask)
+            },
+            // The review: History as a person looks back over an afternoon,
+            // screenshots and clean text together. The whole list, then a
+            // moment with a screenshot its window kept, one with text only,
+            // a document, and one whose screenshot is gone.
+            Scene(name: "review-list", size: CGSize(width: 1100, height: 2100), review: true) {
+                await $0.history.reload()
+            },
+            Scene(name: "review-list-dark", dark: true, size: CGSize(width: 1100, height: 2100), review: true) {
+                await $0.history.reload()
+            },
+            Scene(name: "review-moment-article", size: CGSize(width: 1280, height: 860), review: true) { ask in
+                await ask.history.reload()
+                selectInHistory(ReviewRenderFixture.articleId, in: ask)
+            },
+            Scene(name: "review-moment-article-dark", dark: true, size: CGSize(width: 1280, height: 860),
+                  review: true) { ask in
+                await ask.history.reload()
+                selectInHistory(ReviewRenderFixture.articleId, in: ask)
+            },
+            Scene(name: "review-moment-chat", size: CGSize(width: 1280, height: 860), review: true) { ask in
+                await ask.history.reload()
+                selectInHistory(ReviewRenderFixture.slackId, in: ask)
+            },
+            Scene(name: "review-moment-chat-dark", dark: true, size: CGSize(width: 1280, height: 860),
+                  review: true) { ask in
+                await ask.history.reload()
+                selectInHistory(ReviewRenderFixture.slackId, in: ask)
+            },
+            Scene(name: "review-moment-document", size: CGSize(width: 1280, height: 860), review: true) { ask in
+                await ask.history.reload()
+                selectInHistory(ReviewRenderFixture.documentId, in: ask)
+            },
+            Scene(name: "review-list-narrow", size: CGSize(width: 820, height: 1400), review: true) {
+                await $0.history.reload()
+            },
+            Scene(name: "review-moment-terminal", size: CGSize(width: 1280, height: 860), review: true) { ask in
+                await ask.history.reload()
+                selectInHistory(ReviewRenderFixture.assistantId, in: ask)
+            },
+            Scene(name: "review-moment-terminal-dark", dark: true, size: CGSize(width: 1280, height: 860),
+                  review: true) { ask in
+                await ask.history.reload()
+                selectInHistory(ReviewRenderFixture.assistantId, in: ask)
+            },
+            Scene(name: "review-moment-notes", size: CGSize(width: 1280, height: 860), review: true) { ask in
+                await ask.history.reload()
+                selectInHistory(ReviewRenderFixture.tallNotesId, in: ask)
+            },
+            Scene(name: "review-moment-gmail", size: CGSize(width: 1280, height: 860), review: true) { ask in
+                await ask.history.reload()
+                selectInHistory(ReviewRenderFixture.gmailId, in: ask)
+            },
+            Scene(name: "review-moment-gone", size: CGSize(width: 1280, height: 860), review: true) { ask in
+                await ask.history.reload()
+                selectInHistory(ReviewRenderFixture.notesId, in: ask)
+            },
         ]
     }
 
@@ -132,6 +258,12 @@ enum WindowRenderer {
         guard ask.search.hits.contains(where: { $0.id == id }) else { return }
         ask.search.selectedHitId = id
         ask.search.focusDetail()
+    }
+
+    private static func selectInHistory(_ id: UInt64, in ask: AskViewModel) {
+        guard ask.history.hits.contains(where: { $0.id == id }) else { return }
+        ask.history.selectedHitId = id
+        ask.history.focusDetail()
     }
 
     /// Waits for `condition`, at most two seconds.
@@ -146,8 +278,19 @@ enum WindowRenderer {
                                        now: PreviewUnderstandingReader.sampleNow,
                                        calendar: PreviewUnderstandingReader.sampleCalendar)
         let overviewMoments = OverviewPreviewBrainReader()
-        let reader = RenderFixtureReader(base: base, overviewMoments: overviewMoments)
+        let fixtures = RenderFixtureReader(base: base, overviewMoments: overviewMoments)
+        let history = scene.history ? try? HistoryRenderFixture(base: fixtures, now: base.now) : nil
+        defer { history?.remove() }
+        let review = scene.review ? try? ReviewRenderFixture(base: fixtures, now: base.now) : nil
+        defer { review?.remove() }
+        let reader: any BrainReader = scene.meaning
+            ? MeaningFixtureReader(now: base.now)
+            : review?.reader ?? history?.reader ?? fixtures
         let thumbnails = OverviewPreviewThumbnails(windows: overviewMoments.windows)
+        // Every picture comes from a fixture: drawn windows for Overview, the
+        // synthetic encrypted afternoon for History. Nothing reaches the
+        // person's screenshots or Keychain.
+        let screenshots: any ThumbnailDataProviding = review?.screenshots ?? history?.screenshots ?? thumbnails
         let understanding = PreviewUnderstandingReader(scenario: scene.understanding)
         let now = base.now
         let calendar = base.calendar
@@ -199,6 +342,7 @@ enum WindowRenderer {
         )
         .environment(\.controlActiveState, .key)
         .environment(\.overviewThumbnails, thumbnails)
+        .environment(\.screenshots, screenshots)
         .environment(\.locale, Locale(identifier: "en_US"))
         .environment(\.colorScheme, scene.dark ? .dark : .light)
         .environment(\.timeZone, calendar.timeZone)
@@ -222,8 +366,9 @@ enum WindowRenderer {
         while Date().timeIntervalSince(started) < 8 {
             hosting.layoutSubtreeIfNeeded()
             try? await Task.sleep(for: .milliseconds(50))
-            if thumbnails.count != drawn {
-                drawn = thumbnails.count
+            let served = thumbnails.count + (history?.screenshots.count ?? 0) + (review?.screenshots.count ?? 0)
+            if served != drawn {
+                drawn = served
                 stableSince = Date()
             } else if Date().timeIntervalSince(started) >= 1, Date().timeIntervalSince(stableSince) >= 0.5 {
                 break
@@ -418,6 +563,187 @@ struct RenderFixtureReader: BrainReader {
 
     func timelineEvents(startTsUs: UInt64, endTsUs: UInt64, resolution: TimelineResolution) async throws -> [TimelineEvent] {
         try await base.timelineEvents(startTsUs: startTsUs, endTsUs: endTsUs, resolution: resolution)
+    }
+}
+
+/// A made-up afternoon for the History renders. Each window's text is stored
+/// the way the reader stored it, chrome and all: Chrome's tab strip from the
+/// report, address and bookmarks bars, Slack's top bar and message box, VS
+/// Code's tabs, side bar and status bar, and one window classified by the 0.3
+/// reader. The Rust reader cleans it (`StatelessReading`), and captions are
+/// what the re-clean job stores: two written by the on-device model, the rest
+/// made from the title. Nothing here is real.
+struct MeaningFixtureReader: BrainReader {
+    static let accentsId: UInt64 = 7_001
+    static let codeId: UInt64 = 7_004
+
+    private struct Moment {
+        let hit: Hit
+        let reading: EventReading
+    }
+
+    private struct Window {
+        let id: UInt64
+        let minutesAgo: UInt64
+        let app: String
+        let title: String
+        var url: String?
+        var source = "screen_ocr"
+        let text: String
+        /// A line the on-device model wrote and the job kept (grounded in
+        /// the text above); nil keeps the caption made from the title.
+        var written: String?
+    }
+
+    private let moments: [Moment]
+
+    init(now: Date) {
+        let nowUs = UInt64(max(0, now.timeIntervalSince1970 * 1_000_000))
+        let tabs = "T N 27 Trailhead - Sched \u{00D7} \u{2713} Q4 planning - Goo # launch-plan (Chan\u{2026}"
+        let accents = """
+            How to type accents on a Mac
+            Click where you want to type, in any app.
+            Press and hold a letter key, such as e or a.
+            Choose an accent from the menu, or press its number.
+            Or release the key to keep the plain letter.
+            """
+        let windows = [
+            Window(id: Self.accentsId, minutesAgo: 2, app: "com.google.Chrome",
+                   title: "How to type accents on a Mac - Apple Support", url: "https://support.example/type-accents",
+                   text: "\(tabs)\n< > C support.example/type-accents \u{2606}\n\(accents)",
+                   written: "Looking up how to type accents"),
+            Window(id: 7_007, minutesAgo: 3, app: "com.google.Chrome",
+                   title: "How to type accents on a Mac - Apple Support", url: "https://support.example/type-accents",
+                   text: "\(tabs)\n< > C support.example/type-accents \u{2606}\nHow to type accents on a Mac\nClick where you want to type, in any app.",
+                   written: "Looking up how to type accents"),
+            Window(id: 7_002, minutesAgo: 9, app: "com.figma.Desktop", title: "Checkout redesign",
+                   text: """
+                       Hero
+                       Big headline, one line of copy, one button
+                       Three columns: what it reads, where it stays, what it costs
+                       Pricing table below the fold
+                       Footer with the install line
+                       """ + ReadableText.chromeSeparator + "Drafts / Checkout redesign\nDesign Prototype Inspect",
+                   written: "Planning a checkout redesign"),
+            Window(id: 7_003, minutesAgo: 18, app: "com.tinyspeck.slackmacgap",
+                   title: "launch-plan (Channel) - Northwind Studio - Slack",
+                   text: """
+                       Northwind Studio > Q Search Northwind Studio
+                       Threads
+                       Maya Chen 10:42 AM
+                       Pushed the new onboarding flow to staging. The permissions step is now one screen.
+                       Ravi Patel 10:47 AM
+                       Looks good. One nit: the menu should say Turn on memory.
+                       Direct messages
+                       Message #launch-plan
+                       """),
+            Window(id: Self.codeId, minutesAgo: 31, app: "com.microsoft.VSCode", title: "tax.rs \u{2014} trailhead-shop",
+                   text: """
+                       tax.rs \u{00D7} cart.rs \u{00D7} main.rs \u{00D7}
+                       EXPLORER
+                       src > cart > tax.rs
+                       pub fn order_total(lines: &[Line]) -> Money {
+                           let subtotal: Money = lines.iter().map(|l| l.price * l.qty).sum();
+                           round_half_even(subtotal + subtotal * TAX_RATE)
+                       }
+                       main 0 errors, 2 warnings Ln 14, Col 37 UTF-8 Rust
+                       """),
+            Window(id: 7_005, minutesAgo: 44, app: "com.google.Chrome",
+                   title: "per seat vs tiered pricing - Google Search",
+                   url: "https://www.google.com/search?q=per+seat+vs+tiered+pricing",
+                   text: """
+                       Pricing notes \u{00D7} Stripe Docs \u{00D7} Inbox (12) \u{00D7} +
+                       < > C google.com/search?q=per+seat+vs+tiered+pricing \u{2606}
+                       Gmail Images All Bookmarks
+                       Per-seat or tiered? How to price a team plan
+                       Most teams choose between charging for every seat and charging by tier.
+                       A seat minimum is the usual compromise.
+                       """),
+            Window(id: 7_006, minutesAgo: 58, app: "com.apple.mail", title: "Invoice 4471 for phase two",
+                   text: """
+                       Invoice 4471 for phase two
+                       Dana Whitfield
+                       Phase two of the brand refresh is wrapped up, and the final files are in the shared folder.
+                       The invoice for this phase is attached. Payment is due October 30.
+                       """),
+        ]
+        moments = windows.compactMap { window in
+            let tsUs = nowUs - window.minutesAgo * 60_000_000
+            let stored = "[app=\(window.app) | title=\(window.title) | url=\(window.url ?? "?") | ts=2026-10-12T14:00:00.000Z]\n"
+                + window.text
+            let read = StatelessReading.read(stored: stored, source: window.source, app: window.app,
+                                             title: window.title, url: window.url)
+            let main = read?.main ?? window.text
+            let rest = read?.rest ?? ""
+            let caption = window.written ?? read?.caption
+            let hit = Hit(eventId: window.id, tsUs: tsUs, appBundleId: window.app, windowTitle: window.title,
+                          url: window.url, ocrTextSnippet: String(main.prefix(280)), source: "recent", score: nil,
+                          sourceKind: window.source, caption: caption)
+            guard let reading = try? EventReading(eventId: window.id, tsUs: tsUs, appBundleId: window.app,
+                                                  sourceKind: window.source, main: main, rest: rest,
+                                                  isTruncated: false, caption: caption) else { return nil }
+            return Moment(hit: hit, reading: reading)
+        }
+    }
+
+    private func found(_ query: String, in moment: Moment) -> EventReading.Match? {
+        let words = query.lowercased().split(separator: " ").map(String.init)
+        guard !words.isEmpty else { return nil }
+        if words.allSatisfy({ moment.reading.main.lowercased().contains($0) }) { return .main }
+        if words.allSatisfy({ moment.reading.rest.lowercased().contains($0) }) { return .rest }
+        return nil
+    }
+
+    func search(_ opts: SearchOptions) async throws -> [Hit] {
+        if opts.browse {
+            return Array(moments.map(\.hit).filter { hit in
+                (opts.timeFromUs.map { hit.tsUs >= $0 } ?? true) && (opts.timeToUs.map { hit.tsUs <= $0 } ?? true)
+            }.prefix(max(0, opts.limit)))
+        }
+        // A match shows the line that holds the words, from the text or the
+        // rest of the window, as the FFI's passage does.
+        return moments.compactMap { moment -> Hit? in
+            guard let match = found(opts.text, in: moment) else { return nil }
+            let part = match == .main ? moment.reading.main : moment.reading.rest
+            let word = opts.text.lowercased().split(separator: " ").first.map(String.init) ?? ""
+            let line = part.split(whereSeparator: \.isNewline).first { $0.lowercased().contains(word) }.map(String.init) ?? part
+            let hit = moment.hit
+            return Hit(eventId: hit.eventId, tsUs: hit.tsUs, appBundleId: hit.appBundleId, windowTitle: hit.windowTitle,
+                       url: hit.url, ocrTextSnippet: line, source: "lexical", score: 1, sourceKind: hit.sourceKind,
+                       caption: hit.caption)
+        }
+    }
+
+    func recentEvents(limit: Int) async throws -> [Hit] { Array(moments.map(\.hit).prefix(limit)) }
+    func recentPrivacyMoments(limit: Int) async throws -> [PrivacyMoment] { [] }
+    func listObservedApps(limit: Int, timeFromUs: UInt64?) async throws -> [ObservedApp] { [] }
+    func listEpisodes(limit: Int) async throws -> [Episode] { [] }
+
+    func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] {
+        ids.prefix(32).compactMap { id in moments.first { $0.hit.id == id }?.hit }
+    }
+
+    func eventText(eventId: UInt64) async throws -> EventText? {
+        guard let moment = moments.first(where: { $0.hit.id == eventId }) else { return nil }
+        return try EventText(eventId: eventId, tsUs: moment.hit.tsUs, appBundleId: moment.hit.appBundleId,
+                             text: moment.reading.text(includingRest: true), isTruncated: false)
+    }
+
+    func eventReading(eventId: UInt64, query: String?) async throws -> EventReading? {
+        guard let moment = moments.first(where: { $0.hit.id == eventId }) else { return nil }
+        let reading = moment.reading
+        return try EventReading(eventId: eventId, tsUs: reading.tsUs, appBundleId: reading.appBundleId,
+                                sourceKind: reading.sourceKind, main: reading.main, rest: reading.rest,
+                                matchIn: query.flatMap { found($0, in: moment) }, isTruncated: false,
+                                caption: reading.caption)
+    }
+
+    func briefForDate(_ dateLocal: String) async throws -> Brief? { nil }
+    func latestBrief() async throws -> Brief? { nil }
+    func briefDates(limit: Int) async throws -> [String] { [] }
+    func summaryStats() async throws -> SummaryStats {
+        SummaryStats(totalEvents: UInt64(moments.count), oldestTsUs: moments.last?.hit.tsUs,
+                     newestTsUs: moments.first?.hit.tsUs, diskBytes: 0)
     }
 }
 #endif

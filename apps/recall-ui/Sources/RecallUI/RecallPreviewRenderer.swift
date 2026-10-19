@@ -200,6 +200,7 @@ enum RecallPreviewRenderer {
             .environment(\.isSyntheticPreview, false)
             .environment(\.controlActiveState, .key)
             .environment(\.overviewThumbnails, thumbnails)
+            .environment(\.screenshots, thumbnails)
             .environment(\.timeZone, PreviewUnderstandingReader.sampleTimeZone)
             .environment(\.locale, Locale(identifier: "en_US"))
             .environment(\.colorScheme, dark ? .dark : .light)

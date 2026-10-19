@@ -33,12 +33,12 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mci_brain::graph::{Entity, EntityIdentity};
-use mci_brain::reading::{passage, ExcerptQuery};
+use mci_brain::reading::{excerpt, passage, ExcerptQuery, Reading};
 use mci_brain::{
     explicit_evidence_signal, has_explicit_current_supersession_context, BrainStats, BrainStore,
     EmbedError, Embedder, EntityId, EpisodeRecord, Event, EventId, EventRecord, EvidenceCandidate,
     ExplicitEvidenceSignal, HybridRetriever, IdentityId, NothingMatchedReason, RetrievalMatch,
-    RetrievalOutcome, RetrievalQuery, SqlCipherBrainStore, StoreError,
+    RetrievalOutcome, RetrievalQuery, SqlCipherBrainStore, StoreError, READING_VERSION,
 };
 use mci_core::crypto::DbKey;
 
@@ -463,13 +463,43 @@ impl LiveBrainReader {
     /// [`EventRecord::SNIPPET_MAX_CHARS`] bytes. Only the blocks it shows are
     /// cleaned. The store keeps the raw text.
     fn shown_text(&self, event: &Event, query: &ExcerptQuery) -> String {
-        EventRecord::truncate_snippet(&passage(
-            &event.text,
-            self.event_source(event.id),
-            event.app_bundle_id.as_deref(),
-            query,
-            EventRecord::SNIPPET_MAX_CHARS,
-        ))
+        let app = event.app_bundle_id.as_deref();
+        EventRecord::truncate_snippet(&match self.stored_reading(event.id) {
+            Some(read) => excerpt(&read, app, query, EventRecord::SNIPPET_MAX_CHARS),
+            None => passage(
+                &event.text,
+                self.event_source(event.id),
+                app,
+                query,
+                EventRecord::SNIPPET_MAX_CHARS,
+            ),
+        })
+    }
+
+    /// The cleaned reading the re-clean job stored for `id` (the window's
+    /// chrome learned from many frames set apart), when it is of the current
+    /// rules. Best effort: none on a store without one, and AI tools then get
+    /// the live reading, which sets one-frame chrome apart by itself.
+    fn stored_reading(&self, id: EventId) -> Option<Reading> {
+        self.store
+            .moment_reading(id)
+            .ok()
+            .flatten()
+            .filter(|row| row.version == READING_VERSION)
+            .and_then(|row| row.reading)
+    }
+
+    /// Packet evidence for one event, with its source and stored reading.
+    fn evidence_for(
+        &self,
+        event: &Event,
+        priority: EvidencePriority,
+        score: Option<f32>,
+    ) -> ContextEvidence {
+        let mut evidence = ContextEvidence::from_event(event, priority, score);
+        evidence.source_kind = self.event_source(event.id).as_str().into();
+        evidence.cleaned = self.stored_reading(event.id);
+        evidence
     }
 
     fn materialize_matches(
@@ -517,10 +547,11 @@ impl LiveBrainReader {
         else {
             return Ok(None);
         };
-        let mut evidence =
-            ContextEvidence::from_event(&event, EvidencePriority::Focused, Some(hit.score));
-        evidence.source_kind = self.event_source(event.id).as_str().into();
-        Ok(Some(evidence))
+        Ok(Some(self.evidence_for(
+            &event,
+            EvidencePriority::Focused,
+            Some(hit.score),
+        )))
     }
 }
 
@@ -538,13 +569,18 @@ impl BrainReader for LiveBrainReader {
             Ok(Some(text))
                 if text.ts_us == record.ts_us && text.app_bundle_id == record.app_bundle_id =>
             {
-                EventRecord::truncate_snippet(&passage(
-                    &text.text,
-                    source,
-                    record.app_bundle_id.as_deref(),
-                    &ExcerptQuery::default(),
-                    EventRecord::SNIPPET_MAX_CHARS,
-                ))
+                let app = record.app_bundle_id.as_deref();
+                let none = ExcerptQuery::default();
+                EventRecord::truncate_snippet(&match self.stored_reading(record.event_id) {
+                    Some(read) => excerpt(&read, app, &none, EventRecord::SNIPPET_MAX_CHARS),
+                    None => passage(
+                        &text.text,
+                        source,
+                        app,
+                        &none,
+                        EventRecord::SNIPPET_MAX_CHARS,
+                    ),
+                })
             }
             _ => super::brain_reader::snippet_listed_text(record, source),
         }
@@ -636,10 +672,7 @@ impl BrainReader for LiveBrainReader {
                 if let Some(event) = self.store.get_event(reference.event_id).map_err(|error| {
                     BrainReaderError::Backend(format!("get claim evidence: {error}"))
                 })? {
-                    let mut candidate =
-                        ContextEvidence::from_event(&event, EvidencePriority::Claim, None);
-                    candidate.source_kind = self.event_source(event.id).as_str().into();
-                    evidence.push(candidate);
+                    evidence.push(self.evidence_for(&event, EvidencePriority::Claim, None));
                 }
             }
         }
@@ -677,12 +710,11 @@ impl BrainReader for LiveBrainReader {
             let recent = self.store.recent_events(recent_limit).map_err(|error| {
                 BrainReaderError::Backend(format!("read recent events: {error}"))
             })?;
-            evidence.extend(recent.iter().map(|event| {
-                let mut candidate =
-                    ContextEvidence::from_event(event, EvidencePriority::Recent, None);
-                candidate.source_kind = self.event_source(event.id).as_str().into();
-                candidate
-            }));
+            evidence.extend(
+                recent
+                    .iter()
+                    .map(|event| self.evidence_for(event, EvidencePriority::Recent, None)),
+            );
         }
 
         let mut packet =
@@ -959,5 +991,96 @@ mod tests {
             relaxed_fts5_terms("Which source describes the local-only storage promise?"),
             ["describes", "local", "storage", "promise"]
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Cleaned text for AI tools
+    // -----------------------------------------------------------------------
+
+    fn every_hit(outcome: McpRecallOutcome) -> Vec<McpHit> {
+        match outcome {
+            McpRecallOutcome::Matched { hits } => hits,
+            McpRecallOutcome::Contradicted { evidence } => evidence,
+            McpRecallOutcome::Degraded {
+                related_context, ..
+            } => related_context,
+            McpRecallOutcome::NothingMatched { .. } => Vec::new(),
+        }
+    }
+
+    #[test]
+    fn ai_tools_get_the_cleaned_text_and_a_tab_title_still_finds_its_moment() {
+        let (_dir, path, key) = make_test_db();
+        let writer = SqlCipherBrainStore::new(&path, &key).unwrap();
+        // Safari's tabs carry no close buttons, so only the many-frame rule
+        // can tell them from the page: the re-clean job learns them from
+        // three pages and stores each page's cleaned text.
+        let tabs = "Lunch menu    Q3 roadmap    Team offsite";
+        let pages = [
+            ("Pricing", "Per-seat pricing grows with every seat."),
+            ("Billing", "Annual billing saves two months."),
+            ("Seats", "A seat minimum starts every team at three."),
+        ];
+        let base = 1_791_795_600_000_000u64;
+        for (n, (title, page)) in pages.iter().enumerate() {
+            writer
+                .put_event_with_source(
+                    &Event {
+                        id: EventId(0),
+                        ts_us: base + n as u64 * 60_000_000,
+                        app_bundle_id: Some("com.apple.Safari".into()),
+                        window_title: Some((*title).into()),
+                        url: None,
+                        text: format!(
+                            "[app=com.apple.Safari | title={title} | url=? | ts=x]\n{tabs}\n{page}"
+                        ),
+                        summary: None,
+                        entities: None,
+                        episode_id: None,
+                        cascade_reason: 0,
+                        keyframe_blob: None,
+                        tab_id: None,
+                        embedding: None,
+                    },
+                    mci_brain::EventSource::ScreenOcr,
+                )
+                .unwrap();
+        }
+        let limits = mci_brain::reclean::BatchLimits {
+            moments: 10,
+            captions: 0,
+            deadline: None,
+            utc_offset_s: 0,
+        };
+        // The next day: a day's moments are read once it is over.
+        let next_day = base + 86_400_000_000;
+        let batch = mci_brain::reclean::run_batch(&writer, None, limits, next_day).unwrap();
+        assert!(batch.caught_up);
+        assert_eq!(batch.read, 3);
+        drop(writer);
+        let reader = LiveBrainReader::open_with_embedder(&path, &key, None).unwrap();
+
+        let found = every_hit(reader.recall("minimum", 5).unwrap());
+        assert_eq!(found.len(), 1);
+        assert!(found[0].record.text_snippet.contains("seat minimum"));
+        assert!(!found[0].record.text_snippet.contains("Team offsite"));
+
+        // The stored text keeps the tabs, so a tab title finds all three, and
+        // the passage shows where it was: the rest of the window.
+        let by_tab = every_hit(reader.recall("offsite", 5).unwrap());
+        assert_eq!(by_tab.len(), 3);
+        assert!(by_tab
+            .iter()
+            .all(|hit| hit.record.text_snippet.contains("Team offsite")));
+
+        let packet = reader
+            .context(None, crate::context_packet::ContextBudget::new(2_000, 8))
+            .unwrap();
+        let shown = crate::context_packet::render_context_packet_markdown(&packet);
+        assert!(
+            shown.contains("Annual billing saves two months."),
+            "{shown}"
+        );
+        assert!(!shown.contains("Team offsite"), "{shown}");
     }
 }

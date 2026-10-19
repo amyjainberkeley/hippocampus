@@ -96,7 +96,8 @@ struct TimelineView: View {
                 ForEach(sections) { section in
                     Section {
                         ForEach(section.rows) { row in
-                            HitRow(hit: row.hit, showsClockTime: true, count: row.count)
+                            HitRow(hit: row.hit, showsClockTime: true, count: row.count,
+                                   screenshot: row.screenshot)
                                 .tag(row.hit.id)
                                 .listRowBackground(
                                     viewModel.selectedHitId == row.hit.id
@@ -148,7 +149,10 @@ struct TimelineView: View {
 
         } detail: {
             if let hit = viewModel.selectedHit {
-                DetailPaneView(hit: hit, reader: reader, screenshotEventIDs: MCI.Workspace.recentKeyframes(from: viewModel.hits).map(\.id))
+                DetailPaneView(hit: hit, reader: reader,
+                               screenshotEventIDs: MCI.Workspace.screenshotMoments(from: viewModel.hits,
+                                                                                   keeping: hit.id).map(\.id),
+                               rowScreenshot: sections.lazy.flatMap(\.rows).first { $0.hit.id == hit.id }?.screenshot)
             }
         }
         .onChange(of: viewModel.selectedHitId) { _, newValue in

@@ -383,13 +383,13 @@ if rg -q 'unknown option\|integer from 1 through' "$TMP_ROOT/soak-config.out"; t
 fi
 
 cat "$FIXTURE_DIR/session-unlocked.plist" \
-    | python3 "$SESSION_CHECK" --expected-uid 501 --expected-user amy \
+    | python3 "$SESSION_CHECK" --expected-uid 501 --expected-user sam \
         >"$TMP_ROOT/unlocked.out"
 rg -q '^unlocked console session:' "$TMP_ROOT/unlocked.out" \
     || fail "unlocked fixture was not accepted"
 
 if cat "$FIXTURE_DIR/session-locked.plist" \
-    | python3 "$SESSION_CHECK" --expected-uid 501 --expected-user amy \
+    | python3 "$SESSION_CHECK" --expected-uid 501 --expected-user sam \
         >"$TMP_ROOT/locked.out" 2>&1; then
     fail "locked fixture must fail closed"
 fi

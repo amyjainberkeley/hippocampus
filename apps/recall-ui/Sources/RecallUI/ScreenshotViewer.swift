@@ -93,7 +93,7 @@ struct ScreenshotViewer: View {
                         .buttonStyle(.borderless).font(.caption)
                         GeometryReader { geometry in
                             ScrollView([.horizontal, .vertical]) {
-                                EvidenceThumbnail(url: hit.thumbnailURL,
+                                EvidenceThumbnail(url: hit.thumbnailURL, appBundleId: hit.appBundleId,
                                     size: CGSize(width: geometry.size.width * imageZoom, height: geometry.size.height * imageZoom),
                                     maxPixelSize: ThumbnailDataProvider.maximumScreenshotPixels,
                                     showsStatus: true, fullResolution: true)
@@ -107,7 +107,7 @@ struct ScreenshotViewer: View {
                             Text(hit.windowTitle ?? Formatters.appDisplayName(hit.appBundleId))
                                 .font(.headline).textSelection(.enabled)
                             LabeledContent("Source", value: MemorySourceKind.label(hit.sourceKind))
-                            LabeledContent("Saved", value: hit.thumbnailURL == nil ? "Text only" : "Screenshot")
+                            LabeledContent("Saved", value: savedLabel(for: hit))
                             Text(Date(timeIntervalSince1970: Double(hit.tsUs) / 1_000_000),
                                  format: .dateTime.year().month().day().hour().minute().second().timeZone())
                                 .font(.caption).foregroundStyle(.secondary)
@@ -217,6 +217,14 @@ struct ScreenshotViewer: View {
         if let reading, !reading.rest.isEmpty {
             AlsoInThisWindowDisclosure(rest: reading.rest, lineCount: reading.restLineCount, isExpanded: $showsRest)
         }
+    }
+
+    /// "Screenshot", "Screenshot from 2:14 PM" when an earlier moment of the
+    /// same window kept it, or "Text only".
+    private func savedLabel(for hit: Hit) -> String {
+        guard hit.thumbnailURL != nil else { return UserFacingCopy.textOnly }
+        guard hit.screenshotIsEarlier, let taken = hit.thumbnailTsUs else { return "Screenshot" }
+        return UserFacingCopy.screenshotFrom(Formatters.clockTime(us: Int64(clamping: taken)))
     }
 
     private func clearLoadedEvent() {

@@ -41,11 +41,8 @@ Invoice 4471 for phase two
         Dana Whitfield <dana@northwind.example> 11:02 AM☆≡
         to me
 Hi Sam,
-Phase two of the brand refresh is wrapped up, and the final files are in the shared folder. The
-invoice for this phase is attached: 2,000.00 for the refresh and 300.00 for the icon set, 2,300.00 in
-total.
-Payment is due October 30 by bank transfer. If the purchase order number has changed since
-phase one, let me know and I will reissue it.
+Phase two of the brand refresh is wrapped up, and the final files are in the shared folder. The invoice for this phase is attached: 2,000.00 for the refresh and 300.00 for the icon set, 2,300.00 in total.
+Payment is due October 30 by bank transfer. If the purchase order number has changed since phase one, let me know and I will reissue it.
 
 It has been a pleasure working on this. I would love to hear how the launch goes.
 Best,

@@ -109,6 +109,7 @@ impl StubBrainReader {
                         priority: EvidencePriority::Recent,
                         relevance_score: None,
                         source_kind: "screen_ocr".into(),
+                        cleaned: None,
                     }],
                 },
             ),

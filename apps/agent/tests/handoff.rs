@@ -544,11 +544,14 @@ fn today_groups_by_project_and_day() {
         "## hippocampus ({})",
         root.join("hippocampus").display()
     )));
-    assert!(text.contains(&format!("## notes-app ({})", root.join("notes-app").display())));
+    assert!(text.contains(&format!(
+        "## notes-app ({})",
+        root.join("notes-app").display()
+    )));
     assert!(text.contains("- Goal: Now build the handoff packet compiler"));
     assert!(text.contains("- Stopped at: Extraction and rendering are in place"));
     assert!(text.contains("- Files: handoff.rs, 0012_handoff_deliveries.sql"));
-    assert!(text.contains("- Files: sense.ts"));
+    assert!(text.contains("- Files: markdown.ts"));
     assert!(!text.contains("## Screen"));
 
     let sep24 = day_report(&store, "2026-09-24");

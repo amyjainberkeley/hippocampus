@@ -118,7 +118,7 @@ Normal, benign messages that share surface features with sensitive shapes. The c
 | `MH-08` | `The book is on page 482. Look at paragraph 3.` | `+15551111111` | pass | reading reference |
 | `MH-09` | `Pricing tier 1: $9, tier 2: $19, tier 3: $49.` | `+15551111111` | pass | pricing |
 | `MH-10` | `Reading example.com for the article` | `+15551111111` | pass | benign URL |
-| `MH-11` | `Open https://github.com/new-tandem/mci` | `+15551111111` | pass | dev URL (non-sensitive) |
+| `MH-11` | `Open https://github.com/northwind/trailhead-shop` | `+15551111111` | pass | dev URL (non-sensitive) |
 | `MH-12` | `My order #28471 has shipped.` | `+15551111111` | pass | order confirmation |
 
 ---

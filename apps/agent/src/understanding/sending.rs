@@ -409,296 +409,9 @@ pub fn restates(words: &BTreeSet<String>, forgotten: &BTreeSet<String>) -> bool 
     shared >= 2 && shared * 5 >= shorter * 3
 }
 
-/// The areas no inferred line is sent about until the person confirms it,
-/// each with the words and phrases that place a line in it. A word that is
-/// also everyday technical language ("application", "position", "budget",
-/// "partner", "race") is left out; one that is mostly personal ("interview",
-/// "health") is in, and a line that uses it in a technical sense waits for
-/// the person's Right.
-const SENSITIVE: &[(&str, &[&str])] = &[
-    (
-        "looking for work",
-        &[
-            "job",
-            "jobs",
-            "résumé",
-            "cv",
-            "cover letter",
-            "recruiter",
-            "recruiters",
-            "recruiting",
-            "hiring",
-            "career",
-            "careers",
-            "internship",
-            "internships",
-            "interview",
-            "interviews",
-            "interviewing",
-            "job offer",
-            "offer letter",
-            "applying for",
-            "applies for",
-            "applied for",
-            "apply for",
-            "applying to",
-            "application for",
-            "applications for",
-            "layoff",
-            "layoffs",
-            "laid off",
-            "unemployed",
-            "unemployment",
-            "severance",
-            "resign",
-            "resigning",
-            "resignation",
-        ],
-    ),
-    (
-        "health",
-        &[
-            "health",
-            "healthcare",
-            "medical",
-            "medicine",
-            "medication",
-            "medications",
-            "doctor",
-            "doctors",
-            "physician",
-            "clinic",
-            "hospital",
-            "diagnosis",
-            "diagnosed",
-            "symptom",
-            "symptoms",
-            "therapy",
-            "therapist",
-            "counseling",
-            "counselling",
-            "psychiatrist",
-            "psychologist",
-            "psychiatric",
-            "depression",
-            "depressed",
-            "anxiety",
-            "adhd",
-            "autism",
-            "autistic",
-            "bipolar",
-            "ptsd",
-            "prescription",
-            "prescriptions",
-            "pharmacy",
-            "illness",
-            "disease",
-            "sick",
-            "injury",
-            "injured",
-            "surgery",
-            "pregnant",
-            "pregnancy",
-            "fertility",
-            "ivf",
-            "miscarriage",
-            "abortion",
-            "contraception",
-            "menstrual",
-            "cancer",
-            "diabetes",
-            "diabetic",
-            "covid",
-            "hiv",
-            "insulin",
-            "rehab",
-            "addiction",
-            "sobriety",
-            "sober",
-            "alcoholism",
-            "overdose",
-            "suicide",
-            "suicidal",
-            "self harm",
-            "disability",
-            "disabled",
-            "dieting",
-            "calories",
-            "weight loss",
-            "eating disorder",
-            "mental health",
-            "mental illness",
-            "blood pressure",
-            "vaccine",
-            "vaccination",
-            "allergy",
-            "allergies",
-            "dentist",
-            "dental",
-            "migraine",
-            "insomnia",
-        ],
-    ),
-    (
-        "money",
-        &[
-            "money",
-            "finance",
-            "finances",
-            "financial",
-            "bank",
-            "banking",
-            "loan",
-            "loans",
-            "debt",
-            "debts",
-            "mortgage",
-            "salary",
-            "salaries",
-            "income",
-            "paycheck",
-            "wage",
-            "wages",
-            "taxes",
-            "tax return",
-            "tax returns",
-            "irs",
-            "invest",
-            "investing",
-            "investment",
-            "investments",
-            "stocks",
-            "crypto",
-            "cryptocurrency",
-            "bitcoin",
-            "ethereum",
-            "savings",
-            "retirement",
-            "401k",
-            "insurance",
-            "bills",
-            "bankruptcy",
-            "budgeting",
-            "net worth",
-            "credit card",
-            "credit score",
-            "credit report",
-            "rent",
-            "landlord",
-            "venmo",
-            "zelle",
-        ],
-    ),
-    (
-        "relationships",
-        &[
-            "relationship",
-            "relationships",
-            "dating",
-            "dating app",
-            "boyfriend",
-            "girlfriend",
-            "husband",
-            "wife",
-            "spouse",
-            "fiance",
-            "fiancé",
-            "fiancee",
-            "fiancée",
-            "marriage",
-            "married",
-            "wedding",
-            "divorce",
-            "divorced",
-            "breakup",
-            "broke up",
-            "break up",
-            "romantic",
-            "romance",
-            "tinder",
-            "bumble",
-            "custody",
-        ],
-    ),
-    (
-        "beliefs, identity or the law",
-        &[
-            "religion",
-            "religious",
-            "church",
-            "mosque",
-            "synagogue",
-            "faith",
-            "prayer",
-            "praying",
-            "political",
-            "politics",
-            "election",
-            "elections",
-            "voting",
-            "democrat",
-            "democrats",
-            "republican",
-            "republicans",
-            "protest",
-            "protests",
-            "sexuality",
-            "sexual",
-            "gay",
-            "lesbian",
-            "bisexual",
-            "lgbt",
-            "lgbtq",
-            "queer",
-            "transgender",
-            "immigration",
-            "immigrant",
-            "citizenship",
-            "deportation",
-            "asylum",
-            "visa",
-            "green card",
-            "lawsuit",
-            "lawyer",
-            "attorney",
-            "arrest",
-            "arrested",
-            "criminal",
-            "police",
-            "probation",
-            "ethnicity",
-            "ethnic",
-            "racial",
-        ],
-    ),
-];
-
-/// Technical phrases that use a sensitive word in another sense.
-const NOT_SENSITIVE: &[&str] = &[
-    "health check",
-    "health checks",
-    "healthcheck",
-    "healthchecks",
-    "helper health",
-];
-
-/// The sensitive area `text` is about, if any ([`SENSITIVE`]): a whole word
-/// or phrase, in any case.
-#[must_use]
-pub fn sensitive_area(text: &str) -> Option<&'static str> {
-    let mut padded = format!(" {} ", tokens(text).collect::<Vec<_>>().join(" "));
-    for phrase in NOT_SENSITIVE {
-        padded = padded.replace(&format!(" {phrase} "), " ");
-    }
-    SENSITIVE
-        .iter()
-        .find(|(_, terms)| {
-            terms
-                .iter()
-                .any(|term| padded.contains(&format!(" {term} ")))
-        })
-        .map(|(area, _)| *area)
-}
+/// The sensitive area a line is about, if any: the one list the caption
+/// guard uses too ([`mci_brain::sensitive`]).
+pub use mci_brain::sensitive::sensitive_area;
 
 #[cfg(test)]
 mod tests {
@@ -882,7 +595,7 @@ mod tests {
         let gate = Gate::new(HashSet::new(), vec![forgotten.clone()], PDT);
         let reworded = line(
             12,
-            "Sam manages bookings through the Northwind Travel account.",
+            "Sam is booking trips with the Northwind Travel account.",
             PropositionKind::Project,
             0.9,
         );
@@ -898,7 +611,7 @@ mod tests {
         );
         // A different line that shares a name with it still goes.
         assert!(!restates(
-            &keywords("Amy reads Northwind Travel each morning."),
+            &keywords("Sam reads Northwind Travel mail each morning."),
             &forgotten
         ));
         assert_eq!(
@@ -910,8 +623,8 @@ mod tests {
     #[test]
     fn sensitive_lines_wait_for_the_person() {
         for text in [
-            "Sam is planning a trip through the Northwind Travel account.",
-            "Sam is preparing for an interview with Stripe.",
+            "Sam is applying for a position at Acme.",
+            "Sam is preparing for an interview with Globex.",
             "Sam is looking for a new job in Seattle.",
             "Sam is tracking symptoms in a health journal.",
             "Sam is paying down a student loan.",
@@ -934,7 +647,7 @@ mod tests {
         );
         let colleague = line(
             14,
-            "Amy works with Priya on the Trailhead Bikes pricing.",
+            "Sam works with Priya on the Trailhead Bikes pricing.",
             PropositionKind::Relationship,
             0.9,
         );
@@ -959,13 +672,13 @@ mod tests {
             sensitive_area("Sam is fixing the helper health check"),
             None
         );
-        assert_eq!(sensitive_area("Amy writes the jobserver docs"), None);
+        assert_eq!(sensitive_area("Sam writes the jobserver docs"), None);
         assert_eq!(sensitive_area("Sam is building the web application"), None);
         assert_eq!(
-            sensitive_area("Amy fixed a race condition in the store"),
+            sensitive_area("Sam fixed a race condition in the store"),
             None
         );
-        assert_eq!(sensitive_area("Amy prices the Team plan per seat"), None);
+        assert_eq!(sensitive_area("Sam prices the Team plan per seat"), None);
     }
 
     #[test]

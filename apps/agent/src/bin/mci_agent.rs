@@ -1197,7 +1197,17 @@ async fn run_agent(args: Args) -> ExitCode {
                                 // worker owns the previous calendar day's row.
                                 spawn_today_brief_worker(Arc::clone(&store), shutdown_rx.clone());
                                 spawn_brief_worker(Arc::clone(&store), shutdown_rx.clone());
-                                spawn_understanding_worker(Arc::clone(&store), shutdown_rx.clone());
+                                // One model process for the background work:
+                                // the understanding layer and the re-clean
+                                // worker's captions take turns with it.
+                                let mind =
+                                    Arc::new(mci_agent::understanding::mind::MindClient::locate());
+                                spawn_understanding_worker(
+                                    Arc::clone(&store),
+                                    Arc::clone(&mind),
+                                    shutdown_rx.clone(),
+                                );
+                                spawn_reclean_worker(Arc::clone(&store), mind, shutdown_rx.clone());
 
                                 // The daemon holds the writer lease for its
                                 // lifetime, so it is the only process that
@@ -2966,14 +2976,14 @@ fn render_understanding_text(command: &str, value: &serde_json::Value, tz: i32) 
 /// current. `MCI_UNDERSTANDING=0` turns it off.
 fn spawn_understanding_worker(
     store: Arc<mci_brain::SqlCipherBrainStore>,
+    mind: Arc<mci_agent::understanding::mind::MindClient>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
-    use mci_agent::understanding::{feedback, mind::MindClient, Understanding};
+    use mci_agent::understanding::{feedback, Understanding};
     if std::env::var("MCI_UNDERSTANDING").as_deref() == Ok("0") {
         errln!("mci-agent: understanding worker disabled (MCI_UNDERSTANDING=0)");
         return;
     }
-    let mind = Arc::new(MindClient::locate());
     errln!(
         "mci-agent: understanding worker started (on-device model: {})",
         if mind.path().is_some() {
@@ -3060,6 +3070,41 @@ fn spawn_understanding_worker(
             }
             delay = std::time::Duration::from_secs(120);
         }
+    });
+}
+
+/// Make every moment's cleaned text and caption in the background, the
+/// oldest memories included (`mci_agent::reclean_worker`): only on a power
+/// cable, out of Low Power Mode, while nobody is using the Mac, resting
+/// between batches. Writes only `moment_readings`; never the stored text.
+fn spawn_reclean_worker(
+    store: Arc<mci_brain::SqlCipherBrainStore>,
+    mind: Arc<mci_agent::understanding::mind::MindClient>,
+    shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    use mci_agent::reclean_worker::{run_reclean_worker, WorkerConfig};
+    if std::env::var("MCI_RECLEAN").as_deref() == Ok("0") {
+        errln!("mci-agent: re-clean worker disabled (MCI_RECLEAN=0)");
+        return;
+    }
+    let mind = mind.path().is_some().then_some(mind);
+    errln!(
+        "mci-agent: re-clean worker started (captions: {})",
+        if mind.is_some() {
+            "on-device model when it can, else from titles"
+        } else {
+            "from titles"
+        }
+    );
+    tokio::spawn(async move {
+        let stats = run_reclean_worker(store, mind, shutdown, WorkerConfig::default()).await;
+        errln!(
+            "mci-agent: re-clean worker exited. batches={} read={} captions_by_model={} errors={}",
+            stats.batches,
+            stats.read,
+            stats.captions_by_model,
+            stats.errors,
+        );
     });
 }
 

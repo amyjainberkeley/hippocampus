@@ -299,6 +299,30 @@ public enum Prompts {
         return line.hasSuffix(placeholder) ? String(line.dropLast(placeholder.count)) : line
     }
 
+    /// Captions for History: one short line per moment saying what it was
+    /// about. Grounded in each moment's own words, and about the screen, never
+    /// the person: the agent drops any line that is not.
+    public static func caption(_ input: CaptionInput) -> String {
+        let moments = input.moments.map { moment in
+            "\(moment.n). \(clip(moment.app, 60)), \(clip(moment.title, 200))\n\(clip(moment.text, maxFieldCharacters / 8))"
+        }
+        return """
+        Below are moments from a Mac's screen. Each has a number, the app, the \
+        window title, and the start of the text that was on screen.
+
+        For each moment, write one caption of three to eight words saying what \
+        the moment was about, the way a person would label it: "Looking up how \
+        to type accents", "Planning a checkout redesign", "Reviewing the pricing \
+        table". Start with a verb ending in -ing. Use words from that moment's \
+        title and text, and nothing it does not show. Describe the screen, not \
+        the person at the Mac: no "you", no feelings, and no guesses about \
+        their job, health, money, relationships or identity. Leave out codes, \
+        account numbers and anything like a password.
+
+        \(moments.joined(separator: "\n\n"))
+        """
+    }
+
     static func name(_ userName: String) -> String {
         let trimmed = userName.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "the user" : clip(trimmed, 60)

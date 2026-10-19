@@ -7,7 +7,8 @@ import FoundationModels
 /// Each reply's shape: the JSON schema a model server is sent, and on macOS
 /// 26 Foundation Models' guided-generation schema.
 enum Shape: String, CaseIterable {
-    case proposition, propositions, relation, relations, episode, day, dayFacts, answer, suggestion, suggestions
+    case proposition, propositions, relation, relations, episode, day, dayFacts, answer, suggestion, suggestions,
+         captionLine, captions
 
     var local: String {
         switch self {
@@ -21,6 +22,8 @@ enum Shape: String, CaseIterable {
         case .answer: Schemas.answer
         case .suggestion: Schemas.suggestion
         case .suggestions: Schemas.suggestions
+        case .captionLine: Schemas.captionLine
+        case .captions: Schemas.captions
         }
     }
 
@@ -39,6 +42,8 @@ enum Shape: String, CaseIterable {
             case .answer: GAnswer.generationSchema
             case .suggestion: GSuggestion.generationSchema
             case .suggestions: GSuggestions.generationSchema
+            case .captionLine: GCaptionLine.generationSchema
+            case .captions: GCaptions.generationSchema
             }
             return try? JSONEncoder().encode(schema)
         }

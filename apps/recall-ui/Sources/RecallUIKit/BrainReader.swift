@@ -74,12 +74,32 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
     /// here cannot leak a redacted keyframe.
     public let thumbnailPath: String?
 
+    /// When the screenshot at `thumbnailPath` was taken, microseconds since
+    /// the UNIX epoch. The helper keeps a screenshot only when the window in
+    /// front changes or its picture changes a lot, so most moments show the
+    /// one their window kept a moment earlier, and this says when. Nil
+    /// without a screenshot, and from readers that do not say (then the
+    /// screenshot is taken to be the moment's own).
+    public let thumbnailTsUs: UInt64?
+
     /// Convenience: file URL for the thumbnail, or `nil` when no path
     /// was populated. Purely a derivation from `thumbnailPath` — no I/O.
     public var thumbnailURL: URL? {
         guard let p = thumbnailPath, !p.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return URL(fileURLWithPath: p)
     }
+
+    /// The screenshot shown was kept by an earlier moment of the same window.
+    public var screenshotIsEarlier: Bool {
+        guard thumbnailURL != nil, let taken = thumbnailTsUs else { return false }
+        return taken < tsUs
+    }
+
+    /// One short plain line saying what the moment was about ("Looking up
+    /// how to type accents"): written on this Mac by the on-device model,
+    /// or made from the window title. Nil when there is none. Mirrors the
+    /// FFI's `HitJson.caption`.
+    public let caption: String?
 
     public init(
         eventId: UInt64,
@@ -93,7 +113,9 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
         entities: [String] = [],
         linkedEventIds: [UInt64] = [],
         thumbnailPath: String? = nil,
-        sourceKind: String? = nil
+        sourceKind: String? = nil,
+        thumbnailTsUs: UInt64? = nil,
+        caption: String? = nil
     ) {
         self.eventId = eventId
         self.tsUs = tsUs
@@ -107,6 +129,8 @@ public struct Hit: Sendable, Equatable, Identifiable, Codable {
         self.entities = entities
         self.linkedEventIds = linkedEventIds
         self.thumbnailPath = thumbnailPath
+        self.thumbnailTsUs = thumbnailTsUs
+        self.caption = caption
     }
 }
 

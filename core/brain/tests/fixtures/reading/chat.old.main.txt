@@ -1,6 +1,4 @@
-       Northwind Studio > Q Search Northwind Studio D
 0 Threads # launch-plan☆ 14 members
-       4 Drafts & sent
                                         Today
 ☆ Channels Maya Chen 10:42 AM
        # general Pushed the new onboarding flow to staging. The permissions step is now one screen.
@@ -18,4 +16,3 @@
                                         3 1
 
 B/S e
-Message #launch-plan

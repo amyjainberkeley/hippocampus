@@ -67,14 +67,17 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
 #[cfg(target_os = "macos")]
 use mci_brain::arctic_embed_s::ArcticEmbedSEmbedder;
+use mci_brain::caption::{self, Moment};
 use mci_brain::fts_sanitizer::{
     LexicalAlternative, MAX_LEXICAL_ALTERNATIVES, MAX_LEXICAL_ALTERNATIVE_BYTES,
 };
-use mci_brain::reading::{audit_text, passage, reading, reading_prefix, ExcerptQuery};
+use mci_brain::reading::{
+    audit_text, excerpt, passage, reading, reading_prefix, reading_start, ExcerptQuery,
+};
 use mci_brain::{
-    BrainStore, DeletionOutcome, Embedder, EventId, EventSource, HybridRetriever,
+    BrainStore, DeletionOutcome, Embedder, EventId, EventSource, HybridRetriever, MomentReading,
     RetrievalDegradation, RetrievalMatch, RetrievalOutcome, RetrievalQuery, SqlCipherBrainStore,
-    TimeRange,
+    TimeRange, READING_VERSION,
 };
 use mci_core::crypto::DbKey;
 #[cfg(target_os = "macos")]
@@ -176,8 +179,30 @@ pub struct HitJson {
     /// **Backward compat.** `#[serde(default)]` — pre-8.35-PR-4 clients
     /// omit the key entirely; older Swift decoders that don't know the
     /// field simply ignore it.
+    ///
+    /// **The window's screenshot.** The capture helper keeps a screenshot
+    /// only when the window in front changes, when its picture changes a
+    /// lot, or after five quiet minutes, so most moments share the one their
+    /// window kept a moment earlier. This path names that screenshot too
+    /// ([`SqlCipherBrainStore::screenshot_for_event`]): the moment's own, or
+    /// the newest one kept at or before it of the same app, title and page
+    /// within five minutes. Only an admitted row's own reference is ever
+    /// named, so nothing appears that its own moment does not already show.
     #[serde(default)]
     pub thumbnail_path: Option<String>,
+    /// **Additive.** When the screenshot at [`Self::thumbnail_path`] was
+    /// taken, microseconds since the UNIX epoch: this moment's own time, or
+    /// the earlier moment's whose screenshot its window still showed.
+    /// `None` exactly when `thumbnail_path` is `None`.
+    #[serde(default)]
+    pub thumbnail_ts_us: Option<u64>,
+    /// One short plain line saying what the moment was about
+    /// ([`mci_brain::caption`]): the one stored for it (written by the
+    /// on-device model, or made from its title), or else one made from its
+    /// title now. `None` for surfaces that are not work. `#[serde(default)]`
+    /// so payloads from builds without it still decode.
+    #[serde(default)]
+    pub caption: Option<String>,
 }
 
 /// A privacy-moment card row returned by
@@ -250,7 +275,7 @@ pub struct QueryJson {
     /// the alias list. When the query text contains a token that appears
     /// as either a canonical name or one of its aliases (case-insensitive),
     /// the FTS5 query is OR-expanded to include all the other spellings
-    /// so a search for `"AJ"` also matches events that mention `"Amy Jain"`.
+    /// so a search for `"AJ"` also matches events that mention `"Ana Jung"`.
     /// Missing key / empty map = no expansion; the recall path is
     /// byte-identical to the pre-8.42 behavior. Backward-compat by
     /// `#[serde(default)]`.
@@ -741,6 +766,7 @@ fn search_browse(handle: &Handle, query: &QueryJson, limit: usize) -> Result<Vec
             query.has_url,
         )
         .map_err(|error| format!("browse: {error}"))?;
+    let readings = stored_readings(handle, &ids);
     let mut hits = Vec::with_capacity(ids.len());
     for id in ids {
         let Some(event) = handle
@@ -751,7 +777,8 @@ fn search_browse(handle: &Handle, query: &QueryJson, limit: usize) -> Result<Vec
             continue;
         };
         if query_matches_event(query, &event) {
-            hits.push(hit_json(handle, id, event, "recent", None, None));
+            let stored = readings.get(&id.0);
+            hits.push(hit_json(handle, id, event, "recent", None, None, stored));
         }
     }
     Ok(hits)
@@ -806,6 +833,8 @@ fn search_lexical(
     }
     .map_err(|error| format!("fts5_search: {error}"))?;
     let snippet_query = ExcerptQuery::from_alternatives(&alternatives);
+    let ids: Vec<EventId> = hits_raw.iter().map(|(id, _)| *id).collect();
+    let readings = stored_readings(handle, &ids);
     let mut hits_json = Vec::with_capacity(hits_raw.len());
     for (event_id, score) in hits_raw {
         let Some(event) = handle
@@ -825,6 +854,7 @@ fn search_lexical(
             "lexical",
             Some(score),
             Some(&snippet_query),
+            readings.get(&event_id.0),
         ));
     }
     Ok(hits_json)
@@ -888,6 +918,8 @@ fn materialize_retrieval_matches(
     limit: usize,
     snippet_query: &ExcerptQuery,
 ) -> Result<Vec<HitJson>, String> {
+    let ids: Vec<EventId> = matches.iter().take(limit).map(|m| m.hit.event_id).collect();
+    let readings = stored_readings(handle, &ids);
     let mut hits = Vec::with_capacity(matches.len().min(limit));
     for value in matches.into_iter().take(limit) {
         let event_id = value.hit.event_id;
@@ -905,6 +937,7 @@ fn materialize_retrieval_matches(
             source,
             Some(value.hit.score_combined),
             Some(snippet_query),
+            readings.get(&event_id.0),
         ));
     }
     Ok(hits)
@@ -925,15 +958,13 @@ fn hit_json(
     source: &str,
     score: Option<f32>,
     snippet_query: Option<&ExcerptQuery>,
+    stored: Option<&MomentReading>,
 ) -> HitJson {
     let (entities, linked_event_ids) = enrich_hit(&handle.store, event_id);
-    let thumbnail_path = thumbnail_path_for(&handle.blob_dir, event.keyframe_blob.as_deref());
     let kind = acquisition_source(handle, event_id);
-    let app = event.app_bundle_id.as_deref();
-    let ocr_text_snippet = match snippet_query {
-        Some(query) => passage(&event.text, kind, app, query, SNIPPET_CHAR_CAP),
-        None => list_snippet(&event.text, kind, app),
-    };
+    let (thumbnail_path, thumbnail_ts_us) = moment_screenshot(handle, &event, kind);
+    let shape = snippet_query.map_or(RowShape::List, RowShape::Search);
+    let (ocr_text_snippet, caption) = row_text(&event, kind, stored, shape);
     HitJson {
         source_kind: kind.as_str().into(),
         event_id: event_id.0,
@@ -947,7 +978,97 @@ fn hit_json(
         entities,
         linked_event_ids,
         thumbnail_path,
+        thumbnail_ts_us,
+        caption,
     }
+}
+
+/// The screenshot that shows `event`, as the absolute blob path the Swift
+/// thumbnail provider authenticates and the time it was taken: the
+/// moment's own, or the one its window kept a moment earlier
+/// ([`SqlCipherBrainStore::screenshot_for_event`]).
+///
+/// Best-effort like [`enrich_hit`]: when the lookup fails, the moment keeps
+/// only its own screenshot, as before.
+fn moment_screenshot(
+    handle: &Handle,
+    event: &mci_brain::Event,
+    kind: EventSource,
+) -> (Option<String>, Option<u64>) {
+    let (digest, ts_us) = match handle.store.screenshot_for_event(event, kind) {
+        Ok(Some(shot)) => (Some(shot.digest), shot.ts_us),
+        Ok(None) => (None, event.ts_us),
+        Err(_) => (event.keyframe_blob.clone(), event.ts_us),
+    };
+    let path = thumbnail_path_for(&handle.blob_dir, digest.as_deref());
+    let ts_us = path.as_ref().map(|_| ts_us);
+    (path, ts_us)
+}
+
+/// The readings stored for `ids` ([`mci_brain::moment_readings`]), by event
+/// id. Best effort: a store without them, or an error, gives none, and every
+/// row is read live as before.
+fn stored_readings(
+    handle: &Handle,
+    ids: &[EventId],
+) -> std::collections::HashMap<u64, MomentReading> {
+    handle.store.moment_readings(ids).unwrap_or_default()
+}
+
+/// The shape of a row's text.
+#[derive(Clone, Copy)]
+enum RowShape<'q> {
+    /// History and linked rows: the start, [`SNIPPET_CHAR_CAP`] characters.
+    List,
+    /// Timeline strip cards: the start, [`TIMELINE_SNIPPET_CAP`] characters.
+    Timeline,
+    /// Search results: the passage around the search's words,
+    /// [`SNIPPET_CHAR_CAP`] bytes.
+    Search(&'q ExcerptQuery),
+}
+
+/// What a row shows of a moment: a passage of its text, and its caption.
+///
+/// The text is the stored cleaned reading when one of the current rules
+/// version is stored (the chrome learned from many frames set apart), else
+/// the live reading. The caption is the stored one when it was made by the
+/// current rules too, else one made from the title now: cheap, and the same
+/// rules the re-clean job uses.
+fn row_text(
+    event: &mci_brain::Event,
+    kind: EventSource,
+    stored: Option<&MomentReading>,
+    shape: RowShape<'_>,
+) -> (String, Option<String>) {
+    let app = event.app_bundle_id.as_deref();
+    let current = stored.filter(|row| row.version == READING_VERSION);
+    let cleaned = current.and_then(|row| row.reading.as_ref());
+    let text = match (shape, cleaned) {
+        (RowShape::Search(query), Some(read)) => excerpt(read, app, query, SNIPPET_CHAR_CAP),
+        (RowShape::Search(query), None) => passage(&event.text, kind, app, query, SNIPPET_CHAR_CAP),
+        (RowShape::List, Some(read)) => reading_start(read, SNIPPET_CHAR_CAP),
+        (RowShape::List, None) => list_snippet(&event.text, kind, app),
+        (RowShape::Timeline, Some(read)) => reading_start(read, TIMELINE_SNIPPET_CAP),
+        (RowShape::Timeline, None) => timeline_snippet(&event.text, kind, app),
+    };
+    let caption = if let Some(row) = current {
+        row.caption.clone()
+    } else {
+        // The start of what the window said, which names a document whose
+        // title names only its app ("Notes").
+        let start = match shape {
+            RowShape::Search(_) => list_snippet(&event.text, kind, app),
+            RowShape::List | RowShape::Timeline => text.clone(),
+        };
+        caption::fallback(&Moment {
+            app,
+            title: event.window_title.as_deref(),
+            url: event.url.as_deref(),
+            text: &start,
+            beside: kind == EventSource::ScreenContext,
+        })
+    };
+    (text, caption)
 }
 
 /// Fetch the N most recent events for the plain timeline view. Returns
@@ -976,15 +1097,20 @@ pub unsafe extern "C" fn mci_brain_ffi_recent_events(h: *mut Handle, limit: u32)
             return ptr::null_mut();
         }
     };
+    let ids: Vec<EventId> = events.iter().map(|ev| ev.id).collect();
+    let readings = stored_readings(handle, &ids);
     let hits: Vec<HitJson> = events
         .into_iter()
         .map(|ev| {
             let (entities, linked_event_ids) = enrich_hit(&handle.store, ev.id);
-            let thumbnail_path = thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
             let kind = acquisition_source(handle, ev.id);
+            let (thumbnail_path, thumbnail_ts_us) = moment_screenshot(handle, &ev, kind);
+            let (ocr_text_snippet, caption) =
+                row_text(&ev, kind, readings.get(&ev.id.0), RowShape::List);
             HitJson {
                 source_kind: kind.as_str().into(),
-                ocr_text_snippet: list_snippet(&ev.text, kind, ev.app_bundle_id.as_deref()),
+                ocr_text_snippet,
+                caption,
                 event_id: ev.id.0,
                 ts_us: ev.ts_us,
                 app_bundle_id: ev.app_bundle_id,
@@ -995,6 +1121,7 @@ pub unsafe extern "C" fn mci_brain_ffi_recent_events(h: *mut Handle, limit: u32)
                 entities,
                 linked_event_ids,
                 thumbnail_path,
+                thumbnail_ts_us,
             }
         })
         .collect();
@@ -1114,17 +1241,23 @@ pub unsafe extern "C" fn mci_brain_ffi_events_by_ids(
     // this anyway. See EVENTS_BY_IDS_CAP for the load-bearing bound.
     let ids: Vec<u64> = query.ids.into_iter().take(EVENTS_BY_IDS_CAP).collect();
 
+    let readings = stored_readings(
+        handle,
+        &ids.iter().map(|id| EventId(*id)).collect::<Vec<_>>(),
+    );
     let mut out: Vec<HitJson> = Vec::with_capacity(ids.len());
     for id in ids {
         match handle.store.get_event(EventId(id)) {
             Ok(Some(ev)) => {
                 let (entities, linked_event_ids) = enrich_hit(&handle.store, EventId(id));
-                let thumbnail_path =
-                    thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
                 let kind = acquisition_source(handle, EventId(id));
+                let (thumbnail_path, thumbnail_ts_us) = moment_screenshot(handle, &ev, kind);
+                let (ocr_text_snippet, caption) =
+                    row_text(&ev, kind, readings.get(&id), RowShape::List);
                 out.push(HitJson {
                     source_kind: kind.as_str().into(),
-                    ocr_text_snippet: list_snippet(&ev.text, kind, ev.app_bundle_id.as_deref()),
+                    ocr_text_snippet,
+                    caption,
                     event_id: id,
                     ts_us: ev.ts_us,
                     app_bundle_id: ev.app_bundle_id,
@@ -1135,6 +1268,7 @@ pub unsafe extern "C" fn mci_brain_ffi_events_by_ids(
                     entities,
                     linked_event_ids,
                     thumbnail_path,
+                    thumbnail_ts_us,
                 });
             }
             Ok(None) => {
@@ -1232,6 +1366,9 @@ pub struct EventReadingJson {
     /// True when the 128 KiB read omitted part of the stored text, or when
     /// `main` and `rest` were cut to [`EVENT_READING_BYTE_CAP`].
     pub truncated: bool,
+    /// One short plain line saying what the moment was about: the stored
+    /// caption, or one made from the title now (see [`HitJson::caption`]).
+    pub caption: Option<String>,
 }
 
 /// Read one admitted event's readable text: `main` and `rest`, never the
@@ -1272,9 +1409,38 @@ pub unsafe extern "C" fn mci_brain_ffi_event_reading(
         set_last_error("mci_brain_ffi_event_reading: stored text unavailable");
         return ptr::null_mut();
     };
+    // The stored cleaned reading and caption, when the re-clean job has made
+    // them (best effort: none on a store without them).
+    let stored = handle
+        .store
+        .moment_reading(EventId(event_id))
+        .ok()
+        .flatten();
+    // Its title and address, without its text, for a caption made now.
+    let head = i64::try_from(event_id)
+        .ok()
+        .and_then(|id| handle.store.event_heads(&[id]).ok())
+        .and_then(|heads| heads.into_iter().next());
     json_to_c_string(&value.map(|value| {
         let kind = acquisition_source(handle, EventId(event_id));
-        let mut read = reading(&value.text, kind, value.app_bundle_id.as_deref(), None);
+        let cleaned = stored
+            .as_ref()
+            .filter(|row| row.version == READING_VERSION && !value.truncated)
+            .and_then(|row| row.reading.clone());
+        let mut read = cleaned
+            .unwrap_or_else(|| reading(&value.text, kind, value.app_bundle_id.as_deref(), None));
+        let caption = match stored.as_ref().filter(|row| row.version == READING_VERSION) {
+            Some(row) => row.caption.clone(),
+            None => head.as_ref().and_then(|event| {
+                caption::fallback(&Moment {
+                    app: event.app_bundle_id.as_deref(),
+                    title: event.window_title.as_deref(),
+                    url: event.url.as_deref(),
+                    text: &read.main,
+                    beside: kind == EventSource::ScreenContext,
+                })
+            }),
+        };
         let mut truncated = value.truncated;
         if read.main.len() + read.rest.len() > EVENT_READING_BYTE_CAP {
             whole_lines_within(
@@ -1302,6 +1468,7 @@ pub unsafe extern "C" fn mci_brain_ffi_event_reading(
             rest: read.rest,
             match_in,
             truncated,
+            caption,
         }
     }))
 }
@@ -1345,6 +1512,9 @@ pub struct ReadingInputJson {
     /// Window title.
     #[serde(default)]
     pub title: Option<String>,
+    /// Page address.
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 /// What [`mci_brain_ffi_reading`] returns.
@@ -1354,6 +1524,10 @@ pub struct ReadingJson {
     pub main: String,
     /// Everything else in the window.
     pub rest: String,
+    /// One short plain line made from the title, app and address
+    /// ([`mci_brain::caption::fallback`]); `None` when none can be made.
+    #[serde(default)]
+    pub caption: Option<String>,
 }
 
 /// Largest input [`mci_brain_ffi_reading`] reads, in bytes of JSON.
@@ -1398,10 +1572,40 @@ pub unsafe extern "C" fn mci_brain_ffi_reading(input_json: *const c_char) -> *mu
         input.app.as_deref(),
         input.title.as_deref(),
     );
+    let caption = caption::fallback(&Moment {
+        app: input.app.as_deref(),
+        title: input.title.as_deref(),
+        url: input.url.as_deref(),
+        text: &read.main,
+        beside: source == EventSource::ScreenContext,
+    });
     json_to_c_string(&ReadingJson {
         main: read.main,
         rest: read.rest,
+        caption,
     })
+}
+
+/// The readable name of the app with bundle id `bundle_id`
+/// ([`mci_brain::apps::name`]): the one table of app names, so the app named
+/// under a row and in its caption agree. Needs no handle. Returns a C string
+/// ("Unknown app" for an empty id), or a null pointer on a null or non-UTF8
+/// argument. Free the result with [`mci_brain_ffi_string_free`].
+///
+/// # Safety
+/// `bundle_id` must be null or a null-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn mci_brain_ffi_app_name(bundle_id: *const c_char) -> *mut c_char {
+    if bundle_id.is_null() {
+        set_last_error("mci_brain_ffi_app_name: null bundle id");
+        return ptr::null_mut();
+    }
+    // Safety: the caller passes a null-terminated C string.
+    let Ok(bundle_id) = unsafe { CStr::from_ptr(bundle_id) }.to_str() else {
+        set_last_error("mci_brain_ffi_app_name: non-UTF8 bundle id");
+        return ptr::null_mut();
+    };
+    CString::new(mci_brain::apps::name(bundle_id)).map_or(ptr::null_mut(), CString::into_raw)
 }
 
 /// **V2-P13 (Phase D scaffold)** — Return lightweight event summaries for
@@ -1484,14 +1688,17 @@ pub unsafe extern "C" fn mci_brain_ffi_timeline_events(
                 return ptr::null_mut();
             }
         };
+    let ids: Vec<EventId> = events.iter().map(|ev| ev.id).collect();
+    let readings = stored_readings(handle, &ids);
     let mut filtered: Vec<TimelineEventJson> = events
         .into_iter()
         .map(|ev| {
             let thumbnail_path = thumbnail_path_for(&handle.blob_dir, ev.keyframe_blob.as_deref());
             let kind = acquisition_source(handle, ev.id);
+            let (snippet, _) = row_text(&ev, kind, readings.get(&ev.id.0), RowShape::Timeline);
             TimelineEventJson {
                 source_kind: kind.as_str().into(),
-                snippet: timeline_snippet(&ev.text, kind, ev.app_bundle_id.as_deref()),
+                snippet,
                 event_id: ev.id.0,
                 ts_us: ev.ts_us,
                 app_bundle_id: ev.app_bundle_id,
@@ -2864,10 +3071,16 @@ mod tests {
             thumbnail_path: Some(
                 "/Users/x/Library/Application Support/MCI/blobs/abcdef.bin".into(),
             ),
+            thumbnail_ts_us: Some(1_699_999_994_000_000),
+            caption: Some("Reading Apple Privacy".into()),
         };
         let s = serde_json::to_string(&h).unwrap();
         let back: HitJson = serde_json::from_str(&s).unwrap();
         assert_eq!(h, back);
+        assert!(
+            s.contains("\"thumbnail_ts_us\":1699999994000000"),
+            "got: {s}"
+        );
     }
 
     #[test]
@@ -2889,6 +3102,8 @@ mod tests {
             entities: vec![],
             linked_event_ids: vec![],
             thumbnail_path: None,
+            thumbnail_ts_us: None,
+            caption: None,
         };
         let s = serde_json::to_string(&h).unwrap();
         let back: HitJson = serde_json::from_str(&s).unwrap();
@@ -2897,6 +3112,10 @@ mod tests {
         // emit None — Swift's Optional decoder reads either. Assert the
         // key is present so a client watching the wire sees the field.
         assert!(s.contains("\"thumbnail_path\""), "expected key in {s}");
+        assert!(
+            s.contains("\"thumbnail_ts_us\":null"),
+            "expected key in {s}"
+        );
     }
 
     #[test]
@@ -2962,6 +3181,7 @@ mod tests {
         // Rust build (or a hand-rolled test fixture) that omits the key
         // must still decode without error.
         assert!(h.thumbnail_path.is_none());
+        assert!(h.thumbnail_ts_us.is_none());
     }
 
     #[test]
@@ -2982,6 +3202,8 @@ mod tests {
             entities: vec!["vector-db".into()],
             linked_event_ids: vec![9],
             thumbnail_path: None,
+            thumbnail_ts_us: None,
+            caption: None,
         };
         let s = serde_json::to_string(&h).unwrap();
         assert!(s.contains("\"entities\""), "missing entities key in {s}");
@@ -3133,10 +3355,10 @@ mod tests {
     fn query_json_accepts_user_aliases_field() {
         // Positive: the new field parses and populates the map.
         let q: QueryJson = serde_json::from_str(
-            r#"{"text":"AJ email","limit":5,"user_aliases":{"Amy Jain":["AJ","Amy"]}}"#,
+            r#"{"text":"AJ email","limit":5,"user_aliases":{"Ana Jung":["AJ","Ana"]}}"#,
         )
         .expect("valid alias payload parses");
-        assert_eq!(q.user_aliases.get("Amy Jain").map(Vec::len), Some(2));
+        assert_eq!(q.user_aliases.get("Ana Jung").map(Vec::len), Some(2));
     }
 
     #[test]
@@ -3161,8 +3383,8 @@ mod tests {
     #[test]
     fn expand_query_untriggered_group_is_identity() {
         let mut m = std::collections::HashMap::new();
-        m.insert("Amy Jain".to_string(), vec!["AJ".into()]);
-        // Query has nothing to do with Amy — no expansion.
+        m.insert("Ana Jung".to_string(), vec!["AJ".into()]);
+        // Query has nothing to do with Ana — no expansion.
         assert!(matches!(
             expand_query_with_user_aliases("vector database", &m).as_slice(),
             [LexicalAlternative::Keywords("vector database")]
@@ -3172,15 +3394,15 @@ mod tests {
     #[test]
     fn expand_query_touches_alias_and_adds_canonical_and_sibling_phrases() {
         let mut m = std::collections::HashMap::new();
-        m.insert("Amy Jain".to_string(), vec!["AJ".into(), "Amy".into()]);
+        m.insert("Ana Jung".to_string(), vec!["AJ".into(), "Ana".into()]);
         let out = expand_query_with_user_aliases("AJ email", &m);
         assert!(matches!(
             out.as_slice(),
             [
                 LexicalAlternative::Keywords("AJ email"),
-                LexicalAlternative::Phrase("Amy Jain"),
+                LexicalAlternative::Phrase("Ana Jung"),
                 LexicalAlternative::Phrase("AJ"),
-                LexicalAlternative::Phrase("Amy"),
+                LexicalAlternative::Phrase("Ana"),
             ]
         ));
     }
@@ -3208,14 +3430,14 @@ mod tests {
         // the load-bearing precision guarantee — a user with 50 aliases
         // never sees all 50 stitched into every query.
         let mut m = std::collections::HashMap::new();
-        m.insert("Amy Jain".to_string(), vec!["AJ".into()]);
+        m.insert("Ana Jung".to_string(), vec!["AJ".into()]);
         m.insert("Hippocampus".to_string(), vec!["MCI".into()]);
         let out = expand_query_with_user_aliases("AJ email", &m);
         assert!(matches!(
             out.as_slice(),
             [
                 LexicalAlternative::Keywords("AJ email"),
-                LexicalAlternative::Phrase("Amy Jain"),
+                LexicalAlternative::Phrase("Ana Jung"),
                 LexicalAlternative::Phrase("AJ"),
             ]
         ));

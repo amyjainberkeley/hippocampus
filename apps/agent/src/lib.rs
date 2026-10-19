@@ -94,6 +94,9 @@ pub mod panic_hook;
 /// off in every release.
 #[cfg(all(target_os = "macos", feature = "deep-hooks"))]
 pub mod pump_supervisor;
+/// Re-cleans stored memories in the background: their cleaned text and
+/// captions, only on a power cable and while nobody uses the Mac.
+pub mod reclean_worker;
 /// Bounded incremental import plus enrich of new events, for the handoff hook.
 pub mod refresh;
 /// Background refresh through a per-user launchd agent.

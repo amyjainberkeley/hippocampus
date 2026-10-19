@@ -99,6 +99,22 @@ final class SyntaxHighlighterTests: XCTestCase {
         XCTAssertTrue(comments.contains { $0.text.contains("comment") })
     }
 
+    func testAToolsSentenceBetweenCodeLinesIsNotColored() {
+        let code = "fn main() {\n  let x = 1;\n}\nUpdated src/tax.rs with 2 additions and 1 removal"
+        let tokens = SyntaxHighlighter.tokenize(code)
+        XCTAssertTrue(tokens.contains(SyntaxToken(text: "Updated src/tax.rs with 2 additions and 1 removal",
+                                                  type: .plain)))
+        XCTAssertFalse(tokens.contains(SyntaxToken(text: "2", type: .number)))
+        XCTAssertTrue(tokens.contains(SyntaxToken(text: "1", type: .number)), "code keeps its colors")
+    }
+
+    func testACodingAssistantsMarkersReadAsPlainBullets() {
+        XCTAssertEqual(
+            SyntaxHighlighter.plainBullets("\u{23FA} Update(src/tax.rs)\n  \u{23BF} Updated src/tax.rs"),
+            "\u{2022} Update(src/tax.rs)\n    Updated src/tax.rs")
+        XCTAssertEqual(SyntaxHighlighter.plainBullets("no markers"), "no markers")
+    }
+
     func testUnknownLanguageReturnsSinglePlainToken() {
         let text = "just plain text"
         let tokens = SyntaxHighlighter.tokenize(text)

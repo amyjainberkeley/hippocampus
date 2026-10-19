@@ -17,7 +17,7 @@ Whichever you choose, write the price down in one sentence. If the sentence need
 word “depending”, the plan is not finished.
 
 
-Per-seat or tiered? How to p… × Stripe Docs × Inbox (12) - amy@example.c… ×
+Per-seat or tiered? How to p… × Stripe Docs × Inbox (12) - sam@example.c… ×
 < > C pricingnotes.example/team-plans/per-seat-or-tiered ☆ □
 Docs Pricing notes Roadmap Design system Analytics
 Pricing Notes Guides Case studies Calculator Sign in Subscribe

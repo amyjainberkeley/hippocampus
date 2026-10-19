@@ -70,8 +70,9 @@ struct ShimmerView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        // Muted ink, so the shape shows on the light background as on the dark.
         RoundedRectangle(cornerRadius: 4)
-            .fill(Color.brandBgElevated)
+            .fill(Color.brandFgMuted.opacity(0.16))
             .overlay(
                 GeometryReader { geo in
                     LinearGradient(
@@ -100,6 +101,24 @@ struct ShimmerView: View {
     }
 }
 
+/// A History row while it loads, in the shape `HitRow` takes: a picture
+/// and three lines.
+struct LoadingRow: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: MCI.Spacing.m - 2) {
+            ShimmerView()
+                .frame(width: HitRow.pictureSize.width, height: HitRow.pictureSize.height)
+            VStack(alignment: .leading, spacing: MCI.Spacing.s) {
+                ShimmerView().frame(width: 220, height: 12)
+                ShimmerView().frame(maxWidth: .infinity).frame(height: 10)
+                ShimmerView().frame(width: 160, height: 10)
+            }
+            .padding(.top, MCI.Spacing.xxs)
+        }
+        .padding(.vertical, MCI.Spacing.s - 2)
+    }
+}
+
 struct ShimmerLoadingView: View {
     let isLoading: Bool
     @State private var showShimmer = false
@@ -107,13 +126,14 @@ struct ShimmerLoadingView: View {
     var body: some View {
         Group {
             if showShimmer {
-                VStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 0) {
                     ForEach(0..<5, id: \.self) { _ in
-                        ShimmerView()
-                            .frame(height: 48)
+                        LoadingRow()
+                        Divider().background(Color.brandCardBorder)
                     }
                 }
                 .padding()
+                .accessibilityElement(children: .ignore)
                 .transition(.opacity)
             }
         }

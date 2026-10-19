@@ -740,7 +740,7 @@ mod tests {
             Arc::clone(&store),
             Arc::new(MindClient::new(None)),
             0,
-            "Amy".into(),
+            "Sam".into(),
             Some(dir.path().join("inbox")),
         );
         let stats = understanding.run_cycle(now, 8).unwrap();
@@ -810,7 +810,7 @@ mod tests {
             Arc::clone(&store),
             Arc::new(MindClient::new(None)),
             0,
-            "Amy".into(),
+            "Sam".into(),
             None,
         );
         assert_eq!(reader.run_cycle(now, 1).unwrap().verdicts, 0);
@@ -823,7 +823,7 @@ mod tests {
             Arc::clone(&store),
             Arc::new(MindClient::new(None)),
             0,
-            "Amy".into(),
+            "Sam".into(),
             Some(inbox),
         );
         assert_eq!(worker.run_cycle(now, 1).unwrap().verdicts, 1);
@@ -873,7 +873,7 @@ mod tests {
             Arc::clone(&store),
             Arc::new(MindClient::new(None)),
             0,
-            "Amy".into(),
+            "Sam".into(),
             Some(inbox),
         );
         assert_eq!(

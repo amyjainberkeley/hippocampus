@@ -101,9 +101,42 @@ public enum SyntaxHighlighter {
                 tokens.append(SyntaxToken(text: s, type: .comment))
                 continue
             }
+            if readsAsProse(trimmed, keywords: keywords) {
+                // "Updated src/tax.rs with 2 additions": words, not code, so
+                // its numbers are not colored.
+                tokens.append(SyntaxToken(text: s, type: .plain))
+                continue
+            }
             tokenizeLine(s, keywords: keywords, into: &tokens)
         }
         return tokens
+    }
+
+    /// A line of four words or more with none of code's punctuation and no
+    /// keyword first: a sentence a tool printed between lines of code.
+    static func readsAsProse(_ line: String, keywords: Set<String>) -> Bool {
+        let words = line.split(whereSeparator: \.isWhitespace)
+        guard words.count >= 4, let first = words.first,
+              !keywords.contains(String(first)),
+              !line.contains(where: { "{}();=<>[]".contains($0) })
+        else { return false }
+        let letters = line.filter(\.isLetter).count
+        let shown = line.filter { !$0.isWhitespace }.count
+        return letters * 10 >= shown * 6
+    }
+
+    /// A coding assistant's markers in a terminal as plain bullets: "⏺
+    /// Update" reads "• Update", and "⎿ Updated" reads as an indented line.
+    /// For display only: what is copied stays as it was read.
+    public static func plainBullets(_ text: String) -> String {
+        guard text.contains("\u{23FA}") || text.contains("\u{23BF}") else { return text }
+        return text.split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
+            let indent = line.prefix(while: { $0 == " " })
+            let rest = line.dropFirst(indent.count)
+            if rest.hasPrefix("\u{23FA}") { return indent + "\u{2022}" + rest.dropFirst() }
+            if rest.hasPrefix("\u{23BF}") { return indent + " " + rest.dropFirst() }
+            return String(line)
+        }.joined(separator: "\n")
     }
 
     private static func tokenizeLine(

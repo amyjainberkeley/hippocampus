@@ -42,7 +42,7 @@ public enum WhatIsSent {
 
     /// System apps whose windows are never part of a session: the agent drops
     /// them before it makes sessions (`apps::is_noise`,
-    /// `apps/agent/src/understanding/apps.rs`), and the window drops them from
+    /// `core/brain/src/apps.rs`), and the window drops them from
     /// what it copies for an AI. Lower-cased, in the agent's order.
     public static let ignoredApps = [
         "com.apple.loginwindow",

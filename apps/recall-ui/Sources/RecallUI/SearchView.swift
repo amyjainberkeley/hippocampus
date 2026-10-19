@@ -198,7 +198,9 @@ struct SearchView: View {
 
         } detail: {
             if let hit = viewModel.selectedHit {
-                DetailPaneView(hit: hit, reader: reader, screenshotEventIDs: MCI.Workspace.recentKeyframes(from: viewModel.hits).map(\.id),
+                DetailPaneView(hit: hit, reader: reader,
+                               screenshotEventIDs: MCI.Workspace.screenshotMoments(from: viewModel.hits,
+                                                                                   keeping: hit.id).map(\.id),
                                query: viewModel.query)
             }
         }

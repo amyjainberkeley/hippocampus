@@ -257,7 +257,7 @@ fn context_promotes_only_a_governed_claim_from_the_real_projection() {
         "decision",
         "ship bounded context packets",
         &scope,
-        Some("Amy".into()),
+        Some("Sam".into()),
         0.99,
         source.ts_us,
         source.ts_us,

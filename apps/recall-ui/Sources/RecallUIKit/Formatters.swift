@@ -6,72 +6,46 @@
 // suppressed content can reach these helpers by construction
 // (ADR-0016 §4.3 + ADR-0017 §5).
 
+import CMciBrainFFI
 import Foundation
 
 public enum Formatters {
     /// Render a stable, human-readable application name while keeping the
     /// original bundle identifier on the underlying event for provenance.
+    ///
+    /// The names come from the reader's one table (`mci_brain::apps::name`,
+    /// through `mci_brain_ffi_app_name`), the one captions use too, so the
+    /// app named under a row and in its caption always agree.
     public static func appDisplayName(_ bundleId: String?) -> String {
         guard let bundleId = bundleId?.trimmingCharacters(in: .whitespacesAndNewlines),
               !bundleId.isEmpty,
-              let component = bundleId.split(separator: ".").last,
-              !component.isEmpty
+              let raw = bundleId.withCString({ mci_brain_ffi_app_name($0) })
         else {
             return "Unknown app"
         }
+        defer { mci_brain_ffi_string_free(raw) }
+        let name = String(cString: raw)
+        return name.isEmpty ? "Unknown app" : name
+    }
 
-        let exactNames = [
-            "com.apple.finder": "Finder",
-            "com.apple.safari": "Safari",
-            "com.apple.terminal": "Terminal",
-            "com.apple.mobilesms": "Messages",
-            "com.apple.ical": "Calendar",
-            "com.apple.facetime": "FaceTime",
-            "com.apple.textedit": "TextEdit",
-            "com.apple.systempreferences": "System Settings",
-            "com.github.githubclient": "GitHub",
-            "com.microsoft.vscode": "VS Code",
-            "com.microsoft.edgemac": "Microsoft Edge",
-            "com.microsoft.teams2": "Microsoft Teams",
-            "com.tinyspeck.slackmacgap": "Slack",
-            "com.googlecode.iterm2": "iTerm",
-            "com.openai.chat": "ChatGPT",
-            "com.anthropic.claudefordesktop": "Claude",
-            "com.figma.desktop": "Figma",
-            "company.thebrowser.browser": "Arc",
-            "com.brave.browser": "Brave",
-            "net.whatsapp.whatsapp": "WhatsApp",
-            "notion.id": "Notion",
-            "us.zoom.xos": "Zoom",
-            "dev.warp.warp-stable": "Warp",
-        ]
-        if let name = exactNames[bundleId.lowercased()] {
-            return name
+    /// Whether `scalar` is a mark an app puts before a window's title: a
+    /// status or progress glyph (✳, a braille spinner, ●, ⏺), as the reader
+    /// leaves them out (`chrome::is_title_mark`).
+    public static func isTitleMark(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x2A, 0xB7, 0x2022, 0x2027, 0x2219, 0x22C5, 0x23E9...0x23FA, 0x25A0...0x25FF,
+             0x2600...0x27BF, 0x2800...0x28FF, 0x2B50...0x2B55, 0x1F300...0x1FAFF:
+            return true
+        default:
+            return scalar.properties.isWhitespace
         }
+    }
 
-        let componentNames = [
-            "chrome": "Chrome",
-            "github": "GitHub",
-            "linear": "Linear",
-            "notion": "Notion",
-            "safari": "Safari",
-            "slack": "Slack",
-            "terminal": "Terminal",
-            "vscode": "VS Code",
-            "xcode": "Xcode",
-        ]
-        if let name = componentNames[component.lowercased()] {
-            return name
-        }
-
-        let words = component
-            .replacingOccurrences(of: "-", with: " ")
-            .replacingOccurrences(of: "_", with: " ")
-            .split(whereSeparator: { $0.isWhitespace })
-        guard !words.isEmpty else { return "Unknown app" }
-        return words.map { word in
-            word.prefix(1).uppercased() + word.dropFirst()
-        }.joined(separator: " ")
+    /// A window title without the status marks an app puts before it: "✳ Fix
+    /// rounding" and "⠐ Fix rounding" are one title.
+    public static func titleWithoutMarks(_ title: String) -> String {
+        let scalars = title.unicodeScalars.drop(while: isTitleMark)
+        return String(String.UnicodeScalarView(scalars)).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// One line of what a window said, for a list row: the first line of
@@ -89,6 +63,177 @@ public enum Formatters {
             return snippet(lines[1], maxLen: maxLen)
         }
         return snippet(first, maxLen: maxLen)
+    }
+
+    /// Up to two lines' worth of what the window said, for a row: its lines
+    /// (`previewLines`: no stored header, and no leading line that only
+    /// repeats the title, names a time or labels a heading) run together, at
+    /// most `maxLen` characters. The row shows it in at most two lines.
+    ///
+    /// A search's passage (`isPassage`) keeps its leading lines but a first
+    /// one the title starts with: the words it was found by may be in them.
+    ///
+    /// A line that ends a sentence, or one the next line goes on from (it
+    /// starts in lower case), is followed by a space; any other line break
+    /// reads as " · ", so a heading or a name never runs into what follows it
+    /// ("Maya Chen 10:42 AM · Pushed the new onboarding flow").
+    public static func rowPreview(_ text: String, title: String?, maxLen: Int = 220,
+                                  isPassage: Bool = false) -> String {
+        let lines = isPassage ? passageLines(text, title: title) : previewLines(text, title: title)
+        var joined = ""
+        var previous = ""
+        for line in lines {
+            if joined.count >= maxLen { break }
+            if joined.isEmpty {
+                joined = line
+                previous = line
+                continue
+            }
+            let ended = joined.last.map { ".?!:;,".contains($0) } ?? false
+            let goesOn = line.first?.isLowercase ?? false
+            // A name and a time over a message never run into it, nor the
+            // message before into them: "Sam Lee 2:02 PM · can you look at
+            // the tax test? · Priya Shah 2:05 PM · on it".
+            let speaker = endsWithClockTime(previous) || endsWithClockTime(line)
+            joined += (!speaker && (ended || goesOn) ? " " : " \u{00B7} ") + line
+            previous = line
+        }
+        return snippet(joined, maxLen: maxLen)
+    }
+
+    /// Whether a line ends in a clock time, as a chat's name over a message
+    /// does ("Sam Lee 2:02 PM", "Priya Shah 14:05").
+    public static func endsWithClockTime(_ line: String) -> Bool {
+        let tokens = line.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
+        guard let last = tokens.last else { return false }
+        if ["am", "pm"].contains(last), tokens.count >= 2 {
+            return isClockTime(tokens[tokens.count - 2])
+        }
+        return isClockTime(last)
+    }
+
+    /// A search result's address line, as a search page shows it under a
+    /// result's title: "pricingnotes.example › team-plans".
+    public static func isCitation(_ line: String) -> Bool {
+        let parts = line.components(separatedBy: " \u{203A} ")
+        guard parts.count >= 2, let host = parts.first?.trimmingCharacters(in: .whitespaces) else { return false }
+        let hostLike = !host.contains(" ") && host.contains(".") && host.contains(where: \.isLetter)
+            || host.hasPrefix("https://") || host.hasPrefix("http://")
+        return hostLike && parts.dropFirst().allSatisfy { $0.split(whereSeparator: \.isWhitespace).count <= 4 }
+    }
+
+    /// The lines a row's preview is made from: the stored header left out,
+    /// runs of spaces as one, and while another line follows, the lines that
+    /// lead it without saying more than the row already does (at most
+    /// three): the window's own name read off the screen, a day or a time
+    /// alone on its line, and, unless `keepingLabels` (a terminal's or code's
+    /// own lines), a short label in capitals over a page's heading ("MONEY &
+    /// ROUNDING").
+    public static func previewLines(_ text: String, title: String?, keepingLabels: Bool = false) -> [String] {
+        var lines = stripContextHeader(text)
+            .split(whereSeparator: \.isNewline)
+            .map { $0.split(whereSeparator: \.isWhitespace).joined(separator: " ") }
+            .filter { !$0.isEmpty && !isCitation($0) }
+        var dropped = 0
+        while dropped < 3, lines.count > 1, let first = lines.first,
+              repeatsTitle(first, title: title) || isDayOrTime(first) || (!keepingLabels && isLabel(first)) {
+            lines.removeFirst()
+            dropped += 1
+        }
+        return lines
+    }
+
+    /// A search passage's lines: no stored header, runs of spaces as one, and
+    /// a first line the title starts with left out while another follows.
+    private static func passageLines(_ text: String, title: String?) -> [String] {
+        var lines = stripContextHeader(text)
+            .split(whereSeparator: \.isNewline)
+            .map { $0.split(whereSeparator: \.isWhitespace).joined(separator: " ") }
+            .filter { !$0.isEmpty && !isCitation($0) }
+        let heading = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lines.count > 1, let first = lines.first, !heading.isEmpty, heading.hasPrefix(first.lowercased()) {
+            lines.removeFirst()
+        }
+        return lines
+    }
+
+    /// A short label in capitals: letters, none of them lower case, in at
+    /// most five words ("MONEY & ROUNDING", "OPINION").
+    public static func isLabel(_ line: String) -> Bool {
+        let words = line.split(whereSeparator: \.isWhitespace).filter { $0.contains(where: \.isLetter) }
+        return (1...5).contains(words.count)
+            && line.contains(where: \.isLetter)
+            && !line.contains(where: \.isLowercase)
+    }
+
+    /// Whether `line` only repeats the window's title: the title starts with
+    /// it, or each of its words is a word of the title, leaving out the icons
+    /// and single letters a toolbar is read as ("Q4 planning \u{2606}" under
+    /// "Q4 planning - Google Docs", a search box under its results page).
+    public static func repeatsTitle(_ line: String, title: String?) -> Bool {
+        let heading = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !heading.isEmpty else { return false }
+        if heading.hasPrefix(line.lowercased()) { return true }
+        let said = words(line)
+        return !said.isEmpty && said.isSubset(of: words(heading))
+    }
+
+    /// The words of a line as `repeatsTitle` compares them: lower case,
+    /// without the punctuation and symbols around them, two characters or
+    /// more, each with a letter or a digit.
+    private static func words(_ text: String) -> Set<String> {
+        let edges = CharacterSet.punctuationCharacters.union(.symbols)
+        return Set(text.lowercased().split(whereSeparator: \.isWhitespace).compactMap { token -> String? in
+            let word = token.trimmingCharacters(in: edges)
+            guard word.count > 1, word.contains(where: { $0.isLetter || $0.isNumber }) else { return nil }
+            return word
+        })
+    }
+
+    private static let dayWords: Set<String> = [
+        "today", "yesterday", "tomorrow", "monday", "tuesday", "wednesday", "thursday", "friday",
+        "saturday", "sunday", "mon", "tue", "tues", "wed", "thu", "thur", "thurs", "fri", "sat", "sun",
+    ]
+
+    private static let monthWords: Set<String> = [
+        "january", "february", "march", "april", "may", "june", "july", "august", "september",
+        "october", "november", "december", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep",
+        "sept", "oct", "nov", "dec",
+    ]
+
+    /// A day or a time alone on its line, as a chat shows one over its
+    /// messages: "Today 2:21 PM", "Yesterday", "Mon, Oct 12 at 2:21 PM". It
+    /// names a day or a clock time; a month and a year alone ("May 2026")
+    /// are a heading, not a time.
+    public static func isDayOrTime(_ line: String) -> Bool {
+        let tokens = line.lowercased()
+            .split(whereSeparator: \.isWhitespace)
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ",.")) }
+            .filter { !$0.isEmpty }
+        guard !tokens.isEmpty, tokens.count <= 8 else { return false }
+        var namesATime = false
+        for token in tokens {
+            if dayWords.contains(token) || isClockTime(token) {
+                namesATime = true
+            } else if !(monthWords.contains(token) || ["at", "am", "pm", "a.m", "p.m", "\u{00B7}"].contains(token)
+                        || token.allSatisfy(\.isNumber)) {
+                return false
+            }
+        }
+        return namesATime
+    }
+
+    /// "2:21", "14:05", "2:21pm".
+    private static func isClockTime(_ token: String) -> Bool {
+        var clock = Substring(token)
+        for suffix in ["am", "pm"] where clock.hasSuffix(suffix) {
+            clock = clock.dropLast(suffix.count)
+        }
+        let parts = clock.split(separator: ":", omittingEmptySubsequences: false)
+        return (2...3).contains(parts.count)
+            && (1...2).contains(parts[0].count)
+            && parts.dropFirst().allSatisfy { $0.count == 2 }
+            && parts.allSatisfy { $0.allSatisfy(\.isNumber) }
     }
 
     /// "Oct 12, 2:36 PM" in the person's locale: when a moment was, for

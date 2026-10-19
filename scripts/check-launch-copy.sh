@@ -43,6 +43,11 @@ COPY_FILES=(
   "apps/hippocampus/Sources/HippocampusKit/CommandBar/AskPanelStatus.swift"
   "apps/hippocampus/Sources/HippocampusKit/CaptureStatusAction.swift"
   "assets/installer/render-background.swift"
+  # History's row headlines: the captions the reader makes from a window's
+  # title, and the detail view's own labels.
+  "core/brain/src/caption.rs"
+  "apps/recall-ui/Sources/RecallUIKit/MomentRowText.swift"
+  "apps/recall-ui/Sources/RecallUI/DetailPaneView.swift"
 )
 
 # Marketing / machine-written words (whole word, case-insensitive).

@@ -23,6 +23,10 @@ private final class LockedCounter: @unchecked Sendable {
 @main
 struct ThumbnailProviderBehavior {
     static func main() async throws {
+        if let mode = CommandLine.arguments.firstIndex(of: "--open-in-memory") {
+            await openInMemory(Array(CommandLine.arguments.dropFirst(mode + 1)))
+            return
+        }
         try proveDevelopmentKeyRequiresExplicitGate()
         try proveDevelopmentKeyCanUseSupervisorFileReference()
         await proveStoredBriefDoesNotDependOnOptionalModel()
@@ -83,6 +87,51 @@ struct ThumbnailProviderBehavior {
             symlinkThumbnail == nil,
             "symlink blobs must fail closed"
         )
+    }
+
+    /// `--open-in-memory <blob root> <key hex> <blob>`: open one synthetic
+    /// encrypted screenshot the ways the window does (list thumbnail, detail
+    /// picture, the saved image, and each again from memory), write nothing,
+    /// and print for each result its size and a slice of its bytes in hex.
+    /// `HistoryScreenshotTests` runs this with a private HOME and TMPDIR and
+    /// then looks for those bytes in every file there.
+    private static func openInMemory(_ arguments: [String]) async {
+        guard arguments.count == 3,
+              let key = hexBytes(arguments[1]), key.count == 32
+        else {
+            print("usage: --open-in-memory <blob root> <key hex> <blob>")
+            exit(64)
+        }
+        let provider = ThumbnailDataProvider(blobRoot: URL(fileURLWithPath: arguments[0], isDirectory: true)) { key }
+        let blob = URL(fileURLWithPath: arguments[2])
+        var results: [(String, Data?)] = []
+        for round in 1...2 {
+            results.append(("list-\(round)", await provider.thumbnailData(for: blob, maxPixelSize: 160)))
+            results.append(("detail-\(round)", await provider.thumbnailData(for: blob, maxPixelSize: 640)))
+            results.append(("saved-\(round)", await provider.screenshotData(for: blob)))
+        }
+        for (name, data) in results {
+            guard let data, data.count >= 96 else {
+                print("\(name) missing")
+                exit(1)
+            }
+            let middle = data.count / 2
+            let slice = data[data.startIndex + middle ..< data.startIndex + middle + 48]
+            print("\(name) \(data.count) \(slice.map { String(format: "%02x", $0) }.joined())")
+        }
+    }
+
+    private static func hexBytes(_ hex: String) -> Data? {
+        guard hex.count.isMultiple(of: 2) else { return nil }
+        var bytes = Data()
+        var index = hex.startIndex
+        while index < hex.endIndex {
+            let next = hex.index(index, offsetBy: 2)
+            guard let byte = UInt8(hex[index ..< next], radix: 16) else { return nil }
+            bytes.append(byte)
+            index = next
+        }
+        return bytes
     }
 
     private static func proveDevelopmentKeyRequiresExplicitGate() throws {

@@ -58,6 +58,15 @@ enum Schemas {
         ("suggestions", array(suggestion, "Up to four suggestions", maxItems: 4)),
     ])
 
+    static let captionLine = object([
+        ("n", integer("The moment's number")),
+        ("caption", string("Three to eight words on what the moment was about, starting with a verb ending in -ing, in words from that moment's title and text")),
+    ])
+
+    static let captions = object([
+        ("captions", array(captionLine, "One caption for each moment", maxItems: 8)),
+    ])
+
     // MARK: Building
 
     private static func object(_ properties: [(String, String)]) -> String {

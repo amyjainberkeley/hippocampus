@@ -70,14 +70,14 @@ fn moments(
 }
 
 /// A mail client's inbox on three days: other people's messages, under the
-/// account's label "Northwind Travel" (audit product-4).
+/// account's label "Northwind Travel" (the shape of audit product-4).
 fn inbox(store: &SqlCipherBrainStore, now: u64) -> Vec<i64> {
     moments(
         store,
         &[now - 3 * DAY, now - 2 * DAY, now - DAY],
         "com.apple.mail",
         "Inbox – Northwind Travel",
-        "Career Center: Spring internship fair, Thursday in the ballroom\n\
+        "Harbor Ferries: Spring timetable, Thursday sailings from the north pier\n\
          Priya Shah: Re: checkout tax rounding\n\
          Trailhead Bikes: Your order has shipped",
         "Mailboxes\nInbox\nNorthwind Travel\nDrafts\nSent",
@@ -156,7 +156,7 @@ fn work(store: &SqlCipherBrainStore, now: u64) -> (Vec<i64>, Vec<i64>, Vec<i64>)
 /// 3. someone Sam works with (a relationship: only Sam sees it);
 /// 4. a struggle seen once (not shown);
 /// 5. how Sam is right now (never shown);
-/// 6. a job application read off the inbox (sensitive: only Sam sees it);
+/// 6. a plan read off the inbox's label (only Sam sees it);
 /// 7. a project made from the inbox's label (only Sam sees it);
 /// 8. a preference Sam confirmed (sent, though the model was unsure);
 /// 9. a struggle the checkout shows on two days (sent when looked up).
@@ -203,7 +203,7 @@ fn learn(store: &SqlCipherBrainStore, now: u64) -> Vec<i64> {
             &Vec::new(),
         ),
         (
-            "Sam is applying for a position at Northwind Travel.",
+            "Sam is planning a trip through the Northwind Travel account.",
             PropositionKind::Goal,
             0.9,
             &mail,
@@ -271,7 +271,7 @@ fn the_hook_packet_carries_the_same_recent_work_and_about_you_block_as_context()
         "tax rounding",
         "tired",
         "Northwind Travel",
-        "applying",
+        "trip",
     ] {
         assert!(
             !block.contains(never),
@@ -357,7 +357,7 @@ fn the_page_shows_everything_context_sends() {
         Some("pricing page"),
         Some("rust terminal"),
         Some("Priya checkout"),
-        Some("Northwind Travel position"),
+        Some("Northwind Travel trip"),
         Some("tired"),
     ] {
         for p in about_you(&store, PDT, now, focus) {
@@ -381,7 +381,7 @@ fn the_page_shows_everything_context_sends() {
     assert_eq!(
         listed("not_sent").into_iter().collect::<HashSet<_>>(),
         [ids[2], ids[3], ids[6], ids[7]].into_iter().collect(),
-        "an unsure guess, a person, a sensitive guess and a label: only Sam sees them"
+        "an unsure guess, a person and two lines made from a label: only Sam sees them"
     );
     let everywhere: Vec<i64> = ["shared", "kept_back", "not_sent", "not_seen_lately"]
         .iter()
@@ -450,12 +450,12 @@ fn the_page_shows_everything_context_sends() {
 }
 
 /// Audit product-4 and live-5: the on-device model read a mail client's
-/// inbox, whose account is labelled "Northwind Travel", and wrote that the
-/// person was applying for a position there. It reached every AI session.
+/// inbox and wrote a line about the person from the account's label. It
+/// reached every AI session. Here the label is "Northwind Travel".
 /// However sure the model is, and on however many days the inbox was open,
 /// no wording of it goes to an AI tool unless the person confirms it.
 #[test]
-fn a_mailbox_label_never_becomes_a_job_application_claim() {
+fn a_mailbox_label_never_becomes_a_claim_about_the_person() {
     let (_dir, db, _root, _records) = fixture_brain();
     let now = now_us();
     let ids = {
@@ -463,11 +463,11 @@ fn a_mailbox_label_never_becomes_a_job_application_claim() {
         let mail = inbox(&store, now);
         [
             (
-                "Sam is applying for a position at Northwind Travel.",
+                "Sam is planning a trip through the Northwind Travel account.",
                 PropositionKind::Goal,
             ),
             (
-                "Sam is pursuing a role at Northwind Travel.",
+                "Sam is booking a trip with Northwind Travel.",
                 PropositionKind::Goal,
             ),
             (
@@ -507,7 +507,7 @@ fn a_mailbox_label_never_becomes_a_job_application_claim() {
     );
     assert!(listed("shared").is_empty() && listed("kept_back").is_empty());
 
-    for focus in [None, Some("Northwind Travel"), Some("position application")] {
+    for focus in [None, Some("Northwind Travel"), Some("trip planning")] {
         assert!(
             about_you(&store, PDT, now, focus).is_empty(),
             "nothing about the inbox is sent with focus {focus:?}"

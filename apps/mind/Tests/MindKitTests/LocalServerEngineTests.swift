@@ -226,6 +226,28 @@ final class LocalServerEngineTests: XCTestCase {
         XCTAssertEqual(server.requests.filter { $0.schemaName == "day" }.first?.body["max_tokens"] as? Int, 300)
     }
 
+    func testCaptionsComeFromTheServerByNumberOnAPowerCable() async throws {
+        let server = try FakeModelServer { request in
+            switch request.schemaName {
+            case "caption":
+                FakeModelServer.chat(#"{"captions":[{"n":2,"caption":"Planning a checkout redesign"},{"n":9,"caption":"Not asked"},{"n":1,"caption":"Looking up how to type accents"}]}"#)
+            default: FakeModelServer.models(["llama3.2:3b"])
+            }
+        }
+        defer { server.stop() }
+        let engine = await engine(server)
+        let output = try await engine.caption(CaptionInput(moments: [
+            CaptionMoment(n: 1, app: "Chrome", title: "How to type accents on a Mac", text: "Press and hold a letter key, then choose an accent."),
+            CaptionMoment(n: 2, app: "Figma", title: "Checkout redesign", text: "Hero, three columns"),
+        ]))
+        XCTAssertEqual(output.captions, [
+            CaptionLine(n: 2, caption: "Planning a checkout redesign"),
+            CaptionLine(n: 1, caption: "Looking up how to type accents"),
+        ])
+        let sent = try XCTUnwrap(server.requests.first { $0.schemaName == "caption" })
+        XCTAssertEqual(sent.body["max_tokens"] as? Int, 300)
+    }
+
     func testWorkNobodyAskedForWaitsForAPowerCable() async throws {
         let server = try FakeModelServer { request in
             switch request.schemaName {
@@ -241,6 +263,7 @@ final class LocalServerEngineTests: XCTestCase {
         await assertFails(with: .onBattery, { try await engine.revise(ReviseInput(userName: "Sam", new: PropositionDraft(text: "t", reasoning: "r", kind: "goal", confidence: 5, decay: 5), old: [])) }, "revise")
         await assertFails(with: .onBattery, { try await engine.episode(EpisodeInput(userName: "Sam", observation: "o")) }, "episode")
         await assertFails(with: .onBattery, { try await engine.day(DayInput(userName: "Sam", facts: "f", episodes: [], propositions: [])) }, "day")
+        await assertFails(with: .onBattery, { try await engine.caption(CaptionInput(moments: [CaptionMoment(n: 1, app: "Chrome", title: "t", text: "x")])) }, "caption")
         // The agent stores "unavailable" as the model being gone and the
         // window would say so, so the reply names the battery instead.
         let reply = try JSONSerialization.jsonObject(with: await MindServer(engine: engine).handle(
@@ -382,6 +405,7 @@ final class EngineChoiceTests: XCTestCase {
         func day(_ input: DayInput) async throws -> DayOutput { throw MindError.failed }
         func answer(_ input: AnswerInput) async throws -> AnswerOutput { throw MindError.failed }
         func suggest(_ input: SuggestInput) async throws -> SuggestOutput { throw MindError.failed }
+        func caption(_ input: CaptionInput) async throws -> CaptionOutput { throw MindError.failed }
     }
 
     private let on = Stub(label: "apple-foundation-models", reason: nil)

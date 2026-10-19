@@ -402,6 +402,28 @@ public extension MCI {
             }
         }
 
+        /// The moments the screenshot viewer steps through: one for each
+        /// screenshot, in order. Moments of one window share the screenshot
+        /// it kept, and stepping through the same picture again and again
+        /// shows nothing new. A screenshot is stood for by `selectedId` when
+        /// that moment shows it, else by the first moment that does.
+        public static func screenshotMoments(from hits: [Hit], keeping selectedId: UInt64? = nil) -> [Hit] {
+            let shown = recentKeyframes(from: hits)
+            let selected = shown.first { $0.id == selectedId }
+            var seen = Set<String>()
+            var moments: [Hit] = []
+            for hit in shown {
+                let path = hit.thumbnailURL?.standardizedFileURL.path ?? ""
+                guard seen.insert(path).inserted else { continue }
+                if let selected, selected.thumbnailURL?.standardizedFileURL.path == path {
+                    moments.append(selected)
+                } else {
+                    moments.append(hit)
+                }
+            }
+            return moments
+        }
+
         public static func keyframeCountLabel(_ count: Int) -> String {
             "\(count) \(count == 1 ? "keyframe" : "keyframes")"
         }

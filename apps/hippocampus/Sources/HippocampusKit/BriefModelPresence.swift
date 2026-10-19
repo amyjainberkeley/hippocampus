@@ -74,6 +74,70 @@ public enum BriefModelPresence {
             : nil
     }
 
+    /// Outcome of `removeUnusedQwen3IfNeeded()`.
+    public enum CleanupOutcome: Equatable, Sendable {
+        /// The directory was there and is gone.
+        case removed
+        /// There was nothing to remove.
+        case nothingThere
+        /// This build includes the model, so its copy stays.
+        case keptForBundledModel
+        /// An earlier launch already looked.
+        case alreadyDone
+        /// The path is not a plain directory (a link, a file): left alone.
+        case leftAlone
+        /// Removing failed; the next launch tries again.
+        case failed(String)
+    }
+
+    /// Set once the unused copy is gone, or was never there.
+    public static let cleanupDoneKey = "HippocampusRemovedUnusedQwen3Model"
+
+    /// Remove the Qwen3 copy an earlier version downloaded into
+    /// `~/Library/Application Support/MCI/Models/qwen3-1.7b-fp16/` (about
+    /// 3.2 GB), once, when this build does not include the model.
+    ///
+    /// Nothing in a standard build uses it (ADR-0039): briefs are extractive,
+    /// the opt-in naming worker needs `MCI_QWEN_NER_ENABLED=1`, which the app
+    /// never sets, `mci-agent brief` falls back to the extractive author
+    /// without it, and nothing downloads it again. It is a cache, not the
+    /// person's data. Only that one directory goes, never through a link and
+    /// never anything else in `Models`. A custom build that bundles the model
+    /// keeps the copy it seeds.
+    @discardableResult
+    public static func removeUnusedQwen3IfNeeded(
+        modelsDir: URL = defaultModelsDir(),
+        modelID: String = qwen3ModelID,
+        bundledModel: URL? = bundledQwen3URL(),
+        defaults: UserDefaults = .standard,
+        fileManager: FileManager = .default
+    ) -> CleanupOutcome {
+        if defaults.bool(forKey: cleanupDoneKey) { return .alreadyDone }
+        if bundledModel != nil { return .keptForBundledModel }
+        let directory = modelsDir.appendingPathComponent(modelID, isDirectory: true)
+        let attributes: [FileAttributeKey: Any]
+        do {
+            attributes = try fileManager.attributesOfItem(atPath: directory.path)
+        } catch {
+            guard !fileManager.fileExists(atPath: directory.path) else {
+                return .failed(String(describing: error))
+            }
+            defaults.set(true, forKey: cleanupDoneKey)
+            return .nothingThere
+        }
+        guard attributes[.type] as? FileAttributeType == .typeDirectory else {
+            defaults.set(true, forKey: cleanupDoneKey)
+            return .leftAlone
+        }
+        do {
+            try fileManager.removeItem(at: directory)
+        } catch {
+            return .failed(String(describing: error))
+        }
+        defaults.set(true, forKey: cleanupDoneKey)
+        return .removed
+    }
+
     /// Outcome of `seedBundledQwen3IfNeeded()`. Reported for observability;
     /// call sites treat all cases as non-fatal because the extractive author
     /// remains available.

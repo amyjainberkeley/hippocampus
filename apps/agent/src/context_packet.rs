@@ -83,6 +83,11 @@ pub struct ContextEvidence {
     pub relevance_score: Option<f32>,
     /// Source class such as `screen_ocr` or `structured_app`.
     pub source_kind: String,
+    /// The cleaned reading the re-clean job stored for the event (window
+    /// chrome learned from many frames set apart), when it is of the current
+    /// rules. The packet shows it instead of reading `excerpt` again; filters
+    /// still read `excerpt`, so a tab title still finds the event.
+    pub cleaned: Option<Reading>,
 }
 
 impl ContextEvidence {
@@ -104,6 +109,7 @@ impl ContextEvidence {
             priority,
             relevance_score,
             source_kind: "unknown".into(),
+            cleaned: None,
         }
     }
 }
@@ -1052,14 +1058,17 @@ fn context_body(excerpt: &str) -> &str {
 }
 
 /// The reading of an observation's stored text: what the packet shows,
-/// never the stored header or U+001E.
+/// never the stored header or U+001E. The stored cleaned reading when the
+/// re-clean job made one, else the live reading.
 fn candidate_reading(candidate: &ContextEvidence) -> Reading {
-    reading(
-        &candidate.excerpt,
-        EventSource::from_stored(&candidate.source_kind),
-        candidate.app_bundle_id.as_deref(),
-        candidate.window_title.as_deref(),
-    )
+    candidate.cleaned.clone().unwrap_or_else(|| {
+        reading(
+            &candidate.excerpt,
+            EventSource::from_stored(&candidate.source_kind),
+            candidate.app_bundle_id.as_deref(),
+            candidate.window_title.as_deref(),
+        )
+    })
 }
 
 fn evidence_search_text(candidate: &ContextEvidence) -> String {

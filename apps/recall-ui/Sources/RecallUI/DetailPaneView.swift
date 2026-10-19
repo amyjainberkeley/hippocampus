@@ -13,12 +13,20 @@ struct DetailPaneView: View {
     /// on a flyout row can push it into the search / timeline selection.
     var onSelectRelated: ((Hit) -> Void)? = nil
     var screenshotEventIDs: [UInt64] = []
+    /// History's row of one window: the newest screenshot of its moments,
+    /// shown when this moment has none of its own.
+    var rowScreenshot: Hit? = nil
     /// The search's text when the moment was found by one: "Also in this
     /// window" opens by itself when its words are only there (RULINGS T12).
     var query: String? = nil
 
     @State private var flyoutScope: RelatedHitsScope? = nil
     @State private var showsScreenshot = false
+    /// A screenshot that could not be opened: offered again by "Try Again"
+    /// while its file is there.
+    @State private var unavailableScreenshot: URL?
+    @Environment(\.screenshots) private var screenshots
+    @Environment(\.displayScale) private var displayScale
     @State private var showsRest = false
     @StateObject private var textModel = EventTextViewModel()
 
@@ -32,6 +40,12 @@ struct DetailPaneView: View {
         textModel.copyText(for: hit, includingRest: false)
     }
 
+    /// What the transcript draws: `displayBody`, with a coding assistant's
+    /// markers as plain bullets.
+    private var shownBody: String {
+        SyntaxHighlighter.plainBullets(displayBody)
+    }
+
     private var reading: EventReading? {
         textModel.text(for: hit)
     }
@@ -43,23 +57,7 @@ struct DetailPaneView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: MCI.Spacing.l) {
                 header
-                if hit.thumbnailURL != nil {
-                    Button { showsScreenshot = true } label: {
-                        VStack(alignment: .leading, spacing: 8) {
-                            GeometryReader { geometry in
-                                EvidenceThumbnail(url: hit.thumbnailURL, size: geometry.size, maxPixelSize: 640, showsStatus: true)
-                            }
-                            .aspectRatio(16 / 10, contentMode: .fit)
-                            Label("Open screenshot", systemImage: "arrow.up.left.and.arrow.down.right")
-                                .font(.caption)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(reader == nil)
-                } else {
-                    Label(UserFacingCopy.noScreenshot, systemImage: "doc.text")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+                screenshotSection
                 Divider().background(Color.brandCardBorder)
                 if !hit.entities.isEmpty {
                     entityStrip
@@ -81,9 +79,11 @@ struct DetailPaneView: View {
         .onDisappear { textModel.clear() }
         .sheet(isPresented: $showsScreenshot) {
             if let reader {
+                // Opens at the moment whose screenshot is shown.
+                let shown = screenshot?.id ?? hit.id
                 ScreenshotViewer(selection: ScreenshotSelection(
-                    eventIDs: screenshotEventIDs.contains(hit.id) ? screenshotEventIDs : [hit.id],
-                    initialID: hit.id), reader: reader)
+                    eventIDs: screenshotEventIDs.contains(shown) ? screenshotEventIDs : [shown],
+                    initialID: shown), reader: reader)
             }
         }
         .focusable()
@@ -101,6 +101,83 @@ struct DetailPaneView: View {
         .registerActionPanelCommands(actionPanelCommands)
         .onChange(of: hit) { _, _ in refreshActionPanelCommands() }
         .onChange(of: textModel.state(for: hit)) { _, _ in refreshActionPanelCommands() }
+    }
+
+    /// The screenshot shown: this moment's (its own, or the one its window
+    /// kept a moment earlier), else the one its History row shows.
+    private var screenshot: Hit? {
+        if hit.thumbnailURL != nil { return hit }
+        return rowScreenshot.flatMap { $0.thumbnailURL != nil ? $0 : nil }
+    }
+
+    /// The clock time of the screenshot shown, when an earlier moment of the
+    /// same window took it.
+    private var screenshotTakenEarlier: String? {
+        guard let shot = screenshot else { return nil }
+        let taken = shot.thumbnailTsUs ?? shot.tsUs
+        guard taken < hit.tsUs, shot.id != hit.id || hit.screenshotIsEarlier else { return nil }
+        return Formatters.clockTime(us: Int64(clamping: taken))
+    }
+
+    @ViewBuilder
+    private var screenshotSection: some View {
+        if let shot = screenshot, let url = shot.thumbnailURL, url == unavailableScreenshot {
+            unavailableScreenshotSection(url)
+        } else if let shot = screenshot, let url = shot.thumbnailURL {
+            Button { showsScreenshot = true } label: {
+                VStack(alignment: .leading, spacing: 8) {
+                    GeometryReader { geometry in
+                        EvidenceThumbnail(url: url, appBundleId: hit.appBundleId, size: geometry.size,
+                                          maxPixelSize: MomentPicture.pixels(for: geometry.size, scale: displayScale),
+                                          showsStatus: true,
+                                          onUnavailable: { unavailableScreenshot = $0 })
+                    }
+                    .aspectRatio(16 / 10, contentMode: .fit)
+                    HStack(spacing: MCI.Spacing.s) {
+                        Label("Open screenshot", systemImage: "arrow.up.left.and.arrow.down.right")
+                        Spacer(minLength: 0)
+                        if let taken = screenshotTakenEarlier {
+                            Text(UserFacingCopy.screenshotFrom(taken))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.caption)
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(reader == nil)
+        } else {
+            // Text only: the app, calmly.
+            MomentTile(appBundleId: hit.appBundleId, caption: UserFacingCopy.textOnly)
+                .frame(height: 64)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(UserFacingCopy.noScreenshot)
+        }
+    }
+
+    /// A screenshot that did not open: gone from this Mac, or there but not
+    /// opened this time (the Keychain was busy), which "Try Again" reads
+    /// again.
+    @ViewBuilder
+    private func unavailableScreenshotSection(_ url: URL) -> some View {
+        let missing = !FileManager.default.fileExists(atPath: url.path)
+        let caption = missing ? UserFacingCopy.screenshotMissing : UserFacingCopy.screenshotLoadFailed
+        VStack(alignment: .leading, spacing: MCI.Spacing.s) {
+            MomentTile(appBundleId: hit.appBundleId, caption: caption)
+                .frame(height: 64)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(caption)
+            if !missing {
+                Button(UserFacingCopy.tryAgainAction) {
+                    Task {
+                        _ = await screenshots.rereadScreenshotData(for: url)
+                        unavailableScreenshot = nil
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
     }
 
     private func refreshActionPanelCommands() {
@@ -143,12 +220,18 @@ struct DetailPaneView: View {
         ]
     }
 
+    /// What the moment was about, when it has a caption.
+    private var caption: String? {
+        hit.caption ?? reading?.caption
+    }
+
     private var header: some View {
         VStack(alignment: .leading, spacing: MCI.Spacing.s) {
             HStack(alignment: .firstTextBaseline) {
-                Text(Formatters.appDisplayName(hit.appBundleId))
+                Text(verbatim: caption ?? Formatters.appDisplayName(hit.appBundleId))
                     .mciFont(.title2)
                     .foregroundStyle(Color.brandFgPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer()
                 if reader != nil, !hit.linkedEventIds.isEmpty {
                     relatedBadge
@@ -163,7 +246,14 @@ struct DetailPaneView: View {
                     )
                     .foregroundStyle(Color.brandFgSecondary)
             }
-            if let title = hit.windowTitle, !title.isEmpty {
+            if let caption {
+                // Under a caption: the app, then what of the window's title
+                // the caption does not say.
+                Text(verbatim: MomentRowText.origin(hit, caption: caption))
+                    .font(.system(.body, design: .default))
+                    .foregroundStyle(Color.brandFgSecondary)
+                    .lineLimit(2)
+            } else if let title = hit.windowTitle, !title.isEmpty {
                 Text(title)
                     .font(.system(.body, design: .default))
                     .foregroundStyle(Color.brandFgSecondary)
@@ -367,7 +457,7 @@ struct DetailPaneView: View {
     }
 
     private var highlightedCode: some View {
-        let tokens = SyntaxHighlighter.tokenize(displayBody)
+        let tokens = SyntaxHighlighter.tokenize(shownBody)
         return tokens.reduce(Text("")) { result, token in
             result + Text(token.text).foregroundColor(Color.syntaxColor(for: token.type))
         }
@@ -382,7 +472,7 @@ struct DetailPaneView: View {
     }
 
     private var linkedText: some View {
-        let text = displayBody
+        let text = shownBody
         let links = LinkDetector.detect(in: text)
         let built: Text = {
             guard !links.isEmpty else {

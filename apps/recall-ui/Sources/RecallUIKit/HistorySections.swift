@@ -27,6 +27,34 @@ public struct HistoryRow: Equatable, Sendable, Identifiable {
     public var hit: Hit { hits[0] }
     /// "{n} moments" when more than one.
     public var count: Int { hits.count }
+    /// The row's picture: its own moment's screenshot, else the newest
+    /// screenshot of its other moments, as the reader lets a moment show its
+    /// window's (`screenshot_for_event`): only a moment read off the window
+    /// in front (never a window beside it, an import or a message), and only
+    /// a screenshot taken at most five minutes before it.
+    public var screenshot: Hit? {
+        let newest = hits[0]
+        if newest.thumbnailURL != nil { return newest }
+        guard Self.mayBorrow(newest) else { return nil }
+        return hits.dropFirst().first { hit in
+            guard hit.thumbnailURL != nil, Self.mayBorrow(hit) else { return false }
+            let taken = hit.thumbnailTsUs ?? hit.tsUs
+            return taken <= newest.tsUs && newest.tsUs - taken <= Self.screenshotReuseUs
+        }
+    }
+
+    /// Moments that may show the screenshot their window kept a moment
+    /// earlier (the reader's rule). A row from a build that sent no kind is
+    /// of an unknown kind, as the reader counts it.
+    static let borrowingSources: Set<String> = ["screen_ocr", "browser_page", "browser_page_with_ocr", "unknown"]
+
+    static func mayBorrow(_ hit: Hit) -> Bool {
+        borrowingSources.contains(hit.sourceKind ?? "unknown")
+    }
+
+    /// How long a window's screenshot stands for its later moments, as the
+    /// reader allows (`SCREENSHOT_REUSE_US`).
+    static let screenshotReuseUs: UInt64 = 5 * 60 * 1_000_000
 }
 
 public enum HistorySections {
@@ -82,11 +110,13 @@ public enum HistorySections {
         return .hour(startUs: Int64((hour.timeIntervalSince1970 * 1_000_000).rounded()))
     }
 
-    /// The same window: the same app and the same, non-empty, title.
+    /// The same window: the same app and the same, non-empty, title, leaving
+    /// out a status mark the app puts before it ("✳" and "⠐" while a coding
+    /// assistant works are one session).
     private static func sameWindow(_ a: Hit, _ b: Hit) -> Bool {
-        guard let title = a.windowTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty
-        else { return false }
+        let title = Formatters.titleWithoutMarks(a.windowTitle ?? "")
+        guard !title.isEmpty else { return false }
         return a.appBundleId == b.appBundleId
-            && b.windowTitle?.trimmingCharacters(in: .whitespacesAndNewlines) == title
+            && Formatters.titleWithoutMarks(b.windowTitle ?? "") == title
     }
 }

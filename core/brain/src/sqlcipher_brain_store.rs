@@ -92,6 +92,24 @@ pub struct StoredEventText {
     pub app_bundle_id: Option<String>,
 }
 
+/// The stored screenshot that shows a moment, and the moment it was kept with.
+///
+/// The capture helper keeps a screenshot only when the window in front
+/// changes, when its picture changes a lot, or after five quiet minutes
+/// (`KeyframePolicy` in the capture helper). The window's other moments are
+/// read without one because they look like the screenshot kept a moment
+/// earlier, so that screenshot is theirs too.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MomentScreenshot {
+    /// The moment whose `keyframe_blob` names the screenshot: the moment
+    /// itself, or the earlier moment of its window that kept it.
+    pub event_id: EventId,
+    /// When the screenshot was taken, microseconds since the UNIX epoch.
+    pub ts_us: u64,
+    /// Lowercase SHA-256 hex of the sealed blob, stored as `<blobs>/<digest>.bin`.
+    pub digest: String,
+}
+
 /// A best-effort maintenance stage that runs only after deletion commits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeletionCleanupStage {
@@ -458,6 +476,120 @@ impl SqlCipherBrainStore {
         if has_url {
             sql.push_str(" AND e.url IS NOT NULL AND e.url != ''");
         }
+    }
+
+    /// How long a kept screenshot goes on showing its window. The capture
+    /// helper keeps a new one at least this often while one window stays in
+    /// front (`KeyframePolicy.maxSilenceNanoseconds`, five minutes).
+    pub const SCREENSHOT_REUSE_US: u64 = 5 * 60 * 1_000_000;
+
+    /// The stored screenshot that shows `event`, a row read from this store
+    /// whose acquisition source is `source`.
+    ///
+    /// A moment that kept a screenshot shows its own. Any other moment of
+    /// the window in front shows the newest screenshot kept at or before it,
+    /// when that screenshot is of the same app and the same window title (and
+    /// the same page, when both name one) and at most
+    /// [`Self::SCREENSHOT_REUSE_US`] older. The helper compares each new
+    /// picture with exactly that screenshot and keeps none while the window
+    /// stays the same and its picture barely changes, so it is this moment's
+    /// screen. A newer screenshot of any other window means the window in
+    /// front changed since, so the moment has none.
+    ///
+    /// Rows written before sources were recorded (older schemas) follow the
+    /// same rule: being the window in the newest screenshot is shown by the
+    /// screenshots themselves, not by guessing a source from app or text.
+    /// Windows beside the one in front, mail and messages, imports and MCP
+    /// resources never show another moment's screenshot. Only a stored,
+    /// admitted row's own `keyframe_blob` is ever returned, so nothing
+    /// becomes visible that its own moment does not already show.
+    ///
+    /// # Errors
+    /// Returns a content-free backend error when the lookup query fails.
+    pub fn screenshot_for_event(
+        &self,
+        event: &Event,
+        source: EventSource,
+    ) -> Result<Option<MomentScreenshot>, StoreError> {
+        if let Some(digest) = event
+            .keyframe_blob
+            .as_deref()
+            .map(str::trim)
+            .filter(|digest| is_keyframe_digest(digest))
+        {
+            return Ok(Some(MomentScreenshot {
+                event_id: event.id,
+                ts_us: event.ts_us,
+                digest: digest.to_owned(),
+            }));
+        }
+        if !matches!(
+            source,
+            EventSource::ScreenOcr
+                | EventSource::BrowserPageWithOcr
+                | EventSource::BrowserPage
+                | EventSource::Unknown
+        ) {
+            return Ok(None);
+        }
+        let (Some(app), Some(title)) = (
+            nonempty(event.app_bundle_id.as_deref()),
+            nonempty(event.window_title.as_deref()),
+        ) else {
+            return Ok(None);
+        };
+        let url = nonempty(event.url.as_deref());
+        let (Ok(upper), Ok(lower)) = (
+            i64::try_from(event.ts_us),
+            i64::try_from(event.ts_us.saturating_sub(Self::SCREENSHOT_REUSE_US)),
+        ) else {
+            return Ok(None);
+        };
+        // The newest screenshot kept up to this moment, of any window: the
+        // one the helper compared this moment's picture with.
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let newest = guard
+            .conn()
+            .prepare_cached(
+                "SELECT id, ts_us, app_bundle_id, window_title, url, keyframe_blob
+                 FROM events
+                 WHERE keyframe_blob IS NOT NULL AND ts_us <= ?1 AND ts_us >= ?2
+                 ORDER BY ts_us DESC, id DESC
+                 LIMIT 1",
+            )
+            .and_then(|mut statement| {
+                statement
+                    .query_row(params![upper, lower], |row| {
+                        let id: i64 = row.get(0)?;
+                        let ts_us: i64 = row.get(1)?;
+                        let kept_app: Option<String> = row.get(2)?;
+                        let kept_title: Option<String> = row.get(3)?;
+                        let kept_url: Option<String> = row.get(4)?;
+                        let digest: String = row.get(5)?;
+                        let kept_url = nonempty(kept_url.as_deref());
+                        let same_window = nonempty(kept_app.as_deref()) == Some(app)
+                            && nonempty(kept_title.as_deref()) == Some(title)
+                            && (url.is_none() || kept_url.is_none() || kept_url == url);
+                        Ok((
+                            u64::try_from(id).ok().zip(u64::try_from(ts_us).ok()),
+                            same_window,
+                            digest.trim().to_owned(),
+                        ))
+                    })
+                    .optional()
+            })
+            .map_err(|e| StoreError::Backend(format!("read moment screenshot: {e}")))?;
+        drop(guard);
+        Ok(match newest {
+            Some((Some((id, ts_us)), true, digest)) if is_keyframe_digest(&digest) => {
+                Some(MomentScreenshot {
+                    event_id: EventId(id),
+                    ts_us,
+                    digest,
+                })
+            }
+            _ => None,
+        })
     }
 
     /// Acquisition provenance. Old read-only stores and unattributed rows
@@ -2377,6 +2509,11 @@ fn blob_dir_for_brain(brain_path: &Path) -> PathBuf {
         .map_or_else(|| PathBuf::from("blobs"), |parent| parent.join("blobs"))
 }
 
+/// `value` without surrounding whitespace, or `None` when nothing is left.
+fn nonempty(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
 pub(crate) fn is_keyframe_digest(value: &str) -> bool {
     value.len() == 64
         && value
@@ -2602,6 +2739,8 @@ pub(crate) fn delete_projected_memory_for_events(
     }
     // Inferences built on these events go with them, not only their links.
     crate::understanding::delete_for_events(tx, event_ids)?;
+    // So do their cleaned text and captions.
+    crate::moment_readings::delete_for_events(tx, event_ids)?;
     prepare_memory_deletion_staging(tx)?;
     stage_deleted_event_ids(tx, event_ids)?;
     stage_memory_deletion_closure(tx)?;
@@ -2943,6 +3082,13 @@ fn run_brain_migration(db: &mut Db) -> Result<(), StoreError> {
         "../migrations/0014_understanding_verdicts.sql"
     ))
     .map_err(|error| StoreError::Backend(format!("apply migration 0014: {error}")))?;
+    // 0015 — moment readings: a moment's cleaned text and caption, beside the
+    // stored text it never replaces. One fresh table and index, `IF NOT
+    // EXISTS`, so the apply is idempotent on re-open. The schema version
+    // stays at 10; a read-only reader of a brain without the table reads
+    // moments as before (see `moment_readings`).
+    tx.execute_batch(include_str!("../migrations/0015_moment_readings.sql"))
+        .map_err(|error| StoreError::Backend(format!("apply migration 0015: {error}")))?;
     tx.execute(
         "INSERT OR REPLACE INTO meta (key, value) VALUES ('brain_schema_version', '10')",
         [],

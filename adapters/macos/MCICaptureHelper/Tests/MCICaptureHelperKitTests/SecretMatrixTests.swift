@@ -97,7 +97,7 @@ final class SecretMatrixTests: XCTestCase {
     /// Canonical SYNTHETIC secret strings (all invented).
     private enum Fixture {
         static let awsKeyLine = "export AWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE"
-        static let githubPat = "ghp_EXAMPLE00000000000000000000000000000"
+        static let githubPat = "ghp_EXAMPLE0EXAMPLE0EXAMPLE0EXAMPLE0000"
         static let apiKeyAssign = "api_key = sk_" + "test_4eC39HqLyjWDarjtT1zdp7dc"
         static let jwt =
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." +

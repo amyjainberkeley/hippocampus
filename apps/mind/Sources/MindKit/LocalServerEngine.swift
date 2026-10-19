@@ -317,6 +317,19 @@ public final class LocalServerEngine: MindEngine, @unchecked Sendable {
         }.prefix(4)))
     }
 
+    public func caption(_ input: CaptionInput) async throws -> CaptionOutput {
+        try waitForPower()
+        let input = CaptionInputs.bounded(input, textCharacters: 400, moments: 6)
+        guard !input.moments.isEmpty else { return CaptionOutput(captions: []) }
+        let reply = try await chat("caption", Schemas.captions, userName: "", prompt: Prompts.caption(input),
+                                   temperature: 0.2, maxTokens: 300, timeout: 45)
+        let lines = Self.objects(reply["captions"]).compactMap { item -> CaptionLine? in
+            guard let n = Self.integer(item["n"]), let caption = Self.string(item["caption"]) else { return nil }
+            return CaptionLine(n: n, caption: caption)
+        }
+        return CaptionInputs.answered(lines, for: input)
+    }
+
     private func waitForPower() throws {
         guard onACPower() else { throw MindError.onBattery }
     }
