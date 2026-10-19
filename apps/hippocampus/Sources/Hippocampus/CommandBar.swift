@@ -34,6 +34,10 @@ final class CommandBarController: NSObject, NSWindowDelegate {
     private var copyForAITask: Task<Void, Never>?
     /// When a `hippocampus://ask` link last opened Ask (RULINGS S12).
     private var linkOpenedAt: Date?
+    /// A show asked for before Ask was set up: a link that launched the app
+    /// arrives before the launch sets Ask up. Kept, with its question, and
+    /// shown once it is.
+    private var heldShow: (question: String?, opening: AskPanelDismissal.Opening)?
 
     func configure(
         model: CommandBarModel,
@@ -49,6 +53,10 @@ final class CommandBarController: NSObject, NSWindowDelegate {
         self.openWindow = openWindow
         self.statusAction = statusAction
         self.announceShown = announceShown
+        if let held = heldShow {
+            heldShow = nil
+            show(asking: held.question, from: held.opening)
+        }
     }
 
     /// The key again closes it; it does not jump screens. Only the key and
@@ -60,7 +68,10 @@ final class CommandBarController: NSObject, NSWindowDelegate {
     /// The menu and a link only ever show Ask, even when it is up already
     /// (RULINGS S12): a second link never hides an answer on its way.
     func show(asking question: String? = nil, from opening: AskPanelDismissal.Opening = .menu) {
-        guard let model else { return }
+        guard let model else {
+            heldShow = (question, opening)
+            return
+        }
         let panel = self.panel ?? makePanel(model: model)
         self.panel = panel
         if opening == .link {

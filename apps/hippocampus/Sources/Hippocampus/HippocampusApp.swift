@@ -51,6 +51,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let initialPreferencesRequest = PreferencesOpenRequest(arguments: Array(CommandLine.arguments.dropFirst()))
     /// Why this launch happened; only `.user` opens the window (spec-shell S7).
     private var launchReason = LaunchReason.user
+    /// A link was handed to the app before it read why it launched: the link
+    /// launched it. Such a link arrives before `applicationDidFinishLaunching`.
+    private var linkOpenedAtLaunch = false
+    private var launchReasonRead = false
     /// This copy is quitting so the one in Applications can open: nothing
     /// else opens from here.
     private var leavingForApplications = false
@@ -197,8 +201,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Why Hippocampus was opened, read while the launch's Apple event is
         // still the current one (spec-shell S7). The raw event is logged so a
         // login can be told from a launch with no event at all.
-        let launch = LaunchReason.read(preferencesRequested: initialPreferencesRequest != nil)
+        let launch = LaunchReason.read(preferencesRequested: initialPreferencesRequest != nil, linkOpened: linkOpenedAtLaunch)
         launchReason = launch.reason
+        launchReasonRead = true
         firstLaunchLogger.info(
             "launch: reason=\(launch.reason.rawValue, privacy: .public) event=\(launch.event?.logDescription ?? "none", privacy: .public)"
         )
@@ -640,6 +645,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
+        // A link that launches the app comes first: the launch is the link's,
+        // and keeps Hippocampus in the menu bar (spec-shell S7).
+        if !launchReasonRead { linkOpenedAtLaunch = true }
         guard !leavingForApplications else { return }
         for url in urls {
             guard let route = HippocampusURLRoute.parse(url) else { continue }
