@@ -2,6 +2,7 @@
 import Combine
 import SwiftUI
 import HippocampusKit
+import UserNotifications
 import os
 #if canImport(AppKit)
 import AppKit
@@ -133,6 +134,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         )
         preferencesControllerConfigured = true
+    }
+
+    /// A click on a permission notification can be what launches the app,
+    /// and macOS hands that click over only to a delegate set before the app
+    /// finishes launching.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        UNUserNotificationCenter.current().delegate = self
     }
 
     /// Called by AppKit immediately after the app finishes launching —
@@ -857,5 +865,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .window: supervisor.reopenWindow()
         }
         return false
+    }
+}
+
+/// The permission notifications ("Click to open System Settings."): a click
+/// on one, or on its Open System Settings button, is the status row's Open
+/// System Settings… (`TCCRevokedNotificationActionHandler`).
+extension AppDelegate: UNUserNotificationCenterDelegate {
+    /// Shown while Hippocampus is the active app too.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .list, .sound]
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
+    ) async {
+        let content = response.notification.request.content
+        let category = content.categoryIdentifier
+        let action = response.actionIdentifier
+        let surface = content.userInfo[TCCRevokedNotifierRequestBuilder.userInfoSurfaceKey] as? String
+        _ = await MainActor.run {
+            TCCRevokedNotificationActionHandler.handle(
+                categoryIdentifier: category, actionIdentifier: action, surface: surface,
+                supervisor: supervisor, setupFinished: OnboardingSentinel.isComplete
+            ) { NSWorkspace.shared.open($0) }
+        }
     }
 }

@@ -83,12 +83,12 @@ public enum TCCRevokedNotifierRequestBuilder {
     }
 
     /// userInfo payload key under which the settings-pane URL string
-    /// travels. Read at click-action time by the notification-center
-    /// delegate.
+    /// travels. The click opens the pane its permission names, the same
+    /// one (`TCCRevokedNotificationActionHandler`).
     public static let userInfoPaneKey = "MCITCCRevokedPaneURL"
 
-    /// userInfo payload key under which the surface identifier
-    /// travels — used for logging + tests, not the click action.
+    /// userInfo payload key under which the surface identifier travels: a
+    /// click reads it to know which permission it is about.
     public static let userInfoSurfaceKey = "MCITCCRevokedSurface"
 
     /// Assemble the `UNNotificationRequest` for a given revoke reason.
@@ -242,39 +242,40 @@ public actor TCCRevokedNotifier {
 
 // MARK: - Click-action handler
 
-/// The notification-center delegate glue. AppDelegate installs this
-/// as `UNUserNotificationCenter.current().delegate` at boot so click
-/// actions route through `handleActionResponse`, which opens the
-/// System Settings pane the notification carries in its userInfo.
+/// A click on a permission notification. AppDelegate is the notification
+/// center's delegate from before it finishes launching (a click can launch
+/// it), and hands each response here, taken apart so nothing that is not
+/// Sendable crosses to the main actor.
 public enum TCCRevokedNotificationActionHandler {
-    /// Handle a `UNNotificationResponse`. Returns `true` if the
-    /// response was ours (either the explicit "Open Settings"
-    /// action or a default-tap on a MCITCCRevoked notification);
-    /// `false` if it belongs to some other category and should be
-    /// passed to the caller's other handlers.
+    /// The permission a click is about: on the body or on the "Open System
+    /// Settings" button of one of these notifications. Nil for a dismissal,
+    /// another category, or a surface this app does not know.
+    public static func permission(
+        categoryIdentifier: String, actionIdentifier: String, surface: String?
+    ) -> TCCRevokedReason? {
+        guard categoryIdentifier == TCCRevokedNotifierRequestBuilder.categoryIdentifier,
+              actionIdentifier == TCCRevokedNotifierRequestBuilder.openSettingsActionIdentifier
+                || actionIdentifier == UNNotificationDefaultActionIdentifier,
+              let surface
+        else { return nil }
+        return TCCRevokedReason(rawValue: surface)
+    }
+
+    /// A click is the status row's Open System Settings… for that permission:
+    /// its pane opens, and coming back looks again, including for a Turn On
+    /// the permission refused. True when the response was one of these
+    /// notifications, whatever it asked.
+    @MainActor
     @discardableResult
-    public static func handle(_ response: UNNotificationResponse) -> Bool {
-        let content = response.notification.request.content
-        guard content.categoryIdentifier == TCCRevokedNotifierRequestBuilder.categoryIdentifier
-        else { return false }
-
-        // Both the explicit "Open Settings" action and a default tap
-        // on the notification body should open the pane — the user's
-        // intent is the same either way.
-        let isOurAction =
-            response.actionIdentifier == TCCRevokedNotifierRequestBuilder.openSettingsActionIdentifier
-            || response.actionIdentifier == UNNotificationDefaultActionIdentifier
-
-        guard isOurAction,
-              let urlString = content.userInfo[
-                TCCRevokedNotifierRequestBuilder.userInfoPaneKey
-              ] as? String,
-              let url = URL(string: urlString)
-        else { return true }
-
-        #if canImport(AppKit)
-            NSWorkspace.shared.open(url)
-        #endif
+    public static func handle(
+        categoryIdentifier: String, actionIdentifier: String, surface: String?,
+        supervisor: ProcessSupervisor, setupFinished: Bool, openURL: (URL) -> Void
+    ) -> Bool {
+        guard categoryIdentifier == TCCRevokedNotifierRequestBuilder.categoryIdentifier else { return false }
+        guard let permission = permission(
+            categoryIdentifier: categoryIdentifier, actionIdentifier: actionIdentifier, surface: surface
+        ) else { return true }
+        supervisor.performAskStatusAction(.openSystemSettings(permission), setupFinished: setupFinished, openURL: openURL)
         return true
     }
 }
