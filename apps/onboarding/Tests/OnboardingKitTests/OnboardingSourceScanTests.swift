@@ -227,6 +227,18 @@ final class OnboardingSourceScanTests: XCTestCase {
         }
     }
 
+    func testWarningColoursMarkIconsNeverText() throws {
+        // Orange or red text on white reads at about 2:1 to 4:1; a warning
+        // shows its colour on an icon, beside text in the normal colours.
+        let panel = code(try source("Onboarding/Slides/BrowserExtensionSlide.swift"))
+        for (index, line) in panel.enumerated() where line.contains("Text(OnboardingCopy.extensionFolderMissing)") {
+            let style = panel[index...].prefix(4).joined(separator: "\n")
+            XCTAssertFalse(style.contains("Palette.attention"), "the missing-folder line is orange text")
+            XCTAssertTrue(style.contains(".foregroundStyle(.primary)"))
+        }
+        XCTAssertTrue(panel.contains { $0.contains("Text(OnboardingCopy.extensionFolderMissing)") })
+    }
+
     func testTheOnlyGradientIsTheAppIconsTile() throws {
         // Backdrops stay the native material; the hi mark's tile carries the
         // icon's own white-to-grey fall.

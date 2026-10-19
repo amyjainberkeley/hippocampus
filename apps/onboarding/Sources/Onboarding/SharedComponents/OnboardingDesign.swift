@@ -73,7 +73,9 @@ enum OnboardingDesign {
         static let onSoft = on.opacity(0.12)
 
         /// Semantic status hues (kept sparse — success/attention/danger).
-        static let success = Color.green
+        /// Success is the same calm green as a permission that is on, so
+        /// every checkmark in setup matches.
+        static let success = on
         static let attention = Color.orange
         static let danger = Color.red
 

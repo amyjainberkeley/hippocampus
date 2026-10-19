@@ -42,6 +42,8 @@ final class OnboardingPaletteTests: XCTestCase {
         XCTAssertTrue(design.contains("static let ink = color(OnboardingPalette.ink)"))
         XCTAssertTrue(design.contains("static let secondaryText = color(OnboardingPalette.secondaryText)"))
         XCTAssertTrue(design.contains("static let windowSolid = color(OnboardingPalette.windowSurface)"))
+        // Every checkmark in setup is the permission's calm green.
+        XCTAssertTrue(design.contains("static let success = on"))
         // The theme holds the window's size and margins, and no colour.
         XCTAssertFalse(theme.contains("Color("), "no second accent")
         XCTAssertFalse(theme.contains("Palette."), "no second name for the accent")

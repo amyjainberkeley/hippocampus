@@ -258,7 +258,7 @@ struct BrowserExtensionScreen: View {
                 HStack(spacing: OnboardingDesign.Space.md) {
                     Text(path)
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(OnboardingDesign.Palette.secondaryText)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: OnboardingDesign.Space.sm)
@@ -269,10 +269,18 @@ struct BrowserExtensionScreen: View {
                 }
             }
         } else {
-            Text(OnboardingCopy.extensionFolderMissing)
-                .font(.system(size: 12))
-                .foregroundStyle(OnboardingDesign.Palette.attention)
-                .fixedSize(horizontal: false, vertical: true)
+            // The warning colour marks the icon only: orange text on white
+            // reads at about 2:1.
+            HStack(alignment: .firstTextBaseline, spacing: OnboardingDesign.Space.xs + 2) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(OnboardingDesign.Palette.attention)
+                    .accessibilityHidden(true)
+                Text(OnboardingCopy.extensionFolderMissing)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
