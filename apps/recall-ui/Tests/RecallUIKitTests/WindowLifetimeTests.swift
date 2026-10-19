@@ -25,6 +25,28 @@ final class WindowLifetimeTests: XCTestCase {
         XCTAssertTrue(delegate.contains("ChildProcesses.shared.terminateAll()"))
     }
 
+    /// A command answers only when the window will show itself: the process
+    /// says so once it quits, and checks for a window it can bring forward
+    /// (minimized included), which it does before answering, at once even
+    /// while it is in the background.
+    func testACommandIsAnsweredOnlyWhenTheWindowShowsItself() throws {
+        let source = try appSource()
+        let start = try XCTUnwrap(source.range(of: "final class MCIRecallAppDelegate"))
+        let end = try XCTUnwrap(source.range(of: "struct MCIRecallApp: App"))
+        let delegate = String(source[start.lowerBound..<end.lowerBound])
+        XCTAssertTrue(delegate.contains("func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {"))
+        XCTAssertTrue(delegate.contains("terminating = true"))
+        let handler = try XCTUnwrap(delegate.range(of: "private func receiveRecallCommand("))
+        let body = String(delegate[handler.lowerBound...])
+        let decide = try XCTUnwrap(body.range(of: "RecallCommandAnswer.decide(terminating: self.terminating"))
+        let deminiaturize = try XCTUnwrap(body.range(of: "window.deminiaturize(nil)"))
+        let answer = try XCTUnwrap(body.range(of: "RecallLaunchRequest.acknowledgementName"))
+        XCTAssertLessThan(decide.lowerBound, deminiaturize.lowerBound)
+        XCTAssertLessThan(deminiaturize.lowerBound, answer.lowerBound)
+        XCTAssertTrue(body.contains("deliverImmediately: true"))
+        XCTAssertTrue(delegate.contains("suspensionBehavior: .deliverImmediately"))
+    }
+
     /// One window: a second would be a second reader of the memory, and no
     /// menu offers one.
     func testThereIsNoNewWindowCommand() throws {

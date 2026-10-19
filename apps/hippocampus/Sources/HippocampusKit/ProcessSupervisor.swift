@@ -172,6 +172,60 @@ enum HelperLeaseCommand {
     }
 }
 
+/// How the app talks to a window process that runs (`openRecallUI`).
+@MainActor
+package protocol RecallWindowCommanding: AnyObject {
+    /// Sends `command` to the window process `processID` and returns whether
+    /// it answered, within `timeout`, that it shows its window.
+    func command(_ command: [String: Any], processID: pid_t, timeout: Duration) async -> Bool
+}
+
+/// The app's channel to its window: distributed notifications, sent and
+/// answered at once, so a window in the background hears the command before
+/// anything brings it forward (RecallUIKit's `RecallLaunchRequest` has the
+/// same names). Tests make up their own names.
+@MainActor
+package final class DistributedRecallWindowChannel: RecallWindowCommanding {
+    package static let requestIDKey = "request_id"
+    package let commandName: Notification.Name
+    package let acknowledgementName: Notification.Name
+
+    package init(
+        commandName: Notification.Name = Notification.Name("ai.hippocampus.recall.command.v1"),
+        acknowledgementName: Notification.Name = Notification.Name("ai.hippocampus.recall.command.shown.v1")
+    ) {
+        self.commandName = commandName
+        self.acknowledgementName = acknowledgementName
+    }
+
+    package func command(_ command: [String: Any], processID: pid_t, timeout: Duration) async -> Bool {
+        let id = UUID().uuidString
+        var userInfo = command
+        userInfo[Self.requestIDKey] = id
+        let answered = OSAllocatedUnfairLock(initialState: false)
+        let center = DistributedNotificationCenter.default()
+        let observer = center.addObserver(forName: acknowledgementName, object: String(processID), queue: .main) { note in
+            guard note.userInfo?[Self.requestIDKey] as? String == id else { return }
+            answered.withLock { $0 = true }
+        }
+        defer { center.removeObserver(observer) }
+        center.postNotificationName(commandName, object: nil, userInfo: userInfo, deliverImmediately: true)
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while ContinuousClock.now < deadline, !answered.withLock({ $0 }) {
+            await FoundationSupervisorTopology.pause(for: .milliseconds(10))
+        }
+        return answered.withLock { $0 }
+    }
+}
+
+/// Sends nothing and never answers: the default outside the app, so no test
+/// ever messages a real window.
+@MainActor
+package final class SilentRecallWindowChannel: RecallWindowCommanding {
+    package init() {}
+    package func command(_ command: [String: Any], processID: pid_t, timeout: Duration) async -> Bool { false }
+}
+
 @MainActor
 public final class ProcessSupervisor: ObservableObject, Sendable {
     @Published public private(set) var state: SupervisorState = .idle {
@@ -327,6 +381,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// handle prevents every menu action or hotkey press from launching a
     /// competing window and duplicate database reader.
     private var recallProcess: Process?
+    private let recallWindowChannel: any RecallWindowCommanding
+    /// Window requests, carried out one at a time in the order they came.
+    private var windowRequests: [WindowRequest] = []
+    private var windowRequestTask: Task<Void, Never>?
+    /// Quit has closed the windows: nothing opens after.
+    private var windowsRetired = false
     private var recallPresentationGate = RecallPresentationGate()
     /// This launch has read and checked the memory's key, so the window can
     /// read it too, with no second Keychain request racing the first.
@@ -367,7 +427,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             pauses: pauses,
             orphanSweeper: orphanSweeper,
             memoryOnDisk: { FileManager.default.fileExists(atPath: ProcessSupervisor.databaseURL.path) },
-            permissionProbe: ProcessSupervisor.permissionVisibleHere
+            permissionProbe: ProcessSupervisor.permissionVisibleHere,
+            recallWindowChannel: DistributedRecallWindowChannel()
         )
     }
 
@@ -407,7 +468,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         permissionProbe: @escaping @MainActor @Sendable (TCCRevokedReason) -> Bool? = { _ in nil },
         permissionPollSleep: @escaping @MainActor @Sendable () async throws -> Void = {
             try await Task.sleep(for: .seconds(2))
-        }
+        },
+        recallWindowChannel: any RecallWindowCommanding = SilentRecallWindowChannel()
     ) {
         self.locator = locator
         self.keyStore = developmentKeyMode.map { FileKeyStore(path: $0.keyURL) } ?? keyStore
@@ -427,6 +489,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         self.memoryOnDisk = memoryOnDisk
         self.permissionProbe = permissionProbe
         self.permissionPollSleep = permissionPollSleep
+        self.recallWindowChannel = recallWindowChannel
         self.captureEnabled = runtimeConfig.captureEnabled
         // A pause outlives a relaunch: start goes straight to Paused.
         self.requestedPauseState = pauses.isPaused
@@ -1763,38 +1826,91 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         return openOnboarding()
     }
 
+    private struct WindowRequest {
+        let tab: String?
+        let focusEventId: UInt64?
+        let openPopup: Bool
+    }
+
+    /// How long a window that runs has to say it shows itself, and how long
+    /// one that said nothing has to end before a fresh one opens.
+    static let windowAnswerWait: Duration = .milliseconds(500)
+    static let windowExitWait: Duration = .seconds(3)
+
+    /// Show the window on `initialTab`. Every way of opening it comes here:
+    /// opening Hippocampus, the menu's Open Hippocampus, Ask, a link.
+    ///
+    /// The window's process ends with its last window. A process that runs is
+    /// asked first, and answers only when it shows its window (a minimized
+    /// one comes back out of the Dock), so nothing opens beside it. One that
+    /// does not answer is quitting (its last window just closed): the request
+    /// waits for it to end and opens a fresh window, on the place asked for.
+    /// It used to take any running process as one that would show the
+    /// window, and nothing appeared. One that neither answers nor ends is
+    /// only brought forward: a second window process would be a second
+    /// reader of the memory.
     public func openRecallUI(
         initialTab: String? = nil,
         focusEventId: UInt64? = nil,
         openPopup: Bool = false
     ) {
-        var command: [String: Any] = ["open_popup": openPopup]
-        if let initialTab, !initialTab.isEmpty { command["tab"] = initialTab }
-        if let focusEventId, focusEventId > 0 {
-            command["focus_event_id"] = NSNumber(value: focusEventId)
+        guard !windowsRetired else { return }
+        windowRequests.append(WindowRequest(tab: initialTab, focusEventId: focusEventId, openPopup: openPopup))
+        guard windowRequestTask == nil else { return }
+        windowRequestTask = Task { @MainActor [weak self] in
+            while let self, !self.windowRequests.isEmpty {
+                let request = self.windowRequests.removeFirst()
+                await self.carryOut(request)
+            }
+            self?.windowRequestTask = nil
         }
+    }
 
-        if let recallProcess, recallProcess.isRunning {
-            DistributedNotificationCenter.default().post(
-                name: Notification.Name("ai.hippocampus.recall.command.v1"),
-                object: nil,
-                userInfo: command
+    private func carryOut(_ request: WindowRequest) async {
+        guard !windowsRetired else { return }
+        if let running = recallProcess, running.isRunning {
+            var command: [String: Any] = ["open_popup": request.openPopup]
+            if let tab = request.tab, !tab.isEmpty { command["tab"] = tab }
+            if let focusEventId = request.focusEventId, focusEventId > 0 {
+                command["focus_event_id"] = NSNumber(value: focusEventId)
+            }
+            let shown = await recallWindowChannel.command(
+                command, processID: running.processIdentifier, timeout: Self.windowAnswerWait
             )
-            NSRunningApplication(processIdentifier: recallProcess.processIdentifier)?
+            if !shown, await Self.waitForExit(running, within: Self.windowExitWait) {
+                guard !windowsRetired else { return }
+                launchRecallUI(request)
+                return
+            }
+            if !shown {
+                logger.error("supervisor: the window neither answered nor ended; bringing it forward")
+            }
+            NSRunningApplication(processIdentifier: running.processIdentifier)?
                 .activate(options: [.activateAllWindows])
             return
         }
-        recallProcess = nil
+        launchRecallUI(request)
+    }
 
+    private static func waitForExit(_ process: Process, within limit: Duration) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: limit)
+        while process.isRunning, ContinuousClock.now < deadline {
+            await FoundationSupervisorTopology.pause(for: .milliseconds(25))
+        }
+        return !process.isRunning
+    }
+
+    private func launchRecallUI(_ request: WindowRequest) {
+        recallProcess = nil
         guard let recallPath = locator.recallUIPath() else { return }
         let environment = ProcessSupervisorLaunchPlan.recallEnvironment(
             baseEnvironment: ProcessInfo.processInfo.environment,
             dbPath: dbPath,
             keyReference: currentKeyReference,
             developmentKeyMode: developmentKeyMode,
-            initialTab: initialTab,
-            focusEventId: focusEventId,
-            openPopup: openPopup,
+            initialTab: request.tab,
+            focusEventId: request.focusEventId,
+            openPopup: request.openPopup,
             agentURL: locator.agentPath()
         )
         do {
@@ -1832,6 +1948,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// Capture restarts intentionally do not call this; Recall remains useful
     /// while capture is paused or a helper generation is being replaced.
     public func closeRecallUI() {
+        windowsRetired = true
+        windowRequests.removeAll()
         guard let recallProcess else { return }
         if recallProcess.isRunning {
             let runningApplication = NSRunningApplication(
@@ -1890,6 +2008,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// On quit: ask the window and setup to quit, wait up to `timeout`, then
     /// end whatever is left with SIGTERM and SIGKILL (spec-shell S6.3).
     public func stopWindowsForQuit(timeout: TimeInterval = 1) async {
+        windowsRetired = true
+        windowRequests.removeAll()
         let windows = ([recallProcess] + onboardingProcesses).compactMap { $0 }.filter(\.isRunning)
         recallProcess = nil
         onboardingProcesses = []
