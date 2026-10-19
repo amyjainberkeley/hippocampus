@@ -2,6 +2,7 @@ import AppKit
 import CoreImage
 import OnboardingKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 // Small, faithful copies of Hippocampus's own surfaces, drawn from made-up
 // data (`OnboardingCopy.Demo`): Ask as it drops from the top of the screen,
@@ -35,33 +36,30 @@ enum MiniPalette {
     }
 }
 
-/// An app's own icon, or a plain glyph when it is not installed. Grey
-/// when the app's window is skipped: the grey is in the picture itself, so
-/// it shows the same on screen and in a render.
+/// An app's own icon, or macOS's plain app icon when Launch Services
+/// cannot find the app. Grey when the app's window is skipped: the grey is
+/// in the picture itself, so it shows the same on screen and in a render.
 struct AppIconImage: View {
     let bundleId: String
     var side: CGFloat = 16
     var grey = false
 
     var body: some View {
-        Group {
-            if let icon = Self.icon(for: bundleId, grey: grey) {
-                Image(nsImage: icon).resizable().interpolation(.high)
-            } else {
-                Image(systemName: "app.dashed").resizable().scaledToFit().foregroundStyle(MiniPalette.muted)
-            }
-        }
-        .frame(width: side, height: side)
-        .accessibilityHidden(true)
+        Image(nsImage: Self.icon(for: bundleId, grey: grey))
+            .resizable()
+            .interpolation(.high)
+            .frame(width: side, height: side)
+            .accessibilityHidden(true)
     }
 
     @MainActor private static var cache: [String: NSImage] = [:]
 
-    @MainActor static func icon(for bundleId: String, grey: Bool = false) -> NSImage? {
+    @MainActor static func icon(for bundleId: String, grey: Bool = false) -> NSImage {
         let key = grey ? "grey:" + bundleId : bundleId
         if let known = cache[key] { return known }
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else { return nil }
-        var icon = NSWorkspace.shared.icon(forFile: url.path)
+        var icon = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)
+            .map { NSWorkspace.shared.icon(forFile: $0.path) }
+            ?? NSWorkspace.shared.icon(for: .applicationBundle)
         if grey, let greyed = Self.greyed(icon) { icon = greyed }
         cache[key] = icon
         return icon

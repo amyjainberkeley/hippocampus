@@ -145,6 +145,7 @@ enum OnboardingPreviewRenderer {
         add("5-try-it-turning-on", tryIt(.starting))
         add("5-try-it-reading", tryIt(.reading(pricing)))
         add("5-try-it-proof", tryIt(.proof(read), understanding: .available))
+        add("5-try-it-proof-long-name", tryIt(.proof(longProof()), understanding: .noModel, macOS: 26))
         add("5-try-it-skipped-password-app", tryIt(.skipped(.neverRead, passwords)))
         add("5-try-it-skipped-private", tryIt(.skipped(.privateWindow, incognito)))
         add("5-try-it-skipped-excluded", tryIt(.skipped(.excluded, messages)))
@@ -295,16 +296,32 @@ enum OnboardingPreviewRenderer {
     /// A pricing page read twelve seconds ago, as `ReadProof.choose` makes
     /// it from a stored row. Synthetic text, no real moment.
     private static func proof() -> ReadProof {
-        let text = "Pricing | Stripe\nStart with per-seat pricing for each user on your team.\nVolume pricing charges the same price for every unit.\nTiered pricing lowers the price as more seats are added.\nContact sales"
+        proof(
+            app: "com.apple.Safari", name: "Safari", title: "Pricing | Stripe",
+            text: "Pricing | Stripe\nStart with per-seat pricing for each user on your team.\nVolume pricing charges the same price for every unit.\nTiered pricing lowers the price as more seats are added.\nContact sales"
+        )
+    }
+
+    /// The longest a proof gets: a long app name in the title, a long
+    /// window title on the card, and a line shortened to fit. Made up.
+    private static func longProof() -> ReadProof {
+        proof(
+            app: "com.microsoft.Powerpoint", name: "Microsoft PowerPoint",
+            title: "Team and Business pricing for next year, final review before the board meeting",
+            text: "Team moves to eighteen dollars a seat, billed once a year, for every new customer from January onward.\nBusiness keeps volume pricing for teams over fifty seats.\nAsk finance to confirm the discount before Friday."
+        )
+    }
+
+    private static func proof(app: String, name: String, title: String, text: String) -> ReadProof {
         let row = ReadRow(
             tsUs: UInt64((now.timeIntervalSince1970 - 12) * 1_000_000),
-            appBundleId: "com.apple.Safari",
-            windowTitle: "Pricing | Stripe",
+            appBundleId: app,
+            windowTitle: title,
             text: text,
             sourceKind: "screen_context"
         )
         // swiftlint:disable:next force_unwrapping
-        return ReadProof.choose(from: [row], lastActivatedApp: "com.apple.Safari", nameFor: { _ in "Safari" })!
+        return ReadProof.choose(from: [row], lastActivatedApp: app, nameFor: { _ in name })!
     }
 
     // MARK: - Drawing

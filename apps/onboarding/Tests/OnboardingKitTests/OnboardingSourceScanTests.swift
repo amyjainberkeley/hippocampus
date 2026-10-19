@@ -197,6 +197,14 @@ final class OnboardingSourceScanTests: XCTestCase {
         }
     }
 
+    func testAnAppLaunchServicesCannotFindShowsMacOSsOwnAppIcon() throws {
+        // Never a dashed placeholder: Try it names the app it read, and a
+        // missing icon must still look like an app.
+        let icons = code(try source("Onboarding/Demo/ProductMiniatures.swift"))
+        XCTAssertTrue(icons.contains { $0.contains("?? NSWorkspace.shared.icon(for: .applicationBundle)") })
+        XCTAssertFalse(icons.contains { $0.contains("\"app.dashed\"") })
+    }
+
     func testTryItReadsTheRealWindowInFrontUnderTheSameRules() throws {
         let tryIt = code(try source("Onboarding/Slides/TryItSlide.swift")).joined(separator: "\n")
         XCTAssertTrue(tryIt.contains("let windows = WindowServerFrontWindowSource()"))
