@@ -261,10 +261,16 @@ public enum OnboardingCopy {
 
     public static let tryItTitle = "Try it"
     public static let tryItStarting = "Turning on…"
-    /// Over what was read: the screen's title once a proof shows.
+    /// Over what was read: the screen's title once a proof shows, in Amy's
+    /// words. "Just" here means a moment ago: the read happened seconds
+    /// before, and the card under it says how many.
     public static func tryItReadFrom(_ app: String) -> String {
-        "Here’s what I read from \(app)"
+        "Here’s what I \(justRead) from \(app)"
     }
+
+    /// The one place setup says "just", meaning a moment ago, never "only"
+    /// or "simply". The copy tests allow it in this phrase alone.
+    static let justRead = "just read"
     /// The window in front is being read.
     public static func tryItReading(_ app: String) -> String {
         "Reading \(app)…"

@@ -107,7 +107,7 @@ final class OnboardingE2ETests: XCTestCase {
             await tryIt.tick()
         }
         let shown = TryItPresentation(card: tryIt.card, keyNow: key0, understanding: .available)
-        XCTAssertEqual(shown.title, "Here’s what I read from Notes")
+        XCTAssertEqual(shown.title, "Here’s what I just read from Notes")
         XCTAssertEqual(shown.proof?.appName, "Notes")
         XCTAssertEqual(shown.proof?.lines, ["Beta ships to forty design partners on October 21."])
         XCTAssertEqual(shown.next, "Press Shift twice and ask about it.")

@@ -110,7 +110,7 @@ final class TryItViewModelTests: XCTestCase {
         XCTAssertEqual(proof.appName, "Notes")
         XCTAssertEqual(TryItPresentation(card: vm.card, keyNow: AskKeyNow(effectiveLabel: nil, effectivePhrase: nil, stored: nil),
                                          understanding: nil).title,
-                       "Here’s what I read from Notes")
+                       "Here’s what I just read from Notes")
     }
 
     func testAnotherWindowReadInTheBackgroundIsNotShown() async {

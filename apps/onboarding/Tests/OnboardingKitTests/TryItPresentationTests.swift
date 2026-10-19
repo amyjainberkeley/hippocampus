@@ -22,7 +22,7 @@ final class TryItPresentationTests: XCTestCase {
 
     func testAProofSaysWhereItWasReadAndWhatToTryNow() {
         let shown = TryItPresentation(card: .proof(proof), keyNow: shiftTwice, understanding: .available)
-        XCTAssertEqual(shown.title, "Here’s what I read from Safari")
+        XCTAssertEqual(shown.title, "Here’s what I just read from Safari")
         XCTAssertEqual(shown.proof, proof)
         XCTAssertNil(shown.heading)
         XCTAssertNil(shown.action)

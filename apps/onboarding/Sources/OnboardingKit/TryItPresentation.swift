@@ -5,7 +5,7 @@
 // sees.
 //
 // Once something was read, the screen's title says where from ("Here’s what
-// I read from Safari") and the card shows it. Only a proof carries the lines
+// I just read from Safari") and the card shows it. Only a proof carries the lines
 // under it: what to try now (a question when answers work on this Mac, a
 // word from that window when they do not), "Open it for me", where macOS's
 // recording icon is and what Stop Sharing does, and at most one line about

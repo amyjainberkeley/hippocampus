@@ -158,7 +158,8 @@ final class OnboardingCopyTests: XCTestCase {
     }
 
     func testTryItSaysWhatItReadAndWhyAWindowIsSkipped() {
-        XCTAssertEqual(OnboardingCopy.tryItReadFrom("Safari"), "Here’s what I read from Safari")
+        // Amy's words, word for word: "just" means a moment ago.
+        XCTAssertEqual(OnboardingCopy.tryItReadFrom("Safari"), "Here’s what I just read from Safari")
         XCTAssertEqual(OnboardingCopy.tryItReading("Safari"), "Reading Safari…")
         XCTAssertEqual(OnboardingCopy.tryItNoWindow, "No window to read yet.")
         XCTAssertEqual(OnboardingCopy.tryItNothingToShow("Finder"), "Nothing to read in Finder yet.")
@@ -374,10 +375,13 @@ final class OnboardingCopyTests: XCTestCase {
             "on-device", "monitor", "track", "watch", "observe", "collect", "evidence", "session context",
         ]
         for string in newStrings {
-            // macOS's own names are allowed as macOS spells them.
+            // macOS's own names are allowed as macOS spells them, and Try
+            // it's title says "I just read", where "just" means a moment
+            // ago. Nowhere else may "just" mean "only" or "simply".
             let plain = string
                 .replacingOccurrences(of: "Screen & System Audio Recording", with: "")
                 .replacingOccurrences(of: "Screen Recording", with: "")
+                .replacingOccurrences(of: "what I \(OnboardingCopy.justRead) from", with: "")
                 .lowercased()
             let words = Set(plain.components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty })
             for word in banned where word.contains(" ") ? plain.contains(word) : words.contains(word) {

@@ -117,7 +117,7 @@ final class ReadProofTests: XCTestCase {
         XCTAssertEqual(proof.lines, [])
         // The card names the window; the screen's title names the app.
         XCTAssertEqual(OnboardingCopy.proofHeading(proof), "Untitled")
-        XCTAssertEqual(OnboardingCopy.tryItReadFrom(proof.appName), "Here’s what I read from TextEdit")
+        XCTAssertEqual(OnboardingCopy.tryItReadFrom(proof.appName), "Here’s what I just read from TextEdit")
         let untitled = try XCTUnwrap(ReadProof.choose(
             from: [row(6, "com.apple.TextEdit", title: nil, text: "File Edit\nOK")], lastActivatedApp: nil, nameFor: names
         ))
