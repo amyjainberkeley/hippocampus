@@ -33,8 +33,8 @@ final class ReadProofTests: XCTestCase {
         """
         let lines = ReadProof.lines(from: text, windowTitle: "Launch plan")
         XCTAssertEqual(lines, [
-            "Ask Dana about the annual discount before Friday.",
             "We agreed to ship the pricing page next week.",
+            "Ask Dana about the annual discount before Friday.",
         ])
     }
 
@@ -77,13 +77,30 @@ final class ReadProofTests: XCTestCase {
             "Short but still four words",
         ].joined(separator: "\n")
         XCTAssertEqual(ReadProof.lines(from: text, windowTitle: nil), [
-            "Ask Dana about the annual discount before Friday.",
             "We agreed to ship the pricing page next week.",
+            "Ask Dana about the annual discount before Friday.",
             "Short but still four words",
         ])
     }
 
-    func testTheLongestLinesComeFirstAtMostThreeAndShortened() {
+    func testTheLongestThreeAreKeptAndShowInTheWindowsOrder() {
+        // The card reads like the window: the longest lines are kept, and
+        // a long line low in the window stays low on the card.
+        let text = [
+            "Start with per-seat pricing for each user.",
+            "Two short words here",
+            "Volume pricing charges the same price for every unit.",
+            "Contact sales for more",
+            "Tiered pricing lowers the price per seat as more seats are added to the plan.",
+        ].joined(separator: "\n")
+        XCTAssertEqual(ReadProof.lines(from: text, windowTitle: nil), [
+            "Start with per-seat pricing for each user.",
+            "Volume pricing charges the same price for every unit.",
+            "Tiered pricing lowers the price per seat as more seats are added to the plan.",
+        ])
+    }
+
+    func testTheLongestLinesAreKeptAtMostThreeAndShortened() {
         let long = "This sentence keeps going with more and more words so that it runs well past the ninety character limit for a card"
         let text = [
             "Short but still four words",
@@ -115,7 +132,13 @@ final class ReadProofTests: XCTestCase {
         XCTAssertEqual(proof.appName, "TextEdit")
         XCTAssertEqual(proof.windowTitle, "Untitled")
         XCTAssertEqual(proof.lines, [])
-        XCTAssertEqual(OnboardingCopy.proofHeading(proof), "TextEdit · Untitled")
+        // The card names the window; the screen's title names the app.
+        XCTAssertEqual(OnboardingCopy.proofHeading(proof), "Untitled")
+        XCTAssertEqual(OnboardingCopy.tryItReadFrom(proof.appName), "Here’s what I just read from TextEdit")
+        let untitled = try XCTUnwrap(ReadProof.choose(
+            from: [row(6, "com.apple.TextEdit", title: nil, text: "File Edit\nOK")], lastActivatedApp: nil, nameFor: names
+        ))
+        XCTAssertEqual(OnboardingCopy.proofHeading(untitled), "TextEdit", "a window with no title is named by its app")
     }
 
     func testTheAppNameIsNeverTheBundleId() throws {

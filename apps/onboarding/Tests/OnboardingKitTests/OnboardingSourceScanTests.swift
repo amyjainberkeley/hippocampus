@@ -97,11 +97,23 @@ final class OnboardingSourceScanTests: XCTestCase {
         }
     }
 
-    func testBackShowsOnPermissionsAndPromiseOnly() throws {
+    func testEveryScreenAfterWelcomePutsItsTitleInTheSamePlace() throws {
+        // Welcome centres its hero; the four screens after it lay out from
+        // the top, so the title stays put as the person moves on.
+        let screens = ["WhatYouGetSlide", "PermissionsSlide", "PromiseSlide", "TryItSlide"]
+        for screen in screens {
+            let lines = code(try source("Onboarding/Slides/\(screen).swift"))
+            XCTAssertTrue(lines.contains { $0.hasSuffix("SlideContainer {") }, "\(screen) lays out from the top")
+            XCTAssertFalse(lines.contains { $0.contains("SlideContainer(alignment:") }, "\(screen) moves its title")
+            XCTAssertTrue(lines.contains { $0.contains("ScreenHeader(title:") }, "\(screen) titles itself as the others do")
+        }
+    }
+
+    func testBackShowsOnWhatYouGetPermissionsAndPromiseOnly() throws {
         let flow = try source("Onboarding/OnboardingFlowView.swift")
         XCTAssertTrue(flow.contains("back: flowVM.canGoBack ? { flowVM.back() } : nil"))
         XCTAssertTrue(try source("OnboardingKit/OnboardingFlowViewModel.swift")
-            .contains("screen == .permissions || screen == .promise"))
+            .contains("screen == .whatYouGet || screen == .permissions || screen == .promise"))
     }
 
     // MARK: - What the switch removed
@@ -150,13 +162,100 @@ final class OnboardingSourceScanTests: XCTestCase {
 
     // MARK: - The screens
 
-    func testWelcomeHasNoAppIcon() throws {
+    func testWelcomeDrawsTheHiMarkAndPlaysTheDemoFromItsScript() throws {
         let welcome = try source("Onboarding/Slides/WelcomeSlide.swift")
-        XCTAssertFalse(welcome.contains("AppIcon"), "the title names the product")
+        // The mark is drawn from the icon's own geometry, never a bitmap.
+        XCTAssertTrue(welcome.contains("HiMarkTile("), "the hi mark at the top")
+        XCTAssertFalse(welcome.contains("AppIcon"))
         XCTAssertFalse(welcome.contains("Image(nsImage:"))
-        XCTAssertTrue(welcome.contains("KeycapRow(keycaps: key.keycaps, pressed: pressed)"), "keycaps in the sentence")
-        XCTAssertTrue(welcome.contains("for time in key.pulseTimes"))
-        XCTAssertTrue(welcome.contains("guard animates, !reduceMotion else { return }"))
+        // The keycaps are in the sentence and press as Ask opens in the demo,
+        // as many times as the key is pressed.
+        XCTAssertTrue(welcome.contains("KeycapRow(keycaps: key.keycaps, pressed: pressed"), "keycaps in the sentence")
+        XCTAssertTrue(welcome.contains("let presses = key.pulseTimes.count"))
+        XCTAssertTrue(welcome.contains("WelcomeDemoScript.frame(at: Date().timeIntervalSince(start), presses: presses)"))
+        // Under Reduce Motion nothing moves: each moment whole, then the next.
+        XCTAssertTrue(welcome.contains("guard !reduceMotion else {\n            await playStill()"))
+        XCTAssertTrue(welcome.contains("WelcomeDemoScript.finalFrame("))
+        XCTAssertTrue(welcome.contains("guard animates, demoFrame == nil else { return }"), "the renderer draws one frame")
+    }
+
+    func testTheDemoAndTheRendersShowOnlyMadeUpData() throws {
+        // Welcome's demo and What you get draw `OnboardingCopy.Demo` only:
+        // they read no memory and list no window.
+        var files = ["Onboarding/Slides/WelcomeSlide.swift", "Onboarding/Slides/WhatYouGetSlide.swift",
+                     "Onboarding/OnboardingPreviewRenderer.swift"]
+        let demo = sourcesRoot.appendingPathComponent("Onboarding/Demo")
+        let names = try FileManager.default.contentsOfDirectory(atPath: demo.path).filter { $0.hasSuffix(".swift") }
+        XCTAssertFalse(names.isEmpty)
+        files += names.map { "Onboarding/Demo/\($0)" }
+        for file in files {
+            let lines = code(try source(file))
+            for call in ["LastReadProbe", "AgentReaderLauncher", "WindowServerFrontWindowSource", "CGWindowList",
+                         "PersonExclusions.load", "SecureTextEntry.isOn", "UnderstandingProbe", "DiskRetentionStore"] {
+                XCTAssertFalse(lines.contains { $0.contains(call) }, "\(file) uses \(call)")
+            }
+        }
+    }
+
+    func testAnAppLaunchServicesCannotFindShowsMacOSsOwnAppIcon() throws {
+        // Never a dashed placeholder: Try it names the app it read, and a
+        // missing icon must still look like an app.
+        let icons = code(try source("Onboarding/Demo/ProductMiniatures.swift"))
+        XCTAssertTrue(icons.contains { $0.contains("?? NSWorkspace.shared.icon(for: .applicationBundle)") })
+        XCTAssertFalse(icons.contains { $0.contains("\"app.dashed\"") })
+    }
+
+    func testTryItReadsTheRealWindowInFrontUnderTheSameRules() throws {
+        let tryIt = code(try source("Onboarding/Slides/TryItSlide.swift")).joined(separator: "\n")
+        XCTAssertTrue(tryIt.contains("let windows = WindowServerFrontWindowSource()"))
+        XCTAssertTrue(tryIt.contains("frontWindow: { windows.frontWindow() }"))
+        XCTAssertTrue(tryIt.contains("rules: ReadRules(excludedApps: PersonExclusions.load())"))
+        XCTAssertTrue(tryIt.contains("passwordFieldInUse: { SecureTextEntry.isOn() }"))
+        // A window brought forward is read at once, as opening Ask reads it.
+        XCTAssertTrue(tryIt.contains("requestFreshRead: { SetupReadRequest.post() }"))
+        XCTAssertTrue(tryIt.contains("probe: AgentLastReadProbe(launcher: AgentReaderLauncher())"))
+    }
+
+    func testGreyTextIsTheWindowsOwnGreyNotMacOSsLighterOne() throws {
+        // `OnboardingDesign.Palette.secondaryText` keeps 4.5:1; macOS's
+        // secondary label renders under 4:1 on setup's surfaces.
+        for (name, text) in try sources() {
+            let lines = code(text)
+            XCTAssertFalse(lines.contains { $0.contains("foregroundStyle(.secondary)") }, "\(name) uses .secondary")
+            XCTAssertFalse(lines.contains { $0.contains("Color.secondary)") || $0.contains("= .secondary") },
+                           "\(name) uses .secondary")
+        }
+    }
+
+    func testWarningColoursMarkIconsNeverText() throws {
+        // Orange or red text on white reads at about 2:1 to 4:1; a warning
+        // shows its colour on an icon, beside text in the normal colours.
+        let panel = code(try source("Onboarding/Slides/BrowserExtensionSlide.swift"))
+        for (index, line) in panel.enumerated() where line.contains("Text(OnboardingCopy.extensionFolderMissing)") {
+            let style = panel[index...].prefix(4).joined(separator: "\n")
+            XCTAssertFalse(style.contains("Palette.attention"), "the missing-folder line is orange text")
+            XCTAssertTrue(style.contains(".foregroundStyle(.primary)"))
+        }
+        XCTAssertTrue(panel.contains { $0.contains("Text(OnboardingCopy.extensionFolderMissing)") })
+    }
+
+    func testTheOnlyGradientIsTheAppIconsTile() throws {
+        // Backdrops stay the native material; the hi mark's tile carries the
+        // icon's own white-to-grey fall.
+        for (name, text) in try sources() where name != "HiMarkTile.swift" {
+            XCTAssertFalse(code(text).contains { $0.range(of: "gradient", options: .caseInsensitive) != nil },
+                           "\(name) draws a gradient")
+        }
+        let tile = try source("Onboarding/SharedComponents/HiMarkTile.swift")
+        XCTAssertTrue(tile.contains("OnboardingHiMark.tileTopRGB"))
+        XCTAssertTrue(tile.contains("OnboardingHiMark.tileBottomRGB"))
+    }
+
+    func testTryItsKeycapsPressOnlyLiveAndNeverUnderReduceMotion() throws {
+        let tryIt = code(try source("Onboarding/Slides/TryItSlide.swift")).joined(separator: "\n")
+        XCTAssertTrue(tryIt.contains("guard now == nil, !reduceMotion, presentation.keyPresses > 0 else { return }"))
+        XCTAssertTrue(tryIt.contains("KeycapRow(keycaps: presentation.keycaps, pressed: keyDown, size: 13)"))
+        XCTAssertTrue(tryIt.contains("AskKeyHint.pulseTimes(presses: presentation.keyPresses)"), "Welcome's times")
     }
 
     func testOpenItForMeIsALink() throws {
@@ -181,6 +280,19 @@ final class OnboardingSourceScanTests: XCTestCase {
         let promise = try source("Onboarding/Slides/PromiseSlide.swift")
         XCTAssertTrue(promise.contains("openAtLogin: flowVM.isReview ? nil : $flowVM.openAtLogin"))
         XCTAssertTrue(promise.contains("Toggle(OnboardingCopy.openAtLogin, isOn: openAtLogin)"))
+    }
+
+    func testThePromiseShowsItsFactsOneSentenceALine() throws {
+        let promise = code(try source("Onboarding/Slides/PromiseSlide.swift")).joined(separator: "\n")
+        XCTAssertTrue(promise.contains("ForEach(OnboardingCopy.sentences(text), id: \\.self)"))
+    }
+
+    func testAWaitingPermissionRowShowsOneStepALine() throws {
+        let row = code(try source("Onboarding/Slides/PermissionsSlide.swift")).joined(separator: "\n")
+        XCTAssertTrue(row.contains("ForEach(OnboardingCopy.sentences(OnboardingCopy.waitingHint(row.surface)), id: \\.self)"))
+        XCTAssertEqual(OnboardingCopy.sentences(OnboardingCopy.waitingHint(.screenRecording)), [
+            "Choose Open System Settings, then turn on Hippocampus.", "If macOS offers Quit & Reopen, choose Later.",
+        ])
     }
 
     func testThePromiseIsTitledByMode() throws {
@@ -208,7 +320,7 @@ final class OnboardingSourceScanTests: XCTestCase {
 
     func testTheBrowserExtensionPanelTakesEveryWordFromTheCopyFile() throws {
         // Preferences opens it, so its words are held by the copy tests
-        // like the four screens'.
+        // like the five screens'.
         let panel = code(try source("Onboarding/Slides/BrowserExtensionSlide.swift"))
         let literalWords = try NSRegularExpression(pattern: #"(Text|Button|title:|body:)\(?\s*"[A-Za-z]"#)
         for line in panel {

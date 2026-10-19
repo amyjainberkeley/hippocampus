@@ -1,7 +1,8 @@
 // swift-tools-version: 6.0
 //
-// Hippocampus setup — SwiftUI macOS app: four screens (Welcome,
-// Permissions, Promise, Try it) and the panels the app opens by route.
+// Hippocampus setup — SwiftUI macOS app: five screens (Welcome, What
+// you get, Permissions, Promise, Try it) and the panels the app opens by
+// route.
 //
 // Targets:
 //   - `Onboarding` (executable) — the @main entry point, the window and

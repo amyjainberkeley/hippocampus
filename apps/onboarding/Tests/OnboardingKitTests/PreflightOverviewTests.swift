@@ -4,7 +4,7 @@ import XCTest
 /// The Automation permission and the Full Disk Access snapshot the view
 /// model keeps for the panels: the browser extension panel's Safari flow
 /// raises the Automation prompt, and app access asks for Full Disk Access.
-/// The four screens never ask for either.
+/// The five screens never ask for either.
 @MainActor
 final class PreflightOverviewTests: XCTestCase {
 

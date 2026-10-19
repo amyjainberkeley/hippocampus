@@ -5,8 +5,10 @@
 //
 // The card never shows a bundle id, the stored `[app=…]` header, or a row
 // of interface labels. A line is shown only when it has four or more words,
-// is mostly letters and reads like a sentence; the longest go first. A long
-// line is shortened to fit, and what is shown must pass on its own. When no
+// is mostly letters and reads like a sentence; the longest are kept, and
+// they show in the order the window has them, so the card reads like the
+// window. A long line is shortened to fit, and what is shown must pass on
+// its own. When no
 // line passes, the card shows the app and title alone. It is text only,
 // never a screenshot. Rows from the app the person last brought forward
 // come first, so the card never shows a window they did not click.
@@ -99,7 +101,8 @@ public struct ReadProof: Sendable, Equatable {
         )
     }
 
-    /// The lines worth showing from one row's text, longest first.
+    /// The lines worth showing from one row's text: the longest, at most
+    /// three, in the order the window has them.
     public static func lines(from text: String, windowTitle: String?) -> [String] {
         // Text after a record separator is the window's interface (tabs,
         // sidebars, toolbars); only what comes before it is content.
@@ -119,6 +122,7 @@ public struct ReadProof: Sendable, Equatable {
         return kept.enumerated()
             .sorted { $0.element.length != $1.element.length ? $0.element.length > $1.element.length : $0.offset < $1.offset }
             .prefix(maximumLines)
+            .sorted { $0.offset < $1.offset }
             .map { $0.element.shown }
     }
 

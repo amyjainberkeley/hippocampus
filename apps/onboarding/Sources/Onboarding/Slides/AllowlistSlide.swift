@@ -23,7 +23,7 @@ struct AllowlistSlide: View {
                 // (`admissionPolicy: .ordinaryApplications`), so what is
                 // skipped in all of them is what matters here.
                 OnboardingDesign.TypeRamp.body(OnboardingCopy.appAccessSkipped)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(OnboardingDesign.Palette.secondaryText)
                     .frame(maxWidth: 520, alignment: .leading)
 
                 ScrollView {
@@ -136,7 +136,7 @@ struct AllowlistSlide: View {
             Text(title)
                 .font(.system(size: 14, weight: .semibold))
             OnboardingDesign.TypeRamp.footnote(subtitle)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(OnboardingDesign.Palette.secondaryText)
         }
     }
 

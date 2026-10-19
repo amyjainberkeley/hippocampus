@@ -26,7 +26,7 @@ final class OnboardingAppDelegate: NSObject, NSApplicationDelegate, @unchecked S
 
 /// Started by `OnboardingEntryPoint`, which answers the Screen Recording
 /// probe commands first. One window, 760 by 560 with its title bar hidden:
-/// the four screens, or the panel the app asked for.
+/// the five screens, or the panel the app asked for.
 struct OnboardingApp: App {
     @NSApplicationDelegateAdaptor(OnboardingAppDelegate.self) var appDelegate
 

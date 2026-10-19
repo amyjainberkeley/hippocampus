@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// OnboardingFlowViewModel — setup in four screens: Welcome, Permissions,
-// Promise, Try it.
+// OnboardingFlowViewModel — setup in five screens: Welcome, What you get,
+// Permissions, Promise, Try it.
 //
 // What it holds:
 // - Consent has one writer, `startRemembering(keyReady:)`. Nothing else
@@ -82,7 +82,7 @@ public final class OnboardingFlowViewModel: ObservableObject {
     public let isReview: Bool
     public let screenRecordingPermission: any TCCPermission
     public let accessibilityPermission: any TCCPermission
-    /// Kept for the panels; the four screens never ask for it.
+    /// Kept for the panels; the five screens never ask for it.
     public let automationPermission: any TCCPermission
 
     /// The two rows, in the order they are shown.
@@ -147,7 +147,7 @@ public final class OnboardingFlowViewModel: ObservableObject {
 
     public var canAdvance: Bool {
         switch screen {
-        case .welcome: true
+        case .welcome, .whatYouGet: true
         case .permissions: bothGranted
         // On a first run only Start Remembering leaves Promise.
         case .promise: isReview
@@ -155,8 +155,10 @@ public final class OnboardingFlowViewModel: ObservableObject {
         }
     }
 
+    /// Back on the screens between Welcome and consent. Try it has none:
+    /// consent is behind it.
     public var canGoBack: Bool {
-        screen == .permissions || screen == .promise
+        screen == .whatYouGet || screen == .permissions || screen == .promise
     }
 
     public func advance() {

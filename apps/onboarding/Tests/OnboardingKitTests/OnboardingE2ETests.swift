@@ -22,8 +22,8 @@ private final class OneRowReads: LastReadProbe, @unchecked Sendable {
 }
 
 /// Setup from first launch to its end, through the view models the
-/// screens draw: Welcome, Permissions, Promise (consent), Try it, and
-/// what happens when it is opened again. Nothing here touches the
+/// screens draw: Welcome, What you get, Permissions, Promise (consent),
+/// Try it, and what happens when it is opened again. Nothing here touches the
 /// person's files: every store is in memory or in a temporary folder.
 @MainActor
 final class OnboardingE2ETests: XCTestCase {
@@ -38,8 +38,10 @@ final class OnboardingE2ETests: XCTestCase {
         )
         let key = PrepareBrainViewModel(keyGenerator: StubKeyGenerator())
 
-        // Welcome.
+        // Welcome, then what it does.
         XCTAssertEqual(flow.screen, .welcome)
+        flow.advance()
+        XCTAssertEqual(flow.screen, .whatYouGet)
         flow.advance()
 
         // Permissions: both rows at once, each asked with macOS's prompt.
@@ -73,32 +75,42 @@ final class OnboardingE2ETests: XCTestCase {
         XCTAssertEqual(flow.screen, .tryIt)
         XCTAssertNil(state.loadRoute(), "after consent there is nothing to resume")
 
-        // Try it: "Turning on…", then what was read, then Ask. The app was
-        // not remembering when it opened setup; consent started it.
+        // Try it: "Turning on…", then the window behind setup is read, then
+        // Ask. The app was not remembering when it opened setup; consent
+        // started it. The window is the person's note, read whole by
+        // whole-screen reading while setup is in front.
         let consentAt = try XCTUnwrap(flow.consentGivenAtUs)
         let reads = OneRowReads(row: ReadRow(
             tsUs: consentAt + 5_000_000, appBundleId: "com.apple.Notes", windowTitle: "Launch plan",
-            text: "Launch plan\nBeta ships to forty design partners on October 21.", sourceKind: "screen_ocr"
+            text: "Launch plan\nBeta ships to forty design partners on October 21.", sourceKind: "screen_context"
         ))
+        let note = FrontWindow(bundleId: "com.apple.Notes", appName: "Notes", title: "Launch plan")
         let tryIt = TryItViewModel(
             probe: reads, startedAt: clock.now,
             cursorTsUs: TryItViewModel.cursor(consentGivenAtUs: flow.consentGivenAtUs, now: clock.now),
             remembering: flow.rememberingForTryIt(environment: [RememberingState.environmentKey: "off"]),
             turningOn: flow.consentGivenAtUs != nil, now: { clock.now },
             permissionsOn: { await flow.permissionsStillOn() },
-            nameFor: { _ in "Notes" }
+            nameFor: { _ in "Notes" },
+            frontWindow: { note }
         )
         let key0 = AskKeyNow(effectiveLabel: "⇧⇧", effectivePhrase: "Press Shift twice", stored: nil)
-        XCTAssertEqual(TryItPresentation(card: tryIt.card, keyNow: key0, understanding: nil).message,
+        XCTAssertEqual(TryItPresentation(card: tryIt.card, keyNow: key0, understanding: nil).heading,
                        OnboardingCopy.tryItStarting)
-        for _ in 0..<5 {
+        for _ in 0..<3 {
+            clock.advance(1)
+            await tryIt.tick()
+        }
+        XCTAssertEqual(TryItPresentation(card: tryIt.card, keyNow: key0, understanding: nil).heading, "Reading Notes…")
+        for _ in 0..<2 {
             clock.advance(1)
             await tryIt.tick()
         }
         let shown = TryItPresentation(card: tryIt.card, keyNow: key0, understanding: .available)
+        XCTAssertEqual(shown.title, "Here’s what I just read from Notes")
         XCTAssertEqual(shown.proof?.appName, "Notes")
         XCTAssertEqual(shown.proof?.lines, ["Beta ships to forty design partners on October 21."])
-        XCTAssertEqual(shown.next, "Now press Shift twice and ask about it.")
+        XCTAssertEqual(shown.next, "Press Shift twice and ask about it.")
         XCTAssertEqual(shown.stopSharingNote, OnboardingCopy.stopSharingNote)
         tryIt.askDidShow()
         XCTAssertEqual(TryItPresentation(card: tryIt.card, keyNow: key0, understanding: .available).finished,
@@ -144,6 +156,7 @@ final class OnboardingE2ETests: XCTestCase {
         XCTAssertNil(OnboardingCopy.promiseBody(isReview: true))
         flow.advance()
         flow.advance()
+        flow.advance()
         XCTAssertEqual(flow.screen, .promise)
         XCTAssertEqual(OnboardingCopy.promisePrimary(isReview: true, keyState: .checking), OnboardingCopy.continueLabel)
         flow.advance()
@@ -163,6 +176,7 @@ final class OnboardingE2ETests: XCTestCase {
         let sr = StubTCCPermission(kind: .screenRecording, status: .granted)
         let ax = StubTCCPermission(kind: .accessibility, status: .granted)
         let first = OnboardingFlowViewModel(screenRecording: sr, accessibility: ax, stateStore: store)
+        first.advance()
         first.advance()
         first.advance()
         XCTAssertEqual(first.screen, .promise)

@@ -1,10 +1,11 @@
 import XCTest
 @testable import OnboardingKit
 
-/// Try it tells the person why an app in front is not read. The list it
-/// uses copies the capture helper's, which onboarding does not link; these
-/// tests hold the copy to the helper's source. Browsers are read like every
-/// other window (RULINGS G8), so no browser list is copied.
+/// Try it tells the person why the window in front is not read. The rules it
+/// uses copy the capture helper's, which onboarding does not link; these
+/// tests hold the copies to the helper's source. Browsers are read like
+/// every other window (RULINGS G8); the browser list is copied only to say
+/// when a window shows it is private.
 final class CaptureListParityTests: XCTestCase {
     private let suppression = repositoryRoot
         .appendingPathComponent("adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Suppression")
@@ -33,8 +34,8 @@ final class CaptureListParityTests: XCTestCase {
         // The helper splits its never-read identifiers into two constants:
         // `appBundles` (system agents, matched exactly) and
         // `passwordManagerFamilies` (password managers and authenticators,
-        // matched by identifier family). Onboarding's waiting card copies both,
-        // and these assertions hold the copies to the helper's source.
+        // matched by identifier family). Try it copies both, and these
+        // assertions hold the copies to the helper's source.
         let appBundles = try quotedStrings(
             after: "public static let appBundles: Set<String> =", in: "CaptureAdmissionPolicy.swift")
         let families = try quotedStrings(
@@ -49,18 +50,38 @@ final class CaptureListParityTests: XCTestCase {
 
         // The system agents the card names (exact match) are the helper's
         // `appBundles` minus Hippocampus's own apps — no more, no less.
-        XCTAssertEqual(FrontAppNote.neverReadApps, appBundles.subtracting(own))
+        XCTAssertEqual(ReadRules.neverReadApps, appBundles.subtracting(own))
 
         // The password-manager families the card matches by prefix are the
         // helper's `passwordManagerFamilies`, exactly, so the "never read"
         // note covers every password manager and authenticator the helper
         // drops rather than a hand-picked subset.
-        XCTAssertEqual(FrontAppNote.neverReadPasswordManagerFamilies, families)
+        XCTAssertEqual(ReadRules.neverReadPasswordManagerFamilies, families)
 
         // The two helper constants partition its never-read set (they never
         // double-list an identifier); onboarding checks both the same way the
-        // helper does (`FrontAppNote.isNeverRead` mirrors
+        // helper does (`ReadRules.isNeverRead` mirrors
         // `SensitiveCaptureDenylist.isNeverReadApp`).
         XCTAssertTrue(appBundles.isDisjoint(with: families))
+    }
+
+    func testPrivateWindowsAreKnownByTheHelpersBrowsersAndTitleMarkers() throws {
+        let browsers = try quotedStrings(
+            after: "public static let browserBundleIds: Set<String> =", in: "BrowserPixelCapturePolicy.swift")
+        XCTAssertEqual(ReadRules.browserBundleIds, browsers)
+        let markers = try quotedStrings(
+            after: "static let privateTitleMarkers =", in: "BrowserPixelCapturePolicy.swift")
+        XCTAssertEqual(Set(ReadRules.privateTitleMarkers), markers)
+    }
+
+    func testThePersonsExclusionsAreReadFromTheFileTheHelperReads() throws {
+        let main = try String(contentsOf: repositoryRoot.appendingPathComponent(
+            "adapters/macos/MCICaptureHelper/Sources/MCICaptureHelper/main.swift"), encoding: .utf8)
+        XCTAssertTrue(main.contains(#"appendingPathComponent("MCI").appendingPathComponent("denylist.toml")"#))
+        XCTAssertEqual(PersonExclusions.defaultURL?.pathComponents.suffix(2), ["MCI", "denylist.toml"])
+        let loader = try String(contentsOf: suppression.appendingPathComponent("DenylistTOMLLoader.swift"),
+                                encoding: .utf8)
+        XCTAssertTrue(loader.contains(#"entry-table    = "[[denylist]]" newline"#))
+        XCTAssertTrue(loader.contains("`appBundle`"), "the kind Try it reads")
     }
 }

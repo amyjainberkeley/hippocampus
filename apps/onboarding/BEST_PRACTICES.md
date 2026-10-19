@@ -6,8 +6,8 @@ specific contracts derived from PR #83 and ADR-0017.
 
 ## Purpose
 
-Setup is four screens (Welcome, Permissions, Promise, Try it) and
-the panels the app opens by route. It is the ONLY place where the
+Setup is five screens (Welcome, What you get, Permissions, Promise,
+Try it) and the panels the app opens by route. It is the ONLY place where the
 person allows Screen Recording and Accessibility, and the only place
 consent is given. A bug here can strand the person in a
 half-permissioned state that produces silent capture failures later.
@@ -62,11 +62,22 @@ consent click, and how permissions are asked.
    consent claims). Surface any wording edit in the PR body.
 
 7. **Views decide nothing.** A screen draws what the kit decided
-   (`TryItPresentation`, the row states, `OnboardingCopy`), so the
-   tests and the preview renderer see what a person sees. After a
-   change, render every screen off screen and look at it:
-   `HIPPOCAMPUS_RENDER_ONBOARDING=<dir>` on a debug build writes each
-   screen and state to a PNG and exits before any window exists.
+   (`TryItPresentation`, the row states, `WelcomeDemoScript`,
+   `OnboardingCopy`), so the tests and the preview renderer see what a
+   person sees. After a change, render every screen off screen and look
+   at it: `HIPPOCAMPUS_RENDER_ONBOARDING=<dir>` on a debug build writes
+   each screen and state to a PNG and exits before any window exists.
+   Add `HIPPOCAMPUS_RENDER_DEMO_STEP=<seconds>` to also write Welcome's
+   demo frame by frame, to check its pace.
+
+8. **Demos are made up; Try it is real.** Welcome's demo and What you
+   get draw `OnboardingCopy.Demo` only: they never read memory, list a
+   window or show the person's screen. Try it is the one screen that
+   reads the person's real window, and only after consent, through the
+   app like any other read: never-read apps, the person's exclusions,
+   private browser windows and password fields are skipped, and the
+   screen says so (`ReadRules`, copied from the helper and held to it by
+   `CaptureListParityTests`). Its tests use made-up windows.
 
 ## Common mistakes
 
@@ -76,6 +87,8 @@ consent click, and how permissions are asked.
   instead of through the `--tcc-request` child.
 - Writing the consent file anywhere but `startRemembering`, or
   letting `advance()` or `goTo` pass Promise on a first run.
+- Showing anything real in a demo or a render. The person's own window
+  belongs on Try it alone, at runtime.
 
 ## Reference chain
 

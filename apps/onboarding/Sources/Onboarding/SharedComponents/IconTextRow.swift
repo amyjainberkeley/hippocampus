@@ -26,7 +26,7 @@ struct IconTextRow: View {
                 if let detail {
                     Text(detail)
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(OnboardingDesign.Palette.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

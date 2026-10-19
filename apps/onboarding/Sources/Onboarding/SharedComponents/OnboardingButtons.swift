@@ -65,7 +65,7 @@ struct SecondaryCTAStyle: ButtonStyle {
 // MARK: - Tertiary (text only)
 
 struct TextCTAStyle: ButtonStyle {
-    var color: Color = .secondary
+    var color: Color = OnboardingDesign.Palette.secondaryText
 
     func makeBody(configuration: Configuration) -> some View {
         CTABody(configuration: configuration, fullWidth: false) { label, pressed, _ in
@@ -136,7 +136,7 @@ extension View {
     }
 
     /// Text-only — tertiary / escape-hatch actions.
-    func onboardingText(color: Color = .secondary) -> some View {
+    func onboardingText(color: Color = OnboardingDesign.Palette.secondaryText) -> some View {
         buttonStyle(TextCTAStyle(color: color))
     }
 }

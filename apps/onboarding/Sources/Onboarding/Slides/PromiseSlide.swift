@@ -1,8 +1,9 @@
 import SwiftUI
 import OnboardingKit
 
-/// Screen 3. What happens to what Hippocampus reads, before anything is
-/// read. Consent is the click on Start Remembering in the bar below, the
+/// Screen 4. Privacy at a glance, before anything is read: three promises,
+/// each a short lead with its detail under it, and what the menu-bar mark
+/// shows. Consent is the click on Start Remembering in the bar below, the
 /// only thing that writes it. The open-at-login choice is made here and
 /// recorded with consent. In review, consent exists and remembering has
 /// started: the never-read panel's title, no body sentence, no checkbox,
@@ -45,71 +46,116 @@ struct PromiseScreen: View {
             VStack(spacing: OnboardingDesign.Space.xl) {
                 ScreenHeader(title: title, intro: intro)
 
-                PromiseLines(kept: kept)
+                // What sits under the promises keeps close to them, so the
+                // tallest state (a failed key and the checkbox) still fits.
+                VStack(spacing: OnboardingDesign.Space.lg) {
+                    PromiseLines(kept: kept)
 
-                if keyFailed {
-                    HStack(spacing: OnboardingDesign.Space.sm) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(OnboardingDesign.Palette.attention)
-                            .accessibilityHidden(true)
-                        Text(OnboardingCopy.encryptionFailed)
-                            .font(.system(size: 13))
-                        Button(OnboardingCopy.tryAgain, action: retryKey)
-                            .onboardingText(color: OnboardingDesign.Palette.accentText)
+                    VStack(spacing: OnboardingDesign.Space.md) {
+                        if keyFailed {
+                            HStack(spacing: OnboardingDesign.Space.sm) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(OnboardingDesign.Palette.attention)
+                                    .accessibilityHidden(true)
+                                Text(OnboardingCopy.encryptionFailed)
+                                    .font(.system(size: 13))
+                                Button(OnboardingCopy.tryAgain, action: retryKey)
+                                    .onboardingText(color: OnboardingDesign.Palette.accentText)
+                            }
+                        }
+
+                        if let openAtLogin {
+                            Toggle(OnboardingCopy.openAtLogin, isOn: openAtLogin)
+                                .toggleStyle(.checkbox)
+                                .font(.system(size: 13))
+                        }
                     }
-                }
-
-                if let openAtLogin {
-                    Toggle(OnboardingCopy.openAtLogin, isOn: openAtLogin)
-                        .toggleStyle(.checkbox)
-                        .font(.system(size: 13))
                 }
             }
         }
     }
 }
 
-/// The three lines of the promise, and what the menu-bar dot means. The
-/// never-read panel shows the same lines.
+/// The three promises, and what the menu-bar mark shows. Each promise is a
+/// short lead with its facts under it, one sentence a line, so it reads as
+/// facts, not as a policy. The never-read panel shows the same lines.
 struct PromiseLines: View {
     let kept: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: OnboardingDesign.Space.lg) {
+        VStack(spacing: 0) {
             line("lock", lead: OnboardingCopy.promiseStaysLead, text: OnboardingCopy.promiseStays(kept: kept))
+            Divider().padding(.leading, 62)
             line("eye.slash", lead: OnboardingCopy.promiseNeverReadLead, text: OnboardingCopy.promiseNeverRead)
-            line("pause.circle", lead: OnboardingCopy.promiseStopLead, text: OnboardingCopy.promiseStop)
-
+            Divider().padding(.leading, 62)
+            line("pause", lead: OnboardingCopy.promiseStopLead, text: OnboardingCopy.promiseStop)
             Divider()
-
-            HStack(alignment: .firstTextBaseline, spacing: OnboardingDesign.Space.md) {
-                Circle()
-                    .fill(OnboardingDesign.Palette.ink)
-                    .frame(width: 7, height: 7)
-                    .frame(width: 22)
-                    .accessibilityHidden(true)
-                Text(OnboardingCopy.dotPromise)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            DotLegend()
         }
-        .padding(OnboardingDesign.Space.xl)
         .glassCard(padding: 0)
     }
 
     private func line(_ symbol: String, lead: String, text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: OnboardingDesign.Space.md) {
-            Image(systemName: symbol)
-                .font(.system(size: 15))
-                .foregroundStyle(OnboardingDesign.Palette.accent)
-                .frame(width: 22)
+        HStack(alignment: .top, spacing: OnboardingDesign.Space.md + 2) {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(OnboardingDesign.Palette.accentSoft)
+                .frame(width: 30, height: 30)
+                .overlay(
+                    Image(systemName: symbol)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(OnboardingDesign.Palette.accent)
+                )
                 .accessibilityHidden(true)
-            (Text(lead).fontWeight(.semibold).foregroundStyle(OnboardingDesign.Palette.ink)
-                + Text(" " + text).foregroundStyle(.secondary))
-                .font(.system(size: 14))
-                .lineSpacing(2)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(lead)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(OnboardingDesign.Palette.ink)
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(OnboardingCopy.sentences(text), id: \.self) { sentence in
+                        Text(sentence)
+                            .font(.system(size: 12))
+                            .foregroundStyle(OnboardingDesign.Palette.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+        }
+        .padding(.horizontal, OnboardingDesign.Space.lg + 2)
+        .padding(.vertical, OnboardingDesign.Space.md - 2)
+    }
+}
+
+/// What the menu-bar mark shows: the hi with its solid dot while it is
+/// remembering, and without it when it is not (RULINGS B1). Drawn in one
+/// colour, as the menu bar draws it; VoiceOver reads the promise whole.
+struct DotLegend: View {
+    var body: some View {
+        HStack(spacing: OnboardingDesign.Space.xl) {
+            Text(OnboardingCopy.dotLegendTitle)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(OnboardingDesign.Palette.secondaryText)
+            entry(remembering: true, OnboardingCopy.dotLegendOn)
+            entry(remembering: false, OnboardingCopy.dotLegendOff)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, OnboardingDesign.Space.lg + 2)
+        .padding(.vertical, OnboardingDesign.Space.md - 2)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(OnboardingCopy.dotPromise)
+    }
+
+    private func entry(remembering: Bool, _ label: String) -> some View {
+        HStack(spacing: OnboardingDesign.Space.sm) {
+            HiMarkGlyph(remembering: remembering, letters: OnboardingDesign.Palette.ink, monochrome: true)
+                .frame(height: 13)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 3)
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundStyle(OnboardingDesign.Palette.secondaryText)
         }
     }
 }

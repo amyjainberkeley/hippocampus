@@ -4,28 +4,35 @@ import XCTest
 final class TryItPresentationTests: XCTestCase {
     private let shiftTwice = AskKeyNow(effectiveLabel: "⇧⇧", effectivePhrase: "Press Shift twice", stored: nil)
     private let nothingOpensAsk = AskKeyNow(effectiveLabel: "", effectivePhrase: "", stored: nil)
+    private let pricing = FrontWindow(bundleId: "com.apple.Safari", appName: "Safari", title: "Pricing | Stripe")
 
     private var proof: ReadProof {
         let row = ReadRow(
-            tsUs: 1_800_000_000_000_000, appBundleId: "com.apple.Notes", windowTitle: "Launch plan",
-            text: "Beta ships to forty design partners on October 21.", sourceKind: "screen_ocr"
+            tsUs: 1_800_000_000_000_000, appBundleId: "com.apple.Safari", windowTitle: "Pricing | Stripe",
+            text: "Per-seat pricing charges for each user on the team.", sourceKind: "screen_context"
         )
-        return ReadProof.choose(from: [row], lastActivatedApp: nil, nameFor: { _ in "Notes" })!
+        return ReadProof.choose(from: [row], lastActivatedApp: "com.apple.Safari", nameFor: { _ in "Safari" })!
+    }
+
+    private func shown(_ card: TryItViewModel.Card) -> TryItPresentation {
+        TryItPresentation(card: card, keyNow: shiftTwice, understanding: nil)
     }
 
     // MARK: - Under a proof
 
-    func testAProofCarriesWhatToTryAndWhatToKnow() {
+    func testAProofSaysWhereItWasReadAndWhatToTryNow() {
         let shown = TryItPresentation(card: .proof(proof), keyNow: shiftTwice, understanding: .available)
+        XCTAssertEqual(shown.title, "Here’s what I just read from Safari")
         XCTAssertEqual(shown.proof, proof)
-        XCTAssertNil(shown.message)
+        XCTAssertNil(shown.heading)
         XCTAssertNil(shown.action)
-        XCTAssertEqual(shown.next, "Now press Shift twice and ask about it.")
+        XCTAssertEqual(shown.next, "Press Shift twice and ask about it.")
         XCTAssertEqual(shown.keycaps, ["⇧", "⇧"])
         XCTAssertTrue(shown.offersOpenItForMe)
         XCTAssertEqual(shown.stopSharingNote,
                        "macOS shows an icon in the menu bar while Hippocampus reads. Stop Sharing there ends it.")
         XCTAssertNil(shown.answersNote, "answers work: nothing to explain")
+        XCTAssertEqual(OnboardingCopy.proofHeading(proof), "Pricing | Stripe", "the window; the title names the app")
     }
 
     func testWithoutAnswersTheFirstTryIsAWordAndOneLineSaysWhy() {
@@ -43,7 +50,7 @@ final class TryItPresentationTests: XCTestCase {
             let shown = TryItPresentation(
                 card: .proof(proof), keyNow: shiftTwice, understanding: understanding, macOSMajorVersion: macOS
             )
-            XCTAssertEqual(shown.next, "Now press Shift twice and type a word from that window.")
+            XCTAssertEqual(shown.next, "Press Shift twice and type a word from that window.")
             XCTAssertEqual(shown.answersNote, line)
         }
     }
@@ -55,14 +62,14 @@ final class TryItPresentationTests: XCTestCase {
             let shown = TryItPresentation(
                 card: .proof(proof), keyNow: shiftTwice, understanding: .available, macOSMajorVersion: macOS
             )
-            XCTAssertEqual(shown.next, "Now press Shift twice and ask about it.")
+            XCTAssertEqual(shown.next, "Press Shift twice and ask about it.")
             XCTAssertNil(shown.answersNote)
         }
     }
 
     func testWhileTheCheckRunsTheWordIsOfferedAndNothingIsSaidAboutAnswers() {
         let shown = TryItPresentation(card: .proof(proof), keyNow: shiftTwice, understanding: nil)
-        XCTAssertEqual(shown.next, "Now press Shift twice and type a word from that window.")
+        XCTAssertEqual(shown.next, "Press Shift twice and type a word from that window.")
         XCTAssertNil(shown.answersNote)
     }
 
@@ -70,76 +77,111 @@ final class TryItPresentationTests: XCTestCase {
         let shown = TryItPresentation(card: .proof(proof), keyNow: nothingOpensAsk, understanding: .available)
         XCTAssertNil(shown.next)
         XCTAssertEqual(shown.keycaps, [])
+        XCTAssertEqual(shown.keyPresses, 0, "no keycaps to press")
         XCTAssertTrue(shown.offersOpenItForMe)
+    }
+
+    func testTheKeycapsUnderAProofPressAsTheKeyIsPressed() {
+        XCTAssertEqual(TryItPresentation(card: .proof(proof), keyNow: shiftTwice, understanding: .available).keyPresses, 2)
+        let chord = AskKeyNow(effectiveLabel: "⌃⇧Space", effectivePhrase: "Press ⌃⇧Space", stored: nil)
+        XCTAssertEqual(TryItPresentation(card: .proof(proof), keyNow: chord, understanding: nil).keyPresses, 1)
     }
 
     // MARK: - Before a proof, and after Ask
 
-    func testOnlyAProofCarriesTheLinesUnderIt() {
+    func testOnlyAProofCarriesTheLinesUnderItAndChangesTheTitle() {
         let cards: [TryItViewModel.Card] = [
-            .starting, .waiting(.ordinary), .stalled(.unknown), .notRemembering(.paused), .finished(openedForThem: false),
+            .starting, .reading(pricing), .noWindow, .nothingToShow(pricing), .skipped(.neverRead, pricing),
+            .stalled(.unknown), .notRemembering(.paused), .finished(openedForThem: false),
         ]
         for card in cards {
             let shown = TryItPresentation(card: card, keyNow: shiftTwice, understanding: .turnedOff)
+            XCTAssertEqual(shown.title, "Try it", "\(card)")
             XCTAssertNil(shown.proof, "\(card)")
             XCTAssertNil(shown.next, "\(card)")
             XCTAssertEqual(shown.keycaps, [], "\(card)")
+            XCTAssertEqual(shown.keyPresses, 0, "\(card)")
             XCTAssertFalse(shown.offersOpenItForMe, "\(card)")
             XCTAssertNil(shown.stopSharingNote, "Stop Sharing is explained once something was read")
             XCTAssertNil(shown.answersNote, "the answers line shows only under a proof")
         }
     }
 
-    func testEachCardSaysItsLineWithItsOneButton() {
-        func shown(_ card: TryItViewModel.Card) -> TryItPresentation {
-            TryItPresentation(card: card, keyNow: shiftTwice, understanding: nil)
-        }
-        XCTAssertEqual(shown(.starting).message, "Turning on…")
+    func testReadingNamesTheWindowInFront() {
+        let reading = shown(.reading(pricing))
+        XCTAssertEqual(reading.heading, "Reading Safari…")
+        XCTAssertEqual(reading.detail, "Pricing | Stripe")
+        XCTAssertEqual(reading.icon, .app(bundleId: "com.apple.Safari", skipped: false))
+        XCTAssertTrue(reading.isWorking)
+        XCTAssertNil(reading.action)
+        XCTAssertEqual(reading.spoken, "Reading Safari… Pricing | Stripe")
+
+        let untitled = shown(.reading(FrontWindow(bundleId: "com.apple.TextEdit", appName: "TextEdit", title: nil)))
+        XCTAssertEqual(untitled.heading, "Reading TextEdit…")
+        XCTAssertNil(untitled.detail)
+
+        XCTAssertEqual(shown(.starting).heading, "Turning on…")
         XCTAssertTrue(shown(.starting).isWorking)
-        XCTAssertFalse(shown(.waiting(.ordinary)).isWorking)
-        XCTAssertNil(shown(.waiting(.ordinary)).action)
-        XCTAssertNil(shown(.waiting(.neverRead(app: "System Settings"))).action)
-        XCTAssertEqual(shown(.stalled(.unknown)).message, "Still nothing read.")
+        XCTAssertNil(shown(.starting).icon)
+    }
+
+    func testASkippedWindowSaysWhyAndSuggestsAnother() {
+        let passwords = FrontWindow(bundleId: "com.apple.Passwords", appName: "Passwords", title: nil)
+        let cases: [(SkipReason, FrontWindow, String)] = [
+            (.neverRead, passwords, "Passwords is never read."),
+            (.excluded, FrontWindow(bundleId: "com.apple.MobileSMS", appName: "Messages", title: nil),
+             "Messages is skipped, as you asked."),
+            (.privateWindow, FrontWindow(bundleId: "com.google.Chrome", appName: "Google Chrome", title: "New Incognito Tab"),
+             "This private window is skipped."),
+        ]
+        for (reason, window, heading) in cases {
+            let skipped = shown(.skipped(reason, window))
+            XCTAssertEqual(skipped.heading, heading)
+            XCTAssertEqual(skipped.detail, "Switch to another window to try it.")
+            XCTAssertEqual(skipped.icon, .app(bundleId: window.bundleId, skipped: true))
+            XCTAssertNil(skipped.action, "nothing to press: another window is the way on")
+            XCTAssertFalse(skipped.isWorking)
+        }
+        let field = shown(.skipped(.passwordField, pricing))
+        XCTAssertEqual(field.heading, "Nothing is read while a password field is in use.")
+        XCTAssertEqual(field.detail, "Switch to another window to try it.")
+        XCTAssertEqual(field.icon, .symbol("lock"))
+    }
+
+    func testNothingToReadSaysWhatToOpen() {
+        let finder = FrontWindow(bundleId: "com.apple.finder", appName: "Finder", title: "Applications")
+        let nothing = shown(.nothingToShow(finder))
+        XCTAssertEqual(nothing.heading, "Nothing to read in Finder yet.")
+        XCTAssertEqual(nothing.detail, "Open a page, a document or a chat.")
+        XCTAssertEqual(nothing.icon, .app(bundleId: "com.apple.finder", skipped: false))
+        let none = shown(.noWindow)
+        XCTAssertEqual(none.heading, "No window to read yet.")
+        XCTAssertEqual(none.detail, "Open a page, a document or a chat.")
+        XCTAssertEqual(none.icon, .symbol("macwindow"))
+    }
+
+    func testEachOtherCardSaysItsLineWithItsOneButton() {
+        XCTAssertEqual(shown(.stalled(.unknown)).heading, "Still nothing read.")
+        XCTAssertNil(shown(.stalled(.unknown)).detail)
         XCTAssertEqual(shown(.stalled(.unknown)).action, .tryAgain)
-        XCTAssertEqual(shown(.stalled(.permissionOff(.accessibility))).action, .openSettings(.accessibility))
-        XCTAssertNil(shown(.stalled(.frontApp(.neverRead(app: "1Password")))).action)
-        XCTAssertEqual(shown(.notRemembering(.paused)).message, "Remembering is paused. Resume it from the menu bar.")
-        XCTAssertEqual(shown(.notRemembering(.off)).message, "Remembering is off. Turn it on from the menu bar.")
+        let off = shown(.stalled(.permissionOff(.accessibility)))
+        XCTAssertEqual(off.heading, "Accessibility is off.")
+        XCTAssertEqual(off.detail, "Turn it on in System Settings.", "nothing is dropped")
+        XCTAssertEqual(off.action, .openSettings(.accessibility))
+        XCTAssertEqual(shown(.notRemembering(.paused)).heading, "Remembering is paused.")
+        XCTAssertEqual(shown(.notRemembering(.paused)).detail, "Resume it from the menu bar.")
+        XCTAssertEqual(shown(.notRemembering(.off)).heading, "Remembering is off.")
+        XCTAssertEqual(shown(.notRemembering(.off)).detail, "Turn it on from the menu bar.")
         XCTAssertNil(shown(.notRemembering(.off)).action)
         XCTAssertEqual(shown(.finished(openedForThem: false)).finished, "That’s it. Shift twice works anywhere.")
         XCTAssertEqual(shown(.finished(openedForThem: true)).finished, "That’s Ask. Press Shift twice to open it anywhere.")
-    }
-
-    func testABrowserInFrontGetsTheOrdinaryCardWithNoButton() {
-        // Browsers are read like every other window (RULINGS G8): no
-        // extension and no prompt stand in the way.
-        for (bundle, name) in [("com.apple.Safari", "Safari"), ("com.google.Chrome", "Google Chrome"),
-                               ("org.mozilla.firefox", "Firefox"), ("company.thebrowser.Browser", "Arc")] {
-            let note = FrontAppNote(bundleId: bundle, name: name)
-            XCTAssertEqual(note, .ordinary, bundle)
-            let waiting = TryItPresentation(card: .waiting(note), keyNow: shiftTwice, understanding: nil)
-            XCTAssertEqual(waiting.message, "Nothing read yet. Open a document, note or chat, then come back.")
-            XCTAssertNil(waiting.action)
-            XCTAssertNil(TryItPresentation(card: .stalled(.frontApp(note)), keyNow: shiftTwice, understanding: nil).action)
-        }
-    }
-
-    func testAMessageIsDrawnAsItsFirstSentenceAndTheRestWithNothingDropped() {
-        let two = TryItPresentation(card: .waiting(.ordinary), keyNow: shiftTwice, understanding: nil)
-        let parts = two.messageParts
-        XCTAssertEqual(parts?.heading, "Nothing read yet.")
-        XCTAssertEqual(parts?.detail, "Open a document, note or chat, then come back.")
-        XCTAssertEqual(parts.map { "\($0.heading) \($0.detail ?? "")" }, two.message)
-
-        let one = TryItPresentation(card: .stalled(.unknown), keyNow: shiftTwice, understanding: nil)
-        XCTAssertEqual(one.messageParts?.heading, "Still nothing read.")
-        XCTAssertNil(one.messageParts?.detail)
-        XCTAssertNil(TryItPresentation(card: .proof(proof), keyNow: shiftTwice, understanding: nil).messageParts)
     }
 
     func testTheLinksAreTheAppsRoutes() {
         // Contract section 3b.
         XCTAssertEqual(AppLink.ask.absoluteString, "hippocampus://ask")
         XCTAssertEqual(AppLink.restart.absoluteString, "hippocampus://restart")
+        // The app's own name for the fresh read setup asks for.
+        XCTAssertEqual(SetupReadRequest.notification.rawValue, "ai.hippocampus.setup.readFrontWindow")
     }
 }
