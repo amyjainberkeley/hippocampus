@@ -199,9 +199,15 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     /// A turn-on is under way: pressed or switching on, and not landed yet.
     public var turningOn: Bool { pendingTurnOn != nil || enablingAttempt != nil }
-    /// A turn-off is under way: the setting is off, but the screen may be
-    /// read until the stop is done (RULINGS B1 and S7).
-    var stoppingCapture: Bool { captureStopTask != nil }
+    /// A stop is under way that may still leave the screen read until it is
+    /// done: a turn-off (the setting is already off), or Quit while a capture
+    /// helper may be held, as when it overtakes a turn-on. Off shows once the
+    /// stop is done, never before (RULINGS B1 and S7).
+    var stoppingCapture: Bool {
+        if captureStopTask != nil { return true }
+        let quitting = (shutdownTask != nil || shutdownRequested) && state != .stopped
+        return quitting && mayHoldCaptureHelper
+    }
     /// Called when the window was asked for and a failed start ended the
     /// request: the app shows Preferences, where the reason and the fix are
     /// (spec-shell S5, D9).

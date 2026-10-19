@@ -686,6 +686,55 @@ final class TurnOnTests: XCTestCase {
         try await rig.supervisor.shutdownAndWait()
     }
 
+    /// Quit during a turn-on drops the press at once, but the turn-on's
+    /// capture helper may read until Quit's stop is done: the picture stays
+    /// Starting…, with nothing to press, and reaches Off by itself. It showed
+    /// "Off / Turn On" with the off picture for the whole stop.
+    func test_quit_during_a_turn_on_shows_off_only_once_its_helper_has_stopped() async throws {
+        let rig = rig()
+        try await rig.supervisor.startAndWaitForReadiness()
+        let readiness = TestSuspension()
+        rig.topology.readinessSuspension = readiness
+        press(.turnOn, on: rig.supervisor)
+        await readiness.waitUntilEntered()
+        XCTAssertTrue(rig.topology.captureHelperAlive)
+        let stopping = TestSuspension()
+        rig.topology.stopSuspensionOnCall = rig.topology.stopCalls + 1
+        rig.topology.stopSuspension = stopping
+
+        let quit = Task { try await rig.supervisor.shutdownAndWait() }
+        await stopping.waitUntilEntered()
+
+        XCTAssertFalse(rig.supervisor.turningOn)
+        XCTAssertEqual(rig.supervisor.menuBarStatus.markState, .remembering, "not Off before the stop is done")
+        XCTAssertEqual(row(rig.supervisor).title, "Starting…")
+        XCTAssertNil(row(rig.supervisor).action)
+
+        stopping.resume()
+        rig.topology.readinessSuspension = nil
+        readiness.resume()
+        try await quit.value
+        XCTAssertEqual(rig.supervisor.state, .stopped)
+        XCTAssertEqual(rig.supervisor.menuBarStatus, .idle)
+        XCTAssertEqual(rig.supervisor.menuBarStatus.markState, .off)
+    }
+
+    /// Quit while remembering is off has no capture helper to wait for: Off.
+    func test_quit_while_off_reads_off_at_once() async throws {
+        let rig = rig()
+        try await rig.supervisor.startAndWaitForReadiness()
+        let stopping = TestSuspension()
+        rig.topology.stopSuspensionOnCall = rig.topology.stopCalls + 1
+        rig.topology.stopSuspension = stopping
+
+        let quit = Task { try await rig.supervisor.shutdownAndWait() }
+        await stopping.waitUntilEntered()
+
+        XCTAssertEqual(rig.supervisor.menuBarStatus, .idle)
+        stopping.resume()
+        try await quit.value
+    }
+
     /// Quit wins over a press that is waiting.
     func test_quit_drops_a_waiting_press_without_a_reason() async throws {
         let rig = rig()
