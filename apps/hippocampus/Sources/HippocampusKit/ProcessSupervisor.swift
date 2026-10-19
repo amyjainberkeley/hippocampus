@@ -186,7 +186,7 @@ package protocol RecallWindowCommanding: AnyObject {
 /// same names). Tests make up their own names.
 @MainActor
 package final class DistributedRecallWindowChannel: RecallWindowCommanding {
-    package static let requestIDKey = "request_id"
+    nonisolated package static let requestIDKey = "request_id"
     package let commandName: Notification.Name
     package let acknowledgementName: Notification.Name
 
