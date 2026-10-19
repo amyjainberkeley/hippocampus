@@ -81,7 +81,12 @@ final class AgentKeyCustodyPreparer: KeyCustodyPreparing {
 
 @MainActor
 package protocol SupervisorTopologyControlling: AnyObject {
+    /// The helper and the agent are both running.
     var isRunning: Bool { get }
+    /// It still holds a helper or an agent, running or exited, that only
+    /// `stop()` releases: `launch` refuses until then. A helper whose agent
+    /// exited is not `isRunning`, but it is held, and may still be reading.
+    var holdsProcesses: Bool { get }
     func launch(
         plan: ProcessSupervisorLaunchPlan,
         generation: SupervisorProcessGeneration,
@@ -101,6 +106,7 @@ package protocol SupervisorTopologyControlling: AnyObject {
 }
 
 extension SupervisorTopologyControlling {
+    package var holdsProcesses: Bool { isRunning }
     package var childProcessIDs: Set<pid_t> { [] }
     package func requestFocusedRead() -> Bool { false }
 }
@@ -128,6 +134,12 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
 
     var isRunning: Bool {
         helper?.isRunning == true && agent?.isRunning == true
+    }
+
+    /// Until `stop()` cleans up, an exited helper or agent is still held,
+    /// and `launch` refuses with `.partialStop`.
+    var holdsProcesses: Bool {
+        helper != nil || agent != nil
     }
 
     var childProcessIDs: Set<pid_t> {

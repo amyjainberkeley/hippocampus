@@ -71,11 +71,31 @@ final class FakeKeyCustodyPreparer: KeyCustodyPreparing {
     }
 }
 
+/// Keeps `FoundationSupervisorTopology`'s rules where they matter: a readiness
+/// that reports the helper or the agent exited ends that process (and an
+/// agent drains and exits once its helper is gone), exited processes stay
+/// held until a stop returns, and `launch` refuses with `.partialStop` while
+/// anything is held. A stop that throws leaves what it could not stop.
 @MainActor
 final class FakeSupervisorTopology: SupervisorTopologyControlling {
     var readinessResults: [Result<Void, Error>] = []
     var stopResults: [Result<Void, Error>] = []
-    var isRunning = false
+    var helperAlive = false
+    var agentAlive = false
+    var isRunning: Bool {
+        get { helperAlive && agentAlive }
+        set {
+            helperAlive = newValue
+            agentAlive = newValue
+        }
+    }
+    private(set) var holdsProcesses = false
+    private(set) var refusedLaunches = 0
+    /// The last helper launched had `--capture` and is still alive, so it
+    /// may be reading, or waiting on a permission to start reading.
+    var captureHelperAlive: Bool {
+        helperAlive && launchPlans.last?.helperArguments.contains("--capture") == true
+    }
     var onReadinessWait: ((ProcessSupervisorLaunchPlan) -> Void)?
     var onStop: (() -> Void)?
     var stopDelay: Duration?
@@ -92,9 +112,14 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
         generation: SupervisorProcessGeneration,
         onUnexpectedExit: @escaping @MainActor @Sendable (String, Int32) -> Void
     ) async throws {
+        guard !holdsProcesses else {
+            refusedLaunches += 1
+            throw SupervisorProcessRuntimeError.partialStop
+        }
         launchPlans.append(plan)
         generations.append(generation)
         unexpectedExitCallbacks.append(onUnexpectedExit)
+        holdsProcesses = true
         isRunning = true
     }
 
@@ -106,7 +131,15 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
         onReadinessWait?(launchPlans.last!)
         if let readinessSuspension { await readinessSuspension.suspend() }
         if !readinessResults.isEmpty {
-            try readinessResults.removeFirst().get()
+            let result = readinessResults.removeFirst()
+            if case .failure(let error) = result {
+                switch error as? SupervisorProcessRuntimeError {
+                case .helperExited: isRunning = false
+                case .agentExited: agentAlive = false
+                default: break
+                }
+            }
+            try result.get()
         }
     }
 
@@ -122,6 +155,7 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
             try stopResults.removeFirst().get()
         }
         isRunning = false
+        holdsProcesses = false
     }
 
     func setPaused(_ paused: Bool) throws {
@@ -429,6 +463,51 @@ final class ProcessSupervisorTests: XCTestCase {
 
         XCTAssertNotEqual(supervisor.state, .running)
         XCTAssertEqual(topology.stopCalls, 1)
+    }
+
+    /// A start (a launch, a reopen, a wake) whose agent exited during startup
+    /// left the capture helper running: it was not "running" to a check of
+    /// helper AND agent, so nothing stopped it while the menu said "Not
+    /// saving".
+    func test_a_start_whose_agent_exits_leaves_no_capture_helper() async {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        topology.readinessResults = [.failure(SupervisorProcessRuntimeError.agentExited(21))]
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.startAndWaitForReadiness())
+
+        XCTAssertFalse(topology.captureHelperAlive)
+        XCTAssertFalse(topology.holdsProcesses)
+        XCTAssertFalse(supervisor.stopFailed)
+    }
+
+    /// A capture helper that would not stop after its start failed may still
+    /// be reading: "Couldn’t stop", not "It stopped and couldn’t start again".
+    func test_a_start_whose_capture_helper_will_not_stop_says_couldnt_stop() async {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        topology.readinessResults = [.failure(TestError.timeout)]
+        topology.stopResults = [.failure(TestError.partialStop), .failure(TestError.partialStop)]
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.startAndWaitForReadiness())
+
+        XCTAssertTrue(topology.captureHelperAlive)
+        XCTAssertTrue(supervisor.stopFailed)
+        guard case .stopFailed = supervisor.menuBarStatus else {
+            return XCTFail("expected Couldn’t stop, got \(supervisor.menuBarStatus)")
+        }
+    }
+
+    /// The cleanup tries the stop again; once a stop returns, nothing is left
+    /// that could read, and the failed start says so plainly.
+    func test_a_capture_helper_stopped_on_the_second_try_is_not_a_failed_stop() async {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        topology.readinessResults = [.failure(TestError.timeout)]
+        topology.stopResults = [.failure(TestError.partialStop), .success(())]
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.startAndWaitForReadiness())
+
+        XCTAssertFalse(topology.captureHelperAlive)
+        XCTAssertFalse(supervisor.stopFailed)
+        XCTAssertEqual(supervisor.menuBarStatus, .error(reason: "timeout"))
     }
 
     func test_readiness_timeout_never_reaches_running() async {

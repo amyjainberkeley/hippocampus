@@ -488,6 +488,29 @@ final class SupervisorStopAndPauseTests: XCTestCase {
         try await supervisor.shutdownAndWait()
     }
 
+    /// Try Again stops the run first. When the capture helper will not stop
+    /// it may still be reading, so the row says "Couldn’t stop" with Quit,
+    /// never "It stopped and couldn’t start again". Wake recovery and the
+    /// automatic retries restart the same way.
+    func test_try_again_whose_stop_fails_says_couldnt_stop() async throws {
+        let (supervisor, _, topology) = make(config: FakeRuntimeConfig(captureEnabled: true))
+        try await supervisor.startAndWaitForReadiness()
+        clock.now = clock.now.addingTimeInterval(120)
+        XCTAssertEqual(supervisor.statusRow(setupFinished: true, now: clock.now).action, .tryAgain)
+        topology.stopResults = [.failure(TestError.stopFailed)]
+
+        supervisor.performAskStatusAction(.tryAgain, setupFinished: true) { _ in }
+        await eventually { if case .crashed = supervisor.state { return true } else { return false } }
+
+        XCTAssertTrue(topology.captureHelperAlive)
+        XCTAssertTrue(supervisor.stopFailed)
+        let row = supervisor.statusRow(setupFinished: true, now: clock.now)
+        XCTAssertEqual(row.title, "Couldn’t stop")
+        XCTAssertEqual(row.action, .quit)
+        XCTAssertEqual(supervisor.menuBarStatus.markState, .remembering)
+        try? await supervisor.shutdownAndWait()
+    }
+
     /// No helper is left to say a permission came back, so Try Again clears
     /// it; the menu opening or the app becoming active looks again on its
     /// own while "Needs permission" shows.

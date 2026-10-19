@@ -276,6 +276,48 @@ final class TurnOnTests: XCTestCase {
         try await rig.supervisor.shutdownAndWait()
     }
 
+    /// The real capture helper exits during startup (exit 79), and its agent
+    /// drains and exits after it. Both stay held until a stop, and a launch
+    /// refuses until then, so a rollback that skipped the stop because
+    /// nothing was running hit "Couldn’t stop", with only Quit.
+    func test_turn_on_whose_capture_helper_exits_at_startup_rolls_back_and_says_couldnt_turn_on() async throws {
+        let rig = rig()
+        try await rig.supervisor.startAndWaitForReadiness()
+        rig.topology.readinessResults = [.failure(SupervisorProcessRuntimeError.helperExited(79))]
+
+        press(.turnOn, on: rig.supervisor)
+        await eventually { !rig.supervisor.turningOn }
+
+        XCTAssertEqual(row(rig.supervisor).title, "Couldn’t turn on")
+        XCTAssertEqual(row(rig.supervisor).action, .tryAgain)
+        XCTAssertFalse(rig.supervisor.stopFailed)
+        XCTAssertEqual(rig.supervisor.state, .running, "the off topology is back")
+        XCTAssertEqual(rig.topology.refusedLaunches, 0)
+        XCTAssertEqual(rig.topology.launchPlans.map { $0.helperArguments.contains("--capture") }, [false, true, false])
+        XCTAssertFalse(rig.supervisor.captureEnabled)
+        XCTAssertEqual(rig.config.captureWrites, [])
+        try await rig.supervisor.shutdownAndWait()
+    }
+
+    /// The agent exits during startup (another writer holds the memory) while
+    /// the capture helper lives on, waiting. Helper AND agent are no longer
+    /// both running, so every "stop if running" check skipped that helper.
+    func test_turn_on_whose_agent_exits_at_startup_stops_its_capture_helper() async throws {
+        let rig = rig()
+        try await rig.supervisor.startAndWaitForReadiness()
+        rig.topology.readinessResults = [.failure(SupervisorProcessRuntimeError.agentExited(21))]
+
+        press(.turnOn, on: rig.supervisor)
+        await eventually { !rig.supervisor.turningOn }
+
+        XCTAssertFalse(rig.topology.captureHelperAlive, "a failed turn-on leaves no capture helper")
+        XCTAssertEqual(row(rig.supervisor).title, "Couldn’t turn on")
+        XCTAssertEqual(rig.supervisor.state, .running)
+        XCTAssertEqual(rig.topology.refusedLaunches, 0)
+        XCTAssertFalse(rig.supervisor.captureEnabled)
+        try await rig.supervisor.shutdownAndWait()
+    }
+
     /// The reason lives in the supervisor, so Preferences' switch and setup's
     /// Start Remembering say it too.
     func test_the_preferences_switch_leaves_the_same_reason_in_the_status_row() async throws {

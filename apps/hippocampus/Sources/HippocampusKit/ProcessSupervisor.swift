@@ -165,11 +165,17 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     @Published public private(set) var health: HealthSnapshot?
     @Published public private(set) var captureReceipt: CaptureStatusReceipt?
     public private(set) var captureStartedAt: Date?
-    /// The person asked it to stop, pause or turn off, or a turn-on that
-    /// failed could not stop what it started, so it may still be reading the
-    /// screen. Cleared by the next committed transition (product critique 3,
-    /// RULINGS S10).
-    @Published public private(set) var stopFailed = false
+    /// It may still be reading the screen though a stop was asked for: the
+    /// status says "Couldn’t stop" (product critique 3, RULINGS S10).
+    public var stopFailed: Bool { stopRequestFailed || captureHelperSurvivedStop }
+    /// The person asked it to stop, pause, turn off or quit, and that failed:
+    /// the helper, consent or the saved setting. Cleared by the next
+    /// committed transition.
+    @Published private var stopRequestFailed = false
+    /// A stop threw while a capture helper may have been held, by any change:
+    /// a start's cleanup, a restart, Try Again, a turn-on's rollback. Cleared
+    /// once a later stop returns (RULINGS B1).
+    @Published private var captureHelperSurvivedStop = false
     /// When the person pressed macOS's Stop Sharing; nil once remembering is
     /// turned back on. Kept across launches (spec-shell S5).
     @Published public private(set) var stoppedSharingAt: Date?
@@ -249,6 +255,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private var currentGenerationID: String?
     // Invalidated async work must unwind before another topology can start.
     private var inFlightTransitions: Set<UUID> = []
+    /// A capture helper was launched since the last stop that returned, so
+    /// what the topology holds may be reading the screen.
+    private var mayHoldCaptureHelper = false
     private var captureStopLatched = false
     private var captureStopTask: Task<Void, Error>?
     private var shutdownTask: Task<Void, Error>?
@@ -370,13 +379,15 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
 
     /// Every committed move into running, paused or stopped ends a failed
-    /// stop and shows a window that was asked for (critique-shell-engineering
-    /// 5). A failed start shows it too when there is memory to read, and
-    /// otherwise ends the request.
+    /// stop request and shows a window that was asked for
+    /// (critique-shell-engineering 5). A capture helper that survived a stop
+    /// is not ended by a commit, only by a stop that returns. A failed start
+    /// shows the window too when there is memory to read, and otherwise ends
+    /// the request.
     private func stateChanged() {
         switch state {
         case .running, .paused, .stopped:
-            stopFailed = false
+            stopRequestFailed = false
             guard !shutdownRequested else { return }
             // Nothing of ours reads the screen now: end what an earlier run
             // left behind (spec-shell S6.4). Quit runs its own sweep.
@@ -462,6 +473,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         retryCount = 0
         do {
             try captureConsentAuthority.disable()
+            // A run that ended can leave an exited helper or agent held,
+            // and the launch refuses until it is stopped.
+            if topology.holdsProcesses {
+                try await stopTopology(timeout: 2)
+                try ensureTransitionIsActive(transitionID)
+            }
             let generationID = try await startTopology(
                 captureEnabled: runtimeConfig.captureEnabled,
                 transitionID: transitionID
@@ -480,8 +497,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             activateTopology(captureEnabled: runtimeConfig.captureEnabled, generationID: generationID)
         } catch {
             stopAncillaryServices()
-            if topology.isRunning && !captureStopLatched {
-                try? await topology.stop(timeout: 2)
+            if topology.holdsProcesses && !captureStopLatched {
+                try? await stopTopology(timeout: 2)
             }
             if transitionGate.ownsTransition(transitionID) {
                 transitionGate.fail(transitionID: transitionID)
@@ -520,7 +537,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 try await self.revokeConsentAndStopTopology(timeout: timeout)
                 self.state = .stopped
             } catch {
-                self.stopFailed = true
+                self.stopRequestFailed = true
                 self.state = .crashed(reason: error.localizedDescription)
                 throw error
             }
@@ -632,7 +649,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                     state = .paused
                 } catch {
                     if !shutdownRequested {
-                        stopFailed = true
+                        stopRequestFailed = true
                         state = .crashed(reason: error.localizedDescription)
                     }
                     throw error
@@ -653,7 +670,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             } catch {
                 if transitionGate.ownsTransition(transitionID) {
                     transitionGate.fail(transitionID: transitionID)
-                    stopFailed = true
+                    stopRequestFailed = true
                     state = .crashed(reason: error.localizedDescription)
                 } else {
                     await stopUncommittedTopologyIfNeeded()
@@ -773,12 +790,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 throw requestedError
             }
             // What the failed start launched may still be reading until it
-            // is stopped (RULINGS B1).
-            var launchedTopologyStopped = !topology.isRunning
+            // is stopped (RULINGS B1). A helper or agent that exited is
+            // still held, and the rollback's launch refuses until it is.
             do {
-                if topology.isRunning {
-                    try await topology.stop(timeout: 5)
-                    launchedTopologyStopped = true
+                if topology.holdsProcesses {
+                    try await stopTopology(timeout: 5)
                     try ensureTransitionIsActive(transitionID)
                 }
                 stopAncillaryServices()
@@ -803,12 +819,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 if transitionGate.ownsTransition(transitionID) {
                     transitionGate.fail(transitionID: transitionID)
                     captureEnabled = prior
-                    // A capture helper that would not stop may still be
-                    // reading: say "Couldn’t stop", never Off (RULINGS B1).
-                    if !launchedTopologyStopped
-                        || (error as? SupervisorProcessRuntimeError) == .partialStop {
-                        stopFailed = true
-                    }
+                    // A capture helper that would not stop has already set
+                    // "Couldn’t stop" (`stopTopology`); one that stopped,
+                    // before an off topology that would not start, has not.
                     state = .crashed(
                         reason: "Capture change failed and prior topology could not be restored: \(error.localizedDescription)"
                     )
@@ -924,13 +937,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private func stopUncommittedTurnOn() async {
         guard captureStopTask == nil, pauseTask == nil,
               !shutdownRequested, shutdownTask == nil else { return }
-        if topology.isRunning {
-            do {
-                try await topology.stop(timeout: 2)
-            } catch {
-                // It would not stop, so it may still read (RULINGS B1).
-                stopFailed = true
-            }
+        if topology.holdsProcesses {
+            // One that would not stop may still read: `stopTopology` says
+            // "Couldn’t stop" (RULINGS B1).
+            try? await stopTopology(timeout: 2)
         }
         stopAncillaryServices()
     }
@@ -954,7 +964,6 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         let reference = (keyStore as? FileKeyStore)?.keychainReference
             ?? (keyStore as? KeychainKeyStore)?.reference
             ?? .defaultDatabaseKey
-        var launched = false
         var launchingGenerationID: String?
         do {
             if let developmentKeyMode {
@@ -993,6 +1002,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             captureReceipt = nil
             health = nil
             skipWatch = SkipWatch()
+            if requestedCapture { mayHoldCaptureHelper = true }
             try await topology.launch(
                 plan: plan,
                 generation: generation,
@@ -1004,7 +1014,6 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                     )
                 }
             )
-            launched = true
             try ensureTransitionIsActive(transitionID)
             try await topology.waitForReadiness(
                 generation: generation,
@@ -1022,8 +1031,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 noteStoppedSharing()
                 _ = try? await requestCaptureStop().value
             }
-            if launched && topology.isRunning && !captureStopLatched {
-                try? await topology.stop(timeout: 2)
+            // Whatever the failed start left is torn down, running or not:
+            // a helper whose agent exited may still be reading, and an
+            // exited one keeps the next launch from starting.
+            if topology.holdsProcesses && !captureStopLatched {
+                try? await stopTopology(timeout: 2)
             }
             stopAncillaryServices()
             if transitionGate.ownsTransition(transitionID) {
@@ -1066,7 +1078,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             catch { failures.append("Stopping capture: \(error.localizedDescription)") }
             guard failures.isEmpty else {
                 let error = SupervisorError.captureStopFailed(failures.joined(separator: "; "))
-                self.stopFailed = true
+                self.stopRequestFailed = true
                 self.state = .crashed(reason: error.localizedDescription)
                 throw error
             }
@@ -1107,10 +1119,27 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     private func stopUncommittedTopologyIfNeeded() async {
         guard !captureStopLatched else { return }
-        if topology.isRunning {
-            try? await topology.stop(timeout: 2)
+        if topology.holdsProcesses {
+            try? await stopTopology(timeout: 2)
         }
         stopAncillaryServices()
+    }
+
+    /// Every stop of the helper and the agent but Quit's last resort. A stop
+    /// that returns has ended all the topology held. One that throws left a
+    /// survivor, and a capture helper that survives may still be reading
+    /// the screen, so that is "Couldn’t stop" whichever change asked for the
+    /// stop: a start's cleanup, a restart, Try Again or a turn-on's rollback
+    /// (RULINGS B1).
+    private func stopTopology(timeout: TimeInterval) async throws {
+        do {
+            try await topology.stop(timeout: timeout)
+        } catch {
+            if mayHoldCaptureHelper { captureHelperSurvivedStop = true }
+            throw error
+        }
+        mayHoldCaptureHelper = false
+        captureHelperSurvivedStop = false
     }
 
     /// Consent and child-process shutdown are independent safety boundaries.
@@ -1128,7 +1157,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
 
         do {
-            try await topology.stop(timeout: timeout)
+            try await stopTopology(timeout: timeout)
         } catch {
             topologyError = error
         }
@@ -1621,7 +1650,7 @@ extension ProcessSupervisor {
         self.captureReceipt = receipt
         self.stoppedSharingAt = stoppedSharingAt
         self.state = state
-        self.stopFailed = stopFailed
+        self.stopRequestFailed = stopFailed
     }
 }
 #endif

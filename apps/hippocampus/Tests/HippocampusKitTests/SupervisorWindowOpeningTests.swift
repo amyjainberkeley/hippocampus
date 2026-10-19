@@ -185,6 +185,24 @@ final class SupervisorWindowOpeningTests: XCTestCase {
         try await h.supervisor.shutdownAndWait()
     }
 
+    /// A start whose capture helper exited during startup left it, and its
+    /// agent, held: the reopen's start was refused ("The prior helper
+    /// topology did not stop completely") until Try Again stopped first.
+    func test_reopen_after_a_start_whose_helper_exited_starts_again() async throws {
+        let h = try make(captureEnabled: true)
+        h.topology.readinessResults = [.failure(SupervisorProcessRuntimeError.helperExited(79))]
+        try? await h.supervisor.startAndWaitForReadiness()
+        guard case .crashed = h.supervisor.state else { return XCTFail("the start failed") }
+
+        h.supervisor.reopenWindow()
+
+        await eventually { h.supervisor.state == .running }
+        XCTAssertEqual(h.supervisor.state, .running)
+        XCTAssertEqual(h.topology.refusedLaunches, 0)
+        XCTAssertEqual(h.topology.launchPlans.count, 2)
+        try await h.supervisor.shutdownAndWait()
+    }
+
     /// The window's process ends with its window, so opening Hippocampus
     /// again starts a fresh one, on Overview.
     func test_a_closed_window_opens_again_on_the_next_reopen() async throws {
