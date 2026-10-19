@@ -761,11 +761,15 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             throw SupervisorError.transitionInProgress
         }
         guard enabled != captureEnabled else { return }
-        cancelPendingRetry()
         guard let transitionID = beginOwnedTransition() else {
             throw SupervisorError.transitionInProgress
         }
         defer { inFlightTransitions.remove(transitionID) }
+        // Only once this change owns the gate: a start under way (the app's
+        // own at launch, a reopen, Try Again) runs in the retry task, and
+        // cancelling it before a refusal left "Not saving" with nothing
+        // running. A retry waiting out its backoff is replaced by this one.
+        cancelPendingRetry()
         let attempt = beginTurnOnAttempt()
         defer { endTurnOnAttempt(attempt) }
         do {

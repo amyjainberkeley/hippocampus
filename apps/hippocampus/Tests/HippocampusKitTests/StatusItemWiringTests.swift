@@ -142,6 +142,20 @@ final class StatusItemWiringTests: XCTestCase {
         XCTAssertTrue(preferences.contains("get: { supervisor.captureEnabled || supervisor.turningOn }"))
     }
 
+    /// The status row is the one voice about remembering: the switch's red
+    /// "Couldn’t change that. Try again." said a second thing about the same
+    /// failure, and stayed under the switch after Try Again worked.
+    func testTheSwitchAddsNoCaptionOfItsOwn() throws {
+        let preferences = try source("PreferencesWindow.swift")
+        XCTAssertFalse(preferences.contains("captureController.errorMessage"))
+        let controller = try String(
+            contentsOf: Self.package.appendingPathComponent("Sources/HippocampusKit/CapturePreferenceController.swift"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(controller.contains("Couldn’t change that"))
+        XCTAssertTrue(controller.contains("applier.turnOn()"), "switching on is the menu's Turn On")
+    }
+
     /// One row feeds Preferences too (product critique 11).
     func testPreferencesShowTheMenusStatusRow() throws {
         let health = try source("CaptureHealthView.swift")

@@ -26,7 +26,10 @@ final class TurnOnTests: XCTestCase {
         let consent: FakeCaptureConsentAuthority
     }
 
-    private func rig(captureEnabled: Bool = false, receipts: ReceiptSource? = nil) -> Rig {
+    private func rig(
+        captureEnabled: Bool = false, receipts: ReceiptSource? = nil,
+        custody: FakeKeyCustodyPreparer = FakeKeyCustodyPreparer()
+    ) -> Rig {
         let locator = FakeBinaryLocator()
         locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
         locator.agentURL = URL(fileURLWithPath: "/bundle/mci-agent")
@@ -38,7 +41,7 @@ final class TurnOnTests: XCTestCase {
         let clock = self.clock
         let supervisor = ProcessSupervisor(
             locator: locator, keyStore: keyStore, runtimeConfig: config, topology: topology,
-            keyCustodyPreparer: FakeKeyCustodyPreparer(), captureConsentAuthority: consent,
+            keyCustodyPreparer: custody, captureConsentAuthority: consent,
             readinessTimeout: 0.1,
             captureStatusReader: { (nil, receipts?.receipt) },
             clock: { clock.now }
@@ -427,20 +430,78 @@ final class TurnOnTests: XCTestCase {
     }
 
     /// The reason lives in the supervisor, so Preferences' switch and setup's
-    /// Start Remembering say it too.
-    func test_the_preferences_switch_leaves_the_same_reason_in_the_status_row() async throws {
-        let rig = rig()
+    /// Start Remembering say it too. The status row is the one voice: the
+    /// switch used to add a red "Couldn’t change that. Try again.", which
+    /// stayed under the switch after Try Again had turned remembering on.
+    func test_the_preferences_switch_says_why_only_in_the_status_row() async throws {
+        let receipts = ReceiptSource(clock: clock, saved: clock.now, reason: nil)
+        let rig = rig(receipts: receipts)
         try await rig.supervisor.startAndWaitForReadiness()
         rig.topology.readinessResults = [.failure(SupervisorProcessRuntimeError.readinessTimedOut), .success(())]
         let controller = CapturePreferenceController(applier: rig.supervisor)
 
         await controller.setCaptureEnabled(true)
+        await eventually { !rig.supervisor.turningOn }
 
-        XCTAssertFalse(controller.captureEnabled)
-        XCTAssertEqual(controller.errorMessage, CapturePreferenceController.couldNotChange)
+        XCTAssertFalse(rig.supervisor.captureEnabled)
         XCTAssertEqual(row(rig.supervisor).title, "Couldn’t turn on")
         XCTAssertEqual(row(rig.supervisor).action, .tryAgain)
+
+        press(.tryAgain, on: rig.supervisor)
+        await eventually { rig.supervisor.captureEnabled && !rig.supervisor.turningOn }
+        clock.now = clock.now.addingTimeInterval(5)
+        receipts.saved = clock.now
+        rig.supervisor.refreshCaptureStatus()
+        XCTAssertEqual(row(rig.supervisor).title, "Remembering")
         try await rig.supervisor.shutdownAndWait()
+    }
+
+    /// The switch, turned on while the app's own start ran at launch (the
+    /// key check can wait on a Keychain prompt), cancelled that start before
+    /// it was refused: "Couldn’t change that. Try again." under the switch,
+    /// and "Not saving" with nothing running, though remembering had been
+    /// off. It waits for the start, as the menu's Turn On does.
+    func test_the_switch_turned_on_during_the_launch_start_waits_for_it() async throws {
+        let custody = FakeKeyCustodyPreparer()
+        let rig = rig(custody: custody)
+        let supervisor = rig.supervisor
+        let keyCheck = TestSuspension()
+        custody.suspension = keyCheck
+        supervisor.start()
+        await keyCheck.waitUntilEntered()
+        let controller = CapturePreferenceController(applier: supervisor)
+
+        await controller.setCaptureEnabled(true)
+        XCTAssertTrue(supervisor.turningOn)
+        custody.suspension = nil
+        keyCheck.resume()
+        await eventually { supervisor.captureEnabled && !supervisor.turningOn }
+
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertEqual(rig.topology.launchPlans.map { $0.helperArguments.contains("--capture") }, [false, true])
+        XCTAssertEqual(rig.config.captureWrites, [true])
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// Setup's Start Remembering asks for the change directly. When another
+    /// start holds the gate it is refused, and the start it met runs on.
+    func test_a_refused_direct_turn_on_leaves_the_start_under_way_alone() async throws {
+        let custody = FakeKeyCustodyPreparer()
+        let rig = rig(custody: custody)
+        let supervisor = rig.supervisor
+        let keyCheck = TestSuspension()
+        custody.suspension = keyCheck
+        supervisor.start()
+        await keyCheck.waitUntilEntered()
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.applyCaptureEnabled(true))
+        custody.suspension = nil
+        keyCheck.resume()
+        await eventually { supervisor.state != .starting }
+
+        XCTAssertEqual(supervisor.state, .running, "not crashed by a cancelled start")
+        XCTAssertEqual(rig.topology.launchPlans.count, 1)
+        try await supervisor.shutdownAndWait()
     }
 
     // MARK: A press during another change

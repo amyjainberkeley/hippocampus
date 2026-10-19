@@ -205,11 +205,6 @@ struct PreferencesRootView: View {
                 }
             ))
             .disabled(captureController.isApplying || !setupFinished)
-            if let errorMessage = captureController.errorMessage {
-                Text(errorMessage)
-                    .font(PreferencesStyle.captionFont)
-                    .foregroundStyle(.red)
-            }
 
             Divider()
 
