@@ -40,8 +40,11 @@ final class SupervisorWindowOpeningTests: XCTestCase {
 
     /// A supervisor whose window is a stand-in that writes the place it was
     /// opened on. `memoryOnDisk` false is a first run, before the agent has
-    /// made the memory. Nothing reads the person's own status files.
-    private func make(captureEnabled: Bool, memoryOnDisk: Bool = true) throws -> Harness {
+    /// made the memory. Nothing reads the person's own status files, and the
+    /// orphan sweep, when given, signals nothing.
+    private func make(
+        captureEnabled: Bool, memoryOnDisk: Bool = true, sweeper: (any CaptureOrphanSweeping)? = nil
+    ) throws -> Harness {
         let locator = FakeBinaryLocator()
         locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
         locator.agentURL = URL(fileURLWithPath: "/bundle/mci-agent")
@@ -58,7 +61,7 @@ final class SupervisorWindowOpeningTests: XCTestCase {
         let supervisor = ProcessSupervisor(
             locator: locator, keyStore: keyStore, runtimeConfig: FakeRuntimeConfig(captureEnabled: captureEnabled),
             topology: topology, keyCustodyPreparer: preparer, readinessTimeout: 0.1,
-            captureStatusReader: { (nil, nil) }, memoryOnDisk: { memoryOnDisk }
+            captureStatusReader: { (nil, nil) }, orphanSweeper: sweeper, memoryOnDisk: { memoryOnDisk }
         )
         return Harness(supervisor: supervisor, topology: topology, preparer: preparer, windows: windows)
     }
@@ -378,6 +381,68 @@ final class SupervisorWindowOpeningTests: XCTestCase {
         try await h.supervisor.shutdownAndWait()
     }
 
+    // MARK: The launch's orphan sweep
+
+    /// The launch sweep can wait up to 15 s for an orphaned writer. Opening
+    /// the app again meanwhile used to start capture at once, beside what the
+    /// sweep was ending; with the writer still holding the memory, the new
+    /// agent exited and the launch's own start was refused. Nothing starts
+    /// until the sweep is done; the window request waits for the key check.
+    func test_reopen_during_the_launch_sweep_starts_nothing_until_it_ends() async throws {
+        let gate = SweepGate()
+        let h = try make(captureEnabled: true, sweeper: GatedSweeper(gate: gate))
+        // As the app delegate does at a person's launch.
+        let launch = Task { @MainActor in
+            await h.supervisor.sweepOrphans(.launch)
+            h.supervisor.openRecallWhenReady(initialLaunch: true)
+            h.supervisor.start()
+        }
+        while !(await gate.hasEntered()) { await Task.yield() }
+
+        h.supervisor.reopenWindow()
+        h.supervisor.turnOn()
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(h.topology.launchPlans.count, 0, "nothing starts before the sweep ends")
+        XCTAssertEqual(h.supervisor.state, .idle)
+        let early = await opened(h.windows, within: 0.2)
+        XCTAssertEqual(early, [], "the window waits for the key check")
+
+        await gate.release()
+        await launch.value
+        await eventually { h.supervisor.state == .running }
+        XCTAssertEqual(h.supervisor.state, .running)
+        XCTAssertEqual(h.topology.launchPlans.count, 1)
+        XCTAssertEqual(h.topology.refusedLaunches, 0)
+        let places = await opened(h.windows)
+        XCTAssertEqual(places, ["overview"])
+        try await h.supervisor.shutdownAndWait()
+    }
+
+    /// Turn On during the launch sweep waits for it, and then turns on.
+    func test_turn_on_during_the_launch_sweep_waits_for_it() async throws {
+        let gate = SweepGate()
+        let h = try make(captureEnabled: false, sweeper: GatedSweeper(gate: gate))
+        let launch = Task { @MainActor in
+            await h.supervisor.sweepOrphans(.launch)
+            h.supervisor.start()
+        }
+        while !(await gate.hasEntered()) { await Task.yield() }
+
+        h.supervisor.turnOn()
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertTrue(h.supervisor.turningOn, "the press is kept")
+        XCTAssertEqual(h.topology.launchPlans.count, 0)
+
+        await gate.release()
+        await launch.value
+        await eventually { h.supervisor.captureEnabled && !h.supervisor.turningOn }
+        XCTAssertTrue(h.supervisor.captureEnabled)
+        XCTAssertEqual(h.supervisor.state, .running)
+        XCTAssertTrue(h.topology.launchPlans.last?.helperArguments.contains("--capture") == true)
+        XCTAssertEqual(h.topology.refusedLaunches, 0)
+        try await h.supervisor.shutdownAndWait()
+    }
+
     // MARK: Setup
 
     /// While setup is unfinished, opening the app again brings the setup that
@@ -410,5 +475,39 @@ final class SupervisorWindowOpeningTests: XCTestCase {
         let again = await opened(started, count: 2)
         XCTAssertEqual(again, ["started", "started"])
         await supervisor.stopWindowsForQuit(timeout: 1)
+    }
+}
+
+/// Holds the launch's sweep open, as when it waits out an orphaned writer.
+private actor SweepGate {
+    private var released = false
+    private var entered = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        entered = true
+        if released { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func release() {
+        released = true
+        waiters.forEach { $0.resume() }
+        waiters = []
+    }
+
+    func hasEntered() -> Bool { entered }
+}
+
+/// A sweep that signals nothing: the launch's waits on the gate.
+private struct GatedSweeper: CaptureOrphanSweeping {
+    let gate: SweepGate
+
+    func run(
+        _ moment: CaptureOrphanSweep.Moment,
+        liveChildren: (@Sendable () async -> Set<pid_t>)?
+    ) async -> CaptureOrphanSweep.Outcome {
+        if moment == .launch { await gate.wait() }
+        return CaptureOrphanSweep.Outcome()
     }
 }

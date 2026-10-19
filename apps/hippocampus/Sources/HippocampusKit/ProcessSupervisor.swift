@@ -270,6 +270,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// A capture helper was launched since the last stop that returned, so
     /// what the topology holds may be reading the screen.
     private var mayHoldCaptureHelper = false
+    /// The launch's orphan sweep is still ending what an earlier run left.
+    private var launchSweepRunning = false
     private var captureStopLatched = false
     private var captureStopTask: Task<Void, Error>?
     private var shutdownTask: Task<Void, Error>?
@@ -442,12 +444,19 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// S6.4). It runs off the main thread. Quit's ends every match; the
     /// others leave this supervisor's live children, and what they started,
     /// alone. Nil outside a `.app` bundle.
+    ///
+    /// The launch's sweep can wait out an orphaned writer for up to 15 s.
+    /// Until it returns nothing starts capture: a reopen's start is the
+    /// launch's own, which follows the sweep, and a Turn On waits for it, so
+    /// no new helper starts beside what the sweep is ending.
     @discardableResult
     public func sweepOrphans(_ moment: CaptureOrphanSweep.Moment) async -> CaptureOrphanSweep.Outcome? {
         guard let orphanSweeper else { return nil }
         let children: @Sendable () async -> Set<pid_t> = { [weak self] in
             await self?.captureProcessIDs ?? []
         }
+        if moment == .launch { launchSweepRunning = true }
+        defer { if moment == .launch { launchSweepRunning = false } }
         return await orphanSweeper.run(moment, liveChildren: moment == .quit ? nil : children)
     }
 
@@ -456,7 +465,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// pause starts in, would hide it. "Couldn’t stop" stands until a stop
     /// returns, and its button, Quit, is the sure way (RULINGS B1, S10).
     public func start() {
-        guard !captureStopLatched, captureStopTask == nil, !stopFailed,
+        guard !captureStopLatched, captureStopTask == nil, !stopFailed, !launchSweepRunning,
               !shutdownRequested, shutdownTask == nil, !state.isActive, state != .starting else {
             return
         }
@@ -947,7 +956,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     /// A start, a stop, a pause or a capture change holds the transition gate.
     private var changeUnderWay: Bool {
-        !inFlightTransitions.isEmpty || captureStopTask != nil || pauseTask != nil
+        !inFlightTransitions.isEmpty || captureStopTask != nil || pauseTask != nil || launchSweepRunning
     }
 
     private func beginTurnOnAttempt() -> UUID {
@@ -1113,7 +1122,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
 
     private func beginOwnedTransition() -> UUID? {
-        guard inFlightTransitions.isEmpty, captureStopTask == nil,
+        guard inFlightTransitions.isEmpty, captureStopTask == nil, !launchSweepRunning,
               let id = transitionGate.beginTransition() else { return nil }
         inFlightTransitions.insert(id)
         return id
