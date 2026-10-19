@@ -73,7 +73,10 @@ rg -Fq 'public func saveThen(' "$ONBOARDING_RETENTION_MODEL"
 rg -Fq 'return Ok(RetentionConfig::Days(90));' "$RETENTION_WORKER"
 rg -Fq 'parsed[key] = value' "$RUNTIME_CONFIG"
 rg -Fq 'parsed.convert(to: .toml)' "$RUNTIME_CONFIG"
-rg -Fq 'from: state, captureEnabled: captureEnabled,' "$PROCESS_SUPERVISOR"
+# The status is derived from the supervisor's state (shownState is that state,
+# reading Starting… or Paused only while the launch's first start is coming).
+rg -Fq 'from: shownState, captureEnabled: captureEnabled,' "$PROCESS_SUPERVISOR"
+rg -Fq 'guard state == .idle, launchSweepRunning || startRunning else { return state }' "$PROCESS_SUPERVISOR"
 rg -Fq 'environment["MCI_ONBOARDING_STEP"] = initialStep' "$PROCESS_SUPERVISOR"
 rg -Fq 'OnboardingLaunch.parse(ProcessInfo.processInfo.environment["MCI_ONBOARDING_STEP"])' "$ONBOARDING_APP"
 rg -Fq 'case "app-access", "allowlist": self = .appAccess' "$ONBOARDING_SCREEN"
