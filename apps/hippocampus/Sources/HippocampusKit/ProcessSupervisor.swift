@@ -165,9 +165,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     @Published public private(set) var health: HealthSnapshot?
     @Published public private(set) var captureReceipt: CaptureStatusReceipt?
     public private(set) var captureStartedAt: Date?
-    /// The person asked it to stop, pause or turn off, and that failed, so it
-    /// may still be reading the screen. Cleared by the next committed
-    /// transition (product critique 3, RULINGS S10).
+    /// The person asked it to stop, pause or turn off, or a turn-on that
+    /// failed could not stop what it started, so it may still be reading the
+    /// screen. Cleared by the next committed transition (product critique 3,
+    /// RULINGS S10).
     @Published public private(set) var stopFailed = false
     /// When the person pressed macOS's Stop Sharing; nil once remembering is
     /// turned back on. Kept across launches (spec-shell S5).
@@ -699,12 +700,16 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         } catch {
             let requestedError = error
             guard transitionGate.ownsTransition(transitionID) else {
-                await stopUncommittedTopologyIfNeeded()
+                await stopUncommittedTurnOn()
                 throw requestedError
             }
+            // What the failed start launched may still be reading until it
+            // is stopped (RULINGS B1).
+            var launchedTopologyStopped = !topology.isRunning
             do {
                 if topology.isRunning {
                     try await topology.stop(timeout: 5)
+                    launchedTopologyStopped = true
                     try ensureTransitionIsActive(transitionID)
                 }
                 stopAncillaryServices()
@@ -729,6 +734,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 if transitionGate.ownsTransition(transitionID) {
                     transitionGate.fail(transitionID: transitionID)
                     captureEnabled = prior
+                    // A capture helper that would not stop may still be
+                    // reading: say "Couldn’t stop", never Off (RULINGS B1).
+                    if !launchedTopologyStopped
+                        || (error as? SupervisorProcessRuntimeError) == .partialStop {
+                        stopFailed = true
+                    }
                     state = .crashed(
                         reason: "Capture change failed and prior topology could not be restored: \(error.localizedDescription)"
                     )
@@ -738,6 +749,24 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             }
             throw requestedError
         }
+    }
+
+    /// Stops what a turn-on launched and could not commit, unless a turn-off,
+    /// a pause or Quit under way owns the teardown. A latch left by an
+    /// earlier turn-off is not one: honoring it would leave a helper waiting
+    /// on a permission, to start reading on its own once it is allowed.
+    private func stopUncommittedTurnOn() async {
+        guard captureStopTask == nil, pauseTask == nil,
+              !shutdownRequested, shutdownTask == nil else { return }
+        if topology.isRunning {
+            do {
+                try await topology.stop(timeout: 2)
+            } catch {
+                // It would not stop, so it may still read (RULINGS B1).
+                stopFailed = true
+            }
+        }
+        stopAncillaryServices()
     }
 
     private func startTopology(
