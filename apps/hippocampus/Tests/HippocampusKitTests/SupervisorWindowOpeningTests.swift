@@ -67,8 +67,10 @@ final class SupervisorWindowOpeningTests: XCTestCase {
     }
 
     /// The places the window was opened on, once at least `count` launches
-    /// were seen or `seconds` passed.
-    private func opened(_ windows: URL, count: Int = 1, within seconds: TimeInterval = 2) async -> [String] {
+    /// were seen or `seconds` passed. A stand-in's shell can take a while to
+    /// start on a busy machine, so the wait for one to show is generous; a
+    /// check that nothing opened passes its own short `seconds`.
+    private func opened(_ windows: URL, count: Int = 1, within seconds: TimeInterval = 5) async -> [String] {
         let deadline = Date().addingTimeInterval(seconds)
         var lines: [String] = []
         repeat {

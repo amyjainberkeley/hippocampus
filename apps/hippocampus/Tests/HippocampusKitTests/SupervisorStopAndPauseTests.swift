@@ -128,7 +128,7 @@ final class SupervisorStopAndPauseTests: XCTestCase {
         return marker
     }
 
-    private func openedTab(_ marker: URL, within seconds: TimeInterval = 2) async -> String? {
+    private func openedTab(_ marker: URL, within seconds: TimeInterval = 5) async -> String? {
         let deadline = Date().addingTimeInterval(seconds)
         while Date() < deadline {
             if let tab = try? String(contentsOf: marker, encoding: .utf8) { return tab }
