@@ -147,6 +147,11 @@ final class OnboardingCopyTests: XCTestCase {
         XCTAssertEqual(OnboardingCopy.Demo.askQuestion, "what was that pricing link?")
         XCTAssertEqual(OnboardingCopy.Demo.source, "stripe.com/pricing · 2:14 PM")
         XCTAssertTrue(OnboardingCopy.Demo.source.hasPrefix(OnboardingCopy.Demo.sourceAddress))
+        // Ask opens over a message about the same work, not over the page
+        // it finds: the link comes back from earlier.
+        XCTAssertEqual(OnboardingCopy.Demo.messageTitle, OnboardingCopy.Demo.sessionTitle)
+        XCTAssertEqual(OnboardingCopy.Demo.askContext, "Mail · Team pricing")
+        XCTAssertFalse(OnboardingCopy.Demo.messageBody.lowercased().contains("stripe"))
         // The day it fills in ends on the session Ask and the AI talk about.
         XCTAssertEqual(OnboardingCopy.Demo.sessionTitle, "Team pricing")
         XCTAssertTrue(OnboardingCopy.Demo.aiContextLines[0].hasSuffix(OnboardingCopy.Demo.sessionTitle))
@@ -154,7 +159,7 @@ final class OnboardingCopyTests: XCTestCase {
         XCTAssertTrue(OnboardingCopy.Demo.sessionTime.hasPrefix("2:12 – 2:36 PM"))
         XCTAssertEqual(OnboardingCopy.Demo.places, ["Overview", "Ask", "You"], "the window's three places")
         XCTAssertEqual(OnboardingCopy.welcomeDemoLabel,
-                       "A short demo. Ask finds a pricing link and its source. Overview fills in the day. Your AI starts with your recent work.")
+                       "A short demo. Ask finds a link for the message you’re writing, with its source. Overview fills in the day. Your AI starts with your recent work.")
     }
 
     func testTryItSaysWhatItReadAndWhyAWindowIsSkipped() {
@@ -320,8 +325,10 @@ final class OnboardingCopyTests: XCTestCase {
         // Welcome's demo: made up, but on screen, so held to the same rules.
         let demo = OnboardingCopy.Demo.self
         strings += [
+            demo.messageApp, demo.messageTitle, demo.messageToLabel, demo.messageTo, demo.messageSubjectLabel,
+            demo.messageBody, demo.askContext,
             demo.askQuestion, demo.askAnswer, demo.sourcesLabel, demo.sourceApp, demo.source, demo.sourceAddress,
-            demo.pageTitle, demo.onThisMac, demo.copyAnswerKeys, demo.copyAnswer, demo.menuBarClock, demo.remembering,
+            demo.onThisMac, demo.copyAnswerKeys, demo.copyAnswer, demo.menuBarClock, demo.remembering,
             demo.today, demo.sessionTitle, demo.sessionTime, demo.sessionLine, demo.aiWindowTitle, demo.aiContextTitle,
             demo.aiPrompt, demo.aiReply,
         ]

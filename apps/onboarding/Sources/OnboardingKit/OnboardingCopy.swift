@@ -29,20 +29,30 @@ public enum OnboardingCopy {
 
     /// What VoiceOver says for the demo, which is drawn, not read.
     public static let welcomeDemoLabel =
-        "A short demo. Ask finds a pricing link and its source. Overview fills in the day. Your AI starts with your recent work."
+        "A short demo. Ask finds a link for the message you’re writing, with its source. Overview fills in the day. Your AI starts with your recent work."
 
     /// The words inside Welcome's demo. Everything here is made up: no
     /// person's memory is ever shown in setup.
     public enum Demo {
-        // Ask, dropped from the top of the screen.
+        // The message the person is writing when they need the link: Ask
+        // drops over it, so the page Ask finds is not the one on screen.
+        public static let messageApp = "Mail"
+        public static let messageTitle = "Team pricing"
+        public static let messageToLabel = "To:"
+        public static let messageTo = "Maya"
+        public static let messageSubjectLabel = "Subject:"
+        public static let messageBody = "Here’s the pricing page we looked at:"
+
+        // Ask, dropped from the top of the screen over the message.
         public static let askQuestion = "what was that pricing link?"
         public static let askAnswer = "The Stripe pricing page you read this afternoon."
+        /// Ask's header names the window it opened over, as the app's does.
+        public static let askContext = "\(messageApp) · \(messageTitle)"
         public static let sourcesLabel = "Sources"
         public static let sourceApp = "Safari"
         public static let source = "stripe.com/pricing · 2:14 PM"
-        /// The page behind Ask, in Safari.
+        /// Where the answer came from: a page read earlier, in Safari.
         public static let sourceAddress = "stripe.com/pricing"
-        public static let pageTitle = "Pricing"
         public static let onThisMac = "On this Mac"
         public static let copyAnswerKeys = "⌘C"
         public static let copyAnswer = "Copy Answer"

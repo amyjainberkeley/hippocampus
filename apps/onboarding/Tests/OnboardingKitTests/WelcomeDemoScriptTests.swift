@@ -20,28 +20,42 @@ final class WelcomeDemoScriptTests: XCTestCase {
     }
 
     func testAskOpensTheWayThePersonOpensItThenAnswersWithItsSource() {
-        // The key first: twice for Shift twice, once for any other key.
-        XCTAssertFalse(Script.frame(at: 0).keyDown)
-        XCTAssertTrue(Script.frame(at: 0.15).keyDown)
-        XCTAssertFalse(Script.frame(at: 0.3).keyDown)
-        XCTAssertTrue(Script.frame(at: 0.45).keyDown)
-        XCTAssertFalse(Script.frame(at: 0.45, presses: 1).keyDown)
-        XCTAssertFalse(Script.frame(at: 0.45).askOpen, "the key comes before Ask")
+        // First the message being written, alone, for over half a second.
+        for tenth in 0...6 {
+            let writing = Script.frame(at: Double(tenth) / 10)
+            XCTAssertFalse(writing.keyDown || writing.askOpen, "the message shows first, at \(tenth)")
+        }
+        // Then the key: twice for Shift twice, once for any other key.
+        XCTAssertTrue(Script.frame(at: 0.75).keyDown)
+        XCTAssertFalse(Script.frame(at: 0.9).keyDown)
+        XCTAssertTrue(Script.frame(at: 1.05).keyDown)
+        XCTAssertFalse(Script.frame(at: 1.05, presses: 1).keyDown)
+        XCTAssertFalse(Script.frame(at: 1.05).askOpen, "the key comes before Ask")
         // Then Ask, the question typed, the answer, its source.
-        let opened = Script.frame(at: 0.7)
+        let opened = Script.frame(at: 1.3)
         XCTAssertTrue(opened.askOpen)
         XCTAssertEqual(opened.typedQuestion, 0)
-        let typing = Script.frame(at: 1.5)
+        let typing = Script.frame(at: 2)
         XCTAssertGreaterThan(typing.typedQuestion, 0)
         XCTAssertLessThan(typing.typedQuestion, OnboardingCopy.Demo.askQuestion.count)
         XCTAssertFalse(typing.showsAnswer)
-        let answered = Script.frame(at: 2.5)
+        let answered = Script.frame(at: 2.9)
         XCTAssertEqual(answered.typedQuestion, OnboardingCopy.Demo.askQuestion.count)
         XCTAssertTrue(answered.showsAnswer)
         XCTAssertFalse(answered.showsSource)
-        XCTAssertTrue(Script.frame(at: 3).showsSource)
-        XCTAssertTrue(Script.frame(at: 3).isShown)
+        XCTAssertTrue(Script.frame(at: 3.3).showsSource)
+        XCTAssertTrue(Script.frame(at: 3.3).isShown)
         XCTAssertFalse(Script.frame(at: Script.length(of: .ask) - 0.1).isShown, "it fades before the next")
+    }
+
+    func testEachMomentHoldsItsEndLongEnoughToRead() {
+        // From the last thing arriving to the fade: the answer and its
+        // source, the session card, the reply.
+        let fade = Script.fadeOut
+        XCTAssertGreaterThanOrEqual(Script.length(of: .ask) - fade - Script.answerAt, 2.5)
+        XCTAssertGreaterThanOrEqual(Script.length(of: .ask) - fade - Script.sourceAt, 2.5)
+        XCTAssertGreaterThanOrEqual(Script.length(of: .overview) - fade - Script.sessionCardAt, 2.5)
+        XCTAssertGreaterThanOrEqual(Script.length(of: .ai) - fade - Script.replyAt, 2.5)
     }
 
     func testOverviewFillsInTheDayThenShowsTheSessionItEndsOn() {

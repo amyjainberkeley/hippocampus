@@ -45,9 +45,9 @@ struct WelcomeDemo: View {
         switch frame.moment {
         case .ask:
             ZStack(alignment: .top) {
-                MiniBrowserBehind()
-                    .frame(width: 500, height: 200)
-                    .padding(.top, 40)
+                MiniMessageBehind()
+                    .frame(width: 470, height: 176)
+                    .padding(.top, 36)
                     // Ask has the person's attention once it is open.
                     .opacity(frame.askOpen ? 0.6 : 1)
                     .animation(.easeOut(duration: 0.28), value: frame.askOpen)
@@ -67,8 +67,10 @@ struct WelcomeDemo: View {
                 .animation(.easeOut(duration: 0.3), value: frame.sessionsShown)
                 .animation(.easeOut(duration: 0.3), value: frame.showsSessionCard)
         case .ai:
+            // Wide enough that the reply keeps to one line, as a terminal
+            // this size would show it.
             MiniAIWindow(frame: frame)
-                .frame(width: 440, height: 166)
+                .frame(width: 480, height: 160)
                 .padding(.top, 30)
                 .animation(.easeOut(duration: 0.28), value: frame.contextLinesShown)
                 .animation(.easeOut(duration: 0.28), value: frame.showsReply)

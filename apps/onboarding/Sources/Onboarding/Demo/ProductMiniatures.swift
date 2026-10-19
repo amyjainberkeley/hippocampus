@@ -85,6 +85,8 @@ struct AppIconImage: View {
 struct MiniWindow<Content: View>: View {
     var title: String?
     var titleBar: CGFloat = 20
+    /// A toolbar button beside the window's buttons: Mail's Send.
+    var toolbarSymbol: String?
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -93,6 +95,12 @@ struct MiniWindow<Content: View>: View {
                 HStack(spacing: 5) {
                     ForEach(0..<3, id: \.self) { _ in
                         Circle().fill(Color.black.opacity(0.13)).frame(width: 7, height: 7)
+                    }
+                    if let toolbarSymbol {
+                        Image(systemName: toolbarSymbol)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(MiniPalette.muted)
+                            .padding(.leading, 9)
                     }
                     Spacer(minLength: 0)
                 }
@@ -176,8 +184,10 @@ struct MiniAskPanel: View {
                     }
                 }
                 Spacer(minLength: 0)
+                context
             }
-            .padding(.horizontal, 14)
+            .padding(.leading, 14)
+            .padding(.trailing, 10)
             .frame(height: 40)
 
             if frame.showsAnswer {
@@ -220,46 +230,60 @@ struct MiniAskPanel: View {
             }
         }
         .frame(width: width)
-        .background(MiniPalette.panel.opacity(0.97), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .background(MiniPalette.panel, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(Color.black.opacity(0.1), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.16), radius: 14, y: 7)
     }
+
+    /// The window Ask opened over, as the app's header names it.
+    private var context: some View {
+        HStack(spacing: 4) {
+            AppIconImage(bundleId: MiniMessageBehind.mailBundleId, side: 11)
+            Text(OnboardingCopy.Demo.askContext)
+                .font(.system(size: 8.5))
+                .foregroundStyle(MiniPalette.secondary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3.5)
+        .background(Color.black.opacity(0.05), in: Capsule())
+        .fixedSize()
+    }
 }
 
-/// A page open behind Ask: the pricing page the question is about. Ask
-/// covers it once it answers, as it covers the window it drops over.
-struct MiniBrowserBehind: View {
+/// The message the person is writing when they need the link. Ask drops
+/// over it and finds a page read earlier, so the answer comes from memory,
+/// not from the screen.
+struct MiniMessageBehind: View {
+    static let mailBundleId = "com.apple.mail"
+
     var body: some View {
-        MiniWindow(title: OnboardingCopy.Demo.sourceAddress) {
-            VStack(alignment: .center, spacing: 9) {
-                Text(OnboardingCopy.Demo.pageTitle)
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(MiniPalette.ink.opacity(0.75))
-                RoundedRectangle(cornerRadius: 2).fill(MiniPalette.ink.opacity(0.1)).frame(width: 170, height: 6)
-                HStack(spacing: 9) {
-                    ForEach(0..<3, id: \.self) { index in
-                        VStack(alignment: .leading, spacing: 6) {
-                            RoundedRectangle(cornerRadius: 2).fill(MiniPalette.ink.opacity(0.16)).frame(width: 44, height: 6)
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(index == 1 ? OnboardingDesign.Palette.accent.opacity(0.55) : MiniPalette.ink.opacity(0.22))
-                                .frame(width: 30, height: 10)
-                            ForEach(0..<3, id: \.self) { _ in
-                                RoundedRectangle(cornerRadius: 2).fill(MiniPalette.ink.opacity(0.07)).frame(height: 5)
-                            }
-                        }
-                        .padding(9)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .strokeBorder(index == 1 ? OnboardingDesign.Palette.accent.opacity(0.35) : MiniPalette.border, lineWidth: 1)
-                        )
-                    }
+        MiniWindow(title: OnboardingCopy.Demo.messageTitle, toolbarSymbol: "paperplane") {
+            VStack(alignment: .leading, spacing: 0) {
+                field(OnboardingCopy.Demo.messageToLabel, OnboardingCopy.Demo.messageTo)
+                Divider().opacity(0.7)
+                field(OnboardingCopy.Demo.messageSubjectLabel, OnboardingCopy.Demo.messageTitle)
+                Divider().opacity(0.7)
+                HStack(spacing: 1) {
+                    Text(OnboardingCopy.Demo.messageBody)
+                        .font(.system(size: 11))
+                        .foregroundStyle(MiniPalette.ink)
+                    // The caret: the person is mid-sentence.
+                    Rectangle().fill(OnboardingDesign.Palette.accent).frame(width: 1.2, height: 13)
                 }
+                .padding(.top, 12)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 14)
         }
+    }
+
+    private func field(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 6) {
+            Text(label).foregroundStyle(MiniPalette.muted)
+            Text(value).foregroundStyle(MiniPalette.ink)
+        }
+        .font(.system(size: 10))
+        .frame(height: 22)
     }
 }
 

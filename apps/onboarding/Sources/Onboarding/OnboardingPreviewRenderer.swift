@@ -59,8 +59,9 @@ enum OnboardingPreviewRenderer {
 
         // Welcome: each moment whole, and on the way through it.
         add("1-welcome", welcome(.shiftTwice, WelcomeDemoScript.finalFrame(.ask)))
-        add("1-welcome-ask-key-down", welcome(.shiftTwice, WelcomeDemoScript.frame(.ask, at: 0.15)))
-        add("1-welcome-ask-typing", welcome(.shiftTwice, WelcomeDemoScript.frame(.ask, at: 1.5)))
+        add("1-welcome-ask-writing", welcome(.shiftTwice, WelcomeDemoScript.frame(.ask, at: 0.4)))
+        add("1-welcome-ask-key-down", welcome(.shiftTwice, WelcomeDemoScript.frame(.ask, at: 0.75)))
+        add("1-welcome-ask-typing", welcome(.shiftTwice, WelcomeDemoScript.frame(.ask, at: 2)))
         add("1-welcome-overview-filling", welcome(.shiftTwice, WelcomeDemoScript.frame(.overview, at: 0.9)))
         add("1-welcome-overview", welcome(.shiftTwice, WelcomeDemoScript.finalFrame(.overview)))
         add("1-welcome-ai-starting", welcome(.shiftTwice, WelcomeDemoScript.frame(.ai, at: 1.9)))

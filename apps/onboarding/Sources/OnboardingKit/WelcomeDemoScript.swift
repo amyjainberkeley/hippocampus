@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Welcome's demo, as a script: three moments from the product, played in a
-// loop from made-up data (`OnboardingCopy.Demo`). Ask finds a pricing link
-// and shows its source; Overview fills in the day; your AI starts a session
-// with your recent work. The view draws `frame(at:)` and animates between
+// loop from made-up data (`OnboardingCopy.Demo`). Someone writing a message
+// needs a link they saw earlier: Ask finds it and shows its source; Overview
+// fills in the day; your AI starts a session with your recent work. The
+// view draws `frame(at:)` and animates between
 // frames; the script alone decides what shows when, so the tests and the
 // preview renderer see exactly what plays. Under Reduce Motion the view
 // shows each moment whole (`finalFrame`) and only fades between them.
@@ -72,12 +73,13 @@ public struct DemoSession: Equatable, Sendable {
 }
 
 public enum WelcomeDemoScript {
-    /// How long each moment plays, in seconds.
+    /// How long each moment plays, in seconds. Each holds its last state
+    /// for close to three seconds, long enough to read the answer.
     public static func length(of moment: DemoMoment) -> TimeInterval {
         switch moment {
-        case .ask: 5.2
-        case .overview: 4.8
-        case .ai: 5.4
+        case .ask: 6
+        case .overview: 5.4
+        case .ai: 6
         }
     }
 
@@ -101,14 +103,15 @@ public enum WelcomeDemoScript {
     /// The strip's hours, start and end.
     public static let dayHours: ClosedRange<Double> = 9...15
 
-    /// Ask opens as the person opens it: the key first (twice for Shift
-    /// twice), then the panel. Each press holds the key this long.
-    public static let keyPresses: [TimeInterval] = [0.1, 0.4]
+    /// Ask opens as the person opens it: first the message they are
+    /// writing, alone, then the key (twice for Shift twice), then the
+    /// panel over the message. Each press holds the key this long.
+    public static let keyPresses: [TimeInterval] = [0.7, 1.0]
     public static let keyHold: TimeInterval = 0.12
-    static let askOpensAt: TimeInterval = 0.6
-    static let questionTyping: ClosedRange<TimeInterval> = 0.95...2.05
-    static let answerAt: TimeInterval = 2.4
-    static let sourceAt: TimeInterval = 2.8
+    static let askOpensAt: TimeInterval = 1.2
+    static let questionTyping: ClosedRange<TimeInterval> = 1.5...2.5
+    static let answerAt: TimeInterval = 2.8
+    static let sourceAt: TimeInterval = 3.15
     static let sessionTimes: [TimeInterval] = [0.45, 0.65, 0.85, 1.05, 1.25]
     static let sessionCardAt: TimeInterval = 1.75
     static let contextLineTimes: [TimeInterval] = [0.55, 0.8]
