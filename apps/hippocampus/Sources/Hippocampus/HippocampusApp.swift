@@ -23,7 +23,7 @@ struct HippocampusApp: App {
                         .keyboardShortcut(",", modifiers: [.command])
                 }
                 CommandGroup(replacing: .appTermination) {
-                    Button("Quit Hippocampus") { appDelegate.requestQuit() }
+                    Button("Quit Hippocampus") { appDelegate.requestQuit(fromHippocampus: true) }
                         .keyboardShortcut("q", modifiers: [.command])
                 }
             }
@@ -108,6 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             locator: BundleBinaryLocator(),
             keyStore: KeychainKeyStore.defaultDatabaseKey,
             captureStopNote: UserDefaultsCaptureStopNote(),
+            turnOnWaitNote: UserDefaultsTurnOnWaitNote(),
             pauses: .shared,
             orphanSweeper: CaptureOrphanSweep(bundleURL: Bundle.main.bundleURL)
         )
@@ -352,7 +353,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 },
                 preferences: { [weak self] in self?.showPreferences() },
-                quit: { [weak self] in self?.requestQuit() }
+                quit: { [weak self] in self?.requestQuit(fromHippocampus: true) }
             )
         )
     }
@@ -361,7 +362,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Quit is the app's; everything else is the supervisor's.
     func performStatusAction(_ action: CaptureStatusAction) {
         if action == .quit {
-            requestQuit()
+            requestQuit(fromHippocampus: true)
             return
         }
         supervisor.performAskStatusAction(action) { NSWorkspace.shared.open($0) }
@@ -470,7 +471,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
-    func requestQuit() {
+    /// `fromHippocampus`: the person quit from the menu, ⌘Q or the status
+    /// row. A quit from outside (an Apple event, as System Settings' Quit &
+    /// Reopen sends, SIGTERM, logout) keeps a Turn On a permission refused,
+    /// for the relaunch.
+    func requestQuit(fromHippocampus: Bool = false) {
+        if fromHippocampus { supervisor.forgetTurnOnWaitingOnPermission() }
         requestTermination(.quit)
     }
 

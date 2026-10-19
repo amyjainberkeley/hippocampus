@@ -352,6 +352,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private let retrySleep: @MainActor @Sendable (TimeInterval) async throws -> Void
     private let captureStatusReader: @MainActor @Sendable () -> (HealthSnapshot?, CaptureStatusReceipt?)
     private let captureStopNote: any CaptureStopNoting
+    private let turnOnWaitNote: any TurnOnWaitNoting
+    /// A Turn On a permission refused shortly before this launch: its first
+    /// start presses it again, once (`TurnOnWaitNote`).
+    private var turnOnToResume = false
     private let pauses: UserPauseController
     private let orphanSweeper: (any CaptureOrphanSweeping)?
     private let clock: @MainActor @Sendable () -> Date
@@ -422,6 +426,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         keyStore: KeyStore,
         runtimeConfig: any RuntimeConfiguring = RuntimeConfig(),
         captureStopNote: any CaptureStopNoting = NoCaptureStopNote(),
+        turnOnWaitNote: any TurnOnWaitNoting = NoTurnOnWaitNote(),
         pauses: UserPauseController = UserPauseController(),
         orphanSweeper: (any CaptureOrphanSweeping)? = nil
     ) {
@@ -439,6 +444,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             pauses: pauses,
             orphanSweeper: orphanSweeper,
             memoryOnDisk: { FileManager.default.fileExists(atPath: ProcessSupervisor.databaseURL.path) },
+            turnOnWaitNote: turnOnWaitNote,
             permissionProbe: ProcessSupervisor.permissionVisibleHere,
             recallWindowChannel: DistributedRecallWindowChannel()
         )
@@ -477,6 +483,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         orphanSweeper: (any CaptureOrphanSweeping)? = nil,
         clock: @escaping @MainActor @Sendable () -> Date = { Date() },
         memoryOnDisk: @escaping @MainActor @Sendable () -> Bool = { false },
+        turnOnWaitNote: any TurnOnWaitNoting = NoTurnOnWaitNote(),
         permissionProbe: @escaping @MainActor @Sendable (TCCRevokedReason) -> Bool? = { _ in nil },
         permissionPollSleep: @escaping @MainActor @Sendable () async throws -> Void = {
             try await Task.sleep(for: .seconds(2))
@@ -502,11 +509,17 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         self.permissionProbe = permissionProbe
         self.permissionPollSleep = permissionPollSleep
         self.recallWindowChannel = recallWindowChannel
+        self.turnOnWaitNote = turnOnWaitNote
         self.captureEnabled = runtimeConfig.captureEnabled
         // A pause outlives a relaunch: start goes straight to Paused.
         self.requestedPauseState = pauses.isPaused
         self.stoppedSharingAt = captureStopNote.stoppedSharingAt
         stayOffAfterStopSharing()
+        if TurnOnWaitNote.honours(turnOnWaitNote.refusedAt, now: clock()) {
+            turnOnToResume = true
+        } else if turnOnWaitNote.refusedAt != nil {
+            turnOnWaitNote.clear()
+        }
     }
 
     /// After Stop Sharing the next launch stays off, even if saving "off" to
@@ -659,6 +672,18 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         // is never cancelled for a start either; only a retry still waiting
         // out its backoff is replaced.
         guard !startRunning, inFlightTransitions.isEmpty, pauseTask == nil else { return }
+        // A Turn On a permission refused just before this launch (System
+        // Settings' Quit & Reopen, after the person allowed it) is pressed
+        // again, once, with a fresh helper: it lands only if that helper
+        // finds every permission on.
+        if turnOnToResume {
+            turnOnToResume = false
+            turnOnWaitNote.clear()
+            if !captureEnabled, !requestedPauseState {
+                turnOn()
+                return
+            }
+        }
         cancelPendingRetry()
         startRunning = true
         retryTask = Task { @MainActor [weak self] in
@@ -1063,9 +1088,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             captureEnabled = true
             captureStopLatched = false
             // Turned back on: the Stop Sharing note and any pause are over
-            // (spec-shell S5, D10).
+            // (spec-shell S5, D10), and so is a press waiting on a permission.
             stoppedSharingAt = nil
             captureStopNote.clear()
+            turnOnWaitNote.clear()
             requestedPauseState = false
             pauses.setPaused(false)
             activateTopology(captureEnabled: true, generationID: generationID)
@@ -1212,6 +1238,19 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         logger.error("supervisor: turning remembering on failed: \(error.localizedDescription)")
         turnOnFailure = tccRevokedSurface.map(TurnOnFailure.permission)
             ?? .didNotStart(reason: error.localizedDescription)
+        // Kept for a relaunch only while it waits on a permission.
+        if case .permission = turnOnFailure {
+            turnOnWaitNote.record(clock())
+        } else {
+            turnOnWaitNote.clear()
+        }
+    }
+
+    /// The person quit Hippocampus themselves: a Turn On a permission
+    /// refused is not pressed again at the next launch. (System Settings'
+    /// Quit & Reopen, after they allowed it, keeps it.)
+    public func forgetTurnOnWaitingOnPermission() {
+        turnOnWaitNote.clear()
     }
 
     /// A turn-off or Quit is the newer word, and each stops what runs: a
@@ -1419,6 +1458,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// shutdown are all attempted independently; none can roll capture back on.
     private func requestCaptureStop() -> Task<Void, Error> {
         supersedeTurnOn()
+        turnOnWaitNote.clear()
         if let captureStopTask { return captureStopTask }
         captureStopLatched = true
         captureEnabled = false

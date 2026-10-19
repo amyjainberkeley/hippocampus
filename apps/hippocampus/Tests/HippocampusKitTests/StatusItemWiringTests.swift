@@ -62,7 +62,7 @@ final class StatusItemWiringTests: XCTestCase {
         XCTAssertTrue(scene.contains("Settings { EmptyView() }"))
         XCTAssertTrue(scene.contains("CommandGroup(replacing: .appSettings)"))
         XCTAssertTrue(scene.contains("CommandGroup(replacing: .appTermination)"))
-        XCTAssertTrue(scene.contains("Button(\"Quit Hippocampus\") { appDelegate.requestQuit() }"))
+        XCTAssertTrue(scene.contains("Button(\"Quit Hippocampus\") { appDelegate.requestQuit(fromHippocampus: true) }"))
         XCTAssertTrue(scene.contains(".keyboardShortcut(\"q\", modifiers: [.command])"))
         XCTAssertTrue(scene.contains(".keyboardShortcut(\",\", modifiers: [.command])"))
         for source in [app, try source("StatusMenuView.swift"), try source("CommandBar.swift")] {
@@ -87,7 +87,7 @@ final class StatusItemWiringTests: XCTestCase {
     func testTheStatusButtonRunsTheSupervisorsCodeAndQuitIsTheApps() throws {
         let app = try source("HippocampusApp.swift")
         let perform = try method("func performStatusAction(_ action: CaptureStatusAction)", in: app)
-        let quit = try XCTUnwrap(perform.range(of: "requestQuit()"))
+        let quit = try XCTUnwrap(perform.range(of: "requestQuit(fromHippocampus: true)"))
         let supervisor = try XCTUnwrap(perform.range(of: "supervisor.performAskStatusAction(action) { NSWorkspace.shared.open($0) }"))
         XCTAssertLessThan(quit.lowerBound, supervisor.lowerBound)
         XCTAssertEqual(app.components(separatedBy: "self?.performStatusAction(action)").count - 1, 3,
