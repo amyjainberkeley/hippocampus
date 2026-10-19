@@ -3,7 +3,8 @@
 // CaptureStopNote.swift — remembers that the person pressed macOS's Stop
 // Sharing, and when (spec-shell S5). The menu then says why remembering is
 // off ("You stopped it at 3:04 PM."), and the next launch stays off even if
-// writing `capture_enabled = false` to runtime.toml failed.
+// writing `capture_enabled = false` to runtime.toml failed. A turn-off whose
+// write failed keeps the same note, for the same reason.
 //
 // The note lives on the same disk as runtime.toml, so a full disk defeats
 // both: it covers a refused write (a permission error), not a disk with no

@@ -237,6 +237,34 @@ final class SupervisorStopAndPauseTests: XCTestCase {
 
     /// Remembering was turned on elsewhere after Stop Sharing, so the old
     /// note no longer applies (critique-shell-engineering 13).
+    /// Turned off in Preferences while saving "off" to runtime.toml fails:
+    /// the setting still says on. Quit, as the row offers, and the next
+    /// launch used to start capture. The turn-off keeps Stop Sharing's note,
+    /// so that launch stays off, whether the save works by then or not.
+    func test_a_turn_off_whose_save_failed_stays_off_after_relaunch() async throws {
+        for saveWorksNextTime in [true, false] {
+            let note = RecordingStopNote()
+            let config = FakeRuntimeConfig(captureEnabled: true)
+            let (supervisor, _, _) = make(config: config, note: note)
+            try await supervisor.startAndWaitForReadiness()
+            config.captureWriteError = TestError.writeFailed
+
+            try? await supervisor.applyCaptureEnabled(false)
+            XCTAssertTrue(config.captureEnabled, "the save failed")
+            XCTAssertNotNil(note.stoppedSharingAt)
+            try? await supervisor.shutdownAndWait()
+
+            if saveWorksNextTime { config.captureWriteError = nil }
+            let (relaunched, _, topology) = make(config: config, note: note)
+            try? await relaunched.startAndWaitForReadiness()
+
+            XCTAssertFalse(relaunched.captureEnabled, "save works next time: \(saveWorksNextTime)")
+            XCTAssertFalse(topology.launchPlans.contains { $0.helperArguments.contains("--capture") })
+            XCTAssertEqual(relaunched.statusRow(setupFinished: true, now: clock.now).title, "Off")
+            try? await relaunched.shutdownAndWait()
+        }
+    }
+
     func test_a_note_older_than_the_settings_file_is_dropped() async throws {
         let stopped = clock.now.addingTimeInterval(-3600)
         let note = RecordingStopNote(stopped)

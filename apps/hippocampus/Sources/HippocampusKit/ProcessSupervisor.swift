@@ -1164,7 +1164,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             defer { self.captureStopTask = nil }
             var failures: [String] = []
             do { try self.runtimeConfig.setCaptureEnabled(false) }
-            catch { failures.append("Saving capture off: \(error.localizedDescription)") }
+            catch {
+                failures.append("Saving capture off: \(error.localizedDescription)")
+                self.keepOffAcrossLaunches()
+            }
             do { try await self.revokeConsentAndStopTopology(timeout: 5) }
             catch { failures.append("Stopping capture: \(error.localizedDescription)") }
             guard failures.isEmpty else {
@@ -1400,6 +1403,18 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// stand, so only the log needs the error.
     func logStatusActionFailure(_ what: String, _ error: Error) {
         logger.error("supervisor: \(what, privacy: .public) failed: \(error.localizedDescription)")
+    }
+
+    /// Saving "off" failed, so runtime.toml still says on and the next
+    /// launch would start capture. Keep the note Stop Sharing keeps: the next
+    /// launch honours it and stays off, and it reads "You stopped it at …"
+    /// (spec-shell S5.3, D8). Turning remembering back on clears it.
+    private func keepOffAcrossLaunches() {
+        guard stoppedSharingAt == nil else { return }
+        let now = clock()
+        stoppedSharingAt = now
+        captureStopNote.record(now)
+        logger.error("supervisor: saving capture off failed; kept a note so the next launch stays off")
     }
 
     /// Stop Sharing was pressed: remember when, here and across launches.
