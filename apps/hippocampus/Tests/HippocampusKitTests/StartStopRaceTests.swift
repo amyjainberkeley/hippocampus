@@ -207,8 +207,10 @@ final class StartStopRaceTests: XCTestCase {
         XCTAssertEqual(row(supervisor).title, "Needs permission", describe(supervisor))
         XCTAssertEqual(row(supervisor).action, .openSystemSettings(.screenRecording))
 
-        // Not a dead end: remembering is on, so a look starts it again.
+        // Not a dead end: remembering is on, so a look starts it again (once
+        // the ended start has finished unwinding, a moment after its stop).
         topology.holdReadiness = false
+        try await Task.sleep(for: .milliseconds(100))
         supervisor.retryIfPermissionMayBeBack()
         await eventually { supervisor.state == .running }
         XCTAssertEqual(topology.launchPlans.count, 2)

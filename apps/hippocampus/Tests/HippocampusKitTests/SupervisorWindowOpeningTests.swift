@@ -494,6 +494,100 @@ final class SupervisorWindowOpeningTests: XCTestCase {
         try await h.supervisor.shutdownAndWait()
     }
 
+    // MARK: A Restart that stayed open
+
+    /// Preferences' Restart. The verified stop outlasted the coordinator's
+    /// bound, so the restart failed ("Couldn’t restart … stayed open") while
+    /// the stop was still running, and the quit intent stayed set: once the
+    /// stop landed the row read "Off / Turn On", but Turn On returned at its
+    /// first guard and opening the app showed nothing, until Quit.
+    func test_a_restart_whose_stop_outlasted_its_bound_leaves_turn_on_and_opening_the_app_working() async throws {
+        let h = try make(captureEnabled: true)
+        try await h.supervisor.startAndWaitForReadiness()
+        let stopping = TestSuspension()
+        h.topology.stopSuspensionOnCall = h.topology.stopCalls + 1
+        h.topology.stopSuspension = stopping
+        var failures = 0
+        let coordinator = ApplicationTerminationCoordinator(
+            supervisor: h.supervisor, restartLauncher: FakeApplicationRestartLauncher(),
+            shutdownTimeout: 0.05, extrasTimeout: 0.05, cleanup: {}, onFailure: { _ in failures += 1 }
+        )
+
+        let restarted = await coordinator.terminate(intent: .restart) { _ in }
+        XCTAssertFalse(restarted)
+        XCTAssertEqual(failures, 1, "the person saw “Couldn’t restart”")
+        stopping.resume()
+        await eventually { h.supervisor.state == .stopped }
+        XCTAssertFalse(h.supervisor.stopFailed)
+        let row = h.supervisor.statusRow(setupFinished: true)
+        XCTAssertEqual(row.title, "Off")
+        XCTAssertEqual(row.action, .turnOn)
+
+        h.supervisor.performAskStatusAction(.turnOn, setupFinished: true) { _ in }
+        await eventually { h.supervisor.state == .running }
+        XCTAssertEqual(h.supervisor.state, .running, "Turn On did nothing")
+        XCTAssertEqual(h.topology.launchPlans.count, 2)
+
+        h.supervisor.reopenWindow()
+        let places = await opened(h.windows)
+        XCTAssertEqual(places, ["overview"], "opening Hippocampus showed nothing")
+        try await h.supervisor.shutdownAndWait()
+    }
+
+    /// The same Restart whose stop threw: "Couldn’t stop", with Quit, and
+    /// nothing starts over it. Opening the app still shows the window, as it
+    /// does after a pause that could not stop.
+    func test_a_restart_whose_stop_failed_still_opens_the_window_and_starts_nothing() async throws {
+        let h = try make(captureEnabled: true)
+        try await h.supervisor.startAndWaitForReadiness()
+        h.topology.stopResults = [.failure(TestError.denied)]
+        let coordinator = ApplicationTerminationCoordinator(
+            supervisor: h.supervisor, restartLauncher: FakeApplicationRestartLauncher(),
+            shutdownTimeout: 0.1, cleanup: {}
+        )
+
+        let restarted = await coordinator.terminate(intent: .restart) { _ in }
+        XCTAssertFalse(restarted)
+        XCTAssertEqual(h.supervisor.statusRow(setupFinished: true).title, "Couldn’t stop")
+
+        h.supervisor.reopenWindow()
+        let places = await opened(h.windows)
+        XCTAssertEqual(places, ["overview"], "opening Hippocampus showed nothing")
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(h.topology.launchPlans.count, 1, "nothing starts over a stop that failed")
+        XCTAssertEqual(h.supervisor.statusRow(setupFinished: true).title, "Couldn’t stop")
+    }
+
+    /// Quit or Restart again after a restart that stayed open is a quit
+    /// again: nothing starts while it stops, though the first stop is still
+    /// the one under way.
+    func test_quit_after_a_restart_that_stayed_open_starts_nothing() async throws {
+        let h = try make(captureEnabled: true)
+        try await h.supervisor.startAndWaitForReadiness()
+        let stopping = TestSuspension()
+        h.topology.stopSuspensionOnCall = h.topology.stopCalls + 1
+        h.topology.stopSuspension = stopping
+        let coordinator = ApplicationTerminationCoordinator(
+            supervisor: h.supervisor, restartLauncher: FakeApplicationRestartLauncher(),
+            shutdownTimeout: 0.05, extrasTimeout: 0.05, cleanup: {}
+        )
+        _ = await coordinator.terminate(intent: .restart) { _ in }
+
+        let quit = Task { try await h.supervisor.shutdownAndWait() }
+        try await Task.sleep(for: .milliseconds(20))
+        stopping.resume()
+        try await quit.value
+        h.supervisor.start()
+        h.supervisor.performAskStatusAction(.turnOn, setupFinished: true) { _ in }
+        h.supervisor.reopenWindow()
+        try await Task.sleep(for: .milliseconds(150))
+
+        XCTAssertEqual(h.supervisor.state, .stopped)
+        XCTAssertEqual(h.topology.launchPlans.count, 1, "nothing starts while Hippocampus quits")
+        let places = await opened(h.windows, within: 0.3)
+        XCTAssertEqual(places, [], "no window opens while Hippocampus quits")
+    }
+
     // MARK: Setup
 
     /// While setup is unfinished, opening the app again brings the setup that

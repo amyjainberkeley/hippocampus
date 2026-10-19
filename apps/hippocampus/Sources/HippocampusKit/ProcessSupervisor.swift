@@ -597,12 +597,15 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// Concurrent callers await the same shutdown operation.
     public func shutdownAndWait(timeout: TimeInterval = 2) async throws {
         supersedeTurnOn()
+        // The quit intent comes first, also when this joins a stop already
+        // under way: a restart that stayed open may have left its stop
+        // running with starts allowed again (`allowStartsAfterFailedRestart`).
+        shutdownRequested = true
         if let shutdownTask {
             try await shutdownTask.value
             return
         }
 
-        shutdownRequested = true
         cancelPendingRetry()
         transitionGate.reset()
         let task = Task { @MainActor [weak self] in
@@ -627,13 +630,22 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
     }
 
-    /// A restart whose relaunch could not be scheduled leaves Hippocampus open
-    /// after a verified stop. The quit intent that keeps anything from
-    /// starting again would leave Turn On, Try Again and opening the app doing
-    /// nothing, silently: starts are allowed again. A stop that failed or is
-    /// still under way stays as it is ("Couldn’t stop", or Restart again).
+    /// A restart that failed leaves Hippocampus open: its stop failed, could
+    /// not be verified in time, or its relaunch could not be scheduled. The
+    /// quit intent that keeps anything from starting again would leave Turn
+    /// On, Try Again and opening the app doing nothing, silently, until Quit,
+    /// so it ends here, whatever the stop did:
+    ///
+    /// - A stop that landed: Off, and Turn On works.
+    /// - A stop still under way past the coordinator's bound: nothing starts
+    ///   until it lands (every start waits for `shutdownTask`); then it is
+    ///   Off, and Turn On works.
+    /// - A stop that failed: "Couldn’t stop" stands, and still no start runs
+    ///   over it (`stopFailed`), but opening the app shows the window, as
+    ///   after any other stop that failed.
+    ///
+    /// Restart or Quit again sets the intent again (`shutdownAndWait`).
     public func allowStartsAfterFailedRestart() {
-        guard shutdownRequested, shutdownTask == nil, state == .stopped, !stopFailed else { return }
         shutdownRequested = false
     }
 
