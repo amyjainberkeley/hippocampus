@@ -102,8 +102,10 @@ package protocol SupervisorTopologyControlling: AnyObject {
     func stop(timeout: TimeInterval) async throws
     /// The permission the last ready helper found off as it started, from
     /// its readiness receipt, Screen Recording first. A capture helper
-    /// started with one off is paused on it, and starts reading by itself
-    /// once it is allowed.
+    /// started with one off is paused on it. It may resume by itself once
+    /// the permission is allowed (Accessibility), or never see the grant at
+    /// all (Screen Recording: the process's own answer stays "no"), so the
+    /// supervisor never keeps it: the start ends, and a fresh helper judges.
     var permissionOffAtReadiness: TCCRevokedReason? { get }
     /// The running helper and agent, which the orphan sweep leaves alone
     /// outside Quit (spec-shell S6.4).

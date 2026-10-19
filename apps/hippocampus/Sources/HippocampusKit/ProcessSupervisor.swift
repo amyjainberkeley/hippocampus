@@ -232,6 +232,16 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// When the person paused; nil when not paused. Kept across launches.
     public var pausedSince: Date? { pauses.pausedSince }
     @Published public private(set) var captureEnabled: Bool
+    /// A permission macOS has off for Hippocampus, as a capture helper
+    /// reported it: in its readiness receipt as it started, or on stderr
+    /// while it ran. Remembering never runs with one off. A start that meets
+    /// it ends, and a run that meets it ends, so "Needs permission" and
+    /// "Hippocampus stopped remembering" are true: the helper alone pauses
+    /// itself, while the agent would still take pages from the browser
+    /// extensions and Safari's consent would stay on. Remembering stays on
+    /// in the setting, so the next look (the menu opening, the app becoming
+    /// active) starts a fresh helper, the only reliable judge
+    /// (`retryIfPermissionMayBeBack`).
     @Published public internal(set) var tccRevokedSurface: TCCRevokedReason? {
         didSet {
             guard tccRevokedSurface != nil else { return }
@@ -242,10 +252,14 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             if state == .starting {
                 transitionGate.reset()
                 stopAncillaryServices()
-                state = .crashed(reason: "Capture permission was revoked.")
+                state = .crashed(reason: Self.permissionStopReason)
+            } else if state == .running, captureEnabled {
+                endRunForPermission()
             }
         }
     }
+
+    static let permissionStopReason = "Capture permission was revoked."
 
     private let locator: BinaryLocator
     private let keyStore: KeyStore
@@ -870,22 +884,14 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
         do {
             // A failed capture start rolls back below, and that says how
-            // the change ended.
+            // the change ended. A helper that found a permission off ends
+            // the start inside it: the press does not land, and remembering
+            // stays off with "Needs permission".
             let generationID = try await startTopology(
                 captureEnabled: true,
                 transitionID: transitionID,
                 publishesFailure: false
             )
-            // The fresh helper found a permission off as it started. It is
-            // paused on it, and would start reading by itself once it is
-            // allowed, so this press does not land: the start ends and
-            // remembering stays off, with "Needs permission", exactly as
-            // when the helper's stderr report beats its readiness. That
-            // report is read once a second, so it used to arrive after the
-            // commit most of the time.
-            if let permission = topology.permissionOffAtReadiness {
-                tccRevokedSurface = permission
-            }
             try ensureTransitionIsActive(transitionID)
             try prepareCaptureBoundary(
                 captureEnabled: true,
@@ -1077,6 +1083,31 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         stopAncillaryServices()
     }
 
+    /// A capture run whose helper reported a permission off ends: consent and
+    /// Safari's pages stop at once, the status says Needs permission, and
+    /// the helper and agent stop. A change already under way (a pause, a
+    /// turn-off) stops the run itself. A stop that fails is "Couldn’t stop",
+    /// as any other (`stopTopology`).
+    private func endRunForPermission() {
+        guard let transitionID = beginOwnedTransition() else { return }
+        stopAncillaryServices()
+        state = .crashed(reason: Self.permissionStopReason)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.inFlightTransitions.remove(transitionID) }
+            do {
+                try await self.stopTopology(timeout: 2)
+                self.transitionGate.commitStopped(transitionID: transitionID)
+                // A pause asked for while it stopped is Paused now that
+                // nothing runs.
+                if self.requestedPauseState, case .crashed = self.state { self.state = .paused }
+            } catch {
+                self.logger.error("supervisor: stopping a run a permission ended failed: \(error.localizedDescription)")
+                self.transitionGate.fail(transitionID: transitionID)
+            }
+        }
+    }
+
     /// `publishesFailure` false leaves the state to a caller that will roll
     /// back: a crash published now would be read as the end of the change,
     /// which ends a window asked for on a first run, and the rollback would
@@ -1158,6 +1189,17 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 generation: generation,
                 timeout: readinessTimeout
             )
+            // The fresh capture helper found a permission off as it started.
+            // It is paused on it: it may start reading by itself once that
+            // is allowed, or never see the grant (Screen Recording). So this
+            // start does not land, whichever change it serves: a Turn On
+            // stays off, a start or a restart ends with Needs permission,
+            // exactly as when the helper's stderr report beats its readiness.
+            // That report is read once a second, so it used to arrive after
+            // the commit most of the time.
+            if requestedCapture, let permission = topology.permissionOffAtReadiness {
+                tccRevokedSurface = permission
+            }
             try ensureTransitionIsActive(transitionID)
             guard topology.isRunning else {
                 throw SupervisorProcessRuntimeError.invalidReadiness
@@ -1418,15 +1460,14 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// S10). A fresh helper is the only reliable judge, since a process's own
     /// answer can stay "no" after the person allows it.
     ///
-    /// - Remembering is on and stopped on the permission: nothing is left
-    ///   running to notice it coming back, so every look restarts it.
+    /// - Remembering is on and stopped on the permission (it never runs with
+    ///   one off): nothing is left running to notice it coming back, so every
+    ///   look restarts it. Remembering was on, so no new consent is needed.
     /// - A turn-on found the permission off, so remembering stayed off: a look
     ///   is Turn On again, which is consent. It is pressed again once per Open
     ///   System Settings… the person chose for it, never by a menu opened to
     ///   quit, and the menu it opens shows it as Starting… with Turn Off, so
     ///   it can be dropped.
-    /// - Remembering is on and its helper waits on the permission: after Open
-    ///   System Settings…, a fresh helper replaces it once.
     public func retryIfPermissionMayBeBack() {
         guard !stopFailed else { return }
         if !captureEnabled, case .permission = turnOnFailure {
@@ -1435,17 +1476,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             turnOn()
             return
         }
-        guard captureEnabled, tccRevokedSurface != nil else { return }
-        switch state {
-        case .crashed:
-            permissionFixChosen = false
-            retryNow()
-        case .running where permissionFixChosen:
-            permissionFixChosen = false
-            retryNow()
-        default:
-            break
-        }
+        guard captureEnabled, tccRevokedSurface != nil, case .crashed = state else { return }
+        permissionFixChosen = false
+        retryNow()
     }
 
     /// The person chose Open System Settings… for a permission the status

@@ -290,6 +290,17 @@ final class ProcessSupervisorTests: XCTestCase {
         return (supervisor, locator, keyStore, config, topology, custody)
     }
 
+    /// A run a permission ended stops in a task of its own; the change it
+    /// holds ends a moment after the topology lets go.
+    private func waitUntilStopped(_ topology: FakeSupervisorTopology) async throws {
+        let deadline = Date().addingTimeInterval(3)
+        while topology.holdsProcesses && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertFalse(topology.holdsProcesses)
+        try await Task.sleep(for: .milliseconds(50))
+    }
+
     private func generation(captureEnabled: Bool = false) -> SupervisorProcessGeneration {
         SupervisorProcessGeneration(
             id: "generation-1",
@@ -1302,6 +1313,8 @@ final class ProcessSupervisorTests: XCTestCase {
         }
         await supervisor.recoverAfterWorkspaceWake()
         XCTAssertEqual(topology.launchPlans.count, 1)
+        // The run the permission ended has finished stopping.
+        try await waitUntilStopped(topology)
         supervisor.tccRevokedSurface = nil
         await supervisor.recoverAfterWorkspaceWake()
         XCTAssertEqual(topology.launchPlans.count, 2)
@@ -1317,6 +1330,8 @@ final class ProcessSupervisorTests: XCTestCase {
         )
         try await supervisor.startAndWaitForReadiness()
         supervisor.tccRevokedSurface = .accessibility
+        // The permission ends the run; a pause once it has stopped is Paused.
+        try await waitUntilStopped(topology)
         try await supervisor.setPausedAndWait(true)
         XCTAssertEqual(supervisor.state, .paused)
         XCTAssertFalse(topology.isRunning)

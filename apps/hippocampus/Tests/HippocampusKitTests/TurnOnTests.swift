@@ -235,10 +235,15 @@ final class TurnOnTests: XCTestCase {
         await eventually { rig.supervisor.captureEnabled && !rig.supervisor.turningOn }
         XCTAssertEqual(started, 1)
 
+        // A restart whose helper finds the permission off again does not
+        // run, and the notification it brings stays.
         screenRecording.off = true
         rig.supervisor.retryNow()
-        await eventually { rig.topology.launchPlans.count == 4 && rig.supervisor.state == .running }
-        XCTAssertEqual(started, 1, "a restart paused on the permission keeps it")
+        await eventually {
+            rig.topology.launchPlans.count == 4
+                && rig.supervisor.menuBarStatus == .needsPermission(.screenRecording)
+        }
+        XCTAssertEqual(started, 1, "a restart that met the permission keeps the notification")
         try await rig.supervisor.shutdownAndWait()
     }
 

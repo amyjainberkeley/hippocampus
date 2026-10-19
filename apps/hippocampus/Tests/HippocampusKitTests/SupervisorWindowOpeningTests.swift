@@ -210,11 +210,11 @@ final class SupervisorWindowOpeningTests: XCTestCase {
     func test_a_kept_pause_stops_what_an_ended_run_left_before_it_reads_paused() async throws {
         let h = try make(captureEnabled: true)
         try await h.supervisor.startAndWaitForReadiness()
-        // The helper exits while Screen Recording is off: no retry, and the
-        // exited processes stay held.
-        h.supervisor.tccRevokedSurface = .screenRecording
+        // The helper exits, and Screen Recording is reported off before its
+        // retry: no retry, and the exited processes stay held.
         h.topology.isRunning = false
         h.topology.fireUnexpectedExit(forLaunchAt: 0, label: "helper", status: 9)
+        h.supervisor.tccRevokedSurface = .screenRecording
         guard case .crashed = h.supervisor.state else { return XCTFail("the helper is gone") }
         XCTAssertTrue(h.topology.holdsProcesses)
         h.supervisor.setPaused(true)
