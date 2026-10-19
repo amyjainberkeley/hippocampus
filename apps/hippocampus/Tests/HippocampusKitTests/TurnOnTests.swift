@@ -752,6 +752,28 @@ final class TurnOnTests: XCTestCase {
         XCTAssertEqual(rig.supervisor.menuBarStatus.markState, .off)
     }
 
+    /// A turn-on whose capture launch failed outright left nothing behind,
+    /// and the rollback restored the off topology: a later Quit has no
+    /// capture helper to wait for, so it reads Off at once.
+    func test_quit_after_a_turn_on_whose_launch_failed_reads_off_at_once() async throws {
+        let rig = rig()
+        try await rig.supervisor.startAndWaitForReadiness()
+        rig.topology.launchErrors = [CocoaError(.executableNotLoadable)]
+        press(.turnOn, on: rig.supervisor)
+        await eventually { !rig.supervisor.turningOn }
+        XCTAssertEqual(row(rig.supervisor).title, "Couldn’t turn on")
+        let stopping = TestSuspension()
+        rig.topology.stopSuspensionOnCall = rig.topology.stopCalls + 1
+        rig.topology.stopSuspension = stopping
+
+        let quit = Task { try await rig.supervisor.shutdownAndWait() }
+        await stopping.waitUntilEntered()
+
+        XCTAssertEqual(rig.supervisor.menuBarStatus, .idle)
+        stopping.resume()
+        try await quit.value
+    }
+
     /// Quit while remembering is off has no capture helper to wait for: Off.
     func test_quit_while_off_reads_off_at_once() async throws {
         let rig = rig()

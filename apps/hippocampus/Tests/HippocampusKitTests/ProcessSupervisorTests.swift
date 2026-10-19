@@ -91,6 +91,7 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
     }
     private(set) var holdsProcesses = false
     private(set) var refusedLaunches = 0
+    var launchErrors: [Error] = []
     /// The last helper launched had `--capture` and is still alive, so it
     /// may be reading, or waiting on a permission to start reading.
     var captureHelperAlive: Bool {
@@ -120,6 +121,9 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
             refusedLaunches += 1
             throw SupervisorProcessRuntimeError.partialStop
         }
+        // A launch that fails cleans up after itself, as the real one does
+        // when its stop of the half-started helper works.
+        if !launchErrors.isEmpty { throw launchErrors.removeFirst() }
         launchPlans.append(plan)
         generations.append(generation)
         unexpectedExitCallbacks.append(onUnexpectedExit)

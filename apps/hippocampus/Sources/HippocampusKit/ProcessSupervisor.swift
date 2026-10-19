@@ -1103,7 +1103,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             captureReceipt = nil
             health = nil
             skipWatch = SkipWatch()
-            if requestedCapture { mayHoldCaptureHelper = true }
+            // What the topology holds from here: this launch's processes, or,
+            // when the launch is refused for processes still held, those too.
+            mayHoldCaptureHelper = requestedCapture || (topology.holdsProcesses && mayHoldCaptureHelper)
             try await topology.launch(
                 plan: plan,
                 generation: generation,
@@ -1138,6 +1140,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             if topology.holdsProcesses && !captureStopLatched {
                 try? await stopTopology(timeout: 2)
             }
+            if !topology.holdsProcesses { mayHoldCaptureHelper = false }
             stopAncillaryServices()
             if publishesFailure, transitionGate.ownsTransition(transitionID) {
                 state = .crashed(reason: error.localizedDescription)
