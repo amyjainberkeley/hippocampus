@@ -46,7 +46,7 @@ struct WelcomeDemo: View {
         case .ask:
             ZStack(alignment: .top) {
                 MiniMessageBehind()
-                    .frame(width: 470, height: 176)
+                    .frame(width: 424, height: 176)
                     .padding(.top, 36)
                     // Ask has the person's attention once it is open.
                     .opacity(frame.askOpen ? 0.6 : 1)
