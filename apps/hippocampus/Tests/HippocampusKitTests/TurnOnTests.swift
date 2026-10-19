@@ -199,13 +199,46 @@ final class TurnOnTests: XCTestCase {
         XCTAssertEqual(rig.supervisor.menuBarStatus, .needsPermission(.screenRecording))
         XCTAssertEqual(rig.supervisor.turnOnFailure, .permission(.screenRecording))
 
-        // The tail's report lands later and changes nothing.
+        // The tail's report lands later and changes nothing. Its notification
+        // says what is needed: nothing stopped remembering, it was off.
         await eventually({ notifications.added.count == 1 }, within: 4)
+        XCTAssertEqual(notifications.added.first?.content.title, "Hippocampus needs permission")
+        XCTAssertEqual(
+            notifications.added.first?.content.body, "Screen Recording is off for Hippocampus. Click to open System Settings."
+        )
         XCTAssertFalse(rig.supervisor.captureEnabled)
         XCTAssertEqual(rig.config.captureWrites, [])
         XCTAssertFalse(rig.topology.captureHelperAlive)
         XCTAssertEqual(row(rig.supervisor).title, "Needs permission")
         XCTAssertEqual(row(rig.supervisor).action, .openSystemSettings(.screenRecording))
+        try await rig.supervisor.shutdownAndWait()
+    }
+
+    /// Remembering that starts with every permission withdraws a permission
+    /// notification still up: a helper that has the permission never
+    /// reports it restored. A start whose helper is paused on one keeps it.
+    func test_remembering_that_starts_withdraws_permission_notifications() async throws {
+        let rig = rig()
+        var started = 0
+        rig.supervisor.onRememberingStarted = { started += 1 }
+        try await rig.supervisor.startAndWaitForReadiness()
+        XCTAssertEqual(started, 0, "remembering is off")
+        let screenRecording = PermissionSwitch()
+        helperReports(.screenRecording, to: rig, while: screenRecording)
+        press(.turnOn, on: rig.supervisor)
+        await eventually { !rig.supervisor.turningOn }
+        XCTAssertEqual(started, 0, "the turn-on found the permission off")
+
+        screenRecording.off = false
+        press(.openSystemSettings(.screenRecording), on: rig.supervisor)
+        rig.supervisor.retryIfPermissionMayBeBack()
+        await eventually { rig.supervisor.captureEnabled && !rig.supervisor.turningOn }
+        XCTAssertEqual(started, 1)
+
+        screenRecording.off = true
+        rig.supervisor.retryNow()
+        await eventually { rig.topology.launchPlans.count == 4 && rig.supervisor.state == .running }
+        XCTAssertEqual(started, 1, "a restart paused on the permission keeps it")
         try await rig.supervisor.shutdownAndWait()
     }
 

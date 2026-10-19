@@ -212,6 +212,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// request: the app shows Preferences, where the reason and the fix are
     /// (spec-shell S5, D9).
     public var onPresentationBlocked: (@MainActor () -> Void)?
+    /// Called when remembering starts with every permission it needs: a
+    /// turn-on or a restart committed and its helper found none off. A fresh
+    /// helper never reports a permission restored, so the app withdraws a
+    /// permission notification that would otherwise stay up.
+    public var onRememberingStarted: (@MainActor () -> Void)?
 
     public var menuBarStatus: MenuBarStatus {
         MenuBarStatus.derive(
@@ -1172,6 +1177,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         self.captureEnabled = captureEnabled
         state = .running
         startHealthPolling()
+        if captureEnabled, topology.permissionOffAtReadiness == nil {
+            onRememberingStarted?()
+        }
     }
 
     private func prepareCaptureBoundary(

@@ -105,6 +105,11 @@ final class StatusItemWiringTests: XCTestCase {
         XCTAssertTrue(app.contains("PreferencesWindowController.shared.show(section: .capture)"))
         let active = try method("func applicationDidBecomeActive(", in: app)
         XCTAssertTrue(active.contains("supervisor.retryIfPermissionMayBeBack()"))
+        // A fresh helper never reports a permission restored: once remembering
+        // starts, the permission notification is withdrawn.
+        let tail = try method("private func armTCCStderrTail()", in: app)
+        XCTAssertTrue(tail.contains("supervisor.onRememberingStarted = {"))
+        XCTAssertTrue(tail.contains("await notifier.withdrawAll()"))
     }
 
     /// Preferences' words (spec-copy S4.4, product critique 9, 10, 11, 16;

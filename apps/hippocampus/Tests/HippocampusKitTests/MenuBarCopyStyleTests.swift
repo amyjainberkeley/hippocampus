@@ -72,6 +72,8 @@ final class MenuBarCopyStyleTests: XCTestCase {
             out.append(("tcc.name", reason.name))
             out.append(("tcc.notificationTitle", reason.notificationTitle))
             out.append(("tcc.notificationBody", reason.notificationBody))
+            out.append(("tcc.neededNotificationTitle", reason.neededNotificationTitle))
+            out.append(("tcc.neededNotificationBody", reason.neededNotificationBody))
         }
         return out
     }

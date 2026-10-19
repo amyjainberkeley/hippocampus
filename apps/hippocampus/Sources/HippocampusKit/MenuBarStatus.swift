@@ -331,6 +331,18 @@ public enum TCCRevokedReason: String, Sendable, Equatable, CaseIterable {
         "\(name) was turned off for Hippocampus. Click to open System Settings."
     }
 
+    /// Title of the notification when a turn-on finds the permission off:
+    /// remembering was off and stays off, so nothing stopped. The permission
+    /// may never have been on.
+    public var neededNotificationTitle: String {
+        "Hippocampus needs permission"
+    }
+
+    /// Body of that notification, in the menu's words.
+    public var neededNotificationBody: String {
+        "\(name) is off for Hippocampus. Click to open System Settings."
+    }
+
     /// Deep-link URL string for the notification's action button. The
     /// `x-apple.systempreferences:` scheme drops the user directly on
     /// the correct pane; on macOS 13+ System Settings honours the

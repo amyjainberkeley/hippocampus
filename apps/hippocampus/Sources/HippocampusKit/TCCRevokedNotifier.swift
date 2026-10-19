@@ -92,10 +92,12 @@ public enum TCCRevokedNotifierRequestBuilder {
     public static let userInfoSurfaceKey = "MCITCCRevokedSurface"
 
     /// Assemble the `UNNotificationRequest` for a given revoke reason.
-    public static func makeRequest(for reason: TCCRevokedReason) -> UNNotificationRequest {
+    /// `whileRemembering` false is a turn-on that found the permission off:
+    /// nothing stopped, so it says what is needed instead.
+    public static func makeRequest(for reason: TCCRevokedReason, whileRemembering: Bool = true) -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
-        content.title = reason.notificationTitle
-        content.body = reason.notificationBody
+        content.title = whileRemembering ? reason.notificationTitle : reason.neededNotificationTitle
+        content.body = whileRemembering ? reason.notificationBody : reason.neededNotificationBody
         content.categoryIdentifier = categoryIdentifier
         content.userInfo = [
             userInfoPaneKey: reason.settingsPaneURLString,
@@ -172,13 +174,13 @@ public actor TCCRevokedNotifier {
     /// throws and we swallow the error — the menu-bar red pill is the
     /// belt to this suspenders, and the user chose the "no notifications"
     /// path deliberately.
-    public func notifyRevoked(_ reason: TCCRevokedReason) async {
+    public func notifyRevoked(_ reason: TCCRevokedReason, whileRemembering: Bool = true) async {
         guard !Task.isCancelled else { return }
         if let previous = outstanding[reason], !previous.isCancelled { return }
         let observation = TCCNotificationObservation()
         outstanding[reason] = observation
         await withTaskCancellationHandler {
-            await deliver(reason, observation: observation)
+            await deliver(reason, whileRemembering: whileRemembering, observation: observation)
         } onCancel: {
             // Synchronous cancellation lets a restarted watcher replace this
             // request even while the old task awaits the system auth sheet.
@@ -186,7 +188,9 @@ public actor TCCRevokedNotifier {
         }
     }
 
-    private func deliver(_ reason: TCCRevokedReason, observation: TCCNotificationObservation) async {
+    private func deliver(
+        _ reason: TCCRevokedReason, whileRemembering: Bool, observation: TCCNotificationObservation
+    ) async {
         if authorization == nil {
             let center = center
             authorization = Task { _ = try? await center.requestAuthorization(options: [.alert, .sound]) }
@@ -197,7 +201,7 @@ public actor TCCRevokedNotifier {
             return
         }
 
-        let request = TCCRevokedNotifierRequestBuilder.makeRequest(for: reason)
+        let request = TCCRevokedNotifierRequestBuilder.makeRequest(for: reason, whileRemembering: whileRemembering)
         try? await center.add(request)
         if observation.isCancelled, outstanding[reason] === observation {
             outstanding.removeValue(forKey: reason)
@@ -217,6 +221,17 @@ public actor TCCRevokedNotifier {
         let id = TCCRevokedNotifierRequestBuilder.identifier(for: reason)
         center.removePendingNotificationRequests(withIdentifiers: [id])
         center.removeDeliveredNotifications(withIdentifiers: [id])
+    }
+
+    /// Remembering started with every permission it needs: a fresh helper
+    /// that has a permission never reports it restored, so withdraw every
+    /// permission notification still shown or pending.
+    public func withdrawAll() {
+        outstanding.values.forEach { $0.cancel() }
+        outstanding.removeAll()
+        let ids = TCCRevokedReason.allCases.map(TCCRevokedNotifierRequestBuilder.identifier(for:))
+        center.removePendingNotificationRequests(withIdentifiers: ids)
+        center.removeDeliveredNotifications(withIdentifiers: ids)
     }
 
     /// Test-only accessor. Not public API surface — package-internal.
