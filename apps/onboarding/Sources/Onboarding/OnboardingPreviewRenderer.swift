@@ -18,6 +18,12 @@ import SwiftUI
 /// put in a window, and drawn into a bitmap allocated at twice the
 /// window's size, with solid fills where the materials would be.
 ///
+/// With `HIPPOCAMPUS_RENDER_DEMO_STEP=<seconds>` as well, it also draws
+/// Welcome once every that many seconds through one loop of the demo, at 1x,
+/// to `<dir>/demo/<milliseconds>.png`, so the demo's pace can be seen frame
+/// by frame. The frames are the script's; SwiftUI's fades between them are
+/// not drawn.
+///
 /// Nothing is read from this Mac: the renderer draws the screens' pure
 /// views, never the ones that check permissions, read memory, list windows,
 /// read the retention file or ask about Apple Intelligence. The key, the
@@ -26,6 +32,7 @@ import SwiftUI
 @MainActor
 enum OnboardingPreviewRenderer {
     static let environmentKey = "HIPPOCAMPUS_RENDER_ONBOARDING"
+    static let demoStepKey = "HIPPOCAMPUS_RENDER_DEMO_STEP"
 
     /// True when it rendered; `main` then returns.
     static func renderIfRequested(
@@ -38,6 +45,17 @@ enum OnboardingPreviewRenderer {
         for (name, view) in states() {
             if let png = render(view) {
                 try? png.write(to: out.appendingPathComponent("\(name).png"))
+            }
+        }
+        if let step = environment[demoStepKey].flatMap(Double.init), step >= 0.02 {
+            let frames = out.appendingPathComponent("demo", isDirectory: true)
+            try? FileManager.default.createDirectory(at: frames, withIntermediateDirectories: true)
+            for time in stride(from: 0, to: WelcomeDemoScript.cycle, by: step) {
+                let frame = WelcomeDemoScript.frame(at: time)
+                if let png = render(AnyView(welcome(.shiftTwice, frame)), scale: 1) {
+                    let name = String(format: "%05d.png", Int((time * 1000).rounded()))
+                    try? png.write(to: frames.appendingPathComponent(name))
+                }
             }
         }
         return true
@@ -291,7 +309,7 @@ enum OnboardingPreviewRenderer {
 
     // MARK: - Drawing
 
-    private static func render(_ view: AnyView) -> Data? {
+    private static func render(_ view: AnyView, scale: CGFloat = 2) -> Data? {
         let root = view
             .environment(\.colorScheme, .light)
             .environment(\.locale, locale)
@@ -301,7 +319,6 @@ enum OnboardingPreviewRenderer {
         let size = NSSize(width: OnboardingTheme.windowWidth, height: OnboardingTheme.windowHeight)
         hosting.frame = NSRect(origin: .zero, size: size)
         hosting.layoutSubtreeIfNeeded()
-        let scale: CGFloat = 2
         guard let rep = NSBitmapImageRep(
             bitmapDataPlanes: nil,
             pixelsWide: Int(size.width * scale),
