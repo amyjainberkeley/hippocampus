@@ -307,6 +307,38 @@ final class SupervisorStopAndPauseTests: XCTestCase {
         try await supervisor.shutdownAndWait()
     }
 
+    /// "Starting… / Pause" shows while a resume starts. A Pause pressed then
+    /// waited for the resume, and when that start failed the pause was
+    /// dropped: "Not saving / Try Again" with the pause kept, and Try Again
+    /// refuses while a pause is kept, so nothing did anything.
+    func test_a_pause_pressed_while_a_resume_starts_is_applied_when_that_start_fails() async throws {
+        let pauses = UserPauseController()
+        let (supervisor, _, topology) = make(config: FakeRuntimeConfig(captureEnabled: true), pauses: pauses)
+        try await supervisor.startAndWaitForReadiness()
+        supervisor.setPaused(true)
+        await eventually { supervisor.state == .paused }
+        let readiness = TestSuspension()
+        topology.readinessSuspension = readiness
+        topology.readinessResults = [.failure(SupervisorProcessRuntimeError.helperExited(79))]
+        supervisor.performAskStatusAction(.resume, setupFinished: true) { _ in }
+        await readiness.waitUntilEntered()
+        XCTAssertEqual(supervisor.statusRow(setupFinished: true, now: clock.now).action, .pause)
+
+        supervisor.performAskStatusAction(.pause, setupFinished: true) { _ in }
+        topology.readinessSuspension = nil
+        readiness.resume()
+        await eventually { supervisor.state == .paused }
+
+        XCTAssertEqual(supervisor.state, .paused, "the newer Pause was dropped: \(supervisor.state)")
+        XCTAssertTrue(pauses.isPaused)
+        XCTAssertFalse(topology.holdsProcesses, "nothing the failed resume launched is left")
+        XCTAssertFalse(supervisor.stopFailed)
+        let row = supervisor.statusRow(setupFinished: true, now: clock.now)
+        XCTAssertEqual(row.title, "Paused")
+        XCTAssertEqual(row.action, .resume)
+        try await supervisor.shutdownAndWait()
+    }
+
     func test_a_pause_keeps_its_time_for_the_menu() async throws {
         let pauses = UserPauseController(clock: { Date(timeIntervalSince1970: 1_791_929_040) })
         let (supervisor, _, _) = make(config: FakeRuntimeConfig(captureEnabled: true), pauses: pauses)

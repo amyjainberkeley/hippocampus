@@ -715,7 +715,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                     try await self.setPausedAndWait(requested)
                 } catch {
                     self.logger.error("supervisor: verified pause transition failed: \(error.localizedDescription)")
-                    return
+                    // A newer word came while this one ran (Pause pressed
+                    // while a resume started): it is carried out, not
+                    // dropped with the failure.
+                    guard requested != self.requestedPauseState else { return }
+                    continue
                 }
                 if requested == self.requestedPauseState { return }
             }
@@ -732,6 +736,13 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
 
         if paused {
+            // A start that failed, as a resume can: Paused once what it
+            // left is stopped, as a kept pause at launch.
+            if case .crashed = state {
+                cancelPendingRetry()
+                try await enterKeptPause()
+                return
+            }
             guard state == .starting || state == .running else { return }
             cancelPendingRetry()
             if state == .starting {
