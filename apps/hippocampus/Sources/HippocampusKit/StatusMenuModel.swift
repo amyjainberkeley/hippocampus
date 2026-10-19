@@ -17,19 +17,23 @@ public struct StatusFacts: Equatable, Sendable {
     public var pausedSince: Date?
     /// When the person pressed Stop Sharing, for "You stopped it at {time}."
     public var stoppedSharingAt: Date?
+    /// Turn On is under way: nothing is on yet, so there is nothing to pause.
+    public var turningOn: Bool
 
     public init(
         status: MenuBarStatus,
         setup: AskPanelStatus.Setup = .complete,
         lastSavedAt: Date? = nil,
         pausedSince: Date? = nil,
-        stoppedSharingAt: Date? = nil
+        stoppedSharingAt: Date? = nil,
+        turningOn: Bool = false
     ) {
         self.status = status
         self.setup = setup
         self.lastSavedAt = lastSavedAt
         self.pausedSince = pausedSince
         self.stoppedSharingAt = stoppedSharingAt
+        self.turningOn = turningOn
     }
 }
 
@@ -67,7 +71,10 @@ public struct StatusRow: Equatable, Sendable {
         case .idle: detail = facts.stoppedSharingAt.map(words.stoppedSharing)
         default: detail = status.detailText
         }
-        self.init(title: status.displayText, detail: detail, action: status.action)
+        // A turn-on under way lands, or says why not, by itself; until then
+        // nothing is on to pause.
+        let action = facts.turningOn && status.action == .pause ? nil : status.action
+        self.init(title: status.displayText, detail: detail, action: action)
     }
 }
 

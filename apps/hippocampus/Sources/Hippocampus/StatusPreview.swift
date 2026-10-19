@@ -85,6 +85,7 @@ enum StatusPreviewRenderer {
             state("not-saving-stopped", .error(reason: "fixture")),
             state("couldnt-stop", .stopFailed(reason: "fixture")),
             state("couldnt-stop-dark", .stopFailed(reason: "fixture"), dark: true),
+            state("couldnt-turn-on", .turnOnFailed(reason: "fixture")),
             state("not-set-up", .idle, setup: .notFinished),
             state("not-set-up-onboarding-open", .idle, setup: .inProgress),
             state("ai-tools-connected", .recording, lastSaved: now.addingTimeInterval(-8), connected: true),

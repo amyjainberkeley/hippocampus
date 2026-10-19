@@ -252,6 +252,49 @@ final class MenuBarStatusTests: XCTestCase {
         XCTAssertEqual(MenuBarStatus.derive(from: .crashed(reason: "x")), .error(reason: "x"))
     }
 
+    /// A turn-on under way may read before the setting is on, so it is
+    /// Starting…, with the solid dot, never Off (RULINGS B1).
+    func testATurnOnUnderWayIsStartingNeverOff() {
+        for state: SupervisorState in [.running, .starting, .idle, .stopped, .paused] {
+            let status = MenuBarStatus.derive(from: state, captureEnabled: false, turningOn: true, now: now)
+            XCTAssertEqual(status, .starting, "\(state)")
+            XCTAssertEqual(status.markState, .remembering, "\(state)")
+        }
+        // Settling after its start failed, it is still starting.
+        XCTAssertEqual(MenuBarStatus.derive(from: .crashed(reason: "x"), captureEnabled: false, turningOn: true),
+                       .starting)
+        // A permission it found off shows at once; a failed stop still wins.
+        XCTAssertEqual(MenuBarStatus.derive(from: .crashed(reason: "x"), captureEnabled: false,
+                                            tccRevokedSurface: .screenRecording, turningOn: true),
+                       .needsPermission(.screenRecording))
+        XCTAssertEqual(MenuBarStatus.derive(from: .crashed(reason: "x"), captureEnabled: false,
+                                            stopFailed: true, turningOn: true),
+                       .stopFailed(reason: "x"))
+    }
+
+    /// A turn-on that did not take says why while remembering stays off,
+    /// never a silent Off: a permission with Open System Settings…, or that
+    /// it didn't start, with Try Again.
+    func testATurnOnThatDidNotTakeSaysWhyWhileOff() {
+        let permission = TurnOnFailure.permission(.screenRecording)
+        let didNotStart = TurnOnFailure.didNotStart(reason: "helper exited")
+        for state: SupervisorState in [.running, .stopped, .idle, .crashed(reason: "x")] {
+            XCTAssertEqual(MenuBarStatus.derive(from: state, captureEnabled: false, turnOnFailure: permission),
+                           .needsPermission(.screenRecording), "\(state)")
+            XCTAssertEqual(MenuBarStatus.derive(from: state, captureEnabled: false, turnOnFailure: didNotStart),
+                           .turnOnFailed(reason: "helper exited"), "\(state)")
+        }
+        XCTAssertEqual(permission.status.action, .openSystemSettings(.screenRecording))
+        XCTAssertEqual(didNotStart.status.action, .tryAgain)
+        XCTAssertEqual(MenuBarStatus.derive(from: .running, captureEnabled: false), .idle, "Off with no reason is Off")
+        XCTAssertEqual(MenuBarStatus.derive(from: .crashed(reason: "x"), captureEnabled: false, stopFailed: true,
+                                            turnOnFailure: didNotStart),
+                       .stopFailed(reason: "x"), "a failed stop wins")
+        XCTAssertEqual(MenuBarStatus.derive(from: .starting, captureEnabled: false, stopping: true,
+                                            turnOnFailure: didNotStart, now: now),
+                       .starting, "a turn-off under way is not Off yet")
+    }
+
     /// Turning off flips the setting first; until the stop is done the
     /// screen may be read, so it is not Off yet and keeps the solid dot
     /// (RULINGS B1 and S7). Once stopped, it is Off.
@@ -306,6 +349,7 @@ final class MenuBarStatusTests: XCTestCase {
             (.stale(reason: "x"), "Not saving", "It can’t confirm anything was saved.", "Try Again"),
             (.error(reason: "x"), "Not saving", "It stopped and couldn’t start again.", "Try Again"),
             (.stopFailed(reason: "x"), "Couldn’t stop", "Hippocampus may still be reading the screen.", "Quit Hippocampus"),
+            (.turnOnFailed(reason: "x"), "Couldn’t turn on", "It didn’t start, so remembering is still off.", "Try Again"),
         ]
         for (status, title, detail, action) in expected {
             XCTAssertEqual(status.displayText, title, "\(status)")
@@ -323,7 +367,7 @@ final class MenuBarStatusTests: XCTestCase {
         .stale(reason: "x"), .noMemory, .unchanged,
         .skipping(reason: "secure_input"), .skipping(reason: "secure-event-input"),
         .skipping(reason: "private_browsing"), .skipping(reason: "denylist-source"),
-        .skipping(reason: "ax-secure-subrole"), .stopFailed(reason: "x"),
+        .skipping(reason: "ax-secure-subrole"), .stopFailed(reason: "x"), .turnOnFailed(reason: "x"),
     ]
 
     /// The indicator may overstate, never understate (RULINGS B1): the dim
@@ -354,7 +398,7 @@ final class MenuBarStatusTests: XCTestCase {
             }
         }
         for status in [MenuBarStatus.needsPermission(.automation), .error(reason: "x"), .blocked(reason: "x"),
-                       .stale(reason: "x")] {
+                       .stale(reason: "x"), .turnOnFailed(reason: "x")] {
             XCTAssertEqual(status.markState, .needsYou, "\(status)")
         }
     }
@@ -415,7 +459,8 @@ final class MenuBarStatusTests: XCTestCase {
         XCTAssertTrue(MenuBarStatusIcon.image(for: .paused) === dim)
         XCTAssertTrue(MenuBarStatusIcon.image(for: .idle) === dim)
         let bang = MenuBarStatusIcon.image(for: HiMark.State.needsYou)
-        for status in [MenuBarStatus.needsPermission(.accessibility), .error(reason: "x"), .blocked(reason: "x"), .stale(reason: "x")] {
+        for status in [MenuBarStatus.needsPermission(.accessibility), .error(reason: "x"), .blocked(reason: "x"), .stale(reason: "x"),
+                       .turnOnFailed(reason: "x")] {
             XCTAssertEqual(status.markState, .needsYou, "\(status)")
             XCTAssertTrue(MenuBarStatusIcon.image(for: status) === bang, "\(status)")
         }

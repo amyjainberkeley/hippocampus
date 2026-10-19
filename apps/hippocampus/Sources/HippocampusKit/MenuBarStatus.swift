@@ -29,6 +29,9 @@ public enum MenuBarStatus: Equatable, Sendable {
     /// The person asked it to stop, pause or turn off, and that failed, so
     /// it may still be reading the screen (product critique 3).
     case stopFailed(reason: String)
+    /// Turn On did not take and remembering is still off. `reason` is for
+    /// the log; the menu never shows it.
+    case turnOnFailed(reason: String)
 
     /// A start may take this long before missing evidence counts as a fault
     /// (spec-shell S4, RULINGS S6).
@@ -49,6 +52,7 @@ public enum MenuBarStatus: Equatable, Sendable {
         case .needsPermission: return "Needs permission"
         case .blocked, .stale, .error: return "Not saving"
         case .stopFailed: return "Couldn’t stop"
+        case .turnOnFailed: return "Couldn’t turn on"
         }
     }
 
@@ -63,6 +67,7 @@ public enum MenuBarStatus: Equatable, Sendable {
         case .stale: return "It can’t confirm anything was saved."
         case .error: return "It stopped and couldn’t start again."
         case .stopFailed: return "Hippocampus may still be reading the screen."
+        case .turnOnFailed: return "It didn’t start, so remembering is still off."
         }
     }
 
@@ -74,7 +79,7 @@ public enum MenuBarStatus: Equatable, Sendable {
         case .paused: return .resume
         case .idle: return .turnOn
         case .needsPermission(let permission): return .openSystemSettings(permission)
-        case .blocked, .stale, .error: return .tryAgain
+        case .blocked, .stale, .error, .turnOnFailed: return .tryAgain
         case .stopFailed: return .quit
         }
     }
@@ -88,7 +93,10 @@ public enum MenuBarStatus: Equatable, Sendable {
     /// A failed stop and an explicit off or pause come first; permission and
     /// storage failures then take precedence over evidence of earlier saves.
     /// `stopping` is a turn-off still under way: the setting is already off,
-    /// but the screen may be read until the stop is done.
+    /// but the screen may be read until the stop is done. `turningOn` is a
+    /// turn-on under way: the setting is not on yet, but its helper may read
+    /// once it starts. `turnOnFailure` is why the last turn-on did not take,
+    /// said while remembering stays off.
     public static func derive(
         from state: SupervisorState,
         captureEnabled: Bool = true,
@@ -99,6 +107,8 @@ public enum MenuBarStatus: Equatable, Sendable {
         captureStartedAt: Date? = nil,
         stopFailed: Bool = false,
         stopping: Bool = false,
+        turningOn: Bool = false,
+        turnOnFailure: TurnOnFailure? = nil,
         skipSeenSince: Date? = nil,
         now: Date = Date()
     ) -> MenuBarStatus {
@@ -106,14 +116,24 @@ public enum MenuBarStatus: Equatable, Sendable {
         // even after the requested setting has correctly been latched false.
         if case .crashed(let reason) = state {
             if stopFailed { return .stopFailed(reason: reason) }
-            // A permission turned off during a start: say which, so the fix
-            // is in reach (spec-shell S4.2).
-            if captureEnabled, let surface = tccRevokedSurface { return .needsPermission(surface) }
+            // A permission turned off during a start, or one a turn-on found
+            // off: say which, so the fix is in reach (spec-shell S4.2).
+            if captureEnabled || turningOn, let surface = tccRevokedSurface { return .needsPermission(surface) }
+            if !captureEnabled {
+                // A turn-on still settling is starting; one that failed
+                // says why, never a bare error.
+                if turningOn { return .starting }
+                if let turnOnFailure { return turnOnFailure.status }
+            }
             return .error(reason: reason)
         }
+        // A turn-on under way may read before the setting is on, so it is
+        // Starting…, never Off (RULINGS B1).
+        if turningOn, !captureEnabled { return .starting }
         // Off shows once the stop is done, never before: the icon may
-        // overstate, never understate (RULINGS B1 and S7).
-        guard captureEnabled || stopping else { return .idle }
+        // overstate, never understate (RULINGS B1 and S7). A turn-on that
+        // did not take says why instead of a silent Off.
+        guard captureEnabled || stopping else { return turnOnFailure?.status ?? .idle }
         if state == .paused { return .paused }
         if let reason = tccRevokedSurface {
             return .needsPermission(reason)
@@ -232,6 +252,24 @@ enum ReceiptCode: Equatable {
     }
 }
 
+/// Why Turn On did not take, kept while remembering stays off so the status
+/// says so instead of a silent "Off".
+public enum TurnOnFailure: Equatable, Sendable {
+    /// A permission macOS has off for Hippocampus, as reported by the fresh
+    /// helper the turn-on started.
+    case permission(TCCRevokedReason)
+    /// It did not start. `reason` is for the log, never shown.
+    case didNotStart(reason: String)
+
+    /// What the menu, Ask's footer and Preferences show for it.
+    public var status: MenuBarStatus {
+        switch self {
+        case .permission(let permission): return .needsPermission(permission)
+        case .didNotStart(let reason): return .turnOnFailed(reason: reason)
+        }
+    }
+}
+
 /// When the receipt's skip was first seen with no newer save, so "Skipping
 /// this window" waits until the same skip has held for about 10 s (RULINGS
 /// S8). The supervisor updates it each time it reads the receipt.
@@ -333,7 +371,7 @@ extension MenuBarStatus {
         case .recording, .unchanged, .starting, .noMemory, .stopFailed: return .remembering
         case .skipping(let code): return ReceiptCode.passwordField.contains(code) ? .skipping : .remembering
         case .paused, .idle: return .off
-        case .needsPermission, .error, .blocked, .stale: return .needsYou
+        case .needsPermission, .error, .blocked, .stale, .turnOnFailed: return .needsYou
         }
     }
 }

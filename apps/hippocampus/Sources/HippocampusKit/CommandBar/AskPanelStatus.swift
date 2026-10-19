@@ -61,7 +61,7 @@ public struct AskPanelStatus: Equatable, Sendable {
         // Remembering is running and may be reading other windows; a saved
         // read of this one decides.
         case .blocked, .stale: return true
-        case .skipping, .paused, .idle, .needsPermission, .error, .stopFailed: return false
+        case .skipping, .paused, .idle, .needsPermission, .error, .stopFailed, .turnOnFailed: return false
         }
     }
 }

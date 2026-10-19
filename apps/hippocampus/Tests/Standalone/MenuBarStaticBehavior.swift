@@ -17,6 +17,7 @@ let states: [MenuBarStatus] = [
     .needsPermission(.screenRecording), .blocked(reason: "first"),
     .stale(reason: "first"), .noMemory, .unchanged,
     .skipping(reason: "secure_input"), .skipping(reason: "private_browsing"), .stopFailed(reason: "first"),
+    .turnOnFailed(reason: "first"),
 ]
 for state in states {
     require(!state.shouldPulse, "Every menu-bar state must be static")
@@ -33,4 +34,5 @@ require(MenuBarStatusIcon.image(for: .skipping(reason: "private_browsing")) === 
 require(MenuBarStatusIcon.image(for: .skipping(reason: "secure_input")) !== MenuBarStatusIcon.image(for: .recording), "A password field shows the hollow dot")
 let pictures = HiMark.State.allCases.map { MenuBarStatusIcon.image(for: $0).tiffRepresentation! }
 require(Set(pictures).count == HiMark.State.allCases.count, "The four pictures remain visually distinct")
-print("PASS: static menu label, 13000 cached icon reads, bounded reason-independent cache, four distinct pictures")
+require(MenuBarStatusIcon.image(for: .turnOnFailed(reason: "first")) === MenuBarStatusIcon.image(for: .error(reason: "first")), "A turn-on that did not take shows h!")
+print("PASS: static menu label, \(states.count * 1_000) cached icon reads, bounded reason-independent cache, four distinct pictures")
