@@ -17,6 +17,16 @@ final class OnboardingAppDelegate: NSObject, NSApplicationDelegate, @unchecked S
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// Opening Hippocampus while setup is open brings setup forward: the app
+    /// activates this process (`ProcessSupervisor.showOnboarding`). Only this
+    /// process can bring its window back out of the Dock, so a minimized
+    /// setup comes back here, or opening the app showed nothing.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        for window in NSApp.windows where window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
+    }
+
     /// Closing the window ends setup, as Done does. The resume file keeps
     /// the step, and the app opens what follows when this process exits.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

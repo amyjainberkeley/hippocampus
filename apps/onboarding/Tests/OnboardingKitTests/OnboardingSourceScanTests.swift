@@ -21,6 +21,17 @@ final class OnboardingSourceScanTests: XCTestCase {
         text.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
     }
 
+    /// Opening Hippocampus while setup is open brings setup forward: the app
+    /// activates this process. A minimized setup stayed in the Dock, since
+    /// only this process can bring its window back out, so nothing appeared.
+    func testSetupComesBackOutOfTheDockWhenItIsBroughtForward() throws {
+        let app = try source("Onboarding/OnboardingApp.swift")
+        let start = try XCTUnwrap(app.range(of: "func applicationDidBecomeActive(_ notification: Notification) {"))
+        let body = app[start.upperBound...].prefix(400)
+        XCTAssertTrue(body.contains("for window in NSApp.windows where window.isMiniaturized"))
+        XCTAssertTrue(body.contains("window.deminiaturize(nil)"))
+    }
+
     func testSetupNeverAsksForCalendarOrContacts() throws {
         for (name, text) in try sources() {
             for call in ["EKEventStore", "CNContactStore", "requestFullAccessToEvents", "requestAccess(for:"] {
