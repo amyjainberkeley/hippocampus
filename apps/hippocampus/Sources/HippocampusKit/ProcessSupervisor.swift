@@ -1470,8 +1470,16 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             var failures: [String] = []
             do { try self.runtimeConfig.setCaptureEnabled(false) }
             catch {
-                failures.append("Saving capture off: \(error.localizedDescription)")
                 self.keepOffAcrossLaunches()
+                // A note kept on disk keeps the next launch off, so a stop
+                // that works is Off ("You stopped it at …"), not a stop that
+                // failed. Without one, runtime.toml still says on: that
+                // stays visible.
+                if self.captureStopNote.stoppedSharingAt != nil {
+                    self.logger.error("supervisor: saving capture off failed; the kept note keeps the next launch off: \(error.localizedDescription)")
+                } else {
+                    failures.append("Saving capture off: \(error.localizedDescription)")
+                }
             }
             do { try await self.revokeConsentAndStopTopology(timeout: 5) }
             catch { failures.append("Stopping capture: \(error.localizedDescription)") }

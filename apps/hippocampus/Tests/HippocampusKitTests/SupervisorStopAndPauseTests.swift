@@ -265,6 +265,35 @@ final class SupervisorStopAndPauseTests: XCTestCase {
         }
     }
 
+    /// The save failed but the stop worked, and the kept note keeps the next
+    /// launch off: nothing reads, so it is Off ("You stopped it at …"), not
+    /// "Couldn’t stop / Hippocampus may still be reading the screen." with
+    /// only Quit, which sent the person to quit for nothing.
+    func test_a_turn_off_whose_save_failed_but_that_stopped_reads_off() async throws {
+        let note = RecordingStopNote()
+        let config = FakeRuntimeConfig(captureEnabled: true)
+        let (supervisor, _, topology) = make(config: config, note: note)
+        try await supervisor.startAndWaitForReadiness()
+        config.captureWriteError = TestError.writeFailed
+
+        try? await supervisor.applyCaptureEnabled(false)
+
+        XCTAssertFalse(topology.holdsProcesses, "nothing runs")
+        XCTAssertNotNil(note.stoppedSharingAt, "the next launch stays off")
+        XCTAssertFalse(supervisor.stopFailed)
+        XCTAssertEqual(supervisor.state, .stopped)
+        let row = supervisor.statusRow(setupFinished: true, now: clock.now)
+        XCTAssertEqual(row.title, "Off")
+        XCTAssertTrue(row.detail?.hasPrefix("You stopped it") == true, row.detail ?? "nil")
+        XCTAssertEqual(row.action, .turnOn)
+
+        // Turning it on again is the way back, and ends the note.
+        config.captureWriteError = nil
+        try await supervisor.applyCaptureEnabled(true)
+        XCTAssertNil(note.stoppedSharingAt)
+        try await supervisor.shutdownAndWait()
+    }
+
     func test_a_note_older_than_the_settings_file_is_dropped() async throws {
         let stopped = clock.now.addingTimeInterval(-3600)
         let note = RecordingStopNote(stopped)
