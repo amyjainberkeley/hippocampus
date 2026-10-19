@@ -951,8 +951,13 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             start()
             return
         }
-        // A new press is a new try: Starting…, not the old reason.
+        // A new press is a new try: Starting…, not the old reason. That
+        // includes the permission the last try found off: the fresh helper
+        // this press starts reports it again if it still is, and until then
+        // the menu that press opened (a look after Open System Settings…)
+        // shows Starting… with Turn Off, so the turn-on can be dropped.
         turnOnFailure = nil
+        tccRevokedSurface = nil
         guard pendingTurnOn == nil else { return }
         let press = UUID()
         pendingTurnOn = press

@@ -321,6 +321,8 @@ final class TurnOnTests: XCTestCase {
         press(.openSystemSettings(.screenRecording), on: rig.supervisor)
         rig.supervisor.retryIfPermissionMayBeBack()
         XCTAssertTrue(rig.supervisor.turningOn, "the look shows as Starting…")
+        XCTAssertEqual(row(rig.supervisor).title, "Starting…", "the menu the look opens says what it started")
+        XCTAssertEqual(row(rig.supervisor).action, .turnOff, "and it can be dropped")
         await eventually { !rig.supervisor.turningOn }
         XCTAssertEqual(rig.supervisor.menuBarStatus, .needsPermission(.screenRecording))
         XCTAssertEqual(captureLaunches(rig), 2)
@@ -337,6 +339,43 @@ final class TurnOnTests: XCTestCase {
         XCTAssertNil(rig.supervisor.tccRevokedSurface)
         XCTAssertNil(rig.supervisor.turnOnFailure)
         XCTAssertEqual(rig.config.captureWrites, [true])
+        try await rig.supervisor.shutdownAndWait()
+    }
+
+    /// The menu builds its items right after the look (menuNeedsUpdate). The
+    /// permission the last turn-on found off stayed in the status until the
+    /// new attempt began, a turn later, so the menu the look opened read
+    /// "Needs permission / Open System Settings…" while its turn-on launched
+    /// and landed, with no way to drop it.
+    func test_the_menu_a_look_opens_shows_the_turn_on_it_started_with_turn_off() async throws {
+        let rig = rig()
+        try await rig.supervisor.startAndWaitForReadiness()
+        let screenRecording = PermissionSwitch()
+        helperReports(.screenRecording, to: rig, while: screenRecording)
+        press(.turnOn, on: rig.supervisor)
+        await eventually { !rig.supervisor.turningOn }
+        press(.openSystemSettings(.screenRecording), on: rig.supervisor)
+        screenRecording.off = false
+        let readiness = TestSuspension()
+        rig.topology.readinessSuspension = readiness
+
+        rig.supervisor.retryIfPermissionMayBeBack()
+        let menu = StatusMenuModel.items(
+            row: row(rig.supervisor), setupComplete: true, askLabel: nil, aiToolsConnected: false
+        )
+        XCTAssertEqual(menu.first?.title, "Starting…", "\(menu.map(\.title))")
+        XCTAssertTrue(menu.contains { $0.role == .action(.turnOff) }, "\(menu.map(\.title))")
+        XCTAssertEqual(rig.supervisor.menuBarStatus.markState, .remembering)
+
+        // While that menu is open the turn-on launches; Turn Off drops it.
+        await readiness.waitUntilEntered()
+        press(.turnOff, on: rig.supervisor)
+        rig.topology.readinessSuspension = nil
+        readiness.resume()
+        await eventually { rig.supervisor.state == .stopped && !rig.supervisor.turningOn }
+        XCTAssertFalse(rig.supervisor.captureEnabled)
+        XCTAssertFalse(rig.topology.captureHelperAlive)
+        XCTAssertEqual(rig.config.captureWrites, [false])
         try await rig.supervisor.shutdownAndWait()
     }
 
