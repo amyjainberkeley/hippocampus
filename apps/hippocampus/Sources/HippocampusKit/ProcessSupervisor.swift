@@ -1529,6 +1529,18 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         retryNow()
     }
 
+    /// What the helper's stderr says about permissions now, from the tail:
+    /// the one off (Screen Recording first), or nil once every one it named
+    /// is back. One that comes back while remembering is on and stopped on
+    /// it (the helper said so just before its run ended) is a look: a fresh
+    /// helper starts.
+    public func helperReportedPermission(_ surface: TCCRevokedReason?) {
+        let stoppedOnPermission = captureEnabled && tccRevokedSurface != nil
+            && state == .crashed(reason: Self.permissionStopReason)
+        tccRevokedSurface = surface
+        if surface == nil, stoppedOnPermission, !stopFailed { retryNow() }
+    }
+
     /// The person chose Open System Settings… for a permission the status
     /// says is off: the next look tries again (`retryIfPermissionMayBeBack`).
     func notePermissionFixChosen() {
