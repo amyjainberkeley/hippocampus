@@ -5,6 +5,18 @@ commits are intentionally omitted from release notes.
 
 ## [Unreleased]
 
+### Remembering
+
+- When macOS has Screen Recording or Accessibility off for Hippocampus, remembering stops altogether, whole-screen reading and Safari pages included, and the menu says Needs permission. Once you allow it, opening the menu starts it again; Accessibility starts it again by itself.
+- Clicking a permission notification opens the right pane in System Settings, and coming back tries again.
+- A Turn On that found a permission off is tried again when macOS quits and reopens Hippocampus after you allow it.
+- Opening Hippocampus while its window is closing, or minimized, shows the window. A minimized setup comes back too.
+- After a crash, the menu says Starting…, or Paused, while Hippocampus ends what the earlier run left, and the window opens without waiting for it.
+- Setup’s Try Again turns remembering on when Start Remembering did not take, and setup shown again knows whether remembering is on, paused or off.
+- A hippocampus://ask link that opens Hippocampus shows Ask with its question.
+- “Couldn’t stop” no longer shows when nothing is running: a permission found off while starting, Pause while starting, opening the app twice, or a turn-off whose setting could not be saved.
+- A Restart that could not finish leaves Turn On and opening the app working.
+
 ### Setup
 
 - Setup shows what Hippocampus does before it asks for anything. Welcome plays a short demo, made from Hippocampus’s own screens and made-up data. While you write a message, Ask finds a link you read earlier, with its source. Overview fills in the day, and an AI tool starts a session with your recent work.
