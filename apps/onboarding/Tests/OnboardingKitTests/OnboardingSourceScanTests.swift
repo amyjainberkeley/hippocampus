@@ -252,6 +252,11 @@ final class OnboardingSourceScanTests: XCTestCase {
         XCTAssertTrue(promise.contains("Toggle(OnboardingCopy.openAtLogin, isOn: openAtLogin)"))
     }
 
+    func testThePromiseShowsItsFactsOneSentenceALine() throws {
+        let promise = code(try source("Onboarding/Slides/PromiseSlide.swift")).joined(separator: "\n")
+        XCTAssertTrue(promise.contains("ForEach(OnboardingCopy.sentences(text), id: \\.self)"))
+    }
+
     func testThePromiseIsTitledByMode() throws {
         let promise = code(try source("Onboarding/Slides/PromiseSlide.swift")).joined(separator: "\n")
         XCTAssertTrue(promise.contains("title: OnboardingCopy.promiseTitle(isReview: flowVM.isReview)"))

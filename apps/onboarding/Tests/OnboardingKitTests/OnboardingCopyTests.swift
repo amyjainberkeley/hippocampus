@@ -33,6 +33,29 @@ final class OnboardingCopyTests: XCTestCase {
         XCTAssertTrue(OnboardingCopy.permissionsNothingYet.contains(OnboardingCopy.startRemembering))
     }
 
+    func testEachPromiseShowsOneSentenceALineAndDropsNothing() {
+        // The Promise shows each detail one sentence a line, so it reads as
+        // facts. The lines joined again are the checked words, exactly.
+        let stays = OnboardingCopy.promiseStays(kept: "kept 90 days")
+        XCTAssertEqual(OnboardingCopy.sentences(stays), [
+            "Text and screenshots, encrypted, kept 90 days.",
+            "Nothing is uploaded by Hippocampus.",
+            "It shares them with your AI only if you connect it.",
+            "What your AI reads goes to the company that runs it.",
+        ])
+        XCTAssertEqual(OnboardingCopy.sentences(OnboardingCopy.promiseNeverRead), [
+            "Password fields and known password apps.",
+            OnboardingCopy.privateWindowsSkipped,
+        ])
+        XCTAssertEqual(OnboardingCopy.sentences(OnboardingCopy.promiseStop), [OnboardingCopy.promiseStop])
+        for kept in ["kept 90 days", "kept 1 day", "kept until you delete it"] {
+            for detail in [OnboardingCopy.promiseStays(kept: kept), OnboardingCopy.promiseNeverRead,
+                           OnboardingCopy.promiseStop] {
+                XCTAssertEqual(OnboardingCopy.sentences(detail).joined(separator: " "), detail)
+            }
+        }
+    }
+
     func testThePromiseNeverSaysNeverUploaded() {
         let promise = OnboardingCopy.promiseStays(kept: "kept 90 days").lowercased()
         XCTAssertFalse(promise.contains("never uploaded"))

@@ -223,6 +223,20 @@ public enum OnboardingCopy {
         }
     }
 
+    /// A promise's detail, one sentence a line, so each reads as one fact
+    /// rather than as a paragraph. Nothing is dropped: the sentences joined
+    /// with spaces are the detail.
+    public static func sentences(_ text: String) -> [String] {
+        var sentences: [String] = []
+        var rest = Substring(text)
+        while let stop = rest.range(of: ". ") {
+            sentences.append(String(rest[..<stop.lowerBound]) + ".")
+            rest = rest[stop.upperBound...]
+        }
+        if !rest.isEmpty { sentences.append(String(rest)) }
+        return sentences
+    }
+
     /// The first Promise line, after "Stays on this Mac.".
     ///
     /// No upload holds in code (RULINGS O10, product critique finding 13):

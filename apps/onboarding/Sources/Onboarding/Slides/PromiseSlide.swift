@@ -46,32 +46,39 @@ struct PromiseScreen: View {
             VStack(spacing: OnboardingDesign.Space.xl) {
                 ScreenHeader(title: title, intro: intro)
 
-                PromiseLines(kept: kept)
+                // What sits under the promises keeps close to them, so the
+                // tallest state (a failed key and the checkbox) still fits.
+                VStack(spacing: OnboardingDesign.Space.lg) {
+                    PromiseLines(kept: kept)
 
-                if keyFailed {
-                    HStack(spacing: OnboardingDesign.Space.sm) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(OnboardingDesign.Palette.attention)
-                            .accessibilityHidden(true)
-                        Text(OnboardingCopy.encryptionFailed)
-                            .font(.system(size: 13))
-                        Button(OnboardingCopy.tryAgain, action: retryKey)
-                            .onboardingText(color: OnboardingDesign.Palette.accentText)
+                    VStack(spacing: OnboardingDesign.Space.md) {
+                        if keyFailed {
+                            HStack(spacing: OnboardingDesign.Space.sm) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(OnboardingDesign.Palette.attention)
+                                    .accessibilityHidden(true)
+                                Text(OnboardingCopy.encryptionFailed)
+                                    .font(.system(size: 13))
+                                Button(OnboardingCopy.tryAgain, action: retryKey)
+                                    .onboardingText(color: OnboardingDesign.Palette.accentText)
+                            }
+                        }
+
+                        if let openAtLogin {
+                            Toggle(OnboardingCopy.openAtLogin, isOn: openAtLogin)
+                                .toggleStyle(.checkbox)
+                                .font(.system(size: 13))
+                        }
                     }
-                }
-
-                if let openAtLogin {
-                    Toggle(OnboardingCopy.openAtLogin, isOn: openAtLogin)
-                        .toggleStyle(.checkbox)
-                        .font(.system(size: 13))
                 }
             }
         }
     }
 }
 
-/// The three promises, and what the menu-bar mark shows. The never-read
-/// panel shows the same lines.
+/// The three promises, and what the menu-bar mark shows. Each promise is a
+/// short lead with its facts under it, one sentence a line, so it reads as
+/// facts, not as a policy. The never-read panel shows the same lines.
 struct PromiseLines: View {
     let kept: String
 
@@ -103,17 +110,20 @@ struct PromiseLines: View {
                 Text(lead)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(OnboardingDesign.Palette.ink)
-                Text(text)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .lineSpacing(1.5)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(OnboardingCopy.sentences(text), id: \.self) { sentence in
+                        Text(sentence)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
         }
         .padding(.horizontal, OnboardingDesign.Space.lg + 2)
-        .padding(.vertical, OnboardingDesign.Space.md)
+        .padding(.vertical, OnboardingDesign.Space.md - 2)
     }
 }
 
@@ -131,7 +141,7 @@ struct DotLegend: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, OnboardingDesign.Space.lg + 2)
-        .padding(.vertical, OnboardingDesign.Space.md)
+        .padding(.vertical, OnboardingDesign.Space.md - 2)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(OnboardingCopy.dotPromise)
     }
