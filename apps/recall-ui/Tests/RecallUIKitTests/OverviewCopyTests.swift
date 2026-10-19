@@ -41,7 +41,15 @@ final class OverviewCopyTests: XCTestCase {
             ("yourDataTitle", You.yourDataTitle), ("rememberedRow", You.rememberedRow),
             ("rememberedCaption", You.rememberedCaption), ("namesRow", You.namesRow), ("aiToolsRow", You.aiToolsRow),
             ("sessionRow", You.sessionRow(date: "Oct 12", time: "2:02 – 2:31 PM")),
+            ("firstDayTitle", Overview.firstDayTitle), ("firstDayBody", Overview.firstDayBody),
+            ("firstDayOffTitle", Overview.firstDayOffTitle), ("firstDayOffBody", Overview.firstDayOffBody),
+            ("openPreferences", Overview.openPreferences), ("now", Overview.now),
+            ("firstDayAsk.none", Overview.firstDayAsk("")),
         ]
+        // Every Ask key the app can name, in the first day's line.
+        for (key, names) in UserFacingCopy.askKeyNames.sorted(by: { $0.key < $1.key }) {
+            strings.append(("firstDayAsk.\(key)", Overview.firstDayAsk(names.phrase)))
+        }
         for basis in [ModelItem.Basis.confirmed, .seenOnDays, .seenOnce] {
             strings.append(("basis.\(basis.rawValue)", You.basis(basis, daysSeen: 3)))
         }
@@ -109,6 +117,19 @@ final class OverviewCopyTests: XCTestCase {
     func testTheEmptyDaysSayWhatRulingsW7Says() {
         XCTAssertEqual(Overview.todayEmpty, "Your day fills in as you work. It stays on this Mac.")
         XCTAssertEqual(Overview.pastDayEmpty, "Nothing saved on this day.")
+    }
+
+    /// Where the person lands after setup (Oct 18): one line on what has
+    /// begun, true only while Hippocampus is remembering, and the first thing
+    /// to try, with the Ask key the app names.
+    func testTheFirstDaySaysWhatTheFirstLandingSays() {
+        XCTAssertEqual(Overview.firstDayTitle, "Your memory starts now.")
+        XCTAssertEqual(Overview.firstDayBody, "Your day fills in here as you work. It stays on this Mac.")
+        XCTAssertEqual(Overview.firstDayOffTitle, "Hippocampus isn\u{2019}t remembering right now.")
+        XCTAssertEqual(Overview.firstDayOffBody, "Your day fills in here once it is. It stays on this Mac.")
+        XCTAssertEqual(Overview.firstDayAsk("Press Shift twice"),
+                       "Press Shift twice in any app to ask about something you saw.")
+        XCTAssertEqual(Overview.firstDayAsk(""), "Choose a key for Ask in Preferences.")
     }
 }
 

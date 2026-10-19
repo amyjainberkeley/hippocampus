@@ -41,26 +41,35 @@ final class PreferencesRoutingLifecycleTests: XCTestCase {
         let app = try source("HippocampusApp.swift")
         let start = try method("private func startSupervisorOrDeferUntilOnboarded()", in: app)
         // Only a launch by the person opens the window: not Preferences, a
-        // quiet relaunch, a login or a link (spec-shell S7).
+        // quiet relaunch, a login or a link (spec-shell S7). `AppOpening`
+        // decides from the launch's reason; `AppOpeningTests` holds every
+        // reason to it.
+        XCTAssertTrue(start.contains("AppOpening.atLaunch("))
+        XCTAssertTrue(start.contains("launchReason, setupFinished: OnboardingSentinel.isComplete"))
         XCTAssertEqual(start.components(separatedBy:
-            "if launchReason.opensWindow { supervisor.openRecallWhenReady(initialLaunch: true) }")
-            .count - 1, 2)
-        XCTAssertEqual(start.components(separatedBy: "openRecallWhenReady(").count - 1, 2)
+            "if opening == .window { supervisor.openRecallWhenReady(initialLaunch: true) }")
+            .count - 1, 1)
+        XCTAssertEqual(start.components(separatedBy: "openRecallWhenReady(").count - 1, 1)
     }
 
     /// At login nothing else opens the window: the only other calls are the
     /// first window after setup closes, which only setup's sentinel watcher
-    /// starts, and opening the app again while it runs (07fedaf).
+    /// starts, and opening the app again while it runs (07fedaf). Opening it
+    /// again shows setup while setup is unfinished, and otherwise the window.
     func testOnlyTheGuardedLaunchSetupAndReopenOpenTheWindow() throws {
         let app = try source("HippocampusApp.swift")
-        XCTAssertEqual(app.components(separatedBy: "openRecallWhenReady(").count - 1, 4)
+        XCTAssertEqual(app.components(separatedBy: "openRecallWhenReady(").count - 1, 2)
+        XCTAssertEqual(app.components(separatedBy: "reopenWindow()").count - 1, 1)
         let finishLaunching = try method("func applicationDidFinishLaunching(", in: app)
         // Ask's actions name the window in closures; none opens it at launch.
         XCTAssertFalse(finishLaunching.contains("openRecallWhenReady"))
+        XCTAssertFalse(finishLaunching.contains("reopenWindow"))
         XCTAssertTrue(try method("private func openWindowWhenSetupCloses()", in: app)
             .contains("openRecallWhenReady(initialLaunch: true)"))
-        XCTAssertTrue(try method("func applicationShouldHandleReopen(", in: app)
-            .contains("supervisor.openRecallWhenReady()"))
+        let reopen = try method("func applicationShouldHandleReopen(", in: app)
+        XCTAssertTrue(reopen.contains("AppOpening.atReopen("))
+        XCTAssertTrue(reopen.contains("case .setup: supervisor.showOnboarding()"))
+        XCTAssertTrue(reopen.contains("case .window: supervisor.reopenWindow()"))
         // Setup closing opens the window only after the sentinel appears,
         // which the watcher armed on a first run waits for.
         let afterSetup = try method("private func startCaptureAfterOnboarding()", in: app)

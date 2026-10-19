@@ -8,6 +8,8 @@ import Foundation
 public struct PreviewUnderstandingReader: UnderstandingReader {
     public enum Scenario: String, Sendable {
         case populated, empty, unavailable, nomodel
+        /// Nothing saved yet and no AI tool connected: the first landing.
+        case firstDay
     }
 
     /// The samples' clock and time zone: previews render with these.
@@ -33,6 +35,10 @@ public struct PreviewUnderstandingReader: UnderstandingReader {
             throw UnderstandingError.unavailable
         case .empty:
             return Self.emptyOverview(day)
+        case .firstDay:
+            var overview = Self.emptyOverview(day)
+            overview.aiKnows = AIKnows(recentWork: [], aboutYou: [], hookInstalled: false)
+            return overview
         case .populated, .nomodel:
             guard day == Self.sampleDay else { return Self.emptyOverview(day) }
             var overview = try Self.decode(DayOverview.self, PreviewUnderstandingFixtures.overview)
@@ -50,7 +56,7 @@ public struct PreviewUnderstandingReader: UnderstandingReader {
             throw UnderstandingError.unavailable
         case .populated:
             return try Self.decode(ModelPage.self, PreviewUnderstandingFixtures.modelPage)
-        case .empty, .nomodel:
+        case .empty, .nomodel, .firstDay:
             var page = try Self.decode(ModelPage.self, PreviewUnderstandingFixtures.modelPage)
             page.shared = []
             page.keptBack = []
@@ -64,7 +70,7 @@ public struct PreviewUnderstandingReader: UnderstandingReader {
         switch scenario {
         case .unavailable:
             throw UnderstandingError.unavailable
-        case .empty:
+        case .empty, .firstDay:
             return AskAnswer(answer: nil, unavailable: nil, sources: [])
         case .populated:
             return try Self.decode(AskAnswer.self, PreviewUnderstandingFixtures.answer)

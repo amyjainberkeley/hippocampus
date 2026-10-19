@@ -241,6 +241,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// competing window and duplicate database reader.
     private var recallProcess: Process?
     private var recallPresentationGate = RecallPresentationGate()
+    /// This launch has read and checked the memory's key, so the window can
+    /// read it too, with no second Keychain request racing the first.
+    private var memoryKeyChecked = false
+    /// Whether the memory's database is on disk: the agent makes it on its
+    /// first run, after setup.
+    private let memoryOnDisk: @MainActor @Sendable () -> Bool
     /// Every onboarding this app started that is still running: Ask tells
     /// them when it opens, and Quit stops them (spec-shell S6.3).
     private var onboardingProcesses: [Process] = []
@@ -272,10 +278,13 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             developmentKeyMode: developmentKeyMode,
             captureStopNote: captureStopNote,
             pauses: pauses,
-            orphanSweeper: orphanSweeper
+            orphanSweeper: orphanSweeper,
+            memoryOnDisk: { FileManager.default.fileExists(atPath: ProcessSupervisor.databaseURL.path) }
         )
     }
 
+    /// `memoryOnDisk` says whether the memory's database exists. Tests that
+    /// leave it out get "not yet", the first run before the agent makes it.
     package init(
         locator: BinaryLocator,
         keyStore: KeyStore,
@@ -295,7 +304,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         captureStopNote: any CaptureStopNoting = NoCaptureStopNote(),
         pauses: UserPauseController = UserPauseController(),
         orphanSweeper: (any CaptureOrphanSweeping)? = nil,
-        clock: @escaping @MainActor @Sendable () -> Date = { Date() }
+        clock: @escaping @MainActor @Sendable () -> Date = { Date() },
+        memoryOnDisk: @escaping @MainActor @Sendable () -> Bool = { false }
     ) {
         self.locator = locator
         self.keyStore = developmentKeyMode.map { FileKeyStore(path: $0.keyURL) } ?? keyStore
@@ -312,6 +322,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         self.pauses = pauses
         self.orphanSweeper = orphanSweeper
         self.clock = clock
+        self.memoryOnDisk = memoryOnDisk
         self.captureEnabled = runtimeConfig.captureEnabled
         // A pause outlives a relaunch: start goes straight to Paused.
         self.requestedPauseState = pauses.isPaused
@@ -341,7 +352,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     /// Every committed move into running, paused or stopped ends a failed
     /// stop and shows a window that was asked for (critique-shell-engineering
-    /// 5); a failed start ends the request instead.
+    /// 5). A failed start shows it too when there is memory to read, and
+    /// otherwise ends the request.
     private func stateChanged() {
         switch state {
         case .running, .paused, .stopped:
@@ -353,15 +365,30 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 let moment: CaptureOrphanSweep.Moment = state == .paused ? .paused : .stopped
                 Task { [weak self] in await self?.sweepOrphans(moment) }
             }
-            if recallPresentationGate.consumeIfReady(state: state) {
+            if recallPresentationGate.consumeIfReady(state: state, memoryReady: memoryReady) {
                 openRecallUI(initialTab: Self.windowTab)
             }
         case .crashed:
-            if recallPresentationGate.consumeIfBlocked(state: state) {
+            if !shutdownRequested, recallPresentationGate.consumeIfReady(state: state, memoryReady: memoryReady) {
+                openRecallUI(initialTab: Self.windowTab)
+            } else if recallPresentationGate.consumeIfBlocked(state: state, memoryReady: memoryReady) {
                 onPresentationBlocked?()
             }
         case .idle, .starting:
             break
+        }
+    }
+
+    /// The window can read memory now: its database is on disk and this
+    /// launch has checked its key.
+    var memoryReady: Bool { memoryKeyChecked && memoryOnDisk() }
+
+    /// A window asked for while the key was being checked opens as soon as
+    /// it is, before the helper is ready.
+    private func showWindowIfMemoryReady() {
+        guard !shutdownRequested, shutdownTask == nil else { return }
+        if recallPresentationGate.consumeIfReady(state: state, memoryReady: memoryReady) {
+            openRecallUI(initialTab: Self.windowTab)
         }
     }
 
@@ -775,6 +802,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             _ = try await KeyStoreAccess.readValidatedKey(from: keyStore)
             try ensureTransitionIsActive(transitionID)
             currentKeyReference = reference
+            memoryKeyChecked = true
+            showWindowIfMemoryReady()
 
             let generation = try SupervisorProcessGeneration.make(
                 captureEnabled: requestedCapture
@@ -1185,15 +1214,40 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// Where the window opens when the app is opened (RULINGS X9).
     static let windowTab = "overview"
 
-    /// Show the window once remembering is running, paused or stopped. After
-    /// a failed start the app shows Preferences instead (spec-shell S5, D9).
+    /// Show the window: at once when there is memory to read, whatever
+    /// remembering is doing; otherwise once remembering is running, paused or
+    /// stopped. When a start failed before there was memory to read, the app
+    /// shows Preferences instead (spec-shell S5, D9).
     public func openRecallWhenReady(initialLaunch: Bool = false) {
         guard !shutdownRequested, shutdownTask == nil else { return }
-        if recallPresentationGate.request(initialLaunch: initialLaunch, state: state) {
+        if recallPresentationGate.request(initialLaunch: initialLaunch, state: state, memoryReady: memoryReady) {
             openRecallUI(initialTab: Self.windowTab)
-        } else if recallPresentationGate.consumeIfBlocked(state: state) {
+        } else if recallPresentationGate.consumeIfBlocked(state: state, memoryReady: memoryReady) {
             onPresentationBlocked?()
         }
+    }
+
+    /// The person opened Hippocampus again while it runs: the window, in any
+    /// state of remembering (Oct 18), and a start for a run that ended or
+    /// never began. A stop, a pause or a quit stays as it is.
+    public func reopenWindow() {
+        openRecallWhenReady()
+        if !state.isActive && state != .starting {
+            start()
+        }
+    }
+
+    /// Setup, for a person who opened Hippocampus before finishing it: the
+    /// setup this app already opened comes forward, so a second one never
+    /// starts beside it.
+    @discardableResult
+    public func showOnboarding() -> Bool {
+        if let open = onboardingProcesses.last(where: \.isRunning) {
+            NSRunningApplication(processIdentifier: open.processIdentifier)?
+                .activate(options: [.activateAllWindows])
+            return true
+        }
+        return openOnboarding()
     }
 
     public func openRecallUI(
@@ -1350,7 +1404,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             developmentKeyMode: developmentKeyMode
         )
     }
-    public var dbPath: URL {
+    public var dbPath: URL { Self.databaseURL }
+    /// The memory's database.
+    public static var databaseURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/MCI/mci.sqlite")
     }

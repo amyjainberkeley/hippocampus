@@ -669,32 +669,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ///     sentinel, the watch fires and the supervisor starts —
     ///     no relaunch required.
     ///
-    /// Once the sentinel exists, start the supervisor and present Recall
-    /// once the verified topology is ready.
+    /// Once the sentinel exists, start the supervisor, and show the window
+    /// as soon as there is memory to read when the person opened the app.
     @MainActor
     private func startSupervisorOrDeferUntilOnboarded() {
+        let opening = AppOpening.atLaunch(
+            launchReason, setupFinished: OnboardingSentinel.isComplete, hasSetup: supervisor.hasOnboarding
+        )
+        guard opening != .setup else {
+            firstLaunchLogger.info("first-launch: sentinel absent → spawn onboarding, defer supervisor.start() until it completes")
+            // The Onboarding executable is a separate Process (see
+            // `ProcessSupervisor.openOnboarding`) so it does not block
+            // the menu bar from painting; both happen in parallel.
+            _ = supervisor.openOnboarding()
+            armOnboardingSentinelWatcher()
+            return
+        }
+
         if OnboardingSentinel.isComplete {
             firstLaunchLogger.info("first-launch: sentinel present → start supervisor immediately")
-            if launchReason.opensWindow { supervisor.openRecallWhenReady(initialLaunch: true) }
-            supervisor.start()
-            return
-        }
-
-        guard supervisor.hasOnboarding else {
+        } else {
             firstLaunchLogger.warning("first-launch: no Onboarding binary bundled → start supervisor as fallback")
-            if launchReason.opensWindow { supervisor.openRecallWhenReady(initialLaunch: true) }
-            supervisor.start()
-            return
         }
-
-        firstLaunchLogger.info("first-launch: sentinel absent → spawn onboarding, defer supervisor.start() until it completes")
-
-        // The Onboarding executable is a separate Process (see
-        // `ProcessSupervisor.openOnboarding`) so it does not block
-        // the menu bar from painting; both happen in parallel.
-        _ = supervisor.openOnboarding()
-
-        armOnboardingSentinelWatcher()
+        // Only the person's own launch opens the window: not a login, a quiet
+        // relaunch, a link or Preferences (spec-shell S7, 07fedaf).
+        if opening == .window { supervisor.openRecallWhenReady(initialLaunch: true) }
+        supervisor.start()
     }
 
     /// Arm a Dispatch-source watch on the MCI app-support directory.
@@ -822,15 +822,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Opening Hippocampus while it runs (Finder, Spotlight, the Dock, `open`)
+    /// always shows something: setup while it is unfinished, otherwise the
+    /// window, whatever remembering is doing (Oct 18).
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if leavingForApplications { return false }
-        if !OnboardingSentinel.isComplete && supervisor.hasOnboarding {
-            _ = supervisor.openOnboarding()
-            return false
-        }
-        supervisor.openRecallWhenReady()
-        if !supervisor.state.isActive && supervisor.state != .starting {
-            supervisor.start()
+        switch AppOpening.atReopen(setupFinished: OnboardingSentinel.isComplete, hasSetup: supervisor.hasOnboarding) {
+        case .nothing: break
+        case .setup: supervisor.showOnboarding()
+        case .window: supervisor.reopenWindow()
         }
         return false
     }
