@@ -7,11 +7,12 @@ commits are intentionally omitted from release notes.
 
 ### Setup
 
-- Setup shows what Hippocampus does before it asks for anything. Welcome plays a short demo of Ask, Overview and an AI tool starting a session, made from Hippocampus’s own screens and made-up data.
+- Setup shows what Hippocampus does before it asks for anything. Welcome plays a short demo, made from Hippocampus’s own screens and made-up data. While you write a message, Ask finds a link you read earlier, with its source. Overview fills in the day, and an AI tool starts a session with your recent work.
 - A new screen, What you get, shows the three things it does, each with a small picture of the screen that does it.
 - Each permission says what it lets Hippocampus do, and shows a checkmark the moment it is on.
-- The promises before Start Remembering are shorter to scan, with what the menu-bar mark shows. They now say known password apps are never read.
-- Try it reads the window you were working in and shows what it read. When that window is skipped, a password app, an app you excluded, a private browser window or a password field in use, it says so and suggests another window. A window you bring forward is read at once.
+- The promises before Start Remembering are shorter to scan, one fact a line, with what the menu-bar mark shows. They now say known password apps are never read.
+- Try it reads the window you were working in and shows what it just read, in the window’s order. When that window is skipped, a password app, an app you excluded, a private browser window or a password field in use, it says so and suggests another window. A window you bring forward is read at once.
+- Setup’s grey text is darker, so small lines read clearly.
 
 ## [0.3.0] - 2026-10-15
 
