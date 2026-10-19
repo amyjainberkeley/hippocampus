@@ -147,6 +147,9 @@ package final class ApplicationTerminationCoordinator {
             reply(true)
             return true
         } catch {
+            // A restart that failed leaves Hippocampus open, its menu acting
+            // again: after a verified stop, Turn On must work, not do nothing.
+            if intent == .restart { supervisor.allowStartsAfterFailedRestart() }
             onFailure(error)
             reply(false)
             return false

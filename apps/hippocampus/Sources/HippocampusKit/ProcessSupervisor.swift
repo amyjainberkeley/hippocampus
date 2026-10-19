@@ -619,6 +619,16 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
     }
 
+    /// A restart whose relaunch could not be scheduled leaves Hippocampus open
+    /// after a verified stop. The quit intent that keeps anything from
+    /// starting again would leave Turn On, Try Again and opening the app doing
+    /// nothing, silently: starts are allowed again. A stop that failed or is
+    /// still under way stays as it is ("Couldn’t stop", or Restart again).
+    public func allowStartsAfterFailedRestart() {
+        guard shutdownRequested, shutdownTask == nil, state == .stopped, !stopFailed else { return }
+        shutdownRequested = false
+    }
+
     /// Quit could not verify a clean stop in time. The app is exiting and its
     /// children follow the parent lease, so make certain nothing relaunches,
     /// revoke capture consent, try one more bounded stop, and publish

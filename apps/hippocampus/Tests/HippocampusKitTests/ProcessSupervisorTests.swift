@@ -203,11 +203,13 @@ final class TestSuspension {
 @MainActor
 final class FakeApplicationRestartLauncher: ApplicationRestartLaunching {
     var onSchedule: (() -> Void)?
+    var error: Error?
     private(set) var scheduleCount = 0
 
     func scheduleRestart() throws {
         scheduleCount += 1
         onSchedule?()
+        if let error { throw error }
     }
 }
 
@@ -731,6 +733,55 @@ final class ProcessSupervisorTests: XCTestCase {
         XCTAssertEqual(replies, [false])
         guard case .crashed = supervisor.state else {
             return XCTFail("failed stop must remain visible, got \(supervisor.state)")
+        }
+    }
+
+    /// A restart whose relaunch could not be scheduled after a verified stop
+    /// leaves Hippocampus open, the menu acting again, reading "Off / Turn
+    /// On". Turn On did nothing: the quit intent kept every start away.
+    func test_turn_on_works_after_a_restart_that_stayed_open() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        try await supervisor.startAndWaitForReadiness()
+        let launcher = FakeApplicationRestartLauncher()
+        launcher.error = TestError.denied
+        var failures = 0
+        let coordinator = ApplicationTerminationCoordinator(
+            supervisor: supervisor, restartLauncher: launcher, cleanup: {}, onFailure: { _ in failures += 1 }
+        )
+
+        let restarted = await coordinator.terminate(intent: .restart) { _ in }
+
+        XCTAssertFalse(restarted)
+        XCTAssertEqual(failures, 1)
+        XCTAssertEqual(supervisor.state, .stopped)
+        XCTAssertEqual(supervisor.statusRow(setupFinished: true).action, .turnOn)
+        supervisor.performAskStatusAction(.turnOn, setupFinished: true) { _ in }
+        let deadline = Date().addingTimeInterval(3)
+        while supervisor.state != .running && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertEqual(topology.launchPlans.count, 2)
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// A restart whose stop failed is not allowed to start again: it says
+    /// "Couldn’t stop", with Quit.
+    func test_a_restart_whose_stop_failed_still_starts_nothing() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        try await supervisor.startAndWaitForReadiness()
+        topology.stopResults = [.failure(TestError.partialStop)]
+        let coordinator = ApplicationTerminationCoordinator(
+            supervisor: supervisor, restartLauncher: FakeApplicationRestartLauncher(), cleanup: {}
+        )
+
+        _ = await coordinator.terminate(intent: .restart) { _ in }
+        supervisor.performAskStatusAction(.turnOn, setupFinished: true) { _ in }
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        guard case .stopFailed = supervisor.menuBarStatus else {
+            return XCTFail("expected Couldn’t stop, got \(supervisor.menuBarStatus)")
         }
     }
 
