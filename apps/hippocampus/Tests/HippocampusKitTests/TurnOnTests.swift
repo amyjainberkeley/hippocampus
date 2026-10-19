@@ -277,6 +277,48 @@ final class TurnOnTests: XCTestCase {
         try await rig.supervisor.shutdownAndWait()
     }
 
+    /// The helper is paused on a permission this app has no name for (a
+    /// newer helper's, or a respelled one). It used to read as none off, so
+    /// Turn On saved remembering on, turned consent on and kept a helper
+    /// that would start reading by itself once that permission came back.
+    func test_a_permission_the_app_cannot_name_never_commits_a_turn_on() async throws {
+        let rig = rig()
+        try await rig.supervisor.startAndWaitForReadiness()
+        rig.topology.permissionsOffInReceipt = { plan in
+            plan.helperArguments.contains("--capture") ? ["inputMonitoring"] : []
+        }
+
+        press(.turnOn, on: rig.supervisor)
+        await eventually { !rig.supervisor.turningOn }
+
+        XCTAssertFalse(rig.supervisor.captureEnabled)
+        XCTAssertEqual(rig.config.captureWrites, [])
+        XCTAssertTrue(rig.consent.enabledGenerations.isEmpty)
+        XCTAssertFalse(rig.topology.captureHelperAlive, "no helper waits on the permission")
+        XCTAssertEqual(row(rig.supervisor).title, "Couldn’t turn on")
+        XCTAssertEqual(row(rig.supervisor).action, .tryAgain)
+        try await rig.supervisor.shutdownAndWait()
+    }
+
+    /// The same helper at an ordinary start (remembering on): it does not run
+    /// on, waiting on a permission nobody can see.
+    func test_a_start_whose_helper_names_a_permission_the_app_cannot_name_does_not_run() async throws {
+        let rig = rig(captureEnabled: true)
+        rig.topology.permissionsOffInReceipt = { plan in
+            plan.helperArguments.contains("--capture") ? ["inputMonitoring"] : []
+        }
+
+        try? await rig.supervisor.startAndWaitForReadiness()
+
+        guard case .crashed = rig.supervisor.state else {
+            return XCTFail("expected a failed start, got \(rig.supervisor.state)")
+        }
+        XCTAssertTrue(rig.consent.enabledGenerations.isEmpty)
+        XCTAssertFalse(rig.topology.holdsProcesses)
+        XCTAssertEqual(row(rig.supervisor).action, .tryAgain)
+        try await rig.supervisor.shutdownAndWait()
+    }
+
     private func captureLaunches(_ rig: Rig) -> Int {
         rig.topology.launchPlans.filter { $0.helperArguments.contains("--capture") }.count
     }

@@ -101,6 +101,9 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
     /// What a ready helper's receipt says it found off as it started, as the
     /// real capture helper reports a permission it is paused on.
     var permissionOffInReceipt: ((ProcessSupervisorLaunchPlan) -> TCCRevokedReason?)?
+    /// The receipt's `permissions_off`, read by the real parser as the real
+    /// topology reads it (and refused as the real one refuses it).
+    var permissionsOffInReceipt: ((ProcessSupervisorLaunchPlan) -> [String])?
     private(set) var permissionOffAtReadiness: TCCRevokedReason?
     var onStop: (() -> Void)?
     var stopDelay: Duration?
@@ -149,6 +152,17 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
                 }
             }
             try result.get()
+        }
+        if let permissionsOffInReceipt {
+            let receipt: [String: Any] = [
+                "generation": generation.id,
+                "capture_enabled": generation.captureEnabled,
+                "permissions_off": permissionsOffInReceipt(launchPlans.last!),
+            ]
+            permissionOffAtReadiness = try FoundationSupervisorTopology.permissionOff(
+                inReadiness: JSONSerialization.data(withJSONObject: receipt), for: generation
+            )
+            return
         }
         permissionOffAtReadiness = permissionOffInReceipt?(launchPlans.last!)
     }
@@ -381,7 +395,19 @@ final class ProcessSupervisorTests: XCTestCase {
         )
         XCTAssertNil(try receipt(#"{"generation":"generation-1","capture_enabled":true,"permissions_off":[]}"#))
         XCTAssertNil(try receipt(#"{"generation":"generation-1","capture_enabled":true}"#))
-        XCTAssertNil(try receipt(#"{"generation":"generation-1","capture_enabled":true,"permissions_off":["camera"]}"#))
+        // A permission this app cannot name is still off: the helper is
+        // paused on it, so the start did not land (never "none off").
+        XCTAssertThrowsError(
+            try receipt(#"{"generation":"generation-1","capture_enabled":true,"permissions_off":["camera"]}"#)
+        ) { XCTAssertEqual($0 as? SupervisorProcessRuntimeError, .unknownPermissionOff) }
+        XCTAssertThrowsError(
+            try receipt(#"{"generation":"generation-1","capture_enabled":true,"permissions_off":["ScreenRecording"]}"#)
+        )
+        // One it can name is named, whatever else is listed.
+        XCTAssertEqual(
+            try receipt(#"{"generation":"generation-1","capture_enabled":true,"permissions_off":["camera","accessibility"]}"#),
+            .accessibility
+        )
         XCTAssertThrowsError(try receipt(#"{"generation":"generation-2","capture_enabled":true,"permissions_off":[]}"#))
         XCTAssertThrowsError(try receipt(#"{"generation":"generation-1","capture_enabled":false}"#))
     }
