@@ -256,6 +256,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             } else if state == .running, captureEnabled {
                 endRunForPermission()
             }
+            if captureEnabled { watchPermission() }
         }
     }
 
@@ -276,6 +277,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private let pauses: UserPauseController
     private let orphanSweeper: (any CaptureOrphanSweeping)?
     private let clock: @MainActor @Sendable () -> Date
+    /// Whether macOS has a permission on for Hippocampus as this process can
+    /// tell, nil when it cannot (`permissionVisibleHere`).
+    private let permissionProbe: @MainActor @Sendable (TCCRevokedReason) -> Bool?
+    private let permissionPollSleep: @MainActor @Sendable () async throws -> Void
+    private var permissionWatch: Task<Void, Never>?
     private var skipWatch = SkipWatch()
     private let logger = Logger(subsystem: "ai.hippocampus", category: "supervisor")
     private var retryTask: Task<Void, Never>?
@@ -345,8 +351,19 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             captureStopNote: captureStopNote,
             pauses: pauses,
             orphanSweeper: orphanSweeper,
-            memoryOnDisk: { FileManager.default.fileExists(atPath: ProcessSupervisor.databaseURL.path) }
+            memoryOnDisk: { FileManager.default.fileExists(atPath: ProcessSupervisor.databaseURL.path) },
+            permissionProbe: ProcessSupervisor.permissionVisibleHere
         )
+    }
+
+    /// Accessibility is answered live for this process, which macOS treats as
+    /// the helper's too (the helper is its child). Screen Recording is not: a
+    /// process's own answer can stay "no" after the person allows it.
+    public static func permissionVisibleHere(_ permission: TCCRevokedReason) -> Bool? {
+        switch permission {
+        case .accessibility: return AXIsProcessTrusted()
+        case .screenRecording, .fullDiskAccess, .automation: return nil
+        }
     }
 
     /// `memoryOnDisk` says whether the memory's database exists. Tests that
@@ -371,7 +388,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         pauses: UserPauseController = UserPauseController(),
         orphanSweeper: (any CaptureOrphanSweeping)? = nil,
         clock: @escaping @MainActor @Sendable () -> Date = { Date() },
-        memoryOnDisk: @escaping @MainActor @Sendable () -> Bool = { false }
+        memoryOnDisk: @escaping @MainActor @Sendable () -> Bool = { false },
+        permissionProbe: @escaping @MainActor @Sendable (TCCRevokedReason) -> Bool? = { _ in nil },
+        permissionPollSleep: @escaping @MainActor @Sendable () async throws -> Void = {
+            try await Task.sleep(for: .seconds(2))
+        }
     ) {
         self.locator = locator
         self.keyStore = developmentKeyMode.map { FileKeyStore(path: $0.keyURL) } ?? keyStore
@@ -389,6 +410,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         self.orphanSweeper = orphanSweeper
         self.clock = clock
         self.memoryOnDisk = memoryOnDisk
+        self.permissionProbe = permissionProbe
+        self.permissionPollSleep = permissionPollSleep
         self.captureEnabled = runtimeConfig.captureEnabled
         // A pause outlives a relaunch: start goes straight to Paused.
         self.requestedPauseState = pauses.isPaused
@@ -1105,6 +1128,31 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 self.logger.error("supervisor: stopping a run a permission ended failed: \(error.localizedDescription)")
                 self.transitionGate.fail(transitionID: transitionID)
             }
+        }
+    }
+
+    /// While remembering is on and stopped on a permission this process can
+    /// see for itself, watch it: when it goes from off to on, look again, as
+    /// the menu opening would. A helper paused on Accessibility used to
+    /// resume by itself; a run ended on it now starts again the same way.
+    /// Only a change counts, so a permission this process sees on while the
+    /// helper said off is never tried over and over.
+    private func watchPermission() {
+        guard permissionWatch == nil else { return }
+        permissionWatch = Task { @MainActor [weak self] in
+            var sawOff = false
+            while !Task.isCancelled {
+                guard let self, self.captureEnabled, let permission = self.tccRevokedSurface,
+                      let on = self.permissionProbe(permission) else { break }
+                if !on {
+                    sawOff = true
+                } else if sawOff {
+                    sawOff = false
+                    self.retryIfPermissionMayBeBack()
+                }
+                do { try await self.permissionPollSleep() } catch { break }
+            }
+            self?.permissionWatch = nil
         }
     }
 

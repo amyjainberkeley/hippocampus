@@ -209,6 +209,83 @@ final class PermissionOffTests: XCTestCase {
         try await rig.supervisor.shutdownAndWait()
     }
 
+    // MARK: Allowed again, with nobody looking
+
+    /// Whether this process sees the permission on, as a test changes it.
+    private final class Trust: @unchecked Sendable {
+        var accessibility = false
+    }
+
+    private func rig(trust: Trust) -> Rig {
+        let locator = FakeBinaryLocator()
+        locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
+        locator.agentURL = URL(fileURLWithPath: "/bundle/mci-agent")
+        let keyStore = FakeKeyStore()
+        keyStore.storedKey = String(repeating: "ab", count: 32)
+        let config = FakeRuntimeConfig(captureEnabled: true)
+        let topology = FakeSupervisorTopology()
+        let consent = FakeCaptureConsentAuthority()
+        let supervisor = ProcessSupervisor(
+            locator: locator, keyStore: keyStore, runtimeConfig: config, topology: topology,
+            keyCustodyPreparer: FakeKeyCustodyPreparer(), captureConsentAuthority: consent,
+            readinessTimeout: 0.1, captureStatusReader: { (nil, nil) },
+            permissionProbe: { permission in permission == .accessibility ? trust.accessibility : nil },
+            permissionPollSleep: { try await Task.sleep(for: .milliseconds(20)) }
+        )
+        return Rig(supervisor: supervisor, topology: topology, config: config, consent: consent)
+    }
+
+    /// A helper paused on Accessibility used to resume by itself once it was
+    /// allowed. The run ends now, so the app watches the one permission it
+    /// can see for itself, and looks again once it comes back on.
+    func test_a_run_accessibility_ended_starts_again_by_itself_once_it_is_allowed() async throws {
+        let trust = Trust()
+        let rig = rig(trust: trust)
+        try await rig.supervisor.startAndWaitForReadiness()
+        rig.supervisor.tccRevokedSurface = .accessibility
+        await eventually { !rig.topology.holdsProcesses }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(rig.topology.launchPlans.count, 1, "nothing tries while it is off")
+
+        trust.accessibility = true
+        await eventually { rig.supervisor.state == .running }
+
+        XCTAssertEqual(rig.topology.launchPlans.count, 2)
+        XCTAssertNil(rig.supervisor.tccRevokedSurface)
+        try await rig.supervisor.shutdownAndWait()
+    }
+
+    /// Only a change it saw counts: when this process already says yes while
+    /// the helper says no, it never tries again and again.
+    func test_a_permission_this_process_already_sees_on_is_not_tried_over_and_over() async throws {
+        let trust = Trust()
+        trust.accessibility = true
+        let rig = rig(trust: trust)
+        try await rig.supervisor.startAndWaitForReadiness()
+
+        rig.supervisor.tccRevokedSurface = .accessibility
+        try await Task.sleep(for: .milliseconds(300))
+
+        XCTAssertEqual(rig.topology.launchPlans.count, 1)
+        XCTAssertEqual(rig.supervisor.menuBarStatus, .needsPermission(.accessibility))
+        try await rig.supervisor.shutdownAndWait()
+    }
+
+    /// Screen Recording cannot be seen from here: only a look tries again.
+    func test_screen_recording_is_left_to_the_next_look() async throws {
+        let trust = Trust()
+        let rig = rig(trust: trust)
+        try await rig.supervisor.startAndWaitForReadiness()
+
+        rig.supervisor.tccRevokedSurface = .screenRecording
+        trust.accessibility = true
+        try await Task.sleep(for: .milliseconds(300))
+
+        XCTAssertEqual(rig.topology.launchPlans.count, 1)
+        XCTAssertEqual(rig.supervisor.menuBarStatus, .needsPermission(.screenRecording))
+        try await rig.supervisor.shutdownAndWait()
+    }
+
     /// A run whose stop fails says so.
     func test_a_run_a_permission_ended_whose_stop_fails_says_couldnt_stop() async throws {
         let rig = rig()
