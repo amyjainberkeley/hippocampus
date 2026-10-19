@@ -280,8 +280,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private var mayHoldCaptureHelper = false
     /// The launch's orphan sweep is still ending what an earlier run left.
     private var launchSweepRunning = false
-    /// `start()` has asked for a start that has not begun yet.
-    private var startPending = false
+    /// A start `start()` asked for is under way, from the ask until it ends.
+    private var startRunning = false
     private var captureStopLatched = false
     private var captureStopTask: Task<Void, Error>?
     private var shutdownTask: Task<Void, Error>?
@@ -480,15 +480,20 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             return
         }
         // One start at a time: opening the app twice, or opening it and
-        // pressing Turn On, asks twice before the first has run. Cancelling
-        // it made it fail with CancellationError, a crash that on a first
-        // run ended the window request and showed Preferences instead.
-        guard !startPending else { return }
+        // pressing Turn On, asks again while the first start is still under
+        // way, before it has begun or while it stops what an ended run left.
+        // Cancelling it made it fail with CancellationError: a crash that on
+        // a first run ended the window request and showed Preferences
+        // instead, and otherwise left "Not saving" with nothing running.
+        // Another change under way (Try Again's restart, a retry, a pause)
+        // is never cancelled for a start either; only a retry still waiting
+        // out its backoff is replaced.
+        guard !startRunning, inFlightTransitions.isEmpty, pauseTask == nil else { return }
         cancelPendingRetry()
-        startPending = true
+        startRunning = true
         retryTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            self.startPending = false
+            defer { self.startRunning = false }
             do {
                 try await self.startAndWaitForReadiness()
             } catch {

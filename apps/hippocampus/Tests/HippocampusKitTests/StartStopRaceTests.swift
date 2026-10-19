@@ -269,6 +269,33 @@ final class StartStopRaceTests: XCTestCase {
         try await supervisor.shutdownAndWait()
     }
 
+    // MARK: Opening the app twice
+
+    /// The memory agent exits while the capture helper lives on, held, and
+    /// the retry waits out its backoff. Opening the app starts remembering
+    /// again, and its start first stops what the ended run left. Opening it
+    /// again meanwhile cancelled that start mid-stop.
+    func test_opening_the_app_twice_after_a_crash_starts_once() async throws {
+        let topology = LeaseTopology()
+        let supervisor = make(topology, retrySleep: { _ in try await Task.sleep(for: .seconds(3600)) })
+        supervisor.start()
+        await eventually { supervisor.state == .running }
+        topology.agentExitsUnexpectedly()
+        guard case .crashed = supervisor.state else { return XCTFail("expected crashed, got \(supervisor.state)") }
+        XCTAssertTrue(topology.holdsProcesses)
+
+        supervisor.reopenWindow()
+        await eventually { topology.stopCalls == 1 }
+        supervisor.reopenWindow()
+        await eventually { supervisor.state == .running }
+
+        XCTAssertEqual(supervisor.state, .running, describe(supervisor))
+        XCTAssertFalse(supervisor.stopFailed)
+        XCTAssertEqual(topology.stopsThatThrewCancellation, 0)
+        XCTAssertEqual(topology.launchPlans.count, 2, "one start for the two opens")
+        try await supervisor.shutdownAndWait()
+    }
+
     // MARK: Pause during a start
 
     /// "Starting…" offers Pause. The pause ends the start, whose own cleanup
