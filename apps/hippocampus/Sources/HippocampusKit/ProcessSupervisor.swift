@@ -828,9 +828,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
 
         do {
+            // A failed capture start rolls back below, and that says how
+            // the change ended.
             let generationID = try await startTopology(
                 captureEnabled: true,
-                transitionID: transitionID
+                transitionID: transitionID,
+                publishesFailure: false
             )
             // The fresh helper found a permission off as it started. It is
             // paused on it, and would start reading by itself once it is
@@ -1028,9 +1031,14 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         stopAncillaryServices()
     }
 
+    /// `publishesFailure` false leaves the state to a caller that will roll
+    /// back: a crash published now would be read as the end of the change,
+    /// which ends a window asked for on a first run, and the rollback would
+    /// then undo it.
     private func startTopology(
         captureEnabled requestedCapture: Bool,
-        transitionID: UUID
+        transitionID: UUID,
+        publishesFailure: Bool = true
     ) async throws -> String {
         try ensureTransitionIsActive(transitionID)
         guard !requestedCapture || tccRevokedSurface == nil else {
@@ -1038,10 +1046,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
         state = .starting
         guard let helperURL = locator.helperPath() else {
-            try failStart(SupervisorError.binaryNotFound("MCICaptureHelper"))
+            try failStart(SupervisorError.binaryNotFound("MCICaptureHelper"), publishing: publishesFailure)
         }
         guard let agentURL = locator.agentPath() else {
-            try failStart(SupervisorError.binaryNotFound("mci-agent"))
+            try failStart(SupervisorError.binaryNotFound("mci-agent"), publishing: publishesFailure)
         }
 
         let reference = (keyStore as? FileKeyStore)?.keychainReference
@@ -1121,7 +1129,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 try? await stopTopology(timeout: 2)
             }
             stopAncillaryServices()
-            if transitionGate.ownsTransition(transitionID) {
+            if publishesFailure, transitionGate.ownsTransition(transitionID) {
                 state = .crashed(reason: error.localizedDescription)
             }
             throw error
@@ -1259,8 +1267,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         if let consentError { throw consentError }
     }
 
-    private func failStart(_ error: Error) throws -> Never {
-        state = .crashed(reason: error.localizedDescription)
+    private func failStart(_ error: Error, publishing: Bool) throws -> Never {
+        if publishing { state = .crashed(reason: error.localizedDescription) }
         throw error
     }
 

@@ -350,6 +350,34 @@ final class SupervisorWindowOpeningTests: XCTestCase {
         try await h.supervisor.shutdownAndWait()
     }
 
+    /// Setup's Start Remembering, and the window asked for as setup closes,
+    /// on a first run: the capture start fails and the off topology comes
+    /// back. The failed start used to publish a crash before the rollback,
+    /// which ended the request as a failed start and opened Preferences, so
+    /// whether the window opened depended on when setup closed.
+    func test_a_first_run_window_request_survives_a_turn_on_that_rolls_back() async throws {
+        let h = try make(captureEnabled: false, memoryOnDisk: false)
+        var blocked = 0
+        h.supervisor.onPresentationBlocked = { blocked += 1 }
+        let readiness = TestSuspension()
+        h.topology.readinessSuspension = readiness
+        h.topology.readinessResults = [.failure(SupervisorProcessRuntimeError.readinessTimedOut)]
+        let turningOn = Task { try? await h.supervisor.applyCaptureEnabled(true) }
+        await readiness.waitUntilEntered()
+        h.supervisor.openRecallWhenReady(initialLaunch: true)
+
+        h.topology.readinessSuspension = nil
+        readiness.resume()
+        await turningOn.value
+
+        let places = await opened(h.windows)
+        XCTAssertEqual(blocked, 0)
+        XCTAssertEqual(places, ["overview"])
+        XCTAssertEqual(h.supervisor.state, .running)
+        XCTAssertEqual(h.supervisor.statusRow(setupFinished: true).title, "Couldn’t turn on")
+        try await h.supervisor.shutdownAndWait()
+    }
+
     /// A start that failed before there was any memory to read shows
     /// Preferences, where the reason and the fix are (spec-shell S5, D9).
     func test_a_start_that_failed_before_the_key_was_checked_still_shows_preferences() async throws {
