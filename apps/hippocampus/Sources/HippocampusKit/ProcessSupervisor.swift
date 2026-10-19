@@ -235,6 +235,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     @Published public internal(set) var tccRevokedSurface: TCCRevokedReason? {
         didSet {
             guard tccRevokedSurface != nil else { return }
+            // A start under way ends here at once, cancelled mid-wait. What
+            // it launched is still stopped all the way: every stop runs in a
+            // task of its own (`stopTopology`).
             cancelPendingRetry()
             if state == .starting {
                 transitionGate.reset()
@@ -1241,9 +1244,17 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// the screen, so that is "Couldn’t stop" whichever change asked for the
     /// stop: a start's cleanup, a restart, Try Again or a turn-on's rollback
     /// (RULINGS B1).
+    ///
+    /// The stop runs in a task of its own, so it always runs to its end. The
+    /// change that asks for it may have been cancelled (a permission report,
+    /// a pause or Quit ends a start that way), and a stop that ran in that
+    /// task threw at its first wait, before it signalled anything: nothing
+    /// had stopped, yet it read as a helper that would not stop.
     private func stopTopology(timeout: TimeInterval) async throws {
+        let topology = topology
+        let stop = Task { @MainActor in try await topology.stop(timeout: timeout) }
         do {
-            try await topology.stop(timeout: timeout)
+            try await stop.value
         } catch {
             if mayHoldCaptureHelper { captureHelperSurvivedStop = true }
             throw error

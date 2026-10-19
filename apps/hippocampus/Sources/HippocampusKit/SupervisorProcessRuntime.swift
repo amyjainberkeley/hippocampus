@@ -303,7 +303,9 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
         while Date() < gracefulDeadline,
               helper?.isRunning == true || agent?.isRunning == true
         {
-            try await Task.sleep(for: .milliseconds(25))
+            // Never cancelled: a stop asked for by a cancelled change must
+            // still signal and let go of what it holds.
+            await Self.pause(for: .milliseconds(25))
         }
         do {
             let survivors = [helper, agent].compactMap { process in
@@ -319,6 +321,12 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
             throw SupervisorProcessRuntimeError.partialStop
         }
         cleanup()
+    }
+
+    /// Sleeps the whole `duration` even in a cancelled task, which a bare
+    /// `Task.sleep` refuses to do.
+    static func pause(for duration: Duration) async {
+        await Task { try? await Task.sleep(for: duration) }.value
     }
 
     private func cleanup() {
