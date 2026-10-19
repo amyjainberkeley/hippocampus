@@ -77,7 +77,8 @@ extension ProcessSupervisor {
         StatusRow(StatusFacts(
             status: menuBarStatus, setup: setup(finished: setupFinished),
             lastSavedAt: captureReceipt?.lastStoredFrameAt,
-            pausedSince: pausedSince, stoppedSharingAt: stoppedSharingAt
+            pausedSince: pausedSince, stoppedSharingAt: stoppedSharingAt,
+            turningOn: turningOn
         ), now: now)
     }
 
@@ -103,17 +104,19 @@ extension ProcessSupervisor {
         case .resume:
             setPaused(false)
         case .turnOn:
-            if captureEnabled {
-                setPaused(false)
-                start()
-            } else {
-                // Turning remembering on also ends a pause (spec-shell S5).
-                Task { [weak self] in try? await self?.applyCaptureEnabled(true) }
-            }
+            // Turning remembering on also ends a pause (spec-shell S5). It
+            // never fails silently: the status says why it didn't take.
+            turnOn()
         case .openSystemSettings(let permission):
             if let url = URL(string: permission.settingsPaneURLString) { openURL(url) }
         case .tryAgain:
-            retryNow()
+            // Try Again tries what failed: a turn-on that didn't take, or
+            // the run.
+            if !captureEnabled, turnOnFailure != nil {
+                turnOn()
+            } else {
+                retryNow()
+            }
         case .quit:
             break
         case .finishSetup:
