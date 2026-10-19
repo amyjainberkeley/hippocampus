@@ -143,6 +143,86 @@ final class SupervisorWindowOpeningTests: XCTestCase {
         XCTAssertEqual(h.topology.launchPlans.count, 1, "a pause is not resumed by opening the app")
     }
 
+    /// A pause whose stop failed says "Couldn’t stop": the helper may still be
+    /// reading. Opening the app again shows the window and leaves that as it
+    /// is. It used to start, take the kept pause's shortcut to "Paused" (the
+    /// off picture) without stopping anything, and end "Couldn’t stop".
+    func test_reopen_after_a_pause_that_could_not_stop_still_says_couldnt_stop() async throws {
+        let h = try make(captureEnabled: true)
+        try await h.supervisor.startAndWaitForReadiness()
+        h.topology.stopResults = [.failure(TestError.denied)]
+        h.supervisor.setPaused(true)
+        await eventually { h.supervisor.stopFailed }
+        XCTAssertTrue(h.supervisor.stopFailed)
+
+        h.supervisor.reopenWindow()
+
+        let places = await opened(h.windows)
+        XCTAssertEqual(places, ["overview"])
+        try await Task.sleep(for: .milliseconds(150))
+        let row = h.supervisor.statusRow(setupFinished: true)
+        XCTAssertEqual(row.title, "Couldn’t stop")
+        XCTAssertEqual(row.action, .quit)
+        XCTAssertEqual(h.supervisor.menuBarStatus.markState, .remembering)
+        XCTAssertNotEqual(h.supervisor.state, .paused)
+        XCTAssertTrue(h.topology.captureHelperAlive)
+        XCTAssertEqual(h.topology.stopCalls, 1)
+        XCTAssertEqual(h.topology.launchPlans.count, 1)
+    }
+
+    /// A turn-on whose capture helper would not stop says "Couldn’t stop".
+    /// Opening the app again used to start the off topology, and while that
+    /// start ran (the key check, the Keychain) the row read "Couldn’t turn
+    /// on: It didn’t start, so remembering is still off." with that helper
+    /// alive.
+    func test_reopen_after_a_turn_on_that_could_not_stop_never_says_still_off() async throws {
+        let h = try make(captureEnabled: false)
+        try await h.supervisor.startAndWaitForReadiness()
+        h.topology.readinessResults = [.failure(SupervisorProcessRuntimeError.readinessTimedOut)]
+        h.topology.stopResults = [.success(()), .failure(TestError.denied), .failure(TestError.denied)]
+        h.supervisor.turnOn()
+        await eventually { !h.supervisor.turningOn }
+        XCTAssertEqual(h.supervisor.statusRow(setupFinished: true).title, "Couldn’t stop")
+        let keyChecks = h.preparer.calls.count
+        let keyCheck = TestSuspension()
+        h.preparer.suspension = keyCheck
+
+        h.supervisor.reopenWindow()
+        try await Task.sleep(for: .milliseconds(150))
+
+        let row = h.supervisor.statusRow(setupFinished: true)
+        XCTAssertEqual(row.title, "Couldn’t stop", "while the helper may read: \(row.title) / \(row.detail ?? "-")")
+        XCTAssertEqual(h.supervisor.menuBarStatus.markState, .remembering)
+        XCTAssertEqual(h.preparer.calls.count, keyChecks, "nothing starts over a stop that failed")
+        XCTAssertTrue(h.topology.captureHelperAlive)
+        h.preparer.suspension = nil
+        keyCheck.resume()
+    }
+
+    /// A kept pause goes straight to Paused, which owns no processes. A run
+    /// that ended and left its processes held is stopped first, so Paused
+    /// never shows over something that may still be reading.
+    func test_a_kept_pause_stops_what_an_ended_run_left_before_it_reads_paused() async throws {
+        let h = try make(captureEnabled: true)
+        try await h.supervisor.startAndWaitForReadiness()
+        // The helper exits while Screen Recording is off: no retry, and the
+        // exited processes stay held.
+        h.supervisor.tccRevokedSurface = .screenRecording
+        h.topology.isRunning = false
+        h.topology.fireUnexpectedExit(forLaunchAt: 0, label: "helper", status: 9)
+        guard case .crashed = h.supervisor.state else { return XCTFail("the helper is gone") }
+        XCTAssertTrue(h.topology.holdsProcesses)
+        h.supervisor.setPaused(true)
+
+        h.supervisor.reopenWindow()
+
+        await eventually { h.supervisor.state == .paused }
+        XCTAssertEqual(h.supervisor.state, .paused)
+        XCTAssertFalse(h.topology.holdsProcesses, "stopped before Paused")
+        XCTAssertEqual(h.topology.stopCalls, 1)
+        XCTAssertEqual(h.topology.launchPlans.count, 1)
+    }
+
     /// The window does not wait for the helper: once this launch has checked
     /// the key, it opens while remembering is still starting.
     func test_reopen_while_starting_shows_the_window_before_the_helper_is_ready() async throws {

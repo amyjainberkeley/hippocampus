@@ -439,8 +439,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         return await orphanSweeper.run(moment, liveChildren: moment == .quit ? nil : children)
     }
 
+    /// Start remembering as the setting says. Never while a stop failed: what
+    /// would not stop may still be reading, and a start, or the Paused a kept
+    /// pause starts in, would hide it. "Couldn’t stop" stands until a stop
+    /// returns, and its button, Quit, is the sure way (RULINGS B1, S10).
     public func start() {
-        guard !captureStopLatched, captureStopTask == nil,
+        guard !captureStopLatched, captureStopTask == nil, !stopFailed,
               !shutdownRequested, shutdownTask == nil, !state.isActive, state != .starting else {
             return
         }
@@ -456,14 +460,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
 
     package func startAndWaitForReadiness() async throws {
-        guard !captureStopLatched, captureStopTask == nil,
+        guard !captureStopLatched, captureStopTask == nil, !stopFailed,
               !shutdownRequested, shutdownTask == nil else {
             throw SupervisorError.transitionInProgress
         }
         if requestedPauseState {
-            try captureConsentAuthority.disable()
-            stopAncillaryServices()
-            state = .paused
+            try await enterKeptPause()
             return
         }
         guard let transitionID = beginOwnedTransition() else {
@@ -506,6 +508,35 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             }
             throw error
         }
+    }
+
+    /// A pause kept from before goes straight to Paused, which owns no
+    /// processes. Whatever an ended run left is stopped first, and Paused
+    /// shows only once that stop has returned: until then it may still be
+    /// reading, and Paused would say it is not (RULINGS B1).
+    private func enterKeptPause() async throws {
+        try captureConsentAuthority.disable()
+        if topology.holdsProcesses {
+            guard let transitionID = beginOwnedTransition() else {
+                throw SupervisorError.transitionInProgress
+            }
+            defer { inFlightTransitions.remove(transitionID) }
+            do {
+                try await stopTopology(timeout: 2)
+                try ensureTransitionIsActive(transitionID)
+                guard transitionGate.commitStopped(transitionID: transitionID) else {
+                    throw SupervisorError.transitionInProgress
+                }
+            } catch {
+                if transitionGate.ownsTransition(transitionID) {
+                    transitionGate.fail(transitionID: transitionID)
+                    state = .crashed(reason: error.localizedDescription)
+                }
+                throw error
+            }
+        }
+        stopAncillaryServices()
+        state = .paused
     }
 
     public func stop() {
@@ -1434,7 +1465,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     /// The person opened Hippocampus again while it runs: the window, in any
     /// state of remembering (Oct 18), and a start for a run that ended or
-    /// never began. A stop, a pause or a quit stays as it is.
+    /// never began. A stop, a pause or a quit stays as it is, and so does a
+    /// stop that failed: `start()` leaves "Couldn’t stop" standing.
     public func reopenWindow() {
         openRecallWhenReady()
         if !state.isActive && state != .starting {

@@ -112,10 +112,14 @@ public enum MenuBarStatus: Equatable, Sendable {
         skipSeenSince: Date? = nil,
         now: Date = Date()
     ) -> MenuBarStatus {
-        // A failed shutdown is not proof of being off. Keep that failure visible
-        // even after the requested setting has correctly been latched false.
+        // A failed stop is not proof of being off, in any state: keep it
+        // visible after the setting has correctly been latched false, and
+        // while anything else is under way, until a stop returns (RULINGS B1).
+        if stopFailed {
+            if case .crashed(let reason) = state { return .stopFailed(reason: reason) }
+            return .stopFailed(reason: "The last stop did not finish.")
+        }
         if case .crashed(let reason) = state {
-            if stopFailed { return .stopFailed(reason: reason) }
             // A permission turned off during a start, or one a turn-on found
             // off: say which, so the fix is in reach (spec-shell S4.2).
             if captureEnabled || turningOn, let surface = tccRevokedSurface { return .needsPermission(surface) }
