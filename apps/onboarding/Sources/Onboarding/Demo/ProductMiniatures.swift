@@ -453,8 +453,6 @@ struct MiniOverviewWindow: View {
 struct MiniContextBlock: View {
     var linesShown: Int
     var size: CGFloat = 10
-    /// Small previews keep each line to one, shrinking it to fit.
-    var oneLineEach = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: size * 0.45) {
@@ -470,8 +468,6 @@ struct MiniContextBlock: View {
                     Text(line)
                         .font(.system(size: size))
                         .foregroundStyle(MiniPalette.ink)
-                        .lineLimit(oneLineEach ? 1 : nil)
-                        .minimumScaleFactor(oneLineEach ? 0.75 : 1)
                 }
                 .fixedSize(horizontal: false, vertical: true)
                 .opacity(index < linesShown ? 1 : 0)

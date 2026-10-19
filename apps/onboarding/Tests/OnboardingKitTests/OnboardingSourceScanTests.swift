@@ -97,6 +97,18 @@ final class OnboardingSourceScanTests: XCTestCase {
         }
     }
 
+    func testEveryScreenAfterWelcomePutsItsTitleInTheSamePlace() throws {
+        // Welcome centres its hero; the four screens after it lay out from
+        // the top, so the title stays put as the person moves on.
+        let screens = ["WhatYouGetSlide", "PermissionsSlide", "PromiseSlide", "TryItSlide"]
+        for screen in screens {
+            let lines = code(try source("Onboarding/Slides/\(screen).swift"))
+            XCTAssertTrue(lines.contains { $0.hasSuffix("SlideContainer {") }, "\(screen) lays out from the top")
+            XCTAssertFalse(lines.contains { $0.contains("SlideContainer(alignment:") }, "\(screen) moves its title")
+            XCTAssertTrue(lines.contains { $0.contains("ScreenHeader(title:") }, "\(screen) titles itself as the others do")
+        }
+    }
+
     func testBackShowsOnWhatYouGetPermissionsAndPromiseOnly() throws {
         let flow = try source("Onboarding/OnboardingFlowView.swift")
         XCTAssertTrue(flow.contains("back: flowVM.canGoBack ? { flowVM.back() } : nil"))
