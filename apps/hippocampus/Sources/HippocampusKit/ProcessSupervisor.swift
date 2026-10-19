@@ -839,9 +839,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     ///   over it (`stopFailed`), but opening the app shows the window, as
     ///   after any other stop that failed.
     ///
-    /// Restart or Quit again sets the intent again (`shutdownAndWait`).
+    /// Restart or Quit again sets the intent again (`shutdownAndWait`). The
+    /// windows a verified stop closed before the relaunch failed can open
+    /// again too.
     public func allowStartsAfterFailedRestart() {
         shutdownRequested = false
+        windowsRetired = false
     }
 
     /// Quit could not verify a clean stop in time. The app is exiting and its

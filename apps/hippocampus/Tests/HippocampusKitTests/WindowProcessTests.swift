@@ -151,6 +151,30 @@ final class WindowProcessTests: XCTestCase {
         try await supervisor.shutdownAndWait()
     }
 
+    /// A Restart closes the windows once its stop is verified; when its
+    /// relaunch then cannot be scheduled, Hippocampus stays open, and the
+    /// window opens again.
+    func test_the_window_opens_again_after_a_restart_that_stayed_open() async throws {
+        let channel = FakeRecallWindowChannel()
+        let (supervisor, windows) = try make(lingers: 0, channel: channel)
+        try await supervisor.startAndWaitForReadiness()
+        let launcher = FakeApplicationRestartLauncher()
+        launcher.error = CocoaError(.executableNotLoadable)
+        let coordinator = ApplicationTerminationCoordinator(
+            supervisor: supervisor, restartLauncher: launcher, shutdownTimeout: 0.1,
+            stopExtras: { await supervisor.stopWindowsForQuit(timeout: 1) }, cleanup: {}
+        )
+
+        let restarted = await coordinator.terminate(intent: .restart) { _ in }
+        XCTAssertFalse(restarted)
+        XCTAssertEqual(launcher.scheduleCount, 1, "the stop was verified and the windows closed")
+
+        supervisor.reopenWindow()
+        let places = await opened(windows, count: 1, within: 5)
+        XCTAssertEqual(places, ["overview"], "the window never opened again")
+        try await supervisor.shutdownAndWait()
+    }
+
     /// The real channel, on names made up for this test: the command goes
     /// out at once with an id, and the answer that repeats it, from the
     /// window's process, is heard.
