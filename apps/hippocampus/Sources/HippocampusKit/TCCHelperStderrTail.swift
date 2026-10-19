@@ -163,7 +163,9 @@ public final class TCCNotifierAndSupervisorSink: TCCRevokedEventSink {
         forgetIfCleared()
         revoked.insert(reason)
         updateVisibleReason()
-        await notifier.notifyRevoked(reason)
+        // Remembering is off when a turn-on found the permission off: nothing
+        // stopped remembering, so the notification says what is needed.
+        await notifier.notifyRevoked(reason, whileRemembering: supervisor?.captureEnabled ?? true)
     }
 
     public func handleRestored(_ reason: TCCRevokedReason) async {

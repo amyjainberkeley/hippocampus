@@ -112,10 +112,14 @@ public enum MenuBarStatus: Equatable, Sendable {
         skipSeenSince: Date? = nil,
         now: Date = Date()
     ) -> MenuBarStatus {
-        // A failed shutdown is not proof of being off. Keep that failure visible
-        // even after the requested setting has correctly been latched false.
+        // A failed stop is not proof of being off, in any state: keep it
+        // visible after the setting has correctly been latched false, and
+        // while anything else is under way, until a stop returns (RULINGS B1).
+        if stopFailed {
+            if case .crashed(let reason) = state { return .stopFailed(reason: reason) }
+            return .stopFailed(reason: "The last stop did not finish.")
+        }
         if case .crashed(let reason) = state {
-            if stopFailed { return .stopFailed(reason: reason) }
             // A permission turned off during a start, or one a turn-on found
             // off: say which, so the fix is in reach (spec-shell S4.2).
             if captureEnabled || turningOn, let surface = tccRevokedSurface { return .needsPermission(surface) }
@@ -325,6 +329,18 @@ public enum TCCRevokedReason: String, Sendable, Equatable, CaseIterable {
     /// (product critique 9).
     public var notificationBody: String {
         "\(name) was turned off for Hippocampus. Click to open System Settings."
+    }
+
+    /// Title of the notification when a turn-on finds the permission off:
+    /// remembering was off and stays off, so nothing stopped. The permission
+    /// may never have been on.
+    public var neededNotificationTitle: String {
+        "Hippocampus needs permission"
+    }
+
+    /// Body of that notification, in the menu's words.
+    public var neededNotificationBody: String {
+        "\(name) is off for Hippocampus. Click to open System Settings."
     }
 
     /// Deep-link URL string for the notification's action button. The

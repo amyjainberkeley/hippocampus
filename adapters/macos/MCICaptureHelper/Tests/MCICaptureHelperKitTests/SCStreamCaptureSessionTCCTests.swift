@@ -96,7 +96,26 @@ final class SCStreamCaptureSessionTCCTests: XCTestCase {
 
         XCTAssertTrue(session.isPausedForTCCForTest())
         XCTAssertEqual(session.revokedSurfacesForTest(), [.accessibility])
+        XCTAssertEqual(session.permissionsOff(), ["accessibility"], "what the readiness receipt reports")
         try? await session.stop()
+    }
+
+    func testPermissionsOffNamesEveryPausedSurfaceAndNothingWhenGranted() async {
+        let granted = TCCFixtures.makeSession(initialTCCStatuses: [
+            .screenRecording: .granted,
+            .accessibility: .granted,
+        ])
+        await granted.activateTCCMonitoring()
+        XCTAssertEqual(granted.permissionsOff(), [])
+        try? await granted.stop()
+
+        let denied = TCCFixtures.makeSession(initialTCCStatuses: [
+            .screenRecording: .denied,
+            .accessibility: .denied,
+        ])
+        await denied.activateTCCMonitoring()
+        XCTAssertEqual(denied.permissionsOff(), ["accessibility", "screenRecording"])
+        try? await denied.stop()
     }
 
     // 1

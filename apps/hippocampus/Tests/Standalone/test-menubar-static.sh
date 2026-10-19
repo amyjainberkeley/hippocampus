@@ -4,6 +4,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$ROOT"
 cat apps/hippocampus/Sources/HippocampusKit/SupervisorState.swift \
     apps/hippocampus/Sources/HippocampusKit/CaptureStatusReceipt.swift \
+    apps/hippocampus/Sources/HippocampusKit/CaptureStatusAction.swift \
     apps/hippocampus/Sources/HippocampusKit/HealthSnapshot.swift \
     apps/hippocampus/Sources/HippocampusKit/Brand/HiMarkGeometry.swift \
     apps/hippocampus/Sources/HippocampusKit/MenuBarStatus.swift \

@@ -40,8 +40,11 @@ final class SupervisorWindowOpeningTests: XCTestCase {
 
     /// A supervisor whose window is a stand-in that writes the place it was
     /// opened on. `memoryOnDisk` false is a first run, before the agent has
-    /// made the memory. Nothing reads the person's own status files.
-    private func make(captureEnabled: Bool, memoryOnDisk: Bool = true) throws -> Harness {
+    /// made the memory. Nothing reads the person's own status files, and the
+    /// orphan sweep, when given, signals nothing.
+    private func make(
+        captureEnabled: Bool, memoryOnDisk: Bool = true, sweeper: (any CaptureOrphanSweeping)? = nil
+    ) throws -> Harness {
         let locator = FakeBinaryLocator()
         locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
         locator.agentURL = URL(fileURLWithPath: "/bundle/mci-agent")
@@ -58,7 +61,7 @@ final class SupervisorWindowOpeningTests: XCTestCase {
         let supervisor = ProcessSupervisor(
             locator: locator, keyStore: keyStore, runtimeConfig: FakeRuntimeConfig(captureEnabled: captureEnabled),
             topology: topology, keyCustodyPreparer: preparer, readinessTimeout: 0.1,
-            captureStatusReader: { (nil, nil) }, memoryOnDisk: { memoryOnDisk }
+            captureStatusReader: { (nil, nil) }, orphanSweeper: sweeper, memoryOnDisk: { memoryOnDisk }
         )
         return Harness(supervisor: supervisor, topology: topology, preparer: preparer, windows: windows)
     }
@@ -143,6 +146,86 @@ final class SupervisorWindowOpeningTests: XCTestCase {
         XCTAssertEqual(h.topology.launchPlans.count, 1, "a pause is not resumed by opening the app")
     }
 
+    /// A pause whose stop failed says "Couldn’t stop": the helper may still be
+    /// reading. Opening the app again shows the window and leaves that as it
+    /// is. It used to start, take the kept pause's shortcut to "Paused" (the
+    /// off picture) without stopping anything, and end "Couldn’t stop".
+    func test_reopen_after_a_pause_that_could_not_stop_still_says_couldnt_stop() async throws {
+        let h = try make(captureEnabled: true)
+        try await h.supervisor.startAndWaitForReadiness()
+        h.topology.stopResults = [.failure(TestError.denied)]
+        h.supervisor.setPaused(true)
+        await eventually { h.supervisor.stopFailed }
+        XCTAssertTrue(h.supervisor.stopFailed)
+
+        h.supervisor.reopenWindow()
+
+        let places = await opened(h.windows)
+        XCTAssertEqual(places, ["overview"])
+        try await Task.sleep(for: .milliseconds(150))
+        let row = h.supervisor.statusRow(setupFinished: true)
+        XCTAssertEqual(row.title, "Couldn’t stop")
+        XCTAssertEqual(row.action, .quit)
+        XCTAssertEqual(h.supervisor.menuBarStatus.markState, .remembering)
+        XCTAssertNotEqual(h.supervisor.state, .paused)
+        XCTAssertTrue(h.topology.captureHelperAlive)
+        XCTAssertEqual(h.topology.stopCalls, 1)
+        XCTAssertEqual(h.topology.launchPlans.count, 1)
+    }
+
+    /// A turn-on whose capture helper would not stop says "Couldn’t stop".
+    /// Opening the app again used to start the off topology, and while that
+    /// start ran (the key check, the Keychain) the row read "Couldn’t turn
+    /// on: It didn’t start, so remembering is still off." with that helper
+    /// alive.
+    func test_reopen_after_a_turn_on_that_could_not_stop_never_says_still_off() async throws {
+        let h = try make(captureEnabled: false)
+        try await h.supervisor.startAndWaitForReadiness()
+        h.topology.readinessResults = [.failure(SupervisorProcessRuntimeError.readinessTimedOut)]
+        h.topology.stopResults = [.success(()), .failure(TestError.denied), .failure(TestError.denied)]
+        h.supervisor.turnOn()
+        await eventually { !h.supervisor.turningOn }
+        XCTAssertEqual(h.supervisor.statusRow(setupFinished: true).title, "Couldn’t stop")
+        let keyChecks = h.preparer.calls.count
+        let keyCheck = TestSuspension()
+        h.preparer.suspension = keyCheck
+
+        h.supervisor.reopenWindow()
+        try await Task.sleep(for: .milliseconds(150))
+
+        let row = h.supervisor.statusRow(setupFinished: true)
+        XCTAssertEqual(row.title, "Couldn’t stop", "while the helper may read: \(row.title) / \(row.detail ?? "-")")
+        XCTAssertEqual(h.supervisor.menuBarStatus.markState, .remembering)
+        XCTAssertEqual(h.preparer.calls.count, keyChecks, "nothing starts over a stop that failed")
+        XCTAssertTrue(h.topology.captureHelperAlive)
+        h.preparer.suspension = nil
+        keyCheck.resume()
+    }
+
+    /// A kept pause goes straight to Paused, which owns no processes. A run
+    /// that ended and left its processes held is stopped first, so Paused
+    /// never shows over something that may still be reading.
+    func test_a_kept_pause_stops_what_an_ended_run_left_before_it_reads_paused() async throws {
+        let h = try make(captureEnabled: true)
+        try await h.supervisor.startAndWaitForReadiness()
+        // The helper exits while Screen Recording is off: no retry, and the
+        // exited processes stay held.
+        h.supervisor.tccRevokedSurface = .screenRecording
+        h.topology.isRunning = false
+        h.topology.fireUnexpectedExit(forLaunchAt: 0, label: "helper", status: 9)
+        guard case .crashed = h.supervisor.state else { return XCTFail("the helper is gone") }
+        XCTAssertTrue(h.topology.holdsProcesses)
+        h.supervisor.setPaused(true)
+
+        h.supervisor.reopenWindow()
+
+        await eventually { h.supervisor.state == .paused }
+        XCTAssertEqual(h.supervisor.state, .paused)
+        XCTAssertFalse(h.topology.holdsProcesses, "stopped before Paused")
+        XCTAssertEqual(h.topology.stopCalls, 1)
+        XCTAssertEqual(h.topology.launchPlans.count, 1)
+    }
+
     /// The window does not wait for the helper: once this launch has checked
     /// the key, it opens while remembering is still starting.
     func test_reopen_while_starting_shows_the_window_before_the_helper_is_ready() async throws {
@@ -182,6 +265,24 @@ final class SupervisorWindowOpeningTests: XCTestCase {
         XCTAssertEqual(blocked, 0)
         await eventually { h.supervisor.state == .running }
         XCTAssertEqual(h.topology.launchPlans.count, 2, "opening the app tries the start again")
+        try await h.supervisor.shutdownAndWait()
+    }
+
+    /// A start whose capture helper exited during startup left it, and its
+    /// agent, held: the reopen's start was refused ("The prior helper
+    /// topology did not stop completely") until Try Again stopped first.
+    func test_reopen_after_a_start_whose_helper_exited_starts_again() async throws {
+        let h = try make(captureEnabled: true)
+        h.topology.readinessResults = [.failure(SupervisorProcessRuntimeError.helperExited(79))]
+        try? await h.supervisor.startAndWaitForReadiness()
+        guard case .crashed = h.supervisor.state else { return XCTFail("the start failed") }
+
+        h.supervisor.reopenWindow()
+
+        await eventually { h.supervisor.state == .running }
+        XCTAssertEqual(h.supervisor.state, .running)
+        XCTAssertEqual(h.topology.refusedLaunches, 0)
+        XCTAssertEqual(h.topology.launchPlans.count, 2)
         try await h.supervisor.shutdownAndWait()
     }
 
@@ -249,6 +350,34 @@ final class SupervisorWindowOpeningTests: XCTestCase {
         try await h.supervisor.shutdownAndWait()
     }
 
+    /// Setup's Start Remembering, and the window asked for as setup closes,
+    /// on a first run: the capture start fails and the off topology comes
+    /// back. The failed start used to publish a crash before the rollback,
+    /// which ended the request as a failed start and opened Preferences, so
+    /// whether the window opened depended on when setup closed.
+    func test_a_first_run_window_request_survives_a_turn_on_that_rolls_back() async throws {
+        let h = try make(captureEnabled: false, memoryOnDisk: false)
+        var blocked = 0
+        h.supervisor.onPresentationBlocked = { blocked += 1 }
+        let readiness = TestSuspension()
+        h.topology.readinessSuspension = readiness
+        h.topology.readinessResults = [.failure(SupervisorProcessRuntimeError.readinessTimedOut)]
+        let turningOn = Task { try? await h.supervisor.applyCaptureEnabled(true) }
+        await readiness.waitUntilEntered()
+        h.supervisor.openRecallWhenReady(initialLaunch: true)
+
+        h.topology.readinessSuspension = nil
+        readiness.resume()
+        await turningOn.value
+
+        let places = await opened(h.windows)
+        XCTAssertEqual(blocked, 0)
+        XCTAssertEqual(places, ["overview"])
+        XCTAssertEqual(h.supervisor.state, .running)
+        XCTAssertEqual(h.supervisor.statusRow(setupFinished: true).title, "Couldn’t turn on")
+        try await h.supervisor.shutdownAndWait()
+    }
+
     /// A start that failed before there was any memory to read shows
     /// Preferences, where the reason and the fix are (spec-shell S5, D9).
     func test_a_start_that_failed_before_the_key_was_checked_still_shows_preferences() async throws {
@@ -277,6 +406,91 @@ final class SupervisorWindowOpeningTests: XCTestCase {
         XCTAssertEqual(h.supervisor.state, .running)
         let places = await opened(h.windows, within: 0.3)
         XCTAssertEqual(places, [])
+        try await h.supervisor.shutdownAndWait()
+    }
+
+    /// Opening the app twice quickly, or opening it and pressing Turn On,
+    /// asks to start twice before the first start has run. The second
+    /// cancelled the first, which then failed with CancellationError: a
+    /// brief crash that, on a first run, ended the window request as a
+    /// failed start and showed Preferences instead.
+    func test_two_starts_in_a_row_start_once_and_keep_the_window_request() async throws {
+        let h = try make(captureEnabled: true, memoryOnDisk: false)
+        var blocked = 0
+        h.supervisor.onPresentationBlocked = { blocked += 1 }
+        h.supervisor.openRecallWhenReady(initialLaunch: true)
+
+        h.supervisor.reopenWindow()
+        h.supervisor.turnOn()
+
+        await eventually { h.supervisor.state == .running }
+        XCTAssertEqual(h.supervisor.state, .running)
+        XCTAssertEqual(blocked, 0)
+        XCTAssertEqual(h.topology.launchPlans.count, 1)
+        let places = await opened(h.windows)
+        XCTAssertEqual(places, ["overview"])
+        try await h.supervisor.shutdownAndWait()
+    }
+
+    // MARK: The launch's orphan sweep
+
+    /// The launch sweep can wait up to 15 s for an orphaned writer. Opening
+    /// the app again meanwhile used to start capture at once, beside what the
+    /// sweep was ending; with the writer still holding the memory, the new
+    /// agent exited and the launch's own start was refused. Nothing starts
+    /// until the sweep is done; the window request waits for the key check.
+    func test_reopen_during_the_launch_sweep_starts_nothing_until_it_ends() async throws {
+        let gate = SweepGate()
+        let h = try make(captureEnabled: true, sweeper: GatedSweeper(gate: gate))
+        // As the app delegate does at a person's launch.
+        let launch = Task { @MainActor in
+            await h.supervisor.sweepOrphans(.launch)
+            h.supervisor.openRecallWhenReady(initialLaunch: true)
+            h.supervisor.start()
+        }
+        while !(await gate.hasEntered()) { await Task.yield() }
+
+        h.supervisor.reopenWindow()
+        h.supervisor.turnOn()
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(h.topology.launchPlans.count, 0, "nothing starts before the sweep ends")
+        XCTAssertEqual(h.supervisor.state, .idle)
+        let early = await opened(h.windows, within: 0.2)
+        XCTAssertEqual(early, [], "the window waits for the key check")
+
+        await gate.release()
+        await launch.value
+        await eventually { h.supervisor.state == .running }
+        XCTAssertEqual(h.supervisor.state, .running)
+        XCTAssertEqual(h.topology.launchPlans.count, 1)
+        XCTAssertEqual(h.topology.refusedLaunches, 0)
+        let places = await opened(h.windows)
+        XCTAssertEqual(places, ["overview"])
+        try await h.supervisor.shutdownAndWait()
+    }
+
+    /// Turn On during the launch sweep waits for it, and then turns on.
+    func test_turn_on_during_the_launch_sweep_waits_for_it() async throws {
+        let gate = SweepGate()
+        let h = try make(captureEnabled: false, sweeper: GatedSweeper(gate: gate))
+        let launch = Task { @MainActor in
+            await h.supervisor.sweepOrphans(.launch)
+            h.supervisor.start()
+        }
+        while !(await gate.hasEntered()) { await Task.yield() }
+
+        h.supervisor.turnOn()
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertTrue(h.supervisor.turningOn, "the press is kept")
+        XCTAssertEqual(h.topology.launchPlans.count, 0)
+
+        await gate.release()
+        await launch.value
+        await eventually { h.supervisor.captureEnabled && !h.supervisor.turningOn }
+        XCTAssertTrue(h.supervisor.captureEnabled)
+        XCTAssertEqual(h.supervisor.state, .running)
+        XCTAssertTrue(h.topology.launchPlans.last?.helperArguments.contains("--capture") == true)
+        XCTAssertEqual(h.topology.refusedLaunches, 0)
         try await h.supervisor.shutdownAndWait()
     }
 
@@ -312,5 +526,39 @@ final class SupervisorWindowOpeningTests: XCTestCase {
         let again = await opened(started, count: 2)
         XCTAssertEqual(again, ["started", "started"])
         await supervisor.stopWindowsForQuit(timeout: 1)
+    }
+}
+
+/// Holds the launch's sweep open, as when it waits out an orphaned writer.
+private actor SweepGate {
+    private var released = false
+    private var entered = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        entered = true
+        if released { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func release() {
+        released = true
+        waiters.forEach { $0.resume() }
+        waiters = []
+    }
+
+    func hasEntered() -> Bool { entered }
+}
+
+/// A sweep that signals nothing: the launch's waits on the gate.
+private struct GatedSweeper: CaptureOrphanSweeping {
+    let gate: SweepGate
+
+    func run(
+        _ moment: CaptureOrphanSweep.Moment,
+        liveChildren: (@Sendable () async -> Set<pid_t>)?
+    ) async -> CaptureOrphanSweep.Outcome {
+        if moment == .launch { await gate.wait() }
+        return CaptureOrphanSweep.Outcome()
     }
 }

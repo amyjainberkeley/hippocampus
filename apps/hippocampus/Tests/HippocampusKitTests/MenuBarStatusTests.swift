@@ -320,8 +320,28 @@ final class MenuBarStatusTests: XCTestCase {
         XCTAssertEqual(MenuBarStatus.derive(from: .crashed(reason: "x"), tccRevokedSurface: .accessibility,
                                             stopFailed: true),
                        .stopFailed(reason: "x"))
-        XCTAssertEqual(MenuBarStatus.derive(from: .paused, stopFailed: true), .paused,
-                       "a committed pause has ended the failure")
+    }
+
+    /// Whatever else is under way, a stop that failed still stands: a start
+    /// opening the app began, a turn-on's "Couldn’t turn on", a pause. The
+    /// supervisor ends it only with a stop that returns, so no state may
+    /// read "Off", "Paused" or "still off" while it may be reading (B1).
+    func testAFailedStopWinsInEveryState() {
+        let didNotStart = TurnOnFailure.didNotStart(reason: "helper exited")
+        for state: SupervisorState in [.idle, .starting, .running, .paused, .stopped] {
+            for captureEnabled in [true, false] {
+                let status = MenuBarStatus.derive(
+                    from: state, captureEnabled: captureEnabled, stopFailed: true,
+                    turnOnFailure: didNotStart, now: now
+                )
+                guard case .stopFailed = status else {
+                    XCTFail("\(state), on: \(captureEnabled): \(status)")
+                    continue
+                }
+                XCTAssertEqual(status.markState, .remembering)
+                XCTAssertEqual(status.action, .quit)
+            }
+        }
     }
 
     /// The words on line 1 and line 2, and the button, per status (spec-shell

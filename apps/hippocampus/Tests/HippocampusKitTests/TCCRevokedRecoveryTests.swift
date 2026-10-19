@@ -155,6 +155,47 @@ final class TCCRevokedRecoveryTests: XCTestCase {
         )
     }
 
+    /// A turn-on that finds the permission off stopped nothing: remembering
+    /// was off, and the permission may never have been on. The notification
+    /// says what is needed, in the menu's words.
+    func testNotifier_aPermissionATurnOnFoundOffSaysWhatIsNeeded() async {
+        let center = FakeUNCenter()
+        let notifier = TCCRevokedNotifier(center: center)
+
+        await notifier.notifyRevoked(.screenRecording, whileRemembering: false)
+
+        XCTAssertEqual(center.added.count, 1)
+        XCTAssertEqual(center.added[0].content.title, "Hippocampus needs permission")
+        XCTAssertEqual(
+            center.added[0].content.body,
+            "Screen Recording is off for Hippocampus. Click to open System Settings."
+        )
+        XCTAssertEqual(
+            center.added[0].content.userInfo[TCCRevokedNotifierRequestBuilder.userInfoPaneKey] as? String,
+            TCCRevokedReason.screenRecording.settingsPaneURLString
+        )
+    }
+
+    /// A fresh helper that has the permission never reports it restored, so
+    /// once remembering starts every permission notification is withdrawn,
+    /// and a later revoke can notify again.
+    func testNotifier_withdrawAllRemovesWhatIsShownAndAllowsANewOne() async {
+        let center = FakeUNCenter()
+        let notifier = TCCRevokedNotifier(center: center)
+        await notifier.notifyRevoked(.screenRecording, whileRemembering: false)
+
+        await notifier.withdrawAll()
+
+        let id = TCCRevokedNotifierRequestBuilder.identifier(for: .screenRecording)
+        XCTAssertTrue(center.removedDelivered.contains(id))
+        XCTAssertTrue(center.removedPending.contains(id))
+        let outstanding = await notifier.outstandingForTest()
+        XCTAssertTrue(outstanding.isEmpty)
+        await notifier.notifyRevoked(.screenRecording)
+        XCTAssertEqual(center.added.count, 2)
+        XCTAssertEqual(center.added[1].content.title, "Hippocampus stopped remembering")
+    }
+
     func testNotifier_distinctSurfacesFireDistinctNotifications() async {
         let center = FakeUNCenter()
         let notifier = TCCRevokedNotifier(center: center)

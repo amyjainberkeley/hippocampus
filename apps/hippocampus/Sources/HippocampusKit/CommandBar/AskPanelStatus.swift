@@ -78,7 +78,7 @@ extension ProcessSupervisor {
             status: menuBarStatus, setup: setup(finished: setupFinished),
             lastSavedAt: captureReceipt?.lastStoredFrameAt,
             pausedSince: pausedSince, stoppedSharingAt: stoppedSharingAt,
-            turningOn: turningOn
+            turningOn: turningOn, stopping: stoppingCapture
         ), now: now)
     }
 
@@ -107,7 +107,17 @@ extension ProcessSupervisor {
             // Turning remembering on also ends a pause (spec-shell S5). It
             // never fails silently: the status says why it didn't take.
             turnOn()
+        case .turnOff:
+            // The newer word: a turn-on waiting or under way ends, and what
+            // it started is stopped before Off shows.
+            Task { @MainActor in
+                do { try await self.applyCaptureEnabled(false) }
+                catch { self.logStatusActionFailure("turning off", error) }
+            }
         case .openSystemSettings(let permission):
+            // Coming back may mean it is allowed now: the next look tries
+            // again, once (`retryIfPermissionMayBeBack`).
+            notePermissionFixChosen()
             if let url = URL(string: permission.settingsPaneURLString) { openURL(url) }
         case .tryAgain:
             // Try Again tries what failed: a turn-on that didn't take, or

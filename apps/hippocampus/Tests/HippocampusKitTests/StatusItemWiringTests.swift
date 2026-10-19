@@ -41,6 +41,11 @@ final class StatusItemWiringTests: XCTestCase {
                       "supervisor.retryIfPermissionMayBeBack()"] {
             XCTAssertTrue(open.contains(chore), chore)
         }
+        // The look comes first, so the menu shows what it started, as the
+        // icon does, never "Needs permission" over a helper starting.
+        let look = try XCTUnwrap(open.range(of: "supervisor.retryIfPermissionMayBeBack()"))
+        let build = try XCTUnwrap(open.range(of: "StatusMenuModel.items("))
+        XCTAssertLessThan(look.lowerBound, build.lowerBound)
         for retired in ["Open Recall", "Open Timeline", "Open Daily Brief", "Start Recording", "Stop Recording",
                         "Open Onboarding", "Troubleshoot", "Inspect Key Wrap", "Send Feedback", "MCP Registration",
                         "markPrompted", "startUpdater"] {
@@ -100,6 +105,11 @@ final class StatusItemWiringTests: XCTestCase {
         XCTAssertTrue(app.contains("PreferencesWindowController.shared.show(section: .capture)"))
         let active = try method("func applicationDidBecomeActive(", in: app)
         XCTAssertTrue(active.contains("supervisor.retryIfPermissionMayBeBack()"))
+        // A fresh helper never reports a permission restored: once remembering
+        // starts, the permission notification is withdrawn.
+        let tail = try method("private func armTCCStderrTail()", in: app)
+        XCTAssertTrue(tail.contains("supervisor.onRememberingStarted = {"))
+        XCTAssertTrue(tail.contains("await notifier.withdrawAll()"))
     }
 
     /// Preferences' words (spec-copy S4.4, product critique 9, 10, 11, 16;
@@ -128,6 +138,27 @@ final class StatusItemWiringTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(
             atPath: Self.package.appendingPathComponent("Sources/Hippocampus/KeyWrapAuditView.swift").path
         ), "no key-custody inspector in the interface this round")
+    }
+
+    /// The switch reads On while a turn-on is under way, since its helper
+    /// may read before the setting is; turning it off then drops the turn-on.
+    func testTheSwitchReadsOnWhileTurningOn() throws {
+        let preferences = try source("PreferencesWindow.swift")
+        XCTAssertTrue(preferences.contains("get: { supervisor.captureEnabled || supervisor.turningOn }"))
+    }
+
+    /// The status row is the one voice about remembering: the switch's red
+    /// "Couldn’t change that. Try again." said a second thing about the same
+    /// failure, and stayed under the switch after Try Again worked.
+    func testTheSwitchAddsNoCaptionOfItsOwn() throws {
+        let preferences = try source("PreferencesWindow.swift")
+        XCTAssertFalse(preferences.contains("captureController.errorMessage"))
+        let controller = try String(
+            contentsOf: Self.package.appendingPathComponent("Sources/HippocampusKit/CapturePreferenceController.swift"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(controller.contains("Couldn’t change that"))
+        XCTAssertTrue(controller.contains("applier.turnOn()"), "switching on is the menu's Turn On")
     }
 
     /// One row feeds Preferences too (product critique 11).

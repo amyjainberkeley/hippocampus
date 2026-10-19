@@ -71,12 +71,37 @@ final class FakeKeyCustodyPreparer: KeyCustodyPreparing {
     }
 }
 
+/// Keeps `FoundationSupervisorTopology`'s rules where they matter: a readiness
+/// that reports the helper or the agent exited ends that process (and an
+/// agent drains and exits once its helper is gone), exited processes stay
+/// held until a stop returns, and `launch` refuses with `.partialStop` while
+/// anything is held. A stop that throws leaves what it could not stop.
 @MainActor
 final class FakeSupervisorTopology: SupervisorTopologyControlling {
     var readinessResults: [Result<Void, Error>] = []
     var stopResults: [Result<Void, Error>] = []
-    var isRunning = false
+    var helperAlive = false
+    var agentAlive = false
+    var isRunning: Bool {
+        get { helperAlive && agentAlive }
+        set {
+            helperAlive = newValue
+            agentAlive = newValue
+        }
+    }
+    private(set) var holdsProcesses = false
+    private(set) var refusedLaunches = 0
+    var launchErrors: [Error] = []
+    /// The last helper launched had `--capture` and is still alive, so it
+    /// may be reading, or waiting on a permission to start reading.
+    var captureHelperAlive: Bool {
+        helperAlive && launchPlans.last?.helperArguments.contains("--capture") == true
+    }
     var onReadinessWait: ((ProcessSupervisorLaunchPlan) -> Void)?
+    /// What a ready helper's receipt says it found off as it started, as the
+    /// real capture helper reports a permission it is paused on.
+    var permissionOffInReceipt: ((ProcessSupervisorLaunchPlan) -> TCCRevokedReason?)?
+    private(set) var permissionOffAtReadiness: TCCRevokedReason?
     var onStop: (() -> Void)?
     var stopDelay: Duration?
     var stopSuspensionOnCall: Int?
@@ -92,9 +117,17 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
         generation: SupervisorProcessGeneration,
         onUnexpectedExit: @escaping @MainActor @Sendable (String, Int32) -> Void
     ) async throws {
+        guard !holdsProcesses else {
+            refusedLaunches += 1
+            throw SupervisorProcessRuntimeError.partialStop
+        }
+        // A launch that fails cleans up after itself, as the real one does
+        // when its stop of the half-started helper works.
+        if !launchErrors.isEmpty { throw launchErrors.removeFirst() }
         launchPlans.append(plan)
         generations.append(generation)
         unexpectedExitCallbacks.append(onUnexpectedExit)
+        holdsProcesses = true
         isRunning = true
     }
 
@@ -103,11 +136,21 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
         timeout: TimeInterval
     ) async throws {
         _ = (generation, timeout)
+        permissionOffAtReadiness = nil
         onReadinessWait?(launchPlans.last!)
         if let readinessSuspension { await readinessSuspension.suspend() }
         if !readinessResults.isEmpty {
-            try readinessResults.removeFirst().get()
+            let result = readinessResults.removeFirst()
+            if case .failure(let error) = result {
+                switch error as? SupervisorProcessRuntimeError {
+                case .helperExited: isRunning = false
+                case .agentExited: agentAlive = false
+                default: break
+                }
+            }
+            try result.get()
         }
+        permissionOffAtReadiness = permissionOffInReceipt?(launchPlans.last!)
     }
 
     func stop(timeout: TimeInterval) async throws {
@@ -122,6 +165,7 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
             try stopResults.removeFirst().get()
         }
         isRunning = false
+        holdsProcesses = false
     }
 
     func setPaused(_ paused: Bool) throws {
@@ -163,11 +207,13 @@ final class TestSuspension {
 @MainActor
 final class FakeApplicationRestartLauncher: ApplicationRestartLaunching {
     var onSchedule: (() -> Void)?
+    var error: Error?
     private(set) var scheduleCount = 0
 
     func scheduleRestart() throws {
         scheduleCount += 1
         onSchedule?()
+        if let error { throw error }
     }
 }
 
@@ -317,6 +363,29 @@ final class ProcessSupervisorTests: XCTestCase {
         }
     }
 
+    /// The helper's readiness receipt names the permissions it found off as
+    /// it started; the app takes Screen Recording first, ignores a name it
+    /// does not know, and reads an older receipt as none off.
+    func test_readiness_receipt_reports_the_permission_the_helper_found_off() throws {
+        let generation = generation(captureEnabled: true)
+        func receipt(_ json: String) throws -> TCCRevokedReason? {
+            try FoundationSupervisorTopology.permissionOff(inReadiness: Data(json.utf8), for: generation)
+        }
+        XCTAssertEqual(
+            try receipt(#"{"generation":"generation-1","capture_enabled":true,"permissions_off":["accessibility","screenRecording"]}"#),
+            .screenRecording
+        )
+        XCTAssertEqual(
+            try receipt(#"{"generation":"generation-1","capture_enabled":true,"permissions_off":["accessibility"]}"#),
+            .accessibility
+        )
+        XCTAssertNil(try receipt(#"{"generation":"generation-1","capture_enabled":true,"permissions_off":[]}"#))
+        XCTAssertNil(try receipt(#"{"generation":"generation-1","capture_enabled":true}"#))
+        XCTAssertNil(try receipt(#"{"generation":"generation-1","capture_enabled":true,"permissions_off":["camera"]}"#))
+        XCTAssertThrowsError(try receipt(#"{"generation":"generation-2","capture_enabled":true,"permissions_off":[]}"#))
+        XCTAssertThrowsError(try receipt(#"{"generation":"generation-1","capture_enabled":false}"#))
+    }
+
     func test_start_with_capture_disabled_does_not_start_safari_ingestion() async throws {
         let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: false)
         topology.readinessResults = [.success(())]
@@ -429,6 +498,51 @@ final class ProcessSupervisorTests: XCTestCase {
 
         XCTAssertNotEqual(supervisor.state, .running)
         XCTAssertEqual(topology.stopCalls, 1)
+    }
+
+    /// A start (a launch, a reopen, a wake) whose agent exited during startup
+    /// left the capture helper running: it was not "running" to a check of
+    /// helper AND agent, so nothing stopped it while the menu said "Not
+    /// saving".
+    func test_a_start_whose_agent_exits_leaves_no_capture_helper() async {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        topology.readinessResults = [.failure(SupervisorProcessRuntimeError.agentExited(21))]
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.startAndWaitForReadiness())
+
+        XCTAssertFalse(topology.captureHelperAlive)
+        XCTAssertFalse(topology.holdsProcesses)
+        XCTAssertFalse(supervisor.stopFailed)
+    }
+
+    /// A capture helper that would not stop after its start failed may still
+    /// be reading: "Couldn’t stop", not "It stopped and couldn’t start again".
+    func test_a_start_whose_capture_helper_will_not_stop_says_couldnt_stop() async {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        topology.readinessResults = [.failure(TestError.timeout)]
+        topology.stopResults = [.failure(TestError.partialStop), .failure(TestError.partialStop)]
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.startAndWaitForReadiness())
+
+        XCTAssertTrue(topology.captureHelperAlive)
+        XCTAssertTrue(supervisor.stopFailed)
+        guard case .stopFailed = supervisor.menuBarStatus else {
+            return XCTFail("expected Couldn’t stop, got \(supervisor.menuBarStatus)")
+        }
+    }
+
+    /// The cleanup tries the stop again; once a stop returns, nothing is left
+    /// that could read, and the failed start says so plainly.
+    func test_a_capture_helper_stopped_on_the_second_try_is_not_a_failed_stop() async {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        topology.readinessResults = [.failure(TestError.timeout)]
+        topology.stopResults = [.failure(TestError.partialStop), .success(())]
+
+        await XCTAssertThrowsErrorAsync(try await supervisor.startAndWaitForReadiness())
+
+        XCTAssertFalse(topology.captureHelperAlive)
+        XCTAssertFalse(supervisor.stopFailed)
+        XCTAssertEqual(supervisor.menuBarStatus, .error(reason: "timeout"))
     }
 
     func test_readiness_timeout_never_reaches_running() async {
@@ -623,6 +737,55 @@ final class ProcessSupervisorTests: XCTestCase {
         XCTAssertEqual(replies, [false])
         guard case .crashed = supervisor.state else {
             return XCTFail("failed stop must remain visible, got \(supervisor.state)")
+        }
+    }
+
+    /// A restart whose relaunch could not be scheduled after a verified stop
+    /// leaves Hippocampus open, the menu acting again, reading "Off / Turn
+    /// On". Turn On did nothing: the quit intent kept every start away.
+    func test_turn_on_works_after_a_restart_that_stayed_open() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        try await supervisor.startAndWaitForReadiness()
+        let launcher = FakeApplicationRestartLauncher()
+        launcher.error = TestError.denied
+        var failures = 0
+        let coordinator = ApplicationTerminationCoordinator(
+            supervisor: supervisor, restartLauncher: launcher, cleanup: {}, onFailure: { _ in failures += 1 }
+        )
+
+        let restarted = await coordinator.terminate(intent: .restart) { _ in }
+
+        XCTAssertFalse(restarted)
+        XCTAssertEqual(failures, 1)
+        XCTAssertEqual(supervisor.state, .stopped)
+        XCTAssertEqual(supervisor.statusRow(setupFinished: true).action, .turnOn)
+        supervisor.performAskStatusAction(.turnOn, setupFinished: true) { _ in }
+        let deadline = Date().addingTimeInterval(3)
+        while supervisor.state != .running && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertEqual(topology.launchPlans.count, 2)
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// A restart whose stop failed is not allowed to start again: it says
+    /// "Couldn’t stop", with Quit.
+    func test_a_restart_whose_stop_failed_still_starts_nothing() async throws {
+        let (supervisor, _, _, _, topology, _) = makeSupervisor(captureEnabled: true)
+        try await supervisor.startAndWaitForReadiness()
+        topology.stopResults = [.failure(TestError.partialStop)]
+        let coordinator = ApplicationTerminationCoordinator(
+            supervisor: supervisor, restartLauncher: FakeApplicationRestartLauncher(), cleanup: {}
+        )
+
+        _ = await coordinator.terminate(intent: .restart) { _ in }
+        supervisor.performAskStatusAction(.turnOn, setupFinished: true) { _ in }
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        guard case .stopFailed = supervisor.menuBarStatus else {
+            return XCTFail("expected Couldn’t stop, got \(supervisor.menuBarStatus)")
         }
     }
 

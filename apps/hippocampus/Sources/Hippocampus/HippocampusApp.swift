@@ -413,6 +413,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let tail = TCCHelperStderrTail(sink: sink)
         tail.start()
         tccStderrTail = tail
+        // A fresh helper that has every permission never reports one
+        // restored: once remembering starts, the notification goes.
+        let notifier = tccNotifier
+        supervisor.onRememberingStarted = {
+            Task { await notifier.withdrawAll() }
+        }
 
         // Fire-and-forget category registration; safe to call on every
         // launch (setNotificationCategories replaces).

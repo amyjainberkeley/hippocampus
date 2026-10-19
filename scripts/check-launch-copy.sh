@@ -41,6 +41,7 @@ COPY_FILES=(
   "apps/hippocampus/Sources/HippocampusKit/MenuBarStatus.swift"
   "apps/hippocampus/Sources/HippocampusKit/StatusMenuModel.swift"
   "apps/hippocampus/Sources/HippocampusKit/CommandBar/AskPanelStatus.swift"
+  "apps/hippocampus/Sources/HippocampusKit/CaptureStatusAction.swift"
   "assets/installer/render-background.swift"
 )
 

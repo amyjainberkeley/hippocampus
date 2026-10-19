@@ -675,7 +675,10 @@ if let captureRuntime {
 }
 
 do {
-    try readiness?.publish()
+    // The permissions this generation found off as it started go in the
+    // receipt: until they are allowed it is paused on them, and would start
+    // reading by itself after, so the app must not take a turn-on for done.
+    try readiness?.publish(permissionsOff: captureRuntime?.session.permissionsOff() ?? [])
 } catch {
     FileHandle.standardError.write(
         "mci-capture-helper: readiness publication failed: \(error.localizedDescription)\n"

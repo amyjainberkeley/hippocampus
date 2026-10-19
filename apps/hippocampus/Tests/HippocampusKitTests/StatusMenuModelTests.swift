@@ -60,18 +60,34 @@ final class StatusMenuModelTests: XCTestCase {
     }
 
     /// While Turn On is under way nothing is on yet, so there is no Pause: it
-    /// lands, or says why not, by itself. A fix it found stays in reach.
-    func testWhileTurningOnStartingOffersNothingToPause() {
+    /// lands, or says why not, by itself. Its helper may read already, so
+    /// Turn Off is offered, as the newer word. A fix it found stays in reach.
+    func testWhileTurningOnStartingOffersTurnOff() {
         let row = StatusRow(StatusFacts(status: .starting, turningOn: true), now: now, calendar: calendar)
         XCTAssertEqual(row.title, "Starting…")
-        XCTAssertNil(row.action)
+        XCTAssertEqual(row.action, .turnOff)
         XCTAssertEqual(
             StatusMenuModel.items(row: row, setupComplete: true, askLabel: "⇧⇧", aiToolsConnected: false)
                 .map { $0.role == .separator ? "-" : $0.title },
-            ["Starting…"] + tail
+            ["Starting…", "Turn Off"] + tail
         )
+        XCTAssertEqual(AskPanelStatus(.starting, row: row, setup: .complete).action, .turnOff, "Ask offers it too")
         let permission = StatusRow(StatusFacts(status: .needsPermission(.screenRecording), turningOn: true), now: now)
         XCTAssertEqual(permission.action, .openSystemSettings(.screenRecording))
+    }
+
+    /// While a stop is under way nothing is offered: Pause would record a
+    /// pause the person did not mean, and Off shows once the stop is done.
+    func testWhileStoppingNothingIsOffered() {
+        for status: MenuBarStatus in [.starting, .recording, .unchanged, .noMemory, .skipping(reason: "private_browsing")] {
+            let row = StatusRow(StatusFacts(status: status, stopping: true), now: now, calendar: calendar)
+            XCTAssertNil(row.action, "\(status)")
+        }
+        XCTAssertEqual(StatusRow(StatusFacts(status: .stopFailed(reason: "x"), stopping: true), now: now).action, .quit)
+        XCTAssertEqual(
+            StatusRow(StatusFacts(status: .starting, turningOn: true, stopping: true), now: now).action, .turnOff,
+            "a press waiting out the stop can still be dropped"
+        )
     }
 
     func testSkippingSaysWhy() {
