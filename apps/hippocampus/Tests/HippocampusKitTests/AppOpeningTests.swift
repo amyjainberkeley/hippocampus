@@ -70,3 +70,32 @@ final class AppOpeningTests: XCTestCase {
         XCTAssertEqual(AppOpening.atLaunch(byHand, setupFinished: true, hasSetup: true), .window)
     }
 }
+
+/// Every way to the window but a reopen goes through one place, which
+/// brings setup forward until setup is done. A window opened before setup
+/// made the memory's key built its reader once, with no key, and the window
+/// the person got after setup (setup closing asks for it, and finds that one
+/// running) could not read the memory until they closed and reopened it.
+final class WindowRequestRoutingTests: XCTestCase {
+    func testEveryWindowRequestBringsSetupForwardUntilSetupIsDone() throws {
+        let app = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Sources/Hippocampus/HippocampusApp.swift"),
+            encoding: .utf8
+        )
+        let start = try XCTUnwrap(app.range(of: "private func openWindow(tab: String?, focusEventId: UInt64? = nil, openPopup: Bool = false) {"))
+        let end = try XCTUnwrap(app.range(of: "\n    }\n", range: start.upperBound..<app.endIndex))
+        let route = app[start.upperBound..<end.lowerBound]
+        XCTAssertTrue(route.contains("AppOpening.atReopen(setupFinished: OnboardingSentinel.isComplete, hasSetup: supervisor.hasOnboarding)"))
+        XCTAssertTrue(route.contains("case .setup: supervisor.showOnboarding()"))
+        XCTAssertTrue(route.contains("supervisor.openRecallUI(initialTab: tab, focusEventId: focusEventId, openPopup: openPopup)"))
+        // The menu, Ask (both of its ways), Preferences and the link all use it.
+        XCTAssertEqual(app.components(separatedBy: "supervisor.openRecallUI(").count - 1, 1, "only the route opens the window")
+        XCTAssertTrue(app.contains("openWindow: { [weak self] in self?.openWindow(tab: nil) }"))
+        XCTAssertTrue(app.contains("openEvent: { [weak self] eventId in self?.openWindow(tab: \"search\", focusEventId: eventId) }"))
+        XCTAssertEqual(app.components(separatedBy: "openWindow: { [weak self] tab in self?.openWindow(tab: tab) }").count - 1, 2,
+                       "Ask's and Preferences' Open")
+        XCTAssertTrue(app.contains("openWindow(tab: tab, focusEventId: focusEventId, openPopup: openPopup)"))
+    }
+}

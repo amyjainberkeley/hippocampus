@@ -128,7 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             supervisor: supervisor,
             actions: PreferencesActions(
                 statusAction: { [weak self] action in self?.performStatusAction(action) },
-                openWindow: { tab in supervisor.openRecallUI(initialTab: tab) },
+                openWindow: { [weak self] tab in self?.openWindow(tab: tab) },
                 neverRead: { _ = supervisor.openOnboarding(initialStep: "never-read") },
                 chooseApps: { _ = supervisor.openOnboarding(initialStep: "app-access") },
                 connectAITools: { done in
@@ -288,8 +288,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             CommandBarController.shared.configure(
                 model: CommandBarModel(launch: { assist in supervisor.memorySessionLaunch(assist: assist) }),
                 supervisor: supervisor,
-                openEvent: { eventId in supervisor.openRecallUI(initialTab: "search", focusEventId: eventId) },
-                openWindow: { tab in supervisor.openRecallUI(initialTab: tab) },
+                openEvent: { [weak self] eventId in self?.openWindow(tab: "search", focusEventId: eventId) },
+                openWindow: { [weak self] tab in self?.openWindow(tab: tab) },
                 statusAction: { [weak self] action in self?.performStatusAction(action) },
                 announceShown: {
                     AskPanelNotice.announceShown(onboardingRunning: supervisor.onboardingIsRunning) { name in
@@ -342,7 +342,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             actions: StatusItemController.Actions(
                 perform: { [weak self] action in self?.performStatusAction(action) },
                 ask: { CommandBarController.shared.show() },
-                openWindow: { supervisor.openRecallUI() },
+                openWindow: { [weak self] in self?.openWindow(tab: nil) },
                 aiTools: { [weak self] connected in
                     if connected {
                         self?.showPreferences(section: .sources)
@@ -366,6 +366,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         supervisor.performAskStatusAction(action) { NSWorkspace.shared.open($0) }
+    }
+
+    /// Every way to the window but a reopen: the menu's Open Hippocampus,
+    /// Ask's open-window and its results, Preferences and a
+    /// hippocampus://recall link. Until setup is done the memory has no key,
+    /// and a window opened then built its reader once without one, so even
+    /// the window setup's end asked for could not read the memory: setup
+    /// comes forward instead, as a reopen does.
+    private func openWindow(tab: String?, focusEventId: UInt64? = nil, openPopup: Bool = false) {
+        switch AppOpening.atReopen(setupFinished: OnboardingSentinel.isComplete, hasSetup: supervisor.hasOnboarding) {
+        case .setup: supervisor.showOnboarding()
+        case .window, .nothing: supervisor.openRecallUI(initialTab: tab, focusEventId: focusEventId, openPopup: openPopup)
+        }
     }
 
     func showPreferences(section: PreferencesSection? = nil) {
@@ -663,11 +676,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // deep-links the Brief tab. Unknown tab values fall
                 // through to the recall-ui's default tab.
                 Task { @MainActor in
-                    supervisor.openRecallUI(
-                        initialTab: tab,
-                        focusEventId: focusEventId,
-                        openPopup: openPopup
-                    )
+                    openWindow(tab: tab, focusEventId: focusEventId, openPopup: openPopup)
                 }
             case .openPreferences(let section):
                 configurePreferencesController()
