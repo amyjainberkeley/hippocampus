@@ -78,6 +78,9 @@ public struct TryItPresentation: Equatable, Sendable {
     public let next: String?
     /// Under a proof: the key that opens Ask now, one keycap per entry.
     public let keycaps: [String]
+    /// How many times those keycaps press, now and then, to show the key:
+    /// twice for Shift twice, once for any other, none with no keycaps.
+    public let keyPresses: Int
     /// Under a proof: "Open it for me".
     public let offersOpenItForMe: Bool
     /// Under a proof: macOS's recording icon and Stop Sharing.
@@ -164,6 +167,7 @@ public struct TryItPresentation: Equatable, Sendable {
         self.next = underProof
             ? OnboardingCopy.tryItNext(keyNow, answersAvailable: understanding == .available) : nil
         self.keycaps = underProof && keyNow.phrase != nil ? keyNow.keycaps : []
+        self.keyPresses = self.keycaps.isEmpty ? 0 : keyNow.presses
         self.offersOpenItForMe = underProof
         self.stopSharingNote = underProof ? OnboardingCopy.stopSharingNote : nil
         self.answersNote = underProof ? Self.answersNote(understanding, macOSMajorVersion: macOSMajorVersion) : nil

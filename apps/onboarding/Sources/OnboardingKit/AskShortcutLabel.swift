@@ -142,7 +142,12 @@ public enum AskKeyHint: String, Sendable, Equatable, CaseIterable {
     /// When Welcome's keycaps pulse, in seconds from the start of each
     /// cycle: 0.6 s in, and again 0.3 s later for Shift twice.
     public var pulseTimes: [TimeInterval] {
-        Array([0.6, 0.9].prefix(pulses))
+        Self.pulseTimes(presses: pulses)
+    }
+
+    /// The pulse times for a key pressed `presses` times, as Welcome's.
+    public static func pulseTimes(presses: Int) -> [TimeInterval] {
+        Array([0.6, 0.9].prefix(max(0, presses)))
     }
 
     /// Welcome shows the press again this often while it is on screen.
@@ -198,6 +203,14 @@ public struct AskKeyNow: Equatable, Sendable {
     /// Read now, from the app's defaults.
     public static func current() -> AskKeyNow {
         read(AskShortcutLabel.appValue)
+    }
+
+    /// How many times the keycaps press when Try it shows the key: twice
+    /// for Shift twice, once for a single key or the chord, never when
+    /// nothing opens Ask.
+    public var presses: Int {
+        if keycaps.isEmpty { return 0 }
+        return keycaps == AskKeyHint.shiftTwice.keycaps ? AskKeyHint.shiftTwice.pulses : 1
     }
 
     /// The key's name inside a sentence: the phrase without its verb

@@ -77,7 +77,14 @@ final class TryItPresentationTests: XCTestCase {
         let shown = TryItPresentation(card: .proof(proof), keyNow: nothingOpensAsk, understanding: .available)
         XCTAssertNil(shown.next)
         XCTAssertEqual(shown.keycaps, [])
+        XCTAssertEqual(shown.keyPresses, 0, "no keycaps to press")
         XCTAssertTrue(shown.offersOpenItForMe)
+    }
+
+    func testTheKeycapsUnderAProofPressAsTheKeyIsPressed() {
+        XCTAssertEqual(TryItPresentation(card: .proof(proof), keyNow: shiftTwice, understanding: .available).keyPresses, 2)
+        let chord = AskKeyNow(effectiveLabel: "⌃⇧Space", effectivePhrase: "Press ⌃⇧Space", stored: nil)
+        XCTAssertEqual(TryItPresentation(card: .proof(proof), keyNow: chord, understanding: nil).keyPresses, 1)
     }
 
     // MARK: - Before a proof, and after Ask
@@ -93,6 +100,7 @@ final class TryItPresentationTests: XCTestCase {
             XCTAssertNil(shown.proof, "\(card)")
             XCTAssertNil(shown.next, "\(card)")
             XCTAssertEqual(shown.keycaps, [], "\(card)")
+            XCTAssertEqual(shown.keyPresses, 0, "\(card)")
             XCTAssertFalse(shown.offersOpenItForMe, "\(card)")
             XCTAssertNil(shown.stopSharingNote, "Stop Sharing is explained once something was read")
             XCTAssertNil(shown.answersNote, "the answers line shows only under a proof")

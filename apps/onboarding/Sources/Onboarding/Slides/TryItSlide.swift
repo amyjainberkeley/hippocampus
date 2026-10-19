@@ -86,6 +86,10 @@ struct TryItScreen: View {
     let perform: (Action) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The keycaps under a proof press now and then, as on Welcome, to
+    /// show the key once more. Never in a still render or under Reduce
+    /// Motion.
+    @State private var keyDown = false
 
     var body: some View {
         SlideContainer {
@@ -103,6 +107,31 @@ struct TryItScreen: View {
             }
             .animation(OnboardingDesign.Motion.resolve(OnboardingDesign.Motion.standard, reduceMotion: reduceMotion),
                        value: presentation)
+        }
+        .task(id: KeyPulseID(presses: presentation.keyPresses, reduceMotion: reduceMotion)) { await pulseKeys() }
+    }
+
+    private struct KeyPulseID: Equatable {
+        let presses: Int
+        let reduceMotion: Bool
+    }
+
+    /// Every `AskKeyHint.pulseCycle` seconds, the keycaps press as many
+    /// times as the key is pressed, at Welcome's times.
+    private func pulseKeys() async {
+        keyDown = false
+        guard now == nil, !reduceMotion, presentation.keyPresses > 0 else { return }
+        let times = AskKeyHint.pulseTimes(presses: presentation.keyPresses)
+        while !Task.isCancelled {
+            var elapsed: TimeInterval = 0
+            for time in times {
+                try? await Task.sleep(for: .seconds(time - elapsed))
+                withAnimation(.easeOut(duration: 0.08)) { keyDown = true }
+                try? await Task.sleep(for: .seconds(WelcomeDemoScript.keyHold))
+                withAnimation(.easeOut(duration: 0.16)) { keyDown = false }
+                elapsed = time + WelcomeDemoScript.keyHold
+            }
+            try? await Task.sleep(for: .seconds(AskKeyHint.pulseCycle - elapsed))
         }
     }
 
@@ -159,7 +188,7 @@ struct TryItScreen: View {
             HStack(spacing: OnboardingDesign.Space.md) {
                 if let next = presentation.next {
                     if !presentation.keycaps.isEmpty {
-                        KeycapRow(keycaps: presentation.keycaps, size: 13)
+                        KeycapRow(keycaps: presentation.keycaps, pressed: keyDown, size: 13)
                     }
                     Text(next)
                         .font(.system(size: 15, weight: .medium))

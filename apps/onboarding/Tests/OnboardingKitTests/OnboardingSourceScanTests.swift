@@ -228,6 +228,13 @@ final class OnboardingSourceScanTests: XCTestCase {
         XCTAssertTrue(tile.contains("OnboardingHiMark.tileBottomRGB"))
     }
 
+    func testTryItsKeycapsPressOnlyLiveAndNeverUnderReduceMotion() throws {
+        let tryIt = code(try source("Onboarding/Slides/TryItSlide.swift")).joined(separator: "\n")
+        XCTAssertTrue(tryIt.contains("guard now == nil, !reduceMotion, presentation.keyPresses > 0 else { return }"))
+        XCTAssertTrue(tryIt.contains("KeycapRow(keycaps: presentation.keycaps, pressed: keyDown, size: 13)"))
+        XCTAssertTrue(tryIt.contains("AskKeyHint.pulseTimes(presses: presentation.keyPresses)"), "Welcome's times")
+    }
+
     func testOpenItForMeIsALink() throws {
         let tryIt = try source("Onboarding/Slides/TryItSlide.swift")
         XCTAssertTrue(tryIt.contains(

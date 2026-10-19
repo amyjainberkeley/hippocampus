@@ -43,6 +43,22 @@ final class AskShortcutLabelTests: XCTestCase {
         XCTAssertGreaterThan(AskKeyHint.pulseCycle, AskKeyHint.shiftTwice.pulseTimes.last ?? 0)
     }
 
+    func testTryItsKeycapsPressAsTheKeyThatWorksNowIsPressed() {
+        // Shift twice twice; a single key or the chord once; nothing when no
+        // key opens Ask; a label onboarding does not know, once.
+        XCTAssertEqual(AskKeyNow(effectiveLabel: "⇧⇧", effectivePhrase: "Press Shift twice", stored: nil).presses, 2)
+        XCTAssertEqual(AskKeyNow(effectiveLabel: "right ⌘", effectivePhrase: "Tap right ⌘", stored: nil).presses, 1)
+        XCTAssertEqual(AskKeyNow(effectiveLabel: "⌃⇧Space", effectivePhrase: "Press ⌃⇧Space", stored: nil).presses, 1)
+        XCTAssertEqual(AskKeyNow(effectiveLabel: "", effectivePhrase: "", stored: nil).presses, 0)
+        XCTAssertEqual(AskKeyNow(effectiveLabel: "F19", effectivePhrase: nil, stored: nil).presses, 1)
+        for key in AskKeyHint.allCases {
+            let now = AskKeyNow(effectiveLabel: nil, effectivePhrase: nil, stored: key == .chord ? "off" : key.rawValue)
+            XCTAssertEqual(now.presses, key.pulses, "\(key)")
+            XCTAssertEqual(AskKeyHint.pulseTimes(presses: now.presses), key.pulseTimes, "\(key)")
+        }
+        XCTAssertEqual(AskKeyHint.pulseTimes(presses: 0), [])
+    }
+
     // MARK: - What opens Ask right now (RULINGS X2)
 
     func testWhatTheAppPublishesWinsOverTheChosenKey() {
