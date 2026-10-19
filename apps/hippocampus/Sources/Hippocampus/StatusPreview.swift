@@ -51,10 +51,12 @@ enum StatusPreviewRenderer {
         func state(
             _ name: String, _ status: MenuBarStatus, setup: AskPanelStatus.Setup = .complete,
             lastSaved: Date? = nil, paused: Date? = nil, stopped: Date? = nil,
+            turningOn: Bool = false, stopping: Bool = false,
             askLabel: String? = "⇧⇧", connected: Bool = false, dark: Bool = false
         ) -> MenuState {
             let row = StatusRow(StatusFacts(
-                status: status, setup: setup, lastSavedAt: lastSaved, pausedSince: paused, stoppedSharingAt: stopped
+                status: status, setup: setup, lastSavedAt: lastSaved, pausedSince: paused, stoppedSharingAt: stopped,
+                turningOn: turningOn, stopping: stopping
             ), now: now)
             return MenuState(
                 name: name, status: status,
@@ -68,6 +70,11 @@ enum StatusPreviewRenderer {
             state("remembering-dark", .recording, lastSaved: now.addingTimeInterval(-8), dark: true),
             state("remembering-unchanged", .unchanged, lastSaved: now.addingTimeInterval(-3 * 3600 - 60)),
             state("starting", .starting),
+            // Turn On under way: its helper may read already, so Turn Off.
+            state("turning-on", .starting, turningOn: true),
+            state("turning-on-dark", .starting, turningOn: true, dark: true),
+            // A turn-off or Quit still stopping: nothing to press until Off.
+            state("stopping", .starting, stopping: true),
             state("nothing-saved", .noMemory),
             state("skipping-private", .skipping(reason: "private_browsing")),
             // The Oct 13 receipt, once its skip has held: still the solid dot.
@@ -86,6 +93,9 @@ enum StatusPreviewRenderer {
             state("couldnt-stop", .stopFailed(reason: "fixture")),
             state("couldnt-stop-dark", .stopFailed(reason: "fixture"), dark: true),
             state("couldnt-turn-on", .turnOnFailed(reason: "fixture")),
+            state("couldnt-turn-on-dark", .turnOnFailed(reason: "fixture"), dark: true),
+            state("turn-on-needs-permission", .needsPermission(.screenRecording)),
+            state("turn-on-needs-accessibility", .needsPermission(.accessibility)),
             state("not-set-up", .idle, setup: .notFinished),
             state("not-set-up-onboarding-open", .idle, setup: .inProgress),
             state("ai-tools-connected", .recording, lastSaved: now.addingTimeInterval(-8), connected: true),
@@ -105,7 +115,8 @@ enum StatusPreviewRenderer {
         func pane(
             _ name: String, _ section: PreferencesSection, state: SupervisorState = .running,
             captureEnabled: Bool = true, receipt: CaptureStatusReceipt? = PreviewFixtures.receipt(savedAt: saved),
-            stoppedSharingAt: Date? = nil, stopFailed: Bool = false, paused: Bool = false
+            stoppedSharingAt: Date? = nil, stopFailed: Bool = false, paused: Bool = false,
+            turnOnFailure: TurnOnFailure? = nil, turningOn: Bool = false
         ) -> Pane {
             let pauses = UserPauseController(clock: { Date().addingTimeInterval(-6 * 60) })
             if paused { pauses.setPaused(true) }
@@ -117,7 +128,8 @@ enum StatusPreviewRenderer {
             )
             supervisor.showForPreview(
                 state: state, captureEnabled: captureEnabled, receipt: receipt,
-                startedAt: Date().addingTimeInterval(-600), stoppedSharingAt: stoppedSharingAt, stopFailed: stopFailed
+                startedAt: Date().addingTimeInterval(-600), stoppedSharingAt: stoppedSharingAt, stopFailed: stopFailed,
+                turnOnFailure: turnOnFailure, turningOn: turningOn
             )
             let defaults = UserDefaults(suiteName: "ai.hippocampus.preview.\(UUID().uuidString)")!
             let retention = FileManager.default.temporaryDirectory
@@ -154,6 +166,13 @@ enum StatusPreviewRenderer {
             pane("remembering-needs-permission", .capture, receipt: PreviewFixtures.receipt(
                 savedAt: saved, blocked: "screen_recording_permission"
             )),
+            pane("remembering-off", .capture, captureEnabled: false, receipt: nil),
+            // The switch reads On while Turn On is under way.
+            pane("remembering-turning-on", .capture, captureEnabled: false, receipt: nil, turningOn: true),
+            pane("remembering-couldnt-turn-on", .capture, captureEnabled: false, receipt: nil,
+                 turnOnFailure: .didNotStart(reason: "fixture")),
+            pane("remembering-turn-on-needs-permission", .capture, state: .crashed(reason: "fixture"),
+                 captureEnabled: false, receipt: nil, turnOnFailure: .permission(.screenRecording)),
             pane("ai-tools", .sources),
             pane("privacy", .privacy),
             pane("advanced", .advanced),

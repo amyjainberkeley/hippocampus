@@ -1796,7 +1796,8 @@ extension ProcessSupervisor {
     /// run would, so Preferences draws from the real derivation.
     package func showForPreview(
         state: SupervisorState, captureEnabled: Bool, receipt: CaptureStatusReceipt?,
-        startedAt: Date?, stoppedSharingAt: Date? = nil, stopFailed: Bool = false
+        startedAt: Date?, stoppedSharingAt: Date? = nil, stopFailed: Bool = false,
+        turnOnFailure: TurnOnFailure? = nil, turningOn: Bool = false
     ) {
         self.captureEnabled = captureEnabled
         self.captureStartedAt = startedAt
@@ -1804,6 +1805,9 @@ extension ProcessSupervisor {
         self.stoppedSharingAt = stoppedSharingAt
         self.state = state
         self.stopRequestFailed = stopFailed
+        self.turnOnFailure = turnOnFailure
+        // A press as the menu leaves it: nothing carries it out here.
+        self.pendingTurnOn = turningOn ? UUID() : nil
     }
 }
 #endif

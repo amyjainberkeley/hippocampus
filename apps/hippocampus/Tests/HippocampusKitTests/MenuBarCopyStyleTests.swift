@@ -56,6 +56,13 @@ final class MenuBarCopyStyleTests: XCTestCase {
         // A turn-on under way offers Turn Off.
         let turningOn = StatusRow(StatusFacts(status: .starting, turningOn: true), now: now)
         if let action = turningOn.action { out.append(("action(turningOn)", action.title)) }
+        // Every button the status row can show, whichever state shows it.
+        let actions: [CaptureStatusAction] = [
+            .pause, .resume, .turnOn, .turnOff, .tryAgain, .quit, .finishSetup,
+        ] + TCCRevokedReason.allCases.map { .openSystemSettings($0) }
+        for action in actions {
+            out.append(("button(\(action))", action.title))
+        }
         // The menu items, across setup and connected states.
         for setup in [AskPanelStatus.Setup.complete, .notFinished, .inProgress] {
             for connected in [true, false] {
@@ -113,6 +120,7 @@ final class MenuBarCopyStyleTests: XCTestCase {
         XCTAssertTrue(titles.contains("Couldn’t turn on"))
         XCTAssertTrue(titles.contains("It didn’t start, so remembering is still off."))
         XCTAssertTrue(titles.contains("Turn Off"))
+        XCTAssertTrue(titles.contains("Finish Setup…"))
         XCTAssertGreaterThan(menuStrings.count, 30)
     }
 }
