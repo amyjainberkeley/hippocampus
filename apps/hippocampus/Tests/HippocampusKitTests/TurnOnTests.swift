@@ -935,3 +935,118 @@ private func XCTAssertThrowsErrorAsync<T: Sendable>(
         XCTFail("expected error", file: file, line: line)
     } catch {}
 }
+
+/// Setup's Try Again (`hippocampus://restart`), from Try it's stalled card.
+/// The app dropped it unless remembering was on, so after setup's own Start
+/// Remembering failed to turn on (a helper exit, a timeout, a permission),
+/// Try it said "Turning on…", stalled again at 45 s and offered Try Again
+/// again, with no end. It is the menu's Try Again now.
+@MainActor
+final class SetupTryAgainTests: XCTestCase {
+    private func make(captureEnabled: Bool = false) -> (ProcessSupervisor, FakeSupervisorTopology, FakeRuntimeConfig) {
+        let locator = FakeBinaryLocator()
+        locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
+        locator.agentURL = URL(fileURLWithPath: "/bundle/mci-agent")
+        let keyStore = FakeKeyStore()
+        keyStore.storedKey = String(repeating: "ab", count: 32)
+        let topology = FakeSupervisorTopology()
+        let config = FakeRuntimeConfig(captureEnabled: captureEnabled)
+        let supervisor = ProcessSupervisor(
+            locator: locator, keyStore: keyStore, runtimeConfig: config, topology: topology,
+            keyCustodyPreparer: FakeKeyCustodyPreparer(), readinessTimeout: 0.1, captureStatusReader: { (nil, nil) }
+        )
+        return (supervisor, topology, config)
+    }
+
+    private func eventually(_ condition: @MainActor () -> Bool, within seconds: TimeInterval = 3) async {
+        let deadline = Date().addingTimeInterval(seconds)
+        while !condition() && Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    /// First run: Start Remembering wrote consent, and the turn-on it asked
+    /// for did not start. Setup's Try Again turns remembering on, as the
+    /// menu's Try Again does in the same state.
+    func test_setups_try_again_after_its_turn_on_did_not_start_turns_it_on() async throws {
+        let (supervisor, topology, config) = make()
+        topology.readinessResults = [.failure(SupervisorProcessRuntimeError.helperExited(79))]
+        try? await supervisor.applyCaptureEnabled(true)
+        XCTAssertEqual(supervisor.statusRow(setupFinished: true).title, "Couldn’t turn on")
+
+        supervisor.restartFromSetup(setupFinished: true, setupOpen: true)
+        await eventually { supervisor.captureEnabled && !supervisor.turningOn }
+
+        XCTAssertTrue(supervisor.captureEnabled)
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertEqual(config.captureWrites, [true])
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// The turn-on found Screen Recording off; the person allowed it from
+    /// setup's own Open Settings, which never tells the app, and pressed Try
+    /// Again: a fresh helper, which sees the grant.
+    func test_setups_try_again_after_a_permission_turn_on_tries_a_fresh_helper() async throws {
+        let (supervisor, topology, _) = make()
+        var off = true
+        topology.permissionOffInReceipt = { off && $0.helperArguments.contains("--capture") ? .screenRecording : nil }
+        try? await supervisor.applyCaptureEnabled(true)
+        XCTAssertEqual(supervisor.menuBarStatus, .needsPermission(.screenRecording))
+
+        off = false
+        supervisor.restartFromSetup(setupFinished: true, setupOpen: true)
+        await eventually { supervisor.captureEnabled && !supervisor.turningOn }
+
+        XCTAssertTrue(supervisor.captureEnabled)
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// Only the setup that is open asks: the same link from anywhere else
+    /// never turns remembering on, and nothing before consent.
+    func test_the_link_turns_nothing_on_without_setup_open_or_before_consent() async throws {
+        let (supervisor, topology, config) = make()
+        topology.readinessResults = [.failure(SupervisorProcessRuntimeError.helperExited(79))]
+        try? await supervisor.applyCaptureEnabled(true)
+        let launches = topology.launchPlans.count
+
+        supervisor.restartFromSetup(setupFinished: true, setupOpen: false)
+        supervisor.restartFromSetup(setupFinished: false, setupOpen: true)
+        try await Task.sleep(for: .milliseconds(150))
+
+        XCTAssertEqual(topology.launchPlans.count, launches)
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertEqual(config.captureWrites, [])
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// Remembering is on and not saving: the link restarts it now.
+    func test_with_remembering_on_the_link_restarts_it() async throws {
+        let (supervisor, topology, _) = make(captureEnabled: true)
+        topology.readinessResults = [.failure(SupervisorProcessRuntimeError.readinessTimedOut)]
+        try? await supervisor.startAndWaitForReadiness()
+
+        supervisor.restartFromSetup(setupFinished: true, setupOpen: false)
+        await eventually { supervisor.state == .running }
+
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertEqual(topology.launchPlans.count, 2)
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// The app's link handler is this one path.
+    func test_the_apps_restart_link_goes_through_it() throws {
+        let app = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Sources/Hippocampus/HippocampusApp.swift"),
+            encoding: .utf8
+        )
+        let start = try XCTUnwrap(app.range(of: "case .restartRemembering:"))
+        let end = try XCTUnwrap(app.range(of: "case .unknown:", range: start.upperBound..<app.endIndex))
+        let branch = app[start.upperBound..<end.lowerBound]
+        XCTAssertTrue(branch.contains(
+            "supervisor.restartFromSetup(setupFinished: OnboardingSentinel.isComplete, setupOpen: supervisor.onboardingIsRunning)"
+        ))
+        XCTAssertFalse(branch.contains("retryNow"))
+    }
+}

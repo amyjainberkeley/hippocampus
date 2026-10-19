@@ -671,11 +671,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // question (RULINGS S12).
                 CommandBarController.shared.show(asking: question, from: .link)
             case .restartRemembering:
-                // Setup's "Try Again": the menu's Try Again, in place. Not
-                // before consent or while turned off; `retryNow` itself
-                // yields to a stop, a pause or a quit.
-                guard OnboardingSentinel.isComplete, supervisor.captureEnabled else { continue }
-                supervisor.retryNow()
+                // Setup's "Try Again": the menu's Try Again, in place, which
+                // presses a Turn On that did not take again. Not before
+                // consent, and that press only for the setup that is open.
+                supervisor.restartFromSetup(setupFinished: OnboardingSentinel.isComplete, setupOpen: supervisor.onboardingIsRunning)
             case .unknown:
                 continue
             }

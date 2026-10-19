@@ -133,6 +133,21 @@ extension ProcessSupervisor {
             _ = openOnboarding()
         }
     }
+
+    /// Setup's Try Again (`hippocampus://restart`), from Try it's stalled
+    /// card: the status row's Try Again, in place. A Turn On that did not
+    /// take (setup's own Start Remembering, or a press) is pressed again with
+    /// a fresh helper, which also sees a permission allowed since. That is
+    /// only ever for the setup that is open (`setupOpen`): the link from
+    /// anywhere else never turns remembering on. Nothing before consent, and
+    /// nothing while remembering is off by the person's choice.
+    public func restartFromSetup(setupFinished: Bool, setupOpen: Bool) {
+        guard setupFinished else { return }
+        if !captureEnabled {
+            guard turnOnFailure != nil, setupOpen else { return }
+        }
+        performAskStatusAction(.tryAgain, setupFinished: setupFinished) { _ in }
+    }
 }
 
 /// Tells onboarding's Try it screen that Ask opened (RULINGS X1). A
