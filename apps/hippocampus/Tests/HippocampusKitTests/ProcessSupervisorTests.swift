@@ -97,6 +97,10 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
         helperAlive && launchPlans.last?.helperArguments.contains("--capture") == true
     }
     var onReadinessWait: ((ProcessSupervisorLaunchPlan) -> Void)?
+    /// What a ready helper's receipt says it found off as it started, as the
+    /// real capture helper reports a permission it is paused on.
+    var permissionOffInReceipt: ((ProcessSupervisorLaunchPlan) -> TCCRevokedReason?)?
+    private(set) var permissionOffAtReadiness: TCCRevokedReason?
     var onStop: (() -> Void)?
     var stopDelay: Duration?
     var stopSuspensionOnCall: Int?
@@ -128,6 +132,7 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
         timeout: TimeInterval
     ) async throws {
         _ = (generation, timeout)
+        permissionOffAtReadiness = nil
         onReadinessWait?(launchPlans.last!)
         if let readinessSuspension { await readinessSuspension.suspend() }
         if !readinessResults.isEmpty {
@@ -141,6 +146,7 @@ final class FakeSupervisorTopology: SupervisorTopologyControlling {
             }
             try result.get()
         }
+        permissionOffAtReadiness = permissionOffInReceipt?(launchPlans.last!)
     }
 
     func stop(timeout: TimeInterval) async throws {
@@ -349,6 +355,29 @@ final class ProcessSupervisorTests: XCTestCase {
             XCTAssertNil(environment["MCI_DB_KEYCHAIN_SERVICE"])
             XCTAssertNil(environment["MCI_DB_KEYCHAIN_ACCOUNT"])
         }
+    }
+
+    /// The helper's readiness receipt names the permissions it found off as
+    /// it started; the app takes Screen Recording first, ignores a name it
+    /// does not know, and reads an older receipt as none off.
+    func test_readiness_receipt_reports_the_permission_the_helper_found_off() throws {
+        let generation = generation(captureEnabled: true)
+        func receipt(_ json: String) throws -> TCCRevokedReason? {
+            try FoundationSupervisorTopology.permissionOff(inReadiness: Data(json.utf8), for: generation)
+        }
+        XCTAssertEqual(
+            try receipt(#"{"generation":"generation-1","capture_enabled":true,"permissions_off":["accessibility","screenRecording"]}"#),
+            .screenRecording
+        )
+        XCTAssertEqual(
+            try receipt(#"{"generation":"generation-1","capture_enabled":true,"permissions_off":["accessibility"]}"#),
+            .accessibility
+        )
+        XCTAssertNil(try receipt(#"{"generation":"generation-1","capture_enabled":true,"permissions_off":[]}"#))
+        XCTAssertNil(try receipt(#"{"generation":"generation-1","capture_enabled":true}"#))
+        XCTAssertNil(try receipt(#"{"generation":"generation-1","capture_enabled":true,"permissions_off":["camera"]}"#))
+        XCTAssertThrowsError(try receipt(#"{"generation":"generation-2","capture_enabled":true,"permissions_off":[]}"#))
+        XCTAssertThrowsError(try receipt(#"{"generation":"generation-1","capture_enabled":false}"#))
     }
 
     func test_start_with_capture_disabled_does_not_start_safari_ingestion() async throws {

@@ -793,6 +793,16 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 captureEnabled: true,
                 transitionID: transitionID
             )
+            // The fresh helper found a permission off as it started. It is
+            // paused on it, and would start reading by itself once it is
+            // allowed, so this press does not land: the start ends and
+            // remembering stays off, with "Needs permission", exactly as
+            // when the helper's stderr report beats its readiness. That
+            // report is read once a second, so it used to arrive after the
+            // commit most of the time.
+            if let permission = topology.permissionOffAtReadiness {
+                tccRevokedSurface = permission
+            }
             try ensureTransitionIsActive(transitionID)
             try prepareCaptureBoundary(
                 captureEnabled: true,

@@ -97,6 +97,11 @@ package protocol SupervisorTopologyControlling: AnyObject {
         timeout: TimeInterval
     ) async throws
     func stop(timeout: TimeInterval) async throws
+    /// The permission the last ready helper found off as it started, from
+    /// its readiness receipt, Screen Recording first. A capture helper
+    /// started with one off is paused on it, and starts reading by itself
+    /// once it is allowed.
+    var permissionOffAtReadiness: TCCRevokedReason? { get }
     /// The running helper and agent, which the orphan sweep leaves alone
     /// outside Quit (spec-shell S6.4).
     var childProcessIDs: Set<pid_t> { get }
@@ -107,6 +112,7 @@ package protocol SupervisorTopologyControlling: AnyObject {
 
 extension SupervisorTopologyControlling {
     package var holdsProcesses: Bool { isRunning }
+    package var permissionOffAtReadiness: TCCRevokedReason? { nil }
     package var childProcessIDs: Set<pid_t> { [] }
     package func requestFocusedRead() -> Bool { false }
 }
@@ -116,11 +122,32 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
     private struct ReadinessPayload: Decodable {
         let generation: String
         let captureEnabled: Bool
+        /// Absent from an older helper's receipt.
+        let permissionsOff: [String]?
 
         private enum CodingKeys: String, CodingKey {
             case generation
             case captureEnabled = "capture_enabled"
+            case permissionsOff = "permissions_off"
         }
+    }
+
+    /// Reads a readiness receipt, which must be `generation`'s, with its
+    /// capture setting, and returns the permission it says the helper found
+    /// off as it started, Screen Recording first. A name this app does not
+    /// know is not one it can offer to fix, so it is left to the helper.
+    static func permissionOff(
+        inReadiness data: Data,
+        for generation: SupervisorProcessGeneration
+    ) throws -> TCCRevokedReason? {
+        let payload = try JSONDecoder().decode(ReadinessPayload.self, from: data)
+        guard payload.generation == generation.id,
+              payload.captureEnabled == generation.captureEnabled
+        else {
+            throw SupervisorProcessRuntimeError.invalidReadiness
+        }
+        let off = Set(payload.permissionsOff ?? [])
+        return TCCRevokedReason.allCases.first { off.contains($0.rawValue) }
     }
 
     private var helper: Process?
@@ -131,6 +158,7 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
     private var agentStderrHandle: FileHandle?
     private var currentGeneration: SupervisorProcessGeneration?
     private var isStopping = false
+    private(set) var permissionOffAtReadiness: TCCRevokedReason?
 
     var isRunning: Bool {
         helper?.isRunning == true && agent?.isRunning == true
@@ -163,6 +191,7 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
         guard helper == nil, agent == nil else {
             throw SupervisorProcessRuntimeError.partialStop
         }
+        permissionOffAtReadiness = nil
         try? FileManager.default.removeItem(at: generation.readinessURL)
         let bridgePipe = Pipe()
         let parentLeasePipe = Pipe()
@@ -254,15 +283,10 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
                 throw SupervisorProcessRuntimeError.agentExited(agent?.terminationStatus ?? -1)
             }
             if FileManager.default.fileExists(atPath: generation.readinessURL.path) {
-                let payload = try JSONDecoder().decode(
-                    ReadinessPayload.self,
-                    from: Data(contentsOf: generation.readinessURL)
+                permissionOffAtReadiness = try Self.permissionOff(
+                    inReadiness: Data(contentsOf: generation.readinessURL),
+                    for: generation
                 )
-                guard payload.generation == generation.id,
-                      payload.captureEnabled == generation.captureEnabled
-                else {
-                    throw SupervisorProcessRuntimeError.invalidReadiness
-                }
                 return
             }
             try await Task.sleep(for: .milliseconds(50))
@@ -311,6 +335,7 @@ final class FoundationSupervisorTopology: SupervisorTopologyControlling {
         helperStderrHandle = nil
         agentStderrHandle = nil
         currentGeneration = nil
+        permissionOffAtReadiness = nil
         isStopping = false
     }
 }

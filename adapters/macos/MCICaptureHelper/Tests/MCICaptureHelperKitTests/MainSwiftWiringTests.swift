@@ -229,9 +229,11 @@ final class MainSwiftWiringTests: XCTestCase {
         XCTAssertFalse(src.contains("HIPPOCAMPUS_ENABLE_V2P1"))
         XCTAssertFalse(src.contains("MciV2P1Gate"))
         guard let startRange = src.range(of: "try await captureSession.start()"),
-              let publishRange = src.range(of: "try readiness?.publish()")
+              let publishRange = src.range(
+                  of: "try readiness?.publish(permissionsOff: captureRuntime?.session.permissionsOff() ?? [])"
+              )
         else {
-            return XCTFail("main.swift must start capture and publish readiness")
+            return XCTFail("main.swift must start capture and publish readiness with the permissions found off")
         }
         XCTAssertLessThan(startRange.lowerBound, publishRange.lowerBound)
         XCTAssertTrue(src.contains("exit(78)"), "Keychain startup failure must exit nonzero")

@@ -11,6 +11,7 @@
 // stays off: a permission macOS has off, with Open System Settings…, or that
 // it didn't start, with Try Again. A press during another change waits for it.
 
+import UserNotifications
 import XCTest
 @testable import HippocampusKit
 
@@ -59,14 +60,15 @@ final class TurnOnTests: XCTestCase {
         var off = true
     }
 
-    /// The fresh helper a turn-on starts finds a permission off and says so
-    /// on its way up, as `helper_health tcc_revoked=…` read by the tail.
+    /// The fresh helper a turn-on starts finds a permission off as it starts,
+    /// pauses on it and says so in its readiness receipt, as the real capture
+    /// helper does. (Its `helper_health tcc_revoked=…` line on stderr reaches
+    /// the tail up to a second later, usually after readiness.)
     private func helperReports(
         _ permission: TCCRevokedReason, to rig: Rig, while setting: PermissionSwitch = PermissionSwitch()
     ) {
-        rig.topology.onReadinessWait = { [weak supervisor = rig.supervisor] plan in
-            guard setting.off, plan.helperArguments.contains("--capture") else { return }
-            supervisor?.tccRevokedSurface = permission
+        rig.topology.permissionOffInReceipt = { plan in
+            setting.off && plan.helperArguments.contains("--capture") ? permission : nil
         }
     }
 
@@ -149,6 +151,78 @@ final class TurnOnTests: XCTestCase {
             opened.append($0)
         }
         XCTAssertEqual(opened, [URL(string: TCCRevokedReason.screenRecording.settingsPaneURLString)!])
+        try await rig.supervisor.shutdownAndWait()
+    }
+
+    /// The real pipeline, in the real order: the helper writes its
+    /// `tcc_revoked` line and then reports ready at once, and the tail reads
+    /// the log once a second. The report used to arrive after the turn-on had
+    /// committed: runtime.toml said on, and a capture helper waited on the
+    /// permission to start reading by itself. The receipt decides first now.
+    func test_turn_on_with_screen_recording_off_stays_off_when_the_report_comes_after_readiness() async throws {
+        let rig = rig()
+        try await rig.supervisor.startAndWaitForReadiness()
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("turn-on-tcc-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let log = scratch.appendingPathComponent("helper.stderr.log")
+        FileManager.default.createFile(atPath: log.path, contents: Data())
+        let notifications = RecordingNotificationCenter()
+        let tail = TCCHelperStderrTail(
+            sink: TCCNotifierAndSupervisorSink(
+                notifier: TCCRevokedNotifier(center: notifications), supervisor: rig.supervisor
+            ),
+            logPath: log
+        )
+        tail.start()
+        defer { tail.stop() }
+        helperReports(.screenRecording, to: rig)
+        rig.topology.onReadinessWait = { plan in
+            guard plan.helperArguments.contains("--capture"), let handle = try? FileHandle(forWritingTo: log) else {
+                return
+            }
+            handle.seekToEndOfFile()
+            handle.write(Data("mci-capture-helper: helper_health tcc_revoked=screenRecording\n".utf8))
+            try? handle.close()
+        }
+
+        press(.turnOn, on: rig.supervisor)
+        await eventually { !rig.supervisor.turningOn }
+
+        XCTAssertFalse(rig.supervisor.captureEnabled)
+        XCTAssertEqual(rig.config.captureWrites, [])
+        XCTAssertTrue(rig.consent.enabledGenerations.isEmpty)
+        XCTAssertFalse(rig.topology.captureHelperAlive, "no helper waits on the permission")
+        XCTAssertEqual(rig.supervisor.menuBarStatus, .needsPermission(.screenRecording))
+        XCTAssertEqual(rig.supervisor.turnOnFailure, .permission(.screenRecording))
+
+        // The tail's report lands later and changes nothing.
+        await eventually({ notifications.added.count == 1 }, within: 4)
+        XCTAssertFalse(rig.supervisor.captureEnabled)
+        XCTAssertEqual(rig.config.captureWrites, [])
+        XCTAssertFalse(rig.topology.captureHelperAlive)
+        XCTAssertEqual(row(rig.supervisor).title, "Needs permission")
+        XCTAssertEqual(row(rig.supervisor).action, .openSystemSettings(.screenRecording))
+        try await rig.supervisor.shutdownAndWait()
+    }
+
+    /// The rarer order, the tail's report landing while the helper is still
+    /// getting ready, ends the same way.
+    func test_a_permission_reported_before_readiness_ends_the_same_way() async throws {
+        let rig = rig()
+        try await rig.supervisor.startAndWaitForReadiness()
+        rig.topology.onReadinessWait = { [weak supervisor = rig.supervisor] plan in
+            guard plan.helperArguments.contains("--capture") else { return }
+            supervisor?.tccRevokedSurface = .screenRecording
+        }
+
+        press(.turnOn, on: rig.supervisor)
+        await eventually { !rig.supervisor.turningOn }
+
+        XCTAssertFalse(rig.supervisor.captureEnabled)
+        XCTAssertEqual(rig.config.captureWrites, [])
+        XCTAssertFalse(rig.topology.captureHelperAlive)
+        XCTAssertEqual(rig.supervisor.menuBarStatus, .needsPermission(.screenRecording))
         try await rig.supervisor.shutdownAndWait()
     }
 
@@ -458,6 +532,29 @@ final class TurnOnTests: XCTestCase {
         XCTAssertEqual(rig.supervisor.state, .stopped)
         XCTAssertEqual(rig.topology.launchPlans.count, 1, "nothing starts after Quit")
     }
+}
+
+/// A notification center that only records: nothing reaches the person's
+/// Notification Center.
+final class RecordingNotificationCenter: UserNotificationCenter, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _added: [UNNotificationRequest] = []
+    private var _removedDelivered: [String] = []
+
+    func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool { true }
+
+    func add(_ request: UNNotificationRequest) async throws {
+        lock.withLock { _added.append(request) }
+    }
+
+    func removePendingNotificationRequests(withIdentifiers ids: [String]) {}
+
+    func removeDeliveredNotifications(withIdentifiers ids: [String]) {
+        lock.withLock { _removedDelivered.append(contentsOf: ids) }
+    }
+
+    var added: [UNNotificationRequest] { lock.withLock { _added } }
+    var removedDelivered: [String] { lock.withLock { _removedDelivered } }
 }
 
 @MainActor

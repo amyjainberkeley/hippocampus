@@ -25,21 +25,31 @@ public struct HelperReadinessReceipt: Sendable, Equatable {
     public let fileURL: URL
     public let generation: String
     public let captureEnabled: Bool
+    /// The permissions macOS had off as this generation started, by surface
+    /// name ("screenRecording", "accessibility"). The session is paused on
+    /// them and starts reading by itself once they are allowed, so the app
+    /// does not take a turn-on for done while one is off. Content-free, like
+    /// the `helper_health tcc_revoked=` breadcrumbs; empty without capture.
+    public let permissionsOff: [String]
 
     private struct Payload: Codable {
         let generation: String
         let captureEnabled: Bool
+        /// Absent from an older helper's receipt.
+        let permissionsOff: [String]?
 
         private enum CodingKeys: String, CodingKey {
             case generation
             case captureEnabled = "capture_enabled"
+            case permissionsOff = "permissions_off"
         }
     }
 
-    public init(fileURL: URL, generation: String, captureEnabled: Bool) {
+    public init(fileURL: URL, generation: String, captureEnabled: Bool, permissionsOff: [String] = []) {
         self.fileURL = fileURL
         self.generation = generation
         self.captureEnabled = captureEnabled
+        self.permissionsOff = permissionsOff
     }
 
     public static func parse(arguments: [String]) throws -> HelperReadinessReceipt? {
@@ -62,13 +72,20 @@ public struct HelperReadinessReceipt: Sendable, Equatable {
     }
 
     public func publish() throws {
+        try publish(permissionsOff: permissionsOff)
+    }
+
+    /// Publishes the receipt with the permissions the session found off as
+    /// it started (`SCStreamCaptureSession.permissionsOff()`).
+    public func publish(permissionsOff: [String]) throws {
         guard Self.isValidGeneration(generation) else { throw HelperReadinessError.invalidGeneration }
         guard !FileManager.default.fileExists(atPath: fileURL.path) else {
             throw HelperReadinessError.existingReceipt
         }
         let data = try JSONEncoder().encode(Payload(
             generation: generation,
-            captureEnabled: captureEnabled
+            captureEnabled: captureEnabled,
+            permissionsOff: Array(Set(permissionsOff)).sorted()
         ))
         let temporaryURL = fileURL.deletingLastPathComponent().appendingPathComponent(
             ".\(fileURL.lastPathComponent).\(UUID().uuidString).tmp"
@@ -106,7 +123,8 @@ public struct HelperReadinessReceipt: Sendable, Equatable {
         return HelperReadinessReceipt(
             fileURL: fileURL,
             generation: decoded.generation,
-            captureEnabled: decoded.captureEnabled
+            captureEnabled: decoded.captureEnabled,
+            permissionsOff: decoded.permissionsOff ?? []
         )
     }
 

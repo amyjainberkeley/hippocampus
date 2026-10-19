@@ -1433,6 +1433,14 @@ public final class SCStreamCaptureSession: NSObject, SCStreamOutput, SCStreamDel
         return revokedSurfaces
     }
 
+    /// The permissions this session is paused on, by surface name, for the
+    /// readiness receipt: the app must not take a turn-on for done while
+    /// one is off. Content-free, as the stderr breadcrumbs.
+    public func permissionsOff() -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        return revokedSurfaces.map(\.rawValue).sorted()
+    }
+
     // MARK: - SCStreamOutput
 
     /// The live frame callback. Verified live on macOS 26 Tahoe, 2026-05-19, Step-1 PASS (PR #31 → a19211b, see docs/audit/2026-05-19-step1-live-scstream.md).
