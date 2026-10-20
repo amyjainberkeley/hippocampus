@@ -202,6 +202,60 @@ public enum NavigationCopy {
         count == 1 ? "Forgot 1 moment." : "Forgot \(count) moments."
     }
 
+    // The confirmations a page shows before a larger forget (SPEC 3.11 and
+    // 9, rows 107 to 113). Cancel is their default; Return never forgets.
+
+    /// "Forget 2:12 to 2:36 PM?" (a session) or "Forget 2 PM to 3 PM?" (an hour).
+    public static func forgetSpanTitle(_ span: String) -> String {
+        "Forget \(span)?"
+    }
+
+    /// "Everything saved from 2:12 to 2:36 PM is deleted from this Mac for
+    /// good: 41 moments and their screenshots."
+    public static func forgetSpanBody(_ span: String, moments: Int) -> String {
+        "Everything saved from \(span) is deleted from this Mac for good: \(momentsWord(moments)) and their screenshots."
+    }
+
+    /// "Forget “Rounding half to even”?"
+    public static func forgetPageTitle(_ title: String) -> String {
+        "Forget \u{201C}\(title)\u{201D}?"
+    }
+
+    /// "6 moments from 3 days are deleted from this Mac for good, with their screenshots."
+    public static func forgetPageBody(moments: Int, days: Int) -> String {
+        let from = days == 1 ? "1 day" : "\(days) days"
+        let verb = moments == 1 ? "is" : "are"
+        return "\(momentsWord(moments)) from \(from) \(verb) deleted from this Mac for good, with their screenshots."
+    }
+
+    /// "Forget the search “per seat vs tiered pricing”?"
+    public static func forgetSearchTitle(_ query: String) -> String {
+        "Forget the search \u{201C}\(query)\u{201D}?"
+    }
+
+    public static let forgetSearchBody =
+        "The search and the results page you saw are deleted from this Mac for good."
+
+    /// More than 20 selected: "Forget 36 moments?"
+    public static func forgetSelectionTitle(_ count: Int) -> String {
+        "Forget \(count) moments?"
+    }
+
+    public static let forgetSelectionBody = "Their text and screenshots are deleted from this Mac for good."
+    public static let forgetTodayTitle = "Forget today?"
+    public static let forgetLastDayTitle = "Forget the last 24 hours?"
+
+    /// "Everything saved since midnight is deleted from this Mac for good:
+    /// 1,284 moments and their screenshots."
+    public static func forgetSinceBody(_ since: String, moments: Int) -> String {
+        "Everything saved since \(since) is deleted from this Mac for good: \(momentsWord(moments)) and their screenshots."
+    }
+
+    static func momentsWord(_ count: Int) -> String {
+        let number = count.formatted(.number.grouping(.automatic))
+        return count == 1 ? "1 moment" : "\(number) moments"
+    }
+
     // MARK: Menus and the command bar
 
     public static let goMenu = "Go"

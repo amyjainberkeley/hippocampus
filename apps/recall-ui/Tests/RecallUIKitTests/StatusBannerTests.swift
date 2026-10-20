@@ -185,6 +185,30 @@ final class StatusBannerTests: XCTestCase {
         XCTAssertEqual(NavigationCopy.rowTooltip("Privacy", key: nil), "Privacy")
     }
 
+    /// The confirmations before a larger forget, word for word (SPEC 9,
+    /// rows 107 to 113).
+    func testTheForgetConfirmationsSayWhatGoes() {
+        XCTAssertEqual(NavigationCopy.forgetSpanTitle("2:12 to 2:36 PM"), "Forget 2:12 to 2:36 PM?")
+        XCTAssertEqual(NavigationCopy.forgetSpanBody("2:12 to 2:36 PM", moments: 41),
+                       "Everything saved from 2:12 to 2:36 PM is deleted from this Mac for good: 41 moments and their screenshots.")
+        XCTAssertEqual(NavigationCopy.forgetPageTitle("Rounding half to even"), "Forget \u{201C}Rounding half to even\u{201D}?")
+        XCTAssertEqual(NavigationCopy.forgetPageBody(moments: 6, days: 3),
+                       "6 moments from 3 days are deleted from this Mac for good, with their screenshots.")
+        XCTAssertEqual(NavigationCopy.forgetPageBody(moments: 1, days: 1),
+                       "1 moment from 1 day is deleted from this Mac for good, with their screenshots.")
+        XCTAssertEqual(NavigationCopy.forgetSearchTitle("per seat vs tiered pricing"),
+                       "Forget the search \u{201C}per seat vs tiered pricing\u{201D}?")
+        XCTAssertEqual(NavigationCopy.forgetSelectionTitle(36), "Forget 36 moments?")
+        XCTAssertEqual(NavigationCopy.forgetSinceBody("midnight", moments: 1_284),
+                       "Everything saved since midnight is deleted from this Mac for good: 1,284 moments and their screenshots.")
+        for word in [NavigationCopy.forgetSearchBody, NavigationCopy.forgetSelectionBody, NavigationCopy.forgetTodayTitle,
+                     NavigationCopy.forgetLastDayTitle, NavigationCopy.forgetSpanBody("2 PM to 3 PM", moments: 212)] {
+            XCTAssertNil(CopyStyleValidator.containsMarketingSpeak(word), word)
+            XCTAssertNil(CopyStyleValidator.containsJargon(word), word)
+            XCTAssertFalse(CopyStyleValidator.containsExclamation(word), word)
+        }
+    }
+
     /// The old advice can't work (a window the app opened closes with it)
     /// and appears nowhere (SPEC 3.11).
     func testQuitHippocampusLeaveThisWindowOpenIsGone() {
