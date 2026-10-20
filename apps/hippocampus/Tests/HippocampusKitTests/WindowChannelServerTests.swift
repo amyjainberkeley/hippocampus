@@ -100,6 +100,39 @@ final class WindowChannelServerTests: XCTestCase {
                                                   demoMemory: true))
     }
 
+    /// While the window deletes under its hold it renews the hold, so a
+    /// long forget isn't cut off at 30 seconds. A renewal is taken only
+    /// while the app holds, and carried out as the hold's own.
+    func testRenewIsTakenOnlyWhileTheAppHolds() async throws {
+        XCTAssertEqual(WindowChannelRequest.parse(line(#"{"v":1,"id":"n1","op":"renew"}"#))?.op, .renew)
+        XCTAssertNil(WindowChannelRequest.parse(line(
+            #"{"v":1,"id":"n2","op":"renew","until":"2026-10-12T15:40:00-07:00"}"#)), "only a pause has an end")
+        XCTAssertTrue(WindowChannelPolicy.allows(request(.renew), row: row(nil), holding: true))
+        for action in [CaptureStatusAction.pause, .resume, .turnOn, nil] {
+            XCTAssertFalse(WindowChannelPolicy.allows(request(.renew), row: row(action), holding: false),
+                           "\(String(describing: action))")
+        }
+
+        let locator = FakeBinaryLocator()
+        locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
+        locator.agentURL = URL(fileURLWithPath: "/bundle/mci-agent")
+        let supervisor = ProcessSupervisor(
+            locator: locator, keyStore: FakeKeyStore(), runtimeConfig: FakeRuntimeConfig(captureEnabled: false),
+            topology: FakeSupervisorTopology(), keyCustodyPreparer: FakeKeyCustodyPreparer(), readinessTimeout: 0.1,
+            captureStatusReader: { (nil, nil) }, pauses: UserPauseController())
+        let early = await supervisor.handleWindowRequest(request(.renew), setupFinished: true)
+        XCTAssertFalse(early, "nothing is held yet")
+        let held = await supervisor.handleWindowRequest(request(.hold), setupFinished: true)
+        XCTAssertTrue(held)
+        let renewed = await supervisor.handleWindowRequest(request(.renew), setupFinished: true)
+        XCTAssertTrue(renewed)
+        XCTAssertTrue(supervisor.forgetHold.isHolding)
+        let released = await supervisor.handleWindowRequest(request(.release), setupFinished: true)
+        XCTAssertTrue(released)
+        let late = await supervisor.handleWindowRequest(request(.renew), setupFinished: true)
+        XCTAssertFalse(late, "a released hold isn't renewed")
+    }
+
     // MARK: The pipe
 
     private var descriptors: [Int32] = []

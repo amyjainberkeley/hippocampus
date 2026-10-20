@@ -2186,6 +2186,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             return leaveDemoMemoryForWindow()
         case .hold:
             return await forgetHold.hold()
+        case .renew:
+            return forgetHold.renew()
         case .release:
             await forgetHold.release()
             return true

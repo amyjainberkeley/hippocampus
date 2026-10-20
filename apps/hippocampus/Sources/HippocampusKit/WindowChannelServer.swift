@@ -18,6 +18,9 @@ public struct WindowChannelRequest: Equatable, Sendable {
         /// Leave Demo Memory: back to the person's own memory, with
         /// remembering as it was before, as the menu bar's Leave does.
         case leaveDemo
+        /// The window is still deleting under its hold: the hold's end moves
+        /// 30 seconds out (`CaptureHold.renew`).
+        case renew
     }
 
     public let id: String
@@ -170,9 +173,10 @@ public struct WindowStatusMessage: Equatable, Sendable {
 /// row: the window may do only what the person could click here (SPEC
 /// 2.6.4). Turn On only after setup (before it, the row offers Finish
 /// Setup…), Resume only when paused, and so on. The hold is always asked;
-/// the app answers it at once when nothing holds the memory. Leave Demo
-/// Memory is the menu's own item beside the row: it is there whenever Demo
-/// Memory is in use (`demoMemory`), whatever the row offers.
+/// the app answers it at once when nothing holds the memory, and renews or
+/// releases it only while it holds. Leave Demo Memory is the menu's own item
+/// beside the row: it is there whenever Demo Memory is in use
+/// (`demoMemory`), whatever the row offers.
 public enum WindowChannelPolicy {
     public static func allows(_ request: WindowChannelRequest, row: StatusRow, holding: Bool,
                               demoMemory: Bool = false) -> Bool {
@@ -189,7 +193,7 @@ public enum WindowChannelPolicy {
             guard case let .openSystemSettings(permission) = row.action else { return false }
             return permission == request.permission
         case .hold: return !holding
-        case .release: return holding
+        case .release, .renew: return holding
         }
     }
 }

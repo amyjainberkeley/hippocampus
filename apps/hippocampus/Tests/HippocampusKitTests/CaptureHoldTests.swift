@@ -14,6 +14,8 @@ final class CaptureHoldTests: XCTestCase {
         var isRememberingForHold = true
         var stopError: Error?
         var stopTakes: Duration = .zero
+        /// Called as the stop ends, before the hold hears of it.
+        var stopEnding: (() -> Void)?
         private(set) var stops = 0
         private(set) var restarts = 0
         private(set) var holdStates: [Bool] = []
@@ -21,6 +23,7 @@ final class CaptureHoldTests: XCTestCase {
         func stopForHold() async throws {
             stops += 1
             if stopTakes > .zero { try await Task.sleep(for: stopTakes) }
+            stopEnding?()
             if let stopError { throw stopError }
             isRememberingForHold = false
         }
@@ -46,12 +49,59 @@ final class CaptureHoldTests: XCTestCase {
             }
         }
 
+        /// Sleeps under way.
+        var count: Int { lock.withLock { waiting.count } }
+
         func open() {
             let all = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
                 defer { waiting = [] }
                 return waiting
             }
             for continuation in all { continuation.resume() }
+        }
+    }
+
+    /// Every sleep the hold asks for, in order, each ended by hand: the 30
+    /// seconds, the 10-second wait for the stop and the 10-minute cap.
+    private final class Sleeps: @unchecked Sendable {
+        private var asked: [(duration: Duration, wake: CheckedContinuation<Void, Never>?)] = []
+        private let lock = NSLock()
+
+        func sleep(_ duration: Duration) async {
+            await withCheckedContinuation { continuation in
+                lock.withLock { asked.append((duration, continuation)) }
+            }
+        }
+
+        /// How many sleeps of `duration` were asked for.
+        func count(_ duration: Duration) -> Int {
+            lock.withLock { asked.filter { $0.duration == duration }.count }
+        }
+
+        /// Ends the `index`th sleep of `duration`, counting from 0.
+        func end(_ duration: Duration, _ index: Int) {
+            let wake = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+                let positions = asked.indices.filter { asked[$0].duration == duration }
+                guard index < positions.count else { return nil }
+                defer { asked[positions[index]].wake = nil }
+                return asked[positions[index]].wake
+            }
+            wake?.resume()
+        }
+
+        /// Ends every sleep still under way.
+        func endAll() {
+            let all = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+                defer { for index in asked.indices { asked[index].wake = nil } }
+                return asked.compactMap(\.wake)
+            }
+            for wake in all { wake.resume() }
+        }
+    }
+
+    private func until(_ condition: () -> Bool) async {
+        for _ in 0..<300 where !condition() {
+            try? await Task.sleep(for: .milliseconds(10))
         }
     }
 
@@ -134,6 +184,8 @@ final class CaptureHoldTests: XCTestCase {
         })
         _ = await hold.hold()
         XCTAssertTrue(hold.isHolding)
+        // The 30 seconds start once the lease is free; then they pass.
+        await until { gate.count == 1 }
         gate.open()
         for _ in 0..<100 where hold.isHolding {
             try await Task.sleep(for: .milliseconds(10))
@@ -142,6 +194,78 @@ final class CaptureHoldTests: XCTestCase {
         XCTAssertEqual(target.restarts, 1)
         XCTAssertEqual(CaptureHold.limit, .seconds(30))
         XCTAssertEqual(CaptureHold.stopWait, .seconds(10))
+    }
+
+    /// The window's 30 seconds are for deleting: they start once remembering
+    /// has stopped and the writer lease is free, never while it stops.
+    func testTheThirtySecondsStartOnceTheLeaseIsFree() async {
+        let sleeps = Sleeps()
+        let target = Target()
+        target.stopTakes = .milliseconds(300)
+        var startedWhileStopping = -1
+        target.stopEnding = { startedWhileStopping = sleeps.count(CaptureHold.limit) }
+        let hold = CaptureHold(target: target, sleep: { await sleeps.sleep($0) })
+        let held = await hold.hold()
+        XCTAssertTrue(held)
+        XCTAssertEqual(startedWhileStopping, 0, "the 30 seconds ran while remembering was still stopping")
+        await until { sleeps.count(CaptureHold.limit) == 1 }
+        XCTAssertEqual(sleeps.count(CaptureHold.limit), 1, "they start once the lease is free")
+        XCTAssertTrue(hold.isHolding)
+        sleeps.endAll()
+    }
+
+    /// While the window still deletes it renews the hold: each renewal moves
+    /// the end 30 seconds out, and a hold the window stops renewing ends 30
+    /// seconds after the last one.
+    func testARenewalMovesTheEndThirtySecondsOut() async throws {
+        let sleeps = Sleeps()
+        let target = Target()
+        let hold = CaptureHold(target: target, sleep: { await sleeps.sleep($0) })
+        _ = await hold.hold()
+        await until { sleeps.count(CaptureHold.limit) == 1 }
+        XCTAssertTrue(hold.renew())
+        await until { sleeps.count(CaptureHold.limit) == 2 }
+
+        // The first 30 seconds pass: the renewal stands.
+        sleeps.end(CaptureHold.limit, 0)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertTrue(hold.isHolding, "the hold ended though the window renewed it")
+        XCTAssertEqual(target.restarts, 0)
+
+        // 30 seconds with no word from the window: the hold ends.
+        sleeps.end(CaptureHold.limit, 1)
+        await until { !hold.isHolding }
+        XCTAssertFalse(hold.isHolding)
+        XCTAssertEqual(target.restarts, 1, "remembering comes back")
+        sleeps.endAll()
+    }
+
+    func testOnlyAHoldCanBeRenewed() async {
+        let hold = CaptureHold(target: Target())
+        XCTAssertFalse(hold.renew(), "nothing is held")
+        _ = await hold.hold()
+        XCTAssertTrue(hold.renew())
+        await hold.release()
+        XCTAssertFalse(hold.renew(), "a released hold isn't taken again")
+        XCTAssertFalse(hold.isHolding)
+    }
+
+    /// A window that hangs while its timer still renews never keeps
+    /// remembering still for more than 10 minutes.
+    func testAHoldNeverLastsLongerThanTenMinutesHoweverOftenItIsRenewed() async {
+        let sleeps = Sleeps()
+        let target = Target()
+        let hold = CaptureHold(target: target, sleep: { await sleeps.sleep($0) })
+        _ = await hold.hold()
+        await until { sleeps.count(CaptureHold.longest) == 1 && sleeps.count(CaptureHold.limit) == 1 }
+        XCTAssertTrue(hold.renew())
+        sleeps.end(CaptureHold.longest, 0)
+        await until { !hold.isHolding }
+        XCTAssertFalse(hold.isHolding)
+        XCTAssertEqual(target.restarts, 1)
+        XCTAssertFalse(hold.renew())
+        XCTAssertEqual(CaptureHold.longest, .seconds(600))
+        sleeps.endAll()
     }
 
     // MARK: The supervisor's hold

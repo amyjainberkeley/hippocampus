@@ -10,7 +10,9 @@
 // writer lease is free (at most 10 s). On `release` it starts remembering
 // again only if it was on before the hold and the person hasn't paused or
 // turned it off in the meantime. A hold also ends when the window's process
-// does, and on its own after 30 seconds.
+// does, and on its own 30 seconds after the lease was free, or after the
+// window last said it is still deleting (`renew`), and never lasts more than
+// 10 minutes.
 
 import Foundation
 
@@ -33,14 +35,20 @@ public protocol CaptureHolding: AnyObject {
 public final class CaptureHold {
     /// How long the window may wait for the writer lease.
     public nonisolated static let stopWait: Duration = .seconds(10)
-    /// A hold ends on its own after this.
+    /// A hold ends on its own this long after the writer lease is free, or
+    /// after the window last renewed it. The stop before it has its own
+    /// bound, `stopWait`, so a slow stop never eats into the window's time.
     public nonisolated static let limit: Duration = .seconds(30)
+    /// The longest a hold lasts, however often it is renewed: a window that
+    /// hangs while it still renews never keeps remembering still for long.
+    public nonisolated static let longest: Duration = .seconds(10 * 60)
 
     private let target: any CaptureHolding
     private let sleep: @Sendable (Duration) async throws -> Void
     /// The hold now, with whether remembering was on when it began.
     public private(set) var active: (wasOn: Bool, id: UUID)?
     private var expiry: Task<Void, Never>?
+    private var cap: Task<Void, Never>?
 
     public init(target: any CaptureHolding,
                 sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
@@ -59,18 +67,32 @@ public final class CaptureHold {
         let id = UUID()
         active = (wasOn, id)
         target.holdChanged(true)
-        expiry = Task { [weak self, sleep] in
-            try? await sleep(Self.limit)
+        cap = Task { [weak self, sleep] in
+            try? await sleep(Self.longest)
             guard !Task.isCancelled else { return }
             await self?.end(id)
         }
-        guard wasOn else { return true }
-        let stopped = await stop(within: Self.stopWait)
-        guard stopped else {
-            await end(id)
-            return false
+        if wasOn {
+            let stopped = await stop(within: Self.stopWait)
+            guard stopped else {
+                await end(id)
+                return false
+            }
         }
-        return active?.id == id
+        guard active?.id == id else { return false }
+        // The window's 30 seconds start now, with the lease free.
+        armExpiry(id)
+        return true
+    }
+
+    /// The window is still deleting: the hold now ends `limit` from now,
+    /// unless it is released first, and never after `longest`. False when
+    /// nothing is held.
+    @discardableResult
+    public func renew() -> Bool {
+        guard let id = active?.id else { return false }
+        armExpiry(id)
+        return true
     }
 
     /// The window is done: remembering comes back if it was on.
@@ -84,11 +106,22 @@ public final class CaptureHold {
         await release()
     }
 
+    private func armExpiry(_ id: UUID) {
+        expiry?.cancel()
+        expiry = Task { [weak self, sleep] in
+            try? await sleep(Self.limit)
+            guard !Task.isCancelled else { return }
+            await self?.end(id)
+        }
+    }
+
     private func end(_ id: UUID) async {
         guard let current = active, current.id == id else { return }
         active = nil
         expiry?.cancel()
         expiry = nil
+        cap?.cancel()
+        cap = nil
         target.holdChanged(false)
         if current.wasOn {
             try? await target.restartAfterHold()
