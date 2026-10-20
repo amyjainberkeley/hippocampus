@@ -13,7 +13,7 @@ private enum FixtureError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .usage:
-            return "usage: KeyframeFixtureBuilder --blob-root DIR IMAGE [IMAGE ...]"
+            return "usage: KeyframeFixtureBuilder --blob-root DIR IMAGE [IMAGE ...] | --open BLOB [--out FILE]"
         case .developmentModeRequired:
             return "MCI_DEVELOPMENT_FILE_KEY must be exactly 1"
         case .missingKey:
@@ -51,6 +51,10 @@ private enum KeyframeFixtureBuilder {
         }
 
         let arguments = Array(CommandLine.arguments.dropFirst())
+        if arguments.first == "--open" {
+            try open(arguments: Array(arguments.dropFirst()), key: key)
+            return
+        }
         guard arguments.count >= 3,
               arguments[0] == "--blob-root"
         else {
@@ -90,6 +94,43 @@ private enum KeyframeFixtureBuilder {
             }
             print(sealed.lowercaseHexDigest)
         }
+    }
+
+    /// `--open BLOB [--out FILE]`: open one sealed blob with the key, as the
+    /// window does, and say what is inside: one line of JSON with its image
+    /// kind and size, never its bytes (those go only to `--out`). A blob that
+    /// does not authenticate under this key exits 3; one that is not a sealed
+    /// blob at all exits 4. The storage audit runs it with a wrong key.
+    private static func open(arguments: [String], key: Data) throws {
+        guard let path = arguments.first,
+              arguments.count == 1 || (arguments.count == 3 && arguments[1] == "--out")
+        else {
+            throw FixtureError.usage
+        }
+        let blob = try Data(contentsOf: URL(fileURLWithPath: path), options: .mappedIfSafe)
+        let plaintext: Data
+        do {
+            plaintext = try KeyframeBlobCodec.open(blob: blob, keyMaterial: key)
+        } catch KeyframeBlobCodecError.authenticationFailed {
+            print(#"{"opened":false,"reason":"authentication_failed"}"#)
+            exit(3)
+        } catch {
+            print(#"{"opened":false,"reason":"not_a_sealed_blob"}"#)
+            exit(4)
+        }
+        let kind: String
+        if plaintext.starts(with: [0xFF, 0xD8, 0xFF]) {
+            kind = "jpeg"
+        } else if plaintext.starts(with: [0x89, 0x50, 0x4E, 0x47]) {
+            kind = "png"
+        } else {
+            kind = "other"
+        }
+        if arguments.count == 3 {
+            try plaintext.write(to: URL(fileURLWithPath: arguments[2]), options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: arguments[2])
+        }
+        print(#"{"opened":true,"kind":"\#(kind)","bytes":\#(plaintext.count)}"#)
     }
 
     private static func decodeKey(_ value: String) -> Data? {

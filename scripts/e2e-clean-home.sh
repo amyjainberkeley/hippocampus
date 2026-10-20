@@ -159,9 +159,12 @@ by_id = {response.get("id"): response for response in responses}
 if set(by_id) != {1, 2, 3, 4, 5, 6}:
     raise SystemExit(f"missing MCP responses: {sorted(by_id)}")
 tools = {tool["name"] for tool in by_id[2]["result"]["tools"]}
+# 0.3 lists each tool by its plain name and still answers to the mci_ name
+# these requests use, which it no longer lists.
 required = {"mci_recall", "mci_events_since", "mci_episodes", "mci_context"}
-if not required.issubset(tools):
-    raise SystemExit(f"missing tools: {sorted(required - tools)}")
+missing = {name for name in required if name not in tools and name.removeprefix("mci_") not in tools}
+if missing:
+    raise SystemExit(f"missing tools: {sorted(missing)}")
 recall = json.dumps(by_id[3]["result"])
 if "release sentinel" not in recall:
     raise SystemExit(f"recall missed injected capture: {recall}")

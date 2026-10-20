@@ -22,6 +22,12 @@ set -euo pipefail
 #   VERIFY_WAIT_SECONDS  override the 20s default wait
 #   VERIFY_CLEAN_HOME=1  launch with disposable HOME/CFFIXED_USER_HOME
 #   VERIFY_EXPECT_ONBOARDING=1  require first-run onboarding to stay alive
+#   VERIFY_HOME=DIR      launch with this disposable HOME instead of a fresh
+#                        one, and leave it in place afterwards so the caller
+#                        can inspect what a first launch wrote (implies
+#                        VERIFY_CLEAN_HOME=1; never the caller's own HOME)
+#   VERIFY_EVIDENCE=FILE write the processes the app started, one command
+#                        line each, and whether setup stayed up (content-free)
 #
 # NOTE: This is a structural-init check, not a functional check. The app
 # may still have feature-level bugs that show up later. The point is to
@@ -39,6 +45,8 @@ ONBOARDING_BIN="$APP/Contents/MacOS/onboarding"
 WAIT_SECONDS="${VERIFY_WAIT_SECONDS:-20}"
 CLEAN_HOME_ENABLED="${VERIFY_CLEAN_HOME:-0}"
 EXPECT_ONBOARDING="${VERIFY_EXPECT_ONBOARDING:-0}"
+KEPT_HOME="${VERIFY_HOME:-}"
+EVIDENCE="${VERIFY_EVIDENCE:-}"
 CLEAN_ROOT=""
 
 if [[ ! -d "$APP" ]]; then
@@ -56,7 +64,18 @@ if [[ "$EXPECT_ONBOARDING" == "1" && ! -x "$ONBOARDING_BIN" ]]; then
     exit 1
 fi
 
-if [[ "$CLEAN_HOME_ENABLED" == "1" ]]; then
+if [[ -n "$KEPT_HOME" ]]; then
+    # The caller's disposable home: kept afterwards, so it can be inspected.
+    mkdir -p "$KEPT_HOME"
+    KEPT_HOME="$(cd "$KEPT_HOME" && pwd -P)"
+    if [[ -n "${HOME:-}" && -d "$HOME" && "$KEPT_HOME" == "$(cd "$HOME" && pwd -P)" ]]; then
+        echo "ERROR: VERIFY_HOME must be a disposable home, not the caller's HOME"
+        exit 1
+    fi
+    CLEAN_HOME_ENABLED=1
+    export HOME="$KEPT_HOME"
+    export CFFIXED_USER_HOME="$HOME"
+elif [[ "$CLEAN_HOME_ENABLED" == "1" ]]; then
     CLEAN_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/hippocampus-app-launch.XXXXXX")"
     export HOME="$CLEAN_ROOT/home"
     export CFFIXED_USER_HOME="$HOME"
@@ -92,6 +111,36 @@ collect_descendants() {
         collect_descendants "$child"
         printf '%s\n' "$child"
     done < <(pgrep -P "$parent" 2>/dev/null || true)
+}
+
+# Every process the app started, by command line, for VERIFY_EVIDENCE. Only
+# this launch's own processes, found by parentage, are ever listed.
+SEEN_COMMANDS=""
+note_started_processes() {
+    [[ -n "$EVIDENCE" && -n "${APP_PID:-}" ]] || return 0
+    local child command
+    for child in $(collect_descendants "$APP_PID"); do
+        command="$(ps -p "$child" -o command= 2>/dev/null || true)"
+        [[ -n "$command" ]] || continue
+        case $'\n'"$SEEN_COMMANDS"$'\n' in
+            *$'\n'"$command"$'\n'*) ;;
+            *) SEEN_COMMANDS="$SEEN_COMMANDS${SEEN_COMMANDS:+$'\n'}$command" ;;
+        esac
+    done
+}
+
+EVIDENCE_WRITTEN=0
+write_evidence() {
+    [[ -n "$EVIDENCE" && "$EVIDENCE_WRITTEN" -eq 0 ]] || return 0
+    EVIDENCE_WRITTEN=1
+    {
+        printf 'home=%s\n' "${HOME:-}"
+        printf 'onboarding_seen=%s\n' "${SAW_ONBOARDING:-0}"
+        printf 'survived_seconds=%s\n' "${ELAPSED:-0}"
+        if [[ -n "$SEEN_COMMANDS" ]]; then
+            printf '%s\n' "$SEEN_COMMANDS" | sed 's/^/started=/'
+        fi
+    } > "$EVIDENCE"
 }
 
 onboarding_is_child() {
@@ -132,7 +181,12 @@ cleanup() {
         kill -KILL "$APP_PID" 2>/dev/null || true
         wait "$APP_PID" 2>/dev/null || true
     fi
-    rm -f "$LOG" "$MCI_DB_PATH" "$MCI_DB_PATH"-shm "$MCI_DB_PATH"-wal
+    write_evidence
+    rm -f "$LOG"
+    # A kept home is the caller's evidence: whatever the launch wrote stays.
+    if [[ -z "$KEPT_HOME" ]]; then
+        rm -f "$MCI_DB_PATH" "$MCI_DB_PATH"-shm "$MCI_DB_PATH"-wal
+    fi
     if [[ -n "$CLEAN_ROOT" ]]; then
         rm -rf "$CLEAN_ROOT"
     fi
@@ -168,6 +222,7 @@ while (( ELAPSED < WAIT_SECONDS )); do
     if [[ "$EXPECT_ONBOARDING" == "1" ]] && onboarding_is_child; then
         SAW_ONBOARDING=1
     fi
+    note_started_processes
 done
 
 if [[ "$EXPECT_ONBOARDING" == "1" && "$SAW_ONBOARDING" -ne 1 ]]; then
