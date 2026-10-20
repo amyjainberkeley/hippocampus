@@ -211,22 +211,56 @@ final class AskViewModelTests: XCTestCase {
         XCTAssertEqual(ask.escape(), .ignored)
     }
 
-    func testAMemoryOpenedFromOutsideShowsWithAnEmptyField() async {
+    /// A moment opened from outside (`focus=<moment>`, a moment from the Ask
+    /// panel) shows in History on its own day, selected, with an empty
+    /// field (SPEC 2.16): not alone in the field's results.
+    func testAMomentOpenedFromOutsideShowsInHistoryOnItsOwnDay() async {
         let ask = model(ScriptedUnderstanding())
         ask.query = "something typed"
         await ask.open(RecallRoute(environment: ["MCI_INITIAL_FOCUS_EVENT_ID": "102"]))
         XCTAssertEqual(ask.query, "")
-        XCTAssertEqual(ask.search.focusedEventId, 102)
-        XCTAssertTrue(ask.showsMatches)
-        XCTAssertFalse(ask.showsHistory)
-        XCTAssertEqual(ask.search.hits.map(\.id), [102])
-        XCTAssertEqual(ask.search.selectedHitId, 102)
-        XCTAssertFalse(ask.showsNoMatches)
-        XCTAssertEqual(ask.escape(), .closedDetail)
-        XCTAssertEqual(ask.escape(), .clearedSelection)
-        XCTAssertEqual(ask.escape(), .clearedField)
-        XCTAssertNil(ask.search.focusedEventId)
+        XCTAssertNil(ask.search.focusedEventId, "not one moment alone in the field's results")
         XCTAssertTrue(ask.showsHistory)
+        XCTAssertEqual(ask.history.day, MemoryDay(date: Date(timeIntervalSince1970: 1_736_000_120), calendar: SampleDay.calendar))
+        XCTAssertEqual(ask.history.range, 1_736_000_120_000_000...1_736_000_120_000_000)
+        XCTAssertEqual(ask.history.hits.map(\.id), [102])
+        XCTAssertEqual(ask.history.selectedHitId, 102)
+        XCTAssertTrue(ask.history.canLoadEarlier, "the rest of its day is under it")
+        XCTAssertEqual(ask.escape(), .clearedSelection)
+        XCTAssertTrue(ask.showsHistory)
+    }
+
+    /// Show in History from Working On, Web Pages and Looked Up sends the
+    /// moment alone: it opens exactly as Today's card and the sidebar's Show
+    /// in History do (`.history(of:selecting:)` over the moment's time).
+    func testShowInHistoryWithAMomentAloneOpensWhatTheSessionsRouteOpens() async {
+        let alone = model(ScriptedUnderstanding())
+        alone.query = "tax"
+        await alone.open(RecallRoute(place: .ask, clearsField: true, focusEventId: 101))
+        let session = model(ScriptedUnderstanding())
+        let us: Int64 = 1_736_000_000_000_000
+        await session.open(.history(of: us...us, selecting: 101))
+        for ask in [alone, session] {
+            XCTAssertEqual(ask.query, "")
+            XCTAssertTrue(ask.showsHistory)
+        }
+        XCTAssertEqual(alone.history.day, session.history.day)
+        XCTAssertEqual(alone.history.range, session.history.range)
+        XCTAssertEqual(alone.history.hits.map(\.id), session.history.hits.map(\.id))
+        XCTAssertEqual(alone.history.selectedHitId, 101)
+        XCTAssertEqual(session.history.selectedHitId, 101)
+    }
+
+    /// A moment that can no longer be read (forgotten since) leaves History
+    /// where it was, with nothing picked and the field empty.
+    func testAMomentThatIsGoneLeavesHistoryWhereItWas() async {
+        let ask = model(ScriptedUnderstanding())
+        let before = ask.history.day
+        await ask.open(RecallRoute(place: .ask, clearsField: true, focusEventId: 999))
+        XCTAssertTrue(ask.showsHistory)
+        XCTAssertNil(ask.search.focusedEventId)
+        XCTAssertEqual(ask.history.day, before)
+        XCTAssertNil(ask.history.selectedHitId)
     }
 
     func testShowInHistoryOpensHistoryOnTheSessionsOwnTime() async {

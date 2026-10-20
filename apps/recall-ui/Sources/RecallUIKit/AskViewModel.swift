@@ -273,8 +273,15 @@ public final class AskViewModel: ObservableObject {
         }
     }
 
-    /// Ask's part of a route: the field, a memory to show, or History on a
-    /// day or a session's own time.
+    /// Ask's part of a route: the field, History on a day or a session's own
+    /// time, or a moment.
+    ///
+    /// A moment alone (`focus=<moment>`: Show in History from Working On,
+    /// Web Pages and Looked Up, a moment opened from the Ask panel) opens
+    /// History on that moment's own day with the moment selected (SPEC
+    /// 2.16), the way Today's card and the sidebar show one: its time read
+    /// first, then History from it, as `.history(of:selecting:)` does. A
+    /// moment that can no longer be read leaves History where it is.
     public func open(_ route: RecallRoute) async {
         if route.clearsField { clear() }
         if route.focusesField { fieldFocusRequest += 1 }
@@ -286,7 +293,11 @@ public final class AskViewModel: ObservableObject {
         } else if let date = route.day {
             await history.show(day: MemoryDay(date: date, calendar: calendar))
         } else if let eventId = route.focusEventId {
-            await search.focusEvent(id: eventId)
+            if !route.clearsField { clear() }
+            guard let moment = await search.moment(id: eventId) else { return }
+            let date = Date(timeIntervalSince1970: Double(moment.tsUs) / 1_000_000)
+            await history.show(day: MemoryDay(date: date, calendar: calendar), around: moment.tsUs...moment.tsUs,
+                               selecting: eventId)
         }
     }
 
