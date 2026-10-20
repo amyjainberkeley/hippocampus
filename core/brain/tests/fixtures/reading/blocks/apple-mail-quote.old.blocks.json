@@ -1,0 +1,42 @@
+[
+  {
+    "kind": "paragraph",
+    "text": "Inbox – 14 messages"
+  },
+  {
+    "kind": "heading",
+    "level": 1,
+    "text": "Re: Rounding fix for the October invoices"
+  },
+  {
+    "kind": "meta",
+    "text": "Priya Raman <priya@northwind.example>"
+  },
+  {
+    "kind": "meta",
+    "text": "To: Sam Lee <sam@northwind.example>"
+  },
+  {
+    "kind": "meta",
+    "text": "Oct 12, 2026 at 10:02 AM"
+  },
+  {
+    "kind": "paragraph",
+    "text": "Sam,"
+  },
+  {
+    "kind": "paragraph",
+    "text": "The fix works on the October invoices: every total now matches the processor to the cent."
+  },
+  {
+    "kind": "lines",
+    "lines": [
+      "I will close the ticket once the changelog is out.",
+      "Priya"
+    ]
+  },
+  {
+    "kind": "quote",
+    "text": "On Oct 11, 2026, at 6:40 PM, Sam Lee <sam@northwind.example> wrote:\n> Here is the change for the October invoices. Totals round half to even\n> once, on the whole order, instead of on each line.\n>\n> Can you check invoices 1042 and 1043 before I merge it?\n> The test file is tax_tests.rs.\n>\n> Thanks,\n> Sam"
+  }
+]

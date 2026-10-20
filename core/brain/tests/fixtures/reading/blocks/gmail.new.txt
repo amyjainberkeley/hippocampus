@@ -1,0 +1,19 @@
+[app=com.google.Chrome | title=Invoice 1042 from Northwind Supplies - sam@northwind.example - Gmail | url=https://mail.google.com/mail/u/0/#inbox/FMfcgzQ | ts=2026-10-12T14:02:00.000Z]
+Invoice 1042 from Northwind Supplies
+Dana Whitfield <dana@northwind.example>
+to me
+Hi Sam,
+Thanks for your order. The invoice for October is attached, and the amount due is $1,240.00
+by October 30. The purchase order number has not changed.
+Best,
+Dana
+--
+Dana Whitfield
+Northwind Supplies
+
+
+M Invoice 1042 from North… × D Rounding half to even · Dev No × +
+Gmail Q Search mail
+Compose
+Inbox 1,204
+Inbox ×

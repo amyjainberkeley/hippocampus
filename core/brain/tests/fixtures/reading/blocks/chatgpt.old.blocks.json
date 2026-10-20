@@ -1,0 +1,35 @@
+[
+  {
+    "kind": "paragraph",
+    "text": "New chat"
+  },
+  {
+    "kind": "heading",
+    "level": 1,
+    "text": "Rounding modes for money"
+  },
+  {
+    "kind": "paragraph",
+    "text": "Which rounding mode should a checkout use for sales tax?"
+  },
+  {
+    "kind": "paragraph",
+    "text": "Use round half to even on the order total, not on each line. Rounding each line first is what makes totals drift by a cent, because every tie goes the same way and the errors add up over many orders."
+  },
+  {
+    "kind": "meta",
+    "text": "rust"
+  },
+  {
+    "kind": "meta",
+    "text": "Copy code"
+  },
+  {
+    "kind": "code",
+    "text": "fn order_total(lines: &[Line]) -> Money {\n    let subtotal: Money = lines.iter().map(|l| l.price * l.qty).sum();\n    round_half_even(subtotal + subtotal * TAX_RATE)\n}"
+  },
+  {
+    "kind": "paragraph",
+    "text": "Most payment processors round this way already, so the total a customer sees is the total that settles."
+  }
+]

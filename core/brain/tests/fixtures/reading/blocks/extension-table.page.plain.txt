@@ -1,0 +1,9 @@
+Plans and pricing
+Every plan includes free tune-ups and a loaner bike while yours is in the shop.
+
+Plan	Price	Seats
+Ride	$0	1
+Tour	$18	5
+Club	$29	25
+
+Annual plans save two months.

@@ -1,0 +1,15 @@
+[app=com.openai.chat | title=Rounding modes for money | url=? | ts=2026-10-12T14:02:00.000Z]
+New chat
+Rounding modes for money
+Which rounding mode should a checkout use for sales tax?
+Use round half to even on the order total, not on each line. Rounding each line first
+is what makes totals drift by a cent, because every tie goes the same way and the
+errors add up over many orders.
+rust
+Copy code
+fn order_total(lines: &[Line]) -> Money {
+    let subtotal: Money = lines.iter().map(|l| l.price * l.qty).sum();
+    round_half_even(subtotal + subtotal * TAX_RATE)
+}
+Most payment processors round this way already, so the total a customer sees is the
+total that settles.

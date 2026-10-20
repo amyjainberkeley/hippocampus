@@ -1,0 +1,41 @@
+[
+  {
+    "kind": "heading",
+    "level": 1,
+    "text": "Pricing study"
+  },
+  {
+    "kind": "heading",
+    "level": 2,
+    "text": "2 How customers read a price"
+  },
+  {
+    "kind": "paragraph",
+    "text": "Most people read a price the way they read a sentence: from the left, and only until they have enough. A seat price of $18 is read as “eighteen” long before the reader notices the word “seat”, so a plan that names its unit next to the number is well-known at a glance, and it wins over a cheaper plan that needs a second look."
+  },
+  {
+    "kind": "paragraph",
+    "text": "Tiered plans ask for a decision first. The reader must place the team in a tier before the number means anything, and many leave the page at that step."
+  },
+  {
+    "kind": "list",
+    "items": [
+      {
+        "marker": "•",
+        "text": "Show one price first, the one most teams pay."
+      },
+      {
+        "marker": "•",
+        "text": "Name the unit next to the number."
+      },
+      {
+        "marker": "•",
+        "text": "Put the tiers below, for the teams that need them."
+      }
+    ]
+  },
+  {
+    "kind": "paragraph",
+    "text": "3"
+  }
+]

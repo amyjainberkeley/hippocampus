@@ -30,7 +30,8 @@
 //! - A junk token is deleted together with one whitespace character beside
 //!   it. Every other byte stays.
 //! - N3: outside preformatted blocks, a line with no letter or digit is
-//!   dropped.
+//!   dropped, unless it is code's brackets ("}", "});") or a signature's
+//!   "--", which formatted text needs.
 //! - Outside preformatted blocks, wrapped lines are joined into paragraphs:
 //!   in text that carries the separator, which the helper classified, whose
 //!   indents are also set to none or four spaces; and in older text of a
@@ -1241,7 +1242,7 @@ fn clean_block(lines: &[&str], rules: &Rules<'_>, terminal: bool, budget: usize)
     let kept = lines
         .iter()
         .map(|line| without_junk(line, rules))
-        .filter(|line| line.chars().any(char::is_alphanumeric));
+        .filter(|line| holds_text(line));
     if rules.classified {
         shaped(&kept.collect::<Vec<_>>(), rules)
     } else {
@@ -1259,7 +1260,7 @@ fn joined_paragraphs(lines: &[&str], rules: &Rules<'_>, budget: usize) -> String
     let mut source = lines
         .iter()
         .map(|line| without_junk(line, rules))
-        .filter(|line| line.chars().any(char::is_alphanumeric));
+        .filter(|line| holds_text(line));
     let mut guarded = false;
     loop {
         let mut out = String::new();
@@ -1334,6 +1335,25 @@ fn join_makes_secret(left: &str, glue: &str, right: &str) -> bool {
     contains_secret(&format!("{left}{glue}{right}"))
         && !contains_secret(left)
         && !contains_secret(right)
+}
+
+/// Whether a line outside preformatted text stays (N3): it holds a letter
+/// or a digit, or it is code's brackets ("}", "});") or a signature's "--".
+fn holds_text(line: &str) -> bool {
+    let has_word = if line.is_ascii() {
+        line.bytes().any(|byte| byte.is_ascii_alphanumeric())
+    } else {
+        line.chars().any(char::is_alphanumeric)
+    };
+    if has_word {
+        return true;
+    }
+    let text = line.trim();
+    text == "--"
+        || (!text.is_empty()
+            && text
+                .chars()
+                .all(|ch| matches!(ch, '{' | '}' | '(' | ')' | '[' | ']' | ';' | ',')))
 }
 
 /// `lines` joined by line breaks, stopping once `budget` characters stand
@@ -1443,12 +1463,18 @@ impl<'r> Wrap<'r> {
         let mut widths: Vec<usize> = Vec::new();
         for line in lines {
             let line = line.trim_end();
-            if !line.chars().any(char::is_alphanumeric) {
+            if !holds_text(line) {
                 continue;
             }
             wrap.lines += 1;
-            wrap.longest = wrap.longest.max(line.chars().count());
-            widths.push(width(line));
+            // An ASCII line is as wide as it is long.
+            let (length, wide) = if line.is_ascii() {
+                (line.len(), line.len())
+            } else {
+                (line.chars().count(), width(line))
+            };
+            wrap.longest = wrap.longest.max(length);
+            widths.push(wide);
         }
         wrap.widest = widths.iter().copied().max().unwrap_or(0);
         wrap.at_edge = widths
@@ -1485,51 +1511,53 @@ impl<'r> Wrap<'r> {
         }
         let end = line.trim_end().chars().next_back()?;
         let start = next.trim_start().chars().next()?;
-        if is_cjk_text(end) != is_cjk_text(start)
-            || reading_blocks::code_line(line)
-            || reading_blocks::code_line(next)
-        {
+        if is_cjk_text(end) != is_cjk_text(start) {
             return None;
         }
         let tight = is_cjk_text(end) && is_cjk_text(start);
         let length = line.trim_end().chars().count();
         let fills = |measure: usize, of: usize| measure * 10 >= of * 9;
-        if joins(line, next, self.longest)
-            && (self.join != Join::Filled || (length >= 50 && fills(length, self.longest)))
-        {
-            return Some(if tight || ends_in_hyphenated_word(line) {
-                Glue::Tight
-            } else {
-                Glue::Space
-            });
-        }
-        if self.join != Join::Prose || indent(line) != indent(next) {
-            return None;
-        }
-        let apart = reading_blocks::list_item(next).is_some()
-            || reading_blocks::speaker_line(next).is_some()
-            || reading_blocks::heading_follows(next, after, self.lead);
-        if apart {
-            return None;
-        }
-        // J2: a line of words that ends on a joining word, not the word alone.
-        if self.longest >= 40
+        // Each rule's own shape first, which is quick to tell; code, list
+        // items, speakers and headings only for a pair one of them fits.
+        let j1 = joins(line, next, self.longest)
+            && (self.join != Join::Filled || (length >= 50 && fills(length, self.longest)));
+        let prose_rules = !j1 && self.join == Join::Prose && indent(line) == indent(next);
+        let j2 = prose_rules
+            && self.longest >= 40
             && line.split_whitespace().nth(1).is_some()
-            && reading_blocks::ends_on_joining_word(line)
+            && reading_blocks::ends_on_joining_word(line);
+        let j3_or_j4 = prose_rules
+            && !j2
+            && self.lines >= 3
+            && self.widest >= 50
+            && self.at_edge >= 2
+            && fills(width(line), self.widest)
+            && {
+                let capital = start.is_uppercase() || start.is_ascii_digit() || tight;
+                let j3 = end.is_alphanumeric() && capital;
+                let j4 = (matches!(end, '.' | '?' | '!') && start.is_uppercase())
+                    || (tight && matches!(end, '\u{3002}' | '\u{FF1F}' | '\u{FF01}'));
+                j3 || j4
+            };
+        if !(j1 || j2 || j3_or_j4)
+            || reading_blocks::code_line(line)
+            || reading_blocks::code_line(next)
         {
-            return Some(Glue::Space);
-        }
-        // J3 and J4.
-        let prose = self.lines >= 3 && self.widest >= 50 && self.at_edge >= 2;
-        if !prose || !fills(width(line), self.widest) || reading_blocks::byline_like(next) {
             return None;
         }
-        let glue = if tight { Glue::Tight } else { Glue::Space };
-        let capital = start.is_uppercase() || start.is_ascii_digit() || tight;
-        let j3 = end.is_alphanumeric() && capital;
-        let j4 = (matches!(end, '.' | '?' | '!') && start.is_uppercase())
-            || (tight && matches!(end, '\u{3002}' | '\u{FF1F}' | '\u{FF01}'));
-        (j3 || j4).then_some(glue)
+        if !j1
+            && (reading_blocks::list_item(next).is_some()
+                || reading_blocks::speaker_line(next).is_some()
+                || reading_blocks::heading_follows(next, after, self.lead)
+                || (j3_or_j4 && reading_blocks::byline_like(next)))
+        {
+            return None;
+        }
+        Some(if tight || (j1 && ends_in_hyphenated_word(line)) {
+            Glue::Tight
+        } else {
+            Glue::Space
+        })
     }
 }
 

@@ -1,0 +1,34 @@
+[
+  {
+    "kind": "heading",
+    "level": 1,
+    "text": "Invoice 1042 from Northwind Supplies"
+  },
+  {
+    "kind": "meta",
+    "text": "Dana Whitfield <dana@northwind.example>"
+  },
+  {
+    "kind": "meta",
+    "text": "to me"
+  },
+  {
+    "kind": "paragraph",
+    "text": "Hi Sam,"
+  },
+  {
+    "kind": "paragraph",
+    "text": "Thanks for your order. The invoice for October is attached, and the amount due is $1,240.00 by October 30. The purchase order number has not changed."
+  },
+  {
+    "kind": "lines",
+    "lines": [
+      "Best,",
+      "Dana"
+    ]
+  },
+  {
+    "kind": "meta",
+    "text": "--\nDana Whitfield\nNorthwind Supplies"
+  }
+]

@@ -1,0 +1,11 @@
+[app=com.apple.iWork.Numbers | title=October invoices | url=? | ts=2026-10-12T14:02:00.000Z]
+October invoices
+Invoice Supplier Amount Status
+1042 Northwind Supplies $1,240.00 Due Oct 30
+2291 Spokewise $380.00 Paid Oct 6
+2310 Chainline Parts $212.50 Paid Oct 9
+
+
+Sheet 1
+Summary
+Format Organize

@@ -255,8 +255,9 @@ impl Block {
             Self::Heading { level, text } => {
                 format!("{} {text}", if *level == 1 { "#" } else { "##" })
             }
-            Self::Byline { text } | Self::Paragraph { text } | Self::Meta { text } => text.clone(),
-            Self::List { .. } | Self::Lines { .. } => self.plain(),
+            Self::Byline { text } | Self::Paragraph { text } | Self::Meta { text } => escaped(text),
+            Self::Lines { lines, .. } => escaped(&lines.join("\n")),
+            Self::List { .. } => self.plain(),
             Self::Code { text } | Self::Terminal { text, .. } => {
                 let fence = "`".repeat(longest_backtick_run(text).max(2) + 1);
                 format!("{fence}\n{text}\n{fence}")
@@ -301,6 +302,23 @@ impl Block {
             _ => 0,
         }
     }
+}
+
+/// `text` with a backslash before a "#" or ">" that starts one of its
+/// lines, so a line that was read so ("# launch-plan") is not taken for a
+/// heading or a quote.
+fn escaped(text: &str) -> String {
+    text.split('\n')
+        .map(|line| {
+            let body = line.trim_start();
+            if body.starts_with(['#', '>']) {
+                format!("{}\\{body}", &line[..line.len() - body.len()])
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The longest run of backticks in `text`.
@@ -732,35 +750,42 @@ const WEEKDAYS: [&str; 7] = [
     "sunday",
 ];
 
-/// A word with any punctuation around it removed, in lower case.
-fn bare(word: &str) -> String {
+/// A word with any punctuation around it removed.
+fn bare(word: &str) -> &str {
     word.trim_matches(|ch: char| !ch.is_alphanumeric())
-        .to_lowercase()
+}
+
+/// Whether `word`, in any case, is one of `names` or, three or four letters
+/// long, the start of one ("Oct", "Sept", "Mon").
+fn names_one_of(word: &str, names: &[&str]) -> bool {
+    let word = bare(word);
+    word.len() >= 3
+        && word.is_ascii()
+        && names.iter().any(|name| {
+            name.eq_ignore_ascii_case(word)
+                || (word.len() <= 4
+                    && name.len() > word.len()
+                    && name[..word.len()].eq_ignore_ascii_case(word))
+        })
 }
 
 /// A month's name or its short form ("Oct", "Sept").
 fn is_month(word: &str) -> bool {
-    let word = bare(word);
-    word.len() >= 3
-        && MONTHS
-            .iter()
-            .any(|month| *month == word || (word.len() <= 4 && month.starts_with(word.as_str())))
+    names_one_of(word, &MONTHS)
 }
 
 fn is_weekday(word: &str) -> bool {
-    let word = bare(word);
-    word.len() >= 3
-        && WEEKDAYS
-            .iter()
-            .any(|day| *day == word || (word.len() <= 4 && day.starts_with(word.as_str())))
+    names_one_of(word, &WEEKDAYS)
 }
 
 /// A day of the month as read: "12", "3rd", "12th".
 fn is_day_number(word: &str) -> bool {
     let word = bare(word);
-    let digits = word.chars().take_while(char::is_ascii_digit).count();
+    let digits = word.bytes().take_while(u8::is_ascii_digit).count();
     (1..=2).contains(&digits)
-        && matches!(&word[digits..], "" | "st" | "nd" | "rd" | "th")
+        && ["", "st", "nd", "rd", "th"]
+            .iter()
+            .any(|ending| word[digits..].eq_ignore_ascii_case(ending))
         && word[..digits]
             .parse::<u8>()
             .is_ok_and(|day| (1..=31).contains(&day))
@@ -777,34 +802,49 @@ fn is_clock(word: &str) -> bool {
     })
 }
 
+/// A date written with digits: "2026-10-12", "10/12/2026".
+fn is_digit_date(word: &str) -> bool {
+    let digits = bare(word);
+    let mut parts = digits.split(['-', '/']);
+    let (Some(first), Some(second), Some(third), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    let numbers = [first, second, third]
+        .iter()
+        .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()));
+    let iso = first.len() == 4 && second.len() == 2 && third.len() == 2;
+    let slashed = digits.contains('/') && first.len() <= 2 && second.len() <= 2;
+    numbers && (iso || slashed)
+}
+
 /// Whether `line` holds a date ("Oct 12", "12 October", "2026-10-12",
 /// "10/12/2026") or says how long it takes to read ("6 min read").
 pub(crate) fn has_date(line: &str) -> bool {
-    if line.to_lowercase().contains("min read") {
+    if line
+        .as_bytes()
+        .windows(8)
+        .any(|window| window.eq_ignore_ascii_case(b"min read"))
+    {
         return true;
     }
-    let words: Vec<&str> = line.split_whitespace().collect();
-    for (at, word) in words.iter().enumerate() {
+    if !line.bytes().any(|b| b.is_ascii_digit()) {
+        return false;
+    }
+    let mut before: Option<&str> = None;
+    let mut words = line.split_whitespace().peekable();
+    while let Some(word) = words.next() {
         if is_month(word)
-            && (words.get(at + 1).is_some_and(|next| is_day_number(next))
-                || at
-                    .checked_sub(1)
-                    .is_some_and(|before| is_day_number(words[before])))
+            && (words.peek().is_some_and(|next| is_day_number(next))
+                || before.is_some_and(is_day_number))
         {
             return true;
         }
-        let digits = bare(word);
-        let parts: Vec<&str> = digits.split(['-', '/']).collect();
-        let all_digits = parts
-            .iter()
-            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()));
-        if parts.len() == 3 && all_digits {
-            let iso = parts[0].len() == 4 && parts[1].len() == 2 && parts[2].len() == 2;
-            let slashed = word.contains('/') && parts[0].len() <= 2 && parts[1].len() <= 2;
-            if iso || slashed {
-                return true;
-            }
+        if is_digit_date(word) {
+            return true;
         }
+        before = Some(word);
     }
     false
 }
@@ -813,25 +853,25 @@ pub(crate) fn has_date(line: &str) -> bool {
 /// "Today", "at" ("October 12, 2026 at 2:31 PM", "Yesterday", "Monday,
 /// October 12th"). A chat's day divider, a note's time stamp.
 pub(crate) fn date_only(line: &str) -> bool {
-    let words: Vec<&str> = line.split_whitespace().collect();
-    if words.is_empty() || words.len() > 8 {
-        return false;
-    }
     let mut telling = false;
-    for word in &words {
+    for (count, word) in line.split_whitespace().enumerate() {
+        if count >= 8 {
+            return false;
+        }
         let lower = bare(word);
         if lower.is_empty() {
             continue;
         }
+        let is = |names: &[&str]| names.iter().any(|name| lower.eq_ignore_ascii_case(name));
         if is_month(word)
             || is_weekday(word)
             || is_clock(word)
-            || ["today", "yesterday", "tomorrow"].contains(&lower.as_str())
+            || is(&["today", "yesterday", "tomorrow"])
         {
             telling = true;
         } else if !(is_day_number(word)
             || (lower.len() == 4 && lower.bytes().all(|b| b.is_ascii_digit()))
-            || ["at", "am", "pm", "a.m", "p.m"].contains(&lower.as_str()))
+            || is(&["at", "am", "pm", "a.m", "p.m"]))
         {
             return false;
         }
@@ -850,21 +890,26 @@ pub(crate) fn byline_like(line: &str) -> bool {
 /// comma, a semicolon, a colon or "!", and not a list item, a speaker line,
 /// a date or a line of code.
 pub(crate) fn heading_shaped(line: &str) -> bool {
+    heading_shape(line) && list_item(line).is_none() && !code_line(line)
+}
+
+/// [`heading_shaped`] but for being a list item or code, which the caller
+/// knows.
+fn heading_shape(line: &str) -> bool {
     let text = line.trim();
     let Some(first) = text.chars().next() else {
         return false;
     };
     let caseless = first.is_alphabetic() && !first.is_lowercase() && !first.is_uppercase();
-    text.chars().count() <= 80
+    text.len() <= 320
+        && text.chars().count() <= 80
         && text.split_whitespace().count() <= 12
         && (first.is_uppercase() || first.is_ascii_digit() || caseless)
         && !text.ends_with(['.', ',', ';', ':', '!', '\u{3002}'])
         && text.chars().filter(|ch| ch.is_alphabetic()).take(2).count() == 2
         && !ASSISTANT_LABELS.contains(&text)
-        && list_item(text).is_none()
         && speaker_line(text).is_none()
         && !date_only(text)
-        && !code_line(text)
 }
 
 /// Whether `next`, with `after` the line after it, is a heading the line
@@ -898,16 +943,21 @@ fn label_shaped(line: &str) -> bool {
 /// line that ends in a colon or a comma are prose.
 pub(crate) fn code_line(line: &str) -> bool {
     let text = line.trim();
-    !text.is_empty() && code_signal(text) && !sentence_like(text)
+    !text.is_empty() && (code_mark(text) || (code_signal(text) && !sentence_like(text)))
+}
+
+/// A comment or an attribute: only code starts a line so, however much the
+/// rest reads like a sentence.
+fn code_mark(text: &str) -> bool {
+    const MARKS: [&str; 8] = [
+        "//", "/*", "*/", "#!", "#[", "#include", "#define", "#import",
+    ];
+    MARKS.iter().any(|mark| text.starts_with(mark))
 }
 
 fn code_signal(text: &str) -> bool {
     const OPERATORS: [&str; 14] = [
         "::", "->", "=>", "==", "!=", "<=", ">=", "+=", "-=", "&&", "||", ":=", "</", "/>",
-    ];
-    /// Only code starts a line so.
-    const MARKS: [&str; 8] = [
-        "//", "/*", "*/", "#!", "#[", "#include", "#define", "#import",
     ];
     /// Words code starts a line with, and prose too ("let me know", "use the
     /// form"): they count only with code's punctuation on the line.
@@ -916,9 +966,6 @@ fn code_signal(text: &str) -> bool {
         "class ", "struct ", "impl ", "use ", "enum ", "if (", "for (", "while (", "} else",
         "elif ", "from ", "async ",
     ];
-    if MARKS.iter().any(|mark| text.starts_with(mark)) {
-        return true;
-    }
     if KEYWORDS.iter().any(|keyword| text.starts_with(keyword)) {
         return text.contains(['(', ')', '=', ':', '{', ';', '<', '[', '\'', '"']);
     }
@@ -966,15 +1013,29 @@ fn code_signal(text: &str) -> bool {
 /// no brace and no semicolon at the end. A wrapped line of a sentence counts,
 /// wherever it ends.
 fn sentence_like(text: &str) -> bool {
-    let words = text.split_whitespace().count();
-    let shown = text.chars().filter(|ch| !ch.is_whitespace()).count();
-    let letters = text.chars().filter(|ch| ch.is_alphabetic()).count();
-    words >= 6 && letters * 4 >= shown * 3 && !text.contains(['{', '}']) && !text.ends_with(';')
+    let (mut words, mut shown, mut letters, mut space) = (0usize, 0usize, 0usize, true);
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            space = true;
+            continue;
+        }
+        if space {
+            words += 1;
+            space = false;
+        }
+        if matches!(ch, '{' | '}') {
+            return false;
+        }
+        shown += 1;
+        letters += usize::from(ch.is_alphabetic());
+    }
+    words >= 6 && letters * 4 >= shown * 3 && !text.ends_with(';')
 }
 
 /// The first part of a window's title, which names what the window shows:
 /// before " - ", " — ", " – ", " | " or " · ", without the marks an app
-/// puts before a title. None when it only names the app or says nothing
+/// puts before a title or a document's file extension ("Pricing
+/// study.pdf"). None when it only names the app or says nothing
 /// ("Notes", "New Tab", "Untitled").
 pub(crate) fn title_lead<'t>(title: &'t str, app: Option<&str>) -> Option<&'t str> {
     const SEPARATORS: [&str; 5] = [" - ", " \u{2014} ", " \u{2013} ", " | ", " \u{00B7} "];
@@ -988,12 +1049,20 @@ pub(crate) fn title_lead<'t>(title: &'t str, app: Option<&str>) -> Option<&'t st
         "new chat",
         "start page",
     ];
+    /// A document's file name ends so; its heading does not.
+    const DOCUMENT_EXTENSIONS: [&str; 10] = [
+        ".pdf", ".docx", ".doc", ".pages", ".key", ".numbers", ".xlsx", ".rtf", ".txt", ".md",
+    ];
     let title = chrome::without_title_marks(title).trim();
     let lead = SEPARATORS
         .iter()
         .filter_map(|separator| title.find(separator))
         .min()
         .map_or(title, |at| title[..at].trim());
+    let lead = DOCUMENT_EXTENSIONS
+        .iter()
+        .find_map(|extension| lead.strip_suffix(extension))
+        .map_or(lead, str::trim_end);
     let lower = lead.to_lowercase();
     let app_name = app.and_then(apps::known_name).map(str::to_lowercase);
     (!lead.is_empty()
@@ -1003,22 +1072,42 @@ pub(crate) fn title_lead<'t>(title: &'t str, app: Option<&str>) -> Option<&'t st
 }
 
 /// Whether `line` names the window: it is the first part of its title, by
-/// its words, in any case.
+/// its words, in any case, with quotes around them or not.
 fn names_window(line: &str, lead: Option<&str>) -> bool {
     let Some(lead) = lead else {
         return false;
     };
-    let words = |text: &str| -> Vec<String> {
-        text.split_whitespace()
-            .map(|word| {
-                word.trim_matches(|ch: char| matches!(ch, '"' | '\u{201C}' | '\u{201D}'))
-                    .to_lowercase()
-            })
-            .filter(|word| !word.is_empty())
-            .collect()
-    };
     let line = line.trim();
-    line.chars().count() <= 120 && !line.is_empty() && words(line) == words(lead)
+    if line.is_empty() || line.len() > lead.len() * 2 + 8 || line.chars().count() > 120 {
+        return false;
+    }
+    let quote = |ch: char| matches!(ch, '"' | '\u{201C}' | '\u{201D}');
+    let mut ours = line
+        .split_whitespace()
+        .map(|word| word.trim_matches(quote))
+        .filter(|word| !word.is_empty());
+    let mut theirs = lead
+        .split_whitespace()
+        .map(|word| word.trim_matches(quote))
+        .filter(|word| !word.is_empty());
+    loop {
+        match (ours.next(), theirs.next()) {
+            (None, None) => return true,
+            (Some(a), Some(b)) => {
+                let same = if a.is_ascii() && b.is_ascii() {
+                    a.eq_ignore_ascii_case(b)
+                } else {
+                    a.chars()
+                        .flat_map(char::to_lowercase)
+                        .eq(b.chars().flat_map(char::to_lowercase))
+                };
+                if !same {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+    }
 }
 
 /// Whether a run's lines are a table whose cells are known: two rows or
@@ -1035,14 +1124,57 @@ fn is_table(lines: &[&str]) -> bool {
 /// Whether a run reads like code as a whole: a line starts with a shell
 /// prompt, four lines in ten read like code, or it has three indent levels
 /// with a quarter of its lines indented. A single line of code alone in its
-/// run is code.
+/// run is code. A run with two sentences of prose in it is not code as a
+/// whole (an answer around a code sample): its code is found line by line.
 fn is_code_run(lines: &[&str]) -> bool {
+    is_code_run_with(lines, &Facts::of(lines))
+}
+
+/// What the rules ask of each line of a run more than once, asked once.
+struct Facts {
+    /// The line reads like code ([`code_line`]).
+    code: Vec<bool>,
+    /// The line starts a list item ([`list_item`]).
+    item: Vec<bool>,
+}
+
+impl Facts {
+    fn of(lines: &[&str]) -> Self {
+        Self {
+            code: lines.iter().map(|line| code_line(line)).collect(),
+            item: lines.iter().map(|line| list_item(line).is_some()).collect(),
+        }
+    }
+
+    /// [`heading_shaped`], for line `at`.
+    fn heading(&self, lines: &[&str], at: usize) -> bool {
+        !self.code[at] && !self.item[at] && heading_shape(lines[at])
+    }
+}
+
+fn is_code_run_with(lines: &[&str], facts: &Facts) -> bool {
     if lines.iter().any(|line| starts_with_prompt(line)) {
         return true;
     }
-    let code = lines.iter().filter(|line| code_line(line)).count();
+    let prose = lines
+        .iter()
+        .zip(&facts.code)
+        .filter(|(line, code)| {
+            let text = line.trim();
+            !**code && text.len() >= 60 && text.chars().count() >= 60 && sentence_like(text)
+        })
+        .count();
+    if prose >= 2 {
+        return false;
+    }
+    let code = facts.code.iter().filter(|code| **code).count();
     if code * 10 >= lines.len() * 4 {
         return true;
+    }
+    // Indents make code, not a list with items under items.
+    let items = facts.item.iter().filter(|item| **item).count();
+    if items * 2 >= lines.len() {
+        return false;
     }
     let mut levels: Vec<usize> = Vec::new();
     let mut indented = 0usize;
@@ -1223,6 +1355,8 @@ enum Role {
     Byline,
     Meta,
     Quote,
+    /// A row of a table whose cells are known.
+    Table,
 }
 
 /// A block and the span of `main` it was made from.
@@ -1257,7 +1391,8 @@ pub fn blocks(main: &str, window: &Window<'_>, source: EventSource) -> Vec<Block
         Kind::Editor => editor(main, lead),
         Kind::Sheet => sheet(main, lead),
         Kind::Mail => mail(main, lead),
-        Kind::Document | Kind::AiChat => document(main, lead),
+        Kind::Document => document(main, Doc::new(lead)),
+        Kind::AiChat => document(main, Doc::new(lead).without_question_headings()),
     };
     capped(merged(made, main), main)
 }
@@ -1426,37 +1561,54 @@ fn editor(main: &str, lead: Option<&str>) -> Vec<Piece> {
 }
 
 /// A spreadsheet: tables where cells are known, table-like rows otherwise.
+/// The line that names the window, among the first ones, is its heading.
 fn sheet(main: &str, lead: Option<&str>) -> Vec<Piece> {
     let mut out: Vec<Piece> = Vec::new();
     let mut named = false;
     for run in runs(main) {
         let mut lines: &[Line<'_>] = &run;
-        if !named && names_window(lines[0].text, lead) {
+        let title = (!named)
+            .then(|| {
+                lines
+                    .iter()
+                    .take(3)
+                    .position(|line| names_window(line.text, lead))
+            })
+            .flatten();
+        if let Some(title) = title {
             named = true;
+            if title > 0 {
+                out.push(rows(&lines[..title]));
+            }
             out.push(Piece::of(
-                &lines[..1],
+                &lines[title..=title],
                 Block::Heading {
                     level: 1,
-                    text: lines[0].text.trim().to_owned(),
+                    text: lines[title].text.trim().to_owned(),
                 },
             ));
-            lines = &lines[1..];
+            lines = &lines[title + 1..];
             if lines.is_empty() {
                 continue;
             }
         }
-        let texts: Vec<&str> = lines.iter().map(|line| line.text).collect();
-        let block = if is_table(&texts) {
-            table(&texts)
-        } else {
-            Block::Lines {
-                lines: texts.iter().map(|text| (*text).to_owned()).collect(),
-                table: true,
-            }
-        };
-        out.push(Piece::of(lines, block));
+        out.push(rows(lines));
     }
     out
+}
+
+/// A sheet's rows: a table when their cells are known, else table-like lines.
+fn rows(lines: &[Line<'_>]) -> Piece {
+    let texts: Vec<&str> = lines.iter().map(|line| line.text).collect();
+    let block = if is_table(&texts) {
+        table(&texts)
+    } else {
+        Block::Lines {
+            lines: texts.iter().map(|text| (*text).to_owned()).collect(),
+            table: true,
+        }
+    };
+    Piece::of(lines, block)
 }
 
 fn table(lines: &[&str]) -> Block {
@@ -1544,8 +1696,7 @@ fn mail(main: &str, lead: Option<&str>) -> Vec<Piece> {
 }
 
 /// The document rules, run by run.
-fn document(main: &str, lead: Option<&str>) -> Vec<Piece> {
-    let mut doc = Doc::new(lead);
+fn document(main: &str, mut doc: Doc<'_>) -> Vec<Piece> {
     let mut out: Vec<Piece> = Vec::new();
     for run in runs(main) {
         doc.run(&run, &mut [], &mut out);
@@ -1560,6 +1711,10 @@ struct Doc<'l> {
     h1: bool,
     /// Lines since the level-1 heading, once it was found.
     since_h1: Option<usize>,
+    /// A question over a long line may be a section's heading (a page's
+    /// "What is a seat minimum?"), but not in an AI chat, where it is what
+    /// the person asked.
+    question_headings: bool,
 }
 
 impl<'l> Doc<'l> {
@@ -1568,17 +1723,24 @@ impl<'l> Doc<'l> {
             lead,
             h1: false,
             since_h1: None,
+            question_headings: true,
         }
+    }
+
+    fn without_question_headings(mut self) -> Self {
+        self.question_headings = false;
+        self
     }
 
     /// The blocks of one run of lines. `preset` holds roles already decided
     /// (mail's header lines, quotes and signature), or is empty.
     fn run(&mut self, run: &[Line<'_>], preset: &mut [Role], out: &mut Vec<Piece>) {
         let texts: Vec<&str> = run.iter().map(|line| line.text).collect();
+        let facts = Facts::of(&texts);
         if preset.iter().all(|role| *role == Role::Free) {
             let whole = if is_table(&texts) {
                 Some(table(&texts))
-            } else if is_code_run(&texts) {
+            } else if is_code_run_with(&texts, &facts) {
                 Some(Block::Code {
                     text: texts.join("\n"),
                 })
@@ -1601,7 +1763,7 @@ impl<'l> Doc<'l> {
         } else {
             preset.to_vec()
         };
-        self.decide(run, &mut roles);
+        self.decide(run, &texts, &facts, &mut roles);
         emit(run, &roles, out);
     }
 
@@ -1612,14 +1774,27 @@ impl<'l> Doc<'l> {
         }
     }
 
-    fn decide(&mut self, run: &[Line<'_>], roles: &mut [Role]) {
+    fn decide(&mut self, run: &[Line<'_>], texts: &[&str], facts: &Facts, roles: &mut [Role]) {
         let n = run.len();
+        // Rows with tab-separated cells, two or more in a row.
+        let mut at = 0;
+        while at < n {
+            let mut end = at;
+            while end < n && roles[end] == Role::Free && run[end].text.contains('\t') {
+                end += 1;
+            }
+            let texts: Vec<&str> = run[at..end].iter().map(|line| line.text).collect();
+            if is_table(&texts) {
+                roles[at..end].fill(Role::Table);
+            }
+            at = end.max(at + 1);
+        }
         // Two or more lines of code in a row.
         let mut at = 0;
         while at < n {
-            if roles[at] == Role::Free && code_line(run[at].text) {
+            if roles[at] == Role::Free && facts.code[at] {
                 let mut end = at;
-                while end < n && roles[end] == Role::Free && code_line(run[end].text) {
+                while end < n && roles[end] == Role::Free && facts.code[end] {
                     end += 1;
                 }
                 if end - at >= 2 {
@@ -1630,10 +1805,22 @@ impl<'l> Doc<'l> {
                 at += 1;
             }
         }
+        // A code block's label and button over it ("rust", "Copy code"):
+        // what was read, kept quiet.
+        for at in 0..n {
+            if roles[at] == Role::Code && (at == 0 || roles[at - 1] != Role::Code) {
+                for above in (at.saturating_sub(2)..at).rev() {
+                    if roles[above] != Role::Free || !code_label(run[above].text) {
+                        break;
+                    }
+                    roles[above] = Role::Meta;
+                }
+            }
+        }
         // List items, and the lines indented under them.
         let mut at = 0;
         while at < n {
-            let item = (roles[at] == Role::Free)
+            let item = (roles[at] == Role::Free && facts.item[at])
                 .then(|| list_item(run[at].text))
                 .flatten();
             let Some(item) = item else {
@@ -1644,9 +1831,9 @@ impl<'l> Doc<'l> {
             at += 1;
             while at < n
                 && roles[at] == Role::Free
-                && list_item(run[at].text).is_none()
+                && !facts.item[at]
                 && indent_chars(run[at].text) > item.indent
-                && !code_line(run[at].text)
+                && !facts.code[at]
             {
                 roles[at] = Role::More;
                 at += 1;
@@ -1676,7 +1863,8 @@ impl<'l> Doc<'l> {
             let next = (at + 1 < n).then(|| (run[at + 1].text, roles[at + 1]));
             if label_shaped(text)
                 && next.is_some_and(|(next, role)| {
-                    role == Role::Free && (names_window(next, self.lead) || heading_shaped(next))
+                    role == Role::Free
+                        && (names_window(next, self.lead) || facts.heading(texts, at + 1))
                 })
             {
                 roles[at] = Role::Label;
@@ -1687,19 +1875,93 @@ impl<'l> Doc<'l> {
                 }
                 continue;
             }
-            if heading_shaped(text)
-                && (n == 1
-                    || next.is_some_and(|(next, role)| {
-                        matches!(role, Role::Item | Role::Code)
-                            || (role == Role::Free && next.trim_end().chars().count() >= 60)
-                    }))
-            {
+            if facts.heading(texts, at) && self.section_heading(run, texts, facts, roles, at) {
                 roles[at] = Role::H2;
                 continue;
             }
             roles[at] = Role::Plain;
         }
     }
+
+    /// Whether the heading-shaped line `at` is a section's heading: it
+    /// stands alone in its run; or it comes right before a line of 60
+    /// characters or more, a list, code or a table, and not right after a
+    /// short line of its own shape (then it is one of a group of rows); or it
+    /// comes after a list, code or a long line and before two short lines
+    /// (a title over rows: "Owners", then "Rounding fix Sam").
+    fn section_heading(
+        &self,
+        run: &[Line<'_>],
+        texts: &[&str],
+        facts: &Facts,
+        roles: &[Role],
+        at: usize,
+    ) -> bool {
+        let n = run.len();
+        if n == 1 {
+            return true;
+        }
+        let text = run[at].text.trim();
+        if !self.question_headings && text.ends_with('?') {
+            return false;
+        }
+        let long = |line: &Line<'_>| line.chars() >= 60;
+        let short = |index: usize| {
+            index < n && roles[index] == Role::Free && run[index].chars() < 40 && !facts.item[index]
+        };
+        let in_rows = at > 0 && roles[at - 1] == Role::Plain && facts.heading(texts, at - 1);
+        let before_body = at + 1 < n
+            && (matches!(roles[at + 1], Role::Item | Role::Code | Role::Table)
+                || (roles[at + 1] == Role::Free && long(&run[at + 1])));
+        let after_break = at > 0
+            && (matches!(
+                roles[at - 1],
+                Role::Item | Role::More | Role::Code | Role::Table
+            ) || long(&run[at - 1]));
+        (before_body && !in_rows) || (after_break && short(at + 1) && short(at + 2))
+    }
+}
+
+/// A code block's label or button, read over it: a language's name or
+/// "Copy code".
+fn code_label(line: &str) -> bool {
+    const LABELS: [&str; 34] = [
+        "Copy code",
+        "Copy",
+        "Copy to clipboard",
+        "rust",
+        "python",
+        "swift",
+        "javascript",
+        "typescript",
+        "js",
+        "ts",
+        "jsx",
+        "tsx",
+        "bash",
+        "sh",
+        "shell",
+        "zsh",
+        "console",
+        "json",
+        "yaml",
+        "toml",
+        "sql",
+        "go",
+        "java",
+        "kotlin",
+        "c",
+        "cpp",
+        "csharp",
+        "ruby",
+        "php",
+        "html",
+        "css",
+        "diff",
+        "text",
+        "plaintext",
+    ];
+    LABELS.contains(&line.trim())
 }
 
 fn indent_chars(line: &str) -> usize {
@@ -1717,7 +1979,7 @@ fn emit(run: &[Line<'_>], roles: &[Role], out: &mut Vec<Piece>) {
         let same = |role: Role, other: Role| match role {
             Role::Item | Role::More => matches!(other, Role::Item | Role::More),
             Role::Plain | Role::Free => matches!(other, Role::Plain | Role::Free),
-            Role::Code | Role::Quote | Role::Meta => other == role,
+            Role::Code | Role::Quote | Role::Meta | Role::Table => other == role,
             _ => false,
         };
         while end < n && same(role, roles[end]) {
@@ -1781,6 +2043,10 @@ fn emit(run: &[Line<'_>], roles: &[Role], out: &mut Vec<Piece>) {
                     text,
                 },
             )),
+            Role::Table => {
+                let texts: Vec<&str> = lines.iter().map(|line| line.text).collect();
+                out.push(Piece::of(lines, table(&texts)));
+            }
             Role::Label => out.push(Piece::of(lines, Block::Label { text })),
             Role::Byline => out.push(Piece::of(lines, Block::Byline { text })),
             Role::Plain | Role::Free => plain(lines, longest, out),
@@ -1789,31 +2055,41 @@ fn emit(run: &[Line<'_>], roles: &[Role], out: &mut Vec<Piece>) {
     }
 }
 
-/// Plain lines: a paragraph each, or one `lines` block for a group of short
-/// lines (an address, a menu, a sign-off): when the run's longest line is
-/// under 40 characters, or most of them are under three quarters of it.
+/// Plain lines: a paragraph each, except that two or more short lines in a
+/// row (an address, a menu, a sign-off, rows) are one `lines` block. A line
+/// is short when it is under 60 characters and three quarters of the run's
+/// longest, or when no line of the run reaches 40.
 fn plain(lines: &[Line<'_>], longest: usize, out: &mut Vec<Piece>) {
-    let short = lines
-        .iter()
-        .filter(|line| line.chars() * 4 < longest * 3)
-        .count();
-    if lines.len() >= 2 && (longest < 40 || short * 2 > lines.len()) {
-        out.push(Piece::of(
-            lines,
-            Block::Lines {
-                lines: lines.iter().map(|line| line.text.to_owned()).collect(),
-                table: false,
-            },
-        ));
-        return;
-    }
-    for line in lines {
+    let short =
+        |line: &Line<'_>| longest < 40 || (line.chars() < 60 && line.chars() * 4 < longest * 3);
+    let mut at = 0;
+    while at < lines.len() {
+        let mut end = at;
+        while end < lines.len() && short(&lines[end]) {
+            end += 1;
+        }
+        if end - at >= 2 {
+            out.push(Piece::of(
+                &lines[at..end],
+                Block::Lines {
+                    lines: lines[at..end]
+                        .iter()
+                        .map(|line| line.text.to_owned())
+                        .collect(),
+                    table: false,
+                },
+            ));
+            at = end;
+            continue;
+        }
+        let line = &lines[at];
         out.push(Piece::of(
             std::slice::from_ref(line),
             Block::Paragraph {
                 text: line.text.trim().to_owned(),
             },
         ));
+        at += 1;
     }
 }
 

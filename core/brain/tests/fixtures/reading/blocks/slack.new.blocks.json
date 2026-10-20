@@ -1,0 +1,40 @@
+[
+  {
+    "kind": "paragraph",
+    "text": "# launch-plan 14 members"
+  },
+  {
+    "kind": "meta",
+    "text": "Today"
+  },
+  {
+    "kind": "turn",
+    "speaker": "Maya Chen",
+    "time": "10:42 AM",
+    "text": "Pushed the new onboarding flow to staging. The permissions step is now one screen.\nCan someone check the copy on the screen recording prompt before 3 PM?"
+  },
+  {
+    "kind": "turn",
+    "speaker": "Ravi Patel",
+    "time": "10:47 AM",
+    "text": "Looks good. One nit: \"Allow capture\" should say \"Turn on memory\" to match the menu."
+  },
+  {
+    "kind": "turn",
+    "speaker": "Jonas Weber",
+    "time": "11:05 AM",
+    "text": "Benchmarks from last night: recall p95 is 41 ms on the 100k-event store.\nEmbedding backfill finished in 6m 12s; 0 events skipped, 3 retried."
+  },
+  {
+    "kind": "turn",
+    "speaker": "Maya Chen",
+    "time": "11:09 AM",
+    "text": "Great. Shipping 0.3 to the beta group after lunch unless anyone objects."
+  },
+  {
+    "kind": "turn",
+    "speaker": "Ravi Patel",
+    "time": "11:12 AM",
+    "text": "Let's land Team at $18 a seat, billed annually. I still need an answer on seat minimums."
+  }
+]

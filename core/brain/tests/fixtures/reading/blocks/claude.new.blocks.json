@@ -1,0 +1,39 @@
+[
+  {
+    "kind": "heading",
+    "level": 1,
+    "text": "Rounding question"
+  },
+  {
+    "kind": "lines",
+    "lines": [
+      "Why do my order totals drift by a cent?",
+      "Two things usually cause it:"
+    ]
+  },
+  {
+    "kind": "list",
+    "items": [
+      {
+        "marker": "1.",
+        "text": "Rounding each line before adding them up."
+      },
+      {
+        "marker": "2.",
+        "text": "Rounding half up, so every tie goes the same way."
+      }
+    ]
+  },
+  {
+    "kind": "paragraph",
+    "text": "Round once, on the total, and round half to even:"
+  },
+  {
+    "kind": "code",
+    "text": "let total = round_half_even(subtotal + tax);\nassert_eq!(total, Money::from_cents(7_384));"
+  },
+  {
+    "kind": "paragraph",
+    "text": "That keeps the total a customer sees equal to the total that settles."
+  }
+]

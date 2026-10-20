@@ -6,7 +6,7 @@
 use std::ffi::{c_char, CStr, CString};
 use std::ptr;
 
-use mci_brain::reading_blocks::{blocks, Window};
+use mci_brain::reading_blocks::{blocks, plain_text, Block, Window, MAX_STRUCTURE_BYTES};
 use mci_brain::{BrainStore, Event, EventId, EventSource, SqlCipherBrainStore};
 use mci_brain_ffi::{
     mci_brain_ffi_close, mci_brain_ffi_event_reading, mci_brain_ffi_open,
@@ -101,12 +101,70 @@ fn the_reading_carries_main_as_blocks_of_what_was_read() {
     let main = value["main"].as_str().unwrap().to_owned();
     let made = value["blocks"].as_array().expect("blocks is an array");
     assert!(!made.is_empty());
-    let mut held = Vec::new();
     for block in made {
         assert!(block["kind"].is_string(), "each block names its kind");
-        held.extend(words(block["text"].as_str().unwrap_or_default()));
     }
-    assert_eq!(held, words(&main), "the blocks hold main's words, in order");
+    let made: Vec<Block> = serde_json::from_value(value["blocks"].clone()).unwrap();
+    assert_eq!(
+        words(&plain_text(&made)),
+        words(&main),
+        "the blocks hold main's words, in order"
+    );
+}
+
+#[test]
+fn an_older_article_arrives_formatted() {
+    let brain = TestBrain::new();
+    let title = "Rounding half to even";
+    let stored = format!(
+        "{}MONEY & ROUNDING\nRounding half to even\nPriya Raman \u{b7} Oct 12, 2026 \u{b7} 6 min read\nRound half to even sends each tie to the even neighbour instead, so half the\nties go down and\nhalf go up. The errors cancel out:\nround_half_even(2.5)   // 2.0\nround_half_even(3.5)   // 4.0",
+        header(title)
+    );
+    let id = brain.seed(&stored, title);
+    let value = brain.reading(id.0);
+    let made: Vec<Block> = serde_json::from_value(value["blocks"].clone()).unwrap();
+    assert_eq!(
+        made,
+        [
+            Block::Label {
+                text: "MONEY & ROUNDING".into()
+            },
+            Block::Heading {
+                level: 1,
+                text: "Rounding half to even".into()
+            },
+            Block::Byline {
+                text: "Priya Raman \u{b7} Oct 12, 2026 \u{b7} 6 min read".into()
+            },
+            Block::Paragraph {
+                text: "Round half to even sends each tie to the even neighbour instead, so half the ties go down and half go up. The errors cancel out:".into()
+            },
+            Block::Code {
+                text: "round_half_even(2.5)   // 2.0\nround_half_even(3.5)   // 4.0".into()
+            },
+        ]
+    );
+}
+
+#[test]
+fn the_reading_with_its_blocks_stays_within_the_windows_bound() {
+    // A window of many short list items: the most structure a reading's
+    // blocks can add (EventReading.maxJSONBytes in ReadableText.swift).
+    let brain = TestBrain::new();
+    let mut body = String::new();
+    while body.len() < 120 * 1024 {
+        body.push_str("\u{2022} a\n");
+    }
+    let id = brain.seed(&format!("{}{body}", header("Items")), "Items");
+    let raw = unsafe { mci_brain_ffi_event_reading(brain.handle, id.0, ptr::null()) };
+    assert!(!raw.is_null());
+    let bytes = unsafe { CStr::from_ptr(raw) }.to_bytes().len();
+    unsafe { mci_brain_ffi_string_free(raw) };
+    let text_cap = (128 * 1024 + 1024) * 6;
+    assert!(
+        bytes <= text_cap * 2 + MAX_STRUCTURE_BYTES + 512 + 2048,
+        "{bytes} bytes"
+    );
 }
 
 #[test]

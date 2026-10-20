@@ -1,0 +1,45 @@
+[
+  {
+    "kind": "heading",
+    "level": 1,
+    "text": "Plans and pricing"
+  },
+  {
+    "kind": "paragraph",
+    "text": "Every plan includes free tune-ups and a loaner bike while yours is in the shop."
+  },
+  {
+    "kind": "table",
+    "rows": [
+      [
+        "Plan",
+        "Price",
+        "Seats"
+      ],
+      [
+        "Ride",
+        "$0",
+        "1"
+      ],
+      [
+        "Tour",
+        "$18",
+        "5"
+      ],
+      [
+        "Club",
+        "$29",
+        "25"
+      ]
+    ],
+    "numeric": [
+      false,
+      true,
+      true
+    ]
+  },
+  {
+    "kind": "paragraph",
+    "text": "Annual plans save two months."
+  }
+]

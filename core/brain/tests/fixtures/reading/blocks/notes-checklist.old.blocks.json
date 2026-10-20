@@ -1,0 +1,37 @@
+[
+  {
+    "kind": "heading",
+    "level": 1,
+    "text": "Launch checklist"
+  },
+  {
+    "kind": "list",
+    "items": [
+      {
+        "marker": "☑",
+        "text": "Rounding fix merged",
+        "checked": true
+      },
+      {
+        "marker": "☑",
+        "text": "Changelog updated",
+        "checked": true
+      },
+      {
+        "marker": "☐",
+        "text": "Gift card copy reviewed",
+        "checked": false
+      },
+      {
+        "marker": "☐",
+        "text": "Beta group told about 0.4",
+        "checked": false
+      },
+      {
+        "marker": "☐",
+        "text": "Pricing page live before the October sale",
+        "checked": false
+      }
+    ]
+  }
+]
