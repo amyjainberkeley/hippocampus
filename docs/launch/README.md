@@ -27,7 +27,10 @@ can't watch for 24 hours.
 
 Greps every shipping crate and Swift/Python/JS file for the APIs that
 actually open a socket or make a request (not URL *strings*, which are
-data), then classifies each file against an allowlist ledger in the script:
+data), then classifies each file against an allowlist ledger in the script.
+Build outputs (`.build/`, `target/`, `.venv/`, `build/`, `dist/` and the
+like) are skipped, so a built checkout gets the same answer as a clean
+export (`scripts/test-no-egress.sh`):
 
 - **(a) UPDATE** — Sparkle polls the signed appcast on the GitHub releases
   host (`apps/hippocampus/Resources/Info.plist`). This is the one
@@ -89,6 +92,12 @@ yellow WARN, because that is the honest state of 0.3.0.
 - `no-egress.sh` reasons about **code**. The proof that nothing *actually*
   dials out on your Mac over a day is the human runtime watch in
   `network-check.md`.
+- It reads first-party source only. Third-party native code is outside its
+  view: the text reader's ONNX Runtime carries Microsoft's telemetry client,
+  which the worker turns off and the helper runs with the network denied. A run of the
+  shipped worker with no network (`scripts/lib/ocr_offline.py`, in the
+  release and the `ocr-worker` lane) and the storage audit's `net.binary`
+  and `net.runtime-log` checks cover that.
 - The budgets themselves (download 180 MB, installed size, energy) are
   measured elsewhere; these four checkers cover network, encryption,
   listeners, and live footprint.

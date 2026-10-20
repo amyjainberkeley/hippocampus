@@ -12,6 +12,9 @@ import OnboardingKit
 enum OnboardingEntryPoint {
     @MainActor
     static func main() {
+        // Owner-only before anything is created: every file this process
+        // makes is 0600 and every folder 0700 (reports/e2e, finding 5).
+        umask(0o077)
         #if DEBUG
         // Before the parent watch and the app: nothing on screen.
         if OnboardingPreviewRenderer.renderIfRequested() { return }

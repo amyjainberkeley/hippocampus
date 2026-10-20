@@ -14,6 +14,9 @@ path = "src/main.rs"
 [dependencies]
 mci-core = { path = "../../core" }
 regex     = "1"
+# Already on the workspace lockfile (mci-core and mci-agent use it): the
+# safe umask(2) that makes the host's files owner-only.
+rustix    = { version = "1.1.4", default-features = false, features = ["fs", "process", "std"] }
 serde     = { version = "1", features = ["derive"] }
 serde_json = "1"
 

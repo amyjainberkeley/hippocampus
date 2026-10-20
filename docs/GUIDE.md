@@ -57,7 +57,7 @@ The one-line installer and the Homebrew cask put `mci-agent` on your PATH. It re
 
 Commands that write to memory (`import-sessions`, `embed-backfill`, `mcp-sync`, `enrich`, `brief`) refuse to run while another program holds the database's one writer lease. While Hippocampus is remembering, its own agent holds it, so quit Hippocampus first.
 
-`mci-agent init` and `mci-agent connect --all` are the older command-line setup. Besides registering the MCP server, they add session-start hooks and load a background job (`ai.hippocampus.refresh`) that imports your Claude Code and Codex transcripts; `init` also imports them at once. The app doesn't need them. `mci-agent disconnect --all` removes the hooks and the refresh job; the MCP registrations stay until you use Disconnect in Preferences or `mci-agent clients --disconnect all` ([more](../PRIVACY.md#disconnecting-an-ai-tool)).
+`mci-agent init` and `mci-agent connect --all` are the older command-line setup. Besides registering the MCP server, they add session-start hooks and load a background job (`ai.hippocampus.refresh`) that imports your Claude Code and Codex transcripts; `init` also imports them at once. The app doesn't need them. `mci-agent disconnect --all` removes the hooks, the MCP registrations and the refresh job, like Disconnect All… in Preferences ([more](../PRIVACY.md#disconnecting-an-ai-tool)).
 
 ## Try it on a made-up memory
 

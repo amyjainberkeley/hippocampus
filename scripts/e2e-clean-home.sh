@@ -36,6 +36,10 @@ require_file() {
 }
 
 export HOME="$CLEAN_HOME"
+# Foundation, and Core ML's compiled-model cache with it, ignores HOME for
+# user-domain folders unless CFFIXED_USER_HOME is set: without it, `enrich`
+# read and wrote ~/Library/Caches/mci-agent in the real home.
+export CFFIXED_USER_HOME="$CLEAN_HOME"
 export CARGO_HOME="$HOST_CARGO_HOME"
 export RUSTUP_HOME="$HOST_RUSTUP_HOME"
 export CODEX_HOME="$CLEAN_HOME/.codex"

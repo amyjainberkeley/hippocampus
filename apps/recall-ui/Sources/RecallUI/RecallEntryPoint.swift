@@ -1,3 +1,4 @@
+import Darwin
 import SwiftUI
 
 /// The process starts here. A render of the synthetic preview returns (or
@@ -7,6 +8,9 @@ import SwiftUI
 enum RecallEntryPoint {
     @MainActor
     static func main() {
+        // Owner-only before anything is created: every file this process
+        // makes is 0600 and every folder 0700 (reports/e2e, finding 5).
+        umask(0o077)
         #if DEBUG
         // Overview and You (`--render-previews=`): draws and exits.
         RecallPreviewRenderer.renderAndExitIfRequested()

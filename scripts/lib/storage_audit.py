@@ -607,54 +607,46 @@ def check_network(report: Report, repo: Path, sampler: Path | None, real_home: P
                "the product's processes wrote or read in the real home, outside HOME and CFFIXED_USER_HOME: " + "; ".join(in_real_home[:5]))
 
 
-def sandbox_denials(pids: list[int], programs: dict[int, set[str]], since: float, real_home_prefix: str) -> list[str]:
-    """Real-home paths a run's process tried to open and the test sandbox refused."""
-    import datetime
-    start = datetime.datetime.fromtimestamp(since - 5).strftime("%Y-%m-%d %H:%M:%S")
-    result = subprocess.run(["/usr/bin/log", "show", "--style", "ndjson", "--start", start,
-                             "--predicate", 'senderImagePath ENDSWITH "/Sandbox" AND eventMessage CONTAINS " deny("'],
-                            capture_output=True, text=True)
-    found = set()
-    for line in result.stdout.splitlines():
-        try:
-            message = json.loads(line).get("eventMessage", "")
-        except json.JSONDecodeError:
-            continue
-        match = re.search(r"Sandbox: ([^(]+)\((\d+)\) deny\(\d+\) (\S+) (.+)$", message)
-        if not match or int(match.group(2)) not in pids:
-            continue
-        name, operation, path = match.group(1), match.group(3), match.group(4)
-        if name not in programs.get(int(match.group(2)), set()):
-            continue
-        if path.startswith(real_home_prefix) or path.rstrip("/") + "/" == real_home_prefix + "Library/":
-            found.add(f"{name} -> {path} ({operation}, denied by the test sandbox)")
-        elif operation.startswith("network"):
-            found.add(f"{name} -> {path} ({operation}: a name lookup, denied by the test sandbox)")
-    return sorted(found)
+NETWORK_LOG_PREDICATE = '(subsystem == "com.apple.CFNetwork" OR subsystem BEGINSWITH "com.apple.network")'
+SANDBOX_DENIAL_PREDICATE = 'senderImagePath ENDSWITH "/Sandbox" AND eventMessage CONTAINS " deny("'
 
 
-def unified_log_connections(pids: list[int], programs: dict[int, set[str]], since: float) -> list[str] | None:
+def read_unified_log(predicate: str, since: float) -> list[dict] | None:
+    """The unified log's entries matching `predicate` from five seconds
+    before `since` (epoch seconds), or None when the log can't be read."""
     import datetime
     start = datetime.datetime.fromtimestamp(since - 5).strftime("%Y-%m-%d %H:%M:%S")
-    predicate = ("processID IN {" + ", ".join(map(str, pids)) + "} AND "
-                 "(subsystem == \"com.apple.CFNetwork\" OR subsystem BEGINSWITH \"com.apple.network\")")
     result = subprocess.run(["/usr/bin/log", "show", "--style", "ndjson", "--start", start, "--predicate", predicate],
                             capture_output=True, text=True)
     if result.returncode != 0:
         return None
-    findings: dict[tuple[int, str], dict] = {}
+    entries = []
     for line in result.stdout.splitlines():
         try:
             entry = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if isinstance(entry, dict):
+            entries.append(entry)
+    return entries
+
+
+def network_activity(entries: list[dict], programs: dict[int, set[str]]) -> dict[tuple[int, str], dict]:
+    """What CFNetwork and Network.framework logged for each (pid, program)
+    in `programs`: tasks started, connection attempts, requests sent and
+    their body bytes, remote ports and response statuses. An entry from a
+    pid whose program isn't the one named (a reused pid) is not counted."""
+    findings: dict[tuple[int, str], dict] = {}
+    for entry in entries:
         pid = entry.get("processID")
         message = entry.get("eventMessage", "")
         image = os.path.basename(entry.get("processImagePath", ""))
         if pid not in programs or image not in programs[pid]:
-            continue  # a reused pid is not the run's process
-        key = (pid, image)
-        found = findings.setdefault(key, {"connections": 0, "requests": 0, "bytes": 0, "ports": set(), "statuses": set()})
+            continue
+        found = findings.setdefault((pid, image), {"tasks": 0, "connections": 0, "requests": 0, "bytes": 0,
+                                                   "ports": set(), "statuses": set()})
+        if " resuming, timeouts" in message:
+            found["tasks"] += 1
         if "creating secure tcp or quic connection" in message or "nw_flow_connected" in message:
             found["connections"] += 1
         sent = re.search(r"sent request, body S (\d+)", message)
@@ -667,14 +659,49 @@ def unified_log_connections(pids: list[int], programs: dict[int, set[str]], sinc
         status = re.search(r"received response, status (\d+)", message)
         if status:
             found["statuses"].add(status.group(1))
+    return findings
+
+
+def sandbox_refusals(entries: list[dict], pids: list[int]) -> list[tuple[str, int, str, str]]:
+    """(program, pid, operation, target) for each sandbox refusal of one of `pids`."""
+    found = []
+    for entry in entries:
+        match = re.search(r"Sandbox: ([^(]+)\((\d+)\) deny\(\d+\) (\S+) (.+)$", entry.get("eventMessage", ""))
+        if match and int(match.group(2)) in pids:
+            found.append((match.group(1), int(match.group(2)), match.group(3), match.group(4)))
+    return found
+
+
+def sandbox_denials(pids: list[int], programs: dict[int, set[str]], since: float, real_home_prefix: str) -> list[str]:
+    """Real-home paths a run's process tried to open and the test sandbox refused."""
+    found = set()
+    for name, pid, operation, path in sandbox_refusals(read_unified_log(SANDBOX_DENIAL_PREDICATE, since) or [], pids):
+        if name not in programs.get(pid, set()):
+            continue
+        if path.startswith(real_home_prefix) or path.rstrip("/") + "/" == real_home_prefix + "Library/":
+            found.add(f"{name} -> {path} ({operation}, denied by the test sandbox)")
+        elif operation.startswith("network"):
+            found.add(f"{name} -> {path} ({operation}: a name lookup, denied by the test sandbox)")
+    return sorted(found)
+
+
+def unified_log_connections(pids: list[int], programs: dict[int, set[str]], since: float) -> list[str] | None:
+    predicate = "processID IN {" + ", ".join(map(str, pids)) + "} AND " + NETWORK_LOG_PREDICATE
+    entries = read_unified_log(predicate, since)
+    if entries is None:
+        return None
     out = []
-    for (pid, name), found in sorted(findings.items()):
+    for (pid, name), found in sorted(network_activity(entries, programs).items()):
         if found["connections"] or found["requests"]:
             sent = (f"{found['requests']} HTTP request(s) sent with {found['bytes']} bytes of body, responses "
                     f"{', '.join(sorted(found['statuses'])) or 'none'}" if found["requests"] else
                     "no request left the Mac (the connection never completed)")
             out.append(f"{name} (pid {pid}): {found['connections']} connection attempt(s) to port(s) "
                        f"{', '.join(sorted(found['ports'])) or '?'}; {sent}")
+        elif found["tasks"]:
+            # A URL task that never got as far as a connection still means
+            # the process tried to reach the network.
+            out.append(f"{name} (pid {pid}): {found['tasks']} CFNetwork task(s) started, no connection made")
     return out
 
 

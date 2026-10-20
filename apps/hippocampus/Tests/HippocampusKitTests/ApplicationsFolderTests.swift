@@ -207,6 +207,32 @@ final class ApplicationsFolderTests: XCTestCase {
         XCTAssertEqual(try attribute("com.apple.quarantine", of: source), quarantine)
     }
 
+    /// The app runs with umask 077 so its own files are owner-only. The copy
+    /// it makes of itself in Applications must still open for every account
+    /// on this Mac: modes come from the bundle, not from the mask.
+    func testUnderTheAppsOwnerOnlyMaskTheCopyStillOpensForEveryAccount() throws {
+        let source = try makeBundle(named: "Hippocampus.app")
+        let files = FileManager.default
+        let folders = ["", "Contents", "Contents/MacOS", "Contents/Resources"]
+        for folder in folders {
+            try files.setAttributes([.posixPermissions: 0o755], ofItemAtPath: source.appendingPathComponent(folder).path)
+        }
+        try files.setAttributes([.posixPermissions: 0o644],
+                                ofItemAtPath: source.appendingPathComponent("Contents/Info.plist").path)
+        let destination = scratch.appendingPathComponent("Applications/Hippocampus.app")
+
+        let previous = umask(0o077)
+        defer { umask(previous) }
+        _ = try mover().move(from: source, to: destination)
+
+        func mode(_ relative: String) throws -> Int? {
+            try files.attributesOfItem(atPath: destination.appendingPathComponent(relative).path)[.posixPermissions] as? Int
+        }
+        for folder in folders { XCTAssertEqual(try mode(folder), 0o755, folder) }
+        XCTAssertEqual(try mode("Contents/MacOS/Hippocampus"), 0o755)
+        XCTAssertEqual(try mode("Contents/Info.plist"), 0o644)
+    }
+
     func testAnOlderCopyGoesToTheTrashAndTheNewOneTakesItsPlace() throws {
         let source = try makeBundle(named: "Hippocampus.app", note: "new")
         let applications = scratch.appendingPathComponent("Applications", isDirectory: true)

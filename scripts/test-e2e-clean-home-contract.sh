@@ -26,6 +26,7 @@ require_pattern() {
 
 require_literal 'mktemp -d' 'E2E must allocate a throwaway home'
 require_pattern 'export HOME=.*CLEAN_HOME' 'E2E must replace HOME with the throwaway home'
+require_literal 'export CFFIXED_USER_HOME="$CLEAN_HOME"' 'E2E must keep Foundation and Core ML user folders in the throwaway home too'
 require_literal 'capture_enabled = false' 'E2E must begin with capture disabled'
 require_literal '--drain-stdin' 'E2E must exercise the production capture ingest command'
 require_literal '--strict' 'capture ingest must fail closed when the brain cannot open'

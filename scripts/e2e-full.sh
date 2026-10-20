@@ -41,12 +41,14 @@
 #                         binaries and the Vision reader when no --app is given
 #   --ocr auto|paddle|vision  which reader the fixture uses (default auto:
 #                         the app's bundled PP-OCR worker when there is one)
-#   --allow-ocr-network   run the PP-OCR worker without the test's sandbox.
-#                         By default it runs under sandbox-exec with outbound
-#                         network, DNS and the real home's ONNX Runtime
-#                         telemetry folder denied, because the bundled ONNX
-#                         Runtime uploads telemetry to Microsoft (E2E-REPORT);
-#                         this flag lets that upload happen again
+#   --allow-ocr-network   run the PP-OCR worker without the test's own rules.
+#                         It always runs inside the product's sandbox, which
+#                         denies every network operation and name lookups
+#                         (the bundled ONNX Runtime once uploaded telemetry to
+#                         Microsoft: E2E-REPORT, finding 1); by default the
+#                         test also closes the real ~/Library to it. With this
+#                         flag only the product's own sandbox applies, which
+#                         checks that it is enough on its own
 #   --no-audit            do not run audit-storage-security.sh
 #   --keep                keep the throwaway root (default: only on failure)
 #   --evidence DIR        copy the results, logs and audit into DIR
@@ -538,8 +540,10 @@ fi
 NO_MODEL=(env MCI_MIND_PATH=/nonexistent/hippocampus-mind)
 
 # Custody: the development file key, as the app's FileKeyStore makes it
-# (folder by createDirectory with no attributes, key file 0600).
-mkdir -p "$SUPPORT"
+# (folder by createDirectory with no attributes, under the app's umask 077,
+# so 0700; key file 0600).
+mkdir -p "$(dirname "$SUPPORT")"
+( umask 077; mkdir -p "$SUPPORT" )
 ( umask 077; openssl rand -hex 32 > "$KEY_FILE" )
 chmod 600 "$KEY_FILE"
 KEY_HEX="$(tr -d '\r\n' < "$KEY_FILE")"
@@ -644,24 +648,20 @@ case "$OCR_CHOICE" in
 esac
 FEED_ARGS=(--manifest "$H/frames.json" --report "$H/feed-report.json")
 if [[ -n "$OCR_WORKER" && "$OCR_SANDBOX" == "1" ]]; then
-    # The bundled ONNX Runtime posts telemetry to Microsoft and keeps its
-    # queue in the real home, whatever HOME says. The worker reads screens
-    # the same way inside this sandbox; it only cannot reach the network,
-    # DNS or that folder. Its attempts still show in the unified log.
-    # It also keeps its telemetry queue, URL cache and HTTP storage in the
-    # real ~/Library, so that is closed to it too; the attempts are in the
-    # kernel's sandbox reports, which the audit reads.
+    # The helper starts the worker inside the product's own sandbox, which
+    # denies every network operation and name lookups (OCRWorkerSandbox),
+    # with ONNX Runtime's telemetry turned off. A sandbox can't be applied
+    # inside another, so the test's rules are added to that profile rather
+    # than wrapping the worker: the real ~/Library is closed to it as well.
+    # Any attempt still shows in the unified log and the kernel's sandbox
+    # reports, which the audit reads.
     real_library="$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory 2>/dev/null | awk '{print $2}')/Library"
-    cat > "$H/ocr-sandboxed" <<SANDBOX
-#!/bin/bash
-exec /usr/bin/sandbox-exec -p '(version 1) (allow default) (deny network-outbound (remote ip)) (deny network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder"))) (deny mach-lookup (global-name "com.apple.dnssd.service")) (deny file-read* file-write* (subpath "$real_library"))' "$OCR_WORKER" "\$@"
-SANDBOX
-    chmod 700 "$H/ocr-sandboxed"
-    FEED_ARGS+=(--worker "$H/ocr-sandboxed")
-    READER="the bundled PP-OCR worker ($OCR_WORKER, inside the test's no-network sandbox)"
+    printf '(deny file-read* file-write* (subpath "%s"))\n' "$real_library" > "$H/ocr-sandbox-rules.sb"
+    FEED_ARGS+=(--worker "$OCR_WORKER" --worker-sandbox-rules "$H/ocr-sandbox-rules.sb")
+    READER="the bundled PP-OCR worker ($OCR_WORKER, inside the product's no-network sandbox, with the real ~/Library closed too)"
 elif [[ -n "$OCR_WORKER" ]]; then
     FEED_ARGS+=(--worker "$OCR_WORKER")
-    READER="the bundled PP-OCR worker ($OCR_WORKER, network allowed: --allow-ocr-network)"
+    READER="the bundled PP-OCR worker ($OCR_WORKER, inside the product's no-network sandbox only: --allow-ocr-network)"
 elif [[ "$OCR_CHOICE" == "paddle" ]]; then
     fail c2 "--ocr paddle: no PP-OCR worker in the app or tools/ocr/dist"
     READER=""
@@ -1174,16 +1174,41 @@ for path in re.findall(r'"(~/[^"]+)"', block):
     print(path)
 PY
 if [[ ! -s "$H/zap-paths.txt" ]]; then
-    # The cask lives in the local tap; without it, its list as of 0.3.0.
-    printf '%s\n' "~/.config/hippocampus" "~/.hippocampus" "~/Library/Application Support/MCI" \
-        "~/Library/Caches/ai.hippocampus" "~/Library/HTTPStorages/ai.hippocampus" "~/Library/Logs/MCI" \
+    # The cask lives in the local tap; without it, its home paths as of 0.3.1.
+    printf '%s\n' "~/..claude.json.hippocampus.lock" "~/.claude/.hippocampus-context.lock" \
+        "~/.codex/.config.toml.hippocampus.lock" "~/.codex/.hippocampus-context.lock" \
+        "~/.config/hippocampus" "~/.hippocampus" "~/.hippocampus-client-registry-journal-*" "~/.mci" \
+        "~/Library/Application Support/Hippocampus" "~/Library/Application Support/MCI" \
+        "~/Library/Caches/ai.hippocampus" "~/Library/Caches/hippocampus-ocr" \
+        "~/Library/Containers/ai.hippocampus.SafariExtension" "~/Library/Group Containers/group.ai.hippocampus" \
+        "~/Library/HTTPStorages/ai.hippocampus" "~/Library/HTTPStorages/hippocampus-ocr" "~/Library/Logs/MCI" \
         "~/Library/Preferences/ai.hippocampus.plist" "~/Library/Saved Application State/ai.hippocampus.savedState" \
         > "$H/zap-paths.txt"
 fi
-while IFS= read -r zap; do
-    [[ -n "$zap" ]] || continue
-    rm -rf "${E2E_HOME:?}/${zap#\~/}"
-done < "$H/zap-paths.txt"
+# Without an app bundle (a headless run), the agent is the bare debug binary,
+# and macOS names its caches (Core ML's compiled models) after it rather than
+# after the bundle, Caches/ai.hippocampus, which the zap list has.
+if [[ "$AGENT" != *.app/Contents/MacOS/* ]]; then
+    printf '%s\n' "~/Library/Caches/$(basename "$AGENT")" >> "$H/zap-paths.txt"
+fi
+# Homebrew's zap expands globs (the AI-tool registry's lock files are one);
+# so does this, inside the throwaway home only.
+python3 - "$E2E_HOME" "$H/zap-paths.txt" <<'PY'
+import glob, os, shutil, sys
+home = os.path.realpath(sys.argv[1])
+for line in open(sys.argv[2]):
+    zap = line.strip()
+    if not zap.startswith("~/"):
+        continue
+    for path in glob.glob(os.path.join(glob.escape(home), zap[2:])):
+        parent = os.path.realpath(os.path.dirname(path))
+        if parent != home and not parent.startswith(home + os.sep):
+            continue
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+        else:
+            os.unlink(path)
+PY
 # What is left: any product file or folder, and any file that still names it.
 (cd "$E2E_HOME" && find . -mindepth 1 2>/dev/null | sort) > "$H/after-zap-files.txt"
 python3 - "$E2E_HOME" > "$H/residue.txt" 2>&1 <<'PY'
@@ -1213,7 +1238,7 @@ PY
 if [[ ! -s "$H/residue.txt" ]]; then
     pass e3 "after the cask's zap list nothing of Hippocampus is left in the home"
 else
-    fail e3 "left after uninstall (zap) and disconnect: $(sed 's/^PATH /path: /; s/^NAMES /mentions Hippocampus: /' "$H/residue.txt" | tr '\n' ';' | cut -c1-400) — the MCP server registrations stay in the AI tools' own config (PRIVACY.md: remove by hand)"
+    fail e3 "left after uninstall (zap) and disconnect: $(sed 's/^PATH /path: /; s/^NAMES /mentions Hippocampus: /' "$H/residue.txt" | tr '\n' ';' | cut -c1-400)"
 fi
 person e4 "The database key stays in the login Keychain as ai.hippocampus.brain after uninstall (docs/GUIDE.md); this run used a file key, so removing it in Keychain Access needs a person"
 

@@ -20,6 +20,16 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         let ownerStartTimeUs: UInt64
     }
 
+    /// The extension has no `main` of its own; its first code is this
+    /// object's creation, before any request writes to the App Group.
+    override init() {
+        // Owner-only before anything is created: a staged page is 0600 and
+        // the inbox 0700, as in every Hippocampus process (reports/e2e,
+        // finding 5).
+        umask(0o077)
+        super.init()
+    }
+
     func beginRequest(with context: NSExtensionContext) {
         guard let item = context.inputItems.first as? NSExtensionItem,
               let userInfo = item.userInfo as? [String: Any],

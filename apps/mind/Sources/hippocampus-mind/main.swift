@@ -1,6 +1,11 @@
 import Foundation
 import MindKit
 
+// Owner-only before anything is created: every file this process makes,
+// Core ML's compiled-model cache included, is 0600 and every folder 0700
+// (reports/e2e, finding 5).
+umask(0o077)
+
 // hippocampus-mind --serve
 //
 // Reads one JSON request per line on stdin and writes one reply per line on

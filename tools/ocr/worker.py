@@ -3,7 +3,18 @@
 Images are never written to disk. Model downloads belong to prepare.py, never
 this process. The parent enforces a wall-clock deadline and reaps this child.
 """
-import collections
+import os
+
+# ONNX Runtime's official build carries Microsoft's 1DS telemetry client, on
+# by default: native code that posts usage events and a device ID to
+# mobile.events.data.microsoft.com, out of sight of the Python network guard
+# below (reports/e2e, finding S1). Read when ONNX Runtime starts, this switch
+# keeps the uploader, its events and the device ID from being created, so it
+# is set before anything can import onnxruntime. The capture helper sets it
+# in the worker's environment too, and starts the worker with no network.
+os.environ['ORT_DISABLE_TELEMETRY'] = '1'
+
+import collections  # noqa: E402  (after the telemetry switch, on purpose)
 import hashlib
 import json
 import math
@@ -57,6 +68,10 @@ def load_engine(model_dir, *, threads=1, half_res_detection=False):
         path = model_dir / name
         if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
             raise ValueError('missing or invalid bundled OCR model')
+    import onnxruntime
+    # A second switch, through the API, for the events it controls, in case
+    # ONNX Runtime was started before this module could set the variable.
+    onnxruntime.disable_telemetry_events()
     from rapidocr import RapidOCR
     from rapidocr.ch_ppocr_det.utils import DetPreProcess
     from rapidocr.utils.download_file import DownloadFile

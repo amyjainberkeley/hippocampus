@@ -30,7 +30,14 @@
 // refuses to run, so it can never reach a Keychain item.
 //
 //     SyntheticCaptureFeed --manifest FRAMES.json [--worker PATH]
+//                          [--worker-sandbox-rules RULES.sb]
 //                          [--report REPORT.json] [--timeout-ms MS]
+//
+// The worker starts as the helper starts it, inside the product's
+// no-network sandbox (OCRWorkerSandbox). `--worker-sandbox-rules` appends a
+// test's own rules to that profile: the end-to-end harness closes the real
+// ~/Library to the worker too. A sandbox can't be applied inside another, so
+// a test adds its rules here rather than wrapping the worker.
 //
 // Manifest: {"frames": [{"id", "app", "title", "url"?, "lines": [...],
 //            "offset_seconds"?: -3600, "width"?: 1100, "height"?: 700}]}
@@ -152,6 +159,9 @@ private final class DispositionBox: @unchecked Sendable {
 @main
 private enum SyntheticCaptureFeed {
     static func main() async {
+        // As the capture helper it stands in for (and the OCR worker it
+        // starts): owner-only files and folders (MCICaptureHelper/main.swift).
+        umask(0o077)
         do {
             try await run()
         } catch {
@@ -164,6 +174,7 @@ private enum SyntheticCaptureFeed {
         var arguments = Array(CommandLine.arguments.dropFirst())
         var manifestPath: String?
         var workerPath: String?
+        var workerSandboxRules = ""
         var reportPath: String?
         var timeoutOverride: Int?
         while !arguments.isEmpty {
@@ -173,6 +184,8 @@ private enum SyntheticCaptureFeed {
             switch flag {
             case "--manifest": manifestPath = value
             case "--worker": workerPath = value
+            case "--worker-sandbox-rules":
+                workerSandboxRules = try String(contentsOf: URL(fileURLWithPath: value), encoding: .utf8)
             case "--report": reportPath = value
             case "--timeout-ms": timeoutOverride = Int(value)
             default: throw FeedError.usage
@@ -217,7 +230,8 @@ private enum SyntheticCaptureFeed {
         let timeoutMs: Int
         var paddle: PaddleOCRRunner?
         if let workerPath {
-            let runner = PaddleOCRRunner(executableURL: URL(fileURLWithPath: workerPath), persistent: true)
+            let runner = PaddleOCRRunner(executableURL: URL(fileURLWithPath: workerPath), persistent: true,
+                                         sandbox: OCRWorkerSandbox(extraRules: workerSandboxRules))
             runner.prewarm()
             paddle = runner
             engine = runner
