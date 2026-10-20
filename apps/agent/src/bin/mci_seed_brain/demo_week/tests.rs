@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use super::story::{FOUNDER, OLDEST_DAY_BACK, PEOPLE, PROJECT_FOLDER, PROJECT_PATH};
+use super::story::{FOUNDER, OLDEST_DAY_BACK, PEOPLE, PROJECT_FOLDER};
 use super::*;
 
 /// Names from the maintainers' own lives that must never appear in the
@@ -389,8 +389,7 @@ fn the_world_is_made_up() {
         .map(|(_, text)| text.as_str())
         .collect::<Vec<_>>()
         .join(" ")
-        .replace(PROJECT_FOLDER, "pebblewick-app")
-        .replace(PROJECT_PATH, "pebblewick-app");
+        .replace(PROJECT_FOLDER, "pebblewick-app");
     for never in [
         "Amy",
         "Jain",
@@ -446,6 +445,7 @@ fn the_world_is_made_up() {
 fn item_of(win: &Win) -> Option<&'static str> {
     let title = win.title.as_str();
     if title.ends_with("\u{2014} pebblewick-app")
+        || title.starts_with("pebblewick-app \u{2014}")
         || title.starts_with(&format!("{PROJECT_FOLDER} \u{2014}"))
     {
         Some("pebblewick-app")
@@ -649,33 +649,37 @@ fn the_week_is_written_and_read_back() {
 #[test]
 fn the_terminal_shows_the_project_folder_demo_memory_makes() {
     // Demo Memory's folder, as the app makes it (`DemoMemoryFolder.standard`),
-    // holds the project's folder, and the week's Terminal names it, so
-    // Resume finds a folder to reopen instead of "doesn't know where it is".
+    // holds the project's folder, and a Terminal window names it, so Resume
+    // finds a folder to reopen instead of "doesn't know where it is".
     assert_eq!(
         PROJECT_FOLDER,
         "~/Library/Application Support/Hippocampus/Demo Memory/pebblewick-app"
     );
-    let week = world(MONDAY_AFTERNOON, TZ);
-    let terminals: Vec<&Win> = week
-        .moments()
-        .into_iter()
-        .map(|(_, win, _)| win)
-        .filter(|win| win.app == "com.apple.Terminal")
-        .collect();
-    assert!(!terminals.is_empty());
-    for win in terminals {
-        let folder = mci_brain::subject::terminal_folder_at(&win.title, Some("sam"))
-            .expect("the title names a folder");
-        assert_eq!(
-            folder.path.as_deref(),
-            Some(PROJECT_FOLDER),
-            "{}",
-            win.title
-        );
-        assert_eq!(folder.name, "pebblewick-app");
+    for now in [MONDAY_AFTERNOON, at_local(MONDAY_AFTERNOON, 21, 30)] {
+        let week = world(now, TZ);
+        let today = day_start(now, TZ, 0);
+        let mut named_before_today = false;
+        for (ts, win, _) in week.moments() {
+            if win.app != "com.apple.Terminal" {
+                continue;
+            }
+            let folder = mci_brain::subject::terminal_folder_at(&win.title, Some("sam"))
+                .expect("the title names a folder");
+            assert_eq!(folder.name, "pebblewick-app", "{}", win.title);
+            if let Some(path) = folder.path.as_deref() {
+                assert_eq!(path, PROJECT_FOLDER, "one folder, everywhere");
+                assert!(ts < today, "today's windows keep Terminal's own title");
+                named_before_today = true;
+            }
+            assert!(
+                !win.main.contains("/Users/"),
+                "no other folder: {}",
+                win.main
+            );
+        }
         assert!(
-            !win.main.contains("/Users/ren/dev"),
-            "one folder, everywhere"
+            named_before_today,
+            "a window the agent reads names the folder"
         );
     }
 }

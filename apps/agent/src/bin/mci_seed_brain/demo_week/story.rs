@@ -38,15 +38,14 @@ const OWEN: &str = "Owen Pryce";
 pub const PEOPLE: [&str; 8] = [FOUNDER, IRIS, THEO, NADIA, MALIK, JOY, MIRA, OWEN];
 
 const PROJECT: &str = "pebblewick-app";
-/// The project's folder, as Terminal's title shows it (Terminal set to show
-/// the path): an empty folder Demo Memory makes inside its own folder
-/// ([`super::make_project_folder`]), so Resume finds a folder to reopen,
-/// and it goes when the week does. `~` is whoever's Mac this is.
+/// The project's folder, as yesterday's Terminal window titles show it
+/// (that window set to show the path): an empty folder Demo Memory makes
+/// inside its own folder ([`super::make_project_folder`]), so Resume finds a
+/// folder to reopen, and it goes when the week does. `~` is whoever's Mac
+/// this is. Today's windows show Terminal's default title, so the take's
+/// pictures don't carry the path.
 pub const PROJECT_FOLDER: &str =
     "~/Library/Application Support/Hippocampus/Demo Memory/pebblewick-app";
-/// The same folder as the made-up founder's tools print it.
-pub const PROJECT_PATH: &str =
-    "/Users/ren/Library/Application Support/Hippocampus/Demo Memory/pebblewick-app";
 const PROMPT: &str = "ren@studio pebblewick-app % ";
 /// The lines of code the editor's drawing has room for, at 1440 by 900.
 const EDITOR_LINES: usize = 36;
@@ -1189,10 +1188,13 @@ impl Story {
         )
     }
 
-    fn terminal(lines: &[String], screen_id: &str) -> Win {
+    /// A Terminal window in the project: its title is the project's name,
+    /// as Terminal shows it by default, or its whole path (`shows_path`).
+    fn terminal(lines: &[String], screen_id: &str, shows_path: bool) -> Win {
+        let folder = if shows_path { PROJECT_FOLDER } else { PROJECT };
         Win {
             app: TERMINAL,
-            title: format!("{PROJECT_FOLDER} \u{2014} -zsh \u{2014} 160\u{00D7}40"),
+            title: format!("{folder} \u{2014} -zsh \u{2014} 160\u{00D7}40"),
             url: None,
             main: lines.join("\n"),
             rest: String::new(),
@@ -1210,10 +1212,10 @@ impl Story {
         let mut lines = vec![
             format!("{PROMPT}pnpm test billing"),
             String::new(),
-            format!("> pebblewick-app@2.3.0 test {PROJECT_PATH}"),
+            "> pebblewick-app@2.3.0 test".to_owned(),
             "> vitest run billing".to_owned(),
             String::new(),
-            format!(" RUN  v2.1.4 {PROJECT_PATH}"),
+            " RUN  v2.1.4".to_owned(),
             String::new(),
         ];
         if failing {
@@ -1257,11 +1259,11 @@ impl Story {
     }
 
     fn tests_first_run() -> Win {
-        Self::terminal(&Self::test_run(true), "terminal-tests-first")
+        Self::terminal(&Self::test_run(true), "terminal-tests-first", false)
     }
 
     fn tests_passing() -> Win {
-        Self::terminal(&Self::test_run(false), "terminal-tests-passing")
+        Self::terminal(&Self::test_run(false), "terminal-tests-passing", false)
     }
 
     fn tests_pushed() -> Win {
@@ -1282,7 +1284,7 @@ impl Story {
             "branch 'annual-billing' set up to track 'origin/annual-billing'.".to_owned(),
             PROMPT.trim_end().to_owned(),
         ]);
-        Self::terminal(&lines, "terminal-pushed")
+        Self::terminal(&lines, "terminal-pushed", false)
     }
 
     fn tests_webhooks() -> Win {
@@ -1293,7 +1295,7 @@ impl Story {
             "e80a6c4 Add waitlists".to_owned(),
             format!("{PROMPT}pnpm test webhooks"),
             String::new(),
-            format!(" RUN  v2.1.4 {PROJECT_PATH}"),
+            " RUN  v2.1.4".to_owned(),
             String::new(),
             " \u{2713} src/webhooks.test.ts (3 tests) 22ms".to_owned(),
             "   \u{2713} onInvoicePaid > sends one receipt when Stripe retries".to_owned(),
@@ -1305,7 +1307,7 @@ impl Story {
             String::new(),
             PROMPT.trim_end().to_owned(),
         ];
-        Self::terminal(&lines, "terminal-webhooks")
+        Self::terminal(&lines, "terminal-webhooks", true)
     }
 
     // -- Notion, Figma, Calendar ----------------------------------------------
