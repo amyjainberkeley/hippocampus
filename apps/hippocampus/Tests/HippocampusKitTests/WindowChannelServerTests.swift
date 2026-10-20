@@ -27,7 +27,7 @@ final class WindowChannelServerTests: XCTestCase {
             #"{"v":1,"id":"r3","op":"openSystemSettings","permission":"accessibility"}"#))?.permission, .accessibility)
         for text in [
             "not json", "{}", #"{"v":2,"id":"r","op":"pause"}"#, #"{"v":1,"op":"pause"}"#,
-            #"{"v":1,"id":"","op":"pause"}"#, #"{"v":1,"id":"r","op":"turnOff"}"#,
+            #"{"v":1,"id":"","op":"pause"}"#, #"{"v":1,"id":"r","op":"wipe"}"#,
             #"{"v":1,"id":"r","op":"status","state":"remembering","title":"Remembering"}"#,
             #"{"v":1,"id":"r","op":"resume","until":"2026-10-12T15:40:00-07:00"}"#,
             #"{"v":1,"id":"r","op":"pause","until":"tomorrow"}"#,
@@ -98,6 +98,44 @@ final class WindowChannelServerTests: XCTestCase {
         // never carried out as one.
         XCTAssertFalse(WindowChannelPolicy.allows(request(.resume), row: row(.turnOn), holding: false,
                                                   demoMemory: true))
+    }
+
+    @MainActor
+    private final class Performed {
+        var actions: [CaptureStatusAction] = []
+    }
+
+    /// While a turn-on is under way the row offers Turn Off, and the window
+    /// shows it. The window's Turn Off is carried out as the menu's, and is
+    /// taken only while the row offers it; a Pause is still only the row's
+    /// own Pause.
+    func testTurnOffIsTakenOnlyWhileTheRowOffersIt() async {
+        XCTAssertEqual(WindowChannelRequest.parse(line(#"{"v":1,"id":"o1","op":"turnOff"}"#))?.op, .turnOff)
+        XCTAssertTrue(WindowChannelPolicy.allows(request(.turnOff), row: row(.turnOff), holding: false))
+        for action in [CaptureStatusAction.pause, .resume, .turnOn, .tryAgain, nil] {
+            XCTAssertFalse(WindowChannelPolicy.allows(request(.turnOff), row: row(action), holding: false),
+                           "\(String(describing: action))")
+        }
+        XCTAssertFalse(WindowChannelPolicy.allows(request(.pause), row: row(.turnOff), holding: false))
+
+        let locator = FakeBinaryLocator()
+        locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
+        locator.agentURL = URL(fileURLWithPath: "/bundle/mci-agent")
+        let supervisor = ProcessSupervisor(
+            locator: locator, keyStore: FakeKeyStore(), runtimeConfig: FakeRuntimeConfig(captureEnabled: false),
+            topology: FakeSupervisorTopology(), keyCustodyPreparer: FakeKeyCustodyPreparer(), readinessTimeout: 0.1,
+            captureStatusReader: { (nil, nil) }, pauses: UserPauseController())
+        // A turn-on pressed and not landed yet, as the menu shows it.
+        supervisor.showForPreview(state: .idle, captureEnabled: false, receipt: nil, startedAt: nil, turningOn: true)
+        XCTAssertEqual(supervisor.menuRow(setupFinished: true).action, .turnOff)
+        let performed = Performed()
+        supervisor.windowStatusAction = { performed.actions.append($0) }
+
+        let paused = await supervisor.handleWindowRequest(request(.pause), setupFinished: true)
+        XCTAssertFalse(paused, "the row offers Turn Off, not Pause")
+        let off = await supervisor.handleWindowRequest(request(.turnOff), setupFinished: true)
+        XCTAssertTrue(off)
+        XCTAssertEqual(performed.actions, [.turnOff], "the menu's own Turn Off")
     }
 
     /// While the window deletes under its hold it renews the hold, so a

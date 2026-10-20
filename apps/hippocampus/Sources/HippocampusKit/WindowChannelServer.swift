@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // WindowChannelServer.swift — the app's end of the window's private pipe
-// (SPEC 2.6.4). Pause, Resume, Turn On, Try Again and the forget hold never
-// travel over DistributedNotificationCenter, where any process on the Mac
-// can post; they come only from the window this app started, on the pipe it
-// gave it. The app decides: a request is carried out only in a state where
-// the same click in the menu bar would be, unknown ops and malformed lines
-// are ignored, and nothing about their content is logged.
+// (SPEC 2.6.4). Pause, Resume, Turn On, Turn Off, Try Again and the forget
+// hold never travel over DistributedNotificationCenter, where any process on
+// the Mac can post; they come only from the window this app started, on the
+// pipe it gave it. The app decides: a request is carried out only in a
+// state where the same click in the menu bar would be, unknown ops and
+// malformed lines are ignored, and nothing about their content is logged.
 
 import Foundation
 import os
@@ -21,6 +21,9 @@ public struct WindowChannelRequest: Equatable, Sendable {
         /// The window is still deleting under its hold: the hold's end moves
         /// 30 seconds out (`CaptureHold.renew`).
         case renew
+        /// Turn Off, which the row offers while a turn-on is under way: the
+        /// newer word, as in the menu bar.
+        case turnOff
     }
 
     public let id: String
@@ -184,6 +187,7 @@ public enum WindowChannelPolicy {
         case .pause: return row.action == .pause
         case .resume: return row.action == .resume
         case .turnOn: return row.action == .turnOn
+        case .turnOff: return row.action == .turnOff
         case .tryAgain: return row.action == .tryAgain
         case .quit: return row.action == .quit
         // Never in the middle of a forget: the window it reopens is the

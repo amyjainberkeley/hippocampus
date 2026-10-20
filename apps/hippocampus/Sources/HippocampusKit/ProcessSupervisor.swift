@@ -434,8 +434,8 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// launch's start, a retry, Try Again): nothing starts under a hold, so
     /// it waits, and the hold's end carries it out (`restartAfterHold`).
     @Published public private(set) var startWaitingForHold = false
-    /// What the app does for the window's Turn On, Try Again, Open System
-    /// Settings… and Quit: the same as the status row's button.
+    /// What the app does for the window's Turn On, Turn Off, Try Again, Open
+    /// System Settings… and Quit: the same as the status row's button.
     public var windowStatusAction: (@MainActor (CaptureStatusAction) -> Void)?
     /// Runs the agent's one-shot pass for Forget Pictures of Other Windows…
     /// (`forgetSidePicturesNow`) and says whether it finished. Tests put a
@@ -2242,6 +2242,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             return true
         case .turnOn:
             return perform(.turnOn)
+        case .turnOff:
+            // The row's own Turn Off while a turn-on is under way, carried
+            // out as the menu's: the turn-on ends, and Off shows once what
+            // it started has stopped.
+            return perform(.turnOff)
         case .tryAgain:
             return perform(.tryAgain)
         case .openSystemSettings:
