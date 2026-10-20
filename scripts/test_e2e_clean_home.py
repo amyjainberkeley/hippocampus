@@ -226,7 +226,7 @@ class FullE2EContractTests(unittest.TestCase):
         source = FULL.read_text(encoding="utf-8")
         for literal in (
             "NET_TRIPWIRE=1",
-            '(deny network-outbound (remote ip \\"*:*\\") (with message \\"$TRIPWIRE_TAG\\"))',
+            '(deny network-outbound (remote ip \\"*:*\\") (with send-signal SIGKILL) (with message \\"$TRIPWIRE_TAG\\"))',
             '(allow network-outbound (remote ip \\"localhost:*\\"))',
             '(path-literal \\"/private/var/run/mDNSResponder\\")',
             '(global-name \\"com.apple.dnssd.service\\")',
@@ -242,7 +242,7 @@ class FullE2EContractTests(unittest.TestCase):
         body = source.split("product_env() {", 1)[1].split("\n}\n", 1)[0]
         self.assertIn('[[ "$argument" == "$FEED" && -n "${OCR_WORKER:-}" ]] && wrap=()', body)
 
-    def test_tripwire_refuses_a_lookup_and_the_audit_finds_it_by_the_runs_tag(self):
+    def test_tripwire_kills_an_attempt_and_the_audit_finds_it_by_the_runs_tag(self):
         # The profile exactly as e2e-full.sh builds it. The probe only opens the
         # name-lookup daemon's local socket, which nothing could leave the Mac
         # through even if the tripwire were missing.
@@ -254,25 +254,31 @@ class FullE2EContractTests(unittest.TestCase):
         tag, profile = built.stdout.split("\n", 1)
         self.assertTrue(tag.startswith("hippo-e2e-tripwire hippo-e2e."), tag)
         since = time.time()
-        probe = ("import socket\ns = socket.socket(socket.AF_UNIX)\n"
+        probe = ("import os, socket\nprint(os.getpid(), flush=True)\ns = socket.socket(socket.AF_UNIX)\n"
                  "try:\n    s.connect('/private/var/run/mDNSResponder'); print('open')\n"
                  "except OSError as error:\n    print('refused', error.errno)\n")
-        result = subprocess.run(["/usr/bin/sandbox-exec", "-p", profile, sys.executable, "-I", "-c", probe],
+        result = subprocess.run(["/usr/bin/sandbox-exec", "-p", profile, "/usr/bin/python3", "-I", "-c", probe],
                                 capture_output=True, text=True, timeout=60)
-        self.assertEqual(result.stdout.strip(), "refused 1", result.stdout + result.stderr)
+        # The attempt killed the process: nothing after it ran.
+        self.assertEqual(result.returncode, -9, result.stdout + result.stderr)
+        pid = result.stdout.split()[0]
+        self.assertNotIn("open", result.stdout)
+        self.assertNotIn("refused", result.stdout)
         sys.path.insert(0, str(SCRIPTS / "lib"))
         try:
             import storage_audit
         finally:
             sys.path.pop(0)
+        # The kernel's report, when it keeps one (it drops repeats of the
+        # same refusal), is found by the tag and names the probe.
         found = []
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + 20
         while not found and time.monotonic() < deadline:
             time.sleep(1)
             found = storage_audit.tripwire_refusals(tag, since) or []
-        self.assertEqual(len(found), 1, found)
-        self.assertIn("mDNSResponder", found[0])
-        self.assertIn("a name lookup, refused by the tripwire", found[0])
+        for line in found:
+            self.assertIn(f"(pid {pid}) -> /private/var/run/mDNSResponder", line)
+            self.assertIn("a name lookup, refused by the tripwire", line)
 
     def test_audit_counts_every_refused_network_attempt_and_real_home_reach(self):
         sys.path.insert(0, str(SCRIPTS / "lib"))

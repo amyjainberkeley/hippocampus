@@ -51,12 +51,13 @@
 #                         checks that it is enough on its own
 #   --no-net-tripwire     run the product's programs without the network
 #                         tripwire. By default every product program (but the
-#                         fixture feed, which starts the OCR worker inside its
-#                         own no-network sandbox) runs inside a sandbox that
-#                         refuses every connection that would leave this Mac,
-#                         name lookups and background URL sessions, from any
-#                         API. Nothing can get out, and the kernel logs each
-#                         refused attempt, which the audit counts as a failure
+#                         fixture feed when it starts the PP-OCR worker, which
+#                         runs inside its own no-network sandbox) runs inside
+#                         a sandbox that refuses every connection that would
+#                         leave this Mac, name lookups and background URL
+#                         sessions, from any API. Nothing can get out; an
+#                         attempt kills the process that made it, so its step
+#                         fails, and the audit names any the kernel reports
 #   --no-audit            do not run audit-storage-security.sh
 #   --keep                keep the throwaway root (default: only on failure)
 #   --evidence DIR        copy the results, logs and audit into DIR
@@ -197,17 +198,19 @@ trap 'exit 143' TERM
 # (a model server or MCP server on loopback); every other connection, name
 # lookups (mDNSResponder) and background URL sessions (nsurlsessiond) are
 # refused, whatever API asks, and the kernel logs each refusal.
-# Each refusal carries this run's own tag in the kernel's report, so the
-# audit finds every one, from any process of the run however short-lived,
-# and none from anything else on the Mac.
+# An attempt also kills the process that made it, so the step it belongs
+# to fails even when the kernel leaves the report out (it drops repeats of
+# the same refusal), and the report, when there is one, carries this run's
+# own tag: the audit finds it from any process of the run, however
+# short-lived, and nothing from anything else on the Mac.
 TRIPWIRE_TAG="hippo-e2e-tripwire $(basename "$RUN_ROOT")"
 TRIPWIRE_PROFILE="(version 1) (allow default)
-(deny network-outbound (remote ip \"*:*\") (with message \"$TRIPWIRE_TAG\"))
+(deny network-outbound (remote ip \"*:*\") (with send-signal SIGKILL) (with message \"$TRIPWIRE_TAG\"))
 (allow network-outbound (remote ip \"localhost:*\"))
 (deny network-outbound (remote unix-socket (path-literal \"/private/var/run/mDNSResponder\"))
-    (with message \"$TRIPWIRE_TAG\"))
+    (with send-signal SIGKILL) (with message \"$TRIPWIRE_TAG\"))
 (deny mach-lookup (global-name \"com.apple.dnssd.service\") (global-name \"com.apple.nsurlsessiond\")
-    (global-name \"com.apple.nsurlsessiond-launchondemand\") (with message \"$TRIPWIRE_TAG\"))"
+    (global-name \"com.apple.nsurlsessiond-launchondemand\") (with send-signal SIGKILL) (with message \"$TRIPWIRE_TAG\"))"
 TRIPWIRE=()
 (( NET_TRIPWIRE == 1 )) && TRIPWIRE=(/usr/bin/sandbox-exec -p "$TRIPWIRE_PROFILE")
 # Every product program runs with this environment and nothing else, inside

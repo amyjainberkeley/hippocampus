@@ -832,10 +832,11 @@ def check_network(report: Report, repo: Path, sampler: Path | None, real_home: P
                        "the run's processes tried to reach the network (unified log, hostnames redacted by macOS): " +
                        "; ".join((connections + network_refusals)[:6]))
         else:
-            fenced = (" Every product program but the fixture feed ran inside the network tripwire, which refuses any "
-                      "connection off this Mac, name lookup or background URL session, from any API, and tags each "
-                      f"refusal ('{tripwire}'); the kernel logged none, and the feed's OCR worker ran in its own "
-                      "no-network sandbox." if tripwire else "")
+            fenced = (" The product's programs ran inside the network tripwire, which refuses any connection off this "
+                      "Mac, name lookup or background URL session, from any API, kills the process that tries, and tags "
+                      f"the kernel's report ('{tripwire}'): none was reported, and an attempt would also have failed its "
+                      "step. The PP-OCR worker, when the feed starts it, runs inside its own no-network sandbox instead."
+                      if tripwire else "")
             report.add(True, "net.runtime-log",
                        f"the unified log shows no network connection, CFNetwork task or refused network attempt by the run's "
                        f"{len(product_pids)} product processes ({', '.join(product_seen)}).{fenced}")

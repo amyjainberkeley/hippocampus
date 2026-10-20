@@ -82,18 +82,22 @@ def descendants(table: dict[int, tuple[int, str]], root: int, exclude: int) -> l
 
 # The OCR worker runs inside a no-network sandbox (OCRWorkerSandbox). The
 # kernel answers for a running process whether it is sandboxed and whether an
-# operation is denied to it: sandbox_check(pid, operation, SANDBOX_FILTER_NONE).
+# operation is denied to it: sandbox_check(pid, operation, flags). The flags
+# carry SANDBOX_CHECK_NO_REPORT, so asking leaves no violation report in the
+# unified log, where it would read as an attempt by the worker.
 OCR_WORKER_NAME = "hippocampus-ocr"
 
 
 def sandbox_checker():
     try:
-        check = ctypes.CDLL("/usr/lib/libSystem.B.dylib").sandbox_check
-    except (OSError, AttributeError):
+        library = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+        check = library.sandbox_check
+        no_report = ctypes.c_int.in_dll(library, "SANDBOX_CHECK_NO_REPORT").value
+    except (OSError, AttributeError, ValueError):
         return None
     check.restype = ctypes.c_int
     check.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
-    return check
+    return lambda pid, operation: check(pid, operation, no_report)
 
 
 def sandbox_state(check, pid: int) -> tuple[int, int, int] | None:
@@ -101,7 +105,7 @@ def sandbox_state(check, pid: int) -> tuple[int, int, int] | None:
     or None when the process is gone or the kernel won't say."""
     if check is None:
         return None
-    answers = (check(pid, None, 0), check(pid, b"network-outbound", 0), check(pid, b"network-bind", 0))
+    answers = (check(pid, None), check(pid, b"network-outbound"), check(pid, b"network-bind"))
     if any(answer not in (0, 1) for answer in answers):
         return None
     return answers
