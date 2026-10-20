@@ -5,7 +5,8 @@
 //! headless stub without exposing the test stub on the public mci-brain
 //! API.
 
-use mci_brain::reading::{body, passage, ExcerptQuery};
+use mci_brain::caption::{self, Moment};
+use mci_brain::reading::{body, passage, reading_prefix, ExcerptQuery};
 use mci_brain::{
     BrainStats, EpisodeRecord, EventRecord, EventSource, NothingMatchedReason, RetrievalDegradation,
 };
@@ -91,6 +92,28 @@ pub fn snippet_listed_text(record: &EventRecord, source: EventSource) -> String 
     ))
 }
 
+/// How much of a moment's text a caption made now reads: the start a
+/// History row shows (the window's FFI reads the same many characters).
+pub const CAPTION_TEXT_CHARS: usize = 280;
+
+/// A caption made now from a moment's own window, as History makes one for
+/// a moment without a stored one ([`mci_brain::caption::fallback`]): its
+/// app, title and address, and the start of what the window said, which
+/// names a document whose title names only its app. `None` for an app that
+/// is not work.
+#[must_use]
+pub fn caption_from(record: &EventRecord, source: EventSource, text: &str) -> Option<String> {
+    let app = record.app_bundle_id.as_deref();
+    let start = reading_prefix(text, source, app, CAPTION_TEXT_CHARS);
+    caption::fallback(&Moment {
+        app,
+        title: record.window_title.as_deref(),
+        url: record.url.as_deref(),
+        text: &start,
+        beside: source == EventSource::ScreenContext,
+    })
+}
+
 /// Errors a [`BrainReader`] may surface to the MCP dispatcher.
 #[derive(Debug, Error)]
 pub enum BrainReaderError {
@@ -154,6 +177,15 @@ pub trait BrainReader: Send + Sync {
     /// 512-byte snippet.
     fn listed_text(&self, record: &EventRecord, source: EventSource) -> String {
         snippet_listed_text(record, source)
+    }
+
+    /// One short plain line saying what a listed moment was about, the one
+    /// History's row shows for it ([`mci_brain::caption`]). Readers that
+    /// hold the store give the caption stored for it; this default makes one
+    /// from the row's title, address and snippet, as History does for a
+    /// moment without one. `None` for an app that is not work.
+    fn caption(&self, record: &EventRecord, source: EventSource) -> Option<String> {
+        caption_from(record, source, &record.text_snippet)
     }
 
     /// Compile a bounded, cited packet for one optional work focus.

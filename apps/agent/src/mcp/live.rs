@@ -46,7 +46,9 @@ use crate::context_packet::{
     compile_context_packet, ContextBudget, ContextEvidence, ContextFocusRetrieval, ContextPacket,
     ContextSources, EvidencePriority,
 };
-use crate::mcp::brain_reader::{BrainReader, BrainReaderError, McpHit, McpRecallOutcome};
+use crate::mcp::brain_reader::{
+    caption_from, BrainReader, BrainReaderError, McpHit, McpRecallOutcome,
+};
 
 // ---------------------------------------------------------------------------
 // DynEmbedder — Sized wrapper for Arc<dyn Embedder>
@@ -583,6 +585,30 @@ impl BrainReader for LiveBrainReader {
                 })
             }
             _ => super::brain_reader::snippet_listed_text(record, source),
+        }
+    }
+
+    /// The caption History's row shows: the one stored for the moment when
+    /// the current rules made it (the on-device model's, or one made from
+    /// its title), else one made from its title and the start of its own
+    /// text now, as the window's reader does (`row_text` in mci-brain-ffi).
+    fn caption(&self, record: &EventRecord, source: mci_brain::EventSource) -> Option<String> {
+        if let Some(row) = self
+            .store
+            .moment_reading(record.event_id)
+            .ok()
+            .flatten()
+            .filter(|row| row.version == READING_VERSION)
+        {
+            return row.caption;
+        }
+        match self.store.event_text(record.event_id) {
+            Ok(Some(text))
+                if text.ts_us == record.ts_us && text.app_bundle_id == record.app_bundle_id =>
+            {
+                caption_from(record, source, &text.text)
+            }
+            _ => caption_from(record, source, &record.text_snippet),
         }
     }
     fn recall(&self, query: &str, limit: usize) -> Result<McpRecallOutcome, BrainReaderError> {
