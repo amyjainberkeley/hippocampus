@@ -14,6 +14,9 @@ public final class SidebarHides: @unchecked Sendable {
     public struct Choices: Equatable, Sendable {
         /// Working On items hidden from the sidebar, by id.
         public var hiddenItems: Set<String> = []
+        /// Working On items whose names look personal that the person
+        /// showed in the sidebar anyway (Show in Sidebar), by id.
+        public var shownItems: Set<String> = []
         /// Library kinds hidden from the sidebar.
         public var hiddenKinds: Set<SidebarPlace> = []
         /// Library kinds shown from the View menu before they hold anything.
@@ -24,10 +27,11 @@ public final class SidebarHides: @unchecked Sendable {
         /// Library collapsed to its header (the system disclosure).
         public var libraryCollapsed = false
 
-        public init(hiddenItems: Set<String> = [], hiddenKinds: Set<SidebarPlace> = [],
-                    shownKinds: Set<SidebarPlace> = [], workingOnHidden: Bool = false,
-                    libraryCollapsed: Bool = false) {
+        public init(hiddenItems: Set<String> = [], shownItems: Set<String> = [],
+                    hiddenKinds: Set<SidebarPlace> = [], shownKinds: Set<SidebarPlace> = [],
+                    workingOnHidden: Bool = false, libraryCollapsed: Bool = false) {
             self.hiddenItems = hiddenItems
+            self.shownItems = shownItems
             self.hiddenKinds = hiddenKinds
             self.shownKinds = shownKinds
             self.workingOnHidden = workingOnHidden
@@ -39,6 +43,7 @@ public final class SidebarHides: @unchecked Sendable {
     /// menu-bar app share one bundle, so each key says it is the window's.
     enum Key {
         static let hiddenItems = "window.sidebar.hiddenItems"
+        static let shownItems = "window.sidebar.shownItems"
         static let hiddenKinds = "window.sidebar.hiddenKinds"
         static let shownKinds = "window.sidebar.shownKinds"
         static let workingOnHidden = "window.sidebar.workingOnHidden"
@@ -48,7 +53,7 @@ public final class SidebarHides: @unchecked Sendable {
         static let firstForgetSaid = "window.forget.firstSaid"
         static let rowAnnounced = "window.sidebar.rowAnnounced"
         static let appearedKinds = "window.sidebar.appearedKinds."
-        static let all = [hiddenItems, hiddenKinds, shownKinds, workingOnHidden, libraryCollapsed]
+        static let all = [hiddenItems, shownItems, hiddenKinds, shownKinds, workingOnHidden, libraryCollapsed]
     }
 
     /// The most items kept hidden; the oldest go first.
@@ -71,6 +76,7 @@ public final class SidebarHides: @unchecked Sendable {
     public var choices: Choices {
         Choices(
             hiddenItems: Set(strings(Key.hiddenItems).filter(RecallLaunchRequest.isWorkItemId)),
+            shownItems: Set(strings(Key.shownItems).filter(RecallLaunchRequest.isWorkItemId)),
             hiddenKinds: Set(strings(Key.hiddenKinds).compactMap(SidebarPlace.init(rawValue:))
                 .filter(\.isLibraryKind)),
             shownKinds: Set(strings(Key.shownKinds).compactMap(SidebarPlace.init(rawValue:))
@@ -90,12 +96,19 @@ public final class SidebarHides: @unchecked Sendable {
         var items = strings(Key.hiddenItems).filter { $0 != id }
         items.append(id)
         set(Array(items.suffix(Self.maxHiddenItems)), for: Key.hiddenItems)
+        set(strings(Key.shownItems).filter { $0 != id }, for: Key.shownItems)
         return true
     }
 
-    /// Show a hidden Working On item in the sidebar again.
+    /// Show a Working On item in the sidebar: a hidden one again, or one
+    /// whose name looks personal, which the person chose to show (SPEC 3.2).
+    /// Only an id is kept.
     public func show(item id: String) {
         set(strings(Key.hiddenItems).filter { $0 != id }, for: Key.hiddenItems)
+        guard RecallLaunchRequest.isWorkItemId(id) else { return }
+        var shown = strings(Key.shownItems).filter { $0 != id }
+        shown.append(id)
+        set(Array(shown.suffix(Self.maxHiddenItems)), for: Key.shownItems)
     }
 
     /// Hide one of Library's kinds (right-click › Hide from Sidebar).

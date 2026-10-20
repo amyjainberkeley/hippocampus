@@ -305,7 +305,10 @@ struct DetailPaneView: View {
                 .help(LibraryCopy.History.openLinkHelp)
             }
             if let reader {
-                AskAIButton(source: .moments([hit.id]), reader: reader)
+                // The row's whole run, newest first, with this moment picked:
+                // it never goes to make room (SPEC 5.3.1). ⌘↩ is this button.
+                AskAIButton(source: .moments(run.isEmpty ? [hit.id] : run), reader: reader,
+                            handlesCommandReturn: true, selected: hit.id)
                     .controlSize(.small)
             }
             Spacer(minLength: 0)

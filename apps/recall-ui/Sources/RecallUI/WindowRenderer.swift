@@ -369,6 +369,17 @@ enum WindowRenderer {
              "stored_frame_count": 10, "stored_screenshot_count": 2}
             """.utf8))
         let remembering = scene.status ?? ShellRenderFixture.remembering(now: now)
+        // Sam's Working On, its pages, searches and calendar (lane C's
+        // fixture), its screenshots drawn, sealed and opened as the app opens
+        // the person's own. The shell's pages read it beside the day.
+        let workFixture = try? WorkRenderFixture(now: now, calendar: calendar)
+        if let workFixture {
+            WorkRenders.adopt(workFixture)
+            await workFixture.prewarm()
+        }
+        let world: any BrainReader = workFixture.map { ShellWorldReader(base: reader, work: $0.reader) } ?? reader
+        let snapshot = scene.work ?? workFixture?.snapshot ?? ShellRenderFixture.weekIn(now: now)
+        let services = ShellWorld.services(now: now, calendar: calendar)
         // Overview and You, read before drawing. Their deletion signals are
         // their own, so nothing from the app reaches them. On the first day
         // nothing is saved before today.
@@ -379,12 +390,15 @@ enum WindowRenderer {
                                          savedBefore: { _ in
                                              guard firstDay else { throw UnderstandingError.unavailable }
                                              return false
-                                         })
+                                         },
+                                         reader: world, work: PreviewWorkReader(snapshot: snapshot),
+                                         calendarReader: firstDay ? FixtureCalendar(access: .notAsked)
+                                             : services.calendar,
+                                         offers: EphemeralKeyValueStore())
         await overview.reload()
         let you = UserModelViewModel(understanding: understanding, verdicts: VerdictInbox(directory: nil),
                                      deletions: MemoryDeletionSignal(center: NotificationCenter()))
         await you.reload()
-        let snapshot = scene.work ?? ShellRenderFixture.weekIn(now: now)
         var preset = scene.preset
         if preset.sidebar == nil {
             preset.sidebar = SidebarModel.make(snapshot: snapshot, kinds: scene.kinds ?? Set(SidebarPlace.libraryKinds),
@@ -392,8 +406,10 @@ enum WindowRenderer {
         }
         let notes = BottomNotes()
         scene.note?(notes)
+        let allScreenshots = CombinedScreenshots(
+            [screenshots] + (workFixture.map { [$0.screenshots as any ThumbnailDataProviding] } ?? []))
         let view = MemoryWorkspaceView(
-            reader: reader, understanding: understanding,
+            reader: world, understanding: understanding,
             work: PreviewWorkReader(snapshot: snapshot),
             selection: .constant(scene.place),
             isSyntheticPreview: false,
@@ -409,12 +425,13 @@ enum WindowRenderer {
             hides: SidebarHides(defaults: nil),
             drawsWindowControls: true,
             preset: preset,
-            pictures: shell?.pictures,
+            pictures: workFixture.map(ShellWorld.pictures) ?? shell?.pictures,
+            services: services,
             notes: notes
         )
         .environment(\.controlActiveState, .key)
         .environment(\.overviewThumbnails, thumbnails)
-        .environment(\.screenshots, screenshots)
+        .environment(\.screenshots, allScreenshots)
         .environment(\.locale, Locale(identifier: "en_US"))
         .environment(\.colorScheme, scene.dark ? .dark : .light)
         .environment(\.timeZone, calendar.timeZone)
@@ -765,7 +782,8 @@ struct MeaningFixtureReader: BrainReader {
                           sourceKind: window.source, caption: caption)
             guard let reading = try? EventReading(eventId: window.id, tsUs: tsUs, appBundleId: window.app,
                                                   sourceKind: window.source, main: main, rest: rest,
-                                                  isTruncated: false, caption: caption) else { return nil }
+                                                  isTruncated: false, caption: caption,
+                                                  blocks: read?.blocks ?? []) else { return nil }
             return Moment(hit: hit, reading: reading)
         }
     }

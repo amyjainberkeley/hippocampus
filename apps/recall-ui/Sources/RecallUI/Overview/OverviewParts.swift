@@ -60,57 +60,6 @@ struct SessionScreenshot: View {
     }
 }
 
-/// "Copy for your AI": the session's own moments, as Markdown (RULINGS I13).
-struct CopyForYourAIButton: View {
-    let title: String
-    let range: ClosedRange<Int64>
-    let reader: BrainReader
-    var prominent = false
-
-    private enum Phase { case idle, copying, copied, failed }
-    @State private var phase: Phase = .idle
-
-    var body: some View {
-        HStack(spacing: 8) {
-            let button = Button {
-                Task { await copy() }
-            } label: {
-                Text(phase == .copied ? UserFacingCopy.Overview.copied : UserFacingCopy.copyForYourAI)
-            }
-            .disabled(phase == .copying)
-            if prominent {
-                button.buttonStyle(.borderedProminent).tint(DayStripPalette.color(DayStripPalette.accent))
-            } else {
-                button.buttonStyle(.bordered)
-            }
-            if phase == .failed {
-                Text(UserFacingCopy.Overview.couldNotCopy)
-                    .font(MCI.Font.caption)
-                    .foregroundStyle(MCI.Color.error)
-            }
-        }
-    }
-
-    @MainActor
-    private func copy() async {
-        phase = .copying
-        do {
-            let text = try await SessionCopy.markdown(title: title, range: range, reader: reader)
-            let board = NSPasteboard.general
-            board.clearContents()
-            guard board.setString(text, forType: .string) else {
-                phase = .failed
-                return
-            }
-            phase = .copied
-            try? await Task.sleep(for: .seconds(2))
-            if phase == .copied { phase = .idle }
-        } catch {
-            phase = .failed
-        }
-    }
-}
-
 /// "Open Page" or "Open {App}" (RULINGS W5).
 struct ReopenButton: View {
     let action: ReopenAction

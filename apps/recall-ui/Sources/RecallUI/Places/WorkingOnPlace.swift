@@ -98,7 +98,10 @@ struct WorkingOnPlace: View {
                 ForEach(groups) { group in
                     section(group)
                 }
-                retentionLine
+                // Kept until forgotten (0): nothing is deleted, so no line.
+                if retentionDays > 0 {
+                    retentionLine
+                }
             }
         }
     }

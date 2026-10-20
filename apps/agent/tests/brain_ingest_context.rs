@@ -48,7 +48,7 @@ fn context_text_is_stored_under_its_own_window_as_screen_context() {
     assert_eq!(event.url, None);
     assert_eq!(
         event.keyframe_blob, None,
-        "no screenshot is kept for background windows"
+        "a background window sent without a picture keeps no screenshot"
     );
     assert!(event.text.contains("Budget review moved to Thursday"));
     assert_eq!(
@@ -57,5 +57,34 @@ fn context_text_is_stored_under_its_own_window_as_screen_context() {
             .expect("stats")
             .stored_frame_count,
         1
+    );
+}
+
+#[test]
+fn a_side_windows_picture_digest_is_kept_on_its_own_moment() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let key = DbKey::from_bytes([0xCE; 32]);
+    let store =
+        Arc::new(SqlCipherBrainStore::new(&dir.path().join("ctx.sqlite"), &key).expect("open"));
+    let pump = BrainPump::new(Arc::clone(&store) as Arc<dyn BrainStore>, None);
+    let outcome = pump
+        .ingest_ocr_event(&Message::ContextOCREvent {
+            seq: 1,
+            ts_us: 1_700_000_000_000_000,
+            app_bundle_id: bundle("com.tinyspeck.slackmacgap"),
+            window_title: "launch (Channel) - Northwind Studio - Slack".into(),
+            url: String::new(),
+            ocr_text: "staging is green, shipping the rounding fix at 4".into(),
+            keyframe_hash: [0xAB; 32],
+        })
+        .expect("ingest");
+    let IngestOutcome::Stored { id, .. } = outcome else {
+        panic!("context text must be stored");
+    };
+    let event = store.get_event(id).expect("read").expect("present");
+    assert_eq!(event.keyframe_blob.as_deref(), Some("ab".repeat(32).as_str()));
+    assert_eq!(
+        store.event_source(id).expect("source"),
+        EventSource::ScreenContext
     );
 }

@@ -58,7 +58,13 @@ struct NativeRecallPreview: View {
             now: { now },
             ask: ask,
             status: WindowStatus(kind: .remembering, title: NavigationCopy.remembering, action: .pause),
-            hides: SidebarHides(defaults: nil))
+            hides: SidebarHides(defaults: nil),
+            // Sam's searches and calendar; nothing reaches the agent, the
+            // person's calendar, their AI tools or macOS.
+            services: .syntheticPreview(
+                searches: PreviewSearchesReader(records: WorkFixtures.searches(now: now, calendar: reader.calendar)),
+                calendar: FixtureCalendar(access: .allowed,
+                                          events: WorkFixtures.calendarEvents(now: now, calendar: reader.calendar))))
             .frame(minWidth: 760, minHeight: 480)
     }
 }

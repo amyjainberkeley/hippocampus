@@ -65,7 +65,8 @@ final class ReviewRenderFixture {
                           source: "recent", score: nil, thumbnailPath: shot, sourceKind: kind,
                           thumbnailTsUs: shot == nil ? nil : ago(takenMinutes ?? minutes),
                           caption: MomentRowText.caption(read?.caption))
-            moments.append(ReviewRenderReader.Moment(hit: hit, stored: stored, main: main, rest: rest))
+            moments.append(ReviewRenderReader.Moment(hit: hit, stored: stored, main: main, rest: rest,
+                                                     blocks: read?.blocks ?? []))
         }
 
         // Chrome, in front: an article, read twice. It kept its screenshot
@@ -337,6 +338,8 @@ struct ReviewRenderReader: BrainReader {
         let stored: String
         let main: String
         let rest: String
+        /// `main` as the reader's typed blocks (SPEC 4.2).
+        var blocks: [ReadingBlock] = []
     }
 
     let base: RenderFixtureReader
@@ -370,7 +373,8 @@ struct ReviewRenderReader: BrainReader {
         guard let moment = moments.first(where: { $0.hit.id == eventId }) else { return nil }
         return try EventReading(eventId: eventId, tsUs: moment.hit.tsUs, appBundleId: moment.hit.appBundleId,
                                 sourceKind: moment.hit.sourceKind, main: moment.main, rest: moment.rest,
-                                matchIn: nil, isTruncated: false, caption: moment.hit.caption)
+                                matchIn: nil, isTruncated: false, caption: moment.hit.caption,
+                                blocks: moment.blocks)
     }
 
     func activityIntervals(startUs: UInt64, endUs: UInt64, limit: UInt32) async throws -> ActivityPage {

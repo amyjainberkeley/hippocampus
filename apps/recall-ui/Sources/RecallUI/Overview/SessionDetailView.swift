@@ -94,7 +94,8 @@ struct SessionDetailView: View {
     private var actions: some View {
         HStack(spacing: 8) {
             if showsCardActions {
-                AskAIButton(source: .session(title: detail.title, range: detail.copyRange), reader: reader)
+                AskAIButton(source: .session(title: detail.title, range: detail.copyRange), reader: reader,
+                            handlesCommandReturn: true)
             }
             Button(UserFacingCopy.showInHistory) { open(detail.history) }
                 .buttonStyle(.bordered)

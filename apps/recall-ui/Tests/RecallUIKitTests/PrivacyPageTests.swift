@@ -59,6 +59,23 @@ final class PrivacyPageTests: XCTestCase {
         XCTAssertNil(PicturesUsage.read(environment: ["MCI_DB_PATH": "/nonexistent-\(UUID().uuidString)/brain.db"]))
     }
 
+    /// The file exactly as the agent writes it (`retention_worker.rs`,
+    /// schema 1): its switch is `side_pictures_on`.
+    func testSidePicturesUseReadsTheAgentsOwnFile() {
+        let written = PicturesUsage.decode(Data("""
+            {"schema_version": 1, "updated_at": "2026-10-12T14:00:00Z", "front_bytes": 1400000000,
+             "side_bytes": 640000000, "side_count": 2300, "side_budget_bytes": 2000000000,
+             "side_pictures_on": true}
+            """.utf8))
+        XCTAssertEqual(written?.enabled, true)
+        XCTAssertEqual(written?.line, "Pictures of windows beside the one you\u{2019}re using: 640 MB of 2 GB.")
+        let off = PicturesUsage.decode(Data("""
+            {"schema_version": 1, "side_bytes": 0, "side_budget_bytes": 2000000000, "side_pictures_on": false}
+            """.utf8))
+        XCTAssertEqual(off?.enabled, false)
+        XCTAssertNil(off?.line, "off with nothing kept: no line")
+    }
+
     func testActivityListsForgetsAndExportsOnlyInPlainWords() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!

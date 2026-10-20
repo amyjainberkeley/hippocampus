@@ -261,16 +261,38 @@ fn text_never_stored_reads_by_the_same_rules() {
         None,
     );
     // The same reading, and a caption made from it: no title here, so the
-    // document's own first line names it.
+    // document's own first line names it. Its blocks are the reading's, as
+    // an event's reading carries them (SPEC 4).
+    let expected_blocks = mci_brain::reading_blocks::blocks(
+        &expected.main,
+        &mci_brain::reading_blocks::Window {
+            app: Some(NOTES),
+            title: None,
+            url: None,
+        },
+        EventSource::ScreenOcr,
+    );
+    assert!(!expected_blocks.is_empty());
     assert_eq!(
         value,
-        json!({"main": expected.main, "rest": expected.rest, "caption": "Working on \u{201c}Launch plan\u{201d}"})
+        json!({"main": expected.main, "rest": expected.rest, "caption": "Working on \u{201c}Launch plan\u{201d}",
+               "blocks": serde_json::to_value(&expected_blocks).unwrap()})
     );
 
     let plain = CString::new(json!({"stored": "Re-read text \u{25cf}"}).to_string()).unwrap();
+    let plain_blocks = mci_brain::reading_blocks::blocks(
+        "Re-read text \u{25cf}",
+        &mci_brain::reading_blocks::Window {
+            app: None,
+            title: None,
+            url: None,
+        },
+        EventSource::from_stored(""),
+    );
     assert_eq!(
         take_json(unsafe { mci_brain_ffi_reading(plain.as_ptr()) }),
-        json!({"main": "Re-read text \u{25cf}", "rest": "", "caption": null}),
+        json!({"main": "Re-read text \u{25cf}", "rest": "", "caption": null,
+               "blocks": serde_json::to_value(&plain_blocks).unwrap()}),
         "with no source the text is shown as given, and with no app there is no caption"
     );
     let bad = CString::new("not json").unwrap();

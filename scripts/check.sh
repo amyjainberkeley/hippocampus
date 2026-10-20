@@ -37,6 +37,7 @@ LANES=(
     "swift-test-mind|swift|test|scripts/swift-package.sh test --package-path apps/mind"
     "mind-without-foundation-models|swift|test|apps/mind/scripts/test-without-foundation-models.sh"
     "swift-test-keyframe-codec|swift|test|scripts/swift-package.sh test --package-path adapters/macos/MCIKeyframeCodec"
+    "swift-test-demo-memory|swift|test|scripts/swift-package.sh test --package-path apps/demo-memory"
     "keyframe-codec-behavior|swift|test|scripts/swift-package.sh run --package-path adapters/macos/MCIKeyframeCodec KeyframeCodecBehavior"
     "recall-state-behavior|swift|test|scripts/swift-package.sh run --package-path apps/recall-ui RecallStateBehavior"
     "recall-refresh-behavior|swift|test|scripts/swift-package.sh run --package-path apps/recall-ui MemoryRefreshBehavior"
@@ -130,6 +131,7 @@ LANES
     swift-test-mind       swift test in apps/mind (hippocampus-mind)
     mind-without-foundation-models hippocampus-mind builds and passes with the Apple engine compiled out
     swift-test-keyframe-codec swift test in adapters/macos/MCIKeyframeCodec
+    swift-test-demo-memory swift test in apps/demo-memory (Demo Memory's made-up screenshots)
     keyframe-codec-behavior sealed keyframes open only with their key and reject tampering
     recall-state-behavior responsive Recall layout and ephemeral query-state fixture
     recall-refresh-behavior real process-local refresh signal and re-query behavior
@@ -219,7 +221,8 @@ __swift_fmt_lane() {
         apps/onboarding/Sources \
         apps/mind/Sources \
         adapters/macos/MCICaptureHelper/Sources \
-        adapters/macos/MCIKeyframeCodec/Sources
+        adapters/macos/MCIKeyframeCodec/Sources \
+        apps/demo-memory/Sources
 }
 
 __ocr_worker_lane() {

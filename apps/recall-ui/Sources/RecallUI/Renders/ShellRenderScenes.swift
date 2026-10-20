@@ -23,7 +23,7 @@ extension WindowRenderer {
                 Scene.shell("nav-sidebar-hidden" + tail, place: .today, dark: dark,
                       preset: WindowShellPreset(choices: SidebarHides.Choices(workingOnHidden: true))),
                 Scene.shell("nav-sidebar-hover" + tail, place: .today, dark: dark,
-                      preset: WindowShellPreset(hoveredItem: ShellRenderFixture.pricingId)),
+                      preset: WindowShellPreset(hoveredItem: WorkFixtures.pricingV3)),
                 Scene.shell("nav-status-menu" + tail, place: .today, dark: dark,
                       preset: WindowShellPreset(statusMenu: .footer, statusMenuPauseOpen: true)),
                 Scene.shell("nav-status-menu-paused" + tail, place: .today, dark: dark,
@@ -62,7 +62,7 @@ extension WindowRenderer {
             Scene.shell("nav-short", place: .today, size: CGSize(width: 1100, height: 480)),
             // A Working On item's page is open: its row is selected, its
             // little screenshot inside the selection.
-            Scene.shell("nav-working-on-selected", place: .item(ShellRenderFixture.pricingId)),
+            Scene.shell("nav-working-on-selected", place: .item(WorkFixtures.pricingV3)),
             Scene.shell("nav-sidebar-collapsed", place: .today, preset: WindowShellPreset(sidebarHidden: true)),
             Scene.shell("nav-new-sidebar-line", place: .today, preset: WindowShellPreset(showsNewSidebarLine: true)),
             Scene.shell("nav-working-on-footnote", place: .today, preset: WindowShellPreset(showsFootnote: true)),

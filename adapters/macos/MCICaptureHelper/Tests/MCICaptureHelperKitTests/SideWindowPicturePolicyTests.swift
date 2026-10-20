@@ -17,6 +17,15 @@ final class SideWindowPicturePolicyTests: XCTestCase {
 
     // MARK: Rule 5 — calls and video
 
+    func testASidePicturesWorkCountsTowardTheSharedReadBudget() {
+        var budget = ReadBudget()
+        budget.record(endedUs: 10_000_000, tookUs: 1_000_000)
+        XCTAssertTrue(budget.admits(nowUs: 13_000_000, scale: 1))
+        budget.extend(byUs: 500_000, endedUs: 10_500_000)
+        XCTAssertFalse(budget.admits(nowUs: 14_999_999, scale: 1), "the picture's time adds to the rest owed")
+        XCTAssertTrue(budget.admits(nowUs: 15_000_000, scale: 1))
+    }
+
     func testCallsAndVideoAreNeverPictured() {
         for app in ["us.zoom.xos", "com.microsoft.teams2", "com.apple.FaceTime", "com.cisco.webexmeetingsapp",
                     "com.apple.TV", "com.apple.QuickTimePlayerX", "org.videolan.vlc", "com.colliderli.iina"] {

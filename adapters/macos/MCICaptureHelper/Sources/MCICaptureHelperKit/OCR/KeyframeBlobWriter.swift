@@ -474,6 +474,12 @@ public actor SidePictureRetainer {
             OCRTrace.emit("side-picture", "decision=skip reason=\(skip.rawValue)")
             return nil
         }
+        // The picture's work counts toward the shared read budget (SPEC 6.9).
+        let started = DispatchTime.now().uptimeNanoseconds
+        defer {
+            CaptureReadBudget.shared.recordExtraWork(
+                tookUs: (DispatchTime.now().uptimeNanoseconds &- started) / 1_000)
+        }
         guard !Task.isCancelled,
               let picture = WindowPictureCrop.render(frame.pixelBuffer, plan: candidate.plan)
         else { return nil }

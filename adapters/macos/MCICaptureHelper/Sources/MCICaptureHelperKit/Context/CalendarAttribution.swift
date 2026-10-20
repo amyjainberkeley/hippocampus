@@ -31,11 +31,17 @@
 //
 // # TCC denial path
 //
-// `EKEventStore.requestFullAccessToEvents` is called once at
-// `start()`. On denial / restricted / not-determined we record the
-// denial state, emit ONE `tracing`-style stderr line, and every
-// subsequent `eventNow(...)` returns `nil`. Graceful absence; never
-// crashes. The state-change warn fires only once per transition.
+// `start()` checks the access the person already gave the app; it never
+// asks macOS (only Preferences and Today's Show Calendar ask). On denial /
+// restricted / not-determined we record the denial state, emit ONE
+// `tracing`-style stderr line, and every subsequent `eventNow(...)`
+// returns `nil`. Graceful absence; never crashes. The state-change warn
+// fires only once per transition.
+//
+// # The person's switch
+//
+// Even when macOS allows it, nothing is read unless the person turned the
+// calendar on (`ai.hippocampus.calendar.show`, SPEC-DELTA 5).
 //
 // # Cascade-equivalent binding
 //
@@ -116,15 +122,39 @@ public final class CalendarAttribution: CalendarEventSource, @unchecked Sendable
     private let storeLock = NSLock()
     private let storeFactory: @Sendable () -> any CalendarAttributionStore
     private var store: (any CalendarAttributionStore)?
+    /// Whether the person turned their calendar on (SPEC-DELTA 5). Off,
+    /// nothing is read, even when macOS allows it.
+    private let isTurnedOn: @Sendable () -> Bool
 
-    /// Initial state — `notDetermined`, no cached event.
-    public convenience init(cacheTtl: TimeInterval = 30.0) {
-        self.init(cacheTtl: cacheTtl, storeFactory: { SystemCalendarAttributionStore() })
+    /// The person's choice to show their calendar: the app's own defaults
+    /// key, which this helper shares because it runs inside the app's
+    /// bundle (the app's and the window's `CalendarSetting.key`).
+    public static let settingKey = "ai.hippocampus.calendar.show"
+
+    /// Whether the value stored under `settingKey` says the calendar is on.
+    /// Unset, or anything but `true`, is off.
+    public static func isTurnedOn(stored: Any?) -> Bool {
+        stored as? Bool == true
     }
 
-    init(cacheTtl: TimeInterval = 30.0, storeFactory: @escaping @Sendable () -> any CalendarAttributionStore) {
+    /// Initial state — `notDetermined`, no cached event. Reads only while
+    /// the person has the calendar on in Preferences or on Today.
+    public convenience init(cacheTtl: TimeInterval = 30.0) {
+        self.init(cacheTtl: cacheTtl, storeFactory: { SystemCalendarAttributionStore() },
+                  isTurnedOn: {
+                      CalendarAttribution.isTurnedOn(
+                          stored: UserDefaults.standard.object(forKey: CalendarAttribution.settingKey))
+                  })
+    }
+
+    init(
+        cacheTtl: TimeInterval = 30.0,
+        storeFactory: @escaping @Sendable () -> any CalendarAttributionStore,
+        isTurnedOn: @escaping @Sendable () -> Bool = { true }
+    ) {
         self.cacheTtl = cacheTtl
         self.storeFactory = storeFactory
+        self.isTurnedOn = isTurnedOn
         self.authState = .notDetermined
         self.cachedEvent = nil
         self.cachedAt = nil
@@ -181,6 +211,15 @@ public final class CalendarAttribution: CalendarEventSource, @unchecked Sendable
         stateLock.unlock()
 
         guard auth == .granted else { return nil }
+        // The person's switch comes first: off, the calendar is not read and
+        // nothing read before is kept.
+        guard isTurnedOn() else {
+            stateLock.withLock {
+                cachedEvent = nil
+                cachedAt = nil
+            }
+            return nil
+        }
 
         // Cache-hit fast path: cached event still covers `now` AND
         // the read was within `cacheTtl`.

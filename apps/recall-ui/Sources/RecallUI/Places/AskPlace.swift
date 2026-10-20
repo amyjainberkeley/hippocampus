@@ -33,7 +33,8 @@ struct AskPlace: View {
                             onOpenSource: open,
                             onRetry: { model.ask($0) },
                             onStop: { model.stopAsking() },
-                            maxHeight: showsMatchesUnderAnswer ? 280 : nil
+                            maxHeight: showsMatchesUnderAnswer ? 280 : nil,
+                            reader: reader
                         )
                         if showsMatchesUnderAnswer { Divider() }
                     }
@@ -82,7 +83,7 @@ struct AskPlace: View {
         guard model.answersAvailable != false,
               !model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else { return nil }
-        return model.looksLikeQuestion ? UserFacingCopy.askKeyHintReturn : UserFacingCopy.askKeyHintCommandReturn
+        return model.looksLikeQuestion ? UserFacingCopy.askKeyHintReturn : UserFacingCopy.askKeyHintOptionReturn
     }
 
     private var isWorking: Bool {
@@ -147,10 +148,9 @@ struct AskPlace: View {
     /// and so does ⌥Return (SPEC 2.8), which keeps asking on this Mac once
     /// ⌘Return hands the question to the person's AI tool (SPEC 5.3).
     private var askAnywayButton: some View {
+        // ⌥↩ asks on this Mac; ⌘↩ is Ask {Tool}, the shell's (SPEC 2.10).
         ZStack {
-            Button(UserFacingCopy.askKeyHintCommandReturn) { submit(forceAsk: true) }
-                .keyboardShortcut(.return, modifiers: .command)
-            Button(UserFacingCopy.askKeyHintCommandReturn) { submit(forceAsk: true) }
+            Button(UserFacingCopy.askKeyHintOptionReturn) { submit(forceAsk: true) }
                 .keyboardShortcut(.return, modifiers: .option)
         }
         .frame(width: 0, height: 0)
@@ -181,8 +181,9 @@ struct AnswerCardView: View {
     let onStop: () -> Void
     /// The card scrolls past this height; nil lets it take the place.
     var maxHeight: CGFloat? = 280
+    /// For Ask {Tool}: the question and the answer's sources (SPEC 2.8).
+    var reader: BrainReader?
 
-    @State private var isCopying = false
     @State private var copyFailed = false
 
     var body: some View {
@@ -221,12 +222,17 @@ struct AnswerCardView: View {
                         .foregroundStyle(Color.brandFgPrimary)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
-                    HStack {
-                        Spacer(minLength: 0)
-                        Button(UserFacingCopy.copyForYourAI) { copy(question) }
+                    // [Ask Claude ▾] hands the question and the answer's
+                    // sources to the person's AI tool; Copy copies the
+                    // answer as it reads (SPEC 2.8).
+                    HStack(spacing: MCI.Spacing.s) {
+                        if let reader {
+                            AskAIButton(source: .question(question, moments: Self.sourceIds(answer.sources)),
+                                        reader: reader)
+                        }
+                        Button(UserFacingCopy.copyAnswer) { copyAnswer(text) }
                             .buttonStyle(.bordered)
-                            .disabled(isCopying)
-                            .help(UserFacingCopy.copyForYourAIHelp)
+                        Spacer(minLength: 0)
                     }
                 } else {
                     Text(UserFacingCopy.noAnswer(answer.unavailable))
@@ -269,23 +275,19 @@ struct AnswerCardView: View {
         }
     }
 
-    private func copy(_ question: String) {
-        guard !isCopying else { return }
-        isCopying = true
-        Task {
-            defer { isCopying = false }
-            do {
-                let packet = try await contextExporter(question)
-                NSPasteboard.general.clearContents()
-                guard NSPasteboard.general.setString(packet, forType: .string) else {
-                    copyFailed = true
-                    return
-                }
-                ToastNotifier.shared.notify(UserFacingCopy.copiedToast)
-            } catch {
-                copyFailed = true
-            }
+    /// The answer's sources as moments, in their order.
+    static func sourceIds(_ sources: [AskSource]) -> [UInt64] {
+        sources.compactMap { UInt64(exactly: $0.eventId) }.filter { $0 > 0 }
+    }
+
+    /// The answer as it reads, for the person's own use.
+    private func copyAnswer(_ text: String) {
+        NSPasteboard.general.clearContents()
+        guard NSPasteboard.general.setString(text, forType: .string) else {
+            copyFailed = true
+            return
         }
+        ToastNotifier.shared.notify(UserFacingCopy.copiedToast)
     }
 }
 

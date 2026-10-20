@@ -222,10 +222,12 @@ public struct SidebarModel: Equatable, Sendable {
         snapshot: WorkSnapshot, kinds: Set<SidebarPlace>, hides: SidebarHides.Choices,
         badges: Set<SidebarPlace> = []
     ) -> SidebarModel {
-        let listed = snapshot.items.filter { $0.inSidebar && !hides.hiddenItems.contains($0.id) }
+        // Lane C's rule (SPEC 2.3, 3.2): the agent's sidebar items, without
+        // those hidden, with names that look personal only once shown.
+        let listed = snapshot.items.filter { $0.inSidebar(hidden: hides.hiddenItems, shown: hides.shownItems) }
         let shown = Array(listed.prefix(maxWorkingOnRows))
-        let more = listed.count > shown.count || snapshot.items.contains { !$0.inSidebar }
-            || snapshot.items.contains { hides.hiddenItems.contains($0.id) }
+        let more = listed.count > shown.count
+            || snapshot.items.contains { !$0.inSidebar(hidden: hides.hiddenItems, shown: hides.shownItems) }
         let visibleKinds = kinds.union(hides.shownKinds).subtracting(hides.hiddenKinds)
             .intersection(SidebarPlace.libraryKinds)
         var details: [String: SidebarWorkItem] = [:]

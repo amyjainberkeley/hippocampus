@@ -36,6 +36,8 @@ struct CopyMomentsForAIButton: View {
 
     private enum Phase { case idle, copying, copied, failed }
     @State private var phase: Phase = .idle
+    @Environment(\.handoffServices) private var handoff
+    @Environment(\.isSyntheticPreview) private var isSyntheticPreview
 
     var body: some View {
         HStack(spacing: 8) {
@@ -55,9 +57,9 @@ struct CopyMomentsForAIButton: View {
 
     private func copy() async {
         phase = .copying
-        guard let text = try? await AskAIButton.markdown(moments: ids, reader: reader),
-              MomentClipboard.put(text)
-        else {
+        // The builder's message, by the clipboard rules (SPEC 5.3.6).
+        let services = HandoffServices.resolved(handoff, isSyntheticPreview: isSyntheticPreview)
+        guard await AskAIButton.copyForYourAI(.moments(ids), services: services) else {
             phase = .failed
             return
         }
@@ -105,7 +107,8 @@ struct MultiMomentDetail: View {
                 }
                 HStack(spacing: 8) {
                     if let reader {
-                        AskAIButton(source: .moments(selection.momentIds), reader: reader)
+                        AskAIButton(source: .moments(selection.momentIds), reader: reader,
+                                    handlesCommandReturn: true)
                             .controlSize(.small)
                         CopyMomentsForAIButton(ids: selection.momentIds, reader: reader)
                             .controlSize(.small)
@@ -189,6 +192,8 @@ struct MomentMenu: View {
     let showRelated: (Hit) -> Void
 
     @Environment(\.forget) private var forget
+    @Environment(\.handoffServices) private var handoff
+    @Environment(\.isSyntheticPreview) private var isSyntheticPreview
 
     private var single: HistoryRow? { picked.rows.count == 1 ? picked.rows[0] : nil }
 
@@ -216,11 +221,8 @@ struct MomentMenu: View {
                 Divider()
                 let ids = picked.momentIds
                 Button(LibraryCopy.History.copyForYourAI) {
-                    Task {
-                        if let text = try? await AskAIButton.markdown(moments: ids, reader: reader) {
-                            MomentClipboard.put(text)
-                        }
-                    }
+                    let services = HandoffServices.resolved(handoff, isSyntheticPreview: isSyntheticPreview)
+                    Task { await AskAIButton.copyForYourAI(.moments(ids), services: services) }
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
                 if let row = single, !row.hit.linkedEventIds.isEmpty {

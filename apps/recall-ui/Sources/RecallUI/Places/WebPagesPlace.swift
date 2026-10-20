@@ -176,7 +176,7 @@ struct WebPagesPlace: View {
             }
             if let forget = lensForget.forget {
                 Divider()
-                Button(WorkCopy.forgetThisPage) { forget(row.page.moments, row.page.title) }
+                Button(WorkCopy.forgetThisPage) { forget(row.page.moments, row.page.title, .page) }
             }
         }
     }
@@ -214,11 +214,11 @@ struct WebPagesPlace: View {
                     }
                     // Ask is given the page's newest moments (SPEC 5.3.1).
                     AskAIButton(source: .moments(Array(row.page.moments.prefix(WebPagesModel.askMoments))),
-                                reader: reader)
+                                reader: reader, handlesCommandReturn: true)
                     Spacer(minLength: 0)
                     if let forget = lensForget.forget {
                         Button {
-                            forget(row.page.moments, row.page.title)
+                            forget(row.page.moments, row.page.title, .page)
                         } label: {
                             Image(systemName: "trash").font(.system(size: 14))
                         }

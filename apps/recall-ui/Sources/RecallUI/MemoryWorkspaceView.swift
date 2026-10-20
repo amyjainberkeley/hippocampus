@@ -92,6 +92,9 @@ struct MemoryWorkspaceView: View {
     let hides: SidebarHides
     /// Where the sidebar's little screenshots come from.
     let pictures: SidebarPictures
+    /// What the pages reach beyond the memory: the searches, the calendar,
+    /// Ask {Tool}, Resume, AI Tools and Privacy (nil parts are this Mac's).
+    let services: WindowServices
     /// The notes at the bottom: the window's own; a picture brings its own.
     @ObservedObject var notes: BottomNotes
 
@@ -117,6 +120,20 @@ struct MemoryWorkspaceView: View {
     @State private var forgetSheet: ForgetRecentSheetItem?
     /// The Working On item whose Resume sheet a route asked for.
     @State private var resumeSheet: ResumeSheetItem?
+    /// A forget a page asked for that needs a yes first (SPEC 3.11).
+    @State private var forgetConfirmation: ForgetConfirmation?
+    /// Claude Code starts each session with recent work: a code project's
+    /// page says so (SPEC 3.2).
+    @State private var claudeCodeStarts = false
+    /// The AI Tools row's dot: a connected tool needs a step (SPEC 2.5).
+    @State private var aiToolsNeedsStep = false
+    /// Working On's items as last read, so About You's lines can link them.
+    @State private var workItems: [WorkItem] = []
+    /// How many days moments are kept (0: until forgotten).
+    @State private var retentionDays = 90
+    /// ⌘↩ in the field: Ask {Tool} with the question and its top matches,
+    /// pressed on a button of its own (SPEC 2.8, 5.3.1).
+    @State private var fieldAsk: FieldAsk?
     @AppStorage("window.sidebar.width") private var sidebarWidth = Double(SidebarMetrics.defaultWidth)
     @FocusState private var fieldFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
@@ -150,6 +167,7 @@ struct MemoryWorkspaceView: View {
         drawsWindowControls: Bool = false,
         preset: WindowShellPreset? = nil,
         pictures: SidebarPictures? = nil,
+        services: WindowServices = WindowServices(),
         notes: BottomNotes = .shared
     ) {
         self.reader = reader
@@ -171,12 +189,19 @@ struct MemoryWorkspaceView: View {
         self.drawsWindowControls = drawsWindowControls
         self.preset = preset
         self.pictures = pictures ?? .reading(reader)
+        self.services = services
         self.notes = notes
         _ask = StateObject(wrappedValue: ask ?? Self.makeAsk(
-            reader: reader, understanding: understanding, calendar: calendar, now: now))
+            reader: reader, understanding: understanding, calendar: calendar, now: now, work: work))
+        // Today reads the moments, Working On (for "Part of" and "Also
+        // from yesterday") and the calendar the person turned on; its
+        // one-time offers are kept with the window's settings, never in a
+        // preview (SPEC 3.1, SPEC-DELTA 5).
         _overview = StateObject(wrappedValue: overview ?? OverviewViewModel(
             understanding: understanding, calendar: calendar, healthLoader: healthLoader, now: now,
-            savedBefore: { try await reader.isAnythingSaved(before: $0) }))
+            savedBefore: { try await reader.isAnythingSaved(before: $0) },
+            reader: reader, work: work, calendarReader: services.calendar,
+            offers: isSyntheticPreview ? EphemeralKeyValueStore() : UserDefaultsKeyValueStore()))
         // The preview's verdicts go nowhere: "Right" and "Forget" there must
         // never reach the folder the agent applies to the person's memory.
         _you = StateObject(wrappedValue: you ?? UserModelViewModel(
@@ -211,12 +236,16 @@ struct MemoryWorkspaceView: View {
         reader: BrainReader,
         understanding: UnderstandingReader,
         calendar: Calendar,
-        now: @escaping @Sendable () -> Date
+        now: @escaping @Sendable () -> Date,
+        work: (any WorkReader)? = nil
     ) -> AskViewModel {
         AskViewModel(
             search: SearchViewModel(
                 reader: reader,
-                persistence: QueryPersistence(environment: ["MCI_EPHEMERAL_UI_STATE": "1"])
+                persistence: QueryPersistence(environment: ["MCI_EPHEMERAL_UI_STATE": "1"]),
+                // An item's scope keeps the matches the `work` read says
+                // are its own (SPEC 2.8).
+                work: work
             ),
             history: TimelineViewModel(
                 reader: reader, pageSize: 200, day: MemoryDay(date: now(), calendar: calendar), now: now
@@ -293,6 +322,41 @@ struct MemoryWorkspaceView: View {
         .sheet(item: $resumeSheet) { item in
             ResumeSheet(itemId: item.id)
         }
+        // A larger forget asks first: Cancel is the default, and Return
+        // never forgets (SPEC 3.11).
+        .alert(forgetConfirmation?.title ?? "", isPresented: Binding(
+            get: { forgetConfirmation != nil && !drawsWindowControls },
+            set: { if !$0 { forgetConfirmation = nil } }
+        ), presenting: forgetConfirmation) { confirmation in
+            Button(NavigationCopy.forgetAction, role: .destructive) {
+                forgetConfirmation = nil
+                forgetConfirmed(confirmation)
+            }
+            Button(NavigationCopy.cancelAction, role: .cancel) { forgetConfirmation = nil }
+                .keyboardShortcut(.defaultAction)
+        } message: { confirmation in
+            Text(confirmation.message)
+        }
+        .overlay {
+            // A picture can't show an alert's window: it is drawn in place.
+            if drawsWindowControls, let confirmation = forgetConfirmation {
+                ZStack(alignment: .top) {
+                    Color.black.opacity(0.06)
+                    ForgetAlertFacsimile(confirmation: confirmation)
+                        .padding(.top, 120)
+                }
+            }
+        }
+        .background {
+            // ⌘↩ in the field presses Ask {Tool} on a button of its own,
+            // with the question and its top matches (SPEC 2.8, 5.3.1).
+            if let fieldAsk {
+                AskAIButton(source: fieldAsk.source, reader: reader, pressRequest: fieldAsk.sequence)
+                    .frame(width: 0, height: 0)
+                    .opacity(0)
+                    .accessibilityHidden(true)
+            }
+        }
         .overlay(alignment: .top) {
             // A picture can't show a sheet's window: it is drawn in place.
             if drawsWindowControls, let item = forgetSheet {
@@ -350,15 +414,28 @@ struct MemoryWorkspaceView: View {
             guard preset == nil, !isSyntheticPreview else { return }
             if await forgetting.finishLeftover() != nil { MemoryRefreshSignal.post() }
         }
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            retentionDays = readRetentionDays()
+            await loadTools()
+        }
         .onChange(of: forgetting.phase) { _, phase in
             status = status.forgetting(phase)
         }
         .onChange(of: fieldFocusRequest) { _, _ in focusField() }
         .onChange(of: ask.fieldFocusRequest) { _, _ in focusField() }
         .onChange(of: selection) { _, page in
+            // The field can be kept to the page on screen (SPEC 2.8).
+            ask.search.pageScope = scope(for: page)
+            // AI Tools' dot goes once the page is opened (SPEC 2.5).
+            if page == .aiTools, aiToolsNeedsStep {
+                aiToolsNeedsStep = false
+                Task { await loadSidebar(personAsked: true) }
+            }
             guard !isSyntheticPreview, preset == nil else { return }
             WindowOpening.shared.remember(page, now: now())
         }
+        .onAppear { ask.search.pageScope = scope(for: selection) }
         .onReceive(NotificationCenter.default.publisher(for: MemoryDeletionSignal.notification)) { _ in
             Task { await loadSidebar() }
         }
@@ -384,8 +461,36 @@ struct MemoryWorkspaceView: View {
         .onChange(of: choices) { _, _ in publishMenuState() }
         .onChange(of: sidebarHidden) { _, _ in publishMenuState() }
         // Every place forgets through the shell's coordinator: the hold,
-        // Undo, and a crash's leftover (SPEC 3.11).
+        // Undo, and a crash's leftover (SPEC 3.11). Pages ask with a
+        // `PageForgetRequest`; the shell asks first when it is large.
         .environment(\.forgetCoordinator, forgetting)
+        .environment(\.forget, ForgetAction { request in handle(request) })
+        .environment(\.forgottenMoments, Set(forgetting.undoable?.request.momentIds ?? []))
+        .environment(\.lensForget, LensForget(forget: { moments, title, kind in
+            confirmLensForget(moments, title: title, kind: kind)
+        }))
+        // Working On's places hide and show items in the sidebar through
+        // the shell's own settings (SPEC 2.11).
+        .environment(\.workItemHides, WorkItemHides(
+            ids: choices.hiddenItems, shown: choices.shownItems,
+            hide: { id in
+                hides.hide(item: id)
+                reloadChoices(applyAtOnce: true)
+            },
+            show: { id in
+                hides.show(item: id)
+                reloadChoices(applyAtOnce: true)
+            }))
+        .environment(\.claudeCodeStartsSessions, services.claudeCodeStarts ?? claudeCodeStarts)
+        .environment(\.retentionDays, retentionDays)
+        .environment(\.workCalendarReader, services.calendar)
+        .environment(\.resumeServices, services.resume)
+        .environment(\.handoffServices, services.handoff)
+        .environment(\.workNow, now)
+        // Today never says "Now" while remembering is paused or stopped
+        // (SPEC 3.1), and its Show Calendar asks macOS only in the app.
+        .environment(\.todayStop, status.todayStop)
+        .environment(\.showCalendar, showCalendarAction)
         // Whether Hippocampus is remembering, as the banner says: Today
         // never shows "Now" while it isn't (SPEC 3.1).
         .environment(\.windowStatus, status)
@@ -440,7 +545,10 @@ struct MemoryWorkspaceView: View {
                 reloadChoices(applyAtOnce: true)
             },
             showInHistory: { id in Task { await showItemInHistory(id) } },
-            copyForYourAI: { _ in },
+            copyForYourAI: { id in
+                let handoff = HandoffServices.resolved(services.handoff, isSyntheticPreview: isSyntheticPreview)
+                Task { await AskAIButton.copyForYourAI(.item(id), services: handoff) }
+            },
             folderContext: { WindowCommand.folderContext.post() },
             hideKind: { kind in
                 hides.hide(kind: kind)
@@ -483,7 +591,8 @@ struct MemoryWorkspaceView: View {
                 fieldFocused: $fieldFocused,
                 back: goBack,
                 forward: goForward,
-                toggleSidebar: toggleSidebar
+                toggleSidebar: toggleSidebar,
+                askYourAI: { question in askYourAI(question) }
             )
             if let banner = status.banner(now: now(), calendar: calendar, locale: locale) {
                 StatusBanner(banner: banner, perform: perform)
@@ -505,10 +614,11 @@ struct MemoryWorkspaceView: View {
         .animation(MCI.Motion.standard, value: status.banner(now: now(), calendar: calendar, locale: locale))
     }
 
-    /// The page, or the field's results in its place (SPEC 2.8).
+    /// The page, or the field's results in its place (SPEC 2.8). On Working
+    /// On (Show All) the field filters the cards instead (SPEC 3.3).
     @ViewBuilder
     private var pageContent: some View {
-        if selection.hasField, ask.showsMatches {
+        if selection.hasField, ask.showsMatches, !selection.isWorkingOn {
             FieldResults(model: ask, reader: reader, contextExporter: contextExporter)
         } else {
             page
@@ -521,36 +631,44 @@ struct MemoryWorkspaceView: View {
     private var page: some View {
         switch selection {
         case .place(.today):
-            OverviewPlace(model: overview, reader: reader, open: open, search: searchInField)
+            TodayPlace(model: overview, reader: reader, open: open, search: searchInField,
+                       lookedUp: { _ in go(to: .lookedUp) })
         case .place(.history):
-            HistoryView(history: ask.history, reader: reader, calendar: calendar, now: now)
+            HistoryPlace(history: ask.history, reader: reader, calendar: calendar, now: now, work: work, open: open,
+                         retention: retention)
         case .place(.webPages):
             WebPagesPlace(work: work, reader: reader, open: open)
         case .place(.documents):
-            DocumentsPlace(reader: reader, open: open)
+            DocumentsPlace(reader: reader, open: open, work: work, calendar: calendar, now: now)
         case .place(.code):
-            CodePlace(reader: reader, open: open)
+            CodePlace(reader: reader, open: open, work: work, calendar: calendar, now: now)
         case .place(.conversations):
-            ConversationsPlace(reader: reader, open: open)
+            ConversationsPlace(reader: reader, open: open, work: work, calendar: calendar, now: now)
         case .place(.lookedUp):
-            LookedUpPlace(understanding: understanding, reader: reader, open: open)
+            LookedUpPlace(understanding: understanding, reader: reader, open: open, searches: services.searches)
         case .place(.workingOn):
-            WorkingOnPlace(work: work, reader: reader, open: open)
+            WorkingOnPlace(work: work, reader: reader, open: open, filter: ask.query)
         case let .item(id):
             WorkingOnItemPlace(itemId: id, work: work, reader: reader, open: open)
         case .place(.aboutYou):
             NavigationStack(path: $youPath) {
-                YouPlace(model: you, open: open)
+                AboutYouPlace(model: you, open: open, items: workItems)
                     .navigationDestination(for: RecallYouPage.self) { page in
                         youPage(page)
                     }
             }
         case .place(.aiTools):
-            AIToolsPlace(understanding: understanding, open: open)
+            if let model = services.aiTools {
+                AIToolsPlace(model: model, open: open)
+            } else {
+                AIToolsPlace(understanding: understanding, open: open)
+            }
         case .place(.privacy):
-            if isSyntheticPreview || drawsWindowControls {
+            if let privacy = services.privacy {
+                privacy()
+            } else if isSyntheticPreview || drawsWindowControls {
                 // The page reads the activity log on this Mac: the preview
-                // and pictures never open it.
+                // and pictures without their own never open it.
                 Color.clear
             } else {
                 PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator)
@@ -648,7 +766,9 @@ struct MemoryWorkspaceView: View {
         let request = ForgetRequest.recent(choice, now: click, calendar: calendar)
         Task {
             switch await forgetting.forget(request) {
-            case .forgotten:
+            case let .forgotten(moments):
+                // Privacy's Activity reads "Forgot the last 10 minutes".
+                ForgetAudit.recent(choice).record(count: moments, now: click)
                 notes.show(NavigationCopy.forgotten)
             case .failed:
                 notes.show(NavigationCopy.couldNotForget,
@@ -745,11 +865,29 @@ struct MemoryWorkspaceView: View {
         // A read that fails keeps the last list for this launch, quietly
         // (SPEC 2.12).
         guard let snapshot = try? await work.work(days: 14) else { return }
+        workItems = snapshot.items
         let apps = (try? await reader.listObservedApps(limit: 200, timeFromUs: nil)) ?? []
         let sawSearch = !(overview.overview?.searches.isEmpty ?? true)
-        let kinds = LibraryKinds.kinds(apps: apps, snapshot: snapshot, sawSearch: sawSearch)
+        var kinds = LibraryKinds.kinds(apps: apps, snapshot: snapshot, sawSearch: sawSearch)
         let memory = isSyntheticPreview ? "synthetic" : ProcessInfo.processInfo.environment["MCI_DB_PATH"] ?? "default"
         let before = hides.appearedKinds(memory: memory)
+        if services.readsKinds {
+            // A lens's row appears once its own page finds a moment of its
+            // kind (SPEC-DELTA 1): the page is what has something. A row
+            // that has appeared stays, so its read isn't asked again.
+            for lens in LibraryLens.allCases where !before.contains(lens.place) {
+                if await LibraryLensModel.holdsMoments(lens, reader: reader) {
+                    kinds.insert(lens.place)
+                } else {
+                    kinds.remove(lens.place)
+                }
+            }
+            // Looked Up appears with the first search the agent read.
+            if !before.contains(.lookedUp), !kinds.contains(.lookedUp), let searches = services.searches,
+               let found = try? await searches.searches(hours: 24 * 14, limit: 1), !found.isEmpty {
+                kinds.insert(.lookedUp)
+            }
+        }
         let appeared = hides.noteAppeared(kinds, memory: memory)
         // VoiceOver hears the first new row once, ever, not every one
         // (SPEC 2.15).
@@ -757,7 +895,8 @@ struct MemoryWorkspaceView: View {
            !isSyntheticPreview, hides.takeRowAnnouncement() {
             AccessibilityNotification.Announcement(NavigationCopy.rowAdded(first.title)).post()
         }
-        let model = SidebarModel.make(snapshot: snapshot, kinds: appeared, hides: hides.choices)
+        let model = SidebarModel.make(snapshot: snapshot, kinds: appeared, hides: hides.choices,
+                                      badges: aiToolsNeedsStep ? [.aiTools] : [])
         let first = sidebar.shown.workingOn.isEmpty && !model.workingOn.isEmpty
         withAnimation(MCI.Motion.standard) {
             if personAsked { sidebar.apply(model) } else { sidebar.receive(model) }
@@ -926,7 +1065,12 @@ struct MemoryWorkspaceView: View {
         default:
             if route.clearsField { ask.clear() }
         }
-        if route.focusesField { focusField() }
+        if route.focusesField {
+            // ⌘F keeps the field to the page; ⌘N searches everything
+            // (SPEC 2.8).
+            if route.clearsField { ask.search.searchEverything() } else { ask.search.scopeToPage() }
+            focusField()
+        }
         // Resume's sheet lists what it would open; nothing opens until the
         // person clicks in it (SPEC-DELTA 3).
         if route.showsResume, let item = route.workItem {
@@ -947,6 +1091,213 @@ struct MemoryWorkspaceView: View {
     private func searchInField(_ text: String) {
         ask.query = text
         Task { await ask.search.runSearch() }
+    }
+
+    // MARK: Forgetting from a page (SPEC 3.11)
+
+    /// Up to this many moments go after an Undo note, without a question.
+    static let forgetWithoutAsking = 20
+
+    /// A page asked to forget: a few picked moments go after an Undo note;
+    /// more of them, a session, an hour, a page or a search asks first;
+    /// Forget Recent… opens its sheet. Privacy's typed FORGET already asked.
+    private func handle(_ request: PageForgetRequest) {
+        switch request {
+        case let .moments(ids):
+            let ids = ids.filter { $0 > 0 }
+            guard !ids.isEmpty else { return }
+            let forget = ForgetRequest(momentIds: ids)
+            if ids.count <= Self.forgetWithoutAsking {
+                forgetAfterUndo(forget, count: ids.count)
+            } else {
+                forgetConfirmation = ForgetConfirmation(
+                    title: NavigationCopy.forgetSelectionTitle(ids.count), body: NavigationCopy.forgetSelectionBody,
+                    firstForget: hides.firstForgetDue, request: forget, audit: .moments(ids.count))
+            }
+        case let .range(range, label, confirmed):
+            let span = ForgetRequest.Span(startUs: UInt64(max(0, range.lowerBound)),
+                                          endUs: UInt64(max(0, range.upperBound)))
+            let forget = ForgetRequest(spans: [span])
+            let audit = ForgetAudit.span(span)
+            if confirmed {
+                forgetConfirmed(ForgetConfirmation(title: label, body: "", firstForget: false, request: forget,
+                                                   audit: audit))
+                return
+            }
+            Task { @MainActor in
+                let count = await momentCount(in: span)
+                forgetConfirmation = ForgetConfirmation(
+                    title: NavigationCopy.forgetSpanTitle(label),
+                    body: NavigationCopy.forgetSpanBody(label, moments: count),
+                    firstForget: hides.firstForgetDue, request: forget, audit: audit)
+            }
+        case .recent:
+            forgetSheet = ForgetRecentSheetItem(choice: .tenMinutes, openedAt: now())
+        }
+    }
+
+    /// Forget This Page… and Forget This Search… from Web Pages and Looked
+    /// Up: the page's moments on every day, or the search and its results
+    /// page, after a question (SPEC 3.11).
+    private func confirmLensForget(_ moments: [UInt64], title: String, kind: LensForget.Kind) {
+        let ids = moments.filter { $0 > 0 }
+        guard !ids.isEmpty else { return }
+        let forget = ForgetRequest(momentIds: ids)
+        switch kind {
+        case .search:
+            forgetConfirmation = ForgetConfirmation(
+                title: NavigationCopy.forgetSearchTitle(title), body: NavigationCopy.forgetSearchBody,
+                firstForget: hides.firstForgetDue, request: forget, audit: .moments(ids.count))
+        case .page:
+            Task { @MainActor in
+                let days = await dayCount(of: ids)
+                forgetConfirmation = ForgetConfirmation(
+                    title: NavigationCopy.forgetPageTitle(title),
+                    body: NavigationCopy.forgetPageBody(moments: ids.count, days: max(days, 1)),
+                    firstForget: hides.firstForgetDue, request: forget, audit: .moments(ids.count))
+            }
+        }
+    }
+
+    /// The person said Forget: written down, held, deleted, released.
+    private func forgetConfirmed(_ confirmation: ForgetConfirmation) {
+        hides.firstForgetSaid()
+        Task { @MainActor in
+            let outcome = await forgetting.forget(confirmation.request)
+            report(outcome, audit: confirmation.audit) { forgetConfirmed(confirmation) }
+        }
+    }
+
+    /// A few picked moments: hidden at once, deleted when the Undo note
+    /// closes.
+    private func forgetAfterUndo(_ request: ForgetRequest, count: Int) {
+        Task { @MainActor in
+            guard let outcome = await forgetting.forgetAfterUndo(request, count: count) else { return }
+            report(outcome, audit: .moments(count)) { forgetAfterUndo(request, count: count) }
+        }
+    }
+
+    /// What a forget's note says, and the audit log's line for it: counts
+    /// and ranges, never content.
+    private func report(_ outcome: ForgetCoordinator.Outcome, audit: ForgetAudit,
+                        retry: @escaping @MainActor () -> Void) {
+        switch outcome {
+        case let .forgotten(moments):
+            audit.record(count: moments, now: now())
+            notes.show(NavigationCopy.forgotten)
+        case .failed:
+            notes.show(NavigationCopy.couldNotForget,
+                       action: BottomNote.Action(title: NavigationCopy.tryAgain) { retry() })
+        case .needsApp:
+            notes.show(NavigationCopy.openHippocampusToForget,
+                       action: BottomNote.Action(title: NavigationCopy.openHippocampus) {
+                           perform(.openHippocampus)
+                       })
+        case .unavailable:
+            notes.show(NavigationCopy.couldNotForget)
+        }
+    }
+
+    /// How many moments a span holds, for its question.
+    private func momentCount(in span: ForgetRequest.Span) async -> Int {
+        let hits = (try? await reader.search(SearchOptions(
+            text: "", limit: 5_000, timeFromUs: span.startUs, timeToUs: span.endUs, mode: .text, browse: true
+        ))) ?? []
+        return hits.count
+    }
+
+    /// On how many days `ids` were saved, for "6 moments from 3 days".
+    private func dayCount(of ids: [UInt64]) async -> Int {
+        var days = Set<Date>()
+        var start = 0
+        while start < ids.count {
+            let chunk = Array(ids[start..<min(start + 32, ids.count)])
+            start += 32
+            let hits = (try? await reader.fetchEventsByIds(chunk)) ?? []
+            for hit in hits {
+                days.insert(calendar.startOfDay(for: Date(timeIntervalSince1970: Double(hit.tsUs) / 1_000_000)))
+            }
+        }
+        return days.count
+    }
+
+    // MARK: Ask {Tool} from the field (SPEC 2.8, 5.3.1)
+
+    /// ⌘↩ in the field: the last tool opens with the question and its top
+    /// matches. Nothing is sent; the person presses send in the tool.
+    private func askYourAI(_ question: String) {
+        let matches = ask.search.hits.prefix(Self.fieldAskMatches).map(\.id)
+        let sequence = (fieldAsk?.sequence ?? 0) + 1
+        fieldAsk = FieldAsk(source: .question(question, moments: Array(matches)), sequence: sequence)
+    }
+
+    /// The top matches a question takes with it.
+    static let fieldAskMatches = 8
+
+    // MARK: AI tools (SPEC 2.5, 3.2)
+
+    /// Whether Claude Code starts its sessions with recent work, and
+    /// whether a connected tool needs a step: the agent's `clients` read,
+    /// which holds no content. Never in the preview or a picture.
+    private func loadTools() async {
+        if let starts = services.claudeCodeStarts {
+            claudeCodeStarts = starts
+            return
+        }
+        guard !isSyntheticPreview, preset == nil else { return }
+        let handoff = HandoffServices.resolved(services.handoff, isSyntheticPreview: false)
+        guard let tools = try? await handoff.client.clients() else { return }
+        claudeCodeStarts = tools.contains { $0.id == "claude-code" && $0.sessionStart == "on" }
+        let needsStep = tools.contains { $0.isConnected && $0.needsStep != nil } && selection != .aiTools
+        if needsStep != aiToolsNeedsStep {
+            aiToolsNeedsStep = needsStep
+            await loadSidebar(personAsked: true)
+        }
+    }
+
+    // MARK: Retention and the calendar
+
+    /// How long moments are kept: the person's setting in the app, the
+    /// standard 90 days in the preview and pictures.
+    private var retention: @Sendable () -> RetentionSetting? {
+        if isSyntheticPreview || drawsWindowControls { return { .standard } }
+        return { RetentionSetting.read(from: RetentionSetting.defaultURL) }
+    }
+
+    /// The days moments are kept, for the line at a list's end; 0 when
+    /// they are kept until forgotten, which says nothing.
+    private func readRetentionDays() -> Int {
+        switch retention() {
+        case let .days(days)?: days
+        case .forever?: 0
+        case nil: RetentionSetting.standard.days ?? 90
+        }
+    }
+
+    /// Today's Show Calendar: turns the person's calendar on, asking macOS
+    /// only if it never has. Only the app's own window has it; the preview,
+    /// pictures and Demo Memory never ask macOS for the person's calendar.
+    private var showCalendarAction: (@MainActor () -> Void)? {
+        guard services.asksForCalendar, !isSyntheticPreview, preset == nil else { return nil }
+        let overview = overview
+        return { Task { await ShowCalendarAction.run { await overview.reload() } } }
+    }
+
+    // MARK: The field's scope (SPEC 2.8)
+
+    /// The page the field can be kept to while it is on screen.
+    private func scope(for page: WindowPage) -> SearchScope? {
+        switch page {
+        case let .item(id):
+            let name = sidebar.shown.items[id]?.name ?? workItems.first { $0.id == id }?.name
+            return name.map { SearchScope(kind: .item(id), name: $0) }
+        case .place(.webPages): return .webPages
+        case .place(.lookedUp): return .lookedUp
+        case let .place(place):
+            guard let sidebarPlace = SidebarPlace(rawValue: place.rawValue),
+                  let lens = LibraryLens(place: sidebarPlace) else { return nil }
+            return .lens(lens)
+        }
     }
 }
 

@@ -54,7 +54,7 @@ final class CopyStyleTests: XCTestCase {
         ("askPlaceholder", UserFacingCopy.askPlaceholder),
         ("searchOnlyPlaceholder", UserFacingCopy.searchOnlyPlaceholder),
         ("askKeyHintReturn", UserFacingCopy.askKeyHintReturn),
-        ("askKeyHintCommandReturn", UserFacingCopy.askKeyHintCommandReturn),
+        ("askKeyHintOptionReturn", UserFacingCopy.askKeyHintOptionReturn),
         ("askThinking", UserFacingCopy.askThinking),
         ("askFailed", UserFacingCopy.askFailed),
         ("tryAgainAction", UserFacingCopy.tryAgainAction),

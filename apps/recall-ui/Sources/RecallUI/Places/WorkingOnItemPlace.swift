@@ -149,7 +149,10 @@ struct WorkingOnItemPlace: View {
                 Button(WorkCopy.resume) { open(.resume(item: item.id)) }
                     .buttonStyle(WorkButtonStyle(prominent: true))
                     .help(WorkCopy.resume)
-                AskAIButton(source: .item(item.id), reader: reader)
+                // A code project's button opens Claude Code (or Codex) in
+                // its folder (SPEC 5.3.1); ⌘↩ is this button.
+                AskAIButton(source: .item(item.id), reader: reader, handlesCommandReturn: true,
+                            itemMoments: item.moments, codeProject: item.kind == .code ? item.name : nil)
                     .controlSize(.small)
                 Menu {
                     if hides.keepsOut(item) {

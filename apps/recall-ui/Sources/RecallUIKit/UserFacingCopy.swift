@@ -97,6 +97,7 @@ public enum UserFacingCopy {
     // ⌃⇧Space still opens Ask (RULINGS G3).
     public static let askKeyNames: [String: (label: String, phrase: String)] = [
         "shiftTwice": ("⇧⇧", "Press Shift twice"),
+        "fn": ("fn", "Tap Fn"),
         "rightShift": ("right ⇧", "Tap right Shift"),
         "rightCommand": ("right ⌘", "Tap right ⌘"),
         "rightOption": ("right ⌥", "Tap right ⌥"),
@@ -225,8 +226,9 @@ public enum UserFacingCopy {
     public static let searchOnlyPlaceholder = "Search anything you\u{2019}ve seen"
     /// Return asks what is typed.
     public static let askKeyHintReturn = "\u{21A9} Ask"
-    /// Only ⌘Return asks what is typed.
-    public static let askKeyHintCommandReturn = "\u{2318}\u{21A9} Ask"
+    /// ⌥Return asks on this Mac whatever is typed; ⌘Return is Ask {Tool}
+    /// (SPEC 2.10).
+    public static let askKeyHintOptionReturn = "\u{2325}\u{21A9} Ask"
     public static let askThinking = "Thinking on your Mac\u{2026}"
     public static let askFailed = "Couldn\u{2019}t answer that. Try again."
     public static let tryAgainAction = "Try Again"
@@ -438,6 +440,8 @@ public enum UserFacingCopy {
     public static let folderNothingSent = "Nothing is sent anywhere until you copy it."
     public static func folderWrittenAt(_ time: String) -> String { "Written at \(time)." }
     public static let folderCopy = "Copy"
+    /// The answer card's Copy: the answer as it reads (SPEC 2.8).
+    public static let copyAnswer = "Copy"
     public static let folderPanelTitle = "Choose a Project Folder"
 
     // Reading a screenshot again (RULINGS T5, T17).

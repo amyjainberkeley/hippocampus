@@ -29,13 +29,16 @@ extension WindowRenderer {
             ("about-you", .place(.you)),
             ("window", .window),
         ]
-        // The new pages, once the window has them (WP1 and WP4).
-        if RecallRoute(tab: "work") != nil {
-            shots.append(("working-on", .workItem))
-        }
-        if let route = RecallRoute(tab: "ai-tools") {
-            shots.append(("ai-tools", .route(route)))
-        }
+        // Working On, its pages and the rest of the new window (WP1, WP4).
+        shots += [
+            ("working-on", .workItem),
+            ("working-on-all", .place(.workingOn)),
+            ("web-pages", .place(.webPages)),
+            ("looked-up", .place(.lookedUp)),
+            ("ai-tools", .place(.aiTools)),
+            ("privacy", .place(.privacy)),
+            ("resume", .resume),
+        ]
         return shots.flatMap { name, shot in
             [false, true].map { dark in
                 Scene.picture("demo-\(name)-\(dark ? "dark" : "light")", size: DemoRenderWorld.size, dark: dark) {
@@ -61,6 +64,8 @@ final class DemoRenderWorld {
         case route(RecallRoute)
         /// The first Working On item, from the agent's `work` read.
         case workItem
+        /// Resume's sheet for that item: what it would open.
+        case resume
         /// The window with its title bar and Demo tag.
         case window
     }
@@ -75,6 +80,13 @@ final class DemoRenderWorld {
     let screenshots: CountingDemoScreenshots
     let understanding: AgentUnderstandingReader
     let receipt: CaptureHealthReceipt?
+    /// Working On, Web Pages, Looked Up and Resume's plans: the agent's own
+    /// reads of the made-up week.
+    let work: AgentWorkReader
+    /// Ask {Tool}'s builder and AI Tools' read, from the made-up Mac.
+    let client: SendCardClient
+    /// The week's made-up calendar, beside its memory.
+    let calendarReader: DemoCalendar
 
     private static var made: DemoRenderWorld?
     private static var failed = false
@@ -176,6 +188,65 @@ final class DemoRenderWorld {
         }.value
     }
 
+    /// One agent read with `input` on its standard input (the builder's
+    /// request), with `environment` exactly, within `timeout`.
+    nonisolated static func runAgent(
+        _ command: ContextHandoffCommand, input: Data, timeout: TimeInterval, environment: [String: String]
+    ) async throws -> String {
+        try await Task.detached(priority: .userInitiated) {
+            let process = Process()
+            process.executableURL = command.executableURL
+            process.arguments = command.arguments
+            process.environment = environment
+            let output = Pipe()
+            let stdin = Pipe()
+            process.standardOutput = output
+            process.standardError = FileHandle.nullDevice
+            process.standardInput = stdin
+            _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+            try process.run()
+            try? stdin.fileHandleForWriting.write(contentsOf: input)
+            try? stdin.fileHandleForWriting.close()
+            let reader = Task.detached { output.fileHandleForReading.readDataToEndOfFile() }
+            let deadline = Date().addingTimeInterval(timeout)
+            while process.isRunning, Date() < deadline {
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            if process.isRunning {
+                process.terminate()
+                throw UnderstandingError.unavailable
+            }
+            let data = await reader.value
+            guard process.terminationStatus == 0 else { throw UnderstandingError.unavailable }
+            return String(decoding: data, as: UTF8.self)
+        }.value
+    }
+
+    /// The builder and the `clients` read, run with the made-up week's
+    /// environment and nothing else.
+    static func sendCardClient(agent: URL, database: URL, environment: [String: String]) -> SendCardClient {
+        SendCardClient(
+            card: { request in
+                let body = try JSONEncoder().encode(request)
+                let command = ContextHandoffCommand(executableURL: agent,
+                                                    arguments: ["send-card", "--json", "--db-path", database.path])
+                let output = try await runAgent(command, input: body, timeout: 20, environment: environment)
+                guard let card = try? JSONDecoder().decode(SendCard.self, from: Data(output.utf8)) else {
+                    throw SendCardError.failed
+                }
+                return card
+            },
+            clients: {
+                let command = ContextHandoffCommand(executableURL: agent, arguments: ["clients", "--json"])
+                let output = try await runAgent(command, timeout: 20, environment: environment)
+                struct Reply: Decodable { let tools: [ClientStatus] }
+                guard let reply = try? JSONDecoder().decode(Reply.self, from: Data(output.utf8)) else {
+                    throw SendCardError.failed
+                }
+                return reply.tools
+            })
+    }
+
     private static func run(_ tool: URL, _ arguments: [String], environment: [String: String]) throws -> Data {
         let process = Process()
         process.executableURL = tool
@@ -269,10 +340,20 @@ final class DemoRenderWorld {
             deletions: MemoryDeletionSignal(center: NotificationCenter()),
             verdicts: nil
         )
+        let work = AgentWorkReader(
+            environment: readEnvironment,
+            recallExecutableURL: nil,
+            run: { command, timeout in try await runAgent(command, timeout: timeout, environment: readEnvironment) },
+            now: { nowDate },
+            timeZone: calendar.timeZone,
+            deletions: MemoryDeletionSignal(center: NotificationCenter())
+        )
         return DemoRenderWorld(
             folder: folder, database: database, keyHex: keyHex, calendar: calendar, now: nowDate, agent: agent,
             reader: reader, screenshots: CountingDemoScreenshots(provider), understanding: understanding,
-            receipt: try? CaptureHealthReceipt.decode(Data(receiptText.utf8)))
+            receipt: try? CaptureHealthReceipt.decode(Data(receiptText.utf8)), work: work,
+            client: sendCardClient(agent: agent, database: database, environment: readEnvironment),
+            calendarReader: DemoCalendar(url: store.appendingPathComponent(DemoMemoryMode.calendarFileName)))
     }
 
     /// Claude Code's settings in `home` with Hippocampus's session hook, as
@@ -297,7 +378,7 @@ final class DemoRenderWorld {
     private init(
         folder: URL, database: URL, keyHex: String, calendar: Calendar, now: Date, agent: URL,
         reader: FFIBrainReader, screenshots: CountingDemoScreenshots, understanding: AgentUnderstandingReader,
-        receipt: CaptureHealthReceipt?
+        receipt: CaptureHealthReceipt?, work: AgentWorkReader, client: SendCardClient, calendarReader: DemoCalendar
     ) {
         self.folder = folder
         self.database = database
@@ -309,17 +390,63 @@ final class DemoRenderWorld {
         self.screenshots = screenshots
         self.understanding = understanding
         self.receipt = receipt
+        self.work = work
+        self.client = client
+        self.calendarReader = calendarReader
     }
 
-    /// The first Working On item's id, from the agent's `work` read.
-    private func firstWorkItem() -> String? {
-        let environment = Self.toolEnvironment(home: folder.appendingPathComponent("home"), keyHex: keyHex)
-        let offset = calendar.timeZone.secondsFromGMT(for: now)
-        guard let data = try? Self.run(agent, ["work", "--json", "--tz-offset-secs", String(offset),
-                                               "--db-path", database.path], environment: environment),
-              let snapshot = try? JSONDecoder().decode(WorkSnapshot.self, from: data)
-        else { return nil }
-        return (snapshot.items.first { $0.kind == .code } ?? snapshot.items.first)?.id
+    /// The made-up founder's AI tools: what a Mac with them installed has.
+    static let tools: [InstalledTool] = [
+        InstalledTool(tool: .claude, appURL: URL(fileURLWithPath: "/Applications/Claude.app")),
+        InstalledTool(tool: .claudeCode, appURL: URL(fileURLWithPath: "/Applications/Claude.app")),
+        InstalledTool(tool: .chatgpt, appURL: URL(fileURLWithPath: "/Applications/ChatGPT.app")),
+        InstalledTool(tool: .codex, appURL: URL(fileURLWithPath: "/Applications/Codex.app")),
+        InstalledTool(tool: .cursor, appURL: URL(fileURLWithPath: "/Applications/Cursor.app")),
+    ]
+
+    /// What the window's pages reach on the made-up week: the agent's reads
+    /// of it, its calendar, the made-up Mac's AI tools, and a Resume that
+    /// lists what it would open and opens nothing.
+    func services() -> WindowServices {
+        // The links each made-up app handles (SPEC 5.3.2's detection).
+        let schemes: [String: URL] = [
+            "claude": URL(fileURLWithPath: "/Applications/Claude.app"),
+            "codex": URL(fileURLWithPath: "/Applications/Codex.app"),
+            "cursor": URL(fileURLWithPath: "/Applications/Cursor.app"),
+        ]
+        let chatGPT = URL(fileURLWithPath: "/Applications/ChatGPT.app")
+        let detector = DestinationDetector(
+            appForScheme: { schemes[$0] },
+            appForBundle: { DestinationDetector.chatGPTBundles.contains($0) ? chatGPT : nil },
+            isExecutable: { _ in false }, environment: [:])
+        let now = self.now
+        let calendar = self.calendar
+        let reader = self.reader
+        return WindowServices(
+            searches: work,
+            calendar: calendarReader,
+            handoff: HandoffServices(client: client, tools: { Self.tools }, choices: .ephemeral(), notes: .shared,
+                                     open: { _ in false }, home: "/Users/ren"),
+            resume: ResumeServices(
+                planner: work,
+                workspace: FixtureResumeWorkspace(installed: [
+                    "com.google.Chrome", "com.microsoft.VSCode", "com.apple.Terminal", "com.tinyspeck.slackmacgap",
+                    "us.zoom.xos", "notion.id", "com.figma.Desktop",
+                ]),
+                tabs: NoOpenTabs(), rules: { .none }, asked: nil),
+            aiTools: AIToolsModel(client: client, detector: detector, understanding: understanding,
+                                  choices: .ephemeral(), timeZone: calendar.timeZone, now: { now }),
+            privacy: {
+                AnyView(PrivacyDashboard(reader: reader, mutator: nil, retention: { .standard },
+                                         picturesUsage: { nil }, activity: { [] }, now: { now }, calendar: calendar))
+            },
+            claudeCodeStarts: true)
+    }
+
+    /// The first Working On item's id in the agent's `work` read: the code
+    /// project when there is one.
+    private func firstWorkItem(_ snapshot: WorkSnapshot) -> String? {
+        (snapshot.items.first { $0.kind == .code } ?? snapshot.items.first)?.id
     }
 
     // MARK: Pictures
@@ -338,11 +465,14 @@ final class DemoRenderWorld {
         let receipt = receipt
         let now = now
         let reader = reader
+        let work = work
+        let services = services()
         let ask = AskViewModel(
             search: SearchViewModel(
                 reader: reader,
                 persistence: QueryPersistence(environment: ["MCI_EPHEMERAL_UI_STATE": "1"], store: NothingKeptHere()),
-                userDictionaryLoader: { .empty }),
+                userDictionaryLoader: { .empty },
+                work: work),
             history: TimelineViewModel(reader: reader, pageSize: 200, day: MemoryDay(date: now, calendar: calendar),
                                        now: { now }),
             understanding: understanding,
@@ -351,11 +481,29 @@ final class DemoRenderWorld {
             understanding: understanding, selectedDate: now, calendar: calendar,
             healthLoader: { receipt }, now: { now },
             deletions: MemoryDeletionSignal(center: NotificationCenter()),
-            savedBefore: { try await reader.isAnythingSaved(before: $0) })
+            savedBefore: { try await reader.isAnythingSaved(before: $0) },
+            reader: reader, work: work, calendarReader: services.calendar, offers: EphemeralKeyValueStore())
         await overview.reload()
         let you = UserModelViewModel(understanding: understanding, verdicts: VerdictInbox(directory: nil),
                                      deletions: MemoryDeletionSignal(center: NotificationCenter()))
         await you.reload()
+        // The sidebar as the window reads it: the week's Working On, and
+        // the kinds whose own pages find something.
+        let snapshot = (try? await work.work(days: 14)) ?? .empty
+        var kinds = LibraryKinds.kinds(apps: (try? await reader.listObservedApps(limit: 200, timeFromUs: nil)) ?? [],
+                                       snapshot: snapshot)
+        for lens in LibraryLens.allCases {
+            if await LibraryLensModel.holdsMoments(lens, reader: reader) {
+                kinds.insert(lens.place)
+            } else {
+                kinds.remove(lens.place)
+            }
+        }
+        if let searches = try? await work.searches(hours: 24 * 14, limit: 1), !searches.isEmpty {
+            kinds.insert(.lookedUp)
+        }
+        let preset = WindowShellPreset(sidebar: SidebarModel.make(snapshot: snapshot, kinds: kinds,
+                                                                  hides: SidebarHides.Choices()))
         var place = MemoryWorkspaceSelection.overview
         var route: RecallRoute?
         switch shot {
@@ -379,7 +527,9 @@ final class DemoRenderWorld {
         case .route(let wanted):
             route = wanted
         case .workItem:
-            route = firstWorkItem().map { RecallRoute(workItem: $0) }
+            if let item = firstWorkItem(snapshot) { place = .item(item) }
+        case .resume:
+            if let item = firstWorkItem(snapshot) { place = .item(item) }
         case .window:
             place = .overview
         }
@@ -388,12 +538,36 @@ final class DemoRenderWorld {
             route: route,
             make: { selection, request in
                 MemoryWorkspaceView(
-                    reader: reader, understanding: self.understanding, selection: selection, routeRequest: request,
-                    isSyntheticPreview: false, healthLoader: { receipt }, contextExporter: { _ in "" },
-                    calendar: self.calendar, now: { now }, ask: ask, overview: overview, you: you,
-                    status: SidebarStatus(receipt: receipt, now: now), isDemoMemory: true)
+                    reader: reader, understanding: self.understanding, work: work, selection: selection,
+                    routeRequest: request, isSyntheticPreview: false, healthLoader: { receipt },
+                    contextExporter: { _ in "" }, calendar: self.calendar, now: { now }, ask: ask,
+                    overview: overview, you: you,
+                    status: WindowStatus(kind: .remembering, title: NavigationCopy.remembering, action: .pause),
+                    isDemoMemory: true, hides: SidebarHides(defaults: nil), drawsWindowControls: true,
+                    preset: preset, services: services)
             })
-        return AnyView(view)
+        guard case .resume = shot, case let .item(item) = place, let resume = services.resume else {
+            return AnyView(view.environment(\.workNow, { now }))
+        }
+        // Resume's sheet over the item's page, as macOS shows it at the
+        // window's top: a picture can't capture a sheet's own window.
+        let model = ResumeSheetModel(itemId: item, planner: resume.planner, workspace: resume.workspace,
+                                     tabs: resume.tabs)
+        await model.load()
+        let sheet = ResumeSheetContent(model: model, notes: BottomNotes(), now: now, calendar: calendar,
+                                       loads: false) {}
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MCI.Color.surfaceElevated))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.28), radius: 35, y: 18)
+        return AnyView(
+            ZStack(alignment: .top) {
+                view
+                Color.black.opacity(0.06)
+                sheet.padding(.top, 52)
+            }
+            .environment(\.workNow, { now })
+        )
     }
 
     private func snapshot(_ shot: Shot, dark: Bool) async -> NSImage {
@@ -410,13 +584,9 @@ final class DemoRenderWorld {
             tzset()
             NSTimeZone.resetSystemTimeZone()
         }
-        var content = await window(shot, dark: dark)
-        if case .window = shot {
-            content = AnyView(VStack(spacing: 0) {
-                DemoTitleBar()
-                content.frame(width: size.width, height: size.height - DemoTitleBar.height)
-            })
-        }
+        // The shell draws the window's controls with the Demo tag beside
+        // them (SPEC-DELTA 6).
+        let content = await window(shot, dark: dark)
         let view = content
             .environment(\.controlActiveState, .key)
             .environment(\.overviewThumbnails, screenshots)
@@ -481,32 +651,6 @@ private struct DemoWindowHost: View {
 
     var body: some View {
         make($selection, request)
-    }
-}
-
-/// The window's title bar as the Mac draws it while the window reads Demo
-/// Memory: the window's buttons, then the Demo tag. An off-screen render
-/// draws no toolbar, so this picture adds it where the window shows it.
-private struct DemoTitleBar: View {
-    static let height: CGFloat = 38
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ForEach([Color(red: 1, green: 0.373, blue: 0.341), Color(red: 0.996, green: 0.737, blue: 0.180),
-                     Color(red: 0.157, green: 0.784, blue: 0.251)], id: \.self) { color in
-                Circle().fill(color).frame(width: 12, height: 12)
-            }
-            Image(systemName: "sidebar.left")
-                .foregroundStyle(MCI.Color.foregroundSecondary)
-                .padding(.leading, 18)
-            DemoTag()
-                .padding(.leading, 8)
-            Spacer()
-        }
-        .padding(.horizontal, 14)
-        .frame(height: Self.height)
-        .background(MCI.Color.surface)
-        .overlay(alignment: .bottom) { Rectangle().fill(MCI.Color.border).frame(height: 1) }
     }
 }
 

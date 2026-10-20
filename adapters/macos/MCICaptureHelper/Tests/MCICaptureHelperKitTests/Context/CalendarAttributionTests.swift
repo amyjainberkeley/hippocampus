@@ -175,6 +175,32 @@ final class CalendarAttributionTests: XCTestCase {
         XCTAssertEqual(factory.calls, 1)
     }
 
+    func testWithTheCalendarTurnedOffNothingIsReadEvenWhenMacOSAllowsIt() {
+        let factory = CalendarStoreFactorySpy()
+        let switchOn = LockedFlag(false)
+        let attribution = CalendarAttribution(cacheTtl: 30, storeFactory: factory.makeStore,
+                                              isTurnedOn: { switchOn.value })
+        attribution.start()
+        factory.store.completeAccess(granted: true)
+        let now = Date(timeIntervalSince1970: 100)
+        XCTAssertNil(attribution.eventNow(at: now))
+        XCTAssertTrue(factory.store.readDates.isEmpty, "off means not read (SPEC-DELTA 5)")
+        switchOn.value = true
+        XCTAssertEqual(attribution.eventNow(at: now), factory.store.event)
+        XCTAssertEqual(factory.store.readDates, [now])
+        switchOn.value = false
+        XCTAssertNil(attribution.eventNow(at: now.addingTimeInterval(1)), "turning it off drops what was read")
+        XCTAssertEqual(factory.store.readDates, [now])
+    }
+
+    func testTheSwitchIsTheAppsOwnDefaultsKeyAndUnsetIsOff() {
+        XCTAssertEqual(CalendarAttribution.settingKey, "ai.hippocampus.calendar.show")
+        XCTAssertFalse(CalendarAttribution.isTurnedOn(stored: nil))
+        XCTAssertFalse(CalendarAttribution.isTurnedOn(stored: false))
+        XCTAssertFalse(CalendarAttribution.isTurnedOn(stored: "true"))
+        XCTAssertTrue(CalendarAttribution.isTurnedOn(stored: true))
+    }
+
     func testRepeatedExplicitStartsReuseOneStoreAndPreserveAccessRequests() {
         let factory = CalendarStoreFactorySpy()
         let attribution = CalendarAttribution(storeFactory: factory.makeStore)
@@ -217,5 +243,15 @@ private final class FakeCalendarStore: CalendarAttributionStore, @unchecked Send
     func eventNow(at now: Date) -> CalendarEventRef? {
         lock.withLock { observedDates.append(now) }
         return event
+    }
+}
+
+private final class LockedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flag: Bool
+    init(_ flag: Bool) { self.flag = flag }
+    var value: Bool {
+        get { lock.withLock { flag } }
+        set { lock.withLock { flag = newValue } }
     }
 }

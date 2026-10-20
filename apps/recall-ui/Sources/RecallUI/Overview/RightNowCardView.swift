@@ -17,6 +17,8 @@ struct TodayCardView: View {
     @Environment(\.locale) private var locale
     @Environment(\.timeZone) private var timeZone
     @Environment(\.forget) private var forget
+    @Environment(\.handoffServices) private var handoff
+    @Environment(\.isSyntheticPreview) private var isSyntheticPreview
 
     private typealias Copy = UserFacingCopy.Overview
 
@@ -84,7 +86,7 @@ struct TodayCardView: View {
             if let item = model.cardItem {
                 ResumeButton(itemId: item.id, open: open)
             }
-            AskAIButton(source: .session(title: title, range: card.copyRange), reader: reader)
+            askButton
             if let reopen = card.reopen {
                 ReopenButton(action: reopen)
             }
@@ -110,6 +112,23 @@ struct TodayCardView: View {
         }
     }
 
+    /// Ask {Tool} for the card (SPEC 5.3.1): on a code project it opens
+    /// Claude Code in the project's folder with where you left off; otherwise
+    /// the session's moments. The main button when there is nothing to
+    /// resume. ⌘↩ is this button.
+    @ViewBuilder
+    private var askButton: some View {
+        // Another session picked on the strip has ⌘↩ instead.
+        let commandReturn = model.selectedBlock == nil || model.selectedIsRightNow
+        if let item = model.cardItem, item.kind == .code {
+            AskAIButton(source: .item(item.id), reader: reader, handlesCommandReturn: commandReturn,
+                        itemMoments: item.moments, codeProject: item.name)
+        } else {
+            AskAIButton(source: .session(title: title, range: card.copyRange), reader: reader,
+                        prominent: model.cardItem == nil, handlesCommandReturn: commandReturn)
+        }
+    }
+
     /// "2:12 to 2:36 PM": the session's own time, as its Forget names it.
     private var range: String {
         TodayFormat.span(card.copyRange, locale: locale, timeZone: timeZone)
@@ -120,16 +139,13 @@ struct TodayCardView: View {
                                                               locale: locale, timeZone: timeZone))
     }
 
+    /// The builder's message for the session, by the clipboard rules
+    /// (SPEC 5.3.6): this Mac only, kept out of clipboard history, cleared
+    /// after 2 minutes.
     private func copyForYourAI() {
-        let title = self.title
-        let range = card.copyRange
-        let reader = self.reader
-        Task { @MainActor in
-            guard let text = try? await SessionCopy.markdown(title: title, range: range, reader: reader) else { return }
-            let board = NSPasteboard.general
-            board.clearContents()
-            board.setString(text, forType: .string)
-        }
+        let services = HandoffServices.resolved(handoff, isSyntheticPreview: isSyntheticPreview)
+        let source = AskAISource.session(title: title, range: card.copyRange)
+        Task { await AskAIButton.copyForYourAI(source, services: services) }
     }
 }
 

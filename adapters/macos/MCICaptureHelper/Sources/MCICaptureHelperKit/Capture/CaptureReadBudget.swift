@@ -34,6 +34,15 @@ public struct ReadBudget: Sendable, Equatable {
         self.tookUs = tookUs
     }
 
+    /// Work done after a read, on the same budget: the picture of a window
+    /// beside the front one (SPEC 6.9). It adds to the last read's time, so
+    /// the rest owed grows with it.
+    public mutating func extend(byUs extraUs: UInt64, endedUs: UInt64) {
+        let (sum, overflow) = tookUs.addingReportingOverflow(extraUs)
+        tookUs = overflow ? UInt64.max : sum
+        self.endedUs = max(self.endedUs, endedUs)
+    }
+
     /// Whether a read may start now. The power mode is the one in force now,
     /// so plugging in shortens a rest that began on battery.
     public func admits(nowUs: UInt64, scale: UInt64) -> Bool {
@@ -56,6 +65,12 @@ public final class CaptureReadBudget: @unchecked Sendable {
     /// Call when a read ends, with how long it took.
     public func recordRead(tookUs: UInt64) {
         lock.withLock { budget.record(endedUs: Self.uptimeUs(), tookUs: tookUs) }
+    }
+
+    /// Call when work beside a read ends (a side window's picture), with how
+    /// long it took: it counts toward the same rest (SPEC 6.9).
+    public func recordExtraWork(tookUs: UInt64) {
+        lock.withLock { budget.extend(byUs: tookUs, endedUs: Self.uptimeUs()) }
     }
 
     public func admitsRead() -> Bool {

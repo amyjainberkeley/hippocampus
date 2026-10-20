@@ -68,7 +68,9 @@ final class NativeWorkspacePresentationTests: XCTestCase {
         XCTAssertTrue(app.contains(".defaultSize(width: 1100, height: 720)"))
         XCTAssertTrue(app.contains("QueryPersistence.defaultKey"), "the old saved query is cleared at launch")
         let ask = try source("Places/AskPlace.swift")
-        XCTAssertTrue(ask.contains(".keyboardShortcut(.return, modifiers: .command)"))
+        XCTAssertTrue(ask.contains(".keyboardShortcut(.return, modifiers: .option)"), "⌥↩ asks on this Mac")
+        XCTAssertFalse(ask.contains(".keyboardShortcut(.return, modifiers: .command)"),
+                       "⌘↩ is Ask {Tool} everywhere (SPEC 2.10)")
     }
 
     /// The sidebar's rows stay the system's own selectable list rows, in the

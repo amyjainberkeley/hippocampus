@@ -147,7 +147,7 @@ struct LookedUpList: View {
             }
             if let forget = lensForget.forget {
                 Divider()
-                Button(WorkCopy.forgetThisSearch) { forget(row.eventIds, row.record.query) }
+                Button(WorkCopy.forgetThisSearch) { forget(row.eventIds, row.record.query, .search) }
             }
         }
     }
@@ -220,11 +220,11 @@ struct SearchDetail: View {
                     .buttonStyle(.bordered)
                     .help(url.host() ?? WorkCopy.searchAgain)
                 }
-                AskAIButton(source: .moments(row.eventIds), reader: reader)
+                AskAIButton(source: .moments(row.eventIds), reader: reader, handlesCommandReturn: true)
                 Spacer(minLength: 0)
                 if let forget = lensForget.forget {
                     Button {
-                        forget(row.eventIds, row.record.query)
+                        forget(row.eventIds, row.record.query, .search)
                     } label: {
                         Image(systemName: "trash").font(.system(size: 14))
                     }

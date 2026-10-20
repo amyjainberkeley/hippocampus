@@ -10,6 +10,7 @@ ONBOARDING_APP="$ONBOARDING/OnboardingApp.swift"
 PREFERENCES_APP="$REPO_ROOT/apps/hippocampus/Sources/Hippocampus/PreferencesWindow.swift"
 MEMORY_WORKSPACE="$REPO_ROOT/apps/recall-ui/Sources/RecallUI/MemoryWorkspaceView.swift"
 EVIDENCE_THUMBNAIL="$REPO_ROOT/apps/recall-ui/Sources/RecallUI/EvidenceThumbnail.swift"
+SIDEBAR_MODEL="$REPO_ROOT/apps/recall-ui/Sources/RecallUIKit/SidebarModel.swift"
 
 fail() {
     printf 'FAIL: %s\n' "$1" >&2
@@ -60,23 +61,32 @@ if rg -q -i '(radial|linear|angular|elliptical|mesh)gradient' "$ONBOARDING" --gl
     fail "onboarding draws a gradient outside the hi mark's tile"
 fi
 
-for root in "$RECALL_APP" "$ONBOARDING_APP" "$PREFERENCES_APP"; do
-    rg -q '\.preferredColorScheme\(\.light\)' "$root" \
-        || fail "$(basename "$root") does not pin the V1 window to light appearance"
-done
+# Setup stays light this release (SPEC 7.7).
+rg -q '\.preferredColorScheme\(\.light\)' "$ONBOARDING_APP" \
+    || fail "$(basename "$ONBOARDING_APP") does not keep setup light"
 
-rg -q 'panel\.appearance = NSAppearance\(named: \.aqua\)' "$PREFERENCES_APP" \
-    || fail "Preferences native panel chrome does not pin the V1 Aqua appearance"
+# The window and Preferences follow the Mac's light or dark appearance
+# (SPEC 2.14, 8.4).
+for root in "$RECALL_APP" "$PREFERENCES_APP"; do
+    if rg -q '\.preferredColorScheme\(\.light\)|NSAppearance\(named: \.aqua\)' "$root"; then
+        fail "$(basename "$root") must follow the Mac's appearance"
+    fi
+done
 
 if rg -q '\.blur\(' "$EVIDENCE_THUMBNAIL"; then
     fail "evidence pixels must remain inspectable; blur belongs on the surrounding material"
 fi
-rg -U -q 'case overview\n\s*case ask\n\s*case you' "$MEMORY_WORKSPACE" \
-    || fail "the window must have three places: Overview, Ask and You"
-rg -q 'case \.ask:\s*$' "$MEMORY_WORKSPACE" && rg -q 'AskPlace\(' "$MEMORY_WORKSPACE" \
-    || fail "Ask must show its own place"
-rg -q 'OverviewPlace\(model: overview' "$MEMORY_WORKSPACE" && rg -q 'YouPlace\(model: you' "$MEMORY_WORKSPACE" \
-    || fail "Overview and You must show their own places"
+# The sidebar's fixed places, in order (SPEC 2.2 with SPEC-DELTA 1): Today;
+# History and the kinds people know, each a lens over History; then About
+# You, AI Tools and Privacy, pinned at the bottom.
+rg -U -q 'case today\n\s*case history\n\s*case webPages\n\s*case documents\n\s*case code\n\s*case conversations\n\s*case lookedUp\n\s*case aboutYou\n\s*case aiTools\n\s*case privacy\n' \
+    "$SIDEBAR_MODEL" \
+    || fail "the sidebar's places must be Today, History, the five kinds, About You, AI Tools and Privacy"
+for place in 'TodayPlace\(model: overview' 'HistoryPlace\(' 'WebPagesPlace\(' 'DocumentsPlace\(' 'CodePlace\(' \
+    'ConversationsPlace\(' 'LookedUpPlace\(' 'WorkingOnPlace\(' 'WorkingOnItemPlace\(' 'AboutYouPlace\(model: you' \
+    'AIToolsPlace\(' 'PrivacyDashboard\('; do
+    rg -q "$place" "$MEMORY_WORKSPACE" || fail "the window must show its page: $place"
+done
 if rg -q 'PendingPlace|DailyMemoryView\(|EpisodesView\(|SourcesWorkspaceView|MeasuredInputView\(' "$MEMORY_WORKSPACE"; then
     fail "the window must not show Today, Sessions, Connections or the input chart"
 fi

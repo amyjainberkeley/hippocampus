@@ -147,6 +147,9 @@ public actor MemorySession {
         }
         process = child
         input = stdin.fileHandleForWriting
+        // A child that ends mid-write is a failed request, never a SIGPIPE
+        // that ends the window.
+        _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         let myGeneration = generation
         let reader = stdout.fileHandleForReading
         Task.detached { [weak self] in

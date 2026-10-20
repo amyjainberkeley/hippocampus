@@ -9,6 +9,8 @@ public enum HandoffCopy {
 
     /// "Ask Claude"; "Ask Your AI" before a tool is chosen.
     public static func ask(_ tool: String?) -> String { tool.map { "Ask \($0)" } ?? "Ask Your AI" }
+    /// ⌘K's row for the selection or page (SPEC 2.9): "Ask Claude About This".
+    public static func askAboutThis(_ tool: String?) -> String { ask(tool) + " About This" }
     public static func openIn(_ tool: String) -> String { "Open in \(tool)" }
     public static func copyFor(_ tool: String) -> String { "Copy for \(tool)" }
     public static let copyForYourAI = "Copy for Your AI"

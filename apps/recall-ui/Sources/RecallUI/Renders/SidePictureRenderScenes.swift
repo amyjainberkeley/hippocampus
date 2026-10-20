@@ -86,7 +86,7 @@ extension WindowRenderer {
                     ask: model,
                     overview: overview,
                     you: you,
-                    status: SidebarStatus(receipt: receipt, now: now)
+                    status: WindowStatus(kind: .remembering, title: NavigationCopy.remembering, action: .pause)
                 )
                 .environment(\.overviewThumbnails, thumbnails)
                 .environment(\.screenshots, fixture.screenshots)

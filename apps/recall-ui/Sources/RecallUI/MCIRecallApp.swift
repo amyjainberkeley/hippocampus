@@ -18,6 +18,9 @@ final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Se
     private var terminating = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // A pipe or socket whose reader has gone is an error to handle, never
+        // a signal that ends the window (as the app does).
+        signal(SIGPIPE, SIG_IGN)
         lifetime = ProcessLifetime { _ in
             ChildProcesses.shared.terminateAll()
             exit(0)
@@ -138,11 +141,11 @@ struct MCIRecallApp: App {
     @MainActor
     fileprivate static let understanding: UnderstandingReader = AgentUnderstandingReader()
 
-    /// What the person works on, for the sidebar's Working On and Web
-    /// Pages. The agent-backed reader comes with Working On (lane C); until
-    /// then nothing is listed, and Working On stays out of the sidebar.
+    /// What the person works on, for the sidebar's Working On, its pages,
+    /// Web Pages and Today: the bundled agent's `work` read, kept two
+    /// minutes and cleared by any delete (SPEC 3.12.2).
     @MainActor
-    fileprivate static let work: any WorkReader = PreviewWorkReader()
+    fileprivate static let work: any WorkReader = AgentWorkReader.shared
 
     /// The private pipe from the app that opened this window (SPEC 2.6.4),
     /// opened first thing so its descriptors are close-on-exec before any
@@ -203,7 +206,8 @@ struct MCIRecallApp: App {
                 channel: MCIRecallApp.channel,
                 forget: MCIRecallApp.forget,
                 opening: WindowOpening.shared.page(),
-                isUpgrade: UserDefaults.standard.string(forKey: WhatsNewCoordinator.lastShownKey) != nil
+                isUpgrade: UserDefaults.standard.string(forKey: WhatsNewCoordinator.lastShownKey) != nil,
+                services: .app()
             )
             // The window follows the Mac's appearance (SPEC 2.14).
             .frame(minWidth: 760, minHeight: 480)
@@ -372,6 +376,8 @@ struct RootView: View {
     var channel: (any WindowChannelSending)?
     var forget: ForgetCoordinator?
     var isUpgrade = false
+    /// What the pages reach beyond the memory: this Mac's in the app.
+    var services = WindowServices()
     @State private var selection: MemoryWorkspaceSelection
     @State private var routeRequest: RecallRouteRequest?
     @State private var nextRouteSequence: UInt64 = 2
@@ -397,7 +403,8 @@ struct RootView: View {
         channel: (any WindowChannelSending)? = nil,
         forget: ForgetCoordinator? = nil,
         opening: WindowPage = .today,
-        isUpgrade: Bool = false
+        isUpgrade: Bool = false,
+        services: WindowServices = WindowServices()
     ) {
         self.reader = reader
         self.understanding = understanding
@@ -406,6 +413,7 @@ struct RootView: View {
         self.channel = channel
         self.forget = forget
         self.isUpgrade = isUpgrade
+        self.services = services
         let route = RecallRoute(launchRequest)
         let first: WindowPage = route.workItem.map(WindowPage.item) ?? route.place.map(WindowPage.place) ?? opening
         self._selection = State(initialValue: first)
@@ -549,7 +557,8 @@ struct RootView: View {
             appRunning: { MCIRecallApp.appIsRunning() },
             forget: forget,
             hides: .shared,
-            isUpgrade: isUpgrade
+            isUpgrade: isUpgrade,
+            services: services
         )
         .background(MCI.Color.background)
         .onOpenURL { url in

@@ -186,7 +186,8 @@ struct FieldResults: View {
                     onOpenSource: open,
                     onRetry: { model.ask($0) },
                     onStop: { model.stopAsking() },
-                    maxHeight: showsMatchesUnderAnswer ? 280 : nil
+                    maxHeight: showsMatchesUnderAnswer ? 280 : nil,
+                    reader: reader
                 )
                 if showsMatchesUnderAnswer { Divider() }
             }

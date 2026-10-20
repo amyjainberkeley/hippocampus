@@ -111,6 +111,22 @@ final class SidebarModelTests: XCTestCase {
         XCTAssertEqual(model.allItemCount, 4)
     }
 
+    func testANameThatLooksPersonalJoinsTheSidebarOnlyOnceThePersonShowsIt() {
+        let personal = WorkItem(id: "w_p", kind: .document, name: "Item w_p", lastUs: 1_000, inSidebar: false,
+                                recent: true, hiddenReason: "personal")
+        let snapshot = WorkSnapshot(items: [item("w_1"), personal])
+        let before = SidebarModel.make(snapshot: snapshot, kinds: [], hides: SidebarHides.Choices())
+        XCTAssertEqual(before.workingOn, ["w_1"])
+        XCTAssertTrue(before.hasMoreWorkingOn, "it waits on Show All")
+        let after = SidebarModel.make(snapshot: snapshot, kinds: [],
+                                      hides: SidebarHides.Choices(shownItems: ["w_p"]))
+        XCTAssertEqual(after.workingOn, ["w_1", "w_p"])
+        XCTAssertFalse(after.hasMoreWorkingOn)
+        let hiddenAgain = SidebarModel.make(snapshot: snapshot, kinds: [],
+                                            hides: SidebarHides.Choices(hiddenItems: ["w_p"], shownItems: ["w_p"]))
+        XCTAssertEqual(hiddenAgain.workingOn, ["w_1"], "a hide wins over a show")
+    }
+
     func testWithNothingHiddenAndFiveOrFewerShowAllStaysAway() {
         let snapshot = WorkSnapshot(items: (1...5).map { item("w_\($0)") })
         let model = SidebarModel.make(snapshot: snapshot, kinds: [], hides: SidebarHides.Choices())

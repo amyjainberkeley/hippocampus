@@ -60,8 +60,21 @@ final class SidebarHidesTests: XCTestCase {
         XCTAssertTrue(hides.choices.hiddenKinds.isEmpty, "Today, History and the pinned group always show")
     }
 
+    func testShowInSidebarKeepsTheItemsIdAndHideTakesItBack() {
+        let hides = SidebarHides(defaults: defaults)
+        hides.show(item: "w_personal")
+        XCTAssertEqual(hides.choices.shownItems, ["w_personal"])
+        XCTAssertTrue(hides.choices.hiddenItems.isEmpty)
+        hides.hide(item: "w_personal")
+        XCTAssertTrue(hides.choices.shownItems.isEmpty, "Hide from Sidebar takes back a show")
+        XCTAssertEqual(hides.choices.hiddenItems, ["w_personal"])
+        hides.show(item: "Taxes 2026 for Sam")
+        XCTAssertTrue(hides.choices.shownItems.isEmpty, "a name is never kept, only an id")
+    }
+
     func testResetSidebarClearsEveryHideAndShow() {
         let hides = SidebarHides(defaults: defaults)
+        hides.show(item: "w_2")
         hides.hide(item: "w_1")
         hides.hide(kind: .webPages)
         hides.setWorkingOnHidden(true)

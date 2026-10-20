@@ -189,6 +189,8 @@ public struct PicturesUsage: Equatable, Sendable, Decodable {
     private enum CodingKeys: String, CodingKey {
         case sideBytes = "side_bytes"
         case budgetBytes = "side_budget_bytes"
+        /// The agent's word for the switch (`retention_worker.rs`, schema 1).
+        case picturesOn = "side_pictures_on"
         case enabled = "side_enabled"
     }
 
@@ -196,6 +198,14 @@ public struct PicturesUsage: Equatable, Sendable, Decodable {
         self.sideBytes = sideBytes
         self.budgetBytes = budgetBytes
         self.enabled = enabled
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        sideBytes = try values.decode(UInt64.self, forKey: .sideBytes)
+        budgetBytes = try values.decodeIfPresent(UInt64.self, forKey: .budgetBytes)
+        enabled = try values.decodeIfPresent(Bool.self, forKey: .picturesOn)
+            ?? values.decodeIfPresent(Bool.self, forKey: .enabled)
     }
 
     /// The page's line: "Pictures of windows beside the one you're using:

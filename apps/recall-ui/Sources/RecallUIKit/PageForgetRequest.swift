@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// What a person asked to forget from a page (SPEC 3.11), by ids and times
-/// only, never content.
+/// only, never content. The shell turns it into the coordinator's
+/// `ForgetRequest` (moment ids and spans) once the person has said yes.
 ///
 /// Pages only ask. The window's forget coordinator answers: it hides the rows
 /// at once, asks first when the request is larger than one selection, shows
@@ -9,7 +10,7 @@ import SwiftUI
 /// closes. Today, History and Library ask through `EnvironmentValues.forget`;
 /// with no coordinator in the environment they offer no Forget at all, so
 /// there is never a button that does nothing.
-public enum ForgetRequest: Equatable, Hashable, Sendable {
+public enum PageForgetRequest: Equatable, Hashable, Sendable {
     /// Moments picked in a list, newest first: a row of one window holds
     /// its whole run. Up to 20 are forgotten without a question.
     case moments([UInt64])
@@ -31,16 +32,16 @@ public enum ForgetRequest: Equatable, Hashable, Sendable {
     }
 }
 
-/// The window's answer to a `ForgetRequest`.
+/// The window's answer to a `PageForgetRequest`.
 public struct ForgetAction: Sendable {
-    private let perform: @MainActor @Sendable (ForgetRequest) -> Void
+    private let perform: @MainActor @Sendable (PageForgetRequest) -> Void
 
-    public init(_ perform: @escaping @MainActor @Sendable (ForgetRequest) -> Void) {
+    public init(_ perform: @escaping @MainActor @Sendable (PageForgetRequest) -> Void) {
         self.perform = perform
     }
 
     @MainActor
-    public func callAsFunction(_ request: ForgetRequest) {
+    public func callAsFunction(_ request: PageForgetRequest) {
         perform(request)
     }
 }

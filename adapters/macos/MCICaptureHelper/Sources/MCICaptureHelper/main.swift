@@ -647,11 +647,12 @@ if let captureRuntime {
     //
     // Phase 6 PR 5 — SH Fork D1: kick off the three attribution
     // providers in parallel BEFORE the poller starts. Each provider's
-    // `start()` triggers the TCC prompt (Calendar + Contacts) or
-    // sets up the read path (MPNowPlayingInfoCenter — no prompt).
-    // All three are idempotent + non-blocking; the auth callback
-    // resolves asynchronously, until which point the providers
-    // return `nil` (graceful absence). See security review rows 1-2.
+    // `start()` checks the access the person already gave the app (the
+    // calendar's never prompts, and reads nothing unless the person turned
+    // the calendar on) or sets up the read path (MPNowPlayingInfoCenter —
+    // no prompt). All three are idempotent + non-blocking; until access
+    // resolves the providers return `nil` (graceful absence). See security
+    // review rows 1-2.
     captureRuntime.calendarAttribution.start()
     captureRuntime.nowPlayingAttribution.start()
     captureRuntime.contactsAttribution.start()

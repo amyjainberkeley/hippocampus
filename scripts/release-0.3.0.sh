@@ -75,7 +75,7 @@ CO_AUTHOR="Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 MIN_FREE_MB=1536
 MINIMUM_MACOS="14.0"
 REPOSITORY="amyjainberkeley/hippocampus"
-SWIFT_PACKAGES="apps/hippocampus adapters/macos/MCICaptureHelper apps/recall-ui apps/onboarding apps/mind"
+SWIFT_PACKAGES="apps/hippocampus adapters/macos/MCICaptureHelper apps/recall-ui apps/onboarding apps/mind apps/demo-memory"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -657,7 +657,9 @@ build_binaries() {
         target/release/hippocampus-native-host \
         apps/recall-ui/.build/release/recall-ui \
         apps/onboarding/.build/release/onboarding \
-        apps/mind/.build/release/hippocampus-mind; do
+        apps/mind/.build/release/hippocampus-mind \
+        target/release/mci-seed-brain \
+        apps/demo-memory/.build/release/demo-screens; do
         [[ -x "$REPO_ROOT/$pkg" ]] || stop "The build did not produce $pkg."
         binaries+=("$REPO_ROOT/$pkg")
     done

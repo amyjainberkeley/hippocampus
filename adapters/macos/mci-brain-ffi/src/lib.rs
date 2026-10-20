@@ -1545,6 +1545,11 @@ pub struct ReadingJson {
     /// ([`mci_brain::caption::fallback`]); `None` when none can be made.
     #[serde(default)]
     pub caption: Option<String>,
+    /// `main` as typed blocks ([`mci_brain::reading_blocks::blocks`]), as an
+    /// event's reading carries them, so text read again is formatted the
+    /// same way (SPEC 4). Empty only for empty text.
+    #[serde(default)]
+    pub blocks: Vec<Block>,
 }
 
 /// Largest input [`mci_brain_ffi_reading`] reads, in bytes of JSON.
@@ -1596,10 +1601,20 @@ pub unsafe extern "C" fn mci_brain_ffi_reading(input_json: *const c_char) -> *mu
         text: &read.main,
         beside: source == EventSource::ScreenContext,
     });
+    let blocks = reading_blocks::blocks(
+        &read.main,
+        &reading_blocks::Window {
+            app: input.app.as_deref(),
+            title: input.title.as_deref(),
+            url: input.url.as_deref(),
+        },
+        source,
+    );
     json_to_c_string(&ReadingJson {
         main: read.main,
         rest: read.rest,
         caption,
+        blocks,
     })
 }
 

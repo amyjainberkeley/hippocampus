@@ -12,6 +12,19 @@ public enum StatelessReading {
         public let main: String
         public let rest: String
         public let caption: String?
+        /// `main` as typed blocks, as an event's reading carries them
+        /// (SPEC 4.2); empty from a reader that sends none.
+        public let blocks: [ReadingBlock]
+
+        private enum CodingKeys: String, CodingKey { case main, rest, caption, blocks }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            main = try container.decode(String.self, forKey: .main)
+            rest = try container.decode(String.self, forKey: .rest)
+            caption = try container.decodeIfPresent(String.self, forKey: .caption)
+            blocks = try container.decodeIfPresent([ReadingBlock].self, forKey: .blocks) ?? []
+        }
     }
 
     public static func read(stored: String, source: String, app: String?, title: String?,

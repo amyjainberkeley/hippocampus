@@ -48,7 +48,7 @@ final class HistoryMultiSelectTests: XCTestCase {
         XCTAssertEqual(LibraryCopy.History.selected(picked.momentCount), "4 moments selected")
         XCTAssertEqual(LibraryCopy.History.forgetMomentsMenu(picked.momentCount), "Forget 4 Moments\u{2026}")
         XCTAssertEqual(LibraryCopy.History.forgetHelp(picked.momentCount), "Forget 4 Moments (\u{2318}\u{232B})")
-        XCTAssertEqual(ForgetRequest.moments(picked.momentIds).momentCount, 4)
+        XCTAssertEqual(PageForgetRequest.moments(picked.momentIds).momentCount, 4)
     }
 
     func testARowsMenuSaysHowManyMomentsItForgets() {

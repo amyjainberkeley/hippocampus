@@ -84,7 +84,14 @@ struct NoOpenTabs: OpenTabsReading {
 /// confirmation, the hold and the Undo note) does it; without one, the
 /// lenses offer no Forget.
 struct LensForget {
-    var forget: (@MainActor (_ moments: [UInt64], _ title: String) -> Void)?
+    /// What is forgotten: a web page's moments on every day, or a search
+    /// and its results page. The confirmation words differ (SPEC 3.11).
+    enum Kind: Sendable {
+        case page
+        case search
+    }
+
+    var forget: (@MainActor (_ moments: [UInt64], _ title: String, _ kind: Kind) -> Void)?
 }
 
 private struct LensForgetKey: EnvironmentKey {

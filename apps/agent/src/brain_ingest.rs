@@ -562,15 +562,23 @@ impl BrainIngestor for BrainPump {
                 window_title,
                 url: _,
                 ocr_text,
-                keyframe_hash: _,
+                keyframe_hash,
             } => {
                 // A visible window that was not focused: its own app and
-                // title, no URL (browsers are excluded) and no screenshot.
+                // title, no URL, and the picture the helper kept of it when
+                // its text changed (SPEC 6.4), or none. The helper sends a
+                // digest only once the sealed blob is durable and the text
+                // cleared both privacy passes.
                 let app = bundle_id_from_padded_bytes(app_bundle_id);
                 let title = if window_title.is_empty() {
                     None
                 } else {
                     Some(window_title.clone())
+                };
+                let kb = if keyframe_hash.iter().all(|b| *b == 0) {
+                    None
+                } else {
+                    Some(hex_lower(keyframe_hash))
                 };
                 (
                     ts_us,
@@ -578,7 +586,7 @@ impl BrainIngestor for BrainPump {
                     title,
                     None,
                     ocr_text.clone(),
-                    None,
+                    kb,
                     None,
                     mci_brain::EventSource::ScreenContext,
                 )

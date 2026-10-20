@@ -161,7 +161,7 @@ enum WorkRenders {
                 .environment(\.workNow, { now })
                 .environment(\.workItemHides, WorkItemHides(ids: hidden))
                 .environment(\.claudeCodeStartsSessions, true)
-                .environment(\.lensForget, LensForget(forget: { _, _ in }))
+                .environment(\.lensForget, LensForget(forget: { _, _, _ in }))
                 .environment(\.calendar, calendar)
         )
     }

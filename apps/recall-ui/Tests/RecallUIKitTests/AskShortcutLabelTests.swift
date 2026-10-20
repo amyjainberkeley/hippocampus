@@ -55,6 +55,11 @@ final class AskShortcutLabelTests: XCTestCase {
         XCTAssertEqual(AskShortcutLabel.effectiveLabelKey, "ai.hippocampus.ask.effectiveLabel")
         XCTAssertEqual(AskShortcutLabel.effectivePhraseKey, "ai.hippocampus.ask.effectivePhrase")
         XCTAssertEqual(AskShortcutLabel.askKeyKey, "ai.hippocampus.prefs.askKey")
-        XCTAssertEqual(Set(UserFacingCopy.askKeyNames.keys), ["shiftTwice", "rightShift", "rightCommand", "rightOption", "off"])
+        XCTAssertEqual(Set(UserFacingCopy.askKeyNames.keys),
+                       ["shiftTwice", "fn", "rightShift", "rightCommand", "rightOption", "off"])
+        // Fn (Globe) is a choice in setup and Preferences (SPEC-DELTA 7): the
+        // window names it as the app does.
+        XCTAssertEqual(UserFacingCopy.askKeyNames["fn"]?.label, "fn")
+        XCTAssertEqual(UserFacingCopy.askKeyNames["fn"]?.phrase, "Tap Fn")
     }
 }

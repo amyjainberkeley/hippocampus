@@ -50,8 +50,9 @@ struct AIToolsPlace: View {
         .background(MCI.Color.background)
         .task {
             // The synthetic preview never reaches the agent or this Mac's
-            // tools: its model is filled from fixtures.
-            guard !isSyntheticPreview else { return }
+            // tools: its model is filled from fixtures. A model a picture
+            // filled already is drawn as it is.
+            guard !isSyntheticPreview, model.state == .loading else { return }
             await model.reload()
         }
     }

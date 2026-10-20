@@ -91,6 +91,9 @@ struct AskAIButton: View {
     var contextExporter: @Sendable (String) async throws -> String = {
         try await ContextHandoffExporter.export(focus: $0)
     }
+    /// Moves on each time a key asks for this button's press: the field's
+    /// ⌘↩ hands its question over on a button of its own (SPEC 2.8).
+    var pressRequest = 0
 
     @Environment(\.handoffServices) private var injected
     @Environment(\.isSyntheticPreview) private var isSyntheticPreview
@@ -130,11 +133,32 @@ struct AskAIButton: View {
             )
             .onChange(of: includeAboutMe) { _, _ in preview(content.tool) }
         }
-        .task {
+        .task(id: pressRequest) {
             if injected == nil, services == nil { services = isSyntheticPreview ? .preview : .live }
             tools = handoff.tools()
             await checkScreenshot()
+            if pressRequest > 0 { press() }
         }
+        // ⌘K's Ask {Tool} About This is the button that has ⌘↩ (SPEC 2.9).
+        .registerActionPanelCommands(commandBarItems, registry: .shared)
+    }
+
+    /// The primary half: the tool it names, or Copy for Your AI without one.
+    private func press() {
+        if let tool = primaryTool { ask(tool) } else { copyForAI() }
+    }
+
+    /// ⌘K's rows for the selection or page, while this button has ⌘↩.
+    private var commandBarItems: [ActionPanelCommand] {
+        guard handlesCommandReturn else { return [] }
+        let title = codeProject != nil && label.hasPrefix(HandoffCopy.openIn(""))
+            ? label : HandoffCopy.askAboutThis(primaryTool?.tool.name)
+        return [
+            ActionPanelCommand(id: "handoff.askAboutThis", title: title, shortcut: "\u{2318}\u{21A9}",
+                               category: .actions) { press() },
+            ActionPanelCommand(id: "handoff.copyForYourAI", title: HandoffCopy.copyForYourAI,
+                               shortcut: "\u{21E7}\u{2318}C", category: .actions) { copyForAI() },
+        ]
     }
 
     // MARK: The button
@@ -213,9 +237,7 @@ struct AskAIButton: View {
     @ViewBuilder
     private var commandReturn: some View {
         if handlesCommandReturn {
-            Button("") {
-                if let tool = primaryTool { ask(tool) } else { copyForAI() }
-            }
+            Button("") { press() }
             .keyboardShortcut(.return, modifiers: .command)
             .opacity(0)
             .frame(width: 0, height: 0)
@@ -370,6 +392,45 @@ struct AskAIButton: View {
         guard let id, let hit = try? await reader.fetchEventsByIds([id]).first, let url = hit.thumbnailURL,
               let data = await screenshots.thumbnailData(for: url, maxPixelSize: 1_568) else { return nil }
         return ClipboardHygiene.jpegForAI(data)
+    }
+}
+
+extension HandoffServices {
+    /// The services a view uses: the environment's, else the synthetic
+    /// preview's (nothing reaches the agent or an app), else this Mac's.
+    @MainActor
+    static func resolved(_ injected: HandoffServices?, isSyntheticPreview: Bool) -> HandoffServices {
+        injected ?? (isSyntheticPreview ? .preview : .live)
+    }
+}
+
+extension AskAIButton {
+    /// Copy for Your AI from outside the button: a row's menu (⇧⌘C) and the
+    /// summary of several moments. The builder makes the message, as for the
+    /// button's own Copy for Your AI, and the clipboard rules apply
+    /// (SPEC 5.3.6): this Mac only, kept out of clipboard history, cleared
+    /// after 2 minutes. The note says what was copied, or why nothing was.
+    /// False when nothing was copied.
+    @MainActor
+    @discardableResult
+    static func copyForYourAI(_ source: AskAISource, services: HandoffServices) async -> Bool {
+        let request = source.request(to: "copy")
+        do {
+            let card = try await services.client.card(request)
+            guard !card.message.isEmpty else {
+                services.notes.show(AskAIButtonRules.copiedNote(card))
+                return false
+            }
+            guard ClipboardHygiene.copy(card.message) else {
+                services.notes.show(HandoffCopy.couldNotCopy)
+                return false
+            }
+            services.notes.show(AskAIButtonRules.copiedNote(card))
+            return true
+        } catch {
+            services.notes.show(AskAIButtonRules.failureNote(error))
+            return false
+        }
     }
 }
 

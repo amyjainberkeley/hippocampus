@@ -188,6 +188,12 @@ enum HandoffFixtures {
     enum Week { case connected, needsStep, notConnected, empty }
 
     static func aiTools(_ week: Week, startsWithOpen: Bool = false, exactOpen: Bool = false) -> some View {
+        AIToolsPlace(model: aiToolsModel(week), open: { _ in }, startsWithOpen: startsWithOpen, exactOpen: exactOpen)
+            .environment(\.isSyntheticPreview, true)
+    }
+
+    /// AI Tools' read on Sam's Mac in `week`, filled from fixtures.
+    static func aiToolsModel(_ week: Week) -> AIToolsModel {
         let model = AIToolsModel(client: .unavailable, detector: .none, understanding: PreviewUnderstandingReader(),
                                  choices: .ephemeral())
         let claudeCard = AIToolsModel.card(
@@ -222,8 +228,7 @@ enum HandoffFixtures {
         case .empty:
             model.preview(cards: [], others: [], installed: [], askTool: nil, startsWith: nil)
         }
-        return AIToolsPlace(model: model, open: { _ in }, startsWithOpen: startsWithOpen, exactOpen: exactOpen)
-            .environment(\.isSyntheticPreview, true)
+        return model
     }
 
     /// What Claude Code's sessions start with, in the hook's own shape, from
