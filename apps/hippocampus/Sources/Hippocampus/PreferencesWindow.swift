@@ -319,7 +319,10 @@ struct PreferencesRootView: View {
                     .textSelection(.enabled)
             }
 
-            Text("Hippocampus remembers your screen so you and your AI don’t have to. It stays on this Mac unless you send it to an AI tool.")
+            // What leaves this Mac, in AI Tools' own tested words: a connected
+            // tool can read memory without the person sending it, which "unless
+            // you send it to an AI tool" left out.
+            Text("Hippocampus remembers your screen so you and your AI don’t have to. " + HandoffCopy.lead)
                 .font(PreferencesStyle.bodyFont)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
