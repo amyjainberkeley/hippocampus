@@ -229,6 +229,10 @@ final class DemoRenderWorld {
         let database = store.appendingPathComponent("mci.sqlite")
         _ = try run(seeder, ["--demo-week", "--screens", manifest.path, "--db-path", database.path] + clock,
                     environment: environment)
+        // The made-up Mac has Claude Code connected, so Today shows what
+        // the founder's AI starts with: its session hook, in the temporary
+        // home's own settings.
+        try connectClaudeCode(home: home, database: database)
         // Remembering, as the made-up Mac would say it: Today shows Now.
         let stampFormat = ISO8601DateFormatter()
         stampFormat.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -269,6 +273,25 @@ final class DemoRenderWorld {
             folder: folder, database: database, keyHex: keyHex, calendar: calendar, now: nowDate, agent: agent,
             reader: reader, screenshots: CountingDemoScreenshots(provider), understanding: understanding,
             receipt: try? CaptureHealthReceipt.decode(Data(receiptText.utf8)))
+    }
+
+    /// Claude Code's settings in `home` with Hippocampus's session hook, as
+    /// Connect AI Tools… writes it, naming the made-up week.
+    private static func connectClaudeCode(home: URL, database: URL) throws {
+        let folder = home.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let command = "'/Applications/Hippocampus.app/Contents/MacOS/mci-agent' handoff --format claude-hook "
+            + "--db-path '\(database.path)'"
+        let settings: [String: Any] = [
+            "hooks": [
+                "SessionStart": [[
+                    "matcher": "startup|resume|clear|compact",
+                    "hooks": [["type": "command", "command": command, "timeout": 10]],
+                ]],
+            ],
+        ]
+        try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
+            .write(to: folder.appendingPathComponent("settings.json"))
     }
 
     private init(
