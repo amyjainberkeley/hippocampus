@@ -363,27 +363,9 @@ final class ReadingNSTextView: NSTextView, @preconcurrency NSAccessibilityCustom
     /// The ranges a rotor moves through, in order, with what each is called.
     func rotorItems(for rotor: NSAccessibilityCustomRotor) -> [(range: NSRange, label: String)] {
         guard let storage = textStorage else { return [] }
-        let all = NSRange(location: 0, length: storage.length)
-        var items: [(NSRange, String)] = []
-        if rotor.type == .heading {
-            storage.enumerateAttribute(.readingHeading, in: all) { value, range, _ in
-                guard value != nil else { return }
-                items.append((range, (storage.string as NSString).substring(with: range)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)))
-            }
-            return items
-        }
-        let lists = rotor.label == ReadingCopy.lists
-        storage.enumerateAttribute(.readingGroup, in: all) { value, range, _ in
-            guard let group = value as? String else { return }
-            let parts = group.split(separator: ":")
-            if lists, parts.first == "list" {
-                items.append((range, ReadingCopy.list(items: Int(parts.last ?? "") ?? 0)))
-            } else if !lists, parts.first == "code" || parts.first == "terminal" {
-                items.append((range, ReadingCopy.code))
-            }
-        }
-        return items
+        let kind: ReadingAttributedText.Rotor = rotor.type == .heading
+            ? .headings : rotor.label == ReadingCopy.lists ? .lists : .code
+        return ReadingAttributedText.rotorItems(kind, in: storage)
     }
 
     func rotor(_ rotor: NSAccessibilityCustomRotor,

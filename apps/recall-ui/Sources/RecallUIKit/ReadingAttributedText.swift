@@ -48,6 +48,37 @@ public enum ReadingAttributedText {
     /// The most lines a quote shows before it is closed (SPEC 4.2).
     public static let quoteLinesShown = 6
 
+    /// What VoiceOver's rotors move through in a built reading.
+    public enum Rotor: Sendable {
+        case headings, code, lists
+    }
+
+    /// The ranges a rotor moves through, in order, each with what it is
+    /// called: a heading's own words, "Code", "List, 4 items".
+    public static func rotorItems(_ rotor: Rotor, in string: NSAttributedString) -> [(range: NSRange, label: String)] {
+        let all = NSRange(location: 0, length: string.length)
+        let text = string.string as NSString
+        var items: [(range: NSRange, label: String)] = []
+        switch rotor {
+        case .headings:
+            string.enumerateAttribute(.readingHeading, in: all) { value, range, _ in
+                guard value != nil else { return }
+                items.append((range, text.substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)))
+            }
+        case .code, .lists:
+            string.enumerateAttribute(.readingGroup, in: all) { value, range, _ in
+                guard let group = value as? String else { return }
+                let parts = group.split(separator: ":")
+                if rotor == .lists, parts.first == "list" {
+                    items.append((range, ReadingCopy.list(items: Int(parts.last ?? "") ?? 0)))
+                } else if rotor == .code, parts.first == "code" || parts.first == "terminal" {
+                    items.append((range, ReadingCopy.code))
+                }
+            }
+        }
+        return items
+    }
+
     /// What copying `range` of a built reading gives (⌘C): plain text as it
     /// was read. A drawn checkbox or terminal marker copies as the marker
     /// that was read, a quote's line with its ">", an item's own lines on
@@ -71,10 +102,28 @@ public enum ReadingAttributedText {
         return out
     }
 
+    /// `text`'s lines, split at every "\n" as `components(separatedBy:)`
+    /// splits them, in a fraction of its time.
+    static func lines(of text: String) -> [String] {
+        var lines: [String] = []
+        let bytes = text.utf8
+        var start = bytes.startIndex
+        var index = start
+        while index != bytes.endIndex {
+            if bytes[index] == UInt8(ascii: "\n") {
+                lines.append(String(text[start..<index]))
+                start = bytes.index(after: index)
+            }
+            index = bytes.index(after: index)
+        }
+        lines.append(String(text[start..<bytes.endIndex]))
+        return lines
+    }
+
     /// The blocks as one string. `expandedQuotes` are the quotes (by block
     /// index) that were opened.
     public static func make(_ blocks: [ReadingBlock], expandedQuotes: Set<Int> = []) -> Built {
-        var builder = Builder()
+        let builder = Builder()
         var previous: ReadingBlock?
         var subtitle = false
         for (index, block) in blocks.enumerated() {
@@ -138,79 +187,75 @@ public enum ReadingAttributedText {
 
     // MARK: - Builder
 
-    private struct Builder {
-        let out = NSMutableAttributedString()
+    /// How a run of text looks: everything its attributes say. Runs that
+    /// look alike share one template, so a long reading makes each set of
+    /// attributes once and copies it after (SPEC 4.11's budget).
+    private struct Look: Hashable {
+        enum Font: Hashable {
+            case body, bodyStrong, title, heading, caption, label, mono
 
-        mutating func add(_ block: ReadingBlock, index: Int, gap: CGFloat, expanded: Bool) {
-            switch block {
-            case let .label(text):
-                paragraph(text, font: Style.label, color: Style.muted, gap: gap)
-            case let .heading(level, text):
-                let font = level == 1 ? Style.title : Style.heading
-                let start = out.length
-                paragraph(text, font: font, color: Style.foreground, gap: gap, lineHeight: level == 1 ? 21 : 18)
-                out.addAttribute(.readingHeading, value: level, range: NSRange(location: start, length: out.length - start))
-            case let .byline(text), let .meta(text):
-                lines(text.components(separatedBy: "\n"), font: Style.caption, color: Style.secondary, gap: gap,
-                      between: 2, lineHeight: 16)
-            case let .paragraph(text):
-                lines(text.components(separatedBy: "\n"), font: Style.body, color: Style.foreground, gap: gap,
-                      between: 2, lineHeight: 19, links: true)
-            case let .other(_, text):
-                lines(text.components(separatedBy: "\n"), font: Style.body, color: Style.foreground, gap: gap,
-                      between: 2, lineHeight: 19, links: true)
-            case let .lines(lines, table):
-                if table {
-                    rows(lines.map { [$0] }, numeric: [], gap: gap)
-                } else {
-                    self.lines(lines, font: Style.body, color: Style.foreground, gap: gap, between: 2, lineHeight: 19,
-                               links: true)
+            var font: NSFont {
+                switch self {
+                case .body: Style.body
+                case .bodyStrong: Style.bodyStrong
+                case .title: Style.title
+                case .heading: Style.heading
+                case .caption: Style.caption
+                case .label: Style.label
+                case .mono: Style.mono
                 }
-            case let .list(items):
-                list(items, index: index, gap: gap)
-            case let .code(text):
-                let language = SyntaxHighlighter.detectLanguage(text)
-                box(text.components(separatedBy: "\n"), kind: "code", index: index, gap: gap) { line in
-                    Self.codeLine(line, language: language)
-                }
-            case let .terminal(text, prompts):
-                let prompted = Set(prompts)
-                var number = 0
-                box(text.components(separatedBy: "\n"), kind: "terminal", index: index, gap: gap) { line in
-                    defer { number += 1 }
-                    return Self.terminalLine(line, prompt: prompted.contains(number))
-                }
-            case let .table(rows, numeric):
-                self.rows(rows, numeric: numeric, gap: gap)
-            case let .turn(speaker, time, text):
-                turn(speaker: speaker, time: time, text: text, gap: gap)
-            case let .quote(text):
-                quote(text, index: index, gap: gap, expanded: expanded)
             }
         }
 
-        /// The string ends without a line break after its last paragraph,
-        /// and its first paragraph asks for no space above it: that space is
-        /// the inset the view puts above the text.
-        func finish() -> CGFloat {
-            if out.string.hasSuffix("\n") {
-                out.deleteCharacters(in: NSRange(location: out.length - 1, length: 1))
+        enum Color: Hashable {
+            case foreground, secondary, muted, accent, accentDim
+
+            var color: NSColor {
+                switch self {
+                case .foreground: Style.foreground
+                case .secondary: Style.secondary
+                case .muted: Style.muted
+                case .accent: Style.accent
+                case .accentDim: Style.accentDim
+                }
             }
-            guard out.length > 0,
-                  let style = out.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle,
-                  style.paragraphSpacingBefore > 0,
-                  let first = style.mutableCopy() as? NSMutableParagraphStyle
-            else { return 0 }
-            first.paragraphSpacingBefore = 0
-            let paragraph = (out.string as NSString).paragraphRange(for: NSRange(location: 0, length: 0))
-            out.addAttribute(.paragraphStyle, value: first, range: paragraph)
-            return style.paragraphSpacingBefore
+
+            /// A code token's color.
+            init(_ token: SyntaxTokenType) {
+                switch token {
+                case .keyword: self = .accent
+                case .number: self = .accentDim
+                case .comment: self = .muted
+                case .string: self = .secondary
+                case .plain: self = .foreground
+                }
+            }
         }
 
-        // MARK: Paragraph styles
+        /// A tab stop: right-aligned for a column of numbers, else left.
+        struct Tab: Hashable {
+            var right: Bool
+            var location: CGFloat
+        }
 
-        static func style(lineHeight: CGFloat, before: CGFloat, after: CGFloat = 0, head: CGFloat = 0,
-                          firstHead: CGFloat? = nil, tail: CGFloat = 0, tabs: [NSTextTab] = []) -> NSParagraphStyle {
+        var font: Font
+        var color: Color
+        var lineHeight: CGFloat
+        var before: CGFloat = 0
+        var after: CGFloat = 0
+        var head: CGFloat = 0
+        var firstHead: CGFloat?
+        var tail: CGFloat = 0
+        var tabs: [Tab] = []
+        var box: String?
+        var quote: String?
+        var rule = false
+        var heading: Int?
+        var copyAs: String?
+        var link: URL?
+        var kern: CGFloat?
+
+        var attributes: [NSAttributedString.Key: Any] {
             let style = NSMutableParagraphStyle()
             style.minimumLineHeight = lineHeight
             style.maximumLineHeight = lineHeight
@@ -221,10 +266,99 @@ public enum ReadingAttributedText {
             style.tailIndent = tail
             style.lineBreakMode = .byWordWrapping
             if !tabs.isEmpty {
-                style.tabStops = tabs
+                style.tabStops = tabs.map { NSTextTab(textAlignment: $0.right ? .right : .left, location: $0.location) }
                 style.defaultTabInterval = 18
             }
-            return style
+            let font = font.font
+            var attributes: [NSAttributedString.Key: Any] = [
+                .font: font, .foregroundColor: color.color, .paragraphStyle: style,
+                .baselineOffset: Builder.baseline(font, height: lineHeight),
+            ]
+            if let box { attributes[.readingBox] = box }
+            if let quote { attributes[.readingQuote] = quote }
+            if rule { attributes[.readingRule] = true }
+            if let heading { attributes[.readingHeading] = heading }
+            if let copyAs { attributes[.readingCopyAs] = copyAs }
+            if let link { attributes[.link] = link }
+            if let kern { attributes[.kern] = kern }
+            return attributes
+        }
+    }
+
+    private final class Builder {
+        let out = NSMutableAttributedString()
+        /// One string of one character per look, made the first time it is
+        /// needed.
+        private var templates: [Look: NSAttributedString] = [:]
+
+        func add(_ block: ReadingBlock, index: Int, gap: CGFloat, expanded: Bool) {
+            switch block {
+            case let .label(text):
+                emit(text + "\n", Look(font: .label, color: .muted, lineHeight: 19, before: gap))
+            case let .heading(level, text):
+                emit(text + "\n", Look(font: level == 1 ? .title : .heading, color: .foreground,
+                                       lineHeight: level == 1 ? 21 : 18, before: gap, heading: level))
+            case let .byline(text), let .meta(text):
+                lines(ReadingAttributedText.lines(of: text), font: .caption, color: .secondary, gap: gap, between: 2, lineHeight: 16)
+            case let .paragraph(text), let .other(_, text):
+                lines(ReadingAttributedText.lines(of: text), font: .body, color: .foreground, gap: gap, between: 2, lineHeight: 19,
+                      links: true)
+            case let .lines(lines, table):
+                if table {
+                    rows(lines.map { [$0] }, numeric: [], gap: gap)
+                } else {
+                    self.lines(lines, font: .body, color: .foreground, gap: gap, between: 2, lineHeight: 19,
+                               links: true)
+                }
+            case let .list(items):
+                list(items, index: index, gap: gap)
+            case let .code(text):
+                code(ReadingAttributedText.lines(of: text), language: SyntaxHighlighter.detectLanguage(text), index: index, gap: gap)
+            case let .terminal(text, prompts):
+                terminal(ReadingAttributedText.lines(of: text), prompts: Set(prompts), index: index, gap: gap)
+            case let .table(rows, numeric):
+                self.rows(rows, numeric: numeric, gap: gap)
+            case let .turn(speaker, time, text):
+                turn(speaker: speaker, time: time, text: text, gap: gap)
+            case let .quote(text):
+                quote(text, index: index, gap: gap, expanded: expanded)
+            }
+        }
+
+        /// `text` drawn as `look`: the look's template appended and its one
+        /// character replaced by the text, which takes its attributes. Far
+        /// cheaper than a new attributed string for every run.
+        func emit(_ text: String, _ look: Look) {
+            guard !text.isEmpty else { return }
+            let template: NSAttributedString
+            if let made = templates[look] {
+                template = made
+            } else {
+                template = NSAttributedString(string: " ", attributes: look.attributes)
+                templates[look] = template
+            }
+            out.append(template)
+            out.replaceCharacters(in: NSRange(location: out.length - 1, length: 1), with: text)
+        }
+
+        /// The string ends without a line break after its last paragraph,
+        /// and its first paragraph asks for no space above it: that space is
+        /// the inset the view puts above the text.
+        func finish() -> CGFloat {
+            // The mutable string itself: `out.string` would copy all of it.
+            let text = out.mutableString
+            if text.hasSuffix("\n") {
+                out.deleteCharacters(in: NSRange(location: out.length - 1, length: 1))
+            }
+            guard out.length > 0,
+                  let style = out.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle,
+                  style.paragraphSpacingBefore > 0,
+                  let first = style.mutableCopy() as? NSMutableParagraphStyle
+            else { return 0 }
+            first.paragraphSpacingBefore = 0
+            let paragraph = text.paragraphRange(for: NSRange(location: 0, length: 0))
+            out.addAttribute(.paragraphStyle, value: first, range: paragraph)
+            return style.paragraphSpacingBefore
         }
 
         /// How far to raise text so it sits in the middle of a line `height`
@@ -234,31 +368,21 @@ public enum ReadingAttributedText {
             return max(0, (height - natural) / 2)
         }
 
-        func attributes(_ font: NSFont, _ color: NSColor, style: NSParagraphStyle, height: CGFloat) -> [NSAttributedString.Key: Any] {
-            [.font: font, .foregroundColor: color, .paragraphStyle: style,
-             .baselineOffset: Self.baseline(font, height: height)]
-        }
-
-        func paragraph(_ text: String, font: NSFont, color: NSColor, gap: CGFloat, lineHeight: CGFloat = 19) {
-            let style = Self.style(lineHeight: lineHeight, before: gap)
-            out.append(NSAttributedString(string: text + "\n", attributes: attributes(font, color, style: style, height: lineHeight)))
-        }
-
-        func lines(_ lines: [String], font: NSFont, color: NSColor, gap: CGFloat, between: CGFloat,
+        func lines(_ lines: [String], font: Look.Font, color: Look.Color, gap: CGFloat, between: CGFloat,
                    lineHeight: CGFloat, links: Bool = false) {
             for (number, line) in lines.enumerated() {
-                let style = Self.style(lineHeight: lineHeight, before: number == 0 ? gap : between)
+                let shown = line.trimmingCharacters(in: .whitespaces)
                 let start = out.length
-                out.append(NSAttributedString(string: line.trimmingCharacters(in: .whitespaces) + "\n",
-                                              attributes: attributes(font, color, style: style, height: lineHeight)))
-                if links { link(from: start) }
+                emit(shown + "\n", Look(font: font, color: color, lineHeight: lineHeight,
+                                        before: number == 0 ? gap : between))
+                if links, Self.mayHoldAddress(shown) { link(from: start) }
             }
         }
 
         /// Addresses in the text just added are links, drawn in the accent.
         func link(from start: Int) {
             let range = NSRange(location: start, length: out.length - start)
-            let text = (out.string as NSString).substring(with: range)
+            let text = out.mutableString.substring(with: range)
             for found in LinkDetector.detect(in: text) {
                 guard let url = URL(string: found.url) else { continue }
                 let local = NSRange(found.range, in: text)
@@ -267,33 +391,35 @@ public enum ReadingAttributedText {
             }
         }
 
+        /// Whether `text` can hold an address at all: the cheap test before
+        /// the link detector's.
+        static func mayHoldAddress(_ text: String) -> Bool {
+            text.containsBytes("://")
+        }
+
         // MARK: Lists
 
         func list(_ items: [ReadingListItem], index: Int, gap: CGFloat) {
             let start = out.length
             for (number, item) in items.enumerated() {
                 let indent: CGFloat = item.depth > 0 ? 18 : 0
-                let style = Self.style(lineHeight: 19, before: number == 0 ? gap : 4, head: indent + 18, firstHead: indent,
-                                       tabs: [NSTextTab(textAlignment: .left, location: indent + 18)])
-                let base = attributes(Style.body, Style.foreground, style: style, height: 19)
-                let line = NSMutableAttributedString()
+                let look = Look(font: .body, color: .foreground, lineHeight: 19, before: number == 0 ? gap : 4,
+                                head: indent + 18, firstHead: indent, tabs: [Look.Tab(right: false, location: indent + 18)])
+                let lineStart = out.length
                 if let checked = item.checked {
-                    line.append(Self.checkbox(checked, copyAs: item.marker, attributes: base))
+                    out.append(Self.checkbox(checked, copyAs: item.marker, attributes: look.attributes))
                 } else {
-                    var marker = base
-                    marker[.foregroundColor] = Style.secondary
-                    line.append(NSAttributedString(string: item.marker, attributes: marker))
+                    var marker = look
+                    marker.color = .secondary
+                    emit(item.marker, marker)
                 }
                 // The marker's tab copies as the space Copy Text puts there;
                 // the item's own lines under it break within it.
-                var tab = base
-                tab[.readingCopyAs] = " "
-                line.append(NSAttributedString(string: "\t", attributes: tab))
-                let text = item.text.replacingOccurrences(of: "\n", with: "\u{2028}")
-                line.append(NSAttributedString(string: text + "\n", attributes: base))
-                let lineStart = out.length
-                out.append(line)
-                link(from: lineStart)
+                var tab = look
+                tab.copyAs = " "
+                emit("\t", tab)
+                emit(item.text.replacingOccurrences(of: "\n", with: "\u{2028}") + "\n", look)
+                if Self.mayHoldAddress(item.text) { link(from: lineStart) }
             }
             out.addAttribute(.readingGroup, value: "list:\(index):\(items.count)",
                              range: NSRange(location: start, length: out.length - start))
@@ -326,66 +452,68 @@ public enum ReadingAttributedText {
 
         // MARK: Code and terminal
 
-        /// Lines in an inset box: each line a paragraph, so a long line wraps
-        /// under itself with a two-space hanging indent.
-        func box(_ lines: [String], kind: String, index: Int, gap: CGFloat,
-                 line make: (String) -> NSAttributedString) {
-            let start = out.length
+        /// Room for a box's wrapped line under its first: two spaces of the
+        /// code font.
+        static let hang = Style.mono.advancement(forGlyph: Style.mono.glyph(withName: "space")).width * 2
+
+        /// A line in an inset box: its own paragraph, so a long line wraps
+        /// under itself with a two-space hanging indent, and its place in
+        /// the box.
+        func boxLook(_ number: Int, of count: Int, gap: CGFloat, color: Look.Color) -> Look {
             let padding: CGFloat = 10
-            let hang = Style.mono.advancement(forGlyph: Style.mono.glyph(withName: "space")).width * 2
-            for (number, text) in lines.enumerated() {
-                let first = number == 0
-                let last = number == lines.count - 1
-                let style = Self.style(lineHeight: 18, before: first ? gap + padding : 0,
-                                       after: last ? padding : 0, head: padding + hang, firstHead: padding,
-                                       tail: -padding)
-                let place = first && last ? "only" : first ? "first" : last ? "last" : "middle"
-                let line = NSMutableAttributedString(attributedString: make(text))
-                line.append(NSAttributedString(string: "\n"))
-                let range = NSRange(location: 0, length: line.length)
-                line.addAttributes([.paragraphStyle: style, .readingBox: place, .font: Style.mono,
-                                    .baselineOffset: Self.baseline(Style.mono, height: 18)], range: range)
-                out.append(line)
-            }
-            out.addAttribute(.readingGroup, value: "\(kind):\(index)", range: NSRange(location: start, length: out.length - start))
+            let first = number == 0
+            let last = number == count - 1
+            return Look(font: .mono, color: color, lineHeight: 18, before: first ? gap + padding : 0,
+                        after: last ? padding : 0, head: padding + Self.hang, firstHead: padding, tail: -padding,
+                        box: first && last ? "only" : first ? "first" : last ? "last" : "middle")
         }
 
-        static func codeLine(_ line: String, language: DetectedLanguage) -> NSAttributedString {
-            let out = NSMutableAttributedString()
-            for token in SyntaxHighlighter.codeTokens(line, language: language) {
-                let color: NSColor = switch token.type {
-                case .keyword: Style.accent
-                case .number: Style.accentDim
-                case .comment: Style.muted
-                case .string: Style.secondary
-                case .plain: Style.foreground
+        /// Code, colored by its tokens: tokens of one color in a row are one
+        /// run.
+        func code(_ lines: [String], language: DetectedLanguage, index: Int, gap: CGFloat) {
+            let start = out.length
+            for (number, line) in lines.enumerated() {
+                var runs: [(text: String, color: Look.Color)] = []
+                for token in SyntaxHighlighter.codeTokens(line, language: language) {
+                    let color = Look.Color(token.type)
+                    if let last = runs.last, last.color == color {
+                        runs[runs.count - 1].text += token.text
+                    } else {
+                        runs.append((token.text, color))
+                    }
                 }
-                out.append(NSAttributedString(string: token.text, attributes: [.font: Style.mono, .foregroundColor: color]))
+                if runs.isEmpty { runs.append(("", .foreground)) }
+                runs[runs.count - 1].text += "\n"
+                for run in runs {
+                    emit(run.text, boxLook(number, of: lines.count, gap: gap, color: run.color))
+                }
             }
-            if out.length == 0 {
-                out.append(NSAttributedString(string: "", attributes: [.font: Style.mono]))
-            }
-            return out
+            out.addAttribute(.readingGroup, value: "code:\(index)", range: NSRange(location: start, length: out.length - start))
         }
 
-        /// A terminal's line: a prompt line in the primary color, output in
+        /// A terminal's lines: a prompt line in the primary color, output in
         /// the secondary; a coding assistant's markers drawn as plain bullets
         /// and copied as read.
-        static func terminalLine(_ line: String, prompt: Bool) -> NSAttributedString {
-            let shown = SyntaxHighlighter.plainBullets(line)
-            let out = NSMutableAttributedString(string: shown, attributes: [
-                .font: Style.mono, .foregroundColor: prompt ? Style.foreground : Style.secondary,
-            ])
-            let drawn = Array(shown.utf16)
-            let read = Array(line.utf16)
-            if drawn != read, drawn.count == read.count {
+        func terminal(_ lines: [String], prompts: Set<Int>, index: Int, gap: CGFloat) {
+            let start = out.length
+            for (number, line) in lines.enumerated() {
+                let shown = SyntaxHighlighter.plainBullets(line)
+                let lineStart = out.length
+                emit(shown + "\n", boxLook(number, of: lines.count, gap: gap,
+                                           color: prompts.contains(number) ? .foreground : .secondary))
+                guard shown != line else { continue }
+                let drawn = Array(shown.utf16)
+                let read = Array(line.utf16)
+                guard drawn.count == read.count else { continue }
                 // One unit for one: each changed marker copies as read.
                 for offset in drawn.indices where drawn[offset] != read[offset] {
                     let original = String(utf16CodeUnits: [read[offset]], count: 1)
-                    out.addAttribute(.readingCopyAs, value: original, range: NSRange(location: offset, length: 1))
+                    out.addAttribute(.readingCopyAs, value: original,
+                                     range: NSRange(location: lineStart + offset, length: 1))
                 }
             }
-            return out
+            out.addAttribute(.readingGroup, value: "terminal:\(index)",
+                             range: NSRange(location: start, length: out.length - start))
         }
 
         // MARK: Tables
@@ -396,80 +524,67 @@ public enum ReadingAttributedText {
         func rows(_ rows: [[String]], numeric: [Bool], gap: CGFloat) {
             let columns = rows.map(\.count).max() ?? 0
             var widths = [CGFloat](repeating: 0, count: columns)
+            let measured: [NSAttributedString.Key: Any] = [.font: Style.body]
             for row in rows {
                 for (column, cell) in row.enumerated() {
-                    let size = (cell as NSString).size(withAttributes: [.font: Style.body])
+                    let size = (cell as NSString).size(withAttributes: measured)
                     widths[column] = max(widths[column], ceil(size.width))
                 }
             }
-            var tabs: [NSTextTab] = []
+            var tabs: [Look.Tab] = []
             var x: CGFloat = 0
             for column in 0..<columns {
                 if column > 0 {
                     let right = numeric.indices.contains(column) && numeric[column]
-                    tabs.append(right ? NSTextTab(textAlignment: .right, location: x + widths[column])
-                                      : NSTextTab(textAlignment: .left, location: x))
+                    tabs.append(Look.Tab(right: right, location: right ? x + widths[column] : x))
                 }
                 x += widths[column] + 14
             }
             for (number, row) in rows.enumerated() {
                 let last = number == rows.count - 1
-                let style = Self.style(lineHeight: 19, before: (number == 0 ? gap : 0) + 5, after: last ? 0 : 5,
-                                       tabs: tabs)
-                var line = row.joined(separator: "\t")
-                if row.count == 1 { line = row[0] }
-                let text = NSMutableAttributedString(string: line + "\n",
-                                                     attributes: attributes(Style.body, Style.foreground, style: style, height: 19))
-                if !last {
-                    text.addAttribute(.readingRule, value: true, range: NSRange(location: 0, length: text.length))
-                }
-                out.append(text)
+                let line = row.count == 1 ? row[0] : row.joined(separator: "\t")
+                emit(line + "\n", Look(font: .body, color: .foreground, lineHeight: 19,
+                                       before: (number == 0 ? gap : 0) + 5, after: last ? 0 : 5, tabs: tabs,
+                                       rule: !last))
             }
         }
 
         // MARK: Turns and quotes
 
         func turn(speaker: String, time: String, text: String, gap: CGFloat) {
-            let style = Self.style(lineHeight: 19, before: gap)
-            let head = NSMutableAttributedString(string: speaker,
-                                                 attributes: attributes(Style.bodyStrong, Style.foreground, style: style, height: 19))
-            var timeAttributes = attributes(Style.caption, Style.muted, style: style, height: 19)
-            timeAttributes[.kern] = 0
-            head.append(NSAttributedString(string: "  " + time + "\n", attributes: timeAttributes))
-            out.append(head)
+            emit(speaker, Look(font: .bodyStrong, color: .foreground, lineHeight: 19, before: gap))
+            emit("  " + time + "\n", Look(font: .caption, color: .muted, lineHeight: 19, before: gap, kern: 0))
             if !text.isEmpty {
-                lines(text.components(separatedBy: "\n"), font: Style.body, color: Style.foreground, gap: 2,
-                      between: 2, lineHeight: 19, links: true)
+                lines(ReadingAttributedText.lines(of: text), font: .body, color: .foreground, gap: 2, between: 2, lineHeight: 19,
+                      links: true)
             }
         }
 
         /// Quoted mail: a rule at its left, the secondary color; closed as
         /// "Earlier in this thread" when it is longer than six lines.
         func quote(_ text: String, index: Int, gap: CGFloat, expanded: Bool) {
-            let quoted = text.components(separatedBy: "\n")
+            let quoted = ReadingAttributedText.lines(of: text)
             let long = quoted.count > ReadingAttributedText.quoteLinesShown
             if long {
-                let style = Self.style(lineHeight: 19, before: gap)
-                var toggle = attributes(Style.label, Style.foreground, style: style, height: 19)
-                toggle[.link] = ReadingAttributedText.quoteLink(index)
-                toggle[.readingCopyAs] = ""
                 let mark = expanded ? "\u{2304} " : "\u{203A} "
-                out.append(NSAttributedString(string: mark + ReadingCopy.earlierInThread + "\n", attributes: toggle))
+                emit(mark + ReadingCopy.earlierInThread + "\n",
+                     Look(font: .label, color: .foreground, lineHeight: 19, before: gap, copyAs: "",
+                          link: ReadingAttributedText.quoteLink(index)))
                 guard expanded else { return }
             }
             for (number, line) in quoted.enumerated() {
-                let shown = line.hasPrefix(">") ? String(line.dropFirst()).trimmingCharacters(in: .whitespaces) : line
-                let style = Self.style(lineHeight: 19, before: number == 0 ? (long ? 6 : gap) : 0, head: 12)
-                var quoteAttributes = attributes(Style.body, Style.secondary, style: style, height: 19)
-                quoteAttributes[.readingQuote] = number == 0 ? "first" : number == quoted.count - 1 ? "last" : "middle"
+                let marked = line.hasPrefix(">")
+                let shown = marked ? String(line.dropFirst()).trimmingCharacters(in: .whitespaces) : line
                 let start = out.length
-                out.append(NSAttributedString(string: shown + "\n", attributes: quoteAttributes))
-                if line.hasPrefix(">") {
+                emit(shown + "\n", Look(font: .body, color: .secondary, lineHeight: 19,
+                                        before: number == 0 ? (long ? 6 : gap) : 0, head: 12,
+                                        quote: number == 0 ? "first" : number == quoted.count - 1 ? "last" : "middle"))
+                if marked {
                     // The ">" it was read with copies with it.
                     out.addAttribute(.readingCopyPrefix, value: String(line.prefix(while: { $0 == ">" || $0 == " " })),
                                      range: NSRange(location: start, length: 1))
                 }
-                link(from: start)
+                if Self.mayHoldAddress(shown) { link(from: start) }
             }
         }
     }

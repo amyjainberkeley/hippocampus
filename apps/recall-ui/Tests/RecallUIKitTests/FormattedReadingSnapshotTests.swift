@@ -159,6 +159,25 @@ final class FormattedReadingSnapshotTests: XCTestCase {
         XCTAssertEqual(ReadingCopy.code, "Code")
     }
 
+    func testVoiceOversRotorsListTheHeadingsTheCodeAndTheLists() throws {
+        let string = ReadingAttributedText.make(try golden("google-docs.new")).string
+        XCTAssertEqual(ReadingAttributedText.rotorItems(.headings, in: string).map(\.label),
+                       ["Q4 planning", "Goals", "Owners"])
+        XCTAssertEqual(ReadingAttributedText.rotorItems(.lists, in: string).map(\.label), ["List, 4 items"])
+        let article = ReadingAttributedText.make(try golden("article.new")).string
+        let code = ReadingAttributedText.rotorItems(.code, in: article)
+        XCTAssertEqual(code.map(\.label), ["Code"])
+        XCTAssertEqual((article.string as NSString).substring(with: code[0].range)
+            .trimmingCharacters(in: .newlines), "round_half_even(2.5)   // 2.0\nround_half_even(3.5)   // 4.0")
+    }
+
+    func testLinesSplitAsComponentsSplitThem() {
+        for text in ["", "a", "a\n", "\n", "\n\n", "a\r\nb", "caf\u{E9}\nna\u{EF}ve\n\n", "one\u{2028}two\nthree",
+                     "\u{1F469}\u{200D}\u{1F469}\u{200D}\u{1F467}\nx", "e\u{301}\n\u{301}x"] {
+            XCTAssertEqual(ReadingAttributedText.lines(of: text), text.components(separatedBy: "\n"), text)
+        }
+    }
+
     func testEveryColorIsADesignToken() throws {
         let names = try FileManager.default.contentsOfDirectory(atPath: ReadingBlocksDecodingTests.goldens.path)
             .filter { $0.hasSuffix(".blocks.json") }
@@ -209,6 +228,7 @@ final class FormattedReadingSnapshotTests: XCTestCase {
             return Date().timeIntervalSince(start)
         }
         let best = (0..<3).map { _ in started() }.min() ?? 0
+        print("ReadingAttributedText.make of \(size / 1024) KB: best of three \(best * 1000) ms")
         #if DEBUG
         let budget = 0.25
         #else

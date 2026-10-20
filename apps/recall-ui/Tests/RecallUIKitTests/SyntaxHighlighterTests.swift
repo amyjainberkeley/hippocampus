@@ -159,5 +159,20 @@ final class SyntaxHighlighterTests: XCTestCase {
             "pub fn sweep(store: &Store) -> Result<u64, SweepError> {\n    \"quoted // text\"; // done\n}"
         XCTAssertEqual(SyntaxHighlighter.codeTokens(block).map(\.text).joined(), block)
     }
+
+    /// The byte search language detection and the reading's links use
+    /// answers as `contains` does for every needle they ask about.
+    func testAByteSearchFindsWhatContainsFinds() {
+        let texts = ["", "f", "func", "func main() {", "caf\u{E9} func x()", "\u{1F469}\u{200D}\u{1F4BB} let x = 1",
+                     "see https://devnotes.example/rounding", "fn\u{301} total", "\u{65E5}\u{672C} echo hi", "a:b"]
+        let needles = ["func ", "let ", "fn ", "echo ", "://", ":", "x"]
+        for text in texts {
+            for needle in needles {
+                XCTAssertEqual(text.containsBytes(needle), text.contains(needle), "\(text) / \(needle)")
+            }
+            XCTAssertTrue(text.containsBytes(""), "an empty needle is in every text")
+        }
+        XCTAssertFalse("fn".containsBytes("fn "), "a needle longer than the text")
+    }
 }
 

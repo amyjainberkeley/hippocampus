@@ -53,16 +53,17 @@ public enum SyntaxHighlighter {
     }
 
     public static func detectLanguage(_ text: String) -> DetectedLanguage {
-        if text.contains("func ") && (text.contains("let ") || text.contains("var ") || text.contains("import ")) {
+        let has = { (word: String) in text.containsBytes(word) }
+        if has("func ") && (has("let ") || has("var ") || has("import ")) {
             return .swift
         }
-        if text.contains("fn ") && (text.contains("let ") || text.contains("pub ") || text.contains("use ")) {
+        if has("fn ") && (has("let ") || has("pub ") || has("use ")) {
             return .rust
         }
-        if text.contains("def ") || (text.contains("import ") && text.contains(":") && !text.contains("func ")) {
+        if has("def ") || (has("import ") && has(":") && !has("func ")) {
             return .python
         }
-        if text.hasPrefix("#!") || text.contains("export ") || text.contains("echo ") {
+        if text.hasPrefix("#!") || has("export ") || has("echo ") {
             return .shell
         }
         return .unknown
@@ -168,7 +169,7 @@ public enum SyntaxHighlighter {
                 if ch == open && previous != "\\" { quote = nil }
             } else if ch == "\"" || ch == "'" {
                 quote = ch
-            } else if line[index...].hasPrefix(marker) && previous.isWhitespace {
+            } else if previous.isWhitespace, ch == marker.first, line[index...].hasPrefix(marker) {
                 return (String(line[..<index]), String(line[index...]))
             }
             previous = ch
@@ -245,6 +246,25 @@ public enum SyntaxHighlighter {
             tokens.append(SyntaxToken(text: word, type: .keyword))
         } else {
             tokens.append(SyntaxToken(text: word, type: .plain))
+        }
+    }
+}
+
+extension String {
+    /// Whether `needle` occurs in the string, byte for byte: for an ASCII
+    /// needle ("func ", "://") the same answer as `contains`, which compares
+    /// characters and is many times slower.
+    func containsBytes(_ needle: String) -> Bool {
+        var haystack = self
+        var needle = needle
+        return haystack.withUTF8 { haystack in
+            needle.withUTF8 { needle in
+                guard !needle.isEmpty else { return true }
+                guard needle.count <= haystack.count,
+                      let haystackStart = haystack.baseAddress, let needleStart = needle.baseAddress
+                else { return false }
+                return memmem(haystackStart, haystack.count, needleStart, needle.count) != nil
+            }
         }
     }
 }
