@@ -13,6 +13,8 @@ set -euo pipefail
 #   2. scripts/swift-package.sh build -c release --package-path adapters/macos/MCICaptureHelper
 #   3. scripts/swift-package.sh build -c release --package-path apps/recall-ui
 #   4. cargo build --workspace --release
+#   5. scripts/swift-package.sh build -c release --package-path apps/demo-memory --product demo-screens
+#      (optional: Demo Memory's pictures; without it Use Demo Memory… says a part is missing)
 #
 # Usage:
 #   ./build-app.sh [--help] [--debug] [--development-ad-hoc]
@@ -168,6 +170,7 @@ usage() {
     echo "  scripts/swift-package.sh build -c release --package-path adapters/macos/MCICaptureHelper"
     echo "  scripts/swift-package.sh build -c release --package-path apps/recall-ui"
     echo "  cargo build --workspace --release"
+    echo "  scripts/swift-package.sh build -c release --package-path apps/demo-memory --product demo-screens (optional)"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -249,6 +252,10 @@ NATIVE_HOST_BIN="$REPO_ROOT/target/$PROFILE/hippocampus-native-host"
 # Optional: the on-device model process (Apple Foundation Models, macOS 26).
 # Without it the app still works and understanding uses measurements only.
 MIND_BIN="$REPO_ROOT/apps/mind/.build/$PROFILE/hippocampus-mind"
+# Optional: Demo Memory's tools (SPEC-DELTA 6), the made-up week's seeder and
+# its screenshots. Without them Use Demo Memory… says a part is missing.
+SEEDER_BIN="$REPO_ROOT/target/$PROFILE/mci-seed-brain"
+DEMO_SCREENS_BIN="$REPO_ROOT/apps/demo-memory/.build/$PROFILE/demo-screens"
 KNOWN_SAFE="$REPO_ROOT/adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Resources/known-safe-apps.toml"
 APP_ICON="$REPO_ROOT/assets/branding/AppIcon.icns"
 INFO_PLIST="$SCRIPT_DIR/Info.plist"
@@ -373,6 +380,8 @@ if [[ "$CURRENT_SOURCE_QUALIFICATION" -eq 1 ]]; then
         --package-path "$REPO_ROOT/apps/onboarding"
     "$REPO_ROOT/scripts/swift-package.sh" build \
         --package-path "$REPO_ROOT/apps/mind" || echo "WARN: hippocampus-mind not built (needs the macOS 26 SDK)"
+    "$REPO_ROOT/scripts/swift-package.sh" build \
+        --package-path "$REPO_ROOT/apps/demo-memory" --product demo-screens
     cargo build --manifest-path "$REPO_ROOT/Cargo.toml" \
         -p mci-agent --bins -p hippocampus-native-host
 fi
@@ -448,6 +457,13 @@ if [[ -f "$MIND_BIN" ]]; then
     cp "$MIND_BIN" "$MACOS/hippocampus-mind"
 else
     echo "WARN: $MIND_BIN missing; understanding will use measurements only"
+fi
+# Demo Memory's two tools go together or not at all.
+if [[ -f "$SEEDER_BIN" && -f "$DEMO_SCREENS_BIN" ]]; then
+    cp "$SEEDER_BIN" "$MACOS/mci-seed-brain"
+    cp "$DEMO_SCREENS_BIN" "$MACOS/demo-screens"
+else
+    echo "WARN: Demo Memory's tools missing ($SEEDER_BIN, $DEMO_SCREENS_BIN); Use Demo Memory… will say a part is missing"
 fi
 
 # Embed verified offline OCR before sealing app provenance. Release and debug
@@ -878,6 +894,14 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
             "$MACOS/hippocampus-mind"
     fi
 
+    for demo_tool in mci-seed-brain demo-screens; do
+        if [[ -f "$MACOS/$demo_tool" ]]; then
+            codesign --force --options=runtime --timestamp \
+                --sign "$DEVELOPER_ID" \
+                "$MACOS/$demo_tool"
+        fi
+    done
+
     # Sign Sparkle.framework inside-out per the Sparkle official
     # sandboxing/code-signing doc:
     #   <https://sparkle-project.org/documentation/sandboxing/>
@@ -959,6 +983,8 @@ else
     [[ -f "$MACOS/onboarding" ]] && codesign --force --sign - "$MACOS/onboarding"
     [[ -f "$MACOS/hippocampus-native-host" ]] && codesign --force --sign - "$MACOS/hippocampus-native-host"
     [[ -f "$MACOS/hippocampus-mind" ]] && codesign --force --sign - "$MACOS/hippocampus-mind"
+    [[ -f "$MACOS/mci-seed-brain" ]] && codesign --force --sign - "$MACOS/mci-seed-brain"
+    [[ -f "$MACOS/demo-screens" ]] && codesign --force --sign - "$MACOS/demo-screens"
     codesign --force --sign - --entitlements "$ENTITLEMENTS" "$MACOS/Hippocampus"
     write_build_provenance
     codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP"

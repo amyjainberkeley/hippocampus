@@ -223,6 +223,23 @@ final class StatusMenuModelTests: XCTestCase {
         }
     }
 
+    /// A timed pause's button reads Resume Now, and a forget's hold reads
+    /// "Forgetting…" with nothing to press, in Ask's footer as in the menu
+    /// (SPEC 2.6.2, 3.11).
+    func testTheFooterSaysResumeNowForATimedPauseAndForgettingDuringAHold() {
+        let paused = StatusRow(StatusFacts(status: .paused), now: now, calendar: calendar)
+        let timed = paused.pausedUntil(now.addingTimeInterval(1_800), now: now, calendar: calendar)
+        let footer = AskPanelStatus(.paused, row: timed, setup: .complete)
+        XCTAssertEqual(footer.action, .resume)
+        XCTAssertEqual(footer.actionTitle, "Resume Now")
+        let untimed = AskPanelStatus(.paused, row: paused, setup: .complete)
+        XCTAssertEqual(untimed.actionTitle, paused.actionTitle)
+        let holding = AskPanelStatus(.paused, row: .forgetting, setup: .complete)
+        XCTAssertEqual(holding.text, "Forgetting\u{2026}")
+        XCTAssertNil(holding.action)
+        XCTAssertNil(holding.actionTitle)
+    }
+
     func testTheStatusItemIsNamedByTheMenusFirstLine() {
         let row = StatusRow(StatusFacts(status: .paused), now: now, calendar: calendar)
         XCTAssertEqual(StatusMenuModel.accessibilityLabel(row), "Hippocampus, Paused")

@@ -725,7 +725,7 @@ struct CommandBarView: View {
             HStack(spacing: 10) {
                 Text(model.footerText).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 if let action = model.footerAction {
-                    Button(action.title) { perform(.status(action)) }
+                    Button(model.footerActionTitle ?? action.title) { perform(.status(action)) }
                         .buttonStyle(.link)
                         .font(.caption)
                 }

@@ -271,6 +271,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         configurePreferencesController()
+        // Demo Memory (SPEC-DELTA 6): its menu items, and a week left by a
+        // crash cleared with its pause undone, before the first start.
+        DemoMemoryApp.attach(supervisor: supervisor)
         installPreferencesReceiver()
         installSetupReadReceiver()
         if let request = initialPreferencesRequest {
@@ -598,6 +601,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Open Ask on a tap of the chosen key, and follow the preference.
     private func watchAskKey() {
+        // A key picked in setup becomes the preference at once, so
+        // Preferences shows it without being opened first.
+        SoloKeyMonitor.shared.onSetupChoice = { [weak self] key in self?.preferencesStore.askKey = key }
         askKeyObservation = preferencesStore.$askKey.removeDuplicates().sink { key in
             SoloKeyMonitor.shared.start(key: key) { CommandBarController.shared.toggle() }
         }

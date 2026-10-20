@@ -31,6 +31,8 @@ enum CommandBarPreviewRenderer {
                 memory: NoMemory(), availability: AnswerAvailability(systemSupportsAnswers: true),
                 handoff: .none(choices: choices)
             )
+            // A picture never reads the person's calendar.
+            model.calendarAnswers = CalendarAnswerer(store: FixedCalendarAccess(.notDetermined), setting: .inMemory())
             state.configure(model)
             if let png = render(model: model, dark: state.dark) {
                 try? png.write(to: out.appendingPathComponent("panel-\(state.name).png"))

@@ -86,6 +86,8 @@ final class AskPanelHandoffTests: XCTestCase {
             handoff: agent.handoff(tools: tools ?? [claude, chatGPT], choices: choices),
             now: { clock.now }
         )
+        // Never the person's own calendar.
+        model.calendarAnswers = CalendarAnswerer(store: FixedCalendarAccess(.notDetermined), setting: .inMemory())
         model.setStatus(AskPanelStatus(.recording))
         let performed = Performed()
         model.perform = { performed.actions.append($0) }

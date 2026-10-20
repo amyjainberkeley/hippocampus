@@ -92,6 +92,10 @@ final class CalendarCopyTests: XCTestCase {
         let data = try Data(contentsOf: CalendarSource.package.appendingPathComponent("Resources/Info.plist"))
         let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
         XCTAssertNotNil(plist["NSCalendarsFullAccessUsageDescription"] as? String)
+        // macOS before 14 shows the older key: the same words, never the
+        // retired promise about tagging captured moments.
+        XCTAssertEqual(plist["NSCalendarsUsageDescription"] as? String,
+                       plist["NSCalendarsFullAccessUsageDescription"] as? String)
 
         let entitlements = try Data(contentsOf: CalendarSource.package
             .appendingPathComponent("Resources/Hippocampus.entitlements"))

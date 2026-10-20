@@ -33,6 +33,9 @@ public struct AskPanelStatus: Equatable, Sendable {
 
     public let text: String
     public let action: Action?
+    /// The button's words: the row's own, so a pause with an end reads
+    /// Resume Now as the menu does (SPEC 2.6.2).
+    public let actionTitle: String?
     /// The picture the menu bar shows, so Ask's mark matches it.
     public let mark: HiMark.State
     /// Nothing is read while paused, off, waiting for a permission, stopped,
@@ -50,6 +53,7 @@ public struct AskPanelStatus: Equatable, Sendable {
         let remembering = setup == .complete && status.isRemembering
         text = remembering ? "On this Mac" : row.title
         action = row.action == .pause ? nil : row.action
+        actionTitle = action == nil ? nil : row.actionTitle
         readsThisWindow = setup == .complete && Self.mayReadThisWindow(status)
         mark = status.markState
         isRemembering = remembering
@@ -82,9 +86,11 @@ extension ProcessSupervisor {
         ), now: now)
     }
 
-    /// What Ask's footer shows now.
+    /// What Ask's footer shows now: the menu's own row, so a timed pause
+    /// says when it ends and a forget's hold says "Forgetting…".
     public func askPanelStatus(setupFinished: Bool = OnboardingSentinel.isComplete) -> AskPanelStatus {
-        AskPanelStatus(menuBarStatus, row: statusRow(setupFinished: setupFinished), setup: setup(finished: setupFinished))
+        AskPanelStatus(menuBarStatus, row: menuRow(statusRow(setupFinished: setupFinished)),
+                       setup: setup(finished: setupFinished))
     }
 
     /// The status row's button, wherever it is pressed: the menu, Ask's

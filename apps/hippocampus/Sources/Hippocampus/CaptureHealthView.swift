@@ -11,7 +11,9 @@ struct CaptureHealthView: View {
 
     var body: some View {
         let status = supervisor.menuBarStatus
-        let row = supervisor.statusRow()
+        // The menu's own row: a timed pause says when it ends, and a
+        // forget's hold says "Forgetting…" (SPEC 2.6.2, 3.11).
+        let row = supervisor.menuRow()
         HStack(alignment: .top, spacing: 10) {
             Image(nsImage: MenuBarStatusIcon.image(for: status))
                 .renderingMode(.template)
@@ -26,7 +28,7 @@ struct CaptureHealthView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if let action = row.action {
-                    Button(action.title) { perform(action) }
+                    Button(row.actionTitle ?? action.title) { perform(action) }
                         .padding(.top, 2)
                 }
             }

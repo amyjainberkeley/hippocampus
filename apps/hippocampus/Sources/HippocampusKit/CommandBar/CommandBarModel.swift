@@ -293,6 +293,10 @@ public final class CommandBarModel: ObservableObject {
     var lastRequest: SendCardRequest?
     var work = PanelWork()
     var workLoadedAt: Date?
+    /// "When did I last meet with …?" answered from the person's own
+    /// calendar, on this Mac, while they have it on (SPEC-DELTA 5). Tests and
+    /// pictures give it a fixed calendar, so nothing reads the real one.
+    public var calendarAnswers = CalendarAnswerer()
     private var availability: AnswerAvailability
     private var openID = 0
     private var isOpen = false
@@ -369,6 +373,8 @@ public final class CommandBarModel: ObservableObject {
     }
 
     public var footerAction: AskPanelStatus.Action? { flash == nil ? status.action : nil }
+    /// The footer button's words: Resume Now for a pause with an end.
+    public var footerActionTitle: String? { footerAction.map { status.actionTitle ?? $0.title } }
 
     /// The written answer, for ⌘C.
     public var answerText: String? { mode == .answer ? answer?.answer : nil }
@@ -724,6 +730,18 @@ public final class CommandBarModel: ObservableObject {
         asksRunning += 1
         Task { [weak self] in
             guard let self else { return }
+            // A calendar question is answered from the calendar's titles and
+            // times alone. It has no memory sources, and teaches nothing
+            // about whether answers are available.
+            if let text = await self.calendarAnswers.answer(question) {
+                self.asksRunning -= 1
+                if token == self.askToken {
+                    self.isAsking = false
+                    self.answer = BarAnswer(answer: text, sources: [], unavailable: nil)
+                }
+                if self.asksRunning == 0, self.homeWaitsForAsk, self.mode == .home { self.loadHome() }
+                return
+            }
             var reply: BarAnswer?
             var failure: String?
             do {

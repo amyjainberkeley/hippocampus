@@ -81,6 +81,8 @@ final class AskPanelTests: XCTestCase {
             handoff: handoff,
             now: { clock.now }
         )
+        // Never the person's own calendar.
+        model.calendarAnswers = CalendarAnswerer(store: FixedCalendarAccess(.notDetermined), setting: .inMemory())
         model.setStatus(AskPanelStatus(status))
         return (model, memory, clock)
     }
@@ -155,6 +157,32 @@ final class AskPanelTests: XCTestCase {
         XCTAssertEqual(model.selection, -1, "Return asks again; ↓ reaches the sources")
         await settle()
         XCTAssertEqual(memory.calls(to: "mci_suggest").count, suggests, "nothing is suggested over a kept answer")
+    }
+
+    // MARK: Calendar questions (SPEC-DELTA 5)
+
+    func testACalendarQuestionIsAnsweredFromTheCalendarAloneWithNoSources() async {
+        let (model, memory, clock) = rig()
+        let meeting = CalendarMeeting(title: "Pricing review with Mira", start: clock.now.addingTimeInterval(-86_400),
+                                      end: clock.now.addingTimeInterval(-84_600))
+        model.calendarAnswers = CalendarAnswerer(store: FixedCalendarAccess(.fullAccess, meetings: [meeting]),
+                                                 setting: .inMemory(true), now: { clock.now }, demoMemory: { false })
+        await open(model, over: safari)
+        model.ask("When did I last meet with Mira?")
+        await eventually { model.answer != nil }
+        XCTAssertNotNil(model.answer?.answer)
+        XCTAssertEqual(model.answer?.sources, [], "a calendar answer has no memory sources")
+        XCTAssertFalse(model.isAsking)
+        XCTAssertEqual(memory.calls(to: "mci_ask").count, 0, "the memory is not asked")
+    }
+
+    func testWithTheCalendarOffACalendarQuestionIsAskedOfMemory() async {
+        let (model, memory, _) = rig()
+        await open(model, over: safari)
+        model.ask("When did I last meet with Mira?")
+        await eventually { model.answer != nil }
+        XCTAssertEqual(memory.calls(to: "mci_ask").count, 1)
+        XCTAssertEqual(model.answer?.answer, "Team is $18 a seat.")
     }
 
     func testAnAnswerIsGoneWhenAskReopensAfterTenMinutes() async {
