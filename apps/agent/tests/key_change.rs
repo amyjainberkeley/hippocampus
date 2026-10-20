@@ -939,11 +939,16 @@ fn a_change_that_never_finishes_is_undone_after_its_tries() {
 
 #[test]
 fn a_damaged_journal_is_rebuilt_and_the_change_finishes() {
+    // Before the commit, and after it at each cleanup step: a journal
+    // damaged there is rebuilt from what the files and the Keychain say.
     for step in [
         Step::BackedUp,
         Step::Rekeyed,
         Step::BatchMoved,
         Step::Verified,
+        Step::BackupDeleted,
+        Step::OldKeyDeleted,
+        Step::KeyRestored,
     ] {
         let keychain = FakeKeychain::default();
         let fixture = Fixture::new(30, 500, &keychain);
@@ -1299,83 +1304,20 @@ fn a_huge_store_changes_key_in_reasonable_time() {
 
 // ---------------------------------------------------------------------------
 // A real full disk. Run on purpose, with a small volume mounted at
-// MCI_KEY_CHANGE_SMALL_VOLUME (scripts/test-key-change-full-disk.sh).
+// MCI_KEY_CHANGE_SMALL_VOLUME, for example:
+//   hdiutil create -size 60m -fs APFS -volname kcfull /tmp/kcfull.dmg
+//   hdiutil attach -nobrowse -mountpoint /tmp/kcfull /tmp/kcfull.dmg
+//   MCI_KEY_CHANGE_SMALL_VOLUME=/tmp/kcfull cargo test -p mci-agent \
+//     --test key_change -- --ignored really_full_disk --nocapture
+//   hdiutil detach /tmp/kcfull
 // ---------------------------------------------------------------------------
 
-#[test]
-#[ignore = "needs a small mounted volume; run on purpose"]
-fn a_really_full_disk_undoes_or_postpones_and_loses_nothing() {
-    let Ok(volume) = std::env::var("MCI_KEY_CHANGE_SMALL_VOLUME") else {
-        return;
-    };
-    let volume = PathBuf::from(volume);
-    let keychain = FakeKeychain::default();
-    let fixture = Fixture::new(400, 30_000, &keychain);
-    // Move the memory onto the small volume.
-    let support = volume.join("MCI");
-    let _ = std::fs::remove_dir_all(&support);
-    let status = Command::new("/bin/cp")
-        .arg("-R")
-        .arg(&fixture.support)
-        .arg(&support)
-        .status()
-        .unwrap();
-    assert!(status.success());
+/// Every moment and every screenshot of `fixture`, copied to `support`,
+/// opens with the key readers find, or the screenshot with the old key.
+fn assert_intact(fixture: &Fixture, keychain: &FakeKeychain, support: &Path) {
     let db = support.join("mci.sqlite");
-    // Fill the volume until less than the change needs is free.
-    let filler = volume.join("filler.bin");
-    let free = key_change::VolumeSpace.available_bytes(&volume).unwrap();
-    let db_bytes = std::fs::metadata(&db).unwrap().len();
-    let target = free.saturating_sub(db_bytes / 2);
-    let file = std::fs::File::create(&filler).unwrap();
-    file.set_len(target).unwrap();
-    {
-        // Really allocate it: write it.
-        use std::io::Write as _;
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .open(&filler)
-            .unwrap();
-        let chunk = vec![0x5a_u8; 1 << 20];
-        let mut written = 0;
-        while written < target {
-            if file.write_all(&chunk).is_err() {
-                break;
-            }
-            written += chunk.len() as u64;
-        }
-    }
-    let trusted = fixture.trusted.clone();
-    // The real space probe: postponed, untouched.
-    let ctx = KeyChangeContext {
-        support_dir: &support,
-        db_path: &db,
-        service: SERVICE,
-        reader: &keychain,
-        writer: &keychain,
-        deleter: &keychain,
-        trusted_application_paths: &trusted,
-        envelope: &SealedScreenshotEnvelope,
-        space: &key_change::VolumeSpace,
-        generate: &generate,
-        checkpoints: &NoCheckpoints,
-    };
-    let outcome = key_change::run_key_change(&ctx).unwrap();
-    mci_agent::errln!("full disk, real probe: {outcome:?}");
-    assert!(
-        matches!(outcome, KeyChangeOutcome::Deferred(_)),
-        "{outcome:?}"
-    );
-    // A probe that lies: the change runs into the real full disk, and is
-    // undone, or postponed, with nothing lost.
-    let ctx = KeyChangeContext {
-        space: &PLENTY,
-        ..ctx
-    };
-    let outcome = key_change::run_key_change(&ctx);
-    mci_agent::errln!("full disk, lying probe: {outcome:?}");
     let found = resolve_current_database_key(
-        &keychain,
+        keychain,
         &SqlCipherDatabaseKeyValidator,
         &KeychainKeyReference::default(),
         Some(&db),
@@ -1396,13 +1338,147 @@ fn a_really_full_disk_undoes_or_postpones_and_loses_nothing() {
                 std::fs::read(support.join("blobs").join(format!("{digest}.bin"))).unwrap();
             let opened = SealedScreenshotEnvelope
                 .open(&sealed, &found)
+                .or_else(|| SealedScreenshotEnvelope.open(&sealed, &fixture.old_key))
                 .expect("opens");
             assert_eq!(opened.as_slice(), plaintext.as_slice());
         }
     }
     drop(store);
-    std::fs::remove_file(&filler).unwrap();
-    let _ = std::fs::remove_dir_all(&support);
+}
+
+/// Fill the volume holding `filler` until at most `leave` bytes are free,
+/// or it is full.
+fn fill_volume(volume: &Path, filler: &Path, leave: u64) {
+    use std::io::Write as _;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(filler)
+        .unwrap();
+    let chunk = vec![0x5a_u8; 64 * 1024];
+    loop {
+        let free = key_change::VolumeSpace.available_bytes(volume).unwrap_or(0);
+        if free <= leave.saturating_add(chunk.len() as u64) || file.write_all(&chunk).is_err() {
+            break;
+        }
+    }
+    let _ = file.sync_all();
+}
+
+#[test]
+#[ignore = "needs a small mounted volume; run on purpose"]
+fn a_really_full_disk_undoes_or_postpones_and_loses_nothing() {
+    let Ok(volume) = std::env::var("MCI_KEY_CHANGE_SMALL_VOLUME") else {
+        return;
+    };
+    let volume = PathBuf::from(volume);
+    // Leave room for: almost nothing (the backup fails), and the backup
+    // and the re-encryption but not the screenshots (re-sealing fails).
+    for variant in ["backup", "screenshots", "mid-change"] {
+        let keychain = FakeKeychain::default();
+        let fixture = Fixture::new(400, 30_000, &keychain);
+        let support = volume.join("MCI");
+        let _ = std::fs::remove_dir_all(&support);
+        let status = Command::new("/bin/cp")
+            .arg("-R")
+            .arg(&fixture.support)
+            .arg(&support)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let db = support.join("mci.sqlite");
+        let db_bytes = std::fs::metadata(&db).unwrap().len();
+        let blob_bytes: u64 = std::fs::read_dir(support.join("blobs"))
+            .unwrap()
+            .map(|entry| entry.unwrap().metadata().unwrap().len())
+            .sum();
+        let filler = volume.join("filler.bin");
+        let trusted = fixture.trusted.clone();
+        let ctx = KeyChangeContext {
+            support_dir: &support,
+            db_path: &db,
+            service: SERVICE,
+            reader: &keychain,
+            writer: &keychain,
+            deleter: &keychain,
+            trusted_application_paths: &trusted,
+            envelope: &SealedScreenshotEnvelope,
+            space: &key_change::VolumeSpace,
+            generate: &generate,
+            checkpoints: &NoCheckpoints,
+        };
+        if variant == "mid-change" {
+            // The disk fills up just after the re-encryption, while the
+            // screenshots are being re-sealed.
+            let fill = OnStep {
+                step: Step::Rekeyed,
+                action: || fill_volume(&volume, &filler, 0),
+                done: AtomicBool::new(false),
+            };
+            let ctx = KeyChangeContext {
+                space: &PLENTY,
+                checkpoints: &fill,
+                ..ctx
+            };
+            let outcome = key_change::run_key_change(&ctx);
+            mci_agent::errln!("full disk ({variant}): {outcome:?}");
+            assert!(
+                !matches!(outcome, Ok(KeyChangeOutcome::Changed(_))),
+                "the change can't finish on a full disk: {outcome:?}"
+            );
+        } else {
+            let leave = if variant == "backup" {
+                db_bytes / 2
+            } else {
+                db_bytes * 3 + blob_bytes / 3
+            };
+            fill_volume(&volume, &filler, leave);
+            // The real free-space probe: postponed, untouched.
+            let outcome = key_change::run_key_change(&ctx).unwrap();
+            mci_agent::errln!("full disk ({variant}), real probe: {outcome:?}");
+            assert!(
+                matches!(outcome, KeyChangeOutcome::Deferred(_)),
+                "{outcome:?}"
+            );
+            // A probe that lies: the change runs into the real full disk.
+            let ctx = KeyChangeContext {
+                space: &PLENTY,
+                ..ctx
+            };
+            let outcome = key_change::run_key_change(&ctx);
+            mci_agent::errln!("full disk ({variant}), lying probe: {outcome:?}");
+        }
+        // Room again (on a volume this full not even a reader can open the
+        // memory: SQLite needs its shared-memory file). Whatever happened,
+        // every moment and every screenshot still opens, with the key
+        // readers find or the old one.
+        std::fs::remove_file(&filler).unwrap();
+        assert_intact(&fixture, &keychain, &support);
+        // The next launch finishes, or retries cleanly.
+        let undone = support.join(KEY_CHANGE_DIR).join(UNDONE_FILE);
+        if undone.exists() {
+            std::fs::write(&undone, br#"{"count":1,"last_unix_ms":0}"#).unwrap();
+        }
+        let ctx = KeyChangeContext {
+            space: &PLENTY,
+            ..ctx
+        };
+        let outcome = key_change::run_key_change(&ctx).unwrap();
+        mci_agent::errln!("full disk ({variant}), room again: {outcome:?}");
+        assert!(
+            matches!(outcome, KeyChangeOutcome::NotNeeded)
+                || matches!(outcome, KeyChangeOutcome::Changed(ref report) if report.finished),
+            "{outcome:?}"
+        );
+        let new_key = key_change::decode_key(&keychain.get(V1).unwrap()).unwrap();
+        assert_ne!(
+            new_key, fixture.old_key,
+            "the memory is under a new key now"
+        );
+        assert!(keychain.get(V2).is_none());
+        assert!(key_change::opens(&db, &hex(&new_key)));
+        let _ = std::fs::remove_dir_all(&support);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1420,6 +1496,14 @@ fn ensure_key_settles_first_validates_then_changes_under_the_writer_lease() {
     let settle = body
         .find("settle_key_change(")
         .expect("settles an unfinished change");
+    let needed = body
+        .find("settling_needed(")
+        .expect("decides whether to settle");
+    assert!(needed < settle);
+    assert!(
+        body[needed..settle].contains("take_lease("),
+        "settling runs under the writer lease"
+    );
     let validate = body
         .find("initialize_database_key_with_remover(")
         .expect("validates the usual item");

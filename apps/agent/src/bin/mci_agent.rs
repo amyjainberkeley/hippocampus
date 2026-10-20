@@ -750,7 +750,8 @@ fn print_usage() {
         \x20                            approving one takes a human, per ADR-0018.\n\
         \x20                            Regenerating a date replaces that date's brief.\n\
         \x20 mcp-sync                   pull resources from every MCP server registered in\n\
-        \x20                            ~/Library/Application Support/MCI/mcp-servers.toml\n\
+        \x20                            ~/Library/Application Support/MCI/Config.noindex/\n\
+        \x20                            mcp-servers.toml\n\
         \x20                            into the brain, once, then exit. Safe to re-run:\n\
         \x20                            a resource already ingested is not written twice.\n\
         \x20 embed-backfill             embed every event that has no vector yet, so\n\
@@ -893,7 +894,7 @@ async fn run_agent(args: Args) -> ExitCode {
             let mut stdin = tokio::io::stdin();
 
             // V2-MCP-2 — boot the MCP-client registry from
-            // `~/Library/Application Support/MCI/mcp-servers.toml`.
+            // `~/Library/Application Support/MCI/Config.noindex/mcp-servers.toml`.
             // ADR-0001 §amendment 2026-05-31. The boot helper builds
             // the registry, the agent holds it for the rest of the
             // process lifetime, and the MCP aggregator picks it up.
@@ -3870,17 +3871,25 @@ fn run_ensure_key_with_lease(db_path: &Path, held: Option<&CommandWriterLease>) 
         // 1. An unfinished key change goes on, or is undone, and a key left
         // under the new account is put back, before the usual item is read:
         // until then it may be missing or old.
-        if key_change::key_change_unfinished(&support) && !take_lease(&mut own_lease) {
-            errln!(
-                "hippocampus ensure-key: a key change is unfinished and another writer holds the memory; try again when it is done."
-            );
-            return Err(34);
-        }
-        match key_change::settle_key_change(&ctx) {
-            Ok(outcome) => report_key_change(&outcome),
-            Err(error) => {
-                errln!("hippocampus ensure-key: key change: {error}");
+        // Settling runs under the writer lease: another ensure-key may be in
+        // the middle of a change, with its new key already stored.
+        let settle = key_change::settling_needed(&ctx).map_err(|error| {
+            errln!("hippocampus ensure-key: key change: {error}");
+            34
+        })?;
+        if settle {
+            if !take_lease(&mut own_lease) {
+                errln!(
+                    "hippocampus ensure-key: a key change is under way and another writer holds the memory; try again when it is done."
+                );
                 return Err(34);
+            }
+            match key_change::settle_key_change(&ctx) {
+                Ok(outcome) => report_key_change(&outcome),
+                Err(error) => {
+                    errln!("hippocampus ensure-key: key change: {error}");
+                    return Err(34);
+                }
             }
         }
 
@@ -3906,7 +3915,7 @@ fn run_ensure_key_with_lease(db_path: &Path, held: Option<&CommandWriterLease>) 
         report_key_initialization(outcome);
 
         // 3. A key that once sat in a file is replaced, once.
-        if key_change::key_change_due(&support).unwrap_or(true) {
+        if key_change::key_change_due(&support).unwrap_or(false) {
             run_due_key_change(&ctx, take_lease(&mut own_lease))?;
         }
         drop(own_lease);

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import Darwin
 import Foundation
 
 /// Whether Time Machine backs up the memory (storage-security review S5).
@@ -44,10 +45,18 @@ public enum MemoryBackups {
         }
     }
 
-    /// Whether `folder` is excluded from backups now; nil when unknown.
+    /// The extended attribute the sticky mark is kept in (what
+    /// `tmutil addexclusion` and `isExcludedFromBackup` write).
+    static let stickyMarkAttribute = "com.apple.metadata:com_apple_backup_excludeItem"
+
+    /// Whether `folder` carries the sticky excluded-from-backup mark; nil
+    /// when the folder can't be read. The mark itself, not the computed
+    /// value, which is also true anywhere Time Machine skips by path
+    /// (`/private/tmp`, the temporary folder).
     public static func isExcluded(_ folder: URL) -> Bool? {
-        // A new URL: resource values are cached per URL instance.
-        let fresh = URL(fileURLWithPath: folder.path, isDirectory: true)
-        return try? fresh.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup
+        guard FileManager.default.fileExists(atPath: folder.path) else { return nil }
+        let size = getxattr(folder.path, stickyMarkAttribute, nil, 0, 0, XATTR_NOFOLLOW)
+        if size >= 0 { return true }
+        return errno == ENOATTR ? false : nil
     }
 }

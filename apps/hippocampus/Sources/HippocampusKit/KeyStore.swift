@@ -390,14 +390,9 @@ public struct FileKeyStore: KeyStore, Sendable {
         _ = try KeychainKeyStore.validate(hex)
         let parent = path.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-        let data = Data(hex.utf8)
-        try data.write(to: path, options: .atomic)
-
-        // mode 0600 — owner-only read/write
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o600],
-            ofItemAtPath: path.path
-        )
+        // Mode 0600 from the moment it exists: a key is never readable by
+        // another account, not even between a write and a chmod.
+        try PrivateFileWriter.write(Data(hex.utf8), to: path)
     }
 
     /// Create a local development key on first run. This method is only

@@ -1,6 +1,6 @@
 //! V2-MCP-2 — agent-side bootstrap for the MCP-client registry.
 //!
-//! Reads `~/Library/Application Support/MCI/mcp-servers.toml` on boot,
+//! Reads `~/Library/Application Support/MCI/Config.noindex/mcp-servers.toml` on boot,
 //! constructs a [`mci_mcp_client::ServerRegistry`] populated with one
 //! HTTP entry per enabled `[[server]]` block, and logs each
 //! registration. The registry is returned to the caller so the agent

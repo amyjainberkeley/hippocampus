@@ -24,6 +24,16 @@ final class MemoryEraseTests: XCTestCase {
         }
     }
 
+    private let custody = CountingCustody()
+
+    /// Counts `ensure-key` runs; never runs one.
+    private final class CountingCustody: KeyCustodyPreparing {
+        private(set) var prepared = 0
+        func prepare(agentURL: URL, databaseURL: URL, keyReference: KeychainKeyReference) async throws {
+            prepared += 1
+        }
+    }
+
     private func supervisor() -> ProcessSupervisor {
         let locator = FakeBinaryLocator()
         locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
@@ -32,7 +42,7 @@ final class MemoryEraseTests: XCTestCase {
         keyStore.storedKey = String(repeating: "ab", count: 32)
         return ProcessSupervisor(
             locator: locator, keyStore: keyStore, runtimeConfig: FakeRuntimeConfig(captureEnabled: true),
-            topology: FakeSupervisorTopology(), keyCustodyPreparer: FakeKeyCustodyPreparer(), readinessTimeout: 0.1,
+            topology: FakeSupervisorTopology(), keyCustodyPreparer: custody, readinessTimeout: 0.1,
             captureStatusReader: { (nil, nil) }, pauses: UserPauseController()
         )
     }
@@ -50,6 +60,7 @@ final class MemoryEraseTests: XCTestCase {
         supervisor.memoryEraser = eraser
         try await supervisor.startAndWaitForReadiness()
         XCTAssertEqual(supervisor.state, .running)
+        let preparedBefore = custody.prepared
 
         let erased = await supervisor.handleWindowRequest(WindowChannelRequest(id: "e1", op: .erase))
         XCTAssertTrue(erased)
@@ -58,6 +69,8 @@ final class MemoryEraseTests: XCTestCase {
         XCTAssertNil(eraser.calls.first?.environment["MCI_DB_KEY_HEX"], "no key travels")
         XCTAssertNotNil(eraser.calls.first?.environment["MCI_DB_KEYCHAIN_SERVICE"])
         await eventually { supervisor.state == .running }
+        XCTAssertGreaterThanOrEqual(custody.prepared - preparedBefore, 2,
+                       "a new key is made right after the erase, and checked again when remembering restarts")
         XCTAssertEqual(supervisor.state, .running, "it was on, so it comes back, with a new key")
         XCTAssertFalse(supervisor.holdingForForget)
         try await supervisor.shutdownAndWait()

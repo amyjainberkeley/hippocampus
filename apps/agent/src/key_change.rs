@@ -512,6 +512,18 @@ pub fn key_change_unfinished(support_dir: &Path) -> bool {
     support_dir.join(KEY_CHANGE_DIR).join(JOURNAL_FILE).exists()
 }
 
+/// Whether there is anything for [`settle_key_change`] to do: a change left
+/// unfinished, or a key under the new account. Both are only ever touched
+/// under the memory's writer lease, so a caller that finds either takes the
+/// lease first: another `ensure-key` may be in the middle of a change.
+///
+/// # Errors
+/// The Keychain can't be read now.
+pub fn settling_needed(ctx: &KeyChangeContext<'_>) -> Result<bool, KeyChangeError> {
+    Ok(key_change_unfinished(ctx.support_dir)
+        || ctx.read_optional(ROTATED_KEYCHAIN_ACCOUNT)?.is_some())
+}
+
 /// Record that the key about to be adopted came from a file. Written before
 /// the file is removed, so the change still runs after a crash in between.
 ///
@@ -571,21 +583,29 @@ fn load_journal(ctx: &KeyChangeContext<'_>) -> Result<Option<Journal>, KeyChange
     }
 }
 
-/// The phase a damaged journal must have had: the database under the new
-/// key means at least [`Phase::Rekeyed`], whose steps all repeat safely;
-/// otherwise nothing in the memory changed yet, and the backup is redone.
+/// The phase a damaged journal must have had, from what the files and the
+/// Keychain say. The database under the new key means the re-encryption
+/// happened; if the old key is gone from the usual account, or the backup
+/// is (both go only after the commit), the change was committed and only
+/// cleanup is left. Otherwise nothing in the memory changed yet, and the
+/// change starts over from its backup: every step repeats safely.
 fn rebuild_journal(ctx: &KeyChangeContext<'_>) -> Result<Journal, KeyChangeError> {
-    let rekeyed = match ctx.read_optional(ROTATED_KEYCHAIN_ACCOUNT)? {
-        Some(new_hex) => ctx.db_path.exists() && opens(ctx.db_path, &new_hex),
-        None => false,
+    let rotated = ctx.read_optional(ROTATED_KEYCHAIN_ACCOUNT)?;
+    let usual = ctx.read_optional(DEFAULT_KEYCHAIN_ACCOUNT)?;
+    let rekeyed = rotated
+        .as_deref()
+        .is_some_and(|hex| ctx.db_path.exists() && opens(ctx.db_path, hex));
+    let committed = rekeyed && (usual.is_none() || usual == rotated || !ctx.backup_path().exists());
+    let phase = if committed {
+        Phase::Committed
+    } else if rekeyed {
+        Phase::Rekeyed
+    } else {
+        Phase::Started
     };
     let journal = Journal {
         version: JOURNAL_VERSION,
-        phase: if rekeyed {
-            Phase::Rekeyed
-        } else {
-            Phase::Started
-        },
+        phase,
         service: ctx.service.to_owned(),
         from_account: DEFAULT_KEYCHAIN_ACCOUNT.to_owned(),
         to_account: ROTATED_KEYCHAIN_ACCOUNT.to_owned(),
@@ -848,6 +868,16 @@ fn advance(
     }
     let old_key = key_from_hex(&Zeroizing::new(ctx.read_item(&journal.from_account)?))?;
     let new_key = key_from_hex(&Zeroizing::new(ctx.read_item(&journal.to_account)?))?;
+    if journal.phase >= Phase::Rekeyed
+        && !opens_with_bytes(ctx.db_path, &new_key)
+        && opens_with_bytes(ctx.db_path, &old_key)
+    {
+        // An undo that stopped part way (a full disk) put the database back
+        // under the old key: it is re-encrypted again. Screenshots already
+        // re-sealed are found where they are and kept.
+        journal.phase = Phase::KeyAdded;
+        write_journal(&ctx.journal_path(), journal)?;
+    }
     if journal.phase < Phase::Rekeyed {
         if let Err(reason) = rekey(ctx, journal, &old_key, &new_key)? {
             return Ok(Some(reason));

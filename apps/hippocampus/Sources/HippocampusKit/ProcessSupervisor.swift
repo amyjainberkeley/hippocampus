@@ -2207,8 +2207,14 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         )
         let erased = await memoryEraser.erase(agentURL: agentURL, databaseURL: dbPath, environment: environment)
         if erased {
-            // The key is gone: the next start makes and checks a new one.
+            // The key is gone: a new one is made now, and checked again
+            // before anything opens the new, empty memory.
             memoryKeyChecked = false
+            do {
+                try await prepareKey(agentURL: agentURL, reference: keyReference)
+            } catch {
+                logger.error("supervisor: a new key after the erase: \(error.localizedDescription)")
+            }
         }
         await forgetHold.release()
         if erased { reopenRecallUI(initialTab: "privacy") }

@@ -174,7 +174,9 @@ public final class AuditLog: @unchecked Sendable {
                 return Data()
             }()
             do {
-                try data.write(to: dest, options: .atomic)
+                // An export, so only this account can read it (storage-security
+                // review S8).
+                try PrivateFileWriter.write(data, to: dest)
             } catch {
                 throw AuditLogError.ioFailed("write \(dest.path): \(error)")
             }
