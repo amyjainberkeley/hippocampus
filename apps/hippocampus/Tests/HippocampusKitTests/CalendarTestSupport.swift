@@ -88,6 +88,29 @@ final class FakeCalendarAccess: CalendarAccessStore, @unchecked Sendable {
     }
 }
 
+/// Defaults kept in memory only: a suite would leave a file in
+/// ~/Library/Preferences even after its domain is removed.
+final class CalendarMemoryDefaults: UserDefaults, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: Any] = [:]
+
+    override func object(forKey defaultName: String) -> Any? {
+        lock.withLock { values[defaultName] }
+    }
+
+    override func set(_ value: Any?, forKey defaultName: String) {
+        lock.withLock { values[defaultName] = value }
+    }
+
+    override func set(_ value: Bool, forKey defaultName: String) {
+        lock.withLock { values[defaultName] = value }
+    }
+
+    override func removeObject(forKey defaultName: String) {
+        lock.withLock { values[defaultName] = nil }
+    }
+}
+
 /// The repository's own files, for the checks that read source.
 enum CalendarSource {
     static let package = URL(fileURLWithPath: #filePath)

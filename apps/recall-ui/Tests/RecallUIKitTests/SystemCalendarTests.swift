@@ -59,6 +59,29 @@ final class FakeCalendarStore: CalendarStore, @unchecked Sendable {
     }
 }
 
+/// Defaults kept in memory only: a suite would leave a file in
+/// ~/Library/Preferences even after its domain is removed.
+final class CalendarMemoryDefaults: UserDefaults, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: Any] = [:]
+
+    override func object(forKey defaultName: String) -> Any? {
+        lock.withLock { values[defaultName] }
+    }
+
+    override func set(_ value: Any?, forKey defaultName: String) {
+        lock.withLock { values[defaultName] = value }
+    }
+
+    override func set(_ value: Bool, forKey defaultName: String) {
+        lock.withLock { values[defaultName] = value }
+    }
+
+    override func removeObject(forKey defaultName: String) {
+        lock.withLock { values[defaultName] = nil }
+    }
+}
+
 /// The window's calendar (SPEC-DELTA 5), over a fake store: the person's
 /// choice first, then what macOS allows, and only a click asks.
 final class SystemCalendarTests: XCTestCase {
@@ -282,9 +305,7 @@ final class SystemCalendarTests: XCTestCase {
     }
 
     func testTheChoiceIsSharedWithTheApp() throws {
-        let suite = "ai.hippocampus.tests.window-calendar.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = CalendarMemoryDefaults()
         let setting = CalendarSetting(defaults: defaults)
         XCTAssertNil(setting.choice)
         setting.set(true)

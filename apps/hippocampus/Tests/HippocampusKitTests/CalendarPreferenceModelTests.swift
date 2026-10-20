@@ -214,9 +214,7 @@ final class CalendarPreferenceModelTests: XCTestCase {
     }
 
     func testTheChoiceIsKeptInTheAppsDefaultsUnderTheWindowsKey() throws {
-        let suite = "ai.hippocampus.tests.calendar.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = CalendarMemoryDefaults()
         let setting = CalendarSetting(defaults: defaults)
         XCTAssertNil(setting.choice, "unset until the person chooses")
         setting.set(true)
