@@ -123,6 +123,7 @@ let package = Package(
                 "ContextHandoffBehavior",
                 "MemoryRefreshBehavior",
                 "RecallStateBehavior",
+                "WindowReadsProbe",
             ],
             sources: ["ThumbnailProviderBehavior.swift"]
         ),
@@ -145,6 +146,14 @@ let package = Package(
             name: "ContextHandoffBehavior",
             dependencies: ["RecallUIKit"],
             path: "Tests/Fixtures/ContextHandoffBehavior"
+        ),
+        // The window's own reads and deletes (FFIBrainReader and
+        // ThumbnailDataProvider) as JSON, for scripts/e2e-full.sh.
+        // Development file key only; never bundled.
+        .executableTarget(
+            name: "WindowReadsProbe",
+            dependencies: ["RecallUIKit"],
+            path: "Tests/Fixtures/WindowReadsProbe"
         ),
     ]
 )

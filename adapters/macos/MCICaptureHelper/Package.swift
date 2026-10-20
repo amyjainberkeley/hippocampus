@@ -87,5 +87,14 @@ let package = Package(
             dependencies: ["MCICaptureHelperKit"],
             path: "Tests/Fixtures/HelperReadinessBehavior"
         ),
+        // The helper's pipeline in fixture mode: made-up windows through the
+        // production reader, secret checks and sealed screenshots, framed on
+        // stdout for `mci-agent --drain-stdin`. Development only, never
+        // bundled; `scripts/e2e-full.sh` drives it.
+        .executableTarget(
+            name: "SyntheticCaptureFeed",
+            dependencies: ["MCICaptureHelperKit"],
+            path: "Tests/Fixtures/SyntheticCaptureFeed"
+        ),
     ]
 )

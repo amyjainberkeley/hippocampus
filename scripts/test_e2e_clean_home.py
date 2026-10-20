@@ -2,11 +2,13 @@
 """Exercise the actual clean-home brief gate with isolated command fixtures."""
 
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 
@@ -121,6 +123,94 @@ state.write_text(json.dumps(rows))
         self.assertEqual(result.returncode, 1)
         self.assertIn("brief readback did not find the seeded row", result.stderr)
         self.assert_seeded_once(calls)
+
+
+SCRIPTS = Path(__file__).resolve().parent
+FULL = SCRIPTS / "e2e-full.sh"
+AUDIT = SCRIPTS / "audit-storage-security.sh"
+SAMPLER = SCRIPTS / "lib" / "e2e_sampler.py"
+MCP_CLIENT = SCRIPTS / "lib" / "e2e_mcp.py"
+
+
+class FullE2EContractTests(unittest.TestCase):
+    """The full end-to-end test and its storage audit, without building or launching anything."""
+
+    def test_full_run_stays_in_a_throwaway_home_and_never_reaches_the_keychain(self):
+        source = FULL.read_text(encoding="utf-8")
+        for literal in (
+            'RUN_ROOT="$(mktemp -d /tmp/hippo-e2e.XXXXXX)"',
+            'HOME="$E2E_HOME" CFFIXED_USER_HOME="$E2E_HOME"',
+            "MCI_DEVELOPMENT_FILE_KEY=1",
+            'MCI_DB_KEYCHAIN_SERVICE="ai.hippocampus.e2e.absent.$$"',
+            "MCI_CLAUDE_BINARY=/usr/bin/true",
+            "--no-refresh-agent",
+            "0 valid identities found",
+            'refusing to launch an app inside /Applications',
+            "verify-app-launches.sh",
+            "e2e-clean-home.sh",
+            "e2e-handoff.sh\" --synthetic",
+            "audit-storage-security.sh",
+        ):
+            self.assertIn(literal, source, literal)
+        # Nothing names the installed app as something to run or the real AI-tool configs.
+        self.assertNotIn('open -a Hippocampus', source)
+        self.assertNotIn('"$HOME/.claude', source)
+        self.assertNotIn('"$HOME/.codex', source)
+
+    def test_storage_audit_detectors_flag_dirty_and_pass_clean_fixtures(self):
+        result = subprocess.run(["/bin/bash", str(AUDIT), "--self-test"], capture_output=True,
+                                text=True, timeout=240)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("PASS: every storage-audit detector", result.stdout)
+
+    def test_sampler_watches_only_the_runs_own_processes(self):
+        with tempfile.TemporaryDirectory(prefix="e2e-sampler-") as temporary:
+            root = Path(temporary)
+            stop = root / "sampling"
+            stop.write_text("")
+            # A process tree of our own: a shell that starts a sleeper.
+            tree = subprocess.Popen(["/bin/sh", "-c", "sleep 30 & wait"])
+            sampler = subprocess.Popen([sys.executable, str(SAMPLER), "--root-pid", str(tree.pid),
+                                        "--run-root", str(root), "--out-dir", str(root / "out"),
+                                        "--stop-file", str(stop), "--interval", "0.2"])
+            try:
+                deadline = time.monotonic() + 15
+                log = root / "out" / "processes.log"
+                while time.monotonic() < deadline and not (log.exists() and "sleep" in log.read_text()):
+                    time.sleep(0.2)
+            finally:
+                stop.unlink()
+                sampler.wait(timeout=30)
+                tree.kill()
+                tree.wait()
+            watched = (root / "out" / "processes.log").read_text().splitlines()
+            summary = json.loads((root / "out" / "summary.json").read_text())
+            self.assertTrue(watched, "the sampler saw none of the run's processes")
+            self.assertTrue(all("sleep" in line for line in watched), watched)
+            self.assertNotIn(str(os.getpid()), [line.split("\t")[0] for line in watched])
+            self.assertEqual(summary["internet_sockets_seen"], 0)
+
+    def test_mcp_client_keeps_stdin_open_until_every_request_is_answered(self):
+        with tempfile.TemporaryDirectory(prefix="e2e-mcp-") as temporary:
+            root = Path(temporary)
+            server = root / "server.py"
+            # Answers only after stdin closes would lose the slow answer; this
+            # server answers the slow request late, while stdin is still open.
+            server.write_text(
+                "import json, sys, time\n"
+                "for line in sys.stdin:\n"
+                "    request = json.loads(line)\n"
+                "    if request['id'] == 2:\n"
+                "        time.sleep(1)\n"
+                "    print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': {}}), flush=True)\n"
+            )
+            requests = "\n".join(json.dumps({"jsonrpc": "2.0", "id": i, "method": "x"}) for i in (1, 2)) + "\n"
+            result = subprocess.run([sys.executable, str(MCP_CLIENT), "--out", str(root / "out.jsonl"),
+                                     "--timeout", "20", "--", sys.executable, str(server)],
+                                    input=requests, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            ids = [json.loads(line)["id"] for line in (root / "out.jsonl").read_text().splitlines()]
+            self.assertEqual(sorted(ids), [1, 2])
 
 
 if __name__ == "__main__":
