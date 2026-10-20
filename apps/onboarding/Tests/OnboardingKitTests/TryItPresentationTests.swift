@@ -50,7 +50,7 @@ final class TryItPresentationTests: XCTestCase {
             let shown = TryItPresentation(
                 card: .proof(proof), keyNow: shiftTwice, understanding: understanding, macOSMajorVersion: macOS
             )
-            XCTAssertEqual(shown.next, "Press Shift twice and type a word from that window.")
+            XCTAssertEqual(shown.next, "Press Shift twice and search for a word from that window.")
             XCTAssertEqual(shown.answersNote, line)
         }
     }
@@ -69,7 +69,7 @@ final class TryItPresentationTests: XCTestCase {
 
     func testWhileTheCheckRunsTheWordIsOfferedAndNothingIsSaidAboutAnswers() {
         let shown = TryItPresentation(card: .proof(proof), keyNow: shiftTwice, understanding: nil)
-        XCTAssertEqual(shown.next, "Press Shift twice and type a word from that window.")
+        XCTAssertEqual(shown.next, "Press Shift twice and search for a word from that window.")
         XCTAssertNil(shown.answersNote)
     }
 
