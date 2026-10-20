@@ -2,6 +2,21 @@ import AppKit
 import RecallUIKit
 import SwiftUI
 
+/// Setup's browser extension panel (SPEC 3.5): Add Browser Extension… on Web
+/// Pages and Looked Up. The app opens it, through this window's own app, so
+/// another copy that knows the link never answers it.
+enum BrowserExtensionSetup {
+    static let url = URL(string: "hippocampus://setup/browser-extension")!
+
+    @MainActor
+    static func open() {
+        guard let app = WorkspacePreferencesDestination.hostApplication(bundleURL: Bundle.main.bundleURL) else { return }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.open([url], withApplicationAt: app, configuration: configuration)
+    }
+}
+
 /// Web Pages (SPEC 3.5): pages read in a browser, one row per page across
 /// days, newest first, under Apple Notes' date sections, with a browser
 /// filter. A lens over History: each row is its newest moment drawn as
@@ -114,7 +129,7 @@ struct WebPagesPlace: View {
                     Spacer(minLength: 0)
                     Button(WorkCopy.addBrowserExtension) {
                         guard !isSyntheticPreview else { return }
-                        Task { _ = await WorkspacePreferencesRouter.shared.open(.sources, bundleURL: Bundle.main.bundleURL) }
+                        BrowserExtensionSetup.open()
                     }
                     .buttonStyle(WorkButtonStyle(small: true))
                 }

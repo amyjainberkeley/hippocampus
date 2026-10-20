@@ -63,6 +63,40 @@ final class HippocampusURLRouteTests: XCTestCase {
         }
     }
 
+    /// The window's Add Browser Extension… opens setup's extension panel
+    /// (SPEC 3.5); only the exact URL does, and no other panel is a link.
+    func testSetupsBrowserExtensionPanelIsAnExactRoute() throws {
+        XCTAssertEqual(HippocampusURLRoute.parse(try XCTUnwrap(URL(string: "hippocampus://setup/browser-extension"))),
+                       .showSetupPanel(.browserExtension))
+        for decorated in ["hippocampus://setup", "hippocampus://setup/", "hippocampus://setup/browser-extension/",
+                          "hippocampus://setup/browser-extension?install=chrome", "hippocampus://setup/browser-extension#x",
+                          "hippocampus://setup/Browser-Extension", "hippocampus://setup/browser-extension/more",
+                          "hippocampus://user@setup/browser-extension", "hippocampus://setup:1/browser-extension",
+                          "hippocampus://setup/app-access", "hippocampus://setup/never-read",
+                          "hippocampus://setup/mcp-servers", "hippocampus://setup/%62rowser-extension"] {
+            XCTAssertEqual(HippocampusURLRoute.parse(try XCTUnwrap(URL(string: decorated))), .unknown, decorated)
+        }
+    }
+
+    /// Web Pages' note and Looked Up's empty state open that panel through
+    /// the window's own app, not Preferences › AI Tools, which says nothing
+    /// about browsers.
+    func testTheWindowsAddBrowserExtensionButtonsOpenSetupsExtensionPanel() throws {
+        let places = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("recall-ui/Sources/RecallUI/Places", isDirectory: true)
+        let webPages = try String(contentsOf: places.appendingPathComponent("WebPagesPlace.swift"), encoding: .utf8)
+        let lookedUp = try String(contentsOf: places.appendingPathComponent("LookedUpPlace.swift"), encoding: .utf8)
+        let link = try XCTUnwrap(webPages.range(of: #"hippocampus://setup/[a-z-]+"#, options: .regularExpression))
+        XCTAssertEqual(HippocampusURLRoute.parse(try XCTUnwrap(URL(string: String(webPages[link])))),
+                       .showSetupPanel(.browserExtension))
+        for (name, source) in [("WebPagesPlace", webPages), ("LookedUpPlace", lookedUp)] {
+            XCTAssertTrue(source.contains("BrowserExtensionSetup.open()"), name)
+            XCTAssertFalse(source.contains("open(.sources"), "\(name) still opens Preferences › AI Tools")
+        }
+    }
+
     // MARK: - Recall route (existing surfaces, regression-guarded)
 
     func testRecallWithoutTabQuery() {

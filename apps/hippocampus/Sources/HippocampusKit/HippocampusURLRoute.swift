@@ -25,6 +25,9 @@
 //     the person clicks in the sheet
 //   - `hippocampus://restart`                    → restart remembering in place
 //     (setup's Try it, "Try Again"; onboarding-app contract section 3b)
+//   - `hippocampus://setup/browser-extension`    → setup's browser extension
+//     panel (SPEC 3.5: the window's Add Browser Extension…); before setup is
+//     done, setup itself
 //   - `hippocampus://onboarding/show`            → .showOnboarding
 //   - `hippocampus://onboarding?show=1`          → .showOnboarding
 //     (both forms honored — the cycle 8.46 Action Panel command
@@ -59,6 +62,14 @@ public enum PreferencesSection: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// A setup panel a link may open on its own (`hippocampus://setup/<panel>`).
+/// The raw value is the panel's route name, as setup reads it.
+public enum SetupPanelRoute: String, CaseIterable, Sendable {
+    /// Setup's browser extension panel: the window's Add Browser Extension…
+    /// on Web Pages and Looked Up (SPEC 3.5).
+    case browserExtension = "browser-extension"
+}
+
 public enum HippocampusURLRoute: Equatable, Sendable {
     /// Open or command the Recall UI. Invalid and zero event ids are ignored.
     case openRecall(tab: String?, focusEventId: UInt64?, openPopup: Bool)
@@ -66,6 +77,10 @@ public enum HippocampusURLRoute: Equatable, Sendable {
     case openPreferences(section: PreferencesSection)
     /// Re-open the Onboarding executable (safe to call post-first-run).
     case showOnboarding
+    /// Open one of setup's panels. It only shows the panel: nothing is
+    /// installed or allowed until the person clicks in it, and before setup
+    /// is done setup opens instead.
+    case showSetupPanel(SetupPanelRoute)
     /// Open the command bar, optionally asking `question` right away.
     case ask(question: String?)
     /// Restart remembering in place, as the menu's Try Again does. Never
@@ -116,6 +131,13 @@ public enum HippocampusURLRoute: Equatable, Sendable {
         case "restart":
             // Exact match only, like the preferences route.
             return url.absoluteString == "hippocampus://restart" ? .restartRemembering : .unknown
+        case "setup":
+            // Exact match only, like the preferences route: no query,
+            // fragment, credentials, port or other path.
+            guard let panel = SetupPanelRoute.allCases.first(where: {
+                url.absoluteString == "hippocampus://setup/\($0.rawValue)"
+            }) else { return .unknown }
+            return .showSetupPanel(panel)
         case "resume":
             // Exactly one item id and nothing else: no path, credentials,
             // port, fragment or other query. Ids, never names, travel in links.
