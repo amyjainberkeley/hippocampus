@@ -37,7 +37,7 @@ use mci_brain::SqlCipherBrainStore;
 
 use crate::transcript::{
     self, import_file, import_files, is_injected_user_text, is_mutating_shell, parse_ts_us,
-    read_first_line, tool_line, write_event, Agent, EventContext, FileOutcome, ImportError,
+    read_first_line, tool_line, write_turn, Agent, EventContext, FileOutcome, ImportError,
     ImportStats, Role,
 };
 
@@ -363,7 +363,7 @@ pub fn import_rollout_file(
             src_path: &src_path,
             line_no,
         };
-        write_event(store, &ctx.event(role, ts_us, &body), role, stats)?;
+        write_turn(store, &ctx, role, ts_us, &body, stats)?;
         Ok(true)
     })
 }

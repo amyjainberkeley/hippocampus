@@ -210,8 +210,7 @@ struct DetailPaneView: View {
                 shortcut: "⌘C",
                 category: .hit
             ) {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(copiedBody, forType: .string)
+                ClipboardHygiene.copyToKeep(copiedBody)
             },
             .init(
                 id: "hit.openInApp",
@@ -299,8 +298,7 @@ struct DetailPaneView: View {
     private var actionRow: some View {
         HStack(spacing: 8) {
             Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(copiedBody, forType: .string)
+                ClipboardHygiene.copyToKeep(copiedBody)
             } label: {
                 Label(LibraryCopy.History.copyText, systemImage: "doc.on.doc")
             }

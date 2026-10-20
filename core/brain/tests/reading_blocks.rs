@@ -892,7 +892,11 @@ fn no_secret_appears_in_blocks_markdown_or_plain_text_that_the_reading_lacks() {
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let mut checked = 0usize;
     for case in corpus["cases"].as_array().unwrap() {
-        let secret = case["text"].as_str().unwrap();
+        // A case gives its `text`, or `parts` to join.
+        let joined: String = case["parts"].as_array().map_or_else(String::new, |parts| {
+            parts.iter().map(|part| part.as_str().unwrap()).collect()
+        });
+        let secret = case["text"].as_str().unwrap_or(&joined);
         for cut in (1..secret.len()).filter(|&at| secret.is_char_boundary(at)) {
             let main = format!(
                 "Round half up looks fair, but every tie goes the same way, ending {}\n{} and the rest of it",

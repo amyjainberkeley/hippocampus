@@ -60,11 +60,15 @@
 pub mod calendar_attribution;
 pub mod mail_header;
 pub mod messages_plugin;
-/// The capture helper's four OCR secret patterns, for the reader's guard.
+/// The secret checks every source passes before anything is stored (the
+/// capture helper's patterns, cards and one-time codes), and the redaction
+/// every way out applies.
 pub mod ocr_secrets;
 pub mod parsed_mail_header;
 pub mod sensitive_domains;
 pub mod sms_otp;
+/// Sign-in tokens removed from page addresses before they are stored.
+pub mod url_secrets;
 
 /// Bundle id of macOS Messages — `com.apple.MobileSMS`. The §3(a) + §3(b)
 /// sub-arms fire for frames whose `app_bundle_id` matches this value.

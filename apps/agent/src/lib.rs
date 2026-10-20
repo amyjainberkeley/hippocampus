@@ -94,6 +94,9 @@ pub mod mcp_sync;
 /// every release.
 #[cfg(all(target_os = "macos", feature = "deep-hooks"))]
 pub mod messages_ingest;
+/// A second net on the way out: MCP answers, context packets and handoffs
+/// are scrubbed of secrets even when memory holds one.
+pub mod outbound;
 pub mod page_content;
 pub mod panic_hook;
 pub mod private_files;
@@ -110,6 +113,10 @@ pub mod refresh;
 pub mod refresh_agent;
 pub mod retention_worker;
 pub mod runner;
+/// The last check before anything is stored, for every source: sign-in
+/// parameters out of the address, then no secret in the text, title or
+/// address.
+pub mod secret_gate;
 /// Lines to stdout and stderr that never panic when a reader goes away.
 pub mod stdio;
 pub mod supervisor;

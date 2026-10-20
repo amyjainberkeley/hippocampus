@@ -3269,7 +3269,8 @@ fn report_import_root(label: &str, stats: &mci_agent::import_sessions::ImportSta
     errln!(
         "mci-agent import-sessions: {label}: {} events written ({} tool) from {} file(s) read, \
          {} resumed, {} unchanged, {} rewound, {} subagent skipped; {} records, \
-         {} no text, {} injected, {} sidechain, {} meta, {} malformed{}",
+         {} no text, {} injected, {} sidechain, {} meta, {} malformed, \
+         {} Hippocampus output, {} with a secret{}",
         stats.events_written,
         stats.tool_events_written,
         stats.files_scanned,
@@ -3283,6 +3284,8 @@ fn report_import_root(label: &str, stats: &mci_agent::import_sessions::ImportSta
         stats.skipped_sidechain,
         stats.skipped_meta,
         stats.malformed_lines,
+        stats.skipped_hippocampus_output,
+        stats.skipped_secret,
         if stats.deadline_hit {
             " (stopped at deadline)"
         } else {

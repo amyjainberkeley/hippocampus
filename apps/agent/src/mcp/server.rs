@@ -214,7 +214,15 @@ impl Server {
                     serde_json::json!({ "tools": tools }),
                 ))
             }
-            "tools/call" => Some(self.handle_tools_call(id, req.params)),
+            "tools/call" => {
+                // A second net on the way out (crate::outbound): every
+                // tool's answer loses any secret memory still holds.
+                let mut response = self.handle_tools_call(id, req.params);
+                if let Some(result) = response.result.as_mut() {
+                    crate::outbound::scrub_tool_result(result);
+                }
+                Some(response)
+            }
             "ping" => Some(JsonRpcResponse::ok(id, serde_json::json!({}))),
             _ => {
                 self.counters

@@ -129,6 +129,54 @@ final class WindowClipboardHygieneTests: XCTestCase {
         XCTAssertNil(ClipboardHygiene.jpegForAI(Data("## Moment".utf8)))
     }
 
+    /// A copy the person makes to keep (Copy Text, a link, an answer, ⌘C in
+    /// a reading): on this Mac only and concealed from clipboard-history
+    /// apps, but not transient and never cleared.
+    func testACopyToKeepStaysOnThisMacConcealedAndIsNeverCleared() {
+        let board = RecordingPasteboard()
+        XCTAssertTrue(ClipboardHygiene.copyToKeep("Send the Quillfeather draft", to: board))
+        XCTAssertEqual(board.options, [.currentHostOnly], "never Universal Clipboard")
+        XCTAssertEqual(board.contents[.string], Data("Send the Quillfeather draft".utf8))
+        XCTAssertNotNil(board.contents[ClipboardHygiene.concealed])
+        XCTAssertNil(board.contents[ClipboardHygiene.transient], "meant to stay")
+        XCTAssertEqual(board.cleared, 0)
+    }
+
+    /// A reading's selection, as AppKit writes it for a drag or a Service:
+    /// the text and the concealed marker, nothing else.
+    func testASelectionIsWrittenAsTextAndTheConcealedMarker() {
+        let board = RecordingPasteboard()
+        XCTAssertEqual(ClipboardHygiene.selectionTypes, [.string, ClipboardHygiene.concealed])
+        for type in ClipboardHygiene.selectionTypes {
+            XCTAssertTrue(ClipboardHygiene.writeSelection("a line", to: board, type: type))
+        }
+        XCTAssertFalse(ClipboardHygiene.writeSelection("a line", to: board, type: .rtf))
+        XCTAssertEqual(board.contents[.string], Data("a line".utf8))
+        XCTAssertNotNil(board.contents[ClipboardHygiene.concealed])
+    }
+
+    /// Every clipboard write in the window goes through `ClipboardHygiene`:
+    /// no other source file touches a pasteboard (the storage review, S7,
+    /// counted eight that did).
+    func testNoOtherFileInTheWindowWritesToAPasteboard() throws {
+        let sources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources")
+        let writes = [".setString(", ".setData(", "writeObjects(", ".clearContents()", "declareTypes(",
+                      "prepareForNewContents(", "NSPasteboard.general", "NSPasteboard(name:"]
+        var checked = 0
+        let files = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)
+        while let file = files?.nextObject() as? URL {
+            guard file.pathExtension == "swift", file.lastPathComponent != "ClipboardHygiene.swift" else { continue }
+            let source = try String(contentsOf: file, encoding: .utf8)
+            checked += 1
+            for write in writes {
+                XCTAssertFalse(source.contains(write), "\(file.lastPathComponent) writes to a pasteboard: \(write)")
+            }
+        }
+        XCTAssertGreaterThan(checked, 100)
+    }
+
     /// Every copy the window makes for an AI tool goes through these rules:
     /// none of handoff's views writes the clipboard itself.
     func testHandoffsViewsCopyOnlyByTheRules() throws {

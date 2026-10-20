@@ -17,6 +17,16 @@
 //! `src` cites the transcript file and the 1-based line the event came from,
 //! so a packet built from these events can point at its evidence.
 //!
+//! # What is never imported
+//!
+//! Hippocampus's own output, so a moment that was forgotten cannot come back
+//! through an assistant's transcript: tool results are never read (Claude
+//! Code's `tool_result` blocks, Codex's `function_call_output`), which
+//! covers every answer of Hippocampus's MCP tools, and a turn that carries a
+//! session-start packet, a context packet or a Copy for Your AI card is
+//! skipped ([`is_hippocampus_output`]). Every other turn passes the agent's
+//! secret check ([`crate::secret_gate`]) before it is written.
+//!
 //! # Resume
 //!
 //! A cursor stores the first unconsumed byte and the number of complete
@@ -70,6 +80,11 @@ pub struct ImportStats {
     pub skipped_sidechain: u64,
     /// Claude records flagged `isMeta`.
     pub skipped_meta: u64,
+    /// Turns that carried Hippocampus's own output: a session-start packet,
+    /// a context packet or a Copy for Your AI card.
+    pub skipped_hippocampus_output: u64,
+    /// Turns refused because their text held a secret.
+    pub skipped_secret: u64,
     /// Lines that were not valid JSON. A truncated tail is normal for a
     /// session still being written, so this is counted, not fatal.
     pub malformed_lines: u64,
@@ -95,6 +110,8 @@ impl ImportStats {
         self.skipped_injected += other.skipped_injected;
         self.skipped_sidechain += other.skipped_sidechain;
         self.skipped_meta += other.skipped_meta;
+        self.skipped_hippocampus_output += other.skipped_hippocampus_output;
+        self.skipped_secret += other.skipped_secret;
         self.malformed_lines += other.malformed_lines;
         self.bytes_read += other.bytes_read;
         self.deadline_hit |= other.deadline_hit;
@@ -228,6 +245,51 @@ impl EventContext<'_> {
             tab_id: None,
         }
     }
+}
+
+/// Write one turn: skipped when it is Hippocampus's own output or holds a
+/// secret (counted either way), else built by [`EventContext::event`] and
+/// written by [`write_event`].
+///
+/// # Errors
+/// [`ImportError::Store`] if the write fails.
+pub fn write_turn(
+    store: &SqlCipherBrainStore,
+    ctx: &EventContext<'_>,
+    role: Role,
+    ts_us: u64,
+    body: &str,
+    stats: &mut ImportStats,
+) -> Result<(), ImportError> {
+    if is_hippocampus_output(body) {
+        stats.skipped_hippocampus_output += 1;
+        return Ok(());
+    }
+    let title = ctx.title(role);
+    let cwd = (!ctx.cwd.is_empty()).then_some(ctx.cwd);
+    if crate::secret_gate::find_secret(body, Some(&title), cwd).is_some() {
+        stats.skipped_secret += 1;
+        return Ok(());
+    }
+    write_event(store, &ctx.event(role, ts_us, body), role, stats)
+}
+
+/// Whether a turn carries what Hippocampus itself hands an assistant: the
+/// session-start packet (or its no-memory line), a context packet, the
+/// block both open their screen text with, or a Copy for Your AI card. Each
+/// is recognised by the fixed line Hippocampus writes into it, wherever in
+/// the turn it sits (a person can paste a card into a longer message).
+#[must_use]
+pub fn is_hippocampus_output(body: &str) -> bool {
+    [
+        crate::handoff::DISCLAIMER,
+        crate::handoff::NO_MEMORY_HOOK_TEXT,
+        crate::context_packet::CONTEXT_PACKET_HEADING,
+        crate::context_packet::SCREEN_TEXT_IS_DATA,
+        crate::handoff_card::WARNING,
+    ]
+    .iter()
+    .any(|marker| body.contains(marker))
 }
 
 /// Write one transcript event and count it.

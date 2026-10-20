@@ -198,6 +198,43 @@ where
     drain_with_capture_status(rx, log, clock, device_id, Some(brain), None).await
 }
 
+/// Counts what the brain did with a screen frame or a page, and tells the
+/// capture receipt: a stored screen frame, or the agent's own secret check
+/// ([`crate::secret_gate`]) refusing the focused window, reported like the
+/// helper's privacy tombstone. A background window's refusal says nothing
+/// about the focused one, as the helper drops those silently.
+fn record_ingest_outcome(
+    outcome: &IngestOutcome,
+    message: &Message,
+    stats: &mut RunStats,
+    capture_receipt: Option<&crate::capture_status::CaptureStatusWriter>,
+    clock: &dyn WallClock,
+) {
+    match outcome {
+        IngestOutcome::Stored { .. } => {
+            stats.frames_to_brain += 1;
+            if matches!(
+                message,
+                Message::OCREvent { .. } | Message::ContextOCREvent { .. }
+            ) {
+                if let Some(capture_receipt) = capture_receipt {
+                    capture_receipt.stored_frame(clock);
+                }
+            }
+        }
+        IngestOutcome::NotOcrEvent => stats.frames_non_health += 1,
+        IngestOutcome::Refused => {
+            stats.frames_non_health += 1;
+            if matches!(message, Message::OCREvent { .. }) {
+                if let Some(capture_receipt) = capture_receipt {
+                    capture_receipt
+                        .suppressed(mci_core::ipc::RedactionReason::OcrTimeSecret, clock);
+                }
+            }
+        }
+    }
+}
+
 /// Production drain with immediate committed-frame and helper-health receipts.
 pub async fn drain_with_capture_status<R>(
     rx: &mut R,
@@ -271,22 +308,7 @@ where
                         capture_receipt.blocked("ingest_failed", clock);
                     }
                 })?;
-                match outcome {
-                    IngestOutcome::Stored { .. } => {
-                        stats.frames_to_brain += 1;
-                        if matches!(
-                            &frame.message,
-                            Message::OCREvent { .. } | Message::ContextOCREvent { .. }
-                        ) {
-                            if let Some(capture_receipt) = capture_receipt {
-                                capture_receipt.stored_frame(clock);
-                            }
-                        }
-                    }
-                    IngestOutcome::NotOcrEvent => {
-                        stats.frames_non_health += 1;
-                    }
-                }
+                record_ingest_outcome(&outcome, &frame.message, &mut stats, capture_receipt, clock);
             }
             Message::PrivacyTombstone { reason, .. } => {
                 stats.frames_non_health += 1;

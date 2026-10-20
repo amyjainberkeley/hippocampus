@@ -29,8 +29,12 @@
 //!
 //! - **§4.1** OCR'd text reaching this module already cleared cascade-twice
 //!   on the helper side (pixel-time §1–§5/§7 + OCR-time §6). This module
-//!   does not re-litigate cascade; it trusts the wire variant because the
-//!   helper is the trust boundary (ADR-0007 / ADR-0016 §4.2).
+//!   does not re-run the pixel-time cascade. It does run the secret checks
+//!   again, on every frame's text, title and address and on every browser
+//!   page ([`crate::secret_gate`]): the agent is the one writer of memory,
+//!   and the extensions check less than the helper. A frame that fails them
+//!   is [`IngestOutcome::Refused`] and nothing of it is stored. Every stored
+//!   address has its sign-in parameters removed first.
 //! - **§4.3** `PrivacyTombstone` never reaches `put_event`. Two walls:
 //!   (1) the IPC `Routed::Tombstone(EventRow)` variant carries a typed
 //!   `EventRow`, not a `Frame` — it is *structurally impossible* to
@@ -85,6 +89,10 @@ pub enum IngestOutcome {
     /// IPC `Routed::OCREvent(_)` dispatch is the only path that calls
     /// `ingest_ocr_event`.
     NotOcrEvent,
+    /// The moment's text, title or address held a secret
+    /// ([`crate::secret_gate`]), so nothing of it was stored. The runner
+    /// counts it like the helper's own privacy tombstone.
+    Refused,
 }
 
 /// Errors the ingest pump surfaces.
@@ -271,6 +279,8 @@ pub struct BrainPump {
     chunker: Arc<dyn Chunker>,
     page_cache: Option<PageContentCache>,
     counter: AtomicU64,
+    /// Frames and pages [`crate::secret_gate`] refused. Content-free.
+    refused: AtomicU64,
     /// V2-P4 Tier 1 regex entity extractor. Zero-sized — the regex
     /// bank lives in module-level `LazyLock` statics — so holding it
     /// by value adds no runtime cost. Invoked synchronously on the
@@ -320,6 +330,7 @@ impl BrainPump {
             chunker: Arc::new(EventChunker::default()),
             page_cache: None,
             counter: AtomicU64::new(0),
+            refused: AtomicU64::new(0),
             tier1: Tier1Extractor::new(),
             tier1_mentions_persisted: AtomicU64::new(0),
             ner_sync: None,
@@ -341,6 +352,7 @@ impl BrainPump {
             chunker: Arc::new(EventChunker::default()),
             page_cache: Some(page_cache),
             counter: AtomicU64::new(0),
+            refused: AtomicU64::new(0),
             tier1: Tier1Extractor::new(),
             tier1_mentions_persisted: AtomicU64::new(0),
             ner_sync: None,
@@ -364,6 +376,7 @@ impl BrainPump {
             chunker,
             page_cache: None,
             counter: AtomicU64::new(0),
+            refused: AtomicU64::new(0),
             tier1: Tier1Extractor::new(),
             tier1_mentions_persisted: AtomicU64::new(0),
             ner_sync: None,
@@ -418,6 +431,13 @@ impl BrainPump {
     #[must_use]
     pub fn ner_sync_enabled(&self) -> bool {
         self.ner_sync.is_some()
+    }
+
+    /// Frames and pages refused because their text, title or address held
+    /// a secret. Content-free counter.
+    #[must_use]
+    pub fn refused_count(&self) -> u64 {
+        self.refused.load(Ordering::Relaxed)
     }
 }
 
@@ -632,6 +652,19 @@ impl BrainIngestor for BrainPump {
             }
             _ => return Ok(IngestOutcome::NotOcrEvent),
         };
+
+        // The last check before the store (crate::secret_gate): the address
+        // without its sign-in parameters, then no secret in the text, the
+        // title or that address. Every source that reaches this pump (the
+        // helper's frames, both browser extensions' pages) passes it.
+        let u = crate::secret_gate::storable_url(u);
+        if crate::secret_gate::find_secret(&text, title.as_deref(), u.as_deref()).is_some() {
+            // Nothing of the moment is stored. A screenshot the helper
+            // sealed for it is unreferenced, and the retention worker's
+            // reconcile removes it.
+            self.refused.fetch_add(1, Ordering::Relaxed);
+            return Ok(IngestOutcome::Refused);
+        }
 
         let prepared = prepare_event_content(
             self.chunker.as_ref(),
@@ -1128,7 +1161,9 @@ mod tests {
                 assert_eq!(ev.embedding.as_ref().map(Vec::len), Some(384));
                 assert_eq!(ev.cascade_reason, 0);
             }
-            IngestOutcome::NotOcrEvent => panic!("expected Stored, got NotOcrEvent"),
+            IngestOutcome::NotOcrEvent | IngestOutcome::Refused => {
+                panic!("expected Stored, got NotOcrEvent")
+            }
         }
         assert_eq!(pump.events_ingested_count(), 1);
     }
@@ -1173,7 +1208,7 @@ mod tests {
                 // through).
                 assert_eq!(ev.tab_id, Some(42));
             }
-            IngestOutcome::NotOcrEvent => panic!("expected Stored"),
+            IngestOutcome::NotOcrEvent | IngestOutcome::Refused => panic!("expected Stored"),
         }
     }
 
@@ -1212,11 +1247,11 @@ mod tests {
 
         let id_a = match pump.ingest_ocr_event(&evt_a).expect("a") {
             IngestOutcome::Stored { id, .. } => id,
-            IngestOutcome::NotOcrEvent => panic!("expected Stored a"),
+            IngestOutcome::NotOcrEvent | IngestOutcome::Refused => panic!("expected Stored a"),
         };
         let id_b = match pump.ingest_ocr_event(&evt_b).expect("b") {
             IngestOutcome::Stored { id, .. } => id,
-            IngestOutcome::NotOcrEvent => panic!("expected Stored b"),
+            IngestOutcome::NotOcrEvent | IngestOutcome::Refused => panic!("expected Stored b"),
         };
         assert_ne!(id_a, id_b, "shared URL but distinct tab ⇒ distinct rows");
 
@@ -1249,7 +1284,7 @@ mod tests {
         };
         let id = match pump.ingest_ocr_event(&evt).expect("ingest") {
             IngestOutcome::Stored { id, .. } => id,
-            IngestOutcome::NotOcrEvent => panic!("expected Stored"),
+            IngestOutcome::NotOcrEvent | IngestOutcome::Refused => panic!("expected Stored"),
         };
         let got = store.get_event(id).unwrap().expect("get");
         assert!(
@@ -1269,7 +1304,7 @@ mod tests {
             .expect("ingest")
         {
             IngestOutcome::Stored { id, .. } => id,
-            IngestOutcome::NotOcrEvent => panic!("expected Stored"),
+            IngestOutcome::NotOcrEvent | IngestOutcome::Refused => panic!("expected Stored"),
         };
         let got = store.get_event(id).unwrap().expect("get");
         assert!(got.tab_id.is_none(), "OCREvent path leaves tab_id None");
@@ -1318,7 +1353,7 @@ mod tests {
                     &ev.text[body_start..ev.text.len().min(body_start + 80)]
                 );
             }
-            IngestOutcome::NotOcrEvent => panic!("expected Stored"),
+            IngestOutcome::NotOcrEvent | IngestOutcome::Refused => panic!("expected Stored"),
         }
     }
 
@@ -1366,7 +1401,7 @@ mod tests {
                 assert!(ev.text.ends_with("pure OCR text"));
                 assert!(ev.text.contains("[app=com.apple.Safari"));
             }
-            IngestOutcome::NotOcrEvent => panic!("expected Stored"),
+            IngestOutcome::NotOcrEvent | IngestOutcome::Refused => panic!("expected Stored"),
         }
     }
 
@@ -1405,7 +1440,7 @@ mod tests {
                     "OCR text after separator"
                 );
             }
-            IngestOutcome::NotOcrEvent => panic!("expected Stored"),
+            IngestOutcome::NotOcrEvent | IngestOutcome::Refused => panic!("expected Stored"),
         }
     }
 
@@ -1518,6 +1553,185 @@ mod tests {
         assert_eq!(out, IngestOutcome::NotOcrEvent);
         assert_eq!(pump.events_ingested_count(), 0);
         // Belt + suspenders: nothing in the store.
+        assert!(store.get_event(EventId(1)).unwrap().is_none());
+    }
+
+    // -- The secret gate (crate::secret_gate): every source, before the store --
+
+    const JWT: &str = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJsYXJjaCJ9.TGFyY2hTZWNyZXRTaWduYXR1cmU";
+
+    fn bare_key() -> String {
+        [
+            "sk-",
+            "ant-",
+            "api03-",
+            "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R",
+        ]
+        .concat()
+    }
+
+    fn page(url: &str, title: &str, text: &str) -> Message {
+        Message::PageContentEvent {
+            seq: 1,
+            ts_us: 1_792_492_334_000_000,
+            url: url.to_owned(),
+            title: title.to_owned(),
+            full_text: text.to_owned(),
+            source_browser: "chrome".to_owned(),
+            tab_id: 7,
+        }
+    }
+
+    /// The storage review's extension run (S2): a card, a one-time code and
+    /// a bare key the native host passed are refused here; a page whose only
+    /// secret is a token in its address is kept, without the token.
+    #[test]
+    fn pages_from_the_extensions_get_the_full_secret_check() {
+        let store = Arc::new(InMemoryBrainStore::new());
+        let pump = BrainPump::new(store.clone(), None);
+        for refused in [
+            page(
+                "https://shop.example.test/checkout",
+                "Checkout",
+                "Pay with card 4111 1111 1111 1111 exp 12/29",
+            ),
+            page(
+                "https://mail.example.test/inbox",
+                "Inbox",
+                "Your verification code is 482913.",
+            ),
+            page(
+                "https://console.example.test/keys",
+                "Keys",
+                &format!("Copy your key now: {}", bare_key()),
+            ),
+            page(
+                "https://console.example.test/keys",
+                &format!("Key {}", bare_key()),
+                "Keys",
+            ),
+            page(
+                &format!("https://app.example.test/reset/{JWT}"),
+                "Reset",
+                "Choose a new password",
+            ),
+            page(
+                "https://notes.example.test/n/1",
+                "Note",
+                "password: SYNTHhunter2",
+            ),
+        ] {
+            assert_eq!(
+                pump.ingest_ocr_event(&refused).unwrap(),
+                IngestOutcome::Refused
+            );
+        }
+        assert_eq!(pump.refused_count(), 6);
+        assert_eq!(pump.events_ingested_count(), 0);
+        assert!(
+            store.get_event(EventId(1)).unwrap().is_none(),
+            "nothing stored"
+        );
+
+        let kept = page(
+            &format!("https://app.example.test/cb?access_token={JWT}&lang=en"),
+            "Welcome",
+            "Welcome back",
+        );
+        let IngestOutcome::Stored { id, .. } = pump.ingest_ocr_event(&kept).unwrap() else {
+            panic!("a page whose only secret is a token parameter is kept");
+        };
+        let stored = store.get_event(id).unwrap().unwrap();
+        assert_eq!(
+            stored.url.as_deref(),
+            Some("https://app.example.test/cb?lang=en")
+        );
+        assert!(!stored.text.contains("access_token"), "{}", stored.text);
+        assert!(
+            !stored.text.contains("TGFyY2hTZWNyZXRTaWduYXR1cmU"),
+            "{}",
+            stored.text
+        );
+        assert!(stored
+            .text
+            .contains("url=https://app.example.test/cb?lang=en"));
+    }
+
+    /// The end-to-end run's two leaks (c8): a bare key, and a token in the
+    /// address of a window whose text showed only the site's name. The
+    /// helper now stops the first and strips the second itself; the agent
+    /// does both again for any frame that reaches it.
+    #[test]
+    fn screen_frames_get_the_title_and_address_checks_too() {
+        let store = Arc::new(InMemoryBrainStore::new());
+        let pump = BrainPump::new(store.clone(), None);
+        let frame = |title: &str, url: &str, text: &str| {
+            let mut bundle = [0u8; 64];
+            bundle[..16].copy_from_slice(b"com.apple.Safari");
+            Message::OCREvent {
+                seq: 1,
+                ts_us: 1_792_492_334_000_000,
+                app_bundle_id: bundle,
+                window_title: title.to_owned(),
+                url: url.to_owned(),
+                ocr_text: text.to_owned(),
+                keyframe_hash: [0u8; 32],
+            }
+        };
+        let key = bare_key();
+        assert_eq!(
+            pump.ingest_ocr_event(&frame(
+                "Terminal",
+                "",
+                &format!("Bramble agent setup\n{key}")
+            ))
+            .unwrap(),
+            IngestOutcome::Refused
+        );
+        assert_eq!(
+            pump.ingest_ocr_event(&frame(&format!("Keys {key}"), "", "Bramble agent setup"))
+                .unwrap(),
+            IngestOutcome::Refused
+        );
+        let token_url = format!("https://app.larch.example/auth/callback?access_token={JWT}");
+        let IngestOutcome::Stored { id, .. } = pump
+            .ingest_ocr_event(&frame("Larch Workspace", &token_url, "app.larch.example"))
+            .unwrap()
+        else {
+            panic!("kept with a clean address");
+        };
+        let stored = store.get_event(id).unwrap().unwrap();
+        assert_eq!(
+            stored.url.as_deref(),
+            Some("https://app.larch.example/auth/callback")
+        );
+        assert!(!stored.text.contains("access_token="), "{}", stored.text);
+        assert_eq!(pump.refused_count(), 2);
+        assert_eq!(pump.events_ingested_count(), 1);
+    }
+
+    /// A background window's frame carries no address, but its text and
+    /// title are checked like any other.
+    #[test]
+    fn background_window_frames_are_checked_as_well() {
+        let store = Arc::new(InMemoryBrainStore::new());
+        let pump = BrainPump::new(store.clone(), None);
+        let mut bundle = [0u8; 64];
+        let app = b"com.apple.Terminal";
+        bundle[..app.len()].copy_from_slice(app);
+        let frame = Message::ContextOCREvent {
+            seq: 1,
+            ts_us: 1_792_492_334_000_000,
+            app_bundle_id: bundle,
+            window_title: "zsh".to_owned(),
+            url: String::new(),
+            ocr_text: format!("export KEY={}", bare_key()),
+            keyframe_hash: [0u8; 32],
+        };
+        assert_eq!(
+            pump.ingest_ocr_event(&frame).unwrap(),
+            IngestOutcome::Refused
+        );
         assert!(store.get_event(EventId(1)).unwrap().is_none());
     }
 }

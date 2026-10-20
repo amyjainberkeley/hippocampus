@@ -96,15 +96,15 @@ def main():
             "scenario": "Cross-engine parity: the Swift helper (ICU/NSRegularExpression + hand-rolled "
             "Luhn/OTP scans) and the Rust reader (regex crate + the same scans) agree on every §6 secret "
             "shape, so cleaning the text for recall can never reveal a secret the helper let through. The "
-            "86-case shared corpus now includes the credit-card and OTP cases.",
-            "expected": "same verdict on the shared corpus; the four pattern strings appear verbatim "
+            "135-case shared corpus includes the credit-card, OTP and vendor-key cases.",
+            "expected": "same verdict on the shared corpus; the pattern strings appear verbatim "
             "in SuppressionCascade.swift",
             "observed": "parity holds" if rust_parity_v == "PASS" else "test failure",
             "verdict": rust_parity_v,
-            "rule": "Shared corpus core/brain/fixtures/ocr-secret-corpus.json (86 cases) + "
+            "rule": "Shared corpus core/brain/fixtures/ocr-secret-corpus.json (135 cases) + "
             "verbatim-string guard",
             "proof": "reading.rs::the_guard_answers_the_shared_corpus_like_the_capture_helper, "
-            "the_guard_uses_the_capture_helpers_four_pattern_strings_verbatim; "
+            "the_guard_uses_the_capture_helpers_pattern_strings_verbatim; "
             "OCRReadingPrivacyTests.testSecretPatternsAnswerTheSharedCorpus",
         },
     ]

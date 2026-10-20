@@ -69,13 +69,12 @@ struct CopyMomentsForAIButton: View {
     }
 }
 
-/// The clipboard, as a moment's actions use it.
+/// The clipboard, as a moment's actions use it: the window's one helper.
+@MainActor
 enum MomentClipboard {
     @discardableResult
     static func put(_ text: String) -> Bool {
-        let board = NSPasteboard.general
-        board.clearContents()
-        return board.setString(text, forType: .string)
+        ClipboardHygiene.copyToKeep(text)
     }
 }
 

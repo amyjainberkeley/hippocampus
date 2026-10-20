@@ -141,8 +141,9 @@ async fn reconcile_persists_small_resources_with_mcp_source_tag() {
         assert!(ev.tab_id.is_none());
     }
 
-    // Bodies preserved verbatim — no cascade/redaction at ingest
-    // per Fork F6 = A.
+    // Bodies preserved verbatim — never redacted in place (Fork F6 = A);
+    // a resource holding a secret is refused whole (see
+    // `a_resource_holding_a_secret_is_refused_and_addresses_lose_their_tokens`).
     let bodies: Vec<&str> = events.iter().map(|e| e.text.as_str()).collect();
     assert!(bodies.iter().any(|b| b.contains("the design looks good")));
     assert!(bodies
@@ -545,4 +546,60 @@ fn construction_graph_wiring_at_integration_site() {
         AGENT_BIN.contains("seed_resource_revisions_from_store"),
         "the app-owned aggregator must seed persisted revisions before its first reconcile",
     );
+}
+
+/// The agent's last check before the store (`mci_agent::secret_gate`) runs on
+/// MCP sync too: a resource whose body, name or address holds a secret is
+/// refused whole, and a stored address loses its sign-in parameters.
+#[tokio::test]
+async fn a_resource_holding_a_secret_is_refused_and_addresses_lose_their_tokens() {
+    let key = [
+        "sk-",
+        "ant-",
+        "api03-",
+        "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R",
+    ]
+    .concat();
+    let resources = vec![
+        StubResource::new(
+            "slack://channels/C3",
+            "keys",
+            &format!("here is the key {key}"),
+        ),
+        StubResource::new("slack://channels/C4", &format!("Rotated {key}"), "done"),
+        StubResource::new(
+            "slack://channels/C5",
+            "billing",
+            "card 4111 1111 1111 1111 exp 12/29",
+        ),
+        StubResource::new(
+            "https://docs.example.test/page?access_token=SYNTHtoken&id=7",
+            "Quarterly plan",
+            "the plan is on track",
+        ),
+    ];
+    let (server, registry) = one_server_named("slack", resources).await;
+    let store = Arc::new(InMemoryBrainStore::new());
+    let agg = McpAggregator::new(
+        Arc::clone(&registry),
+        Arc::clone(&store) as Arc<dyn BrainStore>,
+        None,
+    );
+    agg.reconcile_once().await;
+    agg.reconcile_once().await;
+
+    let snap = agg.stats().snapshot();
+    assert_eq!(snap.resources_refused_secret, 3, "{snap:?}");
+    assert_eq!(snap.resources_materialized, 1, "{snap:?}");
+    let events = read_all(&store);
+    assert_eq!(events.len(), 1, "only the clean resource, once");
+    let event = &events[0];
+    assert_eq!(
+        event.url.as_deref(),
+        Some("https://docs.example.test/page?id=7")
+    );
+    assert!(!event.text.contains("access_token"), "{}", event.text);
+    assert!(!event.text.contains("SYNTHtoken"), "{}", event.text);
+    assert!(event.text.contains("the plan is on track"));
+    server.shutdown().await;
 }

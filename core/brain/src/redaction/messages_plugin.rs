@@ -144,6 +144,11 @@ pub enum MessagesPluginDropReason {
     /// The body contains a sensitive URL or domain match per §3(b).
     /// E.g. a Messages forward of `https://secure.chase.com/reset?...`.
     SensitiveUrlInBody,
+    /// After the cascade's own redaction, the body or the participant label
+    /// still holds a secret the shared checks find (a card number, a key, a
+    /// `password:` line). Set by the agent's last check before the store,
+    /// never by [`redact_messages_plugin_event`].
+    SecretInBody,
 }
 
 /// Decision returned by the cascade-equivalent.
