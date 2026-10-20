@@ -125,6 +125,58 @@ public enum SyntaxHighlighter {
         return letters * 10 >= shown * 6
     }
 
+    /// The tokens of a code block as the reading view colors it: the
+    /// language's keywords when it is known, and in any code its numbers,
+    /// strings and comments, a comment at a line's end too
+    /// ("round_half_even(2.5)   // 2.0"). Every character of `text` is in
+    /// one token, in order.
+    public static func codeTokens(_ text: String) -> [SyntaxToken] {
+        codeTokens(text, language: detectLanguage(text))
+    }
+
+    /// [`codeTokens`] for one line of a block whose language was told from
+    /// the whole block.
+    public static func codeTokens(_ text: String, language: DetectedLanguage) -> [SyntaxToken] {
+        let keywords = keywordsFor(language)
+        let comment = (language == .python || language == .shell) ? "#" : "//"
+        var tokens: [SyntaxToken] = []
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        for (index, line) in lines.enumerated() {
+            if index > 0 { tokens.append(SyntaxToken(text: "\n", type: .plain)) }
+            let line = String(line)
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix(comment) || trimmed.hasPrefix("/*") || trimmed.hasPrefix("* ") || trimmed == "*/" {
+                tokens.append(SyntaxToken(text: line, type: .comment))
+                continue
+            }
+            let (code, trailing) = splitTrailingComment(line, marker: comment)
+            if !code.isEmpty { tokenizeLine(code, keywords: keywords, into: &tokens) }
+            if let trailing { tokens.append(SyntaxToken(text: trailing, type: .comment)) }
+        }
+        return tokens
+    }
+
+    /// `line` split where a comment starts after code: at the marker outside
+    /// a string, after a space, and not inside an address ("https://").
+    static func splitTrailingComment(_ line: String, marker: String) -> (code: String, comment: String?) {
+        var quote: Character?
+        var previous: Character = " "
+        var index = line.startIndex
+        while index < line.endIndex {
+            let ch = line[index]
+            if let open = quote {
+                if ch == open && previous != "\\" { quote = nil }
+            } else if ch == "\"" || ch == "'" {
+                quote = ch
+            } else if line[index...].hasPrefix(marker) && previous.isWhitespace {
+                return (String(line[..<index]), String(line[index...]))
+            }
+            previous = ch
+            index = line.index(after: index)
+        }
+        return (line, nil)
+    }
+
     /// A coding assistant's markers in a terminal as plain bullets: "⏺
     /// Update" reads "• Update", and "⎿ Updated" reads as an indented line.
     /// For display only: what is copied stays as it was read.

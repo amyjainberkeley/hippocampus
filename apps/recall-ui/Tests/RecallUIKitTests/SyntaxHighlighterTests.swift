@@ -122,4 +122,42 @@ final class SyntaxHighlighterTests: XCTestCase {
         XCTAssertEqual(tokens.first?.type, .plain)
         XCTAssertEqual(tokens.first?.text, text)
     }
+
+    // MARK: Code blocks in the reading view (SPEC 4.6)
+
+    func testCodeTokensColorNumbersAndALinesTrailingCommentInAnyLanguage() {
+        let line = "round_half_even(2.5)   // 2.0"
+        let tokens = SyntaxHighlighter.codeTokens(line)
+        XCTAssertEqual(tokens.map(\.text).joined(), line, "every character, in order")
+        XCTAssertTrue(tokens.contains(SyntaxToken(text: "2.5", type: .number)))
+        XCTAssertEqual(tokens.last, SyntaxToken(text: "// 2.0", type: .comment))
+    }
+
+    func testAnAddressOrAStringIsNeverTakenForAComment() {
+        for line in [#"let url = "https://devnotes.example/rounding";"#, "curl https://devnotes.example/a//b",
+                     #"print("// not a comment")"#] {
+            let tokens = SyntaxHighlighter.codeTokens(line)
+            XCTAssertEqual(tokens.map(\.text).joined(), line)
+            XCTAssertFalse(tokens.contains { $0.type == .comment }, line)
+        }
+    }
+
+    func testABlocksLanguageColorsEveryLinesKeywords() {
+        let block = "pub fn total() -> Money {\n    let tax = 1;\n    return tax\n}"
+        let language = SyntaxHighlighter.detectLanguage(block)
+        XCTAssertEqual(language, .rust)
+        let second = SyntaxHighlighter.codeTokens("    let tax = 1;", language: language)
+        XCTAssertTrue(second.contains(SyntaxToken(text: "let", type: .keyword)))
+        XCTAssertFalse(SyntaxHighlighter.codeTokens("    let tax = 1;").contains { $0.type == .keyword },
+                       "on its own, one line does not say its language")
+        let python = SyntaxHighlighter.codeTokens("x = 1  # one", language: .python)
+        XCTAssertEqual(python.last, SyntaxToken(text: "# one", type: .comment))
+    }
+
+    func testCodeTokensKeepEveryCharacterOfEveryLine() {
+        let block = "use std::time::Duration;\n\n/// Delete events older than the configured window.\n" +
+            "pub fn sweep(store: &Store) -> Result<u64, SweepError> {\n    \"quoted // text\"; // done\n}"
+        XCTAssertEqual(SyntaxHighlighter.codeTokens(block).map(\.text).joined(), block)
+    }
 }
+

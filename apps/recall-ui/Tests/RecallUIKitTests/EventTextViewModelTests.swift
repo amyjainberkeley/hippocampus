@@ -192,6 +192,24 @@ final class EventTextViewModelTests: XCTestCase {
         XCTAssertEqual(vm.copyText(for: other), ReadableText.guarded(other.ocrTextSnippet))
     }
 
+    func testCopyTextCopiesTheBlocksWithTheirStructure() async throws {
+        let hit = self.hit(1)
+        let vm = EventTextViewModel()
+        let reading = try EventReading(
+            eventId: hit.id, tsUs: hit.tsUs, appBundleId: hit.appBundleId, sourceKind: "screen_ocr",
+            main: "Launch checklist\n\u{2611} Rounding fix merged\n\u{2610} Gift card copy reviewed",
+            rest: "iCloud\nNotes", isTruncated: false,
+            blocks: [.heading(level: 1, text: "Launch checklist"),
+                     .list([ReadingListItem(marker: "\u{2611}", text: "Rounding fix merged", checked: true),
+                            ReadingListItem(marker: "\u{2610}", text: "Gift card copy reviewed", checked: false)])])
+        await vm.load(hit: hit, reader: BlocksReader(reading: reading))
+        XCTAssertEqual(vm.copyText(for: hit),
+                       "Launch checklist\n\n\u{2611} Rounding fix merged\n\u{2610} Gift card copy reviewed",
+                       "blocks set apart by a blank line, markers as read")
+        XCTAssertEqual(vm.copyText(for: hit, includingRest: true),
+                       "Launch checklist\n\n\u{2611} Rounding fix merged\n\u{2610} Gift card copy reviewed\n\niCloud\nNotes")
+    }
+
     func testTheSearchsWordsOnlyInTheRestOfTheWindowOpenIt() async {
         let hit = self.hit(1)
         let vm = EventTextViewModel()
@@ -294,3 +312,26 @@ private actor MatchReader: BrainReader {
         SummaryStats(totalEvents: 0, oldestTsUs: nil, newestTsUs: nil, diskBytes: 0)
     }
 }
+
+/// A reader whose reading of the moment carries blocks, as the FFI's does.
+private struct BlocksReader: BrainReader {
+    let reading: EventReading
+
+    func eventReading(eventId: UInt64, query: String?) async throws -> EventReading? {
+        eventId == reading.eventId ? reading : nil
+    }
+
+    func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] { [] }
+    func search(_ opts: SearchOptions) async throws -> [Hit] { [] }
+    func recentEvents(limit: Int) async throws -> [Hit] { [] }
+    func recentPrivacyMoments(limit: Int) async throws -> [PrivacyMoment] { [] }
+    func listObservedApps(limit: Int, timeFromUs: UInt64?) async throws -> [ObservedApp] { [] }
+    func listEpisodes(limit: Int) async throws -> [Episode] { [] }
+    func briefForDate(_ dateLocal: String) async throws -> Brief? { nil }
+    func latestBrief() async throws -> Brief? { nil }
+    func briefDates(limit: Int) async throws -> [String] { [] }
+    func summaryStats() async throws -> SummaryStats {
+        SummaryStats(totalEvents: 1, oldestTsUs: 5, newestTsUs: 5, diskBytes: 0)
+    }
+}
+
