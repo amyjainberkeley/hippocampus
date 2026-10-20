@@ -60,6 +60,9 @@ extension WindowRenderer {
                                  action: BottomNote.Action(title: NavigationCopy.undoAction) {})
                   }),
             Scene.shell("nav-short", place: .today, size: CGSize(width: 1100, height: 480)),
+            // A Working On item's page is open: its row is selected, its
+            // little screenshot inside the selection.
+            Scene.shell("nav-working-on-selected", place: .item(ShellRenderFixture.pricingId)),
             Scene.shell("nav-sidebar-collapsed", place: .today, preset: WindowShellPreset(sidebarHidden: true)),
             Scene.shell("nav-new-sidebar-line", place: .today, preset: WindowShellPreset(showsNewSidebarLine: true)),
             Scene.shell("nav-working-on-footnote", place: .today, preset: WindowShellPreset(showsFootnote: true)),

@@ -336,6 +336,11 @@ enum SidebarMetrics {
     static let rowHeight: CGFloat = 28
     /// From a row's leading edge to its label: the icon's slot and the gap.
     static let labelInset: CGFloat = 25
+    /// A Working On item's little screenshot (SPEC-DELTA 2: about 26 x 16).
+    static let thumbnailSize = SidebarThumbnailLayout.size
+    /// How far the little screenshot moves toward its name, so it never
+    /// touches the selection's edge.
+    static let thumbnailNudge = SidebarThumbnailLayout.nudge
     static let defaultWidth: CGFloat = 200
     static let minWidth: CGFloat = 180
     static let maxWidth: CGFloat = 260
@@ -414,8 +419,13 @@ private struct WorkingOnRow: View {
                 .truncationMode(.tail)
         } icon: {
             if item.thumbnailMoment != nil {
-                SidebarThumbnail(moment: item.thumbnailMoment, pictures: pictures)
-                    .frame(width: 18, height: 15, alignment: .trailing)
+                SidebarThumbnail(moment: item.thumbnailMoment, pictures: pictures,
+                                 size: SidebarMetrics.thumbnailSize)
+                    // Wider than a symbol: it reaches back toward the row's
+                    // edge, so the name stays in line with every other row's,
+                    // and sits a few points inside the selection.
+                    .frame(width: 18, height: SidebarMetrics.thumbnailSize.height, alignment: .trailing)
+                    .offset(x: SidebarMetrics.thumbnailNudge)
             } else {
                 SidebarSymbol(name: item.systemImage, selected: selected)
             }

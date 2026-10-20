@@ -95,6 +95,9 @@ final class NativeWorkspacePresentationTests: XCTestCase {
         let noteEnd = source.range(of: "\n/// ", range: noteStart.upperBound..<source.endIndex)
         let note = String(source[noteStart.lowerBound..<(noteEnd?.lowerBound ?? source.endIndex)])
         XCTAssertTrue(note.contains(".lineLimit(nil)"), "a sidebar row is one line unless it says otherwise")
+        XCTAssertTrue(source.contains("size: SidebarMetrics.thumbnailSize"))
+        XCTAssertTrue(source.contains(".offset(x: SidebarMetrics.thumbnailNudge)"),
+                      "a Working On item's screenshot sits inside the selection (SidebarThumbnailLayout)")
     }
 
     func testRootKeepsKeyboardAndDeepLinkRouting() throws {
