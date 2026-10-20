@@ -93,6 +93,10 @@ pub struct WorkItem {
     pub days_this_week: u32,
     /// Whether the sidebar lists it.
     pub in_sidebar: bool,
+    /// Whether it has the sidebar's time (30 minutes in front within the
+    /// last 14 days of use), whatever its name: a name that looks personal
+    /// has it and stays out until the person shows it (the window's list).
+    pub recent: bool,
     /// Why the sidebar does not, when it is the name's own: `"personal"`.
     pub hidden_reason: Option<String>,
     /// For code, the files its editors' titles named, newest first.
@@ -475,6 +479,7 @@ fn item(
         week_minutes: minutes(acc.week_us),
         days_this_week: u32::try_from(acc.week_days.len()).unwrap_or(u32::MAX),
         in_sidebar: !personal && acc.fortnight_us >= ITEM_US,
+        recent: acc.fortnight_us >= ITEM_US,
         hidden_reason: personal.then(|| "personal".to_owned()),
         files: files
             .into_iter()
@@ -604,6 +609,7 @@ mod tests {
             week_minutes: 160,
             days_this_week: 3,
             in_sidebar: true,
+            recent: true,
             hidden_reason: None,
             files: vec![WorkFile {
                 name: "tax.rs".into(),
@@ -623,6 +629,7 @@ mod tests {
         assert_eq!(value["thumbnail_moment"], 4790);
         assert_eq!(value["files"][0]["moment"], 4790);
         assert_eq!(value["hidden_reason"], serde_json::Value::Null);
+        assert_eq!(value["recent"], true);
         assert!(value.get("sessions").is_none(), "only with --item");
         assert_eq!(value["conversations"], serde_json::json!([]));
     }

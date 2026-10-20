@@ -263,6 +263,7 @@ fn days_with_nothing_saved_dont_count_toward_two_weeks() {
     let value = work(&memory, &[]);
     let found = item(&value, "October invoices");
     assert_eq!(found["in_sidebar"], false, "it leaves the sidebar");
+    assert_eq!(found["recent"], false, "and showing it can't bring it back");
     assert_eq!(found["week_minutes"], 0);
     assert_eq!(
         found["total_minutes"], 40,
@@ -331,6 +332,9 @@ fn a_name_that_looks_personal_stays_out_of_the_sidebar() {
     let found = item(&value, "Mortgage refinance");
     assert_eq!(found["in_sidebar"], false);
     assert_eq!(found["hidden_reason"], "personal");
+    // It has the sidebar's time: the window lists it once the person
+    // chooses Show in Sidebar.
+    assert_eq!(found["recent"], true);
 }
 
 #[test]
