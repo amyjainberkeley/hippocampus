@@ -60,6 +60,18 @@ ROOTS=(
   extensions
 )
 
+# Build outputs under those roots are not shipping source, and they hold
+# third-party code that does open sockets: SwiftPM's checkouts (Sparkle) in
+# .build/, Cargo's target/, the OCR worker's .venv/, PyInstaller's build/ and
+# dist/. Run in a built checkout, the audit skips them, as it would on a
+# clean export. A tracked file under one of these names is never skipped
+# silently: the invariant below fails instead.
+BUILD_OUTPUT_DIRS=(.build target dist build .venv venv __pycache__ node_modules DerivedData .swiftpm)
+EXCLUDES=()
+for dir in "${BUILD_OUTPUT_DIRS[@]}"; do
+  EXCLUDES+=("--exclude-dir=$dir")
+done
+
 # Connection-capable symbols: the APIs that open a socket / make a request
 # / fetch an update. NOT bare URL strings (those are data; see header).
 SYMBOLS='URLSession|URLRequest|\.dataTask|\.downloadTask|\.uploadTask|NWConnection|NWListener|CFSocket|CFStreamCreate|getaddrinfo|SPUUpdater|SPUStandardUpdater|import Sparkle|SUFeedURL|reqwest|\bureq\b|isahc|surf::|hyper::|hyper_util|HttpConnector|TcpStream|TcpListener|UdpSocket|tokio::net::Tcp|lookup_host|std::net::|urllib|import requests|httpx|aiohttp|http\.client|urlopen|socket\.socket'
@@ -83,7 +95,7 @@ ALLOWLIST=(
   "core/mcp-client/src/transport/http_sse.rs|LOOPBACK|opt-in MCP server; dials only through LoopbackOnlyConnector and refuses HTTPS (http_sse.rs:34); every URL re-validated at connect time"
   "core/mcp-client/src/transport/loopback.rs|LOOPBACK|the loopback validator itself: LoopbackHost::parse + resolve_now (loopback.rs) reject any non-127.0.0.0/8, non-::1 address at registration AND connect time"
   "apps/onboarding/Sources/OnboardingKit/BundleDisplayNameResolver.swift|COMMENT|the token URLSession appears only in a doc comment about splitting camelCase names (BundleDisplayNameResolver.swift:119); no network call"
-  "tools/ocr/worker.py|GUARD|shipping OCR worker; stdin/stdout only. Installs sys.addaudithook(deny_network) blocking socket.connect/bind (worker.py:575) and DownloadFile.run=deny_download blocking model fetches (worker.py:64)"
+  "tools/ocr/worker.py|GUARD|shipping OCR worker; stdin/stdout only. Turns ONNX Runtime's telemetry off before it loads (worker.py:15), installs sys.addaudithook(deny_network) blocking socket.connect/bind (worker.py:590) and DownloadFile.run=deny_download blocking model fetches (worker.py:81); the helper starts it under sandbox-exec with the network denied (OCRWorkerSandbox.swift:60)"
   "tools/ocr/prepare.py|BUILD-ONLY|model fetcher run at release-prep only; the frozen runtime worker is built from worker.py, which blocks downloads (bundle.py refuses a worker carrying extra libs)"
 )
 
@@ -113,7 +125,7 @@ HIT_FILES=()
 while IFS= read -r line; do
   [[ -n "$line" ]] && HIT_FILES+=("$line")
 done < <(
-  grep -rlnE "$SYMBOLS" "${ROOTS[@]}" \
+  grep -rlnE "$SYMBOLS" "${ROOTS[@]}" "${EXCLUDES[@]}" \
     --include='*.swift' --include='*.rs' --include='*.py' --include='*.js' 2>/dev/null \
   | sort -u
 )
@@ -145,8 +157,20 @@ check() { # $1=label ; $2=0/1 pass ; $3=detail
   fi
 }
 
-ship_rs() { grep -rnE "$1" "${ROOTS[@]}" --include='*.rs' 2>/dev/null | grep -vE '/(tests|Tests)/' | grep -vE '_test\.rs:'; }
-ship_swift() { grep -rnE "$1" "${ROOTS[@]}" --include='*.swift' 2>/dev/null | grep -vE 'Tests?\.swift:'; }
+ship_rs() { grep -rnE "$1" "${ROOTS[@]}" "${EXCLUDES[@]}" --include='*.rs' 2>/dev/null | grep -vE '/(tests|Tests)/' | grep -vE '_test\.rs:'; }
+ship_swift() { grep -rnE "$1" "${ROOTS[@]}" "${EXCLUDES[@]}" --include='*.swift' 2>/dev/null | grep -vE 'Tests?\.swift:'; }
+
+# (o) The build-output folders skipped above hold no tracked source. Only
+#     checked in a git checkout; a clean export has no build outputs.
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  build_dirs_re="$(IFS='|'; printf '%s' "${BUILD_OUTPUT_DIRS[*]}" | sed 's/\./\\./g')"
+  hidden="$(git ls-files -- "${ROOTS[@]}" 2>/dev/null | grep -E "(^|/)($build_dirs_re)/" | head -3)"
+  if [[ -z "$hidden" ]]; then
+    check "no tracked source under a skipped build-output folder (${BUILD_OUTPUT_DIRS[*]})" 0 ""
+  else
+    check "no tracked source under a skipped build-output folder" 1 "$(echo "$hidden" | tr '\n' ' ')"
+  fi
+fi
 
 # (i) No general-purpose HTTP client crate in the shipped Rust.
 bad="$(ship_rs 'reqwest|\bureq\b|isahc|surf::|curl::' | grep -vE '#\[cfg\(test' )"
