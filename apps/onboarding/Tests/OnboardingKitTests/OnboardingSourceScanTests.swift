@@ -96,8 +96,38 @@ final class OnboardingSourceScanTests: XCTestCase {
         let theme = try source("Onboarding/SharedComponents/OnboardingTheme.swift")
         XCTAssertTrue(theme.contains("static let windowWidth: CGFloat = 760"))
         XCTAssertTrue(theme.contains("static let windowHeight: CGFloat = 560"))
+        // 760 by 560, shorter only on a screen too short for it (SPEC 7.7);
+        // `SetupWindowFitTests` hold the sizes.
         let window = try source("Onboarding/SharedComponents/OnboardingWindow.swift")
-        XCTAssertTrue(window.contains(".frame(width: OnboardingTheme.windowWidth, height: OnboardingTheme.windowHeight)"))
+        XCTAssertTrue(window.contains(
+            ".frame(width: OnboardingTheme.windowWidth, height: min(OnboardingTheme.windowHeight, windowHeight))"
+        ))
+        XCTAssertTrue(app.contains("private let windowHeight = SetupWindow.fittedHeight()"))
+        XCTAssertTrue(app.contains(".environment(\\.onboardingWindowHeight, windowHeight)"))
+    }
+
+    /// SPEC 7.7: setup opens centred on the display with the pointer, and
+    /// joins the Space the person is on, over a full-screen app too, so it
+    /// never pulls them to another Space.
+    func testSetupOpensWhereThePersonIsAndOnTheirSpace() throws {
+        let app = code(try source("Onboarding/OnboardingApp.swift")).joined(separator: "\n")
+        XCTAssertTrue(app.contains(".background(SetupWindowReader { SetupWindow.place($0) })"))
+        let window = code(try source("Onboarding/SharedComponents/SetupWindow.swift")).joined(separator: "\n")
+        XCTAssertTrue(window.contains("window.collectionBehavior.insert([.moveToActiveSpace, .fullScreenAuxiliary])"))
+        XCTAssertTrue(window.contains("let pointer = NSEvent.mouseLocation"))
+        XCTAssertTrue(window.contains("SetupWindowFit.display(pointer: (pointer.x, pointer.y), screens: screens)"))
+        XCTAssertTrue(window.contains("SetupWindowFit.origin(width: size.width, height: size.height, in: visible)"))
+    }
+
+    /// SPEC 7.4: Done fades setup out in 200 ms, then it quits and the app
+    /// opens the window.
+    func testDoneFadesSetupOutThenQuits() throws {
+        let flow = code(try source("Onboarding/OnboardingFlowView.swift")).joined(separator: "\n")
+        XCTAssertTrue(flow.contains("flowVM.clearResumeState()\n            SetupWindow.fadeOutAndQuit()"))
+        let window = code(try source("Onboarding/SharedComponents/SetupWindow.swift")).joined(separator: "\n")
+        XCTAssertTrue(window.contains("context.duration = SetupExitMotion.fadeOut"))
+        XCTAssertTrue(window.contains("for window in windows { window.animator().alphaValue = 0 }"))
+        XCTAssertEqual(SetupExitMotion.fadeOut, 0.2)
     }
 
     func testTheOnboardingMenusAreGone() throws {
@@ -183,11 +213,26 @@ final class OnboardingSourceScanTests: XCTestCase {
         // as many times as the key is pressed.
         XCTAssertTrue(welcome.contains("KeycapRow(keycaps: key.keycaps, pressed: pressed"), "keycaps in the sentence")
         XCTAssertTrue(welcome.contains("let presses = key.pulseTimes.count"))
-        XCTAssertTrue(welcome.contains("WelcomeDemoScript.frame(at: Date().timeIntervalSince(start), presses: presses)"))
-        // Under Reduce Motion nothing moves: each moment whole, then the next.
-        XCTAssertTrue(welcome.contains("guard !reduceMotion else {\n            await playStill()"))
+        // The script decides every frame, through the playback's own clock;
+        // under Reduce Motion each moment shows whole, then the next
+        // (`WelcomeDemoScript.stillFrame`), and the keycaps never press.
+        XCTAssertTrue(welcome.contains("let next = playback.frame(presses: presses, reduceMotion: reduceMotion)"))
+        XCTAssertTrue(welcome.contains("let down = !reduceMotion && next.keyDown"))
         XCTAssertTrue(welcome.contains("WelcomeDemoScript.finalFrame("))
         XCTAssertTrue(welcome.contains("guard animates, demoFrame == nil else { return }"), "the renderer draws one frame")
+    }
+
+    /// SPEC 7.3: the demo pauses while the pointer is over it, while setup's
+    /// window is not the key window and once the person has moved past
+    /// Welcome, and while paused no task runs for it.
+    func testWelcomesDemoPausesWhileReadOrUnseenAndCostsNothingThen() throws {
+        let welcome = try source("Onboarding/Slides/WelcomeSlide.swift")
+        XCTAssertTrue(welcome.contains(".onHover { playback.hovering = $0 }"))
+        XCTAssertTrue(welcome.contains(".onChange(of: activeState) { _, state in playback.windowIsKey = state == .key }"))
+        XCTAssertTrue(welcome.contains(".onDisappear { playback.onWelcome = false }"))
+        XCTAssertTrue(welcome.contains("DemoTaskID(key: key, reduceMotion: reduceMotion, playing: playback.isPlaying)"),
+                      "pausing ends the task")
+        XCTAssertTrue(welcome.contains("guard playback.isPlaying else {"), "a paused demo starts no loop")
     }
 
     func testTheDemoAndTheRendersShowOnlyMadeUpData() throws {
@@ -325,7 +370,9 @@ final class OnboardingSourceScanTests: XCTestCase {
 
     func testThePermissionsFooterMakesRoomForARowThatSaysWhatToDo() throws {
         let slide = code(try source("Onboarding/Slides/PermissionsSlide.swift")).joined(separator: "\n")
-        XCTAssertTrue(slide.contains("if !rows.contains(where: { $0.state.showsGuidance }) {\n                    Text(OnboardingCopy.permissionsFooter)"))
+        XCTAssertTrue(slide.contains(
+            "if !rows.contains(where: { $0.state.showsGuidance }) {\n                        Text(rows.allSatisfy { $0.state == .granted } ? OnboardingCopy.bothOn : OnboardingCopy.permissionsFooter)"
+        ), "the footer says both are on once they are (SPEC 7.2)")
         XCTAssertFalse(slide.contains(".frame(maxWidth: 480"), "the help line takes the row's width")
     }
 
@@ -344,6 +391,95 @@ final class OnboardingSourceScanTests: XCTestCase {
         XCTAssertTrue(panel.contains { $0.contains("BrowserExtensionScreen(") }, "a screen the renderer draws")
         let renderer = try source("Onboarding/OnboardingPreviewRenderer.swift")
         XCTAssertTrue(renderer.contains("add(\"panel-browser-extension\""))
+    }
+
+    // MARK: - Moving between screens (SPEC 7.1)
+
+    func testEveryScreenArrivesFromTheWaySetupMovesAndTheTitleFirst() throws {
+        let flow = code(try source("Onboarding/OnboardingFlowView.swift")).joined(separator: "\n")
+        XCTAssertTrue(flow.contains(".transition(OnboardingDesign.Motion.screen(move, reduceMotion: reduceMotion))"))
+        XCTAssertTrue(flow.contains("move = ScreenMove(from: old, to: new)"))
+        XCTAssertTrue(flow.contains("withAnimation(OnboardingDesign.Motion.screenAnimation(reduceMotion: reduceMotion))"))
+        let design = code(try source("Onboarding/SharedComponents/OnboardingDesign.swift")).joined(separator: "\n")
+        XCTAssertTrue(design.contains("insertion: .opacity.combined(with: .offset(x: transition.incomingOffset))"))
+        XCTAssertTrue(design.contains("removal: .opacity.combined(with: .offset(x: transition.outgoingOffset))"))
+        // The title arrives first and the content 60 ms after it, on every
+        // screen after Welcome as on Welcome.
+        for screen in ["WelcomeSlide", "WhatYouGetSlide", "PermissionsSlide", "PromiseSlide", "TryItSlide"] {
+            XCTAssertTrue(code(try source("Onboarding/Slides/\(screen).swift")).contains { $0.contains(".arrivesAfterTitle()") },
+                          screen)
+        }
+    }
+
+    func testVoiceOverAndTheKeyboardMoveWithTheScreen() throws {
+        // SPEC 7.1, 7.7: each title is a heading and takes VoiceOver's focus
+        // when its screen arrives; full keyboard access lands on the
+        // primary button, and Return presses it.
+        let window = try source("Onboarding/SharedComponents/OnboardingWindow.swift")
+        XCTAssertTrue(window.contains(".accessibilityAddTraits(.isHeader)\n        .arrivalFocus()"))
+        XCTAssertTrue(window.contains(".keyboardShortcut(.defaultAction)"))
+        XCTAssertTrue(window.contains(".onChange(of: screen) { primaryFocused = true }"))
+        XCTAssertTrue(window.contains(".accessibilityHint(primaryDisabledReason ?? \"\")"), "an off button says why")
+        let welcome = try source("Onboarding/Slides/WelcomeSlide.swift")
+        XCTAssertTrue(welcome.contains(".accessibilityAddTraits(.isHeader)\n                    .arrivalFocus()"))
+        let arrival = try source("Onboarding/SharedComponents/ScreenArrival.swift")
+        XCTAssertTrue(arrival.contains(".accessibilityFocused($focused)"))
+        let flow = try source("Onboarding/OnboardingFlowView.swift")
+        XCTAssertTrue(flow.contains("return flowVM.bothGranted ? nil : OnboardingCopy.turnOnBothFirst"))
+    }
+
+    func testTheButtonKeepsItsWidthAndTheDotsAndFadesFollowTheTokens() throws {
+        let window = code(try source("Onboarding/SharedComponents/OnboardingWindow.swift")).joined(separator: "\n")
+        XCTAssertTrue(window.contains("Text(label).hidden()"), "the widest label holds the width")
+        XCTAssertTrue(window.contains(".opacity(primaryEnabled ? 1 : PrimaryButtonMotion.disabledOpacity)"))
+        XCTAssertTrue(window.contains(".animation(animation(PrimaryButtonMotion.enableFade), value: primaryEnabled)"))
+        XCTAssertTrue(window.contains(".animation(animation(PrimaryButtonMotion.labelCrossfade), value: primaryLabel)"))
+        let dots = code(try source("Onboarding/SharedComponents/ProgressDots.swift")).joined(separator: "\n")
+        XCTAssertTrue(dots.contains("index == current ? ProgressDotsMotion.activeWidth : ProgressDotsMotion.dotWidth"))
+        XCTAssertTrue(dots.contains("ProgressDotsMotion.animationDuration(reduceMotion: reduceMotion)"))
+    }
+
+    func testIncreaseContrastMakesCardsSolidAndHairlinesStrong() throws {
+        let card = code(try source("Onboarding/SharedComponents/GlassCard.swift")).joined(separator: "\n")
+        XCTAssertTrue(card.contains(": reduceTransparency || solidFills || increasedContrast"))
+        let window = code(try source("Onboarding/SharedComponents/OnboardingWindow.swift")).joined(separator: "\n")
+        XCTAssertTrue(window.contains(".fill(increasedContrast ? Color.primary.opacity(0.45) : Color.primary.opacity(0.1))"))
+        let promise = code(try source("Onboarding/Slides/PromiseSlide.swift"))
+        XCTAssertFalse(promise.contains { $0.contains("Divider()") }, "the Promise's lines follow Increase Contrast")
+    }
+
+    // MARK: - The key that opens Ask (SPEC-DELTA 7)
+
+    func testSetupsKeyPickerOpensFromTheAccessibilityRowAndTakesFnOnlyOnAClick() throws {
+        let slide = code(try source("Onboarding/Slides/PermissionsSlide.swift")).joined(separator: "\n")
+        XCTAssertTrue(slide.contains("Button(OnboardingCopy.AskKey.change, action: changeKey)"))
+        XCTAssertTrue(slide.contains("stored: AskShortcutLabel.storedValue(), facts: .thisMac,"))
+        XCTAssertTrue(slide.contains("SetupAskKeyWriter.chooseOnThisMac(chosen, accepting: accepted)"))
+        let sheet = code(try source("Onboarding/Slides/AskKeySheet.swift")).joined(separator: "\n")
+        XCTAssertTrue(sheet.contains("Button(model.confirmLabel, action: confirm)"), "Use Fn when something else uses it")
+        XCTAssertTrue(sheet.contains("Button(OnboardingCopy.AskKey.cancel, action: cancel)"))
+        XCTAssertTrue(sheet.contains("model.recheck()"), "back from Keyboard settings, it looks again")
+        // Only the sheet writes the choice, through the writer.
+        for (name, text) in try sources() where name != "AskKeyChoice.swift" {
+            XCTAssertFalse(code(text).contains { $0.contains("CFPreferencesSetAppValue") }, name)
+        }
+    }
+
+    func testTheRenderersKeyPickerReadsNothingOnThisMac() throws {
+        let renderer = code(try source("Onboarding/OnboardingPreviewRenderer.swift"))
+        for call in ["FnKeyFacts.thisMac", "facts: .thisMac", "MacFacts.", "acceptedOnThisMac", "chooseOnThisMac"] {
+            XCTAssertFalse(renderer.contains { $0.contains(call) }, "the renderer uses \(call)")
+        }
+    }
+
+    func testTheKeyMonitorNeverAsksForInputMonitoring() throws {
+        // Keyboards are read from the I/O Registry's properties; none is
+        // opened for input, which would raise macOS's Input Monitoring prompt.
+        let choice = code(try source("OnboardingKit/AskKeyChoice.swift")).joined(separator: "\n")
+        XCTAssertTrue(choice.contains("IOServiceGetMatchingServices"))
+        for call in ["IOHIDManagerOpen", "IOHIDDeviceOpen", "IOHIDRequestAccess", "CGEventTapCreate", "addGlobalMonitorForEvents"] {
+            XCTAssertFalse(choice.contains(call), call)
+        }
     }
 
     // MARK: - The preview renderer

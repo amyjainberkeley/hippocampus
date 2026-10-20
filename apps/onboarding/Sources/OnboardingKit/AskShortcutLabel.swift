@@ -4,7 +4,7 @@
 // app's own defaults, at render time, so a change shows without a restart:
 //
 // - The key the person chose, `ai.hippocampus.prefs.askKey`: one of
-//   `shiftTwice`, `rightShift`, `rightCommand`, `rightOption`, `off`.
+//   `shiftTwice`, `fn`, `rightShift`, `rightCommand`, `rightOption`, `off`.
 //   Missing or unknown means `shiftTwice`, as the app treats it; `off`
 //   leaves only Control-Shift-Space. Welcome and the Accessibility row
 //   describe this key: they say what Hippocampus does once it is set up,
@@ -41,7 +41,7 @@ public enum AskShortcutLabel {
         appValue(preferenceKey)
     }
 
-    /// The key as the menu shows it: "⇧⇧", "right ⇧", "right ⌘",
+    /// The key as the menu shows it: "⇧⇧", "fn", "right ⇧", "right ⌘",
     /// "right ⌥", or "⌃⇧Space" when the key is off.
     public static func label(forStored stored: String?) -> String {
         AskKeyHint(stored: stored).label
@@ -55,6 +55,8 @@ public enum AskShortcutLabel {
 /// How onboarding names the chosen Ask key in its sentences and keycaps.
 public enum AskKeyHint: String, Sendable, Equatable, CaseIterable {
     case shiftTwice
+    /// Fn (Globe), tapped by itself (SPEC-DELTA 7).
+    case fn
     case rightShift
     case rightCommand
     case rightOption
@@ -63,6 +65,7 @@ public enum AskKeyHint: String, Sendable, Equatable, CaseIterable {
 
     public init(stored: String?) {
         switch stored {
+        case "fn": self = .fn
         case "rightShift": self = .rightShift
         case "rightCommand": self = .rightCommand
         case "rightOption": self = .rightOption
@@ -86,7 +89,7 @@ public enum AskKeyHint: String, Sendable, Equatable, CaseIterable {
     public var verb: String {
         switch self {
         case .shiftTwice, .chord: "Press"
-        case .rightShift, .rightCommand, .rightOption: "Tap"
+        case .fn, .rightShift, .rightCommand, .rightOption: "Tap"
         }
     }
 
@@ -94,6 +97,7 @@ public enum AskKeyHint: String, Sendable, Equatable, CaseIterable {
     public var keycaps: [String] {
         switch self {
         case .shiftTwice: ["⇧", "⇧"]
+        case .fn: ["fn"]
         case .rightShift: ["right ⇧"]
         case .rightCommand: ["right ⌘"]
         case .rightOption: ["right ⌥"]
@@ -110,6 +114,7 @@ public enum AskKeyHint: String, Sendable, Equatable, CaseIterable {
     public var noun: String? {
         switch self {
         case .shiftTwice: "Shift twice"
+        case .fn: "Fn"
         case .rightShift: "right Shift"
         case .rightCommand: "right Command"
         case .rightOption: "right Option"
@@ -126,6 +131,7 @@ public enum AskKeyHint: String, Sendable, Equatable, CaseIterable {
     public var label: String {
         switch self {
         case .shiftTwice: "⇧⇧"
+        case .fn: "fn"
         case .rightShift: "right ⇧"
         case .rightCommand: "right ⌘"
         case .rightOption: "right ⌥"

@@ -50,15 +50,16 @@ require_in_promise() {
     printf '%s\n' "$STAYS" | rg -q "\"[^\"]*${phrase}[^\"]*\"" || fail "$reason"
 }
 
-# Screenshots are kept as well as text; Hippocampus itself uploads
-# nothing; sharing with an AI waits on the person connecting it; and what
-# an AI reads goes to the company that runs it.
-require_in_promise 'Text and screenshots, encrypted' \
-    "onboarding does not disclose that text and screenshots are kept, encrypted"
+# Screenshots of the screen are kept as well as text (the windows beside
+# the one in front too, SPEC 7.6); Hippocampus itself uploads nothing;
+# sharing with an AI waits on the person connecting it or sending what it
+# gets (SPEC 7.5); and what an AI reads goes to the company that runs it.
+require_in_promise 'Text and screenshots of your screen, encrypted' \
+    "onboarding does not disclose that text and screenshots of the screen are kept, encrypted"
 require_in_promise 'Nothing is uploaded by Hippocampus\.' \
     "onboarding does not state Hippocampus's own network boundary"
-require_in_promise 'only if you connect it\.' \
-    "onboarding does not say that an AI gets nothing until the person connects it"
+require_in_promise 'only if you connect it or send them\.' \
+    "onboarding does not say that an AI gets nothing until the person connects it or sends it something"
 require_in_promise 'goes to the company that runs' \
     "onboarding does not disclose the AI tool provider boundary"
 rg -Fq 'OnboardingCopy.promiseStays(kept:' "$PROMISE" \

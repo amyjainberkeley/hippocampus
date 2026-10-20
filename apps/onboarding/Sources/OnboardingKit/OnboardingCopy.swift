@@ -27,9 +27,10 @@ public enum OnboardingCopy {
         "\(key.phrase) \(welcomeBodyAfterKeys)"
     }
 
-    /// What VoiceOver says for the demo, which is drawn, not read.
+    /// What VoiceOver says for the demo, which is drawn, not read: one
+    /// described image (SPEC 7.3).
     public static let welcomeDemoLabel =
-        "A short demo. Ask finds a link for the message you’re writing, with its source. Overview fills in the day. Your AI starts with your recent work."
+        "A short demo. Ask finds a link for the message you’re writing, with its source. Today fills in your day. Your AI starts with your recent work."
 
     /// The words inside Welcome's demo. Everything here is made up: no
     /// person's memory is ever shown in setup.
@@ -58,14 +59,25 @@ public enum OnboardingCopy {
         public static let copyAnswer = "Copy Answer"
         public static let menuBarClock = "2:41 PM"
 
-        // Overview, in the window.
-        public static let places = ["Overview", "Ask", "You"]
+        // Today, in the window (SPEC 7.3): the sidebar's Today, one
+        // Working On item and History, and the card for what is going on now.
+        public static let places = ["Today", "Working On", "History"]
+        /// The one thing the person is working on, as the sidebar names it
+        /// from the window's title: the code folder the AI starts in.
+        public static let workingOnItem = aiWindowTitle
+        /// The section History sits in.
+        public static let library = "Library"
         public static let remembering = "Remembering"
         public static let today = "Today"
+        public static let yourDay = "Your day"
         public static let hours = ["9 AM", "12 PM", "3 PM"]
-        public static let legend = ["Writing", "Code", "Meetings"]
+        /// The day strip's kinds, in the sidebar's nouns, coloured as the
+        /// window colours them (no amber, no red).
+        public static let legend = ["Documents", "Code", "Calls"]
         public static let sessionTitle = "Team pricing"
         public static let sessionTime = "2:12 – 2:36 PM · 24m"
+        /// Today's card: the work going on now, since it began.
+        public static let nowLine = "Now · since 2:12 PM"
         public static let sessionLine = "You compared Stripe’s tiers and drafted the Team plan."
 
         // Your AI, starting a session.
@@ -82,12 +94,24 @@ public enum OnboardingCopy {
     public static let findTitle = "Find anything you’ve seen."
     public static let findLine = "Ask in plain words. See where each answer came from."
     public static let dayTitle = "Your day, written for you."
-    public static let dayLine = "Overview turns today into sessions you can scan."
+    public static let dayLine = "Today shows where you left off and what you’re working on."
     /// Setup connects no AI tool (RULINGS O10): the person connects one
     /// later, from the menu's Connect AI Tools…, and then each session it
     /// starts is given the last few sessions of work (`WhatIsSent`).
     public static let aiTitle = "Your AI starts with your context."
     public static let aiLine = "Connect it once, and each session opens with your recent work."
+
+    /// Every label the bottom bar's primary button can show on `screen`:
+    /// the button keeps the width of the widest, so a label that changes in
+    /// place crossfades without the button moving (SPEC 7.1).
+    public static func primaryLabels(for screen: OnboardingScreen, isReview: Bool) -> [String] {
+        switch screen {
+        case .welcome: [getStarted]
+        case .whatYouGet, .permissions: [continueLabel]
+        case .promise: isReview ? [continueLabel] : [startRemembering, settingUpEncryption]
+        case .tryIt: [done]
+        }
+    }
 
     // Permissions
 
@@ -119,8 +143,36 @@ public enum OnboardingCopy {
     public static let askAgain = "Ask Again"
     public static let permissionOn = "On"
     public static let permissionsFooter = "Change either one any time in System Settings."
+    /// The footer once both are on, which VoiceOver also announces
+    /// (SPEC 7.2). No confetti, no sound.
+    public static let bothOn = "Both are on. You can continue."
+    /// Added to a row that needs help when macOS can list two copies of
+    /// Hippocampus, an old preview and the new build (SPEC 7.7).
+    public static let twoCopies = "If you see two, turn on the one in Applications."
+    /// What a disabled Continue or Start Remembering says to VoiceOver.
+    public static let turnOnBothFirst = "Turn on both permissions first."
     public static let continueLabel = "Continue"
     public static let back = "Back"
+
+    /// What VoiceOver announces the moment a permission is found on.
+    public static func permissionIsOn(_ surface: PermissionSurface) -> String {
+        "\(name(surface)) is on."
+    }
+
+    /// The permission's name, as macOS's list shows it.
+    public static func name(_ surface: PermissionSurface) -> String {
+        switch surface {
+        case .screenRecording: screenRecordingName
+        case .accessibility: accessibilityName
+        }
+    }
+
+    /// What a row that needs help says after "Not on yet.": the steps, and
+    /// on a line of its own the one about two copies when macOS can list
+    /// two, so neither breaks mid-sentence.
+    public static func needsHelpLines(twoCopies: Bool) -> [String] {
+        twoCopies ? [needsHelpHint, Self.twoCopies] : [needsHelpHint]
+    }
 
     /// The Accessibility row's last line: a single key or Shift twice
     /// needs it too. The chord does not, so it has none.
@@ -223,6 +275,14 @@ public enum OnboardingCopy {
         }
     }
 
+    /// `text` with its last two words joined by a no-break space, so a line
+    /// never ends with one word alone ("on.") under a full one. The words
+    /// are unchanged; only where the line may break.
+    public static func keepingLastWordsTogether(_ text: String) -> String {
+        guard let last = text.lastIndex(of: " ") else { return text }
+        return text.replacingCharacters(in: last...last, with: "\u{00A0}")
+    }
+
     /// A promise's detail, one sentence a line, so each reads as one fact
     /// rather than as a paragraph. Nothing is dropped: the sentences joined
     /// with spaces are the detail.
@@ -245,15 +305,21 @@ public enum OnboardingCopy {
     /// runs one, and a feedback link opened in the browser. MCP servers
     /// speak over stdio. Nothing is downloaded at setup.
     ///
+    /// "Of your screen" covers the pictures of windows beside the one in
+    /// front, which new installs keep (SPEC 6.1, 7.6): one consent, and
+    /// Preferences › Remembering says exactly what is kept.
+    ///
     /// Sharing waits on the person: an AI tool is connected only from the
     /// menu's Connect AI Tools… and the AI Tools pane, and setup connects
-    /// nothing. Hippocampus is the subject, because "Copy for your AI"
-    /// lets the person paste text into an AI that is not connected. The
-    /// last sentence is the provider boundary engineering critique 8 keeps
-    /// at consent, in RULINGS V's words ("your AI", "the company that runs
-    /// it").
+    /// nothing. Ask {Tool} and Copy for Your AI put text in a tool's message
+    /// box or on the clipboard, and the person sends it, so the sentence
+    /// names both ways (SPEC 7.5). It drops the spec's last word,
+    /// "yourself", to keep to twelve words; "you" already says who sends.
+    /// The last sentence is the provider boundary engineering critique 8
+    /// keeps at consent, in RULINGS V's words ("your AI", "the company that
+    /// runs it").
     public static func promiseStays(kept: String) -> String {
-        "Text and screenshots, encrypted, \(kept). Nothing is uploaded by Hippocampus. It shares them with your AI only if you connect it. What your AI reads goes to the company that runs it."
+        "Text and screenshots of your screen, encrypted, \(kept). Nothing is uploaded by Hippocampus. Your AI gets them only if you connect it or send them. What your AI reads goes to the company that runs it."
     }
 
     /// How long text and screenshots are kept, for `promiseStays`. A
@@ -301,6 +367,9 @@ public enum OnboardingCopy {
     }
     /// No window but setup's own is open.
     public static let tryItNoWindow = "No window to read yet."
+    /// While nothing is read yet and the Mac is in Low Power Mode, which
+    /// reads the window in front four times less often (SPEC 7.7).
+    public static let tryItLowPower = "Low Power Mode is on, so reading takes a little longer."
     /// The window in front was read and holds no sentence worth showing:
     /// a Finder window, a photo.
     public static func tryItNothingToShow(_ app: String) -> String {
@@ -400,6 +469,51 @@ public enum OnboardingCopy {
         guard let phrase = key.phrase, let name = key.name else { return askFromMenuBar }
         if openedForThem { return "That’s Ask. \(phrase) to open it anywhere." }
         return "That’s it. \(name.prefix(1).uppercased() + name.dropFirst()) works anywhere."
+    }
+
+    // MARK: - The key that opens Ask (SPEC-DELTA 7)
+    //
+    // Setup's picker, from the Accessibility row's Change… button. Shift
+    // twice stays the default; Fn (Globe) is offered with its checks shown
+    // before it is chosen, and never taken from another app silently.
+
+    public enum AskKey {
+        public static let title = "Open Ask with"
+        /// Beside "Opens Ask with Shift twice" in the Accessibility row.
+        public static let change = "Change…"
+        public static let shiftTwiceLine = "Press either Shift twice. It works on every keyboard."
+        public static let fnLine = "Tap Fn by itself. Fn with arrows and function keys keeps working."
+        public static let cancel = "Cancel"
+        /// Takes Fn over what else uses it: the person's own click.
+        public static let useFn = "Use Fn"
+        public static let openKeyboardSettings = "Open Keyboard Settings"
+        /// A keyboard without Fn: Shift twice opens Ask meanwhile.
+        public static let noFnKey = "This keyboard has no Fn key, so Shift twice opens Ask."
+        /// macOS's own setting, the exact step in Keyboard settings. The
+        /// setting's label draws a globe; the words name the key instead.
+        public static let globeStep = "In Keyboard settings, choose Do Nothing for the Globe key."
+
+        /// A known Fn app is installed: say so by name, and the two ways on.
+        public static func appsUseFn(_ names: [String]) -> String {
+            switch names.count {
+            case 0: return ""
+            case 1: return "\(names[0]) uses Fn. Pick another key, or turn Fn off in \(names[0])."
+            case 2: return "\(names[0]) and \(names[1]) use Fn. Pick another key, or turn Fn off in both."
+            default:
+                let list = names.dropLast().joined(separator: ", ") + " and " + (names.last ?? "")
+                return "\(list) use Fn. Pick another key, or turn Fn off in each."
+            }
+        }
+
+        /// What macOS does with the Globe key now.
+        public static func globeUsesFn(_ action: GlobeKeyAction) -> String {
+            switch action {
+            case .changeInputSource: "macOS uses the Globe key to change the input source."
+            case .showEmojiAndSymbols: "macOS uses the Globe key to show Emoji & Symbols."
+            case .startDictation: "macOS uses the Globe key to start Dictation."
+            case .macOSDefault, .doNothing: "macOS uses the Globe key for its own shortcut."
+            }
+        }
     }
 
     // MARK: - The browser extension panel

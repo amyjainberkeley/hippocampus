@@ -9,7 +9,10 @@ struct GlassCard<Content: View>: View {
     var emphasized: Bool = false
     @ViewBuilder let content: Content
 
-    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.colorSchemeContrast) private var systemContrast
+    @Environment(\.onboardingIncreasedContrast) private var forcedContrast
+    /// Increase Contrast: macOS's setting, or the renderer's picture of it.
+    private var increasedContrast: Bool { forcedContrast || systemContrast == .increased }
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.onboardingSolidFills) private var solidFills
 
@@ -17,7 +20,7 @@ struct GlassCard<Content: View>: View {
     /// asked for Increase Contrast (the default 0.10 hairline can vanish).
     private var borderColor: Color {
         if emphasized { return OnboardingDesign.Palette.accentHairline }
-        return contrast == .increased
+        return increasedContrast
             ? Color.primary.opacity(0.3)
             : OnboardingDesign.Palette.hairline
     }
@@ -28,7 +31,9 @@ struct GlassCard<Content: View>: View {
             .background(
                 emphasized
                     ? AnyShapeStyle(OnboardingDesign.Palette.accentSoft)
-                    : reduceTransparency || solidFills
+                    // Solid under Reduce Transparency and Increase Contrast
+                    // (SPEC 7.7), and off screen, where materials draw blank.
+                    : reduceTransparency || solidFills || increasedContrast
                         ? AnyShapeStyle(Color(nsColor: .controlBackgroundColor))
                         : AnyShapeStyle(.thinMaterial),
                 in: RoundedRectangle(
@@ -38,7 +43,7 @@ struct GlassCard<Content: View>: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: OnboardingDesign.Radius.card, style: .continuous)
-                    .stroke(borderColor, lineWidth: contrast == .increased ? 1.5 : 1)
+                    .stroke(borderColor, lineWidth: increasedContrast ? 1.5 : 1)
             )
     }
 }

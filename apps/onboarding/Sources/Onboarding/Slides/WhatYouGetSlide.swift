@@ -23,6 +23,7 @@ struct WhatYouGetSlide: View {
                         AIPreview()
                     }
                 }
+                .arrivesAfterTitle()
             }
         }
     }
@@ -55,7 +56,7 @@ private struct BenefitCard<Preview: View>: View {
                     .foregroundStyle(OnboardingDesign.Palette.ink)
                     .lineLimit(2, reservesSpace: true)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(line)
+                Text(OnboardingCopy.keepingLastWordsTogether(line))
                     .font(.system(size: 13))
                     .foregroundStyle(OnboardingDesign.Palette.secondaryText)
                     .lineSpacing(1.5)
@@ -118,7 +119,7 @@ private struct FindPreview: View {
     }
 }
 
-/// The day on its strip, and the session it ends on.
+/// The day on its strip, and Today's card for what is going on now.
 private struct DayPreview: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -126,7 +127,7 @@ private struct DayPreview: View {
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(MiniPalette.ink)
             MiniDayStrip(sessionsShown: WelcomeDemoScript.day.count, highlightsLast: true, height: 14, showsHours: false)
-            MiniSessionCard(compact: true)
+            MiniNowCard(compact: true)
         }
         .padding(10)
         .background(MiniPalette.canvas, in: RoundedRectangle(cornerRadius: 9, style: .continuous))

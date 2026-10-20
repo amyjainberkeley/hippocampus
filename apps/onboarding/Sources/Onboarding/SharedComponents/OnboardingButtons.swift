@@ -96,10 +96,13 @@ private struct CTABody<Style: View>: View {
     @ViewBuilder let style: (ButtonStyleConfiguration.Label, Bool, HairlineSpec) -> Style
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.colorSchemeContrast) private var systemContrast
+    @Environment(\.onboardingIncreasedContrast) private var forcedContrast
+    /// Increase Contrast: macOS's setting, or the renderer's picture of it.
+    private var increasedContrast: Bool { forcedContrast || systemContrast == .increased }
 
     private var hairline: HairlineSpec {
-        contrast == .increased
+        increasedContrast
             ? HairlineSpec(color: Color.primary.opacity(0.3), width: 1.5)
             : HairlineSpec(color: OnboardingDesign.Palette.hairline, width: 1)
     }

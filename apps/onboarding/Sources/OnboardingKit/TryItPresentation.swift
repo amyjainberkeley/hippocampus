@@ -87,6 +87,9 @@ public struct TryItPresentation: Equatable, Sendable {
     public let stopSharingNote: String?
     /// Under a proof, when answers do not work: why, in one line.
     public let answersNote: String?
+    /// Under a status while it waits for a first read: Low Power Mode makes
+    /// reading slower (SPEC 7.7).
+    public let lowPowerNote: String?
 
     /// - Parameter macOSMajorVersion: picks the line for a Mac with no
     ///   model: macOS 26 can turn Apple Intelligence on.
@@ -94,6 +97,7 @@ public struct TryItPresentation: Equatable, Sendable {
         card: TryItViewModel.Card,
         keyNow: AskKeyNow,
         understanding: UnderstandingAvailability?,
+        lowPowerMode: Bool = false,
         macOSMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
     ) {
         var title = OnboardingCopy.tryItTitle
@@ -171,6 +175,15 @@ public struct TryItPresentation: Equatable, Sendable {
         self.offersOpenItForMe = underProof
         self.stopSharingNote = underProof ? OnboardingCopy.stopSharingNote : nil
         self.answersNote = underProof ? Self.answersNote(understanding, macOSMajorVersion: macOSMajorVersion) : nil
+        self.lowPowerNote = lowPowerMode && Self.waitsForARead(card) ? OnboardingCopy.tryItLowPower : nil
+    }
+
+    /// The cards that wait for something to be read.
+    static func waitsForARead(_ card: TryItViewModel.Card) -> Bool {
+        switch card {
+        case .starting, .reading: true
+        case .noWindow, .nothingToShow, .skipped, .proof, .stalled, .notRemembering, .finished: false
+        }
     }
 
     /// The status as one sentence, as VoiceOver reads it.

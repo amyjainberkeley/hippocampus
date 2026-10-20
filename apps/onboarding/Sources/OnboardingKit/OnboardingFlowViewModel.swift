@@ -24,8 +24,15 @@
 //   and a fresh process is asked once more.
 // - Stores default to memory. Setup passes the file stores; tests and
 //   panels never touch the person's resume or consent files by accident.
+// - Quit & Reopen (SPEC 7.7): the permissions a row was waiting on are kept
+//   beside the resume point. When setup opens again and one of them is on,
+//   its row shows the checkmark appearing once, so the person sees that it
+//   worked. Nothing is read before Start Remembering either way.
 
 import Foundation
+#if canImport(AppKit)
+import AppKit
+#endif
 
 /// The two permissions setup asks for, in the order they are shown.
 public enum PermissionSurface: String, Sendable, Equatable, CaseIterable {
@@ -77,9 +84,16 @@ public final class OnboardingFlowViewModel: ObservableObject {
     @Published public private(set) var permissionRefreshCount = 0
     @Published public private(set) var fullDiskAccessStatus: FullDiskAccessStatus = .notRequested
     @Published private var rows: [PermissionSurface: RowRecord] = [:]
+    /// Rows that came on while setup was closed, after macOS's Quit &
+    /// Reopen: each shows its checkmark appearing once, then is removed
+    /// (`didShowTurnedOn`).
+    @Published public private(set) var turnedOnWhileAway: Set<PermissionSurface> = []
 
     /// Consent existed when setup opened. Promise then only advances.
     public let isReview: Bool
+    /// macOS can list two copies of Hippocampus, an old preview and this
+    /// build: a row that needs help says which to turn on (SPEC 7.7).
+    public let twoCopiesInstalled: Bool
     public let screenRecordingPermission: any TCCPermission
     public let accessibilityPermission: any TCCPermission
     /// Kept for the panels; the five screens never ask for it.
@@ -116,7 +130,8 @@ public final class OnboardingFlowViewModel: ObservableObject {
         stateStore: any OnboardingStateStore = InMemoryOnboardingStateStore(),
         consentStore: any OnboardingConsentStore = InMemoryOnboardingConsentStore(),
         now: @escaping () -> Date = Date.init,
-        initialScreen: OnboardingScreen? = nil
+        initialScreen: OnboardingScreen? = nil,
+        copiesOfTheApp: () -> Int = { 1 }
     ) {
         self.screenRecordingPermission = screenRecording
         self.accessibilityPermission = accessibility
@@ -137,6 +152,17 @@ public final class OnboardingFlowViewModel: ObservableObject {
         let resumed = consentGiven ? nil : stateStore.loadScreen()
         let requested = initialScreen ?? resumed ?? .welcome
         self.screen = Self.clamp(requested, consentGiven: consentGiven, bothGranted: bothOn)
+        self.twoCopiesInstalled = copiesOfTheApp() > 1
+        // After Quit & Reopen: what was asked for and is on now shows its
+        // checkmark appearing once. The list is used once.
+        if !consentGiven {
+            let asked = stateStore.loadAsked()
+            let granted: [PermissionSurface: TCCStatus] = [
+                .screenRecording: screenRecording.status, .accessibility: accessibility.status,
+            ]
+            self.turnedOnWhileAway = asked.filter { granted[$0] == .granted }
+            stateStore.saveAsked(asked.filter { granted[$0] != .granted })
+        }
     }
 
     // MARK: - Moving between screens
@@ -179,6 +205,16 @@ public final class OnboardingFlowViewModel: ObservableObject {
     /// Called when setup is done, so a later run starts fresh.
     public func clearResumeState() {
         stateStore.clear()
+    }
+
+    /// The row has shown its checkmark appearing after Quit & Reopen: once.
+    public func didShowTurnedOn(_ surface: PermissionSurface) {
+        turnedOnWhileAway.remove(surface)
+    }
+
+    /// Every row's state now, for the words VoiceOver announces.
+    public var rowStates: [PermissionSurface: PermissionRowState] {
+        Dictionary(uniqueKeysWithValues: Self.rowSurfaces.map { ($0, rowState($0)) })
     }
 
     /// Try it needs consent, otherwise Promise. Promise needs both
@@ -396,6 +432,11 @@ public final class OnboardingFlowViewModel: ObservableObject {
         row.waiting = true
         row.asked = true
         rows[surface] = row
+        // Kept beside the resume point until consent: macOS may quit and
+        // reopen Hippocampus while this row waits.
+        if !consentStore.isGiven {
+            stateStore.saveAsked(Set(rows.filter { $0.value.asked }.keys))
+        }
     }
 
     private func permission(for surface: PermissionSurface) -> any TCCPermission {
@@ -442,4 +483,40 @@ public final class OnboardingFlowViewModel: ObservableObject {
         permissionRefreshCount += 1
         return status
     }
+}
+
+/// What VoiceOver announces when a permission is found on (SPEC 7.2): the
+/// row's name, and once both are on, that setup can continue, in one
+/// announcement so neither cuts the other off.
+public enum PermissionAnnouncement {
+    public static func after(
+        _ before: [PermissionSurface: PermissionRowState],
+        _ now: [PermissionSurface: PermissionRowState]
+    ) -> String? {
+        let turnedOn = PermissionSurface.allCases.filter { now[$0] == .granted && before[$0] != .granted }
+        guard !turnedOn.isEmpty else { return nil }
+        var parts = turnedOn.map(OnboardingCopy.permissionIsOn)
+        if PermissionSurface.allCases.allSatisfy({ now[$0] == .granted }) {
+            parts.append(OnboardingCopy.bothOn)
+        }
+        return parts.joined(separator: " ")
+    }
+}
+
+/// How many copies of Hippocampus macOS knows, for the line about two of
+/// them in System Settings (SPEC 7.7). Launch Services answers; nothing is
+/// opened and nothing is asked.
+public enum AppCopies {
+    public static let bundleIdentifier = "ai.hippocampus"
+
+    /// Copies at distinct places, leaving out any in the Trash.
+    public static func count(_ urls: [URL]) -> Int {
+        Set(urls.map { $0.standardizedFileURL.path }).filter { !$0.contains("/.Trash/") }.count
+    }
+
+    #if canImport(AppKit)
+    @MainActor public static func installed() -> Int {
+        count(NSWorkspace.shared.urlsForApplications(withBundleIdentifier: bundleIdentifier))
+    }
+    #endif
 }

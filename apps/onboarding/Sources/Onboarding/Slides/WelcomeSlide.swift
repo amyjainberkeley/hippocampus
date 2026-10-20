@@ -6,7 +6,13 @@ import OnboardingKit
 /// data (`WelcomeDemoScript`). Under it, one sentence teaches the key that
 /// opens Ask, with its keycaps in the line; they press as Ask opens in the
 /// demo, twice for Shift twice and once for any other key. Under Reduce
-/// Motion nothing moves: each moment shows whole and the next fades in.
+/// Motion nothing moves: each moment shows whole and the next crossfades in
+/// every 6 seconds.
+///
+/// The demo plays only while it can be watched (`WelcomeDemoPlayback`):
+/// it holds still while the pointer is over it, so it can be read, and
+/// while setup's window is not the key window. When the person moves past
+/// Welcome the screen goes, and its task with it. Paused, no task runs.
 struct WelcomeSlide: View {
     /// The key the person chose, read at render time (RULINGS X2).
     var key: AskKeyHint = .current()
@@ -16,8 +22,10 @@ struct WelcomeSlide: View {
     var demoFrame: DemoFrame?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.controlActiveState) private var activeState
     @State private var frame = WelcomeDemoScript.finalFrame(.ask)
     @State private var pressed = false
+    @State private var playback = WelcomeDemoPlayback()
 
     var body: some View {
         SlideContainer(alignment: .center) {
@@ -31,21 +39,31 @@ struct WelcomeSlide: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
+                    .arrivalFocus()
                     .padding(.bottom, OnboardingDesign.Space.lg + 4)
 
-                WelcomeDemo(frame: demoFrame ?? frame, still: reduceMotion)
-                    .padding(.bottom, OnboardingDesign.Space.lg + 2)
+                VStack(spacing: 0) {
+                    WelcomeDemo(frame: demoFrame ?? frame, still: reduceMotion)
+                        .onHover { playback.hovering = $0 }
+                        .padding(.bottom, OnboardingDesign.Space.lg + 2)
 
-                sentence
+                    sentence
+                }
+                .arrivesAfterTitle()
             }
         }
-        // Starts over when the key or Reduce Motion changes.
-        .task(id: DemoTaskID(key: key, reduceMotion: reduceMotion)) { await play() }
+        .onAppear { playback.windowIsKey = activeState == .key }
+        .onChange(of: activeState) { _, state in playback.windowIsKey = state == .key }
+        .onDisappear { playback.onWelcome = false }
+        // Starts over when the key or Reduce Motion changes, and stops
+        // whenever the demo is paused: nothing runs while it holds still.
+        .task(id: DemoTaskID(key: key, reduceMotion: reduceMotion, playing: playback.isPlaying)) { await play() }
     }
 
     private struct DemoTaskID: Equatable {
         let key: AskKeyHint
         let reduceMotion: Bool
+        let playing: Bool
     }
 
     private var sentence: some View {
@@ -60,33 +78,36 @@ struct WelcomeSlide: View {
         .accessibilityLabel(OnboardingCopy.welcomeBodySpoken(key))
     }
 
-    /// Keep the demo's time. The keycaps press when the script says the key
-    /// is down, as many times as the key is pressed (`key.pulseTimes`).
+    /// Keep the demo's time while it plays. The keycaps press when the
+    /// script says the key is down, as many times as the key is pressed
+    /// (`key.pulseTimes`). Under Reduce Motion each moment shows whole and
+    /// the next crossfades in; the keycaps never press.
     private func play() async {
         guard animates, demoFrame == nil else { return }
-        guard !reduceMotion else {
-            await playStill()
+        guard playback.isPlaying else {
+            if pressed { pressed = false }
             return
         }
-        let start = Date()
         let presses = key.pulseTimes.count
+        var last = Date()
         while !Task.isCancelled {
-            let next = WelcomeDemoScript.frame(at: Date().timeIntervalSince(start), presses: presses)
-            if next != frame { frame = next }
-            if next.keyDown != pressed {
-                withAnimation(.easeOut(duration: next.keyDown ? 0.08 : 0.16)) { pressed = next.keyDown }
+            let now = Date()
+            playback.advance(by: now.timeIntervalSince(last))
+            last = now
+            let next = playback.frame(presses: presses, reduceMotion: reduceMotion)
+            if next != frame {
+                if reduceMotion {
+                    withAnimation(.easeInOut(duration: 0.3)) { frame = next }
+                } else {
+                    frame = next
+                }
             }
-            try? await Task.sleep(for: .milliseconds(40))
-        }
-    }
-
-    /// Reduce Motion: each moment whole, the next fading in. Nothing moves.
-    private func playStill() async {
-        var index = 0
-        while !Task.isCancelled {
-            frame = WelcomeDemoScript.finalFrame(DemoMoment.allCases[index % DemoMoment.allCases.count])
-            index += 1
-            try? await Task.sleep(for: .seconds(5))
+            let down = !reduceMotion && next.keyDown
+            if down != pressed {
+                withAnimation(.easeOut(duration: down ? 0.08 : 0.16)) { pressed = down }
+            }
+            // Under Reduce Motion only a crossfade every 6 seconds is due.
+            try? await Task.sleep(for: reduceMotion ? .milliseconds(250) : .milliseconds(40))
         }
     }
 }

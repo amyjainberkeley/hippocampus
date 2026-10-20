@@ -60,8 +60,8 @@ struct WelcomeDemo: View {
                     .animation(.easeOut(duration: 0.25), value: frame.showsSource)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        case .overview:
-            MiniOverviewWindow(frame: frame)
+        case .today:
+            MiniTodayWindow(frame: frame)
                 .frame(width: 470, height: 182)
                 .padding(.top, 30)
                 .animation(.easeOut(duration: 0.3), value: frame.sessionsShown)

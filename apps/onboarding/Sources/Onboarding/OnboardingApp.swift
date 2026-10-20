@@ -36,12 +36,17 @@ final class OnboardingAppDelegate: NSObject, NSApplicationDelegate, @unchecked S
 
 /// Started by `OnboardingEntryPoint`, which answers the Screen Recording
 /// probe commands first. One window, 760 by 560 with its title bar hidden:
-/// the five screens, or the panel the app asked for.
+/// the five screens, or the panel the app asked for. It opens centred on
+/// the display with the pointer, fits a short screen, and joins the Space
+/// the person is on, over a full-screen app too (SPEC 7.7).
 struct OnboardingApp: App {
     @NSApplicationDelegateAdaptor(OnboardingAppDelegate.self) var appDelegate
 
     /// What `MCI_ONBOARDING_STEP` asked for, once consent is known.
     private let launch: OnboardingLaunch
+    /// 560, or less on a short screen: read once, for the display with the
+    /// pointer, which is where the window opens.
+    private let windowHeight = SetupWindow.fittedHeight()
     @StateObject private var flowVM: OnboardingFlowViewModel
     @StateObject private var prepareBrainVM: PrepareBrainViewModel
     @StateObject private var extensionVM: BrowserExtensionViewModel
@@ -65,7 +70,9 @@ struct OnboardingApp: App {
             // The flow keeps its place; a panel keeps its state in memory.
             stateStore: launch.usesResumeFile ? FileOnboardingStateStore() : InMemoryOnboardingStateStore(),
             consentStore: consentStore,
-            initialScreen: initialScreen
+            initialScreen: initialScreen,
+            // An old preview and this build both in System Settings' list.
+            copiesOfTheApp: { MainActor.assumeIsolated { AppCopies.installed() } }
         ))
         // Setup makes the key; it offers no model download.
         _prepareBrainVM = StateObject(wrappedValue: PrepareBrainViewModel(keyGenerator: LocalKeyGenerator()))
@@ -88,6 +95,8 @@ struct OnboardingApp: App {
         Window("Hippocampus", id: "setup") {
             root
                 .preferredColorScheme(.light)
+                .environment(\.onboardingWindowHeight, windowHeight)
+                .background(SetupWindowReader { SetupWindow.place($0) })
                 .environmentObject(flowVM)
                 .environmentObject(prepareBrainVM)
                 .environmentObject(extensionVM)

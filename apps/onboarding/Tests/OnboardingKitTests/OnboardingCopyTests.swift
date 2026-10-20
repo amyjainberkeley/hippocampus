@@ -10,9 +10,11 @@ final class OnboardingCopyTests: XCTestCase {
         XCTAssertEqual(OnboardingCopy.promiseTitle, "Before it starts")
         XCTAssertEqual(OnboardingCopy.promiseBody,
                        "When you click Start Remembering, Hippocampus begins reading your screen.")
-        // Setup connects no AI tool, so sharing waits on the person.
+        // Setup connects no AI tool, so sharing waits on the person, who
+        // connects it or sends what it gets (SPEC 7.5). "Of your screen"
+        // covers the pictures of windows beside the one in front (SPEC 7.6).
         XCTAssertEqual(OnboardingCopy.promiseStays(kept: "kept 90 days"),
-                       "Text and screenshots, encrypted, kept 90 days. Nothing is uploaded by Hippocampus. It shares them with your AI only if you connect it. What your AI reads goes to the company that runs it.")
+                       "Text and screenshots of your screen, encrypted, kept 90 days. Nothing is uploaded by Hippocampus. Your AI gets them only if you connect it or send them. What your AI reads goes to the company that runs it.")
         // The helper never reads a broad, enumerated set of password apps,
         // but no list names every one, so the line says "known" and never
         // promises every password manager. Private windows are skipped only
@@ -38,9 +40,9 @@ final class OnboardingCopyTests: XCTestCase {
         // facts. The lines joined again are the checked words, exactly.
         let stays = OnboardingCopy.promiseStays(kept: "kept 90 days")
         XCTAssertEqual(OnboardingCopy.sentences(stays), [
-            "Text and screenshots, encrypted, kept 90 days.",
+            "Text and screenshots of your screen, encrypted, kept 90 days.",
             "Nothing is uploaded by Hippocampus.",
-            "It shares them with your AI only if you connect it.",
+            "Your AI gets them only if you connect it or send them.",
             "What your AI reads goes to the company that runs it.",
         ])
         XCTAssertEqual(OnboardingCopy.sentences(OnboardingCopy.promiseNeverRead), [
@@ -128,7 +130,8 @@ final class OnboardingCopyTests: XCTestCase {
         XCTAssertTrue(needsReview)
         let kept = await OnboardingCopy.kept(from: store)
         XCTAssertEqual(kept, "kept until you delete it")
-        XCTAssertTrue(OnboardingCopy.promiseStays(kept: kept).hasPrefix("Text and screenshots, encrypted, kept until you delete it."))
+        XCTAssertTrue(OnboardingCopy.promiseStays(kept: kept)
+            .hasPrefix("Text and screenshots of your screen, encrypted, kept until you delete it."))
     }
 
     func testKeptWithNoRetentionFileIsNinetyDays() async throws {
@@ -160,7 +163,8 @@ final class OnboardingCopyTests: XCTestCase {
         XCTAssertEqual(OnboardingCopy.findTitle, "Find anything you’ve seen.")
         XCTAssertEqual(OnboardingCopy.findLine, "Ask in plain words. See where each answer came from.")
         XCTAssertEqual(OnboardingCopy.dayTitle, "Your day, written for you.")
-        XCTAssertEqual(OnboardingCopy.dayLine, "Overview turns today into sessions you can scan.")
+        // The window's first place is Today (SPEC 7.5).
+        XCTAssertEqual(OnboardingCopy.dayLine, "Today shows where you left off and what you’re working on.")
         XCTAssertEqual(OnboardingCopy.aiTitle, "Your AI starts with your context.")
         // Setup connects no AI tool: the person does, later, from the menu.
         XCTAssertEqual(OnboardingCopy.aiLine, "Connect it once, and each session opens with your recent work.")
@@ -180,9 +184,21 @@ final class OnboardingCopyTests: XCTestCase {
         XCTAssertTrue(OnboardingCopy.Demo.aiContextLines[0].hasSuffix(OnboardingCopy.Demo.sessionTitle))
         XCTAssertTrue(OnboardingCopy.Demo.aiContextLines[0].hasPrefix("2:12 – 2:36 PM"))
         XCTAssertTrue(OnboardingCopy.Demo.sessionTime.hasPrefix("2:12 – 2:36 PM"))
-        XCTAssertEqual(OnboardingCopy.Demo.places, ["Overview", "Ask", "You"], "the window's three places")
+        // The second moment draws the new Today (SPEC 7.3): the sidebar
+        // reads Today, Working On with one item, and History; the card is
+        // what is going on now, since the session began.
+        XCTAssertEqual(OnboardingCopy.Demo.places, ["Today", "Working On", "History"])
+        XCTAssertEqual(OnboardingCopy.Demo.workingOnItem, "pricing-site")
+        XCTAssertEqual(OnboardingCopy.Demo.workingOnItem, OnboardingCopy.Demo.aiWindowTitle,
+                       "the folder the AI starts in is the one thing being worked on")
+        XCTAssertEqual(OnboardingCopy.Demo.nowLine, "Now · since 2:12 PM")
+        XCTAssertTrue(OnboardingCopy.Demo.sessionTime.hasPrefix(
+            String(OnboardingCopy.Demo.nowLine.dropFirst("Now · since ".count).prefix(4))
+        ), "now began when the session did")
+        // The legend in the sidebar's nouns.
+        XCTAssertEqual(OnboardingCopy.Demo.legend, ["Documents", "Code", "Calls"])
         XCTAssertEqual(OnboardingCopy.welcomeDemoLabel,
-                       "A short demo. Ask finds a link for the message you’re writing, with its source. Overview fills in the day. Your AI starts with your recent work.")
+                       "A short demo. Ask finds a link for the message you’re writing, with its source. Today fills in your day. Your AI starts with your recent work.")
     }
 
     func testTryItSaysWhatItReadAndWhyAWindowIsSkipped() {
@@ -199,6 +215,24 @@ final class OnboardingCopyTests: XCTestCase {
         XCTAssertEqual(OnboardingCopy.skippedText(.passwordField, app: "Safari"),
                        "Nothing is read while a password field is in use.")
         XCTAssertEqual(OnboardingCopy.skippedText(.neverRead, app: nil), "This app is never read.")
+    }
+
+    func testPermissionsSaysWhenBothAreOnAndWhatToDoWithTwoCopies() {
+        // SPEC 7.2: the footer once both are on, announced as well.
+        XCTAssertEqual(OnboardingCopy.bothOn, "Both are on. You can continue.")
+        XCTAssertEqual(OnboardingCopy.permissionIsOn(.screenRecording), "Screen Recording is on.")
+        XCTAssertEqual(OnboardingCopy.permissionIsOn(.accessibility), "Accessibility is on.")
+        // SPEC 7.7: an old preview and the new build are both in the list.
+        XCTAssertEqual(OnboardingCopy.twoCopies, "If you see two, turn on the one in Applications.")
+        XCTAssertEqual(OnboardingCopy.needsHelpLines(twoCopies: false), [OnboardingCopy.needsHelpHint])
+        XCTAssertEqual(OnboardingCopy.needsHelpLines(twoCopies: true), [
+            "Turn on Hippocampus in the list. Not there? Click + and choose it in Applications.",
+            "If you see two, turn on the one in Applications.",
+        ])
+        // VoiceOver hears why Start Remembering is off.
+        XCTAssertEqual(OnboardingCopy.turnOnBothFirst, "Turn on both permissions first.")
+        // Low Power Mode reads four times less often (SPEC 7.7).
+        XCTAssertEqual(OnboardingCopy.tryItLowPower, "Low Power Mode is on, so reading takes a little longer.")
     }
 
     func testPermissionsSaysNothingIsReadOnlyBeforeConsent() {
@@ -341,7 +375,20 @@ final class OnboardingCopyTests: XCTestCase {
             OnboardingCopy.tryItReadFrom("Safari"), OnboardingCopy.tryItReading("Safari"),
             OnboardingCopy.tryItNoWindow, OnboardingCopy.tryItNothingToShow("Finder"),
             OnboardingCopy.tryItOpenSomething, OnboardingCopy.tryItSwitchWindows,
+            // SPEC 7.2, 7.5 and 7.7.
+            OnboardingCopy.bothOn, OnboardingCopy.twoCopies, OnboardingCopy.turnOnBothFirst,
+            OnboardingCopy.tryItLowPower,
+            // The key picker (SPEC-DELTA 7).
+            OnboardingCopy.AskKey.title, OnboardingCopy.AskKey.change, OnboardingCopy.AskKey.shiftTwiceLine,
+            OnboardingCopy.AskKey.fnLine, OnboardingCopy.AskKey.cancel, OnboardingCopy.AskKey.useFn,
+            OnboardingCopy.AskKey.openKeyboardSettings, OnboardingCopy.AskKey.noFnKey, OnboardingCopy.AskKey.globeStep,
+            OnboardingCopy.AskKey.appsUseFn(["Wispr Flow"]), OnboardingCopy.AskKey.appsUseFn(["Wispr Flow", "Superwhisper"]),
+            OnboardingCopy.AskKey.appsUseFn(["Wispr Flow", "Superwhisper", "VoiceInk"]),
         ]
+        strings += SetupAskKey.allCases.map(\.label)
+        strings += [GlobeKeyAction.doNothing, .changeInputSource, .showEmojiAndSymbols, .startDictation, .macOSDefault]
+            .map(OnboardingCopy.AskKey.globeUsesFn)
+        strings += PermissionSurface.allCases.map(OnboardingCopy.permissionIsOn)
         strings += OnboardingCopy.screenRecordingBenefits
         let reasons: [SkipReason] = [.neverRead, .excluded, .privateWindow, .passwordField]
         strings += reasons.map { OnboardingCopy.skippedText($0, app: "System Settings") }
@@ -353,7 +400,7 @@ final class OnboardingCopyTests: XCTestCase {
             demo.askQuestion, demo.askAnswer, demo.sourcesLabel, demo.sourceApp, demo.source, demo.sourceAddress,
             demo.onThisMac, demo.copyAnswerKeys, demo.copyAnswer, demo.menuBarClock, demo.remembering,
             demo.today, demo.sessionTitle, demo.sessionTime, demo.sessionLine, demo.aiWindowTitle, demo.aiContextTitle,
-            demo.aiPrompt, demo.aiReply,
+            demo.aiPrompt, demo.aiReply, demo.workingOnItem, demo.library, demo.yourDay, demo.nowLine,
         ]
         strings += demo.places + demo.hours + demo.legend + demo.aiContextLines
         strings += [14, 15, 26].map(OnboardingCopy.noModelNote)
@@ -433,12 +480,39 @@ final class OnboardingCopyTests: XCTestCase {
         }
     }
 
+    func testACardLineNeverEndsWithOneWordAlone() {
+        // The words are unchanged; only where the line may break.
+        XCTAssertEqual(OnboardingCopy.keepingLastWordsTogether(OnboardingCopy.dayLine),
+                       "Today shows where you left off and what you’re working\u{00A0}on.")
+        XCTAssertEqual(OnboardingCopy.keepingLastWordsTogether("Done"), "Done")
+        XCTAssertEqual(OnboardingCopy.keepingLastWordsTogether(OnboardingCopy.dayLine)
+                        .replacingOccurrences(of: "\u{00A0}", with: " "), OnboardingCopy.dayLine)
+    }
+
+    func testTheKeyPickerSaysWhatElseUsesFnInPlainWords() {
+        XCTAssertEqual(OnboardingCopy.AskKey.title, "Open Ask with", "as Preferences names it")
+        XCTAssertEqual(OnboardingCopy.AskKey.change, "Change…")
+        XCTAssertEqual(OnboardingCopy.AskKey.useFn, "Use Fn")
+        XCTAssertEqual(OnboardingCopy.AskKey.openKeyboardSettings, "Open Keyboard Settings")
+        // SPEC-DELTA 7, word for word.
+        XCTAssertEqual(OnboardingCopy.AskKey.appsUseFn(["Wispr Flow"]),
+                       "Wispr Flow uses Fn. Pick another key, or turn Fn off in Wispr Flow.")
+        XCTAssertEqual(OnboardingCopy.AskKey.appsUseFn([]), "")
+        XCTAssertEqual(OnboardingCopy.accessibilityKeyBenefit(.fn), "Opens Ask with Fn")
+        XCTAssertEqual(OnboardingCopy.welcomeBodySpoken(.fn), "Tap Fn and ask about your screen, now or earlier.")
+        // No emoji: macOS draws a globe in its setting's name; the words name the key.
+        for string in [OnboardingCopy.AskKey.globeStep, OnboardingCopy.AskKey.globeUsesFn(.showEmojiAndSymbols)] {
+            XCTAssertFalse(string.unicodeScalars.contains { $0.properties.isEmojiPresentation }, string)
+        }
+    }
+
     func testButtonsAreTitleCase() {
         // As macOS writes them: short words after the first stay lowercase
         // ("Show in Finder").
         let minor: Set<Substring> = ["a", "an", "and", "as", "at", "but", "by", "for", "in", "of", "on", "or", "the", "to"]
         for button in [OnboardingCopy.getStarted, OnboardingCopy.back, OnboardingCopy.allow, OnboardingCopy.openSettings,
-                       OnboardingCopy.askAgain,
+                       OnboardingCopy.askAgain, OnboardingCopy.AskKey.change, OnboardingCopy.AskKey.cancel,
+                       OnboardingCopy.AskKey.useFn, OnboardingCopy.AskKey.openKeyboardSettings,
                        OnboardingCopy.continueLabel, OnboardingCopy.startRemembering, OnboardingCopy.tryAgain,
                        OnboardingCopy.done,
                        OnboardingCopy.openSafariSettings, OnboardingCopy.install, OnboardingCopy.openAutomationSettings,

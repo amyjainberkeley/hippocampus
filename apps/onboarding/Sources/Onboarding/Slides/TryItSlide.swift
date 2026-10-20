@@ -34,14 +34,17 @@ struct TryItSlide: View {
             frontWindow: { windows.frontWindow() },
             rules: ReadRules(excludedApps: PersonExclusions.load()),
             passwordFieldInUse: { SecureTextEntry.isOn() },
-            requestFreshRead: { SetupReadRequest.post() }
+            requestFreshRead: { SetupReadRequest.post() },
+            lowPowerMode: { ProcessInfo.processInfo.isLowPowerModeEnabled }
         ))
         self.openSettings = openSettings
     }
 
     var body: some View {
         TryItScreen(
-            presentation: TryItPresentation(card: tryIt.card, keyNow: .current(), understanding: understanding),
+            presentation: TryItPresentation(
+                card: tryIt.card, keyNow: .current(), understanding: understanding, lowPowerMode: tryIt.lowPowerMode
+            ),
             now: nil,
             perform: perform
         )
@@ -96,14 +99,17 @@ struct TryItScreen: View {
             VStack(spacing: OnboardingDesign.Space.xl) {
                 ScreenHeader(title: presentation.title)
 
-                if let proof = presentation.proof {
-                    ProofCard(proof: proof, now: now, locale: locale)
-                        .transition(OnboardingDesign.Motion.entrance(reduceMotion: reduceMotion))
-                    underProof
-                } else {
-                    status
-                        .frame(maxWidth: .infinity, minHeight: Self.statusHeight)
+                VStack(spacing: OnboardingDesign.Space.xl) {
+                    if let proof = presentation.proof {
+                        ProofCard(proof: proof, now: now, locale: locale)
+                            .transition(OnboardingDesign.Motion.entrance(reduceMotion: reduceMotion))
+                        underProof
+                    } else {
+                        status
+                            .frame(maxWidth: .infinity, minHeight: Self.statusHeight)
+                    }
                 }
+                .arrivesAfterTitle()
             }
             .animation(OnboardingDesign.Motion.resolve(OnboardingDesign.Motion.standard, reduceMotion: reduceMotion),
                        value: presentation)
@@ -174,6 +180,17 @@ struct TryItScreen: View {
                 .frame(maxWidth: 460)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(presentation.spoken ?? heading)
+                if let note = presentation.lowPowerNote {
+                    HStack(spacing: OnboardingDesign.Space.xs + 2) {
+                        Image(systemName: "battery.25percent")
+                            .font(.system(size: 12, weight: .medium))
+                            .accessibilityHidden(true)
+                        Text(note)
+                            .font(.system(size: 12))
+                    }
+                    .foregroundStyle(OnboardingDesign.Palette.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
                 if let action = presentation.screenAction {
                     Button(label(action)) { perform(action) }
                         .buttonStyle(RowButtonStyle(filled: false))
