@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // ConnectAITools.swift — "Connect AI Tools…" does the whole job in one step
-// (RULINGS S4, product critique 5): it connects the AI tools it finds, asks
-// one plain question about starting each session with what you are working
-// on, and ends on "Connected. Restart {tool}." Every word is in
-// `AIToolsCopy`, where tests pin it.
+// (RULINGS S4, product critique 5, SPEC 5.4): it asks whether the AI tools it
+// finds may look things up in your memory, naming them (and ChatGPT's
+// desktop app, which reads Codex's settings), connects them only on
+// Connect, asks the session-start question, and ends on "Connected. Restart
+// {tool}." Every word is in `AIToolsCopy` and `HandoffCopy`, where tests pin
+// them.
 
 import AppKit
 import HippocampusKit
@@ -29,6 +31,23 @@ final class ConnectAITools {
         let dbURL = supervisor.dbPath
         Task { [weak self] in
             defer { self?.isRunning = false }
+            let connector = AIToolConnector(agentURL: agent, baseEnvironment: environment)
+            // The tools found, named in the question; an older agent that
+            // can't say is asked about both.
+            let found = (try? await connector.clients()).map { states in
+                AITool.allCases.filter { states[$0]?.installed == true }
+            } ?? AITool.allCases
+            guard !found.isEmpty else {
+                let result = AIToolsCopy.result(AIToolReport(outcomes: [.claudeCode: .notInstalled, .codex: .notInstalled]))
+                self?.show(title: result.title, message: result.message)
+                done([])
+                return
+            }
+            let chatGPT = DestinationDetector.live().installed().contains { $0.tool == .chatgpt }
+            guard self?.askToConnect(found, chatGPTInstalled: chatGPT) == true else {
+                done([])
+                return
+            }
             let report: AIToolReport
             do {
                 report = try await AIToolConnector(agentURL: agent, baseEnvironment: environment).connect()
@@ -62,6 +81,18 @@ final class ConnectAITools {
                     ?? "Couldn’t change \(tool.name)’s settings. Try again."
             }
         }
+    }
+
+    /// "Let Claude Code and Codex look things up in your memory?" Nothing is
+    /// connected without Connect.
+    private func askToConnect(_ tools: [AITool], chatGPTInstalled: Bool) -> Bool {
+        NSApp.activate()
+        let alert = NSAlert()
+        alert.messageText = AIToolsCopy.connectTitle(tools)
+        alert.informativeText = AIToolsCopy.connectMessage(tools, chatGPTInstalled: chatGPTInstalled)
+        alert.addButton(withTitle: HandoffCopy.connect)
+        alert.addButton(withTitle: HandoffCopy.notNow)
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     private func ask(_ tools: [AITool]) -> Bool {

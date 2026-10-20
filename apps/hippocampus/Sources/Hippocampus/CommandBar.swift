@@ -32,6 +32,10 @@ final class CommandBarController: NSObject, NSWindowDelegate {
     private var closeAfterCopy: Task<Void, Never>?
     /// ⇧⌘C's fetch, cancelled when Ask closes.
     private var copyForAITask: Task<Void, Never>?
+    /// While a note after Ask {Tool} shows, the panel stays up over the
+    /// tool that opened, then goes (SPEC 5.3.8).
+    private var noteUntil: Date?
+    private var noteTask: Task<Void, Never>?
     /// When a `hippocampus://ask` link last opened Ask (RULINGS S12).
     private var linkOpenedAt: Date?
     /// A show asked for before Ask was set up: a link that launched the app
@@ -53,6 +57,7 @@ final class CommandBarController: NSObject, NSWindowDelegate {
         self.openWindow = openWindow
         self.statusAction = statusAction
         self.announceShown = announceShown
+        model.perform = { [weak self] action in self?.perform(action) }
         if let held = heldShow {
             heldShow = nil
             show(asking: held.question, from: held.opening)
@@ -115,6 +120,9 @@ final class CommandBarController: NSObject, NSWindowDelegate {
         closeAfterCopy = nil
         copyForAITask?.cancel()
         copyForAITask = nil
+        noteTask?.cancel()
+        noteTask = nil
+        noteUntil = nil
         // Opened from a link, the app was activated: give focus back to the
         // app the person was in, unless a Hippocampus window is in use.
         let others = NSApp.windows.filter { !($0 is CommandBarPanel) }.map {
@@ -135,7 +143,8 @@ final class CommandBarController: NSObject, NSWindowDelegate {
             model: model,
             perform: { [weak self] action in self?.perform(action) },
             close: { [weak self] in self?.hide() },
-            heightChanged: { [weak self] height in self?.resize(height: height) }
+            heightChanged: { [weak self] height in self?.resize(height: height) },
+            noteAction: { [weak self] action in self?.performNoteAction(action) }
         )
         let hosting = NSHostingView(rootView: view)
         hosting.sizingOptions = []
@@ -244,13 +253,92 @@ final class CommandBarController: NSObject, NSWindowDelegate {
                 let result = await model.copyForAI()
                 guard !Task.isCancelled else { return }
                 switch result {
-                case .text(let text): self?.copy(text)
-                case .failed: model.showFlash("Couldn’t copy. Try again.")
+                case .text(let text): self?.copyForYourAI(text)
+                case .failed: model.showFlash(HandoffCopy.couldNotCopy)
+                case .nothing: model.showFlash(HandoffCopy.nothingToSend)
                 case .dropped: break
                 }
             }
         case .status(let action):
             statusAction?(action)
+        case .handoff(let plan, let tool):
+            deliver(plan, tool: tool)
+        }
+    }
+
+    /// Ask {Tool}: copy by the clipboard rules and open, then the note in the
+    /// footer for six seconds, over the tool that opened (SPEC 5.3.8).
+    private func deliver(_ plan: HandoffPlan, tool: AskTool) {
+        guard let model else { return }
+        var note = plan.note
+        for step in plan.steps {
+            switch step {
+            case .copy(let text):
+                guard ClipboardHygiene.copy(text) else {
+                    model.showFlash(HandoffCopy.couldNotCopy)
+                    return
+                }
+            case .open(let url):
+                if !NSWorkspace.shared.open(url), let text = plan.fallbackCopy {
+                    ClipboardHygiene.copy(text)
+                    note = HandoffDelivery.couldNotOpen(tool)
+                }
+            }
+        }
+        showNote(note)
+    }
+
+    private func showNote(_ note: HandoffNote) {
+        guard let model else { return }
+        model.showNote(note)
+        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
+                             userInfo: [.announcement: note.spoken, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+        noteUntil = Date().addingTimeInterval(6)
+        noteTask?.cancel()
+        noteTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            guard !Task.isCancelled else { return }
+            self?.hide()
+        }
+    }
+
+    /// The note's button.
+    private func performNoteAction(_ action: HandoffNote.Action) {
+        guard let model else { return }
+        switch action {
+        case .copyInstead(let text):
+            ClipboardHygiene.copy(text)
+            showNote(HandoffNote(text: HandoffCopy.copied))
+        case .copyFullVersion:
+            Task { [weak self] in
+                switch await model.copyFullVersion() {
+                case .text(let text):
+                    ClipboardHygiene.copy(text)
+                    self?.showNote(HandoffNote(text: HandoffCopy.copied))
+                default:
+                    model.showFlash(HandoffCopy.couldNotCopy)
+                }
+            }
+        case .openTerminal(let folder):
+            if let terminal = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") {
+                NSWorkspace.shared.open([folder], withApplicationAt: terminal, configuration: NSWorkspace.OpenConfiguration())
+            }
+        }
+    }
+
+    /// Copy for Your AI: by the clipboard rules, then "Copied" a moment
+    /// and Ask closes.
+    private func copyForYourAI(_ text: String) {
+        guard ClipboardHygiene.copy(text) else {
+            model?.showFlash(HandoffCopy.couldNotCopy)
+            return
+        }
+        model?.showFlash(HandoffCopy.copied)
+        closeAfterCopy?.cancel()
+        closeAfterCopy = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(1_200))
+            guard !Task.isCancelled else { return }
+            self?.hide()
         }
     }
 
@@ -271,6 +359,9 @@ final class CommandBarController: NSObject, NSWindowDelegate {
     /// Ask, which can take the keyboard a moment later; that is not the
     /// person clicking away, so Ask takes the keyboard back instead.
     func windowDidResignKey(_ notification: Notification) {
+        // The tool Ask {Tool} opened came forward: the note stays its six
+        // seconds over it.
+        if let noteUntil, Date() < noteUntil { return }
         let sinceLink = linkOpenedAt.map { Date().timeIntervalSince($0) }
         guard AskPanelDismissal.closesOnResignKey(sinceLinkOpen: sinceLink) else {
             DispatchQueue.main.async { [weak self] in
@@ -405,6 +496,7 @@ struct CommandBarView: View {
     let perform: (BarAction) -> Void
     let close: () -> Void
     let heightChanged: (CGFloat) -> Void
+    var noteAction: (HandoffNote.Action) -> Void = { _ in }
     @FocusState private var focused: Bool
     /// The row under the pointer: highlighted, never chosen, so Return keeps
     /// asking (product critique 6).
@@ -448,7 +540,7 @@ struct CommandBarView: View {
     }
 
     private var hasContent: Bool {
-        !model.rows.isEmpty || model.mode == .answer || model.notice != nil
+        !model.rows.isEmpty || model.mode == .answer || model.notice != nil || model.stage != nil
     }
 
     // Search row
@@ -469,8 +561,16 @@ struct CommandBarView: View {
                     if !model.back() { close() }
                     return .handled
                 }
-                .onKeyPress(.return, phases: .down) { _ in
-                    if let action = model.activate() { perform(action) }
+                .onKeyPress(.return, phases: .down) { press in
+                    // ↩ opens; ⌘↩ asks the person's AI tool; ⌥↩ resumes an
+                    // item (SPEC-DELTA 4).
+                    if press.modifiers.contains(.command) {
+                        model.askAITool()
+                    } else if press.modifiers.contains(.option) {
+                        if let action = model.resumeSelected() { perform(action) }
+                    } else if let action = model.activate() {
+                        perform(action)
+                    }
                     return .handled
                 }
             // The answer card shows its own progress.
@@ -490,7 +590,44 @@ struct CommandBarView: View {
 
     // Content
 
+    @ViewBuilder
     private var content: some View {
+        switch model.stage {
+        case .firstUse(let pending, let tool, let card, let includeAboutMe):
+            FirstUseCard(
+                pending: pending, tool: tool, card: card, includeAboutMe: includeAboutMe,
+                toggleAboutMe: { model.toggleIncludeAboutMe() },
+                cancel: { model.cancelHandoff() },
+                open: { model.confirmFirstUse() }
+            )
+        case .sending(let tool):
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(HandoffCopy.askHint(tool.name) + "…").font(.callout).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        case .picking:
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(HandoffCopy.pickTitle).font(.system(size: 13.5, weight: .semibold))
+                        Text(HandoffCopy.pickDetail).font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 12)
+                    .padding(.bottom, 6)
+                    rowList
+                }
+                .padding(.bottom, 6)
+            }
+        case nil:
+            results
+        }
+    }
+
+    private var results: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -517,8 +654,8 @@ struct CommandBarView: View {
 
     private var rowList: some View {
         ForEach(Array(model.rows.enumerated()), id: \.element.id) { index, row in
-            if model.mode == .results, index == firstHit {
-                SectionHeader(title: "From your memory")
+            if model.mode == .results, model.stage == nil, let header = header(before: index) {
+                SectionHeader(title: header)
             }
             BarRowView(
                 row: row,
@@ -540,43 +677,209 @@ struct CommandBarView: View {
         }
     }
 
-    private var firstHit: Int? {
-        model.rows.firstIndex { if case .hit = $0 { true } else { false } }
+    /// "Working On", "Web Pages" and "From your memory", each over its
+    /// first row.
+    private func header(before index: Int) -> String? {
+        let rows = model.rows
+        func kind(_ row: BarRow) -> Int {
+            switch row {
+            case .item: 1
+            case .page: 2
+            case .hit: 3
+            default: 0
+            }
+        }
+        let current = kind(rows[index])
+        guard current != 0, index == 0 || kind(rows[index - 1]) != current else { return nil }
+        switch current {
+        case 1: return HandoffCopy.workingOnGroup
+        case 2: return HandoffCopy.webPagesGroup
+        default: return HandoffCopy.momentsGroup
+        }
     }
 
     // Footer
 
+    @ViewBuilder
     private var footer: some View {
-        HStack(spacing: 10) {
-            Text(model.footerText).font(.caption).foregroundStyle(.secondary)
-            if let action = model.footerAction {
-                Button(action.title) { perform(.status(action)) }
-                    .buttonStyle(.link)
-                    .font(.caption)
+        if let note = model.note {
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(note.text).font(.caption).foregroundStyle(.primary)
+                    ForEach(note.lines, id: \.self) { line in
+                        Text(line).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if let action = note.action {
+                    Button(action.title) { noteAction(action) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
             }
-            Spacer()
-            HStack(spacing: 14) { hints }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(minHeight: 34)
+            .accessibilityElement(children: .combine)
+        } else {
+            HStack(spacing: 10) {
+                Text(model.footerText).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if let action = model.footerAction {
+                    Button(action.title) { perform(.status(action)) }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                }
+                Spacer()
+                HStack(spacing: 14) {
+                    ForEach(model.keyHints, id: \.keys) { hint in
+                        KeyHint(keys: hint.keys, label: hint.label)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 34)
         }
-        .padding(.horizontal, 16)
-        .frame(height: 34)
+    }
+}
+
+/// The first time a tool is asked, one quiet card (SPEC 5.3.8): what opens,
+/// that nothing is sent until the person presses send there, and who
+/// receives it, over the exact message, word for word.
+private struct FirstUseCard: View {
+    let pending: PendingAsk
+    let tool: InstalledTool
+    let card: SendCard?
+    let includeAboutMe: Bool
+    let toggleAboutMe: () -> Void
+    let cancel: () -> Void
+    let open: () -> Void
+
+    private var isProject: Bool {
+        if case .item(let item) = pending.source, tool.tool == .claudeCode { return item.kind == "code" }
+        return false
     }
 
-    @ViewBuilder
-    private var hints: some View {
-        switch model.mode {
-        case .home:
-            KeyHint(keys: "⌘D", label: "Overview")
-            KeyHint(keys: "⌘U", label: "You")
-        case .results:
-            if !model.answersAvailable {
-                KeyHint(keys: "↩", label: "Search")
+    private var title: String {
+        if case .item(let item) = pending.source, isProject { return HandoffCopy.firstUseTitleProject(item.name) }
+        return HandoffCopy.firstUseTitle(tool.tool.name)
+    }
+
+    private var body_: String {
+        tool.tool.isPasted ? HandoffCopy.firstUseBodyPasted(tool.tool.name) : HandoffCopy.firstUseBody(tool.tool.name)
+    }
+
+    private var openTitle: String {
+        tool.tool.isPasted ? HandoffCopy.copyAndOpen(tool.tool.name) : HandoffCopy.openTool(tool.tool.name)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                ToolIcon(tool: tool, size: 32)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.system(size: 14.5, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+                    Text(body_).font(.system(size: 12.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
             }
-            KeyHint(keys: "⇧⌘C", label: "Copy for your AI")
-        case .answer:
-            if model.answerText != nil {
-                KeyHint(keys: "⌘C", label: "Copy Answer")
+            if isProject, let folder = card?.folder {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "folder").foregroundStyle(.secondary)
+                    Text(HandoffCopy.firstUseFolder(folder)).font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
-            KeyHint(keys: "⇧⌘C", label: "Copy for your AI")
+            HStack(alignment: .firstTextBaseline) {
+                Text(HandoffCopy.whatGoes).font(.system(size: 12, weight: .semibold))
+                Spacer()
+                if let card {
+                    Text(HandoffCopy.size(words: card.words, moments: max(card.included.count, 1)))
+                        .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                }
+            }
+            Group {
+                if let card {
+                    ScrollView {
+                        Text(MessagePreview.attributed(card.message))
+                            .font(.system(size: 11, design: .monospaced))
+                            .lineSpacing(2)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                    }
+                } else {
+                    ProgressView().controlSize(.small).frame(maxWidth: .infinity, minHeight: 60)
+                }
+            }
+            .frame(height: 150)
+            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.primary.opacity(0.1)))
+            if card?.peopleMessages == true {
+                Text(HandoffCopy.people).font(.system(size: 11.5)).foregroundStyle(.secondary)
+            }
+            HStack {
+                Toggle(HandoffCopy.includeAboutMe, isOn: Binding(get: { includeAboutMe }, set: { _ in toggleAboutMe() }))
+                    .toggleStyle(.checkbox)
+                    .font(.system(size: 12.5))
+                Spacer()
+                Button(HandoffCopy.cancel, action: cancel)
+                Button(openTitle, action: open)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(card == nil)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+    }
+}
+
+/// The message as the sheet shows it: word for word, with heading marks and
+/// fences in a quieter grey so the moment's own words read first.
+enum MessagePreview {
+    static func attributed(_ message: String) -> AttributedString {
+        var out = AttributedString()
+        let lines = message.components(separatedBy: "\n")
+        for (index, line) in lines.enumerated() {
+            if line.hasPrefix("```") {
+                var mark = AttributedString(line)
+                mark.foregroundColor = .secondary.opacity(0.7)
+                out += mark
+            } else if let space = line.firstIndex(of: " "), line[..<space].allSatisfy({ $0 == "#" }), !line[..<space].isEmpty {
+                var mark = AttributedString(String(line[...space]))
+                mark.foregroundColor = .secondary.opacity(0.7)
+                out += mark
+                out += AttributedString(String(line[line.index(after: space)...]))
+            } else {
+                out += AttributedString(line)
+            }
+            if index < lines.count - 1 { out += AttributedString("\n") }
+        }
+        return out
+    }
+}
+
+/// An AI tool's own app icon, or a quiet tile with its first letter when its
+/// app isn't on this Mac.
+private struct ToolIcon: View {
+    let tool: InstalledTool
+    let size: CGFloat
+
+    var body: some View {
+        if let app = tool.appURL, FileManager.default.fileExists(atPath: app.path) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: app.path))
+                .resizable().interpolation(.high)
+                .frame(width: size, height: size)
+        } else {
+            RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+                .fill(Color.primary.opacity(0.08))
+                .overlay(
+                    Image(systemName: tool.tool == .claudeCode ? "terminal" : "sparkle")
+                        .font(.system(size: size * 0.45, weight: .medium))
+                        .foregroundStyle(.secondary)
+                )
+                .frame(width: size, height: size)
         }
     }
 }
@@ -684,7 +987,17 @@ private struct AppIcon: View {
         if let bundleId, let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
             Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().interpolation(.high)
         } else {
-            Image(systemName: "app.dashed").resizable().scaledToFit().foregroundStyle(.secondary)
+            // An app that isn't on this Mac: a quiet tile with its initial.
+            GeometryReader { proxy in
+                RoundedRectangle(cornerRadius: proxy.size.width * 0.24, style: .continuous)
+                    .fill(Color.primary.opacity(0.08))
+                    .overlay(
+                        Text(bundleId.map { String(AppNames.name($0).prefix(1)).uppercased() } ?? "")
+                            .font(.system(size: proxy.size.width * 0.5, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    )
+            }
+            .padding(1)
         }
     }
 }
@@ -726,6 +1039,14 @@ private struct BarRowView: View {
     @ViewBuilder private var icon: some View {
         switch row {
         case .hit(let hit): AppIcon(bundleId: hit.appBundleId)
+        case .item(let item):
+            Image(systemName: Self.kindSymbol(item.kind))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 26, height: 26)
+                .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        case .page(let page): AppIcon(bundleId: page.app)
+        case .tool(let tool): ToolIcon(tool: tool, size: 26)
         case .thisWindow: AppIcon(bundleId: context?.bundleId)
         case .source: Image(systemName: "quote.opening").font(.system(size: 15)).foregroundStyle(.secondary)
         case .ask:
@@ -734,6 +1055,16 @@ private struct BarRowView: View {
                 .foregroundStyle(.primary)
         case .suggestion(let s):
             Image(systemName: Self.symbol(for: s.kind)).font(.system(size: 16)).foregroundStyle(.secondary)
+        }
+    }
+
+    /// A Working On item's kind, as the sidebar draws it.
+    static func kindSymbol(_ kind: String) -> String {
+        switch kind {
+        case "code": "chevron.left.forwardslash.chevron.right"
+        case "design": "pencil"
+        case "spreadsheet": "tablecells"
+        default: "doc.text"
         }
     }
 
@@ -754,6 +1085,9 @@ private struct BarRowView: View {
 
     private var title: String {
         switch row {
+        case .item(let item): item.name
+        case .page(let page): page.title
+        case .tool(let tool): tool.tool.name
         case .hit(let hit): hit.windowTitle?.isEmpty == false ? hit.windowTitle! : (hit.body.isEmpty ? "Untitled" : hit.body)
         case .thisWindow: "This window"
         case .source(let s): s.title?.isEmpty == false ? s.title! : s.app
@@ -764,6 +1098,13 @@ private struct BarRowView: View {
 
     private var subtitle: String? {
         switch row {
+        case .item(let item):
+            let apps = AppNames.spoken(item.apps.map(AppNames.name))
+            return apps.isEmpty ? HandoffCopy.kind(item.kind) : "\(HandoffCopy.kind(item.kind)) · \(apps)"
+        case .page(let page):
+            return [page.host, AppNames.name(page.app)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+        case .tool:
+            return nil
         case .hit(let hit):
             return hit.body
         case .thisWindow(let s):
@@ -783,6 +1124,8 @@ private struct BarRowView: View {
 
     private var trailing: String? {
         switch row {
+        case .item(let item): item.lastUs > 0 ? Self.relative(item.lastUs) : nil
+        case .page(let page): page.lastUs > 0 ? Self.relative(page.lastUs) : nil
         case .hit(let hit): Self.relative(hit.tsUs)
         case .source(let s), .thisWindow(let s): Self.relative(s.tsUs)
         case .suggestion(let s): s.tsUs.map(Self.relative)
@@ -826,5 +1169,33 @@ private struct AnswerCard: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// An app's name from its bundle id: the app's own when it is on this Mac,
+/// else the names people know, else the last part of the id.
+enum AppNames {
+    static let known: [String: String] = [
+        "com.microsoft.VSCode": "VS Code", "com.apple.Terminal": "Terminal", "com.google.Chrome": "Chrome",
+        "com.apple.Safari": "Safari", "com.figma.Desktop": "Figma", "com.apple.Notes": "Notes",
+        "com.tinyspeck.slackmacgap": "Slack", "com.todesktop.230313mzl4w4u92": "Cursor",
+        "company.thebrowser.Browser": "Arc", "org.mozilla.firefox": "Firefox", "com.apple.mail": "Mail",
+        "com.apple.iWork.Numbers": "Numbers", "com.apple.iWork.Pages": "Pages", "com.apple.Preview": "Preview",
+        "com.anthropic.claudefordesktop": "Claude", "com.openai.chat": "ChatGPT", "dev.zed.Zed": "Zed",
+        "com.apple.dt.Xcode": "Xcode", "notion.id": "Notion", "us.zoom.xos": "Zoom",
+    ]
+
+    static func name(_ bundleId: String) -> String {
+        if let known = known[bundleId] { return known }
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
+            return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+        }
+        return bundleId.split(separator: ".").last.map(String.init) ?? bundleId
+    }
+
+    /// "VS Code and Terminal"; "Chrome, Slack and Notes".
+    static func spoken(_ names: [String]) -> String {
+        guard names.count > 1 else { return names.first ?? "" }
+        return names.dropLast().joined(separator: ", ") + " and " + names[names.count - 1]
     }
 }

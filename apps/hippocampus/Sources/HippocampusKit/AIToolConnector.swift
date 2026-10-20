@@ -39,7 +39,7 @@ public struct AIToolConnector: Sendable {
 
     /// The raw report, for checks of the command's bounds.
     public func connectAll() async throws -> String {
-        let result = try await run()
+        let result = try await run(["register-clients"])
         guard result.status == 0 else {
             throw AIToolConnectorError.commandFailed(code: result.status, diagnostic: result.diagnostic)
         }
@@ -49,7 +49,7 @@ public struct AIToolConnector: Sendable {
     /// Connects every tool it finds and says what happened to each. A tool
     /// that failed is in the report; the command failing as a whole throws.
     public func connect() async throws -> AIToolReport {
-        let result = try await run()
+        let result = try await run(["register-clients"])
         let report = AIToolReport.parse(result.output + "\n" + result.diagnostic)
         guard result.status == 0 || !report.outcomes.isEmpty else {
             throw AIToolConnectorError.commandFailed(code: result.status, diagnostic: result.diagnostic)
@@ -57,7 +57,37 @@ public struct AIToolConnector: Sendable {
         return report
     }
 
-    private func run() async throws -> (status: Int32, output: String, diagnostic: String) {
+    /// What each tool has of Hippocampus now (`mci-agent clients`): content-
+    /// free, and without the memory's key.
+    public func clients() async throws -> [AITool: AIToolState] {
+        let result = try await run(["clients", "--json"])
+        guard result.status == 0 else {
+            throw AIToolConnectorError.commandFailed(code: result.status, diagnostic: result.diagnostic)
+        }
+        return AIToolState.parse(result.output)
+    }
+
+    /// Disconnect (SPEC 5.5): Hippocampus's look-up entry taken out of each
+    /// tool's settings. The hooks and Codex's instruction are taken out by
+    /// `SessionContextInstaller`. Each tool's answer: true when its entry is
+    /// gone (or there was none).
+    public func disconnect(_ tools: [AITool]) async throws -> [AITool: Bool] {
+        let which = Set(tools) == Set(AITool.allCases) ? "all" : (tools.first?.rawValue ?? "all")
+        let result = try await run(["clients", "--disconnect", which, "--json"])
+        guard result.status == 0,
+              let object = try? JSONSerialization.jsonObject(with: Data(result.output.utf8)) as? [String: Any],
+              let done = object["disconnected"] as? [[String: Any]] else {
+            throw AIToolConnectorError.commandFailed(code: result.status, diagnostic: result.diagnostic)
+        }
+        var out: [AITool: Bool] = [:]
+        for entry in done {
+            guard let id = entry["id"] as? String, let tool = AITool(rawValue: id) else { continue }
+            out[tool] = (entry["look_ups"] as? String) != "failed"
+        }
+        return out
+    }
+
+    private func run(_ arguments: [String]) async throws -> (status: Int32, output: String, diagnostic: String) {
         guard timeoutSeconds.isFinite, timeoutSeconds > 0 else {
             throw AIToolConnectorError.timedOut
         }
@@ -71,7 +101,7 @@ public struct AIToolConnector: Sendable {
         process.executableURL = agentURL
         // A distinct subcommand fails closed with older agents. A new flag on
         // `connect` could be ignored, silently installing hooks and an importer.
-        process.arguments = ["register-clients"]
+        process.arguments = arguments
         process.standardOutput = stdout
         process.standardError = stderr
         do {
@@ -177,6 +207,49 @@ public struct AIToolReport: Equatable, Sendable {
     }
 }
 
+/// What a tool has of Hippocampus, as `mci-agent clients --json` says.
+public struct AIToolState: Equatable, Sendable {
+    /// Its command or its settings are on this Mac.
+    public var installed: Bool
+    /// "Look things up in my memory" is on.
+    public var lookUps: Bool
+    /// `on`, `off`, `turned_off_in_tool`, `overridden` or `unavailable`.
+    public var sessionStart: String
+    /// `hook` or `instruction`, when its sessions start with recent work.
+    public var startKind: String?
+    /// Codex hasn't run Hippocampus's new hook yet: it needs the person to
+    /// allow it once.
+    public var needsStep: Bool
+
+    public init(installed: Bool, lookUps: Bool, sessionStart: String, startKind: String? = nil, needsStep: Bool = false) {
+        self.installed = installed
+        self.lookUps = lookUps
+        self.sessionStart = sessionStart
+        self.startKind = startKind
+        self.needsStep = needsStep
+    }
+
+    /// Connected: it looks things up, or its sessions start with recent work.
+    public var isConnected: Bool { lookUps || sessionStart == "on" }
+
+    static func parse(_ json: String) -> [AITool: AIToolState] {
+        guard let object = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+              let tools = object["tools"] as? [[String: Any]] else { return [:] }
+        var out: [AITool: AIToolState] = [:]
+        for entry in tools {
+            guard let id = entry["id"] as? String, let tool = AITool(rawValue: id) else { continue }
+            out[tool] = AIToolState(
+                installed: entry["installed"] as? Bool ?? false,
+                lookUps: entry["look_ups"] as? String == "on",
+                sessionStart: entry["session_start"] as? String ?? "off",
+                startKind: entry["start_kind"] as? String,
+                needsStep: entry["needs_step"] as? String == "allow_hooks"
+            )
+        }
+        return out
+    }
+}
+
 /// Per tool, here rather than in SessionContextInstaller.swift, which the
 /// standalone session-context check compiles without this file.
 extension SessionContextInstaller {
@@ -203,9 +276,10 @@ extension SessionContextInstaller {
 public enum AIToolRegistrations {
     public static let serverName = "hippocampus"
 
-    public static func connected(home: URL, codexHome: URL? = nil) -> Set<AITool> {
+    public static func connected(home: URL, codexHome: URL? = nil, claudeConfigDir: URL? = nil) -> Set<AITool> {
         var tools: Set<AITool> = []
-        if let data = read(home.appendingPathComponent(".claude.json"), limit: 32 << 20),
+        // CLAUDE_CONFIG_DIR moves Claude Code's .claude.json (SPEC 5.5).
+        if let data = read((claudeConfigDir ?? home).appendingPathComponent(".claude.json"), limit: 32 << 20),
            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let servers = object["mcpServers"] as? [String: Any], servers[serverName] != nil {
             tools.insert(.claudeCode)
@@ -218,12 +292,15 @@ public enum AIToolRegistrations {
         return tools
     }
 
-    /// The homes `register-clients` uses: `HOME`, and `CODEX_HOME` when set.
+    /// The homes `register-clients` uses: `HOME`, and `CODEX_HOME` and
+    /// `CLAUDE_CONFIG_DIR` when set.
     public static func connected(environment: [String: String]) -> Set<AITool> {
         let home = environment["HOME"].map(URL.init(fileURLWithPath:))
             ?? FileManager.default.homeDirectoryForCurrentUser
-        let codexHome = environment["CODEX_HOME"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
-        return connected(home: home, codexHome: codexHome)
+        func directory(_ key: String) -> URL? {
+            environment[key].flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath: $0) : nil }
+        }
+        return connected(home: home, codexHome: directory("CODEX_HOME"), claudeConfigDir: directory("CLAUDE_CONFIG_DIR"))
     }
 
     private static func read(_ url: URL, limit: Int) -> Data? {
@@ -238,13 +315,16 @@ public enum AIToolRegistrations {
 /// product critique 5, spec-copy S4.5).
 public enum AIToolsCopy {
     public static let paneTitle = "AI Tools"
-    public static let boundary = "What a connected tool reads goes to the company that runs it. Hippocampus sends nothing on its own."
+    /// The pane's lead (SPEC 5.5): what leaves this Mac, and only that.
+    public static let boundary = HandoffCopy.lead
     /// Said once, in the pane (and the README).
-    public static let whileQuit = "Connected tools can still read your memory while Hippocampus is quit. Disconnect a tool to stop that."
+    public static let whileQuit = HandoffCopy.whileQuit
     public static let connectButton = "Connect AI Tools…"
     public static let connected = "Connected"
     public static let notConnected = "Not connected"
-    public static let sessionToggle = "Start each session with what I’m working on"
+    /// What it sends, named for what it is (SPEC 5.4): "Working On" now
+    /// names the sidebar's list, which no tool receives.
+    public static let sessionToggle = HandoffCopy.sessionSwitch
     public static let unconfirmed = "Done, but Hippocampus couldn’t confirm it. Restart your AI tool and check."
 
     /// "Claude Code", or "Claude Code and Codex".
@@ -254,33 +334,28 @@ public enum AIToolsCopy {
         return names.dropLast().joined(separator: ", ") + " and " + names[names.count - 1]
     }
 
-    // The one question Connect AI Tools… asks.
-    public static let questionTitle = "Start each session with what you’re working on?"
+    // Connect AI Tools… asks first whether the tools may look things up
+    // (SPEC 5.4), naming the tools it found.
+    public static func connectTitle(_ tools: [AITool]) -> String { HandoffCopy.connectTitle(names(tools)) }
+
+    public static func connectMessage(_ tools: [AITool], chatGPTInstalled: Bool) -> String {
+        HandoffCopy.connectMessage(names(tools), count: tools.count, chatGPTInstalled: chatGPTInstalled && tools.contains(.codex))
+    }
+
+    // Then the session-start question, for the tools whose sessions can
+    // start with recent work.
+    public static let questionTitle = HandoffCopy.sessionTitle
     public static let share = "Share"
     public static let dontShare = "Don’t Share"
 
     public static func questionMessage(_ tools: [AITool]) -> String {
-        let who = names(tools)
-        let receiver = tools.count == 1 ? "The company that runs \(who) receives it." : "The company that runs each tool receives it."
-        return "At the start of each session, \(who) \(tools.count == 1 ? "gets" : "get") a short summary of your recent work, "
-            + "with sources. It can include other projects. \(receiver)"
+        HandoffCopy.sessionMessage(names(tools), count: tools.count, codex: tools.contains(.codex))
     }
 
-    // The pane's per-tool question (spec-copy S3 #5 and S4.5).
-    public static func shareTitle(_ tool: AITool) -> String { "Share your recent work with \(tool.name)?" }
+    // The pane's per-tool question: the same question, for one tool.
+    public static func shareTitle(_ tool: AITool) -> String { HandoffCopy.sessionTitle }
 
-    public static func shareMessage(_ tool: AITool) -> String {
-        switch tool {
-        case .claudeCode:
-            "At the start of each session, Claude Code gets a short summary of your recent work, with sources. "
-                + "It can include other projects. The company that runs Claude Code receives it. "
-                + "Restart Claude Code after changing this."
-        case .codex:
-            "Codex is told to ask Hippocampus for a short summary of your recent work, with sources. "
-                + "It can include other projects. The company that runs Codex receives it. "
-                + "Restart Codex after changing this."
-        }
-    }
+    public static func shareMessage(_ tool: AITool) -> String { questionMessage([tool]) }
 
     public static func turnedOn(_ tool: AITool) -> String { "On. Restart \(tool.name) to start." }
 

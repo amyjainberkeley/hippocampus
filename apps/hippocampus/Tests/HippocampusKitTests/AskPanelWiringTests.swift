@@ -16,6 +16,15 @@ final class AskPanelWiringTests: XCTestCase {
         return try String(contentsOf: package.appendingPathComponent("Sources/Hippocampus/\(name)"), encoding: .utf8)
     }
 
+    /// A file of HippocampusKit, by its path inside it.
+    private func kit(_ path: String) throws -> String {
+        let package = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        return try String(contentsOf: package.appendingPathComponent("Sources/HippocampusKit/\(path)"), encoding: .utf8)
+    }
+
     func testThePanelHangsFromTheBarAndCannotBeDragged() throws {
         let bar = try source("CommandBar.swift")
         XCTAssertTrue(bar.contains("AskPanelPlacement(screen: screen)"))
@@ -94,15 +103,63 @@ final class AskPanelWiringTests: XCTestCase {
     func testThePanelDoesOneJob() throws {
         let bar = try source("CommandBar.swift")
         for retired in ["DayCard", "ModelCard", "KindBar", "Suggested for right now", "Ask or search your memory",
-                        "Ask Hippocampus:", "About you", "Your day", "Copy context", "⌘↩", "Thinking on your Mac",
-                        "Hippocampus knows what you’re looking at", "Text(\"Hippocampus\")"] {
+                        "Ask Hippocampus:", "About you", "Your day", "Copy context", "Thinking on your Mac",
+                        "Hippocampus knows what you’re looking at", "Text(\"Hippocampus\")",
+                        "\"Overview\"", "\"You\"", "\"Copy for your AI\""] {
             XCTAssertFalse(bar.contains(retired), retired)
         }
-        for hint in ["\"Overview\"", "\"You\"", "\"Copy for your AI\"", "\"Copy Answer\"", "\"Sources\"", "\"This window\""] {
-            XCTAssertTrue(bar.contains(hint), hint)
+        for word in ["\"Sources\"", "\"This window\""] {
+            XCTAssertTrue(bar.contains(word), word)
+        }
+        // The footer's keys are the model's, in words the launch copy check
+        // reads (HandoffCopy): the window's places by their new names.
+        XCTAssertTrue(bar.contains("ForEach(model.keyHints, id: \\.keys)"))
+        let copy = try kit("HandoffCopy.swift")
+        for word in ["\"Today\"", "\"About You\"", "\"Copy for Your AI\"", "\"Copy Answer\"", "\"Resume\""] {
+            XCTAssertTrue(copy.contains(word), word)
         }
         XCTAssertTrue(bar.contains("Text(model.footerText)"))
         XCTAssertTrue(bar.contains("Button(action.title) { perform(.status(action)) }"))
+    }
+
+    /// ⌘↩ is Ask {Tool} and ⌥↩ resumes (SPEC 5.3.9, SPEC-DELTA 4): the
+    /// field's Return reads its modifiers, which it once ignored.
+    func testReturnReadsItsModifiers() throws {
+        let bar = try source("CommandBar.swift")
+        XCTAssertTrue(bar.contains("if press.modifiers.contains(.command) {\n                        model.askAITool()"))
+        XCTAssertTrue(bar.contains("} else if press.modifiers.contains(.option) {\n                        if let action = model.resumeSelected() { perform(action) }"))
+        XCTAssertTrue(bar.contains("} else if let action = model.activate() {"))
+    }
+
+    /// Every copy for an AI tool follows the clipboard rules (SPEC 5.3.6),
+    /// and the panel stays its six seconds over the tool it opened.
+    func testCopiesFollowTheClipboardRulesAndTheNoteStays() throws {
+        let bar = try source("CommandBar.swift")
+        XCTAssertTrue(bar.contains("guard ClipboardHygiene.copy(text) else {"))
+        XCTAssertTrue(bar.contains("case .text(let text): self?.copyForYourAI(text)"))
+        XCTAssertTrue(bar.contains("if let noteUntil, Date() < noteUntil { return }"))
+        XCTAssertTrue(bar.contains("case .handoff(let plan, let tool):\n            deliver(plan, tool: tool)"))
+        let model = try kit("CommandBar/CommandBarModel.swift")
+        XCTAssertFalse(model.contains("\"mci_context\""), "⇧⌘C never copies the context tool's JSON")
+    }
+
+    /// The launch repair runs once, from launch, off the main thread.
+    func testTheAppRepairsTheHooksOnceAtLaunch() throws {
+        let app = try source("HippocampusApp.swift")
+        XCTAssertEqual(app.components(separatedBy: "SessionContextInstaller.repairOnLaunch()").count - 1, 1)
+        let repair = try kit("Handoff/HookRepair.swift")
+        XCTAssertTrue(repair.contains("Task.detached(priority: .utility)"))
+        XCTAssertTrue(repair.contains("installer.repairExistingEntries(movedHere: movedHere)"))
+        XCTAssertTrue(SessionContextInstaller.isInstalledToStay(
+            executableURL: URL(fileURLWithPath: "/Applications/Hippocampus.app/Contents/MacOS/Hippocampus"),
+            bundleURL: URL(fileURLWithPath: "/Applications/Hippocampus.app")))
+        XCTAssertFalse(SessionContextInstaller.isInstalledToStay(
+            executableURL: URL(fileURLWithPath: "/private/var/folders/x/AppTranslocation/1/d/Hippocampus.app/Contents/MacOS/Hippocampus"),
+            bundleURL: URL(fileURLWithPath: "/private/var/folders/x/AppTranslocation/1/d/Hippocampus.app")))
+        XCTAssertFalse(SessionContextInstaller.isInstalledToStay(
+            executableURL: URL(fileURLWithPath: "/Users/sam/dev/apps/hippocampus/.build/debug/Hippocampus"),
+            bundleURL: URL(fileURLWithPath: "/Users/sam/dev/apps/hippocampus/.build/debug")),
+            "a build run from elsewhere never points anyone's hooks at itself")
     }
 
     func testAskTellsOnboardingWhenItShowsAndTheAppWiresItsActions() throws {
