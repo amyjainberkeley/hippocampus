@@ -140,22 +140,33 @@ final class AskAIButtonRulesTests: XCTestCase {
 
     /// The window and the menu-bar app open the same tool: the same keys in
     /// the app's defaults (the app's HandoffChoices).
-    func testChoicesAreKeptWhereTheMenuBarAppReadsThem() throws {
+    func testChoicesAreKeptWhereTheMenuBarAppReadsThem() {
         XCTAssertEqual(HandoffChoices.lastToolKey, "ai.hippocampus.handoff.lastTool")
         XCTAssertEqual(HandoffChoices.toldKeyPrefix, "ai.hippocampus.handoff.told.")
-        let suite = "ai.hippocampus.tests.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let choices = HandoffChoices(defaults: defaults)
+        var kept: [String: Any] = [:]
+        let choices = HandoffChoices(read: { kept[$0] }, write: { kept[$1] = $0 })
         XCTAssertNil(choices.lastTool)
         choices.lastTool = .codex
-        XCTAssertEqual(defaults.string(forKey: "ai.hippocampus.handoff.lastTool"), "codex")
+        XCTAssertEqual(kept["ai.hippocampus.handoff.lastTool"] as? String, "codex")
         XCTAssertFalse(choices.wasTold(.codex))
         choices.markTold(.codex)
-        XCTAssertTrue(defaults.bool(forKey: "ai.hippocampus.handoff.told.codex"))
+        XCTAssertEqual(kept["ai.hippocampus.handoff.told.codex"] as? Bool, true)
         XCTAssertFalse(choices.wasTold(.claude), "each tool is told once, on its own")
-        defaults.set("not-a-tool", forKey: HandoffChoices.lastToolKey)
+        kept[HandoffChoices.lastToolKey] = "not-a-tool"
         XCTAssertNil(choices.lastTool)
+        choices.lastTool = nil
+        XCTAssertNil(kept[HandoffChoices.lastToolKey])
+    }
+
+    func testPreviewsAndTestsKeepChoicesInMemoryOnly() {
+        let one = HandoffChoices.ephemeral()
+        let other = HandoffChoices.ephemeral()
+        one.lastTool = .cursor
+        one.markTold(.cursor)
+        XCTAssertEqual(one.lastTool, .cursor)
+        XCTAssertTrue(one.wasTold(.cursor))
+        XCTAssertNil(other.lastTool, "each keeps its own")
+        XCTAssertFalse(other.wasTold(.cursor))
     }
 }
 

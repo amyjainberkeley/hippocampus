@@ -22,6 +22,26 @@ struct HandoffServices {
             open: { NSWorkspace.shared.open($0) }, home: FileManager.default.homeDirectoryForCurrentUser.path
         )
     }
+
+    /// The synthetic preview's: Sam's tools, choices kept in memory, no agent
+    /// and nothing opened, so nothing from this Mac's memory reaches a
+    /// message and no app opens.
+    @MainActor
+    static var preview: HandoffServices {
+        HandoffServices(
+            client: .unavailable,
+            tools: {
+                [
+                    InstalledTool(tool: .claude, appURL: URL(fileURLWithPath: "/Applications/Claude.app")),
+                    InstalledTool(tool: .claudeCode, appURL: URL(fileURLWithPath: "/Applications/Claude.app")),
+                    InstalledTool(tool: .chatgpt, appURL: URL(fileURLWithPath: "/Applications/ChatGPT.app")),
+                    InstalledTool(tool: .codex, appURL: URL(fileURLWithPath: "/Applications/Codex.app")),
+                    InstalledTool(tool: .cursor, appURL: URL(fileURLWithPath: "/Applications/Cursor.app")),
+                ]
+            },
+            choices: .ephemeral(), notes: .shared, open: { _ in false }, home: "/Users/sam"
+        )
+    }
 }
 
 private struct HandoffServicesKey: EnvironmentKey {
@@ -73,6 +93,7 @@ struct AskAIButton: View {
     }
 
     @Environment(\.handoffServices) private var injected
+    @Environment(\.isSyntheticPreview) private var isSyntheticPreview
     @Environment(\.screenshots) private var screenshots
     @State private var services: HandoffServices?
     @State private var tools: [InstalledTool] = []
@@ -83,7 +104,7 @@ struct AskAIButton: View {
     @State private var sending = false
     @State private var sendGuard = SendGuard()
 
-    private var handoff: HandoffServices { injected ?? services ?? .live }
+    private var handoff: HandoffServices { injected ?? services ?? (isSyntheticPreview ? .preview : .live) }
 
     var body: some View {
         Group {
@@ -110,7 +131,7 @@ struct AskAIButton: View {
             .onChange(of: includeAboutMe) { _, _ in preview(content.tool) }
         }
         .task {
-            if injected == nil, services == nil { services = .live }
+            if injected == nil, services == nil { services = isSyntheticPreview ? .preview : .live }
             tools = handoff.tools()
             await checkScreenshot()
         }

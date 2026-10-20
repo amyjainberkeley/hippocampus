@@ -152,24 +152,56 @@ public struct HandoffChoices: @unchecked Sendable {
     public static let lastToolKey = "ai.hippocampus.handoff.lastTool"
     public static let toldKeyPrefix = "ai.hippocampus.handoff.told."
 
-    private let defaults: UserDefaults
+    private let read: (String) -> Any?
+    private let write: (Any?, String) -> Void
 
     public init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
+        self.init(read: { defaults.object(forKey: $0) }, write: { defaults.set($0, forKey: $1) })
+    }
+
+    /// Choices read and written by `read` and `write`, under the same keys.
+    public init(read: @escaping (String) -> Any?, write: @escaping (Any?, String) -> Void) {
+        self.read = read
+        self.write = write
     }
 
     /// The tool ⌘↩ opens: the last one chosen.
     public var lastTool: AskTool? {
-        get { defaults.string(forKey: Self.lastToolKey).flatMap(AskTool.init(rawValue:)) }
-        nonmutating set { defaults.set(newValue?.rawValue, forKey: Self.lastToolKey) }
+        get { (read(Self.lastToolKey) as? String).flatMap(AskTool.init(rawValue:)) }
+        nonmutating set { write(newValue?.rawValue, Self.lastToolKey) }
     }
 
     /// Whether the person has seen the first-use sheet for `tool`.
     public func wasTold(_ tool: AskTool) -> Bool {
-        defaults.bool(forKey: Self.toldKeyPrefix + tool.rawValue)
+        (read(Self.toldKeyPrefix + tool.rawValue) as? Bool) ?? false
     }
 
     public func markTold(_ tool: AskTool) {
-        defaults.set(true, forKey: Self.toldKeyPrefix + tool.rawValue)
+        write(true, Self.toldKeyPrefix + tool.rawValue)
+    }
+
+    /// Choices kept in memory only, for previews, renders and tests: nothing
+    /// is written on this Mac.
+    public static func ephemeral() -> HandoffChoices {
+        let store = ChoicesInMemory()
+        return HandoffChoices(read: store.value, write: store.set)
+    }
+}
+
+/// A few values in memory, for `HandoffChoices.ephemeral()`.
+private final class ChoicesInMemory: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: Any] = [:]
+
+    func value(_ key: String) -> Any? {
+        lock.lock()
+        defer { lock.unlock() }
+        return values[key]
+    }
+
+    func set(_ value: Any?, _ key: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        values[key] = value
     }
 }

@@ -23,9 +23,9 @@ enum CommandBarPreviewRenderer {
         let out = URL(fileURLWithPath: dir)
         try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
         for state in states() + handoffStates() {
-            // The tool ⌘↩ opens, kept in a throwaway place: never the app's
-            // own defaults.
-            let choices = HandoffChoices(defaults: UserDefaults(suiteName: "ai.hippocampus.preview.\(UUID().uuidString)")!)
+            // The tool ⌘↩ opens, kept in memory: never the app's own
+            // defaults, and nothing written on this Mac.
+            let choices = HandoffChoices.ephemeral()
             choices.lastTool = state.lastTool
             let model = CommandBarModel(
                 memory: NoMemory(), availability: AnswerAvailability(systemSupportsAnswers: true),

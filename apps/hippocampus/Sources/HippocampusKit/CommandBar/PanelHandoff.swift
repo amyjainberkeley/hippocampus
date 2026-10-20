@@ -28,7 +28,7 @@ public struct PanelHandoff: Sendable {
     }
 
     /// No tools and no agent: for previews that draw fixtures.
-    public static func none(choices: HandoffChoices = HandoffChoices(defaults: UserDefaults(suiteName: "ai.hippocampus.handoff.none")!)) -> PanelHandoff {
+    public static func none(choices: HandoffChoices = .ephemeral()) -> PanelHandoff {
         PanelHandoff(agent: NoPanelAgent(), tools: { [] }, choices: choices, home: NSHomeDirectory())
     }
 }

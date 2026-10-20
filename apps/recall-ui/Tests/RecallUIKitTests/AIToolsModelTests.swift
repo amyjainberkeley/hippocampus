@@ -33,16 +33,8 @@ final class AIToolsModelTests: XCTestCase {
     private let codexApp = URL(fileURLWithPath: "/Applications/Codex.app")
     private let chatGPTApp = URL(fileURLWithPath: "/Applications/ChatGPT.app")
     private let cursorApp = URL(fileURLWithPath: "/Applications/Cursor.app")
-    private var suite = ""
-
-    override func tearDown() {
-        if !suite.isEmpty { UserDefaults().removePersistentDomain(forName: suite) }
-        super.tearDown()
-    }
-
     private func choices() -> HandoffChoices {
-        suite = "ai.hippocampus.tests.\(UUID().uuidString)"
-        return HandoffChoices(defaults: UserDefaults(suiteName: suite)!)
+        .ephemeral()
     }
 
     private func detector(schemes: [String: URL], chatGPT: Bool) -> DestinationDetector {

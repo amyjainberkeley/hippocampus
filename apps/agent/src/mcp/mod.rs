@@ -66,5 +66,5 @@ pub use jsonrpc::{
     METHOD_NOT_FOUND, PARSE_ERROR,
 };
 pub use live::LiveBrainReader;
-pub use server::{rows_within, serve_stdio, Server, ServerCounters, MAX_RESULT_TEXT_CHARS};
+pub use server::{serve_stdio, Server, ServerCounters};
 pub use tools::{tool_definitions, ToolName};

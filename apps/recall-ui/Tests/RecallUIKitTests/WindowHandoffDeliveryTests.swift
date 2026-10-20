@@ -128,6 +128,19 @@ final class WindowClipboardHygieneTests: XCTestCase {
     func testSomethingThatIsntAPictureGivesNothing() {
         XCTAssertNil(ClipboardHygiene.jpegForAI(Data("## Moment".utf8)))
     }
+
+    /// Every copy the window makes for an AI tool goes through these rules:
+    /// none of handoff's views writes the clipboard itself.
+    func testHandoffsViewsCopyOnlyByTheRules() throws {
+        let sources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/RecallUI")
+        for file in ["Handoff/AskAIButton.swift", "Handoff/FirstUseSheet.swift", "Places/AIToolsPlace.swift",
+                     "ProjectHandoffView.swift"] {
+            let source = try String(contentsOf: sources.appendingPathComponent(file), encoding: .utf8)
+            XCTAssertFalse(source.contains("NSPasteboard"), file)
+        }
+    }
 }
 
 final class WindowDestinationDetectorTests: XCTestCase {

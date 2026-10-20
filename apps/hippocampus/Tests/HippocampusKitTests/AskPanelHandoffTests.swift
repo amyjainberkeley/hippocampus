@@ -45,12 +45,6 @@ actor FakePanelAgent: PanelAgent {
     }
 }
 
-extension HandoffChoices {
-    /// Choices kept in a throwaway place, never the app's own defaults.
-    static func ephemeral() -> HandoffChoices {
-        HandoffChoices(defaults: UserDefaults(suiteName: "ai.hippocampus.tests.\(UUID().uuidString)")!)
-    }
-}
 
 @MainActor
 final class AskPanelHandoffTests: XCTestCase {

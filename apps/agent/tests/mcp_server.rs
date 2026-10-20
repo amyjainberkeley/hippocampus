@@ -1006,12 +1006,13 @@ fn rows_are_kept_under_forty_thousand_characters() {
     let row = serde_json::json!({"text_snippet": "x".repeat(500)});
     let rows = vec![row; 200];
     let (kept, truncated) =
-        mci_agent::mcp::rows_within(rows, mci_agent::mcp::MAX_RESULT_TEXT_CHARS);
+        mci_agent::mcp::server::rows_within(rows, mci_agent::mcp::server::MAX_RESULT_TEXT_CHARS);
     assert!(truncated);
     let text = serde_json::to_string(&kept).unwrap();
     assert!(text.chars().count() <= 40_000, "{}", text.len());
     assert!(kept.len() > 70, "as many as fit");
-    let (all, cut) = mci_agent::mcp::rows_within(vec![serde_json::json!({"a": 1}); 3], 40_000);
+    let (all, cut) =
+        mci_agent::mcp::server::rows_within(vec![serde_json::json!({"a": 1}); 3], 40_000);
     assert_eq!(all.len(), 3);
     assert!(!cut);
 }
