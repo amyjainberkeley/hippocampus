@@ -2,8 +2,9 @@ import Foundation
 
 /// The window's words for the calendar (SPEC-DELTA 5). Today's one-time
 /// offer ("Show your calendar on Today.", Show Calendar) and the day strip's
-/// bars are Today's own words (`OverviewCopy`); these are the note after Show
-/// Calendar when the calendar can't be shown. When macOS takes access back
+/// bars are Today's own words (`OverviewCopy`); these are Not Now beside the
+/// offer, and the note after Show Calendar when the calendar can't be shown.
+/// When macOS takes access back
 /// later, the window says nothing: Today drops its bars, and Preferences says
 /// how to turn it back on. Every string passes `CopyStyleValidator` and
 /// `scripts/check-launch-copy.sh`.
@@ -15,6 +16,9 @@ public enum CalendarCopy {
     public static let openSystemSettings = "Open System Settings…"
     /// After Show Calendar, when macOS couldn't be asked.
     public static let couldNotAsk = "Couldn’t ask macOS about your calendar. Try again in Preferences."
+    /// Puts Today's offer aside for good; Preferences still turns the
+    /// calendar on.
+    public static let notNow = "Not Now"
 
     /// The note after Show Calendar, from what `SystemCalendar.turnOn()`
     /// returned; nil once the calendar shows.
@@ -27,5 +31,5 @@ public enum CalendarCopy {
     }
 
     /// Every string above, for the copy checks.
-    public static let all: [String] = [notAllowed, openSystemSettings, couldNotAsk]
+    public static let all: [String] = [notAllowed, openSystemSettings, couldNotAsk, notNow]
 }

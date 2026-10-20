@@ -101,11 +101,18 @@ struct TodayPlace: View {
                     }
                     .transition(.opacity)
                 }
+                // The calendar, offered once (SPEC-DELTA 5): the first day's
+                // card makes the offer itself.
+                if model.showsCalendarOffer, !model.showsFirstDay {
+                    CalendarOfferLine(show: takeCalendarOffer, notNow: { model.calendarOffered() })
+                        .transition(.opacity)
+                }
                 yourDay
                 lookedUpToday
                 summary
             }
             .animation(reduceMotion ? MCI.Motion.snap : MCI.Motion.deliberate, value: model.showsFirstDay)
+            .animation(MCI.Motion.standard, value: model.showsCalendarOffer)
             .frame(maxWidth: Self.maxWidth, alignment: .leading)
             .padding(.horizontal, 32)
             .padding(.top, 24)
@@ -420,6 +427,42 @@ struct AlsoFromLine: View {
         }
         .font(.system(size: 13))
         .padding(.leading, 2)
+    }
+}
+
+/// Today's one-time offer of the calendar (SPEC-DELTA 5) on any day but the
+/// first, whose welcome card makes it: one line, Not Now and Show Calendar.
+/// Either answer is final: the offer isn't made again.
+struct CalendarOfferLine: View {
+    let show: () -> Void
+    let notNow: () -> Void
+    @Environment(\.isSyntheticPreview) private var isSyntheticPreview
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "calendar")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(MCI.Color.foregroundSecondary)
+                .accessibilityHidden(true)
+            Text(UserFacingCopy.Overview.showCalendarLine)
+                .font(MCI.Font.body)
+                .foregroundStyle(MCI.Color.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button(CalendarCopy.notNow, action: notNow)
+                .buttonStyle(.bordered)
+                .disabled(isSyntheticPreview)
+            Button(UserFacingCopy.Overview.showCalendar, action: show)
+                .buttonStyle(.bordered)
+                .disabled(isSyntheticPreview)
+        }
+        .padding(.vertical, 10)
+        .padding(.leading, 16)
+        .padding(.trailing, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(MCI.Color.surface))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(MCI.Color.border, lineWidth: 1))
+        .accessibilityElement(children: .contain)
     }
 }
 

@@ -23,6 +23,46 @@ final class OverviewViewModelTests: XCTestCase {
         return (model, understanding)
     }
 
+    /// The calendar is offered once on Today (SPEC-DELTA 5), not only on the
+    /// first day: someone back from 0.2, or past their first session, sees
+    /// it too, under the card. Never before Today knows whether macOS was
+    /// asked, never on another day, and Not Now puts it aside for good. A
+    /// fake calendar answers; macOS is never asked.
+    func testTodayOffersTheCalendarOnceAfterTheFirstDayToo() async throws {
+        let understanding = ScriptedUnderstanding()
+        await understanding.setOverview(try UnderstandingFixture.overview())
+        let offers = MemoryKeyValueStore()
+        func model(_ access: CalendarAccess) -> OverviewViewModel {
+            OverviewViewModel(understanding: understanding, selectedDate: SampleDay.now, calendar: SampleDay.calendar,
+                              healthLoader: { SampleDay.receipt() }, now: { SampleDay.now },
+                              deletions: MemoryDeletionSignal(), savedBefore: { _ in true },
+                              calendarReader: FixtureCalendar(access: access), offers: offers)
+        }
+        let today = model(.notAsked)
+        XCTAssertFalse(today.showsCalendarOffer, "not before the day and the calendar are read")
+        await today.reload()
+        XCTAssertFalse(today.showsFirstDay)
+        XCTAssertNotNil(today.rightNow)
+        XCTAssertTrue(today.showsCalendarOffer, "a Today past the first day offers it under the card")
+        today.moveDay(-1)
+        XCTAssertFalse(today.showsCalendarOffer, "only on today")
+        today.goToToday()
+        await today.reload()
+        XCTAssertTrue(today.showsCalendarOffer)
+
+        for access in [CalendarAccess.allowed, .denied] {
+            let asked = model(access)
+            await asked.reload()
+            XCTAssertFalse(asked.showsCalendarOffer, "never once macOS was asked: \(access)")
+        }
+
+        today.calendarOffered()
+        XCTAssertFalse(today.showsCalendarOffer, "Not Now puts it aside")
+        let again = model(.notAsked)
+        await again.reload()
+        XCTAssertFalse(again.showsCalendarOffer, "offered once, never again")
+    }
+
     func testItReadsTheDayInThePersonsCalendarAndTheSavedStatus() async throws {
         let receipt = SampleDay.receipt()
         let (model, understanding) = try await loaded(receipt: receipt)
