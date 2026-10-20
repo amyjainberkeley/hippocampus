@@ -7,6 +7,18 @@ import Foundation
 
 public extension UserFacingCopy {
     enum You {
+        // MARK: About You (SPEC 3.7)
+
+        /// The page's title, as the sidebar names it, and its line.
+        public static let title = "About You"
+        public static let lead = "What your AI tools can be told about you. Fix anything that\u{2019}s wrong."
+        /// The group the agent calls "working_on": "Working On" is the sidebar's.
+        public static let projectsAndGoals = "Projects and goals"
+        /// Pushes the names editor.
+        public static let namesYouUse = "Names You Use\u{2026}"
+        /// Under the lines, while Apple Intelligence writes them.
+        public static let writtenByAppleIntelligence = "Written on this Mac by Apple Intelligence."
+
         public static let recentWorkTitle = "Recent work"
         /// Under "Recent work": which sessions a connected AI is given.
         public static var recentWorkCaption: String {
@@ -52,8 +64,9 @@ public extension UserFacingCopy {
             }
         }
 
-        public static let nothingLearnedTitle = "Nothing learned yet"
-        public static let nothingLearnedBody = "This fills in after a few sessions. It needs Apple Intelligence or your own model."
+        public static let nothingLearnedTitle = "Nothing learned yet."
+        public static let nothingLearnedBody =
+            "This fills in after a few sessions. It needs Apple Intelligence or a model on this Mac."
         public static let unavailableTitle = "Couldn\u{2019}t load this page"
 
         /// The footer line when Apple Intelligence cannot write: what is

@@ -25,13 +25,29 @@ final class UserModelViewModelTests: XCTestCase {
         let page = try UnderstandingFixture.modelPage()
         let shared = UserModelGrouping.groups(page.shared)
         XCTAssertEqual(shared.map(\.group), [.workingOn, .howYouWork, .skills])
-        XCTAssertEqual(shared.map(\.title), ["Working on", "How you work", "Skills"])
+        // "Working On" is the sidebar's; the agent's working_on group is "Projects and goals" (SPEC 3.7).
+        XCTAssertEqual(shared.map(\.title), ["Projects and goals", "How you work", "Skills"])
         XCTAssertEqual(shared[0].rows.map(\.id), [41, 37, 45])
         XCTAssertEqual(shared[2].rows.map(\.id), [22, 18])
         let keptBack = UserModelGrouping.groups(page.keptBack)
         XCTAssertEqual(keptBack.map(\.group), [.howYouWork, .people, .struggles])
         XCTAssertEqual(keptBack.map(\.title), ["How you work", "People", "Where you got stuck"])
         XCTAssertTrue(UserModelGrouping.groups([]).isEmpty)
+    }
+
+    func testALineThatNamesAWorkingOnItemExactlyLinksToIt() {
+        func item(_ id: String, _ name: String) -> WorkItem {
+            WorkItem(id: id, kind: .code, name: name, apps: [], lastUs: 1, weekMinutes: 1, daysThisWeek: 1)
+        }
+        let items = [item("w_shop", "trailhead-shop"), item("w_v3", "Trailhead pricing v3"),
+                     item("w_tr", "Trailhead")]
+        XCTAssertEqual(UserModelGrouping.item(named: "Sam is fixing how trailhead-shop rounds tax.", among: items)?.id,
+                       "w_shop")
+        XCTAssertEqual(UserModelGrouping.item(named: "Sam laid out Trailhead pricing v3 in Figma.", among: items)?.id,
+                       "w_v3", "the longest name it says")
+        XCTAssertNil(UserModelGrouping.item(named: "Sam is fixing how the Trailheads checkout rounds tax.",
+                                            among: items), "a name inside another word is not the name")
+        XCTAssertNil(UserModelGrouping.item(named: "Sam drafts copy in Notes.", among: items))
     }
 
     func testAGroupTheWindowHasNoTitleForComesLastUntitled() throws {

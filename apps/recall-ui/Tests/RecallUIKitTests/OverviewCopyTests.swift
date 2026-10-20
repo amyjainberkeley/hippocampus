@@ -41,6 +41,8 @@ final class OverviewCopyTests: XCTestCase {
             ("yourDataTitle", You.yourDataTitle), ("rememberedRow", You.rememberedRow),
             ("rememberedCaption", You.rememberedCaption), ("namesRow", You.namesRow), ("aiToolsRow", You.aiToolsRow),
             ("sessionRow", You.sessionRow(date: "Oct 12", time: "2:02 – 2:31 PM")),
+            ("You.title", You.title), ("You.lead", You.lead), ("projectsAndGoals", You.projectsAndGoals),
+            ("namesYouUse", You.namesYouUse), ("writtenByAppleIntelligence", You.writtenByAppleIntelligence),
             ("firstDayTitle", Overview.firstDayTitle), ("firstDayBody", Overview.firstDayBody),
             ("firstDayOffTitle", Overview.firstDayOffTitle), ("firstDayOffBody", Overview.firstDayOffBody),
             ("openPreferences", Overview.openPreferences), ("now", Overview.now),
