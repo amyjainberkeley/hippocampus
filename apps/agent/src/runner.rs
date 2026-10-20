@@ -294,8 +294,10 @@ where
                         stats.frames_non_health += 1;
                         if matches!(&frame.message, Message::OCREvent { .. }) {
                             if let Some(capture_receipt) = capture_receipt {
-                                capture_receipt
-                                    .suppressed(mci_core::ipc::RedactionReason::OcrTimeSecret, clock);
+                                capture_receipt.suppressed(
+                                    mci_core::ipc::RedactionReason::OcrTimeSecret,
+                                    clock,
+                                );
                             }
                         }
                     }

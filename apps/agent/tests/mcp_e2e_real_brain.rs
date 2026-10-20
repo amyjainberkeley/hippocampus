@@ -1768,7 +1768,13 @@ fn asking_about_the_screen_answers_from_the_window_in_front() {
 #[test]
 fn a_secret_already_in_memory_never_leaves_through_any_tool() {
     let (_dir, store) = open_temp_store();
-    let key = ["sk-", "ant-", "api03-", "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R"].concat();
+    let key = [
+        "sk-",
+        "ant-",
+        "api03-",
+        "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R",
+    ]
+    .concat();
     store
         .put_event(&make_event_custom(
             &format!(
@@ -1783,9 +1789,21 @@ fn a_secret_already_in_memory_never_leaves_through_any_tool() {
         .unwrap();
     let server = server_fts_only(store);
     for (id, name, arguments) in [
-        (1, "recall", serde_json::json!({"query": "Bramble agent setup", "limit": 5})),
-        (2, "events_since", serde_json::json!({"ts_us": 0, "limit": 10})),
-        (3, "context", serde_json::json!({"max_tokens": 512, "max_evidence": 8})),
+        (
+            1,
+            "recall",
+            serde_json::json!({"query": "Bramble agent setup", "limit": 5}),
+        ),
+        (
+            2,
+            "events_since",
+            serde_json::json!({"ts_us": 0, "limit": 10}),
+        ),
+        (
+            3,
+            "context",
+            serde_json::json!({"max_tokens": 512, "max_evidence": 8}),
+        ),
     ] {
         let result = extract_result(server.dispatch(req_with_id(
             "tools/call",
@@ -1793,7 +1811,10 @@ fn a_secret_already_in_memory_never_leaves_through_any_tool() {
             id,
         )));
         let all = result.to_string();
-        assert!(all.contains("Bramble agent setup"), "{name}: the rest stays: {all}");
+        assert!(
+            all.contains("Bramble agent setup"),
+            "{name}: the rest stays: {all}"
+        );
         assert!(!all.contains(&key), "{name}: {all}");
         assert!(!all.contains("4111"), "{name}: {all}");
         assert!(!all.contains("SYNTHtoken"), "{name}: {all}");

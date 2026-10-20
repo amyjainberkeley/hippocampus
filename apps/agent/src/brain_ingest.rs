@@ -1161,7 +1161,9 @@ mod tests {
                 assert_eq!(ev.embedding.as_ref().map(Vec::len), Some(384));
                 assert_eq!(ev.cascade_reason, 0);
             }
-            IngestOutcome::NotOcrEvent | IngestOutcome::Refused => panic!("expected Stored, got NotOcrEvent"),
+            IngestOutcome::NotOcrEvent | IngestOutcome::Refused => {
+                panic!("expected Stored, got NotOcrEvent")
+            }
         }
         assert_eq!(pump.events_ingested_count(), 1);
     }
@@ -1559,7 +1561,13 @@ mod tests {
     const JWT: &str = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJsYXJjaCJ9.TGFyY2hTZWNyZXRTaWduYXR1cmU";
 
     fn bare_key() -> String {
-        ["sk-", "ant-", "api03-", "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R"].concat()
+        [
+            "sk-",
+            "ant-",
+            "api03-",
+            "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R",
+        ]
+        .concat()
     }
 
     fn page(url: &str, title: &str, text: &str) -> Message {
@@ -1582,18 +1590,48 @@ mod tests {
         let store = Arc::new(InMemoryBrainStore::new());
         let pump = BrainPump::new(store.clone(), None);
         for refused in [
-            page("https://shop.example.test/checkout", "Checkout", "Pay with card 4111 1111 1111 1111 exp 12/29"),
-            page("https://mail.example.test/inbox", "Inbox", "Your verification code is 482913."),
-            page("https://console.example.test/keys", "Keys", &format!("Copy your key now: {}", bare_key())),
-            page("https://console.example.test/keys", &format!("Key {}", bare_key()), "Keys"),
-            page(&format!("https://app.example.test/reset/{JWT}"), "Reset", "Choose a new password"),
-            page("https://notes.example.test/n/1", "Note", "password: SYNTHhunter2"),
+            page(
+                "https://shop.example.test/checkout",
+                "Checkout",
+                "Pay with card 4111 1111 1111 1111 exp 12/29",
+            ),
+            page(
+                "https://mail.example.test/inbox",
+                "Inbox",
+                "Your verification code is 482913.",
+            ),
+            page(
+                "https://console.example.test/keys",
+                "Keys",
+                &format!("Copy your key now: {}", bare_key()),
+            ),
+            page(
+                "https://console.example.test/keys",
+                &format!("Key {}", bare_key()),
+                "Keys",
+            ),
+            page(
+                &format!("https://app.example.test/reset/{JWT}"),
+                "Reset",
+                "Choose a new password",
+            ),
+            page(
+                "https://notes.example.test/n/1",
+                "Note",
+                "password: SYNTHhunter2",
+            ),
         ] {
-            assert_eq!(pump.ingest_ocr_event(&refused).unwrap(), IngestOutcome::Refused);
+            assert_eq!(
+                pump.ingest_ocr_event(&refused).unwrap(),
+                IngestOutcome::Refused
+            );
         }
         assert_eq!(pump.refused_count(), 6);
         assert_eq!(pump.events_ingested_count(), 0);
-        assert!(store.get_event(EventId(1)).unwrap().is_none(), "nothing stored");
+        assert!(
+            store.get_event(EventId(1)).unwrap().is_none(),
+            "nothing stored"
+        );
 
         let kept = page(
             &format!("https://app.example.test/cb?access_token={JWT}&lang=en"),
@@ -1604,10 +1642,19 @@ mod tests {
             panic!("a page whose only secret is a token parameter is kept");
         };
         let stored = store.get_event(id).unwrap().unwrap();
-        assert_eq!(stored.url.as_deref(), Some("https://app.example.test/cb?lang=en"));
+        assert_eq!(
+            stored.url.as_deref(),
+            Some("https://app.example.test/cb?lang=en")
+        );
         assert!(!stored.text.contains("access_token"), "{}", stored.text);
-        assert!(!stored.text.contains("TGFyY2hTZWNyZXRTaWduYXR1cmU"), "{}", stored.text);
-        assert!(stored.text.contains("url=https://app.example.test/cb?lang=en"));
+        assert!(
+            !stored.text.contains("TGFyY2hTZWNyZXRTaWduYXR1cmU"),
+            "{}",
+            stored.text
+        );
+        assert!(stored
+            .text
+            .contains("url=https://app.example.test/cb?lang=en"));
     }
 
     /// The end-to-end run's two leaks (c8): a bare key, and a token in the
@@ -1633,11 +1680,17 @@ mod tests {
         };
         let key = bare_key();
         assert_eq!(
-            pump.ingest_ocr_event(&frame("Terminal", "", &format!("Bramble agent setup\n{key}"))).unwrap(),
+            pump.ingest_ocr_event(&frame(
+                "Terminal",
+                "",
+                &format!("Bramble agent setup\n{key}")
+            ))
+            .unwrap(),
             IngestOutcome::Refused
         );
         assert_eq!(
-            pump.ingest_ocr_event(&frame(&format!("Keys {key}"), "", "Bramble agent setup")).unwrap(),
+            pump.ingest_ocr_event(&frame(&format!("Keys {key}"), "", "Bramble agent setup"))
+                .unwrap(),
             IngestOutcome::Refused
         );
         let token_url = format!("https://app.larch.example/auth/callback?access_token={JWT}");
@@ -1648,7 +1701,10 @@ mod tests {
             panic!("kept with a clean address");
         };
         let stored = store.get_event(id).unwrap().unwrap();
-        assert_eq!(stored.url.as_deref(), Some("https://app.larch.example/auth/callback"));
+        assert_eq!(
+            stored.url.as_deref(),
+            Some("https://app.larch.example/auth/callback")
+        );
         assert!(!stored.text.contains("access_token="), "{}", stored.text);
         assert_eq!(pump.refused_count(), 2);
         assert_eq!(pump.events_ingested_count(), 1);
@@ -1672,7 +1728,10 @@ mod tests {
             ocr_text: format!("export KEY={}", bare_key()),
             keyframe_hash: [0u8; 32],
         };
-        assert_eq!(pump.ingest_ocr_event(&frame).unwrap(), IngestOutcome::Refused);
+        assert_eq!(
+            pump.ingest_ocr_event(&frame).unwrap(),
+            IngestOutcome::Refused
+        );
         assert!(store.get_event(EventId(1)).unwrap().is_none());
     }
 }

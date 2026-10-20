@@ -332,7 +332,11 @@ impl ContextPacket {
     /// understanding block. The caller's own focus is left as it was asked.
     pub fn scrub_secrets(&mut self) {
         use crate::outbound::{scrub_option, scrub_string};
-        for item in self.sections.iter_mut().flat_map(|section| section.items.iter_mut()) {
+        for item in self
+            .sections
+            .iter_mut()
+            .flat_map(|section| section.items.iter_mut())
+        {
             scrub_string(&mut item.text);
         }
         for citation in &mut self.citations {

@@ -189,7 +189,13 @@ pub fn redact_secrets(text: &str) -> Cow<'_, str> {
     if contains_secret(&current) {
         current = current
             .split('\n')
-            .map(|line| if contains_secret(line) { REDACTED } else { line })
+            .map(|line| {
+                if contains_secret(line) {
+                    REDACTED
+                } else {
+                    line
+                }
+            })
             .collect::<Vec<_>>()
             .join("\n");
     }
@@ -417,8 +423,24 @@ mod tests {
             key(&["sk-", "proj-", BODY]),
             key(&["sk-", "svcacct-", BODY]),
             key(&["sk-", BODY]),
-            key(&["xox", "b-", "1234567890", "-", "9876543210", "-", &BODY[..24]]),
-            key(&["xox", "p-", "1234567890", "-", "9876543210", "-", &BODY[..24]]),
+            key(&[
+                "xox",
+                "b-",
+                "1234567890",
+                "-",
+                "9876543210",
+                "-",
+                &BODY[..24],
+            ]),
+            key(&[
+                "xox",
+                "p-",
+                "1234567890",
+                "-",
+                "9876543210",
+                "-",
+                &BODY[..24],
+            ]),
             key(&["gh", "p_", &BODY[..36]]),
             key(&["github", "_pat_", &BODY[..22], "_", BODY]),
             key(&["gl", "pat-", &BODY[..20]]),
@@ -432,7 +454,10 @@ mod tests {
         ];
         for key in &keys {
             assert!(contains_secret(key), "{key}");
-            assert!(contains_secret(&format!("Copy it now:\n{key}\nthen close")), "{key}");
+            assert!(
+                contains_secret(&format!("Copy it now:\n{key}\nthen close")),
+                "{key}"
+            );
         }
     }
 
@@ -485,7 +510,11 @@ mod tests {
         for kept in ["Bramble", "Pay with", "today.", "and more"] {
             assert!(redacted.contains(kept), "{kept} not in {redacted}");
         }
-        assert_eq!(redact_secrets(&redacted), redacted, "redacting twice changes nothing");
+        assert_eq!(
+            redact_secrets(&redacted),
+            redacted,
+            "redacting twice changes nothing"
+        );
     }
 
     #[test]

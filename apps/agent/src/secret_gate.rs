@@ -90,7 +90,10 @@ mod tests {
             "https://app.larch.example/cb?access_token={JWT}&lang=en"
         )));
         assert_eq!(url.as_deref(), Some("https://app.larch.example/cb?lang=en"));
-        assert_eq!(find_secret("Welcome back", Some("Larch"), url.as_deref()), None);
+        assert_eq!(
+            find_secret("Welcome back", Some("Larch"), url.as_deref()),
+            None
+        );
     }
 
     #[test]
@@ -104,7 +107,13 @@ mod tests {
 
     #[test]
     fn the_text_and_the_title_are_checked_too() {
-        let key = ["sk-", "ant-", "api03-", "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R"].concat();
+        let key = [
+            "sk-",
+            "ant-",
+            "api03-",
+            "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R",
+        ]
+        .concat();
         assert_eq!(find_secret(&key, None, None), Some(SecretIn::Text));
         assert_eq!(
             find_secret("Keys", Some(&format!("Console — {key}")), None),

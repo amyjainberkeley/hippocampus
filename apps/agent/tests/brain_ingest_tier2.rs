@@ -43,7 +43,6 @@ use std::sync::Arc;
 
 use mci_agent::brain_ingest::{prepare_event_content, BrainIngestor, BrainPump, IngestOutcome};
 use mci_brain::extraction::tier1::persist_tier1_matches;
-use mci_brain::{Event, EventChunker, EventId, EventSource, Tier1Extractor};
 use mci_brain::extraction::tier1::{
     KIND_EMAIL, KIND_REDACTED_TOKEN, KIND_URL, SUBKIND_CASCADE_REDACTED, SUBKIND_JWT,
 };
@@ -56,6 +55,7 @@ use mci_brain::{
     mark_event_tier2_processed, persist_tier2_matches, BrainStore, MockNerBackend,
     SqlCipherBrainStore, Tier2Extractor, Tier2RawMatch,
 };
+use mci_brain::{Event, EventChunker, EventId, EventSource, Tier1Extractor};
 use mci_core::crypto::DbKey;
 use mci_core::ipc::Message;
 use mci_core::store::open as mci_core_open;
@@ -108,7 +108,8 @@ fn full_pipeline_brain_pump_tier1_then_tier2_populates_entity_mentions() {
     // The agent now refuses a frame carrying a JWT before the store
     // (`mci_agent::secret_gate`): nothing is stored or extracted.
     assert_eq!(
-        pump.ingest_ocr_event(&frame).expect("a refusal is not an error"),
+        pump.ingest_ocr_event(&frame)
+            .expect("a refusal is not an error"),
         IngestOutcome::Refused
     );
     assert_eq!(pump.tier1_mentions_persisted_count(), 0);

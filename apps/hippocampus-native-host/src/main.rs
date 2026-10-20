@@ -588,12 +588,34 @@ mod tests {
     fn a_page_holding_a_secret_is_dropped_before_any_socket_write() {
         use std::os::unix::net::UnixStream;
 
-        let key = ["sk-", "ant-", "api03-", "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R"].concat();
+        let key = [
+            "sk-",
+            "ant-",
+            "api03-",
+            "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R",
+        ]
+        .concat();
         for (url, title, text) in [
-            ("https://shop.example.test/checkout", "Checkout", "Pay with card 4111 1111 1111 1111 exp 12/29".to_owned()),
-            ("https://mail.example.test/inbox", "Inbox", "Your verification code is 482913.".to_owned()),
-            ("https://console.example.test/keys", "Keys", format!("Copy your key now: {key}")),
-            ("https://console.example.test/keys", &format!("Key {key}") as &str, "Keys".to_owned()),
+            (
+                "https://shop.example.test/checkout",
+                "Checkout",
+                "Pay with card 4111 1111 1111 1111 exp 12/29".to_owned(),
+            ),
+            (
+                "https://mail.example.test/inbox",
+                "Inbox",
+                "Your verification code is 482913.".to_owned(),
+            ),
+            (
+                "https://console.example.test/keys",
+                "Keys",
+                format!("Copy your key now: {key}"),
+            ),
+            (
+                "https://console.example.test/keys",
+                &format!("Key {key}") as &str,
+                "Keys".to_owned(),
+            ),
         ] {
             let (mut a, b) = UnixStream::pair().expect("socket pair");
             drop(b); // any write would now fail with a broken pipe
@@ -621,7 +643,10 @@ mod tests {
         let mut sent = Vec::new();
         b.read_to_end(&mut sent).unwrap();
         let sent = String::from_utf8_lossy(&sent);
-        assert!(sent.contains("https://app.example.test/cb?lang=en"), "{sent}");
+        assert!(
+            sent.contains("https://app.example.test/cb?lang=en"),
+            "{sent}"
+        );
         assert!(!sent.contains("access_token"), "{sent}");
     }
 

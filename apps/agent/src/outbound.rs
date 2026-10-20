@@ -18,8 +18,8 @@
 
 use std::borrow::Cow;
 
-pub use mci_brain::redaction::ocr_secrets::REDACTED;
 use mci_brain::redaction::ocr_secrets::redact_secrets;
+pub use mci_brain::redaction::ocr_secrets::REDACTED;
 use mci_brain::redaction::url_secrets::strip_secret_params;
 use mci_brain::Event;
 use serde_json::Value;
@@ -145,9 +145,9 @@ fn walk(value: &mut Value, key: Option<&str>) -> bool {
         Value::Array(items) => items
             .iter_mut()
             .fold(false, |changed, item| walk(item, key) | changed),
-        Value::Object(map) => map
-            .iter_mut()
-            .fold(false, |changed, (key, item)| walk(item, Some(key)) | changed),
+        Value::Object(map) => map.iter_mut().fold(false, |changed, (key, item)| {
+            walk(item, Some(key)) | changed
+        }),
         Value::Null | Value::Bool(_) | Value::Number(_) => false,
     }
 }
@@ -199,7 +199,13 @@ mod tests {
     use mci_brain::redaction::ocr_secrets::contains_secret;
 
     fn key() -> String {
-        ["sk-", "ant-", "api03-", "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R"].concat()
+        [
+            "sk-",
+            "ant-",
+            "api03-",
+            "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R",
+        ]
+        .concat()
     }
 
     #[test]
@@ -249,7 +255,10 @@ mod tests {
             "content": [{"type": "text", "text": format!("The answer: {}", key())}],
         });
         scrub_tool_result(&mut result);
-        assert_eq!(result["content"][0]["text"], format!("The answer: {REDACTED}"));
+        assert_eq!(
+            result["content"][0]["text"],
+            format!("The answer: {REDACTED}")
+        );
     }
 
     #[test]
@@ -272,7 +281,10 @@ mod tests {
             tab_id: None,
             embedding: None,
         };
-        assert!(contains_secret(text), "scanned whole, the header would be redacted");
+        assert!(
+            contains_secret(text),
+            "scanned whole, the header would be redacted"
+        );
         scrub_event(&mut event);
         assert_eq!(event.text, text);
     }
@@ -285,7 +297,10 @@ mod tests {
             app_bundle_id: Some("com.apple.Terminal".into()),
             window_title: Some(format!("zsh {}", key())),
             url: Some("https://x.example/?token=SYNTH".into()),
-            text: format!("[app=com.apple.Terminal | title=zsh | url=? | ts=?]\nexport K={}", key()),
+            text: format!(
+                "[app=com.apple.Terminal | title=zsh | url=? | ts=?]\nexport K={}",
+                key()
+            ),
             summary: None,
             entities: None,
             episode_id: None,
@@ -298,7 +313,9 @@ mod tests {
         assert!(!contains_secret(&event.text), "{}", event.text);
         assert!(!contains_secret(event.window_title.as_deref().unwrap()));
         assert_eq!(event.url.as_deref(), Some("https://x.example/"));
-        assert!(event.text.starts_with("[app=com.apple.Terminal | title=zsh | url=? | ts=?]\n"));
+        assert!(event
+            .text
+            .starts_with("[app=com.apple.Terminal | title=zsh | url=? | ts=?]\n"));
     }
 
     #[test]

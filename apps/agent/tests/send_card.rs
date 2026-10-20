@@ -284,8 +284,23 @@ fn a_moment_forgotten_since_the_click_is_left_out_and_counted() {
 fn an_unlabelled_vendor_key_line_is_left_out_of_the_card() {
     let dir = tempfile::tempdir().unwrap();
     let db = empty_memory(dir.path());
-    let anthropic = ["sk-", "ant-", "api03-", "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R"].concat();
-    let slack = ["xox", "b-", "1234567890", "-", "1234567890123", "-", "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5"].concat();
+    let anthropic = [
+        "sk-",
+        "ant-",
+        "api03-",
+        "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R",
+    ]
+    .concat();
+    let slack = [
+        "xox",
+        "b-",
+        "1234567890",
+        "-",
+        "1234567890123",
+        "-",
+        "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5",
+    ]
+    .concat();
     let text = format!("dev@studio trailhead-shop % cat .env.local\n{anthropic}\n{slack}\ntest result: ok. 12 passed");
     let ids = seed(
         &db,

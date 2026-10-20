@@ -90,8 +90,16 @@ mod tests {
     /// card, a one-time code and a bare key, and forwarded them.
     #[test]
     fn cards_codes_and_bare_keys_are_secrets_here_too() {
-        let key = ["sk-", "ant-", "api03-", "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R"].concat();
-        assert!(contains_secret("Pay with card 4111 1111 1111 1111 exp 12/29"));
+        let key = [
+            "sk-",
+            "ant-",
+            "api03-",
+            "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R",
+        ]
+        .concat();
+        assert!(contains_secret(
+            "Pay with card 4111 1111 1111 1111 exp 12/29"
+        ));
         assert!(contains_secret("Your verification code is 482913."));
         assert!(contains_secret(&format!("Copy your key now: {key}")));
     }
@@ -99,8 +107,16 @@ mod tests {
     #[test]
     fn a_page_is_checked_in_its_title_and_addresses() {
         let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl";
-        assert!(page_holds_secret("clean", "Reset password: SYNTHhunter2", &[]));
-        assert!(page_holds_secret("clean", "Reset", &[&format!("https://x.example/reset/{jwt}")]));
+        assert!(page_holds_secret(
+            "clean",
+            "Reset password: SYNTHhunter2",
+            &[]
+        ));
+        assert!(page_holds_secret(
+            "clean",
+            "Reset",
+            &[&format!("https://x.example/reset/{jwt}")]
+        ));
         // A token only in a sign-in parameter is removed, not a reason to drop.
         let url = format!("https://x.example/cb?access_token={jwt}&lang=en");
         assert!(!page_holds_secret("Welcome back", "Larch", &[&url]));

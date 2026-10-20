@@ -637,7 +637,13 @@ fn hippocampus_output_and_secrets_never_come_back_through_a_transcript() {
     import_codex(&store, &sb.codex_root, |_| {}).expect("import");
     let before = all_events(&store).len();
 
-    let key = ["sk-", "ant-", "api03-", "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R"].concat();
+    let key = [
+        "sk-",
+        "ant-",
+        "api03-",
+        "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R",
+    ]
+    .concat();
     let claude_user = |ts: &str, text: &str| {
         serde_json::json!({
             "type": "user", "isSidechain": false, "cwd": "/Users/me/demo", "sessionId": "sess-1",
@@ -649,7 +655,8 @@ fn hippocampus_output_and_secrets_never_come_back_through_a_transcript() {
     };
     let packet = format!("{DISCLAIMER}\n\n# demo (/Users/me/demo)\n- Forgotten Bramble decision");
     let card = format!("{WARNING}\n\nForgotten Bramble moment\nPlease summarise it.");
-    let context = format!("{CONTEXT_PACKET_HEADING}\n\n{SCREEN_TEXT_IS_DATA}\n- Forgotten Bramble line");
+    let context =
+        format!("{CONTEXT_PACKET_HEADING}\n\n{SCREEN_TEXT_IS_DATA}\n- Forgotten Bramble line");
     for line in [
         claude_user("2026-09-25T10:30:00.000Z", &packet),
         claude_user("2026-09-25T10:31:00.000Z", &format!("Look at this:\n{card}")),
