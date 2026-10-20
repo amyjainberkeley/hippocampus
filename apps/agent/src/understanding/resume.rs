@@ -20,8 +20,11 @@
 //! Search result pages, calls and Hippocampus are never offered, and only
 //! what is still in memory can be: forgotten moments take their sessions'
 //! notes with them. Private windows and the apps and sites Hippocampus never
-//! reads were never saved; the window also leaves out whatever the person's
-//! own never-read rules name today, and anything not installed.
+//! reads were never saved. What the person's own never-read list names today
+//! (`denylist.toml` beside the memory: apps, addresses and window titles) is
+//! left out here, as Ask {Tool}'s builder leaves it out, even when it was
+//! remembered before the rule; the window leaves it out again, with the
+//! built-in rules, and anything not installed.
 //!
 //! Every reason is a code (`reason`); the window says it in its own words.
 
@@ -39,6 +42,7 @@ use serde::Serialize;
 use super::work::read::{self, About, Held, ItemAcc};
 use super::work::{is_item_id, Home};
 use super::{ReadCommand, ReadError};
+use crate::handoff_card::KeptOut;
 
 /// How many web pages start ticked.
 pub const PAGES_TICKED: usize = 10;
@@ -139,13 +143,14 @@ impl ResumeTarget {
 /// memory can't be read. Neither repeats what was given or anything read.
 pub fn run_cli(command: &ReadCommand<'_>) -> Result<serde_json::Value, ReadError> {
     let item = item_of(command.args)?;
-    let plan = plan(
+    let plan = plan_leaving_out(
         command.store,
         command.key,
         &item,
         command.tz_offset_secs,
         command.now_us,
         &Home::from_env(),
+        &KeptOut::read(command.db_path),
     )
     .map_err(|_| ReadError::Failed("resume-plan could not be read from the memory".into()))?;
     serde_json::to_value(plan)
@@ -180,6 +185,23 @@ pub fn plan(
     now_us: u64,
     home: &Home,
 ) -> Result<ResumePlan, StoreError> {
+    plan_leaving_out(store, key, id, tz, now_us, home, &KeptOut::default())
+}
+
+/// [`plan`], leaving out every window and target the person's never-read
+/// list names: by app, by address or by a part of the window's title.
+///
+/// # Errors
+/// Store failures.
+pub fn plan_leaving_out(
+    store: &SqlCipherBrainStore,
+    key: &DbKey,
+    id: &str,
+    tz: i32,
+    now_us: u64,
+    home: &Home,
+    kept_out: &KeptOut,
+) -> Result<ResumePlan, StoreError> {
     let model = super::work::model(store, key, None, tz, now_us, home)?;
     let Some((_, acc)) = model.items.iter().find(|(item, _)| item == id) else {
         return Ok(ResumePlan::default());
@@ -196,9 +218,10 @@ pub fn plan(
     if kind == SubjectKind::Code {
         targets.extend(code_folder(store, acc, &session.held, about, home)?);
     }
-    targets.extend(documents(acc, &session.held, about, &urls));
-    targets.extend(pages(&session.held, about, &urls));
+    targets.extend(documents(acc, &session.held, about, &urls, kept_out));
+    targets.extend(pages(&session.held, about, &urls, kept_out));
     targets.extend(other_apps(&session.held, about, &targets));
+    leave_out(&mut targets, kept_out);
     Ok(ResumePlan {
         item: Some(ResumeItem {
             name: acc.name.clone(),
@@ -210,6 +233,29 @@ pub fn plan(
         }),
         items: targets,
     })
+}
+
+/// Leaves out every target the never-read list names, by its app, its
+/// address or its title, as the window does with the same list.
+fn leave_out(targets: &mut Vec<ResumeTarget>, kept_out: &KeptOut) {
+    targets.retain(|target| {
+        !kept_out.keeps_out(
+            target.app.as_deref(),
+            target.url.as_deref(),
+            Some(&target.title),
+        )
+    });
+}
+
+/// Whether the never-read list names a held window: its app, the address
+/// its newest moment had, or a part of its title as it was on screen.
+fn kept_out_window(window: &Held, urls: &HashMap<i64, String>, kept_out: &KeptOut) -> bool {
+    let url = window.newest().and_then(|id| urls.get(&id));
+    kept_out.keeps_out(
+        Some(&window.app),
+        url.map(String::as_str),
+        window.title.as_deref(),
+    )
 }
 
 /// The address each browser window's newest moment had.
@@ -300,6 +346,7 @@ fn documents(
     held: &[Held],
     about: &[About],
     urls: &HashMap<i64, String>,
+    kept_out: &KeptOut,
 ) -> Vec<ResumeTarget> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut windows: Vec<(&Held, &str, &str)> = Vec::new();
@@ -307,7 +354,10 @@ fn documents(
         let About::Item { identity, subject } = what else {
             continue;
         };
-        if subject.kind == SubjectKind::Code || !seen.insert(identity.clone()) {
+        if subject.kind == SubjectKind::Code
+            || kept_out_window(window, urls, kept_out)
+            || !seen.insert(identity.clone())
+        {
             continue;
         }
         windows.push((window, identity, &subject.name));
@@ -338,7 +388,12 @@ fn documents(
 
 /// The web pages open in the session, newest first, one per address: the
 /// newest ten ticked. A search's results are never offered.
-fn pages(held: &[Held], about: &[About], urls: &HashMap<i64, String>) -> Vec<ResumeTarget> {
+fn pages(
+    held: &[Held],
+    about: &[About],
+    urls: &HashMap<i64, String>,
+    kept_out: &KeptOut,
+) -> Vec<ResumeTarget> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut out: Vec<ResumeTarget> = Vec::new();
     for (window, what) in held.iter().zip(about).rev() {
@@ -347,7 +402,7 @@ fn pages(held: &[Held], about: &[About], urls: &HashMap<i64, String>) -> Vec<Res
             About::AiChat { title, .. } => title.clone(),
             _ => continue,
         };
-        if !is_browser(Some(&window.app)) {
+        if !is_browser(Some(&window.app)) || kept_out_window(window, urls, kept_out) {
             continue;
         }
         let url = window
@@ -505,6 +560,87 @@ mod tests {
         assert!(!target.clone().because("no_address").checked);
         assert!(target.clone().because("single_note").checked);
         assert!(target.because("no_folder").checked);
+    }
+
+    fn window(app: &str, title: &str, event: i64) -> Held {
+        Held {
+            start_us: 0,
+            end_us: 60_000_000,
+            app: app.to_owned(),
+            title: Some(title.to_owned()),
+            host: None,
+            events: vec![event],
+            first_line: None,
+        }
+    }
+
+    fn page(name: &str) -> About {
+        About::Page {
+            key: name.to_lowercase(),
+            name: name.to_owned(),
+        }
+    }
+
+    const NEVER_READ: &str =
+        "[[denylist]]\nkind = \"windowTitleSubstring\"\npattern = \"Payroll\"\n\n\
+        [[denylist]]\nkind = \"windowTitleSubstring\"\npattern = \"Google Sheets\"\n\n\
+        [[denylist]]\nkind = \"urlPrefix\"\npattern = \"https://bank.example/\"\n\n\
+        [[denylist]]\nkind = \"appBundle\"\npattern = \"com.example.Diary\"\n";
+
+    #[test]
+    fn a_page_the_never_read_list_names_is_never_offered() {
+        let chrome = "com.google.Chrome";
+        let windows = [
+            window(chrome, "Payroll October", 1),
+            window(chrome, "Statements", 2),
+            window(chrome, "Headcount - Google Sheets", 3),
+            window(chrome, "Rounding half to even", 4),
+        ];
+        let about = [
+            page("Payroll October"),
+            page("Statements"),
+            page("Headcount"),
+            page("Rounding half to even"),
+        ];
+        let urls = HashMap::from([
+            (1, "https://payroll.example/october".to_owned()),
+            (2, "https://bank.example/statements?month=10".to_owned()),
+            (
+                3,
+                "https://docs.google.com/spreadsheets/d/heads/edit".to_owned(),
+            ),
+            (4, "https://devnotes.example/rounding".to_owned()),
+        ]);
+        let offered = |kept_out: &KeptOut| -> Vec<String> {
+            pages(&windows, &about, &urls, kept_out)
+                .into_iter()
+                .map(|target| target.title)
+                .collect()
+        };
+        // By a part of its title, its address, or its title as it was on
+        // screen even when the page's own name doesn't hold the words.
+        assert_eq!(
+            offered(&KeptOut::parse(NEVER_READ)),
+            ["Rounding half to even"]
+        );
+        assert_eq!(offered(&KeptOut::default()).len(), 4, "no list, no change");
+    }
+
+    #[test]
+    fn every_target_the_never_read_list_names_is_left_out() {
+        let mut targets = vec![
+            ResumeTarget::new("folder", "payroll-tools", "com.microsoft.VSCode"),
+            ResumeTarget::new("app", "Diary", "com.example.Diary"),
+            ResumeTarget::new("document", "Payroll October", "com.apple.Notes"),
+            ResumeTarget::new("app", "Slack", "com.tinyspeck.slackmacgap"),
+        ];
+        leave_out(&mut targets, &KeptOut::parse(NEVER_READ));
+        let titles: Vec<&str> = targets.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            ["payroll-tools", "Slack"],
+            "titles match as written"
+        );
     }
 
     #[test]

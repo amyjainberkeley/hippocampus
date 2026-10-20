@@ -145,8 +145,9 @@ public actor AppleScriptOpenTabs: OpenTabsReading {
 }
 
 public extension ResumeRules {
-    /// The rules in the app: the apps and sites Hippocampus never reads,
-    /// and the person's own never-read list, read once when the sheet opens.
+    /// The rules in the app: the apps, sites and private windows' titles
+    /// Hippocampus never reads, and the person's own never-read list (apps,
+    /// addresses and parts of titles), read once when the sheet opens.
     static func system(
         userList: URL? = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent("MCI").appendingPathComponent("denylist.toml")
@@ -157,7 +158,8 @@ public extension ResumeRules {
         let denylist = SensitiveCaptureDenylist(entries: entries)
         return ResumeRules(
             isNeverReadApp: { denylist.appIsDenied(bundleId: $0) },
-            isNeverReadSite: { denylist.urlIsDenied($0) }
+            isNeverReadSite: { denylist.urlIsDenied($0) },
+            isNeverReadTitle: { denylist.windowTitleIsDenied($0) }
         )
     }
 }

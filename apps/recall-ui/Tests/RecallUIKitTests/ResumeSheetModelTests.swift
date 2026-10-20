@@ -131,6 +131,38 @@ final class ResumeSheetModelTests: XCTestCase {
         XCTAssertTrue(without.isNeverReadApp("com.1password.1password"))
     }
 
+    /// A window title the person's never-read list names (`windowTitleSubstring`,
+    /// as Ask {Tool}'s builder honours it) is never offered by Resume, even
+    /// when it was remembered before the rule (from the privacy verifier).
+    func testATitleOnTheNeverReadListIsNeverOffered() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("resume-title-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let list = folder.appendingPathComponent("denylist.toml")
+        try """
+            [[denylist]]
+            kind = "windowTitleSubstring"
+            pattern = "Payroll"
+
+            """.write(to: list, atomically: true, encoding: .utf8)
+        let rules = ResumeRules.system(userList: list)
+        let (model, _) = model([
+            .init(kind: "document", title: "Payroll October", app: chrome,
+                  url: "https://docs.google.com/spreadsheets/d/pay/edit"),
+            .init(kind: "page", title: "Rounding half to even", app: chrome, url: "https://devnotes.example/rounding"),
+        ], installed: [chrome], rules: rules)
+        await model.load()
+        XCTAssertEqual(model.rows.map(\.target.title), ["Rounding half to even"],
+                       "a title on the never-read list is offered")
+        // Titles match as the capture helper matches them: the part as
+        // written, and a private window's own words.
+        XCTAssertFalse(rules.isNeverReadTitle("payroll notes"))
+        XCTAssertTrue(rules.isNeverReadTitle("New Incognito Tab"))
+        XCTAssertFalse(ResumeRules.system(userList: folder.appendingPathComponent("none.toml"))
+            .isNeverReadTitle("Payroll October"), "no list, no title of the person's")
+        XCTAssertFalse(ResumeRules.none.isNeverReadTitle("Payroll October"))
+    }
+
     func testTheNewestTenPagesAreTickedAndTheSheetSaysSo() async {
         let pagesPlan: [ResumePlan.Target] = (0..<12).map { index in
             .init(kind: "page", title: "Page \(index)", app: chrome, url: "https://pages.example/\(index)",

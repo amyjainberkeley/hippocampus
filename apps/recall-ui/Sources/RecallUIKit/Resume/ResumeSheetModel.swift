@@ -32,11 +32,16 @@ public protocol OpenTabsReading: Sendable {
 public struct ResumeRules: Sendable {
     public let isNeverReadApp: @Sendable (String) -> Bool
     public let isNeverReadSite: @Sendable (String) -> Bool
+    /// A title the never-read list names by a part of it, as Ask {Tool}
+    /// leaves it out: a page or document remembered before the rule.
+    public let isNeverReadTitle: @Sendable (String) -> Bool
 
     public init(isNeverReadApp: @escaping @Sendable (String) -> Bool,
-                isNeverReadSite: @escaping @Sendable (String) -> Bool) {
+                isNeverReadSite: @escaping @Sendable (String) -> Bool,
+                isNeverReadTitle: @escaping @Sendable (String) -> Bool = { _ in false }) {
         self.isNeverReadApp = isNeverReadApp
         self.isNeverReadSite = isNeverReadSite
+        self.isNeverReadTitle = isNeverReadTitle
     }
 
     /// No rules: what tests and renders use.
@@ -139,6 +144,7 @@ public final class ResumeSheetModel: ObservableObject {
         plan.items.compactMap { target -> ResumeRow? in
             if let app = target.app, rules.isNeverReadApp(app) { return nil }
             if let url = target.url, rules.isNeverReadSite(url) { return nil }
+            if rules.isNeverReadTitle(target.title) { return nil }
             let name = target.app.map(appName) ?? ""
             let group = Self.group(of: target)
             var blocked: String?
