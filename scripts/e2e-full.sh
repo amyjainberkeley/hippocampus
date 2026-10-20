@@ -197,12 +197,17 @@ trap 'exit 143' TERM
 # (a model server or MCP server on loopback); every other connection, name
 # lookups (mDNSResponder) and background URL sessions (nsurlsessiond) are
 # refused, whatever API asks, and the kernel logs each refusal.
-TRIPWIRE_PROFILE='(version 1) (allow default)
-(deny network-outbound (remote ip "*:*"))
-(allow network-outbound (remote ip "localhost:*"))
-(deny network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))
-(deny mach-lookup (global-name "com.apple.dnssd.service") (global-name "com.apple.nsurlsessiond")
-    (global-name "com.apple.nsurlsessiond-launchondemand"))'
+# Each refusal carries this run's own tag in the kernel's report, so the
+# audit finds every one, from any process of the run however short-lived,
+# and none from anything else on the Mac.
+TRIPWIRE_TAG="hippo-e2e-tripwire $(basename "$RUN_ROOT")"
+TRIPWIRE_PROFILE="(version 1) (allow default)
+(deny network-outbound (remote ip \"*:*\") (with message \"$TRIPWIRE_TAG\"))
+(allow network-outbound (remote ip \"localhost:*\"))
+(deny network-outbound (remote unix-socket (path-literal \"/private/var/run/mDNSResponder\"))
+    (with message \"$TRIPWIRE_TAG\"))
+(deny mach-lookup (global-name \"com.apple.dnssd.service\") (global-name \"com.apple.nsurlsessiond\")
+    (global-name \"com.apple.nsurlsessiond-launchondemand\") (with message \"$TRIPWIRE_TAG\"))"
 TRIPWIRE=()
 (( NET_TRIPWIRE == 1 )) && TRIPWIRE=(/usr/bin/sandbox-exec -p "$TRIPWIRE_PROFILE")
 # Every product program runs with this environment and nothing else, inside
@@ -1182,7 +1187,7 @@ if (( AUDIT == 1 )); then
     if "$SCRIPT_DIR/audit-storage-security.sh" --home "$E2E_HOME" --tmpdir "$E2E_TMP" \
         --markers "$H/markers.txt" --key-file "$KEY_FILE" --wal-snapshots "$H/wal-snapshots" \
         --sampler "$H/sampler" --outputs "$H/outputs.txt" --keyframe-tool "$KEYFRAME_TOOL" \
-        --since "$START_EPOCH" "${BINARIES[@]}" ${TRIPWIRE[@]+--net-tripwire} > "$H/audit.log" 2>&1; then
+        --since "$START_EPOCH" "${BINARIES[@]}" ${TRIPWIRE[@]+--net-tripwire "$TRIPWIRE_TAG"} > "$H/audit.log" 2>&1; then
         pass audit "storage-security audit: $(tail -n 1 "$H/audit.log")"
     else
         fail audit "storage-security audit: $(tail -n 1 "$H/audit.log")"

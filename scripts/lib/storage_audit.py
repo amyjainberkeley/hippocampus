@@ -772,7 +772,7 @@ def telemetry_verdict(scan: dict, runtime: tuple[bool, str] | None) -> tuple[boo
 
 def check_network(report: Report, repo: Path, sampler: Path | None, real_home: Path, repo_root: Path,
                   binaries: list[Path], since: float | None, static: bool = True,
-                  launchers: list[Path] | None = None, tripwire: bool = False) -> None:
+                  launchers: list[Path] | None = None, tripwire: str | None = None) -> None:
     if static:
         in_place_status, in_place_last, tracked_status, tracked_last = run_no_egress(repo)
         message = f"scripts/launch/no-egress.sh on the tracked sources: {tracked_last}"
@@ -816,6 +816,11 @@ def check_network(report: Report, repo: Path, sampler: Path | None, real_home: P
     # is a reach outside the throwaway home (net.isolation).
     refused = sandbox_denials(product_pids, programs, since, real) if since is not None and product_pids else None
     home_refusals, network_refusals = refused if refused is not None else ([], [])
+    tripped = tripwire_refusals(tripwire, since) if tripwire and since is not None else []
+    if tripped is None:
+        refused = None
+    else:
+        network_refusals = sorted(set(network_refusals) | set(tripped))
     if since is None or not product_pids:
         report.add(False, "net.runtime-log", "no run start or no product processes to look up in the unified log")
     else:
@@ -827,9 +832,10 @@ def check_network(report: Report, repo: Path, sampler: Path | None, real_home: P
                        "the run's processes tried to reach the network (unified log, hostnames redacted by macOS): " +
                        "; ".join((connections + network_refusals)[:6]))
         else:
-            fenced = (" Every one of them but the fixture feed ran inside the network tripwire, which refuses and logs "
-                      "any connection off this Mac, name lookup or background URL session, from any API; the kernel "
-                      "logged no refusal, and the feed's OCR worker ran in its own no-network sandbox." if tripwire else "")
+            fenced = (" Every product program but the fixture feed ran inside the network tripwire, which refuses any "
+                      "connection off this Mac, name lookup or background URL session, from any API, and tags each "
+                      f"refusal ('{tripwire}'); the kernel logged none, and the feed's OCR worker ran in its own "
+                      "no-network sandbox." if tripwire else "")
             report.add(True, "net.runtime-log",
                        f"the unified log shows no network connection, CFNetwork task or refused network attempt by the run's "
                        f"{len(product_pids)} product processes ({', '.join(product_seen)}).{fenced}")
@@ -904,12 +910,15 @@ def network_activity(entries: list[dict], programs: dict[int, set[str]]) -> dict
     return findings
 
 
-def sandbox_refusals(entries: list[dict], pids: list[int]) -> list[tuple[str, int, str, str]]:
-    """(program, pid, operation, target) for each sandbox refusal of one of `pids`."""
+def sandbox_refusals(entries: list[dict], pids: list[int] | None) -> list[tuple[str, int, str, str]]:
+    """(program, pid, operation, target) for each sandbox refusal of one of
+    `pids`, or of any process when `pids` is None."""
     found = []
     for entry in entries:
-        match = re.search(r"Sandbox: ([^(]+)\((\d+)\) deny\(\d+\) (\S+) (.+)$", entry.get("eventMessage", ""))
-        if match and int(match.group(2)) in pids:
+        # A rule's own message, when it has one, follows on the next line.
+        first_line = entry.get("eventMessage", "").split("\n", 1)[0]
+        match = re.search(r"Sandbox: ([^(]+)\((\d+)\) deny\(\d+\) (\S+) (.+)$", first_line)
+        if match and (pids is None or int(match.group(2)) in pids):
             found.append((match.group(1), int(match.group(2)), match.group(3), match.group(4)))
     return found
 
@@ -940,6 +949,20 @@ def classify_refusals(refusals: list[tuple[str, int, str, str]], programs: dict[
         elif target.startswith(real_home_prefix) or target.rstrip("/") + "/" == real_home_prefix + "Library/":
             home.add(f"{name} -> {target} ({operation}, denied by the test sandbox)")
     return sorted(home), sorted(network)
+
+
+def tripwire_refusals(tag: str, since: float) -> list[str] | None:
+    """Every refusal the kernel reported under the run's network tripwire,
+    found by the tag its rules carry, from any of the run's processes, or
+    None when the log can't be read."""
+    entries = read_unified_log(f'senderImagePath ENDSWITH "/Sandbox" AND eventMessage CONTAINS "{tag}"', since)
+    if entries is None:
+        return None
+    found = []
+    for name, pid, operation, target in sandbox_refusals(entries, None):
+        kind = "a name lookup" if ("mDNSResponder" in target or "dnssd" in target) else "a connection attempt"
+        found.append(f"{name} (pid {pid}) -> {target} ({operation}: {kind}, refused by the tripwire)")
+    return sorted(set(found))
 
 
 def sandbox_denials(pids: list[int], programs: dict[int, set[str]], since: float,
@@ -1009,8 +1032,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="a shipped bundle or folder whose Mach-O files are scanned for telemetry endpoints")
     parser.add_argument("--launcher", action="append", default=[],
                         help="a program outside --binaries that started the OCR worker in this run")
-    parser.add_argument("--net-tripwire", action="store_true",
-                        help="the run's product programs ran inside e2e-full.sh's network tripwire")
+    parser.add_argument("--net-tripwire", metavar="TAG",
+                        help="the run's product programs ran inside e2e-full.sh's network tripwire, whose refusals carry TAG")
     parser.add_argument("--telemetry-bundle",
                         help="only check this bundle's telemetry switches (no run): print one line, exit 0 when they hold")
     parser.add_argument("--skip", action="append", default=[], help="check groups to skip (self-test)")

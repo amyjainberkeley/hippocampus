@@ -203,7 +203,8 @@ class FullE2EContractTests(unittest.TestCase):
             stop.write_text("")
             profile = "(version 1) (allow default) (deny network-outbound) (deny network-bind)"
             tree = subprocess.Popen(["/bin/sh", "-c",
-                                     f"/usr/bin/sandbox-exec -p '{profile}' '{worker}' 30 & '{worker}' 30 & wait"])
+                                     f"/usr/bin/sandbox-exec -p '{profile}' '{worker}' 30 & '{worker}' 30 & wait"],
+                                    stderr=subprocess.DEVNULL)
             sampler = subprocess.Popen([sys.executable, str(SAMPLER), "--root-pid", str(tree.pid),
                                         "--run-root", str(root), "--out-dir", str(root / "out"),
                                         "--stop-file", str(stop), "--interval", "0.2"])
@@ -225,20 +226,53 @@ class FullE2EContractTests(unittest.TestCase):
         source = FULL.read_text(encoding="utf-8")
         for literal in (
             "NET_TRIPWIRE=1",
-            '(deny network-outbound (remote ip "*:*"))',
-            '(allow network-outbound (remote ip "localhost:*"))',
-            '(path-literal "/private/var/run/mDNSResponder")',
-            '(global-name "com.apple.dnssd.service")',
-            '(global-name "com.apple.nsurlsessiond")',
+            '(deny network-outbound (remote ip \\"*:*\\") (with message \\"$TRIPWIRE_TAG\\"))',
+            '(allow network-outbound (remote ip \\"localhost:*\\"))',
+            '(path-literal \\"/private/var/run/mDNSResponder\\")',
+            '(global-name \\"com.apple.dnssd.service\\")',
+            '(global-name \\"com.apple.nsurlsessiond\\")',
+            'TRIPWIRE_TAG="hippo-e2e-tripwire $(basename "$RUN_ROOT")"',
             '(( NET_TRIPWIRE == 1 )) && TRIPWIRE=(/usr/bin/sandbox-exec -p "$TRIPWIRE_PROFILE")',
             '${wrap[@]+"${wrap[@]}"} "$@"',
             '${TRIPWIRE[@]+"${TRIPWIRE[@]}"} "$SCRIPT_DIR/e2e-clean-home.sh"',
-            "${TRIPWIRE[@]+--net-tripwire}",
+            '${TRIPWIRE[@]+--net-tripwire "$TRIPWIRE_TAG"}',
         ):
             self.assertIn(literal, source, literal)
         # Only the fixture feed, which sandboxes the OCR worker itself, is left out.
         body = source.split("product_env() {", 1)[1].split("\n}\n", 1)[0]
         self.assertIn('[[ "$argument" == "$FEED" ]] && wrap=()', body)
+
+    def test_tripwire_refuses_a_lookup_and_the_audit_finds_it_by_the_runs_tag(self):
+        # The profile exactly as e2e-full.sh builds it. The probe only opens the
+        # name-lookup daemon's local socket, which nothing could leave the Mac
+        # through even if the tripwire were missing.
+        source = FULL.read_text(encoding="utf-8")
+        definition = source[source.index("TRIPWIRE_TAG="):source.index("TRIPWIRE=()")]
+        with tempfile.TemporaryDirectory(prefix="hippo-e2e.") as temporary:
+            built = subprocess.run(["/bin/bash", "-c", definition + 'printf "%s\\n%s" "$TRIPWIRE_TAG" "$TRIPWIRE_PROFILE"'],
+                                   capture_output=True, text=True, env={"RUN_ROOT": temporary, "PATH": "/usr/bin:/bin"})
+        tag, profile = built.stdout.split("\n", 1)
+        self.assertTrue(tag.startswith("hippo-e2e-tripwire hippo-e2e."), tag)
+        since = time.time()
+        probe = ("import socket\ns = socket.socket(socket.AF_UNIX)\n"
+                 "try:\n    s.connect('/private/var/run/mDNSResponder'); print('open')\n"
+                 "except OSError as error:\n    print('refused', error.errno)\n")
+        result = subprocess.run(["/usr/bin/sandbox-exec", "-p", profile, sys.executable, "-I", "-c", probe],
+                                capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.stdout.strip(), "refused 1", result.stdout + result.stderr)
+        sys.path.insert(0, str(SCRIPTS / "lib"))
+        try:
+            import storage_audit
+        finally:
+            sys.path.pop(0)
+        found = []
+        deadline = time.monotonic() + 30
+        while not found and time.monotonic() < deadline:
+            time.sleep(1)
+            found = storage_audit.tripwire_refusals(tag, since) or []
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("mDNSResponder", found[0])
+        self.assertIn("a name lookup, refused by the tripwire", found[0])
 
     def test_audit_counts_every_refused_network_attempt_and_real_home_reach(self):
         sys.path.insert(0, str(SCRIPTS / "lib"))
