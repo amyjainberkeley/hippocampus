@@ -96,6 +96,7 @@ pub mod mcp_sync;
 pub mod messages_ingest;
 pub mod page_content;
 pub mod panic_hook;
+pub mod private_files;
 /// Starts the Mail and Messages pumps. Only with the `deep-hooks` feature,
 /// off in every release.
 #[cfg(all(target_os = "macos", feature = "deep-hooks"))]

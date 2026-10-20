@@ -784,7 +784,30 @@ fn print_usage() {
     );
 }
 
+/// Owner-only modes for the writer's own files: the store and its
+/// siblings, and, in the product's layout, the `MCI` data folder and the
+/// `Hippocampus` run-lock folder beside it. Another folder named on the
+/// command line is never changed.
+fn repair_store_modes(db_path: &Path) {
+    use mci_agent::private_files::{make_owner_only, make_store_owner_only};
+    make_store_owner_only(db_path);
+    if let Some(folder) = db_path
+        .parent()
+        .filter(|parent| parent.file_name().is_some_and(|name| name == "MCI"))
+    {
+        let _ = make_owner_only(folder);
+    }
+    if let Some(folder) = lock_path_for_brain(db_path)
+        .parent()
+        .filter(|parent| parent.file_name().is_some_and(|name| name == "Hippocampus"))
+    {
+        let _ = make_owner_only(folder);
+    }
+}
+
 fn main() -> ExitCode {
+    // Owner-only before anything is created: 0600 files, 0700 folders.
+    mci_agent::private_files::restrict_new_files();
     mci_agent::panic_hook::install();
     let raw_argv: Vec<String> = std::env::args().collect();
     if let Some(code) = run_understanding_cli(&raw_argv) {
@@ -912,6 +935,11 @@ async fn run_agent(args: Args) -> ExitCode {
                             }
                         }
                         let key = DbKey::from_bytes(key_bytes);
+                        // An install from before 0.3.1 made these 0755 and
+                        // 0644. Take group and other access off the data
+                        // folder, the store and its WAL and SHM, and the
+                        // run-lock folder, before the store opens.
+                        repair_store_modes(&db_path);
                         // Cycle 8.44 audit — breakage risk #3 wiring #3:
                         // acquire the run-lock BEFORE opening the store
                         // so a live sibling instance aborts us early

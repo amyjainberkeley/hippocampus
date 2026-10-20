@@ -310,6 +310,9 @@ fn browser_from_path(path: &str) -> Option<&'static str> {
 }
 
 fn main() {
+    // Owner-only before anything is created: 0600 files, 0700 folders, as
+    // in every Hippocampus process.
+    let _previous = rustix::process::umask(rustix::fs::Mode::RWXG | rustix::fs::Mode::RWXO);
     let sock_path = socket_path();
     let Ok(mut socket) = UnixStream::connect(&sock_path) else {
         let ack = serde_json::json!({"status": "error", "reason": "agent_not_running"});

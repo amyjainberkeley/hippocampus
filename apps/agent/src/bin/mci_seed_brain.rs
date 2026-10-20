@@ -1245,6 +1245,9 @@ fn now_us() -> u64 {
 
 #[allow(clippy::too_many_lines)] // each step that can fail exits with its own code
 fn main() -> ExitCode {
+    // Owner-only before anything is created: Demo Memory's store and
+    // screenshots are 0600 in 0700 folders, like the real memory.
+    mci_agent::private_files::restrict_new_files();
     mci_agent::panic_hook::install();
 
     let raw_argv: Vec<String> = std::env::args().collect();

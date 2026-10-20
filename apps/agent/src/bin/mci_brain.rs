@@ -579,6 +579,8 @@ fn run_export(
 // ---------------------------------------------------------------------------
 
 fn main() -> ExitCode {
+    // Owner-only before anything is created: exports and backups too.
+    mci_agent::private_files::restrict_new_files();
     mci_agent::panic_hook::install();
 
     let raw_args: Vec<String> = std::env::args().collect();
