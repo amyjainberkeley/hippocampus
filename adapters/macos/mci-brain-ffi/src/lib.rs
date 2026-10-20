@@ -71,6 +71,7 @@ use mci_brain::caption::{self, Moment};
 use mci_brain::fts_sanitizer::{
     LexicalAlternative, MAX_LEXICAL_ALTERNATIVES, MAX_LEXICAL_ALTERNATIVE_BYTES,
 };
+use mci_brain::moment_readings::{CAPTION_BY_TITLE, CAPTION_RULES_SINCE};
 use mci_brain::reading::{
     audit_text, excerpt, passage, reading, reading_prefix, reading_start, ExcerptQuery,
 };
@@ -1033,8 +1034,10 @@ enum RowShape<'q> {
 /// The text is the stored cleaned reading when one of the current rules
 /// version is stored (the chrome learned from many frames set apart), else
 /// the live reading. The caption is the stored one when it was made by the
-/// current rules too, else one made from the title now: cheap, and the same
-/// rules the re-clean job uses.
+/// current rules too; else the model's line from a row made since the
+/// caption rules last changed, while it is still grounded in the moment as
+/// it reads now ([`kept_model_caption`]); else one made from the title now:
+/// cheap, and the same rules the re-clean job uses.
 fn row_text(
     event: &mci_brain::Event,
     kind: EventSource,
@@ -1061,15 +1064,57 @@ fn row_text(
             RowShape::Search(_) => list_snippet(&event.text, kind, app),
             RowShape::List | RowShape::Timeline => text.clone(),
         };
-        caption::fallback(&Moment {
+        let now = Moment {
             app,
             title: event.window_title.as_deref(),
             url: event.url.as_deref(),
             text: &start,
             beside: kind == EventSource::ScreenContext,
-        })
+        };
+        stored
+            .and_then(|row| {
+                kept_model_caption(row, now, || {
+                    reading(&event.text, kind, app, event.window_title.as_deref()).main
+                })
+            })
+            .or_else(|| caption::fallback(&now))
     };
     (text, caption)
+}
+
+/// The model's line from a row made by an earlier version whose caption
+/// rules are still today's ([`CAPTION_RULES_SINCE`] up to, not including,
+/// [`READING_VERSION`]): kept while it is still grounded in the moment as it
+/// reads now (`main`, the live reading's main text), as the re-clean job
+/// keeps it when it reaches the row. Only the reading's rules changed, so an
+/// upgrade shows the model's captions at once instead of captions from
+/// titles until the job, which runs only while the Mac is idle, gets there.
+///
+/// None for a row from before the caption rules last changed, one from a
+/// newer build (its caption rules may not be these), a caption made from the
+/// title, a moment the model was never asked about, and a line that
+/// `caption::accept` refuses for the moment now.
+fn kept_model_caption(
+    row: &MomentReading,
+    moment: Moment<'_>,
+    main: impl FnOnce() -> String,
+) -> Option<String> {
+    if !(CAPTION_RULES_SINCE..READING_VERSION).contains(&row.version) || !row.model_tried {
+        return None;
+    }
+    let by_model = row
+        .caption_by
+        .as_deref()
+        .is_some_and(|by| by != CAPTION_BY_TITLE);
+    let line = row.caption.as_deref().filter(|_| by_model)?;
+    let main = main();
+    caption::accept(
+        line,
+        &Moment {
+            text: &main,
+            ..moment
+        },
+    )
 }
 
 /// Fetch the N most recent events for the plain timeline view. Returns
@@ -1437,13 +1482,19 @@ pub unsafe extern "C" fn mci_brain_ffi_event_reading(
         let caption = match stored.as_ref().filter(|row| row.version == READING_VERSION) {
             Some(row) => row.caption.clone(),
             None => head.as_ref().and_then(|event| {
-                caption::fallback(&Moment {
+                let now = Moment {
                     app: event.app_bundle_id.as_deref(),
                     title: event.window_title.as_deref(),
                     url: event.url.as_deref(),
                     text: &read.main,
                     beside: kind == EventSource::ScreenContext,
-                })
+                };
+                // A model's line from before only the reading's rules
+                // changed, while it still holds for the moment as it reads.
+                stored
+                    .as_ref()
+                    .and_then(|row| kept_model_caption(row, now, || read.main.clone()))
+                    .or_else(|| caption::fallback(&now))
             }),
         };
         let mut truncated = value.truncated;
