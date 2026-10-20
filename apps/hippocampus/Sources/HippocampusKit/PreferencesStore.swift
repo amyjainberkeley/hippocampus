@@ -351,3 +351,141 @@ public final class PreferencesStore: ObservableObject {
         static let customDatabasePath = "ai.hippocampus.prefs.customDatabasePath"
     }
 }
+
+// MARK: - Pictures of side windows (SPEC 6.7)
+
+/// Preferences › Remembering's pictures of the windows beside the one in
+/// front: the switch, the budget, what they use, and forgetting them.
+///
+/// The switch, budget and Forget request live in `runtime.toml`, where the
+/// capture helper and the agent read them at their next read: turning the
+/// switch off stops new pictures at once, with no restart. What they use
+/// comes from the agent's content-free `pictures-usage.json`.
+@MainActor
+public final class SidePicturesPreferences: ObservableObject {
+    /// What the pictures use, as the agent last measured it.
+    public struct Usage: Equatable, Sendable {
+        public let sideBytes: Int64
+        public let sideCount: Int
+        public let budgetBytes: Int64
+
+        public init(sideBytes: Int64, sideCount: Int, budgetBytes: Int64) {
+            self.sideBytes = sideBytes
+            self.sideCount = sideCount
+            self.budgetBytes = budgetBytes
+        }
+    }
+
+    /// Below this much free space no new side picture is kept.
+    public static let lowSpaceBytes: Int64 = 10_000_000_000
+
+    @Published public private(set) var enabled: Bool
+    @Published public private(set) var budgetMB: Int
+    @Published public private(set) var usage: Usage?
+    @Published public private(set) var lowOnSpace: Bool
+    @Published public private(set) var writeError: String?
+
+    private let config: RuntimeConfig
+    private let usageURL: URL
+    private let availableBytes: () -> Int64?
+    private let now: () -> Date
+
+    public init(
+        config: RuntimeConfig,
+        usageURL: URL,
+        availableBytes: @escaping () -> Int64?,
+        now: @escaping () -> Date = Date.init
+    ) {
+        self.config = config
+        self.usageURL = usageURL
+        self.availableBytes = availableBytes
+        self.now = now
+        let settings = config.sidePictures
+        self.enabled = settings.enabled
+        self.budgetMB = settings.budgetMB ?? SidePictureSettings.defaultBudgetMB
+        self.usage = Self.readUsage(usageURL)
+        self.lowOnSpace = (availableBytes() ?? Int64.max) < Self.lowSpaceBytes
+    }
+
+    /// The person's own: `~/.config/hippocampus/runtime.toml` and the usage
+    /// record beside the memory.
+    public static func live() -> SidePicturesPreferences {
+        let support = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/MCI", isDirectory: true)
+        return SidePicturesPreferences(
+            config: RuntimeConfig(),
+            usageURL: support.appendingPathComponent("pictures-usage.json"),
+            availableBytes: {
+                let values = try? support.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+                return values?.volumeAvailableCapacityForImportantUsage
+            }
+        )
+    }
+
+    /// Read the settings, the usage record and the free space again.
+    public func refresh() {
+        let settings = config.sidePictures
+        enabled = settings.enabled
+        budgetMB = settings.budgetMB ?? SidePictureSettings.defaultBudgetMB
+        usage = Self.readUsage(usageURL)
+        lowOnSpace = (availableBytes() ?? Int64.max) < Self.lowSpaceBytes
+    }
+
+    public func setEnabled(_ value: Bool) {
+        do {
+            try config.setSideWindowPictures(value)
+            enabled = value
+            writeError = nil
+        } catch {
+            writeError = "Couldn’t save. Try again."
+        }
+    }
+
+    public func setBudget(megabytes: Int) {
+        do {
+            try config.setSidePicturesBudgetMB(megabytes)
+            budgetMB = megabytes
+            writeError = nil
+        } catch {
+            writeError = "Couldn’t save. Try again."
+        }
+    }
+
+    /// Forget Pictures of Other Windows…, confirmed: every picture of a side
+    /// window kept until now goes; their text stays.
+    public func forgetPictures() {
+        do {
+            try config.requestDeleteSidePictures(at: now())
+            writeError = nil
+        } catch {
+            writeError = "Couldn’t save. Try again."
+        }
+    }
+
+    /// The line beside the budget: low on space, full, or what they use.
+    public var usageLine: String? {
+        if lowOnSpace { return SidePicturesCopy.lowOnSpace }
+        guard let usage else { return nil }
+        if usage.budgetBytes > 0, usage.sideBytes >= usage.budgetBytes {
+            return SidePicturesCopy.full(bytes: usage.sideBytes, budgetBytes: usage.budgetBytes)
+        }
+        return SidePicturesCopy.using(bytes: usage.sideBytes)
+    }
+
+    /// Whether there is anything to forget: unknown counts as yes.
+    public var hasPictures: Bool {
+        usage.map { $0.sideCount > 0 } ?? true
+    }
+
+    /// `pictures-usage.json`, version 1, or nil.
+    static func readUsage(_ url: URL) -> Usage? {
+        guard let data = try? Data(contentsOf: url),
+              let record = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (record["schema_version"] as? NSNumber)?.intValue == 1,
+              let side = record["side_bytes"] as? NSNumber,
+              let count = record["side_count"] as? NSNumber,
+              let budget = record["side_budget_bytes"] as? NSNumber
+        else { return nil }
+        return Usage(sideBytes: side.int64Value, sideCount: count.intValue, budgetBytes: budget.int64Value)
+    }
+}

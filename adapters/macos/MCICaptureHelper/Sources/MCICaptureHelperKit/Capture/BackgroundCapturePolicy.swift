@@ -231,6 +231,51 @@ public enum BackgroundCapturePolicy {
         }
     }
 
+    /// One window of a whole-screen read, ready for the emitter, or nil when
+    /// it must not be stored: its place in the display frame (global
+    /// top-left points to the frame's normalized bottom-left space), which
+    /// turns on roles; dropped when it is a private browser window or shows a
+    /// site that is never read; and the picture this frame may keep of it.
+    public static func backgroundWindow(
+        _ window: VisibleWindow, lines: [OCRLine], displayBounds: CGRect, pixelSize: CGSize,
+        pixelsPerPoint: CGFloat, windows: [VisibleWindow], excludedBundleIds: Set<String>,
+        denylist: any DenylistProbe, tsUs: UInt64, privateWindows: PrivateBrowserWindows = .shared
+    ) -> CascadeTwiceOCREmitter.BackgroundWindow? {
+        let placed = geometry(of: window, displayBounds: displayBounds, pixelsPerPoint: pixelsPerPoint,
+                              windows: windows, excludedBundleIds: excludedBundleIds)
+        if skipsBrowserWindow(window, lines: lines, geometry: placed.geometry, pixelSize: pixelSize,
+                              denylist: denylist, privateWindows: privateWindows) {
+            return nil
+        }
+        return CascadeTwiceOCREmitter.BackgroundWindow(
+            context: WorkflowContext(appBundleId: window.bundleId, windowTitle: window.title, url: nil,
+                                     pageText: nil),
+            lines: lines, geometry: placed.geometry, ownsSeparators: placed.ownsSeparators,
+            sidePicture: sidePictureCandidate(for: window, lines: lines, displayBounds: displayBounds,
+                                              pixelSize: pixelSize, windows: windows,
+                                              excludedBundleIds: excludedBundleIds, tsUs: tsUs))
+    }
+
+    /// A window this frame may keep a picture of (SPEC 6.2), before its text
+    /// is checked: not a call or a video (rule 5), and enough of it seen on
+    /// this display (rule 4), cut from `pixelSize` and masked wherever a
+    /// window in front covers it. The text and title travel as keys only.
+    /// Whether one is kept is the `SidePictureRetainer`'s call, after the
+    /// text cleared both privacy passes.
+    public static func sidePictureCandidate(
+        for window: VisibleWindow, lines: [OCRLine], displayBounds: CGRect, pixelSize: CGSize,
+        windows: [VisibleWindow], excludedBundleIds: Set<String>, tsUs: UInt64
+    ) -> SidePictureCandidate? {
+        guard window.layer == 0,
+              !SideWindowPicturePolicy.isCallOrVideo(bundleId: window.bundleId, title: window.title),
+              let plan = WindowPictureCrop.plan(for: window, displayBounds: displayBounds, pixelSize: pixelSize,
+                                                windows: windows, excludedBundleIds: excludedBundleIds),
+              plan.isVisibleEnough
+        else { return nil }
+        return SidePictureCandidate(windowId: window.windowId, title: window.title,
+                                    text: SideWindowText(lines: lines.map(\.text)), plan: plan, tsUs: tsUs)
+    }
+
     static func isEligible(
         _ window: VisibleWindow, focusedWindowId: CGWindowID?,
         excludedBundleIds: Set<String>, denylist: SensitiveCaptureDenylist

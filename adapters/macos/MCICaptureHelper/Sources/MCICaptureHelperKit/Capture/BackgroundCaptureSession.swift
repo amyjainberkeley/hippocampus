@@ -13,7 +13,13 @@ import ScreenCaptureKit
 /// filter. Browsers are read, and a browser window that shows it is private is
 /// dropped after recognition. A display is read at most every `minimumReadInterval`,
 /// only when its text visibly changed, never while secure text entry is
-/// active, and not while the user is idle. No screenshot is kept.
+/// active, and not while the user is idle.
+///
+/// A window read this way may keep a picture cut from the same frame when
+/// the person allows pictures of side windows and its text changed
+/// meaningfully (SPEC 6): `BackgroundCapturePolicy.sidePictureCandidate`
+/// says which windows may, `SidePictureRetainer` keeps it, masked, only
+/// after its text cleared both privacy passes.
 public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate, PermissionGatedCapture,
     @unchecked Sendable
 {
@@ -289,21 +295,10 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
                 OCRTrace.emit("background-attribute", "lines=\(lines.count) windows=\(groups.count) "
                     + "kept=\(groups.reduce(0) { $0 + $1.lines.count }) changed_windows=\(changed.count)")
                 return changed.compactMap { group in
-                    // The window in the display frame (global top-left points to
-                    // the frame's normalized bottom-left space), which turns on roles.
-                    let placed = BackgroundCapturePolicy.geometry(
-                        of: group.window, displayBounds: bounds, pixelsPerPoint: pixelsPerPoint,
-                        windows: windows, excludedBundleIds: excluded)
-                    // A private browser window, or one showing a site that is
-                    // never read, is dropped before anything is stored.
-                    if BackgroundCapturePolicy.skipsBrowserWindow(
-                        group.window, lines: group.lines, geometry: placed.geometry,
-                        pixelSize: pixelSize, denylist: denylist) {
-                        return nil
-                    }
-                    return (WorkflowContext(appBundleId: group.window.bundleId, windowTitle: group.window.title,
-                                            url: nil, pageText: nil),
-                            group.lines, placed.geometry, placed.ownsSeparators)
+                    BackgroundCapturePolicy.backgroundWindow(
+                        group.window, lines: group.lines, displayBounds: bounds, pixelSize: pixelSize,
+                        pixelsPerPoint: pixelsPerPoint, windows: windows, excludedBundleIds: excluded,
+                        denylist: denylist, tsUs: tsUs)
                 }
             }
         }

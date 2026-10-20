@@ -499,10 +499,18 @@ impl SqlCipherBrainStore {
     /// Rows written before sources were recorded (older schemas) follow the
     /// same rule: being the window in the newest screenshot is shown by the
     /// screenshots themselves, not by guessing a source from app or text.
-    /// Windows beside the one in front, mail and messages, imports and MCP
-    /// resources never show another moment's screenshot. Only a stored,
-    /// admitted row's own `keyframe_blob` is ever returned, so nothing
-    /// becomes visible that its own moment does not already show.
+    /// Mail and messages, imports and MCP resources never show another
+    /// moment's screenshot. Only a stored, admitted row's own `keyframe_blob`
+    /// is ever returned, so nothing becomes visible that its own moment does
+    /// not already show.
+    ///
+    /// Pictures of the windows beside the one in front (SPEC 6.4) take no
+    /// part in the front window's borrowing: a front-window moment borrows
+    /// only front-window screenshots, so a side picture never changes which
+    /// screenshot it shows. A side moment shows its own picture, or the
+    /// newest side picture of the same app and title (and page, when both
+    /// name one) at most [`Self::SCREENSHOT_REUSE_US`] older; it never
+    /// borrows a front-window screenshot.
     ///
     /// # Errors
     /// Returns a content-free backend error when the lookup query fails.
@@ -523,13 +531,16 @@ impl SqlCipherBrainStore {
                 digest: digest.to_owned(),
             }));
         }
-        if !matches!(
-            source,
-            EventSource::ScreenOcr
-                | EventSource::BrowserPageWithOcr
-                | EventSource::BrowserPage
-                | EventSource::Unknown
-        ) {
+        let beside = source == EventSource::ScreenContext;
+        if !beside
+            && !matches!(
+                source,
+                EventSource::ScreenOcr
+                    | EventSource::BrowserPageWithOcr
+                    | EventSource::BrowserPage
+                    | EventSource::Unknown
+            )
+        {
             return Ok(None);
         }
         let (Some(app), Some(title)) = (
@@ -545,51 +556,29 @@ impl SqlCipherBrainStore {
         ) else {
             return Ok(None);
         };
-        // The newest screenshot kept up to this moment, of any window: the
-        // one the helper compared this moment's picture with.
+        let window = WindowKey { app, title, url };
         let guard = self.db.lock().expect("brain store mutex poisoned");
-        let newest = guard
-            .conn()
-            .prepare_cached(
-                "SELECT id, ts_us, app_bundle_id, window_title, url, keyframe_blob
-                 FROM events
-                 WHERE keyframe_blob IS NOT NULL AND ts_us <= ?1 AND ts_us >= ?2
-                 ORDER BY ts_us DESC, id DESC
-                 LIMIT 1",
-            )
-            .and_then(|mut statement| {
-                statement
-                    .query_row(params![upper, lower], |row| {
-                        let id: i64 = row.get(0)?;
-                        let ts_us: i64 = row.get(1)?;
-                        let kept_app: Option<String> = row.get(2)?;
-                        let kept_title: Option<String> = row.get(3)?;
-                        let kept_url: Option<String> = row.get(4)?;
-                        let digest: String = row.get(5)?;
-                        let kept_url = nonempty(kept_url.as_deref());
-                        let same_window = nonempty(kept_app.as_deref()) == Some(app)
-                            && nonempty(kept_title.as_deref()) == Some(title)
-                            && (url.is_none() || kept_url.is_none() || kept_url == url);
-                        Ok((
-                            u64::try_from(id).ok().zip(u64::try_from(ts_us).ok()),
-                            same_window,
-                            digest.trim().to_owned(),
-                        ))
-                    })
-                    .optional()
-            })
-            .map_err(|e| StoreError::Backend(format!("read moment screenshot: {e}")))?;
-        drop(guard);
-        Ok(match newest {
-            Some((Some((id, ts_us)), true, digest)) if is_keyframe_digest(&digest) => {
-                Some(MomentScreenshot {
-                    event_id: EventId(id),
-                    ts_us,
-                    digest,
-                })
+        let connection = guard.conn();
+        // A store from before sources were recorded holds no side pictures.
+        let sources_recorded = has_event_sources(connection)?;
+        let newest = if beside {
+            if !sources_recorded {
+                return Ok(None);
             }
+            newest_side_picture(connection, upper, lower, &window)?
+        } else {
+            newest_front_screenshot(connection, upper, lower, sources_recorded)?
+                .filter(|kept| window.matches(kept))
+        };
+        drop(guard);
+        Ok(newest.and_then(|kept| match kept.id_and_ts {
+            Some((id, ts_us)) if is_keyframe_digest(&kept.digest) => Some(MomentScreenshot {
+                event_id: EventId(id),
+                ts_us,
+                digest: kept.digest,
+            }),
             _ => None,
-        })
+        }))
     }
 
     /// Acquisition provenance. Old read-only stores and unattributed rows
@@ -648,6 +637,62 @@ impl SqlCipherBrainStore {
     ) -> Result<u64, StoreError> {
         let guard = self.db.lock().expect("brain store mutex poisoned");
         remove_unreferenced_keyframe_blobs(guard.conn(), &self.blob_dir, candidates)
+    }
+
+    /// The managed folder of sealed screenshots, `<brain folder>/blobs`.
+    pub(crate) fn keyframe_blob_dir(&self) -> &Path {
+        &self.blob_dir
+    }
+
+    /// Delete the blob files among `candidates` that no moment references
+    /// any more, reading every live reference once: the cheap way to clean
+    /// up after many pictures are cleared at once. A candidate that is
+    /// still referenced, missing, malformed or not a regular file is left
+    /// alone, as [`Self::reconcile_keyframe_blobs`] leaves it.
+    pub(crate) fn remove_unreferenced_keyframe_batch(
+        &self,
+        candidates: &[String],
+    ) -> Result<u64, StoreError> {
+        let wanted = candidates
+            .iter()
+            .map(String::as_str)
+            .filter(|digest| is_keyframe_digest(digest))
+            .collect::<BTreeSet<_>>();
+        if wanted.is_empty() {
+            return Ok(0);
+        }
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let connection = guard.conn();
+        let mut statement = connection
+            .prepare("SELECT DISTINCT keyframe_blob FROM events WHERE keyframe_blob IS NOT NULL")
+            .map_err(|e| StoreError::Backend(format!("prepare keyframe references: {e}")))?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| StoreError::Backend(format!("query keyframe references: {e}")))?;
+        let mut referenced = BTreeSet::new();
+        for row in rows {
+            let digest =
+                row.map_err(|e| StoreError::Backend(format!("read keyframe references: {e}")))?;
+            referenced.insert(digest.trim().to_owned());
+        }
+        drop(statement);
+        let mut deleted = 0_u64;
+        for digest in wanted {
+            if referenced.contains(digest) {
+                continue;
+            }
+            let path = self.blob_dir.join(format!("{digest}.bin"));
+            let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                continue;
+            }
+            if std::fs::remove_file(&path).is_ok() {
+                deleted = deleted.saturating_add(1);
+            }
+        }
+        Ok(deleted)
     }
 
     /// Reconcile the managed encrypted keyframe directory against live event references.
@@ -2512,6 +2557,129 @@ fn blob_dir_for_brain(brain_path: &Path) -> PathBuf {
 /// `value` without surrounding whitespace, or `None` when nothing is left.
 fn nonempty(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+/// Whether this store records where each moment came from (migration 0009).
+/// Older read-only stores do not, and hold no pictures of side windows.
+pub(crate) fn has_event_sources(connection: &rusqlite::Connection) -> Result<bool, StoreError> {
+    connection
+        .prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_sources')",
+        )
+        .and_then(|mut statement| statement.query_row([], |row| row.get(0)))
+        .map_err(|e| StoreError::Backend(format!("probe event sources: {e}")))
+}
+
+/// One stored screenshot as the borrowing rule reads it: its moment, when
+/// it was kept, the window it shows and the digest that names it.
+struct KeptScreenshotRow {
+    id_and_ts: Option<(u64, u64)>,
+    app: Option<String>,
+    title: Option<String>,
+    url: Option<String>,
+    digest: String,
+}
+
+/// Reads `id, ts_us, app_bundle_id, window_title, url, keyframe_blob`.
+fn kept_screenshot_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<KeptScreenshotRow> {
+    let id: i64 = row.get(0)?;
+    let ts_us: i64 = row.get(1)?;
+    let digest: String = row.get(5)?;
+    Ok(KeptScreenshotRow {
+        id_and_ts: u64::try_from(id).ok().zip(u64::try_from(ts_us).ok()),
+        app: row.get(2)?,
+        title: row.get(3)?,
+        url: row.get(4)?,
+        digest: digest.trim().to_owned(),
+    })
+}
+
+/// The window a moment shows: its app and title, and its page when it names
+/// one.
+struct WindowKey<'a> {
+    app: &'a str,
+    title: &'a str,
+    url: Option<&'a str>,
+}
+
+impl WindowKey<'_> {
+    /// The same app and title, and the same page when both name one.
+    fn matches(&self, kept: &KeptScreenshotRow) -> bool {
+        let kept_url = nonempty(kept.url.as_deref());
+        nonempty(kept.app.as_deref()) == Some(self.app)
+            && nonempty(kept.title.as_deref()) == Some(self.title)
+            && (self.url.is_none() || kept_url.is_none() || kept_url == self.url)
+    }
+}
+
+/// The newest front-window screenshot kept between `lower` and `upper`, of
+/// any window: the one the helper compared a front moment's picture with.
+/// Side pictures are not part of that comparison.
+fn newest_front_screenshot(
+    connection: &rusqlite::Connection,
+    upper: i64,
+    lower: i64,
+    sources_recorded: bool,
+) -> Result<Option<KeptScreenshotRow>, StoreError> {
+    let sql = if sources_recorded {
+        "SELECT id, ts_us, app_bundle_id, window_title, url, keyframe_blob
+         FROM events
+         WHERE keyframe_blob IS NOT NULL AND ts_us <= ?1 AND ts_us >= ?2
+           AND NOT EXISTS (SELECT 1 FROM event_sources s
+                           WHERE s.event_id = events.id AND s.source_kind = 'screen_context')
+         ORDER BY ts_us DESC, id DESC
+         LIMIT 1"
+    } else {
+        "SELECT id, ts_us, app_bundle_id, window_title, url, keyframe_blob
+         FROM events
+         WHERE keyframe_blob IS NOT NULL AND ts_us <= ?1 AND ts_us >= ?2
+         ORDER BY ts_us DESC, id DESC
+         LIMIT 1"
+    };
+    connection
+        .prepare_cached(sql)
+        .and_then(|mut statement| {
+            statement
+                .query_row(params![upper, lower], kept_screenshot_row)
+                .optional()
+        })
+        .map_err(|e| StoreError::Backend(format!("read moment screenshot: {e}")))
+}
+
+/// The newest side picture of `window` kept between `lower` and `upper`.
+/// Other windows' pictures are skipped: many side windows are on screen at
+/// once, and each keeps its own. Its digest is checked by the caller, so a
+/// malformed newest picture hides the older ones, as for the front window.
+fn newest_side_picture(
+    connection: &rusqlite::Connection,
+    upper: i64,
+    lower: i64,
+    window: &WindowKey<'_>,
+) -> Result<Option<KeptScreenshotRow>, StoreError> {
+    let mut statement = connection
+        .prepare_cached(
+            "SELECT e.id, e.ts_us, e.app_bundle_id, e.window_title, e.url, e.keyframe_blob
+             FROM events e
+             WHERE e.keyframe_blob IS NOT NULL AND e.ts_us <= ?1 AND e.ts_us >= ?2
+               AND EXISTS (SELECT 1 FROM event_sources s
+                           WHERE s.event_id = e.id AND s.source_kind = 'screen_context')
+             ORDER BY e.ts_us DESC, e.id DESC",
+        )
+        .map_err(|e| StoreError::Backend(format!("read side picture: {e}")))?;
+    let mut rows = statement
+        .query(params![upper, lower])
+        .map_err(|e| StoreError::Backend(format!("read side picture: {e}")))?;
+    while let Some(row) = rows
+        .next()
+        .map_err(|e| StoreError::Backend(format!("read side picture: {e}")))?
+    {
+        let kept = kept_screenshot_row(row)
+            .map_err(|e| StoreError::Backend(format!("read side picture: {e}")))?;
+        if window.matches(&kept) {
+            return Ok(Some(kept));
+        }
+    }
+    Ok(None)
 }
 
 pub(crate) fn is_keyframe_digest(value: &str) -> bool {

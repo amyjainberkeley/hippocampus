@@ -16,8 +16,19 @@
 //! - `RetentionStore` (Swift onboarding) is the SOLE source of truth
 //!   for the retention policy. The purger reads; never writes.
 //! - Security review required on any change per ADR-0017 §7.4.
+//!
+//! # Pictures of side windows (SPEC 6.5)
+//!
+//! [`clear_side_pictures`] is the one other change this module makes: it
+//! clears the screenshot reference (`keyframe_blob`) of side moments
+//! (`screen_context`) that thinning or Forget Pictures of Other Windows…
+//! chose, then deletes each sealed blob no moment references any more. It
+//! removes a picture and nothing else: no row is inserted or deleted, and a
+//! moment's text, caption and search stay as they were. A row that is not a
+//! side moment, or no longer holds that exact picture, is left untouched.
+//! It never touches a front-window screenshot.
 
-use crate::sqlcipher_brain_store::delete_projected_memory_for_events;
+use crate::sqlcipher_brain_store::{delete_projected_memory_for_events, has_event_sources};
 use crate::{SqlCipherBrainStore, StoreError};
 use rusqlite::params;
 
@@ -168,6 +179,85 @@ pub fn purge_once(
         vectors_deleted: u64::try_from(vectors_count).unwrap_or(0),
         episodes_deleted: episodes_deleted as u64,
         briefs_deleted: briefs_deleted as u64,
+        blobs_deleted,
+    })
+}
+
+/// Content-free stats from [`clear_side_pictures`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SideClearStats {
+    /// Side moments whose picture reference was cleared.
+    pub pictures_cleared: u64,
+    /// Sealed blob files deleted because no moment references them now.
+    pub blobs_deleted: u64,
+}
+
+/// At most this many pictures are cleared in one transaction, so a large
+/// backlog (the first Forget Pictures of Other Windows… after months) never
+/// holds the brain's writer for long: ingest goes on between chunks.
+pub const SIDE_CLEAR_CHUNK: usize = 256;
+
+/// Clear the pictures of side moments: each `(event id, digest)` pair names
+/// a side moment and the picture it keeps. Its reference is cleared only
+/// while the row is still a side moment (`screen_context`) that holds
+/// exactly that digest, [`SIDE_CLEAR_CHUNK`] rows to a transaction; then
+/// each blob no moment references any more is deleted. The moment, its
+/// text, caption and search are untouched. A store from before sources
+/// were recorded holds no side pictures, so nothing changes there.
+///
+/// # Errors
+/// A content-free backend error when a transaction fails. Chunks already
+/// committed stay cleared, and their blobs, now unreferenced, are removed
+/// by the next reconciliation.
+pub fn clear_side_pictures(
+    store: &SqlCipherBrainStore,
+    pictures: &[(u64, String)],
+) -> Result<SideClearStats, StoreError> {
+    if pictures.is_empty() {
+        return Ok(SideClearStats::default());
+    }
+    {
+        let guard = store.db.lock().expect("brain store mutex poisoned");
+        if !has_event_sources(guard.conn())? {
+            return Ok(SideClearStats::default());
+        }
+    }
+    let mut cleared = 0_u64;
+    let mut digests = Vec::new();
+    for chunk in pictures.chunks(SIDE_CLEAR_CHUNK) {
+        let mut guard = store.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin clear side pictures: {e}")))?;
+        {
+            let mut statement = tx
+                .prepare_cached(
+                    "UPDATE events SET keyframe_blob = NULL
+                     WHERE id = ?1 AND trim(keyframe_blob) = ?2
+                       AND EXISTS (SELECT 1 FROM event_sources s
+                                   WHERE s.event_id = events.id AND s.source_kind = 'screen_context')",
+                )
+                .map_err(|e| StoreError::Backend(format!("prepare clear side pictures: {e}")))?;
+            for (event_id, digest) in chunk {
+                let Ok(id) = i64::try_from(*event_id) else {
+                    continue;
+                };
+                let changed = statement
+                    .execute(params![id, digest.trim()])
+                    .map_err(|e| StoreError::Backend(format!("clear side picture: {e}")))?;
+                if changed > 0 {
+                    cleared = cleared.saturating_add(changed as u64);
+                    digests.push(digest.trim().to_owned());
+                }
+            }
+        }
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit clear side pictures: {e}")))?;
+    }
+    let blobs_deleted = store.remove_unreferenced_keyframe_batch(&digests)?;
+    Ok(SideClearStats {
+        pictures_cleared: cleared,
         blobs_deleted,
     })
 }

@@ -107,6 +107,8 @@ struct PreferencesRootView: View {
 
     @State private var confirmingReset = false
     @State private var resetResult: (title: String, message: String)?
+    /// Pictures of side windows; the section shows only when given.
+    @Environment(\.sidePictures) private var sidePictures
 
     var body: some View {
         VStack(spacing: 0) {
@@ -117,7 +119,7 @@ struct PreferencesRootView: View {
             }
         }
         .frame(width: PreferencesStyle.panelWidth, height: PreferencesStyle.panelHeight)
-        .preferredColorScheme(.light)
+        // Preferences follows the Mac's light or dark appearance (SPEC 8.4).
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
@@ -177,6 +179,10 @@ struct PreferencesRootView: View {
                 }
             ))
             .disabled(captureController.isApplying || !setupFinished)
+
+            if let sidePictures {
+                SidePicturesSection(model: sidePictures, setupFinished: setupFinished)
+            }
 
             Divider()
 
@@ -387,6 +393,92 @@ struct PreferencesRootView: View {
     }
 }
 
+// MARK: - Pictures of side windows
+
+private struct SidePicturesKey: EnvironmentKey {
+    static let defaultValue: SidePicturesPreferences? = nil
+}
+
+extension EnvironmentValues {
+    /// Preferences' pictures of side windows (SPEC 6.7). Nil hides them.
+    var sidePictures: SidePicturesPreferences? {
+        get { self[SidePicturesKey.self] }
+        set { self[SidePicturesKey.self] = newValue }
+    }
+}
+
+/// Keep screenshots of windows beside the one you’re using (SPEC 6.7):
+/// the switch and what it means; while on, the budget and what the pictures
+/// use; while off, forgetting them. A change is written at once, and the
+/// capture helper and the agent act on it at their next read.
+struct SidePicturesSection: View {
+    @ObservedObject var model: SidePicturesPreferences
+    let setupFinished: Bool
+    @State private var confirmingForget = false
+
+    /// The checkbox's label starts this far in; the lines under it line up.
+    private static let indent: CGFloat = 20
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle(SidePicturesCopy.toggle, isOn: Binding(
+                get: { model.enabled },
+                set: { model.setEnabled($0) }
+            ))
+            VStack(alignment: .leading, spacing: PreferencesStyle.controlSpacing) {
+                Text(SidePicturesCopy.explanation)
+                    .font(PreferencesStyle.captionFont)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if model.enabled {
+                    HStack(spacing: PreferencesStyle.rowSpacing) {
+                        Picker(SidePicturesCopy.useAtMost, selection: Binding(
+                            get: { model.budgetMB },
+                            set: { model.setBudget(megabytes: $0) }
+                        )) {
+                            ForEach(SidePictureSettings.budgetChoicesMB, id: \.self) { megabytes in
+                                Text(SidePicturesCopy.budget(megabytes: megabytes)).tag(megabytes)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .fixedSize()
+                        if let line = model.usageLine {
+                            Text(line)
+                                .font(PreferencesStyle.captionFont)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } else {
+                    Button(SidePicturesCopy.forgetButton) { confirmingForget = true }
+                        .disabled(!model.hasPictures)
+                }
+                if let writeError = model.writeError {
+                    Text(writeError)
+                        .font(PreferencesStyle.captionFont)
+                        .foregroundStyle(.red)
+                }
+            }
+            .padding(.leading, Self.indent)
+        }
+        .disabled(!setupFinished)
+        .alert(SidePicturesCopy.forgetTitle, isPresented: $confirmingForget) {
+            // Cancel is the default: Return never forgets.
+            Button(SidePicturesCopy.cancel, role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
+            Button(SidePicturesCopy.forget, role: .destructive) { model.forgetPictures() }
+        } message: {
+            Text(SidePicturesCopy.forgetMessage)
+        }
+        .task {
+            // What the pictures use changes as the agent thins and forgets.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                model.refresh()
+            }
+        }
+    }
+}
+
 // MARK: - AppKit coordinator
 
 #if canImport(AppKit)
@@ -400,7 +492,7 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
 
     private var panel: NSPanel?
     private var section: PreferencesSection = .general
-    private var hostingView: NSHostingView<PreferencesRootView>?
+    private var hostingView: NSHostingView<AnyView>?
 
     /// Injected on first `configure`. Stored so a subsequent ⌘, from a
     /// different call site (menu-bar → recall UI → onboarding) reuses
@@ -411,6 +503,9 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
     private var captureController: CapturePreferenceController?
     private var supervisor: ProcessSupervisor?
     private var actions = PreferencesActions()
+    /// Pictures of side windows, read from the person's own settings when
+    /// Preferences first opens.
+    private var sidePictures: SidePicturesPreferences?
 
     /// Provide the dependencies the window needs. Safe to call more
     /// than once — later calls overwrite so a re-initialized supervisor
@@ -462,7 +557,6 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
         panel.isFloatingPanel = false
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
-        panel.appearance = NSAppearance(named: .aqua)
         panel.center()
 
         let toolbar = NSToolbar(identifier: "ai.hippocampus.preferences.toolbar")
@@ -524,7 +618,10 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
             updater: updater,
             actions: actions
         )
-        let host = NSHostingView(rootView: root)
+        let sidePictures = self.sidePictures ?? SidePicturesPreferences.live()
+        self.sidePictures = sidePictures
+        sidePictures.refresh()
+        let host = NSHostingView(rootView: AnyView(root.environment(\.sidePictures, sidePictures)))
         host.frame = NSRect(
             x: 0, y: 0,
             width: PreferencesStyle.panelWidth,
