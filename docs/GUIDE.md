@@ -108,7 +108,7 @@ To point it at the demo yourself, set `MCI_DEVELOPMENT_FILE_KEY=1`, `MCI_DB_KEY_
 
 ## Demo Memory
 
-Option-click the hi in the menu bar and choose Use Demo Memory…, or open Preferences, under About. Hippocampus makes a made-up week at a made-up company in a folder of its own, pauses remembering, and opens the window on it with a small Demo tag. Leave Demo Memory, in the same places or in the window's status menu, goes back to your own memory, which is untouched.
+Option-click the hi in the menu bar and choose Use Demo Memory…, or open Preferences, under About. Hippocampus makes a made-up week at a made-up company in a folder of its own, pauses remembering, and opens the window on it with a small Demo tag; the menu, Ask's footer and the window's footer say Demo Memory. Leave Demo Memory, in the same places or in the window's status menu, goes back to your own memory, which is untouched.
 
 The week is made by code in this repo, the same way every time, with its dates moved to this week:
 
@@ -117,7 +117,7 @@ cargo build -p mci-agent --bin mci-seed-brain
 ./scripts/swift-package.sh build --package-path apps/demo-memory --product demo-screens
 ```
 
-Before filming: AI tools you connected still read your own memory while Demo Memory is in use, so disconnect them first if you film one; and Resume and Open Link open the week's real sites in your own browser, so use a browser profile with no accounts signed in.
+Before filming: AI tools you connected still read your own memory while Demo Memory is in use, so disconnect them first if you film one; and Resume says "Made up for the demo, so nothing opens." for the week's files, folders, documents and made-up sites, but its pages on real sites, and Open Link, open in your own browser, so use a browser profile with no accounts signed in.
 
 ## Your calendar
 
@@ -127,7 +127,7 @@ While Demo Memory is in use, the window shows the week's made-up calendar and As
 
 ## Pictures of other windows
 
-Hippocampus keeps a screenshot of the window you're in. It also keeps one of another window you can see when that window's text changes, so History shows the chat beside your editor as it looked. Calls, video, private windows and anything skipped are never kept, and anything covering the window is blanked out. These pictures use at most 2 GB, older ones thinned out first; Preferences, under Remembering, changes that, turns them off, or forgets them while keeping their text. On a Mac that used an earlier version, they stay off until you turn them on ([ADR-0047](decisions/0047-side-window-pictures.md)).
+Hippocampus keeps a screenshot of the window you're in. It also keeps one of another window you can see when that window's text changes, so History shows the chat beside your editor as it looked. Every window in front of it is blanked out, and none is kept of a call or video app, a window whose title names a call or a video site, a private window or anything skipped. These pictures use at most 2 GB, or 2% of the disk if that is less, and are thinned out as they age; Preferences, under Remembering, sets 1, 2 or 5 GB, turns them off, or forgets them while keeping their text. On a Mac that used an earlier version, they stay off until you turn them on ([ADR-0047](decisions/0047-side-window-pictures.md)).
 
 ## Search by meaning in a source build
 
@@ -154,7 +154,7 @@ The model runs on the CPU on purpose; the reasons are in [`adapters/macos/mci-em
 
 ## Keep an app out
 
-Hippocampus skips six password managers and a few system apps by bundle ID ([PRIVACY.md](../PRIVACY.md#what-is-skipped)). To keep out another app, a website or a window, list it in `~/Library/Application Support/MCI/denylist.toml`:
+Hippocampus skips password managers and authenticator apps (a list of 66 identifier families) and a few system apps by bundle ID ([PRIVACY.md](../PRIVACY.md#what-is-skipped)). To keep out another app, a website or a window, list it in `~/Library/Application Support/MCI/denylist.toml`:
 
 ```toml
 # An app, by its exact bundle ID.

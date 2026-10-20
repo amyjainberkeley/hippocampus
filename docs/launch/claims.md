@@ -63,6 +63,9 @@ the checker will reject if it ever appears in public copy unregistered.
 | dmg-size | 180 MB | README | eval:eval/ocr-bakeoff-2026-10-15.md | 180.3 MB | Y |
 | installed-size | 370 MiB | README | eval:eval/ocr-bakeoff-2026-10-15.md | 370.2 MiB | Y |
 | reader-size | 243 MiB | README | eval:eval/ocr-bakeoff-2026-10-15.md | 243.1 MiB | Y |
+| side-pictures-budget | 2 GB | README, privacy | code:adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/SideWindowPicturePolicy.swift | defaultBudgetBytes: Int64 = 2_000_000_000 | Y |
+| side-pictures-disk-share | 2% | README, privacy | code:core/brain/src/side_pictures.rs | DEFAULT_BUDGET_DISK_PERCENT: u64 = 2 | Y |
+| side-pictures-choices | 5 GB | README, privacy | code:adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/SideWindowPicturePolicy.swift | budgetChoicesMB = [1_000, 2_000, 5_000] | Y |
 | interface-mixed-now | 21% | site how-it-works, site index | measure:tools/ocr/screens | - | Y |
 | interface-mixed-before | 94% | site index | measure:tools/ocr/screens | - | Y |
 | cpu-vs-vision | 8 to 10 times Vision's CPU | README, how-it-works | eval:eval/ocr-bakeoff-2026-10-15.md | 8 to 10 times | N |

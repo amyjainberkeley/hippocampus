@@ -26,27 +26,27 @@ page is refreshed with each release. Each row names the tests that cover it.
 | Reading the window in front | Read when it changes: at most every 3 s plugged in, 6 s on battery and 12 s in Low Power Mode, and every 15 s or more while it keeps moving. Panes are read in order, and a window's tabs, sidebars and bars come after what you were reading. | `FocusedReadPacingTests`, `CapturePowerTests`, `OCRReadingOrderTests` and the reading-order parity fixtures (`tools/ocr/test_layout.py`), and the transcript bench below. On a real screen: needs a person. |
 | Reading other windows | Every display, when text changes outside the window in front: at most every 30 s plugged in and 60 s on battery, none in Low Power Mode. Each line is filed under the window it sits in. | `BackgroundCapturePolicyTests`, `CapturePowerTests`. Two displays on a real Mac: needs a person. |
 | The text reader | PP-OCR (RapidOCR 3.9.2, PP-OCRv6 small, ONNX Runtime 1.30), bundled, without FFmpeg, x264 or x265. | The OCR worker's tests (`ocr-worker` lane), including `test_prepare.py`, which loads the worker with the video libraries gone; the reader bake-off below. |
-| What is skipped | Password fields; six password managers, System Settings, sign-in dialogs, the lock screen and Hippocampus itself, by bundle ID; private browser windows that show it; 18 bank and sign-in addresses; four secret shapes, checked three times. | `SuppressionCascadeTests`, `BrowserPrivateWindowTests`, `BrowserWindowPrivacyTests`, `DenylistTests`, and the secret corpus `core/brain/fixtures/ocr-secret-corpus.json`, which the Swift and Rust checks both read. Real browsers' private windows: needs a person. |
+| What is skipped | Password fields; password managers and authenticator apps (66 identifier families), System Settings, sign-in dialogs, the lock screen and Hippocampus itself, by bundle ID; private browser windows that show it; 30 bank, sign-in and password-manager addresses; six secret shapes, checked three times: a password, secret, API key or token written as `name: value`, a GitHub token, an AWS access key ID, a JSON web token, a card number that passes the Luhn check, and a one-time code of 4 to 8 digits within about 40 characters of words like "verification code". | `SuppressionCascadeTests`, `NeverReadPasswordManagersTests` (76 identifiers, each with where it was read), `BrowserPrivateWindowTests`, `BrowserWindowPrivacyTests`, `DenylistTests`, `SecretMatrixTests`, and the secret corpus `core/brain/fixtures/ocr-secret-corpus.json`, which the Swift and Rust checks both read. Real browsers' private windows, and a code or a card on a real screen: needs a person. |
 | Encrypted memory | One SQLCipher database with its key in the login Keychain; screenshots sealed with AES-GCM. | `mci-brain` store tests, `KeychainDatabaseKeyResolverTests`, the `keyframe-codec-behavior` lane, `keychain_packaging_contract`. |
-| Deleting | The last 24 hours or everything, with what was learned from it; the database is rewritten afterwards. | `delete_events_in_range_*` and `delete_event_*` in `core/brain/tests/sqlcipher_brain_store.rs`, `memory_projection.rs`, `understanding_store.rs`. In the app: needs a person. |
+| Deleting | A moment or a few, an hour of History, a session, a page or a search, the last 10 minutes, the last hour or today, from the window; the last 24 hours or everything from Privacy. What was learned from those moments goes too, and the database is rewritten afterwards. | `delete_events_in_range_*` and `delete_event_*` in `core/brain/tests/sqlcipher_brain_store.rs`, `memory_projection.rs`, `understanding_store.rs`; `ForgetCoordinatorTests` and `ForgetConfirmationTests` in the window. In the app: needs a person. |
 | History | Each moment leads with one short line saying what it was about, written on this Mac by Apple Intelligence or a model server, or made from its title, then its text without the window's tabs, address bar, bookmarks and side bars, which stay under Also in this window and in search. Older moments are cleaned and captioned in the background, only on a power cable while the Mac is idle. | `core/brain/tests/chrome.rs`, `caption.rs`, `reclean.rs` and `reading.rs`; `moment_readings_ffi.rs`; the `reclean_worker` tests in `apps/agent`; `MomentCaptionTests`; the mind's caption tests; renders of made-up windows. On a real memory: needs a person. |
 | Search | Exact words (FTS5) and meaning (Arctic Embed S on Core ML). | `hybrid_retriever.rs`, `recall_fusion.rs` and `retrieval_outcomes.rs` in `core/brain/tests`; the evaluations in [`docs/eval/`](eval/); `scripts/try-it.sh` run on Oct 16 (words only). |
 | Ask | Shift twice (or Fn, if chosen) or ⌃⇧Space opens it over any app, like Spotlight: as you type it finds Working On items, pages and moments; ↩ opens, ⌘↩ asks your AI tool, ⌥↩ resumes an item. Return on a question asks for an answer with sources, this window first. It never takes ⌘Space. When a known Fn app or macOS's Globe key setting holds Fn, Hippocampus says which and waits; only a tap of Fn alone counts, and the key monitor watches modifier keys only. | `AskPanelTests`, `AskPanelHandoffTests`, `AskShortcutTests`, `SoloKeyDetectorTests`, `FnKeyMonitorTests`, `CommandBarTests`. With a real keyboard: needs a person. |
 | Answers and summaries | Apple Intelligence (macOS 26) or a model server on this Mac (Ollama, LM Studio). Without one, search still works. | `apps/mind` tests against a stand-in server (`LocalServerEngineTests`, `FakeModelServer`), and the `mind-without-foundation-models` lane. A real Ollama or LM Studio: not checked. |
-| The window | A sidebar: Today, Working On, Library (History, Web Pages, Documents, Code, Conversations, Looked Up), About You, AI Tools and Privacy, with fixed keys ⌘1 to ⌘9. The field over every memory page searches by meaning, kept to the page with ⌘F. A line at the top of every page while remembering is paused or off; Pause, Resume and the forget hold go to the app over a private pipe. Light and dark. | `SidebarModelTests`, `SidebarHidesTests`, `StatusBannerTests`, `WindowChannelTests`, `ForgetCoordinatorTests`, `WindowContrastTests`, `NativeWorkspacePresentationTests`; the app's `WindowChannelServerTests` and `CaptureHoldTests`; off-screen renders of every page. On a real screen: needs a person. |
+| The window | A sidebar: Today, Working On, Library (History, Web Pages, Documents, Code, Conversations, Looked Up), About You, AI Tools and Privacy, with fixed keys ⌘1 to ⌘9. The field over every memory page searches by meaning, kept to the page with ⌘F. A line at the top of every page while remembering is paused or off; Pause, Start Remembering and the forget hold go to the app over a private pipe. Light and dark. | `SidebarModelTests`, `SidebarHidesTests`, `StatusBannerTests`, `WindowChannelTests`, `ForgetCoordinatorTests`, `WindowContrastTests`, `NativeWorkspacePresentationTests`; the app's `WindowChannelServerTests` and `CaptureHoldTests`; off-screen renders of every page. On a real screen: needs a person. |
 | Today and About You | Where you left off with its screenshot, the day's sessions, today's meetings when the calendar is on, what you looked up; what AI tools can be told about you, with Right and Forget. | `OverviewViewModelTests`, `TodayCardStateTests`, `TodayCalendarTests`, `NoCountingSentencesTests`, `UserModelViewModelTests`, and the `overview` tests in `apps/agent`. |
 | Working On and Resume | Projects and documents named from window titles, by rules, once you spend 30 minutes on them in 14 days of use; a page for each with where you left off, files, pages seen alongside, meetings and its History. Resume lists what was open in the item's last session and opens only what you tick. | `core/brain/tests/subject.rs`, `apps/agent/tests/work_cli.rs`, `WorkingOnModelTests`, `WorkingOnItemModelTests`, `ResumeSheetModelTests`, `ResumePlanTests`. Resume opening real apps and tabs: needs a person. |
 | Formatted text | A moment reads as headings, paragraphs, lists, code, terminal output and chat turns; Copy Text keeps the structure; older moments are made again in the background. | `core/brain/tests/reading_blocks.rs` and `reading_blocks_budget.rs`, `mci-brain-ffi/tests/event_reading_blocks.rs`, `ReadingBlocksDecodingTests`, `FormattedReadingSnapshotTests`. |
 | Ask {your tool} | Ask Claude (or the last tool chosen) opens the tool with the message in its box; nothing is sent. One builder makes every message; the clipboard copy stays on this Mac, out of clipboard history, and clears after 2 minutes. | `apps/agent/tests/send_card.rs`, `AskAIButtonTests`, `SendCardClientTests`, `WindowHandoffDeliveryTests`, `AskPanelHandoffTests`. A real Claude, Codex, Cursor or ChatGPT opening with the text in its box: needs a person. |
 | Calendar | Off until turned on. Then today's meetings over Today's day strip, a call named after its meeting, a project's meetings, and Ask's "When did I last meet with …?". Titles, times, calendar names and places only. | `CalendarPrivacyTests` in both apps, `SystemCalendarTests`, `CalendarQuestionTests`, `CalendarAttributionTests`. macOS's prompt on a signed build: needs a person. |
-| Pictures of other windows | When a window beside the one in front changes its text, a picture of that window alone, masked to it, at most 30 an hour; never for calls, video or private windows. At most 2 GB (1, 2 or 5 GB in Preferences), older ones thinned first. Off for people upgrading until they turn it on. | `SideWindowPicturePolicyTests`, `WindowPictureCropTests`, `core/brain/tests/side_pictures.rs`, `moment_screenshots.rs`, `apps/agent/tests/side_pictures_retention.rs`, `brain_ingest_context.rs`. A working hour's disk and CPU: needs a person. |
-| Demo Memory | A made-up week in its own folder, from Option-click on the hi menu or Preferences, under About; remembering is paused while it is in use. | The seeder's `demo_week` tests, the `swift-test-demo-memory` lane, `DemoMemorySwitchingTests`, `DemoMemoryTests`. In the signed app: needs a person. |
+| Pictures of other windows | When a window beside the one in front changes its text, a picture of that window alone, with every window in front of it blanked out, sealed like the front window's screenshots; at most 30 an hour; none for a call or video app or page it recognises, or a private window. At most 2 GB, or 2% of the disk if that is less (1, 2 or 5 GB in Preferences), thinned out as they age. Off for people upgrading until they turn it on. | `SideWindowPicturePolicyTests`, `WindowPictureCropTests`, `core/brain/tests/side_pictures.rs`, `moment_screenshots.rs`, `apps/agent/tests/side_pictures_retention.rs`, `brain_ingest_context.rs`. A working hour's disk and CPU: needs a person. |
+| Demo Memory | A made-up week in its own folder, from Option-click on the hi menu or Preferences, under About; remembering is paused while it is in use, and the menu, Ask's footer, Preferences and the window's footer say Demo Memory. Resume says "Made up for the demo, so nothing opens." for the week's files, folders, documents and made-up sites. | The seeder's `demo_week` tests, the `swift-test-demo-memory` lane, `DemoMemorySwitchingTests`, `DemoMemoryTests`, `StatusMenuModelTests`, `SupervisorStopAndPauseTests`, `ResumeSheetModelTests`. In the signed app: needs a person. |
 | AI tools | Connect AI Tools… registers the `hippocampus` MCP server with Claude Code and Codex. Each session can start with up to four lines of recent work and up to six things learned about you. Disconnect… and Disconnect All… in Preferences take out exactly what Connect added. | `mcp_server.rs`, `context_packet.rs`, `handoff.rs`, `what_is_sent.rs` and `client_registration_e2e.rs` in `apps/agent/tests`; the `menu-ai-connector`, `onboarding-ai-connector` and `session-context-behavior` lanes. A live Claude Code or Codex session on the 0.3.0 build: needs a person. |
 | Menu bar, Pause, Stop Sharing, Quit | Four menu-bar pictures. Quit stops every process Hippocampus started; Stop Sharing turns remembering off; a crash stops the helper within 10 s. | `MenuBarStatusTests`, `StatusMenuModelTests`, `UserPauseControllerTests`, `CaptureStreamStopPolicyTests`, and the `quit-verifier-contract` lane on a stand-in app. In the real app: needs a person. |
 | Setup | Five screens: Welcome with a live demo of Ask, Today and an AI tool from made-up data, What you get, two permissions, the promises, and Try it, which reads the window behind setup and shows what it read or why it was skipped. Screens slide the way you go; the key that opens Ask can be Fn. | The `apps/onboarding` tests and the off-screen renders (`HIPPOCAMPUS_RENDER_ONBOARDING`). A first run on a new account, and the demo's motion on screen: needs a person. |
 | Updates | Check for Updates reads the newest GitHub release's `appcast.xml`, whose feed and DMG are signed with the release key. | `scripts/test-sparkle-publish.sh` (24 checks, judged by the app's own Sparkle) and `scripts/test-release-identity.sh`. No release is published yet, so until one is, Check for Updates says it couldn't check. |
 | Install | `install.sh` checks the checksum, Apple's notarization and the Team ID before it copies the app. A Homebrew cask is ready in a local tap. | The `install-sh-fixtures` lane (14 checks on a fake release); on Oct 15 the same test passed 18 checks with the notarized 0.2.1 disk image. The cask passed `brew audit --strict` and `brew style` locally. From the public tap: needs a person, once the tap is pushed. |
-| The release build | `scripts/release-0.3.0.sh` builds, signs, notarizes and checks the release; `--dry-run` does all but notarize. | The `release-app-gate`, `notary-log-contract`, `strip-release-binaries` and `release-contract` lanes. A dry run on Oct 15 at `088cd6a` exited 0. A notarized 0.3.0: not built yet. |
+| The release build | `scripts/release-0.3.0.sh` builds, signs, notarizes and checks the release; `--dry-run` does all but notarize. | The `release-app-gate`, `notary-log-contract`, `strip-release-binaries` and `release-contract` lanes. A dry run on Oct 15 at `088cd6a` exited 0. A 0.3.0 candidate built on Oct 18 at `d014a3e7` was signed and notarized (Apple accepted the app and the disk image) and passed `syspolicy_check`; its sizes are below. The published release: not built yet. |
 | The demo | `scripts/try-it.sh` makes a throwaway encrypted memory and searches it, without the Keychain. | Run on Oct 16 after `297a2f5`: exit 0, no Keychain prompt. |
 
 ## Measured
@@ -72,14 +72,16 @@ MacBook Air M3 with made-up screens, Oct 15:
 | Energy per read, median | 3.8 to 4.2 J | 0.49 to 0.51 J |
 | Peak memory, helper and reader | 1.3 to 1.7 GB | 0.30 GB |
 
-Size. No build has both of 0.3.0's size cuts yet; the first release run
-prints the real figures.
+Size, on the notarized 0.3.0 candidate of October 18, built from
+`d014a3e7`, in Finder's decimal units:
 
-- With the reader that leaves out video, on a clone of a 0.3.0 candidate:
-  disk image 180.3 MB (ULMO), app 370.2 MiB, of it the reader 243.1 MiB
-  (bake-off).
-- With stripped programs and the earlier reader, from the release dry run
-  at `088cd6a`: disk image 198.1 MB, app 432.5 MB.
+- Disk image: 176,716,280 bytes (177 MB; 168.5 MiB).
+- The app, as copied to Applications: 364,961,841 bytes (365 MB;
+  348.1 MiB), of it the text reader 253,475,703 bytes (253 MB).
+
+These are `stat -f %z` on the disk image and the sum of the app's file
+sizes, read from the image mounted read-only. The release build is
+measured the same way before its numbers are published.
 
 A picture of a window beside the one in front takes about 48 ms for the
 largest window (median, release build): about 1.5 s of CPU an hour at the
@@ -95,7 +97,8 @@ CPU share.
 
 ## Not checked yet
 
-- A notarized 0.3.0 build. It needs the owner's Developer ID and notary
+- The published 0.3.0 release. It is built again from a later commit than
+  the October 18 candidate, with the owner's Developer ID and notary
   profile (`scripts/release-0.3.0.sh`).
 - A clean install on a new account, and an update from 0.2.1 that keeps the
   Keychain key.
@@ -117,10 +120,13 @@ CPU share.
 
 ## Known limits
 
-- Six password managers are skipped by bundle ID. Others are read like any
-  app; `denylist.toml` keeps one out ([GUIDE](GUIDE.md#keep-an-app-out)).
-- A one-time code or a bank alert shown in a window can be stored. The
-  secret checks look for passwords, keys and tokens.
+- Password managers and authenticator apps are skipped by bundle ID, from a
+  list of 66 identifier families. One not on it is read like any app;
+  `denylist.toml` keeps it out ([GUIDE](GUIDE.md#keep-an-app-out)).
+- The secret checks refuse only their six shapes (above). A one-time code
+  with no keyword nearby or in wording they don't name, a long random token
+  with no label, a card number read too poorly to form one run of digits,
+  and a bank alert shown in a window can be stored.
 - A private browser window that shows no private marker is read.
 - In Low Power Mode only the window in front is read.
 - Connected AI tools can read your memory while Hippocampus is quit, until
@@ -133,8 +139,9 @@ CPU share.
   because no evidence verifier ships.
 - Copy for Your AI and Ask {your tool} send each moment's whole reading as
   Markdown, shortened evenly to fit the tool's message box.
-- The Overview lists searches only when it knows the pages' addresses:
-  where Automation was already allowed, or with the browser extension.
+- Today and Looked Up list searches only when they know the pages'
+  addresses: where Automation was already allowed, or with the browser
+  extension.
 - Memories saved before 0.3 were read before windows were classified. Their
   tab strips, bars and side bars are set apart, but text the old reader ran
   together across columns is only partly separated. Read Again re-reads one
