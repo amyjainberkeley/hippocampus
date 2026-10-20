@@ -34,4 +34,17 @@ public enum WindowStatusActions {
         case .leaveDemoMemory: .send(.leaveDemo)
         }
     }
+
+    /// ⌘K's one status command: the action the status offers now (in Demo
+    /// Memory, Leave Demo Memory), only when the window can ask the app for
+    /// it. None in a window opened by hand, which has no pipe, and none while
+    /// a forget holds remembering, which offers nothing.
+    public static func command(for status: WindowStatus, hasPipe: Bool) -> WindowStatus.Action? {
+        guard hasPipe, status.hasControls, let action = status.action else { return nil }
+        switch effect(of: action) {
+        case .send: return action
+        case .finishSetup: return action
+        case .openHippocampus: return nil
+        }
+    }
 }

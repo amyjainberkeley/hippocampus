@@ -48,4 +48,43 @@ final class WindowStatusActionsTests: XCTestCase {
         XCTAssertFalse(source.contains("case .turnOff: send(.pause)"))
         XCTAssertFalse(source.contains("case .leaveDemoMemory:"), "Leave Demo Memory is never sent as Resume")
     }
+
+    // MARK: ⌘K's status command
+
+    private let paused = WindowStatus(kind: .paused, title: "Paused", action: .resume)
+    private let remembering = WindowStatus(kind: .remembering, title: "Remembering", action: .pause)
+
+    /// ⌘K lists the one action the status offers now, as the menu does.
+    func testCommandBarListsTheOneActionTheStatusOffers() {
+        XCTAssertEqual(WindowStatusActions.command(for: paused, hasPipe: true), .resume)
+        XCTAssertEqual(WindowStatusActions.command(for: remembering, hasPipe: true), .pause)
+        XCTAssertEqual(WindowStatusActions.command(for: paused.inDemoMemory, hasPipe: true), .leaveDemoMemory)
+        XCTAssertEqual(WindowStatusActions.command(
+            for: WindowStatus(kind: .starting, title: "Starting", action: .turnOff), hasPipe: true), .turnOff)
+    }
+
+    /// None while a forget holds remembering, and none in a window opened by
+    /// hand, which has no pipe: a row there would do nothing.
+    func testCommandBarListsNothingTheAppWouldRefuse() {
+        XCTAssertNil(WindowStatusActions.command(for: remembering, hasPipe: false))
+        XCTAssertNil(WindowStatusActions.command(for: remembering.forgetting(.forgetting), hasPipe: true))
+        XCTAssertNil(WindowStatusActions.command(for: WindowStatus(byHand: nil, appRunning: true), hasPipe: true))
+        XCTAssertNil(WindowStatusActions.command(for: WindowStatus(byHand: nil, appRunning: false), hasPipe: false))
+    }
+
+    /// The window registers that one command with Go To's items, and the
+    /// app's fixed Pause and Resume rows, one of which always did nothing,
+    /// are gone.
+    func testTheWindowRegistersItsOneStatusCommand() throws {
+        let package = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let shell = try String(contentsOf: package.appendingPathComponent("Sources/RecallUI/MemoryWorkspaceView.swift"),
+                               encoding: .utf8)
+        XCTAssertTrue(shell.contains(".registerActionPanelCommands(goToItems + statusCommands, registry: .shared)"))
+        XCTAssertTrue(shell.contains("WindowStatusActions.command(for: shownStatus, hasPipe: channel != nil)"))
+        let app = try String(contentsOf: package.appendingPathComponent("Sources/RecallUI/MCIRecallApp.swift"),
+                             encoding: .utf8)
+        XCTAssertFalse(app.contains("id: \"app.pause\""))
+        XCTAssertFalse(app.contains("id: \"app.resume\""))
+    }
 }

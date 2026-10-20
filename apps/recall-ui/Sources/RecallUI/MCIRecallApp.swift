@@ -457,22 +457,8 @@ struct RootView: View {
             ) {
                 go(.newQuestion)
             },
-            .init(
-                id: "app.pause",
-                title: NavigationCopy.pause,
-                shortcut: "",
-                category: .actions
-            ) {
-                if let channel { Task { _ = await channel.send(WindowChannelRequest(op: .pause), timeout: .seconds(15)) } }
-            },
-            .init(
-                id: "app.resume",
-                title: NavigationCopy.resume,
-                shortcut: "",
-                category: .actions
-            ) {
-                if let channel { Task { _ = await channel.send(WindowChannelRequest(op: .resume), timeout: .seconds(15)) } }
-            },
+            // Pause, Resume and the rest: the window registers the one
+            // action its status offers now (`statusCommands`).
             .init(
                 id: "app.forgetRecent",
                 title: NavigationCopy.forgetLastTenMinutes,

@@ -481,7 +481,7 @@ struct MemoryWorkspaceView: View {
         .onChange(of: fieldFocused) { _, focused in
             if WindowMenuState.shared.fieldFocused != focused { WindowMenuState.shared.fieldFocused = focused }
         }
-        .registerActionPanelCommands(goToItems, registry: .shared)
+        .registerActionPanelCommands(goToItems + statusCommands, registry: .shared)
         .onAppear { publishMenuState() }
         .onChange(of: choices) { _, _ in publishMenuState() }
         .onChange(of: sidebarHidden) { _, _ in publishMenuState() }
@@ -895,6 +895,19 @@ struct MemoryWorkspaceView: View {
                 }
             }
         }
+    }
+
+    /// ⌘K's one status command: the action the status offers now (in Demo
+    /// Memory, Leave Demo Memory), as the status menu does. None in a
+    /// window opened by hand, which has no pipe, and none while a forget
+    /// holds remembering (SPEC 2.9).
+    private var statusCommands: [ActionPanelCommand] {
+        guard !isSyntheticPreview, preset == nil,
+              let action = WindowStatusActions.command(for: shownStatus, hasPipe: channel != nil)
+        else { return [] }
+        return [ActionPanelCommand(id: "app.status", title: action.title, shortcut: "", category: .actions) {
+            perform(action)
+        }]
     }
 
     // MARK: Reading the sidebar and the status
