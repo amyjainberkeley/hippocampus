@@ -194,4 +194,187 @@ final class ForgetPipelineTests: XCTestCase {
         _ = await coordinator().forget(ForgetRequest(momentIds: [41, 42]))
         XCTAssertFalse(app.sent.contains(.renew))
     }
+
+    // MARK: Two forgets close together
+
+    /// The app's end as `WindowChannelPolicy` decides: one hold at a time (a
+    /// hold while holding is refused). With `gated`, the first hold is
+    /// answered only when the test opens the gate: the stop takes a while.
+    final class AppLikeChannel: WindowChannelSending, @unchecked Sendable {
+        var holdsAtAll = true
+        var gated = false
+        private let lock = NSLock()
+        private var holding = false
+        private var waiter: CheckedContinuation<Void, Never>?
+        private var open = false
+        private var ops: [WindowChannelProtocol.Op] = []
+
+        var sent: [WindowChannelProtocol.Op] { lock.withLock { ops } }
+
+        func openGate() {
+            let waiting: CheckedContinuation<Void, Never>? = lock.withLock {
+                open = true
+                defer { waiter = nil }
+                return waiter
+            }
+            waiting?.resume()
+        }
+
+        func send(_ request: WindowChannelRequest, timeout: Duration) async -> Bool {
+            lock.withLock { ops.append(request.op) }
+            switch request.op {
+            case .hold:
+                guard holdsAtAll else { return false }
+                let refused: Bool = lock.withLock {
+                    if holding { return true }
+                    holding = true
+                    return false
+                }
+                if refused { return false }
+                if gated {
+                    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                        let resumeNow: Bool = lock.withLock {
+                            if open { return true }
+                            waiter = continuation
+                            return false
+                        }
+                        if resumeNow { continuation.resume() }
+                    }
+                }
+                return true
+            case .release:
+                lock.withLock { holding = false }
+                return true
+            default:
+                return true
+            }
+        }
+
+        func statuses() -> AsyncStream<WindowChannelStatus> { AsyncStream { $0.finish() } }
+    }
+
+    /// The memory's deletes, one at a time; ids in `failing` fail as a busy
+    /// writer lease fails them ("writer lease is active").
+    final class LeaseMutator: PrivacyMutator, @unchecked Sendable {
+        var failing: Set<UInt64> = []
+        private let lock = NSLock()
+        private var done: [UInt64] = []
+
+        var deleted: [UInt64] { lock.withLock { done } }
+
+        func deleteEvent(id: UInt64) async throws -> DeleteResult {
+            if failing.contains(id) { throw BrainReaderError.mutationBlocked }
+            lock.withLock { done.append(id) }
+            return DeleteResult(eventsDeleted: 1, vacuumOk: true)
+        }
+
+        func deleteEventsInRange(startTsUs: UInt64, endTsUs: UInt64) async throws -> DeleteResult {
+            DeleteResult(eventsDeleted: 0, vacuumOk: true)
+        }
+
+        func prepareWipe() async throws -> String { "" }
+        func wipeBrain(token: String) async throws -> DeleteResult { DeleteResult(eventsDeleted: 0, vacuumOk: true) }
+    }
+
+    private func coordinator(_ mutator: LeaseMutator, _ channel: AppLikeChannel) -> ForgetCoordinator {
+        ForgetCoordinator(mutator: mutator, channel: channel, store: store, appRunning: { true },
+                          deletions: MemoryDeletionSignal(center: NotificationCenter()))
+    }
+
+    private func eventually(_ condition: () -> Bool) async {
+        for _ in 0..<300 where !condition() {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    /// ⌘⌫ on one moment; when its note closes its delete begins, and the
+    /// hold takes a moment. Meanwhile ⌘⌫ on another. Each keeps its own
+    /// promise: the second never replaces the first's, and the first one's
+    /// end never removes the second's while it still waits out its note.
+    func testTwoForgetsAtOnceKeepBothPromisesOnDisk() async throws {
+        let mutator = LeaseMutator()
+        let channel = AppLikeChannel()
+        channel.gated = true
+        let forget = coordinator(mutator, channel)
+        _ = await forget.forgetAfterUndo(ForgetRequest(momentIds: [41]), count: 1)
+        let first = Task { await forget.finishUndoable() }
+        await eventually { channel.sent == [.hold] }
+        XCTAssertEqual(channel.sent, [.hold], "the first forget is waiting for its hold")
+
+        _ = await forget.forgetAfterUndo(ForgetRequest(momentIds: [99]), count: 1)
+        XCTAssertEqual(forget.undoable?.request.momentIds, [99])
+        let during = store.load()?.momentIds ?? []
+        XCTAssertTrue(during.contains(41),
+                      "moment 41's promise was replaced before it was deleted (file now holds \(during))")
+
+        channel.openGate()
+        await first.value
+        XCTAssertEqual(mutator.deleted, [41])
+        XCTAssertEqual(store.load()?.momentIds, [99],
+                       "moment 99 still waits out its note: a window that ends now still forgets it")
+        forget.undo()
+        XCTAssertNil(store.load())
+    }
+
+    /// A confirmed forget (a session, an hour, a page) while another
+    /// forget's hold is still being asked for: it waits for that one, in the
+    /// same hold, instead of asking for a second one the app would refuse.
+    func testAConfirmedForgetDuringAnotherForgetsHoldIsNotRefused() async throws {
+        let mutator = LeaseMutator()
+        let channel = AppLikeChannel()
+        channel.gated = true
+        let forget = coordinator(mutator, channel)
+        _ = await forget.forgetAfterUndo(ForgetRequest(momentIds: [41]), count: 1)
+        let first = Task { await forget.finishUndoable() }
+        await eventually { channel.sent == [.hold] }
+        let second = Task { await forget.forget(ForgetRequest(momentIds: [77])) }
+        await eventually { self.store.load()?.momentIds.contains(77) == true }
+        channel.openGate()
+        await first.value
+        let outcome = await second.value
+        XCTAssertNotEqual(outcome, .failed, "\(NavigationCopy.couldNotForget) for a valid forget")
+        XCTAssertEqual(outcome, .forgotten(moments: 1))
+        XCTAssertTrue(mutator.deleted.contains(77), "moment 77 is still saved: \(mutator.deleted)")
+        XCTAssertEqual(channel.sent, [.hold, .release], "one hold for both")
+        XCTAssertNil(store.load())
+    }
+
+    // MARK: The pending file, as a list
+
+    /// Each forget has its own entry: one finishing removes only its own,
+    /// and another memory's entries are kept, never applied here.
+    func testAForgetsEndRemovesOnlyItsOwnPromise() throws {
+        let other = PendingForgetStore(directory: folder, memory: "/elsewhere/demo.sqlite")
+        try other.save(ForgetRequest(momentIds: [7]))
+        let first = try store.save(ForgetRequest(momentIds: [41]))
+        try store.save(ForgetRequest(spans: [.init(startUs: 10, endUs: 20)]))
+        XCTAssertEqual(store.load(), ForgetRequest(momentIds: [41], spans: [.init(startUs: 10, endUs: 20)]))
+        store.remove(first)
+        XCTAssertEqual(store.load(), ForgetRequest(spans: [.init(startUs: 10, endUs: 20)]))
+        XCTAssertEqual(other.load(), ForgetRequest(momentIds: [7]), "another memory's promise is kept")
+        store.remove()
+        XCTAssertNil(store.load())
+        XCTAssertEqual(other.load(), ForgetRequest(momentIds: [7]))
+        let file = folder.appendingPathComponent(PendingForgetStore.fileName)
+        let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+    }
+
+    /// A forget the first build left, in its one-forget form, is still read
+    /// and finished on the next open, then the file goes.
+    func testAForgetTheFirstBuildLeftIsStillFinished() async throws {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        let key = SidebarHides.memoryKey("/tmp/pipeline/mci.sqlite")
+        let json = "{\"version\":1,\"memory\":\"\(key)\",\"request\":{\"momentIds\":[41],\"spans\":[]},\"createdUs\":5}"
+        let file = folder.appendingPathComponent(PendingForgetStore.fileName)
+        XCTAssertTrue(FileManager.default.createFile(atPath: file.path, contents: Data(json.utf8),
+                                                     attributes: [.posixPermissions: 0o600]))
+        XCTAssertEqual(store.load(), ForgetRequest(momentIds: [41]))
+        let outcome = await coordinator().finishLeftover()
+        XCTAssertEqual(outcome, .forgotten(moments: 1))
+        XCTAssertEqual(mutator.calls, [[41]])
+        XCTAssertNil(store.load())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
 }
