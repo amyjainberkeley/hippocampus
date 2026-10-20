@@ -162,15 +162,19 @@ final class OCRReadingPrivacyTests: XCTestCase {
         struct Corpus: Decodable {
             let cases: [Case]
             struct Case: Decodable {
-                let text: String
+                /// The case's text, or `parts` to join: key-shaped cases are
+                /// kept in parts so no whole key sits in the repository.
+                let text: String?
+                let parts: [String]?
                 let secret: Bool
                 let why: String
             }
         }
         let corpus = try JSONDecoder().decode(Corpus.self, from: Data(contentsOf: url))
-        XCTAssertGreaterThanOrEqual(corpus.cases.count, 60)
+        XCTAssertGreaterThanOrEqual(corpus.cases.count, 130)
         for item in corpus.cases {
-            XCTAssertEqual(SuppressionCascade.containsSecretOrPII(item.text), item.secret, item.why)
+            let text = try XCTUnwrap(item.text ?? item.parts?.joined(), item.why)
+            XCTAssertEqual(SuppressionCascade.containsSecretOrPII(text), item.secret, item.why)
         }
     }
 

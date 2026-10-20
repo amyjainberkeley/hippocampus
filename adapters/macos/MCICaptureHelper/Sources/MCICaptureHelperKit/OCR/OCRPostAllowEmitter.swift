@@ -835,7 +835,10 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                 tsUs: tsUs,
                 appBundleId: context.appBundleId ?? "",
                 windowTitle: context.windowTitle ?? "",
-                url: context.url ?? "",
+                // The address as it is stored: sign-in parameters removed
+                // here, so a token never crosses the pipe (the agent removes
+                // them again before anything is stored).
+                url: context.url.map(SuppressionCascade.urlWithoutSecretParams) ?? "",
                 ocrText: memoryText,
                 keyframeHash: zeroHash
             )

@@ -1,41 +1,101 @@
-//! The OCR secret patterns, copied verbatim from the capture helper, plus the
-//! two detectors a plain regex cannot express: credit-card numbers (Luhn) and
-//! one-time codes (a keyword nearby).
+//! The secret checks every source passes before anything is stored, and the
+//! scrub every way out applies: the capture helper's regex patterns, copied
+//! verbatim, plus the two detectors a plain regex cannot express: credit-card
+//! numbers (Luhn) and one-time codes (a keyword nearby).
 //!
 //! `SuppressionCascade.containsSecretOrPII`
 //! (`adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Suppression/SuppressionCascade.swift`)
-//! refuses to store any OCR text one of these matches. The reader
-//! ([`crate::reading`]) checks its output with the same logic, so cleaning text
-//! never makes something look like a secret that the helper let through.
+//! refuses to store any OCR text, window title or address one of these
+//! matches. The agent runs [`contains_secret`] again on the text, title and
+//! address of every moment from every source (screen, browser extensions,
+//! Mail, Messages, transcript import, MCP sync) before it is stored, and
+//! [`redact_secrets`] on what MCP answers, context packets, handoffs and
+//! send-cards carry out. The reader ([`crate::reading`]) checks its output
+//! with the same logic, so cleaning text never makes something look like a
+//! secret that the helper let through.
 //!
-//! Swift compiles the four regex strings with `NSRegularExpression` (ICU); Rust
+//! Swift compiles the regex strings with `NSRegularExpression` (ICU); Rust
 //! compiles them with `regex`. The credit-card and OTP detectors are hand-rolled
 //! byte scans in both languages (no regex engine, no lookaround), so the two
 //! engines cannot drift on them. Both answer the same for every case in
 //! `core/brain/fixtures/ocr-secret-corpus.json`, which an XCTest of
 //! `containsSecretOrPII` reads too. The corpus covers the characters the regex
 //! engines could disagree on (newlines, U+001E, U+000B, U+0085, case folding),
-//! real test PANs and non-Luhn look-alikes, and OTPs with and without a keyword.
+//! real test PANs and non-Luhn look-alikes, OTPs with and without a keyword,
+//! and every vendor key shape with its near misses. Key-shaped cases are
+//! stored as `parts` the tests join, so no whole key sits in the repository.
 
+use std::borrow::Cow;
+use std::ops::Range;
 use std::sync::OnceLock;
 
-use regex::RegexSet;
+use regex::{Regex, RegexSet};
 
 /// The pattern strings, in the helper's order: key-value secrets, GitHub
-/// tokens, AWS access key ids, JSON web tokens.
+/// tokens, AWS access key ids, JSON web tokens, then vendor API keys and
+/// private keys.
 ///
-/// These four are kept BYTE-FOR-BYTE identical to the raw-string literals in
+/// These are kept BYTE-FOR-BYTE identical to the raw-string literals in
 /// `SuppressionCascade.swift` — `reading.rs`'s
-/// `the_guard_uses_the_capture_helpers_four_pattern_strings_verbatim` fails the
+/// `the_guard_uses_the_capture_helpers_pattern_strings_verbatim` fails the
 /// build otherwise. The credit-card and OTP detectors below are deliberately
 /// NOT in this array: they are not pure regex (one needs a checksum, the other
 /// needs keyword context), so a bare `RegexSet` match would over-redact.
-pub const PATTERNS: [&str; 4] = [
+///
+/// The vendor shapes are precision-first: each needs its vendor's prefix and
+/// enough key characters that no word, file name or placeholder matches.
+/// Stripe's test-mode secret keys (`sk_test_`, `rk_test_`) count: they are
+/// working credentials for an account's test data, and Stripe's own docs show
+/// a signed-in reader their real one. Publishable keys (`pk_live_`,
+/// `pk_test_`) are public by design and do not count.
+pub const PATTERNS: [&str; 14] = [
+    // 1. A key name, `:` or `=`, and a value.
     r"(?i)(password|passwd|secret|api[_-]?key|token|bearer|access[_-]?token)\s*[:=]\s*\S+",
+    // 2. GitHub classic tokens: ghp_, gho_, ghu_, ghs_, ghr_.
     r"\bgh[poursAS]_[A-Za-z0-9_]{20,}\b",
+    // 3. AWS access key ids.
     r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b",
+    // 4. JSON web tokens.
     r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b",
+    // 5. Anthropic API, admin and OAuth keys: sk-ant-api03-…, sk-ant-admin01-…
+    r"\bsk-ant-[A-Za-z0-9_-]{20,}",
+    // 6. OpenAI project, service-account and admin keys.
+    r"\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}",
+    // 7. OpenAI user keys and other `sk-` keys: 32 or more letters and digits.
+    r"\bsk-[A-Za-z0-9]{32,}",
+    // 8. Slack bot, user, app, refresh, session and export tokens.
+    r"\bxox[abeprs]-[0-9]+-[A-Za-z0-9-]{8,}",
+    // 9. GitHub fine-grained personal access tokens.
+    r"\bgithub_pat_[A-Za-z0-9_]{22,}",
+    // 10. GitLab personal access tokens.
+    r"\bglpat-[A-Za-z0-9_-]{20,}",
+    // 11. Google API keys.
+    r"\bAIza[0-9A-Za-z_-]{35}",
+    // 12. Stripe secret and restricted keys, live and test.
+    r"\b[rs]k_(?:live|test)_[0-9A-Za-z]{20,}",
+    // 13. A private key's first line, any kind (RSA, EC, OpenSSH, PKCS #8).
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+    // 14. `Bearer` and a long token with no label.
+    r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{20,}",
 ];
+
+/// What [`redact_secrets`] puts where a secret was.
+pub const REDACTED: &str = "[secret removed]";
+
+fn pattern_set() -> &'static RegexSet {
+    static SET: OnceLock<RegexSet> = OnceLock::new();
+    SET.get_or_init(|| RegexSet::new(PATTERNS).expect("the helper patterns compile"))
+}
+
+fn pattern_regexes() -> &'static [Regex] {
+    static EACH: OnceLock<Vec<Regex>> = OnceLock::new();
+    EACH.get_or_init(|| {
+        PATTERNS
+            .iter()
+            .map(|pattern| Regex::new(pattern).expect("the helper patterns compile"))
+            .collect()
+    })
+}
 
 /// Phrases that mark a nearby 4–8 digit run as a one-time code, lower-cased.
 ///
@@ -65,15 +125,78 @@ pub const OTP_KEYWORDS: [&str; 13] = [
 /// of. MUST equal Swift `SuppressionCascade.otpWindowBytes`.
 const OTP_WINDOW_BYTES: usize = 40;
 
-/// True when any of the four patterns matches, or `text` holds a Luhn-valid
+/// True when any of the patterns matches, or `text` holds a Luhn-valid
 /// credit-card number, or a one-time code next to an OTP keyword.
 #[must_use]
 pub fn contains_secret(text: &str) -> bool {
-    static SET: OnceLock<RegexSet> = OnceLock::new();
-    SET.get_or_init(|| RegexSet::new(PATTERNS).expect("the four helper patterns compile"))
-        .is_match(text)
-        || contains_credit_card(text)
-        || contains_otp(text)
+    pattern_set().is_match(text) || contains_credit_card(text) || contains_otp(text)
+}
+
+/// The byte ranges of `text` that [`contains_secret`] would object to:
+/// every pattern match, every Luhn-valid card number and every one-time code,
+/// sorted, with overlapping and touching ranges merged. Empty exactly when
+/// [`contains_secret`] is false.
+#[must_use]
+pub fn secret_spans(text: &str) -> Vec<Range<usize>> {
+    let mut spans: Vec<Range<usize>> = pattern_regexes()
+        .iter()
+        .flat_map(|regex| regex.find_iter(text).map(|found| found.range()))
+        .collect();
+    spans.extend(credit_card_spans(text));
+    spans.extend(otp_spans(text));
+    spans.sort_by_key(|span| (span.start, span.end));
+    let mut merged: Vec<Range<usize>> = Vec::with_capacity(spans.len());
+    for span in spans {
+        match merged.last_mut() {
+            Some(last) if span.start <= last.end => last.end = last.end.max(span.end),
+            _ => merged.push(span),
+        }
+    }
+    merged
+}
+
+/// `text` with every secret [`contains_secret`] finds replaced by
+/// [`REDACTED`], for what leaves Hippocampus (an MCP answer, a context packet,
+/// a handoff). Borrowed and unchanged when there is nothing to remove; the
+/// result never holds a secret, so redacting twice changes nothing.
+///
+/// A whole match goes, key name included (`password: hunter2` becomes
+/// `[secret removed]`), so the marker can never complete a key-value match.
+/// Removing one secret can bring a number within reach of an OTP keyword, so
+/// it repeats until nothing matches; a line that still matches after that
+/// goes whole, and so, as a last resort, does the text.
+#[must_use]
+pub fn redact_secrets(text: &str) -> Cow<'_, str> {
+    if !contains_secret(text) {
+        return Cow::Borrowed(text);
+    }
+    let mut current = text.to_owned();
+    for _ in 0..4 {
+        let spans = secret_spans(&current);
+        if spans.is_empty() {
+            break;
+        }
+        let mut next = String::with_capacity(current.len());
+        let mut at = 0;
+        for span in spans {
+            next.push_str(&current[at..span.start]);
+            next.push_str(REDACTED);
+            at = span.end;
+        }
+        next.push_str(&current[at..]);
+        current = next;
+    }
+    if contains_secret(&current) {
+        current = current
+            .split('\n')
+            .map(|line| if contains_secret(line) { REDACTED } else { line })
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    if contains_secret(&current) {
+        current = REDACTED.to_owned();
+    }
+    Cow::Owned(current)
 }
 
 /// Whether `text` holds a credit-card number: a maximal run of 13–19 digits,
@@ -87,7 +210,13 @@ pub fn contains_secret(text: &str) -> bool {
 /// fire.
 #[must_use]
 pub fn contains_credit_card(text: &str) -> bool {
+    !credit_card_spans(text).is_empty()
+}
+
+/// The byte ranges of the card numbers [`contains_credit_card`] finds.
+fn credit_card_spans(text: &str) -> Vec<Range<usize>> {
     let bytes = text.as_bytes();
+    let mut spans = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
         if !bytes[i].is_ascii_digit() {
@@ -113,11 +242,11 @@ pub fn contains_credit_card(text: &str) -> bool {
             }
         }
         if (13..=19).contains(&digits) && luhn_valid(&bytes[start..i]) {
-            return true;
+            spans.push(start..i);
         }
         // `i` already sits past this run; the maximal run is never re-entered.
     }
-    false
+    spans
 }
 
 /// The Luhn checksum over the ASCII digits in `run`; any other byte (a space or
@@ -149,6 +278,12 @@ fn luhn_valid(run: &[u8]) -> bool {
 /// 4–8 digit numbers (an order id, a year, a port) are kept.
 #[must_use]
 pub fn contains_otp(text: &str) -> bool {
+    !otp_spans(text).is_empty()
+}
+
+/// The byte ranges of the digit runs [`contains_otp`] counts as one-time
+/// codes: every 4–8 digit run within reach of a bounded OTP keyword.
+fn otp_spans(text: &str) -> Vec<Range<usize>> {
     let bytes = text.as_bytes();
 
     // Maximal runs of 4–8 ASCII digits. A longer run (a card, a long id) is not
@@ -169,12 +304,13 @@ pub fn contains_otp(text: &str) -> bool {
         }
     }
     if runs.is_empty() {
-        return false;
+        return Vec::new();
     }
 
     // Lower-case the ASCII so the keyword search is case-insensitive without
     // moving any byte offset (every OTP keyword is ASCII, as are the digits).
     let lower: Vec<u8> = bytes.iter().map(u8::to_ascii_lowercase).collect();
+    let mut codes = vec![false; runs.len()];
     for keyword in OTP_KEYWORDS {
         let keyword = keyword.as_bytes();
         if keyword.len() > lower.len() {
@@ -190,7 +326,7 @@ pub fn contains_otp(text: &str) -> bool {
             if !bounded {
                 continue;
             }
-            for &(run_start, run_end) in &runs {
+            for (index, &(run_start, run_end)) in runs.iter().enumerate() {
                 // Distance between the keyword span [start, end) and the digit
                 // run [run_start, run_end); 0 when they overlap. saturating_sub
                 // makes the non-touching side vanish, so this equals the old
@@ -199,12 +335,15 @@ pub fn contains_otp(text: &str) -> bool {
                     .saturating_sub(end)
                     .max(start.saturating_sub(run_end));
                 if gap <= OTP_WINDOW_BYTES {
-                    return true;
+                    codes[index] = true;
                 }
             }
         }
     }
-    false
+    runs.into_iter()
+        .zip(codes)
+        .filter_map(|((start, end), code)| code.then_some(start..end))
+        .collect()
 }
 
 /// A byte that can be part of a word, for the OTP keyword boundary test.
@@ -260,5 +399,110 @@ mod tests {
     fn luhn_matches_the_textbook_values() {
         assert!(luhn_valid(b"79927398713"));
         assert!(!luhn_valid(b"79927398710"));
+    }
+
+    /// Key material for the vendor shapes, joined at run time so no whole
+    /// key-shaped string sits in the source.
+    const BODY: &str = "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R";
+
+    fn key(parts: &[&str]) -> String {
+        parts.concat()
+    }
+
+    #[test]
+    fn every_vendor_key_shape_is_a_secret_on_its_own_line() {
+        let keys = [
+            key(&["sk-", "ant-", "api03-", BODY]),
+            key(&["sk-", "ant-", "admin01-", BODY]),
+            key(&["sk-", "proj-", BODY]),
+            key(&["sk-", "svcacct-", BODY]),
+            key(&["sk-", BODY]),
+            key(&["xox", "b-", "1234567890", "-", "9876543210", "-", &BODY[..24]]),
+            key(&["xox", "p-", "1234567890", "-", "9876543210", "-", &BODY[..24]]),
+            key(&["gh", "p_", &BODY[..36]]),
+            key(&["github", "_pat_", &BODY[..22], "_", BODY]),
+            key(&["gl", "pat-", &BODY[..20]]),
+            key(&["AK", "IA", "IOSFODNN7EXAMPLE"]),
+            key(&["AI", "za", "Sy", &BODY[..33]]),
+            key(&["sk", "_live_", &BODY[..24]]),
+            key(&["rk", "_live_", &BODY[..24]]),
+            key(&["sk", "_test_", &BODY[..24]]),
+            key(&["-----BEGIN ", "OPENSSH ", "PRIVATE KEY-----"]),
+            key(&["Authorization: ", "Bearer ", BODY]),
+        ];
+        for key in &keys {
+            assert!(contains_secret(key), "{key}");
+            assert!(contains_secret(&format!("Copy it now:\n{key}\nthen close")), "{key}");
+        }
+    }
+
+    #[test]
+    fn near_misses_of_the_vendor_shapes_are_not_secrets() {
+        for text in [
+            "sk-ant-".to_owned(),
+            key(&["sk-", "ant-", "short"]),
+            key(&["task-", "ant-", "api03-", BODY]),
+            "sk-learn is a common alias for scikit-learn".to_owned(),
+            key(&["sk-", &BODY[..31]]),
+            "risk-free, desk-bound, ask-me-anything".to_owned(),
+            "xoxb- tokens start like this".to_owned(),
+            key(&["xox", "o-", "1234-", "gossipgirl"]),
+            key(&["xox", "b-", "notdigits-", BODY]),
+            "github_pat_ is the prefix".to_owned(),
+            key(&["gl", "pat-", "short"]),
+            key(&["AI", "za", "Sy", &BODY[..32]]),
+            key(&["pk", "_live_", &BODY[..24]]),
+            key(&["pk", "_test_", &BODY[..24]]),
+            key(&["sk", "_live_", "short"]),
+            "-----BEGIN PUBLIC KEY-----".to_owned(),
+            "-----BEGIN CERTIFICATE-----".to_owned(),
+            "the bearer of this letter".to_owned(),
+            "Bearer authentication is described in RFC 6750".to_owned(),
+        ] {
+            assert!(!contains_secret(&text), "{text}");
+        }
+    }
+
+    #[test]
+    fn redacting_clean_text_borrows_it_unchanged() {
+        let text = "Send the Quillfeather draft by Thursday. Order #40281773.";
+        assert!(matches!(redact_secrets(text), Cow::Borrowed(same) if same == text));
+        assert!(secret_spans(text).is_empty());
+    }
+
+    #[test]
+    fn redacting_removes_every_secret_and_keeps_the_rest() {
+        let anthropic = key(&["sk-", "ant-", "api03-", BODY]);
+        let text = format!(
+            "Bramble\n{anthropic}\nPay with 4111 1111 1111 1111 today.\n\
+             Your verification code is 482913.\npassword: hunter2 and more"
+        );
+        let redacted = redact_secrets(&text);
+        assert!(!contains_secret(&redacted), "{redacted}");
+        for gone in [anthropic.as_str(), "4111", "482913", "hunter2"] {
+            assert!(!redacted.contains(gone), "{gone} in {redacted}");
+        }
+        for kept in ["Bramble", "Pay with", "today.", "and more"] {
+            assert!(redacted.contains(kept), "{kept} not in {redacted}");
+        }
+        assert_eq!(redact_secrets(&redacted), redacted, "redacting twice changes nothing");
+    }
+
+    #[test]
+    fn a_removed_card_cannot_bring_a_code_within_reach_of_its_keyword() {
+        // The card is 19 bytes and the marker 16, so with the card gone the
+        // run 1234 moves from 42 bytes after "passcode" to 39: within reach.
+        let text = format!("passcode 4111 1111 1111 1111 {} 1234", "x".repeat(20));
+        let redacted = redact_secrets(&text);
+        assert!(!contains_secret(&redacted), "{redacted}");
+        assert!(!redacted.contains("1234"), "{redacted}");
+    }
+
+    #[test]
+    fn spans_cover_exactly_the_secrets() {
+        let text = "a password: hunter2 b";
+        let spans = secret_spans(text);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(&text[spans[0].clone()], "password: hunter2");
     }
 }
