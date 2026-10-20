@@ -444,6 +444,25 @@ final class FormattersTests: XCTestCase {
         XCTAssertEqual(Formatters.rowTextCap, 280)
     }
 
+    /// A preview longer than a row shows stops at its last whole word that
+    /// fits, with "…", never mid-word ("Gift cards Cus…" on Web Pages); a
+    /// first word longer than the row is cut at the limit.
+    func testAPreviewLongerThanARowEndsAtAWholeWord() {
+        let text = String(repeating: "pricing tier ", count: 30)
+        let preview = Formatters.rowPreview(text, title: nil)
+        XCTAssertLessThanOrEqual(preview.count, 220)
+        XCTAssertTrue(preview.hasSuffix("tier\u{2026}") || preview.hasSuffix("pricing\u{2026}"), preview)
+        XCTAssertTrue(text.hasPrefix(String(preview.dropLast()) + " "), "ends at a whole word: \(preview)")
+        let found = Formatters.rowPreview(text, title: nil, isPassage: true)
+        XCTAssertTrue(text.hasPrefix(String(found.dropLast()) + " "), "a search's passage too: \(found)")
+        XCTAssertEqual(Formatters.rowPreview(String(repeating: "x", count: 300), title: nil),
+                       String(repeating: "x", count: 219) + "\u{2026}")
+        XCTAssertEqual(Formatters.cutAtAWholeWord("alpha beta gamma", maxLen: 12), "alpha beta\u{2026}")
+        XCTAssertEqual(Formatters.cutAtAWholeWord("alpha beta gamma", maxLen: 11), "alpha beta\u{2026}")
+        XCTAssertEqual(Formatters.cutAtAWholeWord("alpha beta gamma", maxLen: 10), "alpha\u{2026}")
+        XCTAssertEqual(Formatters.cutAtAWholeWord("alpha \u{00B7} beta", maxLen: 9), "alpha\u{2026}")
+    }
+
     /// A shorter text was not cut, so it ends as it ends; a search's passage
     /// is cut by bytes, and a chat's at its start, so it is left as it came.
     func testOnlyAStartTheFFICutGetsTheEllipsis() {

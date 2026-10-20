@@ -80,10 +80,12 @@ public enum Formatters {
     /// follows it ("Maya Chen 10:42 AM · Pushed the new onboarding flow"),
     /// and a list's own mark never gets a second one.
     ///
-    /// The start of a moment's text that the FFI cut at `rowTextCap` ends
-    /// mid-word: a preview that runs to that end stops at its last whole
-    /// word, with "…". (A search's passage is cut by bytes, and for a chat
-    /// or a terminal at its start, so it is left as it came.)
+    /// A preview longer than `maxLen` stops at its last whole word that
+    /// fits, with "…". The start of a moment's text that the FFI cut at
+    /// `rowTextCap` ends mid-word too: a preview that runs to that end stops
+    /// at its last whole word, with "…". (A search's passage is cut by
+    /// bytes, and for a chat or a terminal at its start, so its end is left
+    /// as it came.)
     public static func rowPreview(_ text: String, title: String?, maxLen: Int = 220,
                                   isPassage: Bool = false) -> String {
         let lines = isPassage ? passageLines(text, title: title) : previewLines(text, title: title)
@@ -110,10 +112,26 @@ public enum Formatters {
             joined += (joins ? " " : " \u{00B7} ") + line
             previous = line
         }
-        if toTheEnd, !isPassage, joined.count <= maxLen, text.count >= rowTextCap {
+        if !toTheEnd || joined.count > maxLen {
+            return cutAtAWholeWord(joined, maxLen: maxLen)
+        }
+        if !isPassage, text.count >= rowTextCap {
             return endingAtAWholeWord(joined)
         }
-        return snippet(joined, maxLen: maxLen)
+        return joined
+    }
+
+    /// `text` cut to fit `maxLen`, "…" included: up to its last whole word
+    /// that fits, or at the limit when its first word alone is longer.
+    static func cutAtAWholeWord(_ text: String, maxLen: Int) -> String {
+        guard maxLen >= 4 else { return String(text.prefix(maxLen)) }
+        let head = String(text.prefix(maxLen - 1))
+        let next = text.dropFirst(head.count).first
+        if head.last?.isWhitespace ?? false || next?.isWhitespace ?? true {
+            // The cut fell between two words.
+            return head.trimmingCharacters(in: looseEnd) + "\u{2026}"
+        }
+        return endingAtAWholeWord(head)
     }
 
     /// The most characters of a moment's text the FFI gives a row:
@@ -126,11 +144,13 @@ public enum Formatters {
     static func endingAtAWholeWord(_ text: String) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         guard let space = trimmed.lastIndex(where: \.isWhitespace) else { return trimmed + "\u{2026}" }
-        // No separator or comma left hanging before the "…".
-        let loose = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "\u{00B7},;:"))
-        let kept = trimmed[..<space].trimmingCharacters(in: loose)
+        let kept = trimmed[..<space].trimmingCharacters(in: looseEnd)
         return (kept.isEmpty ? trimmed : kept) + "\u{2026}"
     }
+
+    /// What a cut never leaves hanging before its "…": spaces, a separator
+    /// or a comma.
+    private static let looseEnd = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "\u{00B7},;:"))
 
     /// A line a list's mark starts: "•", "◦", "▪", "‣", "-", "–" or "*" and
     /// a space, or a number and "." or ")" and a space ("2. Ship it").
