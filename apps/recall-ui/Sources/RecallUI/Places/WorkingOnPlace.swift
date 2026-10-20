@@ -25,6 +25,7 @@ struct WorkingOnPlace: View {
     @Environment(\.workNow) private var now
     @Environment(\.workDisplayCalendar) private var calendar
     @Environment(\.isSyntheticPreview) private var isSyntheticPreview
+    @Environment(\.handoffServices) private var handoff
 
     init(work: any WorkReader, reader: BrainReader, open: @escaping (RecallRoute) -> Void, filter: String = "",
          refreshEvery: Duration = .seconds(120), model: WorkingOnModel? = nil, showsNotShown: Bool = false) {
@@ -153,14 +154,26 @@ struct WorkingOnPlace: View {
         }
     }
 
-    @ViewBuilder
+    /// Show or Hide in Sidebar, Show in History, Copy for Your AI (SPEC 3.3).
     private func menu(for item: WorkItem) -> some View {
-        if hides.keepsOut(item) {
-            Button(WorkCopy.showInSidebar) { show(item) }
-        } else {
-            Button(WorkCopy.hideFromSidebar) { hides.hide(item.id) }
+        ForEach(WorkItemMenuItem.items(kind: item.kind, keptOut: hides.keepsOut(item), in: .showAll),
+                id: \.self) { action in
+            Button(action.title) { perform(action, on: item) }
         }
-        Button(WorkCopy.showInHistory) { showInHistory(item) }
+    }
+
+    private func perform(_ action: WorkItemMenuItem, on item: WorkItem) {
+        switch action {
+        case .showInSidebar: show(item)
+        case .hideFromSidebar: hides.hide(item.id)
+        case .showInHistory: showInHistory(item)
+        case .copyForYourAI:
+            // The builder's message for the item, by the clipboard rules (SPEC 5.3.6).
+            let services = HandoffServices.resolved(handoff, isSyntheticPreview: isSyntheticPreview)
+            Task { await AskAIButton.copyForYourAI(.item(item.id), services: services) }
+        case .contextForThisFolder:
+            break
+        }
     }
 
     private func show(_ item: WorkItem) {

@@ -139,6 +139,19 @@ final class WorkingOnItemModelTests: XCTestCase {
         Date(timeIntervalSince1970: Double(us) / 1_000_000)
     }
 
+    /// An item's menus (SPEC 3.2, 3.3): Show All's right-click used to have
+    /// no Copy for Your AI.
+    func testAnItemsMenusOfferWhatTheSpecSays() {
+        XCTAssertEqual(WorkItemMenuItem.items(kind: .code, keptOut: false, in: .showAll),
+                       [.hideFromSidebar, .showInHistory, .copyForYourAI])
+        XCTAssertEqual(WorkItemMenuItem.items(kind: .document, keptOut: true, in: .showAll),
+                       [.showInSidebar, .showInHistory, .copyForYourAI])
+        XCTAssertEqual(WorkItemMenuItem.items(kind: .code, keptOut: false, in: .itemPage),
+                       [.hideFromSidebar, .showInHistory, .contextForThisFolder, .copyForYourAI])
+        XCTAssertEqual(WorkItemMenuItem.items(kind: .design, keptOut: true, in: .itemPage),
+                       [.showInSidebar, .showInHistory, .copyForYourAI], "a folder only for a code project")
+    }
+
     // MARK: Every day of an item's History is reachable (the verifier's probe)
 
     /// The agent's item read as `work --item <id> --before <us>` pages it:

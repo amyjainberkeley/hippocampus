@@ -431,3 +431,22 @@ public extension WorkFormat {
         return id.split(separator: "_").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
     }
 }
+
+/// What a Working On item's menus offer (SPEC 3.2, 3.3): its page's ⋯ and
+/// its card's right-click in Show All.
+public enum WorkItemMenuItem: Hashable, Sendable {
+    case showInSidebar, hideFromSidebar, showInHistory, contextForThisFolder, copyForYourAI
+
+    public enum Place: Sendable {
+        case itemPage, showAll
+    }
+
+    /// In order: Show or Hide in Sidebar, Show in History, Context for This
+    /// Folder… on a code project's page, then Copy for Your AI.
+    public static func items(kind: WorkItem.Kind, keptOut: Bool, in place: Place) -> [WorkItemMenuItem] {
+        var items: [WorkItemMenuItem] = [keptOut ? .showInSidebar : .hideFromSidebar, .showInHistory]
+        if kind == .code, place == .itemPage { items.append(.contextForThisFolder) }
+        items.append(.copyForYourAI)
+        return items
+    }
+}

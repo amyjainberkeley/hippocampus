@@ -167,21 +167,9 @@ struct WorkingOnItemPlace: View {
                 AskAIButton(source: .item(item.id), reader: reader, handlesCommandReturn: true,
                             itemMoments: item.moments, codeProject: item.kind == .code ? item.name : nil)
                 Menu {
-                    if hides.keepsOut(item) {
-                        Button(WorkCopy.showInSidebar) { hides.show(item.id) }
-                    } else {
-                        Button(WorkCopy.hideFromSidebar) { hides.hide(item.id) }
-                    }
-                    Button(WorkCopy.showInHistory) { showInHistory(item.moments.first) }
-                    if item.kind == .code {
-                        // Today's ⌘J sheet, in the project's folder (SPEC 3.2).
-                        Button(NavigationCopy.contextForThisFolder) {
-                            folderSheet = FolderSheet(guess: isSyntheticPreview ? nil : item.folderGuess)
-                        }
-                    }
-                    Button(HandoffCopy.copyForYourAI) {
-                        let services = HandoffServices.resolved(handoff, isSyntheticPreview: isSyntheticPreview)
-                        Task { await AskAIButton.copyForYourAI(.item(item.id), services: services) }
+                    ForEach(WorkItemMenuItem.items(kind: item.kind, keptOut: hides.keepsOut(item), in: .itemPage),
+                            id: \.self) { action in
+                        Button(action.title) { perform(action, on: item) }
                     }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -267,6 +255,21 @@ struct WorkingOnItemPlace: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .workCard(padding: 16)
+        }
+    }
+
+    /// The ⋯ menu's items (SPEC 3.2).
+    private func perform(_ action: WorkItemMenuItem, on item: WorkItem) {
+        switch action {
+        case .showInSidebar: hides.show(item.id)
+        case .hideFromSidebar: hides.hide(item.id)
+        case .showInHistory: showInHistory(item.moments.first)
+        case .contextForThisFolder:
+            // Today's ⌘J sheet, in the project's folder.
+            folderSheet = FolderSheet(guess: isSyntheticPreview ? nil : item.folderGuess)
+        case .copyForYourAI:
+            let services = HandoffServices.resolved(handoff, isSyntheticPreview: isSyntheticPreview)
+            Task { await AskAIButton.copyForYourAI(.item(item.id), services: services) }
         }
     }
 
