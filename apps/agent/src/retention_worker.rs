@@ -7,13 +7,28 @@
 //! pattern as [`idle_batch`](crate::idle_batch) and
 //! [`episode_worker`](crate::episode_worker).
 //!
+//! # Pictures of side windows (SPEC 6.5)
+//!
+//! Beside the daily purge, the worker looks after the pictures the capture
+//! helper keeps of the windows beside the one in front: every
+//! [`SIDE_PICTURES_INTERVAL`], and whenever the settings file changes (it
+//! looks every [`SETTINGS_POLL_INTERVAL`]), it carries out Forget Pictures
+//! of Other Windows… if it was asked for, thins the pictures by age and to
+//! their budget, and writes `pictures-usage.json` beside the capture
+//! receipt for Preferences, Privacy and the helper. Pictures go; text never
+//! does, and front-window screenshots are never touched
+//! ([`mci_brain::side_pictures`]).
+//!
 //! # Privacy invariants
 //!
-//! - DELETE only — worker never inserts rows.
+//! - DELETE only — worker never inserts rows. Thinning clears a side
+//!   moment's picture reference and deletes the blob, nothing else.
 //! - `retention.json` is the SOLE source of truth (user's onboarding
 //!   choice, reviewed per ADR-0017 §4).
 //! - Safety floor: events younger than 1 hour are never purged
 //!   (enforced in [`purge_once`]).
+//! - The usage file is content-free: sizes, a count, the budget and
+//!   whether side pictures are on.
 
 use crate::errln;
 use std::path::{Path, PathBuf};
@@ -21,11 +36,195 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mci_brain::retention_purger::{self, PurgeStats, RetentionConfig};
+use mci_brain::side_pictures::{self, BlobSizes, PictureUsage, SidePictureSettings};
 use mci_brain::{BlobReconciliationStats, SqlCipherBrainStore, StoreError};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 
 const ORPHAN_GRACE: Duration = Duration::from_secs(3_600);
+
+/// How often pictures of side windows are thinned and their usage written.
+pub const SIDE_PICTURES_INTERVAL: Duration = Duration::from_secs(15 * 60);
+
+/// How often the settings file is checked for a change: a new budget, or
+/// Forget Pictures of Other Windows… confirmed.
+pub const SETTINGS_POLL_INTERVAL: Duration = Duration::from_secs(10);
+
+/// The usage file's name, beside the capture receipt.
+pub const PICTURES_USAGE_FILE: &str = "pictures-usage.json";
+
+/// `pictures-usage.json`, version 1: what the screenshots use. Content-free.
+/// Preferences shows "Using 640 MB.", Privacy the side pictures' share of
+/// their budget, and the capture helper stops keeping side pictures once
+/// they fill it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PicturesUsage {
+    /// JSON contract version.
+    pub schema_version: u32,
+    /// When this was measured, RFC-3339 UTC.
+    pub updated_at: String,
+    /// Sealed screenshots of the window in front, in bytes.
+    pub front_bytes: u64,
+    /// Sealed pictures of the windows beside it, in bytes.
+    pub side_bytes: u64,
+    /// Side moments that keep a picture.
+    pub side_count: u64,
+    /// The side pictures' budget in bytes.
+    pub side_budget_bytes: u64,
+    /// Whether side pictures are on in Preferences.
+    pub side_pictures_on: bool,
+}
+
+/// Content-free stats from one side-picture cycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SidePictureCycleStats {
+    /// Pictures cleared by Forget Pictures of Other Windows….
+    pub forgotten: u64,
+    /// Pictures cleared by thinning.
+    pub thinned: u64,
+    /// Blob files deleted.
+    pub blobs_deleted: u64,
+    /// What the screenshots use after the cycle.
+    pub usage: PictureUsage,
+    /// Whether the usage file was written.
+    pub usage_written: bool,
+}
+
+/// The side-picture half of retention: where its settings and usage file
+/// live, the blob sizes it has measured, and the delete request it last
+/// carried out.
+pub struct SidePictureMaintenance {
+    settings_path: PathBuf,
+    usage_path: PathBuf,
+    sizes: BlobSizes,
+    handled_request_us: Option<u64>,
+    settings_stamp: Option<(SystemTime, u64)>,
+}
+
+impl SidePictureMaintenance {
+    /// Settings from `settings_path` (`runtime.toml`), usage written to
+    /// `usage_path`.
+    #[must_use]
+    pub fn new(settings_path: PathBuf, usage_path: PathBuf) -> Self {
+        Self {
+            settings_path,
+            usage_path,
+            sizes: BlobSizes::new(),
+            handled_request_us: None,
+            settings_stamp: None,
+        }
+    }
+
+    /// The person's own settings and the usage file beside `retention_json`.
+    #[must_use]
+    pub fn for_home(home: &Path, retention_json: &Path) -> Self {
+        Self::new(
+            side_pictures::settings_path(home),
+            retention_json.with_file_name(PICTURES_USAGE_FILE),
+        )
+    }
+
+    /// Whether the settings file changed since the last cycle read it.
+    #[must_use]
+    pub fn settings_changed(&self) -> bool {
+        file_stamp(&self.settings_path) != self.settings_stamp
+    }
+
+    /// One cycle: carry out a new delete request, thin to the budget and
+    /// write the usage file. A usage file that cannot be written is
+    /// reported in the stats, not as a failure: the pictures are thinned.
+    ///
+    /// # Errors
+    /// A content-free store error when the pictures cannot be read or
+    /// cleared.
+    pub fn run_cycle(
+        &mut self,
+        store: &SqlCipherBrainStore,
+        now_us: u64,
+    ) -> Result<SidePictureCycleStats, StoreError> {
+        self.settings_stamp = file_stamp(&self.settings_path);
+        let settings = SidePictureSettings::load(&self.settings_path);
+        let mut stats = SidePictureCycleStats::default();
+        if let Some(through) = settings.delete_requested_at_us {
+            if self.handled_request_us != Some(through) {
+                let forgotten = side_pictures::forget_through(store, &mut self.sizes, through)?;
+                stats.forgotten = forgotten.pictures_cleared;
+                stats.blobs_deleted = forgotten.blobs_deleted;
+                self.handled_request_us = Some(through);
+            }
+        }
+        let budget = settings.budget_bytes(disk_total_bytes(&self.usage_path));
+        let thinned = side_pictures::thin(store, &mut self.sizes, now_us, budget)?;
+        stats.thinned = thinned.pictures_cleared;
+        stats.blobs_deleted = stats.blobs_deleted.saturating_add(thinned.blobs_deleted);
+        stats.usage = side_pictures::usage(store, &mut self.sizes)?;
+        let record = PicturesUsage {
+            schema_version: 1,
+            updated_at: crate::wall_clock::format_unix_ms(u128::from(now_us / 1_000)),
+            front_bytes: stats.usage.front_bytes,
+            side_bytes: stats.usage.side_bytes,
+            side_count: stats.usage.side_count,
+            side_budget_bytes: budget,
+            side_pictures_on: settings.enabled,
+        };
+        stats.usage_written = write_usage(&self.usage_path, &record).is_ok();
+        Ok(stats)
+    }
+}
+
+/// A file's last change and size, to notice a rewrite cheaply.
+fn file_stamp(path: &Path) -> Option<(SystemTime, u64)> {
+    let metadata = std::fs::metadata(path).ok()?;
+    Some((metadata.modified().ok()?, metadata.len()))
+}
+
+/// The size of the disk that holds `path`'s folder, in bytes.
+fn disk_total_bytes(path: &Path) -> Option<u64> {
+    #[cfg(unix)]
+    {
+        let folder = path.parent().unwrap_or(path);
+        let stats = rustix::fs::statvfs(folder).ok()?;
+        stats
+            .f_blocks
+            .checked_mul(stats.f_frsize)
+            .filter(|total| *total > 0)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        None
+    }
+}
+
+/// Write `record` to `path` atomically, readable only by this user.
+fn write_usage(path: &Path, record: &PicturesUsage) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+    let bytes = serde_json::to_vec(record)?;
+    let temporary = path.with_extension(format!(
+        "json.{}.{}.tmp",
+        std::process::id(),
+        NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+    ));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let result = (|| {
+        let mut file = options.open(&temporary)?;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
 
 /// Stats returned when the worker exits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +249,14 @@ pub struct RetentionWorkerStats {
     pub total_blob_cleanup_errors: u64,
     /// Cycles that returned an error (logged, not fatal).
     pub cycle_errors: u64,
+    /// Side-picture cycles run.
+    pub side_cycles_run: u64,
+    /// Side pictures cleared by thinning across all cycles.
+    pub total_side_pictures_thinned: u64,
+    /// Side pictures cleared by Forget Pictures of Other Windows….
+    pub total_side_pictures_forgotten: u64,
+    /// Side-picture cycles that returned an error (logged, not fatal).
+    pub side_cycle_errors: u64,
 }
 
 /// Errors the retention worker can surface.
@@ -230,10 +437,53 @@ pub async fn run_retention_worker(
 }
 
 /// Run retention maintenance and refresh the UI's retained storage counts.
+/// Side pictures are looked after too, with the person's own settings
+/// (`$HOME/.config/hippocampus/runtime.toml`) and the usage file beside
+/// `retention_json_path`.
 pub async fn run_retention_worker_with_status(
     store: Arc<SqlCipherBrainStore>,
     retention_json_path: PathBuf,
     check_interval: std::time::Duration,
+    shutdown: watch::Receiver<bool>,
+    capture_receipt: Option<Arc<crate::capture_status::CaptureStatusWriter>>,
+) -> Result<RetentionWorkerStats, RetentionWorkerError> {
+    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let side = SidePictureMaintenance::for_home(&home, &retention_json_path);
+    run_retention_worker_with_side_pictures(
+        store,
+        retention_json_path,
+        side,
+        RetentionSchedule {
+            purge: check_interval,
+            side_pictures: SIDE_PICTURES_INTERVAL,
+            settings_poll: SETTINGS_POLL_INTERVAL,
+        },
+        shutdown,
+        capture_receipt,
+    )
+    .await
+}
+
+/// How often each part of retention runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetentionSchedule {
+    /// The retention purge and blob reconciliation (a day in the app).
+    pub purge: Duration,
+    /// Side pictures: thinning and the usage file.
+    pub side_pictures: Duration,
+    /// How often the settings file is checked for a change.
+    pub settings_poll: Duration,
+}
+
+/// The retention loop with its side-picture maintenance given: the purge
+/// on `schedule.purge`, side pictures on `schedule.side_pictures` and as
+/// soon as their settings change. Both run once at the start. Errors are
+/// counted and logged without content; the loop goes on until shutdown.
+pub async fn run_retention_worker_with_side_pictures(
+    store: Arc<SqlCipherBrainStore>,
+    retention_json_path: PathBuf,
+    mut side: SidePictureMaintenance,
+    schedule: RetentionSchedule,
     mut shutdown: watch::Receiver<bool>,
     capture_receipt: Option<Arc<crate::capture_status::CaptureStatusWriter>>,
 ) -> Result<RetentionWorkerStats, RetentionWorkerError> {
@@ -248,70 +498,131 @@ pub async fn run_retention_worker_with_status(
         referenced_blobs_missing_last: 0,
         total_blob_cleanup_errors: 0,
         cycle_errors: 0,
+        side_cycles_run: 0,
+        total_side_pictures_thinned: 0,
+        total_side_pictures_forgotten: 0,
+        side_cycle_errors: 0,
     };
+    let mut next_purge = tokio::time::Instant::now();
+    let mut next_side = tokio::time::Instant::now();
 
     loop {
         if *shutdown.borrow() {
             break;
         }
 
-        let config_path = retention_json_path.clone();
-        let store_c = Arc::clone(&store);
+        if tokio::time::Instant::now() >= next_purge {
+            run_purge_cycle(
+                &store,
+                &retention_json_path,
+                capture_receipt.as_ref(),
+                &mut stats,
+            )
+            .await?;
+            next_purge = tokio::time::Instant::now() + schedule.purge;
+        }
 
-        let result: Result<(PurgeStats, BlobReconciliationStats), _> =
-            tokio::task::spawn_blocking(move || {
-                run_retention_cycle(&store_c, &config_path, ORPHAN_GRACE, now_us())
+        if tokio::time::Instant::now() >= next_side || side.settings_changed() {
+            let store_c = Arc::clone(&store);
+            let (back, result) = tokio::task::spawn_blocking(move || {
+                let result = side.run_cycle(&store_c, now_us());
+                (side, result)
             })
             .await
             .map_err(|e| RetentionWorkerError::Fatal(e.to_string()))?;
-
-        if let Some(capture_receipt) = &capture_receipt {
-            capture_receipt.refresh(&crate::wall_clock::SystemWallClock);
-        }
-        match result {
-            Ok((ps, blobs)) => {
-                stats.cycles_run += 1;
-                stats.total_events_deleted += ps.events_deleted;
-                stats.total_vectors_deleted += ps.vectors_deleted;
-                stats.total_episodes_deleted += ps.episodes_deleted;
-                stats.total_blobs_deleted += ps.blobs_deleted;
-                stats.total_orphaned_blobs_deleted += blobs.orphaned_blobs_deleted;
-                stats.total_stale_temporary_files_deleted += blobs.stale_temporary_files_deleted;
-                stats.referenced_blobs_missing_last = blobs.referenced_blobs_missing;
-                stats.total_blob_cleanup_errors += blobs.cleanup_errors;
-                if ps.events_deleted > 0
-                    || ps.blobs_deleted > 0
-                    || blobs.orphaned_blobs_deleted > 0
-                    || blobs.stale_temporary_files_deleted > 0
-                    || blobs.referenced_blobs_missing > 0
-                    || blobs.cleanup_errors > 0
-                {
-                    errln!(
-                        "mci-agent: retention purge: events={} vectors={} episodes={} referenced_blobs_deleted={} orphaned_blobs_deleted={} stale_temps_deleted={} referenced_blobs_missing={} blob_cleanup_errors={}",
-                        ps.events_deleted,
-                        ps.vectors_deleted,
-                        ps.episodes_deleted,
-                        ps.blobs_deleted,
-                        blobs.orphaned_blobs_deleted,
-                        blobs.stale_temporary_files_deleted,
-                        blobs.referenced_blobs_missing,
-                        blobs.cleanup_errors,
-                    );
+            side = back;
+            match result {
+                Ok(cycle) => {
+                    stats.side_cycles_run += 1;
+                    stats.total_side_pictures_thinned += cycle.thinned;
+                    stats.total_side_pictures_forgotten += cycle.forgotten;
+                    if cycle.thinned > 0 || cycle.forgotten > 0 || !cycle.usage_written {
+                        errln!(
+                            "mci-agent: side pictures: thinned={} forgotten={} blobs_deleted={} usage_written={}",
+                            cycle.thinned,
+                            cycle.forgotten,
+                            cycle.blobs_deleted,
+                            cycle.usage_written,
+                        );
+                    }
+                }
+                Err(e) => {
+                    stats.side_cycle_errors += 1;
+                    errln!("mci-agent: side picture cycle skipped: {e}");
                 }
             }
-            Err(e) => {
-                stats.cycle_errors += 1;
-                errln!("mci-agent: retention cycle skipped: {e}");
-            }
+            next_side = tokio::time::Instant::now() + schedule.side_pictures;
         }
 
+        let wake = next_purge
+            .min(next_side)
+            .min(tokio::time::Instant::now() + schedule.settings_poll);
         tokio::select! {
-            () = tokio::time::sleep(check_interval) => {}
+            () = tokio::time::sleep_until(wake) => {}
             _ = shutdown.changed() => break,
         }
     }
 
     Ok(stats)
+}
+
+/// One retention purge and reconciliation, counted into `stats`.
+async fn run_purge_cycle(
+    store: &Arc<SqlCipherBrainStore>,
+    retention_json_path: &Path,
+    capture_receipt: Option<&Arc<crate::capture_status::CaptureStatusWriter>>,
+    stats: &mut RetentionWorkerStats,
+) -> Result<(), RetentionWorkerError> {
+    let config_path = retention_json_path.to_path_buf();
+    let store_c = Arc::clone(store);
+
+    let result: Result<(PurgeStats, BlobReconciliationStats), _> =
+        tokio::task::spawn_blocking(move || {
+            run_retention_cycle(&store_c, &config_path, ORPHAN_GRACE, now_us())
+        })
+        .await
+        .map_err(|e| RetentionWorkerError::Fatal(e.to_string()))?;
+
+    if let Some(capture_receipt) = capture_receipt {
+        capture_receipt.refresh(&crate::wall_clock::SystemWallClock);
+    }
+    match result {
+        Ok((ps, blobs)) => {
+            stats.cycles_run += 1;
+            stats.total_events_deleted += ps.events_deleted;
+            stats.total_vectors_deleted += ps.vectors_deleted;
+            stats.total_episodes_deleted += ps.episodes_deleted;
+            stats.total_blobs_deleted += ps.blobs_deleted;
+            stats.total_orphaned_blobs_deleted += blobs.orphaned_blobs_deleted;
+            stats.total_stale_temporary_files_deleted += blobs.stale_temporary_files_deleted;
+            stats.referenced_blobs_missing_last = blobs.referenced_blobs_missing;
+            stats.total_blob_cleanup_errors += blobs.cleanup_errors;
+            if ps.events_deleted > 0
+                || ps.blobs_deleted > 0
+                || blobs.orphaned_blobs_deleted > 0
+                || blobs.stale_temporary_files_deleted > 0
+                || blobs.referenced_blobs_missing > 0
+                || blobs.cleanup_errors > 0
+            {
+                errln!(
+                    "mci-agent: retention purge: events={} vectors={} episodes={} referenced_blobs_deleted={} orphaned_blobs_deleted={} stale_temps_deleted={} referenced_blobs_missing={} blob_cleanup_errors={}",
+                    ps.events_deleted,
+                    ps.vectors_deleted,
+                    ps.episodes_deleted,
+                    ps.blobs_deleted,
+                    blobs.orphaned_blobs_deleted,
+                    blobs.stale_temporary_files_deleted,
+                    blobs.referenced_blobs_missing,
+                    blobs.cleanup_errors,
+                );
+            }
+        }
+        Err(e) => {
+            stats.cycle_errors += 1;
+            errln!("mci-agent: retention cycle skipped: {e}");
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -514,6 +825,10 @@ mod tests {
             referenced_blobs_missing_last: 0,
             total_blob_cleanup_errors: 0,
             cycle_errors: 0,
+            side_cycles_run: 0,
+            total_side_pictures_thinned: 0,
+            total_side_pictures_forgotten: 0,
+            side_cycle_errors: 0,
         };
         assert_eq!(s.cycles_run, 0);
     }
