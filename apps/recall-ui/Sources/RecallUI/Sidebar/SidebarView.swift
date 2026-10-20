@@ -126,7 +126,7 @@ struct SidebarView: View {
                         if showsFootnote {
                             Text(NavigationCopy.workingOnFootnote)
                                 .font(.system(size: 11))
-                                .foregroundStyle(MCI.Color.foregroundSecondary)
+                                .foregroundStyle(MCI.Color.sidebarSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .padding(.leading, 25)
                                 .selectionDisabled()
@@ -184,7 +184,7 @@ struct SidebarView: View {
                     StatusDot(dot: status.dot)
                     Text(verbatim: status.title)
                         .font(.system(size: 12))
-                        .foregroundStyle(MCI.Color.foregroundSecondary)
+                        .foregroundStyle(MCI.Color.sidebarSecondary)
                         .lineLimit(1)
                 }
                 .padding(.horizontal, MCI.Spacing.s)
@@ -240,7 +240,7 @@ struct SidebarView: View {
             }
         case .showAll:
             Text(NavigationCopy.showAll)
-                .foregroundStyle(selection == row ? MCI.Color.foreground : MCI.Color.foregroundSecondary)
+                .foregroundStyle(selection == row ? MCI.Color.foreground : MCI.Color.sidebarSecondary)
                 .padding(.leading, SidebarMetrics.labelInset)
                 .accessibilityLabel(NavigationCopy.showAllAccessibility(count: model.allItemCount))
         }
@@ -266,7 +266,7 @@ private struct SectionHeader: View {
     var body: some View {
         Text(title)
             .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(MCI.Color.foregroundSecondary)
+            .foregroundStyle(MCI.Color.sidebarSecondary)
             .accessibilityAddTraits(.isHeader)
     }
 }

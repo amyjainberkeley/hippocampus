@@ -42,6 +42,9 @@ public final class UserPauseController: @unchecked Sendable {
     public static let shared = UserPauseController(defaults: .standard)
     /// When the person paused, as seconds since 1970.
     public static let defaultsKey = "ai.hippocampus.capture.paused"
+    /// When a timed pause ends, as seconds since 1970 (SPEC 2.6.2): For 1
+    /// Hour, or Until Tomorrow at 6:00 AM. Absent for Until I Resume.
+    public static let resumeAtKey = "ai.hippocampus.capture.pausedUntil"
 
     private let queue = DispatchQueue(
         label: "ai.hippocampus.user-pause",
@@ -50,6 +53,7 @@ public final class UserPauseController: @unchecked Sendable {
     private let defaults: UserDefaults?
     private let clock: @Sendable () -> Date
     private var _pausedSince: Date?
+    private var _resumeAt: Date?
     private var _sinks: [(Bool) -> Void] = []
 
     /// Default sink — writes the breadcrumb to the same subsystem the
@@ -66,6 +70,9 @@ public final class UserPauseController: @unchecked Sendable {
         self.defaults = defaults
         self.clock = clock
         _pausedSince = (defaults?.object(forKey: Self.defaultsKey) as? NSNumber)
+            .map { Date(timeIntervalSince1970: $0.doubleValue) }
+        // A timed pause outlives a relaunch with its end, as the pause does.
+        _resumeAt = _pausedSince == nil ? nil : (defaults?.object(forKey: Self.resumeAtKey) as? NSNumber)
             .map { Date(timeIntervalSince1970: $0.doubleValue) }
         // Wire the default logger sink. Tests can attach additional
         // sinks; they never remove this one, but the logger is inert
@@ -84,6 +91,37 @@ public final class UserPauseController: @unchecked Sendable {
     /// When the person paused; nil when not paused.
     public var pausedSince: Date? {
         queue.sync { _pausedSince }
+    }
+
+    /// When a timed pause ends; nil when not paused or paused until the
+    /// person resumes.
+    public var resumeAt: Date? {
+        queue.sync { _resumeAt }
+    }
+
+    /// Whether a timed pause's end has come: remembering resumes on its own.
+    public func isDue(now: Date) -> Bool {
+        queue.sync {
+            guard _pausedSince != nil, let end = _resumeAt else { return false }
+            return now >= end
+        }
+    }
+
+    /// Pause until `resumeAt` (nil: until the person resumes). A pause
+    /// already on keeps its first time and takes the new end.
+    @discardableResult
+    public func pause(until resumeAt: Date?) -> Bool {
+        queue.sync {
+            let wasPaused = _pausedSince != nil
+            _resumeAt = resumeAt
+            if let resumeAt {
+                defaults?.set(resumeAt.timeIntervalSince1970, forKey: Self.resumeAtKey)
+            } else {
+                defaults?.removeObject(forKey: Self.resumeAtKey)
+            }
+            if !wasPaused { apply(true) }
+            return true
+        }
     }
 
     /// Set the pause state to `paused`. No-op if already at that
@@ -128,7 +166,9 @@ public final class UserPauseController: @unchecked Sendable {
     public func resetForTesting() {
         queue.sync {
             _pausedSince = nil
+            _resumeAt = nil
             defaults?.removeObject(forKey: Self.defaultsKey)
+            defaults?.removeObject(forKey: Self.resumeAtKey)
             _sinks.removeAll()
         }
         addSink { [logger] paused in
@@ -143,6 +183,8 @@ public final class UserPauseController: @unchecked Sendable {
             defaults?.set(since.timeIntervalSince1970, forKey: Self.defaultsKey)
         } else {
             defaults?.removeObject(forKey: Self.defaultsKey)
+            _resumeAt = nil
+            defaults?.removeObject(forKey: Self.resumeAtKey)
         }
         for sink in _sinks {
             sink(paused)

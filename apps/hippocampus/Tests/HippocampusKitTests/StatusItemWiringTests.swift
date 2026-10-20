@@ -90,8 +90,9 @@ final class StatusItemWiringTests: XCTestCase {
         let quit = try XCTUnwrap(perform.range(of: "requestQuit(fromHippocampus: true)"))
         let supervisor = try XCTUnwrap(perform.range(of: "supervisor.performAskStatusAction(action) { NSWorkspace.shared.open($0) }"))
         XCTAssertLessThan(quit.lowerBound, supervisor.lowerBound)
-        XCTAssertEqual(app.components(separatedBy: "self?.performStatusAction(action)").count - 1, 3,
-                       "the menu, Ask's footer and Preferences")
+        XCTAssertEqual(app.components(separatedBy: "self?.performStatusAction(action)").count - 1, 4,
+                       "the menu, Ask's footer, Preferences and the window's private pipe (SPEC 2.6.4)")
+        XCTAssertTrue(app.contains("supervisor.windowStatusAction = { [weak self] action in self?.performStatusAction(action) }"))
     }
 
     /// Stop Sharing and Pause are kept across launches; a failed start the

@@ -52,11 +52,32 @@ public struct StatusRow: Equatable, Sendable {
     public let detail: String?
     /// Line 3: the one button.
     public let action: CaptureStatusAction?
+    /// A pause with an end: its button reads Resume Now (SPEC 2.6.2).
+    public let isTimedPause: Bool
 
-    public init(title: String, detail: String?, action: CaptureStatusAction?) {
+    public init(title: String, detail: String?, action: CaptureStatusAction?, isTimedPause: Bool = false) {
         self.title = title
         self.detail = detail
         self.action = action
+        self.isTimedPause = isTimedPause
+    }
+
+    /// The button's words: Resume Now for a pause with an end.
+    public var actionTitle: String? {
+        guard let action else { return nil }
+        return action == .resume && isTimedPause ? "Resume Now" : action.title
+    }
+
+    /// While the window forgets, remembering is held still: nothing to press
+    /// until it's done, in one to three seconds (SPEC 3.11).
+    public static let forgetting = StatusRow(title: "Forgetting\u{2026}", detail: nil, action: nil)
+
+    /// A pause with an end says when: "Until 3:41 PM." or "Until tomorrow
+    /// at 6:00 AM." Any other row is unchanged.
+    public func pausedUntil(_ end: Date?, now: Date, calendar: Calendar = .autoupdatingCurrent) -> StatusRow {
+        guard let end, action == .resume else { return self }
+        return StatusRow(title: title, detail: StatusWords(now: now, calendar: calendar).pausedUntil(end),
+                         action: action, isTimedPause: true)
     }
 
     public init(_ facts: StatusFacts, now: Date, calendar: Calendar = .autoupdatingCurrent) {
@@ -112,6 +133,16 @@ struct StatusWords {
 
     func pausedSince(_ date: Date) -> String {
         "Since \(sameDay(date) ? time(date) : day(date))."
+    }
+
+    /// "Until 3:41 PM.", "Until tomorrow at 6:00 AM.", or "Until Oct 14 at
+    /// 9:00 AM."
+    func pausedUntil(_ date: Date) -> String {
+        if sameDay(date) { return "Until \(time(date))." }
+        if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now), calendar.isDate(date, inSameDayAs: tomorrow) {
+            return "Until tomorrow at \(time(date))."
+        }
+        return "Until \(day(date)) at \(time(date))."
     }
 
     func stoppedSharing(_ date: Date) -> String {
@@ -170,6 +201,9 @@ public enum StatusMenuModel {
             /// An item from elsewhere in the app, such as Demo Memory's
             /// (`DemoMemory.menuItems`), by an id its owner carries out.
             case extra(String)
+            /// One of Pause's choices: For 1 Hour, Until Tomorrow, Until I
+            /// Resume (SPEC 2.6.2).
+            case pauseFor(PauseLength)
         }
 
         public let role: Role
@@ -178,16 +212,19 @@ public enum StatusMenuModel {
         /// The chosen key that opens Ask, drawn as a badge.
         public let badge: String?
         public let key: KeyEquivalent?
+        /// A submenu: Pause's three choices.
+        public let submenu: [Item]
 
         public init(
             role: Role, title: String, isEnabled: Bool = true,
-            badge: String? = nil, key: KeyEquivalent? = nil
+            badge: String? = nil, key: KeyEquivalent? = nil, submenu: [Item] = []
         ) {
             self.role = role
             self.title = title
             self.isEnabled = isEnabled
             self.badge = badge
             self.key = key
+            self.submenu = submenu
         }
 
         public static let separator = Item(role: .separator, title: "")
@@ -207,9 +244,14 @@ public enum StatusMenuModel {
             items.append(Item(role: .detail, title: detail, isEnabled: false))
         }
         // After a failed stop the fix, Quit, sits under the reason too
-        // (RULINGS S3).
+        // (RULINGS S3). Pause offers how long (SPEC 2.6.2).
         if let action = row.action {
-            items.append(Item(role: .action(action), title: action.title))
+            if action == .pause {
+                items.append(Item(role: .action(.pause), title: action.title,
+                                  submenu: PauseLength.allCases.map { Item(role: .pauseFor($0), title: $0.title) }))
+            } else {
+                items.append(Item(role: .action(action), title: row.actionTitle ?? action.title))
+            }
         }
         items.append(.separator)
         // Before setup only the menu item is off; the key keeps working
@@ -236,5 +278,35 @@ public enum StatusMenuModel {
     /// The status item's accessibility label and tooltip (RULINGS B2).
     public static func accessibilityLabel(_ row: StatusRow) -> String {
         "Hippocampus, \(row.title)"
+    }
+}
+
+/// How long Pause lasts (SPEC 2.6.2): an hour, until 6:00 AM tomorrow, or
+/// until the person resumes. The same three in the window's status menu.
+public enum PauseLength: CaseIterable, Sendable {
+    case hour
+    case tomorrow
+    case untilResume
+
+    public var title: String {
+        switch self {
+        case .hour: "For 1 Hour"
+        case .tomorrow: "Until Tomorrow"
+        case .untilResume: "Until I Resume"
+        }
+    }
+
+    /// When it ends; nil until the person resumes.
+    public func end(from now: Date, calendar: Calendar = .autoupdatingCurrent) -> Date? {
+        switch self {
+        case .hour:
+            return now.addingTimeInterval(60 * 60)
+        case .tomorrow:
+            let today = calendar.startOfDay(for: now)
+            guard let next = calendar.date(byAdding: .day, value: 1, to: today) else { return nil }
+            return calendar.date(bySettingHour: 6, minute: 0, second: 0, of: next)
+        case .untilResume:
+            return nil
+        }
     }
 }

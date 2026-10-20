@@ -15,6 +15,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     struct Actions {
         /// The status row's button.
         let perform: (CaptureStatusAction) -> Void
+        /// One of Pause's choices (SPEC 2.6.2).
+        let pause: (PauseLength) -> Void
         let ask: () -> Void
         let openWindow: () -> Void
         /// "Connect AI Tools…", or "AI Tools…" once a tool is connected.
@@ -85,7 +87,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     private func updateIcon() {
         let status = supervisor.menuBarStatus
-        let label = StatusMenuModel.accessibilityLabel(supervisor.statusRow())
+        let label = StatusMenuModel.accessibilityLabel(supervisor.menuRow())
         guard shown?.picture != status.markState || shown?.label != label else { return }
         shown = (status.markState, label)
         guard let button = statusItem.button else { return }
@@ -107,7 +109,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         supervisor.retryIfPermissionMayBeBack()
         let setupFinished = OnboardingSentinel.isComplete
         items = StatusMenuModel.items(
-            row: supervisor.statusRow(setupFinished: setupFinished),
+            row: supervisor.menuRow(setupFinished: setupFinished),
             setupComplete: supervisor.setup(finished: setupFinished) == .complete,
             askLabel: askKey.label,
             aiToolsConnected: aiToolsConnected,
@@ -117,7 +119,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         )
         menu.removeAllItems()
         for (index, item) in items.enumerated() {
-            menu.addItem(menuItem(item, index: index))
+            let entry = menuItem(item, index: index)
+            if !item.submenu.isEmpty {
+                // Pause offers how long; the item itself only opens them.
+                let choices = NSMenu()
+                choices.autoenablesItems = false
+                for (offset, choice) in item.submenu.enumerated() {
+                    let sub = menuItem(choice, index: Self.submenuTag + offset)
+                    choices.addItem(sub)
+                }
+                entry.action = nil
+                entry.submenu = choices
+            }
+            menu.addItem(entry)
         }
         updateIcon()
         refreshAITools()
@@ -161,8 +175,20 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return menuItem
     }
 
+    /// Tags for submenu items start here, so they never meet the menu's.
+    private static let submenuTag = 10_000
+
     @objc private func choose(_ sender: NSMenuItem) {
-        guard !quitting, items.indices.contains(sender.tag) else { return }
+        guard !quitting else { return }
+        if sender.tag >= Self.submenuTag {
+            let offset = sender.tag - Self.submenuTag
+            guard let pause = items.first(where: { !$0.submenu.isEmpty }),
+                  pause.submenu.indices.contains(offset),
+                  case let .pauseFor(length) = pause.submenu[offset].role else { return }
+            actions.pause(length)
+            return
+        }
+        guard items.indices.contains(sender.tag) else { return }
         switch items[sender.tag].role {
         case .action(let action): actions.perform(action)
         case .ask: actions.ask()
@@ -171,6 +197,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         case .preferences: actions.preferences()
         case .quit: actions.quit()
         case .extra(let id): DemoMemory.perform(id)
+        case .pauseFor(let length): actions.pause(length)
         case .status, .detail, .separator: break
         }
     }

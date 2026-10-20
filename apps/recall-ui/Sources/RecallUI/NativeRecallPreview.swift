@@ -57,6 +57,7 @@ struct NativeRecallPreview: View {
             calendar: reader.calendar,
             now: { now },
             ask: ask,
+            status: WindowStatus(kind: .remembering, title: NavigationCopy.remembering, action: .pause),
             hides: SidebarHides(defaults: nil))
             .frame(minWidth: 760, minHeight: 480)
     }

@@ -83,6 +83,9 @@ public extension MCI {
         /// the sidebar, the field row and the page.
         public static let sidebar = dynamic(light: 0xEFF0F3, dark: 0x1F2125)
         public static let sidebarSelection = dynamic(light: 0xDCDEE3, dark: 0x36393F)
+        /// Secondary words on the sidebar (headers, Show All, the status):
+        /// a hair darker than `foregroundSecondary`, for 4.5:1 on its grey.
+        public static let sidebarSecondary = dynamic(light: 0x6A6A6F, dark: 0xB8B8BD)
         public static let hairline = dynamic(light: 0xDFE0E1, dark: 0x2E3033)
         public static let windowEdge = dynamic(light: 0xD7D9DE, dark: 0x050607)
         public static let placeholder = dynamic(light: 0xA3A3A8, dark: 0x6C6C72)
@@ -340,6 +343,7 @@ public extension MCI.Color {
         ("borderStrong", 0xC9CCD2, 0x51545B),
         ("sidebar", 0xEFF0F3, 0x1F2125),
         ("sidebarSelection", 0xDCDEE3, 0x36393F),
+        ("sidebarSecondary", 0x6A6A6F, 0xB8B8BD),
         ("hairline", 0xDFE0E1, 0x2E3033),
         ("windowEdge", 0xD7D9DE, 0x050607),
         ("placeholder", 0xA3A3A8, 0x6C6C72),

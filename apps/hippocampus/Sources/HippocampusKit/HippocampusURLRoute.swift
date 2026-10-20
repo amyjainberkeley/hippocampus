@@ -14,6 +14,9 @@
 //   - `hippocampus://recall?tab=brief`           → open the Briefs workspace
 //   - `hippocampus://recall?popup=1`             → reveal global Recall
 //   - `hippocampus://recall?tab=search&focus=42` → inspect event 42
+//   - `hippocampus://recall?tab=work&item=w_9c41e2` → that Working On item
+//   - `hippocampus://recall?session=1791839523000000` → Today, that session
+//   - `hippocampus://recall?forget=10m` → Forget Recent's sheet, unconfirmed
 //   - `hippocampus://preferences/sources`       → open a preferences pane
 //   - `hippocampus://ask`                        → open the command bar
 //   - `hippocampus://ask?q=what+did+I+decide`    → …and ask right away
@@ -86,7 +89,7 @@ public enum HippocampusURLRoute: Equatable, Sendable {
 
         switch url.host {
         case "recall":
-            let tab = queryItems.first(where: { $0.name == "tab" })?.value
+            let tab = recallTab(queryItems)
             let focusEventId = queryItems
                 .first(where: { $0.name == "focus" })?.value
                 .flatMap(UInt64.init)
@@ -131,6 +134,29 @@ public enum HippocampusURLRoute: Equatable, Sendable {
         default:
             return .unknown
         }
+    }
+
+    /// The tab a `recall` link names (SPEC 2.16). A link that carries more
+    /// names it in the window's own prefixed form, which the window reads at
+    /// launch and in a command to a window that is open: `work` with
+    /// `item=<id>` is `work:<id>`; `session=<start_us>` is
+    /// `session:<start_us>`; `forget=10m|1h|today` is `forget:<choice>`,
+    /// which opens Forget Recent's sheet and never confirms it. Ids, never
+    /// names, travel in links.
+    static func recallTab(_ items: [URLQueryItem]) -> String? {
+        func value(_ name: String) -> String? { items.first(where: { $0.name == name })?.value }
+        let tab = value("tab")
+        if let forget = value("forget"), ["10m", "1h", "today"].contains(forget) {
+            return "forget:\(forget)"
+        }
+        if let session = value("session"), session.utf8.count <= 19, let start = Int64(session), start > 0 {
+            return "session:\(start)"
+        }
+        if let tab, ["work", "working-on"].contains(tab.lowercased()),
+           let item = value("item"), isWorkItemId(item) {
+            return "work:\(item)"
+        }
+        return tab
     }
 
     /// The longest id a Working On item can have.

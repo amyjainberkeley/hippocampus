@@ -367,6 +367,9 @@ struct MemoryWorkspaceView: View {
         .onAppear { publishMenuState() }
         .onChange(of: choices) { _, _ in publishMenuState() }
         .onChange(of: sidebarHidden) { _, _ in publishMenuState() }
+        // Every place forgets through the shell's coordinator: the hold,
+        // Undo, and a crash's leftover (SPEC 3.11).
+        .environment(\.forgetCoordinator, forgetting)
         // Outermost, so sheets and every place see it: in the synthetic
         // preview nothing opens the person's own data or deletes anything.
         .environment(\.isSyntheticPreview, isSyntheticPreview)
@@ -694,7 +697,7 @@ struct MemoryWorkspaceView: View {
     // MARK: Reading the sidebar and the status
 
     private func loadStatus() async {
-        guard channel == nil else { return }
+        guard channel == nil, !isSyntheticPreview else { return }
         let receipt = await healthLoader()
         let current = WindowStatus(byHand: receipt, appRunning: appRunning(), now: now())
         status = current.forgetting(forgetting.phase)
@@ -705,7 +708,9 @@ struct MemoryWorkspaceView: View {
     /// a change the person made is drawn at once.
     private func loadSidebar(personAsked: Bool = false) async {
         guard preset?.sidebar == nil else { return }
-        let snapshot = (try? await work.work(days: 14)) ?? .empty
+        // A read that fails keeps the last list for this launch, quietly
+        // (SPEC 2.12).
+        guard let snapshot = try? await work.work(days: 14) else { return }
         let apps = (try? await reader.listObservedApps(limit: 200, timeFromUs: nil)) ?? []
         let sawSearch = !(overview.overview?.searches.isEmpty ?? true)
         let kinds = LibraryKinds.kinds(apps: apps, snapshot: snapshot, sawSearch: sawSearch)
@@ -1024,5 +1029,19 @@ final class WindowMenuState: ObservableObject {
         if self.kinds != kinds { self.kinds = kinds }
         if self.workingOnHidden != workingOnHidden { self.workingOnHidden = workingOnHidden }
         if self.sidebarHidden != sidebarHidden { self.sidebarHidden = sidebarHidden }
+    }
+}
+
+/// The window's forgetting, for every place: History's rows, Today's
+/// sessions, Web Pages and Privacy forget through it, so a forget while
+/// remembering holds it still instead of failing (SPEC 3.11).
+private struct ForgetCoordinatorKey: EnvironmentKey {
+    static let defaultValue: ForgetCoordinator? = nil
+}
+
+extension EnvironmentValues {
+    var forgetCoordinator: ForgetCoordinator? {
+        get { self[ForgetCoordinatorKey.self] }
+        set { self[ForgetCoordinatorKey.self] = newValue }
     }
 }

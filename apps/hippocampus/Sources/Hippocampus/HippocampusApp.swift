@@ -277,6 +277,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             PreferencesWindowController.shared.show(section: request.section)
         }
         installStatusItem()
+        // The window's own Turn On, Try Again, Open System Settings… and
+        // Quit, over its private pipe: the status row's button, the same as
+        // the menu's (SPEC 2.6.4).
+        supervisor.windowStatusAction = { [weak self] action in self?.performStatusAction(action) }
         // A start the person asked to see failed: Preferences shows the
         // reason and the fix (spec-shell S5, D9).
         supervisor.onPresentationBlocked = {
@@ -344,6 +348,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             askKey: SoloKeyMonitor.shared.watch,
             actions: StatusItemController.Actions(
                 perform: { [weak self] action in self?.performStatusAction(action) },
+                pause: { length in supervisor.pause(until: length.end(from: Date())) },
                 ask: { CommandBarController.shared.show() },
                 openWindow: { [weak self] in self?.openWindow(tab: nil) },
                 aiTools: { [weak self] connected in
