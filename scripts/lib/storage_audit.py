@@ -331,20 +331,39 @@ def check_scan(report: Report, home: Path, tmpdir: Path | None, extra: list[Path
                if not key_hits else f"the database key appears in: {key_hits[:5]}")
 
 
-def check_real_crash_reports(report: Report, since: float | None) -> None:
+def check_real_crash_reports(report: Report, since: float | None, sampler: Path | None) -> None:
+    """Crash reports macOS wrote for the run's own processes.
+
+    Reports land in the account's real DiagnosticReports. A report counts as
+    the run's only when its program name is one of the run's and its pid is in
+    the sampler's record of the run's processes; from any other report only
+    the pid field is read, and nothing of it is printed."""
     folder = Path.home() / "Library/Logs/DiagnosticReports"
     if since is None or not folder.is_dir():
         report.add(True, "scan.crash-real", "no run start given or no DiagnosticReports folder")
         return
-    ours = []
-    for path in folder.iterdir():  # names and times only
+    run_pids: set[int] = set()
+    if sampler is not None and (sampler / "processes.log").is_file():
+        for line in (sampler / "processes.log").read_text(errors="replace").splitlines():
+            head = line.split("\t", 1)[0]
+            if head.isdigit():
+                run_pids.add(int(head))
+    ours, others = [], 0
+    for path in folder.iterdir():
         try:
-            if path.stat().st_mtime >= since and path.name.startswith(PRODUCT_PROCESS_NAMES):
-                ours.append(path.name)
+            if path.stat().st_mtime < since or not path.name.startswith(PRODUCT_PROCESS_NAMES):
+                continue
         except OSError:
             continue
+        match = re.search(rb'"pid"\s*:\s*(\d+)', read_capped(path, 16 * 1024))
+        if match and int(match.group(1)) in run_pids:
+            ours.append(path.name)
+        else:
+            others += 1
+    note = (f"; {others} report(s) with the same program names came from other processes on this Mac "
+            f"(their pids are not the run's) and were set aside") if others else ""
     report.add(not ours, "scan.crash-real",
-               "no crash report from any of the run's programs in ~/Library/Logs/DiagnosticReports (names checked, nothing opened)"
+               f"no crash report from any of the run's own processes in ~/Library/Logs/DiagnosticReports{note}"
                if not ours else f"the run's programs crashed: {ours[:5]}")
 
 
@@ -731,7 +750,7 @@ def main(argv: list[str] | None = None) -> int:
                     except OSError:
                         continue
         check_scan(report, home, Path(args.tmpdir).resolve() if args.tmpdir else None, extra, markers, key_hex, key_file)
-        check_real_crash_reports(report, args.since)
+        check_real_crash_reports(report, args.since, Path(args.sampler) if args.sampler else None)
     if "pasteboard" not in skip:
         check_pasteboard(report, repo)
     if "modes" not in skip:
