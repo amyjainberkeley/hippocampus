@@ -90,8 +90,12 @@ private struct BottomNoteView: View {
         }
         .padding(.horizontal, MCI.Spacing.l)
         .padding(.vertical, MCI.Spacing.m)
-        .background(RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous).fill(MCI.Color.surface))
-        .overlay(RoundedRectangle(cornerRadius: MCI.Radius.m, style: .continuous).stroke(MCI.Color.border, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: MCI.Radius.l, style: .continuous).fill(MCI.Color.surface))
+        .overlay(
+            RoundedRectangle(cornerRadius: MCI.Radius.l, style: .continuous)
+                .strokeBorder(MCI.Color.border, lineWidth: 1)
+        )
+        .mciShadow(.card)
         .accessibilityElement(children: .contain)
     }
 }
