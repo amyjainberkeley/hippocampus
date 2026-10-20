@@ -301,4 +301,211 @@ final class RememberingRaceTests: XCTestCase {
         XCTAssertEqual(supervisor.state, .paused)
         try await supervisor.shutdownAndWait()
     }
+
+    // MARK: A start while a forget holds remembering still
+
+    /// A wait a test ends by hand; once opened it stays open.
+    private final class Latch: @unchecked Sendable {
+        private var open = false
+        private var waiting: [CheckedContinuation<Void, Never>] = []
+        private let lock = NSLock()
+
+        func wait() async {
+            await withCheckedContinuation { continuation in
+                let now = lock.withLock { () -> Bool in
+                    if open { return true }
+                    waiting.append(continuation)
+                    return false
+                }
+                if now { continuation.resume() }
+            }
+        }
+
+        var waiters: Int { lock.withLock { waiting.count } }
+
+        func release() {
+            let all = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+                open = true
+                defer { waiting = [] }
+                return waiting
+            }
+            for continuation in all { continuation.resume() }
+        }
+    }
+
+    /// The launch's sweep, held open until the test ends it.
+    private struct LatchedSweep: CaptureOrphanSweeping {
+        let latch: Latch
+
+        func run(_ moment: CaptureOrphanSweep.Moment,
+                 liveChildren: (@Sendable () async -> Set<pid_t>)?) async -> CaptureOrphanSweep.Outcome {
+            if moment == .launch { await latch.wait() }
+            return CaptureOrphanSweep.Outcome()
+        }
+    }
+
+    /// SPEC 3.11: while the window holds remembering still to forget, the
+    /// writer lease stays free until `release`. A timed pause that ends
+    /// during the hold waits for its end, then resumes, as it would have.
+    func testATimedPauseEndingDuringAHoldDoesNotStartRememberingMidForget() async throws {
+        let clock = Clock(start)
+        let pauses = UserPauseController(clock: { clock.now })
+        let topology = FakeSupervisorTopology()
+        let supervisor = supervisor(pauses: pauses, clock: clock, topology: topology)
+        try await supervisor.startAndWaitForReadiness()
+        supervisor.pause(until: start.addingTimeInterval(3_600))
+        await eventually { supervisor.state == .paused }
+
+        // The window's hold: paused, so it is answered at once.
+        let held = await supervisor.forgetHold.hold()
+        XCTAssertTrue(held)
+        XCTAssertEqual(supervisor.menuRow(setupFinished: true), .forgetting)
+        let launches = topology.launchPlans.count
+
+        // The hour ends while the window is still deleting.
+        clock.now = start.addingTimeInterval(3_601)
+        try await Task.sleep(for: .milliseconds(600))
+
+        XCTAssertTrue(supervisor.forgetHold.isHolding, "the window has not released yet")
+        XCTAssertEqual(supervisor.state, .paused,
+                       "remembering started under an active hold (state \(supervisor.state)): the agent takes the writer lease the window deletes under")
+        XCTAssertEqual(topology.launchPlans.count, launches, "nothing started under the hold")
+
+        // The forget is done: the pause's end, which came meanwhile, is
+        // carried out now.
+        await supervisor.forgetHold.release()
+        await eventually { supervisor.state == .running }
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertFalse(pauses.isPaused)
+        XCTAssertFalse(supervisor.startWaitingForHold)
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// The window can open, and finish a forget a crash left, while the
+    /// launch's sweep still ends a writer that crash left behind. The hold
+    /// waits for the sweep, the launch's start waits for the hold, and
+    /// remembering starts once the window releases it.
+    func testTheLaunchsStartWaitsForAForgetAskedForDuringTheSweep() async throws {
+        let clock = Clock(start)
+        let latch = Latch()
+        let topology = FakeSupervisorTopology()
+        let locator = FakeBinaryLocator()
+        locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
+        locator.agentURL = URL(fileURLWithPath: "/bundle/mci-agent")
+        let keyStore = FakeKeyStore()
+        keyStore.storedKey = String(repeating: "ab", count: 32)
+        let supervisor = ProcessSupervisor(
+            locator: locator, keyStore: keyStore, runtimeConfig: FakeRuntimeConfig(captureEnabled: true),
+            topology: topology, keyCustodyPreparer: FakeKeyCustodyPreparer(), readinessTimeout: 0.1,
+            captureStatusReader: { (nil, nil) }, pauses: UserPauseController(clock: { clock.now }),
+            orphanSweeper: LatchedSweep(latch: latch), clock: { clock.now })
+        // The app's launch: the sweep, then the start.
+        let launch = Task { @MainActor in
+            await supervisor.sweepOrphans(.launch)
+            supervisor.start()
+        }
+        await eventually { latch.waiters == 1 }
+
+        let holding = Task { @MainActor in await supervisor.forgetHold.hold() }
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertTrue(supervisor.holdingForForget)
+        XCTAssertTrue(supervisor.isRememberingForHold, "a start follows the sweep")
+
+        latch.release()
+        await launch.value
+        let held = await holding.value
+        XCTAssertTrue(held, "the sweep is done and nothing started: the lease is free")
+        XCTAssertTrue(topology.launchPlans.isEmpty, "the launch's start ran under the hold")
+        XCTAssertTrue(supervisor.startWaitingForHold)
+        XCTAssertEqual(supervisor.menuBarStatus, .starting, "a start is coming: the icon never says Off")
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertTrue(topology.launchPlans.isEmpty)
+
+        await supervisor.forgetHold.release()
+        await eventually { supervisor.state == .running }
+        XCTAssertEqual(supervisor.state, .running, "the launch's start, carried out at the hold's end")
+        XCTAssertEqual(topology.launchPlans.count, 1)
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// A start asked for a moment before the hold, not yet under way, is
+    /// remembering for the hold: it waits for the hold's end, never runs in
+    /// its middle.
+    func testAStartAskedForJustBeforeAHoldWaitsForItsEnd() async throws {
+        let clock = Clock(start)
+        let topology = FakeSupervisorTopology()
+        let supervisor = supervisor(pauses: UserPauseController(clock: { clock.now }), clock: clock,
+                                    topology: topology)
+        supervisor.start()
+        let held = await supervisor.forgetHold.hold()
+        XCTAssertTrue(held)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertTrue(topology.launchPlans.isEmpty, "the start ran under the hold")
+        XCTAssertNotEqual(supervisor.state, .running)
+
+        await supervisor.forgetHold.release()
+        await eventually { supervisor.state == .running }
+        XCTAssertEqual(supervisor.state, .running)
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// Turn On during a forget (Preferences, setup's end) waits for the
+    /// hold's end, then turns remembering on.
+    func testTurnOnDuringAHoldWaitsForItsEnd() async throws {
+        let clock = Clock(start)
+        let topology = FakeSupervisorTopology()
+        let supervisor = supervisor(pauses: UserPauseController(clock: { clock.now }), clock: clock,
+                                    captureEnabled: false, topology: topology)
+        try await supervisor.applyCaptureEnabled(false)
+        XCTAssertEqual(supervisor.state, .stopped)
+        let held = await supervisor.forgetHold.hold()
+        XCTAssertTrue(held)
+
+        supervisor.turnOn()
+        try await supervisor.applyCaptureEnabled(true)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertTrue(topology.launchPlans.isEmpty, "remembering turned on under the hold")
+        XCTAssertFalse(supervisor.captureEnabled)
+        XCTAssertTrue(supervisor.turningOn, "the press waits; it isn't dropped")
+
+        await supervisor.forgetHold.release()
+        await eventually { supervisor.captureEnabled && supervisor.state == .running }
+        XCTAssertTrue(supervisor.captureEnabled)
+        XCTAssertEqual(supervisor.state, .running)
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// A run that ended retries on its own; a retry that comes due during
+    /// a forget waits for the hold's end.
+    func testARetryDuringAHoldWaitsForItsEnd() async throws {
+        let clock = Clock(start)
+        let latch = Latch()
+        let topology = FakeSupervisorTopology()
+        let locator = FakeBinaryLocator()
+        locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
+        locator.agentURL = URL(fileURLWithPath: "/bundle/mci-agent")
+        let keyStore = FakeKeyStore()
+        keyStore.storedKey = String(repeating: "ab", count: 32)
+        let supervisor = ProcessSupervisor(
+            locator: locator, keyStore: keyStore, runtimeConfig: FakeRuntimeConfig(captureEnabled: true),
+            topology: topology, keyCustodyPreparer: FakeKeyCustodyPreparer(), readinessTimeout: 0.1,
+            retrySleep: { _ in await latch.wait() },
+            captureStatusReader: { (nil, nil) }, pauses: UserPauseController(clock: { clock.now }),
+            clock: { clock.now })
+        try await supervisor.startAndWaitForReadiness()
+        topology.fireUnexpectedExit(forLaunchAt: 0)
+        guard case .crashed = supervisor.state else { return XCTFail("the run ended: \(supervisor.state)") }
+
+        let held = await supervisor.forgetHold.hold()
+        XCTAssertTrue(held, "nothing runs: the lease is free")
+        latch.release()
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(topology.launchPlans.count, 1, "a retry started remembering under the hold")
+
+        await supervisor.forgetHold.release()
+        await eventually { supervisor.state == .running }
+        XCTAssertEqual(supervisor.state, .running, "the retry, carried out at the hold's end")
+        XCTAssertEqual(topology.launchPlans.count, 2)
+        try await supervisor.shutdownAndWait()
+    }
 }

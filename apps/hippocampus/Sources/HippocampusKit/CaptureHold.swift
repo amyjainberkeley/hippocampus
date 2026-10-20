@@ -19,13 +19,19 @@ import Foundation
 /// What the hold stops and starts again: the supervisor in the app.
 @MainActor
 public protocol CaptureHolding: AnyObject {
-    /// Remembering runs now: the agent holds the writer lease.
+    /// Remembering runs now, so the agent holds the writer lease, or a start
+    /// under way is about to take it.
     var isRememberingForHold: Bool { get }
     /// Stops the helper and the agent as Pause does, without the person's
-    /// pause. Returns once the writer lease is free.
+    /// pause, once a start under way has settled. Returns once the writer
+    /// lease is free.
     func stopForHold() async throws
-    /// Remembering again after a hold, if the person hasn't paused or turned
-    /// it off since.
+    /// A start came while the hold was on (a timed pause's end, the
+    /// launch's start) and waits for its end: the hold's end starts
+    /// remembering then, even when it wasn't on at the hold's start.
+    var startWaitingForHold: Bool { get }
+    /// Remembering again after a hold, if it was on or a start waited for
+    /// the hold, and the person hasn't paused or turned it off since.
     func restartAfterHold() async throws
     /// The hold is on: the status reads "Forgetting…".
     func holdChanged(_ holding: Bool)
@@ -123,7 +129,7 @@ public final class CaptureHold {
         cap?.cancel()
         cap = nil
         target.holdChanged(false)
-        if current.wasOn {
+        if current.wasOn || target.startWaitingForHold {
             try? await target.restartAfterHold()
         }
     }

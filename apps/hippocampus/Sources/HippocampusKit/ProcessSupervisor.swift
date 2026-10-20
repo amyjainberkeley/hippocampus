@@ -303,10 +303,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     /// The state the status is read from. Before the launch's first start,
     /// while its orphan sweep runs (up to about 15 s, waiting out a writer a
-    /// crash left) or that start is about to begin, nothing has started but
-    /// one is coming: Starting…, or Paused for a kept pause, never Off.
+    /// crash left), that start is about to begin or it waits for a forget's
+    /// hold, nothing has started but one is coming: Starting…, or Paused for
+    /// a kept pause, never Off.
     private var shownState: SupervisorState {
-        guard state == .idle, launchSweepRunning || startRunning else { return state }
+        guard state == .idle, launchSweepRunning || startRunning || startWaitingForHold else { return state }
         return requestedPauseState ? .paused : .starting
     }
 
@@ -412,6 +413,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     public private(set) lazy var forgetHold = CaptureHold(target: self)
     /// The hold is on: the status reads "Forgetting…".
     @Published public private(set) var holdingForForget = false
+    /// A start came while the hold was on (a timed pause's end, the
+    /// launch's start, a retry, Try Again): nothing starts under a hold, so
+    /// it waits, and the hold's end carries it out (`restartAfterHold`).
+    @Published public private(set) var startWaitingForHold = false
     /// What the app does for the window's Turn On, Try Again, Open System
     /// Settings… and Quit: the same as the status row's button.
     public var windowStatusAction: (@MainActor (CaptureStatusAction) -> Void)?
@@ -699,6 +704,13 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         // is never cancelled for a start either; only a retry still waiting
         // out its backoff is replaced.
         guard !startRunning, inFlightTransitions.isEmpty, pauseTask == nil else { return }
+        // A forget holds the memory still (the window may open, and forget,
+        // during the launch's sweep): this start waits for the hold's end.
+        // A kept pause starts nothing, so it is entered now.
+        if holdingForForget, !requestedPauseState {
+            startWaitingForHold = true
+            return
+        }
         // A Turn On a permission refused just before this launch (System
         // Settings' Quit & Reopen, after the person allowed it) is pressed
         // again, once, with a fresh helper: it lands only if that helper
@@ -731,6 +743,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
         if requestedPauseState {
             try await enterKeptPause()
+            return
+        }
+        // A start asked for just before a forget's hold began waits for its
+        // end, as one asked for during it does.
+        if holdingForForget {
+            startWaitingForHold = true
             return
         }
         guard let transitionID = beginOwnedTransition() else {
@@ -1047,6 +1065,13 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
 
         guard state == .paused else { return }
+        // A resume during a forget's hold (a timed pause's end, Resume)
+        // waits for the hold's end: the agent would take the writer lease
+        // the window deletes under.
+        if holdingForForget {
+            startWaitingForHold = true
+            return
+        }
         cancelPendingRetry()
         guard let transitionID = beginOwnedTransition() else {
             throw SupervisorError.transitionInProgress
@@ -1090,6 +1115,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             throw SupervisorError.transitionInProgress
         }
         guard enabled != captureEnabled else { return }
+        // A forget holds remembering still: this turn-on is a press that
+        // waits for the hold's end, as the menu's Turn On does.
+        if holdingForForget {
+            turnOn()
+            return
+        }
         guard let transitionID = beginOwnedTransition() else {
             throw SupervisorError.transitionInProgress
         }
@@ -1245,8 +1276,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     private func carryOutTurnOn(_ press: UUID) async {
         defer { if pendingTurnOn == press { pendingTurnOn = nil } }
-        let giveUpAt = recoveryNow().advanced(by: Self.turnOnWait)
+        var giveUpAt = recoveryNow().advanced(by: Self.turnOnWait)
         while pendingTurnOn == press, !captureEnabled, !shutdownRequested, shutdownTask == nil {
+            // A forget's hold ends by itself, renewed only while the window
+            // deletes: the press waits it out, and its own wait starts after.
+            if holdingForForget { giveUpAt = recoveryNow().advanced(by: Self.turnOnWait) }
             if !changeUnderWay {
                 let tried = turnOnAttempts
                 do {
@@ -1269,9 +1303,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
     }
 
-    /// A start, a stop, a pause or a capture change holds the transition gate.
+    /// A start, a stop, a pause or a capture change holds the transition gate,
+    /// or a forget holds remembering still.
     private var changeUnderWay: Bool {
         !inFlightTransitions.isEmpty || captureStopTask != nil || pauseTask != nil || launchSweepRunning
+            || holdingForForget
     }
 
     private func beginTurnOnAttempt() -> UUID {
@@ -1728,6 +1764,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
               !requestedPauseState, pauseTask == nil,
               !shutdownRequested, shutdownTask == nil,
               inFlightTransitions.isEmpty else { return }
+        // During a forget's hold the restart waits for the hold's end.
+        if holdingForForget {
+            startWaitingForHold = true
+            return
+        }
         cancelPendingRetry()
         retryCount = 0
         tccRevokedSurface = nil
@@ -1855,6 +1896,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
 
     private func restartTopology() async throws {
+        // A retry or a wake's recovery during a forget's hold waits for the
+        // hold's end, which restarts.
+        if holdingForForget {
+            startWaitingForHold = true
+            throw SupervisorError.transitionInProgress
+        }
         guard !captureStopLatched, !requestedPauseState, !shutdownRequested,
               tccRevokedSurface == nil,
               let transitionID = beginOwnedTransition() else {
@@ -2416,21 +2463,57 @@ extension SpawnedWindowProcess: RecallWindowProcess {}
 /// Remembering, held still for a window's forget (SPEC 3.11): stopped the way
 /// Pause stops it, never with the person's own pause, and started again only
 /// if it ran before and the person hasn't paused or turned it off since.
+/// Nothing starts while the hold is on: a start asked for then waits for its
+/// end (`startWaitingForHold`).
 extension ProcessSupervisor: CaptureHolding {
+    /// Remembering runs, or a start is under way that would take the writer
+    /// lease: the launch's sweep (which may still be ending a writer a crash
+    /// left) and the start after it, or a start or resume not at Starting…
+    /// yet. The hold stops it, or waits for it to settle.
     public var isRememberingForHold: Bool {
-        state == .running || state == .starting
+        state == .running || state == .starting || startUnderWay
+    }
+
+    private var startUnderWay: Bool {
+        launchSweepRunning || startRunning || pauseTask != nil || !inFlightTransitions.isEmpty
     }
 
     public func stopForHold() async throws {
-        guard state == .running || state == .starting else { return }
+        // A change under way settles first, within the hold's wait: one
+        // that reaches Starting… is stopped below, and a start asked for
+        // since the hold began waits for its end.
+        while holdingForForget, startUnderWay, state != .running, state != .starting {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        // The hold ended while this waited (it took too long): stop nothing.
+        guard holdingForForget, state == .running || state == .starting else { return }
         // The verified transition without `pauses`: the person's saved pause
         // is never written.
         try await setPausedAndWait(true)
     }
 
+    /// The hold ended: remembering runs again as the person and the setting
+    /// now ask, with the starts that waited for it, and never against a
+    /// pause the person made.
     public func restartAfterHold() async throws {
-        guard !requestedPauseState, state == .paused, !shutdownRequested else { return }
-        try await setPausedAndWait(false)
+        let waited = startWaitingForHold
+        startWaitingForHold = false
+        guard !shutdownRequested, shutdownTask == nil else { return }
+        switch state {
+        case .paused:
+            // The hold's own stop, or a resume that came during the hold (a
+            // timed pause's end): on again unless the person paused.
+            guard !requestedPauseState else { return }
+            try await setPausedAndWait(false)
+        case .idle, .stopped:
+            // The launch's start, or another, that waited.
+            if waited { start() }
+        case .crashed:
+            // A retry, Try Again or a wake's recovery that waited.
+            if waited { retryNow() }
+        case .starting, .running:
+            break
+        }
     }
 
     public func holdChanged(_ holding: Bool) {

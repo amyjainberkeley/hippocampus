@@ -16,6 +16,7 @@ final class CaptureHoldTests: XCTestCase {
         var stopTakes: Duration = .zero
         /// Called as the stop ends, before the hold hears of it.
         var stopEnding: (() -> Void)?
+        var startWaitingForHold = false
         private(set) var stops = 0
         private(set) var restarts = 0
         private(set) var holdStates: [Bool] = []
@@ -128,6 +129,18 @@ final class CaptureHoldTests: XCTestCase {
         XCTAssertEqual(target.stops, 0)
         await hold.release()
         XCTAssertEqual(target.restarts, 0, "remembering starts again only if it was on")
+    }
+
+    /// Paused when the hold began, and the pause's end came during it: the
+    /// start that waited is carried out when the hold ends.
+    func testAStartThatWaitedForTheHoldIsCarriedOutAtItsEnd() async {
+        let target = Target()
+        target.isRememberingForHold = false
+        let hold = CaptureHold(target: target)
+        _ = await hold.hold()
+        target.startWaitingForHold = true
+        await hold.release()
+        XCTAssertEqual(target.restarts, 1)
     }
 
     func testOneHoldAtATime() async {
