@@ -193,6 +193,109 @@ final class SidePictureSettingsTests: XCTestCase {
         XCTAssertTrue(model.enabled)
         XCTAssertEqual(model.budgetMB, 5_000)
     }
+
+    // MARK: Forgetting them while nothing remembers
+
+    /// What the stand-in for the agent's one-shot pass saw.
+    @MainActor
+    private final class Pass {
+        var calls: [(arguments: [String], environment: [String: String], held: Bool)] = []
+    }
+
+    /// The supervisor with fake processes, its memory on disk, remembering
+    /// running or paused by the person.
+    @MainActor
+    private func supervisor(paused: Bool) async throws -> ProcessSupervisor {
+        let locator = FakeBinaryLocator()
+        locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
+        locator.agentURL = URL(fileURLWithPath: "/bundle/mci-agent")
+        let keyStore = FakeKeyStore()
+        keyStore.storedKey = String(repeating: "ab", count: 32)
+        let pauses = UserPauseController()
+        if paused { pauses.setPaused(true) }
+        let supervisor = ProcessSupervisor(
+            locator: locator, keyStore: keyStore, runtimeConfig: FakeRuntimeConfig(captureEnabled: true),
+            topology: FakeSupervisorTopology(), keyCustodyPreparer: FakeKeyCustodyPreparer(), readinessTimeout: 0.1,
+            captureStatusReader: { (nil, nil) }, pauses: pauses, memoryOnDisk: { true })
+        try await supervisor.startAndWaitForReadiness()
+        return supervisor
+    }
+
+    /// Paused, no agent runs to read the request, which could wait for good:
+    /// confirming Forget runs the agent's one short pass at once, on the
+    /// person's own memory, under a hold so nothing starts meanwhile, and
+    /// Preferences reads what the pictures use again.
+    @MainActor
+    func testForgettingWhilePausedIsCarriedOutAtOnce() async throws {
+        let (model, config) = try preferences(settings: "side_window_pictures = false\n",
+                                              usage: usage(side: 640_000_000))
+        let supervisor = try await supervisor(paused: true)
+        XCTAssertEqual(supervisor.state, .paused)
+        let usageURL = config.path.deletingLastPathComponent().appendingPathComponent("pictures-usage.json")
+        let emptied = try JSONSerialization.data(withJSONObject: usage(side: 0, count: 0))
+        let pass = Pass()
+        supervisor.sidePicturesPass = { _, arguments, environment in
+            pass.calls.append((arguments, environment, supervisor.holdingForForget))
+            // As the agent does: the usage file says what is left.
+            try? emptied.write(to: usageURL)
+            return true
+        }
+        model.forgetNow = { _ = await supervisor.forgetSidePicturesNow() }
+        XCTAssertTrue(model.hasPictures)
+
+        await model.forgetPictures()?.value
+
+        XCTAssertEqual(config.sidePictures.deleteRequestedAt, Date(timeIntervalSince1970: 1_792_444_800))
+        XCTAssertEqual(pass.calls.count, 1, "the pictures were left until remembering resumes")
+        XCTAssertEqual(pass.calls.first?.arguments, ["forget-side-pictures", "--db-path", supervisor.dbPath.path])
+        XCTAssertEqual(pass.calls.first?.environment["MCI_DB_PATH"], supervisor.dbPath.path)
+        XCTAssertEqual(pass.calls.first?.held, true, "nothing may start while it holds the memory")
+        XCTAssertFalse(supervisor.holdingForForget)
+        XCTAssertEqual(supervisor.state, .paused, "the person's pause stands")
+        XCTAssertFalse(model.hasPictures, "Preferences reads what they use again")
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// While remembering runs, the running agent reads the request within
+    /// seconds: nothing else runs and remembering isn't stopped.
+    @MainActor
+    func testWhileRememberingRunsTheAgentCarriesItOut() async throws {
+        let (model, config) = try preferences(settings: "side_window_pictures = false\n",
+                                              usage: usage(side: 640_000_000))
+        let supervisor = try await supervisor(paused: false)
+        XCTAssertEqual(supervisor.state, .running)
+        let pass = Pass()
+        supervisor.sidePicturesPass = { _, arguments, environment in
+            pass.calls.append((arguments, environment, true))
+            return true
+        }
+        model.forgetNow = { _ = await supervisor.forgetSidePicturesNow() }
+
+        await model.forgetPictures()?.value
+
+        XCTAssertNotNil(config.sidePictures.deleteRequestedAt, "saved for the running agent")
+        XCTAssertTrue(pass.calls.isEmpty)
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertFalse(supervisor.holdingForForget)
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// A pass that couldn't finish (another writer held the memory) leaves
+    /// the request for the agent's next run, and lets go of the hold.
+    @MainActor
+    func testAPassThatCouldNotFinishLeavesTheRequestForTheAgent() async throws {
+        let (model, config) = try preferences(settings: "side_window_pictures = false\n",
+                                              usage: usage(side: 640_000_000))
+        let supervisor = try await supervisor(paused: true)
+        supervisor.sidePicturesPass = { _, _, _ in false }
+        let finished = await supervisor.forgetSidePicturesNow()
+        XCTAssertFalse(finished)
+        model.forgetPictures()
+        XCTAssertNotNil(config.sidePictures.deleteRequestedAt)
+        XCTAssertFalse(supervisor.holdingForForget)
+        XCTAssertEqual(supervisor.state, .paused)
+        try await supervisor.shutdownAndWait()
+    }
 }
 
 /// The words for pictures of side windows meet the bar every menu-bar word

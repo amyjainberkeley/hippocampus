@@ -139,6 +139,11 @@ enum Mode {
     EnsureKey {
         db_path: PathBuf,
     },
+    /// Forget Pictures of Other Windows… while no agent runs: the request in
+    /// `runtime.toml`, carried out once under the writer lease.
+    ForgetSidePictures {
+        db_path: PathBuf,
+    },
     /// Import Claude Code and Codex transcripts into the brain,
     /// incrementally over both roots.
     ImportSessions {
@@ -419,6 +424,7 @@ fn parse_args(argv: &[String]) -> Args {
             "refresh" => mode_kind = ModeKind::Refresh,
             "init" => mode_kind = ModeKind::Init,
             "ensure-key" => mode_kind = ModeKind::EnsureKey,
+            "forget-side-pictures" => mode_kind = ModeKind::ForgetSidePictures,
             "--transcript-root" | "--root" => {
                 if let Some(v) = argv.get(i + 1) {
                     transcript_root = Some(PathBuf::from(v));
@@ -600,6 +606,9 @@ fn parse_args(argv: &[String]) -> Args {
         ModeKind::EnsureKey => Mode::EnsureKey {
             db_path: resolved_db_path,
         },
+        ModeKind::ForgetSidePictures => Mode::ForgetSidePictures {
+            db_path: resolved_db_path,
+        },
         ModeKind::ImportSessions => Mode::ImportSessions {
             db_path: resolved_db_path,
             root: transcript_root
@@ -645,6 +654,7 @@ enum ModeKind {
     Refresh,
     Init,
     EnsureKey,
+    ForgetSidePictures,
     UnknownCommand,
 }
 
@@ -684,6 +694,9 @@ fn print_usage() {
         \x20                            detected Claude Code and Codex clients\n\
         \x20 ensure-key                 initialize or validate the bundled macOS\n\
         \x20                            Keychain item without importing data\n\
+        \x20 forget-side-pictures       carry out Forget Pictures of Other Windows… now,\n\
+        \x20                            under the writer lease, then exit. What the app\n\
+        \x20                            runs while remembering is paused or off.\n\
         \x20 import-sessions            import Claude Code (~/.claude/projects) and Codex\n\
         \x20                            (~/.codex/sessions) transcripts into the brain.\n\
         \x20                            Incremental: a file already imported is read only\n\
@@ -1498,6 +1511,10 @@ async fn run_agent(args: Args) -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => ExitCode::from(code),
         },
+        Mode::ForgetSidePictures { db_path } => match run_forget_side_pictures_cmd(&db_path) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
         Mode::ImportSessions {
             db_path,
             root,
@@ -1780,11 +1797,12 @@ enum WriterCommand {
     McpSync,
     EmbedBackfill,
     Handoff,
+    ForgetSidePictures,
 }
 
 impl WriterCommand {
     #[cfg(test)]
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Init,
         Self::ImportSessions,
         Self::Enrich,
@@ -1792,6 +1810,7 @@ impl WriterCommand {
         Self::McpSync,
         Self::EmbedBackfill,
         Self::Handoff,
+        Self::ForgetSidePictures,
     ];
 
     const fn label(self) -> &'static str {
@@ -1803,6 +1822,7 @@ impl WriterCommand {
             Self::McpSync => "mcp-sync",
             Self::EmbedBackfill => "embed-backfill",
             Self::Handoff => "handoff",
+            Self::ForgetSidePictures => "forget-side-pictures",
         }
     }
 }
@@ -3550,6 +3570,64 @@ fn run_ensure_key_cmd(db_path: &Path) -> Result<(), u8> {
     }
 }
 
+/// Forget Pictures of Other Windows… while remembering is paused or off
+/// (SPEC 6.7). Preferences saves the request in `runtime.toml` for the
+/// retention worker, and no worker runs while no agent does, so the app runs
+/// this once instead: under the writer lease it does the worker's
+/// side-picture cycle (the request, thinning to the budget, the usage file)
+/// and exits. It starts no capture, no MCP server and no worker. With no
+/// memory yet there is nothing to forget, and nothing is made.
+fn run_forget_side_pictures_cmd(db_path: &Path) -> Result<(), u8> {
+    const COMMAND: WriterCommand = WriterCommand::ForgetSidePictures;
+    match db_path.try_exists() {
+        Ok(true) => {}
+        Ok(false) => {
+            outln!("No memory yet: no pictures to forget.");
+            return Ok(());
+        }
+        Err(error) => {
+            errln!("mci-agent forget-side-pictures: cannot inspect the brain: {error}");
+            return Err(12);
+        }
+    }
+    let lease = acquire_command_writer_lease(COMMAND, db_path)?;
+    let key_hex = resolve_key_for_command(COMMAND.label())?;
+    let Some(key_bytes) = decode_hex32(&key_hex) else {
+        errln!("mci-agent forget-side-pictures: resolved database key is malformed.");
+        return Err(11);
+    };
+    let store = open_command_writer(COMMAND, db_path, &DbKey::from_bytes(key_bytes), &lease)?;
+    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let mut side = retention_worker::SidePictureMaintenance::for_home(
+        &home,
+        &db_path.with_file_name("retention.json"),
+    );
+    let now_us = u64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros(),
+    )
+    .unwrap_or(u64::MAX);
+    match side.run_cycle(&store, now_us) {
+        Ok(cycle) => {
+            // Counts only, never what a picture showed.
+            outln!(
+                "forgotten={} thinned={} blobs_deleted={} usage_written={}",
+                cycle.forgotten,
+                cycle.thinned,
+                cycle.blobs_deleted,
+                cycle.usage_written
+            );
+            Ok(())
+        }
+        Err(error) => {
+            errln!("mci-agent forget-side-pictures: {error}");
+            Err(23)
+        }
+    }
+}
+
 /// One-command setup.
 ///
 /// Chains what a new user would otherwise do by hand: make a key, import
@@ -4819,6 +4897,7 @@ mod writer_command_lease_tests {
                 "mcp-sync",
                 "embed-backfill",
                 "handoff",
+                "forget-side-pictures",
             ]
         );
     }

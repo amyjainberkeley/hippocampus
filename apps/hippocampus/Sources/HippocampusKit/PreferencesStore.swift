@@ -451,14 +451,30 @@ public final class SidePicturesPreferences: ObservableObject {
         }
     }
 
+    /// Carries a confirmed forget out at once when no agent runs to read the
+    /// request (remembering paused or off): the app's one short pass under
+    /// the writer lease (`ProcessSupervisor.forgetSidePicturesNow`). Nil
+    /// leaves it to the agent, which reads it within seconds while
+    /// remembering runs.
+    public var forgetNow: (@MainActor () async -> Void)?
+
     /// Forget Pictures of Other Windows…, confirmed: every picture of a side
-    /// window kept until now goes; their text stays.
-    public func forgetPictures() {
+    /// window kept until now goes; their text stays. The request is saved for
+    /// the agent, `forgetNow` carries it out at once when none runs, and what
+    /// the pictures use is read again after. The task is the carrying out.
+    @discardableResult
+    public func forgetPictures() -> Task<Void, Never>? {
         do {
             try config.requestDeleteSidePictures(at: now())
             writeError = nil
         } catch {
             writeError = "Couldn’t save. Try again."
+            return nil
+        }
+        guard let forgetNow else { return nil }
+        return Task { @MainActor [weak self] in
+            await forgetNow()
+            self?.refresh()
         }
     }
 

@@ -43,7 +43,8 @@ final class RememberingRaceTests: XCTestCase {
     private let start = Date(timeIntervalSince1970: 1_791_841_260)
 
     private func supervisor(pauses: UserPauseController, clock: Clock, captureEnabled: Bool = true,
-                            topology: FakeSupervisorTopology = FakeSupervisorTopology()) -> ProcessSupervisor {
+                            topology: FakeSupervisorTopology = FakeSupervisorTopology(),
+                            memoryOnDisk: Bool = false) -> ProcessSupervisor {
         let locator = FakeBinaryLocator()
         locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
         locator.agentURL = URL(fileURLWithPath: "/bundle/mci-agent")
@@ -53,6 +54,7 @@ final class RememberingRaceTests: XCTestCase {
             locator: locator, keyStore: keyStore, runtimeConfig: FakeRuntimeConfig(captureEnabled: captureEnabled),
             topology: topology, keyCustodyPreparer: FakeKeyCustodyPreparer(), readinessTimeout: 0.1,
             captureStatusReader: { (nil, nil) }, pauses: pauses, clock: { clock.now },
+            memoryOnDisk: { memoryOnDisk },
             // The timed resume's wait: real time does not pass; the test
             // moves the clock.
             timedResumeSleep: { _ in try await Task.sleep(for: .milliseconds(5)) }
@@ -506,6 +508,47 @@ final class RememberingRaceTests: XCTestCase {
         await eventually { supervisor.state == .running }
         XCTAssertEqual(supervisor.state, .running, "the retry, carried out at the hold's end")
         XCTAssertEqual(topology.launchPlans.count, 2)
+        try await supervisor.shutdownAndWait()
+    }
+
+    // MARK: Forgetting pictures of other windows while Demo Memory is in use
+
+    @MainActor
+    private final class Seen {
+        var environment: [String: String]?
+    }
+
+    /// Forget Pictures of Other Windows… in Preferences is about the
+    /// person's own memory. While Demo Memory is in use remembering is
+    /// paused, so the app's one-shot pass carries it out, and it opens the
+    /// person's own memory, never the made-up week, whose children get the
+    /// week.
+    func testForgettingPicturesDuringDemoMemoryOpensThePersonsOwnMemory() async throws {
+        let home = try makeHome()
+        let clock = Clock(start)
+        let pauses = UserPauseController(clock: { clock.now })
+        let supervisor = supervisor(pauses: pauses, clock: clock, memoryOnDisk: true)
+        try await supervisor.startAndWaitForReadiness()
+        let (controller, _) = demo(supervisor, home: home, clock: clock)
+        defer { DemoMemory.detach() }
+        let used = await controller.use()
+        XCTAssertTrue(used)
+        XCTAssertEqual(supervisor.sanitizedChildEnvironment()["MCI_DB_PATH"], controller.folder.database.path,
+                       "the window and Ask read the week")
+
+        let seen = Seen()
+        supervisor.sidePicturesPass = { _, _, environment in
+            seen.environment = environment
+            return true
+        }
+        let finished = await supervisor.forgetSidePicturesNow()
+
+        XCTAssertTrue(finished)
+        XCTAssertEqual(seen.environment?["MCI_DB_PATH"], supervisor.dbPath.path, "the person's own memory")
+        XCTAssertNil(seen.environment?["MCI_DEMO_MEMORY"])
+        XCTAssertNil(seen.environment?["MCI_DB_KEY_FILE"], "never the week's key")
+        XCTAssertEqual(controller.phase, .on, "Demo Memory stays in use")
+        XCTAssertEqual(supervisor.state, .paused)
         try await supervisor.shutdownAndWait()
     }
 }

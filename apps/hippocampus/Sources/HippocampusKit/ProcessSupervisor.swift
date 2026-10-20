@@ -18,6 +18,25 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
         keyReference: KeychainKeyReference,
         developmentKeyMode: DevelopmentFileKeyMode? = nil
     ) -> [String: String] {
+        let environment = ownEnvironment(
+            baseEnvironment: baseEnvironment, dbPath: dbPath, keyReference: keyReference,
+            developmentKeyMode: developmentKeyMode
+        )
+        // Demo Memory's store and flag while it is in use; the person's own
+        // memory, as above, while it is off (SPEC-DELTA 6).
+        return DemoMemory.childEnvironment(environment)
+    }
+
+    /// The person's own memory and key, whatever the window reads: for a
+    /// child that works on the person's memory even while Demo Memory is in
+    /// use, such as forgetting pictures of other windows. Never a window,
+    /// so the window's Demo flag means nothing to it.
+    static func ownEnvironment(
+        baseEnvironment: [String: String],
+        dbPath: URL,
+        keyReference: KeychainKeyReference,
+        developmentKeyMode: DevelopmentFileKeyMode? = nil
+    ) -> [String: String] {
         var environment = ChildProcessEnvironment.scrubbingReusableKeys(from: baseEnvironment)
         environment["MCI_DB_PATH"] = dbPath.path
         if let developmentKeyMode {
@@ -28,9 +47,7 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
             environment["MCI_DB_KEYCHAIN_ACCOUNT"] = keyReference.account
             environment["MCI_DB_KEYCHAIN_STORAGE_MODEL"] = KeychainKeyStore.storageModel
         }
-        // Demo Memory's store and flag while it is in use; the person's own
-        // memory, as above, while it is off (SPEC-DELTA 6).
-        return DemoMemory.childEnvironment(environment)
+        return environment
     }
 
     package static func onboardingEnvironment(
@@ -420,6 +437,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// What the app does for the window's Turn On, Try Again, Open System
     /// Settings… and Quit: the same as the status row's button.
     public var windowStatusAction: (@MainActor (CaptureStatusAction) -> Void)?
+    /// Runs the agent's one-shot pass for Forget Pictures of Other Windows…
+    /// (`forgetSidePicturesNow`) and says whether it finished. Tests put a
+    /// stand-in here.
+    var sidePicturesPass: @MainActor @Sendable (URL, [String], [String: String]) async -> Bool = {
+        await ProcessSupervisor.runSidePicturesPass(agent: $0, arguments: $1, environment: $2)
+    }
     /// Ends a timed pause on time.
     private var timedResume: Task<Void, Never>?
     private let timedResumeSleep: @MainActor @Sendable (TimeInterval) async throws -> Void
@@ -2518,5 +2541,64 @@ extension ProcessSupervisor: CaptureHolding {
 
     public func holdChanged(_ holding: Bool) {
         holdingForForget = holding
+    }
+}
+
+/// Forget Pictures of Other Windows… while nothing remembers (SPEC 6.7).
+extension ProcessSupervisor {
+    /// The longest the agent's one-shot pass may take.
+    static let sidePicturesPassLimit: Duration = .seconds(5 * 60)
+
+    /// Forget Pictures of Other Windows…, carried out now when no agent runs
+    /// to read the request Preferences saved: remembering paused, off, not
+    /// started or stopped on an error, when it could wait for good. One short
+    /// pass of the agent does what its retention worker would (the request,
+    /// thinning, the usage file) under the writer lease, and ends: it starts
+    /// no capture and no MCP server, and opens the person's own memory
+    /// whatever the window reads. It runs under a hold, as a forget does, so
+    /// nothing starts meanwhile. While remembering runs, the running agent
+    /// carries the request out within 10 seconds, and nothing happens here.
+    /// True when the pass ran and finished.
+    @discardableResult
+    public func forgetSidePicturesNow() async -> Bool {
+        guard !isRememberingForHold, !shutdownRequested, shutdownTask == nil, memoryOnDisk(),
+              let agent = locator.agentPath() else { return false }
+        guard await forgetHold.hold() else { return false }
+        let renewal = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(10))
+                guard !Task.isCancelled else { return }
+                self?.forgetHold.renew()
+            }
+        }
+        let pass = sidePicturesPass
+        let arguments = ["forget-side-pictures", "--db-path", dbPath.path]
+        let environment = ProcessSupervisorLaunchPlan.ownEnvironment(
+            baseEnvironment: ProcessInfo.processInfo.environment, dbPath: dbPath,
+            keyReference: keyReference, developmentKeyMode: developmentKeyMode
+        )
+        let run = Task { @MainActor in await pass(agent, arguments, environment) }
+        let limit = Task {
+            try? await Task.sleep(for: Self.sidePicturesPassLimit)
+            guard !Task.isCancelled else { return }
+            run.cancel()
+        }
+        let finished = await run.value
+        limit.cancel()
+        renewal.cancel()
+        await forgetHold.release()
+        if !finished {
+            logger.error("supervisor: forgetting pictures of other windows now did not finish; the agent does it next")
+        }
+        return finished
+    }
+
+    /// `mci-agent forget-side-pictures`, run once; cancelling ends it.
+    nonisolated static func runSidePicturesPass(agent: URL, arguments: [String],
+                                                environment: [String: String]) async -> Bool {
+        let result = try? await KeyCustodyCommandRunner.run(
+            executableURL: agent, arguments: arguments, environment: environment
+        )
+        return result?.terminationStatus == 0
     }
 }

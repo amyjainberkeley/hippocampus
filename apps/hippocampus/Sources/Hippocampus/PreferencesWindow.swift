@@ -410,7 +410,8 @@ extension EnvironmentValues {
 /// Keep screenshots of windows beside the one you’re using (SPEC 6.7):
 /// the switch and what it means; while on, the budget and what the pictures
 /// use; while off, forgetting them. A change is written at once, and the
-/// capture helper and the agent act on it at their next read.
+/// capture helper and the agent act on it at their next read; a forget
+/// while nothing remembers is carried out at once by the app.
 struct SidePicturesSection: View {
     @ObservedObject var model: SidePicturesPreferences
     let setupFinished: Bool
@@ -620,6 +621,8 @@ final class PreferencesWindowController: NSObject, NSToolbarDelegate {
         )
         let sidePictures = self.sidePictures ?? SidePicturesPreferences.live()
         self.sidePictures = sidePictures
+        // Paused or off, no agent reads the request: the app carries it out.
+        sidePictures.forgetNow = { [weak supervisor] in _ = await supervisor?.forgetSidePicturesNow() }
         sidePictures.refresh()
         let host = NSHostingView(rootView: AnyView(root.environment(\.sidePictures, sidePictures)))
         host.frame = NSRect(
