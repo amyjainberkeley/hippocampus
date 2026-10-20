@@ -412,6 +412,7 @@ struct MemoryWorkspaceView: View {
             status: status,
             choices: choices,
             showsFootnote: showsFootnote,
+            width: width,
             drawsWindowControls: drawsWindowControls,
             pictures: pictures,
             calendar: calendar,

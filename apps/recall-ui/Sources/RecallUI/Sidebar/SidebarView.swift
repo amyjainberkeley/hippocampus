@@ -37,6 +37,8 @@ struct SidebarView: View {
     let choices: SidebarHides.Choices
     /// Working On's one-time footnote is showing.
     var showsFootnote = false
+    /// The sidebar's width, which the footnote wraps to.
+    var width: CGFloat = SidebarMetrics.defaultWidth
     /// Off-screen pictures draw the window's controls themselves; the live
     /// window's are the system's own.
     var drawsWindowControls = false
@@ -133,11 +135,7 @@ struct SidebarView: View {
                             ForEach(group.rows) { row in rowView(row).tag(row) }
                         }
                         if showsFootnote, !choices.workingOnHidden {
-                            Text(NavigationCopy.workingOnFootnote)
-                                .font(.system(size: 11))
-                                .foregroundStyle(MCI.Color.sidebarSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .padding(.leading, 25)
+                            SidebarFootnote(text: NavigationCopy.workingOnFootnote, sidebarWidth: width)
                                 .selectionDisabled()
                                 .transition(.opacity)
                         }
@@ -309,6 +307,26 @@ private struct SectionHeader: View {
         .accessibilityLabel(title)
         .accessibilityAddTraits(.isHeader)
         .accessibilityValue(collapsed ? "collapsed" : "")
+    }
+}
+
+/// A note under a section, wrapped to the sidebar's width and as tall as its
+/// lines (`SidebarNoteLayout`), so a sidebar list never cuts it off.
+struct SidebarFootnote: View {
+    let text: String
+    let sidebarWidth: CGFloat
+
+    var body: some View {
+        Text(verbatim: text)
+            .font(.system(size: SidebarNoteLayout.fontSize))
+            .foregroundStyle(MCI.Color.sidebarSecondary)
+            // A sidebar row's words are one line unless they say otherwise.
+            .lineLimit(nil)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(width: SidebarNoteLayout.textWidth(sidebarWidth: sidebarWidth), alignment: .leading)
+            .frame(minHeight: SidebarNoteLayout.height(text, sidebarWidth: sidebarWidth), alignment: .topLeading)
+            .padding(.leading, SidebarNoteLayout.labelInset)
     }
 }
 

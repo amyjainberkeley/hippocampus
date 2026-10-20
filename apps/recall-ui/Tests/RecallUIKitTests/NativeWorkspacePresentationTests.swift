@@ -88,6 +88,13 @@ final class NativeWorkspacePresentationTests: XCTestCase {
         XCTAssertFalse(source.contains(".focusEffectDisabled("),
                        "Native keyboard focus must stay visible on actual controls")
         XCTAssertFalse(source.contains("sparkles"), "no sparkles in the sidebar (SPEC 2.2)")
+        XCTAssertTrue(source.contains("SidebarFootnote(text: NavigationCopy.workingOnFootnote, sidebarWidth: width)"),
+                      "Working On's footnote is as tall as its lines, so the list never cuts it off")
+        XCTAssertTrue(source.contains("minHeight: SidebarNoteLayout.height(text, sidebarWidth: sidebarWidth)"))
+        let noteStart = try XCTUnwrap(source.range(of: "struct SidebarFootnote: View"))
+        let noteEnd = source.range(of: "\n/// ", range: noteStart.upperBound..<source.endIndex)
+        let note = String(source[noteStart.lowerBound..<(noteEnd?.lowerBound ?? source.endIndex)])
+        XCTAssertTrue(note.contains(".lineLimit(nil)"), "a sidebar row is one line unless it says otherwise")
     }
 
     func testRootKeepsKeyboardAndDeepLinkRouting() throws {
