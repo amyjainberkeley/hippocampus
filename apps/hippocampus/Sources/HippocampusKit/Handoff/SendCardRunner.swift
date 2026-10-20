@@ -260,6 +260,33 @@ public protocol PanelAgent: Sendable {
     func work() async throws -> PanelWork
 }
 
+/// The panel's agent, made afresh for each read from the launch Ask's
+/// reads session uses: the memory in use at that moment, so Demo Memory's
+/// week while it is in use and the person's own memory otherwise
+/// (SPEC-DELTA 6). A builder made once at launch would keep reading the
+/// person's own memory under the Demo tag.
+public struct LaunchedPanelAgent: PanelAgent {
+    let launch: @MainActor @Sendable () -> MemorySessionLaunch?
+
+    public init(launch: @escaping @MainActor @Sendable () -> MemorySessionLaunch?) {
+        self.launch = launch
+    }
+
+    public func card(_ request: SendCardRequest) async throws -> SendCard {
+        try await current().card(request)
+    }
+
+    public func work() async throws -> PanelWork {
+        try await current().work()
+    }
+
+    /// The agent as the memory in use now runs it.
+    func current() async throws -> AgentProcess {
+        guard let session = await launch() else { throw SendCardError.unavailable }
+        return AgentProcess(executable: session.executable, environment: session.environment)
+    }
+}
+
 /// The real agent, run as a child with the memory's path and its Keychain
 /// reference only, bounded in time, and stopped when the panel moves on.
 public struct AgentProcess: PanelAgent {

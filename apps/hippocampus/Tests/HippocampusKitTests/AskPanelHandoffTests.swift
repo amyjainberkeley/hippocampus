@@ -139,6 +139,68 @@ final class AskPanelHandoffTests: XCTestCase {
         await eventually { model.matchedItems == [q4] }
     }
 
+    // MARK: Demo Memory
+
+    /// While Demo Memory is in use the panel lists the made-up week's items
+    /// and pages, never the person's own: what it kept from one memory is
+    /// dropped when the other is in use, and a read that finishes after the
+    /// switch is not shown (SPEC-DELTA 6).
+    func testWhatThePanelKeptFromOneMemoryIsDroppedWhenTheOtherIsInUse() async {
+        let (model, agent, _, _) = await rig()
+        await type("trail", into: model)
+        XCTAssertEqual(model.matchedItems, [trailhead])
+        model.closed()
+
+        let pebblewick = PanelItem(id: "w_0d1e2f", kind: "code", name: "pebblewick-app",
+                                   apps: ["com.microsoft.VSCode"], lastUs: 40, moments: [9001])
+        await agent.setWork(PanelWork(items: [pebblewick]))
+        let demo = URL(fileURLWithPath: "/tmp/demo-memory/mci.sqlite")
+        model.memoryInUse = { demo }
+        _ = model.opened()
+        XCTAssertTrue(model.matchedItems.isEmpty, "nothing from the person's own memory shows under Demo Memory")
+        model.query = "trail"
+        await settle()
+        XCTAssertTrue(model.matchedItems.isEmpty)
+        model.query = "pebble"
+        await eventually { model.matchedItems == [pebblewick] }
+        model.closed()
+
+        // And back: the made-up week's items go too.
+        await agent.setWork(PanelWork(items: [trailhead]))
+        model.memoryInUse = { nil }
+        _ = model.opened()
+        XCTAssertTrue(model.matchedItems.isEmpty)
+        model.query = "pebble"
+        await settle()
+        XCTAssertTrue(model.matchedItems.isEmpty)
+        model.query = "trail"
+        await eventually { model.matchedItems == [trailhead] }
+    }
+
+    /// The builder and the work read are run from the launch in use at each
+    /// read, so they read Demo Memory's week while it is in use.
+    func testThePanelsAgentIsMadeFromTheMemoryInUseAtEachRead() async throws {
+        final class Store: @unchecked Sendable { var path = "/own/mci.sqlite" }
+        let store = Store()
+        let agent = LaunchedPanelAgent(launch: {
+            MemorySessionLaunch(executable: URL(fileURLWithPath: "/Applications/Hippocampus.app/agent"),
+                                arguments: ["mcp-serve"], environment: ["MCI_DB_PATH": store.path])
+        })
+        let own = try await agent.current()
+        XCTAssertEqual(own.environment["MCI_DB_PATH"], "/own/mci.sqlite")
+        store.path = "/demo/mci.sqlite"
+        let demo = try await agent.current()
+        XCTAssertEqual(demo.environment["MCI_DB_PATH"], "/demo/mci.sqlite")
+
+        let missing = LaunchedPanelAgent(launch: { nil })
+        do {
+            _ = try await missing.current()
+            XCTFail("no agent: nothing to run")
+        } catch {
+            XCTAssertEqual(error as? SendCardError, .unavailable)
+        }
+    }
+
     func testEachResultHasItsKeys() async {
         let (model, _, _, _) = await rig()
         await type("trail", into: model)

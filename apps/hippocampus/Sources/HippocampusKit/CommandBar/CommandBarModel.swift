@@ -293,6 +293,12 @@ public final class CommandBarModel: ObservableObject {
     var lastRequest: SendCardRequest?
     var work = PanelWork()
     var workLoadedAt: Date?
+    /// The memory `work` was read from: Demo Memory's store while it is in
+    /// use, nil for the person's own.
+    var workMemory: URL?
+    /// The memory in use now. When it changes, what the panel kept from the
+    /// other is dropped before anything is shown.
+    var memoryInUse: @Sendable () -> URL? = { DemoMemory.storeURL }
     /// "When did I last meet with …?" answered from the person's own
     /// calendar, on this Mac, while they have it on (SPEC-DELTA 5). Tests and
     /// pictures give it a fixed calendar, so nothing reads the real one.
@@ -323,12 +329,11 @@ public final class CommandBarModel: ObservableObject {
     private var quiet = false
     private var previewing = false
 
-    public convenience init(launch: @escaping @MainActor (_ assist: Bool) -> MemorySessionLaunch?) {
+    public convenience init(launch: @escaping @MainActor @Sendable (_ assist: Bool) -> MemorySessionLaunch?) {
         // The builder and the work read run as the reads session does: the
-        // bundled agent, the memory's path and its Keychain reference only.
-        let agent: PanelAgent = launch(false).map {
-            AgentProcess(executable: $0.executable, environment: $0.environment)
-        } ?? NoPanelAgent()
+        // bundled agent, the memory's path and its Keychain reference only,
+        // asked again for each read, so they follow Demo Memory.
+        let agent: PanelAgent = LaunchedPanelAgent(launch: { launch(false) })
         let detector = DestinationDetector.live()
         self.init(
             memory: WarmMemorySessions(launch: launch),

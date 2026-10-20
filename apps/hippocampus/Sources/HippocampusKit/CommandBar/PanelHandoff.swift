@@ -332,12 +332,23 @@ public extension CommandBarModel {
     /// Load what Working On and Web Pages list, once a minute at most, while
     /// the panel opens.
     func loadWork() {
+        let memory = memoryInUse()
+        if memory != workMemory {
+            // Demo Memory began or ended: nothing read from the other memory
+            // is shown or kept.
+            work = PanelWork()
+            workLoadedAt = nil
+            workMemory = memory
+            lastCard = nil
+            lastRequest = nil
+            refreshMatches()
+        }
         if let loaded = workLoadedAt, now().timeIntervalSince(loaded) < Self.keepWorkFor { return }
         workLoadedAt = now()
         let agent = handoff.agent
         Task { [weak self] in
             guard let work = try? await agent.work() else { return }
-            guard let self else { return }
+            guard let self, self.memoryInUse() == memory, self.workMemory == memory else { return }
             self.work = work
             self.refreshMatches()
         }

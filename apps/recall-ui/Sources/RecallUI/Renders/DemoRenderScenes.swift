@@ -5,8 +5,10 @@ import SwiftUI
 
 extension WindowRenderer {
     /// The window on Demo Memory (`demo-*`), light and dark: Today, History
-    /// with a moment, Ask's results, About You, the window's title with its
-    /// Demo tag, and, once those pages exist, a Working On page and AI Tools.
+    /// with a moment (a Stripe page, code, a documentation page), Ask's
+    /// results, About You, the window's title with its Demo tag, a Working
+    /// On page and all of Working On, Web Pages, Looked Up, AI Tools,
+    /// Privacy and Resume's sheet.
     /// These are the launch video's and the website's pictures.
     ///
     /// The week is made the way the app makes it, by the same tools, into a
@@ -25,6 +27,8 @@ extension WindowRenderer {
             ("today", .place(.overview)),
             ("history", .history(select: "Product catalog")),
             ("history-code", .history(select: "billing.ts")),
+            // A documentation page as it read: headings, paragraphs, code.
+            ("history-article", .history(select: "Prorations")),
             ("ask", .ask(query: "yearly", select: "Prorating yearly upgrades")),
             ("about-you", .place(.you)),
             ("window", .window),
