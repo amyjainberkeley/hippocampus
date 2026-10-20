@@ -120,8 +120,17 @@ struct TodayPlace: View {
     }
 
     /// A search chip: Looked Up on that search, else the field searches it.
+    /// The page opens on the search the chip leaves for it (SPEC 3.1, 3.6).
     private func openSearch(_ query: String) {
-        if let lookedUp { lookedUp(query) } else { search(query) }
+        guard let lookedUp else { return search(query) }
+        LookedUpFocus.shared.open(on: query)
+        lookedUp(query)
+    }
+
+    /// "All ›": Looked Up on its list.
+    private func openLookedUp() {
+        LookedUpFocus.shared.open(on: nil)
+        lookedUp?(nil)
     }
 
     private func takeCalendarOffer() {
@@ -308,8 +317,8 @@ struct TodayPlace: View {
                         .foregroundStyle(MCI.Color.foreground)
                         .accessibilityAddTraits(.isHeader)
                     Spacer()
-                    if let lookedUp {
-                        LinkButton(title: UserFacingCopy.Overview.all) { lookedUp(nil) }
+                    if lookedUp != nil {
+                        LinkButton(title: UserFacingCopy.Overview.all) { openLookedUp() }
                     }
                 }
                 QueryChips(queries: searches.map(\.query), search: openSearch)
