@@ -36,7 +36,7 @@ fn no_block_holds_a_word_that_was_not_read() {
     assert!(!made.is_empty());
     let read = words(ARTICLE);
     for block in &made {
-        for word in words(block.text()) {
+        for word in words(&block.plain()) {
             assert!(read.contains(&word), "{word} was never read");
         }
     }
@@ -45,7 +45,8 @@ fn no_block_holds_a_word_that_was_not_read() {
 #[test]
 fn every_word_that_was_read_is_in_a_block() {
     let made = blocks(ARTICLE, &window(), EventSource::ScreenOcr);
-    let held: Vec<&str> = made.iter().flat_map(|block| words(block.text())).collect();
+    let plain: Vec<String> = made.iter().map(Block::plain).collect();
+    let held: Vec<&str> = plain.iter().flat_map(|text| words(text)).collect();
     assert_eq!(held, words(ARTICLE));
 }
 
@@ -77,7 +78,7 @@ fn a_paragraph_holds_its_text_as_read() {
     let block = Block::Paragraph {
         text: "Per-seat pricing grows with the customer.".into(),
     };
-    assert_eq!(block.text(), "Per-seat pricing grows with the customer.");
+    assert_eq!(block.plain(), "Per-seat pricing grows with the customer.");
     assert_eq!(
         markdown(&[block]),
         "Per-seat pricing grows with the customer."

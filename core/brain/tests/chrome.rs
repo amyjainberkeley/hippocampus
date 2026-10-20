@@ -734,8 +734,8 @@ Most payment processors already round this way. Matching them means the total a 
 Next: Currency math without floats"
     );
     assert_rows_agree(&stored(CHROME, "Rounding", text), CHROME, &read);
-    // A chat app, a terminal and a code editor keep their lines.
-    for app in [SLACK, "com.apple.Terminal", VSCODE] {
+    // A terminal and a code editor keep their lines.
+    for app in ["com.apple.Terminal", VSCODE] {
         let read = reading(&stored(app, "Rounding", text), SCREEN, Some(app), None);
         assert!(
             read.main
@@ -743,6 +743,21 @@ Next: Currency math without floats"
             "{app}: {read:?}"
         );
     }
+    // A chat with people joins only a line that fills the line (SPEC 4.3):
+    // these wraps reach the window's edge, so they join as on the page, and
+    // nothing else does.
+    let chat = reading(&stored(SLACK, "Rounding", text), SCREEN, Some(SLACK), None);
+    assert!(
+        chat.main
+            .contains("Over thousands of orders the extra half cents add up"),
+        "{chat:?}"
+    );
+    assert!(
+        chat.main.contains(
+            "Why banker\u{2019}s rounding keeps order totals from drifting by a cent\nPriya Shah"
+        ),
+        "{chat:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------

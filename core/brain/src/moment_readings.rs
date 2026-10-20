@@ -27,7 +27,13 @@ use crate::{EventId, EventSource, SqlCipherBrainStore, StoreError};
 /// 2: chrome only at a window's edges and only in older text, learned lines
 /// of two words or more at the edges of half an app's frames, captions that
 /// make no guess about the person or a window beside the front one.
-pub const READING_VERSION: u32 = 2;
+///
+/// 3: wrapped lines also join after a joining word ("ties go down and" /
+/// "half go up"), before a name and after a sentence that fills the line
+/// (J2 to J4, SPEC 4.3); AI chats read as prose; chats with people join only
+/// a line that fills the line; two CJK characters join with no space; Zoom's
+/// navigation bar and Gmail's label chips are chrome.
+pub const READING_VERSION: u32 = 3;
 
 /// `caption_by` for a caption made from the title, without a model.
 pub const CAPTION_BY_TITLE: &str = "title";

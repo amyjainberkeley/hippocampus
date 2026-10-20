@@ -424,23 +424,27 @@ fn wrapped_lines_join_in_classified_text_and_in_older_pages_and_documents() {
         .main,
         joined
     );
-    // Older text of a chat app, a terminal or a code editor keeps its lines.
-    for app in [
-        "com.tinyspeck.slackmacgap",
-        "com.apple.Terminal",
-        "com.microsoft.VSCode",
-    ] {
+    // Older text of a terminal or a code editor keeps its lines.
+    for app in ["com.apple.Terminal", "com.microsoft.VSCode"] {
         assert_eq!(
             read(&format!("{}{prose}", header(app)), Some(app)).main,
             prose,
             "{app}"
         );
     }
+    // A chat with people joins only lines that fill the line (SPEC 4.3):
+    // these two reach the window's edge.
+    assert_eq!(
+        read(&format!("{}{prose}", header(SLACK.unwrap())), SLACK).main,
+        joined
+    );
 }
 
 #[test]
 fn sentence_ends_short_lines_and_capitals_stay_on_their_own_lines() {
-    let text = "Pushed the new onboarding flow to staging today.\nthe next line starts lower\nShort line\nlower start after a short line\nAnother long line that ends without a stop but\nThen a capital starts this one";
+    // J1 never joins a capital: the long line ends on "here", not on a
+    // joining word (J2, which joins whatever the case, is tested below).
+    let text = "Pushed the new onboarding flow to staging today.\nthe next line starts lower\nShort line\nlower start after a short line\nAnother long line that ends without a stop here\nThen a capital starts this one";
     assert_eq!(read(&separated(text, ""), NOTES).main, text);
 }
 
@@ -1649,4 +1653,285 @@ fn search_and_list_passages_of_64_kb_windows_clean_only_what_they_show() {
         rows < Duration::from_secs(2),
         "1,000 list passages took {rows:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Joining wrapped lines: J2 to J4, by kind of window (SPEC 4.3)
+// ---------------------------------------------------------------------------
+
+const CHROME: Option<&str> = Some("com.google.Chrome");
+
+/// Older text of `app`, stored before windows were classified.
+fn older(app: Option<&str>, text: &str) -> String {
+    format!("{}{text}", header(app.unwrap()))
+}
+
+#[test]
+fn the_article_reads_in_paragraphs_as_the_spec_shows_it() {
+    // SPEC 4.10: an older memory of an article, as stored.
+    let stored = older(
+        CHROME,
+        "MONEY & ROUNDING
+Rounding half to even
+Why banker\u{2019}s rounding keeps order totals from drifting by a cent
+Priya Raman \u{b7} Oct 12, 2026 \u{b7} 6 min read
+Round half up looks fair, but every tie goes the same way. Over thousands of orders the extra
+half cents add up, and the books stop matching the bank by a few dollars
+a month.
+Round half to even sends each tie to the even neighbour instead, so half the
+ties go down and
+half go up. The errors cancel out:
+round_half_even(2.5)   // 2.0
+round_half_even(3.5)   // 4.0
+Most payment processors already round this way. Matching them means the total a
+customer sees is the total that settles, to the cent.
+Next: Currency math without floats",
+    );
+    let read = reading(
+        &stored,
+        SCREEN,
+        CHROME,
+        Some("Rounding half to even \u{b7} Dev Notes"),
+    );
+    assert_eq!(
+        read.main,
+        "MONEY & ROUNDING
+Rounding half to even
+Why banker\u{2019}s rounding keeps order totals from drifting by a cent
+Priya Raman \u{b7} Oct 12, 2026 \u{b7} 6 min read
+Round half up looks fair, but every tie goes the same way. Over thousands of orders the extra half cents add up, and the books stop matching the bank by a few dollars a month.
+Round half to even sends each tie to the even neighbour instead, so half the ties go down and half go up. The errors cancel out:
+round_half_even(2.5)   // 2.0
+round_half_even(3.5)   // 4.0
+Most payment processors already round this way. Matching them means the total a customer sees is the total that settles, to the cent.
+Next: Currency math without floats"
+    );
+}
+
+#[test]
+fn j2_joins_a_line_that_ends_on_a_joining_word_whatever_comes_next() {
+    let text = "Round half to even sends each tie to the even neighbour instead, so half the\nties go down and\nhalf go up. The errors cancel out over many orders.";
+    assert_eq!(
+        read(&older(NOTES, text), NOTES).main,
+        "Round half to even sends each tie to the even neighbour instead, so half the ties go down and half go up. The errors cancel out over many orders."
+    );
+    // Before a name, whatever its case.
+    let text = "This guide to rounding money in a checkout was written by\nPriya Raman\nand reviewed by the payments team before it went out.";
+    assert_eq!(
+        read(&older(NOTES, text), NOTES).main,
+        "This guide to rounding money in a checkout was written by Priya Raman\nand reviewed by the payments team before it went out."
+    );
+    // Classified text joins the same way.
+    let text = "Most payment processors already round this way. Matching them means the total\nthe customer sees is the total that settles, to the cent, and\nthe books match the bank.";
+    assert_eq!(
+        read(&separated(text, ""), NOTES).main,
+        "Most payment processors already round this way. Matching them means the total the customer sees is the total that settles, to the cent, and the books match the bank."
+    );
+}
+
+#[test]
+fn j2_never_joins_a_list_item_a_heading_or_a_speaker_line() {
+    for text in [
+        // A numbered list.
+        "1. Ship the rounding fix before the holiday sale and\n2. Update the changelog for the beta group in the same week, please",
+        // A heading over a long line.
+        "Read the rest of the planning notes before the review and\nPricing\nTeam plan at $18 a seat, billed annually, as Ravi and Maya agreed last Tuesday.",
+        // A chat's speaker line, read in a document.
+        "We can ship it today if everyone on the call agrees with the plan and\nJordan Lee 2:14 PM\nstaging is green",
+        // A checklist.
+        "\u{2610} Merge the rounding fix after the review from Priya and\n\u{2611} Changelog updated for the beta group",
+    ] {
+        assert_eq!(read(&older(NOTES, text), NOTES).main, text);
+    }
+}
+
+#[test]
+fn a_group_of_short_lines_never_joins() {
+    for text in [
+        // A short poem.
+        "Rain on the window and\nWind in the trees\nLight on the water",
+        // An address.
+        "Northwind Studio\n123 Market Street\nSan Francisco, CA 94103",
+        // A menu of choices.
+        "Soup of the day or\nGreen salad\nGrilled cheese",
+        // A signature.
+        "Best,\nDana",
+        // A line that is only a joining word.
+        "I\na\nOK\nThanks, J. R. Smith and AJ, for the notes on the plan.",
+    ] {
+        assert_eq!(read(&older(NOTES, text), NOTES).main, text);
+    }
+}
+
+#[test]
+fn j3_joins_a_line_that_fills_the_line_before_a_name() {
+    let text = "The invoice for phase two is attached, and the payment leaves our account
+Monday morning by bank transfer, the same way as for phase one last month.
+If the purchase order number changed since then, let me know and I will
+send a new one.";
+    assert_eq!(
+        read(&older(CHROME, text), CHROME).main,
+        "The invoice for phase two is attached, and the payment leaves our account Monday morning by bank transfer, the same way as for phase one last month. If the purchase order number changed since then, let me know and I will send a new one."
+    );
+}
+
+#[test]
+fn j4_joins_a_sentence_that_ends_at_the_wrap_edge_but_not_a_paragraphs_last_line() {
+    let text = "Round half up looks fair, but every tie goes the same way. The errors add up.
+Over thousands of orders the extra half cents grow, and the books stop being
+right by a few dollars a month.
+Round half to even fixes it.";
+    assert_eq!(
+        read(&older(CHROME, text), CHROME).main,
+        "Round half up looks fair, but every tie goes the same way. The errors add up. Over thousands of orders the extra half cents grow, and the books stop being right by a few dollars a month.
+Round half to even fixes it."
+    );
+    // The widest line alone is no wrap edge: a short block of sentences
+    // keeps its lines.
+    let text = "Click in a document where you want the letter to go.
+Press and hold a letter key, then choose an accent from the menu.
+Release the key to type the letter with its accent.";
+    assert_eq!(read(&older(CHROME, text), CHROME).main, text);
+}
+
+#[test]
+fn cjk_lines_join_with_no_space_and_never_with_another_script() {
+    let text = "\u{4e38}\u{3081}\u{306e}\u{898f}\u{5247}\u{306f}\u{5408}\u{8a08}\u{304c}\u{4e00}\u{5186}\u{305a}\u{308c}\u{306a}\u{3044}\u{3088}\u{3046}\u{306b}\u{3059}\u{308b}\u{305f}\u{3081}\u{306e}\u{5927}\u{5207}\u{306a}
+\u{3082}\u{306e}\u{3067}\u{3059}\u{3002}\u{6ce8}\u{6587}\u{304c}\u{5897}\u{3048}\u{3066}\u{3082}\u{7aef}\u{6570}\u{306f}\u{5076}\u{6570}\u{5074}\u{306b}\u{5bc4}\u{305b}\u{3066}\u{6253}\u{3061}\u{6d88}\u{3057}
+\u{5408}\u{3044}\u{307e}\u{3059}\u{3002}";
+    assert_eq!(
+        read(&older(NOTES, text), NOTES).main,
+        text.replace('\n', "")
+    );
+    // A CJK paragraph next to English stays apart, whichever comes first.
+    let mixed = "\u{6771}\u{4eac}\u{306f}\u{65e5}\u{672c}\u{306e}\u{9996}\u{90fd}\u{3067}\u{3001}\u{4eba}\u{53e3}\u{304c}\u{3068}\u{3066}\u{3082}\u{591a}\u{3044}\u{5927}\u{304d}\u{306a}\u{90fd}\u{5e02}\u{3067}\u{3059}\u{3002}\u{7814}\u{7a76}\u{6240}\u{3082}\u{3053}\u{3053}\u{306b}\u{3042}\u{308a}\u{307e}\u{3059}
+Tokyo is the capital of Japan, a very large city, and the home of our lab too
+\u{3068}\u{3066}\u{3082}\u{591a}\u{304f}\u{306e}\u{4eba}\u{304c}\u{4f4f}\u{3093}\u{3067}\u{3044}\u{307e}\u{3059}";
+    let main = read(&older(NOTES, mixed), NOTES).main;
+    assert_eq!(main.lines().count(), 3, "{main}");
+}
+
+#[test]
+fn ai_chats_read_as_prose() {
+    let text = "Which rounding mode should a checkout use for sales tax?
+Most payment processors round half to even on the final total. Rounding each line
+first is what makes totals drift by a cent, because every tie goes the same way and
+the errors add up over many orders.";
+    let joined = "Which rounding mode should a checkout use for sales tax?
+Most payment processors round half to even on the final total. Rounding each line first is what makes totals drift by a cent, because every tie goes the same way and the errors add up over many orders.";
+    for app in ["com.openai.chat", "com.anthropic.claudefordesktop"] {
+        assert_eq!(
+            read(&older(Some(app), text), Some(app)).main,
+            joined,
+            "{app}"
+        );
+    }
+    // An AI chat's site in a browser.
+    let stored = format!(
+        "[app=com.google.Chrome | title=Rounding modes | url=https://claude.ai/chat/rounding | ts=2026-10-12T14:02:00.000Z]\n{text}"
+    );
+    assert_eq!(read(&stored, CHROME).main, joined);
+}
+
+#[test]
+fn a_chat_with_people_joins_only_a_line_that_fills_the_line() {
+    let text = "Jordan Lee 2:14 PM
+staging is green, shipping the rounding fix at four this afternoon for everyone
+on the beta list, so expect a short pause in checkout around then
+Priya Raman 2:15 PM
+sounds good
+i'll update the changelog before then
+the rounding fix is merged and the tests pass on staging
+also the gift card copy is ready";
+    let main = read(&older(SLACK, text), SLACK).main;
+    assert_eq!(
+        main,
+        "Jordan Lee 2:14 PM
+staging is green, shipping the rounding fix at four this afternoon for everyone on the beta list, so expect a short pause in checkout around then
+Priya Raman 2:15 PM
+sounds good
+i'll update the changelog before then
+the rounding fix is merged and the tests pass on staging
+also the gift card copy is ready",
+        "two messages from one person never merge"
+    );
+    // Nor do they after a joining word, or before a capital.
+    let text = "Maya Chen 2:21 PM\nthe gift card copy is in the doc, ready for a last look and\nThe pricing page is next on the list for this afternoon, after lunch";
+    assert_eq!(read(&older(SLACK, text), SLACK).main, text);
+}
+
+#[test]
+fn code_lines_never_join_before_or_after() {
+    let text = "Most payment processors already round this way, and matching them keeps totals
+the customer sees equal to the totals that settle at the bank at the end of the
+round_half_even(subtotal + tax) and
+round_half_even(shipping) or
+month, so every receipt and every statement agree to the cent, every single time.
+That is the whole reason the helper exists in the first place, and why it stays.";
+    let main = read(&older(NOTES, text), NOTES).main;
+    assert!(
+        main.contains("at the end of the\nround_half_even(subtotal + tax) and\nround_half_even(shipping) or\nmonth, so every receipt"),
+        "{main}"
+    );
+    assert!(main.starts_with("Most payment processors already round this way, and matching them keeps totals the customer sees"), "{main}");
+}
+
+#[test]
+fn spreadsheets_and_terminals_never_join() {
+    let rows = "Invoice 1042 Northwind Supplies paid in full on Friday morning by transfer
+Invoice 2291 Spokewise paid in full on Tuesday morning by bank transfer too
+Invoice 2310 Chainline Parts waiting on the purchase order from the shop";
+    for app in [
+        "com.apple.iWork.Numbers",
+        "com.microsoft.Excel",
+        "com.apple.Terminal",
+    ] {
+        assert_eq!(read(&older(Some(app), rows), Some(app)).main, rows, "{app}");
+    }
+}
+
+#[test]
+fn a_join_that_would_make_a_secret_appear_keeps_only_those_two_lines_apart() {
+    // Every secret the helper's corpus holds, split at a space or after a
+    // hyphen across a wrap that a rule would join. The stored text holds no
+    // pattern; the reading never does either, and the rest of the window
+    // still reads in paragraphs: the guard keeps only the two lines apart.
+    let paragraph = "Most teams choose between charging for every seat and charging by tier. Per-seat\npricing is easy to explain and grows with the customer.";
+    let mut exercised = 0usize;
+    for (secret, is_secret, why) in corpus() {
+        if !is_secret {
+            continue;
+        }
+        let cuts: Vec<usize> = secret
+            .char_indices()
+            .filter(|(_, ch)| *ch == ' ' || *ch == '-')
+            .map(|(at, ch)| if ch == '-' { at + 1 } else { at })
+            .collect();
+        for cut in cuts {
+            let left = secret[..cut].trim_end();
+            let right = secret[cut..].trim_start();
+            if left.is_empty() || right.is_empty() {
+                continue;
+            }
+            let wrap = format!(
+                "{}{left}\n{right} {}",
+                "Pay the invoice with the card on file for the shop, the one ending ",
+                "and due next month, as we agreed on the call with the shop last week."
+            );
+            let text = format!("{paragraph}\n\n{wrap}\nA third line keeps this block a block of prose, as wide as the others are here.");
+            let stored = older(NOTES, &text);
+            if contains_secret(&stored) {
+                continue;
+            }
+            exercised += 1;
+            let read = read(&stored, NOTES);
+            assert!(!contains_secret(&read.main), "{why}: {:?}", read.main);
+            assert!(
+                read.main.starts_with("Most teams choose between charging for every seat and charging by tier. Per-seat pricing"),
+                "{why}: the rest still joins: {:?}",
+                read.main
+            );
+        }
+    }
+    assert!(exercised >= 4, "only {exercised} splits were exercised");
 }
