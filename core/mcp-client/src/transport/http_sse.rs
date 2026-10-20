@@ -639,14 +639,46 @@ impl Service<Uri> for LoopbackOnlyConnector {
     }
 }
 
-/// hyper-util DNS resolver that returns only loopback addresses.
+/// hyper-util resolver that never asks a resolver: it answers only for
+/// loopback IP literals and `localhost`.
 ///
-/// `HttpConnector` resolves the URI's host via a `tower::Service`
-/// over [`Name`]. Most URIs reaching this connector are IP literals
-/// (the [`LoopbackHost`] gate keeps DNS names that resolve outside
-/// loopback out of reach), but the resolver still runs for IP-literal
-/// hostnames. We refuse anything that does not parse as a loopback IP
-/// literal or DNS-resolve entirely into loopback addresses.
+/// `HttpConnector` hands it the URI's host as a [`Name`]. A loopback IP
+/// literal is returned as is; `localhost` (or a name under it) is
+/// `127.0.0.1` then `::1`, so a server listening on either is reached.
+/// Anything else is refused here, without a lookup: asking the system
+/// resolver about a name would send that name off the Mac.
+/// What [`LoopbackResolver`] answers for `host` (the port is the URI's,
+/// filled in by the connector): a loopback IP literal as is, `localhost`
+/// as `127.0.0.1` then `::1`, and an error for anything else.
+fn loopback_addresses(
+    host: &str,
+) -> Result<std::vec::IntoIter<std::net::SocketAddr>, std::io::Error> {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+    let literal = host
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host);
+    if let Ok(ip) = literal.parse::<IpAddr>() {
+        return if ip.is_loopback() {
+            Ok(vec![SocketAddr::new(ip, 0)].into_iter())
+        } else {
+            Err(std::io::Error::other(
+                "loopback resolver: non-loopback address refused",
+            ))
+        };
+    }
+    if crate::transport::loopback::is_localhost_name(host) {
+        return Ok(vec![
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 0),
+        ]
+        .into_iter());
+    }
+    Err(std::io::Error::other(
+        "loopback resolver: only loopback addresses and localhost are dialed; names are never looked up",
+    ))
+}
+
 #[derive(Clone)]
 pub struct LoopbackResolver;
 
@@ -662,34 +694,39 @@ impl Service<Name> for LoopbackResolver {
     }
 
     fn call(&mut self, name: Name) -> Self::Future {
-        let host = name.as_str().to_owned();
-        Box::pin(async move {
-            // Fast path: literal IP. `HttpConnector` historically
-            // strips the port, so the Name we receive is host-only.
-            // Resolve via `lookup_host` with a dummy port so we get a
-            // `SocketAddr` we can shape-check; the connector replaces
-            // the port with the URI's port before dialing.
-            let target = format!("{host}:0");
-            let resolved = tokio::net::lookup_host(target.as_str()).await?;
-            let addrs: Vec<std::net::SocketAddr> = resolved.collect();
-            if addrs.is_empty() {
-                return Err(std::io::Error::other("loopback resolver: no addrs"));
-            }
-            for addr in &addrs {
-                if !addr.ip().is_loopback() {
-                    return Err(std::io::Error::other(
-                        "loopback resolver: non-loopback address refused",
-                    ));
-                }
-            }
-            Ok(addrs.into_iter())
-        })
+        let answer = loopback_addresses(name.as_str());
+        Box::pin(async move { answer })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolver_answers_only_for_loopback_and_localhost_without_a_lookup() {
+        let addresses = |host: &str| {
+            loopback_addresses(host)
+                .map(|found| found.map(|a| a.ip().to_string()).collect::<Vec<_>>())
+        };
+        assert_eq!(addresses("127.0.0.1").unwrap(), ["127.0.0.1"]);
+        assert_eq!(addresses("127.4.5.6").unwrap(), ["127.4.5.6"]);
+        assert_eq!(addresses("::1").unwrap(), ["::1"]);
+        assert_eq!(addresses("[::1]").unwrap(), ["::1"]);
+        assert_eq!(addresses("localhost").unwrap(), ["127.0.0.1", "::1"]);
+        assert_eq!(addresses("mcp.localhost").unwrap(), ["127.0.0.1", "::1"]);
+        // `.invalid` would fail a lookup; refusing it here means none was made.
+        for host in [
+            "example.com",
+            "mcp.invalid",
+            "localhost.example.com",
+            "10.0.0.1",
+            "[2001:db8::1]",
+            "0.0.0.0",
+        ] {
+            assert!(addresses(host).is_err(), "{host}");
+        }
+    }
 
     #[test]
     fn relative_endpoint_resolves_against_base_origin() {

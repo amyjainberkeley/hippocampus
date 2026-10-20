@@ -54,6 +54,26 @@ async fn initialize_and_tools_list_round_trip() {
 }
 
 #[tokio::test]
+async fn localhost_reaches_a_server_on_127_0_0_1_without_a_lookup() {
+    // `localhost` is dialed at 127.0.0.1 (then ::1) by the transport's own
+    // resolver, which never asks the system's.
+    let server = StubMcpServer::start().await;
+    let sse_url = format!("http://localhost:{}/sse", server.port());
+    let host = LoopbackHost::parse(&sse_url)
+        .await
+        .expect("localhost validates");
+    let transport = HttpSseTransport::connect(host, None)
+        .await
+        .expect("transport connects to localhost");
+    let client: McpClient<dyn McpTransport> =
+        McpClient::<dyn McpTransport>::from_dyn(Arc::new(transport));
+    let init = client.initialize().await.expect("initialize ok");
+    assert_eq!(init.server_info.name, "stub-mcp");
+    client.close().await;
+    server.shutdown().await;
+}
+
+#[tokio::test]
 async fn auth_header_is_sent_on_every_request() {
     let server = StubMcpServer::start().await;
     let sse_url = format!("http://127.0.0.1:{}/sse", server.port());
