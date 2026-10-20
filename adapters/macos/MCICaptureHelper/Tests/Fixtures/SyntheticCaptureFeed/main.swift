@@ -159,6 +159,9 @@ private final class DispositionBox: @unchecked Sendable {
 @main
 private enum SyntheticCaptureFeed {
     static func main() async {
+        // As the capture helper it stands in for (and the OCR worker it
+        // starts): owner-only files and folders (MCICaptureHelper/main.swift).
+        umask(0o077)
         do {
             try await run()
         } catch {

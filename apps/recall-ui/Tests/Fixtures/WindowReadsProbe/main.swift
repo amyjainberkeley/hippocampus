@@ -75,6 +75,9 @@ private struct Row: Encodable {
 @main
 private enum WindowReadsProbe {
     static func main() async {
+        // As the window it stands in for: owner-only files and folders
+        // (RecallEntryPoint.swift).
+        umask(0o077)
         do {
             try await run()
         } catch {
