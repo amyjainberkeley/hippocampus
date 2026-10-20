@@ -1,12 +1,14 @@
 import RecallUIKit
 import SwiftUI
 
-/// The day strip (RULINGS W6, contract overview.md section 6): sessions as
-/// blocks coloured by kind on the day's hours, time with nothing saved as
-/// empty space, a hairline where two sessions touch. Hovering a session shows
-/// its screenshot, so the day scrubs; clicking selects it; left and right
-/// arrows move between sessions. Under it, the legend: clicking a kind dims
-/// the rest.
+/// The day strip (RULINGS W6, contract overview.md section 6, SPEC 2.14 and
+/// 3.1): sessions as blocks coloured by kind on the day's hours, time with
+/// nothing saved as empty space, a hairline where two sessions touch.
+/// Hovering a session shows its screenshot, so the day scrubs; clicking
+/// selects it; left and right arrows move between sessions; right-clicking
+/// one offers to forget its time. Over it, when the calendar may be read,
+/// today's events as thin labelled bars (SPEC-DELTA 5). Under it, the legend
+/// in the sidebar's words: clicking a kind dims the rest.
 struct DayStripView: View {
     let overview: DayOverview
     @ObservedObject var model: OverviewViewModel
@@ -18,23 +20,25 @@ struct DayStripView: View {
     @FocusState private var isFocused: Bool
     @Environment(\.locale) private var locale
     @Environment(\.timeZone) private var timeZone
+    @Environment(\.forget) private var forget
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let stripHeight: CGFloat = 40
     private static let tickHeight: CGFloat = 18
-    private static let previewSize = CGSize(width: 208, height: 130)
-    /// Previews open under the hour labels: above the strip they would be
-    /// cut off when the strip is near the top of the page (a past day).
-    private static let previewTop = stripHeight + tickHeight + 6
+    private static let previewSize = CGSize(width: 184, height: 115)
+    /// One row of calendar bars: its title over a thin bar.
+    static let laneHeight: CGFloat = 20
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             GeometryReader { geometry in
                 let width = max(geometry.size.width, 1)
-                if let layout = DayStripLayout(overview: overview, minimumWidth: 6 / width, calendar: model.calendar) {
+                if let layout = DayStripLayout(overview: overview, minimumWidth: 6 / width,
+                                               calendar: model.calendar, span: model.stripSpan) {
                     strip(layout, width: width)
                 }
             }
-            .frame(height: Self.stripHeight + Self.tickHeight)
+            .frame(height: barsHeight + Self.stripHeight + Self.tickHeight)
             .zIndex(1)
             legend
         }
@@ -53,37 +57,83 @@ struct DayStripView: View {
         .accessibilityLabel(UserFacingCopy.Overview.stripLabel)
     }
 
+    private var bars: [TodayCalendar.Bar] {
+        guard let span = model.stripSpan else { return [] }
+        return TodayCalendar.bars(model.events, startUs: span.startUs, endUs: span.endUs)
+    }
+
+    private var barsHeight: CGFloat {
+        let lanes = (bars.map(\.lane).max() ?? -1) + 1
+        return CGFloat(lanes) * Self.laneHeight
+    }
+
     private func strip(_ layout: DayStripLayout, width: CGFloat) -> some View {
         let blocks = Dictionary(uniqueKeysWithValues: overview.blocks.map { ($0.id, $0) })
         let selected = model.selectedBlock?.id
+        let top = barsHeight
         return ZStack(alignment: .topLeading) {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(MCI.Color.border.opacity(0.45))
-                .frame(width: width, height: Self.stripHeight)
-            ForEach(Array(layout.nothingSaved.enumerated()), id: \.offset) { _, span in
-                Rectangle()
-                    .fill(Color.clear)
-                    .contentShape(Rectangle())
-                    .frame(width: max(span.width * width, 1), height: Self.stripHeight)
-                    .offset(x: span.x * width)
-                    .help(UserFacingCopy.Overview.nothingSaved)
-                    .onHover { inside in
-                        if inside { hover = .nothingSaved(span) } else if hover == .nothingSaved(span) { hover = nil }
-                    }
+            ForEach(bars) { bar in
+                calendarBar(bar, width: width)
             }
-            ForEach(layout.blocks) { placed in
-                if let block = blocks[placed.id] {
-                    blockView(placed, block: block, width: width, isSelected: placed.id == selected)
+            Group {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(MCI.Color.border.opacity(0.45))
+                    .frame(width: width, height: Self.stripHeight)
+                ForEach(Array(layout.nothingSaved.enumerated()), id: \.offset) { _, span in
+                    Rectangle()
+                        .fill(Color.clear)
+                        .contentShape(Rectangle())
+                        .frame(width: max(span.width * width, 1), height: Self.stripHeight)
+                        .offset(x: span.x * width)
+                        .help(UserFacingCopy.Overview.nothingSaved)
+                        .onHover { inside in
+                            if inside { hover = .nothingSaved(span) } else if hover == .nothingSaved(span) { hover = nil }
+                        }
+                }
+                ForEach(layout.blocks) { placed in
+                    if let block = blocks[placed.id] {
+                        blockView(placed, block: block, width: width, isSelected: placed.id == selected)
+                    }
+                }
+                ForEach(Array(layout.ticks.enumerated()), id: \.offset) { index, tick in
+                    tickLabel(tick, index: index, count: layout.ticks.count, width: width)
                 }
             }
-            ForEach(Array(layout.ticks.enumerated()), id: \.offset) { index, tick in
-                tickLabel(tick, index: index, count: layout.ticks.count, width: width)
-            }
+            .offset(y: top)
             if let hover {
                 preview(hover, layout: layout, blocks: blocks, width: width)
+                    .offset(y: top)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96)))
             }
         }
-        .frame(width: width, height: Self.stripHeight + Self.tickHeight, alignment: .topLeading)
+        .animation(MCI.Motion.snap, value: hover)
+        .frame(width: width, height: top + Self.stripHeight + Self.tickHeight, alignment: .topLeading)
+    }
+
+    /// One calendar event: its title over a thin bar for its time.
+    private func calendarBar(_ bar: TodayCalendar.Bar, width: CGFloat) -> some View {
+        let x = bar.x * width
+        let barWidth = max(bar.width * width, 3)
+        let time = SessionDetail.timeRange(startUs: bar.startUs, endUs: bar.endUs, locale: locale, timeZone: timeZone)
+        let label = UserFacingCopy.Overview.calendarItem(bar.title, time: time)
+        // A short event's title may run past its bar, up to the strip's edge.
+        let labelWidth = max(min(width - x, max(barWidth, 120)), barWidth)
+        return VStack(alignment: .leading, spacing: 3) {
+            Text(verbatim: bar.title)
+                .font(MCI.Font.footnote)
+                .foregroundStyle(MCI.Color.foregroundSecondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(width: labelWidth, alignment: .leading)
+            Capsule(style: .continuous)
+                .fill(MCI.Color.accentDim.opacity(0.55))
+                .frame(width: barWidth, height: 3)
+        }
+        .frame(width: labelWidth, alignment: .leading)
+        .offset(x: x, y: CGFloat(bar.lane) * Self.laneHeight)
+        .help(label)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
     }
 
     private func blockView(_ placed: DayStripLayout.Block, block: DayBlock, width: CGFloat, isSelected: Bool) -> some View {
@@ -91,8 +141,9 @@ struct DayStripView: View {
         // sessions that touch.
         let inset: CGFloat = placed.touchesPrevious ? 2 : 0
         let blockWidth = max(placed.width * width - inset, 4)
-        let color = DayStripPalette.color(for: block.kind)
+        let color = DayStripPalette.color(for: placed.stripKind)
         let time = SessionDetail.timeRange(startUs: block.startUs, endUs: block.endUs, locale: locale, timeZone: timeZone)
+        let title = model.title(of: block)
         return Button {
             model.select(block)
             isFocused = true
@@ -120,11 +171,19 @@ struct DayStripView: View {
         .buttonStyle(.plain)
         .opacity(model.isDimmed(block) ? 0.22 : 1)
         .offset(x: placed.x * width + inset)
-        .help(UserFacingCopy.Overview.sessionHelp(title: block.title, time: time))
-        .accessibilityLabel(UserFacingCopy.Overview.sessionHelp(title: block.title, time: time))
+        .help(UserFacingCopy.Overview.sessionHelp(title: title, time: time))
+        .accessibilityLabel(UserFacingCopy.Overview.sessionHelp(title: title, time: time))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .onHover { inside in
             if inside { hover = .session(block.id) } else if hover == .session(block.id) { hover = nil }
+        }
+        .contextMenu {
+            if let forget {
+                let range = TodayFormat.span(block.startUs...block.endUs, locale: locale, timeZone: timeZone)
+                Button(UserFacingCopy.Overview.forgetSession(range)) {
+                    forget(.range(block.startUs...block.endUs, label: range))
+                }
+            }
         }
     }
 
@@ -142,29 +201,40 @@ struct DayStripView: View {
             .accessibilityHidden(true)
     }
 
+    /// Previews open under the hour labels: above the strip they would be
+    /// cut off when the strip is near the top of the page (a past day).
+    private static let previewTop = stripHeight + tickHeight + 6
+
     @ViewBuilder
     private func preview(_ hover: StripHover, layout: DayStripLayout, blocks: [Int64: DayBlock], width: CGFloat) -> some View {
         switch hover {
         case let .session(id):
             if let block = blocks[id], let placed = layout.blocks.first(where: { $0.id == id }) {
-                let cardWidth = Self.previewSize.width + 16
+                let cardWidth = Self.previewSize.width + 12
                 let center = (placed.x + placed.width / 2) * width
                 let x = min(max(center - cardWidth / 2, 0), max(width - cardWidth, 0))
-                VStack(alignment: .leading, spacing: 6) {
-                    SessionScreenshot(eventId: block.screenshotEventId, reader: reader, size: Self.previewSize)
-                    Text(block.title)
+                VStack(alignment: .leading, spacing: 4) {
+                    SessionScreenshot(eventId: block.screenshotEventId, reader: reader, size: Self.previewSize,
+                                      fallbackApp: block.apps.first?.bundleId)
+                    Text(model.title(of: block))
                         .font(MCI.Font.bodyStrong)
                         .foregroundStyle(MCI.Color.foreground)
                         .lineLimit(1)
-                    Text(SessionDetail.timeRange(startUs: block.startUs, endUs: block.endUs, locale: locale, timeZone: timeZone))
+                        .padding(.horizontal, 2)
+                        .padding(.top, 3)
+                    Text(UserFacingCopy.Overview.timeAndLength(
+                        SessionDetail.timeRange(startUs: block.startUs, endUs: block.endUs, locale: locale, timeZone: timeZone),
+                        UserFacingCopy.Overview.minutes(block.endUs - block.startUs, locale: locale)))
                         .font(MCI.Font.caption)
                         .foregroundStyle(MCI.Color.foregroundSecondary)
+                        .padding(.horizontal, 2)
                 }
-                .padding(8)
+                .padding(6)
+                .padding(.bottom, 2)
                 .frame(width: cardWidth, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(MCI.Color.surfaceElevated))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(MCI.Color.border, lineWidth: 1))
-                .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(MCI.Color.border, lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.18), radius: 15, y: 10)
                 .offset(x: x, y: Self.previewTop)
                 .allowsHitTesting(false)
             }
@@ -183,7 +253,7 @@ struct DayStripView: View {
             .padding(8)
             .frame(width: cardWidth, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(MCI.Color.surfaceElevated))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(MCI.Color.border, lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(MCI.Color.border, lineWidth: 0.5))
             .offset(x: x, y: Self.previewTop)
             .allowsHitTesting(false)
         }
@@ -191,7 +261,7 @@ struct DayStripView: View {
 
     private var legend: some View {
         HStack(spacing: 14) {
-            ForEach(overview.kinds, id: \.kind) { entry in
+            ForEach(DayStripLayout.legend(overview.blocks)) { entry in
                 let picked = model.highlightedKind
                 Button {
                     model.toggleHighlight(entry.kind)
@@ -200,7 +270,7 @@ struct DayStripView: View {
                         Circle()
                             .fill(DayStripPalette.color(for: entry.kind))
                             .frame(width: 8, height: 8)
-                        Text(entry.kindLabel)
+                        Text(entry.kind.title)
                             .font(MCI.Font.caption)
                             .foregroundStyle(picked == entry.kind ? MCI.Color.foreground : MCI.Color.foregroundSecondary)
                             .fontWeight(picked == entry.kind ? .semibold : .regular)
@@ -209,7 +279,7 @@ struct DayStripView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(entry.kindLabel)
+                .accessibilityLabel(entry.kind.title)
                 .accessibilityHint(UserFacingCopy.Overview.legendHint)
                 .accessibilityAddTraits(picked == entry.kind ? .isSelected : [])
             }

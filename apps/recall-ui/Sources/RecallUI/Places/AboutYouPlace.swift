@@ -1,38 +1,41 @@
 import RecallUIKit
 import SwiftUI
 
-/// You: what Hippocampus tells your AI about you, in the exact words sent,
-/// for you to correct (RULINGS I7, I8, I10; contract model-page.md).
+/// About You (SPEC 3.7): what your AI tools can be told about you, in the
+/// exact words sent, for you to correct (RULINGS I7, I8, I10; contract
+/// model-page.md).
 ///
-/// "Recent work" first, as a connected AI is given it; then "What your AI can
-/// be told about you" with Right and Forget on each item; then, closed, what
-/// is sent only when an AI looks it up and what has not been seen lately; then
-/// "Your data". The numbers in the captions come from `WhatIsSent`.
+/// The groups as headings ("Projects and goals", "How you work", Skills,
+/// People, "Where you got stuck"), each line with where it came from, Why,
+/// Right and Forget; a line that names a Working On item exactly links to
+/// it. At the bottom, one row: "Not sent unless your AI looks it up · Not
+/// seen lately · Names You Use…", then who wrote it. "Recent work" moved to
+/// AI Tools; Privacy and AI Tools are rows of the sidebar now.
 ///
-/// The shell owns the model (built with the verdict inbox) and the page's
-/// navigation: the "Your data" rows and a session row each call `open` with
-/// a route (`.you` with `[.privacy]` or `[.names]`, or a session on
-/// Overview). See `work/contract/places.md`.
-struct YouPlace: View {
+/// The shell owns the model (built with the verdict inbox) and routes:
+/// a session row opens it on Today, an item link its page, and Names You
+/// Use… pushes the names editor (`.you` with `[.names]`).
+struct AboutYouPlace: View {
     @ObservedObject var model: UserModelViewModel
     let open: (RecallRoute) -> Void
+    /// Working On's items, so a line that names one links to it.
+    var items: [WorkItem] = []
 
     @State private var keptBackOpen: Bool
     @State private var notSeenOpen: Bool
     private let firstWhyOpen: Bool
-    @Environment(\.locale) private var locale
-    @Environment(\.timeZone) private var timeZone
-    @Environment(\.isSyntheticPreview) private var isSyntheticPreview
 
-    init(model: UserModelViewModel, open: @escaping (RecallRoute) -> Void) {
-        self.init(model: model, open: open, keptBackOpen: false, notSeenOpen: false, firstWhyOpen: false)
+    init(model: UserModelViewModel, open: @escaping (RecallRoute) -> Void, items: [WorkItem] = []) {
+        self.init(model: model, open: open, items: items, keptBackOpen: false, notSeenOpen: false,
+                  firstWhyOpen: false)
     }
 
     /// The renderer draws the closed sections open.
-    init(model: UserModelViewModel, open: @escaping (RecallRoute) -> Void,
+    init(model: UserModelViewModel, open: @escaping (RecallRoute) -> Void, items: [WorkItem] = [],
          keptBackOpen: Bool, notSeenOpen: Bool, firstWhyOpen: Bool) {
         self.model = model
         self.open = open
+        self.items = items
         _keptBackOpen = State(initialValue: keptBackOpen)
         _notSeenOpen = State(initialValue: notSeenOpen)
         self.firstWhyOpen = firstWhyOpen
@@ -40,9 +43,9 @@ struct YouPlace: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 32) {
+            VStack(alignment: .leading, spacing: 28) {
+                header
                 content
-                yourData
             }
             .frame(maxWidth: 760, alignment: .leading)
             .padding(.horizontal, 32)
@@ -51,6 +54,18 @@ struct YouPlace: View {
         }
         .background(MCI.Color.background)
         .task { await model.reload() }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(verbatim: UserFacingCopy.You.title)
+                .font(MCI.Font.title)
+                .foregroundStyle(MCI.Color.foreground)
+                .accessibilityAddTraits(.isHeader)
+            Text(verbatim: UserFacingCopy.You.lead)
+                .font(.system(size: 13))
+                .foregroundStyle(MCI.Color.foregroundSecondary)
+        }
     }
 
     @ViewBuilder
@@ -68,51 +83,26 @@ struct YouPlace: View {
                     .buttonStyle(.bordered)
             }
         case .nothingLearned, .needsModel:
-            VStack(alignment: .leading, spacing: 32) {
-                if let page = model.page, !page.recentWork.isEmpty {
-                    recentWork(page)
-                }
-                VStack(alignment: .leading, spacing: 8) {
+            OverviewCard(padding: 16) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(UserFacingCopy.You.nothingLearnedTitle)
                         .font(MCI.Font.title2)
                         .foregroundStyle(MCI.Color.foreground)
                     Text(model.state == .needsModel
                          ? UserFacingCopy.You.modelLine(model.page?.modelStatus.unavailableReason ?? .notAvailable)
                          : UserFacingCopy.You.nothingLearnedBody)
-                        .font(MCI.Font.body)
+                        .font(.system(size: 14))
                         .foregroundStyle(MCI.Color.foregroundSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         case .ready:
             if let page = model.page {
-                VStack(alignment: .leading, spacing: 32) {
-                    recentWork(page)
+                VStack(alignment: .leading, spacing: 24) {
                     shared
-                    lookUpOnly(page)
+                    bottomRow(page)
                     footer(page)
-                }
-            }
-        }
-    }
-
-    // MARK: Recent work
-
-    private func recentWork(_ page: ModelPage) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionTitle(UserFacingCopy.You.recentWorkTitle,
-                         caption: UserFacingCopy.You.recentWorkCaption)
-            if page.recentWork.isEmpty {
-                Text(UserFacingCopy.You.recentWorkEmpty)
-                    .font(MCI.Font.body)
-                    .foregroundStyle(MCI.Color.foregroundSecondary)
-            } else {
-                OverviewCard(padding: 16) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(page.recentWork.enumerated()), id: \.offset) { _, line in
-                            SentLine(text: line.text(locale: locale, timeZone: timeZone))
-                        }
-                    }
                 }
             }
         }
@@ -122,16 +112,11 @@ struct YouPlace: View {
 
     private var shared: some View {
         let shared = model.groups(.shared)
-        return VStack(alignment: .leading, spacing: 10) {
-            SectionTitle(UserFacingCopy.You.sharedTitle, caption: UserFacingCopy.You.sharedCaption)
+        return VStack(alignment: .leading, spacing: 24) {
             if shared.isEmpty {
                 // Early on, everything learned may still be below the bar.
                 Text(UserFacingCopy.You.sharedEmpty)
                     .font(MCI.Font.body)
-                    .foregroundStyle(MCI.Color.foregroundSecondary)
-            } else {
-                Text(UserFacingCopy.You.exactWords)
-                    .font(MCI.Font.caption)
                     .foregroundStyle(MCI.Color.foregroundSecondary)
             }
             if model.verdictFailed {
@@ -143,144 +128,110 @@ struct YouPlace: View {
         }
     }
 
-    @ViewBuilder
-    private func lookUpOnly(_ page: ModelPage) -> some View {
-        let keptBack = model.groups(.keptBack)
-        if !keptBack.isEmpty {
-            DisclosureGroup(isExpanded: $keptBackOpen) {
-                groups(keptBack, openFirstWhy: false)
-                    .padding(.top, 8)
-            } label: {
-                Text(UserFacingCopy.You.keptBackTitle)
-                    .font(MCI.Font.bodyStrong)
-                    .foregroundStyle(MCI.Color.foreground)
-            }
-        }
-        let notSeen = model.groups(.notSeenLately)
-        if !notSeen.isEmpty {
-            DisclosureGroup(isExpanded: $notSeenOpen) {
-                groups(notSeen, openFirstWhy: false)
-                    .padding(.top, 8)
-            } label: {
-                Text(UserFacingCopy.You.notSeenLatelyTitle)
-                    .font(MCI.Font.bodyStrong)
-                    .foregroundStyle(MCI.Color.foreground)
-            }
-        }
-    }
-
     private func groups(_ groups: [ModelItemGroup], openFirstWhy: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 24) {
             ForEach(Array(groups.enumerated()), id: \.element.id) { groupIndex, group in
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 4) {
                     if let title = group.title {
                         Text(title)
-                            .font(MCI.Font.caption)
-                            .foregroundStyle(MCI.Color.foregroundMuted)
-                            .padding(.bottom, 2)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(MCI.Color.foreground)
+                            .accessibilityAddTraits(.isHeader)
+                            .padding(.bottom, 4)
                     }
                     ForEach(Array(group.rows.enumerated()), id: \.element.id) { rowIndex, row in
                         if rowIndex > 0 { Divider() }
                         YouItemRow(row: row, model: model, open: open,
-                                   whyOpen: openFirstWhy && groupIndex == 0 && rowIndex == 0)
+                                   whyOpen: openFirstWhy && groupIndex == 0 && rowIndex == 1,
+                                   item: UserModelGrouping.item(named: row.item.text, among: items))
                     }
+                    Divider()
                 }
             }
         }
     }
 
+    // MARK: The bottom row
+
+    /// "Not sent unless your AI looks it up · Not seen lately · Names You
+    /// Use…", the first two opening their lines below.
+    @ViewBuilder
+    private func bottomRow(_ page: ModelPage) -> some View {
+        let keptBack = model.groups(.keptBack)
+        let notSeen = model.groups(.notSeenLately)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 10) {
+                if !keptBack.isEmpty {
+                    DisclosureLink(title: UserFacingCopy.You.keptBackTitle, isOpen: $keptBackOpen)
+                    Text(verbatim: "\u{00B7}").foregroundStyle(MCI.Color.foregroundMuted)
+                }
+                if !notSeen.isEmpty {
+                    DisclosureLink(title: UserFacingCopy.You.notSeenLatelyTitle, isOpen: $notSeenOpen)
+                    Text(verbatim: "\u{00B7}").foregroundStyle(MCI.Color.foregroundMuted)
+                }
+                Button(UserFacingCopy.You.namesYouUse) { open(.names) }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(MCI.Color.accent)
+            }
+            .font(.system(size: 13))
+            if keptBackOpen, !keptBack.isEmpty {
+                openList(UserFacingCopy.You.keptBackTitle, keptBack)
+            }
+            if notSeenOpen, !notSeen.isEmpty {
+                openList(UserFacingCopy.You.notSeenLatelyTitle, notSeen)
+            }
+        }
+    }
+
+    /// One of the bottom row's lists, opened, under its name.
+    private func openList(_ title: String, _ list: [ModelItemGroup]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(verbatim: title)
+                .font(MCI.Font.caption)
+                .foregroundStyle(MCI.Color.foregroundSecondary)
+            groups(list, openFirstWhy: false)
+        }
+        .padding(.top, 8)
+    }
+
     @ViewBuilder
     private func footer(_ page: ModelPage) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(UserFacingCopy.You.footer)
             if model.modelIsOff, let reason = page.modelStatus.unavailableReason {
                 Text(UserFacingCopy.You.modelLine(reason))
+            } else if page.modelStatus.state == .available {
+                Text(UserFacingCopy.You.writtenByAppleIntelligence)
             }
         }
         .font(MCI.Font.caption)
         .foregroundStyle(MCI.Color.foregroundSecondary)
         .fixedSize(horizontal: false, vertical: true)
     }
-
-    // MARK: Your data
-
-    private var yourData: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionTitle(UserFacingCopy.You.yourDataTitle)
-            OverviewCard(padding: 0) {
-                VStack(alignment: .leading, spacing: 0) {
-                    DataRow(title: UserFacingCopy.You.rememberedRow,
-                            caption: UserFacingCopy.You.rememberedCaption) {
-                        open(RecallRoute(place: .you, youPath: [.privacy]))
-                    }
-                    Divider().padding(.leading, 16)
-                    DataRow(title: UserFacingCopy.You.namesRow) {
-                        open(RecallRoute(place: .you, youPath: [.names]))
-                    }
-                    Divider().padding(.leading, 16)
-                    DataRow(title: UserFacingCopy.You.aiToolsRow) { openAITools() }
-                }
-            }
-            .disabled(isSyntheticPreview)
-        }
-    }
 }
 
-/// A section's title, with an optional caption under it.
-private struct SectionTitle: View {
-    let title: String
-    let caption: String?
+/// You's old name: the shell still opens it so.
+typealias YouPlace = AboutYouPlace
 
-    init(_ title: String, caption: String? = nil) {
-        self.title = title
-        self.caption = caption
-    }
+/// A quiet disclosure in a row of links: its title and a chevron that turns.
+private struct DisclosureLink: View {
+    let title: String
+    @Binding var isOpen: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(MCI.Font.title2)
-                .foregroundStyle(MCI.Color.foreground)
-            if let caption {
-                Text(caption)
-                    .font(MCI.Font.caption)
-                    .foregroundStyle(MCI.Color.foregroundSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-}
-
-/// A row of "Your data" that opens a page or a pane.
-private struct DataRow: View {
-    let title: String
-    var caption: String?
-    let action: () -> Void
-    @Environment(\.isEnabled) private var isEnabled
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(MCI.Font.body)
-                        .foregroundStyle(isEnabled ? MCI.Color.foreground : MCI.Color.foregroundMuted)
-                    if let caption {
-                        Text(caption)
-                            .font(MCI.Font.caption)
-                            .foregroundStyle(MCI.Color.foregroundSecondary)
-                    }
-                }
-                Spacer(minLength: 8)
+        Button {
+            withAnimation(MCI.Motion.snap) { isOpen.toggle() }
+        } label: {
+            HStack(spacing: 4) {
                 Image(systemName: "chevron.right")
-                    .font(MCI.Font.caption)
-                    .foregroundStyle(MCI.Color.foregroundMuted)
+                    .font(.system(size: 9, weight: .semibold))
+                    .rotationEffect(.degrees(isOpen ? 90 : 0))
                     .accessibilityHidden(true)
+                Text(verbatim: title)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .foregroundStyle(MCI.Color.foreground)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isOpen ? [.isButton, .isSelected] : .isButton)
     }
 }

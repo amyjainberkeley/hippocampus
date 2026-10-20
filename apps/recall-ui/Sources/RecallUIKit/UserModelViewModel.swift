@@ -45,6 +45,26 @@ public struct ModelItemGroup: Equatable, Sendable, Identifiable {
 /// you got stuck, then any group the window has no title for. Inside a group
 /// the agent's order is kept.
 public enum UserModelGrouping {
+    /// The Working On item a line names exactly, as a whole word, ignoring
+    /// case: "trailhead-shop ›" after the line (SPEC 3.7). The longest name
+    /// wins, so "Trailhead pricing v3" beats "Trailhead".
+    public static func item(named text: String, among items: [WorkItem]) -> WorkItem? {
+        items.filter { item in
+            let name = item.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard name.count >= 3, let range = text.range(of: name, options: [.caseInsensitive]) else {
+                return false
+            }
+            let before = range.lowerBound == text.startIndex ? nil : text[text.index(before: range.lowerBound)]
+            let after = range.upperBound == text.endIndex ? nil : text[range.upperBound]
+            func isWordCharacter(_ character: Character?) -> Bool {
+                guard let character else { return false }
+                return character.isLetter || character.isNumber || character == "-" || character == "_"
+            }
+            return !isWordCharacter(before) && !isWordCharacter(after)
+        }
+        .max { $0.name.count < $1.name.count }
+    }
+
     public static let order: [ModelItem.Group] = [.workingOn, .howYouWork, .skills, .people, .struggles, .other]
 
     public static func groups(_ items: [ModelItem]) -> [ModelItemGroup] {
@@ -56,7 +76,8 @@ public enum UserModelGrouping {
 
     public static func title(_ group: ModelItem.Group) -> String? {
         switch group {
-        case .workingOn: UserFacingCopy.groupWorkingOn
+        // "Working On" means one thing in the window: the sidebar's items (SPEC 3.7).
+        case .workingOn: UserFacingCopy.You.projectsAndGoals
         case .howYouWork: UserFacingCopy.groupHowYouWork
         case .skills: UserFacingCopy.groupSkills
         case .people: UserFacingCopy.groupPeople

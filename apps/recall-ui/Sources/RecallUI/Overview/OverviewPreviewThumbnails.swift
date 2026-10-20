@@ -2,13 +2,16 @@
 import AppKit
 import RecallUIKit
 
-/// Debug-only screenshots for the off-screen renderer: a plain drawing of a
-/// window (title bar, the window's name, lines of text) for each moment the
-/// fixtures name, in its kind's colour. Nothing is read from disk.
+/// Debug-only screenshots for the off-screen renderer: the window each
+/// moment the fixtures name was in, drawn as it looks (Figma, Zoom, Notes,
+/// Mail, VS Code, Terminal, an article in Safari), else a plain drawing of a
+/// window (title bar, the window's name, lines of text) in its kind's colour.
+/// Nothing is read from disk.
 final class OverviewPreviewThumbnails: ThumbnailDataProviding, @unchecked Sendable {
     private let windows: [String: OverviewPreviewBrainReader.Window]
     private let lock = NSLock()
     private var served = 0
+    private var drawn: [String: Data] = [:]
 
     init(windows: [String: OverviewPreviewBrainReader.Window]) {
         self.windows = windows
@@ -33,6 +36,18 @@ final class OverviewPreviewThumbnails: ThumbnailDataProviding, @unchecked Sendab
     @MainActor
     private func draw(url: URL, maxPixelSize: Int) -> Data? {
         guard url.path.hasPrefix("/preview/keyframes/"), let window = windows[url.path] else { return nil }
+        if let screen = screen(for: window) {
+            lock.lock()
+            served += 1
+            let kept = drawn[window.app]
+            lock.unlock()
+            if let kept { return kept }
+            let data = screen()
+            lock.lock()
+            drawn[window.app] = data
+            lock.unlock()
+            return data
+        }
         let width = max(64, min(maxPixelSize, 1_024))
         let height = width * 10 / 16
         guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
@@ -84,6 +99,21 @@ final class OverviewPreviewThumbnails: ThumbnailDataProviding, @unchecked Sendab
         served += 1
         lock.unlock()
         return rep.representation(using: .png, properties: [:])
+    }
+
+    /// The drawn screen for a window's app, when there is one.
+    @MainActor
+    private func screen(for window: OverviewPreviewBrainReader.Window) -> (@MainActor () -> Data?)? {
+        switch window.app {
+        case "Figma": { TodayPreviewScreens.jpeg(.design) }
+        case "Zoom": { TodayPreviewScreens.jpeg(.call) }
+        case "Notes": { TodayPreviewScreens.jpeg(.notes) }
+        case "Mail": { TodayPreviewScreens.jpeg(.mail) }
+        case "VS Code": { SyntheticScreens.jpeg(.editor) }
+        case "Terminal": { SyntheticScreens.jpeg(.terminal) }
+        case "Safari": { SyntheticScreens.jpeg(.article) }
+        default: nil
+        }
     }
 }
 #endif

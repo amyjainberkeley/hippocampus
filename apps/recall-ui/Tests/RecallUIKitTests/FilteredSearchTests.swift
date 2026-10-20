@@ -35,6 +35,8 @@ final class FilteredSearchTests: XCTestCase {
         let reader = FilterRecordingReader()
         let model = model(reader)
         defer { model.clear() }
+        // Exact Words: the window searches by meaning unless it is on.
+        model.mode = .text
         model.query = "needle"
         model.filters = FilterState(appBundleIds: ["test.b", "test.a"], dateRange: .yesterday, hasUrl: true)
         await model.runSearch()
@@ -60,6 +62,7 @@ final class FilteredSearchTests: XCTestCase {
         let reader = FilterRecordingReader()
         let model = model(reader)
         defer { model.clear() }
+        model.mode = .text
         model.query = restored.query
         model.filters = restored.filters
         XCTAssertNotNil(model.filters.appSelectionValidationMessage)

@@ -29,17 +29,20 @@ private struct SharedThumbnails: ThumbnailDataProviding {
     }
 }
 
-/// A session's stored screenshot, found by its moment.
+/// A session's stored screenshot, found by its moment; without one, the
+/// app it was in on a calm tile.
 struct SessionScreenshot: View {
     let eventId: Int64?
     let reader: BrainReader
     let size: CGSize
+    /// The app shown on the tile until the moment says otherwise.
+    var fallbackApp: String? = nil
     @Environment(\.overviewThumbnails) private var provider
     @State private var url: URL?
     @State private var app: String?
 
     var body: some View {
-        EvidenceThumbnail(url: url, appBundleId: app, size: size,
+        EvidenceThumbnail(url: url, appBundleId: app ?? fallbackApp, size: size,
                           maxPixelSize: Int(max(size.width, size.height) * 2),
                           contentMode: .fill, provider: provider)
             .task(id: eventId) {

@@ -2,75 +2,158 @@ import RecallUIKit
 import SwiftUI
 
 /// Today on the first day of the person's memory, before its first session:
-/// where they land after setup (first landing, Oct 18). It sits where the
-/// Right now card will be: the hi mark, one line on what has begun, and what
-/// to try first. The day keeps its place below, empty, with now marked
+/// where they land after setup (first landing, Oct 18; SPEC 3.1.1). It sits
+/// where the card will be: the hi mark, one line on what has begun, what to
+/// try first, the calendar offered once (SPEC-DELTA 5), and as soon as
+/// anything is saved, how much and the newest moment, drawn as History draws
+/// it. The day keeps its place below, empty, with now marked
 /// (`FirstDayStripView`); the first session takes over both as it is saved.
 struct FirstDayCard: View {
     /// By the sidebar footer's rule: the card never says memory has started
     /// while nothing is being saved.
     let remembering: Bool
+    /// Why it isn't, when the window knows: paused or a permission off say so.
+    var stopped: TodayStop? = nil
     /// No AI tool starts its sessions with Hippocampus yet.
     let offersConnect: Bool
+    /// The calendar is offered here once.
+    var offersCalendar = false
+    /// "Saved so far: 6 moments.", and the newest of them.
+    var savedSoFar: UInt64? = nil
+    var newest: Hit? = nil
+    var showCalendar: () -> Void = {}
+    var open: (RecallRoute) -> Void = { _ in }
     @Environment(\.isSyntheticPreview) private var isSyntheticPreview
 
     private typealias Copy = UserFacingCopy.Overview
 
+    private var lead: String {
+        if remembering { return Copy.firstDayBody }
+        switch stopped {
+        case .paused?: return Copy.firstDayPausedBody
+        case .needsPermission?: return Copy.firstDayPermissionBody
+        default: return Copy.firstDayOffBody
+        }
+    }
+
     var body: some View {
-        OverviewCard(padding: 28) {
+        VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 HiTileView(size: 44, remembering: remembering)
                     .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
-                    .padding(.bottom, 20)
                 Text(remembering ? Copy.firstDayTitle : Copy.firstDayOffTitle)
                     .font(MCI.Font.title)
                     .foregroundStyle(MCI.Color.foreground)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(remembering ? Copy.firstDayBody : Copy.firstDayOffBody)
+                    .padding(.top, 18)
+                Text(lead)
                     .font(MCI.Font.body)
                     .foregroundStyle(MCI.Color.foregroundSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 6)
-                if !remembering {
-                    Button(Copy.openPreferences) {
-                        Task { _ = await WorkspacePreferencesRouter.shared.open(.capture, bundleURL: Bundle.main.bundleURL) }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(isSyntheticPreview)
-                    .padding(.top, 16)
+            }
+            .padding(EdgeInsets(top: 26, leading: 28, bottom: 24, trailing: 28))
+            Divider()
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 14) {
+                GridRow {
+                    AskKeyCap()
+                        .frame(width: 44)
+                    Text(Copy.firstDayAsk(AskShortcutLabel.current().phrase))
+                        .font(MCI.Font.body)
+                        .foregroundStyle(MCI.Color.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Divider()
-                    .padding(.vertical, 22)
-                Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 14) {
+                if offersConnect {
                     GridRow {
-                        AskKeyCap()
-                            .gridColumnAlignment(.center)
-                        Text(Copy.firstDayAsk(AskShortcutLabel.current().phrase))
-                            .font(MCI.Font.body)
-                            .foregroundStyle(MCI.Color.foreground)
-                            .fixedSize(horizontal: false, vertical: true)
+                        Image(systemName: "chevron.left.forwardslash.chevron.right")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(MCI.Color.foregroundSecondary)
+                            .frame(width: 44)
+                            .accessibilityHidden(true)
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(Copy.connectRecentWork)
+                                .font(MCI.Font.body)
+                                .foregroundStyle(MCI.Color.foreground)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 8)
+                            Button(Copy.connect) { openAITools() }
+                                .buttonStyle(.bordered)
+                                .disabled(isSyntheticPreview)
+                        }
                     }
-                    if offersConnect {
-                        GridRow {
-                            Image(systemName: "chevron.left.forwardslash.chevron.right")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(MCI.Color.foregroundSecondary)
-                                .accessibilityHidden(true)
-                            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                Text(Copy.connectLine)
-                                    .font(MCI.Font.body)
-                                    .foregroundStyle(MCI.Color.foreground)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                Spacer(minLength: 8)
-                                Button(UserFacingCopy.connectAction) { openAITools() }
-                                    .buttonStyle(.bordered)
-                                    .disabled(isSyntheticPreview)
-                            }
+                }
+                if offersCalendar {
+                    GridRow {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(MCI.Color.foregroundSecondary)
+                            .frame(width: 44)
+                            .accessibilityHidden(true)
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(Copy.showCalendarLine)
+                                .font(MCI.Font.body)
+                                .foregroundStyle(MCI.Color.foreground)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 8)
+                            Button(Copy.showCalendar, action: showCalendar)
+                                .buttonStyle(.bordered)
+                                .disabled(isSyntheticPreview)
                         }
                     }
                 }
             }
+            .padding(EdgeInsets(top: 16, leading: 28, bottom: 16, trailing: 28))
+            if let savedSoFar, savedSoFar > 0 {
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(Copy.savedSoFar(savedSoFar))
+                            .font(MCI.Font.body)
+                            .foregroundStyle(MCI.Color.foreground)
+                        Spacer(minLength: 8)
+                        LinkButton(title: Copy.seeThemInHistory) { open(.showHistory) }
+                    }
+                    if let newest {
+                        Button {
+                            let at = Int64(clamping: newest.tsUs)
+                            open(.history(of: at...at, selecting: Int64(clamping: newest.id)))
+                        } label: {
+                            HitRow(hit: newest, showsClockTime: true)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(EdgeInsets(top: 16, leading: 28, bottom: 16, trailing: 28))
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(MCI.Color.surface))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(MCI.Color.border, lineWidth: 1))
+    }
+}
+
+/// Words that open a place, in the accent with a chevron: "See Them in
+/// History ›", "All ›".
+struct LinkButton: View {
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 2) {
+                Text(verbatim: title)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .accessibilityHidden(true)
+            }
+            .font(.system(size: 13))
+            .foregroundStyle(MCI.Color.accent)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(.isLink)
     }
 }
 

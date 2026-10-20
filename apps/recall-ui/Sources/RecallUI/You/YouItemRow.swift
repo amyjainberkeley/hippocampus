@@ -9,6 +9,8 @@ struct YouItemRow: View {
     @ObservedObject var model: UserModelViewModel
     let open: (RecallRoute) -> Void
     var whyOpen = false
+    /// The Working On item the line names, linked after it.
+    var item: WorkItem? = nil
 
     @State private var isWhyOpen = false
     @State private var didSetWhy = false
@@ -36,11 +38,16 @@ struct YouItemRow: View {
 
     private func itemView(_ item: ModelItem) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(item.text)
-                .font(MCI.Font.body)
-                .foregroundStyle(MCI.Color.foreground)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(item.text)
+                    .font(.system(size: 15))
+                    .foregroundStyle(MCI.Color.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                if let named = self.item {
+                    LinkButton(title: named.name) { open(RecallRoute(workItem: named.id)) }
+                }
+            }
             HStack(spacing: 12) {
                 Text(UserFacingCopy.You.basis(item.basis, daysSeen: item.daysSeen))
                     .font(MCI.Font.caption)

@@ -23,9 +23,22 @@ struct SearchView: View {
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
+                if let scope = viewModel.pageScope,
+                   !viewModel.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    SearchScopeBar(scope: scope, isScoped: $viewModel.isScoped)
+                    Divider().background(Color.brandCardBorder)
+                }
                 if showsFilters || viewModel.filters.anyActive {
                     filterBar
                     Divider().background(Color.brandCardBorder)
+                }
+                if let scope = viewModel.activeScope, !viewModel.hits.isEmpty {
+                    Text(verbatim: LibraryCopy.Search.matches(viewModel.hits.count, in: scope.name))
+                        .mciFont(.caption)
+                        .foregroundStyle(Color.brandFgSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, MCI.Spacing.l)
+                        .padding(.top, MCI.Spacing.m)
                 }
                 if let heading, !viewModel.hits.isEmpty {
                     Text(heading)
@@ -146,6 +159,21 @@ struct SearchView: View {
         } else if viewModel.hits.isEmpty && !viewModel.isSearching && !showsNoMatches {
             // A question waiting to be asked, or one answered above: nothing to say.
             EmptyView()
+        } else if viewModel.hits.isEmpty && !viewModel.isSearching, let scope = viewModel.activeScope {
+            VStack(spacing: MCI.Spacing.m) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 28, weight: .regular))
+                    .foregroundStyle(MCI.Color.foregroundMuted)
+                    .accessibilityHidden(true)
+                Text(verbatim: LibraryCopy.Search.nothingIn(scope.name))
+                    .font(MCI.Font.title2)
+                    .foregroundStyle(MCI.Color.foregroundSecondary)
+                    .multilineTextAlignment(.center)
+                Button(LibraryCopy.Search.searchEverything) { viewModel.searchEverything() }
+                    .buttonStyle(.bordered)
+            }
+            .padding(.horizontal, MCI.Spacing.xl)
+            .padding(.top, MCI.Spacing.xxxl)
         } else if viewModel.hits.isEmpty && !viewModel.isSearching {
             // Keep the query in the search field so long input cannot size the heading.
             if viewModel.filters.anyActive {
@@ -209,5 +237,43 @@ struct SearchView: View {
                 viewModel.isDetailFocused = true
             }
         }
+    }
+}
+
+/// The scope bar under the field while typing on a page that offers one,
+/// Mail-style (SPEC 2.8): "Search: Everything | trailhead-shop".
+struct SearchScopeBar: View {
+    let scope: SearchScope
+    @Binding var isScoped: Bool
+
+    var body: some View {
+        HStack(spacing: MCI.Spacing.xs) {
+            Text(verbatim: LibraryCopy.Search.label)
+                .foregroundStyle(MCI.Color.foregroundSecondary)
+                .padding(.trailing, MCI.Spacing.xs)
+            choice(LibraryCopy.Search.everything, on: !isScoped) { isScoped = false }
+            choice(scope.name, on: isScoped) { isScoped = true }
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 13))
+        .padding(.horizontal, MCI.Spacing.l)
+        .padding(.vertical, MCI.Spacing.xs + 2)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(LibraryCopy.Search.label)
+    }
+
+    private func choice(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(verbatim: title)
+                .fontWeight(on ? .semibold : .regular)
+                .foregroundStyle(MCI.Color.foreground)
+                .padding(.horizontal, MCI.Spacing.s + 2)
+                .padding(.vertical, MCI.Spacing.xs)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(on ? MCI.Color.border.opacity(0.7) : Color.clear))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
     }
 }

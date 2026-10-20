@@ -186,6 +186,8 @@ final class SearchViewModelFilterPropagationTests: XCTestCase {
         ]
         let reader = CapturingReader(hits: hits)
         let vm = SearchViewModel(reader: reader)
+        // Exact Words: several apps are filtered on exact matches only.
+        vm.mode = .text
         vm.query = "x"
         vm.filters.toggleApp("com.apple.Safari")
         vm.filters.toggleApp("com.microsoft.VSCode")
