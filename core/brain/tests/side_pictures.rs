@@ -551,3 +551,27 @@ fn settings_load_from_the_file_and_default_when_it_is_missing() {
     assert!(settings.enabled);
     assert_eq!(settings.budget_bytes(None), GB);
 }
+
+#[test]
+fn a_large_backlog_is_cleared_in_short_transactions() {
+    let mut brain = Brain::new();
+    // More than two chunks of pictures, all forgotten at once.
+    let count = mci_brain::retention_purger::SIDE_CLEAR_CHUNK * 2 + 17;
+    let ids = (0..count)
+        .map(|n| {
+            brain.side(
+                NOW - HOUR - n as u64 * SECOND,
+                SLACK,
+                LAUNCH,
+                &format!("line {n}"),
+                100,
+            )
+        })
+        .collect::<Vec<_>>();
+    let stats = side_pictures::forget_through(&brain.store, &mut BlobSizes::new(), NOW).unwrap();
+    assert_eq!(stats.pictures_cleared, count as u64);
+    assert_eq!(stats.blobs_deleted, count as u64);
+    assert!(ids.iter().all(|id| brain.keyframe(*id).is_none()));
+    assert_eq!(brain.store.stats().unwrap().event_count, count as u64);
+    assert!(brain.pictures().is_empty());
+}
