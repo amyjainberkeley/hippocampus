@@ -82,6 +82,31 @@ public final class ActionPanelRegistry: ObservableObject {
     }
 
     public func unregister(id: String) { commands.removeAll { $0.id == id } }
+
+    /// The ids each view's list registered, by the view's group.
+    private var groups: [String: [String]] = [:]
+
+    /// Registers a view's whole list as one group, and again whenever the
+    /// list changes: ids the group had that are gone are unregistered, new
+    /// ones registered, the rest replaced. So ⌘K's Go To lists the Working On
+    /// items that load after the window appears, and drops one that leaves.
+    public func register(group: String, _ commands: [ActionPanelCommand]) {
+        let ids = commands.map(\.id)
+        for id in groups[group] ?? [] where !ids.contains(id) {
+            unregister(id: id)
+        }
+        for command in commands {
+            register(command)
+        }
+        groups[group] = ids
+    }
+
+    /// Every command a group registered goes: its view went.
+    public func unregister(group: String) {
+        for id in groups.removeValue(forKey: group) ?? [] {
+            unregister(id: id)
+        }
+    }
     public func show() { isVisible = true }
     public func hide() { isVisible = false }
     public func toggle() { isVisible.toggle() }
@@ -104,6 +129,14 @@ public final class ActionPanelRegistry: ObservableObject {
             guard let cmds = byCategory[cat], !cmds.isEmpty else { return nil }
             return (cat, cmds.sorted { $0.title < $1.title })
         }
+    }
+}
+
+public extension [ActionPanelCommand] {
+    /// What a list shows in ⌘K, to tell when it changed: each command's id,
+    /// title and shortcut, in order.
+    var panelSignature: [String] {
+        map { "\($0.id)\u{1F}\($0.title)\u{1F}\($0.shortcut)" }
     }
 }
 
@@ -142,14 +175,27 @@ public final class ActionPanelViewModel: ObservableObject {
     public init(registry: ActionPanelRegistry = .shared) { self.registry = registry }
 
     /// Filtered + fuzzy-ranked commands. Disabled commands are
-    /// dropped so the palette only shows what can be invoked now.
+    /// dropped so the palette only shows what can be invoked now. With
+    /// nothing typed they come in ⌘K's groups (SPEC 2.9): Go To, with the
+    /// places and every Working On item, then Moments, Actions and Help,
+    /// each group in the order its commands were registered.
     public func filtered(from commands: [ActionPanelCommand]) -> [ActionPanelCommand] {
         let enabled = commands.filter { $0.isEnabled() }
-        guard !query.isEmpty else { return enabled }
+        guard !query.isEmpty else { return Self.inGroups(enabled) }
         return enabled.compactMap { cmd -> (ActionPanelCommand, Int)? in
             guard let s = FuzzyMatcher.score(query: query, candidate: cmd.title) else { return nil }
             return (cmd, s)
         }.sorted { $0.1 > $1.1 }.map { $0.0 }
+    }
+
+    /// `commands` in ⌘K's groups' order, keeping their order within each.
+    static func inGroups(_ commands: [ActionPanelCommand]) -> [ActionPanelCommand] {
+        let order = ActionPanelCommand.Category.allCases
+        return commands.enumerated().sorted { first, second in
+            let a = order.firstIndex(of: first.element.category) ?? order.count
+            let b = order.firstIndex(of: second.element.category) ?? order.count
+            return a == b ? first.offset < second.offset : a < b
+        }.map(\.element)
     }
 
     public func selectNext(in list: [ActionPanelCommand]) {
