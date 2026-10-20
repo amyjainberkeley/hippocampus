@@ -901,6 +901,12 @@ public final class CommandBarModel: ObservableObject {
     /// never names).
     public static func itemTab(_ id: String) -> String { "item:\(id)" }
 
+    /// Today on the day of the session that started at `startUs`, with that
+    /// session selected: `session:<start_us>`, as a `session=` link becomes
+    /// (`HippocampusURLRoute.recallTab`, SPEC 2.16) and the window reads it
+    /// (`RecallLaunchRequest.sessionTabPrefix`).
+    public static func sessionTab(_ startUs: UInt64) -> String { "session:\(startUs)" }
+
     private func run(_ suggestion: BarSuggestion) -> BarAction? {
         if let question = suggestion.action.ask {
             ask(question)
@@ -910,7 +916,11 @@ public final class CommandBarModel: ObservableObject {
             query = text
             return nil
         }
-        if suggestion.action.openSession != nil || suggestion.action.view == "day" {
+        if let start = suggestion.action.openSession {
+            // "Resume: …": that session, on its own day (SPEC 2.16).
+            return .openWindow(tab: Self.sessionTab(start))
+        }
+        if suggestion.action.view == "day" {
             return .openWindow(tab: "overview")
         }
         if suggestion.action.view == "model" {

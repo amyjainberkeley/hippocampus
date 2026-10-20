@@ -718,15 +718,25 @@ final class AskPanelTests: XCTestCase {
         XCTAssertEqual(model.activate(), .openURL(URL(string: "https://stripe.com/docs/billing")!))
     }
 
-    func testTheResumeRowOpensOverviewAndTheKeysOpenThePlaces() async {
+    /// "Resume: …" opens Today on that session's own day with the session
+    /// selected (SPEC 2.16), not today's Today without it.
+    func testTheResumeRowOpensItsSessionAndTheKeysOpenThePlaces() async {
         let (model, _, _) = rig()
         await open(model, over: safari)
         await eventually { !model.homeRows.isEmpty }
         model.moveSelection(1)
-        XCTAssertEqual(model.activate(), .openWindow(tab: "overview"))
+        XCTAssertEqual(model.activate(), .openWindow(tab: "session:5"))
         XCTAssertEqual(model.action(for: .openOverview), .openWindow(tab: "overview"))
         XCTAssertEqual(model.action(for: .openYou), .openWindow(tab: "you"))
         XCTAssertEqual(model.action(for: .copyForAI), .copyForAI)
+    }
+
+    /// Ask names a session the way the app's own `session=` link does,
+    /// which the window reads (`RecallLaunchRequest.sessionTabPrefix`).
+    func testTheSessionTabIsTheOneASessionLinkBecomes() {
+        XCTAssertEqual(CommandBarModel.sessionTab(1_791_839_523_000_000),
+                       HippocampusURLRoute.recallTab([URLQueryItem(name: "session", value: "1791839523000000")]))
+        XCTAssertEqual(CommandBarModel.sessionTab(5), "session:5")
     }
 
     func testCommandKeysAreReadFromTheKeyAndItsModifiers() {
