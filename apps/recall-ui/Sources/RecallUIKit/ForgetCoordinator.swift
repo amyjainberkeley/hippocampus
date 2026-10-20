@@ -231,6 +231,10 @@ public final class ForgetCoordinator: ObservableObject {
     public enum Outcome: Equatable, Sendable {
         /// Deleted. `moments` is how many the deletes reported.
         case forgotten(moments: UInt64)
+        /// Some of it was deleted (`moments`) and the rest is still saved:
+        /// its promise stays for the rest, so Try Again, or the next time
+        /// the window opens, finishes it.
+        case partlyForgotten(moments: UInt64)
         /// Nothing was deleted; it's still saved.
         case failed
         /// A window opened by hand while Hippocampus runs: open it first.
@@ -422,18 +426,27 @@ public final class ForgetCoordinator: ObservableObject {
         return Self.together(outcomes)
     }
 
-    /// Several forgets' outcomes as one: every moment they deleted, or
-    /// `failed` when none deleted anything and one failed.
+    /// Several forgets' outcomes as one: every moment they deleted; partly
+    /// when one didn't all go, `failed` when none of them deleted anything.
     private static func together(_ outcomes: [Outcome]) -> Outcome {
         var moments: UInt64 = 0
+        var progressed = false
         var failed = false
         for outcome in outcomes {
             switch outcome {
-            case let .forgotten(count): moments += count
-            case .failed, .needsApp, .unavailable: failed = true
+            case let .forgotten(count):
+                moments += count
+                progressed = true
+            case let .partlyForgotten(count):
+                moments += count
+                progressed = true
+                failed = true
+            case .failed, .needsApp, .unavailable:
+                failed = true
             }
         }
-        return failed && moments == 0 ? .failed : .forgotten(moments: moments)
+        guard failed else { return .forgotten(moments: moments) }
+        return progressed ? .partlyForgotten(moments: moments) : .failed
     }
 
     // MARK: The queue, the hold, the deletes and the release
@@ -505,9 +518,8 @@ public final class ForgetCoordinator: ObservableObject {
             while !queue.isEmpty {
                 let job = queue.removeFirst()
                 phase = job.phase
-                let outcome = await delete(job.request, with: mutator)
-                store.remove(job.id)
-                done.append((job, outcome))
+                let deletion = await delete(job.request, with: mutator)
+                done.append((job, conclude(job, deletion)))
             }
             renewing?.cancel()
             if held, let channel {
@@ -520,31 +532,65 @@ public final class ForgetCoordinator: ObservableObject {
         worker = nil
     }
 
+    /// What a forget's deletes did: how many moments went, what is still
+    /// saved of it, and whether any part went at all.
+    private struct Deletion {
+        var deleted: UInt64 = 0
+        var remaining: ForgetRequest
+        var progressed = false
+    }
+
     /// The picked moments in one call (one transaction, one writer lease,
     /// one integrity check and one cleanup for the whole forget), then each
-    /// span.
-    private func delete(_ request: ForgetRequest, with mutator: any PrivacyMutator) async -> Outcome {
-        var deleted: UInt64 = 0
-        var failed = false
+    /// span. What failed is kept in `remaining`, never dropped.
+    private func delete(_ request: ForgetRequest, with mutator: any PrivacyMutator) async -> Deletion {
+        var result = Deletion(remaining: request)
+        var gone = Set<UInt64>()
         for ids in Self.chunks(of: request.momentIds) {
             do {
-                deleted += try await mutator.deleteEvents(ids: ids).eventsDeleted
+                result.deleted += try await mutator.deleteEvents(ids: ids).eventsDeleted
+                gone.formUnion(ids)
+                result.progressed = true
+            } catch let partial as PartialDeletion {
+                result.deleted += partial.result.eventsDeleted
+                gone.formUnion(partial.deleted)
+                result.progressed = true
             } catch {
-                failed = true
+                // Still saved: kept in `remaining`.
             }
         }
+        var spansLeft: [ForgetRequest.Span] = []
         for span in request.spans {
             do {
-                deleted += try await mutator.deleteEventsInRange(startTsUs: span.startUs, endTsUs: span.endUs)
+                result.deleted += try await mutator.deleteEventsInRange(startTsUs: span.startUs, endTsUs: span.endUs)
                     .eventsDeleted
+                result.progressed = true
             } catch {
-                failed = true
+                spansLeft.append(span)
             }
         }
-        if deleted > 0 || !failed {
+        result.remaining = ForgetRequest(momentIds: request.momentIds.filter { !gone.contains($0) }, spans: spansLeft)
+        if result.progressed {
             deletions.post()
         }
-        return failed && deleted == 0 ? .failed : .forgotten(moments: deleted)
+        return result
+    }
+
+    /// What becomes of a forget's promise once its deletes ran: done, it
+    /// goes; partly done, it stays for what is still saved, never for what
+    /// went; not done at all, it goes, and the rows come back with the
+    /// note's Try Again.
+    private func conclude(_ job: Job, _ deletion: Deletion) -> Outcome {
+        if deletion.remaining.isEmpty {
+            store.remove(job.id)
+            return .forgotten(moments: deletion.deleted)
+        }
+        if deletion.progressed {
+            store.update(job.id, to: deletion.remaining)
+            return .partlyForgotten(moments: deletion.deleted)
+        }
+        store.remove(job.id)
+        return .failed
     }
 
     /// `renew` every `renewal` until cancelled, fire-and-forget: an app that

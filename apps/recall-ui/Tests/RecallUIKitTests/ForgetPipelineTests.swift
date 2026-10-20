@@ -291,7 +291,7 @@ final class ForgetPipelineTests: XCTestCase {
     /// hold takes a moment. Meanwhile ⌘⌫ on another. Each keeps its own
     /// promise: the second never replaces the first's, and the first one's
     /// end never removes the second's while it still waits out its note.
-    func testTwoForgetsAtOnceKeepBothPromisesOnDisk() async throws {
+    func testTwoForgetsAtOnceKeepBothPromisesOnDisk() async {
         let mutator = LeaseMutator()
         let channel = AppLikeChannel()
         channel.gated = true
@@ -319,7 +319,7 @@ final class ForgetPipelineTests: XCTestCase {
     /// A confirmed forget (a session, an hour, a page) while another
     /// forget's hold is still being asked for: it waits for that one, in the
     /// same hold, instead of asking for a second one the app would refuse.
-    func testAConfirmedForgetDuringAnotherForgetsHoldIsNotRefused() async throws {
+    func testAConfirmedForgetDuringAnotherForgetsHoldIsNotRefused() async {
         let mutator = LeaseMutator()
         let channel = AppLikeChannel()
         channel.gated = true
@@ -337,6 +337,58 @@ final class ForgetPipelineTests: XCTestCase {
         XCTAssertTrue(mutator.deleted.contains(77), "moment 77 is still saved: \(mutator.deleted)")
         XCTAssertEqual(channel.sent, [.hold, .release], "one hold for both")
         XCTAssertNil(store.load())
+    }
+
+    // MARK: A forget that deleted only some of it
+
+    /// Three picked moments; the lease turns busy after the first (the hold
+    /// ran out mid-forget and the agent came back). One went and two are
+    /// still saved: the outcome says so, and the promise is kept for the two,
+    /// never for the one that went.
+    func testAForgetThatDeletedOnlySomeMomentsIsNotReportedAsForgotten() async {
+        let mutator = LeaseMutator()
+        mutator.failing = [42, 43]
+        let channel = AppLikeChannel()
+        let forget = coordinator(mutator, channel)
+        let outcome = await forget.forget(ForgetRequest(momentIds: [41, 42, 43]))
+        XCTAssertEqual(mutator.deleted, [41])
+        XCTAssertNotEqual(outcome, .forgotten(moments: 1),
+                          "the note says \"\(NavigationCopy.forgotten)\" while moments 42 and 43 are still saved")
+        XCTAssertEqual(outcome, .partlyForgotten(moments: 1))
+        XCTAssertNotNil(store.load(), "the promise for the moments still saved was thrown away")
+        XCTAssertEqual(store.load()?.momentIds, [42, 43], "only what went leaves the promise")
+
+        // Try Again (or the next open) finishes the rest.
+        mutator.failing = []
+        let rest = await forget.finishLeftover()
+        XCTAssertEqual(rest, .forgotten(moments: 2))
+        XCTAssertEqual(mutator.deleted, [41, 42, 43])
+        XCTAssertNil(store.load())
+    }
+
+    /// A span that fails beside moments that went: the span stays promised.
+    func testASpanThatFailsStaysPromisedBesideMomentsThatWent() async {
+        final class SpansFail: PrivacyMutator, @unchecked Sendable {
+            func deleteEvent(id: UInt64) async throws -> DeleteResult {
+                DeleteResult(eventsDeleted: 1, vacuumOk: true)
+            }
+
+            func deleteEventsInRange(startTsUs: UInt64, endTsUs: UInt64) async throws -> DeleteResult {
+                throw BrainReaderError.mutationBlocked
+            }
+
+            func prepareWipe() async throws -> String { "" }
+            func wipeBrain(token: String) async throws -> DeleteResult {
+                DeleteResult(eventsDeleted: 0, vacuumOk: true)
+            }
+        }
+        let forget = ForgetCoordinator(mutator: SpansFail(), channel: app, store: store, appRunning: { true },
+                                       deletions: MemoryDeletionSignal(center: NotificationCenter()))
+        let span = ForgetRequest.Span(startUs: 10, endUs: 20)
+        let outcome = await forget.forget(ForgetRequest(momentIds: [41], spans: [span]))
+        XCTAssertEqual(outcome, .partlyForgotten(moments: 1))
+        XCTAssertEqual(store.load(), ForgetRequest(spans: [span]))
+        XCTAssertEqual(NavigationCopy.couldNotForgetAll, "Couldn\u{2019}t forget all of it. Some of it is still saved.")
     }
 
     // MARK: The pending file, as a list

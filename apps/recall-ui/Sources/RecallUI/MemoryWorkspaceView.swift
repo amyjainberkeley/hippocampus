@@ -799,6 +799,12 @@ struct MemoryWorkspaceView: View {
                 // Privacy's Activity reads "Forgot the last 10 minutes".
                 ForgetAudit.recent(choice).record(count: moments, now: click)
                 notes.show(NavigationCopy.forgotten)
+            case let .partlyForgotten(moments):
+                ForgetAudit.recent(choice).record(count: moments, now: click)
+                notes.show(NavigationCopy.couldNotForgetAll,
+                           action: BottomNote.Action(title: NavigationCopy.tryAgain) {
+                               finishRest(audit: .recent(choice))
+                           })
             case .failed:
                 notes.show(NavigationCopy.couldNotForget,
                                  action: BottomNote.Action(title: NavigationCopy.tryAgain) {
@@ -1214,6 +1220,12 @@ struct MemoryWorkspaceView: View {
         case let .forgotten(moments):
             audit.record(count: moments, now: now())
             notes.show(NavigationCopy.forgotten)
+        case let .partlyForgotten(moments):
+            // The rest is still promised: Try Again finishes it, and so does
+            // the next open.
+            audit.record(count: moments, now: now())
+            notes.show(NavigationCopy.couldNotForgetAll,
+                       action: BottomNote.Action(title: NavigationCopy.tryAgain) { finishRest(audit: audit) })
         case .failed:
             notes.show(NavigationCopy.couldNotForget,
                        action: BottomNote.Action(title: NavigationCopy.tryAgain) { retry() })
@@ -1224,6 +1236,15 @@ struct MemoryWorkspaceView: View {
                        })
         case .unavailable:
             notes.show(NavigationCopy.couldNotForget)
+        }
+    }
+
+    /// Try Again after a forget that went only partly: what is still
+    /// promised goes now.
+    private func finishRest(audit: ForgetAudit) {
+        Task { @MainActor in
+            guard let outcome = await forgetting.finishLeftover() else { return }
+            report(outcome, audit: audit) { finishRest(audit: audit) }
         }
     }
 
