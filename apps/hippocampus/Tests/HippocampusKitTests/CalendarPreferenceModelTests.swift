@@ -121,7 +121,7 @@ final class CalendarPreferenceModelTests: XCTestCase {
 
     func testOnAMacThatDoesNotAllowItTheSwitchCantChange() async {
         let store = FakeCalendarAccess(.restricted)
-        let (model, _) = model(store)
+        let (model, setting) = model(store)
         XCTAssertEqual(model.state, .restricted)
         XCTAssertFalse(model.isOn)
         XCTAssertFalse(model.canChange)
@@ -130,6 +130,38 @@ final class CalendarPreferenceModelTests: XCTestCase {
         await model.setOn(true)
         XCTAssertEqual(store.requestCount, 0)
         XCTAssertEqual(model.state, .restricted)
+        XCTAssertNil(setting.choice, "no choice is written that the Mac won't allow")
+
+        // Once the Mac allows it, the switch works again.
+        store.change(to: .notDetermined)
+        await model.setOn(true)
+        XCTAssertEqual(store.requestCount, 1)
+        XCTAssertEqual(model.state, .on)
+    }
+
+    func testAnErrorAfterMacOSDecidedIsNotCalledAFailureToAsk() async {
+        // macOS answered, then the request still reported an error: what
+        // macOS decided is what shows.
+        let store = FakeCalendarAccess(.notDetermined, answer: .decidesThenFails(allows: true))
+        let (model, setting) = model(store)
+        await model.setOn(true)
+        XCTAssertEqual(model.state, .on)
+        XCTAssertFalse(model.couldNotAsk)
+        XCTAssertEqual(model.caption, CalendarCopy.about)
+        XCTAssertEqual(setting.choice, true)
+    }
+
+    func testANoteThatMacOSCouldntBeAskedGoesOnceMacOSDecides() async {
+        let store = FakeCalendarAccess(.notDetermined, answer: .fails)
+        let (model, _) = model(store)
+        await model.setOn(true)
+        XCTAssertTrue(model.couldNotAsk)
+        model.recheck()
+        XCTAssertTrue(model.couldNotAsk, "still undecided: the note stays")
+        store.change(to: .denied)
+        model.recheck()
+        XCTAssertFalse(model.couldNotAsk)
+        XCTAssertEqual(model.state, .off, "the person turned nothing on since")
     }
 
     func testWhenMacOSCantBeAskedTheChoiceGoesBackAndSaysSo() async {

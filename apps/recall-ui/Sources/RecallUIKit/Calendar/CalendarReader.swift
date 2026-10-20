@@ -37,10 +37,11 @@ public enum CalendarAccess: Equatable, Sendable {
     case notAsked
     /// The person turned it on and macOS allows it.
     case allowed
-    /// The person turned it on, but macOS said no or took it back later,
-    /// allows adding events only, or this Mac doesn't let apps read
-    /// calendars. Nothing breaks: Today drops the bars, and Preferences says
-    /// how to turn it back on.
+    /// The person turned it on, but macOS said no or took it back later, or
+    /// allows adding events only; or this Mac doesn't let apps read calendars
+    /// at all, whatever the person chose, so Today doesn't offer it. Nothing
+    /// breaks: Today drops the bars, and Preferences says how to turn it back
+    /// on.
     case denied
 }
 

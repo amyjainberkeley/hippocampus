@@ -150,8 +150,7 @@ public final class EventKitCalendarAccess: CalendarAccessStore, @unchecked Senda
     private let readLock = NSLock()
     #if canImport(EventKit)
     private var store: EKEventStore?
-    /// What macOS allowed when `store` was made. A store made before reading
-    /// was allowed is made again, since it may not see the events.
+    /// What macOS allowed when `store` was made.
     private var madeWith: CalendarPermission?
     #endif
 
@@ -177,7 +176,12 @@ public final class EventKitCalendarAccess: CalendarAccessStore, @unchecked Senda
     public func meetings(in interval: DateInterval) throws -> [CalendarMeeting] {
         #if canImport(EventKit)
         let permission = permission()
-        guard permission == .fullAccess else { return [] }
+        guard permission == .fullAccess else {
+            // Taken back, or never given: a store made earlier is let go, so
+            // reading starts fresh once it is allowed again.
+            lock.withLock { self.store = nil; self.madeWith = nil }
+            return []
+        }
         let store = eventStore(for: permission)
         return readLock.withLock {
             let predicate = store.predicateForEvents(withStart: interval.start, end: interval.end, calendars: nil)
@@ -213,9 +217,11 @@ public final class EventKitCalendarAccess: CalendarAccessStore, @unchecked Senda
         return CalendarMeeting(title: String(title.prefix(200)), start: start, end: end, isAllDay: event.isAllDay)
     }
 
+    /// The store, made again whenever macOS's answer has changed since it was
+    /// made: one made before reading was allowed may not see the events.
     private func eventStore(for permission: CalendarPermission) -> EKEventStore {
         lock.withLock {
-            if let store, madeWith == permission || permission != .fullAccess { return store }
+            if let store, madeWith == permission { return store }
             let made = EKEventStore()
             store = made
             madeWith = permission

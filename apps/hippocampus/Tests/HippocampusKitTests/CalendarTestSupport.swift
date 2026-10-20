@@ -13,6 +13,8 @@ final class FakeCalendarAccess: CalendarAccessStore, @unchecked Sendable {
         case fails
         /// macOS returns without deciding; its answer stays as it was.
         case undecided
+        /// macOS decides, then the request reports an error anyway.
+        case decidesThenFails(allows: Bool)
         /// The test answers later, with `answer(allows:)`.
         case held
     }
@@ -56,6 +58,9 @@ final class FakeCalendarAccess: CalendarAccessStore, @unchecked Sendable {
             throw Failure()
         case .undecided:
             return false
+        case .decidesThenFails(let allows):
+            change(to: allows ? .fullAccess : .denied)
+            throw Failure()
         case .held:
             let allows = await withCheckedContinuation { continuation in
                 lock.withLock { waiting = continuation }

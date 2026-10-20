@@ -61,14 +61,25 @@ public final class SystemCalendar: CalendarReader, @unchecked Sendable {
         Self.access(choice: setting.choice, permission: store.permission())
     }
 
-    /// The person's choice first, then what macOS allows.
+    /// The person's choice first, then what macOS allows. A Mac that doesn't
+    /// let apps read calendars is `.denied` whatever the choice, so Today
+    /// never offers what can't work.
     public static func access(choice: Bool?, permission: CalendarPermission) -> CalendarAccess {
+        if permission == .restricted { return .denied }
         guard choice == true else { return .notAsked }
         switch permission {
         case .fullAccess: return .allowed
         case .notDetermined: return .notAsked
         case .addOnly, .denied, .restricted: return .denied
         }
+    }
+
+    /// Whether the person can allow it in System Settings now: after a no,
+    /// or with add-only access. Not on a Mac that doesn't let apps read
+    /// calendars, where the note after Show Calendar offers no button.
+    public var canAllowInSystemSettings: Bool {
+        let permission = store.permission()
+        return permission == .denied || permission == .addOnly
     }
 
     public func events(in interval: DateInterval) async throws -> [CalendarEvent] {
@@ -94,8 +105,10 @@ public final class SystemCalendar: CalendarReader, @unchecked Sendable {
     /// and Preferences says how to allow it in System Settings. When macOS
     /// couldn't be asked, nothing was decided: the choice goes back, so the
     /// window and Preferences agree it is off, and this returns `.notAsked`.
+    /// On a Mac that doesn't let apps read calendars, nothing is kept.
     @discardableResult
     public func turnOn() async -> CalendarAccess {
+        guard store.permission() != .restricted else { return .denied }
         setting.set(true)
         if store.permission() == .notDetermined {
             _ = try? await store.requestFullAccess()

@@ -91,14 +91,20 @@ public final class CalendarPreferenceModel: ObservableObject {
     /// shows or the person comes back from System Settings. Never asks.
     public func recheck() {
         guard state != .asking else { return }
-        state = Self.state(choice: setting.choice, permission: store.permission())
+        let permission = store.permission()
+        // macOS has decided since it couldn't be asked: that note is done.
+        if permission != .notDetermined { couldNotAsk = false }
+        state = Self.state(choice: setting.choice, permission: permission)
     }
 
     /// Turns the calendar on or off. On asks macOS only if it never has; if
     /// it said no before, it won't ask again, and the switch says how to allow
-    /// it in System Settings.
+    /// it in System Settings. On a Mac that doesn't let apps read calendars,
+    /// nothing changes.
     public func setOn(_ on: Bool) async {
         guard state != .asking else { return }
+        recheck()
+        guard state != .restricted else { return }
         couldNotAsk = false
         setting.set(on)
         guard on, store.permission() == .notDetermined else {
@@ -106,11 +112,7 @@ public final class CalendarPreferenceModel: ObservableObject {
             return
         }
         state = .asking
-        do {
-            _ = try await store.requestFullAccess()
-        } catch {
-            couldNotAsk = true
-        }
+        _ = try? await store.requestFullAccess()
         let permission = store.permission()
         if permission == .notDetermined {
             // Nothing was decided: the choice goes back, so the switch and

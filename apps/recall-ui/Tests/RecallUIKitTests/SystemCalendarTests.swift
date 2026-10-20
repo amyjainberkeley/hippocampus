@@ -110,7 +110,9 @@ final class SystemCalendarTests: XCTestCase {
             (true, .fullAccess, .allowed), (true, .notDetermined, .notAsked), (true, .denied, .denied),
             (true, .addOnly, .denied), (true, .restricted, .denied),
             (nil, .fullAccess, .notAsked), (false, .fullAccess, .notAsked), (nil, .denied, .notAsked),
-            (false, .restricted, .notAsked),
+            (nil, .notDetermined, .notAsked),
+            // A Mac that doesn't let apps read calendars: never offered, whatever was chosen.
+            (nil, .restricted, .denied), (false, .restricted, .denied),
         ]
         for (choice, permission, access) in rows {
             XCTAssertEqual(SystemCalendar.access(choice: choice, permission: permission), access,
@@ -183,6 +185,25 @@ final class SystemCalendarTests: XCTestCase {
         let access = await calendar.turnOn()
         XCTAssertEqual(access, .denied)
         XCTAssertEqual(store.requestCount, 0, "macOS won't ask twice: System Settings is where it changes")
+        XCTAssertTrue(calendar.canAllowInSystemSettings)
+        store.change(to: .addOnly)
+        XCTAssertTrue(calendar.canAllowInSystemSettings, "add-only access is changed there too")
+    }
+
+    func testOnAMacThatDoesNotAllowItNothingIsOfferedOrKept() async throws {
+        let store = FakeCalendarStore(.restricted, events: [event("a", hour: 9)])
+        let setting = CalendarSetting.inMemory()
+        let calendar = SystemCalendar(store: store, setting: setting)
+        let before = await calendar.access()
+        XCTAssertEqual(before, .denied, "Today offers only what can work")
+        let access = await calendar.turnOn()
+        XCTAssertEqual(access, .denied)
+        XCTAssertNil(setting.choice, "no choice is kept that the Mac won't allow")
+        XCTAssertEqual(store.requestCount, 0)
+        XCTAssertFalse(calendar.canAllowInSystemSettings, "the person can't change it in System Settings")
+        let events = try await calendar.events(in: day)
+        XCTAssertEqual(events, [])
+        XCTAssertEqual(store.readIntervals, [])
     }
 
     func testShowCalendarWhenMacOSCantBeAsked() async {

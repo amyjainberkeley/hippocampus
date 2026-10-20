@@ -12,9 +12,9 @@ import AppKit
 /// Preferences' switch for showing the calendar on Today: read-only, on
 /// this Mac only, offered once on Today and here (SPEC-DELTA 5). Turning it
 /// on asks macOS for Calendars access; when macOS denies it or takes it back
-/// later, the switch is off and says how to turn it on again in System
-/// Settings. Only each event's title, time, calendar and place are read;
-/// attendee lists never are.
+/// later, the switch keeps the person's choice and says how to allow it
+/// again in System Settings, with Open System Settings…. Only each event's
+/// title, time, calendar and place are read; attendee lists never are.
 ///
 /// Preferences › General shows it under the Ask key. It reads the person's
 /// own calendar choice, or a model made from fakes for pictures
