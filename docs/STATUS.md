@@ -103,8 +103,42 @@ CPU share.
 
 - Six password managers are skipped by bundle ID. Others are read like any
   app; `denylist.toml` keeps one out ([GUIDE](GUIDE.md#keep-an-app-out)).
-- A one-time code or a bank alert shown in a window can be stored. The
-  secret checks look for passwords, keys and tokens.
+- A one-time code with no keyword near it ("verification code",
+  "passcode", "your code is" and the like) or a bank alert shown in a window
+  can be stored. Card numbers that pass the Luhn check and codes next to such
+  a keyword are dropped, as are labelled secrets, GitHub and AWS keys and
+  JSON web tokens (`scripts/e2e-full.sh`, check c8).
+- A key shown on its own, with no label such as `api_key =`, is stored: an
+  unlabelled `sk-ant-…` key reached memory in the end-to-end test (c8).
+- A token in a page's address is stored with the address when the window
+  shows only the site name, as Safari does: the secret checks read the
+  window's text, not the address (c8.url).
+- The text reader's ONNX Runtime 1.30 carries Microsoft's telemetry client.
+  Unblocked, the worker posted to a Microsoft collector over HTTPS (four
+  requests, about 45 KB, in one test run), and it keeps that client's queue,
+  URL cache and HTTP storage in `~/Library`, outside Hippocampus's folders.
+  The end-to-end test now runs the worker in a sandbox and fails on the
+  attempt (`net.runtime-log`, `net.binary`, `net.isolation`).
+- Copy for your AI and the other copy buttons put plain text on the
+  clipboard, not marked transient, concealed or current-host-only, so a
+  clipboard manager keeps it and Universal Clipboard can carry it to your
+  other devices (audit check `pasteboard`).
+- The database key is a login-Keychain item that never syncs, but no
+  this-device-only class is set: it moves with a copied login keychain
+  (audit check `custody.this-device`).
+- The data folder is created 0755 and the database 0644 inside `~/Library`,
+  not 0700 and 0600 (audit check `modes`).
+- After the cask's zap and `mci-agent disconnect --all`,
+  `~/Library/Application Support/Hippocampus`, `~/.mci` and the AI-tool
+  registry's lock files are left, and the MCP registrations stay in the AI
+  tools' own settings (e3).
+- The window can delete the last 24 hours or everything, but has no button
+  that forgets one moment; the reader it uses can.
+- Capture consent is kept in the App Group container, which follows the
+  account and not `HOME`: a build launched under a throwaway home wrote
+  `~/Library/Group Containers/group.ai.hippocampus/capture-consent.json` in
+  the real one, and the development group is not on the cask's zap list
+  (audit check `net.isolation`).
 - A private browser window that shows no private marker is read.
 - In Low Power Mode only the window in front is read.
 - Connected AI tools can read your memory while Hippocampus is quit, and the
@@ -133,6 +167,23 @@ CPU share.
   tiers and ruled-out claims out of the tree.
 - `scripts/verify-quit-leaves-nothing.sh <app>` checks a built app leaves
   nothing running after Quit.
+- `scripts/e2e-full.sh` is the full end-to-end test, a manual gate. It
+  builds the development app and its disk image and checks them (mounted
+  read-only: signatures, layout, architectures, usage strings), opens the
+  app from the build under a throwaway home through the launch gate, sends
+  made-up windows through the capture helper's pipeline into the agent, and
+  checks the window's reads, search, Ask, the handoff packet, Resume's
+  plan, the secret checks, forgetting, retention and uninstall. Then
+  `scripts/audit-storage-security.sh` audits the home: ciphertext brain,
+  WAL and screenshots, no plain text anywhere else, modes, key custody, the
+  clipboard and the network (no-egress, `lsof` samples and the unified
+  log). It needs an unlocked Mac and takes 20 to 40 minutes; every check
+  prints PASS, FAIL, SKIP or PERSON. `--reference-dmg` also inspects a
+  release-signed disk image. Without a GUI, `scripts/e2e-full.sh --headless`
+  runs in the `e2e-full-headless` lane, and the audit's detectors run on
+  made-up homes in `storage-audit-contract`. What only a person can check
+  (Screen Recording and Accessibility, Shift twice, a notarized first open,
+  a live Claude Code session) is the 10-minute check on a fresh account.
 - `apps/hippocampus/Resources/build-app.sh` refuses to assemble a Developer
   ID signed app when this page's baseline is more than three commits behind
   `HEAD`. An ad-hoc development build (`--debug --development-ad-hoc`) builds

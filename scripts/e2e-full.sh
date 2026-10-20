@@ -164,8 +164,10 @@ cleanup() {
     local pid
     for pid in $(pgrep -P $$ 2>/dev/null); do kill -TERM "$pid" 2>/dev/null; done
     if [[ -n "$EVIDENCE_DIR" ]]; then
+        # The WAL copies are ciphertext the audit already judged; list them.
         mkdir -p "$EVIDENCE_DIR"
-        cp -R "$H/." "$EVIDENCE_DIR/" 2>/dev/null
+        (cd "$H" && find . -mindepth 1 -maxdepth 1 ! -name wal-snapshots ! -name .sampling -exec cp -R {} "$EVIDENCE_DIR/" \;) 2>/dev/null
+        ls -l "$H/wal-snapshots" > "$EVIDENCE_DIR/wal-snapshots.txt" 2>/dev/null
     fi
     if (( KEEP == 1 || STATUS_FAIL > 0 )); then
         printf '\nThrowaway root kept at %s\n' "$RUN_ROOT"
@@ -312,8 +314,8 @@ inspect_dmg() {
         fail "$id.sign-each" "executables that do not verify: ${unsigned[*]}"
     fi
     if [[ "$kind" == "release" ]]; then
-        if spctl --assess --type execute "$app" > "$H/$id-spctl.log" 2>&1; then
-            pass "$id.gatekeeper" "Gatekeeper accepts the app (spctl --assess)"
+        if spctl --assess --type execute -vv "$app" > "$H/$id-spctl.log" 2>&1; then
+            pass "$id.gatekeeper" "Gatekeeper accepts the app (spctl --assess): $(grep '^source=' "$H/$id-spctl.log")"
         elif grep -q 'Unnotarized Developer ID' "$H/$id-spctl.log"; then
             person "$id.gatekeeper" "Gatekeeper: 'Unnotarized Developer ID' — the dry run never notarizes; notarizing and stapling need the owner's Developer ID and notary profile (scripts/release-0.3.0.sh)"
         else
@@ -332,8 +334,8 @@ inspect_dmg() {
             fail "$id.runtime" "the capture helper lacks the hardened runtime ($runtime)"
         fi
     else
-        spctl --assess --type execute "$app" > "$H/$id-spctl.log" 2>&1
-        person "$id.gatekeeper" "Gatekeeper and notarization apply to the signed release only; this ad-hoc build is rejected by design ($(tail -n 1 "$H/$id-spctl.log")). Opening the notarized DMG on a fresh account needs a person (HUMAN-CHECKLIST step 1)."
+        spctl --assess --type execute -vv "$app" > "$H/$id-spctl.log" 2>&1
+        person "$id.gatekeeper" "Gatekeeper and notarization apply to the signed release only; this ad-hoc build is rejected by design ($(grep -E '^source=|rejected' "$H/$id-spctl.log" | tail -n 1)). Opening the notarized DMG on a fresh account needs a person (HUMAN-CHECKLIST step 1)."
     fi
     # Telemetry endpoints compiled into anything the app ships.
     local telemetry
@@ -354,14 +356,15 @@ inspect_dmg() {
             [[ "$line" == "arm64" || "$line" == "arm64e" ]] || arm_only=0
         fi
     done < <(find "$app/Contents" -type f \( -perm -0100 -o -name '*.dylib' -o -name '*.so' \) | head -n 400)
-    local count
+    local count own own_x86 universal
     count="$(wc -l < "$archs_report" | tr -d ' ')"
-    if (( any_x86 == 0 && arm_only == 1 )); then
-        pass "$id.arch" "lipo: all $count Mach-O files are arm64 only. Intel Macs are not supported: the app refuses to start on Intel (MciBootGuards.hostIsAppleSilicon) and the cask requires arm64"
-    elif (( any_x86 == 1 )); then
-        fail "$id.arch" "lipo: mixed architectures ($(grep -c x86_64 "$archs_report") of $count files carry x86_64); see $id-architectures.txt"
+    own="$(grep -E '^Contents/MacOS/|^Contents/Resources/HippocampusOCR/hippocampus-ocr' "$archs_report")"
+    own_x86="$(printf '%s\n' "$own" | grep -c x86_64)"
+    universal="$(grep x86_64 "$archs_report" | cut -f1 | sed -E 's|^Contents/Frameworks/([^/]+)/.*|\1|' | sort -u | tr '\n' ' ')"
+    if [[ -n "$own" && "$own_x86" == "0" ]] && ! printf '%s\n' "$own" | grep -qv $'\tarm64$'; then
+        pass "$id.arch" "lipo: the app's $(printf '%s\n' "$own" | grep -c .) executables (Contents/MacOS and the OCR worker) are arm64 only, so Intel Macs are not supported: the app refuses to start on Intel (MciBootGuards.hostIsAppleSilicon) and the cask requires arm64.${universal:+ Universal parts come from ${universal}(prebuilt).} $count Mach-O files checked; see $id-architectures.txt"
     else
-        fail "$id.arch" "lipo: unexpected architectures; see $id-architectures.txt"
+        fail "$id.arch" "lipo: the app's own executables are not uniformly arm64: $(printf '%s\n' "$own" | grep -v $'\tarm64$' | head -n 3 | tr '\n' ';')"
     fi
     # Info.plist and usage strings.
     local plist="$app/Contents/Info.plist" key value missing=()
@@ -376,8 +379,14 @@ inspect_dmg() {
             printf '%s: %s\n' "$key" "$value" >> "$H/$id-usage-strings.txt"
         fi
     done
+    local core_missing=()
+    for key in ${missing[@]+"${missing[@]}"}; do
+        case "$key" in NSScreenCaptureUsageDescription|NSAccessibilityUsageDescription|NSAppleEventsUsageDescription) core_missing+=("$key") ;; esac
+    done
     if (( ${#missing[@]} == 0 )); then
         pass "$id.usage" "Info.plist has all 7 usage strings (Screen Recording, Accessibility, Automation, Calendars x2, Contacts, Media); text in $id-usage-strings.txt"
+    elif [[ "$kind" == "release" && ${#core_missing[@]} -eq 0 ]]; then
+        pass "$id.usage" "Info.plist has the Screen Recording, Accessibility and Automation usage strings; it lacks ${missing[*]}, which this branch added after that build"
     else
         fail "$id.usage" "Info.plist lacks: ${missing[*]}"
     fi
@@ -443,10 +452,21 @@ fi
 section "(b) First launch"
 if (( HEADLESS == 1 )) || [[ -z "$APP" ]]; then
     skip b "no GUI launch in a headless run"
-elif ! /usr/sbin/ioreg -n Root -d1 -a | python3 "$SCRIPT_DIR/live-capture/check_session.py" \
-        --expected-uid "$(id -u)" --expected-user "$(id -un)" > "$H/session.txt" 2>&1; then
-    skip b "no unlocked GUI session: $(tail -n 1 "$H/session.txt")"
+elif ! /usr/sbin/ioreg -n Root -d1 -a | python3 -c '
+import plistlib, sys
+root = plistlib.loads(sys.stdin.buffer.read())
+root = root[0] if isinstance(root, list) else root
+uid = int(sys.argv[1])
+sessions = [s for s in root.get("IOConsoleUsers", []) if s.get("kCGSSessionOnConsoleKey") and s.get("kCGSSessionUserIDKey") == uid]
+if not sessions:
+    raise SystemExit("no login session for this user at the console")
+print("locked" if sessions[0].get("CGSSessionScreenIsLocked") else "unlocked")
+' "$(id -u)" > "$H/session.txt" 2>&1; then
+    skip b "no GUI login session for this user: $(tail -n 1 "$H/session.txt")"
 else
+    # A locked screen still runs the app and setup; they are only not seen.
+    [[ "$(cat "$H/session.txt")" == "locked" ]] && printf 'note: the screen is locked; setup runs but is not visible\n'
+
     if [[ "$APP" == /Applications/* ]]; then
         fail b "refusing to launch an app inside /Applications"
     else
@@ -455,7 +475,7 @@ else
             HOME="$HOME" VERIFY_HOME="$E2E_HOME" VERIFY_EVIDENCE="$H/first-launch.txt" \
             VERIFY_EXPECT_ONBOARDING=1 VERIFY_WAIT_SECONDS=20 \
             "$SCRIPT_DIR/verify-app-launches.sh" "$APP" > "$H/first-launch.log" 2>&1; then
-            pass b1 "launched from the built bundle under the throwaway HOME: alive for 20 s, setup (onboarding) up the whole time"
+            pass b1 "launched from the built bundle under the throwaway HOME: alive for 20 s, setup (onboarding) up the whole time (screen $(cat "$H/session.txt"))"
         else
             fail b1 "launch gate: $(grep -E 'FAIL|ERROR' "$H/first-launch.log" | tail -n 1)"
         fi
