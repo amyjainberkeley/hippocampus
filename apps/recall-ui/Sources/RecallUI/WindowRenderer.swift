@@ -322,11 +322,11 @@ enum WindowRenderer {
 
     private static func render(_ scene: Scene, to directory: URL) async {
         if let make = scene.view {
-            // A page drawn on its own reaches nothing of this Mac's: the
-            // preview's Ask {Tool} and a Resume that opens nothing, unless
-            // the scene brings its own.
+            // A page drawn on its own reaches nothing of this Mac's: Sam's
+            // Ask {Tool}, which reaches no agent and opens nothing, and a
+            // Resume that opens nothing, unless the scene brings its own.
             let view = await make()
-                .environment(\.handoffServices, HandoffServices.preview)
+                .environment(\.handoffServices, ShellWorld.samsHandoff)
                 .environment(\.resumeServices, ResumeServices.none)
                 .environment(\.controlActiveState, .key)
                 .environment(\.locale, Locale(identifier: "en_US"))
@@ -371,13 +371,16 @@ enum WindowRenderer {
                                  understanding: understanding,
                                  calendar: calendar)
         await scene.prepare(model)
-        // A fresh saved status, as Hippocampus writes it while remembering.
+        let remembering = scene.status ?? ShellRenderFixture.remembering(now: now)
+        // A fresh saved status, as Hippocampus writes it while remembering,
+        // or blocked while the scene's status says it isn't: Today then says
+        // where you left off, never "Now".
         let stamp = ISO8601DateFormatter().string(from: now)
+        let blocked = remembering.todayStop == nil ? "" : #", "blocked_reason": "capture_disabled""#
         let receipt = try? CaptureHealthReceipt.decode(Data("""
             {"schema_version": 1, "updated_at": "\(stamp)", "last_stored_frame_at": "\(stamp)",
-             "stored_frame_count": 10, "stored_screenshot_count": 2}
+             "stored_frame_count": 10, "stored_screenshot_count": 2\(blocked)}
             """.utf8))
-        let remembering = scene.status ?? ShellRenderFixture.remembering(now: now)
         // Sam's Working On, its pages, searches and calendar (lane C's
         // fixture), its screenshots drawn, sealed and opened as the app opens
         // the person's own. The shell's pages read it beside the day.

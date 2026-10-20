@@ -138,12 +138,20 @@ final class DemoRenderWorld {
     }
 
     /// A whole-hour offset that puts now in the afternoon, so the pictures
-    /// show a week under way whenever they are drawn.
-    static func afternoonOffset(now: Date) -> Int {
+    /// show a week under way whenever they are drawn; or at `hour` (0 to 23),
+    /// to see the week as it looks then, as when the day's work is done.
+    static func afternoonOffset(now: Date, hour wanted: Int = 14) -> Int {
         let hour = Int(now.timeIntervalSince1970) / 3600 % 24
-        var offset = (14 - hour + 24) % 24
+        var offset = (wanted - hour + 24) % 24
         if offset > 14 { offset -= 24 }
         return offset * 3600
+    }
+
+    /// The hour the pictures are drawn at: `MCI_DEMO_RENDER_HOUR`, or 2 PM.
+    static var renderHour: Int {
+        guard let value = ProcessInfo.processInfo.environment["MCI_DEMO_RENDER_HOUR"], let hour = Int(value),
+              (0...23).contains(hour) else { return 14 }
+        return hour
     }
 
     /// What every tool and agent read here runs with, and nothing else: a
@@ -289,7 +297,7 @@ final class DemoRenderWorld {
         let keyHex = (0..<32).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
         let nowDate = Date()
         let now = UInt64(nowDate.timeIntervalSince1970 * 1_000_000)
-        let tz = afternoonOffset(now: nowDate)
+        let tz = afternoonOffset(now: nowDate, hour: renderHour)
         let environment = toolEnvironment(home: home, keyHex: keyHex)
         let clock = ["--now-us", String(now), "--tz-offset-secs", String(tz)]
         let list = folder.appendingPathComponent("screens.json")
@@ -422,10 +430,15 @@ final class DemoRenderWorld {
         let now = self.now
         let calendar = self.calendar
         let reader = self.reader
+        // Ren last asked Claude, so the buttons read Ask Claude, as on the
+        // person's own Mac once they have picked a tool; kept in memory only.
+        let choices = HandoffChoices.ephemeral()
+        choices.lastTool = .claude
+        choices.markTold(.claude)
         return WindowServices(
             searches: work,
             calendar: calendarReader,
-            handoff: HandoffServices(client: client, tools: { Self.tools }, choices: .ephemeral(), notes: .shared,
+            handoff: HandoffServices(client: client, tools: { Self.tools }, choices: choices, notes: .shared,
                                      open: { _ in false }, home: "/Users/ren"),
             resume: ResumeServices(
                 planner: work,
@@ -504,6 +517,9 @@ final class DemoRenderWorld {
         }
         let preset = WindowShellPreset(sidebar: SidebarModel.make(snapshot: snapshot, kinds: kinds,
                                                                   hides: SidebarHides.Choices()))
+        // Working On's pictures, read before the picture is taken.
+        let moments = WorkMomentCache()
+        await moments.load(snapshot.items.compactMap(\.thumbnailMoment), reader: reader)
         var place = MemoryWorkspaceSelection.overview
         var route: RecallRoute?
         switch shot {
@@ -547,7 +563,7 @@ final class DemoRenderWorld {
                     preset: preset, services: services)
             })
         guard case .resume = shot, case let .item(item) = place, let resume = services.resume else {
-            return AnyView(view.environment(\.workNow, { now }))
+            return AnyView(view.environment(\.workNow, { now }).environment(\.workMoments, moments))
         }
         // Resume's sheet over the item's page, as macOS shows it at the
         // window's top: a picture can't capture a sheet's own window.
@@ -567,6 +583,7 @@ final class DemoRenderWorld {
                 sheet.padding(.top, 52)
             }
             .environment(\.workNow, { now })
+            .environment(\.workMoments, moments)
         )
     }
 

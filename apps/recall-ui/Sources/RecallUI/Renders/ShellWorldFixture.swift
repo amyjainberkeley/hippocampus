@@ -19,17 +19,22 @@ enum ShellWorld {
             searches: PreviewSearchesReader(records: WorkFixtures.searches(now: now, calendar: calendar)),
             calendar: FixtureCalendar(access: .allowed, events: WorkFixtures.calendarEvents(now: now,
                                                                                             calendar: calendar)))
-        // Sam last asked Claude, so the buttons read Ask Claude, as the
-        // prototype draws them; nothing is kept past the picture.
-        var handoff = HandoffServices.preview
-        handoff.choices = .ephemeral()
-        handoff.choices.lastTool = .claude
-        handoff.choices.markTold(.claude)
-        services.handoff = handoff
+        services.handoff = samsHandoff
         services.aiTools = HandoffFixtures.aiToolsModel(.connected)
         services.privacy = { PrivacyRenderScene.page() }
         services.readsKinds = false
         return services
+    }
+
+    /// Ask {Tool} as Sam has it: Claude was asked last, so the buttons read
+    /// Ask Claude, as the prototype draws them. Nothing is kept past the
+    /// picture, no agent is reached and nothing opens.
+    static var samsHandoff: HandoffServices {
+        var handoff = HandoffServices.preview
+        handoff.choices = .ephemeral()
+        handoff.choices.lastTool = .claude
+        handoff.choices.markTold(.claude)
+        return handoff
     }
 
     /// Sam's Working On, its pages and searches (`WorkFixtures`), with

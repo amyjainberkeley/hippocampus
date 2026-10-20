@@ -120,6 +120,71 @@ final class TodayCardStateTests: XCTestCase {
                        "the last day of use, newest first; never the card's item or one the person hid")
     }
 
+    /// A session that ends on a chat with people (never part of an item)
+    /// is still the project's: the card finds the item most of the
+    /// session's moments belong to, for Resume and "Part of" (SPEC 3.1,
+    /// SPEC-DELTA 3). Moments from before the session don't count.
+    func testASessionEndingOnAChatKeepsItsProjectsResume() async throws {
+        let monday = try UnderstandingFixture.overview()
+        let start = nowUs - 30 * minute
+        let last = nowUs - 2 * minute
+        let now = RightNow(state: .inProgress, sinceUs: start, startUs: start, lastSavedUs: last, blockId: nil,
+                           title: "Shipping the fix", writtenBy: "measured", appName: "Slack", openEventId: 7_003,
+                           reopen: nil)
+        let understanding = ScriptedUnderstanding()
+        await understanding.setOverview(monday.with(now: now))
+        let reader = MomentsReader([
+            MomentFactory.hit(7_003, "com.tinyspeck.slackmacgap", title: "#team", minutesAgo: 2,
+                              caption: "Chatting in #team"),
+            MomentFactory.hit(7_002, "com.apple.Terminal", title: "trailhead-shop \u{2014} zsh", minutesAgo: 10),
+            MomentFactory.hit(7_001, "com.microsoft.VSCode", title: "tax.rs \u{2014} trailhead-shop", minutesAgo: 20),
+            MomentFactory.hit(7_000, "com.figma.Desktop", title: "Trailhead pricing v3", minutesAgo: 25),
+            MomentFactory.hit(6_901, "com.figma.Desktop", title: "Trailhead pricing v3", minutesAgo: 80),
+            MomentFactory.hit(6_900, "com.figma.Desktop", title: "Trailhead pricing v3", minutesAgo: 90),
+        ])
+        let work = PreviewWorkReader(snapshot: WorkSnapshot(items: [
+            WorkItem(id: "w_shop", kind: .code, name: "trailhead-shop", lastUs: UInt64(last)),
+            WorkItem(id: "w_card", kind: .design, name: "Trailhead pricing v3", lastUs: UInt64(start)),
+        ], momentItems: [7_002: "w_shop", 7_001: "w_shop", 7_000: "w_card", 6_901: "w_card", 6_900: "w_card"]))
+        let model = OverviewViewModel(understanding: understanding, selectedDate: SampleDay.now,
+                                      calendar: SampleDay.calendar, healthLoader: { SampleDay.receipt() },
+                                      now: { SampleDay.now }, deletions: MemoryDeletionSignal(),
+                                      savedBefore: { _ in true }, reader: reader, work: work)
+        await model.reload()
+        XCTAssertEqual(model.cardItem?.id, "w_shop",
+                       "two of the session's moments are the shop's and one the design's; earlier ones don't count")
+        XCTAssertTrue(model.showsPartOf, "the card's chat doesn't name the shop, so Part of says it")
+    }
+
+    /// The newest moment's own item wins when it has one.
+    func testTheNewestMomentsOwnItemComesFirst() async throws {
+        let monday = try UnderstandingFixture.overview()
+        let start = nowUs - 30 * minute
+        let last = nowUs - 2 * minute
+        let now = RightNow(state: .inProgress, sinceUs: start, startUs: start, lastSavedUs: last, blockId: nil,
+                           title: "Pricing", writtenBy: "measured", appName: "Figma", openEventId: 7_103,
+                           reopen: nil)
+        let understanding = ScriptedUnderstanding()
+        await understanding.setOverview(monday.with(now: now))
+        let reader = MomentsReader([
+            MomentFactory.hit(7_103, "com.figma.Desktop", title: "Trailhead pricing v3", minutesAgo: 2),
+            MomentFactory.hit(7_102, "com.microsoft.VSCode", title: "tax.rs \u{2014} trailhead-shop", minutesAgo: 10),
+            MomentFactory.hit(7_101, "com.microsoft.VSCode", title: "tax.rs \u{2014} trailhead-shop", minutesAgo: 20),
+        ])
+        let work = PreviewWorkReader(snapshot: WorkSnapshot(items: [
+            WorkItem(id: "w_shop", kind: .code, name: "trailhead-shop", lastUs: UInt64(start)),
+            WorkItem(id: "w_card", kind: .design, name: "Trailhead pricing v3", lastUs: UInt64(last)),
+        ], momentItems: [7_103: "w_card", 7_102: "w_shop", 7_101: "w_shop"]))
+        let model = OverviewViewModel(understanding: understanding, selectedDate: SampleDay.now,
+                                      calendar: SampleDay.calendar, healthLoader: { SampleDay.receipt() },
+                                      now: { SampleDay.now }, deletions: MemoryDeletionSignal(),
+                                      savedBefore: { _ in true }, reader: reader, work: work)
+        await model.reload()
+        XCTAssertEqual(model.cardItem?.id, "w_card")
+        XCTAssertEqual(reader.searches.filter { $0.browse && $0.limit == OverviewViewModel.sessionMomentsAsked }.count,
+                       0, "the session is read only when the newest moment belongs to nothing")
+    }
+
     func testAlsoFromYesterdayGoesOnceTodayHoldsHalfAnHour() async throws {
         let monday = try UnderstandingFixture.overview()
         let understanding = ScriptedUnderstanding()

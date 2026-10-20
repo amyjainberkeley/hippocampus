@@ -299,12 +299,44 @@ public final class OverviewViewModel: ObservableObject {
     private func readWork() async {
         guard let workReader else { return }
         work = try? await workReader.work(days: 14)
-        if let id = rightNow?.openEventId.flatMap({ UInt64(exactly: $0) }) {
-            let found = try? await workReader.items(forMoments: [id])
-            cardItemId = found?[id] ?? work?.momentItems[id]
-        } else {
+        guard let card = rightNow, let id = card.openEventId.flatMap({ UInt64(exactly: $0) }) else {
             cardItemId = nil
+            return
         }
+        let found = try? await workReader.items(forMoments: [id])
+        if let item = found?[id] ?? work?.momentItems[id] {
+            cardItemId = item
+        } else {
+            cardItemId = await sessionItem(of: card, workReader: workReader)
+        }
+    }
+
+    /// How many of the card's session's moments are asked about when its
+    /// newest moment belongs to no item.
+    static let sessionMomentsAsked = 120
+
+    /// The Working On item most of the card's session belongs to, when its
+    /// newest moment belongs to none: a session that ends on a chat with
+    /// people (never part of an item) is still the project's, so the card
+    /// keeps its Resume and "Part of" (SPEC 3.1, SPEC-DELTA 3). The item
+    /// with the most of the session's moments; a tie goes to the newer.
+    private func sessionItem(of card: RightNowCard, workReader: any WorkReader) async -> String? {
+        guard let reader, card.copyRange.lowerBound >= 0 else { return nil }
+        let options = SearchOptions(text: "", limit: Self.sessionMomentsAsked,
+                                    timeFromUs: UInt64(card.copyRange.lowerBound),
+                                    timeToUs: UInt64(card.copyRange.upperBound), browse: true)
+        guard let moments = try? await reader.search(options), !moments.isEmpty else { return nil }
+        let ids = moments.sorted { $0.tsUs == $1.tsUs ? $0.id > $1.id : $0.tsUs > $1.tsUs }.map(\.id)
+        guard let found = try? await workReader.items(forMoments: ids), !found.isEmpty else { return nil }
+        var counts: [String: (moments: Int, newest: Int)] = [:]
+        for (index, id) in ids.enumerated() {
+            guard let item = found[id] else { continue }
+            let seen = counts[item] ?? (0, index)
+            counts[item] = (seen.moments + 1, seen.newest)
+        }
+        return counts.max { a, b in
+            a.value.moments == b.value.moments ? a.value.newest > b.value.newest : a.value.moments < b.value.moments
+        }?.key
     }
 
     private func memoryWasDeleted() {
