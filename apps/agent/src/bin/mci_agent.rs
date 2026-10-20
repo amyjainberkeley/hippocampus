@@ -263,7 +263,7 @@ impl ContextOutputFormat {
 }
 
 fn default_device_id_path() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     home.join(".mci/device-id")
 }
 
@@ -272,7 +272,7 @@ fn default_log_path() -> PathBuf {
 }
 
 fn page_content_socket_path() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     home.join("Library/Application Support/MCI/page_content.sock")
 }
 
@@ -286,7 +286,7 @@ fn capture_ingestion_enabled(environment_value: Option<&str>) -> bool {
 fn default_db_path() -> PathBuf {
     // ~/Library/Application Support/MCI/mci.sqlite per ADR-0008 §1.4.
     // Expand $HOME at run-time (no glob-style ~ expansion in env vars).
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     home.join("Library/Application Support/MCI/mci.sqlite")
 }
 
@@ -1999,7 +1999,7 @@ fn repair_existing_client_registrations(db_path: &Path) {
 /// Where the client files live. `CODEX_HOME` overrides `~/.codex`, as it
 /// does for Codex itself and for the MCP registry.
 fn client_homes() -> (PathBuf, Option<PathBuf>) {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     let codex_home = std::env::var_os("CODEX_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);

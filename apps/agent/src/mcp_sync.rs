@@ -68,10 +68,15 @@ url  = \"http://127.0.0.1:7890/mcp\"       # required, must be loopback
 # enabled = true                          # optional, defaults to true
 ";
 
-/// Canonical config path: `~/Library/Application Support/MCI/mcp-servers.toml`.
+/// Canonical config path:
+/// `~/Library/Application Support/MCI/Config.noindex/mcp-servers.toml`. A
+/// file an earlier release left in the data folder itself, where Spotlight
+/// indexes it, is moved there first (review S9).
 #[must_use]
 pub fn default_config_path() -> PathBuf {
-    McpServersConfig::default_path()
+    let path = McpServersConfig::default_path();
+    let _ = McpServersConfig::adopt_legacy_file(&path);
+    path
 }
 
 /// What one sync pass did. Every field is a content-free counter: no

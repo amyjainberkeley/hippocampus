@@ -191,7 +191,7 @@ pub enum UserAllowlistError {
 /// helper's `defaultUserAllowlistURL`.
 #[must_use]
 pub fn default_user_allowlist_path() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     home.join("Library/Application Support/MCI/user-allowlist.toml")
 }
 

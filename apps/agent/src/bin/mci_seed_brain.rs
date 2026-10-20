@@ -63,7 +63,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Default path matching `mci-agent mcp-serve`.
 fn default_db_path() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     home.join("Library/Application Support/MCI/mci.sqlite")
 }
 

@@ -171,6 +171,10 @@ pub fn purge_once(
         .conn()
         .execute_batch("VACUUM")
         .map_err(|e| StoreError::Backend(format!("VACUUM after purge: {e}")))?;
+    // Then empty the write-ahead log, so frames that still hold the expired
+    // rows don't linger in `-wal` (review S3). A reader that keeps the log
+    // busy only delays this to the next purge: the rows are already gone.
+    let _ = crate::sqlcipher_brain_store::checkpoint_and_truncate_wal(guard.conn());
     drop(guard);
     let blobs_deleted = store.remove_unreferenced_keyframe_candidates(&blob_digests)?;
 

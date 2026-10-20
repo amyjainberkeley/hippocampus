@@ -78,7 +78,7 @@ impl Check {
 
 /// Where the helper writes its logs. Read-only; never created here.
 fn helper_log_path() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     home.join("Library/Logs/MCI/helper.stderr.log")
 }
 
@@ -204,7 +204,7 @@ fn fresh_capture_checks(receipt: &CaptureStatus, now_ms: u64) -> Option<Vec<Chec
 
 /// Is there an embedder model, and therefore semantic recall?
 fn check_embedder() -> Check {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     let candidates = [
         std::env::var_os("MCI_ARCTIC_MODEL_PATH").map(PathBuf::from),
         Some(PathBuf::from(
@@ -301,7 +301,7 @@ impl HandoffProbe {
     }
 
     fn from_environment() -> Self {
-        let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+        let home = mci_core::home::user_home_or_unwritable();
         let codex_home = std::env::var_os("CODEX_HOME")
             .filter(|value| !value.is_empty())
             .map(PathBuf::from);

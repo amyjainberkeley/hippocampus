@@ -1,10 +1,17 @@
 //! V2-MCP-2 on-disk registration config.
 //!
-//! Schema lives at `~/Library/Application Support/MCI/mcp-servers.toml`
+//! Schema lives at
+//! `~/Library/Application Support/MCI/Config.noindex/mcp-servers.toml`
 //! (mode 0600, uid-matched — same precedent as the V2-P10
 //! `user-allowlist.toml` from PR #251). The onboarding "Connect MCP
 //! Servers" slide writes this file; the agent reads it on start and
 //! constructs one [`crate::HttpSseTransport`] per enabled entry.
+//!
+//! The file can carry an `Authorization` header for the person's own
+//! servers, so it lives in a `.noindex` folder, which Spotlight does not
+//! index (storage-security review S9). A file left in the data folder
+//! itself by an earlier release is moved there on first read
+//! ([`McpServersConfig::adopt_legacy_file`]).
 //!
 //! # Schema (binding, schema version 1)
 //!
@@ -41,8 +48,12 @@ use thiserror::Error;
 use crate::registry::{ServerRegistration, ServerRegistry};
 use crate::transport::loopback::{LoopbackError, LoopbackHost};
 
-/// File name relative to `~/Library/Application Support/MCI/`.
+/// File name, inside [`CONFIG_DIR_NAME`].
 pub const DEFAULT_FILE_NAME: &str = "mcp-servers.toml";
+
+/// The folder inside `~/Library/Application Support/MCI/` that holds the
+/// file. The `.noindex` suffix keeps Spotlight out of it.
+pub const CONFIG_DIR_NAME: &str = "Config.noindex";
 
 /// Top-level on-disk shape. `#[serde(deny_unknown_fields)]` rejects any
 /// extra keys we did not document — Audit row #6.
@@ -135,12 +146,57 @@ pub enum ConfigError {
 }
 
 impl McpServersConfig {
-    /// Default config path: `~/Library/Application Support/MCI/mcp-servers.toml`.
+    /// Default config path:
+    /// `~/Library/Application Support/MCI/Config.noindex/mcp-servers.toml`.
     #[must_use]
     pub fn default_path() -> PathBuf {
-        let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
-        home.join("Library/Application Support/MCI")
-            .join(DEFAULT_FILE_NAME)
+        Self::path_in(&user_home_or_unwritable().join("Library/Application Support/MCI"))
+    }
+
+    /// The config path inside the data folder `data_dir`.
+    #[must_use]
+    pub fn path_in(data_dir: &Path) -> PathBuf {
+        data_dir.join(CONFIG_DIR_NAME).join(DEFAULT_FILE_NAME)
+    }
+
+    /// Where releases before 0.3 kept the file for `path`: in the data
+    /// folder itself, where Spotlight indexes it. `None` when `path` is not
+    /// inside a [`CONFIG_DIR_NAME`] folder.
+    #[must_use]
+    pub fn legacy_path_for(path: &Path) -> Option<PathBuf> {
+        let config_dir = path.parent()?;
+        if config_dir.file_name()? != CONFIG_DIR_NAME {
+            return None;
+        }
+        Some(config_dir.parent()?.join(DEFAULT_FILE_NAME))
+    }
+
+    /// Move a file an earlier release left at [`Self::legacy_path_for`]
+    /// into `path`'s `.noindex` folder (created owner-only), so Spotlight
+    /// stops indexing it. Nothing moves when `path` already exists or no
+    /// legacy file is there. A rename keeps the file's owner and mode, so
+    /// [`Self::load`] still refuses one that isn't private.
+    ///
+    /// # Errors
+    /// The folder can't be made, or the file can't be moved.
+    pub fn adopt_legacy_file(path: &Path) -> std::io::Result<bool> {
+        let Some(legacy) = Self::legacy_path_for(path) else {
+            return Ok(false);
+        };
+        if std::fs::symlink_metadata(path).is_ok() {
+            return Ok(false);
+        }
+        match std::fs::symlink_metadata(&legacy) {
+            Ok(metadata) if metadata.is_file() => {}
+            Ok(_) => return Ok(false),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        }
+        if let Some(dir) = path.parent() {
+            create_private_dir(dir)?;
+        }
+        std::fs::rename(&legacy, path)?;
+        Ok(true)
     }
 
     /// Read + parse the config at the given path.
@@ -218,6 +274,40 @@ fn is_valid_name(name: &str) -> bool {
         && name
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// `HOME` when it is an absolute folder, else this account's home from the
+/// password database (`getpwuid_r`); never a shared folder such as `/tmp`
+/// (storage-security review S12). Mirrors `mci_core::home`, which this
+/// OS-free crate does not depend on. With no home, the path names an empty
+/// root-owned folder, so reading finds nothing and writing fails.
+fn user_home_or_unwritable() -> PathBuf {
+    let home = match std::env::var_os("HOME") {
+        Some(value) => Some(PathBuf::from(value)),
+        None => std::env::home_dir(),
+    };
+    home.filter(|path| path.is_absolute())
+        .unwrap_or_else(|| PathBuf::from("/var/empty"))
+}
+
+#[cfg(unix)]
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    match std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+    {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error),
+    }
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+}
+
+#[cfg(not(unix))]
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)
 }
 
 #[cfg(unix)]
@@ -453,6 +543,67 @@ url = "http://127.0.0.1/mcp"
         let cfg = McpServersConfig::load(&path).await.expect("0600 load");
         assert_eq!(cfg.servers.len(), 1);
         let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[test]
+    fn the_config_lives_in_a_folder_spotlight_skips() {
+        let data = Path::new("/Users/sam/Library/Application Support/MCI");
+        let path = McpServersConfig::path_in(data);
+        assert_eq!(
+            path,
+            data.join("Config.noindex").join("mcp-servers.toml"),
+            "the file can carry an Authorization header, so it lives in a .noindex folder"
+        );
+        assert!(McpServersConfig::default_path().ends_with("MCI/Config.noindex/mcp-servers.toml"));
+        assert_eq!(
+            McpServersConfig::legacy_path_for(&path),
+            Some(data.join("mcp-servers.toml"))
+        );
+        assert_eq!(
+            McpServersConfig::legacy_path_for(&data.join("mcp-servers.toml")),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn an_earlier_file_moves_into_the_noindex_folder_and_stays_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let data = tempfile_dir();
+        let legacy = data.join("mcp-servers.toml");
+        let body = "[[server]]\nname = \"x\"\nurl = \"http://127.0.0.1/mcp\"\n";
+        std::fs::write(&legacy, body).unwrap();
+        std::fs::set_permissions(&legacy, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let path = McpServersConfig::path_in(&data);
+
+        assert!(McpServersConfig::adopt_legacy_file(&path).expect("adopt"));
+        assert!(!legacy.exists(), "the indexed copy is gone");
+        let folder = std::fs::metadata(path.parent().unwrap()).unwrap();
+        assert_eq!(folder.permissions().mode() & 0o777, 0o700);
+        let cfg = McpServersConfig::load(&path)
+            .await
+            .expect("moved file loads");
+        assert_eq!(cfg.servers.len(), 1);
+        // A second pass, and a newer file already in place, move nothing.
+        std::fs::write(&legacy, body).unwrap();
+        assert!(!McpServersConfig::adopt_legacy_file(&path).expect("no-op"));
+        assert!(legacy.exists(), "an existing new file is never overwritten");
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    #[tokio::test]
+    async fn a_moved_file_with_loose_permissions_is_still_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let data = tempfile_dir();
+        let legacy = data.join("mcp-servers.toml");
+        std::fs::write(&legacy, "").unwrap();
+        std::fs::set_permissions(&legacy, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let path = McpServersConfig::path_in(&data);
+        assert!(McpServersConfig::adopt_legacy_file(&path).expect("adopt"));
+        let err = McpServersConfig::load(&path)
+            .await
+            .expect_err("loose perms");
+        assert!(matches!(err, ConfigError::Permissions));
+        let _ = std::fs::remove_dir_all(&data);
     }
 
     fn tempfile_dir() -> PathBuf {

@@ -447,7 +447,7 @@ pub async fn run_retention_worker_with_status(
     shutdown: watch::Receiver<bool>,
     capture_receipt: Option<Arc<crate::capture_status::CaptureStatusWriter>>,
 ) -> Result<RetentionWorkerStats, RetentionWorkerError> {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     let side = SidePictureMaintenance::for_home(&home, &retention_json_path);
     run_retention_worker_with_side_pictures(
         store,

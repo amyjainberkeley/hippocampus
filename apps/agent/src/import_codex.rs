@@ -44,7 +44,7 @@ use crate::transcript::{
 /// Default rollout root.
 #[must_use]
 pub fn default_codex_root() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     home.join(".codex/sessions")
 }
 

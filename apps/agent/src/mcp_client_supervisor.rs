@@ -104,6 +104,14 @@ pub async fn boot_default() -> McpClientBoot {
 /// [`boot_default`] for tests and future CLI overrides.
 pub async fn boot_at(path: &std::path::Path) -> McpClientBoot {
     let registry = Arc::new(ServerRegistry::new());
+    // A file an earlier release left in the data folder, where Spotlight
+    // indexes it, moves into the `.noindex` folder first (review S9).
+    if let Err(error) = McpServersConfig::adopt_legacy_file(path) {
+        tracing::warn!(
+            "mci-agent: could not move the earlier mcp-servers.toml beside {}: {error}",
+            path.display()
+        );
+    }
     match McpServersConfig::load(path).await {
         Ok(cfg) => match cfg.register_all(&registry).await {
             Ok(n) => McpClientBoot {
