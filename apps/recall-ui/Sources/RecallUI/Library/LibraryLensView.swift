@@ -134,13 +134,13 @@ struct LibraryLensView: View {
             backLabel: lens.title,
             onDismissDetail: { model.dismissDetail() }
         ) {
+            VStack(alignment: .leading, spacing: 0) {
+            // The title and its line stay over the list, in the list's column.
+            header
+                .padding(.horizontal, MCI.Spacing.l + 2)
+                .padding(.top, MCI.Spacing.l + 4)
+                .padding(.bottom, MCI.Spacing.s)
             List(selection: $model.selection) {
-                header
-                    .padding(.top, MCI.Spacing.s)
-                    .padding(.bottom, MCI.Spacing.xs)
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                    .selectionDisabled()
                 ForEach(sections) { section in
                     Section {
                         ForEach(section.rows) { row in
@@ -211,6 +211,7 @@ struct LibraryLensView: View {
                 }
                 return .ignored
             }
+            }
         } detail: {
             if picked.rows.count > 1 {
                 MultiMomentDetail(selection: picked, reader: reader)
@@ -247,27 +248,31 @@ struct ConversationChips: View {
     var body: some View {
         HStack(spacing: 6) {
             ForEach(ConversationFilter.allCases, id: \.self) { chip in
-                let isOn = chip == filter
-                Button { filter = chip } label: {
-                    Text(verbatim: chip.title)
-                        .font(.system(size: 12))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .foregroundStyle(isOn ? MCI.Color.accent : MCI.Color.foreground)
-                        .background(Capsule().fill(isOn ? MCI.Color.accentSubtle : MCI.Color.background))
-                        .overlay(Capsule().strokeBorder(isOn ? MCI.Color.accent.opacity(0.35) : MCI.Color.border,
-                                                        lineWidth: 1))
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+                Button(chip.title) { filter = chip }
+                    .buttonStyle(ChipStyle(isOn: chip == filter))
+                    .accessibilityAddTraits(chip == filter ? [.isButton, .isSelected] : .isButton)
             }
         }
-        // The outer chips' edges stay whole inside a list row.
-        .padding(.horizontal, 1)
-        .padding(.vertical, 1)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(LibraryCopy.Conversations.filterLabel)
+    }
+}
+
+/// A chip: the window's background, a hairline, and the accent when on.
+private struct ChipStyle: ButtonStyle {
+    let isOn: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 11, style: .continuous)
+        configuration.label
+            .font(.system(size: 12))
+            .foregroundStyle(isOn ? MCI.Color.accent : MCI.Color.foreground)
+            .padding(.horizontal, 10)
+            .frame(height: 22)
+            .background(shape.fill(isOn ? MCI.Color.accentSubtle : MCI.Color.background))
+            .overlay(shape.stroke(isOn ? MCI.Color.accent.opacity(0.35) : MCI.Color.border, lineWidth: 1))
+            .contentShape(shape)
+            .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
 
