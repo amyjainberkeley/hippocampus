@@ -234,8 +234,9 @@ char *mci_brain_ffi_storage_usage(McibrainHandle *h);
  * "blob_cleanup_ok": bool}. Cleanup flags may be false after commit.
  * NULL means no committed outcome; caller must free via string_free. */
 
-/* Delete a single event by id. `event_id_json` is
- * {"event_id": <u64>}. */
+/* Delete events by id. `event_id_json` is {"event_id": <u64>} for one,
+ * or {"event_ids": [<u64>, ...]} (up to 10,000) for a whole forget in
+ * one transaction, with one integrity check and one cleanup. */
 char *mci_brain_ffi_delete_event(McibrainHandle *h, const char *event_id_json);
 
 /* Delete every event with `ts_us` in [start_ts_us, end_ts_us] (inclusive

@@ -2115,16 +2115,26 @@ pub unsafe extern "C" fn mci_brain_ffi_storage_usage(h: *mut Handle) -> *mut c_c
 // violation and the test will fail.
 // ---------------------------------------------------------------------------
 
-/// Delete a single event by id. CASCADE removes `event_vectors`, `chunks`,
-/// `entity_mentions` rows referencing this event id (per the migration-0001
+/// The most moments one delete call takes (`{"event_ids":[…]}`): a page read
+/// on many days fits many times over, and a hostile payload stays small.
+pub const MAX_DELETE_EVENT_IDS: usize = 10_000;
+
+/// Delete events by id. CASCADE removes `event_vectors`, `chunks`,
+/// `entity_mentions` rows referencing these event ids (per the migration-0001
 /// / migration-0004 ON DELETE CASCADE clauses). The transient writer also
-/// removes the event's encrypted keyframe file when no surviving event shares
+/// removes each event's encrypted keyframe file when no surviving event shares
 /// its digest. Finally, it `VACUUM`s so freed database pages return to the OS.
 ///
-/// `event_id_json` is a UTF-8 JSON string of shape `{"event_id":<u64>}`.
+/// `event_id_json` is a UTF-8 JSON string of shape `{"event_id":<u64>}` for
+/// one event, or `{"event_ids":[<u64>, …]}` (1 to [`MAX_DELETE_EVENT_IDS`])
+/// for a whole forget: every id goes in one transaction, after one writer
+/// lease and one integrity check, with the cleanup once (SPEC 3.11). An id
+/// that isn't in the store deletes nothing; `events_deleted` counts the rows
+/// that went.
 ///
 /// Returns a JSON [`DeleteResultJson`] on success or null on failure
-/// (`mci_brain_ffi_last_error_message` carries the diagnostic).
+/// (`mci_brain_ffi_last_error_message` carries the diagnostic); on failure
+/// nothing was deleted.
 ///
 /// # Safety
 /// `h` must be a live handle; `event_id_json` must be a non-null,
@@ -2136,7 +2146,10 @@ pub unsafe extern "C" fn mci_brain_ffi_delete_event(
 ) -> *mut c_char {
     #[derive(Deserialize)]
     struct Query {
-        event_id: u64,
+        #[serde(default)]
+        event_id: Option<u64>,
+        #[serde(default)]
+        event_ids: Option<Vec<u64>>,
     }
 
     if h.is_null() {
@@ -2162,8 +2175,27 @@ pub unsafe extern "C" fn mci_brain_ffi_delete_event(
             return ptr::null_mut();
         }
     };
-    match with_writer(handle, |writer| {
-        writer.delete_event_with_outcome(EventId(q.event_id))
+    let ids = match (q.event_id, q.event_ids) {
+        (Some(id), None) => vec![EventId(id)],
+        (None, Some(ids)) if ids.is_empty() => {
+            set_last_error("mci_brain_ffi_delete_event: event_ids is empty");
+            return ptr::null_mut();
+        }
+        (None, Some(ids)) if ids.len() > MAX_DELETE_EVENT_IDS => {
+            set_last_error(&format!(
+                "mci_brain_ffi_delete_event: more than {MAX_DELETE_EVENT_IDS} event_ids"
+            ));
+            return ptr::null_mut();
+        }
+        (None, Some(ids)) => ids.into_iter().map(EventId).collect(),
+        _ => {
+            set_last_error("mci_brain_ffi_delete_event: give event_id or event_ids, not both");
+            return ptr::null_mut();
+        }
+    };
+    match with_writer(handle, |writer| match ids.as_slice() {
+        [id] => writer.delete_event_with_outcome(*id),
+        many => writer.delete_events_with_outcome(many),
     }) {
         Ok(outcome) => json_to_c_string(&delete_result_json(&outcome)),
         Err(e) => {
