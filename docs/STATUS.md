@@ -26,7 +26,7 @@ page is refreshed with each release. Each row names the tests that cover it.
 | Reading the window in front | Read when it changes: at most every 3 s plugged in, 6 s on battery and 12 s in Low Power Mode, and every 15 s or more while it keeps moving. Panes are read in order, and a window's tabs, sidebars and bars come after what you were reading. | `FocusedReadPacingTests`, `CapturePowerTests`, `OCRReadingOrderTests` and the reading-order parity fixtures (`tools/ocr/test_layout.py`), and the transcript bench below. On a real screen: needs a person. |
 | Reading other windows | Every display, when text changes outside the window in front: at most every 30 s plugged in and 60 s on battery, none in Low Power Mode. Each line is filed under the window it sits in. | `BackgroundCapturePolicyTests`, `CapturePowerTests`. Two displays on a real Mac: needs a person. |
 | The text reader | PP-OCR (RapidOCR 3.9.2, PP-OCRv6 small, ONNX Runtime 1.30), bundled, without FFmpeg, x264 or x265. | The OCR worker's tests (`ocr-worker` lane), including `test_prepare.py`, which loads the worker with the video libraries gone; the reader bake-off below. |
-| What is skipped | Password fields; six password managers, System Settings, sign-in dialogs, the lock screen and Hippocampus itself, by bundle ID; private browser windows that show it; 18 bank and sign-in addresses; four secret shapes, checked three times. | `SuppressionCascadeTests`, `BrowserPrivateWindowTests`, `BrowserWindowPrivacyTests`, `DenylistTests`, and the secret corpus `core/brain/fixtures/ocr-secret-corpus.json`, which the Swift and Rust checks both read. Real browsers' private windows: needs a person. |
+| What is skipped | Password fields; six password managers, System Settings, sign-in dialogs, the lock screen and Hippocampus itself, by bundle ID; private browser windows that show it; 18 bank and sign-in addresses; secret shapes (labelled secrets, vendor API keys, tokens, card numbers, one-time codes) in a moment's text, title or address, checked three times on screen and again by the agent before it stores anything from any source, after an address loses its sign-in parameters. | `SuppressionCascadeTests`, `TitleAndAddressSecretTests`, `BrowserPrivateWindowTests`, `BrowserWindowPrivacyTests`, `DenylistTests`, the agent's `secret_gate`, ingest and import tests, and the corpora `core/brain/fixtures/ocr-secret-corpus.json` and `url-secret-params-corpus.json`, which the Swift and Rust checks both read. Real browsers' private windows: needs a person. |
 | Encrypted memory | One SQLCipher database with its key in the login Keychain; screenshots sealed with AES-GCM. | `mci-brain` store tests, `KeychainDatabaseKeyResolverTests`, the `keyframe-codec-behavior` lane, `keychain_packaging_contract`. |
 | Deleting | The last 24 hours or everything, with what was learned from it; the database is rewritten afterwards. | `delete_events_in_range_*` and `delete_event_*` in `core/brain/tests/sqlcipher_brain_store.rs`, `memory_projection.rs`, `understanding_store.rs`. In the app: needs a person. |
 | History | Each moment leads with one short line saying what it was about, written on this Mac by Apple Intelligence or a model server, or made from its title, then its text without the window's tabs, address bar, bookmarks and side bars, which stay under Also in this window and in search. Older moments are cleaned and captioned in the background, only on a power cable while the Mac is idle. | `core/brain/tests/chrome.rs`, `caption.rs`, `reclean.rs` and `reading.rs`; `moment_readings_ffi.rs`; the `reclean_worker` tests in `apps/agent`; `MomentCaptionTests`; the mind's caption tests; renders of made-up windows. On a real memory: needs a person. |
@@ -122,23 +122,21 @@ CPU share.
 - A one-time code with no keyword near it ("verification code",
   "passcode", "your code is" and the like) or a bank alert shown in a window
   can be stored. Card numbers that pass the Luhn check and codes next to such
-  a keyword are dropped, as are labelled secrets, GitHub and AWS keys and
-  JSON web tokens (`scripts/e2e-full.sh`, check c8).
-- A key shown on its own, with no label such as `api_key =`, is stored: an
-  unlabelled `sk-ant-…` key reached memory in the end-to-end test (c8).
-- A token in a page's address is stored with the address when the window
-  shows only the site name, as Safari does: the secret checks read the
-  window's text, not the address (c8.url).
+  a keyword are dropped, as are labelled secrets, JSON web tokens, private
+  keys and the API keys of Anthropic, OpenAI, GitHub, GitLab, Slack, Google,
+  AWS and Stripe, wherever a moment comes from (`scripts/e2e-full.sh`, check
+  c8; `apps/agent/src/secret_gate.rs`).
+- A key in another shape, shown on its own with no label such as
+  `api_key =`, can be stored.
+- An address keeps every parameter whose name doesn't mark a credential
+  (`access_token`, `code`, `key`, `sig`, `password` and the like are
+  removed), so a token under another name can be stored with it.
 - The text reader's ONNX Runtime 1.30 carries Microsoft's telemetry client.
   Unblocked, the worker posted to a Microsoft collector over HTTPS (four
   requests, about 45 KB, in one test run), and it keeps that client's queue,
   URL cache and HTTP storage in `~/Library`, outside Hippocampus's folders.
   The end-to-end test now runs the worker in a sandbox and fails on the
   attempt (`net.runtime-log`, `net.binary`, `net.isolation`).
-- Copy for your AI and the other copy buttons put plain text on the
-  clipboard, not marked transient, concealed or current-host-only, so a
-  clipboard manager keeps it and Universal Clipboard can carry it to your
-  other devices (audit check `pasteboard`).
 - The database key is a login-Keychain item that never syncs, but no
   this-device-only class is set: it moves with a copied login keychain
   (audit check `custody.this-device`).
