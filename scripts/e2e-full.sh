@@ -570,6 +570,21 @@ else
 fi
 
 # The synthetic day. Marker words name each moment; secrets carry their own.
+# The key-shaped ones are put together here, at run time, so this file holds
+# no literal a secret scanner or GitHub push protection would take for a
+# credential. None of them is, or ever was, a real key.
+SYNTH_GITHUB_TOKEN="$(printf '%s_%s' ghp R8nQ2vLx7Tz4Kp9Wm3Yc5Hb6Jd1Fs0Ag2Ue8)"
+SYNTH_AWS_KEY_ID="$(printf '%s%s' AKIA QZ7R4XW2N6M3JH5P)"
+SYNTH_ANTHROPIC_KEY="$(printf '%s-%s-%s' sk ant api03-Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0)"
+with_synthetic_keys() {
+    # Fill the @…@ placeholders of a file written from a quoted heredoc.
+    local file="$1" text
+    text="$(cat "$file")"
+    text="${text//@SYNTH_GITHUB_TOKEN@/$SYNTH_GITHUB_TOKEN}"
+    text="${text//@SYNTH_AWS_KEY_ID@/$SYNTH_AWS_KEY_ID}"
+    text="${text//@SYNTH_ANTHROPIC_KEY@/$SYNTH_ANTHROPIC_KEY}"
+    printf '%s\n' "$text" > "$file"
+}
 cat > "$H/frames.json" <<'FRAMES'
 {"frames": [
  {"id": "notes-larkspur", "app": "com.apple.Notes", "title": "Larkspur launch checklist", "offset_seconds": -3000,
@@ -596,17 +611,18 @@ cat > "$H/frames.json" <<'FRAMES'
  {"id": "secret-otp", "app": "com.apple.MobileSMS", "title": "Messages", "offset_seconds": -450,
   "lines": ["Cobalt Bank", "Your verification code is 739104. Do not share it."]},
  {"id": "secret-github-token", "app": "com.apple.Terminal", "title": "zsh", "offset_seconds": -400,
-  "lines": ["Tamarack deploy notes", "New token: ghp_R8nQ2vLx7Tz4Kp9Wm3Yc5Hb6Jd1Fs0Ag2Ue8"]},
+  "lines": ["Tamarack deploy notes", "New token: @SYNTH_GITHUB_TOKEN@"]},
  {"id": "secret-aws-key", "app": "com.apple.Terminal", "title": "zsh", "offset_seconds": -350,
-  "lines": ["Juniper staging credentials", "AKIAQZ7R4XW2N6M3JH5P"]},
+  "lines": ["Juniper staging credentials", "@SYNTH_AWS_KEY_ID@"]},
  {"id": "secret-jwt", "app": "com.apple.TextEdit", "title": "Thistle notes.txt", "offset_seconds": -300,
   "lines": ["Thistle session", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0aGlzdGxlIn0.VGhpc3RsZVNpZ25hdHVyZQ"]},
  {"id": "secret-password", "app": "com.apple.Notes", "title": "Bluebell house notes", "offset_seconds": -250,
   "lines": ["Bluebell house notes", "Wi-Fi password: Orbit-Lantern-77"]},
  {"id": "secret-bare-api-key", "app": "com.apple.Terminal", "title": "zsh", "offset_seconds": -200,
-  "lines": ["Bramble agent setup", "sk-ant-api03-Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0"]}
+  "lines": ["Bramble agent setup", "@SYNTH_ANTHROPIC_KEY@"]}
 ]}
 FRAMES
+with_synthetic_keys "$H/frames.json"
 ORDINARY_IDS="notes-larkspur code-kestrel mail-heron chat-marigold forget-pelican range-osprey-1 range-osprey-2 retention-wombat url-token-larch"
 SECRET_IDS="secret-card secret-otp secret-github-token secret-aws-key secret-jwt secret-password secret-bare-api-key"
 # Markers for the audit: every word that names a moment, and every secret.
@@ -626,20 +642,21 @@ secret	4242424242424242
 secret	Cobalt
 secret	739104
 secret	Tamarack
-secret	ghp_R8nQ2vLx7Tz4Kp9Wm3Yc5Hb6Jd1Fs0Ag2Ue8
+secret	@SYNTH_GITHUB_TOKEN@
 secret	R8nQ2vLx7Tz4
 secret	Juniper
-secret	AKIAQZ7R4XW2N6M3JH5P
+secret	@SYNTH_AWS_KEY_ID@
 secret	Thistle
 secret	VGhpc3RsZVNpZ25hdHVyZQ
 secret	Bluebell
 secret	Orbit-Lantern-77
 secret	Bramble
-secret	sk-ant-api03-Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0
+secret	@SYNTH_ANTHROPIC_KEY@
 secret	Qm7Zp2Lr9Xw4
 secret	TGFyY2hTZWNyZXRTaWduYXR1cmU
 secret	access_token=eyJ
 MARKERS
+with_synthetic_keys "$H/markers.txt"
 
 OCR_WORKER=""
 case "$OCR_CHOICE" in

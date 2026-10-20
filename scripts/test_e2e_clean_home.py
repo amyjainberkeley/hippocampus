@@ -221,6 +221,28 @@ class FullE2EContractTests(unittest.TestCase):
             states = sorted(line.split("\t")[1:] for line in log.read_text().splitlines())
             self.assertEqual(states, [["hippocampus-ocr", "0", "0", "0"], ["hippocampus-ocr", "1", "1", "1"]], states)
 
+    def test_full_run_puts_its_key_shaped_values_together_at_run_time(self):
+        # The file holds no literal that looks like a GitHub token, an AWS key
+        # ID or an Anthropic key; the synthetic day still shows all three.
+        source = FULL.read_text(encoding="utf-8")
+        import re
+        for pattern in (r"ghp_[A-Za-z0-9]{20,}", r"AKIA[0-9A-Z]{16}", r"sk-ant-api0\d-[A-Za-z0-9_-]{8,}"):
+            self.assertIsNone(re.search(pattern, source), pattern)
+        fragment = source.split("# The synthetic day.", 1)[1].split('OCR_WORKER=""', 1)[0]
+        with tempfile.TemporaryDirectory(prefix="e2e-synthetic-day-") as temporary:
+            result = subprocess.run(["/bin/bash", "-uo", "pipefail", "-c", fragment], capture_output=True, text=True,
+                                    env={"H": temporary, "PATH": "/usr/bin:/bin"}, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            frames = json.loads((Path(temporary) / "frames.json").read_text())
+            lines = {frame["id"]: frame["lines"][-1] for frame in frames["frames"]}
+            markers = (Path(temporary) / "markers.txt").read_text()
+        self.assertRegex(lines["secret-github-token"], r"^New token: ghp_[A-Za-z0-9]{36}$")
+        self.assertRegex(lines["secret-aws-key"], r"^AKIA[0-9A-Z]{16}$")
+        self.assertRegex(lines["secret-bare-api-key"], r"^sk-ant-api03-[A-Za-z0-9]{30}$")
+        self.assertNotIn("@SYNTH", markers)
+        for value in (lines["secret-github-token"].split(": ")[1], lines["secret-aws-key"], lines["secret-bare-api-key"]):
+            self.assertIn(f"secret\t{value}\n", markers)
+
     def test_mcp_client_keeps_stdin_open_until_every_request_is_answered(self):
         with tempfile.TemporaryDirectory(prefix="e2e-mcp-") as temporary:
             root = Path(temporary)
