@@ -488,6 +488,69 @@ final class ForgetPipelineTests: XCTestCase {
         XCTAssertNil(store.load())
     }
 
+    // MARK: A forget that ends after its Undo note
+
+    private final class RefusingApp: WindowChannelSending, @unchecked Sendable {
+        func send(_ request: WindowChannelRequest, timeout: Duration) async -> Bool { request.op != .hold }
+        func statuses() -> AsyncStream<WindowChannelStatus> { AsyncStream { $0.finish() } }
+    }
+
+    /// The trash button or ⌘⌫ on one moment: "Forgot 1 moment." with Undo,
+    /// and the delete when the note closes. If the app can't hold remembering
+    /// then, the moment stays saved, and SPEC 3.11 says "Couldn't forget it.
+    /// It's still saved." [Try Again]: the window hears of it, with what to
+    /// try again, instead of seeing what it sees after a forget that worked.
+    func testAForgetThatFailsAfterItsUndoNoteSaysSo() async {
+        let mutator = LeaseMutator()
+        let forget = ForgetCoordinator(mutator: mutator, channel: RefusingApp(),
+                                       store: PendingForgetStore(directory: nil, memory: "/tmp/verifier/mci.sqlite"),
+                                       appRunning: { true }, deletions: MemoryDeletionSignal(center: NotificationCenter()))
+        let immediate = await forget.forgetAfterUndo(ForgetRequest(momentIds: [41]), count: 1)
+        XCTAssertNil(immediate, "the Undo note shows")
+        XCTAssertNotNil(forget.undoable)
+        await forget.finishUndoable()
+        XCTAssertTrue(mutator.deleted.isEmpty, "the moment is still saved")
+        XCTAssertFalse(forget.undoable == nil && forget.phase == nil && forget.lateOutcome == nil,
+                       "nothing the window can observe says the forget failed; the row just comes back")
+        XCTAssertEqual(forget.lateOutcome?.outcome, .failed)
+        XCTAssertEqual(forget.lateOutcome?.request, ForgetRequest(momentIds: [41]), "what Try Again forgets")
+        XCTAssertEqual(forget.lateOutcome?.count, 1)
+    }
+
+    /// One that went is heard too (for its Activity line), and a newer
+    /// forget that moved the earlier one ahead never swallows its outcome.
+    func testEveryForgetAfterItsNoteIsHeardOnce() async {
+        let mutator = LeaseMutator()
+        let forget = coordinator(mutator, AppLikeChannel())
+        _ = await forget.forgetAfterUndo(ForgetRequest(momentIds: [41]), count: 1)
+        await forget.finishUndoable()
+        XCTAssertEqual(forget.lateOutcome?.outcome, .forgotten(moments: 1))
+        let first = forget.lateOutcome?.id
+
+        mutator.failing = [42]
+        _ = await forget.forgetAfterUndo(ForgetRequest(momentIds: [42]), count: 1)
+        _ = await forget.forgetAfterUndo(ForgetRequest(momentIds: [43]), count: 1)
+        XCTAssertEqual(forget.lateOutcome?.outcome, .failed, "the earlier one, moved ahead by the newer")
+        XCTAssertEqual(forget.lateOutcome?.request.momentIds, [42])
+        XCTAssertNotEqual(forget.lateOutcome?.id, first)
+        forget.undo()
+    }
+
+    /// The shell says so: a failure with Try Again, which forgets at once,
+    /// and the Activity line for one that went.
+    func testTheShellSaysWhenAForgetFailsAfterItsNote() throws {
+        let source = try Self.source("Sources/RecallUI/MemoryWorkspaceView.swift")
+        XCTAssertTrue(source.contains(".onChange(of: forgetting.lateOutcome)"))
+        XCTAssertTrue(source.contains("report(late.outcome, audit: audit) { forgetNow(late.request, count: late.count) }"))
+        XCTAssertTrue(source.contains("let outcome = await forgetting.forget(request)"))
+    }
+
+    static func source(_ path: String) throws -> String {
+        let package = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        return try String(contentsOf: package.appendingPathComponent(path), encoding: .utf8)
+    }
+
     // MARK: The pending file, as a list
 
     /// Each forget has its own entry: one finishing removes only its own,

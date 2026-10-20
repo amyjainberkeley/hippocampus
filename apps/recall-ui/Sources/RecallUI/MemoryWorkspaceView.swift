@@ -453,6 +453,12 @@ struct MemoryWorkspaceView: View {
             guard let box = note.object as? WindowShellCommandBox else { return }
             perform(box.command)
         }
+        // A forget that ended after its Undo note closed: its Activity line,
+        // and a note with Try Again when it didn't all go (SPEC 3.11).
+        .onChange(of: forgetting.lateOutcome) { _, late in
+            guard let late else { return }
+            reportLate(late)
+        }
         .onChange(of: forgetting.undoable) { _, undoable in
             guard let undoable else { return }
             notes.show(NavigationCopy.forgotMoments(undoable.count),
@@ -1239,6 +1245,27 @@ struct MemoryWorkspaceView: View {
                        })
         case .unavailable:
             notes.show(NavigationCopy.couldNotForget)
+        }
+    }
+
+    /// A forget that ended after its Undo note closed. The note already
+    /// said "Forgot 1 moment.", so one that went adds only its Activity
+    /// line; one that didn't all go says so, with Try Again.
+    private func reportLate(_ late: ForgetCoordinator.LateOutcome) {
+        let audit = ForgetAudit.moments(late.count)
+        if case let .forgotten(moments) = late.outcome {
+            audit.record(count: moments, now: now())
+            return
+        }
+        report(late.outcome, audit: audit) { forgetNow(late.request, count: late.count) }
+    }
+
+    /// Try Again after a forget that failed after its Undo note: it goes
+    /// now, without a second note to undo.
+    private func forgetNow(_ request: ForgetRequest, count: Int) {
+        Task { @MainActor in
+            let outcome = await forgetting.forget(request)
+            report(outcome, audit: .moments(count)) { forgetNow(request, count: count) }
         }
     }
 

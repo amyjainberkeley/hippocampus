@@ -251,10 +251,23 @@ public final class ForgetCoordinator: ObservableObject {
         public let count: Int
     }
 
+    /// How a forget ended after its Undo note closed: nobody waited for it,
+    /// so the window hears of it here, and says so when it didn't all go.
+    public struct LateOutcome: Equatable, Sendable {
+        public let id: UUID
+        public let outcome: Outcome
+        /// What the person picked, for Try Again.
+        public let request: ForgetRequest
+        /// How many moments the note counted.
+        public let count: Int
+    }
+
     /// What the footer says while a forget runs.
     @Published public private(set) var phase: ForgetPhase?
     /// The forget whose Undo note is up, if any.
     @Published public private(set) var undoable: Undoable?
+    /// The newest forget that ended after its Undo note closed.
+    @Published public private(set) var lateOutcome: LateOutcome?
 
     /// How long the Undo note waits before the delete goes ahead.
     public static let undoWindow: Duration = .seconds(5)
@@ -554,6 +567,9 @@ public final class ForgetCoordinator: ObservableObject {
         inFlight[job.id] = nil
         for continuation in waiting.removeValue(forKey: job.id) ?? [] {
             continuation.resume(returning: outcome)
+        }
+        if case let .afterUndo(count) = job.kind {
+            lateOutcome = LateOutcome(id: UUID(), outcome: outcome, request: job.request, count: count)
         }
     }
 
