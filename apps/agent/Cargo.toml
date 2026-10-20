@@ -66,6 +66,12 @@ default = []
 # screen, and these read mail and message databases (launch plan item 10).
 # `tests/shipped_readers.rs` checks the built binary either way.
 deep-hooks = ["dep:mci-mail-reader", "dep:mci-messages-reader"]
+# Development file keys (MCI_DEVELOPMENT_FILE_KEY with MCI_DB_KEY_HEX,
+# MCI_DB_KEY_FILE or MCI/dev.key) for the person's own memory. Debug builds
+# always have them; a release build only with this feature, which no shipped
+# build turns on (storage-security review S11). `tests/development_key_gate.rs`
+# checks the built binaries either way.
+development-file-key = []
 
 [dependencies]
 mci-core    = { path = "../../core" }
@@ -101,6 +107,7 @@ serde_json  = "1"
 sha2        = "0.10"
 toml_edit   = "0.22"
 getrandom   = "0.3.4"   # key generation for `init`; same crate mci-core uses
+zeroize     = "1.8.2"   # wipes keys the key change holds; already on the lockfile
 # P3.8 — idle-batch embedder. macOS-only (Core ML / ANE backend for
 # arctic-embed-s). On non-macOS this crate compiles to an empty lib,
 # so the workspace stays green. No net-new third-party crate (objc2

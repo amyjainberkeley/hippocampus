@@ -45,6 +45,11 @@ fn normalized_development_key(value: &str) -> Option<String> {
 }
 
 fn development_key_hex() -> Option<String> {
+    // A release build never reads a raw or file key (storage-security
+    // review S11); `mci-brain` never opens Demo Memory.
+    if !mci_agent::key_resolver::DEVELOPMENT_FILE_KEY_COMPILED_IN {
+        return None;
+    }
     if std::env::var("MCI_DEVELOPMENT_FILE_KEY").as_deref() != Ok("1") {
         return None;
     }

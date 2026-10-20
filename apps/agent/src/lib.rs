@@ -64,6 +64,9 @@ pub mod idle_batch;
 /// [`import_sessions`]; both write through [`transcript`].
 pub mod import_codex;
 pub mod import_sessions;
+pub mod erase;
+pub mod export;
+pub mod key_change;
 pub mod key_resolver;
 /// Mail.app reader pump. Only with the `deep-hooks` feature, off in every
 /// release.

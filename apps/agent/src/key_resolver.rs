@@ -19,6 +19,12 @@ use mci_core::crypto::DbKey;
 pub const DEFAULT_KEYCHAIN_SERVICE: &str = "ai.hippocampus.brain";
 /// Keychain account for the production `SQLCipher` key.
 pub const DEFAULT_KEYCHAIN_ACCOUNT: &str = "database-key-v1";
+/// Keychain account a changed key is stored under while the memory moves to
+/// it (storage-security review S4, `key_change`). Only ever there for the
+/// length of one key change: once it is finished the new key is back under
+/// [`DEFAULT_KEYCHAIN_ACCOUNT`] and this item is gone. So a reader of the
+/// default reference that finds it uses it.
+pub const ROTATED_KEYCHAIN_ACCOUNT: &str = "database-key-v2";
 /// Storage-domain identifier shared by Swift, Rust, and packaging tests.
 pub const KEYCHAIN_STORAGE_MODEL: &str = "file-keychain-acl-v1";
 /// Executables explicitly trusted by the file-Keychain ACL.
@@ -46,6 +52,14 @@ impl Default for KeychainKeyReference {
 }
 
 impl KeychainKeyReference {
+    /// Whether this names the production item every process and AI tool is
+    /// registered with: during and just after a key change its key may be
+    /// under [`ROTATED_KEYCHAIN_ACCOUNT`] instead.
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        self.service == DEFAULT_KEYCHAIN_SERVICE && self.account == DEFAULT_KEYCHAIN_ACCOUNT
+    }
+
     /// Resolve the content-free reference from process metadata.
     pub fn from_environment() -> Result<Self, KeyResolutionError> {
         if let Ok(model) = std::env::var("MCI_DB_KEYCHAIN_STORAGE_MODEL") {
@@ -346,9 +360,88 @@ pub enum KeyInitializationOutcome {
 }
 
 /// Resolve and validate the production database key.
+///
+/// For the default reference this is the memory's key wherever a key change
+/// left it ([`resolve_current_database_key`]).
 pub fn resolve_database_key() -> Result<String, KeyResolutionError> {
     let reference = KeychainKeyReference::from_environment()?;
-    resolve_database_key_with_reader(&SystemKeychainReader, &reference)
+    let database = database_path_hint();
+    resolve_current_database_key(
+        &SystemKeychainReader,
+        &SqlCipherDatabaseKeyValidator,
+        &reference,
+        database.as_deref(),
+    )
+}
+
+/// The memory this process was pointed at (`MCI_DB_PATH`), or the default
+/// one, used only to choose between two keys during a key change.
+fn database_path_hint() -> Option<PathBuf> {
+    std::env::var_os("MCI_DB_PATH")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| {
+            mci_core::home::user_home()
+                .map(|home| home.join("Library/Application Support/MCI/mci.sqlite"))
+        })
+}
+
+/// The memory's key for `reference` (storage-security review S4).
+///
+/// Any reference but the default is read exactly. For the default one, a key
+/// under [`ROTATED_KEYCHAIN_ACCOUNT`] is the newer key: a key change put it
+/// there, and moves it back to the default account when it finishes. While
+/// both items exist, the one that opens the memory at `database_path` is
+/// returned, the newer first: before the database is re-encrypted that is
+/// the old key, after it the new one, and a reader never has to know which
+/// step the change is at.
+///
+/// # Errors
+/// The same typed Keychain errors as [`resolve_database_key_with_reader`].
+pub fn resolve_current_database_key<R: KeychainReader, V: DatabaseKeyValidator>(
+    reader: &R,
+    validator: &V,
+    reference: &KeychainKeyReference,
+    database_path: Option<&Path>,
+) -> Result<String, KeyResolutionError> {
+    if !reference.is_default() {
+        return resolve_database_key_with_reader(reader, reference);
+    }
+    let rotated = KeychainKeyReference {
+        service: reference.service.clone(),
+        account: ROTATED_KEYCHAIN_ACCOUNT.to_owned(),
+    };
+    let newer = match resolve_database_key_with_reader(reader, &rotated) {
+        Err(KeyResolutionError::MissingKey { .. }) => {
+            return resolve_database_key_with_reader(reader, reference);
+        }
+        other => other,
+    };
+    let older = resolve_database_key_with_reader(reader, reference);
+    let existing = database_path.filter(|path| path.exists());
+    let opens = |key: &str| {
+        existing.is_some_and(|path| validator.validate_existing_database(path, key).is_ok())
+    };
+    match (newer, older) {
+        (Ok(newer), Ok(older)) => {
+            if newer != older && !opens(&newer) && opens(&older) {
+                Ok(older)
+            } else {
+                Ok(newer)
+            }
+        }
+        (Ok(newer), Err(_)) => Ok(newer),
+        // The newer item can't be read now: the older one only if it is the
+        // one that opens the memory.
+        (Err(error), Ok(older)) => {
+            if opens(&older) {
+                Ok(older)
+            } else {
+                Err(error)
+            }
+        }
+        (Err(error), Err(_)) => Err(error),
+    }
 }
 
 /// Resolve with an injected reader; does not access a real Keychain in tests.
@@ -544,6 +637,91 @@ fn remove_legacy_key<D: LegacyKeyRemover>(
             path: path.to_path_buf(),
             reason: error.to_string(),
         })
+}
+
+/// Whether this build honours development file keys for the person's own
+/// memory: a debug build, or one built with the `development-file-key`
+/// feature. A release build never does (storage-security review S11): a
+/// developer who exported `MCI_DEVELOPMENT_FILE_KEY=1` and runs the shipped
+/// agent gets the Keychain, never a memory keyed by a file beside it.
+pub const DEVELOPMENT_FILE_KEY_COMPILED_IN: bool =
+    cfg!(any(debug_assertions, feature = "development-file-key"));
+
+/// Demo Memory's folder: `~/Library/Application Support/Hippocampus/Demo
+/// Memory`. Its made-up week has its own key file there, which a release
+/// build still reads, for a store in that folder only.
+#[must_use]
+pub fn demo_memory_folder(home: &Path) -> PathBuf {
+    home.join("Library/Application Support/Hippocampus/Demo Memory")
+}
+
+/// What the environment says about a development key.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DevelopmentKeyEnvironment<'a> {
+    /// `MCI_DEVELOPMENT_FILE_KEY`: only `1` turns it on.
+    pub marker: Option<&'a str>,
+    /// `MCI_DB_KEY_HEX`.
+    pub raw_key: Option<&'a str>,
+    /// `MCI_DB_KEY_FILE`.
+    pub key_file: Option<&'a Path>,
+    /// The memory the command opens (`--db-path` or `MCI_DB_PATH`).
+    pub db_path: Option<&'a Path>,
+    /// The home folder.
+    pub home: Option<&'a Path>,
+}
+
+impl DevelopmentKeyEnvironment<'_> {
+    /// The development key this build honours, if any.
+    #[must_use]
+    pub fn key(&self) -> Option<String> {
+        self.key_for_build(DEVELOPMENT_FILE_KEY_COMPILED_IN)
+    }
+
+    /// The development key a build with or without the development path
+    /// honours. Without it, only Demo Memory's own key file opens Demo
+    /// Memory's own store; never a raw key, never `MCI/dev.key`.
+    #[must_use]
+    pub fn key_for_build(&self, development_compiled_in: bool) -> Option<String> {
+        if self.marker != Some("1") {
+            return None;
+        }
+        if !development_compiled_in {
+            let demo = demo_memory_folder(self.home?);
+            let key_file = self.key_file?;
+            let inside = |path: &Path| {
+                path.is_absolute()
+                    && path.starts_with(&demo)
+                    && !path
+                        .components()
+                        .any(|part| matches!(part, std::path::Component::ParentDir))
+            };
+            if !inside(key_file) || !self.db_path.is_some_and(inside) {
+                return None;
+            }
+            return read_development_key_file(key_file);
+        }
+        if let Some(path) = self.key_file {
+            return read_development_key_file(path);
+        }
+        self.raw_key
+            .filter(|key| is_valid_database_key(key))
+            .map(str::to_owned)
+            .or_else(|| {
+                let path = self.home?.join("Library/Application Support/MCI/dev.key");
+                read_development_key_file(&path)
+            })
+    }
+}
+
+/// A key file's 64 hex characters, with at most one line ending after them;
+/// any other whitespace is never normalised into key material.
+fn read_development_key_file(path: &Path) -> Option<String> {
+    let contents = std::fs::read_to_string(path).ok()?;
+    let key = contents
+        .strip_suffix("\r\n")
+        .or_else(|| contents.strip_suffix('\n'))
+        .unwrap_or(&contents);
+    is_valid_database_key(key).then(|| key.to_owned())
 }
 
 /// True for an exact 32-byte key encoded as 64 ASCII hexadecimal digits.
