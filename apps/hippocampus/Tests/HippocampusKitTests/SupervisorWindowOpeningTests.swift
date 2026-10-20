@@ -447,6 +447,12 @@ final class SupervisorWindowOpeningTests: XCTestCase {
     func test_reopen_during_the_launch_sweep_starts_nothing_until_it_ends() async throws {
         let gate = SweepGate()
         let h = try make(captureEnabled: true, sweeper: GatedSweeper(gate: gate))
+        // The key check is still under way when the person opens the app
+        // again, so both asks meet it. (Left to the scheduler, the check
+        // could finish first, and the stand-in window, which quits at once,
+        // would be started a second time for the reopen.)
+        let keyCheck = TestSuspension()
+        h.preparer.suspension = keyCheck
         // As the app delegate does at a person's launch.
         h.supervisor.openRecallWhenReady(initialLaunch: true)
         let launch = Task { @MainActor in
@@ -454,9 +460,12 @@ final class SupervisorWindowOpeningTests: XCTestCase {
             h.supervisor.start()
         }
         while !(await gate.hasEntered()) { await Task.yield() }
+        await keyCheck.waitUntilEntered()
 
         h.supervisor.reopenWindow()
         h.supervisor.turnOn()
+        h.preparer.suspension = nil
+        keyCheck.resume()
         try await Task.sleep(for: .milliseconds(150))
         XCTAssertEqual(h.topology.launchPlans.count, 0, "nothing starts before the sweep ends")
         XCTAssertEqual(h.supervisor.state, .idle)

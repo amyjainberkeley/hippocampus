@@ -137,8 +137,10 @@ public struct RuntimeConfig: RuntimeConfiguring, Sendable {
     }
 
     private func setBool(_ value: Bool, for key: String) throws {
-        try update(requiringBooleans: [key]) { table in
-            table[key] = value
+        // The parsed document is changed, never the text (the product-truth
+        // lane holds this line).
+        try update(requiringBooleans: [key]) { parsed in
+            parsed[key] = value
         } verify: { $0[key]?.bool == value }
     }
 

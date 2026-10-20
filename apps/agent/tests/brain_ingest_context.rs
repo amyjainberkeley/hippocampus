@@ -82,7 +82,10 @@ fn a_side_windows_picture_digest_is_kept_on_its_own_moment() {
         panic!("context text must be stored");
     };
     let event = store.get_event(id).expect("read").expect("present");
-    assert_eq!(event.keyframe_blob.as_deref(), Some("ab".repeat(32).as_str()));
+    assert_eq!(
+        event.keyframe_blob.as_deref(),
+        Some("ab".repeat(32).as_str())
+    );
     assert_eq!(
         store.event_source(id).expect("source"),
         EventSource::ScreenContext

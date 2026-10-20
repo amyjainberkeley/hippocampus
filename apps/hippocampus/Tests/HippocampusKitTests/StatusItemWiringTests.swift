@@ -166,9 +166,10 @@ final class StatusItemWiringTests: XCTestCase {
     func testPreferencesShowTheMenusStatusRow() throws {
         let health = try source("CaptureHealthView.swift")
         XCTAssertTrue(health.contains("let status = supervisor.menuBarStatus"))
-        // The menu's own row: a timed pause says when it ends, a forget's
-        // hold says "Forgetting…" (SPEC 2.6.2, 3.11).
-        XCTAssertTrue(health.contains("let row = supervisor.menuRow()"))
+        // The supervisor's row as the menu shows it: a timed pause says when
+        // it ends, a forget's hold says "Forgetting…" (SPEC 2.6.2, 3.11).
+        XCTAssertTrue(health.contains("let row = supervisor.statusRow()"))
+        XCTAssertTrue(health.contains("lines(supervisor.menuRow(row))"))
         XCTAssertTrue(health.contains("Text(row.title)"))
         XCTAssertTrue(health.contains("Button(row.actionTitle ?? action.title) { perform(action) }"))
         for retired in ["storedCountsText", "lastSavedText", "unverified", "No saved memory in the last report",
