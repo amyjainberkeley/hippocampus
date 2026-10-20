@@ -231,6 +231,26 @@ public enum BackgroundCapturePolicy {
         }
     }
 
+    /// A window this frame may keep a picture of (SPEC 6.2), before its text
+    /// is checked: not a call or a video (rule 5), and enough of it seen on
+    /// this display (rule 4), cut from `pixelSize` and masked wherever a
+    /// window in front covers it. The text and title travel as keys only.
+    /// Whether one is kept is the `SidePictureRetainer`'s call, after the
+    /// text cleared both privacy passes.
+    public static func sidePictureCandidate(
+        for window: VisibleWindow, lines: [OCRLine], displayBounds: CGRect, pixelSize: CGSize,
+        windows: [VisibleWindow], excludedBundleIds: Set<String>, tsUs: UInt64
+    ) -> SidePictureCandidate? {
+        guard window.layer == 0,
+              !SideWindowPicturePolicy.isCallOrVideo(bundleId: window.bundleId, title: window.title),
+              let plan = WindowPictureCrop.plan(for: window, displayBounds: displayBounds, pixelSize: pixelSize,
+                                                windows: windows, excludedBundleIds: excludedBundleIds),
+              plan.isVisibleEnough
+        else { return nil }
+        return SidePictureCandidate(windowId: window.windowId, title: window.title,
+                                    text: SideWindowText(lines: lines.map(\.text)), plan: plan, tsUs: tsUs)
+    }
+
     static func isEligible(
         _ window: VisibleWindow, focusedWindowId: CGWindowID?,
         excludedBundleIds: Set<String>, denylist: SensitiveCaptureDenylist

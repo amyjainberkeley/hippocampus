@@ -270,6 +270,10 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
     private let sequence: FrameSequence
     private let counters: HelperHealthCounters
     private let keyframeRetainer: (any KeyframeRetaining)?
+    /// Pictures of the windows beside the one in front (SPEC 6): sealed with
+    /// the same key into the same folder as `keyframeRetainer`'s, under the
+    /// person's own settings, which leave them off unless they said yes.
+    private let sidePictureRetainer: SidePictureRetainer?
     private let completionCoordinator: OrderedCaptureDispatcher
 
     public init(
@@ -278,7 +282,8 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         sink: any FrameSink,
         sequence: FrameSequence,
         counters: HelperHealthCounters,
-        keyframeRetainer: (any KeyframeRetaining)? = nil
+        keyframeRetainer: (any KeyframeRetaining)? = nil,
+        sidePictureRetainer: SidePictureRetainer? = nil
     ) {
         self.worker = worker
         self.cascade = cascade
@@ -286,6 +291,8 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         self.sequence = sequence
         self.counters = counters
         self.keyframeRetainer = keyframeRetainer
+        self.sidePictureRetainer = sidePictureRetainer
+            ?? (keyframeRetainer as? KeyframeRetentionCoordinator)?.makeSidePictureRetainer()
         self.completionCoordinator = OrderedCaptureDispatcher(
             capacity: VisionOCRWorker.defaultCapacity
         )
@@ -413,30 +420,59 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
         )
     }
 
+    /// One window read from a whole-screen frame, as `processBackground`'s
+    /// `split` gives it.
+    public struct BackgroundWindow: Sendable {
+        public let context: WorkflowContext
+        public let lines: [OCRLine]
+        public let geometry: OCRWindowGeometry?
+        public let ownsSeparators: Bool
+        /// The window's picture may be kept from this frame (SPEC 6), under
+        /// its rules, once its text has cleared both privacy passes.
+        public let sidePicture: SidePictureCandidate?
+
+        public init(context: WorkflowContext, lines: [OCRLine], geometry: OCRWindowGeometry?,
+                    ownsSeparators: Bool, sidePicture: SidePictureCandidate? = nil) {
+            self.context = context
+            self.lines = lines
+            self.geometry = geometry
+            self.ownsSeparators = ownsSeparators
+            self.sidePicture = sidePicture
+        }
+    }
+
     /// Whole-screen capture: read one display frame, then emit each visible,
     /// unfocused window's lines as its own context event, attributed to that
     /// window. `split` runs after recognition and decides which windows may be
     /// emitted at all; every emitted window passes the same raw and compacted
-    /// secret checks as focused text. No screenshot is retained. `geometry`
-    /// is the window in the display frame, which turns on roles; a window
-    /// that `ownsSeparators` (nothing in front of it) also takes the frame's
-    /// pane separators, while a covered one's pixels hold other windows'
-    /// edges, so it takes none.
+    /// secret checks as focused text. `geometry` is the window in the display
+    /// frame, which turns on roles; a window that `ownsSeparators` (nothing in
+    /// front of it) also takes the frame's pane separators, while a covered
+    /// one's pixels hold other windows' edges, so it takes none.
+    ///
+    /// A window that comes with a `sidePicture` candidate may keep a picture
+    /// cut from this same frame: only after its text cleared both privacy
+    /// passes and the event validated, sealed and durable before its digest
+    /// is written, by the same path as the window in front's screenshot. A
+    /// suppressed or dropped window never gets one.
     public func processBackground(
         tsUs: UInt64,
         input: OCREngineInput,
-        split: @escaping @Sendable ([OCRLine]) -> [(context: WorkflowContext, lines: [OCRLine],
-                                                     geometry: OCRWindowGeometry?, ownsSeparators: Bool)]
+        split: @escaping @Sendable ([OCRLine]) -> [BackgroundWindow]
     ) async {
         if Self.killOcrEmit { return }
         let cascade = cascade, sink = sink, sequence = sequence, counters = counters
         let coordinator = completionCoordinator
+        let sideRetainer = sidePictureRetainer
         await worker.submit(input: input, onDrop: {}) { result in
             coordinator.submit(
                 captureOrdinal: 0,
                 operation: {
                     guard !result.timedOut else { return }
                     for group in split(result.recognizedLines) where !group.lines.isEmpty {
+                        let side = sideRetainer.flatMap { retainer in
+                            group.sidePicture.map { SidePictureRetention(retainer: retainer, candidate: $0) }
+                        }
                         await Self.handleOCRResult(
                             tsUs: tsUs,
                             context: group.context,
@@ -448,6 +484,8 @@ public struct CascadeTwiceOCREmitter: OCRPostAllowEmitter {
                             sequence: sequence,
                             counters: counters,
                             pixelBuffer: input.pixelBuffer,
+                            keyframeRetainer: side,
+                            evidenceCandidate: side?.evidence,
                             background: true,
                             geometry: group.geometry
                         )
