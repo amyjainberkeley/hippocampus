@@ -246,6 +246,11 @@ struct TimelineView: View {
                 }
                 return .ignored
             }
+            // ⌘C, ⇧⌘C, ⌘O and ⇧⌘R: the row menu's items, on what is picked.
+            .modifier(MomentRowKeys(picked: picked, reader: reader) { hit in
+                show([hit.id])
+                relatedRequests += 1
+            })
 
         } detail: {
             if picked.rows.count > 1 {

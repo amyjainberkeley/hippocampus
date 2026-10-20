@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import RecallUIKit
 
@@ -13,6 +14,30 @@ final class WindowKeysTests: XCTestCase {
         XCTAssertFalse(WindowKeys.fieldTakesCommandReturn("\n\t "))
         XCTAssertTrue(WindowKeys.fieldTakesCommandReturn("rounding half to even"))
         XCTAssertTrue(WindowKeys.fieldTakesCommandReturn("  tax  "))
+    }
+
+    /// The row menu's keys work on the list itself (SPEC 2.10): they used to
+    /// live only on the menu's items, which are no keys at all while the
+    /// menu is closed.
+    func testTheRowMenusKeysActOnThePickedRowsFromTheList() {
+        XCTAssertEqual(MomentKey(character: "c", modifiers: .command), .copyText)
+        XCTAssertEqual(MomentKey(character: "C", modifiers: [.command, .shift]), .copyForYourAI)
+        XCTAssertEqual(MomentKey(character: "c", modifiers: [.command, .shift]), .copyForYourAI)
+        XCTAssertEqual(MomentKey(character: "o", modifiers: .command), .openLink)
+        XCTAssertEqual(MomentKey(character: "R", modifiers: [.command, .shift]), .showRelated)
+        XCTAssertEqual(MomentKey(character: "c", modifiers: [.command, .capsLock]), .copyText, "Caps Lock doesn't count")
+        XCTAssertNil(MomentKey(character: "c", modifiers: []), "typing goes on to the list")
+        XCTAssertNil(MomentKey(character: "c", modifiers: [.command, .option]))
+        XCTAssertNil(MomentKey(character: "r", modifiers: .command), "⌘R is Refresh, the window's")
+        XCTAssertNil(MomentKey(character: "o", modifiers: [.command, .shift]))
+        XCTAssertNil(MomentKey(character: "k", modifiers: .command), "⌘K is the command bar")
+    }
+
+    func testTheShortcutsSheetListsEveryRowKey() {
+        let chips = Set(WindowKeys.all.flatMap(\.keys))
+        for key in MomentKey.allCases {
+            XCTAssertTrue(chips.contains(key.chip), "\(key) is in the Keyboard Shortcuts sheet")
+        }
     }
 
     func testTheShortcutsSheetSaysCommandReturnAsksWithTheSelectionOrTheQuestion() throws {
