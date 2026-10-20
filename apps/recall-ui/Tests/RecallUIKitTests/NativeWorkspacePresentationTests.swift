@@ -23,12 +23,12 @@ final class NativeWorkspacePresentationTests: XCTestCase {
     /// person's own files.
     func testEachPageShowsItsOwnViewWithoutASharedRecentFeed() throws {
         let source = try source("MemoryWorkspaceView.swift")
-        for (page, view) in [("place\\(\\.today\\)", "OverviewPlace"), ("place\\(\\.history\\)", "HistoryView"),
+        for (page, view) in [("place\\(\\.today\\)", "TodayPlace"), ("place\\(\\.history\\)", "HistoryPlace"),
                              ("place\\(\\.webPages\\)", "WebPagesPlace"), ("place\\(\\.documents\\)", "DocumentsPlace"),
                              ("place\\(\\.code\\)", "CodePlace"), ("place\\(\\.conversations\\)", "ConversationsPlace"),
                              ("place\\(\\.lookedUp\\)", "LookedUpPlace"), ("place\\(\\.workingOn\\)", "WorkingOnPlace"),
                              ("let \\.item\\(id\\)", "WorkingOnItemPlace"), ("place\\(\\.aiTools\\)", "AIToolsPlace"),
-                             ("place\\(\\.aboutYou\\)", "NavigationStack\\(path: \\$youPath\\)\\s*\\{\\s*YouPlace")] {
+                             ("place\\(\\.aboutYou\\)", "NavigationStack\\(path: \\$youPath\\)\\s*\\{\\s*AboutYouPlace")] {
             XCTAssertNotNil(source.range(
                 of: "case \\.?\(page):\\s*\(view)\\(",
                 options: .regularExpression

@@ -50,6 +50,19 @@ and Hippocampus has none. The ones cited most often:
   which permissions it found off.
 - `0043-clean-moments-and-captions.md`: window chrome set apart, a
   caption for each moment, and old memories re-cleaned.
+- `0044-window-places-and-safe-controls.md`: the window's sidebar and
+  places, the private pipe, the forget hold, and hides kept as ids.
+- `0045-working-on-from-window-titles.md`: Working On made from window
+  titles by rules, with no model.
+- `0046-reading-blocks.md`: a moment's text as typed blocks, and more
+  wrapped lines joined.
+- `0047-side-window-pictures.md`: pictures of windows beside the front one,
+  their budget and thinning.
+- `0048-ask-your-tool-and-disconnect.md`: one builder for every message to
+  an AI tool, its links and clipboard rules, and Disconnect.
+- `0049-calendar.md`: the calendar, optional and on this Mac.
+- `0050-demo-memory.md`: Demo Memory, a made-up week for videos and
+  screenshots.
 
 ## Related
 

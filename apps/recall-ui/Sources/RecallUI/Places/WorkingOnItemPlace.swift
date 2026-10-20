@@ -24,6 +24,7 @@ struct WorkingOnItemPlace: View {
     @Environment(\.workNow) private var now
     @Environment(\.workDisplayCalendar) private var calendar
     @Environment(\.isSyntheticPreview) private var isSyntheticPreview
+    @Environment(\.handoffServices) private var handoff
     @Environment(\.displayScale) private var displayScale
 
     init(itemId: String, work: any WorkReader, reader: BrainReader, open: @escaping (RecallRoute) -> Void,
@@ -161,6 +162,14 @@ struct WorkingOnItemPlace: View {
                         Button(WorkCopy.hideFromSidebar) { hides.hide(item.id) }
                     }
                     Button(WorkCopy.showInHistory) { showInHistory(item.moments.first) }
+                    if item.kind == .code {
+                        // Today's ⌘J sheet (SPEC 3.2).
+                        Button(NavigationCopy.contextForThisFolder) { WindowCommand.folderContext.post() }
+                    }
+                    Button(HandoffCopy.copyForYourAI) {
+                        let services = HandoffServices.resolved(handoff, isSyntheticPreview: isSyntheticPreview)
+                        Task { await AskAIButton.copyForYourAI(.item(item.id), services: services) }
+                    }
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 13, weight: .medium))

@@ -139,6 +139,31 @@ final class StatusBannerTests: XCTestCase {
         XCTAssertEqual(WindowStatusMenu.items(notRunning).last, .action(.openHippocampus))
     }
 
+    /// While the window reads Demo Memory, remembering is paused, and the
+    /// Demo tag says so: no banner on every page, the footer says Demo
+    /// Memory, and its one action goes back to the person's own memory
+    /// (SPEC-DELTA 6). A forget under way still says so.
+    func testDemoMemoryShowsNoBannerAndOffersToLeave() {
+        let paused = status(.paused, title: "Paused", action: "resume", since: now.addingTimeInterval(-60))
+        let demo = paused.inDemoMemory
+        XCTAssertEqual(demo.kind, .demoMemory)
+        XCTAssertNil(banner(demo))
+        XCTAssertEqual(demo.dot, .off, "nothing new is remembered while it is in use")
+        XCTAssertEqual(demo.title, "Demo Memory")
+        XCTAssertEqual(demo.action, .leaveDemoMemory)
+        XCTAssertEqual(demo.action?.title, "Leave Demo Memory")
+        XCTAssertTrue(demo.hasControls)
+        XCTAssertEqual(WindowStatusMenu.items(demo).prefix(4),
+                       [.title("Demo Memory", .off), .line("Your own memory is paused until you leave."), .separator,
+                        .action(.leaveDemoMemory)])
+        let forgetting = WindowStatus(kind: .forgetting, title: NavigationCopy.forgetting)
+        XCTAssertEqual(forgetting.inDemoMemory, forgetting)
+        for word in [NavigationCopy.demoMemory, NavigationCopy.demoMemoryDetail, NavigationCopy.leaveDemoMemory] {
+            XCTAssertNil(CopyStyleValidator.containsMarketingSpeak(word), word)
+            XCTAssertNil(CopyStyleValidator.containsJargon(word), word)
+        }
+    }
+
     func testPauseChoicesEndWhenTheySay() {
         XCTAssertEqual(WindowStatusMenu.PauseChoice.hour.until(now: now, calendar: calendar),
                        now.addingTimeInterval(3_600))

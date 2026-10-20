@@ -318,7 +318,12 @@ enum WindowRenderer {
 
     private static func render(_ scene: Scene, to directory: URL) async {
         if let make = scene.view {
+            // A page drawn on its own reaches nothing of this Mac's: the
+            // preview's Ask {Tool} and a Resume that opens nothing, unless
+            // the scene brings its own.
             let view = await make()
+                .environment(\.handoffServices, HandoffServices.preview)
+                .environment(\.resumeServices, ResumeServices.none)
                 .environment(\.controlActiveState, .key)
                 .environment(\.locale, Locale(identifier: "en_US"))
                 .environment(\.colorScheme, scene.dark ? .dark : .light)

@@ -1,6 +1,6 @@
-# ADR-0044: A moment's text reads as typed blocks, and more wrapped lines join
+# ADR-0046: A moment's text reads as typed blocks, and more wrapped lines join
 
-- Status: Accepted (2026-10-19)
+- Status: Accepted (2026-10-19). Numbered when the round merged (the records of 2026-10-19 are 0044 to 0050).
 - Supplements: ADR-0043 (clean moments and captions)
 - Ratifier: Amy ("yes do it make it clean, the context transcription should all make sense and make it formatted")
 

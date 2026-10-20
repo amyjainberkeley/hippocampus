@@ -37,13 +37,19 @@ Setup is five short screens. It shows what you get first, then asks for two perm
 
 ## What it does
 
-**Ask.** Press Shift twice and Ask drops from the menu bar over any app. Ask about the window in front of you or something from last week. Matches appear as you type, by meaning and by exact words. An answer cites its sources, this window first. ⌃⇧Space works too.
+**Today.** Where you left off, with its screenshot, and your day as sessions you can click. Resume reopens what you had open for that project: its pages, documents, code folder and apps, only the ones you tick.
 
-**Overview.** Your day as sessions you can click, a card for what you’re on right now, and a short summary written on your Mac.
+**Working On.** Your projects and documents by name, from their window titles. Each has a page with where you left off, its files, the pages you read alongside it, its meetings and its history.
 
-**You.** What Hippocampus has learned about you, in the exact words your AI tools are given, with the moments behind each line. Mark what’s right. Forget what isn’t.
+**History.** Every moment, newest first, as it read on screen: headings, paragraphs, lists, code and chats. Web Pages, Documents, Code, Conversations and Looked Up show the same moments by kind.
 
-**Your AI tools start with what you’re working on.** Connect Claude Code or Codex from the menu bar. They can then search your memory through the `hippocampus` MCP server, with tools such as `mci_recall`, `mci_context` and `mci_user_model`. If you let them, each session starts with your recent work and up to six things learned about you, with sources. For any other chatbot, Copy for your AI copies what you’re working on, for you to paste.
+**Ask.** Press Shift twice (or Fn, if you choose it) and Ask drops from the menu bar over any app, like Spotlight. It finds projects, pages and moments as you type, and answers questions with sources, this window first. ⌃⇧Space works too.
+
+**Your AI tools start with what you’re working on.** Connect Claude Code or Codex from the menu bar. They can then search your memory through the `hippocampus` MCP server, with tools such as `mci_recall`, `mci_context` and `mci_user_model`. If you let them, each session starts with your recent work and up to six things learned about you, with sources. Ask Claude opens Claude, Codex or Cursor with what you picked already in its message box, and you press send; for ChatGPT it is copied, ready to paste. AI Tools shows the exact words each tool gets.
+
+**About You.** What Hippocampus has learned about you, in the exact words your AI tools are given, with the moments behind each line. Mark what’s right. Forget what isn’t.
+
+**Your calendar, if you want it.** Today’s meetings over your day, and calls named after them. It is off until you turn it on, and read only on your Mac.
 
 Answers and summaries need Apple Intelligence (macOS 26) or a model on your Mac. Hippocampus finds Ollama or LM Studio by itself. Without either, search still works.
 
@@ -59,9 +65,9 @@ Answers and summaries need Apple Intelligence (macOS 26) or a model on your Mac.
 - **You can tell.** A solid dot means it is remembering. No solid dot means it is not.
 - **It stays on your Mac.** Encrypted on disk. Hippocampus itself has no cloud service. There is no account and no telemetry, and it uploads nothing you saw.
 - **Some things are skipped.** Password fields, six password managers, private browser windows that show they are private, and a short list of bank and sign-in sites. They are rules, and [PRIVACY.md](PRIVACY.md#what-is-skipped) says what they miss.
-- **Your AI tools read it only if you connect them.** What a connected tool reads goes to the company that runs it. A connected tool can read your memory while Hippocampus is quit, until you [disconnect it](PRIVACY.md#disconnecting-an-ai-tool).
+- **Your AI tools get it only if you connect them, or send it yourself.** Ask Claude opens the tool with the message in its box, and nothing is sent until you press send. What a tool reads goes to the company that runs it. A connected tool can read your memory while Hippocampus is quit, until you [disconnect it](PRIVACY.md#disconnecting-an-ai-tool), which takes one click in Preferences.
 - **You can stop it.** Pause from the menu bar. Quit, or Stop Sharing in macOS, stops remembering.
-- **Deleting is real.** Delete the last 24 hours or everything, and what was learned from it goes too.
+- **Forgetting is real.** Forget a moment, a session, the last 10 minutes, today or everything, and what was learned from it goes too.
 
 [PRIVACY.md](PRIVACY.md) says what is stored, where, every request the app makes, and its threat model. [SECURITY.md](SECURITY.md) says how to report a gap.
 
@@ -99,7 +105,7 @@ uv venv tools/ocr/.venv --python 3.12
 uv pip install --python tools/ocr/.venv/bin/python --require-hashes --no-deps -r tools/ocr/requirements.txt
 env -i HOME="$HOME" PATH=/usr/bin:/bin tools/ocr/.venv/bin/python tools/ocr/prepare.py
 cargo build -p mci-agent --bins -p hippocampus-native-host
-for package in apps/hippocampus adapters/macos/MCICaptureHelper apps/recall-ui apps/onboarding apps/mind; do
+for package in apps/hippocampus adapters/macos/MCICaptureHelper apps/recall-ui apps/onboarding apps/mind apps/demo-memory; do
   ./scripts/swift-package.sh build --package-path "$package"
 done
 ./apps/hippocampus/Resources/build-app.sh --debug --development-ad-hoc --development-lite

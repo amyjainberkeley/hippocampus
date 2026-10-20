@@ -1,6 +1,6 @@
 # ADR-0043: Moments are read without their window's chrome, and each says what it was about
 
-- Status: Accepted (2026-10-18)
+- Status: Accepted (2026-10-18). Supplemented by [ADR-0046](0046-reading-blocks.md): a moment's text reads as typed blocks.
 - Extends: the reader in `core/brain/src/reading.rs`, ADR-0016 (the store), ADR-0039 (the brief model boundary)
 
 ## Context

@@ -1,7 +1,7 @@
 # ADR-0047: Pictures of windows beside the front one
 
-- Status: Accepted (owner decision, 2026-10-19, SPEC section 6). Number
-  provisional: the records of this round are numbered when they merge.
+- Status: Accepted (owner decision, 2026-10-19, SPEC section 6). Numbered
+  when the round merged (the records of 2026-10-19 are 0044 to 0050).
 - Supplements: [ADR-0040](0040-whole-screen-background-capture.md), whose
   "No screenshot is retained for background windows" this replaces for
   people who allow it.

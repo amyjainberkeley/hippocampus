@@ -120,6 +120,10 @@ public enum NavigationCopy {
     // MARK: Status: the menu, the footer and the banner
 
     public static let remembering = "Remembering"
+    /// While the window reads the made-up week (SPEC-DELTA 6).
+    public static let demoMemory = "Demo Memory"
+    public static let demoMemoryDetail = "Your own memory is paused until you leave."
+    public static let leaveDemoMemory = "Leave Demo Memory"
     public static let notRemembering = "Not remembering"
     public static let forgetting = "Forgetting\u{2026}"
     /// The footer while the window applies a forget a crash left behind.

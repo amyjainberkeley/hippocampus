@@ -1,9 +1,11 @@
 # Hippocampus guide
 
-The [README](../README.md) says what Hippocampus is. This is the reference: the command line, a made-up memory to try things on, search by meaning in a source build, keeping an app out, your own MCP servers, and fixing things.
+The [README](../README.md) says what Hippocampus is. This is the reference: the window's keys, the command line, a made-up memory to try things on, Demo Memory, search by meaning in a source build, keeping an app out, your own MCP servers, and fixing things.
 
+- [The window's keys](#the-windows-keys)
 - [The command line](#the-command-line)
 - [Try it on a made-up memory](#try-it-on-a-made-up-memory)
+- [Demo Memory](#demo-memory)
 - [Search by meaning in a source build](#search-by-meaning-in-a-source-build)
 - [Keep an app out](#keep-an-app-out)
 - [Pull in your other MCP servers](#pull-in-your-other-mcp-servers)
@@ -11,6 +13,28 @@ The [README](../README.md) says what Hippocampus is. This is the reference: the 
 - [Build requirements](#build-requirements)
 - [Uninstall](#uninstall)
 - [Troubleshooting](#troubleshooting)
+
+## The window's keys
+
+| Key | Does |
+| --- | --- |
+| ⌘1 to ⌘9 | Today, History, Web Pages, Documents, Code, Conversations, Looked Up, About You, AI Tools. Privacy opens from its row and the hi mark's menu. |
+| ⌘F | The field, kept to the page you're on. |
+| ⌘N | A new question: the field emptied, searching everything. |
+| ⌘K | The command bar: places, Working On items and actions. |
+| ⌘[ and ⌘] | Back and Forward. |
+| ⌘T | Today's date on Today and History; elsewhere, Today. |
+| ⌘← and ⌘→ | The day before or after, on Today and History. |
+| ⌘↩ | Ask your AI tool with what you picked, or with the question in the field. |
+| ⌥↩ | Ask on this Mac. |
+| ⇧⌘C | Copy for Your AI. |
+| Space | The picked moment's screenshot. |
+| ⌘⌫ | Forget what you picked; ⌘Z undoes it while its note shows. |
+| ⇧⌘⌫ | Forget Recent…: the last 10 minutes, the last hour or today. |
+| ⌃⌘S | Show or hide the sidebar. |
+| ⌘/ | Every key, in one sheet. |
+
+Ask, from any app, opens with Shift twice; Preferences offers Fn (Globe), right Shift, right ⌘ or right ⌥ instead. In Ask, ↩ opens, ⌘↩ asks your AI tool and ⌥↩ resumes a project.
 
 ## The command line
 
@@ -20,7 +44,9 @@ The one-line installer and the Homebrew cask put `mci-agent` on your PATH. It re
 | --- | --- |
 | `mci-agent doctor` | Says why memory is empty, or what is in the way, in plain words. Reads only. |
 | `mci-agent context --focus "a task"` | Prints a short summary of what memory holds about a task, with the moments it comes from. |
-| `mci-agent overview --date 2026-10-15 --json` | The day as the Overview draws it. Reads only. |
+| `mci-agent overview --date 2026-10-15 --json` | The day as Today draws it. Reads only. |
+| `mci-agent work --json` | Working On: projects and documents by name, the pages read, and which moments belong to each. Reads only. |
+| `mci-agent clients --json` | What each AI tool can reach, with no content. `--disconnect claude-code`, `codex` or `all` takes Hippocampus out of a tool's settings, as Preferences' Disconnect does. |
 | `mci-agent mcp-serve` | The MCP server an AI tool starts. It speaks over stdio and opens no port. |
 | `mci-agent register-clients` | Adds that server to Claude Code and Codex, as Connect AI Tools… does. |
 | `mci-agent embed-backfill` | Builds search-by-meaning data for moments that have none. Needs the embedding model. |
@@ -29,7 +55,7 @@ The one-line installer and the Homebrew cask put `mci-agent` on your PATH. It re
 
 Commands that write to memory (`import-sessions`, `embed-backfill`, `mcp-sync`, `enrich`, `brief`) refuse to run while another program holds the database's one writer lease. While Hippocampus is remembering, its own agent holds it, so quit Hippocampus first.
 
-`mci-agent init` and `mci-agent connect --all` are the older command-line setup. Besides registering the MCP server, they add session-start hooks and load a background job (`ai.hippocampus.refresh`) that imports your Claude Code and Codex transcripts; `init` also imports them at once. The app doesn't need them. `mci-agent disconnect --all` removes the hooks and the refresh job; the MCP registrations stay ([how to remove them](../PRIVACY.md#disconnecting-an-ai-tool)).
+`mci-agent init` and `mci-agent connect --all` are the older command-line setup. Besides registering the MCP server, they add session-start hooks and load a background job (`ai.hippocampus.refresh`) that imports your Claude Code and Codex transcripts; `init` also imports them at once. The app doesn't need them. `mci-agent disconnect --all` removes the hooks and the refresh job; the MCP registrations stay until you use Disconnect in Preferences or `mci-agent clients --disconnect all` ([more](../PRIVACY.md#disconnecting-an-ai-tool)).
 
 ## Try it on a made-up memory
 
@@ -77,6 +103,19 @@ mci-brain stats --json
 `mci-brain search` matches words only (SQLite FTS5). Search by meaning needs the embedding model, which this command doesn't load. `mci-brain` opens the file read-only at the SQLite level, so it can't change it.
 
 To point it at the demo yourself, set `MCI_DEVELOPMENT_FILE_KEY=1`, `MCI_DB_KEY_HEX` to the key in `hippocampus-demo/demo.key`, and `MCI_DB_PATH` to `hippocampus-demo/demo.sqlite`; the script prints the lines. `rm -rf ./hippocampus-demo` deletes the demo and its only key.
+
+## Demo Memory
+
+Option-click the hi in the menu bar and choose Use Demo Memory…, or open Preferences, under About. Hippocampus makes a made-up week at a made-up company in a folder of its own, pauses remembering, and opens the window on it with a small Demo tag. Leave Demo Memory, in the same places or in the window's status menu, goes back to your own memory, which is untouched.
+
+The week is made by code in this repo, the same way every time, with its dates moved to this week:
+
+```bash
+cargo build -p mci-agent --bin mci-seed-brain
+./scripts/swift-package.sh build --package-path apps/demo-memory --product demo-screens
+```
+
+Before filming: AI tools you connected still read your own memory while Demo Memory is in use, so disconnect them first if you film one; and Resume and Open Link open the week's real sites in your own browser, so use a browser profile with no accounts signed in.
 
 ## Search by meaning in a source build
 
@@ -187,8 +226,8 @@ The demo needs only Rust and openssl.
 
 ## Uninstall
 
-1. If you want your memory gone, delete everything first: Preferences, Privacy, See or Delete What's Remembered….
-2. Disconnect your AI tools ([PRIVACY.md](../PRIVACY.md#disconnecting-an-ai-tool)).
+1. If you want your memory gone, delete everything first, on the window's Privacy page.
+2. Disconnect your AI tools: Preferences, AI Tools, Disconnect All… ([PRIVACY.md](../PRIVACY.md#disconnecting-an-ai-tool)).
 3. Quit Hippocampus and move it to the Trash.
 
 With Homebrew, `brew uninstall --cask hippocampus` removes the app and keeps your memory. `brew uninstall --zap --cask hippocampus` also deletes your memory, logs and settings, and that can't be undone.

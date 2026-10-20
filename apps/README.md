@@ -14,10 +14,12 @@ messaging host. Each app is a thin shell — the substance lives in
 - `hippocampus/` — the main SwiftUI Mac app shell (menu-bar
   `MenuBarExtra`). Supervises `MCICaptureHelper` + `mci-agent` as
   child processes.
-- `recall-ui/` — the window: Overview, Ask with its History, You, and
-  the privacy window. Links `../adapters/macos/mci-brain-ffi/`.
-- `onboarding/` — setup's four screens, the two permissions, and
-  Choose Apps.
+- `recall-ui/` — the window: Today, Working On, History and its lenses,
+  About You, AI Tools and Privacy. Links `../adapters/macos/mci-brain-ffi/`.
+- `onboarding/` — setup's five screens, the two permissions, the Ask key,
+  and Choose Apps.
+- `demo-memory/` — `demo-screens`, which draws Demo Memory's made-up
+  screenshots and seals them with the capture helper's codec.
 - `mind/` — `hippocampus-mind`, which writes answers, notes and what is
   learned with Apple Intelligence or a model server on the Mac.
 - `hippocampus-native-host/` — Rust native-messaging host for the

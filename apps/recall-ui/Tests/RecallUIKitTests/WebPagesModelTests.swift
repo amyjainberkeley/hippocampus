@@ -69,7 +69,7 @@ final class WebPagesModelTests: XCTestCase {
                  lastUs: WorkClock.us(20, 15), moments: [1]),
             page("Last year", host: "old.example", path: "/", lastUs: WorkClock.us(80, 9), moments: [0]),
         ]
-        let reader = MomentsReader([workMoment(5, WorkClock.us(0, 14, 35), url: "https://devnotes.example/rounding")])
+        let reader = WorkMomentsReader([workMoment(5, WorkClock.us(0, 14, 35), url: "https://devnotes.example/rounding")])
         let model = WebPagesModel(work: PreviewWorkReader(snapshot: WorkSnapshot(pages: pages)), reader: reader,
                                   calendar: WorkClock.calendar, now: { WorkClock.now })
         await model.reload()
@@ -87,7 +87,7 @@ final class WebPagesModelTests: XCTestCase {
 
     func testWithoutAddressesTheLineAboutBrowsersShows() async {
         let pages = [page("Rounding half to even", host: nil, path: nil, lastUs: WorkClock.us(0, 14), moments: [5])]
-        let model = WebPagesModel(work: PreviewWorkReader(snapshot: WorkSnapshot(pages: pages)), reader: MomentsReader([]),
+        let model = WebPagesModel(work: PreviewWorkReader(snapshot: WorkSnapshot(pages: pages)), reader: WorkMomentsReader([]),
                                   calendar: WorkClock.calendar, now: { WorkClock.now })
         await model.reload()
         XCTAssertTrue(model.hasNoAddresses)
@@ -95,7 +95,7 @@ final class WebPagesModelTests: XCTestCase {
     }
 
     func testWhenTheWorkReadFailsTheLastSevenDaysOfAddressesShow() async {
-        let reader = MomentsReader([
+        let reader = WorkMomentsReader([
             workMoment(7, WorkClock.us(0, 14), title: "Rounding half to even", url: "https://devnotes.example/rounding"),
             workMoment(6, WorkClock.us(0, 13), app: "com.microsoft.VSCode", title: "tax.rs \u{2014} trailhead-shop"),
             workMoment(5, WorkClock.us(9, 13), title: "Too old", url: "https://old.example/page"),
@@ -110,7 +110,7 @@ final class WebPagesModelTests: XCTestCase {
         XCTAssertEqual(asked?.timeFromUs, UInt64(WorkClock.now.addingTimeInterval(-7 * 86_400).timeIntervalSince1970
                                                      * 1_000_000))
 
-        let broken = MomentsReader([])
+        let broken = WorkMomentsReader([])
         broken.failSearches()
         let failed = WebPagesModel(work: UnavailableWorkReader(), reader: broken, calendar: WorkClock.calendar,
                                    now: { WorkClock.now })
@@ -132,7 +132,7 @@ final class WebPagesModelTests: XCTestCase {
             page("Once", path: "/once", lastUs: WorkClock.us(0, 9), moments: [4]),
         ]
         let model = WebPagesModel(work: PreviewWorkReader(snapshot: WorkSnapshot(pages: pages)),
-                                  reader: MomentsReader(moments), calendar: WorkClock.calendar, now: { WorkClock.now })
+                                  reader: WorkMomentsReader(moments), calendar: WorkClock.calendar, now: { WorkClock.now })
         await model.reload()
         let rows = model.rows
         await model.select(rows[0].id)

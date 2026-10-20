@@ -46,7 +46,7 @@ final class WorkingOnItemModelTests: XCTestCase {
 
     private func model(_ item: WorkItem?, calendar: (any CalendarReader)? = nil) -> WorkingOnItemModel {
         WorkingOnItemModel(itemId: shop, work: PreviewWorkReader(snapshot: WorkSnapshot(items: item.map { [$0] } ?? [])),
-                           reader: MomentsReader(moments), calendarReader: calendar, calendar: WorkClock.calendar,
+                           reader: WorkMomentsReader(moments), calendarReader: calendar, calendar: WorkClock.calendar,
                            now: { WorkClock.now })
     }
 
@@ -129,7 +129,7 @@ final class WorkingOnItemModelTests: XCTestCase {
         XCTAssertEqual(gone.state, .gone)
         XCTAssertNil(gone.item)
 
-        let broken = WorkingOnItemModel(itemId: shop, work: UnavailableWorkReader(), reader: MomentsReader([]),
+        let broken = WorkingOnItemModel(itemId: shop, work: UnavailableWorkReader(), reader: WorkMomentsReader([]),
                                         calendar: WorkClock.calendar, now: { WorkClock.now })
         await broken.reload()
         XCTAssertEqual(broken.state, .failed)

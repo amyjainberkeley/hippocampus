@@ -489,14 +489,20 @@ struct MemoryWorkspaceView: View {
         .environment(\.workNow, now)
         // Today never says "Now" while remembering is paused or stopped
         // (SPEC 3.1), and its Show Calendar asks macOS only in the app.
-        .environment(\.todayStop, status.todayStop)
+        .environment(\.todayStop, shownStatus.todayStop)
         .environment(\.showCalendar, showCalendarAction)
         // Whether Hippocampus is remembering, as the banner says: Today
         // never shows "Now" while it isn't (SPEC 3.1).
-        .environment(\.windowStatus, status)
+        .environment(\.windowStatus, shownStatus)
         // Outermost, so sheets and every place see it: in the synthetic
         // preview nothing opens the person's own data or deletes anything.
         .environment(\.isSyntheticPreview, isSyntheticPreview)
+    }
+
+    /// What the window shows about remembering: the app's own words, or,
+    /// while the window reads Demo Memory, that it does (SPEC-DELTA 6).
+    private var shownStatus: WindowStatus {
+        isDemoMemory ? status.inDemoMemory : status
     }
 
     /// Off-screen pictures paint the sidebar's colour, since the system's
@@ -514,7 +520,7 @@ struct MemoryWorkspaceView: View {
         SidebarView(
             model: sidebar.shown,
             selection: selection.sidebarRow(listing: sidebar.shown.workingOn),
-            status: status,
+            status: shownStatus,
             choices: choices,
             showsFootnote: showsFootnote,
             width: width,
@@ -594,7 +600,7 @@ struct MemoryWorkspaceView: View {
                 toggleSidebar: toggleSidebar,
                 askYourAI: { question in askYourAI(question) }
             )
-            if let banner = status.banner(now: now(), calendar: calendar, locale: locale) {
+            if let banner = shownStatus.banner(now: now(), calendar: calendar, locale: locale) {
                 StatusBanner(banner: banner, perform: perform)
                     .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
             }
@@ -611,7 +617,7 @@ struct MemoryWorkspaceView: View {
                 // nothing at all until there is one.
                 .overlay(alignment: .bottom) { BottomNoteHost(notes: notes) }
         }
-        .animation(MCI.Motion.standard, value: status.banner(now: now(), calendar: calendar, locale: locale))
+        .animation(MCI.Motion.standard, value: shownStatus.banner(now: now(), calendar: calendar, locale: locale))
     }
 
     /// The page, or the field's results in its place (SPEC 2.8). On Working
@@ -657,12 +663,10 @@ struct MemoryWorkspaceView: View {
                         youPage(page)
                     }
             }
+        // A picture's or Demo Memory's own read, else this Mac's tools and
+        // the agent's.
         case .place(.aiTools):
-            if let model = services.aiTools {
-                AIToolsPlace(model: model, open: open)
-            } else {
-                AIToolsPlace(understanding: understanding, open: open)
-            }
+            AIToolsPlace(model: services.aiTools ?? AIToolsModel(understanding: understanding), open: open)
         case .place(.privacy):
             if let privacy = services.privacy {
                 privacy()
@@ -692,7 +696,7 @@ struct MemoryWorkspaceView: View {
     private func openStatusMenu(from anchor: MenuAnchor.Holder) {
         guard let view = anchor.view else { return }
         let above = view.convert(view.bounds, to: nil).minY < 140
-        StatusMenu.open(status, from: view, above: above) { command in
+        StatusMenu.open(shownStatus, from: view, above: above) { command in
             switch command {
             case let .pause(choice):
                 send(.pause, until: choice.until(now: now(), calendar: calendar))
@@ -712,7 +716,7 @@ struct MemoryWorkspaceView: View {
     @ViewBuilder
     private func statusMenuPicture(narrow: Bool) -> some View {
         if let anchor = preset?.statusMenu {
-            let menu = StatusMenuFacsimile(status: status, showsPauseChoices: preset?.statusMenuPauseOpen == true)
+            let menu = StatusMenuFacsimile(status: shownStatus, showsPauseChoices: preset?.statusMenuPauseOpen == true)
             switch anchor {
             case .footer:
                 menu
@@ -747,6 +751,10 @@ struct MemoryWorkspaceView: View {
         case .openHippocampus:
             guard !isSyntheticPreview else { return }
             NSWorkspace.shared.open(Bundle.main.bundleURL)
+        case .leaveDemoMemory:
+            // The app's Resume ends Demo Memory and reopens the window on
+            // the person's own memory (SPEC-DELTA 6).
+            send(.resume)
         }
     }
 

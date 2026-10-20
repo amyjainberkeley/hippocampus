@@ -1,6 +1,6 @@
 # ADR-0040: Whole-screen capture with per-window attribution
 
-- Status: Accepted (owner decision, 2026-10-08). Superseded in part by [ADR-0041](0041-browsers-and-reading-cadence.md): browsers are now read, and §5's cost bound is replaced.
+- Status: Accepted (owner decision, 2026-10-08). Superseded in part by [ADR-0041](0041-browsers-and-reading-cadence.md): browsers are now read, and §5's cost bound is replaced. Supplemented by [ADR-0047](0047-side-window-pictures.md): pictures of windows beside the front one are kept for people who allow it.
 - Amends: ADR-0031 (focused-window capture scope)
 
 ## Context

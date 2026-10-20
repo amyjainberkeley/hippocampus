@@ -53,6 +53,9 @@ public struct WindowStatus: Equatable, Sendable {
         case notRunning
         /// Opened by hand while Hippocampus runs: only the saved status.
         case byHand(remembering: Bool)
+        /// The window reads Demo Memory, the made-up week (SPEC-DELTA 6):
+        /// the person's own remembering is paused while it does.
+        case demoMemory
     }
 
     /// The footer's dot: blue, a hollow grey ring, or red (SPEC 2.6.3).
@@ -83,6 +86,8 @@ public struct WindowStatus: Equatable, Sendable {
         case quit
         case finishSetup
         case openHippocampus
+        /// Back to the person's own memory (SPEC-DELTA 6).
+        case leaveDemoMemory
 
         public var title: String {
             switch self {
@@ -96,6 +101,7 @@ public struct WindowStatus: Equatable, Sendable {
             case .quit: NavigationCopy.quitHippocampus
             case .finishSetup: NavigationCopy.finishSetup
             case .openHippocampus: NavigationCopy.openHippocampus
+            case .leaveDemoMemory: NavigationCopy.leaveDemoMemory
             }
         }
     }
@@ -179,6 +185,18 @@ public struct WindowStatus: Equatable, Sendable {
     /// The permission that is off, for Needs permission.
     public var permission: Permission?
 
+    /// What the window shows while it reads Demo Memory (SPEC-DELTA 6): its
+    /// own line in the footer and the status menu, no banner (the Demo tag
+    /// says it), and one action that goes back to the person's own memory.
+    /// A forget under way still says so.
+    public var inDemoMemory: WindowStatus {
+        switch kind {
+        case .forgetting, .finishingForget: self
+        default: WindowStatus(kind: .demoMemory, title: NavigationCopy.demoMemory,
+                              detail: NavigationCopy.demoMemoryDetail, action: .leaveDemoMemory)
+        }
+    }
+
     /// Whether the window can change remembering: only through the pipe.
     public var hasControls: Bool {
         switch kind {
@@ -195,7 +213,7 @@ public struct WindowStatus: Equatable, Sendable {
         switch kind {
         case .remembering, .starting, .nothingSaved, .skipping: .on
         case .byHand(let remembering): remembering ? .on : .off
-        case .paused, .off, .notSetUp, .forgetting, .finishingForget, .notRunning: .off
+        case .paused, .off, .notSetUp, .forgetting, .finishingForget, .notRunning, .demoMemory: .off
         case .needsPermission, .notSaving, .couldNotStop, .couldNotTurnOn: .problem
         }
     }
@@ -229,7 +247,8 @@ public struct WindowStatus: Equatable, Sendable {
             return Banner(text: NavigationCopy.bannerNotSetUp, action: .finishSetup, isProblem: false)
         case .notRunning:
             return Banner(text: NavigationCopy.bannerNotRunning, action: .openHippocampus, isProblem: false)
-        case .remembering, .starting, .nothingSaved, .skipping, .forgetting, .finishingForget, .byHand:
+        // Demo Memory's tag says it; a banner on every page would not.
+        case .remembering, .starting, .nothingSaved, .skipping, .forgetting, .finishingForget, .byHand, .demoMemory:
             return nil
         }
     }

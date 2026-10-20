@@ -1,6 +1,6 @@
 # Hippocampus Status
 
-_Updated October 17, 2026, for 0.3.0._
+_Updated October 20, 2026, for the next release after 0.3.0._
 
 Audited code baseline: `99bc8b7`
 
@@ -31,12 +31,19 @@ page is refreshed with each release. Each row names the tests that cover it.
 | Deleting | The last 24 hours or everything, with what was learned from it; the database is rewritten afterwards. | `delete_events_in_range_*` and `delete_event_*` in `core/brain/tests/sqlcipher_brain_store.rs`, `memory_projection.rs`, `understanding_store.rs`. In the app: needs a person. |
 | History | Each moment leads with one short line saying what it was about, written on this Mac by Apple Intelligence or a model server, or made from its title, then its text without the window's tabs, address bar, bookmarks and side bars, which stay under Also in this window and in search. Older moments are cleaned and captioned in the background, only on a power cable while the Mac is idle. | `core/brain/tests/chrome.rs`, `caption.rs`, `reclean.rs` and `reading.rs`; `moment_readings_ffi.rs`; the `reclean_worker` tests in `apps/agent`; `MomentCaptionTests`; the mind's caption tests; renders of made-up windows. On a real memory: needs a person. |
 | Search | Exact words (FTS5) and meaning (Arctic Embed S on Core ML). | `hybrid_retriever.rs`, `recall_fusion.rs` and `retrieval_outcomes.rs` in `core/brain/tests`; the evaluations in [`docs/eval/`](eval/); `scripts/try-it.sh` run on Oct 16 (words only). |
-| Ask | Shift twice or ⌃⇧Space opens it over any app. Matches appear as you type; Return asks for an answer with sources, this window first. | `AskPanelTests`, `AskShortcutTests`, `SoloKeyDetectorTests`, `CommandBarTests`. With a real keyboard: needs a person. |
+| Ask | Shift twice (or Fn, if chosen) or ⌃⇧Space opens it over any app, like Spotlight: as you type it finds Working On items, pages and moments; ↩ opens, ⌘↩ asks your AI tool, ⌥↩ resumes an item. Return on a question asks for an answer with sources, this window first. It never takes ⌘Space. When a known Fn app or macOS's Globe key setting holds Fn, Hippocampus says which and waits; only a tap of Fn alone counts, and the key monitor watches modifier keys only. | `AskPanelTests`, `AskPanelHandoffTests`, `AskShortcutTests`, `SoloKeyDetectorTests`, `FnKeyMonitorTests`, `CommandBarTests`. With a real keyboard: needs a person. |
 | Answers and summaries | Apple Intelligence (macOS 26) or a model server on this Mac (Ollama, LM Studio). Without one, search still works. | `apps/mind` tests against a stand-in server (`LocalServerEngineTests`, `FakeModelServer`), and the `mind-without-foundation-models` lane. A real Ollama or LM Studio: not checked. |
-| Overview and You | Your day as sessions, a Right now card, a summary, and what AI tools can be told about you, with Right and Forget. | The `recall-ui` tests and the `overview` tests in `apps/agent`. |
-| AI tools | Connect AI Tools… registers the `hippocampus` MCP server with Claude Code and Codex. Each session can start with up to four lines of recent work and up to six things learned about you. | `mcp_server.rs`, `context_packet.rs`, `handoff.rs`, `what_is_sent.rs` and `client_registration_e2e.rs` in `apps/agent/tests`; the `menu-ai-connector`, `onboarding-ai-connector` and `session-context-behavior` lanes. A live Claude Code or Codex session on the 0.3.0 build: needs a person. |
+| The window | A sidebar: Today, Working On, Library (History, Web Pages, Documents, Code, Conversations, Looked Up), About You, AI Tools and Privacy, with fixed keys ⌘1 to ⌘9. The field over every memory page searches by meaning, kept to the page with ⌘F. A line at the top of every page while remembering is paused or off; Pause, Resume and the forget hold go to the app over a private pipe. Light and dark. | `SidebarModelTests`, `SidebarHidesTests`, `StatusBannerTests`, `WindowChannelTests`, `ForgetCoordinatorTests`, `WindowContrastTests`, `NativeWorkspacePresentationTests`; the app's `WindowChannelServerTests` and `CaptureHoldTests`; off-screen renders of every page. On a real screen: needs a person. |
+| Today and About You | Where you left off with its screenshot, the day's sessions, today's meetings when the calendar is on, what you looked up; what AI tools can be told about you, with Right and Forget. | `OverviewViewModelTests`, `TodayCardStateTests`, `TodayCalendarTests`, `NoCountingSentencesTests`, `UserModelViewModelTests`, and the `overview` tests in `apps/agent`. |
+| Working On and Resume | Projects and documents named from window titles, by rules, once you spend 30 minutes on them in 14 days of use; a page for each with where you left off, files, pages seen alongside, meetings and its History. Resume lists what was open in the item's last session and opens only what you tick. | `core/brain/tests/subject.rs`, `apps/agent/tests/work_cli.rs`, `WorkingOnModelTests`, `WorkingOnItemModelTests`, `ResumeSheetModelTests`, `ResumePlanTests`. Resume opening real apps and tabs: needs a person. |
+| Formatted text | A moment reads as headings, paragraphs, lists, code, terminal output and chat turns; Copy Text keeps the structure; older moments are made again in the background. | `core/brain/tests/reading_blocks.rs` and `reading_blocks_budget.rs`, `mci-brain-ffi/tests/event_reading_blocks.rs`, `ReadingBlocksDecodingTests`, `FormattedReadingSnapshotTests`. |
+| Ask {your tool} | Ask Claude (or the last tool chosen) opens the tool with the message in its box; nothing is sent. One builder makes every message; the clipboard copy stays on this Mac, out of clipboard history, and clears after 2 minutes. | `apps/agent/tests/send_card.rs`, `AskAIButtonTests`, `SendCardClientTests`, `WindowHandoffDeliveryTests`, `AskPanelHandoffTests`. A real Claude, Codex, Cursor or ChatGPT opening with the text in its box: needs a person. |
+| Calendar | Off until turned on. Then today's meetings over Today's day strip, a call named after its meeting, a project's meetings, and Ask's "When did I last meet with …?". Titles, times, calendar names and places only. | `CalendarPrivacyTests` in both apps, `SystemCalendarTests`, `CalendarQuestionTests`, `CalendarAttributionTests`. macOS's prompt on a signed build: needs a person. |
+| Pictures of other windows | When a window beside the one in front changes its text, a picture of that window alone, masked to it, at most 30 an hour; never for calls, video or private windows. At most 2 GB (1, 2 or 5 GB in Preferences), older ones thinned first. Off for people upgrading until they turn it on. | `SideWindowPicturePolicyTests`, `WindowPictureCropTests`, `core/brain/tests/side_pictures.rs`, `moment_screenshots.rs`, `apps/agent/tests/side_pictures_retention.rs`, `brain_ingest_context.rs`. A working hour's disk and CPU: needs a person. |
+| Demo Memory | A made-up week in its own folder, from Option-click on the hi menu or Preferences, under About; remembering is paused while it is in use. | The seeder's `demo_week` tests, the `swift-test-demo-memory` lane, `DemoMemorySwitchingTests`, `DemoMemoryTests`. In the signed app: needs a person. |
+| AI tools | Connect AI Tools… registers the `hippocampus` MCP server with Claude Code and Codex. Each session can start with up to four lines of recent work and up to six things learned about you. Disconnect… and Disconnect All… in Preferences take out exactly what Connect added. | `mcp_server.rs`, `context_packet.rs`, `handoff.rs`, `what_is_sent.rs` and `client_registration_e2e.rs` in `apps/agent/tests`; the `menu-ai-connector`, `onboarding-ai-connector` and `session-context-behavior` lanes. A live Claude Code or Codex session on the 0.3.0 build: needs a person. |
 | Menu bar, Pause, Stop Sharing, Quit | Four menu-bar pictures. Quit stops every process Hippocampus started; Stop Sharing turns remembering off; a crash stops the helper within 10 s. | `MenuBarStatusTests`, `StatusMenuModelTests`, `UserPauseControllerTests`, `CaptureStreamStopPolicyTests`, and the `quit-verifier-contract` lane on a stand-in app. In the real app: needs a person. |
-| Setup | Five screens: Welcome with a live demo of Ask, Overview and an AI tool from made-up data, What you get, two permissions, the promises, and Try it, which reads the window behind setup and shows what it read or why it was skipped. | The `apps/onboarding` tests and the off-screen renders (`HIPPOCAMPUS_RENDER_ONBOARDING`). A first run on a new account, and the demo's motion on screen: needs a person. |
+| Setup | Five screens: Welcome with a live demo of Ask, Today and an AI tool from made-up data, What you get, two permissions, the promises, and Try it, which reads the window behind setup and shows what it read or why it was skipped. Screens slide the way you go; the key that opens Ask can be Fn. | The `apps/onboarding` tests and the off-screen renders (`HIPPOCAMPUS_RENDER_ONBOARDING`). A first run on a new account, and the demo's motion on screen: needs a person. |
 | Updates | Check for Updates reads the newest GitHub release's `appcast.xml`, whose feed and DMG are signed with the release key. | `scripts/test-sparkle-publish.sh` (24 checks, judged by the app's own Sparkle) and `scripts/test-release-identity.sh`. No release is published yet, so until one is, Check for Updates says it couldn't check. |
 | Install | `install.sh` checks the checksum, Apple's notarization and the Team ID before it copies the app. A Homebrew cask is ready in a local tap. | The `install-sh-fixtures` lane (14 checks on a fake release); on Oct 15 the same test passed 18 checks with the notarized 0.2.1 disk image. The cask passed `brew audit --strict` and `brew style` locally. From the public tap: needs a person, once the tap is pushed. |
 | The release build | `scripts/release-0.3.0.sh` builds, signs, notarizes and checks the release; `--dry-run` does all but notarize. | The `release-app-gate`, `notary-log-contract`, `strip-release-binaries` and `release-contract` lanes. A dry run on Oct 15 at `088cd6a` exited 0. A notarized 0.3.0: not built yet. |
@@ -74,6 +81,10 @@ prints the real figures.
 - With stripped programs and the earlier reader, from the release dry run
   at `088cd6a`: disk image 198.1 MB, app 432.5 MB.
 
+A picture of a window beside the one in front takes about 48 ms for the
+largest window (median, release build): about 1.5 s of CPU an hour at the
+caps, counted against the reader's rest.
+
 Not measured yet: CPU, memory, energy and disk over a whole working hour or
 day. The goal is under 5% of the Mac. What bounds it today is in code: the
 reader rests three times as long as each read took plugged in (busy at most
@@ -97,7 +108,12 @@ CPU share.
 - MCP clients other than Claude Code and Codex.
 - Installing from the public Homebrew tap, and an update from the first
   published release.
-- A working hour's footprint (above).
+- A working hour's footprint (above), and the disk the pictures of other
+  windows use over one.
+- Asking macOS for the calendar from a signed build, from Preferences and
+  from Today's Show Calendar.
+- Resume and Ask {your tool} opening real apps, tabs and AI tools.
+- Demo Memory in the signed app, and leaving it.
 
 ## Known limits
 
@@ -107,15 +123,16 @@ CPU share.
   secret checks look for passwords, keys and tokens.
 - A private browser window that shows no private marker is read.
 - In Low Power Mode only the window in front is read.
-- Connected AI tools can read your memory while Hippocampus is quit, and the
-  app can't disconnect one ([how to](../PRIVACY.md#disconnecting-an-ai-tool)).
+- Connected AI tools can read your memory while Hippocampus is quit, until
+  you disconnect them ([how](../PRIVACY.md#disconnecting-an-ai-tool)).
 - Up to six things learned about you can start an AI session before you
-  confirm them, at a model confidence of 0.5 or more. You shows each, and
-  Forget removes it.
+  confirm them, once the model's confidence is 0.75 or more and three
+  moments on two different days show them; nothing about a sensitive area
+  goes unless you confirm it. About You shows each, and Forget removes it.
 - Search results reach AI tools as plain text, and are marked "degraded",
   because no evidence verifier ships.
-- Copy for your AI pastes 280-character previews, with some symbols written
-  as HTML codes.
+- Copy for Your AI and Ask {your tool} send each moment's whole reading as
+  Markdown, shortened evenly to fit the tool's message box.
 - The Overview lists searches only when it knows the pages' addresses:
   where Automation was already allowed, or with the browser extension.
 - Memories saved before 0.3 were read before windows were classified. Their

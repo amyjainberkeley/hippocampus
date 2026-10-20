@@ -32,7 +32,7 @@ func workMoment(_ id: UInt64, _ tsUs: UInt64, app: String = "com.google.Chrome",
 
 /// Moments read as the FFI reads them: by id, and browsed by time, app and
 /// address, newest first. It keeps what it was asked.
-final class MomentsReader: BrainReader, @unchecked Sendable {
+final class WorkMomentsReader: BrainReader, @unchecked Sendable {
     let hits: [Hit]
     private let lock = NSLock()
     private var asked: [SearchOptions] = []

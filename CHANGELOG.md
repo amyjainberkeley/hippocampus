@@ -5,6 +5,55 @@ commits are intentionally omitted from release notes.
 
 ## [Unreleased]
 
+### The window
+
+- A sidebar instead of three places: Today, then Working On, then Library with History, Web Pages, Documents, Code, Conversations and Looked Up, and at the bottom About You, AI Tools and Privacy. A row appears once it has something in it. ⌘1 to ⌘9 open them in that order.
+- The field, “Ask or search your memory”, sits at the top of every page, with Back and Forward (⌘[ and ⌘]). It searches by meaning, as Ask does, and words in quotes match exactly. ⌘F keeps it to the page you’re on; ⌘N searches everything.
+- The hi mark is a button: Pause for an hour, until tomorrow or until you resume, Forget the last 10 minutes, the last hour or today, Privacy and Preferences. While remembering is paused or off, a line at the top of every page says so, with the button that turns it back on.
+- Forget from anywhere: a moment, a few you picked (⌘⌫, with Undo for a few seconds), an hour of History, a session, a page or a search, or recent time (⇧⌘⌫). Hippocampus holds still while it forgets, so you no longer need to pause first.
+- ⌘T goes to today. ⌘↩ asks your AI tool, and ⌥↩ asks on this Mac.
+- View › Hide Working On takes project names off the screen before you share it.
+- The window follows the Mac’s light or dark appearance.
+- People who used the earlier window see one line about the new sidebar, once.
+
+### Working On and Resume
+
+- Working On lists your projects and documents by name, from their window titles, once you spend 30 minutes on one in two weeks of use. Each shows a small picture of where you left off, and a larger one when you rest the pointer on it.
+- A project’s page shows where you left off, its files, the pages, searches and AI chats you had open alongside it, its meetings and its History.
+- Resume, on a project’s page and on Today, lists what you had open for it last time, its pages in the browser you read them in, its documents, its code folder in your editor and Terminal, and opens only what you tick. Tabs already open aren’t opened twice. It sends nothing anywhere.
+- Show All shows every project as a card, with what isn’t in the sidebar and why.
+
+### Ask and your AI tools
+
+- Ask works like Spotlight: as you type it finds projects, pages and moments. Return opens one, ⌘↩ asks your AI tool, ⌥↩ resumes a project. It never takes ⌘Space.
+- Ask Claude, on History, Today, a project’s page and an answer, opens Claude with what you picked already in its message box, and you press send. The button remembers your last tool: Claude, ChatGPT, Codex or Cursor. On a code project it reads Open in Claude Code and opens a session in the project’s folder.
+- Copy for Your AI makes the same message. The copy stays on this Mac, clipboard history apps don’t keep it, and it clears after 2 minutes.
+- AI Tools shows what each connected tool can reach, and the exact words its sessions start with.
+- Disconnect, in Preferences under AI Tools, takes Hippocampus out of a tool’s settings and leaves the rest as it was.
+
+### Reading
+
+- A moment reads as it looked: headings, paragraphs, lists, code, terminal output and chat messages with their names. Copy Text keeps that shape. Older moments are made again in the background.
+- A Zoom window’s menu and Gmail’s label chips no longer lead a moment’s preview.
+
+### Calendar
+
+- Show your calendar on Today, if you want it: today’s meetings as thin bars over your day, calls named after their meetings, and a project’s meetings on its page. Ask can answer “When did I last meet with …?”.
+- It is off until you turn it on, in Preferences or on Today. Only titles, times, calendar names and places are read, on this Mac. Nothing is stored, nothing is learned about you from it, and it is never sent to an AI tool.
+
+### Pictures of other windows
+
+- Hippocampus can now keep pictures of the other windows you can see, not just the one you’re using. It’s off until you turn it on, in Preferences under Remembering. Calls, video and private windows are never kept, pictures use at most 2 GB, and older ones are thinned out first.
+
+### Setup
+
+- Screens slide the way you go, and a permission that turns on shows a calm checkmark. The demo shows the new Today.
+- The key that opens Ask can be Fn (Globe). If another app, or macOS, uses Fn, setup and Preferences say so and wait for you.
+
+### Demo Memory
+
+- Option-click the hi in the menu bar, or open Preferences under About, to use Demo Memory: a made-up week for videos and screenshots. Remembering pauses while it is in use, and Leave Demo Memory goes back to your own memory, untouched.
+
 ### Remembering
 
 - When macOS has Screen Recording or Accessibility off for Hippocampus, remembering stops altogether, whole-screen reading and Safari pages included, and the menu says Needs permission. Once you allow it, opening the menu starts it again; Accessibility starts it again by itself.

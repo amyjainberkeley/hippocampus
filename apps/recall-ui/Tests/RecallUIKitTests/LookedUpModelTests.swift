@@ -54,7 +54,7 @@ final class LookedUpModelTests: XCTestCase {
                                    title: "Page \(index)", url: "https://pages.example/\(index)"))
         }
         hits.append(workMoment(30, WorkClock.us(0, 14, 12), title: "Too late", url: "https://late.example/"))
-        let reader = MomentsReader(hits)
+        let reader = WorkMomentsReader(hits)
         let model = LookedUpModel(searches: PreviewSearchesReader(records: [
             record("per seat vs tiered pricing", WorkClock.us(0, 14, 6), 10),
         ]), reader: reader, calendar: WorkClock.calendar, now: { WorkClock.now })
@@ -96,12 +96,12 @@ final class LookedUpModelTests: XCTestCase {
         let model = LookedUpModel(searches: PreviewSearchesReader(records: [
             record("per seat vs tiered pricing", WorkClock.us(0, 14, 6), 1),
             record("sales tax rounding rules by state", WorkClock.us(4, 15, 5), 2),
-        ]), reader: MomentsReader([]), calendar: WorkClock.calendar, now: { WorkClock.now })
+        ]), reader: WorkMomentsReader([]), calendar: WorkClock.calendar, now: { WorkClock.now })
         await model.reload()
         XCTAssertEqual(model.sections.map(\.title), [WorkCopy.today, WorkCopy.previous7Days])
         XCTAssertNil(model.rows.first?.page, "a results page that is gone leaves the row without its text")
 
-        let failing = LookedUpModel(searches: FailingSearches(), reader: MomentsReader([]),
+        let failing = LookedUpModel(searches: FailingSearches(), reader: WorkMomentsReader([]),
                                     calendar: WorkClock.calendar, now: { WorkClock.now })
         await failing.reload()
         XCTAssertEqual(failing.state, .failed)
