@@ -274,7 +274,9 @@ inspect_dmg() {
         return
     fi
     MOUNTED="$mount_point"
-    if mount | grep -F " on $mount_point " | grep -q "read-only"; then
+    local mounts
+    mounts="$(mount)"
+    if grep -F " on $mount_point " <<< "$mounts" | grep -q "read-only"; then
         pass "$id.mount" "$(basename "$image") mounted read-only at a private mount point (no Finder, no auto-open)"
     else
         fail "$id.mount" "the volume is not mounted read-only"
@@ -293,10 +295,14 @@ inspect_dmg() {
     app="$mount_point/Hippocampus.app"
     # Signatures.
     if codesign --verify --deep --strict "$app" > "$H/$id-codesign.log" 2>&1; then
-        local authority team
-        authority="$(codesign -dv --verbose=2 "$app" 2>&1 | sed -n 's/^Authority=//p' | head -n 1)"
-        team="$(codesign -dv --verbose=2 "$app" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
-        if codesign -dv --verbose=2 "$app" 2>&1 | grep -q '^Signature=adhoc'; then
+        # Read the signature once, then match it: a grep -q that stops early
+        # would cut codesign's output, and pipefail would call that a mismatch.
+        local signature authority team
+        signature="$(codesign -dv --verbose=2 "$app" 2>&1)"
+        printf '%s\n' "$signature" >> "$H/$id-codesign.log"
+        authority="$(sed -n 's/^Authority=//p' <<< "$signature" | head -n 1)"
+        team="$(sed -n 's/^TeamIdentifier=//p' <<< "$signature")"
+        if grep -q '^Signature=adhoc' <<< "$signature"; then
             pass "$id.sign" "codesign --verify --deep --strict passes; signature is ad-hoc (development build: no Team ID, no hardened runtime)"
         else
             pass "$id.sign" "codesign --verify --deep --strict passes; signed by ${authority:-?} (Team ID ${team:-?})"
