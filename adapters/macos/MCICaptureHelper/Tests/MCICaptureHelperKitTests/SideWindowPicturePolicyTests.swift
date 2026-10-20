@@ -43,6 +43,27 @@ final class SideWindowPicturePolicyTests: XCTestCase {
         }
     }
 
+    /// Chat apps with video calls, and more video sites, are never pictured:
+    /// a Discord or WhatsApp call beside the front window would show other
+    /// people's faces (the privacy verifier's list).
+    func testChatAppsWithCallsAndMoreVideoSitesAreNeverPictured() {
+        for app in ["com.hnc.Discord", "net.whatsapp.WhatsApp", "desktop.WhatsApp",
+                    "org.whispersystems.signal-desktop", "ru.keepcoder.Telegram", "org.telegram.desktop"] {
+            XCTAssertTrue(SideWindowPicturePolicy.isCallOrVideo(bundleId: app, title: "Anything"), app)
+            XCTAssertTrue(SideWindowPicturePolicy.isCallOrVideo(bundleId: app, title: nil), app)
+        }
+        for title in ["The Last of Us | Max", "Max", "The Pitt | HBO Max", "Yellowstone - Paramount+",
+                      "TikTok - Make Your Day", "Onboarding walkthrough | Loom", "Loom",
+                      "Watch The Office | Peacock"] {
+            XCTAssertTrue(SideWindowPicturePolicy.isCallOrVideo(bundleId: "com.google.Chrome", title: title), title)
+        }
+        // Ordinary words stay ordinary: only the sites' own names count.
+        for title in ["Bloomberg Markets", "M3 Max review - Northwind Notes", "Maximum file size",
+                      "Heirloom tomatoes - Trailhead Kitchen", "Paramount Pictures history"] {
+            XCTAssertFalse(SideWindowPicturePolicy.isCallOrVideo(bundleId: "com.google.Chrome", title: title), title)
+        }
+    }
+
     // MARK: Rules 2 and 6 — the ledger
 
     func testTheFirstPictureOfAWindowIsKept() {
