@@ -162,18 +162,22 @@ public final class DemoMemoryController: ObservableObject {
         }
     }
 
-    /// Leave Demo Memory.
-    public func requestLeave() {
+    /// Leave Demo Memory, from the menu bar or the window's footer. False
+    /// when it isn't in use, or a switch is under way.
+    @discardableResult
+    public func requestLeave() -> Bool {
         requestLeave(restoringRemembering: true)
     }
 
-    private func requestLeave(restoringRemembering: Bool) {
-        guard phase == .on, switching == nil else { return }
+    @discardableResult
+    private func requestLeave(restoringRemembering: Bool) -> Bool {
+        guard phase == .on, switching == nil else { return false }
         switching = Task { [weak self] in
             guard let self else { return }
             await self.leave(restoringRemembering: restoringRemembering)
             self.switching = nil
         }
+        return true
     }
 
     // MARK: Switching
@@ -285,4 +289,18 @@ public final class DemoMemoryController: ObservableObject {
         self.phase = phase
     }
     #endif
+}
+
+/// The window's Leave Demo Memory, for its private pipe (SPEC 2.6.4,
+/// SPEC-DELTA 6): the menu bar's own Leave, read and carried out here, so the
+/// supervisor reaches Demo Memory's store only through its children's
+/// environment (`ProcessSupervisorLaunchPlan.sanitizedEnvironment`).
+extension ProcessSupervisor {
+    /// Demo Memory is in use: the window may ask to leave it.
+    var windowMayLeaveDemoMemory: Bool { DemoMemory.controller?.phase == .on }
+
+    /// Leave Demo Memory, as the menu bar's item does. True when it began.
+    func leaveDemoMemoryForWindow() -> Bool {
+        DemoMemory.controller?.requestLeave() ?? false
+    }
 }

@@ -15,6 +15,9 @@ import os
 public struct WindowChannelRequest: Equatable, Sendable {
     public enum Op: String, CaseIterable, Sendable {
         case pause, resume, turnOn, tryAgain, openSystemSettings, quit, hold, release
+        /// Leave Demo Memory: back to the person's own memory, with
+        /// remembering as it was before, as the menu bar's Leave does.
+        case leaveDemo
     }
 
     public let id: String
@@ -167,15 +170,21 @@ public struct WindowStatusMessage: Equatable, Sendable {
 /// row: the window may do only what the person could click here (SPEC
 /// 2.6.4). Turn On only after setup (before it, the row offers Finish
 /// Setup…), Resume only when paused, and so on. The hold is always asked;
-/// the app answers it at once when nothing holds the memory.
+/// the app answers it at once when nothing holds the memory. Leave Demo
+/// Memory is the menu's own item beside the row: it is there whenever Demo
+/// Memory is in use (`demoMemory`), whatever the row offers.
 public enum WindowChannelPolicy {
-    public static func allows(_ request: WindowChannelRequest, row: StatusRow, holding: Bool) -> Bool {
+    public static func allows(_ request: WindowChannelRequest, row: StatusRow, holding: Bool,
+                              demoMemory: Bool = false) -> Bool {
         switch request.op {
         case .pause: return row.action == .pause
         case .resume: return row.action == .resume
         case .turnOn: return row.action == .turnOn
         case .tryAgain: return row.action == .tryAgain
         case .quit: return row.action == .quit
+        // Never in the middle of a forget: the window it reopens is the
+        // one deleting.
+        case .leaveDemo: return demoMemory && !holding
         case .openSystemSettings:
             guard case let .openSystemSettings(permission) = row.action else { return false }
             return permission == request.permission

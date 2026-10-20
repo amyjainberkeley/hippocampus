@@ -231,6 +231,73 @@ final class DemoMemorySwitchingTests: XCTestCase {
 
     // MARK: Leaving takes back exactly what using changed
 
+    /// The window's footer, in Demo Memory, offers one action, Leave Demo
+    /// Memory, which it sends over the pipe as `leaveDemo`. The app carries
+    /// it out as the menu bar's Leave: a pause the person made before Demo
+    /// Memory is still there afterwards.
+    func testLeavingFromTheWindowKeepsAPauseThePersonMade() async throws {
+        let home = try makeHome()
+        let supervisor = ProcessSupervisor(
+            locator: FakeBinaryLocator(), keyStore: FakeKeyStore(),
+            runtimeConfig: FakeRuntimeConfig(captureEnabled: true), topology: FakeSupervisorTopology(),
+            keyCustodyPreparer: FakeKeyCustodyPreparer(), readinessTimeout: 0.1,
+            captureStatusReader: { (nil, nil) }
+        )
+        // The person paused, Until I Resume, before Use Demo Memory….
+        supervisor.showForPreview(state: .paused, captureEnabled: true, receipt: nil, startedAt: nil)
+        supervisor.pause(until: nil)
+        XCTAssertNotNil(supervisor.pausedSince)
+        let controller = DemoMemoryController(
+            host: SupervisorDemoMemoryHost(supervisor: supervisor,
+                                           locator: BundleBinaryLocator(bundle: Bundle(for: Self.self))),
+            maker: FakeDemoMaker(), folder: .standard(home: home), home: home
+        )
+        DemoMemory.attach(controller)
+        defer { DemoMemory.detach() }
+        let used = await controller.use()
+        XCTAssertTrue(used)
+        // The window's Leave Demo Memory, as the app receives it.
+        let leave = WindowChannelRequest(id: "leave-demo", op: .leaveDemo)
+        XCTAssertTrue(WindowChannelPolicy.allows(leave, row: supervisor.menuRow(setupFinished: true), holding: false,
+                                                 demoMemory: true))
+        let handled = await supervisor.handleWindowRequest(leave, setupFinished: true)
+        XCTAssertTrue(handled)
+        try await waitUntil { controller.phase == .off }
+        XCTAssertNotNil(supervisor.pausedSince,
+                        "Leave Demo Memory in the window ended the pause the person made before Demo Memory")
+    }
+
+    /// With remembering off before Demo Memory, the window's Leave Demo
+    /// Memory still leaves it.
+    func testLeavingFromTheWindowWorksWhenRememberingWasOff() async throws {
+        let home = try makeHome()
+        let supervisor = ProcessSupervisor(
+            locator: FakeBinaryLocator(), keyStore: FakeKeyStore(),
+            runtimeConfig: FakeRuntimeConfig(captureEnabled: false), topology: FakeSupervisorTopology(),
+            keyCustodyPreparer: FakeKeyCustodyPreparer(), readinessTimeout: 0.1,
+            captureStatusReader: { (nil, nil) }
+        )
+        supervisor.showForPreview(state: .idle, captureEnabled: false, receipt: nil, startedAt: nil)
+        let controller = DemoMemoryController(
+            host: SupervisorDemoMemoryHost(supervisor: supervisor,
+                                           locator: BundleBinaryLocator(bundle: Bundle(for: Self.self))),
+            maker: FakeDemoMaker(), folder: .standard(home: home), home: home
+        )
+        DemoMemory.attach(controller)
+        defer { DemoMemory.detach() }
+        let used = await controller.use()
+        XCTAssertTrue(used)
+        let leave = WindowChannelRequest(id: "leave-demo", op: .leaveDemo)
+        let row = supervisor.menuRow(setupFinished: true)
+        XCTAssertTrue(WindowChannelPolicy.allows(leave, row: row, holding: false, demoMemory: true),
+                      "the app refuses the window's Leave Demo Memory (the menu row offers \(String(describing: row.action)))")
+        let handled = await supervisor.handleWindowRequest(leave, setupFinished: true)
+        XCTAssertTrue(handled)
+        try await waitUntil { controller.phase == .off }
+        XCTAssertEqual(controller.phase, .off, "the window's Leave Demo Memory left nothing")
+        XCTAssertNil(supervisor.pausedSince, "remembering is off again, as it was, not paused")
+    }
+
     func testAPauseThePersonMadeStaysAfterLeaving() async throws {
         let home = try makeHome()
         let host = FakeDemoHost()

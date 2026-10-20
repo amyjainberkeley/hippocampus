@@ -77,6 +77,29 @@ final class WindowChannelServerTests: XCTestCase {
         XCTAssertTrue(WindowChannelPolicy.allows(request(.release), row: row(nil), holding: true))
     }
 
+    /// Leave Demo Memory is the menu's own item beside the row: the window
+    /// may send it whenever Demo Memory is in use, whatever the row offers
+    /// (paused by the person, or Off with Turn On), and never otherwise.
+    func testLeaveDemoMemoryIsTakenOnlyWhileDemoMemoryIsInUse() {
+        XCTAssertEqual(WindowChannelRequest.parse(line(#"{"v":1,"id":"l1","op":"leaveDemo"}"#))?.op, .leaveDemo)
+        XCTAssertNil(WindowChannelRequest.parse(line(
+            #"{"v":1,"id":"l2","op":"leaveDemo","until":"2026-10-12T15:40:00-07:00"}"#)), "only a pause has an end")
+        for action in [CaptureStatusAction.resume, .turnOn, .pause, .tryAgain, nil] {
+            XCTAssertTrue(WindowChannelPolicy.allows(request(.leaveDemo), row: row(action), holding: false,
+                                                     demoMemory: true), "\(String(describing: action))")
+            XCTAssertFalse(WindowChannelPolicy.allows(request(.leaveDemo), row: row(action), holding: false,
+                                                      demoMemory: false), "\(String(describing: action))")
+        }
+        XCTAssertFalse(WindowChannelPolicy.allows(request(.leaveDemo), row: row(.resume), holding: false),
+                       "Demo Memory is not in use unless the app says so")
+        XCTAssertFalse(WindowChannelPolicy.allows(request(.leaveDemo), row: row(nil), holding: true, demoMemory: true),
+                       "never in the middle of a forget")
+        // Resume is still only the row's own Resume: the window's Leave is
+        // never carried out as one.
+        XCTAssertFalse(WindowChannelPolicy.allows(request(.resume), row: row(.turnOn), holding: false,
+                                                  demoMemory: true))
+    }
+
     // MARK: The pipe
 
     private var descriptors: [Int32] = []

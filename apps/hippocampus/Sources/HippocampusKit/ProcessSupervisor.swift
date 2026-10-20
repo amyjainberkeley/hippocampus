@@ -2156,8 +2156,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     /// One request from the window: carried out only where the menu bar's
     /// same click would be (`WindowChannelPolicy`).
-    func handleWindowRequest(_ request: WindowChannelRequest) async -> Bool {
-        guard WindowChannelPolicy.allows(request, row: menuRow(), holding: forgetHold.isHolding) else {
+    func handleWindowRequest(_ request: WindowChannelRequest,
+                             setupFinished: Bool = OnboardingSentinel.isComplete) async -> Bool {
+        guard WindowChannelPolicy.allows(request, row: menuRow(setupFinished: setupFinished),
+                                         holding: forgetHold.isHolding,
+                                         demoMemory: windowMayLeaveDemoMemory) else {
             return false
         }
         switch request.op {
@@ -2176,6 +2179,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             return perform(.openSystemSettings(permission))
         case .quit:
             return perform(.quit)
+        case .leaveDemo:
+            // The menu bar's own Leave: remembering goes back to what it was
+            // before Demo Memory. Never a Resume, which would end a pause the
+            // person made, or do nothing while remembering is off.
+            return leaveDemoMemoryForWindow()
         case .hold:
             return await forgetHold.hold()
         case .release:
