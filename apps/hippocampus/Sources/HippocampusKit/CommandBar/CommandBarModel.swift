@@ -299,6 +299,10 @@ public final class CommandBarModel: ObservableObject {
     /// The memory in use now. When it changes, what the panel kept from the
     /// other is dropped before anything is shown.
     var memoryInUse: @Sendable () -> URL? = { DemoMemory.storeURL }
+    /// The memory the shown question was asked of, as `memoryInUse` named
+    /// it then. A kept answer comes back only in that memory: never the
+    /// person's own under Demo Memory, nor the made-up week's in their own.
+    private var askedMemory: URL?
     /// "When did I last meet with …?" answered from the person's own
     /// calendar, on this Mac, while they have it on (SPEC-DELTA 5). Tests and
     /// pictures give it a fixed calendar, so nothing reads the real one.
@@ -452,7 +456,8 @@ public final class CommandBarModel: ObservableObject {
 
     /// Ask opened. Returns the id `contextArrived` must quote. An answer from
     /// the last 10 minutes comes back with its question selected and the
-    /// window it was asked over; anything else starts fresh.
+    /// window it was asked over, in the memory it was asked of; anything
+    /// else starts fresh.
     @discardableResult
     public func opened() -> Int {
         openID += 1
@@ -468,6 +473,17 @@ public final class CommandBarModel: ObservableObject {
         liveContext = nil
         liveContextKnown = false
         answersAvailable = availability.isAvailable(at: now())
+        if askedMemory != memoryInUse() {
+            // Demo Memory began or ended since the last question: its
+            // answer, sources and the message ⌘↩ made from them belong to
+            // the other memory. They go before anything is shown, and a
+            // reply still on its way is dropped (`askToken`, below).
+            askedQuestion = nil
+            answer = nil
+            lastCard = nil
+            lastRequest = nil
+            askedMemory = memoryInUse()
+        }
         if keepsAnswer {
             showingKeptAnswer = true
             selection = -1
@@ -707,6 +723,7 @@ public final class CommandBarModel: ObservableObject {
         setQuery(trimmed)
         askToken += 1
         askedQuestion = trimmed
+        askedMemory = memoryInUse()
         askedAt = nil
         answer = nil
         notice = nil

@@ -253,6 +253,93 @@ final class AskPanelTests: XCTestCase {
         XCTAssertFalse(model.back(), "a second Esc closes")
     }
 
+    // MARK: One memory's answer never shows in the other (Demo Memory)
+
+    private static let demoStore = URL(fileURLWithPath: "/tmp/demo-memory/mci.sqlite")
+
+    /// An answer from the person's own memory, kept for ten minutes after
+    /// Ask closes, never shows once Demo Memory is in use: not on camera,
+    /// not its question, not its sources.
+    func testAKeptAnswerFromOneMemoryNeverShowsUnderTheOther() async throws {
+        let (model, _, _) = rig()
+        model.memoryInUse = { nil }
+        await open(model, over: safari)
+        model.ask("what did I decide about pricing?")
+        await eventually { model.answer != nil }
+        model.closed()
+        // Use Demo Memory… while the answer is still kept.
+        let demo = Self.demoStore
+        model.memoryInUse = { demo }
+        let id = model.opened()
+        XCTAssertNotEqual(model.mode, .answer, "the person's own answer shows under Demo Memory")
+        XCTAssertNil(model.answer, "the person's own answer shows under Demo Memory")
+        XCTAssertNil(model.askedQuestion, "the person's own question shows under Demo Memory")
+        XCTAssertEqual(model.query, "", "the person's own question stays out of the field")
+        model.contextArrived(safari, openID: id)
+        await settle()
+        XCTAssertFalse(model.rows.contains { if case .source = $0 { true } else { false } },
+                       "none of the person's own sources are listed")
+    }
+
+    /// The other way: the made-up week's answer never shows in the person's
+    /// own memory after leaving Demo Memory, and ⌘↩ has nothing of it to
+    /// build a message from.
+    func testADemoAnswerNeverShowsAfterLeavingDemoMemory() async throws {
+        let (model, _, _) = rig()
+        let demo = Self.demoStore
+        model.memoryInUse = { demo }
+        await open(model, over: safari)
+        model.ask("what did we decide about yearly billing?")
+        await eventually { model.answer != nil }
+        // The message ⌘↩ made from the made-up week's moments.
+        model.lastCard = SendCard(message: "what did we decide about yearly billing?", words: 7, open: nil,
+                                  copy: true, included: [7, 11])
+        model.closed()
+        // Leave Demo Memory.
+        model.memoryInUse = { nil }
+        model.opened()
+        XCTAssertNotEqual(model.mode, .answer, "the made-up week's answer shows in the person's own memory")
+        XCTAssertNil(model.answer)
+        XCTAssertNil(model.askedQuestion)
+        XCTAssertNil(model.lastCard, "the message made from the made-up week is gone")
+        XCTAssertNil(model.pendingAsk(), "⌘↩ has none of the made-up week's moments to send")
+    }
+
+    /// A question still being answered from one memory when the other is
+    /// opened never lands there.
+    func testAReplyFromTheOtherMemoryNeverLands() async {
+        let (model, memory, _) = rig()
+        model.memoryInUse = { nil }
+        memory.held = ["mci_ask"]
+        await open(model, over: safari)
+        model.ask("what did I decide about pricing?")
+        model.closed()
+        let demo = Self.demoStore
+        model.memoryInUse = { demo }
+        model.opened()
+        memory.release("mci_ask")
+        await settle()
+        XCTAssertNil(model.answer, "the person's own reply landed under Demo Memory")
+        XCTAssertNotEqual(model.mode, .answer)
+        XCTAssertFalse(model.isAsking)
+    }
+
+    /// In the memory it was asked of, a kept answer still comes back: the
+    /// person's own, and Demo Memory's while it stays in use.
+    func testAKeptAnswerStillComesBackInItsOwnMemory() async {
+        for store in [nil, Self.demoStore] {
+            let (model, _, _) = rig()
+            model.memoryInUse = { store }
+            await open(model, over: safari)
+            model.ask("what did we decide on team pricing?")
+            await eventually { model.answer != nil }
+            model.closed()
+            model.opened()
+            XCTAssertEqual(model.mode, .answer, "\(String(describing: store))")
+            XCTAssertEqual(model.answer?.answer, "Team is $18 a seat.")
+        }
+    }
+
     func testTypingReplacesAKeptQuestion() async {
         let (model, _, _) = rig()
         await open(model, over: safari)
