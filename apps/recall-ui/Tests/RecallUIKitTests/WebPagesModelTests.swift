@@ -42,6 +42,33 @@ final class WebPagesModelTests: XCTestCase {
                        "a link never carries the query or fragment")
     }
 
+    /// When the work read fails or times out, the fallback lists what the
+    /// agent's own list would (SPEC 3.5): never mail, chat, documents and
+    /// designs on the web, AI chats, calls or planning tools, which have
+    /// their own places. It used to list them all.
+    func testTheFallbackLeavesOutMailDocumentsAndAIChatsAsTheAgentDoes() {
+        let hits = [
+            workMoment(10, WorkClock.us(0, 14, 50), title: "Inbox (3) - Gmail", url: "https://mail.google.com/mail/u/0/#inbox"),
+            workMoment(9, WorkClock.us(0, 14, 45), title: "Q4 planning - Google Docs",
+                       url: "https://docs.google.com/document/d/q4-planning/edit"),
+            workMoment(8, WorkClock.us(0, 14, 40), title: "Rounding modes - Claude", url: "https://claude.ai/chat/rounding"),
+            workMoment(7, WorkClock.us(0, 14, 35), title: "Trailhead pricing v3 - Figma",
+                       url: "https://www.figma.com/design/trailhead-pricing"),
+            workMoment(6, WorkClock.us(0, 14, 30), title: "October invoices - Google Sheets",
+                       url: "https://sheets.google.com/d/october"),
+            workMoment(5, WorkClock.us(0, 14, 25), title: "Team sync - Google Meet", url: "https://meet.google.com/abc-defg"),
+            workMoment(4, WorkClock.us(0, 14, 20), title: "Launch board - Linear", url: "https://linear.app/northwind/team"),
+            workMoment(3, WorkClock.us(0, 14, 15), title: "Rounding half to even", url: "https://devnotes.example/rounding"),
+            workMoment(2, WorkClock.us(0, 14, 10), title: "Round totals once · trailhead-shop",
+                       url: "https://github.com/northwind/trailhead-shop/pull/12"),
+            workMoment(1, WorkClock.us(0, 14, 5), app: "com.tinyspeck.slackmacgap", title: "launch (Channel)",
+                       url: "https://app.slack.com/client/T01/C01"),
+        ]
+        let rows = WebPagesModel.pages(from: hits, calendar: WorkClock.calendar)
+        XCTAssertEqual(rows.map(\.id), ["devnotes.example/rounding", "github.com/northwind/trailhead-shop/pull/12"],
+                       "pages read in a browser, as the agent lists them")
+    }
+
     func testARowSaysItsBrowserSiteAndDaysAndItsLinkKeepsItsScheme() {
         var row = WebPageRow(id: "a", page: page("Rounding half to even", days: 3, lastUs: WorkClock.us(0, 14),
                                                  moments: [9]))

@@ -129,14 +129,15 @@ public final class WebPagesModel: ObservableObject {
     }
 
     /// Pages from moments with an address, newest first: one per address,
-    /// never its query or fragment. Search result pages are left out.
+    /// never its query or fragment. Search result pages are left out, and
+    /// so is everything the agent's own list leaves out (SPEC 3.5).
     public static func pages(from hits: [Hit], calendar: Calendar) -> [WebPageRow] {
         var rows: [String: WebPageRow] = [:]
         var order: [String] = []
         var days: [String: Set<String>] = [:]
         var moments: [String: [UInt64]] = [:]
         for hit in hits.sorted(by: { $0.tsUs > $1.tsUs }) {
-            guard let url = hit.url, let address = Self.address(url), !Self.isSearch(url),
+            guard let url = hit.url, let address = Self.address(url), !Self.isSearch(url), Self.isPage(hit),
                   let app = hit.appBundleId else { continue }
             let key = address.host + address.path
             let day = MemoryDay(date: Date(timeIntervalSince1970: Double(hit.tsUs) / 1_000_000), calendar: calendar)
@@ -169,6 +170,20 @@ public final class WebPagesModel: ObservableObject {
         var path = components.path.isEmpty ? "/" : components.path
         if path.count > 1, path.hasSuffix("/") { path.removeLast() }
         return (host, path)
+    }
+
+    /// Whether a moment is a page Web Pages lists, by the agent's rule
+    /// (`page_subject` in core/brain/src/subject.rs): read in a browser, on
+    /// a site that isn't mail or chat, a call, an AI tool, a planning tool,
+    /// or a document or design on the web (Google Docs, Sheets and Slides,
+    /// Notion, Figma, Canva), which Conversations, Documents and Working On
+    /// have instead.
+    static func isPage(_ hit: Hit) -> Bool {
+        guard MomentKinds.workKind(bundleId: hit.appBundleId) == .research else { return false }
+        switch MomentKinds.workKind(of: hit) {
+        case .communication, .meetings, .ai, .planning, .writing, .design: return false
+        case .research, .code, .media, .other: return true
+        }
     }
 
     static func isSearch(_ url: String) -> Bool {
