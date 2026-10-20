@@ -1185,6 +1185,12 @@ if [[ ! -s "$H/zap-paths.txt" ]]; then
         "~/Library/Preferences/ai.hippocampus.plist" "~/Library/Saved Application State/ai.hippocampus.savedState" \
         > "$H/zap-paths.txt"
 fi
+# Without an app bundle (a headless run), the agent is the bare debug binary,
+# and macOS names its caches (Core ML's compiled models) after it rather than
+# after the bundle, Caches/ai.hippocampus, which the zap list has.
+if [[ "$AGENT" != *.app/Contents/MacOS/* ]]; then
+    printf '%s\n' "~/Library/Caches/$(basename "$AGENT")" >> "$H/zap-paths.txt"
+fi
 # Homebrew's zap expands globs (the AI-tool registry's lock files are one);
 # so does this, inside the throwaway home only.
 python3 - "$E2E_HOME" "$H/zap-paths.txt" <<'PY'
