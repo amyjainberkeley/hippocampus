@@ -361,7 +361,7 @@ final class MenuBarStatusTests: XCTestCase {
              "It can’t tell if this browser window is private.", "Pause"),
             (.skipping(reason: "app_identity_unknown"), "Skipping this window", "It can’t tell which app this is.", "Pause"),
             (.skipping(reason: "ax-secure-subrole"), "Skipping this window", "A password field is active.", "Pause"),
-            (.paused, "Paused", nil, "Resume"),
+            (.paused, "Paused", nil, "Start Remembering"),
             (.idle, "Off", nil, "Turn On"),
             (.needsPermission(.screenRecording), "Needs permission", "Screen Recording is off for Hippocampus.",
              "Open System Settings…"),

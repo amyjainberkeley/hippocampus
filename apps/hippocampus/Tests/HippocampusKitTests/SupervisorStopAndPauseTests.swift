@@ -312,7 +312,8 @@ final class SupervisorStopAndPauseTests: XCTestCase {
     // MARK: Pause (spec-shell S5, critique-shell-engineering 5)
 
     /// Pause, then Off, then On used to leave a running capture that said
-    /// "Resume" and could not recover from a crash (D10).
+    /// "Resume" (now Start Remembering) and could not recover from a crash
+    /// (D10).
     func test_turning_on_ends_a_pause() async throws {
         let pauses = UserPauseController()
         let (supervisor, _, topology) = make(config: FakeRuntimeConfig(captureEnabled: true), pauses: pauses)

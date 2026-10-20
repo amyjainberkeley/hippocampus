@@ -119,7 +119,7 @@ final class AskPanelWiringTests: XCTestCase {
             XCTAssertTrue(copy.contains(word), word)
         }
         XCTAssertTrue(bar.contains("Text(model.footerText)"))
-        // The row's own words: Resume Now for a pause with an end.
+        // The row's own words: Start Remembering for a pause.
         XCTAssertTrue(bar.contains("Button(model.footerActionTitle ?? action.title) { perform(.status(action)) }"))
     }
 

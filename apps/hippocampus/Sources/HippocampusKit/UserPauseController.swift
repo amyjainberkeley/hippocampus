@@ -43,7 +43,7 @@ public final class UserPauseController: @unchecked Sendable {
     /// When the person paused, as seconds since 1970.
     public static let defaultsKey = "ai.hippocampus.capture.paused"
     /// When a timed pause ends, as seconds since 1970 (SPEC 2.6.2): For 1
-    /// Hour, or Until Tomorrow at 6:00 AM. Absent for Until I Resume.
+    /// Hour, or Until Tomorrow at 6:00 AM. Absent for Until I Start It Again.
     public static let resumeAtKey = "ai.hippocampus.capture.pausedUntil"
 
     private let queue = DispatchQueue(

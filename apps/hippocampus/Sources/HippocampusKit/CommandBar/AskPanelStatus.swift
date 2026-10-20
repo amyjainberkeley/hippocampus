@@ -33,8 +33,8 @@ public struct AskPanelStatus: Equatable, Sendable {
 
     public let text: String
     public let action: Action?
-    /// The button's words: the row's own, so a pause with an end reads
-    /// Resume Now as the menu does (SPEC 2.6.2).
+    /// The button's words: the row's own, so a pause reads Start
+    /// Remembering as the menu does.
     public let actionTitle: String?
     /// The picture the menu bar shows, so Ask's mark matches it.
     public let mark: HiMark.State

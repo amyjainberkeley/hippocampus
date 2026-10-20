@@ -100,9 +100,9 @@ final class StatusMenuModelTests: XCTestCase {
     }
 
     func testPausedSaysSinceWhenOnTheSameDayAndAnotherDay() {
-        XCTAssertEqual(titles(.paused, paused: sixMinutesAgo), ["Paused", "Since 3:04 PM.", "Resume"] + tail)
-        XCTAssertEqual(titles(.paused, paused: yesterday), ["Paused", "Since Oct 12.", "Resume"] + tail)
-        XCTAssertEqual(titles(.paused), ["Paused", "Resume"] + tail)
+        XCTAssertEqual(titles(.paused, paused: sixMinutesAgo), ["Paused", "Since 3:04 PM.", "Start Remembering"] + tail)
+        XCTAssertEqual(titles(.paused, paused: yesterday), ["Paused", "Since Oct 12.", "Start Remembering"] + tail)
+        XCTAssertEqual(titles(.paused), ["Paused", "Start Remembering"] + tail)
     }
 
     func testOffAfterStopSharingSaysWhenTheSameDayAndAnotherDay() {
@@ -223,15 +223,15 @@ final class StatusMenuModelTests: XCTestCase {
         }
     }
 
-    /// A timed pause's button reads Resume Now, and a forget's hold reads
-    /// "Forgetting…" with nothing to press, in Ask's footer as in the menu
-    /// (SPEC 2.6.2, 3.11).
-    func testTheFooterSaysResumeNowForATimedPauseAndForgettingDuringAHold() {
+    /// A timed pause's button reads Start Remembering, as any pause's does,
+    /// and a forget's hold reads "Forgetting…" with nothing to press, in
+    /// Ask's footer as in the menu (SPEC 2.6.2, 3.11).
+    func testTheFooterSaysStartRememberingForATimedPauseAndForgettingDuringAHold() {
         let paused = StatusRow(StatusFacts(status: .paused), now: now, calendar: calendar)
         let timed = paused.pausedUntil(now.addingTimeInterval(1_800), now: now, calendar: calendar)
         let footer = AskPanelStatus(.paused, row: timed, setup: .complete)
         XCTAssertEqual(footer.action, .resume)
-        XCTAssertEqual(footer.actionTitle, "Resume Now")
+        XCTAssertEqual(footer.actionTitle, "Start Remembering")
         let untimed = AskPanelStatus(.paused, row: paused, setup: .complete)
         XCTAssertEqual(untimed.actionTitle, paused.actionTitle)
         let holding = AskPanelStatus(.paused, row: .forgetting, setup: .complete)

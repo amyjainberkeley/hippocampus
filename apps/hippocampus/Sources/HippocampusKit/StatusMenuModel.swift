@@ -52,7 +52,7 @@ public struct StatusRow: Equatable, Sendable {
     public let detail: String?
     /// Line 3: the one button.
     public let action: CaptureStatusAction?
-    /// A pause with an end: its button reads Resume Now (SPEC 2.6.2).
+    /// A pause with an end, which says when it ends (SPEC 2.6.2).
     public let isTimedPause: Bool
 
     public init(title: String, detail: String?, action: CaptureStatusAction?, isTimedPause: Bool = false) {
@@ -62,10 +62,11 @@ public struct StatusRow: Equatable, Sendable {
         self.isTimedPause = isTimedPause
     }
 
-    /// The button's words: Resume Now for a pause with an end.
+    /// The button's words. A pause with an end and one without both end
+    /// with Start Remembering, setup's own words, so there is one name for
+    /// turning remembering back on.
     public var actionTitle: String? {
-        guard let action else { return nil }
-        return action == .resume && isTimedPause ? "Resume Now" : action.title
+        action?.title
     }
 
     /// While the window forgets, remembering is held still: nothing to press
@@ -202,7 +203,7 @@ public enum StatusMenuModel {
             /// (`DemoMemory.menuItems`), by an id its owner carries out.
             case extra(String)
             /// One of Pause's choices: For 1 Hour, Until Tomorrow, Until I
-            /// Resume (SPEC 2.6.2).
+            /// Start It Again (SPEC 2.6.2).
             case pauseFor(PauseLength)
         }
 
@@ -282,7 +283,8 @@ public enum StatusMenuModel {
 }
 
 /// How long Pause lasts (SPEC 2.6.2): an hour, until 6:00 AM tomorrow, or
-/// until the person resumes. The same three in the window's status menu.
+/// until the person starts it again with Start Remembering. The same three
+/// in the window's status menu.
 public enum PauseLength: CaseIterable, Sendable {
     case hour
     case tomorrow
@@ -292,11 +294,11 @@ public enum PauseLength: CaseIterable, Sendable {
         switch self {
         case .hour: "For 1 Hour"
         case .tomorrow: "Until Tomorrow"
-        case .untilResume: "Until I Resume"
+        case .untilResume: "Until I Start It Again"
         }
     }
 
-    /// When it ends; nil until the person resumes.
+    /// When it ends; nil until the person starts it again.
     public func end(from now: Date, calendar: Calendar = .autoupdatingCurrent) -> Date? {
         switch self {
         case .hour:

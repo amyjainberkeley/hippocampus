@@ -133,9 +133,11 @@ public enum NavigationCopy {
     public static let pause = "Pause"
     public static let pauseForAnHour = "For 1 Hour"
     public static let pauseUntilTomorrow = "Until Tomorrow"
-    public static let pauseUntilResume = "Until I Resume"
-    public static let resume = "Resume"
-    public static let resumeNow = "Resume Now"
+    public static let pauseUntilResume = "Until I Start It Again"
+    /// Ends a pause, with or without an end time: setup's own words for
+    /// turning remembering on (launch playbook, decision 5). Resume is
+    /// Working On's, and reopens a project.
+    public static let resume = "Start Remembering"
     public static let turnOn = "Turn On"
     public static let openSystemSettings = "Open System Settings\u{2026}"
     public static let tryAgain = "Try Again"
@@ -148,9 +150,9 @@ public enum NavigationCopy {
     public static let privacyMenu = "Privacy\u{2026}"
     public static let preferencesMenu = "Preferences\u{2026}"
 
-    /// "Paused since 2:40 PM. Nothing new is saved until you resume."
+    /// "Paused since 2:40 PM. Nothing new is saved until you start it again."
     public static func bannerPaused(since time: String) -> String {
-        "Paused since \(time). Nothing new is saved until you resume."
+        "Paused since \(time). Nothing new is saved until you start it again."
     }
 
     /// "Paused until 3:40 PM. Nothing new is saved until then."
@@ -158,7 +160,7 @@ public enum NavigationCopy {
         "Paused until \(time). Nothing new is saved until then."
     }
 
-    public static let bannerPausedNoTime = "Paused. Nothing new is saved until you resume."
+    public static let bannerPausedNoTime = "Paused. Nothing new is saved until you start it again."
     public static let bannerOff = "Remembering is off. What\u{2019}s already saved is still here."
 
     /// "Screen Recording is off for Hippocampus, so nothing new is saved."

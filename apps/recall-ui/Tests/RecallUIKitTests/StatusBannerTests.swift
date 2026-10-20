@@ -36,21 +36,25 @@ final class StatusBannerTests: XCTestCase {
         }
     }
 
-    func testPausedSaysSinceWhenAndOffersResume() {
+    func testPausedSaysSinceWhenAndOffersStartRemembering() {
         let paused = status(.paused, title: "Paused", action: "resume", since: now.addingTimeInterval(-60))
         XCTAssertEqual(banner(paused), WindowStatus.Banner(
-            text: "Paused since 2:40\u{202F}PM. Nothing new is saved until you resume.", action: .resume,
+            text: "Paused since 2:40\u{202F}PM. Nothing new is saved until you start it again.", action: .resume,
             isProblem: false))
         XCTAssertEqual(paused.dot, .off)
         XCTAssertFalse(paused.remembering, "the hi mark loses its dot")
+        // Setup's own words end a pause; Resume is Working On's, and reopens
+        // a project.
+        XCTAssertEqual(WindowStatus.Action.resume.title, "Start Remembering")
     }
 
-    func testATimedPauseSaysUntilWhenAndOffersResumeNow() {
+    func testATimedPauseSaysUntilWhenAndOffersStartRemembering() {
         let timed = status(.paused, title: "Paused", action: "resume", since: now,
                            until: now.addingTimeInterval(59 * 60))
         XCTAssertEqual(timed.action, .resumeNow)
         XCTAssertEqual(banner(timed)?.text, "Paused until 3:40\u{202F}PM. Nothing new is saved until then.")
         XCTAssertEqual(banner(timed)?.action, .resumeNow)
+        XCTAssertEqual(WindowStatus.Action.resumeNow.title, "Start Remembering", "one name for every pause")
         let tomorrow = status(.paused, title: "Paused", action: "resume", since: now,
                               until: WindowStatusMenu.PauseChoice.tomorrow.until(now: now, calendar: calendar))
         XCTAssertEqual(banner(tomorrow)?.text,
@@ -109,7 +113,7 @@ final class StatusBannerTests: XCTestCase {
             .forget(.tenMinutes), .forget(.hour), .forget(.today), .separator, .privacy, .preferences,
         ])
         XCTAssertEqual(WindowStatusMenu.PauseChoice.allCases.map(\.title),
-                       ["For 1 Hour", "Until Tomorrow", "Until I Resume"])
+                       ["For 1 Hour", "Until Tomorrow", "Until I Start It Again"])
         XCTAssertEqual(WindowStatusMenu.title(.tenMinutes), "Forget the Last 10 Minutes\u{2026}")
         XCTAssertEqual(WindowStatusMenu.title(.hour), "Forget the Last Hour\u{2026}")
         XCTAssertEqual(WindowStatusMenu.title(.today), "Forget Today\u{2026}")
@@ -187,6 +191,7 @@ final class StatusBannerTests: XCTestCase {
     func testEveryWordPassesTheCopyRules() {
         let words = [
             NavigationCopy.bannerPaused(since: "2:40 PM"), NavigationCopy.bannerPausedUntil("3:40 PM"),
+            NavigationCopy.bannerPausedNoTime, NavigationCopy.resume, NavigationCopy.pauseUntilResume,
             NavigationCopy.bannerOff, NavigationCopy.bannerPermission("Screen Recording"),
             NavigationCopy.bannerNotSaving, NavigationCopy.bannerCouldNotStop, NavigationCopy.bannerCouldNotTurnOn,
             NavigationCopy.bannerNotSetUp, NavigationCopy.bannerNotRunning, NavigationCopy.lowPower,

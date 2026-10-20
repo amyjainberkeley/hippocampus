@@ -312,7 +312,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     /// When the person paused; nil when not paused. Kept across launches.
     public var pausedSince: Date? { pauses.pausedSince }
-    /// When a timed pause ends; nil for Until I Resume (SPEC 2.6.2). Kept
+    /// When a timed pause ends; nil for Until I Start It Again (SPEC 2.6.2). Kept
     /// across launches.
     public var pausedUntil: Date? { pauses.resumeAt }
     @Published public private(set) var captureEnabled: Bool
