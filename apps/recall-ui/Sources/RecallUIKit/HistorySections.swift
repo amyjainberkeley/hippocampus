@@ -112,8 +112,8 @@ public enum HistorySections {
 
     /// The same window: the same app and the same, non-empty, title, leaving
     /// out a status mark the app puts before it ("✳" and "⠐" while a coding
-    /// assistant works are one session).
-    private static func sameWindow(_ a: Hit, _ b: Hit) -> Bool {
+    /// assistant works are one session). Library's lenses run rows the same way.
+    static func sameWindow(_ a: Hit, _ b: Hit) -> Bool {
         let title = Formatters.titleWithoutMarks(a.windowTitle ?? "")
         guard !title.isEmpty else { return false }
         return a.appBundleId == b.appBundleId
