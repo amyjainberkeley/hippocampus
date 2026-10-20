@@ -57,14 +57,31 @@ final class SessionContextInstallerTests: XCTestCase {
         ["matcher": "startup", "hooks": [["type": "command", "command": "echo user-hook"]]]
     }
 
-    /// What `client_hooks.rs` writes, rendered here independently of the
-    /// installer so a drift on either side fails this test.
+    private func quote(_ path: String) -> String {
+        "'" + path.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+    }
+
+    private var agentPath: String {
+        installer.executableURL.deletingLastPathComponent().appendingPathComponent("mci-agent").path
+    }
+
+    /// What `client_hooks.rs` writes now: quiet (SPEC 5.5), and importing.
+    /// Rendered here independently of the installer so a drift on either
+    /// side fails this test.
     private var rustCommand: String {
-        func quote(_ path: String) -> String {
-            "'" + path.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
-        }
-        let agent = installer.executableURL.deletingLastPathComponent().appendingPathComponent("mci-agent").path
-        return "\(quote(agent)) handoff --format claude-hook --db-path \(quote(installer.dbURL.path))"
+        let agent = quote(agentPath)
+        return "[ -x \(agent) ] && \(agent) handoff --format claude-hook --db-path \(quote(installer.dbURL.path)) || true"
+    }
+
+    /// What `client_hooks.rs` wrote before hooks were quiet.
+    private var loudRustCommand: String {
+        "\(quote(agentPath)) handoff --format claude-hook --db-path \(quote(installer.dbURL.path))"
+    }
+
+    /// The app's own: quiet, and sharing stored memory without importing.
+    private var appCommand: String {
+        let agent = quote(agentPath)
+        return "[ -x \(agent) ] && \(agent) handoff --format claude-hook --db-path \(quote(installer.dbURL.path)) --no-refresh || true"
     }
 
     // MARK: - Status
@@ -91,21 +108,23 @@ final class SessionContextInstallerTests: XCTestCase {
     // MARK: - Enable
 
     func testPreviousImportingHookCanBeReviewedOrRemoved() throws {
-        let previous = ["hooks": ["SessionStart": [userHook, group(command: rustCommand)]]]
-        try write(previous)
-        XCTAssertEqual(try installer.claudeStatus(), .configured)
-        try installer.setClaudeEnabled(true)
-        let enabled = try sessionStarts()
-        XCTAssertEqual(enabled.count, 2)
-        XCTAssertEqual(enabled[0]["matcher"] as? String, "startup")
-        let handlers = try XCTUnwrap(enabled[1]["hooks"] as? [[String: Any]])
-        XCTAssertEqual(handlers[0]["command"] as? String, rustCommand + " --no-refresh")
+        for command in [rustCommand, loudRustCommand] {
+            let previous = ["hooks": ["SessionStart": [userHook, group(command: command)]]]
+            try write(previous)
+            XCTAssertEqual(try installer.claudeStatus(), .configured, command)
+            try installer.setClaudeEnabled(true)
+            let enabled = try sessionStarts()
+            XCTAssertEqual(enabled.count, 2)
+            XCTAssertEqual(enabled[0]["matcher"] as? String, "startup")
+            let handlers = try XCTUnwrap(enabled[1]["hooks"] as? [[String: Any]])
+            XCTAssertEqual(handlers[0]["command"] as? String, appCommand)
 
-        try write(previous)
-        try installer.setClaudeEnabled(false)
-        let remaining = try sessionStarts()
-        XCTAssertEqual(remaining.count, 1)
-        XCTAssertEqual(remaining[0]["matcher"] as? String, "startup")
+            try write(previous)
+            try installer.setClaudeEnabled(false)
+            let remaining = try sessionStarts()
+            XCTAssertEqual(remaining.count, 1)
+            XCTAssertEqual(remaining[0]["matcher"] as? String, "startup")
+        }
     }
 
     func testEnableSharesExistingMemoryWithoutImportingTranscripts() throws {
@@ -118,8 +137,8 @@ final class SessionContextInstallerTests: XCTestCase {
         XCTAssertEqual(handlers.count, 1)
         XCTAssertEqual(handlers[0]["type"] as? String, "command")
         XCTAssertEqual(handlers[0]["timeout"] as? Int, 10)
-        XCTAssertEqual(handlers[0]["command"] as? String, rustCommand + " --no-refresh")
-        XCTAssertEqual(installer.claudeCommand, rustCommand + " --no-refresh")
+        XCTAssertEqual(handlers[0]["command"] as? String, appCommand)
+        XCTAssertEqual(installer.claudeCommand, appCommand)
         XCTAssertEqual(handlers[0].count, 3, "no extra keys the Rust side would not write")
         XCTAssertTrue(rustCommand.contains(SessionContextInstaller.handoffMarker))
         XCTAssertFalse(rustCommand.contains(SessionContextHook.flag))
@@ -137,7 +156,10 @@ final class SessionContextInstallerTests: XCTestCase {
             .replacingOccurrences(of: "'", with: "'\"'\"'")
         let db = sandbox.appendingPathComponent("db's.sqlite").path
             .replacingOccurrences(of: "'", with: "'\"'\"'")
-        XCTAssertEqual(odd.claudeCommand, "'\(agent)' handoff --format claude-hook --db-path '\(db)' --no-refresh")
+        XCTAssertEqual(odd.claudeCommand,
+                       "[ -x '\(agent)' ] && '\(agent)' handoff --format claude-hook --db-path '\(db)' --no-refresh || true")
+        XCTAssertEqual(HandoffHookCommand.parse(odd.claudeCommand)?.agent,
+                       sandbox.appendingPathComponent("It's Here.app/Contents/MacOS/mci-agent").path)
     }
 
     func testEnableOverTheLegacyGroupReplacesItInPlace() throws {

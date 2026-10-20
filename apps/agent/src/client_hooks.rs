@@ -66,9 +66,22 @@ impl HookPaths {
     /// Standard locations under `home`, with an optional Codex home override.
     #[must_use]
     pub fn for_home(home: &Path, codex_home: Option<&Path>) -> Self {
+        Self::for_dirs(home, None, codex_home)
+    }
+
+    /// The locations when the tools' own folders are moved:
+    /// `CLAUDE_CONFIG_DIR` holds Claude Code's `settings.json` and
+    /// `CODEX_HOME` Codex's files (SPEC 5.5).
+    #[must_use]
+    pub fn for_dirs(
+        home: &Path,
+        claude_config_dir: Option<&Path>,
+        codex_home: Option<&Path>,
+    ) -> Self {
+        let claude = claude_config_dir.map_or_else(|| home.join(".claude"), Path::to_path_buf);
         let codex = codex_home.map_or_else(|| home.join(".codex"), Path::to_path_buf);
         Self {
-            claude_settings: home.join(".claude").join("settings.json"),
+            claude_settings: claude.join("settings.json"),
             codex_hooks: codex.join("hooks.json"),
             codex_config: codex.join("config.toml"),
         }
@@ -120,10 +133,13 @@ impl HookCommand {
         &self.db_path
     }
 
+    /// A quiet command (SPEC 5.5): when Hippocampus is gone, the hook exits
+    /// at once and says nothing, so deleting the app without disconnecting
+    /// never fills a session with errors.
     fn command_for(&self, format: &str) -> String {
+        let agent = shell_quote(&self.executable);
         format!(
-            "{} handoff --format {format} --db-path {}",
-            shell_quote(&self.executable),
+            "[ -x {agent} ] && {agent} handoff --format {format} --db-path {} || true",
             shell_quote(&self.db_path)
         )
     }
@@ -636,7 +652,7 @@ mod tests {
       {
         "hooks": [
           {
-            "command": "'/Applications/Hippocampus.app/Contents/MacOS/mci-agent' handoff --format claude-hook --db-path '/Users/me/Library/Application Support/MCI/mci.sqlite'",
+            "command": "[ -x '/Applications/Hippocampus.app/Contents/MacOS/mci-agent' ] && '/Applications/Hippocampus.app/Contents/MacOS/mci-agent' handoff --format claude-hook --db-path '/Users/me/Library/Application Support/MCI/mci.sqlite' || true",
             "timeout": 10,
             "type": "command"
           }
@@ -655,7 +671,7 @@ mod tests {
         "hooks": [
           {
             "additionalContextLimit": 2500,
-            "command": "'/Applications/Hippocampus.app/Contents/MacOS/mci-agent' handoff --format codex-hook --db-path '/Users/me/Library/Application Support/MCI/mci.sqlite'",
+            "command": "[ -x '/Applications/Hippocampus.app/Contents/MacOS/mci-agent' ] && '/Applications/Hippocampus.app/Contents/MacOS/mci-agent' handoff --format codex-hook --db-path '/Users/me/Library/Application Support/MCI/mci.sqlite' || true",
             "timeout": 10,
             "type": "command"
           }
@@ -698,13 +714,56 @@ mod tests {
         let cmd = command();
         assert_eq!(
             cmd.claude_command(),
-            "'/Applications/Hippocampus.app/Contents/MacOS/mci-agent' handoff --format claude-hook --db-path '/Users/me/Library/Application Support/MCI/mci.sqlite'"
+            "[ -x '/Applications/Hippocampus.app/Contents/MacOS/mci-agent' ] && '/Applications/Hippocampus.app/Contents/MacOS/mci-agent' handoff --format claude-hook --db-path '/Users/me/Library/Application Support/MCI/mci.sqlite' || true"
         );
         let odd = HookCommand::new(PathBuf::from("/it's/mci-agent"), PathBuf::from("/db"));
         assert_eq!(
             odd.codex_command(),
-            "'/it'\"'\"'s/mci-agent' handoff --format codex-hook --db-path '/db'"
+            "[ -x '/it'\"'\"'s/mci-agent' ] && '/it'\"'\"'s/mci-agent' handoff --format codex-hook --db-path '/db' || true"
         );
+    }
+
+    #[test]
+    fn a_hook_exits_quietly_when_hippocampus_is_gone() {
+        let temp = tempfile::tempdir().unwrap();
+        let gone = HookCommand::new(
+            temp.path().join("Deleted.app/mci-agent"),
+            temp.path().join("db"),
+        );
+        for command in [gone.claude_command(), gone.codex_command()] {
+            let output = std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg(&command)
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{command}");
+            assert!(
+                output.stdout.is_empty() && output.stderr.is_empty(),
+                "{command}"
+            );
+        }
+        // Present, it runs with every argument as one word.
+        let agent = temp.path().join("it's here").join("mci-agent");
+        std::fs::create_dir_all(agent.parent().unwrap()).unwrap();
+        std::fs::write(&agent, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
+        std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let present = HookCommand::new(agent, PathBuf::from("/db path"));
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(present.claude_command())
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            "handoff\n--format\nclaude-hook\n--db-path\n/db path\n"
+        );
+        let paths = HookPaths::for_dirs(Path::new("/h"), Some(Path::new("/c")), None);
+        assert_eq!(paths.claude_settings, PathBuf::from("/c/settings.json"));
+        assert_eq!(paths.codex_hooks, PathBuf::from("/h/.codex/hooks.json"));
     }
 
     #[test]
@@ -755,7 +814,7 @@ mod tests {
         );
 
         let after = read(&paths.claude_settings);
-        let ours = "      {\n        \"hooks\": [\n          {\n            \"command\": \"'/Applications/Hippocampus.app/Contents/MacOS/mci-agent' handoff --format claude-hook --db-path '/Users/me/Library/Application Support/MCI/mci.sqlite'\",\n            \"timeout\": 10,\n            \"type\": \"command\"\n          }\n        ],\n        \"matcher\": \"startup|resume|clear|compact\"\n      }\n";
+        let ours = "      {\n        \"hooks\": [\n          {\n            \"command\": \"[ -x '/Applications/Hippocampus.app/Contents/MacOS/mci-agent' ] && '/Applications/Hippocampus.app/Contents/MacOS/mci-agent' handoff --format claude-hook --db-path '/Users/me/Library/Application Support/MCI/mci.sqlite' || true\",\n            \"timeout\": 10,\n            \"type\": \"command\"\n          }\n        ],\n        \"matcher\": \"startup|resume|clear|compact\"\n      }\n";
         // Our group is appended after the existing SessionStart group; the
         // rest of the file is byte-identical to the original.
         let expected = original.replacen(

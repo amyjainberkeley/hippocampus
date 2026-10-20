@@ -113,15 +113,34 @@ final class AIToolsTests: XCTestCase {
 
     // MARK: The words
 
-    func testTheOneQuestion() {
-        XCTAssertEqual(AIToolsCopy.questionTitle, "Start each session with what you’re working on?")
+    /// SPEC 5.4: the question names what it sends, and says nothing read on
+    /// screen is in it; Codex's asks for its one step.
+    func testTheSessionQuestion() {
+        XCTAssertEqual(AIToolsCopy.questionTitle, "Start each session with your recent work?")
         XCTAssertEqual(AIToolsCopy.questionMessage([.claudeCode]),
-                       "At the start of each session, Claude Code gets a short summary of your recent work, "
-                       + "with sources. It can include other projects. The company that runs Claude Code receives it.")
+                       "At the start of each session, Claude Code gets your recent work and up to six things "
+                       + "Hippocampus learned about you, with sources. Nothing you read on screen is in it. "
+                       + "It can include other projects. The company that runs Claude Code receives it.")
         XCTAssertEqual(AIToolsCopy.questionMessage([.claudeCode, .codex]),
-                       "At the start of each session, Claude Code and Codex get a short summary of your recent work, "
-                       + "with sources. It can include other projects. The company that runs each tool receives it.")
+                       "At the start of each session, Claude Code and Codex get your recent work and up to six things "
+                       + "Hippocampus learned about you, with sources. Nothing you read on screen is in it. "
+                       + "It can include other projects. The company that runs each tool receives it. "
+                       + "Codex asks you to allow new hooks once. Type /hooks in Codex and allow Hippocampus.")
         XCTAssertEqual([AIToolsCopy.share, AIToolsCopy.dontShare], ["Share", "Don’t Share"])
+        XCTAssertEqual(AIToolsCopy.shareTitle(.codex), AIToolsCopy.questionTitle)
+        XCTAssertEqual(AIToolsCopy.shareMessage(.claudeCode), AIToolsCopy.questionMessage([.claudeCode]))
+    }
+
+    /// SPEC 5.4: Connect asks first, naming the tools, and says ChatGPT's
+    /// desktop app reads Codex's settings when it is on this Mac.
+    func testTheConnectQuestion() {
+        XCTAssertEqual(AIToolsCopy.connectTitle([.claudeCode, .codex]),
+                       "Let Claude Code and Codex look things up in your memory?")
+        XCTAssertTrue(AIToolsCopy.connectMessage([.claudeCode, .codex], chatGPTInstalled: true)
+            .hasSuffix("ChatGPT’s desktop app uses Codex’s settings, so it can look things up too."))
+        XCTAssertFalse(AIToolsCopy.connectMessage([.claudeCode], chatGPTInstalled: true).contains("ChatGPT"),
+                       "only when Codex is connected")
+        XCTAssertFalse(AIToolsCopy.connectMessage([.codex], chatGPTInstalled: false).contains("ChatGPT"))
     }
 
     /// It ends on "Connected. Restart {tool}." (RULINGS S4).
@@ -149,9 +168,14 @@ final class AIToolsTests: XCTestCase {
     /// (product critique 5, spec-copy S4.5).
     func testThePanesWords() {
         XCTAssertEqual(AIToolsCopy.whileQuit,
-                       "Connected tools can still read your memory while Hippocampus is quit. Disconnect a tool to stop that.")
+                       "Connected tools can still read your memory while Hippocampus is quit; Disconnect stops that.")
         XCTAssertEqual(AIToolsCopy.paneTitle, "AI Tools")
-        XCTAssertEqual(AIToolsCopy.sessionToggle, "Start each session with what I’m working on")
+        // SPEC 5.4: renamed for what it sends.
+        XCTAssertEqual(AIToolsCopy.sessionToggle, "Start each session with my recent work")
+        // SPEC 5.5: the contradiction is gone.
+        XCTAssertEqual(AIToolsCopy.boundary,
+                       "Nothing leaves this Mac unless you send it, or a tool you connected asks for it.")
+        XCTAssertFalse(AIToolsCopy.boundary.contains("sends nothing on its own"))
         XCTAssertEqual(AIToolsCopy.turnedOn(.codex), "On. Restart Codex to start.")
         XCTAssertEqual(AIToolsCopy.turnedOff(.claudeCode), "Off. Restart Claude Code. What it already read stays in its history.")
         XCTAssertEqual(AIToolsCopy.status(.disabledByClient, for: .claudeCode), "Turned off in Claude Code’s own settings")

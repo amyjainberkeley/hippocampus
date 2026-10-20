@@ -182,10 +182,11 @@ fn connect_installs_both_hooks_and_disconnect_removes_only_ours() {
     assert!(!home.join("Library/LaunchAgents").exists());
 
     let exe = agent_bin().canonicalize().unwrap();
+    // Quiet (SPEC 5.5): a missing app exits silently.
     let expected_claude = format!(
-        "'{}' handoff --format claude-hook --db-path '{}'",
-        exe.display(),
-        brain.display()
+        "[ -x '{exe}' ] && '{exe}' handoff --format claude-hook --db-path '{}' || true",
+        brain.display(),
+        exe = exe.display()
     );
     let value = json(&settings);
     assert_eq!(value["theme"], "dark");
@@ -208,9 +209,9 @@ fn connect_installs_both_hooks_and_disconnect_removes_only_ours() {
     assert_eq!(
         groups[1]["hooks"][0]["command"],
         format!(
-            "'{}' handoff --format codex-hook --db-path '{}'",
-            exe.display(),
-            brain.display()
+            "[ -x '{exe}' ] && '{exe}' handoff --format codex-hook --db-path '{}' || true",
+            brain.display(),
+            exe = exe.display()
         )
     );
     assert_eq!(groups[1]["hooks"][0]["additionalContextLimit"], 2500);

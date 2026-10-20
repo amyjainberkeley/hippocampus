@@ -81,8 +81,9 @@ struct ProjectHandoffView: View {
                     .disabled(model.project == nil || model.isLoading)
                 Button(copied ? UserFacingCopy.copiedToast : UserFacingCopy.folderCopy) {
                     guard let packet = model.packet else { return }
-                    NSPasteboard.general.clearContents()
-                    copied = NSPasteboard.general.setString(packet, forType: .string)
+                    // For an AI tool: this Mac only, out of clipboard
+                    // history, cleared after 2 minutes (SPEC 5.3.6).
+                    copied = ClipboardHygiene.copy(packet)
                 }
                 .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
                 .disabled(model.packet == nil || model.isLoading)

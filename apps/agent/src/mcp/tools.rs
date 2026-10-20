@@ -178,7 +178,7 @@ pub fn tool_definitions() -> serde_json::Value {
                         "type": "integer",
                         "description": "Maximum events to return. Defaults to 100.",
                         "minimum": 1,
-                        "maximum": 1000
+                        "maximum": 200
                     }
                 },
                 "required": ["ts_us"]
@@ -229,7 +229,7 @@ pub fn tool_definitions() -> serde_json::Value {
                         "type": "integer",
                         "description": "Maximum events to return. Defaults to 50.",
                         "minimum": 1,
-                        "maximum": 1000
+                        "maximum": 200
                     }
                 },
                 "required": ["app_bundle_id"]

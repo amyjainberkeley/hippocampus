@@ -18,6 +18,37 @@ struct ContextHandoffTests {
             #expect(Date().timeIntervalSince(cancelledAt) < 2)
         }
     }
+    @Test("what is asked goes on the child's standard input, and a locked memory is said as such")
+    func inputGoesOnStandardInput() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("handoff-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let echo = folder.appendingPathComponent("echo-agent")
+        try "#!/bin/sh\ncat\n".write(to: echo, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: echo.path)
+        let output = try await ContextHandoffExporter.run(
+            command: ContextHandoffCommand(executableURL: echo, arguments: ["send-card", "--json"]),
+            timeoutSeconds: 10, input: Data(#"{"to":"copy","question":"private words"}"#.utf8)
+        )
+        #expect(output == #"{"to":"copy","question":"private words"}"#)
+
+        let locked = folder.appendingPathComponent("locked-agent")
+        try "#!/bin/sh\ncat > /dev/null\nexit 10\n".write(to: locked, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: locked.path)
+        await #expect(throws: ContextHandoffError.memoryLocked) {
+            try await ContextHandoffExporter.run(
+                command: ContextHandoffCommand(executableURL: locked, arguments: []), timeoutSeconds: 10,
+                input: Data("{}".utf8)
+            )
+        }
+        // Commands that read no input keep their own failure.
+        await #expect(throws: ContextHandoffError.commandFailed) {
+            try await ContextHandoffExporter.run(
+                command: ContextHandoffCommand(executableURL: locked, arguments: []), timeoutSeconds: 10
+            )
+        }
+    }
+
     @Test("builds a bounded Markdown command for the bundled agent")
     func buildsBoundedMarkdownCommand() throws {
         let executable = URL(fileURLWithPath: "/Applications/Hippocampus.app/Contents/MacOS/recall-ui")

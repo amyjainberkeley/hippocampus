@@ -59,10 +59,73 @@ commandCheck.waitUntilExit()
 let commandText = String(decoding: commandOutput.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
 check(commandCheck.terminationStatus == 0 && commandText == "handoff\n--format\nclaude-hook\n--db-path\n\(installer.dbURL.path)\n--no-refresh\n", "Shell quoting preserves all fixed arguments and prevents import")
 check(!FileManager.default.fileExists(atPath: sandbox.appendingPathComponent("bad").path), "Quoted app path cannot execute substitutions")
-check(installer.claudeCommand == "\(SessionContextInstaller.shellQuote(installer.agentURL.path)) handoff --format claude-hook --db-path \(SessionContextInstaller.shellQuote(installer.dbURL.path)) --no-refresh", "Desktop context sharing does not request transcript import")
+let quotedAgent = SessionContextInstaller.shellQuote(installer.agentURL.path)
+check(installer.claudeCommand == "[ -x \(quotedAgent) ] && \(quotedAgent) handoff --format claude-hook --db-path \(SessionContextInstaller.shellQuote(installer.dbURL.path)) --no-refresh || true", "Desktop context sharing does not request transcript import, and is quiet")
+check(HandoffHookCommand.parse(installer.claudeCommand)?.agent == installer.agentURL.path, "Our own command reads back")
 try installer.setClaudeEnabled(false)
-let restored = try JSONSerialization.jsonObject(with: Data(contentsOf: settings)) as! NSDictionary
-check(restored == (try JSONSerialization.jsonObject(with: original) as! NSDictionary), "Remove only our hook")
+check(try Data(contentsOf: settings) == original, "Remove only our hook: the file is byte for byte as before")
+
+print("Testing quiet hooks")
+fflush(nil)
+try FileManager.default.removeItem(at: installer.agentURL)
+for command in [installer.claudeCommand, installer.codexCommand] {
+    let quiet = Process()
+    quiet.executableURL = URL(fileURLWithPath: "/bin/sh")
+    quiet.arguments = ["-c", command]
+    quiet.environment = ["HOME": sandbox.path, "PATH": "/usr/bin:/bin"]
+    let out = Pipe()
+    let err = Pipe()
+    quiet.standardOutput = out
+    quiet.standardError = err
+    try quiet.run()
+    quiet.waitUntilExit()
+    check(quiet.terminationStatus == 0, "A deleted Hippocampus exits quietly")
+    check(out.fileHandleForReading.readDataToEndOfFile().isEmpty
+          && err.fileHandleForReading.readDataToEndOfFile().isEmpty, "And says nothing")
+}
+check(!FileManager.default.fileExists(atPath: installer.codexHookMarkURL.path), "No mark when nothing ran")
+try Data("#!/bin/sh\nprintf '%s\\n' \"$@\"\n".utf8).write(to: installer.agentURL)
+try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: installer.agentURL.path)
+
+print("Testing formatting kept byte for byte")
+fflush(nil)
+// Claude Code's own shape: two spaces, ": ", its own key order.
+let claudeStyle = Data("""
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status)"
+    ]
+  },
+  "model": "opus",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo pre"
+          }
+        ]
+      }
+    ]
+  }
+}
+""".utf8)
+try claudeStyle.write(to: settings)
+try installer.setClaudeEnabled(true)
+let styled = String(decoding: try Data(contentsOf: settings), as: UTF8.self)
+check(styled.hasPrefix("{\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(git status)\"\n    ]\n  },\n  \"model\": \"opus\","), "Unrelated keys keep their order and spacing")
+check(styled.contains("\"PreToolUse\": [") && styled.contains("\"SessionStart\": [\n      {\n        \"hooks\": ["), "Our group in the file's own indentation")
+check(try installer.claudeStatus() == .configured, "Configured in a hand-formatted file")
+try installer.setClaudeEnabled(false)
+check(try Data(contentsOf: settings) == claudeStyle, "Disconnect leaves Claude Code's file exactly as it was")
+try FileManager.default.removeItem(at: settings)
+try installer.setClaudeEnabled(true)
+try installer.setClaudeEnabled(false)
+check(!FileManager.default.fileExists(atPath: settings.path), "A file Connect made goes with Disconnect")
+try original.write(to: settings)
 
 print("Testing legacy group replacement")
 fflush(nil)
@@ -141,12 +204,108 @@ expectRefusal { try installer.setCodexEnabled(true) }
 try installer.setCodexEnabled(false)
 check(try String(contentsOf: agents, encoding: .utf8) == userInstructions, "Restore exact user instructions")
 try FileManager.default.removeItem(at: installer.codexOverrideURL)
+
+print("Testing Codex's hook and the v2 instruction")
+fflush(nil)
+let codexHooksOriginal = Data(#"{"description":"mine","hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"echo theirs"}]}]}}"#.utf8)
+try codexHooksOriginal.write(to: installer.codexHooksURL)
+try installer.setCodexEnabled(true)
+let instructionsNow = try String(contentsOf: agents, encoding: .utf8)
+check(instructionsNow.contains("<!-- hippocampus-session-context:v2 -->") && instructionsNow.contains("MCP context tool")
+      && !instructionsNow.contains("mci_context"), "The v2 block names context")
+let codexHooks = try JSONSerialization.jsonObject(with: Data(contentsOf: installer.codexHooksURL)) as! [String: Any]
+let codexStarts = (codexHooks["hooks"] as! [String: Any])["SessionStart"] as! [[String: Any]]
+check(codexStarts.count == 2 && codexStarts[1]["matcher"] as? String == "*", "Codex's own SessionStart hook, after theirs")
+let codexHandler = (codexStarts[1]["hooks"] as! [[String: Any]])[0]
+check(codexHandler["command"] as? String == installer.codexCommand
+      && (codexHandler["additionalContextLimit"] as? NSNumber)?.intValue == 2_500, "Codex's hook in its own shape")
+check(try installer.codexHookStatus() == .configured, "The hook reads as configured")
+try Data("[features]\nhooks = false # mine\n".utf8).write(to: installer.codexConfigURL)
+check(try installer.codexHookStatus() == .disabledByClient, "Codex's hooks switch is read, never written")
+check(try String(contentsOf: installer.codexConfigURL, encoding: .utf8) == "[features]\nhooks = false # mine\n", "config.toml untouched")
+try FileManager.default.removeItem(at: installer.codexConfigURL)
+// The hook leaves its mark when it runs.
+let ran = Process()
+ran.executableURL = URL(fileURLWithPath: "/bin/sh")
+ran.arguments = ["-c", installer.codexCommand]
+ran.environment = ["HOME": sandbox.path, "PATH": "/usr/bin:/bin"]
+ran.standardOutput = Pipe()
+try ran.run()
+ran.waitUntilExit()
+check(ran.terminationStatus == 0 && FileManager.default.fileExists(atPath: installer.codexHookMarkURL.path), "The Codex hook leaves its mark")
+check(try Data(contentsOf: installer.codexHookMarkURL).isEmpty, "The mark is content-free")
+try installer.setCodexEnabled(false)
+check(try Data(contentsOf: installer.codexHooksURL) == codexHooksOriginal, "Codex's hooks file is byte for byte as before")
+check(try String(contentsOf: agents, encoding: .utf8) == userInstructions, "And its instructions")
+// The v1 block is recognised: replaced by v2 on enable, removed on disable.
+try Data((userInstructions + SessionContextInstaller.codexBlockV1).utf8).write(to: agents)
+check(try installer.codexStatus() == .configured, "v1 reads as configured")
+try installer.setCodexEnabled(true)
+let upgraded = try String(contentsOf: agents, encoding: .utf8)
+check(upgraded == userInstructions + SessionContextInstaller.codexBlock, "v1 becomes v2 in place")
+try installer.setCodexEnabled(false)
+check(try String(contentsOf: agents, encoding: .utf8) == userInstructions, "Removing leaves the user's words")
+try Data((userInstructions + SessionContextInstaller.codexBlockV1).utf8).write(to: agents)
+try installer.setCodexEnabled(false)
+check(try String(contentsOf: agents, encoding: .utf8) == userInstructions, "v1 is removed too")
+let hooksAfterDisable = try? Data(contentsOf: installer.codexHooksURL)
+check(hooksAfterDisable == nil || hooksAfterDisable == codexHooksOriginal, "Nothing added to hooks on disable")
+
 try installer.setCodexEnabled(true)
 let modifiedInstructions = try String(contentsOf: agents, encoding: .utf8)
     .replacingOccurrences(of: "max_tokens 1000", with: "max_tokens 999")
 try Data(modifiedInstructions.utf8).write(to: agents)
+let hooksBeforeRefusal = try Data(contentsOf: installer.codexHooksURL)
 expectRefusal { try installer.setCodexEnabled(false) }
 check(try String(contentsOf: agents, encoding: .utf8) == modifiedInstructions, "Do not overwrite edited app block")
+check(try Data(contentsOf: installer.codexHooksURL) == hooksBeforeRefusal, "Nor touch the hook when the block was edited")
+
+print("Testing the repair at launch")
+fflush(nil)
+try Data(userInstructions.utf8).write(to: agents)
+try FileManager.default.removeItem(at: installer.codexHooksURL)
+let loudCommand = HandoffHookCommand(agent: installer.agentURL.path, format: "claude-hook", dbPath: installer.dbURL.path, noRefresh: true, quiet: false).command
+let movedAgent = "/Old Place/Hippocampus.app/Contents/MacOS/mci-agent"
+let movedCodex = HandoffHookCommand(agent: movedAgent, format: "codex-hook", dbPath: installer.dbURL.path, noRefresh: false, quiet: false).command
+check(HandoffHookCommand.parse(loudCommand)?.quiet == false && HandoffHookCommand.parse(movedCodex)?.agent == movedAgent, "Loud commands read back")
+let repairClaude = Data("{\n  \"theme\": \"dark\",\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"matcher\": \"startup|resume|clear|compact\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \(SettingsJSON.quote(loudCommand)),\n            \"timeout\": 10\n          }\n        ]\n      }\n    ]\n  }\n}\n".utf8)
+try repairClaude.write(to: settings)
+let repairCodex = try JSONSerialization.data(withJSONObject: ["hooks": ["SessionStart": [SessionContextInstaller.codexGroup(command: movedCodex)]]])
+try repairCodex.write(to: installer.codexHooksURL)
+try Data((userInstructions + SessionContextInstaller.codexBlockV1).utf8).write(to: agents)
+let notMoved = installer.repairExistingEntries(movedHere: false)
+check(notMoved.claudeHook && notMoved.codexHook && notMoved.codexInstruction, "Loud hooks made quiet, v1 made v2")
+let repairedClaude = String(decoding: try Data(contentsOf: settings), as: UTF8.self)
+check(repairedClaude.contains(SettingsJSON.quote(installer.claudeCommand)) && repairedClaude.hasPrefix("{\n  \"theme\": \"dark\",\n"), "Repaired in place, in the file's own shape")
+let repairedCodex = try JSONSerialization.jsonObject(with: Data(contentsOf: installer.codexHooksURL)) as! [String: Any]
+let codexCommandNow = ((((repairedCodex["hooks"] as! [String: Any])["SessionStart"] as! [[String: Any]])[0]["hooks"] as! [[String: Any]])[0]["command"] as! String)
+check(HandoffHookCommand.parse(codexCommandNow) == HandoffHookCommand(agent: movedAgent, format: "codex-hook", dbPath: installer.dbURL.path, noRefresh: false, quiet: true), "Not installed to stay: the agent is kept, only made quiet")
+check(try String(contentsOf: agents, encoding: .utf8) == userInstructions + SessionContextInstaller.codexBlock, "The instruction names context now")
+let moved = installer.repairExistingEntries(movedHere: true)
+check(!moved.claudeHook && moved.codexHook && !moved.codexInstruction, "Moved: only what points elsewhere changes")
+let movedCodexNow = try JSONSerialization.jsonObject(with: Data(contentsOf: installer.codexHooksURL)) as! [String: Any]
+let pointed = ((((movedCodexNow["hooks"] as! [String: Any])["SessionStart"] as! [[String: Any]])[0]["hooks"] as! [[String: Any]])[0]["command"] as! String)
+check(HandoffHookCommand.parse(pointed)?.agent == installer.agentURL.path, "The hook follows the app")
+check(installer.repairExistingEntries(movedHere: true) == SessionContextRepair(), "A second repair changes nothing")
+// Legacy group becomes the current one; an edited one is left alone.
+var legacyFile = try JSONSerialization.jsonObject(with: original) as! [String: Any]
+var legacyFileHooks = legacyFile["hooks"] as! [String: Any]
+legacyFileHooks["SessionStart"] = [SessionContextInstaller.group(command: installer.legacyClaudeCommand)]
+legacyFile["hooks"] = legacyFileHooks
+try JSONSerialization.data(withJSONObject: legacyFile).write(to: settings)
+check(installer.repairExistingEntries(movedHere: false).claudeHook, "The old Claude Code group is replaced")
+check(try installer.claudeStatus() == .configured && String(decoding: try Data(contentsOf: settings), as: UTF8.self).contains("--no-refresh"), "By the current one")
+var editedFile = legacyFile
+var editedHooks = editedFile["hooks"] as! [String: Any]
+editedHooks["SessionStart"] = [["matcher": "startup", "hooks": [["type": "command", "command": loudCommand, "timeout": 10]]]]
+editedFile["hooks"] = editedHooks
+let editedData = try JSONSerialization.data(withJSONObject: editedFile)
+try editedData.write(to: settings)
+_ = installer.repairExistingEntries(movedHere: true)
+check(try Data(contentsOf: settings) == editedData, "An edited group is never repaired")
+try FileManager.default.removeItem(at: settings)
+let nothing = installer.repairExistingEntries(movedHere: true)
+check(nothing == SessionContextRepair() && !FileManager.default.fileExists(atPath: settings.path), "Repair adds nothing")
 
 let agent = sandbox.appendingPathComponent("fake-agent")
 print("Testing bounded local retrieval")

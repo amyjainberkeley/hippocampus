@@ -963,8 +963,10 @@ fn tools_call_mci_events_by_app_default_limit_is_fifty() {
     assert_eq!(invs.events_by_app, vec![("com.example.app".to_owned(), 50)]);
 }
 
+/// SPEC 5.5: smaller look-ups, so a tool never writes one to disk outside
+/// Hippocampus's encryption.
 #[test]
-fn tools_call_mci_events_by_app_caps_at_one_thousand() {
+fn tools_call_mci_events_by_app_caps_at_two_hundred() {
     let (s, stub) = server();
     let _ = s
         .dispatch(req(
@@ -978,8 +980,41 @@ fn tools_call_mci_events_by_app_caps_at_one_thousand() {
     let invs = stub.invocations();
     assert_eq!(
         invs.events_by_app,
-        vec![("com.example.app".to_owned(), 1_000)]
+        vec![("com.example.app".to_owned(), 200)]
     );
+}
+
+#[test]
+fn every_look_up_offers_at_most_two_hundred_rows() {
+    let tools = mci_agent::mcp::tool_definitions();
+    for name in ["events_since", "events_by_app"] {
+        let tool = tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == name)
+            .unwrap();
+        assert_eq!(
+            tool["inputSchema"]["properties"]["limit"]["maximum"], 200,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn rows_are_kept_under_forty_thousand_characters() {
+    let row = serde_json::json!({"text_snippet": "x".repeat(500)});
+    let rows = vec![row; 200];
+    let (kept, truncated) =
+        mci_agent::mcp::server::rows_within(rows, mci_agent::mcp::server::MAX_RESULT_TEXT_CHARS);
+    assert!(truncated);
+    let text = serde_json::to_string(&kept).unwrap();
+    assert!(text.chars().count() <= 40_000, "{}", text.len());
+    assert!(kept.len() > 70, "as many as fit");
+    let (all, cut) =
+        mci_agent::mcp::server::rows_within(vec![serde_json::json!({"a": 1}); 3], 40_000);
+    assert_eq!(all.len(), 3);
+    assert!(!cut);
 }
 
 // ---------------------------------------------------------------------------

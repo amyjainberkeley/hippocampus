@@ -8,6 +8,8 @@ public enum ContextHandoffError: Error, Equatable, LocalizedError {
     case commandFailed
     case emptyOutput
     case invalidProject
+    /// The memory couldn't be opened: its key couldn't be read.
+    case memoryLocked
 
     public var errorDescription: String? {
         switch self {
@@ -23,6 +25,8 @@ public enum ContextHandoffError: Error, Equatable, LocalizedError {
             "No context packet was returned."
         case .invalidProject:
             "Choose a project folder on this Mac."
+        case .memoryLocked:
+            "Hippocampus couldn’t open your memory. Open Hippocampus, then try again."
         }
     }
 }
@@ -152,10 +156,15 @@ public enum ContextHandoffExporter {
     /// Timeout first requests a normal exit, then uses `SIGKILL` if the
     /// bundled child does not honor the grace period. The child is listed in
     /// `children` while it runs, so quitting the window stops it too.
+    /// `input` goes on its standard input, never in its arguments, so what
+    /// is asked never shows in the process list (`send-card`, SPEC 5.3.10).
+    /// A memory that couldn't be opened (the agent's exits 10 to 12) throws
+    /// `memoryLocked`.
     public static func run(
         command: ContextHandoffCommand,
         timeoutSeconds: TimeInterval = defaultTimeoutSeconds,
-        children: ChildProcesses = .shared
+        children: ChildProcesses = .shared,
+        input: Data? = nil
     ) async throws -> String {
         guard timeoutSeconds.isFinite, timeoutSeconds > 0 else {
             throw ContextHandoffError.timedOut
@@ -168,16 +177,31 @@ public enum ContextHandoffExporter {
             process.arguments = command.arguments
             process.standardOutput = outputPipe
             process.standardError = FileHandle.nullDevice
-            process.standardInput = FileHandle.nullDevice
+            let inputPipe = input.map { _ in Pipe() }
+            if let inputPipe {
+                process.standardInput = inputPipe
+            } else {
+                process.standardInput = FileHandle.nullDevice
+            }
             process.environment = childEnvironment(from: ProcessInfo.processInfo.environment)
             do {
                 try children.run(process)
             } catch {
                 throw ContextHandoffError.launchFailed
             }
-
             let outputReader = Task.detached(priority: .userInitiated) {
                 outputPipe.fileHandleForReading.readDataToEndOfFile()
+            }
+            if let input, let inputPipe {
+                let writer = inputPipe.fileHandleForWriting
+                // A child that exits without reading gives EPIPE, never the
+                // SIGPIPE that would end the window; the write runs beside
+                // the clock, so a child that never reads is still stopped.
+                _ = fcntl(writer.fileDescriptor, F_SETNOSIGPIPE, 1)
+                Task.detached(priority: .userInitiated) {
+                    try? writer.write(contentsOf: input)
+                    try? writer.close()
+                }
             }
             let deadline = Date().addingTimeInterval(timeoutSeconds)
             while process.isRunning, !Task.isCancelled, Date() < deadline {
@@ -206,6 +230,9 @@ public enum ContextHandoffExporter {
 
             try Task.checkCancellation()
             let output = await outputReader.value
+            if input != nil, (10...12).contains(process.terminationStatus) {
+                throw ContextHandoffError.memoryLocked
+            }
             guard process.terminationStatus == 0 else {
                 throw ContextHandoffError.commandFailed
             }

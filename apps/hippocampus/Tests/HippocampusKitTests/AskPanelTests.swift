@@ -66,7 +66,8 @@ final class AskPanelTests: XCTestCase {
 
     private func rig(
         answers: Bool = true,
-        status: MenuBarStatus = .recording
+        status: MenuBarStatus = .recording,
+        handoff: PanelHandoff = .none()
     ) -> (CommandBarModel, FakeAskMemory, TestClock) {
         let memory = FakeAskMemory()
         let clock = TestClock()
@@ -77,6 +78,7 @@ final class AskPanelTests: XCTestCase {
         let model = CommandBarModel(
             memory: memory,
             availability: AnswerAvailability(systemSupportsAnswers: answers),
+            handoff: handoff,
             now: { clock.now }
         )
         model.setStatus(AskPanelStatus(status))
@@ -620,6 +622,12 @@ final class AskPanelTests: XCTestCase {
         XCTAssertNil(AskKeyCommand(key: "c", command: false, shift: false, option: false, control: false))
         XCTAssertNil(AskKeyCommand(key: "c", command: true, shift: false, option: true, control: false))
         XCTAssertNil(AskKeyCommand(key: "x", command: true, shift: false, option: false, control: false))
+        // ⌘↩ is Ask {Tool} (SPEC 5.3.9); ⌥↩ is not a ⌘ key.
+        XCTAssertEqual(AskKeyCommand(key: "\r", command: true, shift: false, option: false, control: false), .askAITool)
+        XCTAssertNil(AskKeyCommand(key: "\r", command: true, shift: false, option: true, control: false))
+        // Ask never takes ⌘Space: that is Spotlight's (SPEC-DELTA 4).
+        XCTAssertNil(AskKeyCommand(key: " ", command: true, shift: false, option: false, control: false))
+        XCTAssertNil(AskKeyCommand(key: " ", command: true, shift: true, option: false, control: false))
     }
 
     // MARK: Things go wrong out loud
@@ -689,36 +697,63 @@ final class AskPanelTests: XCTestCase {
         await eventually { model.notice == "Opening your memory…" }
     }
 
-    func testCopyForAIIsDroppedOnceAskHasClosedOrOpenedAgain() async {
-        let (model, memory, _) = rig()
-        memory.replies["mci_context"] = .success(##"{"content":[{"type":"text","text":"# Hippocampus context"}]}"##)
+    /// ⇧⌘C pastes Markdown, never JSON (SPEC 5.3.9): the context tool's
+    /// real reply is a JSON packet, so the fake returns one, and the copy
+    /// must be the builder's message instead. What arrives after Ask has
+    /// closed, or closed and opened again, is dropped.
+    func testCopyForAIIsTheBuildersMarkdownAndIsDroppedOnceAskHasClosedOrOpenedAgain() async {
+        let agent = FakePanelAgent()
+        let (model, memory, _) = rig(handoff: agent.handoff())
+        memory.replies["mci_context"] = .success(
+            ##"{"content":[{"type":"text","text":"{\"outcome\":\"matched\",\"items\":[{\"event_id\":7}]}"}]}"##
+        )
+        let markdown = "From my screen, kept by Hippocampus on my Mac.\n\n## Pricing\nSafari · Oct 12, 2:35 PM"
+        await agent.reply(.success(SendCard(message: markdown, words: 12, open: nil, copy: true, included: [7])))
         await open(model, over: safari)
+        await eventually { model.windowRead }
         let copied = await model.copyForAI()
-        XCTAssertEqual(copied, .text("# Hippocampus context"))
+        XCTAssertEqual(copied, .text(markdown))
+        XCTAssertTrue(memory.calls(to: "mci_context").isEmpty, "the panel never copies the context tool's JSON")
+        let request = await agent.requests.last
+        XCTAssertEqual(request?.to, "copy")
+        XCTAssertEqual(request?.moments, [7], "nothing typed: the window in front, as Hippocampus read it")
 
         // Closed before it arrived: the person may have copied something since.
-        memory.held = ["mci_context"]
+        await agent.hold()
         let afterClose = Task { await model.copyForAI() }
-        await eventually { memory.calls(to: "mci_context").count == 2 }
+        await eventuallyAsync { await agent.requests.count == 2 }
         model.closed()
-        memory.release("mci_context")
+        await agent.release()
         let closedResult = await afterClose.value
         XCTAssertEqual(closedResult, .dropped)
 
         // Closed and opened again: it belongs to the earlier open.
         model.opened()
-        memory.held = ["mci_context"]
+        model.contextArrived(safari, openID: model.opened())
+        await eventually { model.windowRead }
+        await agent.hold()
         let afterReopen = Task { await model.copyForAI() }
-        await eventually { memory.calls(to: "mci_context").count == 3 }
+        await eventuallyAsync { await agent.requests.count == 3 }
         model.closed()
         model.opened()
-        memory.release("mci_context")
+        await agent.release()
         let reopenedResult = await afterReopen.value
         XCTAssertEqual(reopenedResult, .dropped)
 
-        memory.replies["mci_context"] = .failure(.timedOut)
+        model.contextArrived(safari, openID: model.opened())
+        await eventually { model.windowRead }
+        await agent.reply(.failure(SendCardError.failed))
         let failed = await model.copyForAI()
         XCTAssertEqual(failed, .failed)
+    }
+
+    private func eventuallyAsync(_ condition: () async -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
+        for _ in 0..<400 {
+            if await condition() { return }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        let met = await condition()
+        XCTAssertTrue(met, "timed out", file: file, line: line)
     }
 
     func testAFailedSearchIsSaid() async {

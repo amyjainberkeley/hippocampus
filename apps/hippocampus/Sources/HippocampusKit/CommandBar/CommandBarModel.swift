@@ -103,17 +103,26 @@ public struct BarAnswer: Decodable, Sendable, Equatable {
 public enum BarRow: Sendable, Equatable, Identifiable {
     case suggestion(BarSuggestion)
     case ask(String)
+    /// A Working On item whose name holds what is typed (SPEC-DELTA 4).
+    case item(PanelItem)
+    /// A web page whose title or site holds what is typed.
+    case page(PanelPage)
     case hit(BarHit)
     case source(BarSource)
     /// The window in front as the answer read it, labelled "This window".
     case thisWindow(BarSource)
+    /// An AI tool to choose, the first time ⌘↩ is pressed.
+    case tool(InstalledTool)
 
     public var id: String {
         switch self {
         case .suggestion(let s): "s-\(s.id)"
         case .ask(let q): "a-\(q)"
+        case .item(let item): "i-\(item.id)"
+        case .page(let page): "p-\(page.id)"
         case .hit(let h): "h-\(h.eventId)"
         case .source(let s), .thisWindow(let s): "c-\(s.n)"
+        case .tool(let tool): "t-\(tool.tool.rawValue)"
         }
     }
 }
@@ -122,6 +131,8 @@ public enum BarRow: Sendable, Equatable, Identifiable {
 public enum CopyForAIResult: Sendable, Equatable {
     case text(String)
     case failed
+    /// Nothing to copy: nothing typed, and the window in front wasn't read.
+    case nothing
     /// Ask closed, or closed and opened again, before it arrived: the person
     /// has moved on, and may have copied something else since.
     case dropped
@@ -138,6 +149,8 @@ public enum BarAction: Sendable, Equatable {
     case copyForAI
     /// The footer's button.
     case status(AskPanelStatus.Action)
+    /// Ask {Tool}: open the tool or copy for it, then show the note.
+    case handoff(HandoffPlan, AskTool)
 }
 
 /// What the answer card says: never nothing once a request has ended (spec-copy
@@ -182,13 +195,16 @@ public enum AnswerLine: Equatable, Sendable {
     }
 }
 
-/// A key pressed with ⌘ in Ask.
+/// A key pressed with ⌘ in Ask. ⌘Space is never one of them: it is
+/// Spotlight's (SPEC-DELTA 4).
 public enum AskKeyCommand: Equatable, Sendable {
     case copyAnswer
     case copyForAI
     case openOverview
     case openYou
     case close
+    /// ⌘↩: Ask {Tool} (SPEC 5.3.9).
+    case askAITool
 
     public init?(key: String, command: Bool, shift: Bool, option: Bool, control: Bool) {
         guard command, !option, !control else { return nil }
@@ -198,6 +214,7 @@ public enum AskKeyCommand: Equatable, Sendable {
         case ("d", false): self = .openOverview
         case ("u", false): self = .openYou
         case ("q", false): self = .close
+        case ("\r", false), ("\u{3}", false): self = .askAITool
         default: return nil
         }
     }
@@ -239,10 +256,17 @@ public final class CommandBarModel: ObservableObject {
     @Published public private(set) var isAsking = false
     @Published public private(set) var isSearching = false
     /// -1 is the field itself: Return asks what is typed.
-    @Published public private(set) var selection = 0
+    @Published public internal(set) var selection = 0
     @Published public private(set) var notice: String?
     /// A word the footer shows for a moment, such as "Copied".
-    @Published public private(set) var flash: String?
+    @Published public internal(set) var flash: String?
+    /// Where a ⌘↩ is: choosing a tool, its one-time sheet, or waiting.
+    @Published public internal(set) var stage: HandoffStage?
+    /// The note after Ask {Tool}, in the footer.
+    @Published public internal(set) var note: HandoffNote?
+    /// Working On's items and Web Pages' pages that hold what is typed.
+    @Published public private(set) var matchedItems: [PanelItem] = []
+    @Published public private(set) var matchedPages: [PanelPage] = []
     @Published public private(set) var status: AskPanelStatus
     @Published public private(set) var answersAvailable: Bool
     /// Room for the content between the search row and the footer.
@@ -257,10 +281,26 @@ public final class CommandBarModel: ObservableObject {
     @Published public private(set) var askedAt: Date?
 
     private let memory: AskMemory
-    private let now: () -> Date
+    let now: () -> Date
+    /// The AI tools and the builder (`mci-agent send-card`).
+    let handoff: PanelHandoff
+    /// Performs what the model asks for once its work is done (Ask {Tool}).
+    public var perform: (@MainActor (BarAction) -> Void)?
+    var installedTools: [InstalledTool] = []
+    var handoffTask: Task<Void, Never>?
+    var lastSendAt: Date?
+    var lastCard: SendCard?
+    var lastRequest: SendCardRequest?
+    var work = PanelWork()
+    var workLoadedAt: Date?
     private var availability: AnswerAvailability
     private var openID = 0
     private var isOpen = false
+    /// The open a request belongs to: one that arrives later is dropped.
+    var currentOpenID: Int { openID }
+    var isPanelOpen: Bool { isOpen }
+    /// The saved read of the window in front, when there is one.
+    var readEventIdForHandoff: UInt64? { readEventId }
     private var homeGeneration = 0
     private var homeLoaded = false
     private var homeWaitsForAsk = false
@@ -280,16 +320,30 @@ public final class CommandBarModel: ObservableObject {
     private var previewing = false
 
     public convenience init(launch: @escaping @MainActor (_ assist: Bool) -> MemorySessionLaunch?) {
-        self.init(memory: WarmMemorySessions(launch: launch))
+        // The builder and the work read run as the reads session does: the
+        // bundled agent, the memory's path and its Keychain reference only.
+        let agent: PanelAgent = launch(false).map {
+            AgentProcess(executable: $0.executable, environment: $0.environment)
+        } ?? NoPanelAgent()
+        let detector = DestinationDetector.live()
+        self.init(
+            memory: WarmMemorySessions(launch: launch),
+            handoff: PanelHandoff(
+                agent: agent, tools: { detector.installed() }, choices: HandoffChoices(),
+                home: FileManager.default.homeDirectoryForCurrentUser.path
+            )
+        )
     }
 
     public init(
         memory: AskMemory,
         availability: AnswerAvailability = AnswerAvailability(),
+        handoff: PanelHandoff = .none(),
         now: @escaping () -> Date = Date.init
     ) {
         self.memory = memory
         self.availability = availability
+        self.handoff = handoff
         self.now = now
         status = AskPanelStatus(.starting)
         answersAvailable = availability.isAvailable(at: now())
@@ -338,12 +392,14 @@ public final class CommandBarModel: ObservableObject {
     }
 
     public var rows: [BarRow] {
+        if case .picking = stage { return installedTools.map(BarRow.tool) }
+        if case .firstUse = stage { return [] }
         switch mode {
         case .home:
             return homeRows.map(BarRow.suggestion)
         case .results:
             let ask = answersAvailable ? [BarRow.ask(query.trimmed)] : []
-            return ask + hits.map(BarRow.hit)
+            return ask + matchedItems.map(BarRow.item) + matchedPages.map(BarRow.page) + hits.map(BarRow.hit)
         case .answer:
             return (answer?.sources ?? []).enumerated().map { index, source in
                 index == 0 && isThisWindow(source) ? .thisWindow(source) : .source(source)
@@ -392,6 +448,12 @@ public final class CommandBarModel: ObservableObject {
         isOpen = true
         focusRequest += 1
         flash = nil
+        note = nil
+        handoffTask?.cancel()
+        handoffTask = nil
+        stage = nil
+        installedTools = handoff.tools()
+        loadWork()
         liveContext = nil
         liveContextKnown = false
         answersAvailable = availability.isAvailable(at: now())
@@ -437,8 +499,13 @@ public final class CommandBarModel: ObservableObject {
         closedAt = now()
         isOpen = false
         flash = nil
+        note = nil
         searchTask?.cancel()
         isSearching = false
+        // Closed before the message was ready: the tool never opens late.
+        handoffTask?.cancel()
+        handoffTask = nil
+        stage = nil
     }
 
     /// The window in front, read once the panel is up (RULINGS S9).
@@ -551,6 +618,7 @@ public final class CommandBarModel: ObservableObject {
         // Typing replaces a question; emptying the field drops its answer.
         if mode == .answer { leaveAnswer() }
         if trimmed.isEmpty {
+            refreshMatches()
             hits = []
             isSearching = false
             notice = nil
@@ -563,6 +631,9 @@ public final class CommandBarModel: ObservableObject {
         }
         mode = .results
         selection = answersAvailable ? 0 : -1
+        // Items and pages are found at once, from the work read; moments
+        // follow from the search.
+        refreshMatches()
         searchTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else { return }
@@ -570,7 +641,20 @@ public final class CommandBarModel: ObservableObject {
         }
     }
 
-    private func search(_ text: String) async {
+    /// The items and pages that hold what is typed, from the work read.
+    func refreshMatches() {
+        let text = query.trimmed
+        guard mode == .results, !text.isEmpty else {
+            matchedItems = []
+            matchedPages = []
+            return
+        }
+        let found = Self.matches(text, in: work)
+        matchedItems = found.items
+        matchedPages = found.pages
+    }
+
+        private func search(_ text: String) async {
         searchToken += 1
         let token = searchToken
         isSearching = true
@@ -687,26 +771,25 @@ public final class CommandBarModel: ObservableObject {
         }
     }
 
-    /// Context for an AI tool: a cited packet for the question or the window.
-    /// What arrives after Ask has closed, or closed and opened again, is
-    /// dropped, so it never replaces something copied since.
+    /// Copy for Your AI (⇧⌘C): the same message ⌘↩ hands over, made by the
+    /// one builder as Markdown, for any AI (SPEC 5.3.9). What arrives after
+    /// Ask has closed, or closed and opened again, is dropped, so it never
+    /// replaces something copied since.
     public func copyForAI() async -> CopyForAIResult {
         let open = openID
-        let focus = query.isEmpty ? (context?.windowTitle ?? "") : query
-        let data = try? await memory.call(
-            .reads, "mci_context", arguments: Self.json(["focus": focus, "max_tokens": 1200]), timeout: .seconds(15)
-        )
+        guard let pending = pendingAsk() else { return .nothing }
+        let request = pending.request(to: "copy", appInstalled: nil, includeAboutMe: false)
+        let card = try? await handoff.agent.card(request)
         guard isOpen, open == openID else { return .dropped }
-        guard let data,
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let content = object["content"] as? [[String: Any]],
-              let text = content.first?["text"] as? String
-        else { return .failed }
-        return .text(text)
+        guard let card, !card.message.isEmpty else { return .failed }
+        lastCard = card
+        lastRequest = request
+        return .text(card.message)
     }
 
     public func showFlash(_ text: String?) {
         flash = text
+        if text != nil { note = nil }
     }
 
     // MARK: Keyboard
@@ -727,11 +810,25 @@ public final class CommandBarModel: ObservableObject {
     /// for the controller to perform outside the panel, or nil.
     public func activate() -> BarAction? {
         let text = query.trimmed
+        if case .firstUse = stage {
+            confirmFirstUse()
+            return nil
+        }
+        if case .sending = stage { return nil }
         if rows.indices.contains(selection) {
             switch rows[selection] {
             case .ask:
                 ask(text)
                 return nil
+            case .tool(let tool):
+                choose(tool)
+                return nil
+            case .item(let item):
+                // The item's page in the window.
+                return .openWindow(tab: Self.itemTab(item.id))
+            case .page(let page):
+                if let url = page.url { return .openURL(url) }
+                return page.moments.first.map(BarAction.openEvent)
             case .hit(let hit):
                 return Self.open(url: hit.url, event: hit.eventId)
             case .source(let source), .thisWindow(let source):
@@ -747,14 +844,22 @@ public final class CommandBarModel: ObservableObject {
     /// What a ⌘ key does now; nil lets the field have it (⌘C with no answer
     /// copies what is selected in the field). The controller closes on ⌘Q.
     public func action(for command: AskKeyCommand) -> BarAction? {
-        switch command {
+        if command == .askAITool {
+            askAITool()
+            return nil
+        }
+        return switch command {
         case .copyAnswer: answerText.map(BarAction.copy)
         case .copyForAI: .copyForAI
         case .openOverview: .openWindow(tab: "overview")
         case .openYou: .openWindow(tab: "you")
-        case .close: nil
+        case .close, .askAITool: nil
         }
     }
+
+    /// Where a Working On item's page is in the window: `item:<id>` (ids,
+    /// never names).
+    public static func itemTab(_ id: String) -> String { "item:\(id)" }
 
     private func run(_ suggestion: BarSuggestion) -> BarAction? {
         if let question = suggestion.action.ask {
@@ -781,8 +886,13 @@ public final class CommandBarModel: ObservableObject {
         return .openEvent(event)
     }
 
-    /// Esc: forget an answer or what is typed, then close.
+    /// Esc: leave a tool's sheet or the tool picker, forget an answer or what
+    /// is typed, then close.
     public func back() -> Bool {
+        if stage != nil {
+            cancelHandoff()
+            return true
+        }
         switch mode {
         case .answer:
             leaveAnswer()
@@ -795,6 +905,8 @@ public final class CommandBarModel: ObservableObject {
             searchTask?.cancel()
             setQuery("")
             hits = []
+            matchedItems = []
+            matchedPages = []
             isSearching = false
             notice = nil
             mode = .home
@@ -840,7 +952,13 @@ extension CommandBarModel {
         notice: String? = nil,
         flash: String? = nil,
         working: Bool = false,
-        askedAt: Date? = nil
+        askedAt: Date? = nil,
+        items: [PanelItem] = [],
+        pages: [PanelPage] = [],
+        selection: Int? = nil,
+        stage: HandoffStage? = nil,
+        note: HandoffNote? = nil,
+        tools: [InstalledTool] = []
     ) {
         previewing = true
         setQuery(query)
@@ -864,11 +982,17 @@ extension CommandBarModel {
         self.flash = flash
         self.isAsking = working && mode == .answer
         self.isSearching = working && mode == .results
+        self.matchedItems = items
+        self.matchedPages = pages
+        self.installedTools = tools
+        self.stage = stage
+        self.note = note
         switch mode {
-        case .home: selection = 0
-        case .results: selection = answersAvailable ? 0 : -1
-        case .answer: selection = -1
+        case .home: self.selection = 0
+        case .results: self.selection = answersAvailable ? 0 : -1
+        case .answer: self.selection = -1
         }
+        if let selection { self.selection = selection }
     }
 }
 #endif
