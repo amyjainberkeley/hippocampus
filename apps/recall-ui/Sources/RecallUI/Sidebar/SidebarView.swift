@@ -56,6 +56,9 @@ struct SidebarView: View {
     @State private var hiMarkAnchor = MenuAnchor.Holder()
     @State private var footerAnchor = MenuAnchor.Holder()
     @State private var hiMarkHovered = false
+    /// Context for This Folder…, open in an item's folder.
+    @State private var folderSheet: FolderSheet?
+    @Environment(\.isSyntheticPreview) private var isSyntheticPreview
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -68,6 +71,9 @@ struct SidebarView: View {
         .frame(maxHeight: .infinity, alignment: .top)
         .onHover { actions.pointerInside($0) }
         .onChange(of: focusedList) { _, list in actions.focusInside(list != nil) }
+        .sheet(item: $folderSheet) { sheet in
+            ProjectHandoffView(folderGuess: sheet.guess)
+        }
     }
 
     enum SidebarList: Hashable {
@@ -250,7 +256,10 @@ struct SidebarView: View {
                         Button(NavigationCopy.hideFromSidebar) { actions.hideItem(id) }
                         Button(UserFacingCopy.showInHistory) { actions.showInHistory(id) }
                         if item.kind == .code {
-                            Button(NavigationCopy.contextForThisFolder) { actions.folderContext() }
+                            // Today's ⌘J sheet, in the project's folder (SPEC 3.2).
+                            Button(NavigationCopy.contextForThisFolder) {
+                                folderSheet = FolderSheet(guess: isSyntheticPreview ? nil : item.folderGuess)
+                            }
                         }
                         Button(NavigationCopy.copyForYourAI) { actions.copyForYourAI(id) }
                     }

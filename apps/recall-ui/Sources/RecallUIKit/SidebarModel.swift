@@ -137,18 +137,23 @@ public struct SidebarWorkItem: Equatable, Sendable, Identifiable {
     public let lastUs: UInt64
     /// Its newest moment with a kept screenshot; nil draws the kind's symbol.
     public let thumbnailMoment: UInt64?
+    /// For code, the folder it seems to be in, with `~` for home: where its
+    /// Context for This Folder… starts.
+    public let folderGuess: String?
 
-    public init(id: String, kind: WorkItem.Kind, name: String, lastUs: UInt64, thumbnailMoment: UInt64? = nil) {
+    public init(id: String, kind: WorkItem.Kind, name: String, lastUs: UInt64, thumbnailMoment: UInt64? = nil,
+                folderGuess: String? = nil) {
         self.id = id
         self.kind = kind
         self.name = name
         self.lastUs = lastUs
         self.thumbnailMoment = thumbnailMoment
+        self.folderGuess = folderGuess
     }
 
     public init(_ item: WorkItem) {
         self.init(id: item.id, kind: item.kind, name: item.name, lastUs: item.lastUs,
-                  thumbnailMoment: item.thumbnailMoment)
+                  thumbnailMoment: item.thumbnailMoment, folderGuess: item.folderGuess)
     }
 
     /// The kind's SF Symbol, monochrome (SPEC 2.2).

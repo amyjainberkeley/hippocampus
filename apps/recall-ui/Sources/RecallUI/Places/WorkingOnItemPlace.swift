@@ -19,6 +19,8 @@ struct WorkingOnItemPlace: View {
 
     @StateObject private var model: WorkingOnItemModel
     @State private var selected: Hit?
+    /// Context for This Folder…, open in the item's folder.
+    @State private var folderSheet: FolderSheet?
     @Environment(\.workItemHides) private var hides
     @Environment(\.claudeCodeStartsSessions) private var claudeCodeStarts
     @Environment(\.workNow) private var now
@@ -72,6 +74,9 @@ struct WorkingOnItemPlace: View {
         .onReceive(NotificationCenter.default.publisher(for: MemoryDeletionSignal.notification)) { _ in
             selected = nil
             Task { await model.reload() }
+        }
+        .sheet(item: $folderSheet) { sheet in
+            ProjectHandoffView(folderGuess: sheet.guess)
         }
     }
 
@@ -168,8 +173,10 @@ struct WorkingOnItemPlace: View {
                     }
                     Button(WorkCopy.showInHistory) { showInHistory(item.moments.first) }
                     if item.kind == .code {
-                        // Today's ⌘J sheet (SPEC 3.2).
-                        Button(NavigationCopy.contextForThisFolder) { WindowCommand.folderContext.post() }
+                        // Today's ⌘J sheet, in the project's folder (SPEC 3.2).
+                        Button(NavigationCopy.contextForThisFolder) {
+                            folderSheet = FolderSheet(guess: isSyntheticPreview ? nil : item.folderGuess)
+                        }
                     }
                     Button(HandoffCopy.copyForYourAI) {
                         let services = HandoffServices.resolved(handoff, isSyntheticPreview: isSyntheticPreview)

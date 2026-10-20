@@ -12,10 +12,45 @@ public final class ProjectHandoffModel: ObservableObject {
     private var generation: UInt64 = 0
     private let exporter: @Sendable (URL) async throws -> String
 
-    public init(exporter: @escaping @Sendable (URL) async throws -> String = { directory in
-        try await ContextHandoffExporter.run(command: ContextHandoffCommand.makeProject(directory: directory))
-    }) {
+    /// `folder` is where the sheet starts: a Working On item's folder, from
+    /// its page or its row in the sidebar (SPEC 3.2). Nil starts it empty,
+    /// as ⌘J does.
+    public init(startingIn folder: URL? = nil,
+                exporter: @escaping @Sendable (URL) async throws -> String = { directory in
+                    try await ContextHandoffExporter.run(command: ContextHandoffCommand.makeProject(directory: directory))
+                }) {
         self.exporter = exporter
+        project = folder
+    }
+
+    /// The folder a code project's guess names ("~/dev/trailhead-shop", with
+    /// `~` for home, or a full path), when it is a folder on this Mac; nil
+    /// for anything else, so the sheet then starts empty and the person
+    /// chooses.
+    public nonisolated static func startingFolder(
+        _ guess: String?,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        isFolder: (URL) -> Bool = ProjectHandoffModel.isFolder
+    ) -> URL? {
+        guard let guess = guess?.trimmingCharacters(in: .whitespacesAndNewlines), !guess.isEmpty else { return nil }
+        let url: URL
+        if guess == "~" {
+            url = home
+        } else if guess.hasPrefix("~/") {
+            url = home.appendingPathComponent(String(guess.dropFirst(2)), isDirectory: true)
+        } else if guess.hasPrefix("/") {
+            url = URL(fileURLWithPath: guess, isDirectory: true)
+        } else {
+            return nil
+        }
+        let folder = url.standardizedFileURL
+        return isFolder(folder) ? folder : nil
+    }
+
+    /// Whether `url` is a folder on this Mac.
+    public nonisolated static func isFolder(_ url: URL) -> Bool {
+        var directory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &directory) && directory.boolValue
     }
 
     public func selectProject(_ directory: URL) {

@@ -3,12 +3,24 @@ import RecallUIKit
 import SwiftUI
 
 struct ProjectHandoffView: View {
-    @StateObject private var model = ProjectHandoffModel()
+    @StateObject private var model: ProjectHandoffModel
     @Environment(\.dismiss) private var dismiss
     /// The synthetic preview never runs Hippocampus on a real folder.
     @Environment(\.isSyntheticPreview) private var isSyntheticPreview
     @State private var copied = false
     @State private var refreshRevision = 0
+
+    /// `folder`: where the sheet starts, a Working On item's folder (SPEC
+    /// 3.2). Nil starts it empty, as ⌘J does.
+    init(startingIn folder: URL? = nil) {
+        _model = StateObject(wrappedValue: ProjectHandoffModel(startingIn: folder))
+    }
+
+    /// The sheet for a Working On item: in its folder when its guess names a
+    /// folder on this Mac.
+    init(folderGuess: String?) {
+        self.init(startingIn: ProjectHandoffModel.startingFolder(folderGuess))
+    }
 
     private struct Request: Hashable {
         let project: URL?
@@ -90,7 +102,10 @@ struct ProjectHandoffView: View {
             }.padding(20)
         }
         .frame(width: 680, height: 560)
-        .task(id: Request(project: model.project, revision: refreshRevision)) { await model.refresh() }
+        .task(id: Request(project: model.project, revision: refreshRevision)) {
+            guard !isSyntheticPreview else { return }
+            await model.refresh()
+        }
     }
 
     private func chooseFolder() {
@@ -103,4 +118,12 @@ struct ProjectHandoffView: View {
         copied = false
         model.selectProject(directory)
     }
+}
+
+/// Context for This Folder… from a Working On item, its page's ⋯ or its row
+/// in the sidebar: the sheet, in the item's folder when there is one.
+struct FolderSheet: Identifiable {
+    let id = UUID()
+    /// The item's folder guess ("~/dev/trailhead-shop").
+    let guess: String?
 }
