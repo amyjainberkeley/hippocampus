@@ -119,6 +119,28 @@ final class LibraryLensModelTests: XCTestCase {
         XCTAssertEqual(sections[0].rows[0].count, 2)
     }
 
+    func testARowSaysItsTimeAsItsDayHeadingLeavesIt() {
+        let now = SampleDay.now
+        let day: UInt64 = 86_400_000_000
+        let nowUs = UInt64(now.timeIntervalSince1970 * 1_000_000)
+        let hits = [
+            MomentFactory.hit(1, "com.apple.Notes", title: "A", at: nowUs - minute),
+            MomentFactory.hit(2, "com.apple.Notes", title: "B", at: nowUs - day),
+            MomentFactory.hit(3, "com.apple.Notes", title: "C", at: nowUs - 3 * day),
+            MomentFactory.hit(4, "com.apple.Notes", title: "D", at: nowUs - 20 * day),
+        ]
+        let sections = LibrarySections.group(hits, now: now, calendar: SampleDay.calendar)
+        let times = sections.map { section in
+            section.time(of: section.rows[0].hit, calendar: SampleDay.calendar, locale: SampleDay.locale)
+        }
+        XCTAssertEqual(times.count, 4)
+        XCTAssertFalse(times[0].contains(","), "today shows the clock: \(times[0])")
+        XCTAssertTrue(times[0].hasSuffix("PM") || times[0].hasSuffix("AM"), times[0])
+        XCTAssertFalse(times[1].contains(","), "yesterday shows the clock: \(times[1])")
+        XCTAssertTrue(times[2].hasPrefix("Fri "), "the last week shows its weekday: \(times[2])")
+        XCTAssertTrue(times[3].hasPrefix("Sep 22, "), "older shows its date: \(times[3])")
+    }
+
     func testADeleteClearsTheRowsAtOnceAndReadsAgain() async {
         let deletions = MemoryDeletionSignal()
         let model = LibraryLensModel(lens: .code, reader: MomentsReader([MomentFactory.hit(1, "com.apple.Terminal")]),

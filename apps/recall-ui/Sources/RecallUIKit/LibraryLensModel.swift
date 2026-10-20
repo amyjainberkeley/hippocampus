@@ -301,6 +301,31 @@ public struct LibrarySection: Equatable, Sendable, Identifiable {
     }
 }
 
+public extension LibrarySection {
+    /// A row's time in a lens: the clock under Today and Yesterday, the
+    /// weekday in the last week ("Fri 4:05 PM"), else the date ("Oct 2,
+    /// 4:05 PM"), as the prototype's rows show it.
+    func time(of hit: Hit, calendar: Calendar, locale: Locale = .autoupdatingCurrent) -> String {
+        let date = Date(timeIntervalSince1970: Double(hit.tsUs) / 1_000_000)
+        var calendar = calendar
+        calendar.locale = locale
+        let clock = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+            .hour().minute()
+        switch period {
+        case .today, .yesterday:
+            return date.formatted(clock)
+        case .previous7Days:
+            let day = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+                .weekday(.abbreviated)
+            return "\(date.formatted(day)) \(date.formatted(clock))"
+        case .previous30Days, .month:
+            let day = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+                .month(.abbreviated).day()
+            return "\(date.formatted(day)), \(date.formatted(clock))"
+        }
+    }
+}
+
 /// Groups moments under Apple Notes' day headings: Today, Yesterday,
 /// Previous 7 Days, Previous 30 Days, then each month (SPEC 3.5).
 public enum LibrarySections {

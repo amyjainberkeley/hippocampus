@@ -24,6 +24,9 @@ struct HitRow: View {
     /// The row's picture when it is not `hit`'s own: History's row of one
     /// window shows the newest screenshot of its moments.
     var screenshot: Hit? = nil
+    /// The time as a list across days writes it under its day heading
+    /// ("Fri 4:05 PM"), in place of the clock or how long ago.
+    var time: String? = nil
 
     /// A moment's picture in a list: the screen's own shape (16:10), large
     /// enough to tell one screen from another at a glance and about as tall
@@ -50,7 +53,8 @@ struct HitRow: View {
     /// History has the day above it, so a row shows the clock time; a match
     /// can be from any day ("Oct 12, 2:36 PM").
     private var when: String {
-        showsClockTime
+        if let time { return time }
+        return showsClockTime
             ? Formatters.clockTime(us: Int64(clamping: hit.tsUs))
             : Formatters.dayAndTime(us: hit.tsUs)
     }
@@ -58,7 +62,7 @@ struct HitRow: View {
     /// Only a match by meaning says how it matched: an exact-words match
     /// already shows the words, and History is not a search.
     private var reason: String? {
-        guard !showsClockTime, hit.source != "lexical" else { return nil }
+        guard !showsClockTime, time == nil, hit.source != "lexical" else { return nil }
         return Formatters.matchReason(hit.source)
     }
 
