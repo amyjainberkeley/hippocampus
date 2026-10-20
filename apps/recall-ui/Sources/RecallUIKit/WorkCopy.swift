@@ -10,13 +10,21 @@ public enum WorkCopy {
     /// The primary button on a Working On page and Today's card, and the
     /// sheet's default button (⌘↩).
     public static let resume = "Resume"
-    public static let resumeTitle = "Pick up where you left off"
+    /// The sheet's title names what it reopens (launch playbook, decision
+    /// 12): "Reopen Q4 investor update". Until the plan names it, or when
+    /// it can't, what it lists.
+    public static func resumeTitle(_ name: String?) -> String {
+        guard let name, !name.isEmpty else { return resumeTitleUnnamed }
+        return "Reopen \(name)"
+    }
+    public static let resumeTitleUnnamed = "Reopen what was open"
     /// The sheet when nothing from the last session can be opened again.
     public static let resumeNothing = "Nothing to reopen."
     public static let cancel = "Cancel"
-    /// Under the sheet's title: where the list comes from.
-    public static func resumeLead(name: String, when: String) -> String {
-        "What was open in \(name), \(when). Nothing opens until you click Resume."
+    /// Under the sheet's title, which names the item: where the list comes
+    /// from, the item's last session, and when it was.
+    public static func resumeLead(when: String) -> String {
+        "What was open in its last session, \(when). Nothing opens until you click Resume."
     }
     /// The sheet's groups.
     public static let resumeCode = "Code"

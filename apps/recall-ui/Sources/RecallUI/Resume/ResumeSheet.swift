@@ -98,13 +98,12 @@ struct ResumeSheetContent: View {
                     .frame(width: 36, height: 36)
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(WorkCopy.resumeTitle)
+                Text(WorkCopy.resumeTitle(model.plan?.item?.name))
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(MCI.Color.foreground)
                     .accessibilityAddTraits(.isHeader)
-                if let item = model.plan?.item, let session = model.plan?.session {
-                    Text(WorkCopy.resumeLead(name: item.name,
-                                             when: WorkFormat.when(us: session.endUs, now: now, calendar: calendar)))
+                if model.plan?.item != nil, let session = model.plan?.session {
+                    Text(WorkCopy.resumeLead(when: WorkFormat.when(us: session.endUs, now: now, calendar: calendar)))
                         .font(.system(size: 12.5))
                         .foregroundStyle(MCI.Color.foregroundSecondary)
                         .fixedSize(horizontal: false, vertical: true)

@@ -228,7 +228,7 @@ final class ResumeSheetModelTests: XCTestCase {
         XCTAssertEqual(ResumeSheetModel.note(tabs: 0, apps: 0, alreadyOpen: 0, failed: ["Slack", "Chrome"]),
                        "Nothing opened. Couldn\u{2019}t open Slack.")
         for text in [WorkCopy.resumeWillOpen(tabs: 3, apps: 1), WorkCopy.resumeOpened(tabs: 1, apps: 1),
-                     WorkCopy.resumeLead(name: "trailhead-shop", when: "today at 2:35 PM"), WorkCopy.resumeSingleNote,
+                     WorkCopy.resumeLead(when: "today at 2:35 PM"), WorkCopy.resumeSingleNote,
                      WorkCopy.resumeNoAddress, WorkCopy.resumeNewestTicked(10), WorkCopy.resumeMissing("bike-api"),
                      WorkCopy.resumeAppOnly("Pages"), WorkCopy.resumeNoFolder("Cursor")] {
             XCTAssertNil(CopyStyleValidator.containsJargon(text), text)
