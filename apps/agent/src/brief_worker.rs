@@ -134,7 +134,7 @@ pub fn briefs_disabled_via_env() -> bool {
 /// Default install path for the Qwen3 Core ML model on macOS.
 #[must_use]
 pub fn default_model_dir() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     home.join("Library/Application Support/MCI/Models")
 }
 

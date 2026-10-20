@@ -36,6 +36,12 @@ BUILD_APP="$REPO_ROOT/apps/hippocampus/Resources/build-app.sh"
 APP_DIST="$REPO_ROOT/apps/hippocampus/dist"
 APP_PATH="$APP_DIST/Hippocampus.app"
 DEMO_ARCTIC_MODEL="$REPO_ROOT/models/ArcticEmbedS_FP16.mlmodelc"
+# The demo's command-line tools open its memory with the development key, which
+# a release build has only with the development-file-key feature (storage-
+# security review S11). They are built with it into a target folder of their
+# own, so a shipped build never picks them up from target/release.
+DEMO_TARGET="$REPO_ROOT/target/demo"
+DEMO_CARGO_FLAGS=(--release --target-dir "$DEMO_TARGET" --features mci-agent/development-file-key)
 
 # macOS Tahoe (26.x) toolchain note (PR #95):
 # SwiftPM may warn about deployment target vs SDK version.
@@ -214,7 +220,7 @@ do_seed() {
     fi
 
     echo "Building the synthetic memory and brief seeders..."
-    cargo build --manifest-path "$REPO_ROOT/Cargo.toml" --release \
+    cargo build --manifest-path "$REPO_ROOT/Cargo.toml" "${DEMO_CARGO_FLAGS[@]}" \
         --bin mci-agent --bin mci-seed-brain --bin mci-seed-brief 2>&1 | tail -3
 
     echo "Sealing three fixture images with the production keyframe codec..."
@@ -243,10 +249,10 @@ do_seed() {
     for digest in "${digests[@]}"; do
         seed_args+=(--keyframe-digest "$digest")
     done
-    "$REPO_ROOT/target/release/mci-seed-brain" "${seed_args[@]}"
+    "$DEMO_TARGET/release/mci-seed-brain" "${seed_args[@]}"
 
     echo "Running the production understanding pipeline..."
-    if ! enrich_output=$("$REPO_ROOT/target/release/mci-agent" enrich --db-path "$DB_PATH" 2>&1); then
+    if ! enrich_output=$("$DEMO_TARGET/release/mci-agent" enrich --db-path "$DB_PATH" 2>&1); then
         printf '%s\n' "$enrich_output" >&2
         red "ERROR: production understanding pipeline failed"
         return 1
@@ -268,7 +274,7 @@ do_seed() {
     fi
 
     echo "Seeding a synthetic daily brief..."
-    "$REPO_ROOT/target/release/mci-seed-brief" \
+    "$DEMO_TARGET/release/mci-seed-brief" \
         --date "$(date +%F)" \
         --title "Today in your work" \
         --body "Hippocampus captured the launch-lifecycle fix, retrieval benchmark, agent context handoff, and local-memory architecture. The remaining release gates are a validation-qualified evidence verifier, a real capture soak, and Developer ID notarization." \
@@ -325,10 +331,10 @@ do_query() {
     require_cmd cargo
     load_key
 
-    BRAIN="$REPO_ROOT/target/release/mci-brain"
+    BRAIN="$DEMO_TARGET/release/mci-brain"
     if [[ ! -f "$BRAIN" ]]; then
         echo "Building mci-brain CLI..."
-        cargo build --manifest-path "$REPO_ROOT/Cargo.toml" --release --bin mci-brain 2>&1 | tail -3
+        cargo build --manifest-path "$REPO_ROOT/Cargo.toml" "${DEMO_CARGO_FLAGS[@]}" --bin mci-brain 2>&1 | tail -3
     fi
 
     export MCI_DB_PATH="$DB_PATH"
@@ -368,10 +374,10 @@ do_mcp_demo() {
     bold "=== demo mcp-demo ==="
     load_key
 
-    AGENT="$REPO_ROOT/target/release/mci-agent"
+    AGENT="$DEMO_TARGET/release/mci-agent"
     if [[ ! -f "$AGENT" ]]; then
         echo "Building mci-agent..."
-        cargo build --manifest-path "$REPO_ROOT/Cargo.toml" --release --bin mci-agent 2>&1 | tail -3
+        cargo build --manifest-path "$REPO_ROOT/Cargo.toml" "${DEMO_CARGO_FLAGS[@]}" --bin mci-agent 2>&1 | tail -3
     fi
 
     export MCI_DB_PATH="$DB_PATH"
@@ -501,7 +507,7 @@ do_screenshot_auto() {
 
     export MCI_DB_PATH="$DB_PATH"
     export MCI_DB_KEY_FILE="$KEY_FILE"
-    export MCI_BRAIN_BIN="$REPO_ROOT/target/release/mci-brain"
+    export MCI_BRAIN_BIN="$DEMO_TARGET/release/mci-brain"
     SCREENSHOTS="$REPO_ROOT/assets/screenshots"
 
     bold "--- 1/4: hero-cli.png (programmatic render) ---"

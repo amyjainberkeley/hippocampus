@@ -21,6 +21,7 @@
 pub mod capture;
 pub mod crypto;
 pub mod error;
+pub mod home;
 pub mod ipc;
 pub mod store;
 

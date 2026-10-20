@@ -39,6 +39,8 @@ public final class SafariInboxReader: Sendable {
     public private(set) var forwarded: UInt64 = 0
     public private(set) var droppedDenylist: UInt64 = 0
     public private(set) var droppedSecret: UInt64 = 0
+    /// Staged pages deleted unread because they waited over a minute.
+    public private(set) var droppedStale: UInt64 = 0
     public private(set) var droppedConsent: UInt64 = 0
     public private(set) var failedParse: UInt64 = 0
 
@@ -128,12 +130,43 @@ public final class SafariInboxReader: Sendable {
             options: [.skipsHiddenFiles]
         ) else { return }
 
-        let jsonFiles = files.filter { $0.pathExtension == "json" }
+        // A page staged longer than a minute is deleted unread, whatever
+        // kept it (storage-security review S10): the inbox never holds
+        // page text for long, even while the agent is down.
+        droppedStale += UInt64(Self.removeStalePages(in: inboxURL))
+
+        let jsonFiles = files.filter {
+            $0.pathExtension == "json" && FileManager.default.fileExists(atPath: $0.path)
+        }
         guard !jsonFiles.isEmpty else { return }
 
         for fileURL in jsonFiles {
             processPayloadFile(fileURL)
         }
+    }
+
+    /// How long a staged page may wait to be forwarded.
+    package nonisolated static let maxStagedAge: TimeInterval = 60
+
+    /// Deletes every staged page in `inbox` older than `maxStagedAge`.
+    /// Returns how many went.
+    @discardableResult
+    package nonisolated static func removeStalePages(in inbox: URL, now: Date = Date()) -> Int {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: inbox,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: []
+        ) else { return 0 }
+        var removed = 0
+        for file in files where file.pathExtension == "json" || file.pathExtension == "tmp" {
+            let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            if now.timeIntervalSince(modified) > maxStagedAge,
+               (try? FileManager.default.removeItem(at: file)) != nil {
+                removed += 1
+            }
+        }
+        return removed
     }
 
     private func processPayloadFile(_ fileURL: URL) {
@@ -187,8 +220,9 @@ public final class SafariInboxReader: Sendable {
             return
         }
 
-        // §6 secret-pattern filter (same patterns as native host)
-        if Self.containsSecret(text) {
+        // The capture helper's six secret checks, on the text, the title
+        // and the page address alike (storage-security review S10).
+        if Self.containsSecret(text) || Self.containsSecret(title) || Self.containsSecret(url) {
             droppedSecret += 1
             removeFile(fileURL)
             return
@@ -334,6 +368,8 @@ public final class SafariInboxReader: Sendable {
         return specs.compactMap { try? NSRegularExpression(pattern: $0) }
     }()
 
+    /// The capture helper's full check: these four shapes, a card number
+    /// and a one-time code (`PageSecretCheck`).
     nonisolated static func containsSecret(_ text: String) -> Bool {
         let range = NSRange(text.startIndex..., in: text)
         for pattern in secretPatterns {
@@ -341,7 +377,7 @@ public final class SafariInboxReader: Sendable {
                 return true
             }
         }
-        return false
+        return PageSecretCheck.containsSecret(text)
     }
 
     // MARK: - Text truncation (mirrors native host)

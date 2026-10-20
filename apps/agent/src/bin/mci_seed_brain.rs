@@ -63,7 +63,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Default path matching `mci-agent mcp-serve`.
 fn default_db_path() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     home.join("Library/Application Support/MCI/mci.sqlite")
 }
 
@@ -1111,7 +1111,11 @@ fn demo_week_key(from_stdin: bool) -> Result<DbKey, (u8, String)> {
             .map_err(|_| (10, "could not read the key from standard input".to_owned()))?;
         line.trim().to_owned()
     } else {
-        if std::env::var("MCI_DEVELOPMENT_FILE_KEY").as_deref() != Ok("1") {
+        // A release build takes the key on standard input only
+        // (storage-security review S11): Demo Memory always passes it there.
+        if !mci_agent::key_resolver::DEVELOPMENT_FILE_KEY_COMPILED_IN
+            || std::env::var("MCI_DEVELOPMENT_FILE_KEY").as_deref() != Ok("1")
+        {
             return Err((
                 9,
                 "pass --key-stdin, or MCI_DEVELOPMENT_FILE_KEY=1 with MCI_DB_KEY_HEX".to_owned(),

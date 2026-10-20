@@ -219,24 +219,34 @@ struct MCIRecallApp: App {
         let environment = ProcessInfo.processInfo.environment
         let reference = KeychainDatabaseKeyReference.from(environment: environment)
         do {
-            let keyHex = try DevelopmentDatabaseKeyMaterial.hex(from: environment)
-                ?? KeychainDatabaseKeyResolver().resolveHex(reference: reference)
+            // During a key change both Keychain items exist and only one
+            // opens the memory: each is tried, newest first.
+            let keys = try DevelopmentDatabaseKeyMaterial.hex(from: environment).map { [$0] }
+                ?? KeychainDatabaseKeyResolver().resolveHexCandidates(reference: reference)
             let path = environment["MCI_DB_PATH"] ?? defaultBrainPath()
-            if let modelPath = embeddingModelPath(environment: environment) {
+            var lastError: Error = KeychainDatabaseKeyError.missing
+            for keyHex in keys {
+                if let modelPath = embeddingModelPath(environment: environment) {
+                    do {
+                        return try FFIBrainReader(
+                            path: path,
+                            keyHex: keyHex,
+                            modelPath: modelPath
+                        )
+                    } catch {
+                        NSLog(
+                            "MCI: semantic Recall unavailable; retrying lexical mode: %@",
+                            error.localizedDescription
+                        )
+                    }
+                }
                 do {
-                    return try FFIBrainReader(
-                        path: path,
-                        keyHex: keyHex,
-                        modelPath: modelPath
-                    )
+                    return try FFIBrainReader(path: path, keyHex: keyHex)
                 } catch {
-                    NSLog(
-                        "MCI: semantic Recall unavailable; retrying lexical mode: %@",
-                        error.localizedDescription
-                    )
+                    lastError = error
                 }
             }
-            return try FFIBrainReader(path: path, keyHex: keyHex)
+            throw lastError
         } catch {
             let message = "Recall cannot open the encrypted brain: \(error.localizedDescription)"
             NSLog("MCI: %@", message)

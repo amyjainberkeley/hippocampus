@@ -6,7 +6,7 @@ import OnboardingKit
 /// Otter / Figma / Apple-stock-via-MCP-bridge as of 2026-05).
 ///
 /// Loopback-only per ADR-0001 amendment 2026-05-31. The slide writes
-/// `~/Library/Application Support/MCI/mcp-servers.toml` (mode 0600,
+/// `~/Library/Application Support/MCI/Config.noindex/mcp-servers.toml` (mode 0600,
 /// uid-matched); the agent re-reads on next launch and connects one
 /// HTTP+SSE transport per enabled row.
 struct McpServersSlide: View {
@@ -28,7 +28,7 @@ struct McpServersSlide: View {
 
                 registeredServersList
 
-                OnboardingDesign.TypeRamp.footnote("To add or remove servers later, edit ~/Library/Application Support/MCI/mcp-servers.toml — full Settings UI ships in v1.0.x. You can skip this step entirely; the registry stays empty.")
+                OnboardingDesign.TypeRamp.footnote("To add or remove servers later, edit ~/Library/Application Support/MCI/Config.noindex/mcp-servers.toml — full Settings UI ships in v1.0.x. You can skip this step entirely; the registry stays empty.")
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: 520, alignment: .leading)
             }

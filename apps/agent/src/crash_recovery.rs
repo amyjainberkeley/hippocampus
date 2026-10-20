@@ -124,7 +124,7 @@ enum CrashMarker {
 /// `/tmp/.hippocampus.running` when `HOME` is unset (headless CI).
 #[must_use]
 pub fn default_lock_path() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     home.join("Library/Application Support/Hippocampus/.running")
 }
 

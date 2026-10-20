@@ -24,7 +24,7 @@
 //! - [`ServerRegistration`] + [`ServerRegistry`] for lazy multi-server
 //!   connection lifecycle (stdio + http).
 //! - [`config::McpServersConfig`] + on-disk schema for
-//!   `~/Library/Application Support/MCI/mcp-servers.toml`.
+//!   `~/Library/Application Support/MCI/Config.noindex/mcp-servers.toml`.
 //!
 //! # Not in scope (separate PRs)
 //!

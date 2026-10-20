@@ -83,7 +83,7 @@ final class RuntimeConfigTests: XCTestCase {
 
         let attrs = try FileManager.default.attributesOfItem(atPath: cfg.path.path)
         let mode = attrs[.posixPermissions] as? Int
-        XCTAssertEqual(mode, 0o600, "runtime.toml must be 0600, like every file Hippocampus writes")
+        XCTAssertEqual(mode, 0o600, "runtime.toml must be 0600, like every settings file (review S9)")
     }
 
     func test_capture_write_uses_file_mode_0600() throws {
@@ -94,7 +94,7 @@ final class RuntimeConfigTests: XCTestCase {
 
         let attrs = try FileManager.default.attributesOfItem(atPath: cfg.path.path)
         let mode = attrs[.posixPermissions] as? Int
-        XCTAssertEqual(mode, 0o600, "runtime.toml is owner-only even though capture_enabled is not a secret")
+        XCTAssertEqual(mode, 0o600, "runtime.toml must be 0600: the home folder lets other accounts in (review S9)")
     }
 
     // MARK: - parseBool

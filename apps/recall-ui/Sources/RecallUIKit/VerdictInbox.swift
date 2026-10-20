@@ -123,7 +123,7 @@ public final class VerdictInbox: Sendable {
         let milliseconds = Int64((now.timeIntervalSince1970 * 1000).rounded(.down))
         let file = directory.appendingPathComponent("\(milliseconds)-\(id).json", isDirectory: false)
         let body = #"{"id":\#(id),"verdict":"\#(verdict.rawValue)"}"#
-        try Data(body.utf8).write(to: file, options: .atomic)
+        try PrivateFileWriter.write(Data(body.utf8), to: file)
         return file
     }
 

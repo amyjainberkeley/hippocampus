@@ -21,10 +21,7 @@ use std::sync::Arc;
 /// list. See ADR-0028 §4 for the bundle-path contract.
 #[cfg(target_os = "macos")]
 pub fn arctic_embed_s_model_candidates() -> Vec<std::path::PathBuf> {
-    let home = std::env::var_os("HOME").map_or_else(
-        || std::path::PathBuf::from("/tmp"),
-        std::path::PathBuf::from,
-    );
+    let home = mci_core::home::user_home_or_unwritable();
     let env_path = std::env::var_os("MCI_ARCTIC_MODEL_PATH").map(std::path::PathBuf::from);
 
     let mut candidates: Vec<std::path::PathBuf> = Vec::new();

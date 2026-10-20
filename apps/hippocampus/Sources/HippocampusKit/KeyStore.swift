@@ -178,15 +178,35 @@ public struct KeychainKeyStore: KeyStore, Sendable {
 
     public static let defaultDatabaseKey = KeychainKeyStore()
 
+    /// The account a key change stores the new key under while the memory
+    /// moves to it (storage-security review S4, `mci-agent ensure-key`).
+    /// It exists only for the length of one change; when it does, it holds
+    /// the memory's key, so a reader of the default item uses it first.
+    public static let rotatedAccount = "database-key-v2"
+
+    /// The items to read, in order: for the default item, the key-change
+    /// account first, then the usual one; any other reference exactly.
+    var accountsToRead: [String] {
+        reference == .defaultDatabaseKey
+            ? [Self.rotatedAccount, reference.account]
+            : [reference.account]
+    }
+
     public func readKey() throws -> String {
-        let query = KeychainItemQuery(
-            service: reference.service,
-            account: reference.account,
-            useDataProtectionKeychain: false,
-            synchronizable: false
-        )
+        let accounts = accountsToRead
+        var result = KeychainReadResult.failure(errSecItemNotFound)
+        for account in accounts {
+            result = client.readGenericPassword(query: KeychainItemQuery(
+                service: reference.service,
+                account: account,
+                useDataProtectionKeychain: false,
+                synchronizable: false
+            ))
+            if case .failure(errSecItemNotFound) = result { continue }
+            break
+        }
         let data: Data
-        switch client.readGenericPassword(query: query) {
+        switch result {
         case .success(let value): data = value
         case .failure(errSecItemNotFound): throw KeyStoreError.noKeyFound
         case .failure(errSecAuthFailed), .failure(errSecMissingEntitlement):
@@ -370,14 +390,9 @@ public struct FileKeyStore: KeyStore, Sendable {
         _ = try KeychainKeyStore.validate(hex)
         let parent = path.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-        let data = Data(hex.utf8)
-        try data.write(to: path, options: .atomic)
-
-        // mode 0600 — owner-only read/write
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o600],
-            ofItemAtPath: path.path
-        )
+        // Mode 0600 from the moment it exists: a key is never readable by
+        // another account, not even between a write and a chmod.
+        try PrivateFileWriter.write(Data(hex.utf8), to: path)
     }
 
     /// Create a local development key on first run. This method is only

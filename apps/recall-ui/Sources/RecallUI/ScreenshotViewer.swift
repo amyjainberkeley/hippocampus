@@ -248,6 +248,9 @@ struct ScreenshotViewer: View {
         guard let hit = selectedHit else { return }
         let generation = loadGeneration
         let panel = NSSavePanel()
+        // The text isn't encrypted, and Spotlight reads Markdown in full
+        // (storage-security review S8).
+        panel.message = ExportDestination.panelMessage
         panel.nameFieldStringValue = "screenshot-\(hit.id).md"
         panel.allowedContentTypes = [.init(filenameExtension: "md") ?? .text]
         if panel.runModal() == .OK, let url = panel.url {
@@ -256,7 +259,8 @@ struct ScreenshotViewer: View {
                 return
             }
             let text = ScreenshotInspectorContext.markdown(hit: current, text: textModel.text(for: current))
-            do { try text.write(to: url, atomically: true, encoding: .utf8) }
+            // Mode 0600 from the moment it exists.
+            do { try PrivateFileWriter.write(text, to: url) }
             catch { exportError = UserFacingCopy.saveContextFailedBody }
         }
     }

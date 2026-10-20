@@ -123,15 +123,14 @@ fn socket_path() -> PathBuf {
     support.join("page_content.sock")
 }
 
+/// `~/Library/Application Support/MCI`. With no home to resolve, the path
+/// names an empty root-owned folder, so connecting fails closed: never a
+/// shared folder such as `/tmp` another account could create first.
 fn dirs_path() -> PathBuf {
-    if let Some(home) = std::env::var_os("HOME") {
-        PathBuf::from(home)
-            .join("Library")
-            .join("Application Support")
-            .join("MCI")
-    } else {
-        PathBuf::from("/tmp/mci")
-    }
+    mci_core::home::user_home_or_unwritable()
+        .join("Library")
+        .join("Application Support")
+        .join("MCI")
 }
 
 fn read_native_message(reader: &mut impl Read) -> io::Result<Option<Vec<u8>>> {

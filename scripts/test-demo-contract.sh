@@ -28,7 +28,14 @@ grep -Fq '"name":"mci_context"' "$DEMO" || fail "MCP demo must request the bound
 grep -Fq -- '--keyframe-digest' "$DEMO" || fail "demo seed must include authenticated visual evidence"
 grep -Fq 'mci-seed-brief' "$DEMO" || fail "demo seed must include a daily brief"
 grep -Fq -- '--model-id "hippocampus-extractive"' "$DEMO" || fail "demo brief must disclose extractive provenance"
-grep -Fq 'target/release/mci-agent" enrich' "$DEMO" || fail "demo seed must run the production understanding pipeline"
+grep -Fq 'DEMO_TARGET/release/mci-agent" enrich' "$DEMO" || fail "demo seed must run the production understanding pipeline"
+grep -Fq 'DEMO_TARGET="$REPO_ROOT/target/demo"' "$DEMO" \
+    || fail "the demo's development-key tools must build outside target/release, which builds ship from"
+grep -Fq -- '--features mci-agent/development-file-key' "$DEMO" \
+    || fail "a release build reads a development key only with the explicit feature"
+if grep -Fq '"$REPO_ROOT/target/release/' "$DEMO"; then
+    fail "the demo must never run or build the shipped target/release binaries"
+fi
 grep -Fq 'DEMO_ARCTIC_MODEL="$REPO_ROOT/models/ArcticEmbedS_FP16.mlmodelc"' "$DEMO" \
     || fail "demo must resolve the verified repo-local Arctic model explicitly"
 grep -Fq 'export MCI_ARCTIC_MODEL_PATH="$DEMO_ARCTIC_MODEL"' "$DEMO" \

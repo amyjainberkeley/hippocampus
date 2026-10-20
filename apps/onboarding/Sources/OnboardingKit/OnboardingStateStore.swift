@@ -89,7 +89,7 @@ public struct FileOnboardingStateStore: OnboardingStateStore {
             at: parent, withIntermediateDirectories: true
         )
         let payload = "\(route)\n"
-        try? payload.write(to: path, atomically: true, encoding: .utf8)
+        try? PrivateFileWriter.write(Data(payload.utf8), to: path)
     }
 
     public func clear() {
@@ -119,7 +119,7 @@ public struct FileOnboardingStateStore: OnboardingStateStore {
             at: askedPath.deletingLastPathComponent(), withIntermediateDirectories: true
         )
         let lines = PermissionSurface.allCases.filter(surfaces.contains).map(\.rawValue)
-        try? (lines.joined(separator: "\n") + "\n").write(to: askedPath, atomically: true, encoding: .utf8)
+        try? PrivateFileWriter.write(Data((lines.joined(separator: "\n") + "\n").utf8), to: askedPath)
     }
 
     /// A route is lowercase letters and dashes ("try-it"). Anything else,
