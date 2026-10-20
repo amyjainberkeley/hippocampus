@@ -109,15 +109,21 @@ public enum HandoffCopy {
 
     // MARK: AI Tools, in Preferences (SPEC 3.8, 5.4, 5.5; SPEC 9, 90 to 143)
 
-    public static let lead = "Nothing leaves this Mac unless you send it, or a tool you connected asks for it."
+    /// What leaves this Mac, exactly: memory goes only when the person sends
+    /// it or a tool they connected asks for it. "Nothing leaves" was not
+    /// exact: the update check leaves too, carrying nothing from memory
+    /// (PRIVACY.md, "What leaves your Mac").
+    public static let lead = "Your memory leaves this Mac only when you send it, or a tool you connected asks for it."
     public static let companyLine = "What a tool reads goes to the company that runs it."
     public static let whileQuit =
         "Connected tools can still read your memory while Hippocampus is quit; Disconnect stops that."
     public static let lookUpsSwitch = "Look things up in my memory"
     public static let sessionSwitch = "Start each session with my recent work"
     /// Connect writes Hippocampus into Codex's settings file
-    /// (`~/.codex/config.toml`), which Codex in ChatGPT's desktop app reads
-    /// too, as OpenAI documents it. ChatGPT's own chats can't use it yet.
+    /// (`~/.codex/config.toml`, `client_registry.rs`). OpenAI documents that
+    /// the ChatGPT desktop app shares that file with the Codex CLI and IDE
+    /// extension, and that ChatGPT on the web doesn't read it
+    /// (https://developers.openai.com/codex/mcp, read Oct 20, 2026).
     public static let chatGPTShares = "Codex in ChatGPT’s desktop app uses the same settings, so it can look things up too."
     public static let codexNeedsStep = "Needs a step in Codex"
     public static let codexStep = "Codex asks you to allow new hooks once. Type /hooks in Codex and allow Hippocampus."

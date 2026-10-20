@@ -81,7 +81,11 @@ public enum HandoffCopy {
     // MARK: The AI Tools page (SPEC 3.8; SPEC 9, 90 to 100)
 
     public static let pageTitle = "AI Tools"
-    public static let lead = "Nothing leaves this Mac unless you send it, or a tool you connected asks for it."
+    /// What leaves this Mac, exactly: memory goes only when the person sends
+    /// it or a tool they connected asks for it. "Nothing leaves" was not
+    /// exact: the update check leaves too, carrying nothing from memory
+    /// (PRIVACY.md, "What leaves your Mac").
+    public static let lead = "Your memory leaves this Mac only when you send it, or a tool you connected asks for it."
     public static let onTheirOwn = "On their own"
     public static let withOneKey = "With one key"
     public static let alsoOnThisMac = "Also on this Mac"
@@ -91,9 +95,12 @@ public enum HandoffCopy {
     public static let looksThingsUp = "Looks things up when a question needs it."
     public static func turnedOffIn(_ tool: String) -> String { "Turned off in \(tool)’s own settings" }
     public static let codexAsked = "Asked to fetch your recent work when a task starts. Codex decides."
-    /// Connect writes Hippocampus into Codex's settings file, which Codex in
-    /// ChatGPT's desktop app reads too, as OpenAI documents it. ChatGPT's
-    /// own chats can't use it yet (`chatGPTUse`).
+    /// Connect writes Hippocampus into Codex's settings file
+    /// (`~/.codex/config.toml`). OpenAI documents that the ChatGPT desktop
+    /// app shares that file with the Codex CLI and IDE extension, and that
+    /// ChatGPT on the web doesn't read it
+    /// (https://developers.openai.com/codex/mcp, read Oct 20, 2026). Chats
+    /// get memory only when the person sends it (`chatGPTUse`).
     public static let chatGPTShares = "Codex in ChatGPT’s desktop app uses the same settings, so it can look things up too."
     public static let codexNeedsStep = "Needs a step in Codex"
     public static let codexStep = "Codex asks you to allow new hooks once. Type /hooks in Codex and allow Hippocampus."

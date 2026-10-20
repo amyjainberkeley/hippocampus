@@ -299,7 +299,10 @@ final class HandoffCopyTests: XCTestCase {
         XCTAssertEqual(HandoffCopy.size(words: 151, moments: 1), "About 151 words · 1 moment")
         XCTAssertEqual(HandoffCopy.size(words: 218, moments: 7), "About 218 words · 7 moments")
         XCTAssertEqual(HandoffCopy.copyAndOpen("ChatGPT"), "Copy and Open ChatGPT")
-        XCTAssertEqual(HandoffCopy.lead, "Nothing leaves this Mac unless you send it, or a tool you connected asks for it.")
+        // Exact about what leaves: memory, only when sent or asked for. The
+        // update check leaves too, so "Nothing leaves this Mac" was not true.
+        XCTAssertEqual(HandoffCopy.lead, "Your memory leaves this Mac only when you send it, or a tool you connected asks for it.")
+        XCTAssertFalse(HandoffCopy.lead.hasPrefix("Nothing leaves"))
         XCTAssertEqual(HandoffCopy.disconnectTitle("Claude Code"), "Disconnect Claude Code?")
         XCTAssertEqual(HandoffCopy.disconnectMessage,
                        "It stops looking things up and starting sessions with your work. What it already read stays in its history.")

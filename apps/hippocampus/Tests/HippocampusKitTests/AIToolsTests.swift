@@ -180,7 +180,7 @@ final class AIToolsTests: XCTestCase {
         XCTAssertEqual(AIToolsCopy.sessionToggle, "Start each session with my recent work")
         // SPEC 5.5: the contradiction is gone.
         XCTAssertEqual(AIToolsCopy.boundary,
-                       "Nothing leaves this Mac unless you send it, or a tool you connected asks for it.")
+                       "Your memory leaves this Mac only when you send it, or a tool you connected asks for it.")
         XCTAssertFalse(AIToolsCopy.boundary.contains("sends nothing on its own"))
         XCTAssertEqual(AIToolsCopy.turnedOn(.codex), "On. Restart Codex to start.")
         XCTAssertEqual(AIToolsCopy.turnedOff(.claudeCode), "Off. Restart Claude Code. What it already read stays in its history.")

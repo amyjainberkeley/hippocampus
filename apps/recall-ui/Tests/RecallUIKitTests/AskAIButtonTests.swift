@@ -341,7 +341,7 @@ final class WindowHandoffCopyTests: XCTestCase {
         XCTAssertEqual(HandoffCopy.size(words: 218, moments: 7), "About 218 words · 7 moments")
         XCTAssertEqual(HandoffCopy.opened("Claude"), "Opened in Claude. You send it from there.")
         XCTAssertEqual(HandoffCopy.copyAndOpen("ChatGPT"), "Copy and Open ChatGPT")
-        XCTAssertEqual(HandoffCopy.lead, "Nothing leaves this Mac unless you send it, or a tool you connected asks for it.")
+        XCTAssertEqual(HandoffCopy.lead, "Your memory leaves this Mac only when you send it, or a tool you connected asks for it.")
         // The exact text opens "From the user's screen": the size line says
         // what it is made from, never that the screen is left out.
         XCTAssertEqual(HandoffCopy.startsWithSize(words: 120),
