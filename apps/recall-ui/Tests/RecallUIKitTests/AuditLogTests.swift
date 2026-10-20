@@ -34,6 +34,46 @@ final class AuditLogTests: XCTestCase {
         return { d }
     }
 
+    // MARK: - Demo Memory
+
+    /// What the app gives a window it opens on Demo Memory (SPEC-DELTA 6).
+    private func demoEnvironment(_ week: URL) -> [String: String] {
+        ["MCI_DEMO_MEMORY": "1", "MCI_DEVELOPMENT_FILE_KEY": "1",
+         "MCI_DB_PATH": week.appendingPathComponent("mci.sqlite").path]
+    }
+
+    /// A window on Demo Memory keeps its log beside the made-up week: a
+    /// forget there never lands in the person's own log, and Privacy on the
+    /// week never lists the person's forgets and exports.
+    func testAWindowOnDemoMemoryKeepsItsOwnLogBesideTheWeek() throws {
+        let week = tmpDir.appendingPathComponent("Demo Memory", isDirectory: true)
+        try FileManager.default.createDirectory(at: week, withIntermediateDirectories: true)
+        let log = AuditLog.forWindow(environment: demoEnvironment(week))
+        XCTAssertEqual(log.baseURL.standardizedFileURL, week.standardizedFileURL)
+        log.record(action: .deleteEvent, details: ["count": "1"])
+        XCTAssertEqual(log.readRecent(count: 5).map(\.action), [.deleteEvent])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: week.appendingPathComponent("audit.log").path))
+
+        // Otherwise the person's own, in Hippocampus's folder: the flag
+        // alone, or a store alone, is not Demo Memory.
+        let path = week.appendingPathComponent("mci.sqlite").path
+        for environment in [[:], ["MCI_DB_PATH": path], ["MCI_DEMO_MEMORY": "1"]] {
+            let own = AuditLog.forWindow(environment: environment)
+            XCTAssertEqual(own.baseURL.lastPathComponent, "Hippocampus", "\(environment)")
+            XCTAssertNotEqual(own.baseURL.standardizedFileURL, week.standardizedFileURL)
+        }
+    }
+
+    /// The week's folder goes with the week, and a line written after never
+    /// makes it again.
+    func testALineAfterTheWeekIsGoneMakesNothing() {
+        let week = tmpDir.appendingPathComponent("Demo Memory", isDirectory: true)
+        let log = AuditLog.forWindow(environment: demoEnvironment(week))
+        log.record(action: .wipeBrain)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: week.path))
+        XCTAssertEqual(log.readRecent(), [])
+    }
+
     // MARK: - Pure encode / decode
 
     func testEncodeLineEmptyDetails() {
