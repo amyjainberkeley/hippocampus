@@ -22,7 +22,24 @@ extension StatusPreviewRenderer {
             sidePicturePane("remembering-side-pictures-full", enabled: true, usedBytes: 2_000_000_000),
             sidePicturePane("remembering-side-pictures-low-space", enabled: true, usedBytes: 640_000_000,
                             freeBytes: 8_000_000_000),
+        ] + darkPanes
+    }
+
+    /// Every pane on a dark Mac: Preferences follows the Mac's appearance
+    /// (`prefs-dark-<pane>`).
+    private static var darkPanes: [Pane] {
+        let sections: [(String, PreferencesSection)] = [
+            ("general", .general), ("remembering", .capture), ("ai-tools", .sources), ("privacy", .privacy),
+            ("advanced", .advanced), ("about", .about),
         ]
+        return sections.map { name, section in
+            let pane = fixturePane("dark-\(name)", section,
+                                   receipt: savedReceipt(savedAt: Date().addingTimeInterval(-8)))
+            let model = fixtureSidePictures(enabled: true, usedBytes: 640_000_000, budgetMB: 2_000,
+                                            freeBytes: 300_000_000_000)
+            let view = pane.view.environment(\.sidePictures, model).environment(\.colorScheme, .dark)
+            return Pane(name: pane.name, view: AnyView(AppearanceHost(appearance: .darkAqua, content: AnyView(view))))
+        }
     }
 
     private static func sidePicturePane(
