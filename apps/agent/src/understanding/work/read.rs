@@ -116,6 +116,8 @@ pub(crate) struct ItemAcc {
     pub last_us: u64,
     /// Time held by app.
     pub apps: HashMap<String, u64>,
+    /// Time held by site, for documents on the web ("docs.google.com").
+    pub hosts: HashMap<String, u64>,
     /// (segment end, moment), to sort newest first.
     pub moments: Vec<(u64, i64)>,
     /// Files by folded name: (name, last, newest moment).
@@ -209,6 +211,9 @@ pub(crate) fn build(
             }
             acc.last_us = acc.last_us.max(held.end_us);
             *acc.apps.entry(held.app.clone()).or_default() += held_us;
+            if let Some(host) = &held.host {
+                *acc.hosts.entry(host.clone()).or_default() += held_us;
+            }
             acc.moments
                 .extend(held.events.iter().map(|id| (held.end_us, *id)));
             if let (Some(part), Some(newest)) = (&subject.part, held.newest()) {

@@ -225,6 +225,26 @@ fn an_item_is_made_at_thirty_minutes_in_front_in_all() {
     assert_eq!(found["days_this_week"], 2);
     assert_eq!(found["in_sidebar"], true);
     assert_eq!(found["apps"], serde_json::json!([FIGMA]));
+    assert_eq!(found["hosts"], serde_json::json!([]));
+}
+
+#[test]
+fn a_document_on_the_web_names_its_site() {
+    let memory = Memory::new();
+    memory.session(
+        at(0, 10),
+        &[Window::page(
+            CHROME,
+            "Q4 planning - Google Docs",
+            "https://docs.google.com/document/d/abc/edit",
+            35,
+        )],
+    );
+    let value = work(&memory, &[]);
+    let found = item(&value, "Q4 planning");
+    assert_eq!(found["kind"], "document");
+    assert_eq!(found["apps"], serde_json::json!([CHROME]));
+    assert_eq!(found["hosts"], serde_json::json!(["docs.google.com"]));
 }
 
 #[test]

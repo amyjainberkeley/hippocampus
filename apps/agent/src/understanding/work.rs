@@ -80,8 +80,11 @@ pub struct WorkItem {
     pub kind: SubjectKind,
     /// Its name, as its windows' titles write it.
     pub name: String,
-    /// The bundle ids of the apps it was worked on in.
+    /// The bundle ids of the apps it was worked on in, most time first.
     pub apps: Vec<String>,
+    /// The sites it was worked on at, most time first: a document on the
+    /// web ("docs.google.com"). Empty for one in its own app.
+    pub hosts: Vec<String>,
     /// When it was last worked on.
     pub last_us: u64,
     /// Minutes in front in the last 7 days of use.
@@ -463,6 +466,11 @@ fn item(
         kind,
         name: acc.name.clone(),
         apps: apps.into_iter().map(|(app, _)| app.clone()).collect(),
+        hosts: {
+            let mut hosts: Vec<(&String, &u64)> = acc.hosts.iter().collect();
+            hosts.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+            hosts.into_iter().map(|(host, _)| host.clone()).collect()
+        },
         last_us: newest_us.unwrap_or(acc.last_us),
         week_minutes: minutes(acc.week_us),
         days_this_week: u32::try_from(acc.week_days.len()).unwrap_or(u32::MAX),
@@ -591,6 +599,7 @@ mod tests {
             kind: SubjectKind::Code,
             name: "trailhead-shop".into(),
             apps: vec!["com.microsoft.VSCode".into()],
+            hosts: Vec::new(),
             last_us: 1_760_304_000_000_000,
             week_minutes: 160,
             days_this_week: 3,
