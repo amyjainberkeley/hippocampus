@@ -41,6 +41,10 @@ public enum WindowChannelProtocol {
         case hold
         /// The forget is done: remember again, if it was on.
         case release
+        /// The forget's deletes still run: keep the hold. Sent every 10
+        /// seconds while they do, and never awaited: an app that doesn't know
+        /// it ignores the line.
+        case renew
         /// The app pushes this; the window never sends it.
         case status
     }

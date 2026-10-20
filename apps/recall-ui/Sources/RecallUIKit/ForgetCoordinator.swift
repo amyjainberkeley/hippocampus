@@ -171,6 +171,15 @@ public final class ForgetCoordinator: ObservableObject {
     public static let undoWindow: Duration = .seconds(5)
     /// How long the app has to free the writer lease.
     public static let holdWait: Duration = .seconds(12)
+    /// While the deletes run, how often the window asks the app to keep its
+    /// hold, which otherwise ends on its own (SPEC 3.11).
+    public static let renewEvery: Duration = .seconds(10)
+    /// How long a renewal waits for its answer; it is never awaited by the
+    /// forget, and a refusal changes nothing.
+    public static let renewWait: Duration = .seconds(2)
+    /// The most moments one delete call takes (the FFI's
+    /// `MAX_DELETE_EVENT_IDS`): a forget of more goes in a few calls.
+    public static let idsPerDelete = 10_000
 
     private let mutator: (any PrivacyMutator)?
     private let channel: (any WindowChannelSending)?
@@ -178,6 +187,7 @@ public final class ForgetCoordinator: ObservableObject {
     private let appRunning: @Sendable () -> Bool
     private let deletions: MemoryDeletionSignal
     private let now: @Sendable () -> Date
+    private let renewal: Duration
     private var undoTask: Task<Void, Never>?
 
     /// `channel` is the private pipe; nil for a window opened by hand,
@@ -188,7 +198,8 @@ public final class ForgetCoordinator: ObservableObject {
         store: PendingForgetStore,
         appRunning: @escaping @Sendable () -> Bool,
         deletions: MemoryDeletionSignal = .shared,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        renewEvery: Duration = ForgetCoordinator.renewEvery
     ) {
         self.mutator = mutator
         self.channel = channel
@@ -196,6 +207,7 @@ public final class ForgetCoordinator: ObservableObject {
         self.appRunning = appRunning
         self.deletions = deletions
         self.now = now
+        renewal = renewEvery
     }
 
     // MARK: Forgetting now
@@ -299,11 +311,16 @@ public final class ForgetCoordinator: ObservableObject {
                 return .failed
             }
         }
+        // The hold ends on its own unless the window asks for more while
+        // its deletes run.
+        let renewing = held ? renewals() : nil
         var deleted: UInt64 = 0
         var failed = false
-        for id in request.momentIds {
+        // The picked moments go in one call: one transaction, one writer
+        // lease, one integrity check and one cleanup for the whole forget.
+        for ids in Self.chunks(of: request.momentIds) {
             do {
-                deleted += try await mutator.deleteEvent(id: id).eventsDeleted
+                deleted += try await mutator.deleteEvents(ids: ids).eventsDeleted
             } catch {
                 failed = true
             }
@@ -316,6 +333,7 @@ public final class ForgetCoordinator: ObservableObject {
                 failed = true
             }
         }
+        renewing?.cancel()
         store.remove()
         if held, let channel {
             _ = await channel.send(WindowChannelRequest(op: .release), timeout: .seconds(5))
@@ -324,5 +342,26 @@ public final class ForgetCoordinator: ObservableObject {
             deletions.post()
         }
         return failed && deleted == 0 ? .failed : .forgotten(moments: deleted)
+    }
+
+    /// `renew` every `renewal` until cancelled, fire-and-forget: an app that
+    /// doesn't answer, or doesn't know the op, never fails the forget.
+    private func renewals() -> Task<Void, Never>? {
+        guard let channel else { return nil }
+        let every = renewal
+        return Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: every)
+                guard !Task.isCancelled else { return }
+                _ = await channel.send(WindowChannelRequest(op: .renew), timeout: Self.renewWait)
+            }
+        }
+    }
+
+    /// The ids in calls of at most `idsPerDelete`, in order.
+    static func chunks(of ids: [UInt64]) -> [[UInt64]] {
+        stride(from: 0, to: ids.count, by: idsPerDelete).map { start in
+            Array(ids[start..<min(start + idsPerDelete, ids.count)])
+        }
     }
 }

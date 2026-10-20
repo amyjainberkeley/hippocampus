@@ -785,6 +785,29 @@ extension FFIBrainReader: PrivacyMutator {
         }
     }
 
+    /// A whole forget in one call (`{"event_ids":[…]}`): one transaction, so
+    /// either every id goes or none does.
+    public func deleteEvents(ids: [UInt64]) async throws -> DeleteResult {
+        guard !ids.isEmpty else { return DeleteResult(eventsDeleted: 0, vacuumOk: true) }
+        return try await MemoryDeletionSignal.shared.reporting {
+            guard let h = handle else {
+                throw BrainReaderError.openFailed("FFIBrainReader: handle already closed")
+            }
+            let queryJsonData = try JSONEncoder().encode(DeleteEventsPayload(event_ids: ids))
+            guard let queryJsonString = String(data: queryJsonData, encoding: .utf8) else {
+                throw BrainReaderError.decodeFailed("FFIBrainReader: non-UTF8 delete payload")
+            }
+            let rawJson: UnsafeMutablePointer<CChar>? = queryJsonString.withCString { q in
+                mci_brain_ffi_delete_event(h, q)
+            }
+            guard let rawJson else {
+                throw Self.mutationError(Self.consumeLastError())
+            }
+            defer { mci_brain_ffi_string_free(rawJson) }
+            return try Self.decodeDeleteResult(rawJson)
+        }
+    }
+
     public func deleteEventsInRange(
         startTsUs: UInt64,
         endTsUs: UInt64
@@ -872,6 +895,10 @@ extension FFIBrainReader: PrivacyMutator {
 
 private struct DeleteEventPayload: Encodable {
     let event_id: UInt64
+}
+
+private struct DeleteEventsPayload: Encodable {
+    let event_ids: [UInt64]
 }
 
 private struct DeleteResultWire: Decodable {
