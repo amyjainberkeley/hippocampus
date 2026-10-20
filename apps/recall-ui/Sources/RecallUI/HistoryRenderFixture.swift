@@ -35,12 +35,12 @@ final class HistoryRenderFixture {
         func ago(_ minutes: Double) -> UInt64 { nowUs - UInt64(minutes * 60_000_000) }
 
         let separator = ReadableText.chromeSeparator
-        var moments: [(Hit, main: String, rest: String, stored: String)] = []
+        var moments: [(Hit, main: String, rest: String, stored: String, blocks: [ReadingBlock])] = []
         /// A row as the FFI gives it: the start of what was read, never the
         /// window's chrome, and the caption made from the title.
         func add(_ id: UInt64, _ minutes: Double, _ app: String, _ title: String, url: String? = nil,
                  kind: String, screen: SyntheticScreens.Screen? = nil, takenMinutes: Double? = nil,
-                 path: String? = nil, main: String, rest: String = "") {
+                 path: String? = nil, main: String, rest: String = "", blocks: [ReadingBlock] = []) {
             let shot = path ?? screen.flatMap { paths[$0] }
             let caption = StatelessReading.read(stored: "", source: kind, app: app, title: title, url: url)?.caption
             let hit = Hit(eventId: id, tsUs: ago(minutes), appBundleId: app, windowTitle: title, url: url,
@@ -48,7 +48,7 @@ final class HistoryRenderFixture {
                           score: nil, thumbnailPath: shot, sourceKind: kind,
                           thumbnailTsUs: shot == nil ? nil : ago(takenMinutes ?? minutes),
                           caption: MomentRowText.caption(caption))
-            moments.append((hit, main, rest, rest.isEmpty ? main : main + separator + rest))
+            moments.append((hit, main, rest, rest.isEmpty ? main : main + separator + rest, blocks))
         }
 
         let chat = "Are we still on for 3?\nYes, running five minutes late\nNo rush. I grabbed the corner table\n"
@@ -83,12 +83,15 @@ final class HistoryRenderFixture {
             cents add up, and the books stop matching the bank by a few dollars a month.
             """
         let articleChrome = "Dev Notes\nArticles\nTopics\nAbout\nSubscribe"
+        // The article as the FFI reads it: the golden blocks the Rust
+        // tests check, so its detail is formatted as the prototype draws it.
+        let articleBlocks = ReadingRenderFixture.blocks("article.new")
         add(70_107, 24, "com.google.Chrome", "Rounding half to even \u{00B7} Dev Notes",
             url: "https://devnotes.example/rounding", kind: "browser_page_with_ocr", screen: .article,
-            takenMinutes: 27, main: article, rest: articleChrome)
+            takenMinutes: 27, main: article, rest: articleChrome, blocks: articleBlocks)
         add(Self.articleId, 27, "com.google.Chrome", "Rounding half to even \u{00B7} Dev Notes",
             url: "https://devnotes.example/rounding", kind: "browser_page_with_ocr", screen: .article,
-            main: article, rest: articleChrome)
+            main: article, rest: articleChrome, blocks: articleBlocks)
         add(70_109, 35, "com.apple.Terminal", "trailhead-shop \u{2014} zsh", kind: "screen_ocr", screen: .terminal,
             main: "cargo test tax\nrunning 6 tests\ntest tax::tests::rounds_half_to_even ... ok\n"
                 + "test result: ok. 6 passed; 0 failed")
@@ -107,7 +110,8 @@ final class HistoryRenderFixture {
         self.store = store
         screenshots = CountingScreenshots(store.provider())
         reader = HistoryRenderReader(base: base, moments: moments.map {
-            HistoryRenderReader.Moment(hit: $0.0, main: $0.main, rest: $0.rest, stored: $0.stored)
+            HistoryRenderReader.Moment(hit: $0.0, main: $0.main, rest: $0.rest, stored: $0.stored,
+                                       blocks: $0.blocks)
         })
     }
 
@@ -151,6 +155,8 @@ struct HistoryRenderReader: BrainReader {
         let rest: String
         /// The text as the store keeps it: what was read, then the chrome.
         let stored: String
+        /// What was read as the FFI's blocks, when the fixture has them.
+        var blocks: [ReadingBlock] = []
     }
 
     let base: RenderFixtureReader
@@ -182,9 +188,11 @@ struct HistoryRenderReader: BrainReader {
 
     func eventReading(eventId: UInt64, query: String?) async throws -> EventReading? {
         guard let moment = moments.first(where: { $0.hit.id == eventId }) else { return nil }
+        let main = moment.blocks.isEmpty ? moment.main : ReadingBlocks.plainText(moment.blocks)
         return try EventReading(eventId: eventId, tsUs: moment.hit.tsUs, appBundleId: moment.hit.appBundleId,
-                                sourceKind: moment.hit.sourceKind, main: moment.main, rest: moment.rest,
-                                matchIn: nil, isTruncated: false, caption: moment.hit.caption)
+                                sourceKind: moment.hit.sourceKind, main: main, rest: moment.rest,
+                                matchIn: nil, isTruncated: false, caption: moment.hit.caption,
+                                blocks: moment.blocks)
     }
 
     func activityIntervals(startUs: UInt64, endUs: UInt64, limit: UInt32) async throws -> ActivityPage {

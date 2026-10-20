@@ -47,9 +47,12 @@ struct AboutYouPlace: View {
                 header
                 content
             }
-            .frame(maxWidth: 760, alignment: .leading)
+            // Where every page starts, as Working On lays out (the
+            // prototype's About You).
             .padding(.horizontal, 32)
-            .padding(.vertical, 28)
+            .padding(.top, 24)
+            .padding(.bottom, 48)
+            .frame(maxWidth: 940, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
         .background(MCI.Color.background)

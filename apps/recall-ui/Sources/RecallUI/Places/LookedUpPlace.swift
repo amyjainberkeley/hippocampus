@@ -145,6 +145,7 @@ struct LookedUpList: View {
                     NSWorkspace.shared.open(url)
                 }
             }
+            AskAIMenu(source: .moments(row.eventIds))
             if let forget = lensForget.forget {
                 Divider()
                 Button(WorkCopy.forgetThisSearch) { forget(row.eventIds, row.record.query, .search) }

@@ -2,10 +2,13 @@ import AppKit
 import RecallUIKit
 import SwiftUI
 
-/// ⌘↩ in the field: Ask {Tool} with the question and its top matches, as a
-/// press on a button of its own. A new sequence is a new press.
+/// Ask {Tool} without a button of its own: the field's ⌘↩ (the question
+/// and its top matches), or a row's Ask Claude ▸ (the moments, and the tool
+/// it named). The shell presses a hidden button; a new sequence is a new
+/// press.
 struct FieldAsk: Equatable {
     let source: AskAISource
+    var tool: AskTool?
     let sequence: Int
 }
 
@@ -17,7 +20,7 @@ struct ForgetAlertFacsimile: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            Image(nsImage: NSApplication.shared.applicationIconImage)
+            Image(nsImage: Self.icon)
                 .resizable()
                 .frame(width: 64, height: 64)
                 .accessibilityHidden(true)
@@ -50,6 +53,25 @@ struct ForgetAlertFacsimile: View {
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(MCI.Color.surface))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(MCI.Color.border, lineWidth: 0.5))
         .shadow(color: .black.opacity(0.22), radius: 24, x: 0, y: 10)
+    }
+
+    /// The app's icon, as the alert shows it. The bare renderer has none of
+    /// its own, so its pictures take the icon the app is built with.
+    private static var icon: NSImage {
+        #if DEBUG
+        if Bundle.main.bundleURL.pathExtension != "app",
+           let built = NSImage(contentsOf: URL(fileURLWithPath: #filePath)
+               .deletingLastPathComponent() // Forget
+               .deletingLastPathComponent() // RecallUI
+               .deletingLastPathComponent() // Sources
+               .deletingLastPathComponent() // recall-ui
+               .deletingLastPathComponent() // apps
+               .deletingLastPathComponent() // the repository
+               .appendingPathComponent("assets/branding/AppIcon.icns")) {
+            return built
+        }
+        #endif
+        return NSApplication.shared.applicationIconImage
     }
 }
 

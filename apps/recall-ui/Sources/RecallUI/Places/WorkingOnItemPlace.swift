@@ -27,16 +27,20 @@ struct WorkingOnItemPlace: View {
     @Environment(\.handoffServices) private var handoff
     @Environment(\.displayScale) private var displayScale
 
+    /// `calendarReader`: the person's calendar when they turned it on, for
+    /// the meetings that overlapped the item's sessions (SPEC-DELTA 5).
     init(itemId: String, work: any WorkReader, reader: BrainReader, open: @escaping (RecallRoute) -> Void,
          name: String? = nil, refreshEvery: Duration = .seconds(120), model: WorkingOnItemModel? = nil,
-         selected: Hit? = nil) {
+         selected: Hit? = nil, calendarReader: (any CalendarReader)? = nil,
+         now: @escaping @Sendable () -> Date = { Date() }) {
         self.itemId = itemId
         self.work = work
         self.reader = reader
         self.open = open
         self.name = name
         self.refreshEvery = refreshEvery
-        _model = StateObject(wrappedValue: model ?? WorkingOnItemModel(itemId: itemId, work: work, reader: reader))
+        _model = StateObject(wrappedValue: model ?? WorkingOnItemModel(itemId: itemId, work: work, reader: reader,
+                                                                       calendarReader: calendarReader, now: now))
         _selected = State(initialValue: selected)
     }
 
@@ -152,9 +156,10 @@ struct WorkingOnItemPlace: View {
                     .help(WorkCopy.resume)
                 // A code project's button opens Claude Code (or Codex) in
                 // its folder (SPEC 5.3.1); ⌘↩ is this button.
+                // The size of Resume and ⋯ beside it, as the prototype draws
+                // the header's buttons.
                 AskAIButton(source: .item(item.id), reader: reader, handlesCommandReturn: true,
                             itemMoments: item.moments, codeProject: item.kind == .code ? item.name : nil)
-                    .controlSize(.small)
                 Menu {
                     if hides.keepsOut(item) {
                         Button(WorkCopy.showInSidebar) { hides.show(item.id) }

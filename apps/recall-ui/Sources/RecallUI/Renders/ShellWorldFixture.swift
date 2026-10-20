@@ -19,11 +19,50 @@ enum ShellWorld {
             searches: PreviewSearchesReader(records: WorkFixtures.searches(now: now, calendar: calendar)),
             calendar: FixtureCalendar(access: .allowed, events: WorkFixtures.calendarEvents(now: now,
                                                                                             calendar: calendar)))
+        // Sam last asked Claude, so the buttons read Ask Claude, as the
+        // prototype draws them; nothing is kept past the picture.
+        var handoff = HandoffServices.preview
+        handoff.choices = .ephemeral()
+        handoff.choices.lastTool = .claude
+        handoff.choices.markTold(.claude)
+        services.handoff = handoff
         services.aiTools = HandoffFixtures.aiToolsModel(.connected)
         services.privacy = { PrivacyRenderScene.page() }
         services.readsKinds = false
         return services
     }
+
+    /// Sam's Working On, its pages and searches (`WorkFixtures`), with
+    /// Today's moments (`TodayRenderFixture`) said to belong to the same
+    /// items by name, so Today's card shows "Part of" and Resume.
+    static func snapshot(now: Date, calendar: Calendar) -> WorkSnapshot {
+        let work = WorkFixtures.snapshot(now: now, calendar: calendar)
+        var lookups = work.momentItems
+        for item in TodayRenderFixture.work.items {
+            guard let same = work.items.first(where: { $0.name == item.name }) else { continue }
+            for moment in item.moments where lookups[moment] == nil { lookups[moment] = same.id }
+        }
+        for (moment, item) in historyItems where lookups[moment] == nil { lookups[moment] = item }
+        // A page, search or AI chat read in an item's sessions is part of
+        // it, as the agent says (`moment_items`): what each item saw
+        // alongside.
+        for item in work.items {
+            for seen in item.alongside where lookups[seen.moment] == nil { lookups[seen.moment] = item.id }
+        }
+        return WorkSnapshot(generatedUs: work.generatedUs, items: work.items, pages: work.pages,
+                            momentItems: lookups)
+    }
+
+    /// History's afternoon (`HistoryRenderFixture`) in the same items: the
+    /// shop's editor, article and terminal, the checklist and the plan, so
+    /// a moment's detail says "Part of trailhead-shop" where its caption
+    /// doesn't already.
+    static let historyItems: [UInt64: String] = [
+        HistoryRenderFixture.editorId: WorkFixtures.trailheadShop, 70_104: WorkFixtures.trailheadShop,
+        70_105: WorkFixtures.trailheadShop, 70_107: WorkFixtures.trailheadShop,
+        HistoryRenderFixture.articleId: WorkFixtures.trailheadShop, 70_109: WorkFixtures.trailheadShop,
+        HistoryRenderFixture.notesId: WorkFixtures.launchChecklist, 70_112: WorkFixtures.q4Planning,
+    ]
 
     /// The sidebar's little screenshots: each item's newest kept moment.
     static func pictures(_ fixture: WorkRenderFixture) -> SidebarPictures {
@@ -40,8 +79,20 @@ enum ShellWorld {
 struct ShellWorldReader: BrainReader {
     let base: any BrainReader
     let work: WorkFixtureReader
+    /// Today's moments, with what each window said and its screenshot.
+    var today: (any BrainReader)?
 
-    func search(_ opts: SearchOptions) async throws -> [Hit] { try await base.search(opts) }
+    /// History and its lenses browse the day's moments. A browse of one app
+    /// in a short window (Looked Up's "Opened next") reads Working On's
+    /// moments too, where those pages are.
+    func search(_ opts: SearchOptions) async throws -> [Hit] {
+        let found = try await base.search(opts)
+        guard opts.browse, opts.appFilter != nil, let from = opts.timeFromUs, let to = opts.timeToUs,
+              to > from, to - from <= 3_600_000_000 else { return found }
+        let known = Set(found.map(\.id))
+        let more = ((try? await work.search(opts)) ?? []).filter { !known.contains($0.id) }
+        return Array((found + more).sorted { $0.tsUs > $1.tsUs }.prefix(max(0, opts.limit)))
+    }
     func recentEvents(limit: Int) async throws -> [Hit] { try await base.recentEvents(limit: limit) }
     func recentPrivacyMoments(limit: Int) async throws -> [PrivacyMoment] {
         try await base.recentPrivacyMoments(limit: limit)
@@ -53,23 +104,33 @@ struct ShellWorldReader: BrainReader {
 
     func listEpisodes(limit: Int) async throws -> [Episode] { try await base.listEpisodes(limit: limit) }
 
+    /// The readers asked by id, in order: Today's, the day's, Working On's.
+    private var byId: [any BrainReader] { (today.map { [$0] } ?? []) + [base, work] }
+
     func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] {
-        let found = (try? await base.fetchEventsByIds(ids)) ?? []
-        let known = Set(found.map(\.id))
-        let missing = ids.filter { !known.contains($0) }
-        let more = missing.isEmpty ? [] : ((try? await work.fetchEventsByIds(missing)) ?? [])
-        let all = found + more
-        return ids.compactMap { id in all.first { $0.id == id } }
+        var found: [UInt64: Hit] = [:]
+        for reader in byId {
+            let missing = ids.filter { found[$0] == nil }
+            guard !missing.isEmpty else { break }
+            for hit in (try? await reader.fetchEventsByIds(missing)) ?? [] where found[hit.id] == nil {
+                found[hit.id] = hit
+            }
+        }
+        return ids.compactMap { found[$0] }
     }
 
     func eventText(eventId: UInt64) async throws -> EventText? {
-        if let text = try await base.eventText(eventId: eventId) { return text }
-        return try await work.eventText(eventId: eventId)
+        for reader in byId {
+            if let text = try? await reader.eventText(eventId: eventId) { return text }
+        }
+        return nil
     }
 
     func eventReading(eventId: UInt64, query: String?) async throws -> EventReading? {
-        if let reading = try await base.eventReading(eventId: eventId, query: query) { return reading }
-        return try await work.eventReading(eventId: eventId, query: query)
+        for reader in byId {
+            if let reading = try? await reader.eventReading(eventId: eventId, query: query) { return reading }
+        }
+        return nil
     }
 
     func activityIntervals(startUs: UInt64, endUs: UInt64, limit: UInt32) async throws -> ActivityPage {

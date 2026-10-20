@@ -104,6 +104,10 @@ enum WindowRenderer {
         var preset = WindowShellPreset()
         /// A note at the bottom, from the scene's own `BottomNotes`.
         var note: (@MainActor (BottomNotes) -> Void)?
+        /// The page drawn inside the shell, read before the picture is taken
+        /// (a list with its first row open, an item's page): a picture can't
+        /// click. Nil draws the place's own page.
+        var shellPage: (@MainActor (ShellWorldContext) async -> AnyView)?
 
         /// A picture of `view` alone, made from fixtures.
         static func picture(
@@ -118,8 +122,8 @@ enum WindowRenderer {
 
     /// Every scene: the window's own, then each package's, in a fixed order.
     private static func scenes() -> [Scene] {
-        ownScenes() + shellScenes + workScenes + readingScenes + sidePictureScenes + handoffScenes + resumeScenes
-            + calendarScenes + demoScenes + libraryScenes
+        ownScenes() + shellScenes + appScenes + workScenes + readingScenes + sidePictureScenes + handoffScenes
+            + resumeScenes + calendarScenes + demoScenes + libraryScenes
     }
 
     private static func ownScenes() -> [Scene] {
@@ -382,8 +386,12 @@ enum WindowRenderer {
             WorkRenders.adopt(workFixture)
             await workFixture.prewarm()
         }
-        let world: any BrainReader = workFixture.map { ShellWorldReader(base: reader, work: $0.reader) } ?? reader
-        let snapshot = scene.work ?? workFixture?.snapshot ?? ShellRenderFixture.weekIn(now: now)
+        let today = TodayRenderReader(base: overviewMoments, firstDay: scene.firstDay, savedSoFar: false)
+        let world: any BrainReader = workFixture.map {
+            ShellWorldReader(base: reader, work: $0.reader, today: scene.firstDay ? nil : today)
+        } ?? reader
+        let snapshot = scene.work ?? (workFixture == nil ? ShellRenderFixture.weekIn(now: now)
+                                                        : ShellWorld.snapshot(now: now, calendar: calendar))
         let services = ShellWorld.services(now: now, calendar: calendar)
         // Overview and You, read before drawing. Their deletion signals are
         // their own, so nothing from the app reaches them. On the first day
@@ -409,10 +417,17 @@ enum WindowRenderer {
             preset.sidebar = SidebarModel.make(snapshot: snapshot, kinds: scene.kinds ?? Set(SidebarPlace.libraryKinds),
                                                hides: preset.choices)
         }
+        if let shellPage = scene.shellPage {
+            preset.page = await shellPage(ShellWorldContext(
+                reader: world, work: PreviewWorkReader(snapshot: snapshot), now: now, calendar: calendar,
+                services: services))
+        }
         let notes = BottomNotes()
         scene.note?(notes)
+        let workMoments = WorkMomentCache()
+        await workMoments.load(snapshot.items.compactMap(\.thumbnailMoment), reader: world)
         let allScreenshots = CombinedScreenshots(
-            [screenshots] + (workFixture.map { [$0.screenshots as any ThumbnailDataProviding] } ?? []))
+            [screenshots, thumbnails] + (workFixture.map { [$0.screenshots as any ThumbnailDataProviding] } ?? []))
         let view = MemoryWorkspaceView(
             reader: world, understanding: understanding,
             work: PreviewWorkReader(snapshot: snapshot),
@@ -435,8 +450,13 @@ enum WindowRenderer {
             notes: notes
         )
         .environment(\.controlActiveState, .key)
-        .environment(\.overviewThumbnails, thumbnails)
+        // Today's cards show the day's drawn windows, and an item's newest
+        // screenshot from Working On's sealed ones.
+        .environment(\.overviewThumbnails, allScreenshots)
         .environment(\.screenshots, allScreenshots)
+        // Each picture reads Working On's pictures afresh, before it is
+        // drawn: a sealed folder goes when its scene is drawn.
+        .environment(\.workMoments, workMoments)
         .environment(\.locale, Locale(identifier: "en_US"))
         .environment(\.colorScheme, scene.dark ? .dark : .light)
         .environment(\.timeZone, calendar.timeZone)
@@ -465,7 +485,8 @@ enum WindowRenderer {
         window.contentView = hosting
         // Ready when the screenshots have stopped arriving (a screenshot is
         // read in two steps, its moment then its image), and never before
-        // the views have had time to read their models.
+        // the views have had time to read their models and make a formatted
+        // reading's text.
         let started = Date()
         var drawn = -1
         var stableSince = started
@@ -476,7 +497,7 @@ enum WindowRenderer {
             if count != drawn {
                 drawn = count
                 stableSince = Date()
-            } else if Date().timeIntervalSince(started) >= 1, Date().timeIntervalSince(stableSince) >= 0.5 {
+            } else if Date().timeIntervalSince(started) >= 1.5, Date().timeIntervalSince(stableSince) >= 0.5 {
                 break
             }
         }

@@ -13,6 +13,9 @@ struct WebPagesPlace: View {
     let open: (RecallRoute) -> Void
 
     @StateObject private var model: WebPagesModel
+    /// The Working On item each page's newest moment is part of, for
+    /// "Part of trailhead-shop ›" under the detail's header (SPEC 3.4).
+    @StateObject private var items: MomentItems
     @Environment(\.workNow) private var now
     @Environment(\.workDisplayCalendar) private var calendar
     @Environment(\.lensForget) private var lensForget
@@ -24,6 +27,7 @@ struct WebPagesPlace: View {
         self.reader = reader
         self.open = open
         _model = StateObject(wrappedValue: model ?? WebPagesModel(work: work, reader: reader))
+        _items = StateObject(wrappedValue: MomentItems(reader: work))
     }
 
     var body: some View {
@@ -39,7 +43,11 @@ struct WebPagesPlace: View {
         .task {
             await model.reload()
         }
+        .task(id: model.selected?.newest?.id) {
+            if let id = model.selected?.newest?.id { await items.load([id]) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: MemoryDeletionSignal.notification)) { _ in
+            items.clear()
             Task { await model.reload() }
         }
         .onReceive(NotificationCenter.default.publisher(for: MemoryRefreshSignal.notification)) { _ in
@@ -174,6 +182,7 @@ struct WebPagesPlace: View {
                 }
                 Button(WorkCopy.copyLink) { copy(url) }
             }
+            AskAIMenu(source: .moments(Array(row.page.moments.prefix(WebPagesModel.askMoments))))
             if let forget = lensForget.forget {
                 Divider()
                 Button(WorkCopy.forgetThisPage) { forget(row.page.moments, row.page.title, .page) }
@@ -184,59 +193,64 @@ struct WebPagesPlace: View {
     // MARK: The detail
 
     private func detail(_ row: WebPageRow, hit: Hit) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
-                if let readOn = model.readOn(row) {
-                    HStack(spacing: 6) {
-                        Text(readOn.lead)
-                            .font(.system(size: 12))
-                            .foregroundStyle(MCI.Color.foregroundSecondary)
-                        ForEach(readOn.moments, id: \.id) { moment in
-                            Button {
-                                open(RecallRoute(place: .ask, clearsField: true, focusEventId: moment.id))
-                            } label: {
-                                Text(verbatim: WorkFormat.whenShort(us: moment.tsUs, now: now(), calendar: calendar))
-                                    .font(.system(size: 11.5))
-                                    .foregroundStyle(MCI.Color.foreground)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 2)
-                                    .background(Capsule().fill(MCI.Color.surface))
-                                    .overlay(Capsule().strokeBorder(MCI.Color.border, lineWidth: 1))
-                            }
-                            .buttonStyle(.plain)
-                        }
+        // History's own detail, with the page's "Read 2 times today" under
+        // its date and the page's actions in place of a moment's (SPEC 3.5).
+        DetailPaneView(hit: hit, reader: reader, partOf: items.partOf(hit),
+                       openItem: { open(RecallRoute(workItem: $0.id)) }, underDate: readOnLine(row),
+                       actions: AnyView(actions(row)))
+            .id(hit.id)
+    }
+
+    /// "Read 2 times today:" and each time, which opens it in History.
+    private func readOnLine(_ row: WebPageRow) -> AnyView? {
+        guard let readOn = model.readOn(row) else { return nil }
+        return AnyView(
+            HStack(spacing: 6) {
+                Text(readOn.lead)
+                    .font(.system(size: 12))
+                    .foregroundStyle(MCI.Color.foregroundSecondary)
+                ForEach(readOn.moments, id: \.id) { moment in
+                    Button {
+                        open(RecallRoute(place: .ask, clearsField: true, focusEventId: moment.id))
+                    } label: {
+                        Text(verbatim: WorkFormat.whenShort(us: moment.tsUs, now: now(), calendar: calendar))
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(MCI.Color.foreground)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(MCI.Color.surface))
+                            .overlay(Capsule().strokeBorder(MCI.Color.border, lineWidth: 1))
                     }
-                }
-                HStack(spacing: 8) {
-                    if let url = WebPagesModel.link(row) {
-                        Button(WorkCopy.copyLink) { copy(url) }
-                            .buttonStyle(.bordered)
-                    }
-                    // Ask is given the page's newest moments (SPEC 5.3.1).
-                    AskAIButton(source: .moments(Array(row.page.moments.prefix(WebPagesModel.askMoments))),
-                                reader: reader, handlesCommandReturn: true)
-                    Spacer(minLength: 0)
-                    if let forget = lensForget.forget {
-                        Button {
-                            forget(row.page.moments, row.page.title, .page)
-                        } label: {
-                            Image(systemName: "trash").font(.system(size: 14))
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(MCI.Color.foregroundSecondary)
-                        .help(WorkCopy.forgetThisPage)
-                        .accessibilityLabel(WorkCopy.forgetThisPage)
-                    }
+                    .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, MCI.Spacing.l)
-            .padding(.top, MCI.Spacing.l)
-            .padding(.bottom, MCI.Spacing.s)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            // One layer of material, as History's detail under it has.
-            .background(.thinMaterial)
-            DetailPaneView(hit: hit, reader: reader)
-                .id(hit.id)
+        )
+    }
+
+    /// Open Link, Copy Link, Ask and, at the far right, Forget This Page.
+    private func actions(_ row: WebPageRow) -> some View {
+        HStack(spacing: 8) {
+            if let url = WebPagesModel.link(row) {
+                Button(WorkCopy.openLink) {
+                    guard !isSyntheticPreview else { return }
+                    NSWorkspace.shared.open(url)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                Button(WorkCopy.copyLink) { copy(url) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            // Ask is given the page's newest moments (SPEC 5.3.1).
+            AskAIButton(source: .moments(Array(row.page.moments.prefix(WebPagesModel.askMoments))),
+                        reader: reader, handlesCommandReturn: true)
+                .controlSize(.small)
+            Spacer(minLength: 0)
+            if let forget = lensForget.forget {
+                TrashButton(help: WorkCopy.forgetThisPage, label: WorkCopy.forgetThisPage) {
+                    forget(row.page.moments, row.page.title, .page)
+                }
+            }
         }
     }
 

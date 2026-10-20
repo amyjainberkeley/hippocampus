@@ -318,6 +318,8 @@ final class WorkMomentCache: ObservableObject {
         asked.formUnion(wanted)
         let found = (try? await WorkingOnItemModel.fetch(wanted, reader: reader)) ?? []
         for hit in found { hits[hit.id] = hit }
+        // A read that found nothing is asked again next time.
+        asked.subtract(wanted.filter { hits[$0] == nil })
     }
 
     private func dropIfDeleted() {

@@ -220,6 +220,8 @@ struct MomentMenu: View {
             if let reader {
                 Divider()
                 let ids = picked.momentIds
+                // Ask Claude ▸, the tools on this Mac (SPEC 5.3.1).
+                AskAIMenu(source: .moments(ids))
                 Button(LibraryCopy.History.copyForYourAI) {
                     let services = HandoffServices.resolved(handoff, isSyntheticPreview: isSyntheticPreview)
                     Task { await AskAIButton.copyForYourAI(.moments(ids), services: services) }

@@ -43,14 +43,19 @@ struct FormattedReadingView: View {
         return ReadingBlocks.fallback(main: text)
     }
 
-    /// What the string is built from: when it changes, it is built again.
+    /// What the string is built from, and whose it is: when either changes,
+    /// it is built again. A reading whose blocks match the excerpt it
+    /// replaces (a short moment's text) is still a new owner, so its string
+    /// is made and shown.
     private struct Source: Equatable {
+        let identity: Identity
         let blocks: [ReadingBlock]
         let openQuotes: Set<Int>
     }
 
     private var source: Source {
-        Source(blocks: blocks, openQuotes: openQuotesFor == reading?.eventId ? openQuotes : [])
+        Source(identity: identity, blocks: blocks,
+               openQuotes: openQuotesFor == reading?.eventId ? openQuotes : [])
     }
 
     var body: some View {
@@ -63,13 +68,12 @@ struct FormattedReadingView: View {
             )
             .task(id: source) {
                 let source = self.source
-                let identity = self.identity
                 let made = await Task.detached(priority: .userInitiated) {
                     ReadingAttributedText.make(source.blocks, expandedQuotes: source.openQuotes)
                 }.value
                 guard !Task.isCancelled else { return }
                 built = made
-                builtFor = identity
+                builtFor = source.identity
             }
     }
 

@@ -119,7 +119,8 @@ final class AskPanelWiringTests: XCTestCase {
             XCTAssertTrue(copy.contains(word), word)
         }
         XCTAssertTrue(bar.contains("Text(model.footerText)"))
-        XCTAssertTrue(bar.contains("Button(action.title) { perform(.status(action)) }"))
+        // The row's own words: Resume Now for a pause with an end.
+        XCTAssertTrue(bar.contains("Button(model.footerActionTitle ?? action.title) { perform(.status(action)) }"))
     }
 
     /// ⌘↩ is Ask {Tool} and ⌥↩ resumes (SPEC 5.3.9, SPEC-DELTA 4): the

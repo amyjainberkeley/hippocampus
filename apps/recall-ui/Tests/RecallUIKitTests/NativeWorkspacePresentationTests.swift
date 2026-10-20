@@ -114,6 +114,17 @@ final class NativeWorkspacePresentationTests: XCTestCase {
         XCTAssertFalse(source.contains(".focusEffectDisabled("))
     }
 
+    /// A moment's reading replaces the row's excerpt even when its blocks
+    /// are the excerpt's (a short moment): the string is rebuilt for its new
+    /// owner, never left as the blank frame shown while it is made.
+    func testTheReadingIsRebuiltForItsMomentEvenWhenItsTextIsTheExcerpts() throws {
+        let source = try source("Reading/FormattedReadingView.swift")
+        XCTAssertTrue(source.contains("let identity: Identity"), "the owner is part of what the string is built from")
+        XCTAssertTrue(source.contains(".task(id: source)"))
+        XCTAssertTrue(source.contains("builtFor = source.identity"))
+        XCTAssertTrue(source.contains("if let built, builtFor == identity"))
+    }
+
     private func source(_ file: String) throws -> String {
         let package = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

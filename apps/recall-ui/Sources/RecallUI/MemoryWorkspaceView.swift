@@ -49,6 +49,11 @@ struct WindowShellPreset {
     var showsNewSidebarLine = false
     var forgetSheet: ForgetRecentChoice?
     var canGoBack = false
+    /// The page drawn in place of the place's own, read before the picture
+    /// is taken: a list with a row open, an item's page.
+    var page: AnyView?
+    /// A forget's question drawn open over the page.
+    var forgetConfirmation: ForgetConfirmation?
 
     enum StatusMenuAnchor { case hiMark, footer }
 }
@@ -226,6 +231,7 @@ struct MemoryWorkspaceView: View {
             if let choice = preset.forgetSheet {
                 _forgetSheet = State(initialValue: ForgetRecentSheetItem(choice: choice))
             }
+            _forgetConfirmation = State(initialValue: preset.forgetConfirmation)
         }
     }
 
@@ -351,7 +357,8 @@ struct MemoryWorkspaceView: View {
             // ⌘↩ in the field presses Ask {Tool} on a button of its own,
             // with the question and its top matches (SPEC 2.8, 5.3.1).
             if let fieldAsk {
-                AskAIButton(source: fieldAsk.source, reader: reader, pressRequest: fieldAsk.sequence)
+                AskAIButton(source: fieldAsk.source, reader: reader, pressRequest: fieldAsk.sequence,
+                            pressTool: fieldAsk.tool)
                     .frame(width: 0, height: 0)
                     .opacity(0)
                     .accessibilityHidden(true)
@@ -465,6 +472,10 @@ struct MemoryWorkspaceView: View {
         // `PageForgetRequest`; the shell asks first when it is large.
         .environment(\.forgetCoordinator, forgetting)
         .environment(\.forget, ForgetAction { request in handle(request) })
+        // A row's Ask Claude ▸ presses the same hidden button as ⌘↩.
+        .environment(\.askAI, AskAIAction { source, tool in
+            fieldAsk = FieldAsk(source: source, tool: tool, sequence: (fieldAsk?.sequence ?? 0) + 1)
+        })
         .environment(\.forgottenMoments, Set(forgetting.undoable?.request.momentIds ?? []))
         .environment(\.lensForget, LensForget(forget: { moments, title, kind in
             confirmLensForget(moments, title: title, kind: kind)
@@ -624,7 +635,7 @@ struct MemoryWorkspaceView: View {
     /// On (Show All) the field filters the cards instead (SPEC 3.3).
     @ViewBuilder
     private var pageContent: some View {
-        if selection.hasField, ask.showsMatches, !selection.isWorkingOn {
+        if selection.hasField, ask.showsMatches, selection != .workingOn {
             FieldResults(model: ask, reader: reader, contextExporter: contextExporter)
         } else {
             page
@@ -635,6 +646,15 @@ struct MemoryWorkspaceView: View {
 
     @ViewBuilder
     private var page: some View {
+        if let drawn = preset?.page {
+            drawn
+        } else {
+            placePage
+        }
+    }
+
+    @ViewBuilder
+    private var placePage: some View {
         switch selection {
         case .place(.today):
             TodayPlace(model: overview, reader: reader, open: open, search: searchInField,
@@ -655,7 +675,8 @@ struct MemoryWorkspaceView: View {
         case .place(.workingOn):
             WorkingOnPlace(work: work, reader: reader, open: open, filter: ask.query)
         case let .item(id):
-            WorkingOnItemPlace(itemId: id, work: work, reader: reader, open: open)
+            WorkingOnItemPlace(itemId: id, work: work, reader: reader, open: open, calendarReader: services.calendar,
+                               now: now)
         case .place(.aboutYou):
             NavigationStack(path: $youPath) {
                 AboutYouPlace(model: you, open: open, items: workItems)
@@ -1236,7 +1257,7 @@ struct MemoryWorkspaceView: View {
     private func askYourAI(_ question: String) {
         let matches = ask.search.hits.prefix(Self.fieldAskMatches).map(\.id)
         let sequence = (fieldAsk?.sequence ?? 0) + 1
-        fieldAsk = FieldAsk(source: .question(question, moments: Array(matches)), sequence: sequence)
+        fieldAsk = FieldAsk(source: .question(question, moments: Array(matches)), tool: nil, sequence: sequence)
     }
 
     /// The top matches a question takes with it.

@@ -29,6 +29,12 @@ struct DetailPaneView: View {
     var openItem: ((WorkItem) -> Void)? = nil
     /// Moves on each time a row's menu asks to show what is related.
     var relatedRequests = 0
+    /// A line under the date, for a page that knows more about the moment:
+    /// Web Pages' "Read 2 times today" (SPEC 3.5).
+    var underDate: AnyView? = nil
+    /// The page's own action row in place of History's: Web Pages' Open
+    /// Link, Copy Link, Ask and Forget This Page (SPEC 3.5).
+    var actions: AnyView? = nil
 
     @Environment(\.forget) private var forget
 
@@ -277,7 +283,14 @@ struct DetailPaneView: View {
             if let partOf, let openItem {
                 PartOfLink(name: partOf.name) { openItem(partOf) }
             }
-            actionRow
+            if let underDate {
+                underDate
+            }
+            if let actions {
+                actions
+            } else {
+                actionRow
+            }
         }
     }
 

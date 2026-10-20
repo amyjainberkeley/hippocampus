@@ -73,7 +73,9 @@ struct WindowTopBar: View {
     // MARK: The field
 
     private var placeholder: String {
-        if page.isWorkingOn { return NavigationCopy.workingOnPlaceholder }
+        // Show All filters its cards; an item's page searches, kept to the
+        // item (SPEC 3.2, 3.3).
+        if page == .place(.workingOn) { return NavigationCopy.workingOnPlaceholder }
         return ask.answersAvailable == false ? UserFacingCopy.searchOnlyPlaceholder : UserFacingCopy.askPlaceholder
     }
 
@@ -161,6 +163,8 @@ struct WindowTopBar: View {
     }
 
     private func submit(forceAsk: Bool) {
+        // Show All's field only filters its cards (SPEC 3.3).
+        guard page != .place(.workingOn) else { return }
         if ask.submit(forceAsk: forceAsk) == .focusFirstMatch, let first = ask.search.hits.first {
             ask.search.selectedHitId = first.id
         }

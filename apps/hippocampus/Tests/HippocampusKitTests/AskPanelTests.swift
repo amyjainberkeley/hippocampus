@@ -165,8 +165,9 @@ final class AskPanelTests: XCTestCase {
         let (model, memory, clock) = rig()
         let meeting = CalendarMeeting(title: "Pricing review with Mira", start: clock.now.addingTimeInterval(-86_400),
                                       end: clock.now.addingTimeInterval(-84_600))
+        let asked = clock.now
         model.calendarAnswers = CalendarAnswerer(store: FixedCalendarAccess(.fullAccess, meetings: [meeting]),
-                                                 setting: .inMemory(true), now: { clock.now }, demoMemory: { false })
+                                                 setting: .inMemory(true), now: { asked }, demoMemory: { false })
         await open(model, over: safari)
         model.ask("When did I last meet with Mira?")
         await eventually { model.answer != nil }

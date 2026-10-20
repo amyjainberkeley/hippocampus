@@ -94,6 +94,8 @@ struct AskAIButton: View {
     /// Moves on each time a key asks for this button's press: the field's
     /// ⌘↩ hands its question over on a button of its own (SPEC 2.8).
     var pressRequest = 0
+    /// The tool a press asks, when a menu named one (a row's Ask Claude ▸).
+    var pressTool: AskTool?
 
     @Environment(\.handoffServices) private var injected
     @Environment(\.isSyntheticPreview) private var isSyntheticPreview
@@ -144,8 +146,16 @@ struct AskAIButton: View {
     }
 
     /// The primary half: the tool it names, or Copy for Your AI without one.
+    /// A press from a menu asks the tool it named, when it is on this Mac.
     private func press() {
-        if let tool = primaryTool { ask(tool) } else { copyForAI() }
+        if let wanted = pressTool, let tool = tools.first(where: { $0.tool == wanted }) {
+            handoff.choices.lastTool = wanted
+            ask(tool)
+        } else if let tool = primaryTool {
+            ask(tool)
+        } else {
+            copyForAI()
+        }
     }
 
     /// ⌘K's rows for the selection or page, while this button has ⌘↩.
@@ -392,6 +402,59 @@ struct AskAIButton: View {
         guard let id, let hit = try? await reader.fetchEventsByIds([id]).first, let url = hit.thumbnailURL,
               let data = await screenshots.thumbnailData(for: url, maxPixelSize: 1_568) else { return nil }
         return ClipboardHygiene.jpegForAI(data)
+    }
+}
+
+/// Ask {Tool} from a menu, where a button can't live: a row's right-click
+/// menu in History, its lenses, Web Pages and Looked Up (SPEC 5.3.1). The
+/// shell presses a button of its own with the source and the tool, so the
+/// first-use sheet and the notes work as they do on the button.
+struct AskAIAction {
+    let ask: @MainActor (AskAISource, AskTool?) -> Void
+
+    @MainActor
+    func callAsFunction(_ source: AskAISource, tool: AskTool? = nil) {
+        ask(source, tool)
+    }
+}
+
+private struct AskAIActionKey: EnvironmentKey {
+    static let defaultValue: AskAIAction? = nil
+}
+
+extension EnvironmentValues {
+    /// The shell's Ask {Tool} for menus; nil shows no Ask in a menu.
+    var askAI: AskAIAction? {
+        get { self[AskAIActionKey.self] }
+        set { self[AskAIActionKey.self] = newValue }
+    }
+}
+
+/// "Ask Claude ▸" in a right-click menu: the AI tools on this Mac, with
+/// their own icons, each asking with `source` (SPEC 5.3.1). Nothing without
+/// a tool or without the shell's Ask.
+struct AskAIMenu: View {
+    let source: AskAISource
+
+    @Environment(\.askAI) private var askAI
+    @Environment(\.handoffServices) private var injected
+    @Environment(\.isSyntheticPreview) private var isSyntheticPreview
+
+    var body: some View {
+        let services = HandoffServices.resolved(injected, isSyntheticPreview: isSyntheticPreview)
+        let tools = services.tools()
+        if let askAI, !tools.isEmpty {
+            let last = services.choices.lastTool.flatMap { wanted in tools.first { $0.tool == wanted } }
+            Menu(HandoffCopy.ask((last ?? tools[0]).tool.name)) {
+                ForEach(tools) { tool in
+                    Button {
+                        askAI(source, tool: tool.tool)
+                    } label: {
+                        Label { Text(tool.tool.name) } icon: { Image(nsImage: ToolIcons.image(for: tool, size: 16)) }
+                    }
+                }
+            }
+        }
     }
 }
 

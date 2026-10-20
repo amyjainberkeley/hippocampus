@@ -37,7 +37,12 @@ final class WorkRenderFixture {
                        thumbnailPath: path, sourceKind: hit.sourceKind, thumbnailTsUs: path == nil ? nil : hit.tsUs,
                        caption: hit.caption)
         }
-        reader = WorkFixtureReader(hits: hits)
+        // The article read as the FFI reads it: the golden blocks the Rust
+        // tests check, so its detail is formatted as the prototype draws it.
+        let article = ReadingRenderFixture.blocks("article.new")
+        let blocks = Dictionary(moments.filter { $0.screen == "article" }.map { ($0.hit.eventId, article) },
+                                uniquingKeysWith: { first, _ in first })
+        reader = WorkFixtureReader(hits: hits, blocks: blocks)
         screenshots = PrewarmedScreenshots(store.provider())
         snapshot = WorkFixtures.snapshot(now: now, calendar: calendar)
     }
@@ -91,6 +96,8 @@ final class PrewarmedScreenshots: ThumbnailDataProviding, @unchecked Sendable {
 /// text for the detail.
 struct WorkFixtureReader: BrainReader {
     let hits: [Hit]
+    /// What a moment read as the FFI's blocks, when the fixture has them.
+    var blocks: [UInt64: [ReadingBlock]] = [:]
 
     func search(_ opts: SearchOptions) async throws -> [Hit] {
         let filtered = hits.filter { hit in
@@ -111,6 +118,11 @@ struct WorkFixtureReader: BrainReader {
 
     func eventReading(eventId: UInt64, query: String?) async throws -> EventReading? {
         guard let hit = hits.first(where: { $0.id == eventId }) else { return nil }
+        if let blocks = blocks[eventId], !blocks.isEmpty {
+            return try EventReading(eventId: hit.id, tsUs: hit.tsUs, appBundleId: hit.appBundleId,
+                                    sourceKind: hit.sourceKind, main: ReadingBlocks.plainText(blocks), rest: "",
+                                    isTruncated: false, caption: hit.caption, blocks: blocks)
+        }
         return try EventReading(eventId: hit.id, tsUs: hit.tsUs, appBundleId: hit.appBundleId,
                                 sourceKind: hit.sourceKind, main: hit.ocrTextSnippet.replacingOccurrences(of: " \u{00B7} ", with: "\n"),
                                 rest: "", isTruncated: false, caption: hit.caption)

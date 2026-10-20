@@ -79,7 +79,6 @@ struct YouItemRow: View {
                     .help(UserFacingCopy.You.forgetHelp)
                     .buttonStyle(.bordered)
             }
-            .controlSize(.small)
             if isWhyOpen {
                 why(item)
             }
