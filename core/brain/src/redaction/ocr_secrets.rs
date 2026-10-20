@@ -211,9 +211,11 @@ pub fn redact_secrets(text: &str) -> Cow<'_, str> {
 ///
 /// Precision-first. The run is maximal: a 20-digit blob is one 20-digit
 /// candidate (out of range, so no match), never a 16-digit card hidden inside
-/// it. Luhn then drops almost every ordinary number — phone numbers, order ids
-/// and timestamps rarely pass — so a real card has to be on screen for this to
-/// fire.
+/// it. It must stand on its own ([`stands_alone`]): a number inside a name
+/// (`zebrafish20261020125831`, `handoff-20261020125831`, `…831.json`) is an
+/// id or a timestamp, and one in ten of those passes Luhn. Luhn then drops
+/// almost every ordinary number — phone numbers, order ids and timestamps
+/// rarely pass — so a real card has to be on screen for this to fire.
 #[must_use]
 pub fn contains_credit_card(text: &str) -> bool {
     !credit_card_spans(text).is_empty()
@@ -247,12 +249,34 @@ fn credit_card_spans(text: &str) -> Vec<Range<usize>> {
                 break;
             }
         }
-        if (13..=19).contains(&digits) && luhn_valid(&bytes[start..i]) {
+        if (13..=19).contains(&digits)
+            && stands_alone(bytes, start, i)
+            && luhn_valid(&bytes[start..i])
+        {
             spans.push(start..i);
         }
         // `i` already sits past this run; the maximal run is never re-entered.
     }
     spans
+}
+
+/// Whether the digit run `bytes[start..end]` stands on its own rather than
+/// inside a name: no ASCII letter or `_` right before or right after it, and
+/// no `-`, `.` or `/` joining it to a letter or digit on that side. A card
+/// number is written apart from the words around it (`card 4111 …`,
+/// `number: 4111…`, `…1111.` at the end of a sentence); a number glued into
+/// a name (`zebrafish2026…`, `handoff-2026…`, `export_…831.json`) is an id or
+/// a timestamp. Only ASCII counts, as in the helper's Swift twin
+/// (`SuppressionCascade.standsAlone`).
+fn stands_alone(bytes: &[u8], start: usize, end: usize) -> bool {
+    let glued = |near: Option<&u8>, beyond: Option<&u8>| match near {
+        Some(byte) if byte.is_ascii_alphabetic() || *byte == b'_' => true,
+        Some(b'-' | b'.' | b'/') => beyond.is_some_and(u8::is_ascii_alphanumeric),
+        _ => false,
+    };
+    let before = start.checked_sub(1).and_then(|at| bytes.get(at));
+    let before_that = start.checked_sub(2).and_then(|at| bytes.get(at));
+    !glued(before, before_that) && !glued(bytes.get(end), bytes.get(end + 1))
 }
 
 /// The Luhn checksum over the ASCII digits in `run`; any other byte (a space or
@@ -399,6 +423,37 @@ mod tests {
         assert!(!contains_otp("Order #40281773"));
         // "someone timer" is not "one time"; the boundary test rejects it.
         assert!(!contains_otp("someone timer showed 283910 on it"));
+    }
+
+    /// A number inside a name is an id or a timestamp, not a card: the
+    /// end-to-end test's project, `handoff-<yyyymmddHHMMSS>`, was refused
+    /// and its packet heading redacted whenever the stamp passed Luhn, which
+    /// one stamp in ten does.
+    #[test]
+    fn a_number_inside_a_name_is_not_a_card() {
+        assert!(luhn_valid(b"20261020125831"), "the stamp passes Luhn");
+        for text in [
+            "zebrafish20261020125831",
+            "# handoff-20261020125831",
+            "export_20261020125831.json",
+            "builds/20261020125831/log.txt",
+            "v1.20261020125831",
+            "20261020125831abc",
+        ] {
+            assert!(!contains_credit_card(text), "{text}");
+            assert!(!contains_secret(text), "{text}");
+            assert_eq!(redact_secrets(text), text);
+        }
+        for text in [
+            "card 4111 1111 1111 1111.",
+            "number:4111111111111111",
+            "(4111-1111-1111-1111)",
+            "#4111111111111111",
+            "card=4111111111111111&exp=1229",
+            "- 4111111111111111",
+        ] {
+            assert!(contains_credit_card(text), "{text}");
+        }
     }
 
     #[test]
