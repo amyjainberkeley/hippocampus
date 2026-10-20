@@ -1110,66 +1110,67 @@ impl Story {
         }
     }
 
-    /// What the terminal showed before the latest command.
-    fn terminal_history() -> Vec<String> {
-        vec![
-            format!("{PROMPT}git switch -c annual-billing"),
-            "Switched to a new branch 'annual-billing'".to_owned(),
+    /// A test run in the terminal, as vitest prints it.
+    fn test_run(failing: bool) -> Vec<String> {
+        let mut lines = vec![
+            format!("{PROMPT}pnpm test billing"),
+            String::new(),
+            "> pebblewick-app@2.3.0 test /Users/ren/dev/pebblewick-app".to_owned(),
+            "> vitest run billing".to_owned(),
+            String::new(),
+            " RUN  v2.1.4 /Users/ren/dev/pebblewick-app".to_owned(),
+            String::new(),
+        ];
+        if failing {
+            lines.extend([
+                " \u{276F} src/billing.test.ts (4 tests | 1 failed) 38ms".to_owned(),
+                "   \u{00D7} switchToYearly > credits the unused part of the month".to_owned(),
+                "     \u{2192} expected 1633 to be 1960 // Object.is equality".to_owned(),
+                "   \u{2713} switchToYearly > starts the yearly period today".to_owned(),
+                "   \u{2713} switchToYearly > keeps the studio's coupon".to_owned(),
+                "   \u{2713} previewYearly > shows the credit before anything changes".to_owned(),
+                String::new(),
+                " FAIL  src/billing.test.ts > switchToYearly > credits the unused part of the month".to_owned(),
+                "AssertionError: expected 1633 to be 1960".to_owned(),
+                " \u{276F} src/billing.test.ts:9:32".to_owned(),
+                String::new(),
+                " Test Files  1 failed (1)".to_owned(),
+                "      Tests  1 failed | 3 passed (4)".to_owned(),
+            ]);
+        } else {
+            lines.extend([
+                " \u{2713} src/billing.test.ts (4 tests) 41ms".to_owned(),
+                "   \u{2713} switchToYearly > credits the unused part of the month".to_owned(),
+                "   \u{2713} switchToYearly > starts the yearly period today".to_owned(),
+                "   \u{2713} switchToYearly > keeps the studio's coupon".to_owned(),
+                "   \u{2713} previewYearly > shows the credit before anything changes".to_owned(),
+                String::new(),
+                " Test Files  1 passed (1)".to_owned(),
+                "      Tests  4 passed (4)".to_owned(),
+            ]);
+        }
+        lines.extend([
+            "   Duration  412ms".to_owned(),
+            String::new(),
             format!("{PROMPT}git status --short"),
             " M src/billing.ts".to_owned(),
             " M src/plans.ts".to_owned(),
             "?? src/billing.test.ts".to_owned(),
-            String::new(),
-        ]
+            PROMPT.trim_end().to_owned(),
+        ]);
+        lines
     }
 
     fn tests_first_run() -> Win {
-        let mut lines = Self::terminal_history();
-        lines.extend([
-            format!("{PROMPT}pnpm test billing"),
-            String::new(),
-            " RUN  v2.1.4 /Users/ren/dev/pebblewick-app".to_owned(),
-            String::new(),
-            " \u{276F} src/billing.test.ts (4 tests | 1 failed) 38ms".to_owned(),
-            "   \u{00D7} switchToYearly > credits the unused part of the month".to_owned(),
-            "     \u{2192} expected 1633 to be 1960 // Object.is equality".to_owned(),
-            "   \u{2713} switchToYearly > starts the yearly period today".to_owned(),
-            "   \u{2713} switchToYearly > keeps the studio's coupon".to_owned(),
-            "   \u{2713} previewYearly > shows the credit before anything changes".to_owned(),
-            String::new(),
-            " Test Files  1 failed (1)".to_owned(),
-            "      Tests  1 failed | 3 passed (4)".to_owned(),
-            "   Duration  412ms".to_owned(),
-            String::new(),
-            PROMPT.trim_end().to_owned(),
-        ]);
-        Self::terminal(&lines, "terminal-tests-first")
+        Self::terminal(&Self::test_run(true), "terminal-tests-first")
     }
 
     fn tests_passing() -> Win {
-        let mut lines = Self::terminal_history();
-        lines.extend([
-            format!("{PROMPT}pnpm test billing"),
-            String::new(),
-            " RUN  v2.1.4 /Users/ren/dev/pebblewick-app".to_owned(),
-            String::new(),
-            " \u{2713} src/billing.test.ts (4 tests) 41ms".to_owned(),
-            "   \u{2713} switchToYearly > credits the unused part of the month".to_owned(),
-            "   \u{2713} switchToYearly > starts the yearly period today".to_owned(),
-            "   \u{2713} switchToYearly > keeps the studio's coupon".to_owned(),
-            "   \u{2713} previewYearly > shows the credit before anything changes".to_owned(),
-            String::new(),
-            " Test Files  1 passed (1)".to_owned(),
-            "      Tests  4 passed (4)".to_owned(),
-            "   Duration  398ms".to_owned(),
-            String::new(),
-            PROMPT.trim_end().to_owned(),
-        ]);
-        Self::terminal(&lines, "terminal-tests-passing")
+        Self::terminal(&Self::test_run(false), "terminal-tests-passing")
     }
 
     fn tests_pushed() -> Win {
-        let mut lines = Self::terminal_history();
+        let mut lines = Vec::new();
         lines.extend([
             format!("{PROMPT}pnpm test"),
             String::new(),

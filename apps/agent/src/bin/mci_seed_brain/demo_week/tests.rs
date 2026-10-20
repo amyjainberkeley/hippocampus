@@ -86,7 +86,7 @@ fn every_moment_is_in_the_last_week_and_none_after_now() {
     ] {
         let week = world(now, TZ);
         let moments = week.moments();
-        assert!(moments.len() > 600, "a busy week: {}", moments.len());
+        assert!(moments.len() > 150, "a busy week: {}", moments.len());
         let first = day_start(now, TZ, 6);
         for (ts, _, _) in &moments {
             assert!(*ts >= first, "inside the week");
@@ -96,7 +96,7 @@ fn every_moment_is_in_the_last_week_and_none_after_now() {
         let mut sorted = times.clone();
         sorted.sort_unstable();
         sorted.dedup();
-        assert_eq!(times, sorted, "one moment a minute, in order");
+        assert_eq!(times, sorted, "one moment at a time, in order");
     }
 }
 
@@ -144,7 +144,7 @@ fn a_pause_between_sessions_stays_with_the_session_before() {
     assert_eq!(going.start_us, at_local(MONDAY_AFTERNOON, 11, 44));
     assert!(going.note.is_none());
     let newest = week.moments().last().unwrap().0;
-    assert!(now - newest <= 90_000_000);
+    assert_eq!(now - newest, 30_000_000, "still at it, a moment ago");
 }
 
 #[test]
@@ -340,9 +340,16 @@ fn working_on_ranks_as_the_story_says_on_every_day_of_the_week() {
 fn ranks_as_the_story_says(now: u64) {
     let week = world(now, TZ);
     let mut minutes: BTreeMap<&str, u64> = BTreeMap::new();
-    for (_, win, _) in week.moments() {
-        if let Some(item) = item_of(win) {
-            *minutes.entry(item).or_default() += 1;
+    for day in &week.days {
+        for session in &day.sessions {
+            let mut at = session.start_us;
+            for hold in &session.holds {
+                let held = hold.minutes.min(now.saturating_sub(at) / MIN);
+                if let Some(item) = item_of(&hold.win) {
+                    *minutes.entry(item).or_default() += held;
+                }
+                at += hold.minutes * MIN;
+            }
         }
     }
     let mut ranked: Vec<(&str, u64)> = minutes.into_iter().collect();
@@ -466,7 +473,7 @@ fn the_week_is_written_and_read_back() {
         .collect();
     let written = seed(&store, &week, &digests).unwrap();
     assert_eq!(written.moments, week.moments().len());
-    assert!(written.screenshots > 100, "{written:?}");
+    assert!(written.screenshots > 40, "{written:?}");
     assert_eq!(
         written.notes,
         week.days

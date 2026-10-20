@@ -48,6 +48,9 @@ const NEWEST_AGE_US: u64 = 30_000_000;
 /// The capture helper keeps a screenshot when the window in front changes
 /// and after five quiet minutes; the moments between show the one before.
 const SCREENSHOT_EVERY_MINUTES: u64 = 5;
+/// A window held in front is read again when what it shows changes; the
+/// week keeps a moment of it every few minutes, and its last minute.
+const MOMENT_EVERY_MINUTES: u64 = 4;
 /// The version of the screen list the drawing tool reads.
 pub const SCREENS_VERSION: u32 = 1;
 /// The version of the demo calendar the window reads.
@@ -334,6 +337,15 @@ pub struct World {
     pub claims: Vec<Claim>,
 }
 
+/// One moment of the week, where it falls.
+struct Planned<'w> {
+    day: usize,
+    session: usize,
+    ts_us: u64,
+    win: &'w Win,
+    keeps: bool,
+}
+
 /// Make the week that ends at `now_us`, at `tz` seconds east of UTC.
 #[must_use]
 pub fn world(now_us: u64, tz: i32) -> World {
@@ -345,19 +357,55 @@ impl World {
     /// whether it keeps a screenshot.
     #[must_use]
     pub fn moments(&self) -> Vec<(u64, &Win, bool)> {
+        self.plan()
+            .into_iter()
+            .map(|moment| (moment.ts_us, moment.win, moment.keeps))
+            .collect()
+    }
+
+    /// The moments, with the day and the session each belongs to.
+    fn plan(&self) -> Vec<Planned<'_>> {
+        let cutoff = self.now_us.saturating_sub(NEWEST_AGE_US);
         let mut out = Vec::new();
-        for day in &self.days {
-            for session in &day.sessions {
+        for (day_index, day) in self.days.iter().enumerate() {
+            for (session_index, session) in day.sessions.iter().enumerate() {
                 let mut at = session.start_us;
                 for hold in &session.holds {
-                    for minute in 0..hold.minutes {
+                    let mut last_kept: Option<u64> = None;
+                    let mut push = |ts: u64| {
+                        let keeps = last_kept
+                            .is_none_or(|kept| ts - kept >= SCREENSHOT_EVERY_MINUTES * MIN);
+                        if keeps {
+                            last_kept = Some(ts);
+                        }
+                        out.push(Planned {
+                            day: day_index,
+                            session: session_index,
+                            ts_us: ts,
+                            win: &hold.win,
+                            keeps,
+                        });
+                    };
+                    let end = at + hold.minutes * MIN;
+                    let mut minute = 0;
+                    let mut last = None;
+                    while minute < hold.minutes {
                         let ts = at + minute * MIN;
-                        if ts > self.now_us.saturating_sub(NEWEST_AGE_US) {
+                        if ts > cutoff {
                             break;
                         }
-                        out.push((ts, &hold.win, minute % SCREENSHOT_EVERY_MINUTES == 0));
+                        push(ts);
+                        last = Some(ts);
+                        if minute + 1 == hold.minutes {
+                            break;
+                        }
+                        minute = (minute + MOMENT_EVERY_MINUTES).min(hold.minutes - 1);
                     }
-                    at += hold.minutes * MIN;
+                    // The window still in front now: read a moment ago.
+                    if at <= cutoff && cutoff < end && last.is_some_and(|ts| ts < cutoff) {
+                        push(cutoff);
+                    }
+                    at = end;
                 }
             }
         }
@@ -608,50 +656,45 @@ pub fn seed(
 ) -> Result<Written, String> {
     let mut written = Written::default();
     let mut kept: Vec<Kept> = Vec::new();
+    measure_input(store, world)?;
     let mut noted: Vec<Noted<'_>> = Vec::new();
-    let cutoff = world.now_us.saturating_sub(NEWEST_AGE_US);
-    for day in &world.days {
-        for session in &day.sessions {
-            let mut events = Vec::new();
-            let mut at = session.start_us;
-            for hold in &session.holds {
-                if at <= cutoff {
-                    let end = (at + hold.minutes * MIN).min(world.now_us);
-                    activity(store, at, end, hold.win.app)?;
-                }
-                for minute in 0..hold.minutes {
-                    let ts = at + minute * MIN;
-                    if ts > cutoff {
-                        break;
-                    }
-                    let keyframe = hold
-                        .win
-                        .screen
-                        .as_ref()
-                        .filter(|_| minute % SCREENSHOT_EVERY_MINUTES == 0)
-                        .and_then(|screen| digests.get(&screen.id))
-                        .map(String::as_str);
-                    let id = put_moment(store, ts, &hold.win, keyframe)?;
-                    written.moments += 1;
-                    written.screenshots += usize::from(keyframe.is_some());
-                    kept.push(Kept {
-                        id,
-                        back: day.back,
-                        title: hold.win.title.clone(),
-                    });
-                    events.push(ObservedEvent {
-                        id,
-                        ts_us: ts,
-                        app_bundle_id: Some(hold.win.app.into()),
-                        window_title: Some(hold.win.title.clone()),
-                        url: hold.win.url.clone(),
-                        text: hold.win.main.clone(),
-                        source: "screen_ocr".into(),
-                    });
-                }
-                at += hold.minutes * MIN;
-            }
-            noted.push(Noted { session, events });
+    for moment in world.plan() {
+        let keyframe = moment
+            .win
+            .screen
+            .as_ref()
+            .filter(|_| moment.keeps)
+            .and_then(|screen| digests.get(&screen.id))
+            .map(String::as_str);
+        let id = put_moment(store, moment.ts_us, moment.win, keyframe)?;
+        written.moments += 1;
+        written.screenshots += usize::from(keyframe.is_some());
+        let day = &world.days[moment.day];
+        kept.push(Kept {
+            id,
+            back: day.back,
+            title: moment.win.title.clone(),
+        });
+        let session = &day.sessions[moment.session];
+        if !noted
+            .last()
+            .is_some_and(|n| std::ptr::eq(n.session, session))
+        {
+            noted.push(Noted {
+                session,
+                events: Vec::new(),
+            });
+        }
+        if let Some(current) = noted.last_mut() {
+            current.events.push(ObservedEvent {
+                id,
+                ts_us: moment.ts_us,
+                app_bundle_id: Some(moment.win.app.into()),
+                window_title: Some(moment.win.title.clone()),
+                url: moment.win.url.clone(),
+                text: moment.win.main.clone(),
+                source: "screen_ocr".into(),
+            });
         }
     }
     // Searches come from the pages' addresses, as the agent reads them.
@@ -679,8 +722,43 @@ pub fn seed(
             put_summary(store, world, day, headline, narrative)?;
         }
     }
+    written.claims = put_claims(store, world, &kept)?;
+    ModelStatus {
+        state: "available".into(),
+        reason: None,
+        checked_us: Some(world.now_us.saturating_sub(20 * MIN)),
+    }
+    .write(store)
+    .map_err(|e| format!("model status: {e}"))?;
+    mci_agent::understanding::mark_noted_through(store, noted_through)
+        .map_err(|e| format!("state: {e}"))?;
+    Ok(written)
+}
+
+/// Input, measured in the app of each window held, up to now: five-second
+/// samples, as the helper measures them.
+fn measure_input(store: &SqlCipherBrainStore, world: &World) -> Result<(), String> {
+    for day in &world.days {
+        for session in &day.sessions {
+            let mut at = session.start_us;
+            for hold in &session.holds {
+                let end = (at + hold.minutes * MIN).min(world.now_us);
+                if at < end {
+                    activity(store, at, end, hold.win.app)?;
+                }
+                at += hold.minutes * MIN;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The lines about Ren, each with the moments that show it. Returns how
+/// many were written.
+fn put_claims(store: &SqlCipherBrainStore, world: &World, kept: &[Kept]) -> Result<usize, String> {
+    let mut written = 0;
     for item in &world.claims {
-        let evidence = evidence(&kept, item);
+        let evidence = evidence(kept, item);
         if evidence.is_empty() {
             continue;
         }
@@ -693,17 +771,8 @@ pub fn seed(
                 .confirm_proposition(id, learned)
                 .map_err(|e| format!("confirm: {e}"))?;
         }
-        written.claims += 1;
+        written += 1;
     }
-    ModelStatus {
-        state: "available".into(),
-        reason: None,
-        checked_us: Some(world.now_us.saturating_sub(20 * MIN)),
-    }
-    .write(store)
-    .map_err(|e| format!("model status: {e}"))?;
-    mci_agent::understanding::mark_noted_through(store, noted_through)
-        .map_err(|e| format!("state: {e}"))?;
     Ok(written)
 }
 

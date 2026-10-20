@@ -152,7 +152,11 @@ fn the_screen_list_needs_no_key_and_writes_nothing() {
 #[test]
 fn the_week_reads_as_the_window_expects() {
     let seeded = seed(None);
-    assert!(seeded.summary["moments"].as_u64().unwrap() > 600);
+    assert!(
+        seeded.summary["moments"].as_u64().unwrap() > 150,
+        "{}",
+        seeded.summary
+    );
     assert!(
         seeded.summary["notes"].as_u64().unwrap() >= 30,
         "{}",
@@ -463,5 +467,5 @@ fn the_drawing_tools_manifest_puts_screenshots_on_their_moments() {
             .output()
             .unwrap(),
     );
-    assert!(summary["screenshots"].as_u64().unwrap() >= 100, "{summary}");
+    assert!(summary["screenshots"].as_u64().unwrap() >= 40, "{summary}");
 }
