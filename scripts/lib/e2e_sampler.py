@@ -15,6 +15,10 @@ Output, in --out-dir:
   net.log            one line per internet socket seen (lsof's own fields)
   processes.log      pid, parent, program name and command line of each process
   outside-files.log  files open outside the run: pid, program, path
+  ocr-sandbox.log    for each running OCR worker (hippocampus-ocr), what the
+                     kernel says of it: pid, program, sandboxed, and whether
+                     network-outbound and network-bind are denied (1 or 0),
+                     one line per pid each time that changes
   summary.json       samples taken, processes watched, sockets seen
 It stops when --stop-file disappears.
 """
@@ -22,6 +26,7 @@ It stops when --stop-file disappears.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
 import os
 import subprocess
@@ -75,6 +80,33 @@ def descendants(table: dict[int, tuple[int, str]], root: int, exclude: int) -> l
     return found
 
 
+# The OCR worker runs inside a no-network sandbox (OCRWorkerSandbox). The
+# kernel answers for a running process whether it is sandboxed and whether an
+# operation is denied to it: sandbox_check(pid, operation, SANDBOX_FILTER_NONE).
+OCR_WORKER_NAME = "hippocampus-ocr"
+
+
+def sandbox_checker():
+    try:
+        check = ctypes.CDLL("/usr/lib/libSystem.B.dylib").sandbox_check
+    except (OSError, AttributeError):
+        return None
+    check.restype = ctypes.c_int
+    check.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+    return check
+
+
+def sandbox_state(check, pid: int) -> tuple[int, int, int] | None:
+    """(sandboxed, network-outbound denied, network-bind denied), each 1 or 0,
+    or None when the process is gone or the kernel won't say."""
+    if check is None:
+        return None
+    answers = (check(pid, None, 0), check(pid, b"network-outbound", 0), check(pid, b"network-bind", 0))
+    if any(answer not in (0, 1) for answer in answers):
+        return None
+    return answers
+
+
 def lsof(arguments: list[str]) -> str:
     return subprocess.run(
         ["/usr/sbin/lsof", *arguments], capture_output=True, text=True, check=False,
@@ -107,8 +139,11 @@ def main() -> int:
     sockets = 0
     watched: dict[int, str] = {}
     outside: set[str] = set()
+    check = sandbox_checker()
+    sandboxes: dict[int, tuple[int, int, int]] = {}
     with open(out / "net.log", "a", encoding="utf-8") as net, \
-         open(out / "processes.log", "a", encoding="utf-8") as processes:
+         open(out / "processes.log", "a", encoding="utf-8") as processes, \
+         open(out / "ocr-sandbox.log", "a", encoding="utf-8") as ocr_sandbox:
         while os.path.exists(args.stop_file):
             table = process_table()
             pids = descendants(table, args.root_pid, me)
@@ -121,6 +156,12 @@ def main() -> int:
                     # pid, parent, program name, command line
                     processes.write(f"{pid}\t{table[pid][0]}\t{os.path.basename(table[pid][1])}\t{command_line(pid)}\n")
                     processes.flush()
+                if os.path.basename(table[pid][1]) == OCR_WORKER_NAME:
+                    state = sandbox_state(check, pid)
+                    if state is not None and sandboxes.get(pid) != state:
+                        sandboxes[pid] = state
+                        ocr_sandbox.write(f"{pid}\t{OCR_WORKER_NAME}\t" + "\t".join(map(str, state)) + "\n")
+                        ocr_sandbox.flush()
             if pids:
                 listing = lsof(["-nP", "-a", "-i", "-p", ",".join(map(str, pids))])
                 for line in listing.splitlines()[1:]:

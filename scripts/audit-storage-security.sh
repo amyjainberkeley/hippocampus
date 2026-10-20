@@ -27,6 +27,9 @@
 #     never read);
 #   - no network: scripts/launch/no-egress.sh, and the runtime lsof -i samples
 #     of the run's own processes taken by scripts/lib/e2e_sampler.py;
+#   - no telemetry endpoint in the shipped binaries, except ONNX Runtime's in
+#     the OCR worker, which must be switched off three ways and, in the run,
+#     sandboxed with no network (sandbox_check on the running worker);
 #   - MCP answers, Ask and hook packets carry no secret marker.
 #
 # It never prints file contents, and it reads only the throwaway home, its
@@ -119,6 +122,10 @@ printf '{"samples": 5, "processes_watched": 2, "internet_sockets_seen": 1, "file
 printf '1.0\tmci-agent 1 me 9u IPv4 TCP 10.0.0.2:5000->1.2.3.4:443 (ESTABLISHED)\n' > "$ROOT/sampler-dirty/net.log"
 : > "$ROOT/sampler-dirty/processes.log"
 printf '2\tmci-agent\t%s/Documents/private.txt\n' "$HOME" > "$ROOT/sampler-dirty/outside-files.log"
+# What the sampler's sandbox_check saw of the running OCR worker.
+printf '3\thippocampus-ocr\t1\t1\t1\n' > "$ROOT/sampler-clean/ocr-sandbox.log"
+printf '4\thippocampus-ocr\t0\t0\t0\n' > "$ROOT/sampler-dirty/ocr-sandbox.log"
+mkdir -p "$ROOT/sampler-norun"
 printf '{"result":"Larkspur"}\n' > "$ROOT/output-clean.jsonl"
 printf '{"result":"card 4242 4242 4242 4242"}\n' > "$ROOT/output-dirty.jsonl"
 echo "$ROOT/output-clean.jsonl" > "$ROOT/outputs-clean.txt"
@@ -126,6 +133,48 @@ echo "$ROOT/output-dirty.jsonl" > "$ROOT/outputs-dirty.txt"
 
 make_home "$ROOT/clean" clean
 make_home "$ROOT/dirty" dirty
+# Made-up shipped binaries for net.binary: an OCR worker whose ONNX Runtime
+# carries the 1DS collector, frozen with (clean) or without (dirty) its
+# telemetry switches, a program that starts it with (clean) or without
+# (dirty) the switch and the no-network profile, and another library with a
+# different telemetry endpoint.
+make_binaries() {
+    # make_binaries DIR clean|dirty
+    python3 - "$1" "$2" "$REPO_ROOT/tools/ocr/worker.py" <<'PY'
+import hashlib, json, os, struct, sys, zlib
+root, kind, worker_py = sys.argv[1:]
+macho = b"\xcf\xfa\xed\xfe" + bytes(60)
+def write(relative, data):
+    path = os.path.join(root, relative)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as handle:
+        handle.write(data)
+    os.chmod(path, 0o755)
+# A PyInstaller executable: its archive's one entry script is "worker".
+script = (b"os.environ ORT_DISABLE_TELEMETRY 1 onnxruntime disable_telemetry_events"
+          if kind == "clean" else b"import onnxruntime")
+blob = zlib.compress(script)
+entry = struct.calcsize("!IIIIBc") + len(b"worker") + 1
+entry += (-entry) % 16
+toc = struct.pack("!IIIIBc", entry, 0, len(blob), len(script), 1, b"s") + b"worker".ljust(entry - 18, b"\0")
+cookie = struct.pack("!8sIIII64s", b"MEI\014\013\012\013\016", len(blob) + len(toc) + 88, len(blob), len(toc),
+                     312, b"libpython3.12.dylib")
+write("hippocampus-ocr/hippocampus-ocr", macho + blob + toc + cookie)
+frozen_from = hashlib.sha256(open(worker_py, "rb").read()).hexdigest() if kind == "clean" else "0" * 64
+write("hippocampus-ocr/build-manifest.json", json.dumps({"source_inputs": {"worker.py": frozen_from}}).encode())
+collector = b"https://mobile.events.data.microsoft.com/OneCollector/1.0/"
+write("hippocampus-ocr/_internal/onnxruntime/capi/libonnxruntime.1.30.0.dylib", macho + collector)
+write("hippocampus-ocr/_internal/onnxruntime/capi/onnxruntime_pybind11_state.so", macho + collector)
+launch = b"Contents/Resources/HippocampusOCR/hippocampus-ocr"
+if kind == "clean":
+    launch += (b" ORT_DISABLE_TELEMETRY /usr/bin/sandbox-exec (deny network-outbound) (deny network-bind) "
+               b"com.apple.dnssd.service")
+write("Helper", macho + launch)
+write("other/libtracker.dylib", macho + b"https://api.segment.io/v1/batch")
+PY
+}
+make_binaries "$ROOT/bin-clean" clean
+make_binaries "$ROOT/bin-dirty" dirty
 # A stand-in keyframe tool: opens with the clean home's key, refuses others.
 printf '#!/bin/sh\n[ "$MCI_DB_KEY_HEX" = "%s" ] || { echo '"'"'{"opened":false,"reason":"authentication_failed"}'"'"'; exit 3; }\necho '"'"'{"opened":true,"kind":"jpeg","bytes":10}'"'"'\n' \
     "$(cat "$ROOT/clean/Library/Application Support/MCI/dev.key")" > "$ROOT/keyframe-tool"
@@ -134,8 +183,35 @@ for kind in clean dirty; do
     python3 "$AUDIT" --repo "$REPO_ROOT" --home "$ROOT/$kind" --markers "$ROOT/markers.txt" \
         --key-file "$ROOT/$kind/Library/Application Support/MCI/dev.key" --keyframe-tool "$ROOT/keyframe-tool" \
         --sampler "$ROOT/sampler-$kind" --outputs "$ROOT/outputs-$kind.txt" --real-home "$HOME" \
+        --binaries "$ROOT/bin-$kind/hippocampus-ocr" --launcher "$ROOT/bin-$kind/Helper" \
         --skip pasteboard --skip custody --skip egress > "$ROOT/$kind.log" 2>&1 || true
 done
+# net.binary's other ways to fail, one at a time, around the clean binaries.
+binary_case() {
+    # binary_case NAME AUDIT-ARGUMENTS...
+    local name="$1"; shift
+    python3 "$AUDIT" --repo "$REPO_ROOT" --home "$ROOT/clean" --real-home "$HOME" \
+        --skip brain --skip blobs --skip wal --skip scan --skip pasteboard --skip modes --skip custody \
+        --skip egress --skip outputs "$@" > "$ROOT/binary-$name.log" 2>&1 || true
+}
+binary_case other --binaries "$ROOT/bin-clean/hippocampus-ocr" --binaries "$ROOT/bin-clean/other" \
+    --launcher "$ROOT/bin-clean/Helper" --sampler "$ROOT/sampler-clean"
+binary_case open-sandbox --binaries "$ROOT/bin-clean/hippocampus-ocr" --launcher "$ROOT/bin-clean/Helper" \
+    --sampler "$ROOT/sampler-dirty"
+binary_case not-run --binaries "$ROOT/bin-clean/hippocampus-ocr" --launcher "$ROOT/bin-clean/Helper" \
+    --sampler "$ROOT/sampler-norun"
+binary_case launcher --binaries "$ROOT/bin-clean/hippocampus-ocr" --launcher "$ROOT/bin-dirty/Helper" \
+    --sampler "$ROOT/sampler-clean"
+bundle_case() {
+    # bundle_case KIND: --telemetry-bundle's one line and exit status
+    if python3 "$AUDIT" --repo "$REPO_ROOT" --telemetry-bundle "$ROOT/bin-$1/hippocampus-ocr" > "$ROOT/bundle-$1.log" 2>&1; then
+        printf 'PASS  net.binary bundle (exit 0)\n' >> "$ROOT/bundle-$1.log"
+    else
+        printf 'FAIL  net.binary bundle (exit 1)\n' >> "$ROOT/bundle-$1.log"
+    fi
+}
+bundle_case clean
+bundle_case dirty
 expect "a SQLCipher-like brain passes the header check"      PASS brain.header   "$ROOT/clean.log"
 expect "a plain SQLite brain fails the header check"         FAIL brain.header   "$ROOT/dirty.log"
 expect "sqlite3 refuses random bytes"                        PASS brain.sqlite3  "$ROOT/clean.log"
@@ -156,6 +232,14 @@ expect "an internet socket in the samples fails"             FAIL net.runtime   
 expect "a file opened in the real home fails isolation"      FAIL net.isolation  "$ROOT/dirty.log"
 expect "outputs without secrets pass"                        PASS outputs        "$ROOT/clean.log"
 expect "a secret in an MCP answer fails"                     FAIL outputs        "$ROOT/dirty.log"
+expect "ONNX Runtime's client switched off and sandboxed passes" PASS net.binary "$ROOT/clean.log"
+expect "a worker frozen without its switches fails"          FAIL net.binary     "$ROOT/dirty.log"
+expect "another telemetry endpoint fails"                    FAIL net.binary     "$ROOT/binary-other.log"
+expect "a worker seen running with the network open fails"   FAIL net.binary     "$ROOT/binary-open-sandbox.log"
+expect "a worker never seen running fails"                   FAIL net.binary     "$ROOT/binary-not-run.log"
+expect "a launcher without the switch or sandbox fails"      FAIL net.binary     "$ROOT/binary-launcher.log"
+expect "a bundle with every switch passes on its own"        PASS "net.binary bundle" "$ROOT/bundle-clean.log"
+expect "a bundle frozen without its switches fails"          FAIL "net.binary bundle" "$ROOT/bundle-dirty.log"
 
 # The source checks run against this checkout, as in a real audit.
 python3 "$AUDIT" --repo "$REPO_ROOT" --home "$ROOT/clean" \

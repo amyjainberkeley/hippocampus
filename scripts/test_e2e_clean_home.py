@@ -190,6 +190,37 @@ class FullE2EContractTests(unittest.TestCase):
             self.assertNotIn(str(os.getpid()), [line.split("\t")[0] for line in watched])
             self.assertEqual(summary["internet_sockets_seen"], 0)
 
+    def test_sampler_records_whether_each_ocr_worker_runs_without_network(self):
+        # Two stand-ins named like the worker (a link to sleep keeps the name
+        # in ps): one inside a no-network sandbox, one not. The sampler must
+        # tell them apart from the running processes, as the audit reads it.
+        with tempfile.TemporaryDirectory(prefix="e2e-sampler-ocr-") as temporary:
+            root = Path(temporary)
+            (root / "bin").mkdir()
+            worker = root / "bin" / "hippocampus-ocr"
+            worker.symlink_to("/bin/sleep")
+            stop = root / "sampling"
+            stop.write_text("")
+            profile = "(version 1) (allow default) (deny network-outbound) (deny network-bind)"
+            tree = subprocess.Popen(["/bin/sh", "-c",
+                                     f"/usr/bin/sandbox-exec -p '{profile}' '{worker}' 30 & '{worker}' 30 & wait"])
+            sampler = subprocess.Popen([sys.executable, str(SAMPLER), "--root-pid", str(tree.pid),
+                                        "--run-root", str(root), "--out-dir", str(root / "out"),
+                                        "--stop-file", str(stop), "--interval", "0.2"])
+            log = root / "out" / "ocr-sandbox.log"
+            try:
+                deadline = time.monotonic() + 20
+                while time.monotonic() < deadline and not (log.exists() and len(log.read_text().splitlines()) >= 2):
+                    time.sleep(0.2)
+            finally:
+                stop.unlink()
+                sampler.wait(timeout=30)
+                subprocess.run(["/usr/bin/pkill", "-P", str(tree.pid)], check=False)
+                tree.kill()
+                tree.wait()
+            states = sorted(line.split("\t")[1:] for line in log.read_text().splitlines())
+            self.assertEqual(states, [["hippocampus-ocr", "0", "0", "0"], ["hippocampus-ocr", "1", "1", "1"]], states)
+
     def test_mcp_client_keeps_stdin_open_until_every_request_is_answered(self):
         with tempfile.TemporaryDirectory(prefix="e2e-mcp-") as temporary:
             root = Path(temporary)

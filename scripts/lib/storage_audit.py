@@ -24,7 +24,10 @@ Checks:
   modes            files 0600, folders 0700 in the product's folders
   custody.*        the production key path (source, cited by file:line)
   net.static       scripts/launch/no-egress.sh, on the tracked sources
-  net.binary       no telemetry endpoint compiled into a shipped binary
+  net.binary       no telemetry endpoint compiled into a shipped binary, but
+                   ONNX Runtime's in the OCR worker, switched off three ways
+                   (frozen script, source, launcher) and, in the run, inside
+                   a sandbox the kernel says denies it the network
   net.runtime      no internet socket on the run's processes, sampled by lsof
   net.runtime-log  no connection by the run's processes in the unified log
   net.isolation    the product's processes opened nothing in the real home
@@ -40,9 +43,11 @@ import math
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
+import zlib
 from pathlib import Path
 
 SQLITE_HEADER = b"SQLite format 3\x00"
@@ -500,6 +505,225 @@ TELEMETRY_ENDPOINTS = re.compile(
     rb"google-analytics\.com|app-measurement\.com|crashlytics|bugsnag\.com|telemetry\.[a-z0-9-]+\.(?:com|net|io)"
 )
 
+# ONNX Runtime 1.30, inside the frozen OCR worker, is Microsoft's official
+# build: its two native libraries carry the 1DS telemetry client and its
+# collector address. Removing them needs ONNX Runtime built from source with
+# --no_telemetry (a networked build), so the shipped client is instead
+# switched off three ways and denied the network, and net.binary checks
+# exactly that. Any other telemetry endpoint in a shipped binary fails.
+ORT_CLIENT_LIBRARY = re.compile(
+    r"(?:^|/)(?:HippocampusOCR|hippocampus-ocr)/_internal/onnxruntime/capi/"
+    r"(?:libonnxruntime[.0-9]*\.dylib|onnxruntime_pybind11_state[^/]*\.so)$")
+WORKER_SOURCE = "tools/ocr/worker.py"
+WORKER_SANDBOX_SOURCE = "adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/OCR/OCRWorkerSandbox.swift"
+WORKER_LAUNCH_SOURCES = (
+    "adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/OCR/PaddleOCRServer.swift",
+    "adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/OCR/PaddleOCRRunner.swift",
+)
+# What every program that starts the worker carries (PaddleOCRRunner's path to
+# it), and what its launch must carry with it (OCRWorkerSandbox).
+WORKER_LAUNCHER_MARK = b"Contents/Resources/HippocampusOCR/hippocampus-ocr"
+WORKER_LAUNCH_NEEDS = (b"ORT_DISABLE_TELEMETRY", b"/usr/bin/sandbox-exec", b"(deny network-outbound)",
+                       b"(deny network-bind)", b"com.apple.dnssd.service")
+MACHO_MAGICS = (b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xfe\xed\xfa\xcf")
+PYINSTALLER_COOKIE_MAGIC = b"MEI\014\013\012\013\016"
+PYINSTALLER_COOKIE = struct.Struct("!8sIIII64s")
+PYINSTALLER_TOC_ENTRY = struct.Struct("!IIIIBc")
+
+
+def pyinstaller_entry_script(executable: Path, name: str) -> bytes | None:
+    """The entry script `name` of a PyInstaller executable, decompressed (a
+    marshalled code object), read the way PyInstaller's CArchiveReader reads
+    it: the last cookie in the file, then its table of contents. None when
+    the file has no archive or no such script."""
+    data = read_capped(executable, 1024 * 1024 * 1024)
+    cookie = data.rfind(PYINSTALLER_COOKIE_MAGIC)
+    if cookie < 0 or cookie + PYINSTALLER_COOKIE.size > len(data):
+        return None
+    _magic, length, toc_offset, toc_length, _python, _library = PYINSTALLER_COOKIE.unpack_from(data, cookie)
+    start = cookie + PYINSTALLER_COOKIE.size - length
+    if start < 0:
+        return None
+    toc = data[start + toc_offset:start + toc_offset + toc_length]
+    position = 0
+    while position + PYINSTALLER_TOC_ENTRY.size <= len(toc):
+        entry_length, offset, size, _full, compressed, kind = PYINSTALLER_TOC_ENTRY.unpack_from(toc, position)
+        if entry_length < PYINSTALLER_TOC_ENTRY.size:
+            return None
+        entry = toc[position + PYINSTALLER_TOC_ENTRY.size:position + entry_length].rstrip(b"\0").decode(errors="replace")
+        position += entry_length
+        if kind == b"s" and entry == name:
+            blob = data[start + offset:start + offset + size]
+            try:
+                return zlib.decompress(blob) if compressed else blob
+            except zlib.error:
+                return None
+    return None
+
+
+def line_of(lines: list[str], pattern: str) -> int | None:
+    """1-based number of the first line matching `pattern`, or None."""
+    regex = re.compile(pattern)
+    return next((number for number, line in enumerate(lines, start=1) if regex.search(line)), None)
+
+
+def worker_source_switches(repo: Path) -> tuple[list[str], list[str]]:
+    """worker.py's own two switches: ORT_DISABLE_TELEMETRY=1 set before any
+    import but `os` (ONNX Runtime reads it when it loads, and rapidocr loads
+    it), and onnxruntime.disable_telemetry_events() called."""
+    evidence: list[str] = []
+    problems: list[str] = []
+    path = repo / WORKER_SOURCE
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path.is_file() else []
+    switch = line_of(lines, r"""^os\.environ\[['"]ORT_DISABLE_TELEMETRY['"]\]\s*=\s*['"]1['"]""")
+    first_import = next((number for number, line in enumerate(lines, start=1)
+                         if re.match(r"(import|from)\s", line) and line.strip() != "import os"), None)
+    if switch is None:
+        problems.append(f"{WORKER_SOURCE} never sets ORT_DISABLE_TELEMETRY=1")
+    elif first_import is not None and first_import < switch:
+        problems.append(f"{WORKER_SOURCE}:{switch} sets ORT_DISABLE_TELEMETRY=1 after an import (line {first_import})")
+    else:
+        evidence.append(f"{WORKER_SOURCE}:{switch} sets ORT_DISABLE_TELEMETRY=1 before any import but os")
+    call = line_of(lines, r"onnxruntime\.disable_telemetry_events\(\)")
+    if call is None:
+        problems.append(f"{WORKER_SOURCE} never calls onnxruntime.disable_telemetry_events()")
+    else:
+        evidence.append(f"calls disable_telemetry_events() at :{call}")
+    return evidence, problems
+
+
+def launcher_source_switch(repo: Path) -> tuple[list[str], list[str]]:
+    """OCRWorkerSandbox: the worker's environment carries the switch, its
+    profile denies the network, and both launch sites start the worker
+    through it."""
+    path = repo / WORKER_SANDBOX_SOURCE
+    text = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+    lines = text.splitlines()
+    problems = []
+    environment = line_of(lines, r'"ORT_DISABLE_TELEMETRY":\s*"1"')
+    if environment is None:
+        problems.append(f"{WORKER_SANDBOX_SOURCE} starts the worker without ORT_DISABLE_TELEMETRY=1")
+    for rule in ("(deny network-outbound)", "(deny network-inbound)", "(deny network-bind)", '"com.apple.dnssd.service"'):
+        if rule not in text:
+            problems.append(f"the worker's sandbox profile lacks {rule}")
+    for launch in WORKER_LAUNCH_SOURCES:
+        source = repo / launch
+        if not source.is_file() or ".prepare(" not in source.read_text(encoding="utf-8", errors="replace"):
+            problems.append(f"{launch} starts the worker without OCRWorkerSandbox.prepare")
+    evidence = [f"the helper starts it with ORT_DISABLE_TELEMETRY=1 ({Path(WORKER_SANDBOX_SOURCE).name}:{environment}) "
+                f"inside sandbox-exec with network-outbound, -inbound, -bind and name lookups denied"] if not problems else []
+    return evidence, problems
+
+
+def frozen_worker_switches(repo: Path, worker_dir: Path) -> tuple[list[str], list[str]]:
+    """The shipped worker itself: its entry script carries both switches, and
+    its build manifest says it was frozen from this checkout's worker.py."""
+    evidence: list[str] = []
+    problems: list[str] = []
+    name = worker_dir.name
+    script = pyinstaller_entry_script(worker_dir / "hippocampus-ocr", "worker")
+    if script is None:
+        problems.append(f"{name}/hippocampus-ocr has no readable 'worker' entry script")
+    else:
+        missing = [token for token in ("ORT_DISABLE_TELEMETRY", "disable_telemetry_events") if token.encode() not in script]
+        if missing:
+            problems.append(f"{name}/hippocampus-ocr's frozen worker.py lacks {', '.join(missing)}")
+        else:
+            evidence.append(f"{name}/hippocampus-ocr's frozen worker.py carries both")
+    try:
+        manifest = json.loads((worker_dir / "build-manifest.json").read_text())
+        frozen_from = manifest["source_inputs"]["worker.py"]
+    except (OSError, KeyError, TypeError, json.JSONDecodeError):
+        problems.append(f"{name}/build-manifest.json is missing or unreadable")
+    else:
+        source = repo / WORKER_SOURCE
+        if source.is_file() and frozen_from == hashlib.sha256(source.read_bytes()).hexdigest():
+            evidence.append(f"and was frozen from this worker.py ({frozen_from[:12]}…, build-manifest.json)")
+        else:
+            problems.append(f"{name} was frozen from another worker.py ({str(frozen_from)[:12]}…)")
+    return evidence, problems
+
+
+def launcher_binary_switches(paths: list[Path]) -> tuple[list[str], list[str], int]:
+    """Every program here that can start the worker carries the switch and the
+    no-network profile. Returns evidence, problems and how many it found."""
+    found = 0
+    problems = []
+    for path in paths:
+        data = read_capped(path)
+        if WORKER_LAUNCHER_MARK not in data:
+            continue
+        found += 1
+        missing = [token.decode() for token in WORKER_LAUNCH_NEEDS if token not in data]
+        if missing:
+            problems.append(f"{path.name} starts the worker without {', '.join(missing)}")
+    evidence = [f"{found} program(s) that start the worker carry the switch and the no-network profile"] if found and not problems else []
+    return evidence, problems, found
+
+
+def macho_files(roots: list[Path]) -> list[tuple[Path, Path]]:
+    """(file, the root it was found under) for every Mach-O file in `roots`."""
+    found = []
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in ([root] if root.is_file() else sorted(p for p in root.rglob("*") if p.is_file() and not p.is_symlink())):
+            if read_capped(path, 4) in MACHO_MAGICS:
+                found.append((path, root))
+    return found
+
+
+def telemetry_in_binaries(repo: Path, roots: list[Path], launchers: list[Path]) -> dict:
+    """Telemetry endpoints compiled into `roots` (shipped bundles or folders),
+    and, when the only ones are ONNX Runtime's in the OCR worker, whether its
+    client is switched off: the worker's two switches (source and frozen
+    build), and the launch's switch and no-network sandbox (source, and every
+    program in `roots` or `launchers` that starts the worker)."""
+    files = macho_files(roots)
+    hits: dict[str, set[str]] = {}
+    for path, root in files:
+        for match in set(TELEMETRY_ENDPOINTS.findall(read_capped(path))):
+            hits.setdefault(str(path.relative_to(root.parent)), set()).add(match.decode(errors="replace"))
+    other = sorted(name for name in hits if not ORT_CLIENT_LIBRARY.search(name))
+    ort = sorted(name for name in hits if ORT_CLIENT_LIBRARY.search(name))
+    evidence: list[str] = []
+    problems: list[str] = [f"{name}: {', '.join(sorted(hits[name]))}" for name in other]
+    if ort:
+        found, missing = worker_source_switches(repo)
+        evidence += found
+        problems += missing
+        worker_dirs = sorted({path.parent.parent.parent.parent for path, root in files
+                              if ORT_CLIENT_LIBRARY.search(str(path.relative_to(root.parent)))})
+        for worker_dir in worker_dirs:
+            found, missing = frozen_worker_switches(repo, worker_dir)
+            evidence += found
+            problems += missing
+        found, missing = launcher_source_switch(repo)
+        evidence += found
+        problems += missing
+        found, missing, _count = launcher_binary_switches([path for path, _root in files] + [Path(p) for p in launchers])
+        evidence += found
+        problems += missing
+    return {"scanned": len(files), "other": other, "ort": ort, "hits": hits, "evidence": evidence, "problems": problems}
+
+
+def worker_sandbox_evidence(sampler: Path | None) -> tuple[bool, str]:
+    """What the sampler saw of each running OCR worker: sandboxed, with
+    network-outbound and network-bind denied (sandbox_check on its pid)."""
+    log = sampler / "ocr-sandbox.log" if sampler else None
+    rows = [line.split("\t") for line in log.read_text().splitlines() if line] if log and log.is_file() else []
+    rows = [row for row in rows if len(row) == 5]
+    if not rows:
+        return False, "no OCR worker was seen running in this run, so its sandbox was not observed"
+    pids = sorted({row[0] for row in rows})
+    open_rows = [row for row in rows if row[2:] != ["1", "1", "1"]]
+    if open_rows:
+        return False, ("an OCR worker ran with the network open: " +
+                       "; ".join(f"pid {row[0]} sandboxed={row[2]} network-outbound denied={row[3]} network-bind denied={row[4]}"
+                                 for row in open_rows[:3]))
+    return True, (f"in this run the kernel reported the running worker ({len(pids)} process(es), pid {', '.join(pids[:4])}) "
+                  f"sandboxed with network-outbound and network-bind denied at every sample (sandbox_check)")
+
 
 def run_no_egress(repo: Path) -> tuple[int, str, int, str]:
     """no-egress.sh in place, and on a copy of only the tracked sources."""
@@ -524,8 +748,31 @@ def run_no_egress(repo: Path) -> tuple[int, str, int, str]:
     return in_place.returncode, last(in_place), snapshot.returncode, last(snapshot)
 
 
+def telemetry_verdict(scan: dict, runtime: tuple[bool, str] | None) -> tuple[bool, str]:
+    """net.binary's verdict. No endpoint passes. ONNX Runtime's client in the
+    OCR worker passes only when every switch is in place and, when `runtime`
+    is given, the running worker was seen in its no-network sandbox. Any
+    other endpoint fails."""
+    if not scan["hits"]:
+        return True, f"{scan['scanned']} Mach-O files in the shipped binaries carry no telemetry endpoint"
+    problems = list(scan["problems"])
+    if runtime is not None and scan["ort"] and not runtime[0]:
+        problems.append(runtime[1])
+    libraries = ", ".join(name.split("/capi/")[-1] for name in scan["ort"][:2])
+    if problems:
+        return False, ("telemetry in shipped binaries that is not switched off and kept off the network: " +
+                       "; ".join(problems[:6]))
+    message = (f"ONNX Runtime 1.30's own libraries in the OCR worker ({libraries}) still contain Microsoft's 1DS telemetry "
+               f"client and its collector address; it is switched off three ways: " + "; ".join(scan["evidence"]))
+    if runtime is not None:
+        message += f"; {runtime[1]}"
+    return True, message + (". Removing the client needs ONNX Runtime built from source with --no_telemetry "
+                            "(a networked build, not done yet)")
+
+
 def check_network(report: Report, repo: Path, sampler: Path | None, real_home: Path, repo_root: Path,
-                  binaries: list[Path], since: float | None, static: bool = True) -> None:
+                  binaries: list[Path], since: float | None, static: bool = True,
+                  launchers: list[Path] | None = None) -> None:
     if static:
         in_place_status, in_place_last, tracked_status, tracked_last = run_no_egress(repo)
         message = f"scripts/launch/no-egress.sh on the tracked sources: {tracked_last}"
@@ -534,24 +781,13 @@ def check_network(report: Report, repo: Path, sampler: Path | None, real_home: P
                         f"such as apps/hippocampus/.build/checkouts and tools/ocr/.venv, are not shipping source)")
         report.add(tracked_status == 0, "net.static", message)
 
-    # What the source audit cannot see: endpoints compiled into shipped binaries.
-    hits: dict[str, set[str]] = {}
-    scanned = 0
-    for root in binaries:
-        if not root.exists():
-            continue
-        for path in ([root] if root.is_file() else sorted(p for p in root.rglob("*") if p.is_file() and not p.is_symlink())):
-            head = read_capped(path, 4)
-            if head not in (b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xfe\xed\xfa\xcf"):
-                continue
-            scanned += 1
-            for match in set(TELEMETRY_ENDPOINTS.findall(read_capped(path))):
-                hits.setdefault(str(path.relative_to(root.parent if root.is_dir() else root.parent)), set()).add(match.decode(errors="replace"))
+    # What the source audit cannot see: endpoints compiled into shipped
+    # binaries. ONNX Runtime's client passes only switched off three ways and,
+    # in this run, inside the worker's no-network sandbox.
     if binaries:
-        report.add(not hits, "net.binary",
-                   f"{scanned} Mach-O files in the shipped bundle carry no telemetry endpoint" if not hits else
-                   "telemetry endpoints compiled into shipped binaries: " +
-                   "; ".join(f"{name}: {', '.join(sorted(found))}" for name, found in sorted(hits.items())[:4]))
+        scan = telemetry_in_binaries(repo, binaries, launchers or [])
+        ok, message = telemetry_verdict(scan, worker_sandbox_evidence(sampler))
+        report.add(ok, "net.binary", message)
 
     if sampler is None or not (sampler / "summary.json").is_file():
         report.add(False, "net.runtime", "no sampler summary: the runtime network check did not run")
@@ -726,7 +962,7 @@ def check_outputs(report: Report, listing: Path | None, markers, key_hex: str | 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--home", required=True)
+    parser.add_argument("--home")
     parser.add_argument("--tmpdir")
     parser.add_argument("--markers")
     parser.add_argument("--key-file")
@@ -740,8 +976,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sqlite3", default="/usr/bin/sqlite3")
     parser.add_argument("--binaries", action="append", default=[],
                         help="a shipped bundle or folder whose Mach-O files are scanned for telemetry endpoints")
+    parser.add_argument("--launcher", action="append", default=[],
+                        help="a program outside --binaries that started the OCR worker in this run")
+    parser.add_argument("--telemetry-bundle",
+                        help="only check this bundle's telemetry switches (no run): print one line, exit 0 when they hold")
     parser.add_argument("--skip", action="append", default=[], help="check groups to skip (self-test)")
     args = parser.parse_args(argv)
+
+    if args.telemetry_bundle:
+        ok, message = telemetry_verdict(telemetry_in_binaries(Path(args.repo).resolve(), [Path(args.telemetry_bundle)], []),
+                                        None)
+        print(message)
+        return 0 if ok else 1
+    if not args.home:
+        parser.error("--home is required")
 
     home = Path(args.home).resolve()
     support = home / "Library/Application Support/MCI"
@@ -786,7 +1034,8 @@ def main(argv: list[str] | None = None) -> int:
         check_custody(report, repo)
     if "network" not in skip:
         check_network(report, repo, Path(args.sampler) if args.sampler else None, Path(args.real_home), repo,
-                      [Path(b) for b in args.binaries], args.since, static="egress" not in skip)
+                      [Path(b) for b in args.binaries], args.since, static="egress" not in skip,
+                      launchers=[Path(b) for b in args.launcher])
     if "outputs" not in skip:
         check_outputs(report, Path(args.outputs) if args.outputs else None, markers, key_hex)
 

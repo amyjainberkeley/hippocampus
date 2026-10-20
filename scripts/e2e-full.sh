@@ -347,13 +347,17 @@ inspect_dmg() {
         spctl --assess --type execute -vv "$app" > "$H/$id-spctl.log" 2>&1
         person "$id.gatekeeper" "Gatekeeper and notarization apply to the signed release only; this ad-hoc build is rejected by design ($(grep -E '^source=|rejected' "$H/$id-spctl.log" | tail -n 1)). Opening the notarized DMG on a fresh account needs a person (HUMAN-CHECKLIST step 1)."
     fi
-    # Telemetry endpoints compiled into anything the app ships.
+    # Telemetry endpoints compiled into anything the app ships. ONNX Runtime
+    # 1.30's client in the OCR worker passes only when it is switched off
+    # three ways (the worker's own two switches, in its frozen script and
+    # source, and the launch's) and the programs that start the worker carry
+    # the no-network sandbox; the audit's net.binary also checks the running
+    # worker. Any other endpoint fails (storage_audit.py --telemetry-bundle).
     local telemetry
-    telemetry="$(grep -rlaE 'events\.data\.microsoft\.com|OneCollector' "$app/Contents" 2>/dev/null | sed "s|^$app/||" | head -n 5 | tr '\n' ' ')"
-    if [[ -z "$telemetry" ]]; then
-        pass "$id.telemetry" "no telemetry collector endpoint is compiled into anything in the bundle"
+    if telemetry="$(python3 "$SCRIPT_DIR/lib/storage_audit.py" --repo "$REPO_ROOT" --telemetry-bundle "$app" 2>&1)"; then
+        pass "$id.telemetry" "$telemetry"
     else
-        fail "$id.telemetry" "Microsoft's 1DS telemetry collector (mobile.events.data.microsoft.com/OneCollector) is compiled into: $telemetry(the OCR worker's ONNX Runtime 1.30)"
+        fail "$id.telemetry" "$telemetry"
     fi
     # Architectures.
     local archs_report="$H/$id-architectures.txt" arm_only=1 any_x86=0 line
@@ -1126,7 +1130,8 @@ if (( AUDIT == 1 )); then
         BINARIES+=(--binaries "$APP")
     else
         BINARIES+=(--binaries "$AGENT")
-        [[ -n "$OCR_WORKER" ]] && BINARIES+=(--binaries "$(dirname "$OCR_WORKER")")
+        # The fixture feed started the worker, through the helper's own launch.
+        [[ -n "$OCR_WORKER" ]] && BINARIES+=(--binaries "$(dirname "$OCR_WORKER")" --launcher "$FEED")
     fi
     if "$SCRIPT_DIR/audit-storage-security.sh" --home "$E2E_HOME" --tmpdir "$E2E_TMP" \
         --markers "$H/markers.txt" --key-file "$KEY_FILE" --wal-snapshots "$H/wal-snapshots" \

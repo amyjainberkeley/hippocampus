@@ -131,11 +131,17 @@ CPU share.
 - An address keeps every parameter whose name doesn't mark a credential
   (`access_token`, `code`, `key`, `sig`, `password` and the like are
   removed), so a token under another name can be stored with it.
-- The text reader's ONNX Runtime 1.30 still contains Microsoft's telemetry
-  client (audit check `net.binary`). The worker turns it off before ONNX
-  Runtime loads and runs with the network denied (`sandbox-exec`), and a
-  release stops if its worker starts any network request. Builds up to 0.3.0
-  did neither: their worker posted to a Microsoft collector over HTTPS (four
+- The text reader's ONNX Runtime 1.30 is Microsoft's official build, and it
+  still contains Microsoft's telemetry client. Hippocampus turns the client
+  off three ways: the worker sets `ORT_DISABLE_TELEMETRY=1` before ONNX
+  Runtime loads and calls `disable_telemetry_events()`, and the capture
+  helper starts the worker with `ORT_DISABLE_TELEMETRY=1`. The worker also
+  runs with the network denied (`sandbox-exec`), and a release stops if its
+  worker starts any network request. The audit check `net.binary` checks the
+  switches in the shipped worker and in the programs that start it, and the
+  sandbox on the running worker. Taking the client out needs an ONNX Runtime
+  built from source with `--no_telemetry`, which needs a build with network
+  access; that isn't done yet. Builds up to 0.3.0 did neither: their worker posted to a Microsoft collector over HTTPS (four
   requests, about 45 KB, in one test run). They left
   `~/Library/Caches/hippocampus-ocr` and `~/Library/HTTPStorages/hippocampus-ocr`,
   which the app now deletes when it starts, and ONNX Runtime's own
