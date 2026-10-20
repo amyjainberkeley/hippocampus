@@ -240,7 +240,7 @@ class FullE2EContractTests(unittest.TestCase):
             self.assertIn(literal, source, literal)
         # Only the fixture feed, which sandboxes the OCR worker itself, is left out.
         body = source.split("product_env() {", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn('[[ "$argument" == "$FEED" ]] && wrap=()', body)
+        self.assertIn('[[ "$argument" == "$FEED" && -n "${OCR_WORKER:-}" ]] && wrap=()', body)
 
     def test_tripwire_refuses_a_lookup_and_the_audit_finds_it_by_the_runs_tag(self):
         # The profile exactly as e2e-full.sh builds it. The probe only opens the

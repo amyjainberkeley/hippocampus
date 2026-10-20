@@ -211,13 +211,14 @@ TRIPWIRE_PROFILE="(version 1) (allow default)
 TRIPWIRE=()
 (( NET_TRIPWIRE == 1 )) && TRIPWIRE=(/usr/bin/sandbox-exec -p "$TRIPWIRE_PROFILE")
 # Every product program runs with this environment and nothing else, inside
-# the tripwire. The fixture feed is the exception: it starts the OCR worker
-# inside the product's own no-network sandbox, and sandboxes don't nest.
+# the tripwire. The fixture feed is the exception when it starts the PP-OCR
+# worker, which goes inside the product's own no-network sandbox: sandboxes
+# don't nest. With --ocr vision the feed is inside the tripwire too.
 product_env() {
     local wrap=(${TRIPWIRE[@]+"${TRIPWIRE[@]}"})
     local argument
     for argument in "$@"; do
-        [[ "$argument" == "$FEED" ]] && wrap=()
+        [[ "$argument" == "$FEED" && -n "${OCR_WORKER:-}" ]] && wrap=()
     done
     env -i \
         HOME="$E2E_HOME" CFFIXED_USER_HOME="$E2E_HOME" TMPDIR="$E2E_TMP/" \
