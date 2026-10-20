@@ -270,6 +270,8 @@ fn random_key() -> [u8; 32] {
     bytes
 }
 
+// The shape the change's `generate` hook takes; this one never fails.
+#[allow(clippy::unnecessary_wraps)]
 fn generate() -> Result<String, KeyResolutionError> {
     Ok(hex(&random_key()))
 }
@@ -1231,14 +1233,14 @@ fn a_kill_at_any_moment_resumes_and_finishes() {
         .unwrap_or_else(|error| panic!("round {round}: {error}"));
         match outcome {
             KeyChangeOutcome::Changed(report) => {
-                assert!(report.finished, "round {round}: {report:?}")
+                assert!(report.finished, "round {round}: {report:?}");
             }
             KeyChangeOutcome::NotNeeded => {}
             other => panic!("round {round}: {other:?}"),
         }
         fixture.assert_finished(&keychain);
     }
-    eprintln!("{killed_mid_change} of 20 kills landed mid-change");
+    mci_agent::errln!("{killed_mid_change} of 20 kills landed mid-change");
     assert!(
         killed_mid_change >= 6,
         "only {killed_mid_change} kills landed mid-change"
@@ -1272,7 +1274,7 @@ fn a_huge_store_changes_key_in_reasonable_time() {
         .unwrap()
         .map(|e| e.unwrap().metadata().unwrap().len())
         .sum();
-    eprintln!(
+    mci_agent::errln!(
         "huge store: {moments} moments, {} screenshots, database {} MB, screenshots {} MB, built in {:.1} s",
         fixture.expected.pictures.len(),
         db_bytes / 1_000_000,
@@ -1281,7 +1283,7 @@ fn a_huge_store_changes_key_in_reasonable_time() {
     );
     let timer = Instant::now();
     let report = changed(fixture.run(&keychain, &NoCheckpoints).unwrap());
-    eprintln!(
+    mci_agent::errln!(
         "huge store: key changed in {:.1} s ({} screenshots re-sealed)",
         timer.elapsed().as_secs_f64(),
         report.screenshots_resealed
@@ -1289,7 +1291,7 @@ fn a_huge_store_changes_key_in_reasonable_time() {
     assert!(report.finished);
     let verify = Instant::now();
     fixture.assert_finished(&keychain);
-    eprintln!(
+    mci_agent::errln!(
         "huge store: verified in {:.1} s",
         verify.elapsed().as_secs_f64()
     );
@@ -1359,7 +1361,7 @@ fn a_really_full_disk_undoes_or_postpones_and_loses_nothing() {
         checkpoints: &NoCheckpoints,
     };
     let outcome = key_change::run_key_change(&ctx).unwrap();
-    eprintln!("full disk, real probe: {outcome:?}");
+    mci_agent::errln!("full disk, real probe: {outcome:?}");
     assert!(
         matches!(outcome, KeyChangeOutcome::Deferred(_)),
         "{outcome:?}"
@@ -1371,7 +1373,7 @@ fn a_really_full_disk_undoes_or_postpones_and_loses_nothing() {
         ..ctx
     };
     let outcome = key_change::run_key_change(&ctx);
-    eprintln!("full disk, lying probe: {outcome:?}");
+    mci_agent::errln!("full disk, lying probe: {outcome:?}");
     let found = resolve_current_database_key(
         &keychain,
         &SqlCipherDatabaseKeyValidator,
@@ -1421,7 +1423,8 @@ fn ensure_key_settles_first_validates_then_changes_under_the_writer_lease() {
     let validate = body
         .find("initialize_database_key_with_remover(")
         .expect("validates the usual item");
-    let change = body.find("run_key_change(").expect("runs a due change");
+    let change = body.find("run_due_key_change(").expect("runs a due change");
+    assert!(source.contains("mci_agent::key_change::run_key_change(ctx)"));
     assert!(
         settle < validate && validate < change,
         "an unfinished change is settled before the usual item is read, and a due one runs after"
@@ -1431,9 +1434,10 @@ fn ensure_key_settles_first_validates_then_changes_under_the_writer_lease() {
         "a legacy key file is marked for the change, then shredded"
     );
     assert!(
-        body.contains("acquire_lock("),
+        body.contains("take_writer_lease("),
         "the change runs under the writer lease"
     );
+    assert!(source.contains("match acquire_lock(&lock_path_for_brain(db_path))"));
     assert!(
         source.contains("run_ensure_key_with_lease(db_path, Some(&lease))"),
         "init passes the lease it holds"

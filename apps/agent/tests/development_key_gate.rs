@@ -20,7 +20,11 @@ use mci_core::crypto::DbKey;
 fn key_pair() -> ([u8; 32], String) {
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes).expect("csprng");
-    let hex = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    let hex = bytes.iter().fold(String::new(), |mut out, byte| {
+        use std::fmt::Write as _;
+        let _ = write!(out, "{byte:02x}");
+        out
+    });
     (bytes, hex)
 }
 

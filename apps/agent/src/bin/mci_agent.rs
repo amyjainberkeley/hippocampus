@@ -3564,6 +3564,99 @@ impl mci_agent::key_change::KeychainDeleter for NativeKeychainDeleter {
     }
 }
 
+/// The writer lease for `ensure-key`'s changes: the caller's, one taken
+/// earlier, or a new one. False when another writer holds it.
+fn take_writer_lease(
+    db_path: &Path,
+    held: Option<&CommandWriterLease>,
+    own: &mut Option<CommandWriterLease>,
+) -> bool {
+    if held.is_some() || own.is_some() {
+        return true;
+    }
+    match acquire_lock(&lock_path_for_brain(db_path)) {
+        Ok((_, lock)) => {
+            *own = Some(CommandWriterLease {
+                command: WriterCommand::KeyChange,
+                unclean_prior_shutdown: false,
+                lock: Some(lock),
+            });
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// Finish an erase a crash or a refusal left (storage-security review S3).
+#[cfg(target_os = "macos")]
+fn finish_pending_erase(
+    support: &Path,
+    db_path: &Path,
+    service: &str,
+    deleter: &dyn mci_agent::key_change::KeychainDeleter,
+) -> Result<(), u8> {
+    let erase = mci_agent::erase::EraseContext {
+        support_dir: support,
+        db_path,
+        service,
+        deleter,
+    };
+    match mci_agent::erase::erase_memory(&erase) {
+        Ok(_) => {
+            outln!("  key      an unfinished erase was finished; the old key is gone");
+            Ok(())
+        }
+        Err(error) => {
+            errln!("hippocampus ensure-key: finishing the erase: {error}");
+            Err(35)
+        }
+    }
+}
+
+/// Run the key change a key file or the adoption marker asks for, when
+/// `ensure-key` holds the writer lease; postpone it otherwise.
+#[cfg(target_os = "macos")]
+fn run_due_key_change(
+    ctx: &mci_agent::key_change::KeyChangeContext<'_>,
+    lease_held: bool,
+) -> Result<(), u8> {
+    if !lease_held {
+        outln!("  key      key change postponed: another writer holds the memory");
+        return Ok(());
+    }
+    match mci_agent::key_change::run_key_change(ctx) {
+        Ok(outcome) => {
+            report_key_change(&outcome);
+            Ok(())
+        }
+        Err(error) => {
+            errln!("hippocampus ensure-key: key change: {error}");
+            Err(34)
+        }
+    }
+}
+
+/// Print what `ensure-key` found or did to the usual item.
+fn report_key_initialization(outcome: key_resolver::KeyInitializationOutcome) {
+    match outcome {
+        key_resolver::KeyInitializationOutcome::AlreadyPresent => {
+            outln!("  key      existing Keychain item validated");
+        }
+        key_resolver::KeyInitializationOutcome::Created => {
+            outln!("  key      created in macOS Keychain with bundled-executable ACL");
+        }
+        key_resolver::KeyInitializationOutcome::MigratedLegacyKey => {
+            outln!("  key      legacy database key migrated and validated");
+        }
+        key_resolver::KeyInitializationOutcome::ConcurrentItemValidated => {
+            outln!("  key      concurrent Keychain item re-read and validated");
+        }
+        key_resolver::KeyInitializationOutcome::CompletedInterruptedMigration => {
+            outln!("  key      interrupted legacy migration completed and plaintext removed");
+        }
+    }
+}
+
 /// Print what a key change did, one content-free line.
 fn report_key_change(outcome: &mci_agent::key_change::KeyChangeOutcome) {
     use mci_agent::key_change::KeyChangeOutcome;
@@ -3759,22 +3852,8 @@ fn run_ensure_key_with_lease(db_path: &Path, held: Option<&CommandWriterLease>) 
             checkpoints: &key_change::NoCheckpoints,
         };
         let mut own_lease: Option<CommandWriterLease> = None;
-        let take_lease = |own: &mut Option<CommandWriterLease>| -> bool {
-            if held.is_some() || own.is_some() {
-                return true;
-            }
-            match acquire_lock(&lock_path_for_brain(db_path)) {
-                Ok((_, lock)) => {
-                    *own = Some(CommandWriterLease {
-                        command: WriterCommand::KeyChange,
-                        unclean_prior_shutdown: false,
-                        lock: Some(lock),
-                    });
-                    true
-                }
-                Err(_) => false,
-            }
-        };
+        let take_lease =
+            |own: &mut Option<CommandWriterLease>| take_writer_lease(db_path, held, own);
 
         // 0. An erase left unfinished is finished first: its key must never
         // be used for a new memory (storage-security review S3).
@@ -3785,17 +3864,7 @@ fn run_ensure_key_with_lease(db_path: &Path, held: Option<&CommandWriterLease>) 
                 );
                 return Err(35);
             }
-            let erase = mci_agent::erase::EraseContext {
-                support_dir: &support,
-                db_path,
-                service: &reference.service,
-                deleter: &deleter,
-            };
-            if let Err(error) = mci_agent::erase::erase_memory(&erase) {
-                errln!("hippocampus ensure-key: finishing the erase: {error}");
-                return Err(35);
-            }
-            outln!("  key      an unfinished erase was finished; the old key is gone");
+            finish_pending_erase(&support, db_path, &reference.service, &deleter)?;
         }
 
         // 1. An unfinished key change goes on, or is undone, and a key left
@@ -3834,38 +3903,11 @@ fn run_ensure_key_with_lease(db_path: &Path, held: Option<&CommandWriterLease>) 
             33
         })?;
 
-        match outcome {
-            key_resolver::KeyInitializationOutcome::AlreadyPresent => {
-                outln!("  key      existing Keychain item validated");
-            }
-            key_resolver::KeyInitializationOutcome::Created => {
-                outln!("  key      created in macOS Keychain with bundled-executable ACL");
-            }
-            key_resolver::KeyInitializationOutcome::MigratedLegacyKey => {
-                outln!("  key      legacy database key migrated and validated");
-            }
-            key_resolver::KeyInitializationOutcome::ConcurrentItemValidated => {
-                outln!("  key      concurrent Keychain item re-read and validated");
-            }
-            key_resolver::KeyInitializationOutcome::CompletedInterruptedMigration => {
-                outln!("  key      interrupted legacy migration completed and plaintext removed");
-            }
-        }
+        report_key_initialization(outcome);
 
         // 3. A key that once sat in a file is replaced, once.
-        let due = key_change::key_change_due(&support).unwrap_or(true);
-        if due {
-            if take_lease(&mut own_lease) {
-                match key_change::run_key_change(&ctx) {
-                    Ok(outcome) => report_key_change(&outcome),
-                    Err(error) => {
-                        errln!("hippocampus ensure-key: key change: {error}");
-                        return Err(34);
-                    }
-                }
-            } else {
-                outln!("  key      key change postponed: another writer holds the memory");
-            }
+        if key_change::key_change_due(&support).unwrap_or(true) {
+            run_due_key_change(&ctx, take_lease(&mut own_lease))?;
         }
         drop(own_lease);
         Ok(())

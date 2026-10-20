@@ -1678,7 +1678,7 @@ pub fn shred_file(path: &Path) -> Result<(), KeyChangeError> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            options.custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed());
+            options.custom_flags(i32::try_from(rustix::fs::OFlags::NOFOLLOW.bits()).unwrap_or(0));
         }
         if let Ok(mut file) = options.open(path) {
             let length = usize::try_from(metadata.len()).unwrap_or(0).min(1 << 20);

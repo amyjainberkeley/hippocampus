@@ -5,14 +5,14 @@
 use std::io::Write as _;
 use std::path::Path;
 
-/// Write the lines `fill` produces to `out`: first to a new temporary file
+/// Write the lines `produce` makes to `out`: first to a new temporary file
 /// beside it, created mode 0600 (never readable by another account, not
-/// even for a moment), synced, then renamed over `out`. Returns what `fill`
-/// returns. On any failure the temporary file goes and `out` is untouched.
+/// even for a moment), synced, then renamed over `out`. Returns what
+/// `produce` returns. On any failure the temporary file goes and `out` is untouched.
 ///
 /// # Errors
-/// The folder can't be written, a line can't be written, or `fill` failed.
-pub fn write_private_jsonl<F>(out: &Path, fill: F) -> std::io::Result<u64>
+/// The folder can't be written, a line can't be written, or `produce` failed.
+pub fn write_private_jsonl<F>(out: &Path, produce: F) -> std::io::Result<u64>
 where
     F: FnOnce(&mut dyn FnMut(&str) -> std::io::Result<()>) -> std::io::Result<u64>,
 {
@@ -26,7 +26,11 @@ where
         .unwrap_or("export");
     let mut nonce = [0u8; 8];
     let _ = getrandom::fill(&mut nonce);
-    let suffix: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
+    let suffix = nonce.iter().fold(String::new(), |mut out, byte| {
+        use std::fmt::Write as _;
+        let _ = write!(out, "{byte:02x}");
+        out
+    });
     let temporary = dir.join(format!(".{name}.{suffix}.tmp"));
     let result = (|| {
         let mut options = std::fs::OpenOptions::new();
@@ -36,19 +40,19 @@ where
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
         }
-        let file = options.open(&temporary)?;
-        let mut writer = std::io::BufWriter::new(file);
+        let handle = options.open(&temporary)?;
+        let mut writer = std::io::BufWriter::new(handle);
         let count = {
             let mut sink = |line: &str| -> std::io::Result<()> {
                 writer.write_all(line.as_bytes())?;
                 writer.write_all(b"\n")
             };
-            fill(&mut sink)?
+            produce(&mut sink)?
         };
-        let file = writer
+        let written = writer
             .into_inner()
             .map_err(std::io::IntoInnerError::into_error)?;
-        file.sync_all()?;
+        written.sync_all()?;
         std::fs::rename(&temporary, out)?;
         Ok(count)
     })();

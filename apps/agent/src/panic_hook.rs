@@ -51,6 +51,7 @@ fn install_to(path: PathBuf) {
 }
 
 /// The default panic log path: `~/Library/Logs/MCI/panic.jsonl`.
+#[must_use]
 pub fn default_panic_log_path() -> PathBuf {
     let home = mci_core::home::user_home_or_unwritable();
     home.join("Library/Logs/MCI/panic.jsonl")
