@@ -776,26 +776,20 @@ struct MemoryWorkspaceView: View {
     // MARK: What the controls do
 
     /// The banner's button, and the menu's actions. Every change to
-    /// remembering goes over the private pipe; navigation never does.
+    /// remembering goes over the private pipe as the op the app carries out
+    /// for that click (`WindowStatusActions`); navigation never does. Leave
+    /// Demo Memory is the app's own Leave, which keeps a pause the person
+    /// made, never a Resume (SPEC-DELTA 6).
     private func perform(_ action: WindowStatus.Action) {
-        switch action {
-        case .pause: send(.pause)
-        case .resume, .resumeNow: send(.resume)
-        case .turnOn: send(.turnOn)
-        case .turnOff: send(.pause)
-        case let .openSystemSettings(permission): send(.openSystemSettings, permission: permission.rawValue)
-        case .tryAgain: send(.tryAgain)
-        case .quit: send(.quit)
+        switch WindowStatusActions.effect(of: action) {
+        case let .send(op, permission):
+            send(op, permission: permission)
         case .finishSetup:
             guard !isSyntheticPreview, let url = URL(string: "hippocampus://onboarding/show") else { return }
             NSWorkspace.shared.open(url)
         case .openHippocampus:
             guard !isSyntheticPreview else { return }
             NSWorkspace.shared.open(Bundle.main.bundleURL)
-        case .leaveDemoMemory:
-            // The app's Resume ends Demo Memory and reopens the window on
-            // the person's own memory (SPEC-DELTA 6).
-            send(.resume)
         }
     }
 

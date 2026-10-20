@@ -45,6 +45,10 @@ public enum WindowChannelProtocol {
         /// seconds while they do, and never awaited: an app that doesn't know
         /// it ignores the line.
         case renew
+        /// Leave Demo Memory: back to the person's own memory with
+        /// remembering as it was before, a pause they made included, as the
+        /// menu bar's Leave does. Never a Resume.
+        case leaveDemo
         /// The app pushes this; the window never sends it.
         case status
     }
