@@ -91,7 +91,10 @@ public enum HandoffCopy {
     public static let looksThingsUp = "Looks things up when a question needs it."
     public static func turnedOffIn(_ tool: String) -> String { "Turned off in \(tool)’s own settings" }
     public static let codexAsked = "Asked to fetch your recent work when a task starts. Codex decides."
-    public static let chatGPTShares = "ChatGPT’s desktop app uses Codex’s settings, so it can look things up too."
+    /// Connect writes Hippocampus into Codex's settings file, which Codex in
+    /// ChatGPT's desktop app reads too, as OpenAI documents it. ChatGPT's
+    /// own chats can't use it yet (`chatGPTUse`).
+    public static let chatGPTShares = "Codex in ChatGPT’s desktop app uses the same settings, so it can look things up too."
     public static let codexNeedsStep = "Needs a step in Codex"
     public static let codexStep = "Codex asks you to allow new hooks once. Type /hooks in Codex and allow Hippocampus."
     public static let overridden = "Overridden by your AGENTS.override.md file"
@@ -101,15 +104,18 @@ public enum HandoffCopy {
     public static let off = "Off"
     public static let whatItStartsWith = "What It Starts With"
     public static let showExactText = "Show the Exact Text"
-    /// "About 120 words. Nothing you read on screen is in it."
+    /// "About 120 words, written on this Mac from what you read on screen."
+    /// The exact text opens by saying it is from the screen: the session
+    /// titles and what a model wrote about them, and what was learned
+    /// about the person (`render_understanding_block` in apps/agent).
     public static func startsWithSize(words: Int) -> String {
-        "About \(words) words. Nothing you read on screen is in it."
+        "About \(words) words, written on this Mac from what you read on screen."
     }
     public static func notConnectedNote(_ tool: String) -> String {
         "Once connected, it gets your recent work at each session start, and you can read every word here."
     }
     public static let codexNotConnectedNote =
-        "ChatGPT’s desktop app uses Codex’s settings, so connecting Codex lets it look things up too."
+        "Codex in ChatGPT’s desktop app uses the same settings, so connecting Codex lets it look things up too."
     public static let connectButton = "Connect…"
     public static let opens = "opens"
     public static let oneKeyTail = "with what you picked in its message box. You press send."

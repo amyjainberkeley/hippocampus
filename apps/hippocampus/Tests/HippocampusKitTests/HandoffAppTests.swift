@@ -308,7 +308,7 @@ final class HandoffCopyTests: XCTestCase {
         XCTAssertEqual(HandoffCopy.connectMessage("Claude Code and Codex", count: 2, chatGPTInstalled: true),
                        "They can search what you’ve seen and read your sessions, your day and what Hippocampus learned about you, "
                        + "when a question needs it. What they read goes to the companies that run them. They can read while "
-                       + "Hippocampus is quit. ChatGPT’s desktop app uses Codex’s settings, so it can look things up too.")
+                       + "Hippocampus is quit. Codex in ChatGPT’s desktop app uses the same settings, so it can look things up too.")
         XCTAssertEqual(HandoffCopy.connectMessage("Claude Code", count: 1, chatGPTInstalled: false),
                        "It can search what you’ve seen and read your sessions, your day and what Hippocampus learned about you, "
                        + "when a question needs it. What it reads goes to the company that runs Claude Code. It can read while "

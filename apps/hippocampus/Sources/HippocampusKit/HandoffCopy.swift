@@ -115,7 +115,10 @@ public enum HandoffCopy {
         "Connected tools can still read your memory while Hippocampus is quit; Disconnect stops that."
     public static let lookUpsSwitch = "Look things up in my memory"
     public static let sessionSwitch = "Start each session with my recent work"
-    public static let chatGPTShares = "ChatGPT’s desktop app uses Codex’s settings, so it can look things up too."
+    /// Connect writes Hippocampus into Codex's settings file
+    /// (`~/.codex/config.toml`), which Codex in ChatGPT's desktop app reads
+    /// too, as OpenAI documents it. ChatGPT's own chats can't use it yet.
+    public static let chatGPTShares = "Codex in ChatGPT’s desktop app uses the same settings, so it can look things up too."
     public static let codexNeedsStep = "Needs a step in Codex"
     public static let codexStep = "Codex asks you to allow new hooks once. Type /hooks in Codex and allow Hippocampus."
 
@@ -138,12 +141,17 @@ public enum HandoffCopy {
 
     public static let sessionTitle = "Start each session with your recent work?"
 
+    /// What a session starts with, exactly (`render_understanding_block` in
+    /// apps/agent): up to four lines of recent work, each a session's title
+    /// and what a model on this Mac wrote about it, and up to six things
+    /// learned about the person, with the moments behind them. All of it is
+    /// made from the screen, so it says so.
     public static func sessionMessage(_ names: String, count: Int, codex: Bool) -> String {
         let gets = count == 1 ? "gets" : "get"
-        let receiver = count == 1 ? "The company that runs \(names) receives it." : "The company that runs each tool receives it."
-        var message = "At the start of each session, \(names) \(gets) your recent work and up to six things "
-            + "Hippocampus learned about you, with sources. Nothing you read on screen is in it. "
-            + "It can include other projects. \(receiver)"
+        let receiver = count == 1 ? "The company that runs \(names) receives them." : "The company that runs each tool receives them."
+        var message = "At the start of each session, \(names) \(gets) up to four lines of your recent work and up to "
+            + "six things Hippocampus learned about you, with sources. Both are written on this Mac from what you "
+            + "read on screen, and can include other projects. \(receiver)"
         if codex { message += " " + codexStep }
         return message
     }

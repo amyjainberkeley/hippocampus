@@ -95,11 +95,11 @@ final class AIToolsModelTests: XCTestCase {
     func testChatGPTSharesCodexsSettings() {
         let codex = AIToolsModel.card(Self.status("codex", kind: "instruction"), chatGPTInstalled: true,
                                       appURL: codexApp)
-        XCTAssertEqual(codex.lines.last, "ChatGPT’s desktop app uses Codex’s settings, so it can look things up too.")
+        XCTAssertEqual(codex.lines.last, "Codex in ChatGPT’s desktop app uses the same settings, so it can look things up too.")
         let off = AIToolsModel.card(Self.status("codex", lookUps: "off", start: "off", kind: nil),
                                     chatGPTInstalled: true, appURL: codexApp)
         XCTAssertFalse(off.connected)
-        XCTAssertEqual(off.lines, ["ChatGPT’s desktop app uses Codex’s settings, so connecting Codex lets it look things up too."])
+        XCTAssertEqual(off.lines, ["Codex in ChatGPT’s desktop app uses the same settings, so connecting Codex lets it look things up too."])
         XCTAssertFalse(off.showsSessionSwitch)
         let claudeOff = AIToolsModel.card(Self.status("claude-code", lookUps: "off", start: "off", kind: nil),
                                           chatGPTInstalled: true, appURL: claudeApp)

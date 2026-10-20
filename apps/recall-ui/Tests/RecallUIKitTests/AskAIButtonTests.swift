@@ -342,7 +342,10 @@ final class WindowHandoffCopyTests: XCTestCase {
         XCTAssertEqual(HandoffCopy.opened("Claude"), "Opened in Claude. You send it from there.")
         XCTAssertEqual(HandoffCopy.copyAndOpen("ChatGPT"), "Copy and Open ChatGPT")
         XCTAssertEqual(HandoffCopy.lead, "Nothing leaves this Mac unless you send it, or a tool you connected asks for it.")
-        XCTAssertEqual(HandoffCopy.startsWithSize(words: 120), "About 120 words. Nothing you read on screen is in it.")
+        // The exact text opens "From the user's screen": the size line says
+        // what it is made from, never that the screen is left out.
+        XCTAssertEqual(HandoffCopy.startsWithSize(words: 120),
+                       "About 120 words, written on this Mac from what you read on screen.")
     }
 
     /// Every window word for handing context passes the launch copy rules.
