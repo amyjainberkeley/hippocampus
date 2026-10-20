@@ -143,9 +143,9 @@ final class OnboardingCopyTests: XCTestCase {
     // MARK: - The other screens
 
     func testWelcomeAndPermissionsFollowTheKey() {
+        // What Hippocampus does for the person, in their words (launch
+        // playbook, decision 4).
         XCTAssertEqual(OnboardingCopy.welcomeTitle, "Your work, remembered.")
-        // Another screen memory's headline, word for word: never ours.
-        XCTAssertNotEqual(OnboardingCopy.welcomeTitle, "Your Mac, with a memory.")
         XCTAssertEqual(OnboardingCopy.welcomeBody(.shiftTwice), "Press ⇧ ⇧ and ask about your screen, now or earlier.")
         XCTAssertEqual(OnboardingCopy.welcomeBody(.rightOption), "Tap right ⌥ and ask about your screen, now or earlier.")
         XCTAssertEqual(OnboardingCopy.welcomeBody(.chord), "Press ⌃ ⇧ Space and ask about your screen, now or earlier.")

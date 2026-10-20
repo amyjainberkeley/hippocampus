@@ -13,8 +13,7 @@ public enum OnboardingCopy {
     // Welcome
 
     /// Says what Hippocampus does for the person, in their words (launch
-    /// playbook, decision 4). "Your Mac, with a memory." was another
-    /// screen memory's headline, word for word, so it is never used.
+    /// playbook, decision 4): their work, not the Mac, is what it keeps.
     public static let welcomeTitle = "Your work, remembered."
     /// Follows the keycaps: "Press ⇧ ⇧ and ask about your screen, now or earlier."
     public static let welcomeBodyAfterKeys = "and ask about your screen, now or earlier."
