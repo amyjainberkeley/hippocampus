@@ -1,0 +1,22 @@
+[app=com.google.Chrome | title=Invoice 1042 from Northwind Supplies - sam@northwind.example - Gmail | url=https://mail.google.com/mail/u/0/#inbox/FMfcgzQ | ts=2026-10-12T14:02:00.000Z]
+M Invoice 1042 from North… × D Rounding half to even · Dev No × +
+< > C mail.google.com/mail/u/0/#inbox/FMfcgzQ ☆
+Gmail Q Search mail
+Compose
+Inbox 1,204
+Starred
+Snoozed
+Sent
+Drafts 3
+More
+Invoice 1042 from Northwind Supplies Inbox ×
+Dana Whitfield <dana@northwind.example>
+to me
+Hi Sam,
+Thanks for your order. The invoice for October is attached, and the amount due is $1,240.00
+by October 30. The purchase order number has not changed.
+Best,
+Dana
+--
+Dana Whitfield
+Northwind Supplies

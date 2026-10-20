@@ -1,0 +1,21 @@
+[app=com.google.Chrome | title=Rounding half to even · Dev Notes | url=https://devnotes.example/rounding | ts=2026-10-12T14:02:00.000Z]
+MONEY & ROUNDING
+Rounding half to even
+Why banker’s rounding keeps order totals from drifting by a cent
+Priya Raman · Oct 12, 2026 · 6 min read
+Round half up looks fair, but every tie goes the same way. Over thousands of orders the extra
+half cents add up, and the books stop matching the bank by a few dollars
+a month.
+Round half to even sends each tie to the even neighbour instead, so half the
+ties go down and
+half go up. The errors cancel out:
+round_half_even(2.5)   // 2.0
+round_half_even(3.5)   // 4.0
+Most payment processors already round this way. Matching them means the total a
+customer sees is the total that settles, to the cent.
+Next: Currency math without floats
+
+
+D Rounding half to even · Dev No × 31 Northwind - Calen × ✓ Q4 planning - Google Do… × +
+< > C devnotes.example/rounding ☆
+Dev Notes Articles Topics About Subscribe

@@ -69,6 +69,32 @@ public enum ReadableText {
             .replacingOccurrences(of: "\u{1E}", with: " ")
     }
 
+    /// `block` with no U+001E in any text it holds (the reader never writes
+    /// one; this is the last check, as for `main`).
+    public static func guarded(_ block: ReadingBlock) -> ReadingBlock {
+        func clean(_ text: String) -> String {
+            text.contains("\u{1E}") ? text.replacingOccurrences(of: "\u{1E}", with: " ") : text
+        }
+        switch block {
+        case let .label(text): return .label(clean(text))
+        case let .heading(level, text): return .heading(level: level, text: clean(text))
+        case let .byline(text): return .byline(clean(text))
+        case let .paragraph(text): return .paragraph(clean(text))
+        case let .list(items):
+            return .list(items.map {
+                ReadingListItem(marker: clean($0.marker), text: clean($0.text), depth: $0.depth, checked: $0.checked)
+            })
+        case let .code(text): return .code(clean(text))
+        case let .terminal(text, prompts): return .terminal(text: clean(text), prompts: prompts)
+        case let .table(rows, numeric): return .table(rows: rows.map { $0.map(clean) }, numeric: numeric)
+        case let .lines(lines, table): return .lines(lines.map(clean), table: table)
+        case let .turn(speaker, time, text): return .turn(speaker: clean(speaker), time: clean(time), text: clean(text))
+        case let .quote(text): return .quote(clean(text))
+        case let .meta(text): return .meta(clean(text))
+        case let .other(kind, text): return .other(kind: kind, text: clean(text))
+        }
+    }
+
     /// The parts of stored text without any cleaning: what was read, and the
     /// rest of the window (contract reading.md 2.1 steps 1, 2 and 5). Screen
     /// text is cut at the chrome separator; a browser page read both ways is
@@ -116,11 +142,11 @@ public struct EventReading: Sendable, Equatable {
     /// Both parts come from the same bounded read as `EventText`.
     public static let maxUTF8Bytes = EventText.maxUTF8Bytes + 1024
     /// The two parts escaped at worst; `main` again as the reading's
-    /// `blocks`, which hold only text of `main`, with 64 KiB for their kinds
-    /// (one block today; more kinds of block need more room); the other
-    /// fields; and a caption (at most 200 characters on one line, so at most
-    /// 2 KiB as JSON).
-    static let maxJSONBytes = (EventText.maxUTF8Bytes + 1024) * 6 * 2 + 64 * 1024 + 512 + 2048
+    /// `blocks`, which hold only text of `main`, with the structure the FFI
+    /// adds around it (`ReadingBlocks.maxStructureBytes`, `MAX_STRUCTURE_BYTES`
+    /// in Rust); the other fields; and a caption (at most 200 characters on
+    /// one line, so at most 2 KiB as JSON).
+    static let maxJSONBytes = (EventText.maxUTF8Bytes + 1024) * 6 * 2 + ReadingBlocks.maxStructureBytes + 512 + 2048
 
     public let eventId: UInt64
     public let tsUs: UInt64
@@ -136,11 +162,15 @@ public struct EventReading: Sendable, Equatable {
     public let isTruncated: Bool
     /// What the moment was about, one short line, when there is one.
     public let caption: String?
+    /// `main` as typed blocks (headings, paragraphs, lists, code …), as the
+    /// FFI makes them (SPEC 4.2). Empty from a reader without them: the
+    /// window then draws `main` as it always has.
+    public let blocks: [ReadingBlock]
 
     public init(
         eventId: UInt64, tsUs: UInt64, appBundleId: String?, sourceKind: String?,
         main: String, rest: String, matchIn: Match? = nil, isTruncated: Bool,
-        caption: String? = nil
+        caption: String? = nil, blocks: [ReadingBlock] = []
     ) throws {
         let main = ReadableText.guarded(main)
         let rest = ReadableText.guarded(rest)
@@ -158,6 +188,9 @@ public struct EventReading: Sendable, Equatable {
         self.matchIn = matchIn
         self.isTruncated = isTruncated
         self.caption = MomentRowText.caption(caption)
+        // Blocks hold only text of `main`: the same guard on what a person
+        // reads, and none when `main` holds nothing.
+        self.blocks = main.isEmpty ? [] : blocks.map(ReadableText.guarded)
     }
 
     /// The reading of stored text from a reader without the FFI's reading:
@@ -173,6 +206,7 @@ public struct EventReading: Sendable, Equatable {
         self.matchIn = nil
         self.isTruncated = text.isTruncated
         self.caption = nil
+        self.blocks = []
     }
 
     /// Ids can be reused after a delete: use a reading only for the moment it was read for.
@@ -180,10 +214,14 @@ public struct EventReading: Sendable, Equatable {
         eventId == hit.id && tsUs == hit.tsUs && appBundleId == hit.appBundleId
     }
 
-    /// What "Copy Text" copies: `main`, then `rest` when it is shown. Never a header.
+    /// What "Copy Text" copies: what was read, with its structure kept
+    /// (blocks set apart by blank lines, list markers and code lines as read,
+    /// no Markdown symbol added, SPEC 4.7), then `rest` when it is shown.
+    /// Never a header.
     public func text(includingRest: Bool) -> String {
-        guard includingRest, !rest.isEmpty else { return main }
-        return main.isEmpty ? rest : main + "\n\n" + rest
+        let read = blocks.isEmpty ? main : ReadingBlocks.plainText(blocks)
+        guard includingRest, !rest.isEmpty else { return read }
+        return read.isEmpty ? rest : read + "\n\n" + rest
     }
 
     /// The line count "Also in this window" shows: `rest`'s non-empty lines.
@@ -202,10 +240,13 @@ extension EventReading: Decodable {
         case matchIn = "match_in"
         case isTruncated = "truncated"
         case caption
+        case blocks
     }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        // A reading whose blocks cannot be read is still its text.
+        let blocks = ((try? values.decodeIfPresent([ReadingBlock].self, forKey: .blocks)) ?? nil) ?? []
         try self.init(
             eventId: values.decode(UInt64.self, forKey: .eventId),
             tsUs: values.decode(UInt64.self, forKey: .tsUs),
@@ -215,7 +256,8 @@ extension EventReading: Decodable {
             rest: values.decodeIfPresent(String.self, forKey: .rest) ?? "",
             matchIn: (try? values.decodeIfPresent(String.self, forKey: .matchIn)).flatMap(Match.init(rawValue:)),
             isTruncated: values.decodeIfPresent(Bool.self, forKey: .isTruncated) ?? false,
-            caption: try? values.decodeIfPresent(String.self, forKey: .caption)
+            caption: try? values.decodeIfPresent(String.self, forKey: .caption),
+            blocks: blocks
         )
     }
 }

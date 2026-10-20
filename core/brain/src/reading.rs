@@ -30,7 +30,8 @@
 //! - A junk token is deleted together with one whitespace character beside
 //!   it. Every other byte stays.
 //! - N3: outside preformatted blocks, a line with no letter or digit is
-//!   dropped.
+//!   dropped, unless it is code's brackets ("}", "});") or a signature's
+//!   "--", which formatted text needs.
 //! - Outside preformatted blocks, wrapped lines are joined into paragraphs:
 //!   in text that carries the separator, which the helper classified, whose
 //!   indents are also set to none or four spaces; and in older text of a
@@ -81,6 +82,7 @@ use regex::Regex;
 use crate::chrome::{self, Apart, RepeatedChrome, Window};
 use crate::event_source::EventSource;
 use crate::fts_sanitizer::{sanitize_fts5_query, LexicalAlternative};
+use crate::reading_blocks::{self, Kind};
 use crate::redaction::ocr_secrets::contains_secret;
 
 /// Between a classified window's content and its chrome, in stored text.
@@ -343,8 +345,9 @@ pub fn reading_prefix(
     match source {
         EventSource::ScreenOcr | EventSource::ScreenContext => {
             let (content, chrome, classified) = split_chrome(text);
-            let rules = Rules::new(text, classified, app);
-            let set_aside = old_chrome_apart(content, classified, &window_of(stored, app, None));
+            let window = window_of(stored, app, None);
+            let rules = Rules::new(text, classified, &window);
+            let set_aside = old_chrome_apart(content, classified, &window);
             let (content, chrome) = parts_after(content, chrome, set_aside.as_ref());
             let main = part_prefix(content, &rules, is_terminal(app), max_chars);
             if main.is_empty() {
@@ -653,22 +656,64 @@ struct Rules<'t> {
     cjk_rare: OnceCell<bool>,
     /// The text carries the separator: paragraphs join, indents are set.
     classified: bool,
-    /// Older text of a browser or a document: paragraphs join, indents stay.
-    paragraphs: bool,
+    /// How wrapped lines join in this window.
+    join: Join,
+    /// The first part of the window's title: a line that repeats it is a
+    /// heading, never the end of the line before it.
+    lead: Option<String>,
+}
+
+/// How wrapped lines join, by the kind of window (SPEC 4.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Join {
+    /// Never: terminals, spreadsheets, and code editors' older text.
+    Never,
+    /// J1 only: what a code editor's classified text holds besides code (an
+    /// assistant's panel).
+    Wrapped,
+    /// J1, and only for a line that fills the line: chats with people, so
+    /// two messages never merge.
+    Filled,
+    /// J1 to J4: pages, documents, notes, PDFs, mail and AI chats.
+    Prose,
 }
 
 impl<'t> Rules<'t> {
-    fn new(text: &'t str, classified: bool, app: Option<&str>) -> Self {
-        let paragraphs = !classified
-            && !is_terminal(app)
-            && !chrome::is_editor(app)
-            && !app.is_some_and(|app| CHAT_APPS.contains(&app));
+    fn new(text: &'t str, classified: bool, window: &Window<'_>) -> Self {
+        let join = match reading_blocks::kind_of(window.app, window.title, window.url) {
+            Kind::Editor if classified => Join::Wrapped,
+            Kind::Terminal | Kind::Sheet | Kind::Editor => Join::Never,
+            Kind::People => Join::Filled,
+            Kind::Document | Kind::Mail | Kind::AiChat => Join::Prose,
+        };
         Self {
             text,
             cjk_rare: OnceCell::new(),
             classified,
-            paragraphs,
+            join,
+            lead: window
+                .title
+                .and_then(|title| reading_blocks::title_lead(title, window.app))
+                .map(str::to_owned),
         }
+    }
+
+    #[cfg(test)]
+    fn for_app(text: &'t str, classified: bool, app: Option<&str>) -> Self {
+        Self::new(
+            text,
+            classified,
+            &Window {
+                app,
+                title: None,
+                url: None,
+            },
+        )
+    }
+
+    /// Older text whose wrapped lines join; its indents stay as read.
+    fn joins_older(&self) -> bool {
+        !self.classified && self.join != Join::Never
     }
 
     /// Under 10% of the text's letters are CJK, so N1 applies. Counted only
@@ -690,7 +735,7 @@ fn newest_last(app: Option<&str>) -> bool {
 fn read_screen(text: &str, window: &Window<'_>, learned: Option<&RepeatedChrome>) -> Reading {
     let app = window.app;
     let (content, chrome, classified) = split_chrome(text);
-    let rules = Rules::new(text, classified, app);
+    let rules = Rules::new(text, classified, window);
     let set_aside = if classified {
         None
     } else {
@@ -1132,7 +1177,7 @@ fn screen_passage(
 ) -> String {
     let app = window.app;
     let (content, chrome, classified) = split_chrome(text);
-    let rules = Rules::new(text, classified, app);
+    let rules = Rules::new(text, classified, window);
     let set_aside = old_chrome_apart(content, classified, window);
     let (content, chrome) = parts_after(content, chrome, set_aside.as_ref());
     let content = shown(content);
@@ -1191,58 +1236,124 @@ fn clean_block(lines: &[&str], rules: &Rules<'_>, terminal: bool, budget: usize)
         // Junk tokens go; every line keeps its place.
         return joined_lines(lines.iter().map(|line| without_junk(line, rules)), budget);
     }
-    if rules.paragraphs {
+    if rules.joins_older() {
         return joined_paragraphs(lines, rules, budget);
     }
     let kept = lines
         .iter()
         .map(|line| without_junk(line, rules))
-        .filter(|line| line.chars().any(char::is_alphanumeric));
+        .filter(|line| holds_text(line));
     if rules.classified {
-        shaped(&kept.collect::<Vec<_>>())
+        shaped(&kept.collect::<Vec<_>>(), rules)
     } else {
         joined_lines(kept, budget)
     }
 }
 
-/// Older text of a browser or a document: its lines without junk, wrapped
-/// lines joined into paragraphs by the rule classified text gets
-/// ([`joins`]), indents as read, until `budget` characters stand before the
-/// trailing whitespace. The longest line is measured as read.
+/// Older text of a browser, a document or a chat: its lines without junk,
+/// wrapped lines joined into paragraphs by the rules for its kind of window
+/// ([`Wrap::glue`]), indents as read, until `budget` characters stand before
+/// the trailing whitespace. The longest line is measured as read.
 fn joined_paragraphs(lines: &[&str], rules: &Rules<'_>, budget: usize) -> String {
-    let longest = lines
+    let wrap = Wrap::of(lines.iter().copied(), rules);
+    let mut kept: Vec<Cow<'_, str>> = Vec::new();
+    let mut source = lines
         .iter()
-        .map(|line| line.trim_end().chars().count())
-        .max()
-        .unwrap_or(0);
-    let mut out = String::new();
-    let mut previous: Option<Cow<'_, str>> = None;
-    for line in lines {
-        let line = without_junk(line, rules);
-        if !line.chars().any(char::is_alphanumeric) {
-            continue;
-        }
-        match &previous {
-            Some(before) if joins(before, &line, longest) => {
-                out.truncate(out.trim_end().len());
-                if !ends_in_hyphenated_word(before) {
-                    out.push(' ');
+        .map(|line| without_junk(line, rules))
+        .filter(|line| holds_text(line));
+    let mut guarded = false;
+    loop {
+        let mut out = String::new();
+        let mut at = 0usize;
+        loop {
+            // Each join looks at the line after the next one.
+            while kept.len() < at + 3 {
+                match source.next() {
+                    Some(line) => kept.push(line),
+                    None => break,
                 }
-                out.push_str(line.trim_start());
             }
-            _ => {
-                if !out.is_empty() {
-                    out.push('\n');
-                }
-                out.push_str(&line);
+            let Some(line) = kept.get(at) else {
+                break;
+            };
+            let glue = at.checked_sub(1).and_then(|before| {
+                wrap.glue(&kept[before], line, kept.get(at + 1).map(AsRef::as_ref))
+            });
+            push_line(&mut out, line, glue, guarded);
+            at += 1;
+            if budget != usize::MAX && out.trim_end().chars().count() >= budget {
+                break;
             }
         }
-        previous = Some(line);
-        if budget != usize::MAX && out.trim_end().chars().count() >= budget {
-            break;
+        if guarded || !made_a_secret(&out, &kept[..at.min(kept.len())]) {
+            return out;
+        }
+        // A join made a secret pattern appear: join again, keeping apart
+        // any two lines whose join would.
+        guarded = true;
+    }
+}
+
+/// Appends `line` to `out`: after a line break, or joined to the line before
+/// it with `glue`. With `guarded`, two lines whose join would make a secret
+/// pattern appear that neither holds stay apart.
+fn push_line(out: &mut String, line: &str, glue: Option<Glue>, guarded: bool) {
+    if let Some(glue) = glue {
+        let left = out.trim_end().len();
+        let right = line.trim_start();
+        let space = if glue == Glue::Space { " " } else { "" };
+        if !guarded || !join_makes_secret(&out[..left], space, right) {
+            out.truncate(left);
+            out.push_str(space);
+            out.push_str(right);
+            return;
         }
     }
-    out
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out.push_str(line);
+}
+
+/// Whether `joined` holds a secret pattern its lines, kept apart, do not.
+fn made_a_secret(joined: &str, lines: &[Cow<'_, str>]) -> bool {
+    contains_secret(joined)
+        && !contains_secret(
+            &lines
+                .iter()
+                .map(AsRef::as_ref)
+                .collect::<Vec<&str>>()
+                .join("\n"),
+        )
+}
+
+/// Whether putting `right` after `left` with `glue` makes a secret pattern
+/// appear that neither side holds, looking [`MEET_REACH`] bytes each way.
+fn join_makes_secret(left: &str, glue: &str, right: &str) -> bool {
+    let left = &left[ceil_char_boundary(left, left.len().saturating_sub(MEET_REACH))..];
+    let right = &right[..floor_char_boundary(right, MEET_REACH)];
+    contains_secret(&format!("{left}{glue}{right}"))
+        && !contains_secret(left)
+        && !contains_secret(right)
+}
+
+/// Whether a line outside preformatted text stays (N3): it holds a letter
+/// or a digit, or it is code's brackets ("}", "});") or a signature's "--".
+fn holds_text(line: &str) -> bool {
+    let has_word = if line.is_ascii() {
+        line.bytes().any(|byte| byte.is_ascii_alphanumeric())
+    } else {
+        line.chars().any(char::is_alphanumeric)
+    };
+    if has_word {
+        return true;
+    }
+    let text = line.trim();
+    text == "--"
+        || (!text.is_empty()
+            && text
+                .chars()
+                .all(|ch| matches!(ch, '{' | '}' | '(' | ')' | '[' | ']' | ';' | ',')))
 }
 
 /// `lines` joined by line breaks, stopping once `budget` characters stand
@@ -1272,48 +1383,201 @@ fn joined_lines<'l>(lines: impl Iterator<Item = Cow<'l, str>>, budget: usize) ->
     }
 }
 
-/// Join wrapped lines into paragraphs, then set every indent to none or four
-/// spaces.
-fn shaped(lines: &[Cow<'_, str>]) -> String {
-    let longest = lines
-        .iter()
-        .map(|line| line.trim_end().chars().count())
-        .max()
-        .unwrap_or(0);
-    let mut out: Vec<String> = Vec::with_capacity(lines.len());
-    let mut previous: Option<&str> = None;
-    for line in lines {
-        let line: &str = line;
-        if let (Some(before), Some(last)) = (previous, out.last_mut()) {
-            if joins(before, line, longest) {
-                last.truncate(last.trim_end().len());
-                if !ends_in_hyphenated_word(before) {
-                    last.push(' ');
+/// Classified text: wrapped lines joined into paragraphs by the rules for
+/// its kind of window, then every indent set to none or four spaces.
+fn shaped(lines: &[Cow<'_, str>], rules: &Rules<'_>) -> String {
+    let wrap = Wrap::of(lines.iter().map(AsRef::as_ref), rules);
+    let mut guarded = false;
+    loop {
+        let mut out: Vec<String> = Vec::with_capacity(lines.len());
+        for (at, line) in lines.iter().enumerate() {
+            let line: &str = line;
+            let glue = at.checked_sub(1).and_then(|before| {
+                wrap.glue(&lines[before], line, lines.get(at + 1).map(AsRef::as_ref))
+            });
+            if let (Some(glue), Some(last)) = (glue, out.last_mut()) {
+                let space = if glue == Glue::Space { " " } else { "" };
+                let left = last.trim_end().len();
+                if !guarded || !join_makes_secret(&last[..left], space, line.trim_start()) {
+                    last.truncate(left);
+                    last.push_str(space);
+                    last.push_str(line.trim_start());
+                    continue;
                 }
-                last.push_str(line.trim_start());
-                previous = Some(line);
-                continue;
             }
+            out.push(line.to_owned());
         }
-        out.push(line.to_owned());
-        previous = Some(line);
+        let text = out
+            .iter()
+            .map(|line| {
+                if indent(line).is_empty() {
+                    Cow::Borrowed(line.as_str())
+                } else {
+                    Cow::Owned(format!("    {}", line.trim_start()))
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        if guarded || !made_a_secret(&text, lines) {
+            return text;
+        }
+        guarded = true;
     }
-    out.iter()
-        .map(|line| {
-            if indent(line).is_empty() {
-                Cow::Borrowed(line.as_str())
-            } else {
-                Cow::Owned(format!("    {}", line.trim_start()))
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
-/// Whether `next` continues the paragraph `line` wraps: `line` is long (30
-/// characters and at least three quarters of the block's longest), ends in a
-/// letter, digit, comma or hyphen, `next` starts with a lowercase letter, and
-/// both have the same indent.
+/// How two lines meet when the second continues the first: with a space,
+/// or with nothing (a hyphenated word, "well-" and "known"; two CJK, kana or
+/// hangul characters).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Glue {
+    Space,
+    Tight,
+}
+
+/// What the joining rules know of one block of lines, as read.
+struct Wrap<'r> {
+    join: Join,
+    /// The longest line, in characters (J1).
+    longest: usize,
+    /// The widest line, a CJK character counting as two (J3, J4).
+    widest: usize,
+    /// How many lines hold text.
+    lines: usize,
+    /// How many lines reach the wrap edge (nine tenths of the widest): a
+    /// wrap edge is one only where two lines or more reach it.
+    at_edge: usize,
+    /// The first part of the window's title.
+    lead: Option<&'r str>,
+}
+
+impl<'r> Wrap<'r> {
+    fn of<'l>(lines: impl Iterator<Item = &'l str>, rules: &'r Rules<'_>) -> Self {
+        let mut wrap = Self {
+            join: rules.join,
+            longest: 0,
+            widest: 0,
+            lines: 0,
+            at_edge: 0,
+            lead: rules.lead.as_deref(),
+        };
+        let mut widths: Vec<usize> = Vec::new();
+        for line in lines {
+            let line = line.trim_end();
+            if !holds_text(line) {
+                continue;
+            }
+            wrap.lines += 1;
+            // An ASCII line is as wide as it is long.
+            let (length, wide) = if line.is_ascii() {
+                (line.len(), line.len())
+            } else {
+                (line.chars().count(), width(line))
+            };
+            wrap.longest = wrap.longest.max(length);
+            widths.push(wide);
+        }
+        wrap.widest = widths.iter().copied().max().unwrap_or(0);
+        wrap.at_edge = widths
+            .iter()
+            .filter(|&&width| width * 10 >= wrap.widest * 9)
+            .count();
+        wrap
+    }
+
+    /// How `next` joins `line`, the line before it, when it continues it;
+    /// none when they stay apart. `after` is the line after `next`. Lines of
+    /// code never join, nor a line of one script with a line of another.
+    ///
+    /// - J1: `line` is long (30 characters and three quarters of the
+    ///   block's longest), ends in a letter, digit, comma or hyphen, `next`
+    ///   starts with a small letter, and both have the same indent. In a
+    ///   chat with people, `line` must also fill the line (50 characters and
+    ///   nine tenths of the longest), so two messages never merge.
+    /// - J2: `line` ends on a joining word ("and", "the", "by" …), with the
+    ///   same indent, whatever `next`'s length or case, unless `next` is a
+    ///   list item, a speaker line or a heading. Not in a group of short
+    ///   lines (no line of 40 characters): an address, a menu, a poem.
+    /// - J3: in a block of prose (three lines or more, one of them 50
+    ///   characters wide, two of them at the wrap edge), `line` fills the
+    ///   line (nine tenths of the widest), ends in a letter or digit, and
+    ///   `next` starts with a
+    ///   capital or a digit and is not a list item, a heading, a byline or a
+    ///   speaker line: a wrap just before a name.
+    /// - J4: the same, with `line` ending a sentence: a line that ends at
+    ///   the wrap edge was wrapped; a paragraph's last line rarely is.
+    fn glue(&self, line: &str, next: &str, after: Option<&str>) -> Option<Glue> {
+        if self.join == Join::Never {
+            return None;
+        }
+        let end = line.trim_end().chars().next_back()?;
+        let start = next.trim_start().chars().next()?;
+        if is_cjk_text(end) != is_cjk_text(start) {
+            return None;
+        }
+        let tight = is_cjk_text(end) && is_cjk_text(start);
+        let length = line.trim_end().chars().count();
+        let fills = |measure: usize, of: usize| measure * 10 >= of * 9;
+        // Each rule's own shape first, which is quick to tell; code, list
+        // items, speakers and headings only for a pair one of them fits.
+        let j1 = joins(line, next, self.longest)
+            && (self.join != Join::Filled || (length >= 50 && fills(length, self.longest)));
+        let prose_rules = !j1 && self.join == Join::Prose && indent(line) == indent(next);
+        let j2 = prose_rules
+            && self.longest >= 40
+            && line.split_whitespace().nth(1).is_some()
+            && reading_blocks::ends_on_joining_word(line);
+        let j3_or_j4 = prose_rules
+            && !j2
+            && self.lines >= 3
+            && self.widest >= 50
+            && self.at_edge >= 2
+            && fills(width(line), self.widest)
+            && {
+                let capital = start.is_uppercase() || start.is_ascii_digit() || tight;
+                let j3 = end.is_alphanumeric() && capital;
+                let j4 = (matches!(end, '.' | '?' | '!') && start.is_uppercase())
+                    || (tight && matches!(end, '\u{3002}' | '\u{FF1F}' | '\u{FF01}'));
+                j3 || j4
+            };
+        if !(j1 || j2 || j3_or_j4)
+            || reading_blocks::code_line(line)
+            || reading_blocks::code_line(next)
+        {
+            return None;
+        }
+        if !j1
+            && (reading_blocks::list_item(next).is_some()
+                || reading_blocks::speaker_line(next).is_some()
+                || reading_blocks::heading_follows(next, after, self.lead)
+                || (j3_or_j4 && reading_blocks::byline_like(next)))
+        {
+            return None;
+        }
+        Some(if tight || (j1 && ends_in_hyphenated_word(line)) {
+            Glue::Tight
+        } else {
+            Glue::Space
+        })
+    }
+}
+
+/// A CJK, kana or hangul character, or CJK punctuation.
+fn is_cjk_text(ch: char) -> bool {
+    is_cjk(ch) || matches!(ch, '\u{3000}'..='\u{303F}' | '\u{FF00}'..='\u{FF65}')
+}
+
+/// How wide `line` is drawn: a CJK character counts as two.
+fn width(line: &str) -> usize {
+    line.trim_end()
+        .chars()
+        .map(|ch| if is_cjk_text(ch) { 2 } else { 1 })
+        .sum()
+}
+
+/// J1: whether `next` continues the paragraph `line` wraps: `line` is long
+/// (30 characters and at least three quarters of the block's longest), ends
+/// in a letter, digit, comma or hyphen, `next` starts with a lowercase
+/// letter, and both have the same indent.
 fn joins(line: &str, next: &str, longest: usize) -> bool {
     let end = line.trim_end();
     let length = end.chars().count();
@@ -1441,9 +1705,15 @@ fn is_number(token: &str) -> bool {
         .starts_with(|ch: char| ch.is_ascii_digit())
 }
 
-fn starts_with_prompt(line: &str) -> bool {
+pub(crate) fn starts_with_prompt(line: &str) -> bool {
     static PROMPT: OnceLock<Regex> = OnceLock::new();
-    if !line.contains(['$', '%', '#', '>', '\u{276F}', '\u{279C}', '\u{3BB}']) {
+    // Most lines hold no prompt mark: a byte test first ("\u{276F}" and
+    // "\u{279C}" start with 0xE2, "\u{3BB}" with 0xCE).
+    if !line
+        .bytes()
+        .any(|byte| matches!(byte, b'$' | b'%' | b'#' | b'>' | 0xE2 | 0xCE))
+        || !line.contains(['$', '%', '#', '>', '\u{276F}', '\u{279C}', '\u{3BB}'])
+    {
         return false;
     }
     PROMPT
@@ -1708,8 +1978,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn every_prompt_mark_is_seen_past_the_byte_test() {
+        for line in [
+            "$ ls",
+            "% make",
+            "> npm test",
+            ">>> print(1)",
+            "\u{276F} cargo test",
+            "\u{279C} git status",
+            "\u{3BB} stack build",
+            "dev@studio shop % cargo test",
+            "root@box:~# ls",
+        ] {
+            assert!(starts_with_prompt(line), "{line}");
+        }
+        for line in [
+            "Round half up looks fair.",
+            "It costs $5 a month",
+            "50% off",
+            "a -> b",
+            "\u{2019}Quoted\u{2019} \u{2014} not a prompt",
+            "\u{3B1}\u{3B2} letters",
+        ] {
+            assert!(!starts_with_prompt(line), "{line}");
+        }
+    }
+
+    #[test]
     fn a_junk_token_goes_with_the_space_before_it() {
-        let latin = Rules::new("Docs Pricing and some more words to count", false, None);
+        let latin = Rules::for_app("Docs Pricing and some more words to count", false, None);
         assert_eq!(
             without_junk("Docs \u{25a1} Pricing", &latin),
             "Docs Pricing"
@@ -1722,13 +2019,13 @@ mod tests {
         );
         assert_eq!(without_junk("a \u{53e3} \u{53e3}", &latin), "a");
         assert_eq!(without_junk("\u{53e3} \u{53e3} b", &latin), "b");
-        let cjk = Rules::new("\u{53e3} b", false, None);
+        let cjk = Rules::for_app("\u{53e3} b", false, None);
         assert_eq!(without_junk("\u{53e3} b", &cjk), "\u{53e3} b");
     }
 
     #[test]
     fn letters_are_counted_only_when_a_lone_cjk_character_turns_up() {
-        let rules = Rules::new("Docs \u{25a1} Pricing", false, None);
+        let rules = Rules::for_app("Docs \u{25a1} Pricing", false, None);
         assert_eq!(
             without_junk("Docs \u{25a1} Pricing", &rules),
             "Docs Pricing"
@@ -1747,7 +2044,7 @@ mod tests {
         let prose =
             "the plan grows with every seat the customer adds and the price follows it\n".repeat(4);
         let text = format!("{code}{comments}{prose}");
-        let rules = Rules::new(&text, true, None);
+        let rules = Rules::for_app(&text, true, None);
         assert_eq!(clean(text.trim_end(), &rules, false), text.trim_end());
     }
 
@@ -1761,7 +2058,7 @@ mod tests {
             "by October 30, and the purchase order number has not changed.",
         ];
         assert!(!is_preformatted(&mail));
-        let rules = Rules::new("", false, Some("com.google.Chrome"));
+        let rules = Rules::for_app("", false, Some("com.google.Chrome"));
         assert!(clean_block(&mail, &rules, false, usize::MAX)
             .contains("the amount due is $1,240.00 by October 30, and"));
         assert!(is_preformatted(&[
@@ -1777,12 +2074,12 @@ mod tests {
     fn a_list_prefix_stops_inside_a_long_block() {
         let text = "the plan grows with every seat the customer adds\n".repeat(2_000);
         // Lines kept as read (a chat app's older text).
-        let rules = Rules::new(&text, false, Some("com.tinyspeck.slackmacgap"));
+        let rules = Rules::for_app(&text, false, Some("com.tinyspeck.slackmacgap"));
         let head = clean_blocks(&text, &rules, false, 100);
         assert!(head.len() < 200, "{}", head.len());
         assert_eq!(head, text[..head.len()]);
         // Lines joined into a paragraph (a page's older text) stop as soon.
-        let rules = Rules::new(&text, false, None);
+        let rules = Rules::for_app(&text, false, None);
         let head = clean_blocks(&text, &rules, false, 100);
         assert!(head.len() < 200, "{}", head.len());
         assert!(

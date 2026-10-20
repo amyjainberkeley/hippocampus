@@ -8,7 +8,7 @@
 use std::cell::RefCell;
 use std::time::{Duration, Instant};
 
-use mci_brain::moment_readings::CAPTION_BY_TITLE;
+use mci_brain::moment_readings::{CAPTION_BY_TITLE, CAPTION_RULES_SINCE};
 use mci_brain::reading::reading;
 use mci_brain::reclean::{
     local_day_start, run_batch, BatchLimits, CaptionRequest, Captioner, ModelUnavailable,
@@ -434,6 +434,8 @@ fn a_reading_never_lands_on_a_capture_that_took_a_deleted_moments_id() {
 struct Scripted {
     answer: fn(&CaptionRequest) -> Option<String>,
     calls: RefCell<Vec<usize>>,
+    /// The title of every window it was asked about.
+    titles: RefCell<Vec<String>>,
     unavailable: bool,
 }
 
@@ -442,6 +444,7 @@ impl Scripted {
         Self {
             answer,
             calls: RefCell::new(Vec::new()),
+            titles: RefCell::new(Vec::new()),
             unavailable: false,
         }
     }
@@ -461,6 +464,9 @@ impl Captioner for Scripted {
             return Err(ModelUnavailable("on_battery".into()));
         }
         self.calls.borrow_mut().push(requests.len());
+        self.titles
+            .borrow_mut()
+            .extend(requests.iter().map(|request| request.title.clone()));
         Ok(requests
             .iter()
             .map(|request| (self.answer)(request))
@@ -522,6 +528,116 @@ fn a_grounded_model_line_replaces_the_title_caption_and_others_keep_theirs() {
     let again = run_batch(&store, Some(&model), limits(20, 20), T0 + 3 * DAY_US).unwrap();
     assert!(again.caught_up);
     assert_eq!(model.calls.borrow().iter().sum::<usize>(), asked);
+}
+
+#[test]
+fn a_models_caption_outlasts_a_change_to_the_readings_rules_alone() {
+    // Rows an earlier version made, whose caption rules were the same: one
+    // with the model's line, one the model was asked about and gave none,
+    // one never asked.
+    let (_dir, store) = store();
+    let ids = seed(&store);
+    const { assert!(READING_VERSION > CAPTION_RULES_SINCE) };
+    let row = |id: EventId, caption: &str, by: &str, tried: bool, version: u32| {
+        let read = store.stored_moment(id).unwrap().unwrap();
+        let row = mci_brain::MomentReading {
+            event_id: id,
+            version,
+            reading: None,
+            caption: Some(caption.into()),
+            caption_by: Some(by.into()),
+            model_tried: tried,
+            updated_us: T0,
+        };
+        assert!(store.put_moment_reading(&row, &read).unwrap());
+    };
+    row(
+        ids[6],
+        "Choosing an accent from the menu",
+        "local:test-model",
+        true,
+        CAPTION_RULES_SINCE,
+    );
+    row(
+        ids[3],
+        "Chatting in #general",
+        CAPTION_BY_TITLE,
+        true,
+        CAPTION_RULES_SINCE,
+    );
+    row(
+        ids[4],
+        "Chatting in #design-review",
+        CAPTION_BY_TITLE,
+        false,
+        CAPTION_RULES_SINCE,
+    );
+    // A line no longer grounded in the moment as it now reads goes, and the
+    // moment is offered again.
+    row(
+        ids[1],
+        "Planning a birthday party",
+        "local:test-model",
+        true,
+        CAPTION_RULES_SINCE,
+    );
+    // A row from before the caption rules changed keeps nothing.
+    row(
+        ids[5],
+        "An old model line",
+        "local:test-model",
+        true,
+        CAPTION_RULES_SINCE - 1,
+    );
+    let model = Scripted::new(|_| None);
+    for _ in 0..10 {
+        if run_batch(&store, Some(&model), limits(20, 20), T0 + 2 * DAY_US)
+            .unwrap()
+            .caught_up
+        {
+            break;
+        }
+    }
+    let rows = store.moment_readings(&ids).unwrap();
+    let accents = &rows[&ids[6].0];
+    assert_eq!(
+        accents.version, READING_VERSION,
+        "made again by the new rules"
+    );
+    assert_eq!(
+        accents.caption.as_deref(),
+        Some("Choosing an accent from the menu"),
+        "the model's line carries over"
+    );
+    assert_eq!(accents.caption_by.as_deref(), Some("local:test-model"));
+    assert!(accents.model_tried);
+    assert!(rows[&ids[3].0].model_tried, "asked before: not asked again");
+    assert_eq!(
+        rows[&ids[3].0].caption_by.as_deref(),
+        Some(CAPTION_BY_TITLE)
+    );
+    assert_ne!(
+        rows[&ids[5].0].caption.as_deref(),
+        Some("An old model line"),
+        "made by older caption rules: not kept"
+    );
+    assert_eq!(
+        rows[&ids[1].0].caption_by.as_deref(),
+        Some(CAPTION_BY_TITLE),
+        "a line not grounded in the moment now is not kept"
+    );
+    // Offered: the channel never asked, the one asked under older caption
+    // rules, the three Safari pages (one whose line no longer held), and the
+    // accents window once for its other five moments. Not the channel asked
+    // before.
+    let titles = model.titles.borrow();
+    let offered = |title: &str| titles.iter().filter(|t| t.as_str() == title).count();
+    assert_eq!(offered("Stripe Docs"), 1);
+    assert_eq!(offered("general (Channel) - Northwind - Slack"), 0);
+    assert_eq!(offered("design-review (Channel) - Northwind - Slack"), 1);
+    assert_eq!(offered("launch-plan (Channel) - Northwind - Slack"), 1);
+    assert_eq!(offered("How to type accents on a Mac"), 1);
+    assert_eq!(titles.len(), 6, "{titles:?}");
 }
 
 #[test]

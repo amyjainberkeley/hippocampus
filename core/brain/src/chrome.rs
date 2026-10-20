@@ -27,7 +27,9 @@
 //!   ("File Edit View Insert Format Tools Help"); a search page's tabs; a
 //!   site's menu ending in its "Subscribe" or "Sign in" button; the side
 //!   navigation of Gmail, Google Calendar, GitHub, YouTube, LinkedIn, Notes,
-//!   Finder and System Settings; "EXPLORER", "Ln 14, Col 37"; Slack's
+//!   Finder and System Settings; Zoom's tabs and home buttons; Gmail's
+//!   label chips after a message's subject ("Inbox ×"), so neither leads a
+//!   row; "EXPLORER", "Ln 14, Col 37"; Slack's
 //!   "Message #launch-plan"; Messages' "Delivered" and "iMessage".
 //! - **Many frames** ([`RepeatedChrome`]). A line of two words or more that
 //!   windows of one app showed at their edges, unchanged, in at least half of
@@ -406,8 +408,13 @@ pub fn set_apart<'t>(
         });
     };
     let (bottom, body_end) = bottom_run(content, &look, body_start, first_end);
-    // The middle: what is chrome wherever it sits.
-    let cuts = middle_cuts(content, body_start, body_end, &look);
+    // The middle: what is chrome wherever it sits, and a mail's label chips.
+    let mut cuts = middle_cuts(content, body_start, body_end, &look);
+    if look.site == Some(Site::Gmail) {
+        cuts.extend(label_chip_cuts(content, body_start, body_end));
+        cuts.sort_by_key(|cut| cut.from);
+        cuts.dedup_by(|later, earlier| later.from < earlier.to);
+    }
     if top.is_empty() && bottom.is_empty() && cuts.is_empty() {
         return None;
     }
@@ -1530,6 +1537,7 @@ enum Site {
     Notes,
     Finder,
     SystemSettings,
+    Zoom,
 }
 
 const GMAIL_NAV: [&str; 26] = [
@@ -1754,6 +1762,7 @@ impl Site {
         match window.app {
             Some("com.apple.Notes") => Some(Self::Notes),
             Some("com.apple.finder") => Some(Self::Finder),
+            Some("us.zoom.xos") => Some(Self::Zoom),
             Some("com.apple.systempreferences" | "com.apple.Settings") => {
                 Some(Self::SystemSettings)
             }
@@ -1778,8 +1787,136 @@ impl Site {
             Self::Notes => NOTES_NAV.contains(&bare),
             Self::Finder => FINDER_NAV.contains(&bare),
             Self::SystemSettings => SETTINGS_NAV.contains(&bare),
+            Self::Zoom => names_row(line, &ZOOM_NAV, 3) || names_row(line, &ZOOM_HOME_BUTTONS, 1),
         }
     }
+}
+
+/// Zoom's tabs, across the top of its window: "Home Team Chat Meetings
+/// Contacts …". Read first, they would lead the window's row.
+const ZOOM_NAV: [&str; 20] = [
+    "Home",
+    "Team Chat",
+    "Chat",
+    "Meetings",
+    "Phone",
+    "Mail",
+    "Calendar",
+    "Docs",
+    "Whiteboards",
+    "Clips",
+    "Notes",
+    "Contacts",
+    "Apps",
+    "Hub",
+    "Events",
+    "Workflows",
+    "Scheduler",
+    "AI Companion",
+    "Workspaces",
+    "More",
+];
+
+/// The buttons under Zoom's tabs on its home screen.
+const ZOOM_HOME_BUTTONS: [&str; 5] = [
+    "New meeting",
+    "New Meeting",
+    "Join",
+    "Schedule",
+    "Share screen",
+];
+
+/// Gmail's system labels, which a label chip may name. A chip whose close
+/// mark was read as a letter ("Inbox x") counts only with one of these.
+const GMAIL_LABELS: [&str; 15] = [
+    "Inbox",
+    "Important",
+    "Starred",
+    "Spam",
+    "Trash",
+    "Sent",
+    "Drafts",
+    "Scheduled",
+    "Snoozed",
+    "Social",
+    "Updates",
+    "Forums",
+    "Promotions",
+    "Purchases",
+    "Personal",
+];
+
+/// How many of a message's first lines a label chip is looked for in: its
+/// subject, and a line of chips under it.
+const CHIP_LINES: usize = 3;
+
+/// Gmail's label chips after a message's subject ("Re: Invoice 1042 Inbox
+/// ×"), or on a line of their own under it: what moves out of the content's
+/// first lines between `from` and `to`. Read first, a chip would lead the
+/// message's row.
+fn label_chip_cuts(content: &str, from: usize, to: usize) -> Vec<Cut<'_>> {
+    let mut cuts = Vec::new();
+    let mut at = from;
+    for line in content[from..to].split('\n').take(CHIP_LINES) {
+        let end = at + line.len();
+        if let Some(start) = chips_start(line) {
+            let chrome = line[start..].trim();
+            if line[..start].trim().is_empty() {
+                // A line of chips: it goes whole, with its line break.
+                if end < to {
+                    cuts.push(Cut {
+                        from: at,
+                        to: end + 1,
+                        chrome,
+                    });
+                }
+            } else {
+                cuts.push(Cut {
+                    from: at + start,
+                    to: end,
+                    chrome,
+                });
+            }
+        }
+        at = end + 1;
+    }
+    cuts
+}
+
+/// Where the label chips at the end of `line` start, with the space before
+/// them: each chip a label of one word, a space and its close mark "×" (or
+/// an "x" after a system label). None when the line ends in no chip.
+fn chips_start(line: &str) -> Option<usize> {
+    let mut end = line.trim_end().len();
+    let mut start = None;
+    loop {
+        let head = line[..end].trim_end();
+        let (label_end, latin) = if let Some(before) = head.strip_suffix('\u{d7}') {
+            (before, false)
+        } else if let Some(before) = head.strip_suffix('x').or_else(|| head.strip_suffix('X')) {
+            (before, true)
+        } else {
+            break;
+        };
+        if !label_end.ends_with(char::is_whitespace) {
+            break;
+        }
+        let label_end = label_end.trim_end();
+        let label_start = label_end
+            .rfind(char::is_whitespace)
+            .map_or(0, |space| space + 1);
+        let label = &label_end[label_start..];
+        let shaped = label.chars().any(char::is_alphabetic)
+            && label
+                .chars()
+                .all(|ch| ch.is_alphanumeric() || matches!(ch, '-' | '/' | '_' | '&'));
+        if !shaped || (latin && !GMAIL_LABELS.contains(&label)) {
+            break;
+        }
+        start = Some(label_start);
+        end = label_start;
+    }
+    start.map(|start| line[..start].trim_end().len())
 }
 
 /// A line without the count after it: "Inbox 1,204" is "Inbox", "Drafts
@@ -2611,10 +2748,17 @@ mod tests {
         };
         let text = "Gmail Q Search mail\nCompose\nInbox 1,204\nStarred\nSnoozed\nSent\nDrafts 3\nMore\nRe: Invoice 1042 Inbox \u{d7}\nThanks for sending this over.";
         let found = set_apart(text, &gmail, None).unwrap();
+        // The label chip after the subject moves too (SPEC-DELTA 9).
         assert_eq!(
             found.kept,
-            "Re: Invoice 1042 Inbox \u{d7}\nThanks for sending this over."
+            "Re: Invoice 1042\nThanks for sending this over."
         );
+        assert!(
+            found.moved.ends_with("More\nInbox \u{d7}"),
+            "{}",
+            found.moved
+        );
+        assert_eq!(found.holes, vec!["Re: Invoice 1042".len()]);
         let notes = Window {
             app: Some("com.apple.Notes"),
             title: Some("Launch checklist"),

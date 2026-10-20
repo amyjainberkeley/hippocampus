@@ -1,0 +1,31 @@
+[
+  {
+    "kind": "code",
+    "text": "retention_worker.rs — hippocampus\nQ apps 1 use std::time::Duration; CHAT +×\n8 agent 2\n        src 3 /// Delete events older than the configured window, oldest first. You\n          brain_ingest.rs 4 pub fn sweep(store: &Store, config: RetentionConfig) -> Result<u64, SweepError> { Why does the sweep sleep between batches?\n          D retention_worker.rs 5 let Some(cutoff_us) = config.cutoff_us(now_us()) else {\n                                      6 return Ok(0); Assistant\n0 D today.rs 7 } So a long sweep never holds the writer for more than one\n          understanding 8 let mut deleted = 0_u64; batch. Each batch deletes at most 512 events, then yields\n        core 9 for batch in store.events_before(cutoff_us).chunks(512) { for 25 ms so capture can write.\n        docs 10 deleted += store.delete_batch(batch)?;\n        scripts 11 std::thread::sleep(Duration::from_millis(25)); You\n        install.sh 14 if deleted > 0 { Could we make the batch size configurable?\n        D Cargo.toml 12 } store.vacuum()?; // reclaim pages so deleted text is gone Assistant\n                                     13\n        D README.md 15 } and clamp it between 64 and 4096. I can draft the change\n                                        Yes. Add batch_size to RetentionConfig with a default of 512\n                                     16 Ok(deleted) and a test that checks the clamp.\n                                     17 }"
+  },
+  {
+    "kind": "label",
+    "text": "OUTLINE"
+  },
+  {
+    "kind": "heading",
+    "level": 2,
+    "text": "TIMELINE"
+  },
+  {
+    "kind": "paragraph",
+    "text": "claude/hippocampus-0.3 0  0"
+  },
+  {
+    "kind": "code",
+    "text": "$ cargo test -p mci-agent retention\n   Compiling mci-agent v0.3.0\n    Finished `test profile in 41.07s\nrunning 6 tests\ntest retention::sweep_deletes_oldest_first ... ok\ntest retention::sweep_stops_at_cutoff ... ok\ntest result: ok. 6 passed; 0 failed"
+  },
+  {
+    "kind": "paragraph",
+    "text": "Ask about your code..."
+  },
+  {
+    "kind": "paragraph",
+    "text": "e A"
+  }
+]

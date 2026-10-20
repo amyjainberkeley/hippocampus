@@ -1,0 +1,14 @@
+Invoice 1042 from Northwind Supplies
+Dana Whitfield <dana@northwind.example>
+to me
+
+Hi Sam,
+
+Thanks for your order. The invoice for October is attached, and the amount due is $1,240.00 by October 30. The purchase order number has not changed.
+
+Best,
+Dana
+
+--
+Dana Whitfield
+Northwind Supplies

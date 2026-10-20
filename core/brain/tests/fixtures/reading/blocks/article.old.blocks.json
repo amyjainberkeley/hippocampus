@@ -1,0 +1,39 @@
+[
+  {
+    "kind": "label",
+    "text": "MONEY & ROUNDING"
+  },
+  {
+    "kind": "heading",
+    "level": 1,
+    "text": "Rounding half to even"
+  },
+  {
+    "kind": "paragraph",
+    "text": "Why banker’s rounding keeps order totals from drifting by a cent"
+  },
+  {
+    "kind": "byline",
+    "text": "Priya Raman · Oct 12, 2026 · 6 min read"
+  },
+  {
+    "kind": "paragraph",
+    "text": "Round half up looks fair, but every tie goes the same way. Over thousands of orders the extra half cents add up, and the books stop matching the bank by a few dollars a month."
+  },
+  {
+    "kind": "paragraph",
+    "text": "Round half to even sends each tie to the even neighbour instead, so half the ties go down and half go up. The errors cancel out:"
+  },
+  {
+    "kind": "code",
+    "text": "round_half_even(2.5)   // 2.0\nround_half_even(3.5)   // 4.0"
+  },
+  {
+    "kind": "paragraph",
+    "text": "Most payment processors already round this way. Matching them means the total a customer sees is the total that settles, to the cent."
+  },
+  {
+    "kind": "paragraph",
+    "text": "Next: Currency math without floats"
+  }
+]

@@ -1,0 +1,17 @@
+Q4 planning
+Owner: Priya Raman · Updated Oct 12
+
+Goals
+
+• Ship the rounding fix before the holiday sale
+• Cut checkout to under 30 seconds on mobile
+• Launch gift cards in two markets
+• Close the books each month with no cent drift
+
+Owners
+
+Rounding fix Sam
+Checkout speed Maya
+Gift cards Jordan
+
+Rounding ships first: every other goal depends on totals that match the processor to the cent, and the holiday sale is the first time the new totals meet real volume.
