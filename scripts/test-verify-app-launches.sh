@@ -74,6 +74,29 @@ if pgrep -f "$ALIAS/Contents/MacOS/onboarding" >/dev/null 2>&1; then
     fail "launch verifier leaked the aliased onboarding child"
 fi
 
+# A caller-owned disposable home is used, kept, and described in evidence.
+KEPT="$TEST_ROOT/kept-home"
+EVIDENCE="$TEST_ROOT/launch-evidence.txt"
+VERIFY_FIXTURE_RESULT="$RESULT" \
+VERIFY_WAIT_SECONDS=2 \
+VERIFY_HOME="$KEPT" \
+VERIFY_EVIDENCE="$EVIDENCE" \
+VERIFY_EXPECT_ONBOARDING=1 \
+    "$VERIFY" "$APP"
+[[ "$(cat "$RESULT")" == "$(cd "$KEPT" && pwd -P)" ]] \
+    || fail "launch verifier did not launch with the caller's disposable home"
+[[ -d "$KEPT" ]] || fail "launch verifier removed the caller's disposable home"
+grep -qx 'onboarding_seen=1' "$EVIDENCE" || fail "launch evidence does not record setup"
+grep -q "^started=.*$MACOS/onboarding" "$EVIDENCE" \
+    || fail "launch evidence does not list the onboarding process"
+if pgrep -f "$MACOS/onboarding" >/dev/null 2>&1; then
+    fail "launch verifier leaked the onboarding child of a kept home"
+fi
+if VERIFY_FIXTURE_RESULT="$RESULT" VERIFY_WAIT_SECONDS=1 VERIFY_HOME="$HOME" \
+    "$VERIFY" "$APP" >/dev/null 2>&1; then
+    fail "launch verifier accepted the caller's own HOME as a disposable home"
+fi
+
 # Identical bytes and the same filename in another bundle are not our child.
 OTHER="$TEST_ROOT/Other.app/Contents/MacOS/onboarding"
 mkdir -p "$(dirname "$OTHER")"
