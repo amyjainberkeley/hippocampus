@@ -34,7 +34,7 @@ public protocol CalendarStore: Sendable {
 /// denial, a restriction or access taken back later simply reads nothing:
 /// Today drops its bars, and Preferences says how to turn it back on. Only
 /// `turnOn()`, which a person's click calls, ever asks macOS.
-public final class SystemCalendar: CalendarReader, @unchecked Sendable {
+public final class SystemCalendar: CalendarReader, Sendable {
     /// The longest time read at once: a year, the most "when did I last
     /// meet" looks back. A longer request keeps its latest year.
     public static let longestRead: TimeInterval = 366 * 86_400
@@ -120,6 +120,27 @@ public final class SystemCalendar: CalendarReader, @unchecked Sendable {
     /// Turns it off: nothing is read until the person turns it back on.
     public func turnOff() {
         setting.set(false)
+    }
+
+    /// What Today's Show Calendar ends with: what the window may read now,
+    /// and the note to show when the calendar can't be shown.
+    public struct ShowOutcome: Equatable, Sendable {
+        public let access: CalendarAccess
+        /// Nil once the calendar shows: the bars appearing say it.
+        public let note: String?
+        /// Whether the note offers Open System Settings…, where the person
+        /// can allow it.
+        public let offersSystemSettings: Bool
+    }
+
+    /// Today's Show Calendar: `turnOn()`, and what to say after it.
+    public func show() async -> ShowOutcome {
+        let access = await turnOn()
+        return ShowOutcome(
+            access: access,
+            note: CalendarCopy.note(after: access),
+            offersSystemSettings: access == .denied && canAllowInSystemSettings
+        )
     }
 
     /// Where the person allows Hippocampus to read calendars again.

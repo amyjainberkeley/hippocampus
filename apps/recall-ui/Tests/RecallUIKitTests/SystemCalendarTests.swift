@@ -217,6 +217,27 @@ final class SystemCalendarTests: XCTestCase {
         XCTAssertNil(CalendarCopy.note(after: .allowed))
     }
 
+    func testShowCalendarSaysWhatHappenedAndOffersSystemSettingsOnlyWhereItHelps() async {
+        let allowed = await SystemCalendar(store: FakeCalendarStore(.notDetermined, answer: .person(allows: true)),
+                                           setting: .inMemory()).show()
+        XCTAssertEqual(allowed, .init(access: .allowed, note: nil, offersSystemSettings: false))
+
+        let refused = await SystemCalendar(store: FakeCalendarStore(.notDetermined, answer: .person(allows: false)),
+                                           setting: .inMemory()).show()
+        XCTAssertEqual(refused, .init(access: .denied, note: CalendarCopy.notAllowed, offersSystemSettings: true))
+
+        let addOnly = await SystemCalendar(store: FakeCalendarStore(.addOnly), setting: .inMemory()).show()
+        XCTAssertEqual(addOnly, .init(access: .denied, note: CalendarCopy.notAllowed, offersSystemSettings: true))
+
+        let managed = await SystemCalendar(store: FakeCalendarStore(.restricted), setting: .inMemory()).show()
+        XCTAssertEqual(managed, .init(access: .denied, note: CalendarCopy.notAllowed, offersSystemSettings: false),
+                       "System Settings can't change it on this Mac")
+
+        let failed = await SystemCalendar(store: FakeCalendarStore(.notDetermined, answer: .fails),
+                                          setting: .inMemory()).show()
+        XCTAssertEqual(failed, .init(access: .notAsked, note: CalendarCopy.couldNotAsk, offersSystemSettings: false))
+    }
+
     func testTurningOffStopsReading() async throws {
         let store = FakeCalendarStore(.fullAccess, events: [event("a", hour: 9)])
         let setting = CalendarSetting.inMemory(true)

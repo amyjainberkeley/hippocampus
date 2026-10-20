@@ -86,12 +86,12 @@ trust, notarization, successful OS prompting, or ordinary browser capture.
 `com.apple.security.personal-information.calendars` is the hardened
 runtime's Calendar resource entitlement. Apple's
 [Calendars entitlement reference](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.personal-information.calendars)
-describes it as allowing the app to request calendar access; the
-hardened runtime refuses a calendar request from an app without it, the same
-way it refused Automation before the Apple Events key was added. It permits a
-request only: it does not grant access, override a denial or skip the macOS
-dialog, and the person can take access back in System Settings › Privacy &
-Security › Calendars at any time.
+describes it as letting the app have read-write access to Calendars data;
+with the hardened runtime, an app without it can't get calendar access at
+all, the same way it couldn't ask for Automation before the Apple Events key
+was added. It permits a request only: it does not grant access, override a
+denial or skip the macOS dialog, and the person can take access back in
+System Settings › Privacy & Security › Calendars at any time.
 
 How Hippocampus uses it:
 
@@ -108,12 +108,13 @@ How Hippocampus uses it:
   `CalendarReaderTests`, `EventKitCalendarStoreTests` and
   `CalendarCopyTests` hold the code to that). Events are never stored in the
   memory and are never sent to an AI tool unless the person sends them.
-- **Who asks.** The key is on the app only. The window and the capture helper
-  run inside the bundle without their own entitlement files, so macOS
-  attributes their calendar reads to the app (the responsible process) and
-  its one grant. If a future macOS also checks the accessing executable, the
-  window would need this key too; verify on a signed build with a test
-  account before relying on reads from the window alone.
+- **Who asks.** The key is on the app only. The window runs inside the
+  bundle with no entitlement file, and the capture helper's own file grants
+  Apple Events only; macOS attributes a child's calendar access to the app
+  that started it (the responsible process), with its one grant. If macOS
+  also checks the window's own executable, the window's Show Calendar can't
+  ask (Preferences still can) and the window would need this key too: verify
+  on a signed build with a test account.
 - **When access is taken back,** reads return nothing: Today drops its bars,
   and Preferences says how to allow it again.
 
