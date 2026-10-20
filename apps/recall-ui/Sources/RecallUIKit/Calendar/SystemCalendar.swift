@@ -91,12 +91,15 @@ public final class SystemCalendar: CalendarReader, @unchecked Sendable {
     /// Turns the calendar on, as Today's Show Calendar does: the person's
     /// choice is kept, and macOS is asked only if it never has been. When
     /// macOS said no before, it won't ask again, so this returns `.denied`
-    /// and Preferences says how to allow it in System Settings.
+    /// and Preferences says how to allow it in System Settings. When macOS
+    /// couldn't be asked, nothing was decided: the choice goes back, so the
+    /// window and Preferences agree it is off, and this returns `.notAsked`.
     @discardableResult
     public func turnOn() async -> CalendarAccess {
         setting.set(true)
         if store.permission() == .notDetermined {
             _ = try? await store.requestFullAccess()
+            if store.permission() == .notDetermined { setting.set(false) }
         }
         return await access()
     }

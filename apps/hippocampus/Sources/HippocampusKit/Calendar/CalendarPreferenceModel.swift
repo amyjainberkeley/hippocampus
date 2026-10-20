@@ -112,10 +112,12 @@ public final class CalendarPreferenceModel: ObservableObject {
             couldNotAsk = true
         }
         let permission = store.permission()
-        if couldNotAsk, permission == .notDetermined {
+        if permission == .notDetermined {
             // Nothing was decided: the choice goes back, so the switch and
-            // the window agree it is off.
+            // the window agree it is off, and the switch says macOS couldn't
+            // be asked.
             setting.set(false)
+            couldNotAsk = true
         }
         state = Self.state(choice: setting.choice, permission: permission)
     }

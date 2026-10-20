@@ -187,9 +187,11 @@ final class SystemCalendarTests: XCTestCase {
 
     func testShowCalendarWhenMacOSCantBeAsked() async {
         let store = FakeCalendarStore(.notDetermined, answer: .fails)
-        let calendar = SystemCalendar(store: store, setting: .inMemory())
+        let setting = CalendarSetting.inMemory()
+        let calendar = SystemCalendar(store: store, setting: setting)
         let access = await calendar.turnOn()
         XCTAssertEqual(access, .notAsked)
+        XCTAssertEqual(setting.choice, false, "nothing was decided: the window and Preferences agree it is off")
         XCTAssertEqual(CalendarCopy.note(after: access), CalendarCopy.couldNotAsk)
         XCTAssertNil(CalendarCopy.note(after: .allowed))
     }

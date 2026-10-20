@@ -145,6 +145,17 @@ final class CalendarPreferenceModelTests: XCTestCase {
         XCTAssertFalse(model.couldNotAsk, "the next change clears it")
     }
 
+    func testWhenMacOSDecidesNothingTheChoiceGoesBack() async {
+        let store = FakeCalendarAccess(.notDetermined, answer: .undecided)
+        let (model, setting) = model(store)
+        await model.setOn(true)
+        XCTAssertEqual(store.requestCount, 1)
+        XCTAssertEqual(model.state, .off)
+        XCTAssertFalse(model.isOn)
+        XCTAssertEqual(setting.choice, false, "Preferences and the window agree: off")
+        XCTAssertEqual(model.caption, CalendarCopy.couldNotAsk)
+    }
+
     func testWhileMacOSIsAskingTheSwitchHoldsStill() async {
         let store = FakeCalendarAccess(.notDetermined, answer: .held)
         let (model, setting) = model(store)
