@@ -53,7 +53,9 @@ printf '{}\n' > "$CLEAN_HOME/.claude.json"
 : > "$CODEX_HOME/config.toml"
 
 step "Build the product engine and fixture tools"
-cargo build --quiet --jobs 2 -p mci-agent --bins --manifest-path "$REPO_ROOT/Cargo.toml"
+# From the checkout, so rust-toolchain.toml picks the compiler whatever the
+# caller's working folder is.
+(cd "$REPO_ROOT" && cargo build --quiet --jobs 2 -p mci-agent --bins --manifest-path "$REPO_ROOT/Cargo.toml")
 for binary in mci-agent mci-brain mci-seed-brain mci-seed-brief mci-e2e-fixture; do
     source_path="$REPO_ROOT/target/debug/$binary"
     [[ -x "$source_path" ]] || fail "build did not produce $binary"

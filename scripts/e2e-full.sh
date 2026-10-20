@@ -215,6 +215,8 @@ python3 "$SCRIPT_DIR/lib/e2e_sampler.py" --root-pid $$ --run-root "$RUN_ROOT" \
 SAMPLER_PID=$!
 
 # ---- Tools ----------------------------------------------------------------------
+# Builds run from the checkout, where rust-toolchain.toml pins the compiler.
+cd "$REPO_ROOT" || exit 1
 section "Build: Rust engine and the fixture tools"
 FEED="$REPO_ROOT/adapters/macos/MCICaptureHelper/.build/debug/SyntheticCaptureFeed"
 PROBE="$REPO_ROOT/apps/recall-ui/.build/debug/WindowReadsProbe"
@@ -552,8 +554,8 @@ fi
 # The engine contract that already exists (seeded history, a production wire
 # frame, MCP, client registration, deletion and uninstall), in its own
 # throwaway home.
-if env -i HOME="$HOME" USER="${USER:-e2e}" TMPDIR="$E2E_TMP/" LANG="${LANG:-en_US.UTF-8}" PATH="$PATH" \
-    "$SCRIPT_DIR/e2e-clean-home.sh" > "$H/e2e-clean-home.log" 2>&1; then
+if (cd "$REPO_ROOT" && env -i HOME="$HOME" USER="${USER:-e2e}" TMPDIR="$E2E_TMP/" LANG="${LANG:-en_US.UTF-8}" PATH="$PATH" \
+    "$SCRIPT_DIR/e2e-clean-home.sh") > "$H/e2e-clean-home.log" 2>&1; then
     pass c0 "scripts/e2e-clean-home.sh: $(tail -n 1 "$H/e2e-clean-home.log" | sed 's/^PASS: //')"
 else
     fail c0 "scripts/e2e-clean-home.sh: $(grep FAIL "$H/e2e-clean-home.log" | tail -n 1)"
