@@ -78,6 +78,7 @@ private enum FeedError: Error, CustomStringConvertible {
     case developmentModeRequired
     case manifest(String)
     case render(String)
+    case unattributedMessages(Int)
 
     var description: String {
         switch self {
@@ -89,6 +90,8 @@ private enum FeedError: Error, CustomStringConvertible {
             return "manifest: \(detail)"
         case .render(let detail):
             return "render: \(detail)"
+        case .unattributedMessages(let count):
+            return "\(count) event(s) or tombstone(s) named no frame of the manifest"
         }
     }
 }
@@ -109,37 +112,56 @@ private struct FrameOutcome: Encodable {
     }
 }
 
-/// Forwards every frame to the real stdout sink and notes its type.
+/// What one message on the wire was: its type, a tombstone's reason, whether
+/// an event carried a sealed screenshot, and the frame time it names.
+private struct WrittenMessage {
+    let type: UInt16
+    let reason: UInt8?
+    let sealed: Bool
+    let tsUs: UInt64?
+}
+
+/// Forwards every frame to the real stdout sink and notes what it was.
 private actor TeeSink: FrameSink {
     private let forward: FileHandleFrameSink
-    private var seen: [(type: UInt16, reason: UInt8?, sealed: Bool)] = []
+    private var seen: [WrittenMessage] = []
 
     init(forward: FileHandleFrameSink) {
         self.forward = forward
     }
 
+    /// The little-endian u64 at `offset`, when the message is long enough.
+    private static func uint64(_ data: Data, at offset: Int) -> UInt64? {
+        guard data.count >= offset + 8 else { return nil }
+        let start = data.startIndex + offset
+        return data[start ..< start + 8].enumerated().reduce(UInt64(0)) { $0 | (UInt64($1.element) << (8 * $1.offset)) }
+    }
+
     func write(_ data: Data) async throws {
         try await forward.write(data)
         guard data.count >= minFrameHeaderBytes else { return }
-        let type = UInt16(data[2]) | (UInt16(data[3]) << 8)
+        let type = UInt16(data[data.startIndex + 2]) | (UInt16(data[data.startIndex + 3]) << 8)
         switch type {
         case MessageType.privacyTombstone.rawValue:
             // payload: ts u64, app (u16 length + bytes), reason u8.
-            seen.append((type, data.last, false))
+            seen.append(WrittenMessage(type: type, reason: data.last, sealed: false,
+                                       tsUs: Self.uint64(data, at: minFrameHeaderBytes)))
         case MessageType.ocrEvent.rawValue, MessageType.contextOcrEvent.rawValue:
             // payload: seq u64, ts u64, bundle[64], three lengths, hash[32].
             let hashStart = minFrameHeaderBytes + 8 + 8 + ocrEventAppBundleIdLen + 2 + 2 + 4
             var sealed = false
             if data.count >= hashStart + ocrEventKeyframeHashLen {
-                sealed = data[hashStart ..< hashStart + ocrEventKeyframeHashLen].contains { $0 != 0 }
+                let start = data.startIndex + hashStart
+                sealed = data[start ..< start + ocrEventKeyframeHashLen].contains { $0 != 0 }
             }
-            seen.append((type, nil, sealed))
+            seen.append(WrittenMessage(type: type, reason: nil, sealed: sealed,
+                                       tsUs: Self.uint64(data, at: minFrameHeaderBytes + 8)))
         default:
-            seen.append((type, nil, false))
+            seen.append(WrittenMessage(type: type, reason: nil, sealed: false, tsUs: nil))
         }
     }
 
-    func drain() -> [(type: UInt16, reason: UInt8?, sealed: Bool)] {
+    func drain() -> [WrittenMessage] {
         defer { seen.removeAll() }
         return seen
     }
@@ -270,11 +292,17 @@ private enum SyntheticCaptureFeed {
 
         let nowUs = UInt64(Date().timeIntervalSince1970 * 1_000_000)
         var outcomes: [FrameOutcome] = []
+        // Each frame's time, which every event and tombstone for it carries:
+        // a message is counted for the frame it names, not for whichever
+        // frame was being read when it arrived. A reader that runs late (Vision
+        // on a loaded Mac) can finish a frame after the next one has started.
+        var frameByTs: [UInt64: Int] = [:]
         for (index, frame) in manifest.frames.enumerated() {
             let ordinal = UInt64(index + 1)
             let pixels = try render(frame)
             let offsetUs = (frame.offsetSeconds ?? 0) * 1_000_000
             let tsUs = offsetUs < 0 ? nowUs - UInt64(-offsetUs) : nowUs + UInt64(offsetUs)
+            frameByTs[tsUs] = index
             let box = DispositionBox()
             await emitter.processAfterAllow(
                 captureOrdinal: ordinal,
@@ -299,28 +327,40 @@ private enum SyntheticCaptureFeed {
                 try? await Task.sleep(for: .milliseconds(50))
             }
             var outcome = FrameOutcome(id: frame.id)
-            for written in await tee.drain() {
-                if written.type == MessageType.privacyTombstone.rawValue {
-                    outcome.tombstones += 1
-                    if let reason = written.reason { outcome.tombstoneReasons.append(reason) }
-                } else if written.type == MessageType.ocrEvent.rawValue
-                    || written.type == MessageType.contextOcrEvent.rawValue {
-                    outcome.events += 1
-                    outcome.screenshotSealed = outcome.screenshotSealed || written.sealed
-                }
-            }
             switch box.get() {
             case .finalized: outcome.disposition = "finalized"
             case .retryableNoContent: outcome.disposition = "no_content"
             case nil: outcome.disposition = "timed_out"
             }
             outcomes.append(outcome)
-            FileHandle.standardError.write(Data(
-                "SyntheticCaptureFeed: frame \(frame.id): events=\(outcome.events) tombstones=\(outcome.tombstones) disposition=\(outcome.disposition)\n".utf8
-            ))
         }
         await emitter.stopAndDrain()
         paddle?.stop()
+
+        // Everything the pipeline wrote, each message counted for its frame.
+        var unattributed = 0
+        for written in await tee.drain() {
+            let isTombstone = written.type == MessageType.privacyTombstone.rawValue
+            let isEvent = written.type == MessageType.ocrEvent.rawValue
+                || written.type == MessageType.contextOcrEvent.rawValue
+            guard isTombstone || isEvent else { continue }
+            guard let tsUs = written.tsUs, let index = frameByTs[tsUs] else {
+                unattributed += 1
+                continue
+            }
+            if isTombstone {
+                outcomes[index].tombstones += 1
+                if let reason = written.reason { outcomes[index].tombstoneReasons.append(reason) }
+            } else {
+                outcomes[index].events += 1
+                outcomes[index].screenshotSealed = outcomes[index].screenshotSealed || written.sealed
+            }
+        }
+        for outcome in outcomes {
+            FileHandle.standardError.write(Data(
+                "SyntheticCaptureFeed: frame \(outcome.id): events=\(outcome.events) tombstones=\(outcome.tombstones) disposition=\(outcome.disposition)\n".utf8
+            ))
+        }
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -331,6 +371,11 @@ private enum SyntheticCaptureFeed {
             FileHandle.standardError.write(report)
         }
         try? FileHandle.standardOutput.synchronize()
+        // A message that names no frame of the manifest is one the run can't
+        // vouch for: the feed fails, after the report is written.
+        if unattributed > 0 {
+            throw FeedError.unattributedMessages(unattributed)
+        }
     }
 
     /// One made-up window: a grey title bar with its title, then its lines,
