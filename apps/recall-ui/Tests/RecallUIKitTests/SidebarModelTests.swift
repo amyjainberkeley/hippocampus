@@ -88,4 +88,109 @@ final class SidebarModelTests: XCTestCase {
         XCTAssertEqual(SidebarRow.place(.webPages).id, "place:webPages")
         XCTAssertEqual(SidebarRow.showAll.id, "showAll")
     }
+
+    // MARK: From the work read and the person's tidying
+
+    private func item(_ id: String, _ kind: WorkItem.Kind = .document, inSidebar: Bool = true,
+                      thumbnail: UInt64? = nil) -> WorkItem {
+        WorkItem(id: id, kind: kind, name: "Item \(id)", lastUs: 1_000, inSidebar: inSidebar,
+                 thumbnailMoment: thumbnail)
+    }
+
+    func testTheSidebarListsWhatTheAgentPutsThereWithoutWhatThePersonHid() {
+        let snapshot = WorkSnapshot(items: [item("w_1", .code, thumbnail: 7), item("w_2"), item("w_3"),
+                                            item("w_4", inSidebar: false)])
+        let model = SidebarModel.make(snapshot: snapshot, kinds: [],
+                                      hides: SidebarHides.Choices(hiddenItems: ["w_2"]))
+        XCTAssertEqual(model.workingOn, ["w_1", "w_3"])
+        XCTAssertTrue(model.hasMoreWorkingOn, "Show All while any are hidden")
+        XCTAssertEqual(model.groups[1].rows, [.workItem("w_1"), .workItem("w_3"), .showAll])
+        XCTAssertEqual(model.items["w_1"]?.thumbnailMoment, 7)
+        XCTAssertEqual(model.items["w_1"]?.systemImage, "chevron.left.forwardslash.chevron.right")
+        XCTAssertNil(model.items["w_2"], "a hidden item's name is not even drawn")
+        XCTAssertEqual(model.allItemCount, 4)
+    }
+
+    func testWithNothingHiddenAndFiveOrFewerShowAllStaysAway() {
+        let snapshot = WorkSnapshot(items: (1...5).map { item("w_\($0)") })
+        let model = SidebarModel.make(snapshot: snapshot, kinds: [], hides: SidebarHides.Choices())
+        XCTAssertFalse(model.groups[1].rows.contains(.showAll))
+        let six = SidebarModel.make(snapshot: WorkSnapshot(items: (1...6).map { item("w_\($0)") }), kinds: [],
+                                    hides: SidebarHides.Choices())
+        XCTAssertEqual(six.groups[1].rows.last, .showAll)
+        XCTAssertEqual(six.workingOn.count, 5)
+    }
+
+    func testAKindShownFromTheViewMenuAppearsAndAHiddenOneGoes() {
+        let model = SidebarModel.make(snapshot: .empty, kinds: [.webPages, .code],
+                                      hides: SidebarHides.Choices(hiddenKinds: [.code], shownKinds: [.lookedUp]))
+        XCTAssertEqual(model.groups.first { $0.section == .library }?.rows,
+                       [.place(.history), .place(.webPages), .place(.lookedUp)])
+    }
+
+    func testOnlyAboutYouAndAIToolsCarryABadge() {
+        let model = SidebarModel(badges: [.aiTools, .history, .aboutYou, .today])
+        XCTAssertEqual(model.badges, [.aiTools, .aboutYou])
+    }
+
+    // MARK: Nothing moves under the pointer (SPEC 2.3, 2.13)
+
+    func testANewReadWaitsWhileThePointerIsInTheSidebarAndIsDrawnWhenItLeaves() {
+        var updates = SidebarUpdates()
+        let first = SidebarModel(workingOn: ["w_1", "w_2"])
+        XCTAssertTrue(updates.receive(first), "drawn at once while the pointer is elsewhere")
+        updates.pointer(inside: true)
+        let reordered = SidebarModel(workingOn: ["w_2", "w_1", "w_3"])
+        XCTAssertFalse(updates.receive(reordered))
+        XCTAssertEqual(updates.shown, first, "no row moves under the pointer")
+        XCTAssertEqual(updates.waiting, reordered)
+        let newest = SidebarModel(workingOn: ["w_3", "w_2", "w_1"])
+        XCTAssertFalse(updates.receive(newest))
+        XCTAssertEqual(updates.waiting, newest, "only the newest read waits")
+        XCTAssertTrue(updates.pointer(inside: false))
+        XCTAssertEqual(updates.shown, newest)
+        XCTAssertNil(updates.waiting)
+    }
+
+    func testANewReadWaitsWhileARowHasKeyboardFocus() {
+        var updates = SidebarUpdates(shown: SidebarModel(workingOn: ["w_1"]))
+        updates.focus(inside: true)
+        updates.receive(SidebarModel(workingOn: ["w_1", "w_2"]))
+        XCTAssertEqual(updates.shown.workingOn, ["w_1"])
+        updates.pointer(inside: true)
+        updates.focus(inside: false)
+        XCTAssertEqual(updates.shown.workingOn, ["w_1"], "the pointer is still in")
+        updates.pointer(inside: false)
+        XCTAssertEqual(updates.shown.workingOn, ["w_1", "w_2"])
+    }
+
+    func testThePersonsOwnChangeIsDrawnAtOnce() {
+        var updates = SidebarUpdates(shown: SidebarModel(workingOn: ["w_1", "w_2"]))
+        updates.pointer(inside: true)
+        updates.apply(SidebarModel(workingOn: ["w_2"]))
+        XCTAssertEqual(updates.shown.workingOn, ["w_2"], "Hide from Sidebar acts where the person clicked")
+    }
+
+    func testTheSameReadChangesNothing() {
+        var updates = SidebarUpdates(shown: SidebarModel(workingOn: ["w_1"]))
+        XCTAssertFalse(updates.receive(SidebarModel(workingOn: ["w_1"])))
+        XCTAssertNil(updates.waiting)
+    }
+
+    // MARK: Which kinds hold something
+
+    func testKindsComeFromTheAppsHistoryHoldsAndWorkingOn() {
+        let apps = [ObservedApp(appBundleId: "com.google.Chrome", count: 40),
+                    ObservedApp(appBundleId: "com.microsoft.VSCode", count: 12),
+                    ObservedApp(appBundleId: "com.tinyspeck.slackmacgap", count: 3),
+                    ObservedApp(appBundleId: "com.apple.Notes", count: 0)]
+        XCTAssertEqual(LibraryKinds.kinds(apps: apps), [.webPages, .code, .conversations],
+                       "an app with no moments makes no kind")
+        let snapshot = WorkSnapshot(items: [WorkItem(id: "w_1", kind: .design, name: "x", lastUs: 1)])
+        XCTAssertEqual(LibraryKinds.kinds(apps: [], snapshot: snapshot), [.documents])
+        XCTAssertEqual(LibraryKinds.kinds(apps: [], sawSearch: true), [.lookedUp])
+        XCTAssertEqual(LibraryKinds.kinds(apps: [ObservedApp(appBundleId: "com.jetbrains.goland", count: 1)]),
+                       [.code])
+        XCTAssertTrue(LibraryKinds.kinds(apps: [ObservedApp(appBundleId: "com.example.unknown", count: 9)]).isEmpty)
+    }
 }

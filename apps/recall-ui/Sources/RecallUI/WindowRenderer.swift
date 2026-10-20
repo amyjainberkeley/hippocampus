@@ -91,6 +91,19 @@ enum WindowRenderer {
         /// sheet, a note, a reading or a page drawn on its own. It is made
         /// from fixtures only, like everything here.
         var view: (@MainActor () async -> AnyView)?
+        /// Whether Hippocampus is remembering, as the pipe would say;
+        /// nil draws "Remembering", last saved a moment ago.
+        var status: WindowStatus?
+        /// What Working On holds; nil is Sam a week in
+        /// (`ShellRenderFixture.weekIn`).
+        var work: WorkSnapshot?
+        /// Library's kinds that hold something; nil is all of them.
+        var kinds: Set<SidebarPlace>?
+        /// What a person would have done: a menu open, the pointer resting
+        /// on an item, the narrow sidebar shown.
+        var preset = WindowShellPreset()
+        /// A note at the bottom, from the scene's own `BottomNotes`.
+        var note: (@MainActor (BottomNotes) -> Void)?
 
         /// A picture of `view` alone, made from fixtures.
         static func picture(
@@ -105,7 +118,7 @@ enum WindowRenderer {
 
     /// Every scene: the window's own, then each package's, in a fixed order.
     private static func scenes() -> [Scene] {
-        ownScenes() + workScenes + readingScenes + sidePictureScenes + handoffScenes + resumeScenes
+        ownScenes() + shellScenes + workScenes + readingScenes + sidePictureScenes + handoffScenes + resumeScenes
             + calendarScenes + demoScenes + libraryScenes
     }
 
@@ -327,6 +340,10 @@ enum WindowRenderer {
             ? MeaningFixtureReader(now: base.now)
             : review?.reader ?? history?.reader ?? fixtures
         let thumbnails = OverviewPreviewThumbnails(windows: overviewMoments.windows)
+        // The sidebar's little screenshots: drawn, sealed and opened as the
+        // app opens the person's own.
+        let shell = try? ShellRenderFixture()
+        defer { shell?.remove() }
         // Every picture comes from a fixture: drawn windows for Overview, the
         // synthetic encrypted afternoon for History. Nothing reaches the
         // person's screenshots or Keychain.
@@ -351,7 +368,7 @@ enum WindowRenderer {
             {"schema_version": 1, "updated_at": "\(stamp)", "last_stored_frame_at": "\(stamp)",
              "stored_frame_count": 10, "stored_screenshot_count": 2}
             """.utf8))
-        let remembering = SidebarStatus(receipt: receipt, now: now)
+        let remembering = scene.status ?? ShellRenderFixture.remembering(now: now)
         // Overview and You, read before drawing. Their deletion signals are
         // their own, so nothing from the app reaches them. On the first day
         // nothing is saved before today.
@@ -367,8 +384,17 @@ enum WindowRenderer {
         let you = UserModelViewModel(understanding: understanding, verdicts: VerdictInbox(directory: nil),
                                      deletions: MemoryDeletionSignal(center: NotificationCenter()))
         await you.reload()
+        let snapshot = scene.work ?? ShellRenderFixture.weekIn(now: now)
+        var preset = scene.preset
+        if preset.sidebar == nil {
+            preset.sidebar = SidebarModel.make(snapshot: snapshot, kinds: scene.kinds ?? Set(SidebarPlace.libraryKinds),
+                                               hides: preset.choices)
+        }
+        let notes = BottomNotes()
+        scene.note?(notes)
         let view = MemoryWorkspaceView(
             reader: reader, understanding: understanding,
+            work: PreviewWorkReader(snapshot: snapshot),
             selection: .constant(scene.place),
             isSyntheticPreview: false,
             healthLoader: { receipt },
@@ -379,7 +405,12 @@ enum WindowRenderer {
             overview: overview,
             you: you,
             status: remembering,
-            isDemoMemory: scene.demoMemory
+            isDemoMemory: scene.demoMemory,
+            hides: SidebarHides(defaults: nil),
+            drawsWindowControls: true,
+            preset: preset,
+            pictures: shell?.pictures,
+            notes: notes
         )
         .environment(\.controlActiveState, .key)
         .environment(\.overviewThumbnails, thumbnails)
@@ -391,6 +422,7 @@ enum WindowRenderer {
 
         await draw(view, scene: scene, served: {
             thumbnails.count + (history?.screenshots.count ?? 0) + (review?.screenshots.count ?? 0)
+                + (shell?.screenshots.count ?? 0)
         }, to: directory)
     }
 

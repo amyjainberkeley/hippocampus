@@ -13,7 +13,8 @@ import SwiftUI
 enum StatusPreviewRenderer {
     static func render(to out: URL) {
         for state in menuStates() + contributedMenuStates {
-            let view = MenuFacsimile(name: state.name, status: state.status, items: state.items, dark: state.dark)
+            let view = MenuFacsimile(name: state.name, status: state.status, items: state.items, dark: state.dark,
+                                     opensSubmenu: state.opensSubmenu)
             if let png = OffscreenPNG.render(view, dark: state.dark) {
                 try? png.write(to: out.appendingPathComponent("menu-\(state.name).png"))
             }
@@ -45,6 +46,8 @@ enum StatusPreviewRenderer {
         let status: MenuBarStatus
         let items: [StatusMenuModel.Item]
         var dark = false
+        /// Draws Pause's choices open beside it.
+        var opensSubmenu = false
     }
 
     /// Oct 13, 3:10 PM in the renderer's time zone, so times read the same
@@ -110,6 +113,27 @@ enum StatusPreviewRenderer {
             state("not-set-up-onboarding-open", .idle, setup: .inProgress),
             state("ai-tools-connected", .recording, lastSaved: now.addingTimeInterval(-8), connected: true),
             state("ask-fallback-key", .recording, lastSaved: now.addingTimeInterval(-8), askLabel: AskShortcut.fallbackLabel),
+        ] + timedStates(sixMinutesAgo: sixMinutesAgo)
+    }
+
+    /// Pause's choices open; a pause for an hour and until tomorrow; and
+    /// "Forgetting…" while a window's forget holds remembering still (SPEC
+    /// 2.6.2, 3.11).
+    private static func timedStates(sixMinutesAgo: Date) -> [MenuState] {
+        func items(_ row: StatusRow) -> [StatusMenuModel.Item] {
+            StatusMenuModel.items(row: row, setupComplete: true, askLabel: "⇧⇧", aiToolsConnected: false)
+        }
+        let remembering = StatusRow(StatusFacts(status: .recording, lastSavedAt: now.addingTimeInterval(-8)), now: now)
+        let paused = StatusRow(StatusFacts(status: .paused, pausedSince: sixMinutesAgo), now: now)
+        let hour = paused.pausedUntil(PauseLength.hour.end(from: sixMinutesAgo), now: now)
+        let tomorrow = paused.pausedUntil(PauseLength.tomorrow.end(from: sixMinutesAgo), now: now)
+        return [
+            MenuState(name: "remembering-pause-open", status: .recording, items: items(remembering), opensSubmenu: true),
+            MenuState(name: "remembering-pause-open-dark", status: .recording, items: items(remembering), dark: true,
+                      opensSubmenu: true),
+            MenuState(name: "paused-for-an-hour", status: .paused, items: items(hour)),
+            MenuState(name: "paused-until-tomorrow", status: .paused, items: items(tomorrow)),
+            MenuState(name: "forgetting", status: .paused, items: items(.forgetting)),
         ]
     }
 
@@ -245,6 +269,7 @@ private struct MenuFacsimile: View {
     let status: MenuBarStatus
     let items: [StatusMenuModel.Item]
     let dark: Bool
+    var opensSubmenu = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -262,19 +287,40 @@ private struct MenuFacsimile: View {
             }
             .frame(width: 300, height: 24)
             .background(dark ? Color(white: 0.16) : Color(white: 0.93))
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    row(item)
+            HStack(alignment: .top, spacing: -4) {
+                box(items)
+                    .frame(width: 270, alignment: .leading)
+                if opensSubmenu, let pause = items.first(where: { !$0.submenu.isEmpty }) {
+                    box(pause.submenu)
+                        .frame(width: 170, alignment: .leading)
+                        .padding(.top, submenuOffset)
                 }
             }
-            .padding(.vertical, 5)
-            .frame(width: 270, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 10).fill(dark ? Color(white: 0.2) : Color(white: 0.97)))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.15)))
             .padding(.leading, 20)
         }
         .padding(16)
         .background(dark ? Color(white: 0.1) : Color(white: 0.85))
+    }
+
+    private func box(_ items: [StatusMenuModel.Item]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                row(item)
+            }
+        }
+        .padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 10).fill(dark ? Color(white: 0.2) : Color(white: 0.97)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.15)))
+    }
+
+    /// Level with Pause, roughly: the rows above it.
+    private var submenuOffset: CGFloat {
+        var offset: CGFloat = 0
+        for item in items {
+            if !item.submenu.isEmpty { return offset }
+            offset += item.role == .separator ? 11 : (item.role == .detail ? 20 : 22)
+        }
+        return offset
     }
 
     @ViewBuilder
@@ -293,7 +339,8 @@ private struct MenuFacsimile: View {
         default:
             HStack(spacing: 6) {
                 Text(item.title).font(.system(size: 13))
-                    .foregroundStyle(item.isEnabled ? Color.primary : Color.secondary.opacity(0.6))
+                    .foregroundStyle(opensSubmenu && !item.submenu.isEmpty ? Color.white
+                                     : item.isEnabled ? Color.primary : Color.secondary.opacity(0.6))
                 Spacer()
                 if let badge = item.badge {
                     Text(badge).font(.system(size: 11))
@@ -303,8 +350,17 @@ private struct MenuFacsimile: View {
                 if let key = item.key {
                     Text(Self.label(key)).font(.system(size: 13)).foregroundStyle(.secondary)
                 }
+                if !item.submenu.isEmpty {
+                    Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(opensSubmenu ? Color.white : Color.secondary)
+                }
             }
             .padding(.horizontal, 14).padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(opensSubmenu && !item.submenu.isEmpty ? Color.accentColor : Color.clear)
+                    .padding(.horizontal, 5)
+            )
         }
     }
 

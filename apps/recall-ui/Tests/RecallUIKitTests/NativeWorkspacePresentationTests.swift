@@ -18,17 +18,25 @@ final class NativeWorkspacePresentationTests: XCTestCase {
                       "the preview reads fixtures, never the agent (critique-recall-engineering finding 12)")
     }
 
-    func testEachPlaceShowsItsOwnViewWithoutASharedRecentFeed() throws {
+    /// Each page shows its own place's view (SPEC 2.2 with SPEC-DELTA 1),
+    /// the shell owns every model, and nothing from the preview reaches the
+    /// person's own files.
+    func testEachPageShowsItsOwnViewWithoutASharedRecentFeed() throws {
         let source = try source("MemoryWorkspaceView.swift")
-        for (place, view) in [("overview", "OverviewPlace"), ("ask", "AskPlace"),
-                              ("you", "NavigationStack\\(path: \\$youPath\\)\\s*\\{\\s*YouPlace")] {
+        for (page, view) in [("place\\(\\.today\\)", "OverviewPlace"), ("place\\(\\.history\\)", "HistoryView"),
+                             ("place\\(\\.webPages\\)", "WebPagesPlace"), ("place\\(\\.documents\\)", "DocumentsPlace"),
+                             ("place\\(\\.code\\)", "CodePlace"), ("place\\(\\.conversations\\)", "ConversationsPlace"),
+                             ("place\\(\\.lookedUp\\)", "LookedUpPlace"), ("place\\(\\.workingOn\\)", "WorkingOnPlace"),
+                             ("let \\.item\\(id\\)", "WorkingOnItemPlace"), ("place\\(\\.aiTools\\)", "AIToolsPlace"),
+                             ("place\\(\\.aboutYou\\)", "NavigationStack\\(path: \\$youPath\\)\\s*\\{\\s*YouPlace")] {
             XCTAssertNotNil(source.range(
-                of: "case \\.\(place):\\s*\(view)\\(",
+                of: "case \\.?\(page):\\s*\(view)\\(",
                 options: .regularExpression
-            ), "Place \(place) must show \(view)")
+            ), "Page \(page) must show \(view)")
         }
         for gone in ["DisclosureGroup(", "Picker(\"History view\"", "reader.recentEvents(", "PendingPlace",
-                     "DailyMemoryView(", "EpisodesView(", "SourcesWorkspaceView", "WorkspaceSettingsView"] {
+                     "DailyMemoryView(", "EpisodesView(", "SourcesWorkspaceView", "WorkspaceSettingsView",
+                     "preferredColorScheme(.light)"] {
             XCTAssertFalse(source.contains(gone), gone)
         }
         for model in ["ask: AskViewModel", "overview: OverviewViewModel", "you: UserModelViewModel"] {
@@ -36,12 +44,20 @@ final class NativeWorkspacePresentationTests: XCTestCase {
                           "The shell owns every place's model, so each survives a change of place")
         }
         XCTAssertTrue(source.contains("PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator)"),
-                      "What's remembered is pushed inside You")
-        XCTAssertTrue(source.contains("UserDictionaryEditor()"), "The names page is pushed inside You")
+                      "Privacy is its own page")
+        XCTAssertTrue(source.contains("if isSyntheticPreview || drawsWindowControls {"),
+                      "the preview and pictures never open Privacy's activity log")
+        XCTAssertTrue(source.contains("UserDictionaryEditor()"), "The names page is pushed inside About You")
         XCTAssertTrue(source.contains("isSyntheticPreview ? VerdictInbox(directory: nil) : .shared"),
                       "The preview's verdicts never reach the folder the agent applies")
-        XCTAssertTrue(source.contains("WindowHiMarkView("))
-        XCTAssertTrue(source.contains("SidebarStatus("))
+        XCTAssertTrue(source.contains("mutator: isSyntheticPreview ? nil : reader as? PrivacyMutator"),
+                      "nothing in the preview deletes anything")
+        XCTAssertTrue(source.contains("StatusBanner("))
+        XCTAssertTrue(source.contains("WindowTopBar("))
+        let sidebar = try self.source("Sidebar/SidebarView.swift")
+        XCTAssertTrue(sidebar.contains("WindowHiMarkView("))
+        XCTAssertTrue(sidebar.contains(".accessibilityLabel(NavigationCopy.hiMarkLabel(status.title))"),
+                      "the hi mark is a button VoiceOver names (SPEC 2.6.1)")
     }
 
     func testTheWindowHasNoPopupOfItsOwnAndNoNewWindow() throws {
@@ -55,20 +71,33 @@ final class NativeWorkspacePresentationTests: XCTestCase {
         XCTAssertTrue(ask.contains(".keyboardShortcut(.return, modifiers: .command)"))
     }
 
-    func testSidebarLabelsKeepNativeListSelectionWithoutExtraFocusTargets() throws {
-        let source = try source("MemoryWorkspaceView.swift")
-        let rowStart = try XCTUnwrap(source.range(of: "private struct MemorySidebarRow: View"))
-        let rowEnd = source.range(of: "\nprivate struct ", range: rowStart.upperBound..<source.endIndex)
-        let row = String(source[rowStart.lowerBound..<(rowEnd?.lowerBound ?? source.endIndex)])
-
-        XCTAssertTrue(source.contains("List(selection: $selection)"))
-        XCTAssertTrue(source.contains(".tag(item)"))
+    /// The sidebar's rows stay the system's own selectable list rows, in the
+    /// system's sidebar style, with no extra focus stops inside a row.
+    func testSidebarRowsKeepNativeListSelectionWithoutExtraFocusTargets() throws {
+        let source = try source("Sidebar/SidebarView.swift")
+        XCTAssertTrue(source.contains("List(selection: selectionBinding)"))
+        XCTAssertTrue(source.contains(".tag(row)"))
         XCTAssertTrue(source.contains(".listStyle(.sidebar)"))
+        let rowStart = try XCTUnwrap(source.range(of: "private struct PlaceRow: View"))
+        let rowEnd = source.range(of: "\n/// ", range: rowStart.upperBound..<source.endIndex)
+        let row = String(source[rowStart.lowerBound..<(rowEnd?.lowerBound ?? source.endIndex)])
         XCTAssertFalse(row.contains(".focusable("),
                        "A plain label must not add a second keyboard stop inside a selectable row")
-        XCTAssertTrue(row.contains(".accessibilityLabel(item.descriptor.title)"))
+        XCTAssertTrue(row.contains(".accessibilityLabel(accessibilityLabel)"))
+        XCTAssertTrue(row.contains(".help(NavigationCopy.rowTooltip(place.title, key: place.key))"))
         XCTAssertFalse(source.contains(".focusEffectDisabled("),
                        "Native keyboard focus must stay visible on actual controls")
+        XCTAssertFalse(source.contains("sparkles"), "no sparkles in the sidebar (SPEC 2.2)")
+        XCTAssertTrue(source.contains("SidebarFootnote(text: NavigationCopy.workingOnFootnote, sidebarWidth: width)"),
+                      "Working On's footnote is as tall as its lines, so the list never cuts it off")
+        XCTAssertTrue(source.contains("minHeight: SidebarNoteLayout.height(text, sidebarWidth: sidebarWidth)"))
+        let noteStart = try XCTUnwrap(source.range(of: "struct SidebarFootnote: View"))
+        let noteEnd = source.range(of: "\n/// ", range: noteStart.upperBound..<source.endIndex)
+        let note = String(source[noteStart.lowerBound..<(noteEnd?.lowerBound ?? source.endIndex)])
+        XCTAssertTrue(note.contains(".lineLimit(nil)"), "a sidebar row is one line unless it says otherwise")
+        XCTAssertTrue(source.contains("size: SidebarMetrics.thumbnailSize"))
+        XCTAssertTrue(source.contains(".offset(x: SidebarMetrics.thumbnailNudge)"),
+                      "a Working On item's screenshot sits inside the selection (SidebarThumbnailLayout)")
     }
 
     func testRootKeepsKeyboardAndDeepLinkRouting() throws {
@@ -76,6 +105,8 @@ final class NativeWorkspacePresentationTests: XCTestCase {
         XCTAssertTrue(source.contains(".focusable(true, interactions: .automatic)"))
         XCTAssertTrue(source.contains(".onKeyPress("))
         XCTAssertTrue(source.contains("MCI.Workspace.allDestinations.compactMap"))
+        XCTAssertTrue(source.contains(".windowStyle(.hiddenTitleBar)"))
+        XCTAssertFalse(source.contains(".preferredColorScheme(.light)"), "the window follows the Mac (SPEC 2.14)")
         XCTAssertTrue(source.contains(".onOpenURL"))
         XCTAssertTrue(source.contains("RecallLaunchRequest.localCommandName"))
         XCTAssertFalse(source.contains(".focusEffectDisabled("))

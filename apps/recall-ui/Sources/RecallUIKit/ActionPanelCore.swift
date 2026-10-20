@@ -6,11 +6,22 @@
 import Foundation
 
 public struct ActionPanelCommand: Identifiable {
+    /// The ⌘K groups, in order (SPEC 2.9): Go To (the places and every
+    /// Working On item), Moments (matches for what is typed), Actions and
+    /// Help. The shortcuts sheet's headings are the same.
     public enum Category: String, Sendable, CaseIterable {
-        case search = "Search"
-        case hit = "Hit"
-        case app = "App"
-        case debug = "Debug"
+        case goTo = "Go To"
+        case moments = "Moments"
+        case actions = "Actions"
+        case help = "Help"
+
+        /// The names the groups had before (SPEC 2.9: "Hit" and "Debug"
+        /// go). Kept so a command registered by an older name lands in the
+        /// group that holds it now.
+        public static let search = Category.moments
+        public static let hit = Category.actions
+        public static let app = Category.actions
+        public static let debug = Category.help
     }
 
     public let id: String
@@ -82,7 +93,7 @@ public final class ActionPanelRegistry: ObservableObject {
     public func endRefresh() { isRefreshing = false }
 
     /// Group the currently-registered commands by category, in the
-    /// canonical presentation order (Search → Hit → App → Debug) with
+    /// canonical presentation order (Go To → Moments → Actions → Help) with
     /// each group's commands sorted by title. Powers the ⌘/ help sheet
     /// — kept here so the sheet's rendering is a pure function of the
     /// registry (no hardcoded lists) and headless tests can pin the

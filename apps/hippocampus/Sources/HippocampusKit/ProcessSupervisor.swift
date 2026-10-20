@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import Foundation
 import AppKit
+import Combine
 import os
 
 public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
@@ -311,6 +312,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     /// When the person paused; nil when not paused. Kept across launches.
     public var pausedSince: Date? { pauses.pausedSince }
+    /// When a timed pause ends; nil for Until I Resume (SPEC 2.6.2). Kept
+    /// across launches.
+    public var pausedUntil: Date? { pauses.resumeAt }
     @Published public private(set) var captureEnabled: Bool
     /// A permission macOS has off for Hippocampus, as a capture helper
     /// reported it: in its readiness receipt as it started, or on stderr
@@ -398,8 +402,22 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// The Recall executable is a single commanded child. Keeping the process
     /// handle prevents every menu action or hotkey press from launching a
     /// competing window and duplicate database reader.
-    private var recallProcess: Process?
+    private var recallProcess: (any RecallWindowProcess)?
     private let recallWindowChannel: any RecallWindowCommanding
+    /// The app's end of the window's private pipe (SPEC 2.6.4), while the
+    /// window this app started runs.
+    private var windowServer: WindowChannelServer?
+    private var windowStatusWatch: AnyCancellable?
+    /// Remembering held still for a window's forget (SPEC 3.11).
+    public private(set) lazy var forgetHold = CaptureHold(target: self)
+    /// The hold is on: the status reads "Forgetting…".
+    @Published public private(set) var holdingForForget = false
+    /// What the app does for the window's Turn On, Try Again, Open System
+    /// Settings… and Quit: the same as the status row's button.
+    public var windowStatusAction: (@MainActor (CaptureStatusAction) -> Void)?
+    /// Ends a timed pause on time.
+    private var timedResume: Task<Void, Never>?
+    private let timedResumeSleep: @MainActor @Sendable (TimeInterval) async throws -> Void
     /// Window requests, carried out one at a time in the order they came.
     private var windowRequests: [WindowRequest] = []
     private var windowRequestTask: Task<Void, Never>?
@@ -490,7 +508,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         permissionPollSleep: @escaping @MainActor @Sendable () async throws -> Void = {
             try await Task.sleep(for: .seconds(2))
         },
-        recallWindowChannel: any RecallWindowCommanding = SilentRecallWindowChannel()
+        recallWindowChannel: any RecallWindowCommanding = SilentRecallWindowChannel(),
+        timedResumeSleep: @escaping @MainActor @Sendable (TimeInterval) async throws -> Void = {
+            try await Task.sleep(for: .seconds($0))
+        }
     ) {
         self.locator = locator
         self.keyStore = developmentKeyMode.map { FileKeyStore(path: $0.keyURL) } ?? keyStore
@@ -511,12 +532,16 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         self.permissionProbe = permissionProbe
         self.permissionPollSleep = permissionPollSleep
         self.recallWindowChannel = recallWindowChannel
+        self.timedResumeSleep = timedResumeSleep
         self.turnOnWaitNote = turnOnWaitNote
         self.captureEnabled = runtimeConfig.captureEnabled
+        // A timed pause whose end came while Hippocampus was quit is over.
+        if pauses.isDue(now: clock()) { pauses.setPaused(false) }
         // A pause outlives a relaunch: start goes straight to Paused.
         self.requestedPauseState = pauses.isPaused
         self.stoppedSharingAt = captureStopNote.stoppedSharingAt
         stayOffAfterStopSharing()
+        scheduleTimedResume()
         if TurnOnWaitNote.honours(turnOnWaitNote.refusedAt, now: clock()) {
             turnOnToResume = true
         } else if turnOnWaitNote.refusedAt != nil {
@@ -888,6 +913,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// Pause or resume. The pause and its time are kept, so it outlives a
     /// relaunch (spec-shell S5).
     public func setPaused(_ paused: Bool) {
+        if !paused {
+            timedResume?.cancel()
+            timedResume = nil
+        }
         if paused {
             // The newer word: a press still waiting is dropped. A turn-on
             // already starting lands unless the pause stops it, and one the
@@ -923,6 +952,36 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 }
                 if requested == self.requestedPauseState { return }
             }
+        }
+    }
+
+    /// Pause until `until` (For 1 Hour, Until Tomorrow), or until the
+    /// person resumes (nil). The end is kept with the pause, so it outlives
+    /// a relaunch, and remembering resumes on its own when it comes.
+    public func pause(until: Date?) {
+        pauses.pause(until: until)
+        setPaused(true)
+        scheduleTimedResume()
+    }
+
+    /// Waits for a timed pause's end, then resumes, unless the pause changed
+    /// meanwhile. Rechecks each minute, so a Mac that slept still resumes on
+    /// time.
+    private func scheduleTimedResume() {
+        timedResume?.cancel()
+        guard let end = pauses.resumeAt else {
+            timedResume = nil
+            return
+        }
+        timedResume = Task { @MainActor [weak self] in
+            while let self, !Task.isCancelled {
+                let wait = end.timeIntervalSince(self.clock())
+                if wait <= 0 { break }
+                do { try await self.timedResumeSleep(min(wait, 60)) } catch { return }
+            }
+            guard let self, !Task.isCancelled, self.pauses.resumeAt == end else { return }
+            self.timedResume = nil
+            self.setPaused(false)
         }
     }
 
@@ -1995,7 +2054,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         launchRecallUI(request)
     }
 
-    private static func waitForExit(_ process: Process, within limit: Duration) async -> Bool {
+    private static func waitForExit(_ process: any RecallWindowProcess, within limit: Duration) async -> Bool {
         let deadline = ContinuousClock.now.advanced(by: limit)
         while process.isRunning, ContinuousClock.now < deadline {
             await FoundationSupervisorTopology.pause(for: .milliseconds(25))
@@ -2003,8 +2062,13 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         return !process.isRunning
     }
 
+    /// Starts the window as this app's own child with its private pipe
+    /// (SPEC 2.6.4): descriptor 3 for the window to write, 4 for it to read,
+    /// `MCI_WINDOW_CHANNEL=3,4`. The environment passes the same checks as
+    /// every child's (`ChildProcessEnvironment`).
     private func launchRecallUI(_ request: WindowRequest) {
         recallProcess = nil
+        endWindowChannel()
         guard let recallPath = locator.recallUIPath() else { return }
         let environment = ProcessSupervisorLaunchPlan.recallEnvironment(
             baseEnvironment: ProcessInfo.processInfo.environment,
@@ -2017,15 +2081,113 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             agentURL: locator.agentPath()
         )
         do {
-            let task = try ChildProcessEnvironment.makeProcess(
-                preparedEnvironment: environment
-            )
-            task.executableURL = recallPath
-            try task.run()
-            recallProcess = task
+            // The environment's checks: no raw key, no feature override.
+            _ = try ChildProcessEnvironment.makeProcess(preparedEnvironment: environment)
+            let window = try ChildProcessSpawner.spawnWindow(executable: recallPath, environment: environment)
+            recallProcess = window
+            startWindowChannel(for: window)
         } catch {
             logger.error("supervisor: Recall launch failed: \(error.localizedDescription)")
         }
+    }
+
+    // MARK: The window's private pipe
+
+    private func startWindowChannel(for window: SpawnedWindowProcess) {
+        let server = WindowChannelServer(input: window.fromWindow, output: window.toWindow) { [weak self] request in
+            await self?.handleWindowRequest(request) ?? false
+        }
+        windowServer = server
+        server.start()
+        let pid = window.processIdentifier
+        window.onExit { [weak self] _ in
+            Task { @MainActor in self?.windowEnded(pid) }
+        }
+        // The status goes to the window whenever it changes, so its footer
+        // and banner follow at once instead of every 10 seconds.
+        windowStatusWatch = objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.pushWindowStatus() } }
+        pushWindowStatus()
+    }
+
+    /// The window's process ended: its pipe goes, and a hold it held ends
+    /// as a release does (SPEC 3.11).
+    private func windowEnded(_ pid: pid_t) {
+        guard recallProcess == nil || recallProcess?.processIdentifier == pid else { return }
+        endWindowChannel()
+        Task { await forgetHold.windowEnded() }
+    }
+
+    private func endWindowChannel() {
+        windowServer?.close()
+        windowServer = nil
+        windowStatusWatch = nil
+    }
+
+    private func pushWindowStatus() {
+        guard let windowServer else { return }
+        windowServer.push(windowStatusMessage())
+    }
+
+    /// What the window shows about remembering: the menu bar's own row,
+    /// with a timed pause's end and the hold.
+    public func windowStatusMessage(setupFinished: Bool = OnboardingSentinel.isComplete) -> WindowStatusMessage {
+        let row = menuRow(setupFinished: setupFinished)
+        return WindowStatusMessage(
+            row: row, status: menuBarStatus,
+            setupComplete: setup(finished: setupFinished) == .complete,
+            forgetting: holdingForForget, pausedSince: pausedSince, pausedUntil: pausedUntil,
+            lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled
+        )
+    }
+
+    /// The status row as the menu bar and the window show it: a timed
+    /// pause says when it ends, and a hold says "Forgetting…".
+    public func menuRow(setupFinished: Bool = OnboardingSentinel.isComplete) -> StatusRow {
+        menuRow(statusRow(setupFinished: setupFinished))
+    }
+
+    /// `row` as the menu bar and the window show it.
+    public func menuRow(_ row: StatusRow) -> StatusRow {
+        if holdingForForget { return .forgetting }
+        return row.pausedUntil(pausedUntil, now: clock())
+    }
+
+    /// One request from the window: carried out only where the menu bar's
+    /// same click would be (`WindowChannelPolicy`).
+    func handleWindowRequest(_ request: WindowChannelRequest) async -> Bool {
+        guard WindowChannelPolicy.allows(request, row: menuRow(), holding: forgetHold.isHolding) else {
+            return false
+        }
+        switch request.op {
+        case .pause:
+            pause(until: request.until)
+            return true
+        case .resume:
+            setPaused(false)
+            return true
+        case .turnOn:
+            return perform(.turnOn)
+        case .tryAgain:
+            return perform(.tryAgain)
+        case .openSystemSettings:
+            guard let permission = request.permission else { return false }
+            return perform(.openSystemSettings(permission))
+        case .quit:
+            return perform(.quit)
+        case .hold:
+            return await forgetHold.hold()
+        case .release:
+            await forgetHold.release()
+            return true
+        }
+    }
+
+    private func perform(_ action: CaptureStatusAction) -> Bool {
+        guard let windowStatusAction else { return false }
+        windowStatusAction(action)
+        return true
     }
 
     /// How the command bar starts its memory sessions: the bundled agent in
@@ -2053,6 +2215,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     public func closeRecallUI() {
         windowsRetired = true
         windowRequests.removeAll()
+        endWindowChannel()
         guard let recallProcess else { return }
         if recallProcess.isRunning {
             let runningApplication = NSRunningApplication(
@@ -2113,7 +2276,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     public func stopWindowsForQuit(timeout: TimeInterval = 1) async {
         windowsRetired = true
         windowRequests.removeAll()
-        let windows = ([recallProcess] + onboardingProcesses).compactMap { $0 }.filter(\.isRunning)
+        endWindowChannel()
+        let windows: [any RecallWindowProcess] = ([recallProcess] + onboardingProcesses.map { $0 as any RecallWindowProcess })
+            .compactMap { $0 }.filter(\.isRunning)
         recallProcess = nil
         onboardingProcesses = []
         guard !windows.isEmpty else { return }
@@ -2124,16 +2289,28 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
         let survivors = windows.filter(\.isRunning)
         guard !survivors.isEmpty else { return }
+        // The window started with its pipe ends here the same way as the rest:
+        // TERM, then KILL.
+        for spawned in survivors.compactMap({ $0 as? SpawnedWindowProcess }) {
+            spawned.terminate()
+        }
         do {
-            try await SupervisorProcessShutdown.stop(processes: survivors, termTimeout: 0.5, killTimeout: 0.5)
+            try await SupervisorProcessShutdown.stop(processes: survivors.compactMap { $0 as? Process },
+                                                     termTimeout: 0.5, killTimeout: 0.5)
         } catch {
             logger.error("supervisor: a window did not stop at quit: \(error.localizedDescription)")
         }
+        let spawned = survivors.compactMap { $0 as? SpawnedWindowProcess }
+        let end = Date().addingTimeInterval(0.5)
+        while Date() < end, spawned.contains(where: \.isRunning) {
+            if (try? await Task.sleep(for: .milliseconds(25))) == nil { break }
+        }
+        for window in spawned where window.isRunning { window.kill() }
     }
 
     /// A window quits the way a person quits it; a process that is not a
     /// registered app gets SIGTERM instead.
-    private static func askToQuit(_ process: Process) {
+    private static func askToQuit(_ process: any RecallWindowProcess) {
         if NSRunningApplication(processIdentifier: process.processIdentifier)?.terminate() != true {
             process.terminate()
         }
@@ -2212,5 +2389,41 @@ enum SupervisorError: LocalizedError {
         case .transitionInProgress: "A supervisor reconfiguration is already in progress."
         case .captureStopFailed(let reason): "Capture is disabled for this session. \(reason)"
         }
+    }
+}
+
+/// The window's process: started with its private pipe in the app
+/// (`SpawnedWindowProcess`), or as a plain process.
+public protocol RecallWindowProcess: AnyObject {
+    var processIdentifier: Int32 { get }
+    var isRunning: Bool { get }
+    func terminate()
+}
+
+extension Process: RecallWindowProcess {}
+extension SpawnedWindowProcess: RecallWindowProcess {}
+
+/// Remembering, held still for a window's forget (SPEC 3.11): stopped the way
+/// Pause stops it, never with the person's own pause, and started again only
+/// if it ran before and the person hasn't paused or turned it off since.
+extension ProcessSupervisor: CaptureHolding {
+    public var isRememberingForHold: Bool {
+        state == .running || state == .starting
+    }
+
+    public func stopForHold() async throws {
+        guard state == .running || state == .starting else { return }
+        // The verified transition without `pauses`: the person's saved pause
+        // is never written.
+        try await setPausedAndWait(true)
+    }
+
+    public func restartAfterHold() async throws {
+        guard !requestedPauseState, state == .paused, !shutdownRequested else { return }
+        try await setPausedAndWait(false)
+    }
+
+    public func holdChanged(_ holding: Bool) {
+        holdingForForget = holding
     }
 }

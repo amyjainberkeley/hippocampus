@@ -123,6 +123,12 @@ final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Se
 struct MCIRecallApp: App {
     @NSApplicationDelegateAdaptor(MCIRecallAppDelegate.self) var appDelegate
 
+    /// The first thing the window does: its private pipe's descriptors are
+    /// marked close-on-exec before any child process can start (SPEC 2.6.4).
+    init() {
+        _ = Self.channel
+    }
+
     @MainActor
     // fileprivate (not private): the live workspace below reads it.
     fileprivate static let reader: BrainReader = Self.makeReader()
@@ -131,6 +137,37 @@ struct MCIRecallApp: App {
     /// children stop with the window (`ChildProcesses`, RULINGS G7).
     @MainActor
     fileprivate static let understanding: UnderstandingReader = AgentUnderstandingReader()
+
+    /// What the person works on, for the sidebar's Working On and Web
+    /// Pages. The agent-backed reader comes with Working On (lane C); until
+    /// then nothing is listed, and Working On stays out of the sidebar.
+    @MainActor
+    fileprivate static let work: any WorkReader = PreviewWorkReader()
+
+    /// The private pipe from the app that opened this window (SPEC 2.6.4),
+    /// opened first thing so its descriptors are close-on-exec before any
+    /// child starts. Nil for a window opened by hand.
+    @MainActor
+    fileprivate static let channel: WindowChannel? = WindowChannel.open()
+
+    /// Forgetting, with the pending file beside the verdict inbox.
+    @MainActor
+    fileprivate static let forget = ForgetCoordinator(
+        mutator: reader as? PrivacyMutator,
+        channel: channel,
+        store: PendingForgetStore(
+            directory: ProcessInfo.processInfo.environment["MCI_DEVELOPMENT_FILE_KEY"] == "1"
+                ? nil : PendingForgetStore.defaultDirectory(),
+            memory: ProcessInfo.processInfo.environment["MCI_DB_PATH"] ?? "default"),
+        appRunning: { MCIRecallApp.appIsRunning() })
+
+    /// Whether the menu-bar app runs: another process of this bundle.
+    nonisolated static func appIsRunning() -> Bool {
+        guard let id = Bundle.main.bundleIdentifier else { return false }
+        let me = ProcessInfo.processInfo.processIdentifier
+        return NSRunningApplication.runningApplications(withBundleIdentifier: id)
+            .contains { $0.processIdentifier != me && !$0.isTerminated }
+    }
 
     var body: some Scene {
         WindowGroup("Hippocampus") {
@@ -146,6 +183,9 @@ struct MCIRecallApp: App {
         }
         .defaultPosition(.center)
         .defaultSize(width: 1100, height: 720)
+        // The window draws its own top: the field row, and the window's
+        // controls over the sidebar (SPEC 2.1).
+        .windowStyle(.hiddenTitleBar)
         .commands { WindowCommands() }
     }
 
@@ -157,12 +197,17 @@ struct MCIRecallApp: App {
             RootView(
                 reader: MCIRecallApp.reader,
                 understanding: MCIRecallApp.understanding,
+                work: MCIRecallApp.work,
                 launchRequest: launchRequest,
-                isDemoMemory: DemoMemoryMode.isOn(environment: ProcessInfo.processInfo.environment)
+                isDemoMemory: DemoMemoryMode.isOn(environment: ProcessInfo.processInfo.environment),
+                channel: MCIRecallApp.channel,
+                forget: MCIRecallApp.forget,
+                opening: WindowOpening.shared.page(),
+                isUpgrade: UserDefaults.standard.string(forKey: WhatsNewCoordinator.lastShownKey) != nil
             )
-            .preferredColorScheme(.light)
+            // The window follows the Mac's appearance (SPEC 2.14).
             .frame(minWidth: 760, minHeight: 480)
-            .background(Color.brandBgPrimary)
+            .background(MCI.Color.background)
     }
 
     @MainActor
@@ -224,8 +269,12 @@ enum WindowCommand {
 
     case go(RecallRoute)
     case refresh
-    /// "What your AI gets in this folder" (⌘J).
+    /// "Context for This Folder…" (⌘J).
     case folderContext
+    /// ⌘T: today's date on Today and History; elsewhere, Today.
+    case goToToday
+    /// ⌘← and ⌘→ on Today and History.
+    case moveDay(Int)
 
     @MainActor
     func post() {
@@ -238,9 +287,13 @@ final class WindowCommandBox: NSObject {
     init(_ command: WindowCommand) { self.command = command }
 }
 
-/// The menu bar's items for the window: no New Window, Preferences… and a Go
-/// menu whose keys really work (critique-recall-engineering finding 6).
+/// The menu bar's items for the window (SPEC 2.10, 2.11 with SPEC-DELTA 1):
+/// no New Window, Preferences…, a Go menu whose keys really work (⌘1 Today
+/// to ⌘9 AI Tools; Privacy from its row and the status menu), and the View
+/// menu's sidebar tidying.
 struct WindowCommands: Commands {
+    @ObservedObject private var menu = WindowMenuState.shared
+
     var body: some Commands {
         CommandGroup(replacing: .newItem) {}
         CommandGroup(replacing: .appSettings) {
@@ -249,24 +302,60 @@ struct WindowCommands: Commands {
             }
             .keyboardShortcut(",", modifiers: .command)
         }
-        CommandMenu(UserFacingCopy.goMenu) {
-            ForEach(MCI.Workspace.primaryDestinations) { destination in
-                Button(destination.title) {
-                    if let place = RecallPlace(rawValue: destination.id) {
-                        WindowCommand.go(RecallRoute(place: place)).post()
-                    }
+        CommandGroup(before: .sidebar) {
+            Button(menu.sidebarHidden ? NavigationCopy.showSidebar : NavigationCopy.hideSidebar) {
+                WindowShellCommand.toggleSidebar.post()
+            }
+            .keyboardShortcut("s", modifiers: [.command, .control])
+            Menu(NavigationCopy.sidebarMenu) {
+                Toggle(NavigationCopy.workingOn, isOn: Binding(get: { !menu.workingOnHidden },
+                                                               set: { _ in WindowShellCommand.toggleWorkingOn.post() }))
+                ForEach(SidebarPlace.libraryKinds) { kind in
+                    Toggle(kind.title, isOn: Binding(get: { menu.kinds.contains(kind) },
+                                                     set: { _ in WindowShellCommand.toggleKind(kind).post() }))
                 }
-                .keyboardShortcut(KeyEquivalent(Character(destination.keyboardShortcut)), modifiers: .command)
+                Divider()
+                Button(NavigationCopy.resetSidebar) { WindowShellCommand.resetSidebar.post() }
+            }
+            Button(menu.workingOnHidden ? NavigationCopy.showWorkingOn : NavigationCopy.hideWorkingOn) {
+                WindowShellCommand.toggleWorkingOn.post()
             }
             Divider()
-            Button(UserFacingCopy.commandNewQuestion) { WindowCommand.go(.newQuestion).post() }
+        }
+        CommandMenu(NavigationCopy.goMenu) {
+            ForEach(SidebarPlace.allCases) { place in
+                if let key = place.key {
+                    Button(place.title) { WindowCommand.go(RecallRoute(place: RecallPlace(place))).post() }
+                        .keyboardShortcut(KeyEquivalent(key), modifiers: .command)
+                } else {
+                    Button(place.title) { WindowCommand.go(RecallRoute(place: RecallPlace(place))).post() }
+                }
+            }
+            Divider()
+            Button(NavigationCopy.newQuestion) { WindowCommand.go(.newQuestion).post() }
                 .keyboardShortcut("n", modifiers: .command)
-            Button(UserFacingCopy.commandHistory) { WindowCommand.go(.showHistory).post() }
-                .keyboardShortcut("t", modifiers: .command)
-            Button(UserFacingCopy.commandFind) { WindowCommand.go(.findInAsk).post() }
+            Button(NavigationCopy.find) { WindowCommand.go(.findInAsk).post() }
                 .keyboardShortcut("f", modifiers: .command)
-            Button(UserFacingCopy.commandFolderContext) { WindowCommand.folderContext.post() }
+            Divider()
+            Button(NavigationCopy.back) { WindowShellCommand.back.post() }
+                .keyboardShortcut("[", modifiers: .command)
+            Button(NavigationCopy.forward) { WindowShellCommand.forward.post() }
+                .keyboardShortcut("]", modifiers: .command)
+            Divider()
+            Button(NavigationCopy.goToToday) { WindowCommand.goToToday.post() }
+                .keyboardShortcut("t", modifiers: .command)
+            // The field wins while typing: ⌘← and ⌘→ move its cursor then.
+            Button(NavigationCopy.previousDay) { WindowCommand.moveDay(-1).post() }
+                .keyboardShortcut(.leftArrow, modifiers: .command)
+                .disabled(menu.fieldFocused)
+            Button(NavigationCopy.nextDay) { WindowCommand.moveDay(1).post() }
+                .keyboardShortcut(.rightArrow, modifiers: .command)
+                .disabled(menu.fieldFocused)
+            Divider()
+            Button(NavigationCopy.contextForThisFolder) { WindowCommand.folderContext.post() }
                 .keyboardShortcut("j", modifiers: .command)
+            Button(NavigationCopy.forgetRecentCommand) { WindowShellCommand.forgetRecent(.tenMinutes).post() }
+                .keyboardShortcut(.delete, modifiers: [.command, .shift])
             Divider()
             Button(UserFacingCopy.commandRefresh) { WindowCommand.refresh.post() }
                 .keyboardShortcut("r", modifiers: .command)
@@ -277,8 +366,12 @@ struct WindowCommands: Commands {
 struct RootView: View {
     let reader: BrainReader
     let understanding: UnderstandingReader
+    var work: any WorkReader = PreviewWorkReader()
     /// The app opened this window on Demo Memory (SPEC-DELTA 6).
     var isDemoMemory = false
+    var channel: (any WindowChannelSending)?
+    var forget: ForgetCoordinator?
+    var isUpgrade = false
     @State private var selection: MemoryWorkspaceSelection
     @State private var routeRequest: RecallRouteRequest?
     @State private var nextRouteSequence: UInt64 = 2
@@ -292,48 +385,93 @@ struct RootView: View {
     @StateObject private var whatsNewCoord = WhatsNewCoordinator()
 
     /// The window opens where the app asked: the same route a running window
-    /// takes (critique-recall-engineering finding 5).
+    /// takes (critique-recall-engineering finding 5). With nowhere asked
+    /// for, on the page it was left on less than an hour ago, else Today
+    /// (SPEC 2.16).
     init(
         reader: BrainReader,
         understanding: UnderstandingReader,
+        work: any WorkReader = PreviewWorkReader(),
         launchRequest: RecallLaunchRequest = RecallLaunchRequest(tab: nil, focusEventId: nil, openPopup: false),
-        isDemoMemory: Bool = false
+        isDemoMemory: Bool = false,
+        channel: (any WindowChannelSending)? = nil,
+        forget: ForgetCoordinator? = nil,
+        opening: WindowPage = .today,
+        isUpgrade: Bool = false
     ) {
         self.reader = reader
         self.understanding = understanding
+        self.work = work
         self.isDemoMemory = isDemoMemory
+        self.channel = channel
+        self.forget = forget
+        self.isUpgrade = isUpgrade
         let route = RecallRoute(launchRequest)
-        self._selection = State(initialValue: MemoryWorkspaceSelection(place: route.place(keeping: .overview)))
+        let first: WindowPage = route.workItem.map(WindowPage.item) ?? route.place.map(WindowPage.place) ?? opening
+        self._selection = State(initialValue: first)
         self._routeRequest = State(initialValue: RecallRouteRequest(route: route, sequence: 1))
     }
 
-    /// Global (non-contextual) commands, shown in the command palette and the
-    /// keyboard shortcuts sheet. The keys themselves are the menu bar's.
+    /// Global (non-contextual) commands, shown in the ⌘K bar under its
+    /// groups: Go To, Moments, Actions and Help (SPEC 2.9).
     private var globalCommands: [ActionPanelCommand] {
-        [
+        var commands: [ActionPanelCommand] = SidebarPlace.allCases.map { place in
+            .init(
+                id: "go.\(place.rawValue)",
+                title: place.title,
+                shortcut: place.key.map { "\u{2318}\($0)" } ?? "",
+                category: .goTo
+            ) {
+                go(RecallRoute(place: RecallPlace(place)))
+            }
+        }
+        commands += [
             .init(
                 id: "app.newSearch",
                 title: UserFacingCopy.commandNewQuestion,
-                shortcut: "⌘N",
-                category: .search,
+                shortcut: "\u{2318}N",
+                category: .moments,
                 description: UserFacingCopy.commandNewQuestionDetail
             ) {
                 go(.newQuestion)
             },
             .init(
-                id: "app.showTimeline",
-                title: UserFacingCopy.commandHistory,
-                shortcut: "⌘T",
-                category: .app,
-                description: UserFacingCopy.commandHistoryDetail
+                id: "app.pause",
+                title: NavigationCopy.pause,
+                shortcut: "",
+                category: .actions
             ) {
-                go(.showHistory)
+                if let channel { Task { _ = await channel.send(WindowChannelRequest(op: .pause), timeout: .seconds(15)) } }
+            },
+            .init(
+                id: "app.resume",
+                title: NavigationCopy.resume,
+                shortcut: "",
+                category: .actions
+            ) {
+                if let channel { Task { _ = await channel.send(WindowChannelRequest(op: .resume), timeout: .seconds(15)) } }
+            },
+            .init(
+                id: "app.forgetRecent",
+                title: NavigationCopy.forgetLastTenMinutes,
+                shortcut: "\u{21E7}\u{2318}\u{232B}",
+                category: .actions
+            ) {
+                WindowShellCommand.forgetRecent(.tenMinutes).post()
+            },
+            .init(
+                id: "app.folderContext",
+                title: UserFacingCopy.commandFolderContext,
+                shortcut: "\u{2318}J",
+                category: .actions
+            ) {
+                showsFolderContext = true
             },
             .init(
                 id: "app.openSettings",
                 title: UserFacingCopy.commandPreferences,
-                shortcut: "⌘,",
-                category: .app
+                shortcut: "\u{2318},",
+                category: .actions
             ) {
                 Task { _ = await WorkspacePreferencesRouter.shared.open(.general, bundleURL: Bundle.main.bundleURL) }
             },
@@ -341,44 +479,25 @@ struct RootView: View {
                 id: "app.openCustomNames",
                 title: UserFacingCopy.commandNames,
                 shortcut: "",
-                category: .app,
+                category: .actions,
                 description: UserFacingCopy.commandNamesDetail
             ) {
                 go(.names)
             },
             .init(
-                id: "app.folderContext",
-                title: UserFacingCopy.commandFolderContext,
-                shortcut: "⌘J",
-                category: .app
-            ) {
-                showsFolderContext = true
-            },
-            .init(
                 id: "app.refreshBrain",
                 title: UserFacingCopy.commandRefresh,
-                shortcut: "⌘R",
-                category: .app,
+                shortcut: "\u{2318}R",
+                category: .actions,
                 description: UserFacingCopy.commandRefreshDetail
             ) {
                 refresh()
             },
             .init(
-                id: "app.exportDebugBundle",
-                title: UserFacingCopy.commandSupportReport,
-                shortcut: "",
-                category: .debug,
-                description: UserFacingCopy.commandSupportReportDetail
-            ) {
-                if let url = URL(string: "hippocampus://debug?export=1") {
-                    NSWorkspace.shared.open(url)
-                }
-            },
-            .init(
                 id: "app.showHelp",
                 title: UserFacingCopy.commandShortcuts,
-                shortcut: "⌘/",
-                category: .app
+                shortcut: "\u{2318}/",
+                category: .help
             ) {
                 actionPanelRegistry.showHelp()
             },
@@ -388,33 +507,51 @@ struct RootView: View {
             .init(
                 id: "app.whatsNew",
                 title: UserFacingCopy.commandWhatsNew,
-                shortcut: "⌘⇧N",
-                category: .app,
+                shortcut: "\u{21E7}\u{2318}N",
+                category: .help,
                 description: UserFacingCopy.commandWhatsNewDetail
             ) {
                 whatsNewCoord.showOnDemand()
             },
             .init(
+                id: "app.exportDebugBundle",
+                title: UserFacingCopy.commandSupportReport,
+                shortcut: "",
+                category: .help,
+                description: UserFacingCopy.commandSupportReportDetail
+            ) {
+                if let url = URL(string: "hippocampus://debug?export=1") {
+                    NSWorkspace.shared.open(url)
+                }
+            },
+            .init(
                 id: "app.quit",
                 title: UserFacingCopy.commandCloseWindow,
-                shortcut: "⌘Q",
-                category: .app
+                shortcut: "\u{2318}Q",
+                category: .help
             ) {
                 NSApp.terminate(nil)
             },
         ]
+        return commands
     }
 
     var body: some View {
         MemoryWorkspaceView(
             reader: reader,
             understanding: understanding,
+            work: work,
             selection: $selection,
             routeRequest: routeRequest,
             fieldFocusRequest: fieldFocusRequest,
-            isDemoMemory: isDemoMemory
+            isDemoMemory: isDemoMemory,
+            channel: channel,
+            appRunning: { MCIRecallApp.appIsRunning() },
+            forget: forget,
+            hides: .shared,
+            isUpgrade: isUpgrade
         )
-        .background(Color.brandBgPrimary)
+        .background(MCI.Color.background)
         .onOpenURL { url in
             guard let request = RecallLaunchRequest(url: url) else { return }
             go(RecallRoute(request))
@@ -431,6 +568,8 @@ struct RootView: View {
             case let .go(route): go(route)
             case .refresh: refresh()
             case .folderContext: showsFolderContext = true
+            case .goToToday: goToToday()
+            case let .moveDay(days): moveDay(by: days)
             }
         }
         .focusable(true, interactions: .automatic)
@@ -444,13 +583,12 @@ struct RootView: View {
         ) { press in
             guard
                 press.modifiers == .command,
-                let destination = MemoryWorkspaceSelection(
-                    keyboardShortcut: press.key.character
-                )
+                let destination = MemoryWorkspaceSelection(keyboardShortcut: press.key.character),
+                case let .place(place) = destination
             else {
                 return .ignored
             }
-            go(RecallRoute(place: destination.place))
+            go(RecallRoute(place: place))
             return .handled
         }
         .onKeyPress(.init("/"), phases: .down) { press in
@@ -464,6 +602,13 @@ struct RootView: View {
             // so a bare ⌘N (New Question) still routes cleanly.
             guard press.modifiers == [.command, .shift] else { return .ignored }
             whatsNewCoord.showOnDemand()
+            return .handled
+        }
+        .onKeyPress(.init("z"), phases: .down) { press in
+            // ⌘Z undoes the last forget while its note shows; the field's
+            // own text undo comes first while it is typed in.
+            guard press.modifiers == .command, forget?.undoable != nil else { return .ignored }
+            WindowShellCommand.undoForget.post()
             return .handled
         }
         .registerActionPanelCommands(globalCommands, registry: actionPanelRegistry)
@@ -493,11 +638,28 @@ struct RootView: View {
     }
 
     /// Every route, from a link, the app, a menu or a button, goes the same
-    /// way: the workspace applies it (selection, then what Ask shows).
+    /// way: the workspace applies it (the page, then what it shows).
     private func go(_ route: RecallRoute) {
         if route.focusesField { fieldFocusRequest &+= 1 }
         routeRequest = RecallRouteRequest(route: route, sequence: nextRouteSequence)
         nextRouteSequence &+= 1
+    }
+
+    /// ⌘T: today's date on Today and History; elsewhere, Today (SPEC 2.10).
+    private func goToToday() {
+        let today = Date()
+        switch selection {
+        case .place(.history):
+            go(RecallRoute(place: .history, day: today))
+        default:
+            go(RecallRoute(place: .today, day: today))
+        }
+    }
+
+    /// ⌘← and ⌘→ on Today and History: the day before or after, never past
+    /// today.
+    private func moveDay(by days: Int) {
+        WindowDayMove.shared.move(days)
     }
 
     /// "Refresh": forget what was read about the day and the person, then
@@ -510,5 +672,18 @@ struct RootView: View {
             actionPanelRegistry.endRefresh()
             ToastNotifier.shared.notify(UserFacingCopy.refreshingToast)
         }
+    }
+}
+
+/// ⌘← and ⌘→ from the Go menu, for the page that shows a day.
+@MainActor
+final class WindowDayMove: ObservableObject {
+    static let shared = WindowDayMove()
+    @Published private(set) var days = 0
+    @Published private(set) var sequence = 0
+
+    func move(_ days: Int) {
+        self.days = days
+        sequence += 1
     }
 }

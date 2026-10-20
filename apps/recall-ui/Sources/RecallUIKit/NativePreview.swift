@@ -13,7 +13,11 @@ public struct NativePreviewConfiguration: Sendable {
             arguments.first { $0.hasPrefix(name + "=") }.map { String($0.dropFirst(name.count + 1)) }
         }
         let requested = value("--preview-tab").flatMap(RecallTab.from) ?? .now
-        tab = [.now, .search, .timeline, .episodes, .you].contains(requested.workspaceTab) ? requested.workspaceTab : .now
+        // Memory pages only: Privacy and settings read the person's own
+        // files, which the preview never opens.
+        let memoryPages: [RecallTab] = [.now, .search, .timeline, .episodes, .you, .aboutYou, .webPages, .lookedUp,
+                                        .work, .documents, .code, .conversations, .aiTools]
+        tab = memoryPages.contains(requested.workspaceTab) ? requested.workspaceTab : .now
         query = value("--preview-query") ?? ""
         scenario = value("--preview-state").flatMap(Scenario.init(rawValue:)) ?? .populated
     }

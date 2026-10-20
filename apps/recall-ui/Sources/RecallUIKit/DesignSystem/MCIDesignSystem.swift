@@ -77,6 +77,25 @@ public extension MCI {
         public static let border = dynamic(light: 0xE2E4E8, dark: 0x383A3F)
         public static let borderStrong = dynamic(light: 0xC9CCD2, dark: 0x51545B)
 
+        /// The window's frame (SPEC 2.4, the approved prototype): the
+        /// sidebar's backdrop where the system's material can't be drawn
+        /// (off-screen pictures), its selection, and the hairlines between
+        /// the sidebar, the field row and the page.
+        public static let sidebar = dynamic(light: 0xEFF0F3, dark: 0x1F2125)
+        public static let sidebarSelection = dynamic(light: 0xDCDEE3, dark: 0x36393F)
+        /// Secondary words on the sidebar (headers, Show All, the status):
+        /// a hair darker than `foregroundSecondary`, for 4.5:1 on its grey.
+        public static let sidebarSecondary = dynamic(light: 0x6A6A6F, dark: 0xB8B8BD)
+        public static let hairline = dynamic(light: 0xDFE0E1, dark: 0x2E3033)
+        public static let windowEdge = dynamic(light: 0xD7D9DE, dark: 0x050607)
+        public static let placeholder = dynamic(light: 0xA3A3A8, dark: 0x6C6C72)
+        /// Over the sidebar: the line above the pinned group.
+        public static let sidebarLine = dynamic(light: 0x000000, dark: 0xFFFFFF, alpha: 0.09)
+        /// Behind a control the pointer is over.
+        public static let hover = dynamic(light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.05, darkAlpha: 0.06)
+        /// A menu drawn in a picture, as the system draws its menus.
+        public static let menu = dynamic(light: 0xF6F6F8, dark: 0x2A2C31)
+
         public static let change = dynamic(light: 0xC7473A, dark: 0xFF8B7F)
         public static let error = dynamic(light: 0xC7473A, dark: 0xFF8B7F)
         public static let warning = dynamic(light: 0x9A6700, dark: 0xE9B949)
@@ -93,10 +112,19 @@ public extension MCI {
         /// updates live when the user flips appearance without a
         /// window rebuild.
         private static func dynamic(light: UInt32, dark: UInt32) -> SwiftUI.Color {
+            dynamic(light: light, dark: dark, lightAlpha: 1, darkAlpha: 1)
+        }
+
+        private static func dynamic(light: UInt32, dark: UInt32, alpha: CGFloat) -> SwiftUI.Color {
+            dynamic(light: light, dark: dark, lightAlpha: alpha, darkAlpha: alpha)
+        }
+
+        private static func dynamic(light: UInt32, dark: UInt32, lightAlpha: CGFloat,
+                                    darkAlpha: CGFloat) -> SwiftUI.Color {
             #if canImport(AppKit)
             return SwiftUI.Color(nsColor: NSColor(name: nil) { appearance in
                 let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                return NSColor(hex: isDark ? dark : light)
+                return NSColor(hex: isDark ? dark : light, alpha: isDark ? darkAlpha : lightAlpha)
             })
             #else
             return SwiftUI.Color(hex: UInt(dark))
@@ -313,6 +341,12 @@ public extension MCI.Color {
         ("foregroundMuted", 0x8E8E93, 0x85858B),
         ("border", 0xE2E4E8, 0x383A3F),
         ("borderStrong", 0xC9CCD2, 0x51545B),
+        ("sidebar", 0xEFF0F3, 0x1F2125),
+        ("sidebarSelection", 0xDCDEE3, 0x36393F),
+        ("sidebarSecondary", 0x6A6A6F, 0xB8B8BD),
+        ("hairline", 0xDFE0E1, 0x2E3033),
+        ("windowEdge", 0xD7D9DE, 0x050607),
+        ("placeholder", 0xA3A3A8, 0x6C6C72),
         ("change", 0xC7473A, 0xFF8B7F),
         ("error", 0xC7473A, 0xFF8B7F),
         ("warning", 0x9A6700, 0xE9B949),
@@ -356,35 +390,28 @@ public extension MCI {
             }
         }
 
-        public static let primaryDestinations: [Destination] = [
-            .init(
-                id: "overview",
-                title: "Overview",
-                systemImage: "house",
-                requiresSourceAccess: false,
-                keyboardShortcut: "1"
-            ),
-            .init(
-                id: "ask",
-                title: "Ask",
-                systemImage: "magnifyingglass",
-                requiresSourceAccess: true,
-                keyboardShortcut: "2"
-            ),
-            .init(
-                id: "you",
-                title: "You",
-                systemImage: "person.crop.circle",
-                requiresSourceAccess: false,
-                keyboardShortcut: "3"
-            ),
+        /// The sidebar's places with a key, in key order (SPEC 2.2 with
+        /// SPEC-DELTA 1): ⌘1 Today to ⌘9 AI Tools. Privacy opens from its
+        /// row and the status menu, and has no key.
+        public static let primaryDestinations: [Destination] = SidebarPlace.allCases.compactMap { place in
+            place.key.map { key in
+                Destination(id: place.rawValue, title: place.title, systemImage: place.systemImage,
+                            requiresSourceAccess: place == .history || place.isLibraryKind,
+                            keyboardShortcut: String(key))
+            }
+        }
+
+        /// Every place the sidebar has a row for: the keyed ones, then
+        /// Privacy.
+        public static let allDestinations: [Destination] = primaryDestinations + [
+            Destination(id: SidebarPlace.privacy.rawValue, title: SidebarPlace.privacy.title,
+                        systemImage: SidebarPlace.privacy.systemImage, requiresSourceAccess: false,
+                        keyboardShortcut: ""),
         ]
 
-        /// The window has three places and nothing else (RULINGS G5).
-        public static let allDestinations = primaryDestinations
-
         public static func destination(forKeyboardShortcut shortcut: String) -> Destination? {
-            allDestinations.first { $0.keyboardShortcut == shortcut }
+            guard !shortcut.isEmpty else { return nil }
+            return allDestinations.first { $0.keyboardShortcut == shortcut }
         }
 
         public static func historicalEventMetric(for summary: SummaryStats) -> HistoricalMetric {

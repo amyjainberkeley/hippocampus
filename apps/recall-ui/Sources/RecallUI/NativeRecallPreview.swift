@@ -21,7 +21,7 @@ struct NativeRecallPreview: View {
         let understanding = PreviewUnderstandingReader(
             scenario: PreviewUnderstandingReader.Scenario(rawValue: configuration.scenario.rawValue) ?? .populated)
         self.understanding = understanding
-        _selection = State(initialValue: MemoryWorkspaceSelection(initialTab: configuration.tab))
+        _selection = State(initialValue: RecallRoute(tab: configuration.tab).place.map(WindowPage.place) ?? .today)
         _ask = StateObject(wrappedValue: Self.makeAsk(reader: reader, understanding: understanding,
                                                       query: configuration.query))
     }
@@ -46,7 +46,8 @@ struct NativeRecallPreview: View {
     var body: some View {
         let reader = self.reader
         let now = reader.now
-        MemoryWorkspaceView(reader: reader, understanding: understanding, selection: $selection,
+        MemoryWorkspaceView(reader: reader, understanding: understanding,
+            work: PreviewWorkReader(snapshot: ShellRenderFixture.weekIn(now: now)), selection: $selection,
             isSyntheticPreview: true,
             healthLoader: { nil },
             contextExporter: { query in
@@ -55,8 +56,9 @@ struct NativeRecallPreview: View {
             },
             calendar: reader.calendar,
             now: { now },
-            ask: ask)
-            .preferredColorScheme(.light)
+            ask: ask,
+            status: WindowStatus(kind: .remembering, title: NavigationCopy.remembering, action: .pause),
+            hides: SidebarHides(defaults: nil))
             .frame(minWidth: 760, minHeight: 480)
     }
 }

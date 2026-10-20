@@ -13,6 +13,8 @@ struct BottomNote: Identifiable {
 
     let id = UUID()
     let text: String
+    /// A quieter line under it, such as the first forget's.
+    var detail: String?
     let action: Action?
 }
 
@@ -30,12 +32,12 @@ final class BottomNotes: ObservableObject {
 
     /// Shows `text`, with a button when `action` is given, in place of any
     /// note showing now.
-    static func show(_ text: String, action: BottomNote.Action? = nil) {
-        shared.show(text, action: action)
+    static func show(_ text: String, detail: String? = nil, action: BottomNote.Action? = nil) {
+        shared.show(text, detail: detail, action: action)
     }
 
-    func show(_ text: String, action: BottomNote.Action? = nil) {
-        let note = BottomNote(text: text, action: action)
+    func show(_ text: String, detail: String? = nil, action: BottomNote.Action? = nil) {
+        let note = BottomNote(text: text, detail: detail, action: action)
         current = note
         AccessibilityNotification.Announcement(text).post()
         hiding?.cancel()
@@ -77,9 +79,18 @@ private struct BottomNoteView: View {
 
     var body: some View {
         HStack(spacing: MCI.Spacing.m) {
-            Text(verbatim: note.text)
-                .mciFont(.body)
-                .foregroundStyle(MCI.Color.foreground)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: note.text)
+                    .mciFont(.body)
+                    .foregroundStyle(MCI.Color.foreground)
+                if let detail = note.detail {
+                    Text(verbatim: detail)
+                        .mciFont(.caption)
+                        .foregroundStyle(MCI.Color.foregroundSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: note.detail == nil ? nil : 380, alignment: .leading)
             if let action = note.action {
                 Button(action.title) {
                     action.perform()

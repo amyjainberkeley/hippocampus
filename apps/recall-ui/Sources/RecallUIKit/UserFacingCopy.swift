@@ -49,9 +49,9 @@ public enum UserFacingCopy {
     public static let deleteFailedBanner =
         "Delete didn\u{2019}t go through. Nothing was removed. "
         + "Try again in a moment."
-    public static let deleteBlockedBanner =
-        "Hippocampus is updating your memory. Quit Hippocampus, leave "
-        + "this window open, then try deleting again."
+    /// A forget the writer lease refused: the hold didn't free it. Never
+    /// "quit Hippocampus" (SPEC 3.11): a window the app opened closes with it.
+    public static let deleteBlockedBanner = NavigationCopy.couldNotForget + " Try again in a moment."
     public static let dashboardLoadFailedBanner =
         "The Privacy Dashboard couldn\u{2019}t load right now. "
         + "Try relaunching Hippocampus."
@@ -200,7 +200,9 @@ public enum UserFacingCopy {
 
     // The groups on You (contract model-page.md section 4).
 
-    public static let groupWorkingOn = "Working on"
+    /// About You's first group: "Working on" would read as the sidebar's
+    /// Working On, which is something else (SPEC 3.7).
+    public static let groupWorkingOn = "Projects and goals"
     public static let groupHowYouWork = "How you work"
     public static let groupSkills = "Skills"
     public static let groupPeople = "People"
@@ -313,7 +315,7 @@ public enum UserFacingCopy {
     public static let commandWhatsNewDetail = "What changed in this version."
     public static let commandCloseWindow = "Close Hippocampus Window"
     /// ⌘J: what your AI gets in a folder you choose.
-    public static let commandFolderContext = "Context for a Folder\u{2026}"
+    public static let commandFolderContext = NavigationCopy.contextForThisFolder
     public static let goMenu = "Go"
 
     // A moment's detail and its screenshot (spec-copy S4.12, RULINGS T17).

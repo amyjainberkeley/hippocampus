@@ -3,20 +3,24 @@ import XCTest
 @testable import RecallUIKit
 
 final class MemoryWorkspaceTests: XCTestCase {
-    func testTheWindowHasThreePlaces() {
+    /// The sidebar's places with a key, in key order (SPEC 2.2 with
+    /// SPEC-DELTA 1): ⌘1 Today to ⌘9 AI Tools.
+    func testTheSidebarsKeyedPlacesAreTodayToAITools() {
         let destinations = MCI.Workspace.primaryDestinations
-        XCTAssertEqual(destinations.map(\.title), ["Overview", "Ask", "You"])
-        XCTAssertEqual(destinations.map(\.id), ["overview", "ask", "you"])
-        XCTAssertEqual(destinations.map(\.systemImage), [
-            "house",
-            "magnifyingglass",
-            "person.crop.circle",
+        XCTAssertEqual(destinations.map(\.title), [
+            "Today", "History", "Web Pages", "Documents", "Code", "Conversations", "Looked Up", "About You", "AI Tools",
         ])
+        XCTAssertEqual(destinations.map(\.systemImage), [
+            "sun.max", "clock", "globe", "doc.text", "chevron.left.forwardslash.chevron.right",
+            "bubble.left.and.bubble.right", "text.magnifyingglass", "person.crop.circle", "cable.connector",
+        ])
+        XCTAssertEqual(MCI.Workspace.allDestinations.last?.title, "Privacy", "Privacy is a row with no key")
     }
 
-    func testOnlyAskReadsMoments() {
+    func testHistoryAndItsKindsReadMoments() {
         let sourceBacked = MCI.Workspace.primaryDestinations.filter(\.requiresSourceAccess)
-        XCTAssertEqual(sourceBacked.map(\.title), ["Ask"])
+        XCTAssertEqual(sourceBacked.map(\.title), ["History", "Web Pages", "Documents", "Code", "Conversations",
+                                                    "Looked Up"])
     }
 
     func testNowMetricDescribesHistoricalRowsWithoutClaimingLiveCaptureState() {
@@ -82,19 +86,23 @@ final class MemoryWorkspaceTests: XCTestCase {
         )
     }
 
-    func testThePlacesAreCommandOneToThreeAndNothingElse() {
+    /// ⌘1 to ⌘9 never move; Privacy opens from its row and the status menu.
+    func testThePlacesAreCommandOneToNineAndPrivacyHasNone() {
         let destinations = MCI.Workspace.allDestinations
-        XCTAssertEqual(destinations.count, 3)
-        XCTAssertEqual(destinations.map(\.keyboardShortcut), ["1", "2", "3"])
-        XCTAssertEqual(MCI.Workspace.destination(forKeyboardShortcut: "1")?.id, "overview")
-        XCTAssertEqual(MCI.Workspace.destination(forKeyboardShortcut: "3")?.id, "you")
-        XCTAssertNil(MCI.Workspace.destination(forKeyboardShortcut: "5"))
-        XCTAssertNil(MCI.Workspace.destination(forKeyboardShortcut: "6"))
+        XCTAssertEqual(destinations.count, 10)
+        XCTAssertEqual(destinations.map(\.keyboardShortcut), ["1", "2", "3", "4", "5", "6", "7", "8", "9", ""])
+        XCTAssertEqual(MCI.Workspace.destination(forKeyboardShortcut: "1")?.id, "today")
+        XCTAssertEqual(MCI.Workspace.destination(forKeyboardShortcut: "2")?.id, "history")
+        XCTAssertEqual(MCI.Workspace.destination(forKeyboardShortcut: "8")?.id, "aboutYou")
+        XCTAssertEqual(MCI.Workspace.destination(forKeyboardShortcut: "9")?.id, "aiTools")
+        XCTAssertNil(MCI.Workspace.destination(forKeyboardShortcut: "0"))
+        XCTAssertNil(MCI.Workspace.destination(forKeyboardShortcut: ""))
     }
 
+    /// The old places' names go (SPEC 2.2: Overview, Ask and You).
     func testOldPlacesAreNotInTheSidebar() {
         let titles = Set(MCI.Workspace.allDestinations.map(\.title))
-        for old in ["Today", "Search", "History", "Sessions", "Connections", "Privacy", "Settings", "Strip", "Chat"] {
+        for old in ["Overview", "Ask", "You", "Search", "Sessions", "Connections", "Settings", "Strip", "Chat"] {
             XCTAssertFalse(titles.contains(old), old)
         }
     }
