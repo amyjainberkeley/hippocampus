@@ -521,6 +521,7 @@ fi
 SIGNING_SCRATCH=$(mktemp -d -t hippocampus-installer-signing)
 ENTITLEMENTS="$SIGNING_SCRATCH/Hippocampus.entitlements"
 CAPTURE_HELPER_ENTITLEMENTS="$REPO_ROOT/apps/hippocampus/Resources/MCICaptureHelper.entitlements"
+RECALL_UI_ENTITLEMENTS="$REPO_ROOT/apps/hippocampus/Resources/RecallUI.entitlements"
 APPEX_ENTITLEMENTS="$SIGNING_SCRATCH/HippocampusSafariExtension.entitlements"
 hippocampus_render_app_group_entitlements \
     "$REPO_ROOT/apps/hippocampus/Resources/Hippocampus.entitlements" \
@@ -553,6 +554,7 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
 
     codesign --force --options=runtime --timestamp \
         --sign "$DEVELOPER_ID" \
+        --entitlements "$RECALL_UI_ENTITLEMENTS" \
         "$APP_PATH/Contents/MacOS/recall-ui"
 
     if [[ -f "$APP_PATH/Contents/MacOS/onboarding" ]]; then

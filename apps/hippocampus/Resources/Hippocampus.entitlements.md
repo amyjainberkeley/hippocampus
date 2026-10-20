@@ -1,6 +1,6 @@
 # Hippocampus.entitlements — audit notes
 
-`Hippocampus.entitlements` is the hardened-runtime entitlement set embedded into the signed `Hippocampus.app` and its main executable. The capture helper uses the separate, narrowly scoped `MCICaptureHelper.entitlements` in this directory. The plist files contain **no XML comments** because `AMFIUnserializeXML` (the codesign-side parser) rejects in-body comments and aborts with `syntax error near line 5`. Documentation lives here instead.
+`Hippocampus.entitlements` is the hardened-runtime entitlement set embedded into the signed `Hippocampus.app` and its main executable. The capture helper uses the separate, narrowly scoped `MCICaptureHelper.entitlements` in this directory, and the window (`recall-ui`) uses `RecallUI.entitlements`, which holds only Apple Events and Calendars (see "The window's own file" below). The plist files contain **no XML comments** because `AMFIUnserializeXML` (the codesign-side parser) rejects in-body comments and aborts with `syntax error near line 5`. Documentation lives here instead.
 
 Each key, in the order it appears in the plist:
 
@@ -31,8 +31,9 @@ private-window exclusion. Both the responsible parent (`ai.hippocampus`) and
 the actual sender (`MCICaptureHelper`) carry
 `com.apple.security.automation.apple-events = true`. The helper's entitlement
 file contains only this key, with no App Group or Keychain access groups.
-The agent, Recall UI, onboarding process, Chromium native host, and Safari
-extension receive no Apple Events entitlement.
+The window (`recall-ui`) carries it too, from its own file, for Resume's
+open-tab check (below). The agent, onboarding process, Chromium native host,
+and Safari extension receive no Apple Events entitlement.
 
 Apple's [Apple Events entitlement reference](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.automation.apple-events)
 describes the entitlement as enabling permission requests to send Apple events
@@ -43,9 +44,10 @@ for APIs that send Apple events. The purpose string in the responsible parent's
 of private windows, local memory, and sharing only when the user chooses it.
 The helper is an executable inside this app bundle, not a separate app bundle.
 
-Assembly signs the helper with its own file in both Developer ID and explicit
-development ad-hoc modes. Installer Developer ID re-signing supplies that same
-file again; its ad-hoc path verifies the existing assembly signature. The parent
+Assembly signs the helper and the window with their own files in both
+Developer ID and explicit development ad-hoc modes. Installer Developer ID
+re-signing supplies those same files again; its ad-hoc path verifies the
+existing assembly signature. The parent
 keeps its separately rendered App Group entitlement in both signing stages.
 Production signing retains `--options=runtime` and timestamps, following Apple's
 [hardened runtime guidance](https://help.apple.com/xcode/mac/current/en.lproj/devf87a2ac8f.html).
@@ -81,6 +83,32 @@ after assembly and installer re-signing. It also verifies the development
 ad-hoc path. No fixture is launched; these checks do not establish Developer ID
 trust, notarization, successful OS prompting, or ordinary browser capture.
 
+## The window's own file
+
+`RecallUI.entitlements` signs the window (`recall-ui`) with exactly two keys,
+`com.apple.security.automation.apple-events` and
+`com.apple.security.personal-information.calendars`: no App Group, no
+Keychain group and no hardening exception. The window makes two requests of
+its own:
+
+- **Resume's open-tab check** (SPEC-DELTA 3). The first time Resume opens
+  pages in a Chrome-family browser or Arc, the window asks macOS whether it
+  may list that browser's open tabs, so it doesn't open one twice. It asks
+  for the tabs of normal windows only, compares the addresses on this Mac and
+  keeps none (`SystemResume.swift`). Under the hardened runtime, a process
+  without the Apple Events key may be refused before macOS asks the person,
+  and every tab then opens again.
+- **Today's Show Calendar** (SPEC-DELTA 5), described under Calendars below.
+
+Like the app's keys, these permit a request only: macOS still asks the
+person, who can say no or take it back in System Settings. Whether macOS
+checks the window's own executable or only the app that started it (its
+responsible process) has not been verified on a signed build: with the keys
+on both, either way works. `scripts/test_apple_events_signing_contract.py`
+holds the file to these two keys and checks that assembly and installer
+re-signing both apply it. That the prompts appear on a signed, notarized
+build is checked at release, with a test account.
+
 ## Calendars
 
 `com.apple.security.personal-information.calendars` is the hardened
@@ -108,13 +136,13 @@ How Hippocampus uses it:
   `CalendarReaderTests`, `EventKitCalendarStoreTests` and
   `CalendarCopyTests` hold the code to that). Events are never stored in the
   memory and are never sent to an AI tool unless the person sends them.
-- **Who asks.** The key is on the app only. The window runs inside the
-  bundle with no entitlement file, and the capture helper's own file grants
-  Apple Events only; macOS attributes a child's calendar access to the app
-  that started it (the responsible process), with its one grant. If macOS
-  also checks the window's own executable, the window's Show Calendar can't
-  ask (Preferences still can) and the window would need this key too: verify
-  on a signed build with a test account.
+- **Who asks.** The app (Preferences) and the window (Today's Show
+  Calendar) both ask, so the key is on both: on the app in this file, on the
+  window in `RecallUI.entitlements`. macOS attributes a child's calendar
+  access to the app that started it (the responsible process), with its one
+  grant; the window carries the key as well in case macOS also checks the
+  executable that asks. The capture helper's own file grants Apple Events
+  only, and the helper never asks for Calendars.
 - **When access is taken back,** reads return nothing: Today drops its bars,
   and Preferences says how to allow it again.
 

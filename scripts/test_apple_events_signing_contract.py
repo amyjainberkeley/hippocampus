@@ -17,6 +17,7 @@ RESOURCES = ROOT / "apps/hippocampus/Resources"
 ASSEMBLY = RESOURCES / "build-app.sh"
 INSTALLER = ROOT / "scripts/build-installer.sh"
 APPLE_EVENTS = "com.apple.security.automation.apple-events"
+CALENDARS = "com.apple.security.personal-information.calendars"
 APP_GROUPS = "com.apple.security.application-groups"
 HARDENING_EXCEPTIONS = (
     "com.apple.security.get-task-allow",
@@ -55,16 +56,22 @@ class AppleEventsSigningContract(unittest.TestCase):
         for key in HARDENING_EXCEPTIONS:
             self.assertIs(payload.get(key, False), False, key)
 
-    def helper_entitlements(self, script):
-        prefix = "CAPTURE_HELPER_ENTITLEMENTS="
+    def entitlements_source(self, script, variable, file):
+        prefix = f"{variable}="
         assignments = [line for line in script.read_text().splitlines() if line.startswith(prefix)]
-        self.assertEqual(len(assignments), 1, f"{script.name}: helper needs its own entitlement source")
+        self.assertEqual(len(assignments), 1, f"{script.name}: {file} needs its own entitlement source")
         value = shlex.split(assignments[0])[0][len(prefix):]
         resolved = string.Template(value).substitute(SCRIPT_DIR=str(script.parent), REPO_ROOT=str(ROOT))
-        self.assertEqual(Path(resolved), RESOURCES / "MCICaptureHelper.entitlements")
+        self.assertEqual(Path(resolved), RESOURCES / file)
         return resolved
 
-    def test_only_parent_and_helper_receive_apple_events(self):
+    def helper_entitlements(self, script):
+        return self.entitlements_source(script, "CAPTURE_HELPER_ENTITLEMENTS", "MCICaptureHelper.entitlements")
+
+    def window_entitlements(self, script):
+        return self.entitlements_source(script, "RECALL_UI_ENTITLEMENTS", "RecallUI.entitlements")
+
+    def test_the_parent_and_the_helper_receive_apple_events(self):
         for name in ("Hippocampus", "MCICaptureHelper"):
             with self.subTest(binary=name):
                 path = RESOURCES / f"{name}.entitlements"
@@ -80,6 +87,14 @@ class AppleEventsSigningContract(unittest.TestCase):
         safari = ROOT / "extensions/safari/appex/HippocampusSafariExtension.entitlements"
         self.assertNotIn(APPLE_EVENTS, plistlib.loads(safari.read_bytes()))
 
+    def test_the_window_asks_only_for_automation_and_calendars(self):
+        # Resume's open-tab check and Today's Show Calendar ask macOS from the
+        # window itself: exactly those two keys, no App Group, still hardened.
+        payload = plistlib.loads((RESOURCES / "RecallUI.entitlements").read_bytes())
+        self.assert_hardened_entitlements(payload)
+        self.assertEqual({key for key, value in payload.items() if value}, {APPLE_EVENTS, CALENDARS})
+        self.assertEqual(set(payload), {APPLE_EVENTS, CALENDARS})
+
     def test_purpose_explains_classification_local_memory_and_opt_in_sharing(self):
         purpose = plistlib.loads((RESOURCES / "Info.plist").read_bytes())["NSAppleEventsUsageDescription"]
         self.assertIsInstance(purpose, str)
@@ -94,6 +109,8 @@ class AppleEventsSigningContract(unittest.TestCase):
         for script, identities in ((ASSEMBLY, ("$DEVELOPER_ID", "-")), (INSTALLER, ("$DEVELOPER_ID",))):
             with self.subTest(script=script.name, contract="helper source"):
                 self.helper_entitlements(script)
+            with self.subTest(script=script.name, contract="window source"):
+                self.window_entitlements(script)
             for identity in identities:
                 commands = [args for args in signing_commands(script) if option(args, "--sign") == identity]
                 with self.subTest(script=script.name, identity=identity):
@@ -108,6 +125,8 @@ class AppleEventsSigningContract(unittest.TestCase):
                             self.assertIn("--timestamp", args)
                         if target.endswith("/MCICaptureHelper"):
                             self.assertEqual(option(args, "--entitlements"), "$CAPTURE_HELPER_ENTITLEMENTS")
+                        elif target.endswith("/recall-ui"):
+                            self.assertEqual(option(args, "--entitlements"), "$RECALL_UI_ENTITLEMENTS")
                         elif target.endswith("/Hippocampus") or target in ("$APP", "$APP_PATH"):
                             self.assertEqual(option(args, "--entitlements"), "$ENTITLEMENTS")
                         else:
@@ -137,6 +156,8 @@ class AppleEventsSigningContract(unittest.TestCase):
                         commands = [args for args in signing_commands(script) if option(args, "--sign") == identity]
                         if any("$CAPTURE_HELPER_ENTITLEMENTS" in args for args in commands):
                             variables["CAPTURE_HELPER_ENTITLEMENTS"] = self.helper_entitlements(script)
+                        if any("$RECALL_UI_ENTITLEMENTS" in args for args in commands):
+                            variables["RECALL_UI_ENTITLEMENTS"] = self.window_entitlements(script)
                         for args in commands:
                             expanded = [string.Template(arg).substitute(variables) for arg in args]
                             expanded = ["--timestamp=none" if arg == "--timestamp" else arg for arg in expanded]
@@ -149,10 +170,13 @@ class AppleEventsSigningContract(unittest.TestCase):
                             with self.subTest(signed=name):
                                 payload = plistlib.loads(signed) if signed.strip() else {}
                                 self.assert_hardened_entitlements(payload)
-                                if name in ("Hippocampus", "Hippocampus.app", "MCICaptureHelper"):
+                                if name in ("Hippocampus", "Hippocampus.app", "MCICaptureHelper", "recall-ui"):
                                     self.assertIs(payload.get(APPLE_EVENTS), True, f"{name}: signed Automation entitlement missing")
                                 else:
                                     self.assertNotIn(APPLE_EVENTS, payload)
+                                if name == "recall-ui":
+                                    self.assertIs(payload.get(CALENDARS), True, "recall-ui: signed Calendars entitlement missing")
+                                    self.assertEqual(set(payload), {APPLE_EVENTS, CALENDARS})
                                 if name in ("Hippocampus", "Hippocampus.app"):
                                     self.assertEqual(payload.get(APP_GROUPS), [group])
                                 else:
