@@ -1,19 +1,65 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt::Write as _;
-
-use sha2::Digest as _;
+use std::path::{Path, PathBuf};
 
 use super::story::{FOUNDER, PEOPLE};
 use super::*;
 
-/// Names from the maintainer's own life that must never appear in the made-up
-/// world, kept as SHA-256 digests of the lowercased word so this public file
-/// doesn't list them.
-const PRIVATE_NAMES: [&str; 3] = [
-    "ed6c58a3009a2b91b6b1374e3745762de7370bf1e40c1a6e66140d2942769da4",
-    "cdf2e21fa04b3c5e4793783192eb1bebb4574064d2f43853535d7e765aa3e8c9",
-    "d6c8dec6ccdd9eb13bc4f47d18b0c0b2c57dd96dbe51e913fe2030c024749f04",
-];
+/// Names from the maintainers' own lives that must never appear in the
+/// made-up world. They are kept outside the repository, one per line, in
+/// this file under the home folder; the check runs only where it exists.
+/// The repository holds neither the names nor anything that leads to them.
+const PRIVATE_NAMES_FILE: &str = ".config/hippocampus-dev/private-names.txt";
+
+/// The private names list at `path`, lowercased: one name per line, blank
+/// lines and lines starting with `#` skipped. Empty when there is no file.
+fn private_names_at(path: &Path) -> Vec<String> {
+    std::fs::read_to_string(path)
+        .map(|text| {
+            text.lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .map(str::to_lowercase)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The list under this user's home folder, if there is one.
+fn private_names() -> Vec<String> {
+    std::env::var_os("HOME")
+        .map(|home| private_names_at(&PathBuf::from(home).join(PRIVATE_NAMES_FILE)))
+        .unwrap_or_default()
+}
+
+/// The words in `text`, lowercased: its runs of letters and digits.
+fn words(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
+        .collect()
+}
+
+/// Whether `text` holds `name`: its words, whole and in a row, whatever
+/// the case and whatever stands between them.
+fn holds_name(text: &str, name: &str) -> bool {
+    let name = words(name);
+    !name.is_empty()
+        && words(text)
+            .windows(name.len())
+            .any(|run| run == name.as_slice())
+}
+
+/// The first place in `fields` that holds a name from `names`: only where it
+/// is, never the name.
+fn place_of_a_private_name<'a>(
+    fields: &'a [(String, String)],
+    names: &[String],
+) -> Option<&'a str> {
+    fields
+        .iter()
+        .find(|(_, text)| names.iter().any(|name| holds_name(text, name)))
+        .map(|(place, _)| place.as_str())
+}
 
 /// Pacific daylight time.
 const TZ: i32 = -7 * 3600;
@@ -258,22 +304,82 @@ fn a_screenshot_shows_the_same_window_wherever_it_is_used() {
     }
 }
 
+/// Every piece of text the week writes, with where it is.
+fn every_field(week: &World) -> Vec<(String, String)> {
+    let mut fields = Vec::new();
+    for (index, (_, win, _)) in week.moments().into_iter().enumerate() {
+        fields.push((format!("moment {index}'s title"), win.title.clone()));
+        fields.push((
+            format!("moment {index}'s address"),
+            win.url.clone().unwrap_or_default(),
+        ));
+        fields.push((format!("moment {index}'s text"), win.main.clone()));
+        fields.push((format!("moment {index}'s window parts"), win.rest.clone()));
+        fields.push((format!("moment {index}'s caption"), win.caption.clone()));
+    }
+    fields.push(("the screen list".into(), week.screens().to_string()));
+    fields.push(("the calendar".into(), week.calendar_json().to_string()));
+    for (index, claim) in week.claims.iter().enumerate() {
+        fields.push((format!("line {index} about Ren"), claim.text.clone()));
+    }
+    fields
+}
+
+#[test]
+fn the_private_names_list_lives_outside_the_repository_and_never_says_a_name() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(
+        private_names_at(&dir.path().join("none.txt")).is_empty(),
+        "no file, no names: the check passes where there is no list"
+    );
+    let list = dir.path().join("private-names.txt");
+    std::fs::write(
+        &list,
+        "# made up for this test\n\nZebulon\n  Quillfeather Works \n",
+    )
+    .unwrap();
+    let names = private_names_at(&list);
+    assert_eq!(names, ["zebulon", "quillfeather works"]);
+    let fields = vec![
+        (
+            "moment 0's title".to_owned(),
+            "Zebulonia - Google Docs".to_owned(),
+        ),
+        (
+            "moment 1's caption".to_owned(),
+            "Writing to QUILLFEATHER works".to_owned(),
+        ),
+        (
+            "moment 2's text".to_owned(),
+            "Lunch with zebulon".to_owned(),
+        ),
+    ];
+    // A whole word or the words in a row; the place, never the name.
+    assert_eq!(
+        place_of_a_private_name(&fields, &names),
+        Some("moment 1's caption")
+    );
+    assert_eq!(place_of_a_private_name(&fields[..1], &names), None);
+    let wrapped = [(
+        "moment 3's text".to_owned(),
+        "Quillfeather\nworks".to_owned(),
+    )];
+    assert_eq!(
+        place_of_a_private_name(&wrapped, &names),
+        Some("moment 3's text")
+    );
+    assert!(PRIVATE_NAMES_FILE.starts_with(".config/"));
+}
+
 #[test]
 fn the_world_is_made_up() {
     let week = world(MONDAY_AFTERNOON, TZ);
-    let mut corpus = String::new();
-    for (_, win, _) in week.moments() {
-        let _ = writeln!(
-            corpus,
-            "{} {:?} {} {} {}",
-            win.title, win.url, win.main, win.rest, win.caption
-        );
-    }
-    corpus.push_str(&week.screens().to_string());
-    corpus.push_str(&week.calendar_json().to_string());
-    for claim in &week.claims {
-        corpus.push_str(&claim.text);
-    }
+    let fields = every_field(&week);
+    let corpus = fields
+        .iter()
+        .map(|(_, text)| text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
     for never in [
         "Amy",
         "Jain",
@@ -291,15 +397,10 @@ fn the_world_is_made_up() {
     ] {
         assert!(!corpus.contains(never), "{never} is in the demo week");
     }
-    for word in corpus.split(|c: char| !c.is_alphanumeric()) {
-        let mut hex = String::with_capacity(64);
-        for byte in sha2::Sha256::digest(word.to_lowercase().as_bytes()) {
-            let _ = write!(hex, "{byte:02x}");
-        }
-        assert!(
-            !PRIVATE_NAMES.contains(&hex.as_str()),
-            "a private name is in the demo week"
-        );
+    // Names from the maintainers' own lives, from the list outside the
+    // repository where there is one. A failure says where, never the name.
+    if let Some(place) = place_of_a_private_name(&fields, &private_names()) {
+        panic!("a private name is in {place}");
     }
     // Addresses are the real products' or `.example` ones.
     for (_, win, _) in week.moments() {
