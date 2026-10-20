@@ -160,6 +160,15 @@ final class OnboardingCopyTests: XCTestCase {
         XCTAssertEqual(OnboardingCopy.accessibilityBenefits(.chord), ["Knows the window you’re in", "Skips password fields"])
     }
 
+    /// Ending a pause has one name, the menu's Start Remembering, which is
+    /// also setup's own button (launch playbook, decision 5). Resume is
+    /// Working On's, and reopens a project.
+    func testTryItEndsAPauseWithStartRemembering() {
+        XCTAssertEqual(OnboardingCopy.tryItPaused, "Remembering is paused. Choose Start Remembering from the menu bar.")
+        XCTAssertTrue(OnboardingCopy.tryItPaused.contains(OnboardingCopy.startRemembering))
+        XCTAssertFalse(OnboardingCopy.tryItPaused.localizedCaseInsensitiveContains("resume"))
+    }
+
     func testWhatYouGetNamesThreeThingsTheAppDoes() {
         XCTAssertEqual(OnboardingCopy.whatYouGetTitle, "What you get")
         XCTAssertEqual(OnboardingCopy.findTitle, "Find anything you’ve seen.")

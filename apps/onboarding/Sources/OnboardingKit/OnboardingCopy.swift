@@ -388,7 +388,9 @@ public enum OnboardingCopy {
     /// screen starts over with it.
     public static let tryItStillNothing = "Still nothing read."
     public static let openItForMe = "Open it for me"
-    public static let tryItPaused = "Remembering is paused. Resume it from the menu bar."
+    /// The menu's own words for ending a pause, Start Remembering (launch
+    /// playbook, decision 5): Resume reopens a project.
+    public static let tryItPaused = "Remembering is paused. Choose Start Remembering from the menu bar."
     public static let tryItOff = "Remembering is off. Turn it on from the menu bar."
     /// Once a proof shows: where the indicator is, and what it does.
     public static let stopSharingNote = "macOS shows an icon in the menu bar while Hippocampus reads. Stop Sharing there ends it."

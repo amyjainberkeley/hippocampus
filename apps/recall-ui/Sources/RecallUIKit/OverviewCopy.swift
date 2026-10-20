@@ -181,8 +181,11 @@ public extension UserFacingCopy {
 
         // The first day.
 
-        /// Paused on the first day.
-        public static let firstDayPausedBody = "Your day fills in here when you resume. It stays on this Mac."
+        /// Paused on the first day. The banner above ends the pause with
+        /// Start Remembering, so the line uses those words, not Resume, which
+        /// reopens a project.
+        public static let firstDayPausedBody =
+            "Your day fills in here once you start remembering again. It stays on this Mac."
         /// A permission off on the first day; the banner above names it.
         public static let firstDayPermissionBody =
             "Your day fills in here once the permission is back on. It stays on this Mac."
