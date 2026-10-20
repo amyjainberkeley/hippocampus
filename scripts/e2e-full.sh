@@ -540,8 +540,10 @@ fi
 NO_MODEL=(env MCI_MIND_PATH=/nonexistent/hippocampus-mind)
 
 # Custody: the development file key, as the app's FileKeyStore makes it
-# (folder by createDirectory with no attributes, key file 0600).
-mkdir -p "$SUPPORT"
+# (folder by createDirectory with no attributes, under the app's umask 077,
+# so 0700; key file 0600).
+mkdir -p "$(dirname "$SUPPORT")"
+( umask 077; mkdir -p "$SUPPORT" )
 ( umask 077; openssl rand -hex 32 > "$KEY_FILE" )
 chmod 600 "$KEY_FILE"
 KEY_HEX="$(tr -d '\r\n' < "$KEY_FILE")"
