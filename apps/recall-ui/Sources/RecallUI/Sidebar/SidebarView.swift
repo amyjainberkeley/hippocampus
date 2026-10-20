@@ -48,6 +48,9 @@ struct SidebarView: View {
     /// A picture of the pointer resting on this item.
     var restingOn: String?
 
+    /// Which of the sidebar's two lists has the keyboard: changes wait while
+    /// either does (SPEC 2.3).
+    @FocusState private var focusedList: SidebarList?
     @State private var hiMarkAnchor = MenuAnchor.Holder()
     @State private var footerAnchor = MenuAnchor.Holder()
     @State private var hiMarkHovered = false
@@ -62,6 +65,11 @@ struct SidebarView: View {
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .onHover { actions.pointerInside($0) }
+        .onChange(of: focusedList) { _, list in actions.focusInside(list != nil) }
+    }
+
+    enum SidebarList: Hashable {
+        case middle, pinned
     }
 
     // MARK: The top: the window's controls and the hi mark
@@ -157,6 +165,10 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
+        .focused($focusedList, equals: .middle)
+        // Today sits right under the hi mark, as the prototype has it: the
+        // list's own top inset goes.
+        .padding(.top, -10)
         .animation(MCI.Motion.standard, value: model)
     }
 
@@ -176,6 +188,7 @@ struct SidebarView: View {
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
+            .focused($focusedList, equals: .pinned)
             .scrollDisabled(true)
             .frame(height: SidebarMetrics.rowHeight * CGFloat(pinnedRows.count) + 14)
         }

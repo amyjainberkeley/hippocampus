@@ -107,6 +107,9 @@ struct MemoryWorkspaceView: View {
     @State private var navigation = NavigationHistory()
     @State private var sidebarHidden = false
     @State private var narrowSidebarOpen = false
+    /// The window is narrower than `narrowWidth`: the sidebar shows over
+    /// the page when asked for.
+    @State private var isNarrow = false
     @State private var hovered: (item: SidebarWorkItem, frame: CGRect)?
     @State private var preview: (item: SidebarWorkItem, frame: CGRect)?
     @State private var showsFootnote = false
@@ -270,10 +273,22 @@ struct MemoryWorkspaceView: View {
             }
             .animation(MCI.Motion.standard, value: narrowSidebarOpen)
             .animation(MCI.Motion.snap, value: preview?.item.id)
+            .onAppear { isNarrow = narrow }
+            .onChange(of: narrow) { _, now in
+                isNarrow = now
+                if !now { narrowSidebarOpen = false }
+            }
         }
         .coordinateSpace(name: "window")
         .background(MCI.Color.background)
         .ignoresSafeArea()
+        // The title is the app's name, and is not drawn (SPEC 2.1).
+        .navigationTitle(UserFacingCopy.windowTitle)
+        .onDisappear {
+            // Where the window is left, for the next open within the hour.
+            guard !isSyntheticPreview, preset == nil else { return }
+            WindowOpening.shared.remember(selection, now: now())
+        }
         .background(WindowChromeConfigurator())
         .sheet(item: $resumeSheet) { item in
             ResumeSheet(itemId: item.id)
@@ -673,7 +688,7 @@ struct MemoryWorkspaceView: View {
     }
 
     private func toggleSidebar() {
-        if NSApp?.keyWindow.map({ $0.frame.width < Self.narrowWidth }) ?? false || narrowSidebarOpen {
+        if isNarrow {
             narrowSidebarOpen.toggle()
         } else {
             withAnimation(MCI.Motion.standard) { sidebarHidden.toggle() }
