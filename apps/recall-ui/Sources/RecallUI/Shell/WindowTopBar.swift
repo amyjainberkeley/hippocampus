@@ -141,7 +141,8 @@ struct WindowTopBar: View {
     }
 
     /// ⌥↩ asks on this Mac whatever is typed; ⌘↩ hands it to your AI tool
-    /// (SPEC 2.8, 2.10).
+    /// (SPEC 2.8, 2.10). While the field is empty its ⌘↩ is off, so the
+    /// page's own ⌘↩ asks with what the page has selected.
     private var keys: some View {
         ZStack {
             Button("") { submit(forceAsk: true) }
@@ -156,6 +157,7 @@ struct WindowTopBar: View {
                 }
             }
             .keyboardShortcut(.return, modifiers: .command)
+            .disabled(!WindowKeys.fieldTakesCommandReturn(ask.query))
         }
         .frame(width: 0, height: 0)
         .opacity(0)

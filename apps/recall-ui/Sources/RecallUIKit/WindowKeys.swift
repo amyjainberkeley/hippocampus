@@ -50,6 +50,15 @@ public enum WindowKeys {
         WindowKey(["\u{2318},"], "Preferences", in: .help),
     ]
 
+    /// Whether the field takes ⌘↩ (SPEC 2.8, 2.10): only while it holds a
+    /// question. Otherwise the key is the page's Ask {Tool}, with what the
+    /// page has selected. Two ⌘↩ buttons in one window go to the one drawn
+    /// first, and the field is drawn before every page, so the field's
+    /// button is off while the field is empty.
+    public static func fieldTakesCommandReturn(_ query: String) -> Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// The sheet's sections, in the ⌘K groups' order.
     public static var grouped: [(group: ActionPanelCommand.Category, keys: [WindowKey])] {
         ActionPanelCommand.Category.allCases.compactMap { group in
