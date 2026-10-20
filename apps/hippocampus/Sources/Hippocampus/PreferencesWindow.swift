@@ -144,38 +144,10 @@ struct PreferencesRootView: View {
                 set: { _ in loginItemVM.toggle() }
             ))
 
-            VStack(alignment: .leading, spacing: PreferencesStyle.controlSpacing) {
-                Picker("Open Ask with", selection: $store.askKey) {
-                    ForEach(SoloKey.allCases) { key in
-                        Text(key.label).tag(key)
-                    }
-                }
-                .pickerStyle(.menu)
-                let caption = AskKeyCaption(
-                    key: store.askKey,
-                    accessibilityGranted: askKey.accessibilityGranted,
-                    fallbackRegistered: askKey.fallbackRegistered
-                )
-                Text(caption.text)
-                    .font(PreferencesStyle.captionFont)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let secondLine = caption.secondLine {
-                    Text(secondLine)
-                        .font(PreferencesStyle.captionFont)
-                        .foregroundStyle(.secondary)
-                }
-                if caption.needsAccessibility {
-                    Button("Open System Settings…") {
-                        if let url = URL(string: TCCRevokedReason.accessibility.settingsPaneURLString) {
-                            NSWorkspace.shared.open(url)
-                        }
-                    }
-                }
-            }
+            AskKeyPicker(store: store, askKey: askKey)
+
+            CalendarPreferencesSection()
         }
-        // Accessibility may have been allowed since the key last looked.
-        .onAppear { askKey.recheck() }
     }
 
     // MARK: Remembering
@@ -354,6 +326,8 @@ struct PreferencesRootView: View {
                     set: { updater.automaticallyChecksForUpdates = $0 }
                 ))
             }
+
+            DemoMemoryPreferencesSection()
 
             Divider()
 

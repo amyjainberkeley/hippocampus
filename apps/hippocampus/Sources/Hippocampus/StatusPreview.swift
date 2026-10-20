@@ -12,13 +12,13 @@ import SwiftUI
 @MainActor
 enum StatusPreviewRenderer {
     static func render(to out: URL) {
-        for state in menuStates() {
+        for state in menuStates() + contributedMenuStates {
             let view = MenuFacsimile(name: state.name, status: state.status, items: state.items, dark: state.dark)
             if let png = OffscreenPNG.render(view, dark: state.dark) {
                 try? png.write(to: out.appendingPathComponent("menu-\(state.name).png"))
             }
         }
-        for pane in preferencePanes() {
+        for pane in preferencePanes() + contributedPanes {
             let view = pane.view
                 .frame(width: 560)
                 .background(Color(nsColor: .windowBackgroundColor))
@@ -28,9 +28,19 @@ enum StatusPreviewRenderer {
         }
     }
 
+    /// Every other package's pictures, from its own `Renders/*.swift` file,
+    /// so no package edits this file to add one: the hi menu with Option
+    /// held (Demo Memory), and Preferences' panes for side-window pictures,
+    /// AI Tools, the Ask key, the calendar and Demo Memory.
+    private static var contributedMenuStates: [MenuState] { demoMenuStates }
+    private static var contributedPanes: [Pane] {
+        sidePicturePanes + aiToolsPanes + askKeyPanes + calendarPanes + demoPanes
+    }
+
     // MARK: The menu
 
-    private struct MenuState {
+    /// One picture of the menu: `menu-<name>.png`.
+    struct MenuState {
         let name: String
         let status: MenuBarStatus
         let items: [StatusMenuModel.Item]
@@ -39,7 +49,7 @@ enum StatusPreviewRenderer {
 
     /// Oct 13, 3:10 PM in the renderer's time zone, so times read the same
     /// on every run.
-    private static let now: Date = {
+    static let now: Date = {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current
         return calendar.date(from: DateComponents(year: 2026, month: 10, day: 13, hour: 15, minute: 10))!
@@ -105,9 +115,65 @@ enum StatusPreviewRenderer {
 
     // MARK: Preferences
 
-    private struct Pane {
+    /// One picture of Preferences: `prefs-<name>.png`, 560 pt wide.
+    struct Pane {
         let name: String
         let view: AnyView
+    }
+
+    /// A saved status from `savedAt`, as the menu bar's receipt has it.
+    static func savedReceipt(savedAt: Date) -> CaptureStatusReceipt? {
+        PreviewFixtures.receipt(savedAt: savedAt)
+    }
+
+    /// Preferences on `section`, fed fixtures: a supervisor in `state` that
+    /// starts nothing, its own throwaway settings (`configure` sets them
+    /// before the pane reads them), and Shift twice as the Ask key. Nothing
+    /// reads or writes the person's own settings or memory.
+    static func fixturePane(
+        _ name: String, _ section: PreferencesSection, state: SupervisorState = .running,
+        captureEnabled: Bool = true, receipt: CaptureStatusReceipt?,
+        stoppedSharingAt: Date? = nil, stopFailed: Bool = false, paused: Bool = false,
+        turnOnFailure: TurnOnFailure? = nil, turningOn: Bool = false,
+        configure: (UserDefaults) -> Void = { _ in }
+    ) -> Pane {
+        let pauses = UserPauseController(clock: { Date().addingTimeInterval(-6 * 60) })
+        if paused { pauses.setPaused(true) }
+        let supervisor = ProcessSupervisor(
+            locator: PreviewLocator(), keyStore: PreviewKeyStore(),
+            runtimeConfig: PreviewRuntimeConfig(captureEnabled: captureEnabled),
+            topology: PreviewTopology(), keyCustodyPreparer: PreviewKeyCustody(),
+            readinessTimeout: 0.1, captureStatusReader: { (nil, receipt) }, pauses: pauses
+        )
+        supervisor.showForPreview(
+            state: state, captureEnabled: captureEnabled, receipt: receipt,
+            startedAt: Date().addingTimeInterval(-600), stoppedSharingAt: stoppedSharingAt, stopFailed: stopFailed,
+            turnOnFailure: turnOnFailure, turningOn: turningOn
+        )
+        let defaults = UserDefaults(suiteName: "ai.hippocampus.preview.\(UUID().uuidString)")!
+        configure(defaults)
+        let retention = FileManager.default.temporaryDirectory
+            .appendingPathComponent("preview-\(UUID().uuidString)/retention.json")
+        let askKey = AskKeyWatch(hooks: AskKeyWatch.Hooks(
+            isTrusted: { true }, install: { _ in true }, uninstall: {},
+            after: { _, _ in AnyCancellable {} }
+        ))
+        askKey.setFallbackRegistered(true)
+        askKey.start(key: .shiftTwice)
+        let view = PreferencesRootView(
+            store: PreferencesStore(defaults: defaults, retentionURL: retention),
+            section: .constant(section),
+            loginItemVM: LoginItemViewModel(service: PreviewLoginService()),
+            captureController: CapturePreferenceController(applier: supervisor),
+            supervisor: supervisor,
+            askKey: askKey,
+            updater: PreviewUpdater(),
+            actions: PreferencesActions(),
+            aiToolsPreview: SessionContextPreferencesView.Facts(
+                connected: [.claudeCode], statuses: [.claudeCode: .configured, .codex: .notConfigured]
+            )
+        )
+        return Pane(name: name, view: AnyView(view))
     }
 
     private static func preferencePanes() -> [Pane] {
@@ -118,42 +184,9 @@ enum StatusPreviewRenderer {
             stoppedSharingAt: Date? = nil, stopFailed: Bool = false, paused: Bool = false,
             turnOnFailure: TurnOnFailure? = nil, turningOn: Bool = false
         ) -> Pane {
-            let pauses = UserPauseController(clock: { Date().addingTimeInterval(-6 * 60) })
-            if paused { pauses.setPaused(true) }
-            let supervisor = ProcessSupervisor(
-                locator: PreviewLocator(), keyStore: PreviewKeyStore(),
-                runtimeConfig: PreviewRuntimeConfig(captureEnabled: captureEnabled),
-                topology: PreviewTopology(), keyCustodyPreparer: PreviewKeyCustody(),
-                readinessTimeout: 0.1, captureStatusReader: { (nil, receipt) }, pauses: pauses
-            )
-            supervisor.showForPreview(
-                state: state, captureEnabled: captureEnabled, receipt: receipt,
-                startedAt: Date().addingTimeInterval(-600), stoppedSharingAt: stoppedSharingAt, stopFailed: stopFailed,
-                turnOnFailure: turnOnFailure, turningOn: turningOn
-            )
-            let defaults = UserDefaults(suiteName: "ai.hippocampus.preview.\(UUID().uuidString)")!
-            let retention = FileManager.default.temporaryDirectory
-                .appendingPathComponent("preview-\(UUID().uuidString)/retention.json")
-            let askKey = AskKeyWatch(hooks: AskKeyWatch.Hooks(
-                isTrusted: { true }, install: { _ in true }, uninstall: {},
-                after: { _, _ in AnyCancellable {} }
-            ))
-            askKey.setFallbackRegistered(true)
-            askKey.start(key: .shiftTwice)
-            let view = PreferencesRootView(
-                store: PreferencesStore(defaults: defaults, retentionURL: retention),
-                section: .constant(section),
-                loginItemVM: LoginItemViewModel(service: PreviewLoginService()),
-                captureController: CapturePreferenceController(applier: supervisor),
-                supervisor: supervisor,
-                askKey: askKey,
-                updater: PreviewUpdater(),
-                actions: PreferencesActions(),
-                aiToolsPreview: SessionContextPreferencesView.Facts(
-                    connected: [.claudeCode], statuses: [.claudeCode: .configured, .codex: .notConfigured]
-                )
-            )
-            return Pane(name: name, view: AnyView(view))
+            fixturePane(name, section, state: state, captureEnabled: captureEnabled, receipt: receipt,
+                        stoppedSharingAt: stoppedSharingAt, stopFailed: stopFailed, paused: paused,
+                        turnOnFailure: turnOnFailure, turningOn: turningOn)
         }
         return [
             pane("general", .general),

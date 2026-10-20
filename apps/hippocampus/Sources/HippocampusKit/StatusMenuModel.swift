@@ -167,6 +167,9 @@ public enum StatusMenuModel {
             case aiTools
             case preferences
             case quit
+            /// An item from elsewhere in the app, such as Demo Memory's
+            /// (`DemoMemory.menuItems`), by an id its owner carries out.
+            case extra(String)
         }
 
         public let role: Role
@@ -192,8 +195,13 @@ public enum StatusMenuModel {
 
     /// Top to bottom. `askLabel` is what opens Ask right now
     /// (`AskShortcut.label`): ⌃⇧Space is a real key equivalent, a chosen key
-    /// is a badge (spec-shell S3).
-    public static func items(row: StatusRow, setupComplete: Bool, askLabel: String?, aiToolsConnected: Bool) -> [Item] {
+    /// is a badge (spec-shell S3). `extraItems`, from elsewhere in the app
+    /// (Demo Memory's while Option is held, SPEC-DELTA 6), are a group of
+    /// their own above Quit; with none, the menu is exactly as before.
+    public static func items(
+        row: StatusRow, setupComplete: Bool, askLabel: String?, aiToolsConnected: Bool,
+        extraItems: [Item] = []
+    ) -> [Item] {
         var items = [Item(role: .status, title: row.title, isEnabled: false)]
         if let detail = row.detail {
             items.append(Item(role: .detail, title: detail, isEnabled: false))
@@ -217,6 +225,10 @@ public enum StatusMenuModel {
         items.append(Item(role: .aiTools, title: aiToolsConnected ? "AI Tools…" : "Connect AI Tools…"))
         items.append(Item(role: .preferences, title: "Preferences…", key: KeyEquivalent(key: ",", command: true)))
         items.append(.separator)
+        if !extraItems.isEmpty {
+            items.append(contentsOf: extraItems)
+            items.append(.separator)
+        }
         items.append(Item(role: .quit, title: "Quit Hippocampus", key: KeyEquivalent(key: "q", command: true)))
         return items
     }

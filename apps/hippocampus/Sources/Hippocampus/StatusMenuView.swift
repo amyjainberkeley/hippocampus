@@ -110,7 +110,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             row: supervisor.statusRow(setupFinished: setupFinished),
             setupComplete: supervisor.setup(finished: setupFinished) == .complete,
             askLabel: askKey.label,
-            aiToolsConnected: aiToolsConnected
+            aiToolsConnected: aiToolsConnected,
+            // Demo Memory's items, while Option is held as the menu opens or
+            // while it is in use; none otherwise (SPEC-DELTA 6).
+            extraItems: DemoMemory.menuItems(optionHeld: NSEvent.modifierFlags.contains(.option))
         )
         menu.removeAllItems()
         for (index, item) in items.enumerated() {
@@ -167,6 +170,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         case .aiTools: actions.aiTools(aiToolsConnected)
         case .preferences: actions.preferences()
         case .quit: actions.quit()
+        case .extra(let id): DemoMemory.perform(id)
         case .status, .detail, .separator: break
         }
     }

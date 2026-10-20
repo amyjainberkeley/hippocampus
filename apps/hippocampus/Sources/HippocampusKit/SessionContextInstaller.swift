@@ -309,3 +309,16 @@ private enum ClientSettingsFile {
         guard rename(temp.path, url.path) == 0 else { throw SessionContextInstallError.unsafePath }
     }
 }
+
+public extension SessionContextInstaller {
+    /// Brings the AI tools' entries for Hippocampus up to date, once per
+    /// launch: quiet hooks that exit silently when the app is gone, and
+    /// entries that follow Hippocampus when it moves (SPEC 5.5). The app
+    /// calls it once, from launch.
+    ///
+    /// A seam for now: it changes nothing. The repair lands with the
+    /// handoff, which runs it off the main thread under the installer's
+    /// safety rules (structured edits, never a file edited by hand, never a
+    /// link, an atomic replace under a lock).
+    static func repairOnLaunch() {}
+}

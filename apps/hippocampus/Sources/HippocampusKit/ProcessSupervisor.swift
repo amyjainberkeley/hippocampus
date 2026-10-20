@@ -22,12 +22,14 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
         if let developmentKeyMode {
             environment["MCI_DEVELOPMENT_FILE_KEY"] = "1"
             environment["MCI_DB_KEY_FILE"] = developmentKeyMode.keyURL.path
-            return environment
+        } else {
+            environment["MCI_DB_KEYCHAIN_SERVICE"] = keyReference.service
+            environment["MCI_DB_KEYCHAIN_ACCOUNT"] = keyReference.account
+            environment["MCI_DB_KEYCHAIN_STORAGE_MODEL"] = KeychainKeyStore.storageModel
         }
-        environment["MCI_DB_KEYCHAIN_SERVICE"] = keyReference.service
-        environment["MCI_DB_KEYCHAIN_ACCOUNT"] = keyReference.account
-        environment["MCI_DB_KEYCHAIN_STORAGE_MODEL"] = KeychainKeyStore.storageModel
-        return environment
+        // Demo Memory's store and flag while it is in use; the person's own
+        // memory, as above, while it is off (SPEC-DELTA 6).
+        return DemoMemory.childEnvironment(environment)
     }
 
     package static func onboardingEnvironment(

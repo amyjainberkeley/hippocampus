@@ -17,6 +17,9 @@
 //   - `hippocampus://preferences/sources`       → open a preferences pane
 //   - `hippocampus://ask`                        → open the command bar
 //   - `hippocampus://ask?q=what+did+I+decide`    → …and ask right away
+//   - `hippocampus://resume?item=w_9c41e2`       → the window on a Working On
+//     item with Resume's sheet over it (SPEC-DELTA 3); nothing opens until
+//     the person clicks in the sheet
 //   - `hippocampus://restart`                    → restart remembering in place
 //     (setup's Try it, "Try Again"; onboarding-app contract section 3b)
 //   - `hippocampus://onboarding/show`            → .showOnboarding
@@ -65,6 +68,10 @@ public enum HippocampusURLRoute: Equatable, Sendable {
     /// Restart remembering in place, as the menu's Try Again does. Never
     /// quits the app: setup, which asked, exits with it.
     case restartRemembering
+    /// Open the window on a Working On item, by its id, with Resume's sheet
+    /// over it. The sheet lists what would open; nothing opens until the
+    /// person clicks in it, and nothing is sent anywhere.
+    case resume(item: String)
     /// URL scheme matched, but the host / path combination is unknown.
     /// Callers should log-and-ignore rather than throw.
     case unknown
@@ -106,6 +113,15 @@ public enum HippocampusURLRoute: Equatable, Sendable {
         case "restart":
             // Exact match only, like the preferences route.
             return url.absoluteString == "hippocampus://restart" ? .restartRemembering : .unknown
+        case "resume":
+            // Exactly one item id and nothing else: no path, credentials,
+            // port, fragment or other query. Ids, never names, travel in links.
+            guard let components, components.user == nil, components.password == nil,
+                  components.port == nil, components.path.isEmpty, components.fragment == nil,
+                  queryItems.count == 1, queryItems[0].name == "item",
+                  let item = queryItems[0].value, isWorkItemId(item)
+            else { return .unknown }
+            return .resume(item: item)
         case "onboarding":
             let showQuery = queryItems.first(where: { $0.name == "show" })?.value
             if url.path == "/show" || showQuery == "1" {
@@ -115,5 +131,27 @@ public enum HippocampusURLRoute: Equatable, Sendable {
         default:
             return .unknown
         }
+    }
+
+    /// The longest id a Working On item can have.
+    public static let maxWorkItemIdLength = 64
+
+    /// Whether `id` has the shape of a Working On item's id: 1 to 64 ASCII
+    /// letters, digits, `_` and `-`, not starting with `-` (the agent's
+    /// `work::is_item_id`, and RecallUIKit's `RecallLaunchRequest`). A name
+    /// never passes.
+    public static func isWorkItemId(_ id: String) -> Bool {
+        !id.isEmpty && id.utf8.count <= maxWorkItemIdLength && !id.hasPrefix("-")
+            && id.utf8.allSatisfy { byte in
+                (byte >= 0x30 && byte <= 0x39) || (byte >= 0x41 && byte <= 0x5A)
+                    || (byte >= 0x61 && byte <= 0x7A) || byte == 0x5F || byte == 0x2D
+            }
+    }
+
+    /// How Resume for `item` is asked of the window: as the tab
+    /// `resume:<id>`, which RecallUIKit's `RecallLaunchRequest` reads at
+    /// launch and in a command to a window that is open.
+    public static func resumeTab(item: String) -> String {
+        "resume:\(item)"
     }
 }

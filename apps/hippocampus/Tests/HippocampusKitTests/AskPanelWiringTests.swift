@@ -178,14 +178,18 @@ final class AskPanelWiringTests: XCTestCase {
     }
 
     func testPreferencesGeneralSaysHowTheKeyWorks() throws {
+        // General shows the key picker from its own file (WP0, SPEC-DELTA 7),
+        // so General's words are those two files together.
         let preferences = try source("PreferencesWindow.swift")
+        let general = try preferences + source("AskKeyPicker.swift")
         XCTAssertTrue(preferences.contains("Toggle(\"Open at login\""))
-        XCTAssertTrue(preferences.contains("Picker(\"Open Ask with\", selection: $store.askKey)"))
-        XCTAssertTrue(preferences.contains("AskKeyCaption("))
-        XCTAssertTrue(preferences.contains("Button(\"Open System Settings…\")"))
+        XCTAssertTrue(preferences.contains("AskKeyPicker(store: store, askKey: askKey)"))
+        XCTAssertTrue(general.contains("Picker(\"Open Ask with\", selection: $store.askKey)"))
+        XCTAssertTrue(general.contains("AskKeyCaption("))
+        XCTAssertTrue(general.contains("Button(\"Open System Settings…\")"))
         for retired in ["Launch at login", "Show menu-bar icon", "Default view when opening recall UI",
                         "Recall popup", "always works", "will start automatically"] {
-            XCTAssertFalse(preferences.contains(retired), retired)
+            XCTAssertFalse(general.contains(retired), retired)
         }
     }
 

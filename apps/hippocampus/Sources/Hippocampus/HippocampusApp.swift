@@ -312,6 +312,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             self.watchAskKey()
             self.installBrowserHostManifests()
+            // AI tools' entries for Hippocampus, brought up to date once per
+            // launch (SPEC 5.5).
+            SessionContextInstaller.repairOnLaunch()
             self.armTCCStderrTail()
             // The person's own launch asks for the window first: it opens as
             // soon as there is memory to read, while the sweep below runs.
@@ -701,6 +704,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // presses a Turn On that did not take again. Not before
                 // consent, and that press only for the setup that is open.
                 supervisor.restartFromSetup(setupFinished: OnboardingSentinel.isComplete, setupOpen: supervisor.onboardingIsRunning)
+            case .resume(let item):
+                // The window on the item with Resume's sheet; nothing opens
+                // until the person clicks in it. Through openWindow, so
+                // setup comes forward until it is done.
+                Task { @MainActor in
+                    openWindow(tab: HippocampusURLRoute.resumeTab(item: item))
+                }
             case .unknown:
                 continue
             }
