@@ -56,6 +56,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use mci_brain::{BrainStore, Event, EventId, SqlCipherBrainStore};
 use mci_core::crypto::DbKey;
 
+#[path = "mci_seed_brain/demo_week.rs"]
+mod demo_week;
+
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Default path matching `mci-agent mcp-serve`.
@@ -84,6 +87,20 @@ fn print_usage() {
         \x20 --demo-day                 instead, write a made-up workday ending now: moments\n\
         \x20                            in everyday apps, session notes, searches, a day\n\
         \x20                            summary and learned items (Overview, You)\n\
+        \x20 --demo-week                instead, write Demo Memory's made-up week ending now:\n\
+        \x20                            a founder's moments with captions and screenshots,\n\
+        \x20                            session notes, searches, summaries, lines about the\n\
+        \x20                            founder and demo-calendar.json beside the memory.\n\
+        \x20                            Needs an explicit --db-path outside the person's own\n\
+        \x20                            memory folder, and an empty memory there.\n\
+        \x20 --print-screens            with --demo-week: print the screenshots the week needs\n\
+        \x20                            as JSON, for the drawing tool, and write nothing\n\
+        \x20 --screens MANIFEST         with --demo-week: the drawing tool's manifest of sealed\n\
+        \x20                            screenshots, attached to the moments that show them\n\
+        \x20 --key-stdin                with --demo-week: read Demo Memory's 64-character hex\n\
+        \x20                            key from standard input instead of the environment\n\
+        \x20 --now-us MICROSECONDS      with --demo-week: the week's clock (default: now)\n\
+        \x20 --tz-offset-secs SECONDS   with --demo-week: its time zone (default: this Mac's)\n\
         \x20 -h, --help                 print this and exit\n\
         \x20 --version                  print version and exit\n\
         \n\
@@ -98,9 +115,23 @@ fn print_usage() {
 
 struct Args {
     db_path: PathBuf,
+    /// `--db-path` was given: the demo week is written only where asked.
+    db_path_given: bool,
     force: bool,
     demo_day: bool,
     keyframe_digests: Vec<String>,
+    demo: DemoWeekArgs,
+}
+
+/// `--demo-week` and the flags that go with it.
+#[derive(Default)]
+struct DemoWeekArgs {
+    on: bool,
+    print_screens: bool,
+    screens: Option<PathBuf>,
+    key_stdin: bool,
+    now_us: Option<u64>,
+    tz_offset_secs: Option<i32>,
 }
 
 enum ParseOutcome {
@@ -114,6 +145,7 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
     let mut demo_day = false;
     let mut db_path: Option<PathBuf> = None;
     let mut keyframe_digests = Vec::new();
+    let mut demo = DemoWeekArgs::default();
     let mut i = 1;
     while i < argv.len() {
         match argv[i].as_str() {
@@ -126,6 +158,42 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
             "--demo-day" => {
                 demo_day = true;
                 i += 1;
+            }
+            "--demo-week" => {
+                demo.on = true;
+                i += 1;
+            }
+            "--print-screens" => {
+                demo.print_screens = true;
+                i += 1;
+            }
+            "--key-stdin" => {
+                demo.key_stdin = true;
+                i += 1;
+            }
+            "--screens" => {
+                demo.screens = Some(PathBuf::from(value_of(argv, i, "a MANIFEST path")));
+                i += 2;
+            }
+            "--now-us" => {
+                let Ok(value) = value_of(argv, i, "MICROSECONDS").parse::<u64>() else {
+                    errln!("mci-seed-brain: --now-us must be microseconds since 1970");
+                    std::process::exit(2);
+                };
+                demo.now_us = Some(value);
+                i += 2;
+            }
+            "--tz-offset-secs" => {
+                match value_of(argv, i, "SECONDS").parse::<i32>() {
+                    Ok(value) if (-14 * 3600..=14 * 3600).contains(&value) => {
+                        demo.tz_offset_secs = Some(value);
+                    }
+                    _ => {
+                        errln!("mci-seed-brain: --tz-offset-secs must be seconds east of UTC, within 14 hours");
+                        std::process::exit(2);
+                    }
+                }
+                i += 2;
             }
             "--db-path" => {
                 if i + 1 >= argv.len() {
@@ -155,15 +223,27 @@ fn parse_args(argv: &[String]) -> ParseOutcome {
             }
         }
     }
+    let db_path_given = db_path.is_some();
     let db_path = db_path
         .or_else(|| std::env::var_os("MCI_DB_PATH").map(PathBuf::from))
         .unwrap_or_else(default_db_path);
     ParseOutcome::Run(Args {
         db_path,
+        db_path_given,
         force,
         demo_day,
         keyframe_digests,
+        demo,
     })
+}
+
+/// The value after the flag at `i`, or exit 2 naming what was missing.
+fn value_of<'a>(argv: &'a [String], i: usize, what: &str) -> &'a str {
+    let Some(value) = argv.get(i + 1) else {
+        errln!("mci-seed-brain: {} requires {what}", argv[i]);
+        std::process::exit(2);
+    };
+    value
 }
 
 fn normalize_keyframe_digest(value: &str) -> Option<String> {
@@ -987,6 +1067,176 @@ mod demo_day {
     }
 }
 
+/// The person's own memory folder: the demo week is never written there.
+fn own_memory_folder() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join("Library/Application Support/MCI"))
+}
+
+/// Whether `path` is inside `folder`, comparing real paths where they exist
+/// (a link to the folder is the folder).
+fn is_inside(path: &std::path::Path, folder: &std::path::Path) -> bool {
+    let real = |p: &std::path::Path| -> PathBuf {
+        // The nearest part of the path that exists, made real, then the rest.
+        let mut existing = p.to_path_buf();
+        let mut rest = Vec::new();
+        while !existing.exists() {
+            let Some(name) = existing.file_name().map(std::ffi::OsStr::to_owned) else {
+                break;
+            };
+            rest.push(name);
+            if !existing.pop() {
+                break;
+            }
+        }
+        let mut out = std::fs::canonicalize(&existing).unwrap_or(existing);
+        for name in rest.into_iter().rev() {
+            out.push(name);
+        }
+        out
+    };
+    real(path).starts_with(real(folder))
+}
+
+/// Demo Memory's key: from standard input with `--key-stdin` (the app's
+/// way: it never travels in arguments or the environment), otherwise the
+/// development key as for the other seeds.
+fn demo_week_key(from_stdin: bool) -> Result<DbKey, (u8, String)> {
+    use std::io::Read as _;
+    let hex = if from_stdin {
+        let mut line = String::new();
+        std::io::stdin()
+            .take(256)
+            .read_to_string(&mut line)
+            .map_err(|_| (10, "could not read the key from standard input".to_owned()))?;
+        line.trim().to_owned()
+    } else {
+        if std::env::var("MCI_DEVELOPMENT_FILE_KEY").as_deref() != Ok("1") {
+            return Err((
+                9,
+                "pass --key-stdin, or MCI_DEVELOPMENT_FILE_KEY=1 with MCI_DB_KEY_HEX".to_owned(),
+            ));
+        }
+        std::env::var("MCI_DB_KEY_HEX").map_err(|_| (10, "MCI_DB_KEY_HEX not set".to_owned()))?
+    };
+    decode_hex32(&hex)
+        .map(DbKey::from_bytes)
+        .ok_or((11, "the key must be 64 hexadecimal characters".to_owned()))
+}
+
+/// `--demo-week`: Demo Memory's made-up week, into an empty memory of its
+/// own, or its screen list with `--print-screens`.
+fn demo_week_main(args: &Args) -> ExitCode {
+    let now = args.demo.now_us.unwrap_or_else(now_us);
+    let tz = args
+        .demo
+        .tz_offset_secs
+        .unwrap_or_else(mci_agent::brief_worker::current_tz_offset_secs);
+    let world = demo_week::world(now, tz);
+    if args.demo.print_screens {
+        outln!("{}", world.screens());
+        return ExitCode::SUCCESS;
+    }
+    if args.force || args.demo_day || !args.keyframe_digests.is_empty() {
+        errln!("mci-seed-brain: --demo-week takes no --force, --demo-day or --keyframe-digest");
+        return ExitCode::from(2);
+    }
+    if !args.db_path_given {
+        errln!("mci-seed-brain: --demo-week needs --db-path: Demo Memory has a folder of its own");
+        return ExitCode::from(2);
+    }
+    if own_memory_folder().is_some_and(|folder| is_inside(&args.db_path, &folder)) {
+        errln!("mci-seed-brain: refusing to write Demo Memory into the person's own memory folder");
+        return ExitCode::from(15);
+    }
+    let digests = match &args.demo.screens {
+        Some(path) => match std::fs::read_to_string(path)
+            .map_err(|e| format!("screens manifest: {e}"))
+            .and_then(|text| demo_week::read_manifest(&text))
+        {
+            Ok(digests) => digests,
+            Err(error) => {
+                errln!("mci-seed-brain: {error}");
+                return ExitCode::from(2);
+            }
+        },
+        None => std::collections::HashMap::new(),
+    };
+    let key = match demo_week_key(args.demo.key_stdin) {
+        Ok(key) => key,
+        Err((code, message)) => {
+            errln!("mci-seed-brain: {message}");
+            return ExitCode::from(code);
+        }
+    };
+    let Some(folder) = args.db_path.parent().map(std::path::Path::to_path_buf) else {
+        errln!("mci-seed-brain: --db-path has no folder");
+        return ExitCode::from(2);
+    };
+    if let Err(e) = std::fs::create_dir_all(&folder) {
+        errln!("mci-seed-brain: create_dir_all({}): {e}", folder.display());
+        return ExitCode::from(12);
+    }
+    let store = match SqlCipherBrainStore::new(&args.db_path, &key) {
+        Ok(store) => store,
+        Err(e) => {
+            errln!(
+                "mci-seed-brain: open Demo Memory at {}: {e}",
+                args.db_path.display()
+            );
+            return ExitCode::from(13);
+        }
+    };
+    if let Err(error) = demo_week::require_empty(&store) {
+        errln!("mci-seed-brain: {error} ({})", args.db_path.display());
+        return ExitCode::from(15);
+    }
+    let written = match demo_week::seed(&store, &world, &digests) {
+        Ok(written) => written,
+        Err(error) => {
+            errln!("mci-seed-brain: demo week failed: {error}");
+            return ExitCode::from(16);
+        }
+    };
+    drop(store);
+    let calendar = folder.join("demo-calendar.json");
+    if let Err(e) = write_private(&calendar, world.calendar_json().to_string().as_bytes()) {
+        errln!("mci-seed-brain: write {}: {e}", calendar.display());
+        return ExitCode::from(17);
+    }
+    outln!(
+        "{}",
+        serde_json::json!({
+            "moments": written.moments,
+            "screenshots": written.screenshots,
+            "notes": written.notes,
+            "claims": written.claims,
+        })
+    );
+    errln!(
+        "mci-seed-brain: wrote Demo Memory's made-up week ({} moments, {} with a screenshot, {} session notes, {} lines learned) to {}.",
+        written.moments,
+        written.screenshots,
+        written.notes,
+        written.claims,
+        args.db_path.display()
+    );
+    ExitCode::SUCCESS
+}
+
+/// Write `bytes` to `path`, readable by this user only.
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(bytes)
+}
+
 fn now_us() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1009,6 +1259,19 @@ fn main() -> ExitCode {
         }
         ParseOutcome::Run(a) => a,
     };
+
+    if args.demo.on {
+        return demo_week_main(&args);
+    }
+    if args.demo.print_screens
+        || args.demo.screens.is_some()
+        || args.demo.key_stdin
+        || args.demo.now_us.is_some()
+        || args.demo.tz_offset_secs.is_some()
+    {
+        errln!("mci-seed-brain: --print-screens, --screens, --key-stdin, --now-us and --tz-offset-secs go with --demo-week");
+        return ExitCode::from(2);
+    }
 
     if std::env::var("MCI_DEVELOPMENT_FILE_KEY").as_deref() != Ok("1") {
         errln!(
