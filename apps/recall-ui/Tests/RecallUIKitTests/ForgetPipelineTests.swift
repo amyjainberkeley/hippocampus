@@ -599,6 +599,31 @@ final class ForgetPipelineTests: XCTestCase {
         XCTAssertTrue(source.contains(".environment(\\.forgottenMoments, forgetting.hiddenMoments)"))
     }
 
+    // MARK: The Undo note
+
+    /// Undo works for five seconds and the note showed for six, so a click
+    /// in the sixth second closed the note while the forget went ahead. The
+    /// note now shows exactly while Undo works.
+    func testTheUndoNoteShowsExactlyWhileUndoWorks() throws {
+        let shell = try Self.source("Sources/RecallUI/MemoryWorkspaceView.swift")
+        XCTAssertTrue(shell.contains("for: ForgetCoordinator.undoWindow)"), "the note's time is Undo's")
+        XCTAssertTrue(shell.contains("notes.dismiss(undoNote)"), "and it goes the moment Undo stops working")
+        let notes = try Self.source("Sources/RecallUI/Notes/BottomNote.swift")
+        XCTAssertTrue(notes.contains("for duration: Duration = shownFor"))
+        XCTAssertTrue(notes.contains("try? await Task.sleep(for: duration)"))
+    }
+
+    /// Undo stops working the moment the forget goes ahead: `undoable` goes
+    /// then, and with it the note.
+    func testUndoStopsWorkingTheMomentTheForgetGoesAhead() async {
+        let forget = coordinator()
+        _ = await forget.forgetAfterUndo(ForgetRequest(momentIds: [41]), count: 1)
+        XCTAssertNotNil(forget.undoable)
+        await forget.finishUndoable()
+        XCTAssertNil(forget.undoable)
+        XCTAssertFalse(forget.undo(), "too late: the note went with it")
+    }
+
     // MARK: Closing the window
 
     /// History, ⌘⌫ ("Forgot 1 moment." with Undo), then ⌘W within the

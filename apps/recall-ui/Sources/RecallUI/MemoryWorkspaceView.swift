@@ -127,6 +127,8 @@ struct MemoryWorkspaceView: View {
     @State private var resumeSheet: ResumeSheetItem?
     /// A forget a page asked for that needs a yes first (SPEC 3.11).
     @State private var forgetConfirmation: ForgetConfirmation?
+    /// The Undo note showing, to take away the moment Undo stops working.
+    @State private var undoNote: UUID?
     /// Claude Code starts each session with recent work: a code project's
     /// page says so (SPEC 3.2).
     @State private var claudeCodeStarts = false
@@ -460,10 +462,17 @@ struct MemoryWorkspaceView: View {
             reportLate(late)
         }
         .onChange(of: forgetting.undoable) { _, undoable in
+            // The Undo note shows exactly while Undo works: it goes when the
+            // forget goes ahead, is undone, or a newer one takes its place.
+            if let undoNote {
+                notes.dismiss(undoNote)
+                self.undoNote = nil
+            }
             guard let undoable else { return }
-            notes.show(NavigationCopy.forgotMoments(undoable.count),
-                       detail: hides.firstForgetDue ? NavigationCopy.firstForget : nil,
-                       action: BottomNote.Action(title: NavigationCopy.undoAction) { forgetting.undo() })
+            undoNote = notes.show(NavigationCopy.forgotMoments(undoable.count),
+                                  detail: hides.firstForgetDue ? NavigationCopy.firstForget : nil,
+                                  action: BottomNote.Action(title: NavigationCopy.undoAction) { forgetting.undo() },
+                                  for: ForgetCoordinator.undoWindow)
             hides.firstForgetSaid()
         }
         .onReceive(WindowDayMove.shared.$sequence.dropFirst()) { _ in

@@ -19,7 +19,8 @@ struct BottomNote: Identifiable {
 }
 
 /// Where every place puts a note: `BottomNotes.show(_:action:)`. The window
-/// draws the newest one at the bottom of the page for six seconds, and
+/// draws the newest one at the bottom of the page for six seconds, or as long
+/// as its button works (an Undo note: `ForgetCoordinator.undoWindow`), and
 /// VoiceOver reads it out.
 @MainActor
 final class BottomNotes: ObservableObject {
@@ -31,27 +32,41 @@ final class BottomNotes: ObservableObject {
     private var hiding: Task<Void, Never>?
 
     /// Shows `text`, with a button when `action` is given, in place of any
-    /// note showing now.
-    static func show(_ text: String, detail: String? = nil, action: BottomNote.Action? = nil) {
-        shared.show(text, detail: detail, action: action)
+    /// note showing now, for `duration`.
+    @discardableResult
+    static func show(_ text: String, detail: String? = nil, action: BottomNote.Action? = nil,
+                     for duration: Duration = shownFor) -> UUID {
+        shared.show(text, detail: detail, action: action, for: duration)
     }
 
-    func show(_ text: String, detail: String? = nil, action: BottomNote.Action? = nil) {
+    /// Shows the note for `duration`: six seconds, or exactly as long as its
+    /// button works. Its id, to take it away early.
+    @discardableResult
+    func show(_ text: String, detail: String? = nil, action: BottomNote.Action? = nil,
+              for duration: Duration = shownFor) -> UUID {
         let note = BottomNote(text: text, detail: detail, action: action)
         current = note
         AccessibilityNotification.Announcement(text).post()
         hiding?.cancel()
         hiding = Task { [weak self] in
-            try? await Task.sleep(for: Self.shownFor)
+            try? await Task.sleep(for: duration)
             guard !Task.isCancelled, let self, self.current?.id == note.id else { return }
             self.current = nil
         }
+        return note.id
     }
 
     /// Takes the note away now, as its button does once it has acted.
     func dismiss() {
         hiding?.cancel()
         current = nil
+    }
+
+    /// Takes `id`'s note away if it still shows: an Undo note once Undo no
+    /// longer works. A newer note stays.
+    func dismiss(_ id: UUID) {
+        guard current?.id == id else { return }
+        dismiss()
     }
 }
 
