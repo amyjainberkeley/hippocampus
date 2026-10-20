@@ -48,6 +48,20 @@ COPY_FILES=(
   "core/brain/src/caption.rs"
   "apps/recall-ui/Sources/RecallUIKit/MomentRowText.swift"
   "apps/recall-ui/Sources/RecallUI/DetailPaneView.swift"
+  # The new window, the handoff and setup (SPEC 8.1, SPEC-DELTA Oct 19):
+  # each package writes its words in its own copy file.
+  "apps/recall-ui/Sources/RecallUIKit/NavigationCopy.swift"
+  "apps/recall-ui/Sources/RecallUIKit/WorkCopy.swift"
+  "apps/recall-ui/Sources/RecallUIKit/LibraryCopy.swift"
+  "apps/recall-ui/Sources/RecallUIKit/ReadingCopy.swift"
+  "apps/recall-ui/Sources/RecallUIKit/HandoffCopy.swift"
+  "apps/recall-ui/Sources/RecallUIKit/CalendarCopy.swift"
+  "apps/recall-ui/Sources/RecallUIKit/DemoCopy.swift"
+  "apps/hippocampus/Sources/HippocampusKit/HandoffCopy.swift"
+  "apps/hippocampus/Sources/HippocampusKit/SidePicturesCopy.swift"
+  "apps/hippocampus/Sources/HippocampusKit/AskKeyCopy.swift"
+  "apps/hippocampus/Sources/HippocampusKit/CalendarCopy.swift"
+  "apps/hippocampus/Sources/HippocampusKit/DemoCopy.swift"
 )
 
 # Marketing / machine-written words (whole word, case-insensitive).
