@@ -354,33 +354,16 @@ impl StoredSegment {
         self.end_us.saturating_sub(self.start_us)
     }
 
-    /// The label back-and-forth pairs are stored under.
-    fn label(&self) -> String {
-        format!(
-            "{} — {}",
-            apps::name(&self.app),
-            self.title.clone().unwrap_or_default()
-        )
-    }
-
     fn kind(&self) -> WorkKind {
         apps::kind_for_host(&self.app, self.host.as_deref())
     }
 }
 
-#[derive(Default, Deserialize)]
-struct StoredSignals {
-    #[serde(default)]
-    back_and_forth: Vec<(String, String, u32)>,
-    #[serde(default)]
-    reworded_searches: u32,
-}
-
+/// A stored note's segments. Its counts of back-and-forth and reworded
+/// searches are never read: nothing the window shows counts them.
 #[derive(Deserialize)]
 struct StoredNoteSignals {
     segments: Vec<StoredSegment>,
-    #[serde(default)]
-    signals: StoredSignals,
 }
 
 /// A note's segments from its stored signals, or `None` when they cannot be
@@ -965,8 +948,6 @@ struct Draft {
     last_us: u64,
     note: Option<SessionNote>,
     segments: Vec<StoredSegment>,
-    back_and_forth: Vec<(String, String, u32)>,
-    reworded_searches: u32,
     newest: Option<EventHead>,
 }
 
@@ -994,33 +975,20 @@ fn is_noise(head: &EventHead) -> bool {
 }
 
 /// Segments and signals measured from moments (no text is read).
-fn measure(
-    heads: &[&EventHead],
-    end_us: u64,
-    searches: &[SearchRecord],
-) -> (Vec<StoredSegment>, observe::Signals) {
+fn measure(heads: &[&EventHead], end_us: u64) -> Vec<StoredSegment> {
     let events: Vec<ObservedEvent> = heads.iter().map(|h| observed(h)).collect();
-    let segments = observe::segments(&events, &[], end_us);
-    let start = heads.first().map_or(0, |h| h.ts_us);
-    let within: Vec<SearchRecord> = searches
+    observe::segments(&events, &[], end_us)
         .iter()
-        .filter(|s| s.ts_us >= start && s.ts_us <= end_us)
-        .cloned()
-        .collect();
-    let signals = observe::signals(&events, &segments, &within);
-    (
-        segments.iter().map(StoredSegment::from_observed).collect(),
-        signals,
-    )
+        .map(StoredSegment::from_observed)
+        .collect()
 }
 
 /// Sessions in `[from, to)`: one per stored note, and the moments outside
 /// every note split as the worker splits them. `focus` is oldest first, with
-/// noise and background windows already left out; `searches` oldest first.
+/// noise and background windows already left out.
 fn drafts(
     focus: &[EventHead],
     notes: &[SessionNote],
-    searches: &[SearchRecord],
     from: u64,
     to: u64,
     now_us: u64,
@@ -1041,17 +1009,10 @@ fn drafts(
             .iter()
             .filter(|h| note.start_us <= h.ts_us && h.ts_us <= note.end_us)
             .collect();
-        let (segments, back_and_forth, reworded_searches) =
-            if let Ok(stored) = serde_json::from_str::<StoredNoteSignals>(&note.signals) {
-                (
-                    stored.segments,
-                    stored.signals.back_and_forth,
-                    stored.signals.reworded_searches,
-                )
-            } else {
-                let (segments, signals) = measure(&heads, note.end_us, searches);
-                (segments, signals.back_and_forth, signals.reworded_searches)
-            };
+        let segments = match serde_json::from_str::<StoredNoteSignals>(&note.signals) {
+            Ok(stored) => stored.segments,
+            Err(_) => measure(&heads, note.end_us),
+        };
         out.push(Draft {
             own_start_us: note.start_us,
             start_us: note.start_us,
@@ -1059,8 +1020,6 @@ fn drafts(
             last_us: heads.last().map_or(note.end_us, |h| h.ts_us),
             note: Some((*note).clone()),
             segments,
-            back_and_forth,
-            reworded_searches,
             newest: heads.last().map(|h| (*h).clone()),
         });
     }
@@ -1071,16 +1030,13 @@ fn drafts(
         let events: Vec<ObservedEvent> = region.iter().map(|h| observed(h)).collect();
         for span in observe::split_sessions(&events) {
             let heads = &region[span.start..span.end];
-            let (segments, signals) = measure(heads, span.end_us, searches);
             out.push(Draft {
                 own_start_us: span.start_us,
                 start_us: span.start_us,
                 end_us: span.end_us,
                 last_us: span.end_us,
                 note: None,
-                segments,
-                back_and_forth: signals.back_and_forth,
-                reworded_searches: signals.reworded_searches,
+                segments: measure(heads, span.end_us),
                 newest: heads.last().map(|h| (*h).clone()),
             });
         }
@@ -1117,66 +1073,13 @@ struct Shaped {
     windows: Vec<(String, WorkKind, u64, String)>,
 }
 
-/// The `n` direct switches between two windows: consecutive segments whose
-/// labels are the pair, either way round.
-fn direct_switches(segments: &[StoredSegment], a: &str, b: &str) -> usize {
-    segments
-        .windows(2)
-        .filter(|pair| {
-            let (x, y) = (pair[0].label(), pair[1].label());
-            (x == a && y == b) || (x == b && y == a)
-        })
-        .count()
-}
-
-fn app_of_label(label: &str) -> &str {
-    label.split_once(" — ").map_or(label, |(app, _)| app)
-}
-
-/// The two measured sentences, in order, each only when it qualifies.
-fn block_sentences(draft: &Draft) -> Vec<Sentence> {
-    let mut out = Vec::new();
-    let mut best: Option<&(String, String, u32)> = None;
-    for pair in &draft.back_and_forth {
-        if best.is_none_or(|b| pair.2 > b.2) {
-            best = Some(pair);
-        }
-    }
-    if let Some((a, b, _)) = best {
-        let switches = direct_switches(&draft.segments, a, b);
-        let (app_a, app_b) = (app_of_label(a), app_of_label(b));
-        if switches >= 4 && app_a != app_b {
-            // The app seen first in the session leads.
-            let first = draft
-                .segments
-                .iter()
-                .map(StoredSegment::label)
-                .find(|l| l == a || l == b);
-            let (first, second) = if first.as_deref() == Some(b.as_str()) {
-                (app_b, app_a)
-            } else {
-                (app_a, app_b)
-            };
-            out.push(Sentence {
-                id: "switched_between".into(),
-                text: Template::new(format!(
-                    "You switched between {} and {} {}.",
-                    escape_braces(first),
-                    escape_braces(second),
-                    times_word(switches)
-                )),
-            });
-        }
-    }
-    let reworded = usize::try_from(draft.reworded_searches).unwrap_or(usize::MAX);
-    if reworded >= 2 {
-        out.push(Sentence {
-            id: "reworded_search".into(),
-            text: Template::new(format!("You reworded a search {}.", times_word(reworded))),
-        });
-    }
-    out.truncate(2);
-    out
+/// The sentences said about a session: none that count what the person did.
+/// Today never shows how often someone switched windows or reworded a
+/// search, nor their keys, clicks or scrolls (RULINGS W4, SPEC 3.1), so the
+/// overview the window reads carries neither `switched_between` nor
+/// `reworded_search` any more. The list stays, empty, for the contract.
+fn block_sentences(_draft: &Draft) -> Vec<Sentence> {
+    Vec::new()
 }
 
 fn reopen_of(head: &EventHead) -> Option<Reopen> {
@@ -1646,11 +1549,10 @@ pub fn overview(
     searches.reverse();
 
     // Each session with its newest focus moment.
-    let mut shaped: Vec<(Shaped, u64)> =
-        drafts(&focus, &notes, &searches, day_start, day_end, now_us)
-            .iter()
-            .filter_map(|draft| shape(store, draft, &searches).map(|s| (s, draft.last_us)))
-            .collect();
+    let mut shaped: Vec<(Shaped, u64)> = drafts(&focus, &notes, day_start, day_end, now_us)
+        .iter()
+        .filter_map(|draft| shape(store, draft, &searches).map(|s| (s, draft.last_us)))
+        .collect();
     if shaped.len() > MAX_BLOCKS {
         shaped.drain(..shaped.len() - MAX_BLOCKS);
         truncated = true;
@@ -1690,8 +1592,7 @@ pub fn overview(
             let (earlier, _) = heads_in(store, from, day_start)?;
             let earlier_focus: Vec<EventHead> = earlier.into_iter().filter(is_focus).collect();
             let earlier_notes = store.session_notes_in_range(from, day_start)?;
-            let earlier_drafts =
-                drafts(&earlier_focus, &earlier_notes, &[], from, day_start, now_us);
+            let earlier_drafts = drafts(&earlier_focus, &earlier_notes, from, day_start, now_us);
             if let Some(draft) = earlier_drafts.last() {
                 if let Some(shaped_earlier) = shape(store, draft, &[]) {
                     now = now_card(&shaped_earlier.block, draft.last_us, None, None);
@@ -2135,7 +2036,7 @@ mod tests {
         assert!(o.blocks[0].noticed.is_none());
     }
 
-    fn draft_with(segments: &[(&str, &str)], reworded: u32) -> Draft {
+    fn draft_with(segments: &[(&str, &str)]) -> Draft {
         let segs: Vec<StoredSegment> = segments
             .iter()
             .enumerate()
@@ -2148,21 +2049,6 @@ mod tests {
                 events: vec![i64::try_from(i).unwrap()],
             })
             .collect();
-        let events: Vec<ObservedEvent> = segs
-            .iter()
-            .map(|s| ObservedEvent {
-                id: s.events[0],
-                ts_us: s.start_us,
-                app_bundle_id: Some(s.app.clone()),
-                window_title: s.title.clone(),
-                url: None,
-                text: String::new(),
-                source: "screen_ocr".into(),
-            })
-            .collect();
-        let observed_segments =
-            observe::segments(&events, &[], segs.last().map_or(0, |s| s.end_us));
-        let signals = observe::signals(&events, &observed_segments, &[]);
         Draft {
             own_start_us: 0,
             start_us: 0,
@@ -2170,66 +2056,76 @@ mod tests {
             last_us: 0,
             note: None,
             segments: segs,
-            back_and_forth: signals.back_and_forth,
-            reworded_searches: reworded,
             newest: None,
         }
     }
 
-    /// Windows held in order, searches reworded, and the sentences said.
-    type SentenceCase<'a> = (Vec<(&'a str, &'a str)>, u32, Vec<&'a str>);
-
+    /// No session says how often the person switched windows or reworded a
+    /// search, however often they did (RULINGS W4, SPEC 3.1): the overview
+    /// carries neither `switched_between` nor `reworded_search`.
     #[test]
-    fn sentences_follow_thresholds_and_order() {
+    fn no_session_says_a_sentence_that_counts() {
         let figma = ("com.figma.Desktop", "Trailhead pricing v3");
         let notes = ("com.apple.Notes", "Pricing page draft");
-        let notes_b = ("com.apple.Notes", "Other draft");
         let alternate = |n: usize, a, b| {
             (0..=n)
                 .map(|i| if i % 2 == 0 { a } else { b })
                 .collect::<Vec<_>>()
         };
-        let cases: Vec<SentenceCase<'_>> = vec![
-            // Four switches between two apps: said; three: not.
-            (
-                alternate(4, figma, notes),
-                0,
-                vec!["You switched between Figma and Notes four times."],
-            ),
-            (alternate(3, figma, notes), 0, vec![]),
-            (
-                alternate(5, notes, figma),
-                0,
-                vec!["You switched between Notes and Figma five times."],
-            ),
-            (
-                alternate(10, figma, notes),
-                0,
-                vec!["You switched between Figma and Notes 10 times."],
-            ),
-            // Two windows of one app: cut.
-            (alternate(6, notes, notes_b), 0, vec![]),
-            // Reworded searches: twice and up, never once.
-            (vec![notes], 2, vec!["You reworded a search twice."]),
-            (vec![notes], 1, vec![]),
-            (vec![notes], 3, vec!["You reworded a search three times."]),
-            (vec![notes], 12, vec!["You reworded a search 12 times."]),
-            // Both, in order.
-            (
-                alternate(4, figma, notes),
-                2,
-                vec![
-                    "You switched between Figma and Notes four times.",
-                    "You reworded a search twice.",
-                ],
-            ),
-        ];
-        for (segments, reworded, expected) in cases {
-            let said: Vec<String> = block_sentences(&draft_with(&segments, reworded))
-                .into_iter()
-                .map(|s| s.text.template)
-                .collect();
-            assert_eq!(said, expected, "{segments:?} reworded {reworded}");
+        for n in [3usize, 4, 5, 10, 40] {
+            assert!(
+                block_sentences(&draft_with(&alternate(n, figma, notes))).is_empty(),
+                "{n} switches"
+            );
+        }
+    }
+
+    /// A stored note whose signals count back-and-forth and reworded
+    /// searches, as notes written before this release do, still gives a
+    /// session with no sentence, and neither count reaches the overview.
+    #[test]
+    fn stored_counts_never_reach_the_overview() {
+        let (_dir, store) = store();
+        let start = DAY0 + 9 * 60 * MIN;
+        let ids = run(
+            &store,
+            start,
+            20,
+            "com.figma.Desktop",
+            "Trailhead pricing v3",
+        );
+        let signals = serde_json::json!({
+            "signals": {
+                "back_and_forth": [["Figma — Trailhead pricing v3", "Notes — Pricing page draft", 9]],
+                "reworded_searches": 4
+            },
+            "segments": [{ "start_us": start, "end_us": start + 19 * MIN, "app": "com.figma.Desktop",
+                "name": "Figma", "title": "Trailhead pricing v3", "host": null, "events": ids }],
+        });
+        store
+            .put_session_note(&SessionNote {
+                start_us: start,
+                end_us: start + 19 * MIN,
+                title: "Figma — Trailhead pricing v3".into(),
+                surface: "Working in Figma".into(),
+                beneath: String::new(),
+                signals: signals.to_string(),
+                event_count: 20,
+                generated_us: start + 25 * MIN,
+                model: "measured".into(),
+            })
+            .unwrap();
+        let o = day(&store, start + 60 * MIN, false);
+        assert!(!o.blocks.is_empty());
+        assert!(o.blocks.iter().all(|b| b.sentences.is_empty()));
+        let json = serde_json::to_string(&o).unwrap();
+        for said in [
+            "switched_between",
+            "reworded_search",
+            "You switched",
+            "You reworded",
+        ] {
+            assert!(!json.contains(said), "{said} reached the overview");
         }
     }
 
@@ -2237,11 +2133,6 @@ mod tests {
     fn no_template_contains_a_judgement_word_or_a_raw_count() {
         let mut templates: Vec<String> = Vec::new();
         for n in [2usize, 3, 4, 9, 10, 12] {
-            templates.push(format!(
-                "You switched between Figma and Notes {}.",
-                times_word(n)
-            ));
-            templates.push(format!("You reworded a search {}.", times_word(n)));
             templates.push(format!(
                 "You came back to “Pricing page draft” {}.",
                 times_word(n)
@@ -2464,10 +2355,10 @@ mod tests {
             .blocks
             .iter()
             .all(|b| !b.title.is_empty() && b.written_by == "measured"));
-        assert!(o.blocks[0]
-            .sentences
-            .iter()
-            .any(|s| s.id == "switched_between"));
+        assert!(
+            o.blocks.iter().all(|b| b.sentences.is_empty()),
+            "a session never counts the person's switches"
+        );
         assert!(
             o.ai_knows.about_you.is_empty(),
             "a line seen in one session goes to no AI tool"
