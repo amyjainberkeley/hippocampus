@@ -18,6 +18,13 @@ final class WindowStatusActionsTests: XCTestCase {
         XCTAssertEqual(object["op"] as? String, "leaveDemo")
     }
 
+    /// While a turn-on is under way the app offers Turn Off, and takes a
+    /// pause only when it offers Pause: Turn Off is its own op.
+    func testTurnOffIsItsOwnOpNeverPause() {
+        XCTAssertEqual(WindowStatusActions.effect(of: .turnOff), .send(.turnOff))
+        XCTAssertEqual(WindowChannelProtocol.Op.turnOff.rawValue, "turnOff")
+    }
+
     func testEveryOtherControlKeepsItsOp() {
         XCTAssertEqual(WindowStatusActions.effect(of: .pause), .send(.pause))
         XCTAssertEqual(WindowStatusActions.effect(of: .resume), .send(.resume))
@@ -38,6 +45,7 @@ final class WindowStatusActionsTests: XCTestCase {
         let source = try String(contentsOf: package.appendingPathComponent("Sources/RecallUI/MemoryWorkspaceView.swift"),
                                 encoding: .utf8)
         XCTAssertTrue(source.contains("switch WindowStatusActions.effect(of: action) {"))
+        XCTAssertFalse(source.contains("case .turnOff: send(.pause)"))
         XCTAssertFalse(source.contains("case .leaveDemoMemory:"), "Leave Demo Memory is never sent as Resume")
     }
 }

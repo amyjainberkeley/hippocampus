@@ -15,15 +15,17 @@ public enum WindowStatusActions {
         case openHippocampus
     }
 
-    /// The op for `action`. Leave Demo Memory is its own, never Resume: the
-    /// app goes back to the person's own memory with remembering as it was
-    /// before, a pause they made included, as the menu bar's Leave does.
+    /// The op for `action`. Turn Off is its own op, never a pause: while a
+    /// turn-on is under way the app offers Turn Off, not Pause. Leave Demo
+    /// Memory is its own too, never Resume: the app goes back to the
+    /// person's own memory with remembering as it was before, a pause they
+    /// made included, as the menu bar's Leave does.
     public static func effect(of action: WindowStatus.Action) -> Effect {
         switch action {
         case .pause: .send(.pause)
         case .resume, .resumeNow: .send(.resume)
         case .turnOn: .send(.turnOn)
-        case .turnOff: .send(.pause)
+        case .turnOff: .send(.turnOff)
         case let .openSystemSettings(permission): .send(.openSystemSettings, permission: permission.rawValue)
         case .tryAgain: .send(.tryAgain)
         case .quit: .send(.quit)

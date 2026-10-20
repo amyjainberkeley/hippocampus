@@ -32,6 +32,9 @@ public enum WindowChannelProtocol {
         case pause
         case resume
         case turnOn
+        /// Turn Off, offered while a turn-on is under way: its own op,
+        /// never a pause, which the app takes only when it offers Pause.
+        case turnOff
         case tryAgain
         case openSystemSettings
         /// Quit Hippocampus, the one fix for "Couldn't stop", as in the
