@@ -192,6 +192,43 @@ final class DemoMemorySwitchingTests: XCTestCase {
         XCTAssertNil(DemoMemory.storeURL)
     }
 
+    func testAStartWhileItIsInUseRemembersIntoThePersonsMemoryAndEndsIt() async throws {
+        let home = try makeHome()
+        let locator = FakeBinaryLocator()
+        locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
+        locator.agentURL = URL(fileURLWithPath: "/bundle/mci-agent")
+        let keyStore = FakeKeyStore()
+        keyStore.storedKey = String(repeating: "ab", count: 32)
+        let topology = FakeSupervisorTopology()
+        let custody = FakeKeyCustodyPreparer()
+        let supervisor = ProcessSupervisor(
+            locator: locator, keyStore: keyStore, runtimeConfig: FakeRuntimeConfig(captureEnabled: true),
+            topology: topology, keyCustodyPreparer: custody, readinessTimeout: 0.1,
+            captureStatusReader: { (nil, nil) }
+        )
+        let controller = DemoMemoryController(
+            host: SupervisorDemoMemoryHost(supervisor: supervisor,
+                                           locator: BundleBinaryLocator(bundle: Bundle(for: Self.self))),
+            maker: FakeDemoMaker(), folder: .standard(home: home), home: home
+        )
+        DemoMemory.attach(controller)
+        defer { DemoMemory.detach() }
+        controller.showForPreview(.on)
+
+        // The supervisor's own start: the key check, then the helper and the
+        // agent, all built while the start is under way.
+        try await supervisor.startAndWaitForReadiness()
+        let plan = try XCTUnwrap(topology.launchPlans.last)
+        XCTAssertEqual(plan.agentArguments.last, supervisor.dbPath.path)
+        for environment in [plan.agentEnvironment, plan.helperEnvironment] {
+            XCTAssertEqual(environment["MCI_DB_PATH"], supervisor.dbPath.path)
+            XCTAssertNil(environment["MCI_DEMO_MEMORY"])
+            XCTAssertNil(environment["MCI_DB_KEY_FILE"])
+        }
+        XCTAssertEqual(custody.calls.map(\.1), [supervisor.dbPath])
+        try await waitUntil { controller.phase == .off }
+    }
+
     // MARK: Leaving takes back exactly what using changed
 
     func testAPauseThePersonMadeStaysAfterLeaving() async throws {
