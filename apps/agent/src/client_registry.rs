@@ -158,6 +158,8 @@ pub struct ClientRegistry {
     agent_executable: PathBuf,
     codex_executable: Option<PathBuf>,
     codex_home: Option<PathBuf>,
+    /// `CLAUDE_CONFIG_DIR`: where Claude Code keeps `.claude.json` when set.
+    claude_config_dir: Option<PathBuf>,
     claude_detected: bool,
     #[cfg(debug_assertions)]
     debug_hook: Option<ClientRegistryDebugHook>,
@@ -171,6 +173,7 @@ impl fmt::Debug for ClientRegistry {
             .field("agent_executable", &self.agent_executable)
             .field("codex_executable", &self.codex_executable)
             .field("codex_home", &self.codex_home)
+            .field("claude_config_dir", &self.claude_config_dir)
             .field("claude_detected", &self.claude_detected)
             .finish_non_exhaustive()
     }
@@ -190,10 +193,19 @@ impl ClientRegistry {
             agent_executable,
             codex_executable,
             codex_home,
+            claude_config_dir: None,
             claude_detected: true,
             #[cfg(debug_assertions)]
             debug_hook: None,
         }
+    }
+
+    /// Claude Code's own folder when `CLAUDE_CONFIG_DIR` moves it: its
+    /// `.claude.json` is read and written there instead of the home folder.
+    #[must_use]
+    pub fn with_claude_config_dir(mut self, directory: Option<PathBuf>) -> Self {
+        self.claude_config_dir = directory.filter(|path| !path.as_os_str().is_empty());
+        self
     }
 
     /// Install deterministic transaction synchronization points for tests.
@@ -223,18 +235,28 @@ impl ClientRegistry {
         let codex_home = std::env::var_os("CODEX_HOME")
             .filter(|value| !value.is_empty())
             .map(PathBuf::from);
+        let claude_config_dir = std::env::var_os("CLAUDE_CONFIG_DIR")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute());
+        let local_claude = home.join(".local/bin/claude");
         let claude_detected = discover_client_binary(
             "MCI_CLAUDE_BINARY",
-            &["/usr/local/bin/claude", "/opt/homebrew/bin/claude"],
+            &[
+                "/usr/local/bin/claude",
+                "/opt/homebrew/bin/claude",
+                &local_claude.to_string_lossy(),
+            ],
             "claude",
         )
         .is_some()
-            || home.join(".claude.json").exists();
+            || claude_json_path(&home, claude_config_dir.as_deref()).exists();
         Ok(Self {
             home,
             agent_executable,
             codex_executable,
             codex_home,
+            claude_config_dir,
             claude_detected,
             #[cfg(debug_assertions)]
             debug_hook: None,
@@ -245,11 +267,9 @@ impl ClientRegistry {
     pub fn register_claude(&self, db_path: &Path) -> Result<RegistrationChange, RegistrationError> {
         let desired = self.desired_entry(db_path)?;
         let journal_directory = stable_journal_directory(&self.home)?;
-        update_config(
-            &self.home.join(".claude.json"),
-            &journal_directory,
-            |bytes| patch_claude_json(bytes, &desired),
-        )
+        update_config(&self.claude_json(), &journal_directory, |bytes| {
+            patch_claude_json(bytes, &desired)
+        })
     }
 
     /// Patch Codex's user-wide TOML directly, preserving unrelated formatting.
@@ -309,11 +329,76 @@ impl ClientRegistry {
             .join("config.toml")
     }
 
+    /// Where Claude Code keeps its look-up entries: `.claude.json` in its
+    /// `CLAUDE_CONFIG_DIR` when set, else in the home folder.
+    #[must_use]
+    pub fn claude_json(&self) -> PathBuf {
+        claude_json_path(&self.home, self.claude_config_dir.as_deref())
+    }
+
+    /// Whether Claude Code was found: its command or its settings.
+    #[must_use]
+    pub const fn claude_detected(&self) -> bool {
+        self.claude_detected
+    }
+
+    /// Whether Codex was found: its command or its settings.
+    #[must_use]
+    pub fn codex_detected(&self) -> bool {
+        self.codex_executable.is_some() || self.codex_config_path().exists()
+    }
+
+    /// Whether Claude Code has Hippocampus's look-up entry. A name taken by
+    /// some other server, or a file that can't be read safely, is an error.
+    pub fn claude_registered(&self) -> Result<bool, RegistrationError> {
+        let journal_directory = stable_journal_directory(&self.home)?;
+        claude_config_has_owned_registration(&self.claude_json(), &journal_directory)
+    }
+
+    /// Whether Codex has Hippocampus's look-up entry.
+    pub fn codex_registered(&self) -> Result<bool, RegistrationError> {
+        let journal_directory = stable_journal_directory(&self.home)?;
+        codex_config_has_owned_registration(&self.codex_config_path(), &journal_directory)
+    }
+
+    /// Disconnect: remove Hippocampus's look-up entry from Claude Code, with
+    /// the same safety rules as registering. An entry that isn't ours is
+    /// never touched; there being none is not an error.
+    pub fn unregister_claude(&self) -> Result<RegistrationRepair, RegistrationError> {
+        let path = self.claude_json();
+        let journal_directory = stable_journal_directory(&self.home)?;
+        if !claude_config_has_owned_registration(&path, &journal_directory)? {
+            return Ok(RegistrationRepair::NotRegistered);
+        }
+        repair_existing_config(
+            &path,
+            &journal_directory,
+            remove_claude_json,
+            self.debug_hook(),
+        )
+    }
+
+    /// Disconnect: remove Hippocampus's look-up entry from Codex (which
+    /// `ChatGPT`'s desktop app reads too).
+    pub fn unregister_codex(&self) -> Result<RegistrationRepair, RegistrationError> {
+        let path = self.codex_config_path();
+        let journal_directory = stable_journal_directory(&self.home)?;
+        if !codex_config_has_owned_registration(&path, &journal_directory)? {
+            return Ok(RegistrationRepair::NotRegistered);
+        }
+        repair_existing_config(
+            &path,
+            &journal_directory,
+            remove_codex_toml,
+            self.debug_hook(),
+        )
+    }
+
     fn repair_existing_claude(
         &self,
         db_path: &Path,
     ) -> Result<RegistrationRepair, RegistrationError> {
-        let path = self.home.join(".claude.json");
+        let path = self.claude_json();
         let journal_directory = stable_journal_directory(&self.home)?;
         if !claude_config_has_owned_registration(&path, &journal_directory)? {
             return Ok(RegistrationRepair::NotRegistered);
@@ -363,6 +448,110 @@ impl ClientRegistry {
             env: mcp_registration_env(&db_path),
         })
     }
+}
+
+/// `.claude.json` in `claude_config_dir` when Claude Code was told to keep
+/// its settings there, else in `home`.
+fn claude_json_path(home: &Path, claude_config_dir: Option<&Path>) -> PathBuf {
+    claude_config_dir.map_or_else(|| home.join(".claude.json"), |dir| dir.join(".claude.json"))
+}
+
+/// `.claude.json` without Hippocampus's entry; unchanged when it has none.
+/// The entry must be ours ([`claude_entry_is_repairable`]); the servers'
+/// table goes too when nothing else is in it.
+fn remove_claude_json(bytes: Option<&[u8]>) -> Result<PatchOutcome, RegistrationError> {
+    let Some(content) = bytes else {
+        return Ok(PatchOutcome::NotRegistered);
+    };
+    let mut root = parse_claude_json(content)?
+        .as_object()
+        .cloned()
+        .ok_or_else(|| {
+            RegistrationError::new(
+                RegistrationErrorKind::BlockedMalformed,
+                "Claude config root must be a JSON object",
+            )
+        })?;
+    let Some(servers) = root.get_mut("mcpServers") else {
+        return Ok(PatchOutcome::Unchanged);
+    };
+    let servers = servers.as_object_mut().ok_or_else(|| {
+        RegistrationError::new(
+            RegistrationErrorKind::BlockedMalformed,
+            "Claude mcpServers must be a JSON object",
+        )
+    })?;
+    let Some(existing) = servers.get(SERVER_NAME) else {
+        return Ok(PatchOutcome::Unchanged);
+    };
+    if !claude_entry_is_repairable(existing)? {
+        return Err(RegistrationError::new(
+            RegistrationErrorKind::NameConflict,
+            "Claude already has an unrelated server named hippocampus",
+        ));
+    }
+    servers.remove(SERVER_NAME);
+    // Connect made the servers' table when there was none; an empty one
+    // goes with the entry, as before Connect.
+    if servers.is_empty() {
+        root.remove("mcpServers");
+    }
+    serde_json::to_vec_pretty(&root)
+        .map(PatchOutcome::Write)
+        .map_err(|error| {
+            RegistrationError::new(
+                RegistrationErrorKind::Failed,
+                format!("serialize Claude config: {error}"),
+            )
+        })
+}
+
+/// Codex's `config.toml` without Hippocampus's entry, every other byte as
+/// it was; unchanged when it has none.
+fn remove_codex_toml(bytes: Option<&[u8]>) -> Result<PatchOutcome, RegistrationError> {
+    let Some(content) = bytes else {
+        return Ok(PatchOutcome::NotRegistered);
+    };
+    let mut document = std::str::from_utf8(content)
+        .map_err(|_| {
+            RegistrationError::new(
+                RegistrationErrorKind::BlockedMalformed,
+                "Codex config is not valid UTF-8",
+            )
+        })?
+        .parse::<DocumentMut>()
+        .map_err(|_| {
+            RegistrationError::new(
+                RegistrationErrorKind::BlockedMalformed,
+                "Codex config is not valid TOML",
+            )
+        })?;
+    let Some(servers) = document
+        .get_mut("mcp_servers")
+        .and_then(Item::as_table_like_mut)
+    else {
+        return Ok(PatchOutcome::Unchanged);
+    };
+    let Some(existing) = servers.get(SERVER_NAME) else {
+        return Ok(PatchOutcome::Unchanged);
+    };
+    if !codex_entry_is_repairable(existing)? {
+        return Err(RegistrationError::new(
+            RegistrationErrorKind::NameConflict,
+            "Codex already has an unrelated server named hippocampus",
+        ));
+    }
+    servers.remove(SERVER_NAME);
+    let empty = servers.is_empty();
+    if empty
+        && document
+            .get("mcp_servers")
+            .and_then(Item::as_table)
+            .is_some_and(Table::is_implicit)
+    {
+        document.remove("mcp_servers");
+    }
+    Ok(PatchOutcome::Write(document.to_string().into_bytes()))
 }
 
 fn stable_journal_directory(path: &Path) -> Result<PathBuf, RegistrationError> {

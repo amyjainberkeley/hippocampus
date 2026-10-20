@@ -39,8 +39,14 @@ const DEFAULT_EPISODES_LIMIT: usize = 20;
 const MAX_EPISODES_LIMIT: usize = 100;
 /// Default `limit` for `events_by_app` when the client omits it.
 const DEFAULT_EVENTS_BY_APP_LIMIT: usize = 50;
-/// Hard cap for `events_by_app`'s `limit` parameter.
-const MAX_EVENTS_BY_APP_LIMIT: usize = 1000;
+/// Hard cap for `events_by_app`'s `limit` parameter (SPEC 5.5: smaller
+/// look-ups, so a tool never writes one to disk outside Hippocampus's
+/// encryption).
+pub const MAX_EVENTS_BY_APP_LIMIT: usize = 200;
+/// Every look-up's text stays under this many characters: Claude Code
+/// writes a tool result over 50,000 characters to a file in its own folder,
+/// outside Hippocampus's encryption (SPEC 5.5).
+pub const MAX_RESULT_TEXT_CHARS: usize = 40_000;
 /// MCP protocol version this server advertises in `initialize`.
 ///
 /// The MCP spec uses calendar-versioned protocol revisions; Claude Code
@@ -67,8 +73,8 @@ const DEFAULT_EVENTS_SINCE_LIMIT: usize = 100;
 /// Hard cap for `recall`'s `limit` parameter (matches the
 /// `inputSchema` advertised in `tools/list`).
 const MAX_RECALL_LIMIT: usize = 100;
-/// Hard cap for `events_since`'s `limit` parameter.
-const MAX_EVENTS_SINCE_LIMIT: usize = 1000;
+/// Hard cap for `events_since`'s `limit` parameter (SPEC 5.5).
+pub const MAX_EVENTS_SINCE_LIMIT: usize = 200;
 
 /// Content-free per-tool request counters. Public so the supervisor
 /// (eventually) can plumb them into the `HelperHealth` wire surface.
@@ -437,14 +443,17 @@ impl Server {
                 }
             };
         match self.reader.understanding(&query) {
-            Ok(payload) => JsonRpcResponse::ok(
-                id,
-                serde_json::json!({
-                    "content": [{ "type": "text", "text": serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_owned()) }],
-                    "result": payload,
-                    "isError": false,
-                }),
-            ),
+            Ok(payload) => {
+                let payload = lists_within(payload, MAX_RESULT_TEXT_CHARS);
+                JsonRpcResponse::ok(
+                    id,
+                    serde_json::json!({
+                        "content": [{ "type": "text", "text": serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_owned()) }],
+                        "result": payload,
+                        "isError": false,
+                    }),
+                )
+            }
             Err(e) => brain_err_to_response(id, &e),
         }
     }
@@ -505,26 +514,7 @@ impl Server {
             .clamp(1, MAX_EVENTS_SINCE_LIMIT);
 
         match self.reader.events_since(parsed.ts_us, limit) {
-            Ok(rows) => {
-                let rows_json: Vec<serde_json::Value> = rows
-                    .iter()
-                    .map(|r| event_row_json(r, self.reader.as_ref()))
-                    .collect();
-                JsonRpcResponse::ok(
-                    id,
-                    serde_json::json!({
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": serde_json::to_string(&rows_json)
-                                    .unwrap_or_else(|_| "[]".to_owned()),
-                            }
-                        ],
-                        "events": rows_json,
-                        "isError": false,
-                    }),
-                )
-            }
+            Ok(rows) => JsonRpcResponse::ok(id, events_result(&rows, self.reader.as_ref())),
             Err(e) => brain_err_to_response(id, &e),
         }
     }
@@ -644,26 +634,7 @@ impl Server {
             .clamp(1, MAX_EVENTS_BY_APP_LIMIT);
 
         match self.reader.events_by_app(&parsed.app_bundle_id, limit) {
-            Ok(rows) => {
-                let rows_json: Vec<serde_json::Value> = rows
-                    .iter()
-                    .map(|r| event_row_json(r, self.reader.as_ref()))
-                    .collect();
-                JsonRpcResponse::ok(
-                    id,
-                    serde_json::json!({
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": serde_json::to_string(&rows_json)
-                                    .unwrap_or_else(|_| "[]".to_owned()),
-                            }
-                        ],
-                        "events": rows_json,
-                        "isError": false,
-                    }),
-                )
-            }
+            Ok(rows) => JsonRpcResponse::ok(id, events_result(&rows, self.reader.as_ref())),
             Err(e) => brain_err_to_response(id, &e),
         }
     }
@@ -706,7 +677,25 @@ impl Server {
                 .clamp(1, MAX_CONTEXT_EVIDENCE),
         );
 
-        match self.reader.context(focus, budget) {
+        let mut answer = self.reader.context(focus, budget);
+        // A packet whose text is too long is asked for again smaller, so its
+        // citations are never cut from what they cite (SPEC 5.5).
+        let mut tokens = budget.max_tokens;
+        for _ in 0..4 {
+            let too_long = answer.as_ref().is_ok_and(|packet| {
+                serde_json::to_string(packet)
+                    .is_ok_and(|text| text.chars().count() > MAX_RESULT_TEXT_CHARS)
+            });
+            if !too_long || tokens <= MIN_CONTEXT_TOKENS {
+                break;
+            }
+            tokens = (tokens * 3 / 4).max(MIN_CONTEXT_TOKENS);
+            let evidence = (budget.max_evidence * 3 / 4).max(1);
+            answer = self
+                .reader
+                .context(focus, ContextBudget::new(tokens, evidence));
+        }
+        match answer {
             Ok(packet) => {
                 let text = serde_json::to_string(&packet).unwrap_or_else(|_| {
                     "{\"outcome\":\"nothing_available\",\"serialization_error\":true}".to_owned()
@@ -741,6 +730,50 @@ fn event_row_json(record: &mci_brain::EventRecord, reader: &dyn BrainReader) -> 
         "text_snippet": reader.listed_text(record, source),
         "source_kind": source.as_str(),
     })
+}
+
+/// The result of a tool that lists moments: as many rows as keep its text
+/// under [`MAX_RESULT_TEXT_CHARS`], in the order read, with `truncated`
+/// saying when some were left out.
+fn events_result(rows: &[mci_brain::EventRecord], reader: &dyn BrainReader) -> serde_json::Value {
+    let all: Vec<serde_json::Value> = rows.iter().map(|r| event_row_json(r, reader)).collect();
+    let (kept, truncated) = rows_within(all, MAX_RESULT_TEXT_CHARS);
+    let text = serde_json::to_string(&kept).unwrap_or_else(|_| "[]".to_owned());
+    let mut result = serde_json::json!({
+        "content": [{ "type": "text", "text": text }],
+        "events": kept,
+        "isError": false,
+    });
+    if truncated {
+        result["truncated"] = serde_json::Value::Bool(true);
+    }
+    result
+}
+
+/// The first `rows` whose JSON array stays under `max_chars` characters, and
+/// whether any were left out.
+#[must_use]
+pub fn rows_within(
+    rows: Vec<serde_json::Value>,
+    max_chars: usize,
+) -> (Vec<serde_json::Value>, bool) {
+    let total = rows.len();
+    // "[" and "]", and a comma between rows.
+    let mut used = 2usize;
+    let mut kept = Vec::with_capacity(total);
+    for row in rows {
+        let length = serde_json::to_string(&row).map_or(usize::MAX, |text| text.chars().count());
+        let next = used
+            .saturating_add(length)
+            .saturating_add(usize::from(!kept.is_empty()));
+        if next > max_chars {
+            break;
+        }
+        used = next;
+        kept.push(row);
+    }
+    let truncated = kept.len() < total;
+    (kept, truncated)
 }
 
 fn hit_json(hit: &McpHit, reader: &dyn BrainReader) -> serde_json::Value {
@@ -803,6 +836,7 @@ fn recall_wire_result(outcome: McpRecallOutcome, reader: &dyn BrainReader) -> se
             "contradicting_context": [],
         }),
     };
+    let payload = recall_within(payload, MAX_RESULT_TEXT_CHARS);
     let text = serde_json::to_string(&payload).unwrap_or_else(|_| {
         "{\"outcome\":\"degraded\",\"degradation\":\"serialization_failed\"}".to_owned()
     });
@@ -816,6 +850,67 @@ fn recall_wire_result(outcome: McpRecallOutcome, reader: &dyn BrainReader) -> se
     );
     object.insert("isError".into(), serde_json::Value::Bool(false));
     result
+}
+
+/// An understanding payload whose text stays under `max_chars`: the last
+/// rows of its longest lists go first, and `truncated` says so.
+fn lists_within(mut payload: serde_json::Value, max_chars: usize) -> serde_json::Value {
+    let size = |value: &serde_json::Value| {
+        serde_json::to_string(value).map_or(usize::MAX, |text| text.chars().count())
+    };
+    if size(&payload) <= max_chars || !payload.is_object() {
+        return payload;
+    }
+    payload["truncated"] = serde_json::Value::Bool(true);
+    while size(&payload) > max_chars {
+        let Some(object) = payload.as_object_mut() else {
+            break;
+        };
+        let longest = object
+            .iter()
+            .filter_map(|(key, value)| {
+                let list = value.as_array()?;
+                (!list.is_empty()).then(|| (key.clone(), size(value)))
+            })
+            .max_by_key(|(_, length)| *length)
+            .map(|(key, _)| key);
+        let Some(key) = longest else {
+            break;
+        };
+        if let Some(list) = object
+            .get_mut(&key)
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            list.pop();
+        }
+    }
+    payload
+}
+
+/// A recall payload whose text stays under `max_chars`: its lowest-ranked
+/// hits go first, and `truncated` says so.
+fn recall_within(mut payload: serde_json::Value, max_chars: usize) -> serde_json::Value {
+    let size = |payload: &serde_json::Value| {
+        serde_json::to_string(payload).map_or(usize::MAX, |text| text.chars().count())
+    };
+    if size(&payload) <= max_chars {
+        return payload;
+    }
+    payload["truncated"] = serde_json::Value::Bool(true);
+    for key in ["contradicting_context", "related_context", "hits"] {
+        while size(&payload) > max_chars {
+            let Some(list) = payload
+                .get_mut(key)
+                .and_then(serde_json::Value::as_array_mut)
+            else {
+                break;
+            };
+            if list.pop().is_none() {
+                break;
+            }
+        }
+    }
+    payload
 }
 
 fn brain_err_to_response(id: JsonRpcId, e: &BrainReaderError) -> JsonRpcResponse {
