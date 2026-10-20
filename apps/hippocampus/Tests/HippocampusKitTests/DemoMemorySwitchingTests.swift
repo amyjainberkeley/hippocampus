@@ -323,6 +323,15 @@ final class DemoMemorySwitchingTests: XCTestCase {
         let usedThroughLink = await linked.use()
         XCTAssertFalse(usedThroughLink)
         XCTAssertEqual(personsFiles(home), before)
+
+        // Nor a link that leads nowhere yet.
+        try FileManager.default.removeItem(at: standard.url)
+        try FileManager.default.createSymbolicLink(
+            at: standard.url, withDestinationURL: home.appendingPathComponent("nowhere")
+        )
+        XCTAssertFalse(standard.isSafe(home: home))
+        XCTAssertFalse(DemoMemoryFolder(url: home.appendingPathComponent("Library")).isSafe(home: home),
+                       "never a folder the person's memory is inside")
     }
 
     func testSomethingElseInItsPlaceIsNeverRemoved() async throws {

@@ -63,12 +63,9 @@ public struct DemoMemoryFolder: Sendable, Equatable {
         let own = Self.resolved(Self.personsOwnFolder(home: home)).path
         let mine = Self.resolved(url).path
         if mine == own || mine.hasPrefix(own + "/") || own.hasPrefix(mine + "/") { return false }
-        var isDirectory: ObjCBool = false
-        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) {
-            if let type = try? FileManager.default.attributesOfItem(atPath: url.path)[.type] as? FileAttributeType,
-               type == .typeSymbolicLink { return false }
-        }
-        return true
+        // The folder itself is never a link, even one that leads nowhere.
+        let type = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType
+        return type != .typeSymbolicLink
     }
 
     /// Whether Demo Memory's folder is there.
