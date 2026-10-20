@@ -739,6 +739,17 @@ final class AskPanelTests: XCTestCase {
         XCTAssertEqual(CommandBarModel.sessionTab(5), "session:5")
     }
 
+    /// Ask names a Working On item the way the app's own `tab=work&item=`
+    /// link does, which the window reads (`RecallLaunchRequest.workTabPrefix`).
+    /// "item:<id>" was a name the window never read, so ↩ on an item left the
+    /// window where it was.
+    func testTheItemTabIsTheOneAnItemLinkBecomes() {
+        XCTAssertEqual(CommandBarModel.itemTab("w_9c41e2"),
+                       HippocampusURLRoute.recallTab([URLQueryItem(name: "tab", value: "work"),
+                                                      URLQueryItem(name: "item", value: "w_9c41e2")]))
+        XCTAssertEqual(CommandBarModel.itemTab("w_9c41e2"), "work:w_9c41e2")
+    }
+
     func testCommandKeysAreReadFromTheKeyAndItsModifiers() {
         XCTAssertEqual(AskKeyCommand(key: "c", command: true, shift: false, option: false, control: false), .copyAnswer)
         XCTAssertEqual(AskKeyCommand(key: "C", command: true, shift: true, option: false, control: false), .copyForAI)

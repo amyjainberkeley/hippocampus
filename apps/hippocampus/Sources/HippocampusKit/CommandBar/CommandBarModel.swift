@@ -897,9 +897,11 @@ public final class CommandBarModel: ObservableObject {
         }
     }
 
-    /// Where a Working On item's page is in the window: `item:<id>` (ids,
-    /// never names).
-    public static func itemTab(_ id: String) -> String { "item:\(id)" }
+    /// Where a Working On item's page is in the window: `work:<id>` (ids,
+    /// never names), as a `tab=work&item=<id>` link becomes
+    /// (`HippocampusURLRoute.recallTab`) and the window reads it
+    /// (`RecallLaunchRequest.workTabPrefix`).
+    public static func itemTab(_ id: String) -> String { "work:\(id)" }
 
     /// Today on the day of the session that started at `startUs`, with that
     /// session selected: `session:<start_us>`, as a `session=` link becomes
