@@ -56,6 +56,15 @@ public protocol CalendarReader: Sendable {
     func events(in interval: DateInterval) async throws -> [CalendarEvent]
 }
 
+public extension CalendarReader {
+    /// The events of the day `date` falls on, in `calendar`'s time zone:
+    /// today's, unless another day is asked for.
+    func events(onDayOf date: Date = Date(), calendar: Calendar = .current) async throws -> [CalendarEvent] {
+        guard let day = calendar.dateInterval(of: .day, for: date) else { return [] }
+        return try await events(in: day)
+    }
+}
+
 /// A calendar from fixtures; empty by default, as on a Mac whose calendar
 /// isn't shown. It never touches EventKit.
 public struct FixtureCalendar: CalendarReader {
