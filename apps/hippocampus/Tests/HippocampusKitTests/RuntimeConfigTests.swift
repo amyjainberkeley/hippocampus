@@ -75,7 +75,7 @@ final class RuntimeConfigTests: XCTestCase {
 
     // MARK: - File permissions
 
-    func test_file_mode_is_0644() throws {
+    func test_file_mode_is_0600() throws {
         let (cfg, dir) = try tmpConfig()
         defer { try? FileManager.default.removeItem(at: dir) }
 
@@ -83,10 +83,10 @@ final class RuntimeConfigTests: XCTestCase {
 
         let attrs = try FileManager.default.attributesOfItem(atPath: cfg.path.path)
         let mode = attrs[.posixPermissions] as? Int
-        XCTAssertEqual(mode, 0o644, "runtime.toml must be 0644")
+        XCTAssertEqual(mode, 0o600, "runtime.toml must be 0600, like every settings file (review S9)")
     }
 
-    func test_capture_write_uses_file_mode_0644() throws {
+    func test_capture_write_uses_file_mode_0600() throws {
         let (cfg, dir) = try tmpConfig()
         defer { try? FileManager.default.removeItem(at: dir) }
 
@@ -94,7 +94,7 @@ final class RuntimeConfigTests: XCTestCase {
 
         let attrs = try FileManager.default.attributesOfItem(atPath: cfg.path.path)
         let mode = attrs[.posixPermissions] as? Int
-        XCTAssertEqual(mode, 0o644, "runtime.toml must be 0644 because capture_enabled is not a secret")
+        XCTAssertEqual(mode, 0o600, "runtime.toml must be 0600: the home folder lets other accounts in (review S9)")
     }
 
     // MARK: - parseBool

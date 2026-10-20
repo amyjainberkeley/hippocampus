@@ -102,10 +102,44 @@ public enum KeychainDatabaseKeyError: Error, Sendable, Equatable {
 /// development bundles. Production bundles do not carry the capability that
 /// lets the supervisor set this marker.
 public enum DevelopmentDatabaseKeyMaterial {
+    /// Whether this build honours development keys for the person's own
+    /// memory: a debug build, or one compiled with `-DMCI_DEVELOPMENT_FILE_KEY`.
+    /// A release build never does (storage-security review S11); it reads
+    /// only Demo Memory's own key file, for Demo Memory's own store.
+    public static let compiledIn: Bool = {
+        #if DEBUG || MCI_DEVELOPMENT_FILE_KEY
+        return true
+        #else
+        return false
+        #endif
+    }()
+
     public static func hex(from environment: [String: String]) throws -> String? {
+        try hex(from: environment, compiledIn: compiledIn,
+                home: URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true))
+    }
+
+    /// Demo Memory's folder under `home`.
+    static func demoMemoryFolder(home: URL) -> URL {
+        home.appendingPathComponent("Library/Application Support/Hippocampus/Demo Memory", isDirectory: true)
+    }
+
+    static func hex(from environment: [String: String], compiledIn: Bool, home: URL) throws -> String? {
         guard environment["MCI_DEVELOPMENT_FILE_KEY"] == "1" else { return nil }
+        if !compiledIn {
+            // Only Demo Memory's key file, for Demo Memory's store.
+            let demo = demoMemoryFolder(home: home).standardizedFileURL.path + "/"
+            func inside(_ path: String?) -> Bool {
+                guard let path, path.hasPrefix("/") else { return false }
+                let standard = URL(fileURLWithPath: path).standardizedFileURL.path
+                return standard.hasPrefix(demo) && !path.contains("/../")
+            }
+            guard inside(environment["MCI_DB_KEY_FILE"]), inside(environment["MCI_DB_PATH"]) else {
+                return nil
+            }
+        }
         let value: String
-        if let raw = environment["MCI_DB_KEY_HEX"] {
+        if compiledIn, let raw = environment["MCI_DB_KEY_HEX"] {
             value = raw
         } else if let path = environment["MCI_DB_KEY_FILE"] {
             value = try String(contentsOfFile: path, encoding: .utf8)
@@ -162,14 +196,56 @@ public struct KeychainDatabaseKeyResolver: Sendable {
         self.client = client
     }
 
+    /// The account a key change stores the new key under while the memory
+    /// moves to it (storage-security review S4). It exists only for the
+    /// length of one change; when it does, it holds the newer key.
+    public static let rotatedAccount = "database-key-v2"
+
+    /// The memory's key: for the default item, the key-change account's
+    /// item when there is one, else the usual item; any other reference
+    /// exactly.
     public func resolveHex(reference: KeychainDatabaseKeyReference) throws -> String {
+        try resolveHexCandidates(reference: reference)[0]
+    }
+
+    /// Every key the memory may be under, newest first: during a key change
+    /// both items exist, and only one of them opens the memory (the window
+    /// opens it with each in turn). Throws when there is none.
+    public func resolveHexCandidates(reference: KeychainDatabaseKeyReference) throws -> [String] {
         guard reference.storageModel == KeychainDatabaseKeyReference.storageModel else {
             throw KeychainDatabaseKeyError.domainMismatch
         }
+        let accounts = reference == .defaultDatabaseKey
+            ? [Self.rotatedAccount, reference.account]
+            : [reference.account]
+        var found: [String] = []
+        var firstError: KeychainDatabaseKeyError?
+        for account in accounts {
+            do {
+                if let hex = try readHex(service: reference.service, account: account) {
+                    found.append(hex)
+                }
+            } catch let error as KeychainDatabaseKeyError {
+                // A newer item that can't be read now is skipped, and the
+                // error kept for when no item can be read at all.
+                firstError = firstError ?? error
+            }
+        }
+        if found.isEmpty { throw firstError ?? KeychainDatabaseKeyError.missing }
+        return found
+    }
+
+    /// One item's key, nil when it does not exist.
+    private func readHex(service: String, account: String) throws -> String? {
         let data: Data
-        switch client.readGenericPassword(query: KeychainDatabaseKeyQuery(reference: reference)) {
+        switch client.readGenericPassword(query: KeychainDatabaseKeyQuery(
+            service: service,
+            account: account,
+            useDataProtectionKeychain: false,
+            synchronizable: false
+        )) {
         case .success(let value): data = value
-        case .failure(errSecItemNotFound): throw KeychainDatabaseKeyError.missing
+        case .failure(errSecItemNotFound): return nil
         case .failure(errSecAuthFailed), .failure(errSecMissingEntitlement):
             throw KeychainDatabaseKeyError.accessDenied
         case .failure(errSecInteractionNotAllowed), .failure(errSecNotAvailable),

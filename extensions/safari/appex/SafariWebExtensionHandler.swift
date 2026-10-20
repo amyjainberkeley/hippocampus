@@ -64,7 +64,12 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         }
 
         let inbox = containerURL.appendingPathComponent(Self.inboxDir, isDirectory: true)
-        try? FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(
+            at: inbox, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
+        )
+        // A page staged over a minute ago is deleted unread, whether or not
+        // Hippocampus ever read it (storage-security review S10).
+        Self.removeStalePages(in: inbox)
 
         let filename = "\(ProcessInfo.processInfo.globallyUniqueString).json"
         let fileURL = inbox.appendingPathComponent(filename)
@@ -76,12 +81,47 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             return false
         }
 
-        do {
-            try data.write(to: fileURL, options: .atomic)
-            return true
-        } catch {
-            logger.error("Failed to write to App Group inbox: \(error.localizedDescription)")
+        // Mode 0600 from the moment it exists: a hidden temporary file, then
+        // renamed, so Hippocampus never reads half a page.
+        let temporary = inbox.appendingPathComponent(".\(filename).tmp")
+        let descriptor = Darwin.open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else {
+            logger.error("Failed to write to App Group inbox")
             return false
+        }
+        let written = data.withUnsafeBytes { buffer -> Bool in
+            guard let base = buffer.baseAddress else { return true }
+            var offset = 0
+            while offset < buffer.count {
+                let result = Darwin.write(descriptor, base + offset, buffer.count - offset)
+                if result <= 0 { return false }
+                offset += result
+            }
+            return true
+        }
+        Darwin.close(descriptor)
+        guard written, Darwin.rename(temporary.path, fileURL.path) == 0 else {
+            Darwin.unlink(temporary.path)
+            logger.error("Failed to write to App Group inbox")
+            return false
+        }
+        return true
+    }
+
+    /// How long a staged page may wait to be forwarded.
+    private static let maxStagedAge: TimeInterval = 60
+
+    /// Deletes every staged page older than `maxStagedAge`.
+    private static func removeStalePages(in inbox: URL, now: Date = Date()) {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: inbox, includingPropertiesForKeys: [.contentModificationDateKey], options: []
+        ) else { return }
+        for file in files where file.pathExtension == "json" || file.pathExtension == "tmp" {
+            let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            if now.timeIntervalSince(modified) > maxStagedAge {
+                try? FileManager.default.removeItem(at: file)
+            }
         }
     }
 

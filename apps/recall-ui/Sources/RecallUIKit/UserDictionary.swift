@@ -374,14 +374,17 @@ public func saveUserDictionary(
     let parent = url.deletingLastPathComponent()
     do {
         try FileManager.default.createDirectory(
-            at: parent, withIntermediateDirectories: true
+            at: parent, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
         )
     } catch {
         throw UserDictionaryError.ioFailed("mkdir \(parent.path): \(error)")
     }
     let text = validated.toTOML()
     do {
-        try text.write(to: url, atomically: true, encoding: .utf8)
+        // People's names and aliases: mode 0600 from the moment the file
+        // exists (storage-security review S9).
+        try PrivateFileWriter.write(text, to: url)
     } catch {
         throw UserDictionaryError.ioFailed("write \(url.path): \(error)")
     }

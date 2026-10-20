@@ -377,15 +377,23 @@ public enum UserFacingCopy {
 
     public static func recentMoments(_ count: Int) -> String { "Recent moments (\(count))" }
     public static func exportedMoments(_ count: Int) -> String {
-        "Saved \(count) moments to Downloads. The file isn\u{2019}t encrypted."
+        "Saved \(count) moments. The file isn\u{2019}t encrypted."
     }
     public static let deleteLast24hExplanation = "Everything from the last 24 hours is deleted for good."
-    public static let deleteEverythingExplanation = "Every moment, session and summary is deleted for good."
+    public static let deleteEverythingExplanation =
+        "Every moment, screenshot and summary is deleted for good, and so is the key that reads them, "
+        + "so copies in earlier backups can\u{2019}t be read either."
+    /// Delete Everything finished: the memory and its key are gone.
+    public static let erasedEverything =
+        "Everything is deleted, and so is its key. Copies in earlier backups can\u{2019}t be read."
+    /// Delete Everything didn't finish.
+    public static let eraseFailedBanner =
+        "Couldn\u{2019}t delete everything. Try again, or quit Hippocampus and open it again to finish."
     public static let deleteEverythingTitle = "Delete everything Hippocampus remembers?"
     public static let deleteUnavailable = "Deleting isn\u{2019}t available."
     public static let deleteAction = "Delete"
-    /// Writes straight to Downloads: no further step, so no ellipsis.
-    public static let exportEverythingAction = "Export Everything"
+    /// Asks where to save first, so it ends in an ellipsis.
+    public static let exportEverythingAction = "Export Everything\u{2026}"
     public static let deleteLast24hAction = "Delete Last 24 Hours\u{2026}"
     public static let deleteEverythingAction = "Delete Everything\u{2026}"
     public static let exportNotEncrypted = "Exported files aren\u{2019}t encrypted."

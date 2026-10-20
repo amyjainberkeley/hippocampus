@@ -7,6 +7,8 @@ final class KeyStoreTests: XCTestCase {
 
     private final class FakeKeychainClient: KeychainClient, @unchecked Sendable {
         var readResult: KeychainReadResult = .failure(errSecItemNotFound)
+        /// Per-account answers, consulted before `readResult`.
+        var readResults: [String: KeychainReadResult] = [:]
         var addStatus: OSStatus = errSecSuccess
         private(set) var addedSecrets: [Data] = []
         private(set) var readQueries: [KeychainItemQuery] = []
@@ -14,7 +16,7 @@ final class KeyStoreTests: XCTestCase {
 
         func readGenericPassword(query: KeychainItemQuery) -> KeychainReadResult {
             readQueries.append(query)
-            return readResult
+            return readResults[query.account] ?? readResult
         }
 
         func addGenericPassword(
@@ -126,19 +128,55 @@ final class KeyStoreTests: XCTestCase {
 
     func test_keychain_queries_pin_file_based_non_synchronizable_domain() {
         let client = FakeKeychainClient()
+        // No key change under way: the key-change account is asked first
+        // (storage-security review S4), then the usual item; both queries
+        // pin the file-based, non-synchronizable domain.
+        client.readResults["database-key-v2"] = .failure(errSecItemNotFound)
         client.readResult = .success(Data(String(repeating: "ab", count: 32).utf8))
         let store = makeStore(client: client)
 
         XCTAssertNoThrow(try store.readKey())
         XCTAssertEqual(
             client.readQueries,
-            [KeychainItemQuery(
-                service: "ai.hippocampus.brain",
-                account: "database-key-v1",
-                useDataProtectionKeychain: false,
-                synchronizable: false
-            )]
+            [
+                KeychainItemQuery(
+                    service: "ai.hippocampus.brain",
+                    account: "database-key-v2",
+                    useDataProtectionKeychain: false,
+                    synchronizable: false
+                ),
+                KeychainItemQuery(
+                    service: "ai.hippocampus.brain",
+                    account: "database-key-v1",
+                    useDataProtectionKeychain: false,
+                    synchronizable: false
+                ),
+            ]
         )
+    }
+
+    func test_a_key_left_by_a_key_change_is_read_first() throws {
+        let client = FakeKeychainClient()
+        client.readResults["database-key-v2"] = .success(Data(String(repeating: "cd", count: 32).utf8))
+        client.readResults["database-key-v1"] = .success(Data(String(repeating: "ab", count: 32).utf8))
+        let store = makeStore(client: client)
+
+        XCTAssertEqual(try store.readKey(), String(repeating: "cd", count: 32))
+        XCTAssertEqual(client.readQueries.map(\.account), ["database-key-v2"])
+    }
+
+    func test_a_reference_other_than_the_default_is_read_exactly() throws {
+        let client = FakeKeychainClient()
+        client.readResults["database-key-v2"] = .success(Data(String(repeating: "cd", count: 32).utf8))
+        client.readResults["other"] = .success(Data(String(repeating: "ab", count: 32).utf8))
+        let store = KeychainKeyStore(
+            reference: KeychainKeyReference(service: "ai.hippocampus.brain", account: "other"),
+            client: client,
+            trustedApplicationPaths: { Self.trustedPaths }
+        )
+
+        XCTAssertEqual(try store.readKey(), String(repeating: "ab", count: 32))
+        XCTAssertEqual(client.readQueries.map(\.account), ["other"])
     }
 
     func test_keychain_write_attaches_exact_bundled_executable_acl() throws {

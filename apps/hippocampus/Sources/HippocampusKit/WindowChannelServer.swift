@@ -15,6 +15,9 @@ import os
 public struct WindowChannelRequest: Equatable, Sendable {
     public enum Op: String, CaseIterable, Sendable {
         case pause, resume, turnOn, tryAgain, openSystemSettings, quit, hold, release
+        /// Delete Everything: the memory and its key (storage-security
+        /// review S3). The app stops remembering, erases, starts again.
+        case erase
     }
 
     public let id: String
@@ -181,6 +184,8 @@ public enum WindowChannelPolicy {
             return permission == request.permission
         case .hold: return !holding
         case .release: return holding
+        // Never inside a forget's hold: the erase holds by itself.
+        case .erase: return !holding
         }
     }
 }

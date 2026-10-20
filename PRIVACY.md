@@ -54,7 +54,9 @@ Option-click the hi in the menu bar, or open Preferences, under About, to use De
 ## Where it is kept
 
 - Text, sessions and search data are in one encrypted database (SQLCipher) in `~/Library/Application Support/MCI/`. Screenshots are separately encrypted files beside it, in `MCI/blobs/`.
-- The key is in your login Keychain and is not synced. AI tools you connect are given a Keychain reference, never the key. A development build can use a file key (`dev.key`, mode 0600) only when `MCI_DEVELOPMENT_FILE_KEY=1` is set.
+- The key is in your login Keychain and is not synced. AI tools you connect are given a Keychain reference, never the key. A development build can use a file key (`dev.key`, mode 0600) only when `MCI_DEVELOPMENT_FILE_KEY=1` is set; a release build never does.
+- If your key was ever in a file (a `dev.key` from a build before 0.1, or a copy of one in this folder), Hippocampus moves your memory to a new key once, the next time it starts: it keeps an encrypted copy until the move is checked, then deletes the file, the copy and the old key. A backup made before the move still holds the old key and opens what was in it then.
+- Time Machine doesn't back up `~/Library/Application Support/MCI/` unless you turn on Include my memory in Time Machine backups, in Preferences, under Privacy. A backup can restore your memory, but it also keeps what you delete until that backup expires.
 - Everything is kept for 90 days, unless you choose otherwise in Preferences, under Privacy. Anything older is deleted for good.
 - Logs and crash records are in `~/Library/Logs/MCI/`.
 - The window keeps a plain-text log of what was done to your memory: launches, deletions and exports, with counts, times and an export's file path, never what you saw. It is `~/Library/Application Support/Hippocampus/audit.log`, and deleting your memory leaves it.
@@ -73,7 +75,7 @@ Hippocampus uploads nothing you saw. What you saw leaves your Mac only in one of
 These requests carry nothing you saw:
 
 - The updater (Sparkle) asks `github.com/amyjainberkeley/hippocampus/releases/latest/download/appcast.xml`, which GitHub serves from `release-assets.githubusercontent.com`, whether there is a newer version. It asks when you click Check for Updates, or daily if you turn on automatic checks. It checks an update's signature before installing it.
-- If you list MCP servers in `~/Library/Application Support/MCI/mcp-servers.toml`, Hippocampus reads from them. It refuses any address that is not on this Mac.
+- If you list MCP servers in `~/Library/Application Support/MCI/Config.noindex/mcp-servers.toml` (a folder Spotlight skips, since the file can hold a sign-in header), Hippocampus reads from them. It refuses any address that is not on this Mac.
 
 There is no analytics and no telemetry. Preferences has a Send crash reports switch, but this version has no address to send them to, so crash records stay in `~/Library/Logs/MCI/panic.jsonl`. ADR-0025, which planned opt-in analytics, is withdrawn.
 
@@ -105,15 +107,15 @@ Browsers are read like every other window, with no extension and no Automation p
 ## How to delete it
 
 - From the window: a moment or a few you picked (⌘⌫, with Undo for a few seconds), an hour of History, a session on Today, a web page or a search, or recent time with Forget Recent… (⇧⌘⌫): the last 10 minutes, the last hour or today. Larger ones ask you first. While Hippocampus is remembering, it holds still for the second or two a forget takes, then carries on.
-- The last 24 hours, or everything: on the window's Privacy page. Both ask you to confirm first, and what was learned from those moments goes too. The database file is then rewritten without them.
-- You can export it all as JSON on the same page. The exported file isn't encrypted.
+- The last 24 hours, or everything: on the window's Privacy page. Both ask you to confirm first, and what was learned from those moments goes too. The database file is then rewritten without them, and its log is emptied. Delete Everything also deletes the key, so copies of your memory in earlier backups or snapshots can't be read any more; a new key comes with the next start.
+- You can export every moment, in full, as JSON lines, on the same page. It asks where to save. The file isn't encrypted, only your account can open it, and in Desktop, Documents or iCloud Drive it may sync to iCloud.
 - Something it learned about you: Forget, on About You.
 - Pictures of other windows only: Forget Pictures of Other Windows…, in Preferences, under Remembering. Their text stays.
-- Removing the app: disconnect your AI tools (above), quit Hippocampus, then move it to the Trash. Delete everything first if you want your memory gone too.
+- Removing the app: disconnect your AI tools (above), quit Hippocampus, then move it to the Trash. Delete everything first if you want your memory gone too; that deletes its key as well. With Hippocampus quit, `/Applications/Hippocampus.app/Contents/MacOS/mci-agent erase-memory` does the same.
 
 ## Threat model
 
-- **Encryption protects the memory at rest.** A copy of the database or a screenshot file, in a backup or on a lost disk, can't be read without the key in your login Keychain.
+- **Encryption protects the memory at rest.** A copy of the database or a screenshot file, in a backup or on a lost disk, can't be read without the key in your login Keychain. A Time Machine backup that includes your memory also holds that keychain, which opens with your login password; that is why the memory is left out of backups unless you include it.
 - **It doesn't protect against software running as you.** A program that runs under your login can read your screen itself, or start Hippocampus's own `mci-agent` and read your memory the way a connected AI tool does. Keep malware off your Mac; Hippocampus can't tell it from you.
 - **A connected AI tool can read all of your memory**, a search at a time, for as long as it is connected, including while Hippocampus is quit. Disconnect stops that.
 - **Screen text can carry instructions aimed at an AI.** Session-start text and `mci-agent context` begin by telling the AI that memory is reference, never instructions. Search results carry no such line. A page written to steer an AI can still steer one, so review what a connected tool proposes to do.

@@ -41,6 +41,9 @@ public enum WindowChannelProtocol {
         case hold
         /// The forget is done: remember again, if it was on.
         case release
+        /// Delete Everything: the app stops remembering, erases the memory
+        /// and its key, and starts again (storage-security review S3).
+        case erase
         /// The app pushes this; the window never sends it.
         case status
     }

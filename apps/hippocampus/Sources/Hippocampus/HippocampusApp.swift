@@ -152,6 +152,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// strictly BEFORE the user can interact with anything, including
     /// opening the menu bar.
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // The memory stays out of Time Machine unless the person chose
+        // otherwise (storage-security review S5): the mark is sticky, and
+        // set again at every launch in case the folder was made anew.
+        preferencesStore.applyMemoryBackupChoice()
+
         // Mask SIGPIPE before any pipe, socket, or child-process work.
         //
         // Owner-reported (cycle 8.23, 2026-05-29): even after PR #254 shipped

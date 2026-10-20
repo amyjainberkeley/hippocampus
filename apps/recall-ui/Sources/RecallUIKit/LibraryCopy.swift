@@ -133,7 +133,7 @@ public enum LibraryCopy {
         public static let exportEverything = "Export Everything\u{2026}"
         public static let deleteEverything = "Delete Everything\u{2026}"
         /// Export Everything's tooltip.
-        public static let exportHelp = "Saves a copy to Downloads. The copy is not encrypted."
+        public static let exportHelp = "Saves a copy of every moment where you choose. The copy is not encrypted."
 
         // Forget the Last 24 Hours… asks for a typed word.
         public static let forgetLast24Title = "Forget the last 24 hours?"

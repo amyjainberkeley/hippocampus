@@ -122,16 +122,14 @@ public actor DiskDenylistEditorStore: DenylistEditorStore {
         }
 
         let dir = userPath.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-
-        let tmp = dir.appendingPathComponent("user-deny.toml.\(UUID().uuidString).tmp")
-        do {
-            try content.write(to: tmp, atomically: false, encoding: .utf8)
-            _ = try FileManager.default.replaceItemAt(userPath, withItemAt: tmp)
-        } catch {
-            try? content.write(to: userPath, atomically: true, encoding: .utf8)
-            try? FileManager.default.removeItem(at: tmp)
-        }
+        try? FileManager.default.createDirectory(
+            at: dir, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: NSNumber(value: Int16(0o700))]
+        )
+        // The list names the sites and apps the person keeps out, which is
+        // itself private: mode 0600 from the moment the file exists
+        // (storage-security review S9), never a world-readable fallback.
+        try? PrivateFileWriter.write(Data(content.utf8), to: userPath)
     }
 
     private static func escapeToml(_ s: String) -> String {
