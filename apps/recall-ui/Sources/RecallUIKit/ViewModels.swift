@@ -10,8 +10,27 @@ public final class SearchViewModel: ObservableObject {
     @Published public var query: String = "" {
         didSet { if query != oldValue { searchInputChanged() } }
     }
-    @Published public var mode: SearchMode = .text {
+    /// Search by meaning, as the Ask panel does: meaning merged with exact
+    /// matches when the embedding model is loaded, exact words otherwise.
+    /// Exact Words under Filters sets `.text`; words in quotes match exactly
+    /// whatever this says (SPEC 2.8).
+    @Published public var mode: SearchMode = .related {
         didSet { if mode != oldValue { searchInputChanged() } }
+    }
+    /// The page the field can be kept to while it is on screen: a Working
+    /// On item, Web Pages, Looked Up, a lens. The shell sets it as places
+    /// change; the bar then shows with the page chosen.
+    @Published public var pageScope: SearchScope? {
+        didSet {
+            guard pageScope != oldValue else { return }
+            isScoped = pageScope != nil
+            searchInputChanged()
+        }
+    }
+    /// Whether matches are kept to `pageScope`: "Search: Everything |
+    /// trailhead-shop" with the page chosen.
+    @Published public var isScoped = false {
+        didSet { if isScoped != oldValue { searchInputChanged() } }
     }
     @Published public private(set) var hits: [Hit] = []
     @Published public private(set) var isSearching: Bool = false
@@ -30,6 +49,8 @@ public final class SearchViewModel: ObservableObject {
     @Published public private(set) var focusedEventId: UInt64?
 
     private let reader: BrainReader
+    /// Tells which matches belong to a Working On item, for its scope.
+    private let work: (any WorkReader)?
     /// Persists `{ query, filters }` across quit/restore. Cycle 8.35
     /// audit follow-up. Injectable so tests can pass an in-memory store.
     private let persistence: QueryPersistence
@@ -46,9 +67,11 @@ public final class SearchViewModel: ObservableObject {
         persistence: QueryPersistence = QueryPersistence(),
         userDictionaryLoader: @escaping @Sendable () -> UserDictionary = {
             (try? loadUserDictionary()) ?? .empty
-        }
+        },
+        work: (any WorkReader)? = nil
     ) {
         self.reader = reader
+        self.work = work
         self.persistence = persistence
         self.userDictionaryLoader = userDictionaryLoader
         // Rehydrate synchronously so the view's first render already
@@ -103,13 +126,30 @@ public final class SearchViewModel: ObservableObject {
     /// A memory opened from outside the list is on screen.
     public var isShowingFocusedEvent: Bool { focusedEventId != nil }
 
+    /// The scope matches are kept to, when one is chosen.
+    public var activeScope: SearchScope? { isScoped ? pageScope : nil }
+
+    /// How the typed words are searched: by meaning, or exactly when they are
+    /// in quotes or Exact Words is on.
+    public var effectiveMode: SearchMode { Self.request(query, mode: mode).mode }
+
+    /// "Search Everything", from a scope that found nothing, and ⌘N.
+    public func searchEverything() {
+        isScoped = false
+    }
+
+    /// ⌘F on a page that offers a scope: the field kept to the page.
+    public func scopeToPage() {
+        if pageScope != nil { isScoped = true }
+    }
+
     /// Filter capability independent of selected mode.
     public var hasUnsupportedRelatedFilters: Bool {
         filters.appBundleIds.count > 1 || filters.hasUrl
     }
 
     public var filterLimitationMessage: String? {
-        guard mode == .related,
+        guard effectiveMode == .related,
               !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               filters.anyActive else { return nil }
         if hasUnsupportedRelatedFilters {
@@ -122,8 +162,10 @@ public final class SearchViewModel: ObservableObject {
         let generation = beginSearchRequest()
         focusedEventId = nil
         let requestedFilters = filters
-        let requestedMode = mode
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let request = Self.request(query, mode: mode)
+        let requestedMode = request.mode
+        let scope = activeScope
+        let q = request.text
         guard !q.isEmpty else {
             hits = []
             selectedHitId = nil
@@ -151,9 +193,10 @@ public final class SearchViewModel: ObservableObject {
                 return
             }
             let dict = q.isEmpty ? UserDictionary.empty : userDictionaryLoader()
+            // A scope keeps some of the matches: more are read, then kept.
             let opts = SearchOptions(
                 text: q,
-                limit: 50,
+                limit: scope == nil ? 50 : Self.scopedReadLimit,
                 appFilter: requestedFilters.appFilter,
                 timeFromUs: window.fromUs,
                 timeToUs: window.toUs.map { $0 - 1 },
@@ -163,11 +206,15 @@ public final class SearchViewModel: ObservableObject {
                 appFilters: requestedFilters.appBundleIds.sorted(),
                 hasUrl: requestedFilters.hasUrl
             )
-            let results = try await applyClientFilters(
+            var results = try await applyClientFilters(
                 to: reader.search(opts),
                 filters: requestedFilters,
-                window: window
+                window: window,
+                limit: opts.limit
             )
+            if let scope {
+                results = Array(await scope.keep(results, work: work).prefix(50))
+            }
             guard generation == searchGeneration, !Task.isCancelled else { return }
             hits = results
             if let selectedHitId, !results.contains(where: { $0.id == selectedHitId }) {
@@ -210,7 +257,8 @@ public final class SearchViewModel: ObservableObject {
     private func applyClientFilters(
         to results: [Hit],
         filters: FilterState,
-        window: (fromUs: UInt64?, toUs: UInt64?)
+        window: (fromUs: UInt64?, toUs: UInt64?),
+        limit: Int = 50
     ) -> [Hit] {
         var out = results
         if let from = window.fromUs {
@@ -225,8 +273,11 @@ public final class SearchViewModel: ObservableObject {
         if filters.hasUrl {
             out = out.filter { $0.url != nil && !$0.url!.isEmpty }
         }
-        return Array(out.prefix(50))
+        return Array(out.prefix(limit))
     }
+
+    /// How many matches a scoped search reads before keeping the scope's.
+    static let scopedReadLimit = 200
 
     public func clear() {
         query = ""

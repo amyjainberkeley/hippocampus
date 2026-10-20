@@ -30,6 +30,11 @@ final class LibraryCopyTests: XCTestCase {
             ("today", LibraryCopy.today), ("yesterday", LibraryCopy.yesterday),
             ("previous7Days", LibraryCopy.previous7Days), ("previous30Days", LibraryCopy.previous30Days),
             ("Conversations.filterLabel", LibraryCopy.Conversations.filterLabel),
+            ("Search.label", LibraryCopy.Search.label), ("Search.everything", LibraryCopy.Search.everything),
+            ("Search.matches", LibraryCopy.Search.matches(9, in: "trailhead-shop")),
+            ("Search.matchesOne", LibraryCopy.Search.matches(1, in: "Web Pages")),
+            ("Search.nothingIn", LibraryCopy.Search.nothingIn("trailhead-shop")),
+            ("Search.searchEverything", LibraryCopy.Search.searchEverything),
         ]
         for lens in LibraryLens.allCases {
             strings.append(("lead.\(lens)", LibraryCopy.lead(lens)))
@@ -82,7 +87,8 @@ final class LibraryCopyTests: XCTestCase {
         let actions = [History.open, History.copyText, History.openLink, History.openScreenshot,
                        History.copyForYourAI, History.showRelated, History.forgetThisMomentMenu,
                        History.forgetMomentsMenu(2), History.wholeDay, History.previousDay, History.nextDay,
-                       LibraryCopy.showEarlier, LibraryCopy.previous7Days, LibraryCopy.previous30Days]
+                       LibraryCopy.showEarlier, LibraryCopy.previous7Days, LibraryCopy.previous30Days,
+                       LibraryCopy.Search.searchEverything]
         let small: Set<String> = ["for", "to", "in", "of", "the", "a", "and"]
         for action in actions {
             for word in action.split(separator: " ").dropFirst() where !small.contains(String(word)) {

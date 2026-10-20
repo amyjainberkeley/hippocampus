@@ -122,7 +122,15 @@ struct LensRenderReader: BrainReader {
     }
 
     func search(_ opts: SearchOptions) async throws -> [Hit] {
-        guard opts.browse else { return [] }
+        guard opts.browse else {
+            // A search: every word somewhere in the moment, newest first.
+            let words = opts.text.lowercased().split(separator: " ").map(String.init)
+            return Array(hits.filter { hit in
+                let text = [hit.caption, hit.windowTitle, hit.ocrTextSnippet].compactMap { $0 }
+                    .joined(separator: " ").lowercased()
+                return !words.isEmpty && words.allSatisfy(text.contains)
+            }.prefix(max(0, opts.limit)))
+        }
         return Array(hits.filter { hit in
             (opts.appFilters.isEmpty || opts.appFilters.contains(hit.appBundleId ?? ""))
                 && (opts.timeFromUs.map { hit.tsUs >= $0 } ?? true) && (opts.timeToUs.map { hit.tsUs <= $0 } ?? true)

@@ -84,6 +84,23 @@ public enum LibraryCopy {
     public static let change = "Change\u{2026}"
     public static let showEarlier = "Show Earlier"
 
+    // MARK: The field's scope (SPEC 2.8)
+
+    public enum Search {
+        /// Before the bar's two choices.
+        public static let label = "Search:"
+        public static let everything = "Everything"
+        /// Over a scope's matches: "9 matches in trailhead-shop".
+        public static func matches(_ count: Int, in scope: String) -> String {
+            count == 1 ? "1 match in \(scope)" : "\(count) matches in \(scope)"
+        }
+
+        /// A scope with no match, over [Search Everything].
+        public static func nothingIn(_ scope: String) -> String { "Nothing in \(scope) matched." }
+
+        public static let searchEverything = "Search Everything"
+    }
+
     // MARK: History (SPEC 3.4)
 
     public enum History {

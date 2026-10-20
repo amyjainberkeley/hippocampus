@@ -143,13 +143,19 @@ struct AskPlace: View {
         .background(Color.brandBgSecondary)
     }
 
-    /// ⌘Return asks whatever is typed (critique-recall-engineering finding 6).
+    /// ⌘Return asks whatever is typed (critique-recall-engineering finding 6),
+    /// and so does ⌥Return (SPEC 2.8), which keeps asking on this Mac once
+    /// ⌘Return hands the question to the person's AI tool (SPEC 5.3).
     private var askAnywayButton: some View {
-        Button(UserFacingCopy.askKeyHintCommandReturn) { submit(forceAsk: true) }
-            .keyboardShortcut(.return, modifiers: .command)
-            .frame(width: 0, height: 0)
-            .opacity(0)
-            .accessibilityHidden(true)
+        ZStack {
+            Button(UserFacingCopy.askKeyHintCommandReturn) { submit(forceAsk: true) }
+                .keyboardShortcut(.return, modifiers: .command)
+            Button(UserFacingCopy.askKeyHintCommandReturn) { submit(forceAsk: true) }
+                .keyboardShortcut(.return, modifiers: .option)
+        }
+        .frame(width: 0, height: 0)
+        .opacity(0)
+        .accessibilityHidden(true)
     }
 
     private func submit(forceAsk: Bool) {
