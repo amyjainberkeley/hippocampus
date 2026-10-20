@@ -1,3 +1,4 @@
+import RecallUIKit
 import SwiftUI
 
 /// The process starts here. A render of the synthetic preview returns (or
@@ -13,6 +14,9 @@ enum RecallEntryPoint {
         // The shell and Ask (`--render-window=`).
         if WindowRenderer.renderIfRequested() { return }
         #endif
+        // Copies AppKit makes itself (⌘C on selected text, a view's Copy
+        // command) stay on this Mac and out of clipboard history too.
+        ClipboardHygiene.ruleEveryCopy()
         MCIRecallApp.main()
     }
 }

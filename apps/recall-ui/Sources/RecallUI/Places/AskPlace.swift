@@ -282,8 +282,7 @@ struct AnswerCardView: View {
 
     /// The answer as it reads, for the person's own use.
     private func copyAnswer(_ text: String) {
-        NSPasteboard.general.clearContents()
-        guard NSPasteboard.general.setString(text, forType: .string) else {
+        guard ClipboardHygiene.copyToKeep(text) else {
             copyFailed = true
             return
         }

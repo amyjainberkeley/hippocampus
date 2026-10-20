@@ -285,15 +285,23 @@ final class ReadingNSTextView: NSTextView, @preconcurrency NSAccessibilityCustom
         }
     }
 
-    // MARK: Copy: plain text, as it was read
+    // MARK: Copy: plain text, as it was read, by the clipboard rules
 
     override var writablePasteboardTypes: [NSPasteboard.PasteboardType] {
-        [.string]
+        ClipboardHygiene.selectionTypes
     }
 
+    /// ⌘C and Copy: through the window's one clipboard helper, so the copy
+    /// stays on this Mac and clipboard-history apps don't keep it.
+    override func copy(_ sender: Any?) {
+        let text = selectedPlainText()
+        guard !text.isEmpty else { return }
+        ClipboardHygiene.copyToKeep(text)
+    }
+
+    /// A drag or a Service: the same text, marked concealed too.
     override func writeSelection(to pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
-        guard type == .string else { return false }
-        return pboard.setString(selectedPlainText(), forType: .string)
+        ClipboardHygiene.writeSelection(selectedPlainText(), to: pboard, type: type)
     }
 
     /// The selection as plain text: a drawn checkbox or marker as the

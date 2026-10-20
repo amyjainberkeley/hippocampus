@@ -262,8 +262,7 @@ struct ScreenshotViewer: View {
     }
 
     private func copy(_ text: String, notification: String = UserFacingCopy.copiedToast) {
-        NSPasteboard.general.clearContents()
-        if NSPasteboard.general.setString(text, forType: .string) {
+        if ClipboardHygiene.copyToKeep(text) {
             ToastNotifier.shared.notify(notification)
         } else { exportError = UserFacingCopy.copyFailedTryAgain }
     }

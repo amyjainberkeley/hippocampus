@@ -74,6 +74,40 @@ final class ClipboardHygieneTests: XCTestCase {
         XCTAssertEqual(board.contents[NSPasteboard.PasteboardType("public.jpeg")], Data([0xFF, 0xD8]))
         XCTAssertNotNil(board.contents[ClipboardHygiene.concealed])
     }
+
+    /// Ask's own Copy: on this Mac only and concealed from clipboard-history
+    /// apps, but not transient and never cleared.
+    func testACopyToKeepStaysOnThisMacConcealedAndIsNeverCleared() {
+        let board = FakePasteboard()
+        XCTAssertTrue(ClipboardHygiene.copyToKeep("Thursday", to: board))
+        XCTAssertEqual(board.options, [.currentHostOnly], "never Universal Clipboard")
+        XCTAssertEqual(board.contents[.string], Data("Thursday".utf8))
+        XCTAssertNotNil(board.contents[ClipboardHygiene.concealed])
+        XCTAssertNil(board.contents[ClipboardHygiene.transient], "meant to stay")
+        XCTAssertEqual(board.cleared, 0)
+    }
+
+    /// Every clipboard write in the menu-bar app goes through
+    /// `ClipboardHygiene`: no other source file touches a pasteboard (Ask's
+    /// Copy wrote straight to it before; storage review S7).
+    func testNoOtherFileInTheMenuBarAppWritesToAPasteboard() throws {
+        let sources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources")
+        let writes = [".setString(", ".setData(", "writeObjects(", ".clearContents()", "declareTypes(",
+                      "prepareForNewContents(", "NSPasteboard.general", "NSPasteboard(name:"]
+        var checked = 0
+        let files = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)
+        while let file = files?.nextObject() as? URL {
+            guard file.pathExtension == "swift", file.lastPathComponent != "ClipboardHygiene.swift" else { continue }
+            let source = try String(contentsOf: file, encoding: .utf8)
+            checked += 1
+            for write in writes {
+                XCTAssertFalse(source.contains(write), "\(file.lastPathComponent) writes to a pasteboard: \(write)")
+            }
+        }
+        XCTAssertGreaterThan(checked, 50)
+    }
 }
 
 final class DestinationDetectorTests: XCTestCase {

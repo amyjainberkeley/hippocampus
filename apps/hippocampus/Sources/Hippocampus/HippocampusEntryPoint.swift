@@ -18,6 +18,9 @@ enum HippocampusEntryPoint {
         }
         if arguments.first == PreferencesOpenRequest.flag,
            PreferencesOpenRequest(arguments: arguments) == nil { return }
+        // Copies AppKit makes itself (⌘C on selected text in Ask or
+        // Preferences) stay on this Mac and out of clipboard history too.
+        ClipboardHygiene.ruleEveryCopy()
         // A direct Recall launch cannot use Launch Services' shared bundle-ID
         // reuse. Serialize GUI parents before constructing any supervisor.
         guard Bundle.main.bundleURL.pathExtension == "app", let executable = Bundle.main.executableURL else {

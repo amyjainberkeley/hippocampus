@@ -54,8 +54,7 @@ struct BrowserExtensionSlide: View {
             flowVM.automationPermission.openPrivacySettings()
         case .copy(let text):
             #if canImport(AppKit)
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
+            SetupClipboard.copy(text)
             #endif
         case .showInFinder(let path):
             #if canImport(AppKit)
