@@ -1707,7 +1707,13 @@ fn is_number(token: &str) -> bool {
 
 pub(crate) fn starts_with_prompt(line: &str) -> bool {
     static PROMPT: OnceLock<Regex> = OnceLock::new();
-    if !line.contains(['$', '%', '#', '>', '\u{276F}', '\u{279C}', '\u{3BB}']) {
+    // Most lines hold no prompt mark: a byte test first ("\u{276F}" and
+    // "\u{279C}" start with 0xE2, "\u{3BB}" with 0xCE).
+    if !line
+        .bytes()
+        .any(|byte| matches!(byte, b'$' | b'%' | b'#' | b'>' | 0xE2 | 0xCE))
+        || !line.contains(['$', '%', '#', '>', '\u{276F}', '\u{279C}', '\u{3BB}'])
+    {
         return false;
     }
     PROMPT
@@ -1970,6 +1976,33 @@ fn ceil_char_boundary(text: &str, at: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_prompt_mark_is_seen_past_the_byte_test() {
+        for line in [
+            "$ ls",
+            "% make",
+            "> npm test",
+            ">>> print(1)",
+            "\u{276F} cargo test",
+            "\u{279C} git status",
+            "\u{3BB} stack build",
+            "dev@studio shop % cargo test",
+            "root@box:~# ls",
+        ] {
+            assert!(starts_with_prompt(line), "{line}");
+        }
+        for line in [
+            "Round half up looks fair.",
+            "It costs $5 a month",
+            "50% off",
+            "a -> b",
+            "\u{2019}Quoted\u{2019} \u{2014} not a prompt",
+            "\u{3B1}\u{3B2} letters",
+        ] {
+            assert!(!starts_with_prompt(line), "{line}");
+        }
+    }
 
     #[test]
     fn a_junk_token_goes_with_the_space_before_it() {

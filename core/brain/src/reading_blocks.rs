@@ -956,9 +956,27 @@ fn code_mark(text: &str) -> bool {
 }
 
 fn code_signal(text: &str) -> bool {
-    const OPERATORS: [&str; 14] = [
-        "::", "->", "=>", "==", "!=", "<=", ">=", "+=", "-=", "&&", "||", ":=", "</", "/>",
-    ];
+    /// "::", "->", "=>", "==", "!=", "<=", ">=", "+=", "-=", "&&", "||",
+    /// ":=", "</" and "/>": two ASCII bytes each, found in one pass.
+    fn operator(pair: &[u8]) -> bool {
+        matches!(
+            pair,
+            b"::"
+                | b"->"
+                | b"=>"
+                | b"=="
+                | b"!="
+                | b"<="
+                | b">="
+                | b"+="
+                | b"-="
+                | b"&&"
+                | b"||"
+                | b":="
+                | b"</"
+                | b"/>"
+        )
+    }
     /// Words code starts a line with, and prose too ("let me know", "use the
     /// form"): they count only with code's punctuation on the line.
     const KEYWORDS: [&str; 22] = [
@@ -972,10 +990,10 @@ fn code_signal(text: &str) -> bool {
     if text.ends_with(['{', '}', ';']) || text == ")" || text == "]" {
         return true;
     }
-    if OPERATORS.iter().any(|operator| text.contains(operator)) {
+    let bytes = text.as_bytes();
+    if bytes.windows(2).any(operator) {
         return true;
     }
-    let bytes = text.as_bytes();
     for (at, &byte) in bytes.iter().enumerate() {
         match byte {
             // A call or an index: a name right before the bracket.
@@ -2113,4 +2131,27 @@ fn list(lines: &[Line<'_>], roles: &[Role]) -> Option<Block> {
         }
     }
     (!items.is_empty()).then_some(Block::List { items })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_of_codes_operators_makes_a_line_code() {
+        for operator in [
+            "::", "->", "=>", "==", "!=", "<=", ">=", "+=", "-=", "&&", "||", ":=", "</", "/>",
+        ] {
+            assert!(code_line(&format!("a {operator} b")), "{operator}");
+        }
+        // One half of an operator alone is not one.
+        for line in [
+            "a : b", "a - b", "a < b", "a > b", "a | b", "a & b", "a / b",
+        ] {
+            assert!(!code_line(line), "{line}");
+        }
+        assert!(!code_line("Round half up looks fair"));
+        // Inside a word of another script, no byte of an operator appears.
+        assert!(!code_line("\u{65E5}\u{672C}\u{8A9E}\u{3067}\u{3059}"));
+    }
 }
