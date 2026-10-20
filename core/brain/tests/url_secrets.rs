@@ -1,5 +1,5 @@
 //! The shared corpus for removing sign-in tokens from page addresses, which
-//! the capture helper's XCTest reads too: both languages turn every address
+//! the capture helper's `XCTest` reads too: both languages turn every address
 //! into the same stored one.
 
 use std::path::PathBuf;

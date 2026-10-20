@@ -18,7 +18,7 @@
 //! compiles them with `regex`. The credit-card and OTP detectors are hand-rolled
 //! byte scans in both languages (no regex engine, no lookaround), so the two
 //! engines cannot drift on them. Both answer the same for every case in
-//! `core/brain/fixtures/ocr-secret-corpus.json`, which an XCTest of
+//! `core/brain/fixtures/ocr-secret-corpus.json`, which an `XCTest` of
 //! `containsSecretOrPII` reads too. The corpus covers the characters the regex
 //! engines could disagree on (newlines, U+001E, U+000B, U+0085, case folding),
 //! real test PANs and non-Luhn look-alikes, OTPs with and without a keyword,
@@ -200,7 +200,7 @@ pub fn redact_secrets(text: &str) -> Cow<'_, str> {
             .join("\n");
     }
     if contains_secret(&current) {
-        current = REDACTED.to_owned();
+        REDACTED.clone_into(&mut current);
     }
     Cow::Owned(current)
 }

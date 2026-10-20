@@ -619,31 +619,58 @@ fn help_describes_both_roots_and_refresh() {
     }
 }
 
-/// S6 in the storage review: an assistant's transcript holds what it read
-/// from Hippocampus, so importing it must never bring that back, or a
-/// forgotten moment returns. Tool results (every answer of Hippocampus's MCP
-/// tools) are never read; a turn carrying a session-start packet, a context
-/// packet or a pasted Copy for Your AI card is skipped; and a turn holding a
-/// secret is refused like every other source.
-#[test]
-fn hippocampus_output_and_secrets_never_come_back_through_a_transcript() {
+/// What Hippocampus hands an assistant, as the assistant's transcript keeps
+/// it, and a key to paste. S6 in the storage review: a transcript holds what
+/// the assistant read from Hippocampus, so importing it must never bring that
+/// back, or a forgotten moment returns.
+struct HandedOut {
+    packet: String,
+    card: String,
+    context: String,
+    key: String,
+}
+
+fn handed_out() -> HandedOut {
     use mci_agent::context_packet::{CONTEXT_PACKET_HEADING, SCREEN_TEXT_IS_DATA};
     use mci_agent::handoff::DISCLAIMER;
     use mci_agent::handoff_card::WARNING;
+    HandedOut {
+        packet: format!("{DISCLAIMER}\n\n# demo (/Users/me/demo)\n- Forgotten Bramble decision"),
+        card: format!("{WARNING}\n\nForgotten Bramble moment\nPlease summarise it."),
+        context: format!(
+            "{CONTEXT_PACKET_HEADING}\n\n{SCREEN_TEXT_IS_DATA}\n- Forgotten Bramble line"
+        ),
+        key: [
+            "sk-",
+            "ant-",
+            "api03-",
+            "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R",
+        ]
+        .concat(),
+    }
+}
 
+/// Nothing Hippocampus handed out, and no secret, is in memory.
+fn assert_nothing_came_back(events: &[Event], key: &str) {
+    for event in events {
+        assert!(!event.text.contains("Bramble"), "{}", event.text);
+        assert!(!event.text.contains(key), "{}", event.text);
+        assert!(!event.text.contains("4111"), "{}", event.text);
+    }
+}
+
+/// Claude Code: a tool result (every answer of Hippocampus's MCP tools) is
+/// never read; a turn carrying a session-start packet, a context packet or a
+/// pasted Copy for Your AI card is skipped; and a turn holding a secret is
+/// refused like every other source.
+#[test]
+fn hippocampus_output_and_secrets_never_come_back_through_claude_codes_transcript() {
     let sb = Sandbox::new();
     let store = sb.store();
     import_sessions(&store, &sb.claude_root, |_| {}).expect("import");
-    import_codex(&store, &sb.codex_root, |_| {}).expect("import");
     let before = all_events(&store).len();
+    let out = handed_out();
 
-    let key = [
-        "sk-",
-        "ant-",
-        "api03-",
-        "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R",
-    ]
-    .concat();
     let claude_user = |ts: &str, text: &str| {
         serde_json::json!({
             "type": "user", "isSidechain": false, "cwd": "/Users/me/demo", "sessionId": "sess-1",
@@ -653,15 +680,11 @@ fn hippocampus_output_and_secrets_never_come_back_through_a_transcript() {
         .to_string()
             + "\n"
     };
-    let packet = format!("{DISCLAIMER}\n\n# demo (/Users/me/demo)\n- Forgotten Bramble decision");
-    let card = format!("{WARNING}\n\nForgotten Bramble moment\nPlease summarise it.");
-    let context =
-        format!("{CONTEXT_PACKET_HEADING}\n\n{SCREEN_TEXT_IS_DATA}\n- Forgotten Bramble line");
     for line in [
-        claude_user("2026-09-25T10:30:00.000Z", &packet),
-        claude_user("2026-09-25T10:31:00.000Z", &format!("Look at this:\n{card}")),
-        claude_user("2026-09-25T10:32:00.000Z", &context),
-        claude_user("2026-09-25T10:33:00.000Z", &format!("my key is {key}")),
+        claude_user("2026-09-25T10:30:00.000Z", &out.packet),
+        claude_user("2026-09-25T10:31:00.000Z", &format!("Look at this:\n{}", out.card)),
+        claude_user("2026-09-25T10:32:00.000Z", &out.context),
+        claude_user("2026-09-25T10:33:00.000Z", &format!("my key is {}", out.key)),
         // Hippocampus's MCP answer, as Claude Code records a tool result.
         serde_json::json!({
             "type": "user", "isSidechain": false, "cwd": "/Users/me/demo", "sessionId": "sess-1",
@@ -684,6 +707,28 @@ fn hippocampus_output_and_secrets_never_come_back_through_a_transcript() {
         Sandbox::append(&sb.claude_file(), &line);
     }
 
+    let claude = import_sessions(&store, &sb.claude_root, |_| {}).expect("import");
+    assert_eq!(claude.events_written, 1, "{claude:?}");
+    assert_eq!(claude.skipped_hippocampus_output, 3, "{claude:?}");
+    assert_eq!(claude.skipped_secret, 1, "{claude:?}");
+
+    let events = all_events(&store);
+    assert_eq!(events.len(), before + 1);
+    let new: Vec<&str> = events[before..].iter().map(body).collect();
+    assert_eq!(new, ["Ship the importer fix."]);
+    assert_nothing_came_back(&events, &out.key);
+}
+
+/// Codex: the same rules on its rollout files, where Hippocampus's MCP
+/// answers are `function_call_output` items.
+#[test]
+fn hippocampus_output_and_secrets_never_come_back_through_codexs_transcript() {
+    let sb = Sandbox::new();
+    let store = sb.store();
+    import_codex(&store, &sb.codex_root, |_| {}).expect("import");
+    let before = all_events(&store).len();
+    let out = handed_out();
+
     let codex_item = |ts: &str, payload: serde_json::Value| {
         serde_json::json!({"timestamp": ts, "ordinal": 30, "type": "response_item", "payload": payload})
             .to_string()
@@ -693,7 +738,7 @@ fn hippocampus_output_and_secrets_never_come_back_through_a_transcript() {
         codex_item(
             "2026-09-25T11:30:00.000Z",
             serde_json::json!({"type": "message", "role": "user",
-                "content": [{"type": "input_text", "text": packet}]}),
+                "content": [{"type": "input_text", "text": out.packet}]}),
         ),
         codex_item(
             "2026-09-25T11:31:00.000Z",
@@ -719,22 +764,14 @@ fn hippocampus_output_and_secrets_never_come_back_through_a_transcript() {
         Sandbox::append(&sb.codex_file(), &line);
     }
 
-    let claude = import_sessions(&store, &sb.claude_root, |_| {}).expect("import");
     let codex = import_codex(&store, &sb.codex_root, |_| {}).expect("import");
-    assert_eq!(claude.events_written, 1, "{claude:?}");
-    assert_eq!(claude.skipped_hippocampus_output, 3, "{claude:?}");
-    assert_eq!(claude.skipped_secret, 1, "{claude:?}");
     assert_eq!(codex.events_written, 1, "{codex:?}");
     assert_eq!(codex.skipped_hippocampus_output, 1, "{codex:?}");
     assert_eq!(codex.skipped_secret, 1, "{codex:?}");
 
     let events = all_events(&store);
-    assert_eq!(events.len(), before + 2);
+    assert_eq!(events.len(), before + 1);
     let new: Vec<&str> = events[before..].iter().map(body).collect();
-    assert_eq!(new, ["Ship the importer fix.", "The importer fix is in."]);
-    for event in &events {
-        assert!(!event.text.contains("Bramble"), "{}", event.text);
-        assert!(!event.text.contains(&key), "{}", event.text);
-        assert!(!event.text.contains("4111"), "{}", event.text);
-    }
+    assert_eq!(new, ["The importer fix is in."]);
+    assert_nothing_came_back(&events, &out.key);
 }

@@ -36,6 +36,35 @@ fn make_event(seq: u64, ts_us: u64, body: &str) -> Message {
     }
 }
 
+/// A frame that carries a JWT never reaches the store or the extractor:
+/// the agent's secret check refuses it first (`mci_agent::secret_gate`), so
+/// no row and no placeholder exist. Tier 1's own JWT placeholder (no source
+/// bytes) is pinned by `mci_brain::extraction::tier1` tests for memory
+/// stored before.
+#[test]
+fn brain_pump_refuses_a_frame_with_a_jwt_before_tier1() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("v2p4-jwt.sqlite");
+    let key = DbKey::from_bytes([0xCC; 32]);
+    let store = Arc::new(SqlCipherBrainStore::new(&path, &key).expect("open store"));
+    let pump = BrainPump::new(Arc::clone(&store) as Arc<dyn BrainStore>, None);
+
+    let with_jwt = "Visit https://example.com/x, mail me at user@example.com, \
+                code [REDACTED:SMS_OTP] auth eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+    assert_eq!(
+        pump.ingest_ocr_event(&make_event(1, 1_700_000_000_000_000, with_jwt))
+            .expect("a refusal is not an error"),
+        IngestOutcome::Refused
+    );
+    assert_eq!(pump.tier1_mentions_persisted_count(), 0);
+    let db = mci_core_open(&path, &key).expect("raw_open");
+    let entities: i64 = db
+        .conn()
+        .query_row("SELECT COUNT(*) FROM entities", [], |r| r.get(0))
+        .expect("count entities");
+    assert_eq!(entities, 0, "nothing of the refused frame was extracted");
+}
+
 #[test]
 fn brain_pump_runs_tier1_after_put_event() {
     // Hermetic tempdir + test key (same pattern as chunker_event_wire.rs).
@@ -45,28 +74,6 @@ fn brain_pump_runs_tier1_after_put_event() {
     let store = Arc::new(SqlCipherBrainStore::new(&path, &key).expect("open store"));
 
     let pump = BrainPump::new(Arc::clone(&store) as Arc<dyn BrainStore>, None);
-
-    // A frame that carries a JWT never reaches the store or the
-    // extractor: the agent's secret check refuses it first
-    // (`mci_agent::secret_gate`), so no row and no placeholder exist.
-    // Tier 1's own JWT placeholder (no source bytes) is pinned by
-    // `mci_brain::extraction::tier1` tests for memory stored before.
-    let with_jwt = "Visit https://example.com/x, mail me at user@example.com, \
-                code [REDACTED:SMS_OTP] auth eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
-    assert_eq!(
-        pump.ingest_ocr_event(&make_event(1, 1_700_000_000_000_000, with_jwt))
-            .expect("a refusal is not an error"),
-        IngestOutcome::Refused
-    );
-    assert_eq!(pump.tier1_mentions_persisted_count(), 0);
-    {
-        let db = mci_core_open(&path, &key).expect("raw_open");
-        let entities: i64 = db
-            .conn()
-            .query_row("SELECT COUNT(*) FROM entities", [], |r| r.get(0))
-            .expect("count entities");
-        assert_eq!(entities, 0, "nothing of the refused frame was extracted");
-    }
 
     // The OCR text includes the literal cascade marker (post-§6
     // redaction shape), a URL and an email. The extractor must:
@@ -123,7 +130,8 @@ fn brain_pump_runs_tier1_after_put_event() {
         .expect("count cascade");
     assert_eq!(cascade_rows, 1);
 
-    // No jwt placeholder: the only JWT was in the refused frame.
+    // No jwt placeholder: a frame with a JWT is refused before the store
+    // (see the test above).
     let jwt_rows: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM entities WHERE kind=?1 AND canonical_name=?2",
