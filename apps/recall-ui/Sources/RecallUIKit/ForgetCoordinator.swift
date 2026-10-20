@@ -341,6 +341,9 @@ public final class ForgetCoordinator: ObservableObject {
     private var holdable = true
     /// Tries made on the app's statuses since the last kept forget was done.
     private var tries = 0
+    /// A status that lets the app hold came while a forget was under way:
+    /// a forget that ends kept is tried again as soon as nothing else runs.
+    private var heardWhileBusy = false
     /// The window is closing: no note can say a forget failed, so every
     /// failure keeps its promise for the next open.
     private var quitting = false
@@ -494,12 +497,22 @@ public final class ForgetCoordinator: ObservableObject {
     /// app says.
     public func statusArrived(_ status: WindowChannelStatus) {
         holdable = Self.letsTheAppHold(status.state)
-        guard worker == nil, !quitting else { return }
+        guard !quitting else { return }
+        guard worker == nil else {
+            // Heard mid-forget (the app's own release, say): not lost.
+            heardWhileBusy = heardWhileBusy || holdable
+            return
+        }
         refreshPhase()
+        tryKeptForgetsAgain()
+    }
+
+    /// The kept forgets go into the queue, when the app can hold and tries
+    /// are left. Queued at once, so a second status before they start finds
+    /// them under way rather than trying them twice.
+    private func tryKeptForgetsAgain() {
         guard holdable, !unfinished.isEmpty, tries < Self.automaticTries else { return }
         tries += 1
-        // Queued at once, so a second status before it starts finds it
-        // under way rather than trying it twice.
         let kept = unfinished.sorted { $0.key.uuidString < $1.key.uuidString }
         unfinished.removeAll()
         for (id, request) in kept {
@@ -679,6 +692,13 @@ public final class ForgetCoordinator: ObservableObject {
         }
         worker = nil
         refreshPhase()
+        if heardWhileBusy, !quitting {
+            heardWhileBusy = false
+            tryKeptForgetsAgain()
+        }
+        // Idle only when nothing was queued again.
+        guard worker == nil else { return }
+        heardWhileBusy = false
         let waiters = idleWaiters
         idleWaiters.removeAll()
         for waiter in waiters { waiter.resume() }

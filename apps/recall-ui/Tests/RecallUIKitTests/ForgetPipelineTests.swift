@@ -455,6 +455,65 @@ final class ForgetPipelineTests: XCTestCase {
         XCTAssertNotNil(store.load(), "still promised for the next open")
     }
 
+    /// The app's status arrives while the kept forget is under way, and its
+    /// hold is then refused: the status isn't lost, and the forget is tried
+    /// again as soon as that try ends, not only on the next status.
+    func testAStatusHeardMidForgetIsNotLost() async throws {
+        /// The first hold is answered only once the gate opens, and then
+        /// refused; every later request is granted.
+        final class RefusesOnce: WindowChannelSending, @unchecked Sendable {
+            private let lock = NSLock()
+            private var ops: [WindowChannelProtocol.Op] = []
+            private var waiter: CheckedContinuation<Void, Never>?
+            private var open = false
+
+            var sent: [WindowChannelProtocol.Op] { lock.withLock { ops } }
+
+            func openGate() {
+                let waiting: CheckedContinuation<Void, Never>? = lock.withLock {
+                    open = true
+                    defer { waiter = nil }
+                    return waiter
+                }
+                waiting?.resume()
+            }
+
+            func send(_ request: WindowChannelRequest, timeout: Duration) async -> Bool {
+                let first: Bool = lock.withLock {
+                    ops.append(request.op)
+                    return request.op == .hold && ops.filter { $0 == .hold }.count == 1
+                }
+                guard first else { return true }
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    let now: Bool = lock.withLock {
+                        if open { return true }
+                        waiter = continuation
+                        return false
+                    }
+                    if now { continuation.resume() }
+                }
+                return false
+            }
+
+            func statuses() -> AsyncStream<WindowChannelStatus> { AsyncStream { $0.finish() } }
+        }
+        try store.save(ForgetRequest(momentIds: [41]))
+        let mutator = LeaseMutator()
+        let channel = RefusesOnce()
+        let forget = ForgetCoordinator(mutator: mutator, channel: channel, store: store, appRunning: { true },
+                                       deletions: MemoryDeletionSignal(center: NotificationCenter()))
+        let first = Task { await forget.finishLeftover() }
+        await eventually { channel.sent == [.hold] }
+        forget.statusArrived(Self.remembering)
+        channel.openGate()
+        let outcome = await first.value
+        XCTAssertEqual(outcome, .failed, "the first try's hold was refused")
+        await forget.idle()
+        XCTAssertEqual(mutator.deleted, [41], "tried again at once on the status heard meanwhile")
+        XCTAssertNil(store.load())
+        XCTAssertNil(forget.phase)
+    }
+
     /// A stop that failed: the app's banner and its Quit show, not "Finishing
     /// a forget…", and nothing is tried until the app says a hold can be had.
     func testAKeptForgetNeverHidesTheAppsCouldNotStop() async throws {
