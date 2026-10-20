@@ -38,6 +38,15 @@ const OWEN: &str = "Owen Pryce";
 pub const PEOPLE: [&str; 8] = [FOUNDER, IRIS, THEO, NADIA, MALIK, JOY, MIRA, OWEN];
 
 const PROJECT: &str = "pebblewick-app";
+/// The project's folder, as Terminal's title shows it (Terminal set to show
+/// the path): an empty folder Demo Memory makes inside its own folder
+/// ([`super::make_project_folder`]), so Resume finds a folder to reopen,
+/// and it goes when the week does. `~` is whoever's Mac this is.
+pub const PROJECT_FOLDER: &str =
+    "~/Library/Application Support/Hippocampus/Demo Memory/pebblewick-app";
+/// The same folder as the made-up founder's tools print it.
+pub const PROJECT_PATH: &str =
+    "/Users/ren/Library/Application Support/Hippocampus/Demo Memory/pebblewick-app";
 const PROMPT: &str = "ren@studio pebblewick-app % ";
 const Q4_DOC: &str = "https://docs.google.com/document/d/1pW4q-investor-update-oct/edit";
 const BUDGET_SHEET: &str = "https://docs.google.com/spreadsheets/d/1pW27-budget-plan/edit";
@@ -1097,7 +1106,7 @@ impl Story {
     fn terminal(lines: &[String], screen_id: &str) -> Win {
         Win {
             app: TERMINAL,
-            title: format!("{PROJECT} \u{2014} -zsh \u{2014} 160\u{00D7}40"),
+            title: format!("{PROJECT_FOLDER} \u{2014} -zsh \u{2014} 160\u{00D7}40"),
             url: None,
             main: lines.join("\n"),
             rest: String::new(),
@@ -1115,10 +1124,10 @@ impl Story {
         let mut lines = vec![
             format!("{PROMPT}pnpm test billing"),
             String::new(),
-            "> pebblewick-app@2.3.0 test /Users/ren/dev/pebblewick-app".to_owned(),
+            format!("> pebblewick-app@2.3.0 test {PROJECT_PATH}"),
             "> vitest run billing".to_owned(),
             String::new(),
-            " RUN  v2.1.4 /Users/ren/dev/pebblewick-app".to_owned(),
+            format!(" RUN  v2.1.4 {PROJECT_PATH}"),
             String::new(),
         ];
         if failing {
@@ -1198,7 +1207,7 @@ impl Story {
             "e80a6c4 Add waitlists".to_owned(),
             format!("{PROMPT}pnpm test webhooks"),
             String::new(),
-            " RUN  v2.1.4 /Users/ren/dev/pebblewick-app".to_owned(),
+            format!(" RUN  v2.1.4 {PROJECT_PATH}"),
             String::new(),
             " \u{2713} src/webhooks.test.ts (3 tests) 22ms".to_owned(),
             "   \u{2713} onInvoicePaid > sends one receipt when Stripe retries".to_owned(),

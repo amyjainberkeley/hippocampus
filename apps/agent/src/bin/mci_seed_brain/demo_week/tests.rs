@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use super::story::{FOUNDER, PEOPLE};
+use super::story::{FOUNDER, PEOPLE, PROJECT_FOLDER, PROJECT_PATH};
 use super::*;
 
 /// Names from the maintainers' own lives that must never appear in the
@@ -375,11 +375,15 @@ fn the_private_names_list_lives_outside_the_repository_and_never_says_a_name() {
 fn the_world_is_made_up() {
     let week = world(MONDAY_AFTERNOON, TZ);
     let fields = every_field(&week);
+    // The project's folder is inside Demo Memory's own folder, so Resume
+    // has a real folder to reopen: the one place the product's name shows.
     let corpus = fields
         .iter()
         .map(|(_, text)| text.as_str())
         .collect::<Vec<_>>()
-        .join(" ");
+        .join(" ")
+        .replace(PROJECT_FOLDER, "pebblewick-app")
+        .replace(PROJECT_PATH, "pebblewick-app");
     for never in [
         "Amy",
         "Jain",
@@ -434,7 +438,9 @@ fn the_world_is_made_up() {
 /// for `mci_brain::subject`, enough to check the story's ranking.
 fn item_of(win: &Win) -> Option<&'static str> {
     let title = win.title.as_str();
-    if title.ends_with("\u{2014} pebblewick-app") || title.starts_with("pebblewick-app \u{2014}") {
+    if title.ends_with("\u{2014} pebblewick-app")
+        || title.starts_with(&format!("{PROJECT_FOLDER} \u{2014}"))
+    {
         Some("pebblewick-app")
     } else if title.starts_with("Q4 investor update") {
         Some("Q4 investor update")
@@ -619,4 +625,86 @@ fn the_week_is_written_and_read_back() {
         queries.contains(&"stripe prorate monthly to yearly"),
         "{queries:?}"
     );
+}
+
+#[test]
+fn the_terminal_shows_the_project_folder_demo_memory_makes() {
+    // Demo Memory's folder, as the app makes it (`DemoMemoryFolder.standard`),
+    // holds the project's folder, and the week's Terminal names it, so
+    // Resume finds a folder to reopen instead of "doesn't know where it is".
+    assert_eq!(
+        PROJECT_FOLDER,
+        "~/Library/Application Support/Hippocampus/Demo Memory/pebblewick-app"
+    );
+    let week = world(MONDAY_AFTERNOON, TZ);
+    let terminals: Vec<&Win> = week
+        .moments()
+        .into_iter()
+        .map(|(_, win, _)| win)
+        .filter(|win| win.app == "com.apple.Terminal")
+        .collect();
+    assert!(!terminals.is_empty());
+    for win in terminals {
+        let folder = mci_brain::subject::terminal_folder_at(&win.title, Some("sam"))
+            .expect("the title names a folder");
+        assert_eq!(
+            folder.path.as_deref(),
+            Some(PROJECT_FOLDER),
+            "{}",
+            win.title
+        );
+        assert_eq!(folder.name, "pebblewick-app");
+        assert!(
+            !win.main.contains("/Users/ren/dev"),
+            "one folder, everywhere"
+        );
+    }
+}
+
+#[test]
+fn the_project_folder_is_made_only_inside_demo_memorys_own_folder() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let home = tempfile::tempdir().unwrap();
+    let demo = home
+        .path()
+        .join("Library/Application Support/Hippocampus/Demo Memory");
+    std::fs::create_dir_all(&demo).unwrap();
+    let made = make_project_folder(&demo, home.path()).unwrap();
+    let project = demo.join("pebblewick-app");
+    assert_eq!(made.as_deref(), Some(project.as_path()));
+    assert!(project.is_dir());
+    assert_eq!(
+        std::fs::metadata(&project).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    assert_eq!(std::fs::read_dir(&project).unwrap().count(), 0, "empty");
+    // Again: the folder is kept as it is.
+    assert_eq!(
+        make_project_folder(&demo, home.path()).unwrap().as_deref(),
+        Some(project.as_path())
+    );
+
+    // A store anywhere else makes nothing, in the home folder or beside it.
+    let elsewhere = tempfile::tempdir().unwrap();
+    let other_home = tempfile::tempdir().unwrap();
+    assert_eq!(
+        make_project_folder(elsewhere.path(), other_home.path()).unwrap(),
+        None
+    );
+    assert_eq!(
+        std::fs::read_dir(other_home.path()).unwrap().count(),
+        0,
+        "nothing made in a home whose Demo Memory isn't the store's folder"
+    );
+    assert_eq!(std::fs::read_dir(elsewhere.path()).unwrap().count(), 0);
+
+    // Something that isn't a folder at its place is never touched.
+    let third = tempfile::tempdir().unwrap();
+    let demo = third
+        .path()
+        .join("Library/Application Support/Hippocampus/Demo Memory");
+    std::fs::create_dir_all(&demo).unwrap();
+    std::fs::write(demo.join("pebblewick-app"), b"kept").unwrap();
+    assert!(make_project_folder(&demo, third.path()).is_err());
+    assert_eq!(std::fs::read(demo.join("pebblewick-app")).unwrap(), b"kept");
 }
