@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// What "Open {App}" or "Open Page" opens for a session or the Right now card
@@ -29,6 +30,21 @@ public enum ReopenAction: Equatable, Sendable {
         case .page: UserFacingCopy.openPage
         case let .app(_, name): UserFacingCopy.openApp(name)
         }
+    }
+
+    /// Whether it can open on this Mac (SPEC 3.1): a page always; an app
+    /// only while it is installed, so a removed app gets no Open button
+    /// that would do nothing, as a Working On page already does.
+    public func canOpen(appInstalled: (String) -> Bool = ReopenAction.isInstalled) -> Bool {
+        switch self {
+        case .page: true
+        case let .app(bundleId, _): appInstalled(bundleId)
+        }
+    }
+
+    /// Whether an app with `bundleId` is on this Mac.
+    public static func isInstalled(_ bundleId: String) -> Bool {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) != nil
     }
 }
 

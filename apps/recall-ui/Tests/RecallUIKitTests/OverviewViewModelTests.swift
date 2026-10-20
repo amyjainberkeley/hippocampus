@@ -352,6 +352,18 @@ final class OverviewViewModelTests: XCTestCase {
         XCTAssertNil(ReopenAction(nil))
     }
 
+    /// The card's app was removed from the Mac: no Open button (SPEC 3.1).
+    /// It used to show and do nothing when pressed.
+    func testOpenIsOfferedOnlyForAnAppStillOnThisMac() throws {
+        let removed = try XCTUnwrap(ReopenAction(Reopen(url: nil, bundleId: "com.example.gone-editor", appName: "Gone")))
+        XCTAssertFalse(removed.canOpen(appInstalled: { _ in false }))
+        XCTAssertTrue(removed.canOpen(appInstalled: { $0 == "com.example.gone-editor" }))
+        let page = try XCTUnwrap(ReopenAction(Reopen(url: "https://devnotes.example/rounding",
+                                                     bundleId: "com.example.gone-browser", appName: "Gone")))
+        XCTAssertTrue(page.canOpen(appInstalled: { _ in false }), "a page opens in whatever browser is here")
+        XCTAssertFalse(ReopenAction.isInstalled("com.example.no-such-app-\(UUID().uuidString)"))
+    }
+
     func testThePreviewsCardRendersAndWhatItCopiesIsInThePreviewsMemory() async throws {
         let reader = NativePreviewReader(date: SampleDay.now, now: SampleDay.now, calendar: SampleDay.calendar)
         let model = OverviewViewModel(understanding: PreviewUnderstandingReader(), selectedDate: SampleDay.now,

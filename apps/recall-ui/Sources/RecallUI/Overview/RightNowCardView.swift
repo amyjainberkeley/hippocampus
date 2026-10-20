@@ -87,7 +87,8 @@ struct TodayCardView: View {
                 ResumeButton(itemId: item.id, open: open)
             }
             askButton
-            if let reopen = card.reopen {
+            // An app that was removed from the Mac has no Open button.
+            if let reopen = card.reopen, reopen.canOpen() {
                 ReopenButton(action: reopen)
             }
             Button(UserFacingCopy.showInHistory) {
