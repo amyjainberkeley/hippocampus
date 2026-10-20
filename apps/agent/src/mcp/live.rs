@@ -726,6 +726,9 @@ impl BrainReader for LiveBrainReader {
             now_us,
             focus,
         );
+        // The `context` command, the `mci_context` tool and Copy for Your
+        // AI's packet all come through here: a second net on the way out.
+        packet.scrub_secrets();
         Ok(packet)
     }
 }

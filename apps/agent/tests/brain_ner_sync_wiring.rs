@@ -136,10 +136,26 @@ fn sync_ner_wired_into_ingest_writes_ner_mentions_and_sentinel() {
         .with_ner_sync(Arc::new(backend));
     assert!(pump.ner_sync_enabled(), "sync NER must be installed");
 
-    let frame = make_event(1, 1_700_000_000_000_000, &body);
+    // A frame carrying a JWT never reaches the sync NER tier: the agent's
+    // secret check refuses it before the store (`mci_agent::secret_gate`).
+    // The filter chain's token-REDACT SKIP on a JWT span, which memory
+    // stored before that check still needs, is pinned by
+    // `mci_brain::extraction::tier2` tests and `brain_ingest_tier2.rs`.
+    assert_eq!(
+        pump.ingest_ocr_event(&make_event(1, 1_700_000_000_000_000, &body))
+            .expect("a refusal is not an error"),
+        IngestOutcome::Refused
+    );
+    assert_eq!(pump.ner_sync_mentions_persisted_count(), 0);
+
+    // The same window without the JWT: the sync tier runs inline, keeps
+    // the three legitimate entities and drops the cascade-marker one.
+    let body = body.replace(&format!("Auth: Bearer {jwt} "), "");
+    assert!(!body.contains("eyJ"));
+    let frame = make_event(2, 1_700_000_000_000_000, &body);
     let id = match pump.ingest_ocr_event(&frame).expect("ingest ok") {
         IngestOutcome::Stored { id, .. } => id,
-        IngestOutcome::NotOcrEvent => panic!("expected Stored"),
+        IngestOutcome::NotOcrEvent | IngestOutcome::Refused => panic!("expected Stored"),
     };
     assert!(id.0 > 0);
 
@@ -263,7 +279,7 @@ fn no_ner_backend_means_no_ner_mentions() {
     let frame = make_event(1, 1_700_000_000_000_000, "Alice met Bob in Seattle");
     let id = match pump.ingest_ocr_event(&frame).expect("ingest") {
         IngestOutcome::Stored { id, .. } => id,
-        IngestOutcome::NotOcrEvent => panic!("expected Stored"),
+        IngestOutcome::NotOcrEvent | IngestOutcome::Refused => panic!("expected Stored"),
     };
     assert_eq!(pump.ner_sync_mentions_persisted_count(), 0);
 

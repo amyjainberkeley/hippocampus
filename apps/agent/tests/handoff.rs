@@ -384,6 +384,52 @@ fn injected_and_pasted_user_turns_are_never_quoted_as_the_users_words() {
     );
 }
 
+/// A second net on the way out (`mci_agent::outbound`): a turn stored before
+/// its key's shape was known still reaches a session start without the key,
+/// in the packet, the JSON report and both hook envelopes.
+#[test]
+fn a_secret_already_in_a_transcript_never_reaches_a_session_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("proj");
+    std::fs::create_dir_all(&root).unwrap();
+    let db = dir.path().join("brain.sqlite");
+    let store = SqlCipherBrainStore::new(&db, &key()).unwrap();
+    let cwd = root.display().to_string();
+    let key = ["sk-", "proj-", "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R"].concat();
+    let put = |minute: u64, role: &str, body: &str| {
+        put_transcript(
+            &store,
+            ts_us("2026-09-25T18:00:00Z") + minute * 60 * 1_000_000,
+            "claude-code",
+            "proj",
+            role,
+            &cwd,
+            "main",
+            Some("s1"),
+            None,
+            body,
+        )
+    };
+    put(
+        0,
+        "user",
+        &format!("Please use sqlite for the cache. The test key is {key} and the card is 4111 1111 1111 1111."),
+    );
+    put(1, "assistant", &format!("Done. I will rotate {key} next."));
+
+    let packet = compile_handoff(&store, &root, 4096, &clock(now_us())).unwrap();
+    let report = serde_json::to_string(&packet).unwrap();
+    for (what, text) in [
+        ("packet", packet.packet.clone()),
+        ("json", report),
+        ("claude hook", hook_envelope(&packet.packet)),
+    ] {
+        assert!(!text.contains(&key), "{what}: {text}");
+        assert!(!text.contains("4111"), "{what}: {text}");
+    }
+    assert!(packet.packet.contains("sqlite"), "{}", packet.packet);
+}
+
 #[test]
 fn json_report_round_trips() {
     let (_dir, db, root, _records) = fixture_brain();

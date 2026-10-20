@@ -1866,8 +1866,15 @@ pub fn compile_handoff_with_block(
     block: &str,
 ) -> Result<HandoffPacket, String> {
     let root = resolve_project_root(cwd);
-    let events = project_events(store, &root, cwd)?;
-    let git = collect_git_evidence(&root);
+    // A second net on the way out (crate::outbound): the packet is built
+    // from events, commits and a block with every secret already removed.
+    let mut events = project_events(store, &root, cwd)?;
+    events.iter_mut().for_each(crate::outbound::scrub_event);
+    let mut git = collect_git_evidence(&root);
+    for commit in git.iter_mut().flat_map(|git| git.commits.iter_mut()) {
+        crate::outbound::scrub_string(&mut commit.subject);
+    }
+    let block = crate::outbound::scrub_text(block);
     let mut sources = ProjectSources {
         root: &root,
         screen_events: &[],
@@ -1876,15 +1883,17 @@ pub fn compile_handoff_with_block(
     };
     let mut state = extract_project_state(&events, &sources);
     if let Some((start, end)) = state.latest_window() {
-        let screen = store
+        let mut screen = store
             .events_by_source_in_range(EventSource::ScreenOcr, start, end, MAX_SCREEN_EVENTS)
             .unwrap_or_default();
+        screen.iter_mut().for_each(crate::outbound::scrub_event);
         if !screen.is_empty() {
             sources.screen_events = &screen;
             state = extract_project_state(&events, &sources);
         }
     }
-    let (packet, cited_event_ids) = render_handoff_with_block(&state, max_tokens, clock, block);
+    let (packet, cited_event_ids) = render_handoff_with_block(&state, max_tokens, clock, &block);
+    let packet = crate::outbound::scrub_text(&packet).into_owned();
     Ok(HandoffPacket {
         project_root: root.display().to_string(),
         token_estimate: token_estimate(&packet),

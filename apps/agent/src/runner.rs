@@ -286,6 +286,19 @@ where
                     IngestOutcome::NotOcrEvent => {
                         stats.frames_non_health += 1;
                     }
+                    IngestOutcome::Refused => {
+                        // The agent's own secret check refused it: counted and
+                        // reported like the helper's privacy tombstone. A
+                        // background window's refusal says nothing about the
+                        // focused one, as the helper drops those silently.
+                        stats.frames_non_health += 1;
+                        if matches!(&frame.message, Message::OCREvent { .. }) {
+                            if let Some(capture_receipt) = capture_receipt {
+                                capture_receipt
+                                    .suppressed(mci_core::ipc::RedactionReason::OcrTimeSecret, clock);
+                            }
+                        }
+                    }
                 }
             }
             Message::PrivacyTombstone { reason, .. } => {

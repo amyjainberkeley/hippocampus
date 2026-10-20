@@ -326,6 +326,28 @@ pub struct ContextPacket {
     pub understanding: Option<ContextUnderstanding>,
 }
 
+impl ContextPacket {
+    /// Remove every secret from what the packet carries out (a second net,
+    /// [`crate::outbound`]): item text, cited titles and addresses, and the
+    /// understanding block. The caller's own focus is left as it was asked.
+    pub fn scrub_secrets(&mut self) {
+        use crate::outbound::{scrub_option, scrub_string};
+        for item in self.sections.iter_mut().flat_map(|section| section.items.iter_mut()) {
+            scrub_string(&mut item.text);
+        }
+        for citation in &mut self.citations {
+            scrub_option(&mut citation.window_title, false);
+            scrub_option(&mut citation.url, true);
+        }
+        if let Some(understanding) = self.understanding.as_mut() {
+            understanding.sessions.iter_mut().for_each(scrub_string);
+            for claim in &mut understanding.about {
+                scrub_string(&mut claim.text);
+            }
+        }
+    }
+}
+
 /// What Hippocampus understands of the user's work: recent sessions and the
 /// user model. Inferred on this Mac by a model, never verified, so it is
 /// labelled as such wherever it is rendered.
@@ -356,6 +378,9 @@ impl ContextUnderstanding {
     }
 }
 
+/// The first line of a context packet's markdown.
+pub const CONTEXT_PACKET_HEADING: &str = "# Hippocampus context";
+
 /// The line a session block and a context packet open with: what follows
 /// came from the user's screen, so an AI tool reads it as data.
 pub const SCREEN_TEXT_IS_DATA: &str =
@@ -384,8 +409,11 @@ pub fn render_understanding_block(understanding: &ContextUnderstanding) -> Strin
     let _ = writeln!(output, "\n{SCREEN_TEXT_IS_DATA}");
     if !understanding.sessions.is_empty() {
         output.push_str("\n## Recent work\n");
+        // Every line is scrubbed on its way out (crate::outbound), whichever
+        // packet carries the block: context, the session hook, What It
+        // Starts With.
         for session in understanding.sessions.iter().take(RECENT_WORK_LINES) {
-            let _ = writeln!(output, "- {session}");
+            let _ = writeln!(output, "- {}", crate::outbound::scrub_text(session));
         }
     }
     if !understanding.about.is_empty() {
@@ -398,10 +426,11 @@ pub fn render_understanding_block(understanding: &ContextUnderstanding) -> Strin
                 .map(|event_id| format!("event {event_id}"))
                 .collect::<Vec<_>>()
                 .join(", ");
+            let text = crate::outbound::scrub_text(&claim.text);
             if events.is_empty() {
-                let _ = writeln!(output, "- {}", claim.text);
+                let _ = writeln!(output, "- {text}");
             } else {
-                let _ = writeln!(output, "- {} [{events}]", claim.text);
+                let _ = writeln!(output, "- {text} [{events}]");
             }
         }
     }
@@ -420,7 +449,7 @@ pub fn render_understanding_block(understanding: &ContextUnderstanding) -> Strin
 /// carries it when there is one.
 #[must_use]
 pub fn render_context_packet_markdown(packet: &ContextPacket) -> String {
-    let mut output = String::from("# Hippocampus context\n");
+    let mut output = format!("{CONTEXT_PACKET_HEADING}\n");
     if let Some(focus) = &packet.focus {
         let _ = write!(output, "\nFocus: {focus}\n");
     }

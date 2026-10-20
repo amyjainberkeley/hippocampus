@@ -46,22 +46,42 @@ fn brain_pump_runs_tier1_after_put_event() {
 
     let pump = BrainPump::new(Arc::clone(&store) as Arc<dyn BrainStore>, None);
 
+    // A frame that carries a JWT never reaches the store or the
+    // extractor: the agent's secret check refuses it first
+    // (`mci_agent::secret_gate`), so no row and no placeholder exist.
+    // Tier 1's own JWT placeholder (no source bytes) is pinned by
+    // `mci_brain::extraction::tier1` tests for memory stored before.
+    let with_jwt = "Visit https://example.com/x, mail me at user@example.com, \
+                code [REDACTED:SMS_OTP] auth eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+    assert_eq!(
+        pump.ingest_ocr_event(&make_event(1, 1_700_000_000_000_000, with_jwt))
+            .expect("a refusal is not an error"),
+        IngestOutcome::Refused
+    );
+    assert_eq!(pump.tier1_mentions_persisted_count(), 0);
+    {
+        let db = mci_core_open(&path, &key).expect("raw_open");
+        let entities: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM entities", [], |r| r.get(0))
+            .expect("count entities");
+        assert_eq!(entities, 0, "nothing of the refused frame was extracted");
+    }
+
     // The OCR text includes the literal cascade marker (post-§6
-    // redaction shape), a URL, an email, and a JWT shape. The
-    // extractor must:
+    // redaction shape), a URL and an email. The extractor must:
     // - emit URL + email entities normally
     // - emit a `cascade_redacted` placeholder for the marker
-    // - emit a `jwt` placeholder WITHOUT the JWT bytes
     // - emit NO `phone` entity (the digits were already redacted
     //   upstream by the cascade)
     let text = "Visit https://example.com/x, mail me at user@example.com, \
-                code [REDACTED:SMS_OTP] auth eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
-    let frame = make_event(1, 1_700_000_000_000_000, text);
+                code [REDACTED:SMS_OTP]";
+    let frame = make_event(2, 1_700_000_000_000_000, text);
 
     let outcome = pump.ingest_ocr_event(&frame).expect("ingest ok");
     let id = match outcome {
         IngestOutcome::Stored { id, .. } => id,
-        IngestOutcome::NotOcrEvent => panic!("expected Stored"),
+        IngestOutcome::NotOcrEvent | IngestOutcome::Refused => panic!("expected Stored"),
     };
     assert!(id.0 > 0, "event_id should be assigned by put_event");
 
@@ -103,8 +123,7 @@ fn brain_pump_runs_tier1_after_put_event() {
         .expect("count cascade");
     assert_eq!(cascade_rows, 1);
 
-    // jwt entity present BUT no JWT bytes anywhere in `entities` /
-    // `entity_mentions`.
+    // No jwt placeholder: the only JWT was in the refused frame.
     let jwt_rows: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM entities WHERE kind=?1 AND canonical_name=?2",
@@ -112,7 +131,7 @@ fn brain_pump_runs_tier1_after_put_event() {
             |r| r.get(0),
         )
         .expect("count jwt");
-    assert_eq!(jwt_rows, 1);
+    assert_eq!(jwt_rows, 0);
 
     // NO phone entity (cascade marker doesn't expose digits).
     let phone_rows: i64 = conn

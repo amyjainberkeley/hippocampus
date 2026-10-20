@@ -191,7 +191,7 @@ impl PageContentListener {
                                 Ok(IngestOutcome::Stored { .. }) => {
                                     counter.fetch_add(1, Ordering::Relaxed);
                                 }
-                                Ok(IngestOutcome::NotOcrEvent) => {}
+                                Ok(IngestOutcome::NotOcrEvent | IngestOutcome::Refused) => {}
                                 Err(e) => {
                                     errln!("page-content-listener: ingest error: {e}");
                                 }

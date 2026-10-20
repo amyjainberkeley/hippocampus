@@ -1756,3 +1756,47 @@ fn asking_about_the_screen_answers_from_the_window_in_front() {
         .unwrap()
         .contains("invoice-4471.pdf"));
 }
+
+// ---------------------------------------------------------------------------
+// A second net on the way out (mci_agent::outbound)
+// ---------------------------------------------------------------------------
+
+/// A moment stored before its secret's shape was known (written straight to
+/// the store here, past the agent's ingest check) never leaves through MCP:
+/// recall, recent events and the context packet all carry it scrubbed, the
+/// address without its token, and the rest of the moment intact.
+#[test]
+fn a_secret_already_in_memory_never_leaves_through_any_tool() {
+    let (_dir, store) = open_temp_store();
+    let key = ["sk-", "ant-", "api03-", "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R"].concat();
+    store
+        .put_event(&make_event_custom(
+            &format!(
+                "[app=com.apple.Terminal | title=zsh | url=? | ts=?]\nBramble agent setup\n{key}\n\
+                 card 4111 1111 1111 1111 exp 12/29"
+            ),
+            1_000_000,
+            Some("com.apple.Terminal"),
+            Some(&format!("zsh {key}")),
+            Some("https://app.example/cb?access_token=SYNTHtoken&lang=en"),
+        ))
+        .unwrap();
+    let server = server_fts_only(store);
+    for (id, name, arguments) in [
+        (1, "recall", serde_json::json!({"query": "Bramble agent setup", "limit": 5})),
+        (2, "events_since", serde_json::json!({"ts_us": 0, "limit": 10})),
+        (3, "context", serde_json::json!({"max_tokens": 512, "max_evidence": 8})),
+    ] {
+        let result = extract_result(server.dispatch(req_with_id(
+            "tools/call",
+            Some(serde_json::json!({"name": name, "arguments": arguments})),
+            id,
+        )));
+        let all = result.to_string();
+        assert!(all.contains("Bramble agent setup"), "{name}: the rest stays: {all}");
+        assert!(!all.contains(&key), "{name}: {all}");
+        assert!(!all.contains("4111"), "{name}: {all}");
+        assert!(!all.contains("SYNTHtoken"), "{name}: {all}");
+        assert!(!all.contains("access_token"), "{name}: {all}");
+    }
+}

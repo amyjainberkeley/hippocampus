@@ -208,14 +208,24 @@ fn decorate_iframe_title(parent_url: &str, original_title: &str) -> String {
     format!("[iframe of {trimmed}] {original_title}")
 }
 
-fn process_message(msg: &BrowserMessage, socket: &mut UnixStream) -> io::Result<()> {
+/// What the host did with one page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Forwarded {
+    /// Written to the agent's socket.
+    Sent,
+    /// Kept back: an incognito tab, a denied address, or a secret. Answered
+    /// `dropped`, with this reason, never `ok`.
+    Dropped(&'static str),
+}
+
+fn process_message(msg: &BrowserMessage, socket: &mut UnixStream) -> io::Result<Forwarded> {
     // Security review invariant: incognito tabs never reach the wire. Checked here
     // BEFORE denylist / secret filter / socket write so a JS regression
     // (background.js stops forwarding `incognito: true`, content.js
     // stops bailing) still cannot leak content as long as the host is
     // up-to-date. Pair with the JS guards in extensions/chromium/.
     if msg.incognito {
-        return Ok(());
+        return Ok(Forwarded::Dropped("incognito"));
     }
 
     // Per-frame denylist (SH Fork E1). Resolve effective URLs:
@@ -239,11 +249,17 @@ fn process_message(msg: &BrowserMessage, socket: &mut UnixStream) -> io::Result<
         msg.parent_url.as_str()
     };
     if is_denied_url(effective_frame_url) || is_denied_url(effective_parent_url) {
-        return Ok(());
+        return Ok(Forwarded::Dropped("denied_url"));
     }
 
-    if secret_filter::contains_secret(&msg.text) {
-        return Ok(());
+    // The full shared check on the text, the title and both addresses; the
+    // agent runs it again before anything is stored.
+    if secret_filter::page_holds_secret(
+        &msg.text,
+        &msg.title,
+        &[effective_frame_url, effective_parent_url],
+    ) {
+        return Ok(Forwarded::Dropped("secret"));
     }
 
     let text = truncate_at_sentence_boundary(&msg.text, MAX_PAGE_CONTENT_TEXT_BYTES as usize);
@@ -252,11 +268,15 @@ fn process_message(msg: &BrowserMessage, socket: &mut UnixStream) -> io::Result<
     // top frames this matches today's behavior (page URL); for sub-
     // frames it's the iframe URL so the brain can key on it for
     // denylist/dedupe. Parent attribution rides in the title prefix.
-    let wire_url = effective_frame_url.to_string();
+    // Both addresses lose their sign-in parameters before they are sent.
+    let wire_url = secret_filter::strip_secret_params(effective_frame_url).into_owned();
     let wire_title = if msg.is_top_frame {
         msg.title.clone()
     } else {
-        decorate_iframe_title(effective_parent_url, &msg.title)
+        decorate_iframe_title(
+            &secret_filter::strip_secret_params(effective_parent_url),
+            &msg.title,
+        )
     };
 
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
@@ -274,7 +294,7 @@ fn process_message(msg: &BrowserMessage, socket: &mut UnixStream) -> io::Result<
     let frame = wire::encode(seq, &wire_msg);
     socket.write_all(&frame)?;
     socket.flush()?;
-    Ok(())
+    Ok(Forwarded::Sent)
 }
 
 /// The browser that launched this host, from its parent process's path.
@@ -338,8 +358,13 @@ fn main() {
                 let _ = write_native_message(&mut stdout, ack.to_string().as_bytes());
             }
             NativeRequest::PageContent(msg) => {
-                if process_message(&msg, &mut socket).is_ok() {
-                    let ack = serde_json::json!({"status": "ok"});
+                if let Ok(forwarded) = process_message(&msg, &mut socket) {
+                    let ack = match forwarded {
+                        Forwarded::Sent => serde_json::json!({"status": "ok"}),
+                        Forwarded::Dropped(reason) => {
+                            serde_json::json!({"status": "dropped", "reason": reason})
+                        }
+                    };
                     let _ = write_native_message(&mut stdout, ack.to_string().as_bytes());
                 } else {
                     let ack = serde_json::json!({"status": "error", "reason": "socket_write"});
@@ -554,6 +579,50 @@ mod tests {
             result.is_err(),
             "non-incognito message must attempt the socket write (broken pipe expected)"
         );
+    }
+
+    /// The storage review's extension run (S2): a card, a one-time code and
+    /// a bare key were answered `ok` and forwarded. Now each is dropped
+    /// before any socket write, and answered `dropped`.
+    #[test]
+    fn a_page_holding_a_secret_is_dropped_before_any_socket_write() {
+        use std::os::unix::net::UnixStream;
+
+        let key = ["sk-", "ant-", "api03-", "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R"].concat();
+        for (url, title, text) in [
+            ("https://shop.example.test/checkout", "Checkout", "Pay with card 4111 1111 1111 1111 exp 12/29".to_owned()),
+            ("https://mail.example.test/inbox", "Inbox", "Your verification code is 482913.".to_owned()),
+            ("https://console.example.test/keys", "Keys", format!("Copy your key now: {key}")),
+            ("https://console.example.test/keys", &format!("Key {key}") as &str, "Keys".to_owned()),
+        ] {
+            let (mut a, b) = UnixStream::pair().expect("socket pair");
+            drop(b); // any write would now fail with a broken pipe
+            let msg = top_frame_msg(url, title, &text, false);
+            assert_eq!(
+                process_message(&msg, &mut a).expect("dropped before the write"),
+                Forwarded::Dropped("secret"),
+                "{text}"
+            );
+        }
+    }
+
+    /// A page whose only secret is a token in its address is forwarded,
+    /// with the token gone from the address.
+    #[test]
+    fn a_token_in_the_address_is_removed_before_the_page_is_sent() {
+        use std::io::Read as _;
+        use std::os::unix::net::UnixStream;
+
+        let (mut a, mut b) = UnixStream::pair().expect("socket pair");
+        let url = "https://app.example.test/cb?access_token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl&lang=en";
+        let msg = top_frame_msg(url, "Welcome", "Welcome back", false);
+        assert_eq!(process_message(&msg, &mut a).unwrap(), Forwarded::Sent);
+        drop(a);
+        let mut sent = Vec::new();
+        b.read_to_end(&mut sent).unwrap();
+        let sent = String::from_utf8_lossy(&sent);
+        assert!(sent.contains("https://app.example.test/cb?lang=en"), "{sent}");
+        assert!(!sent.contains("access_token"), "{sent}");
     }
 
     // ---- SH Fork E1 (all_frames:true) per-frame coverage --------------

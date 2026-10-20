@@ -277,6 +277,38 @@ fn a_moment_forgotten_since_the_click_is_left_out_and_counted() {
     assert_eq!(gone["left_out"]["forgotten"], 1);
 }
 
+/// Copy for Your AI and Ask {Tool} come from send-card: a key on a line of
+/// its own, with no label, is left out like a labelled one (the end-to-end
+/// run's `send-card.json` carried one before the vendor shapes were known).
+#[test]
+fn an_unlabelled_vendor_key_line_is_left_out_of_the_card() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = empty_memory(dir.path());
+    let anthropic = ["sk-", "ant-", "api03-", "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R"].concat();
+    let slack = ["xox", "b-", "1234567890", "-", "1234567890123", "-", "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5"].concat();
+    let text = format!("dev@studio trailhead-shop % cat .env.local\n{anthropic}\n{slack}\ntest result: ok. 12 passed");
+    let ids = seed(
+        &db,
+        &[Seed {
+            ts_us: ARTICLE_TS,
+            app: "com.apple.Terminal",
+            title: "trailhead-shop — zsh",
+            url: None,
+            text: &text,
+        }],
+    );
+    let card = ask(
+        dir.path(),
+        &db,
+        &serde_json::json!({"to": "chatgpt", "moments": ids, "include_screenshot": false}),
+    );
+    let message = card["message"].as_str().unwrap();
+    assert!(!message.contains(&anthropic), "{message}");
+    assert!(!message.contains(&slack), "{message}");
+    assert!(message.contains("test result: ok"), "{message}");
+    assert_eq!(card["left_out"]["secret_lines"], 2);
+}
+
 #[test]
 fn lines_that_look_like_secrets_are_removed_and_counted() {
     let dir = tempfile::tempdir().unwrap();
