@@ -19,6 +19,18 @@ struct DetailPaneView: View {
     /// The search's text when the moment was found by one: "Also in this
     /// window" opens by itself when its words are only there (RULINGS T12).
     var query: String? = nil
+    /// Every moment of the row this one heads, newest first: the trash
+    /// forgets the row's whole run, as its menu does (SPEC 3.4). Empty for
+    /// a moment shown alone.
+    var run: [UInt64] = []
+    /// "Part of trailhead-shop ›": the Working On item the moment belongs to,
+    /// when its caption doesn't already say it, and what opens it.
+    var partOf: WorkItem? = nil
+    var openItem: ((WorkItem) -> Void)? = nil
+    /// Moves on each time a row's menu asks to show what is related.
+    var relatedRequests = 0
+
+    @Environment(\.forget) private var forget
 
     @State private var flyoutScope: RelatedHitsScope? = nil
     @State private var showsScreenshot = false
@@ -93,6 +105,9 @@ struct DetailPaneView: View {
             return .ignored
         }
         .registerActionPanelCommands(actionPanelCommands)
+        .onChange(of: relatedRequests) { _, _ in
+            if reader != nil, !hit.linkedEventIds.isEmpty { flyoutScope = .all(hitId: hit.eventId) }
+        }
         .onChange(of: hit) { _, _ in refreshActionPanelCommands() }
         .onChange(of: textModel.state(for: hit)) { _, _ in refreshActionPanelCommands() }
     }
@@ -128,7 +143,7 @@ struct DetailPaneView: View {
                     }
                     .aspectRatio(16 / 10, contentMode: .fit)
                     HStack(spacing: MCI.Spacing.s) {
-                        Label("Open screenshot", systemImage: "arrow.up.left.and.arrow.down.right")
+                        Label(LibraryCopy.History.openScreenshot, systemImage: "arrow.up.left.and.arrow.down.right")
                         Spacer(minLength: 0)
                         if let taken = screenshotTakenEarlier {
                             Text(UserFacingCopy.screenshotFrom(taken))
@@ -139,6 +154,7 @@ struct DetailPaneView: View {
                 }
             }
             .buttonStyle(.plain)
+            .help(LibraryCopy.History.openScreenshotHelp)
             .disabled(reader == nil)
         } else {
             // Text only: the app, calmly.
@@ -258,26 +274,46 @@ struct DetailPaneView: View {
                     .font(.system(.caption, design: .default))
                     .foregroundStyle(Color.brandFgSecondary)
             }
-            HStack(spacing: 8) {
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(copiedBody, forType: .string)
-                } label: {
-                    Label(UserFacingCopy.copyTextAction, systemImage: "doc.on.doc")
+            if let partOf, let openItem {
+                PartOfLink(name: partOf.name) { openItem(partOf) }
+            }
+            actionRow
+        }
+    }
+
+    /// Copy Text, Open Link, the Ask button and, at the far right, a quiet
+    /// trash button (SPEC 3.4).
+    private var actionRow: some View {
+        HStack(spacing: 8) {
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(copiedBody, forType: .string)
+            } label: {
+                Label(LibraryCopy.History.copyText, systemImage: "doc.on.doc")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(Color.brandMint)
+
+            if let url = MomentActions.link(of: hit) {
+                Button(LibraryCopy.History.openLink) {
+                    NSWorkspace.shared.open(url)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(Color.brandMint)
-
-                if let urlStr = hit.url, URL(string: urlStr) != nil {
-                    Button(UserFacingCopy.openLink) {
-                        if let url = URL(string: urlStr) {
-                            NSWorkspace.shared.open(url)
-                        }
-                    }
-                    .buttonStyle(.bordered)
+                .help(LibraryCopy.History.openLinkHelp)
+            }
+            if let reader {
+                AskAIButton(source: .moments([hit.id]), reader: reader)
                     .controlSize(.small)
-                    .tint(Color.brandMint)
+            }
+            Spacer(minLength: 0)
+            if let forget {
+                let moments = run.isEmpty ? [hit.id] : run
+                TrashButton(help: LibraryCopy.History.forgetHelp(moments.count),
+                            label: LibraryCopy.History.forgetMoments(moments.count)) {
+                    forget(.moments(moments))
                 }
             }
         }
@@ -381,7 +417,7 @@ struct DetailPaneView: View {
                 .foregroundStyle(Color.brandMintDim)
                 .font(.caption)
             if let url = URL(string: urlStr) {
-                Link(urlStr, destination: url)
+                Link(MomentActions.shownLink(urlStr), destination: url)
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(Color.brandMint)
                     .lineLimit(1)

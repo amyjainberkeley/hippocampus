@@ -149,14 +149,23 @@ class EvidencePresentationTests(unittest.TestCase):
         self.assertGreaterEqual(int(threshold.group(1)), 300 + 360 + 1)
 
     def test_existing_search_and_timeline_keyboard_selection_is_retained(self):
-        for name in ("SearchView.swift", "TimelineView.swift"):
+        # Search picks one match; History picks one row or several (SPEC 3.4).
+        for name, selection in (("SearchView.swift", "selectedHitId"), ("TimelineView.swift", "selection")):
             with self.subTest(destination=name):
                 source = (SOURCE / name).read_text()
-                self.assertIn("List(selection: $viewModel.selectedHitId)", source)
+                self.assertIn(f"List(selection: $viewModel.{selection})", source)
                 self.assertIn(".onKeyPress(.return", source)
                 self.assertIn("viewModel.focusDetail()", source)
                 self.assertIn("viewModel.dismissDetail()", source)
-                self.assertIn(".onChange(of: viewModel.selectedHitId)", source)
+                self.assertIn(f".onChange(of: viewModel.{selection})", source)
+
+    def test_history_rows_offer_their_menu_space_and_forget_on_the_selection_only(self):
+        source = (SOURCE / "TimelineView.swift").read_text()
+        self.assertIn(".contextMenu(forSelectionType: UInt64.self)", source)
+        self.assertIn(".onKeyPress(.space", source)
+        delete = source.split(".onKeyPress(.delete", 1)[1].split(".onKeyPress(", 1)[0]
+        self.assertIn("press.modifiers == .command", delete, "plain delete does nothing in a list")
+        self.assertIn("!picked.isEmpty", delete, "the key acts only on a selection")
 
 
 if __name__ == "__main__":

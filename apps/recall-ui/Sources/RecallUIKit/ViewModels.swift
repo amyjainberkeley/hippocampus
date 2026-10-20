@@ -316,8 +316,14 @@ public final class TimelineViewModel: ObservableObject {
     @Published public private(set) var hits: [Hit] = []
     @Published public private(set) var isLoading: Bool = false
     @Published public private(set) var errorMessage: String?
-    @Published public var selectedHitId: UInt64?
+    /// The rows picked (SPEC 3.4): ⌘-click and ⇧-click pick several, whose
+    /// summary shows in place of one moment's detail. A row is picked by its
+    /// newest moment.
+    @Published public var selection: Set<UInt64> = []
     @Published public var isDetailFocused: Bool = false
+    /// The day shown is the oldest one kept: the list ends with how long
+    /// moments are kept (SPEC 3.4).
+    @Published public private(set) var isOldestDay = false
     /// The day shown. Nil shows the newest moments, whatever their day.
     @Published public private(set) var day: MemoryDay?
     /// A session's own time inside `day`, from "Show in History".
@@ -354,6 +360,13 @@ public final class TimelineViewModel: ObservableObject {
             .sink { [weak self] _ in
                 MainActor.assumeIsolated { self?.memoryWasDeleted() }
             }
+    }
+
+    /// The one row picked, when one is: its detail shows. Setting it picks
+    /// that row alone; nil picks none.
+    public var selectedHitId: UInt64? {
+        get { selection.count == 1 ? selection.first : nil }
+        set { selection = newValue.map { [$0] } ?? [] }
     }
 
     public var selectedHit: Hit? {
@@ -493,10 +506,11 @@ public final class TimelineViewModel: ObservableObject {
             earlierUpperBound = next
             if let eventId, rows.contains(where: { $0.id == eventId }) {
                 selectedHitId = eventId
-            } else if let selected = selectedHitId, !rows.contains(where: { $0.id == selected }) {
-                selectedHitId = nil
-                isDetailFocused = false
+            } else {
+                selection = selection.filter { id in rows.contains { $0.id == id } }
+                if selection.isEmpty { isDetailFocused = false }
             }
+            await readWhetherOldest(day: day, request: request)
         } catch {
             guard request == generation, !Task.isCancelled else { return }
             hits = []
@@ -504,6 +518,19 @@ public final class TimelineViewModel: ObservableObject {
             earlierUpperBound = nil
             errorMessage = "\(error)"
         }
+    }
+
+    /// Whether `day` is the oldest day kept: nothing is saved before it.
+    /// One moment at most is read, through the time index.
+    private func readWhetherOldest(day: MemoryDay?, request: Int) async {
+        guard let day, !canLoadEarlier else {
+            isOldestDay = false
+            return
+        }
+        let start = Date(timeIntervalSince1970: Double(day.startUs) / 1_000_000)
+        let earlier = try? await reader.isAnythingSaved(before: start)
+        guard request == generation else { return }
+        isOldestDay = earlier == false
     }
 
     /// Up to a page of moments between `lower` and `upper`, newest first, and
@@ -535,8 +562,9 @@ public final class TimelineViewModel: ObservableObject {
         isLoadingEarlier = false
         loadEarlierFailed = false
         errorMessage = nil
-        selectedHitId = nil
+        selection = []
         isDetailFocused = false
+        isOldestDay = false
     }
 
     /// Moments were deleted: nothing shown may be one of them, so the rows go
@@ -574,7 +602,7 @@ public final class TimelineViewModel: ObservableObject {
     }
 
     public func focusDetail() {
-        if selectedHitId != nil { isDetailFocused = true }
+        if !selection.isEmpty { isDetailFocused = true }
     }
 
     public func dismissDetail() {

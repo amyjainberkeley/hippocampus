@@ -106,6 +106,9 @@ public enum LibraryCopy {
         public static let copyText = "Copy Text"
         public static let openLink = "Open Link"
         public static let openScreenshot = "Open Screenshot"
+        /// Their tooltips, with their keys.
+        public static let openLinkHelp = "Open Link (\u{2318}O)"
+        public static let openScreenshotHelp = "Open Screenshot (Space)"
         public static let copyForYourAI = "Copy for Your AI"
         public static let showRelated = "Show Related"
 
