@@ -75,7 +75,7 @@ These requests carry nothing you saw:
 - The updater (Sparkle) asks `github.com/amyjainberkeley/hippocampus/releases/latest/download/appcast.xml`, which GitHub serves from `release-assets.githubusercontent.com`, whether there is a newer version. It asks when you click Check for Updates, or daily if you turn on automatic checks. It checks an update's signature before installing it.
 - If you list MCP servers in `~/Library/Application Support/MCI/mcp-servers.toml`, Hippocampus reads from them. It refuses any address that is not on this Mac.
 
-There is no analytics and no telemetry. Preferences has a Send crash reports switch, but this version has no address to send them to, so crash records stay in `~/Library/Logs/MCI/panic.jsonl`. ADR-0025, which planned opt-in analytics, is withdrawn.
+There is no analytics and no telemetry. The text reader's ONNX Runtime library includes Microsoft's telemetry client: Hippocampus turns it off and runs the reader with no network access ([OCRWorkerSandbox.swift](adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/OCR/OCRWorkerSandbox.swift)). Versions up to 0.3.0 did neither, and their reader sent ONNX Runtime's usage events and a device ID to Microsoft. The app deletes the two folders that left in `~/Library` (`Caches/hippocampus-ocr`, `HTTPStorages/hippocampus-ocr`) when it starts; ONNX Runtime's own `~/Library/Application Support/Microsoft/DeveloperTools/.onnxruntime` is shared with other apps, so it stays. Preferences has a Send crash reports switch, but this version has no address to send them to, so crash records stay in `~/Library/Logs/MCI/panic.jsonl`. ADR-0025, which planned opt-in analytics, is withdrawn.
 
 ### Disconnecting an AI tool
 

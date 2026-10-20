@@ -129,12 +129,17 @@ CPU share.
 - A token in a page's address is stored with the address when the window
   shows only the site name, as Safari does: the secret checks read the
   window's text, not the address (c8.url).
-- The text reader's ONNX Runtime 1.30 carries Microsoft's telemetry client.
-  Unblocked, the worker posted to a Microsoft collector over HTTPS (four
-  requests, about 45 KB, in one test run), and it keeps that client's queue,
-  URL cache and HTTP storage in `~/Library`, outside Hippocampus's folders.
-  The end-to-end test now runs the worker in a sandbox and fails on the
-  attempt (`net.runtime-log`, `net.binary`, `net.isolation`).
+- The text reader's ONNX Runtime 1.30 still contains Microsoft's telemetry
+  client (audit check `net.binary`). The worker turns it off before ONNX
+  Runtime loads and runs with the network denied (`sandbox-exec`), and a
+  release stops if its worker starts any network request. Builds up to 0.3.0
+  did neither: their worker posted to a Microsoft collector over HTTPS (four
+  requests, about 45 KB, in one test run). They left
+  `~/Library/Caches/hippocampus-ocr` and `~/Library/HTTPStorages/hippocampus-ocr`,
+  which the app now deletes when it starts, and ONNX Runtime's own
+  `~/Library/Application Support/Microsoft/DeveloperTools/.onnxruntime` (a
+  device ID), which apps that use ONNX Runtime share, so Hippocampus leaves
+  it.
 - Copy for your AI and the other copy buttons put plain text on the
   clipboard, not marked transient, concealed or current-host-only, so a
   clipboard manager keeps it and Universal Clipboard can carry it to your
@@ -142,19 +147,8 @@ CPU share.
 - The database key is a login-Keychain item that never syncs, but no
   this-device-only class is set: it moves with a copied login keychain
   (audit check `custody.this-device`).
-- The data folder is created 0755 and the database 0644 inside `~/Library`,
-  not 0700 and 0600 (audit check `modes`).
-- After the cask's zap and `mci-agent disconnect --all`,
-  `~/Library/Application Support/Hippocampus`, `~/.mci` and the AI-tool
-  registry's lock files are left, and the MCP registrations stay in the AI
-  tools' own settings (e3).
 - The window can delete the last 24 hours or everything, but has no button
   that forgets one moment; the reader it uses can.
-- Capture consent is kept in the App Group container, which follows the
-  account and not `HOME`: a build launched under a throwaway home wrote
-  `~/Library/Group Containers/group.ai.hippocampus/capture-consent.json` in
-  the real one, and the development group is not on the cask's zap list
-  (audit check `net.isolation`).
 - A private browser window that shows no private marker is read.
 - In Low Power Mode only the window in front is read.
 - Connected AI tools can read your memory while Hippocampus is quit, until
