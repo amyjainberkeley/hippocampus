@@ -22,9 +22,11 @@ pub mod mind;
 pub mod observe;
 pub mod overview;
 pub mod query;
+pub mod resume;
 pub mod sending;
+pub mod work;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -32,6 +34,51 @@ use serde::{Deserialize, Serialize};
 
 use mci_brain::understanding::{DayReport, ObservedEvent, PropositionStatus, SessionNote};
 use mci_brain::{SqlCipherBrainStore, StoreError};
+use mci_core::crypto::DbKey;
+
+/// What one of the window's own reads is given (`work`, `resume-plan`,
+/// `send-card`): the memory, opened read-only, and the command's own
+/// arguments. `mci-agent` resolves the key, opens the memory and reads the
+/// shared flags (`--json`, `--db-path`, `--tz-offset-secs`) the same way for
+/// each, so a command's module never touches the Keychain or the shared
+/// flags, and prints nothing itself.
+pub struct ReadCommand<'a> {
+    /// The command's name, as typed.
+    pub name: &'a str,
+    /// The memory, opened read-only.
+    pub store: &'a Arc<SqlCipherBrainStore>,
+    /// The memory's key, for ids keyed to this Mac (a Working On item's).
+    /// Never written out, logged or sent.
+    pub key: &'a DbKey,
+    /// Where the memory is.
+    pub db_path: &'a Path,
+    /// The arguments after the command's name that are not shared flags:
+    /// the command's own flags and their values, in order.
+    pub args: &'a [String],
+    /// Seconds east of UTC: `--tz-offset-secs`, else this Mac's.
+    pub tz_offset_secs: i32,
+    /// Now, in microseconds since the epoch.
+    pub now_us: u64,
+}
+
+/// Why one of the window's reads gave no answer. Its words name what was
+/// wrong and never repeat a value given or anything read from the memory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReadError {
+    /// It was asked wrongly: a missing or malformed flag or request. The
+    /// command exits 2.
+    Usage(String),
+    /// It could not be answered from the memory. The command exits 13.
+    Failed(String),
+}
+
+impl std::fmt::Display for ReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Usage(message) | Self::Failed(message) => f.write_str(message),
+        }
+    }
+}
 
 use crate::brief_worker::{local_date_start_secs, local_date_string};
 use mind::{MindCallError, MindClient};

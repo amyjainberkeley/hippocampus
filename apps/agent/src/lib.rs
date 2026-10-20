@@ -30,6 +30,9 @@ pub mod child_command_environment;
 pub mod client_hooks;
 /// Atomic, reference-only registration with supported local AI clients.
 pub mod client_registry;
+/// `mci-agent clients`: which AI tools are connected and what each needs,
+/// content-free, for the window's AI Tools page.
+pub mod client_status;
 pub mod consolidator_worker;
 /// Deterministic, cited context packets for local agent handoff.
 pub mod context_packet;
@@ -48,6 +51,9 @@ pub mod enrich;
 pub mod episode_worker;
 /// Per-project handoff packet compiler (docs/handoff/CONTRACT.md section 5).
 pub mod handoff;
+/// `mci-agent send-card`: the one builder for Ask {Tool} and Copy for Your
+/// AI, from a request on standard input.
+pub mod handoff_card;
 /// Read-only transcript freshness and hook delivery view for `doctor`.
 pub mod handoff_status;
 pub mod health_log;

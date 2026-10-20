@@ -66,6 +66,7 @@ use mci_agent::refresh_agent;
 use mci_agent::retention_worker;
 use mci_agent::runner::drain_with_capture_status;
 use mci_agent::today::{compile_today, render_today, TodayFormat};
+use mci_agent::understanding::{ReadCommand, ReadError};
 #[cfg(all(target_os = "macos", feature = "deep-hooks"))]
 use mci_agent::user_allowlist::default_user_allowlist_path;
 use mci_agent::wall_clock::{format_unix_ms, SystemWallClock};
@@ -697,6 +698,16 @@ fn print_usage() {
         \x20 overview                   the day the window's Overview draws: sessions,\n\
         \x20                            facts and searches. Read-only. --date YYYY-MM-DD,\n\
         \x20                            --tz-offset-secs N (seconds east of UTC), --json.\n\
+        \x20 work                       what Working On and Web Pages list, from window\n\
+        \x20                            titles. Read-only. --days N, --item ID\n\
+        \x20                            [--before TS_US], --moments ID,ID; always JSON.\n\
+        \x20 resume-plan --item ID      what Resume would open again for a Working On\n\
+        \x20                            item. Opens nothing. Always JSON.\n\
+        \x20 send-card                  the message for an AI tool's box, from a request\n\
+        \x20                            read on standard input, never from arguments.\n\
+        \x20                            Sends nothing. Always JSON.\n\
+        \x20 clients                    the AI tools Hippocampus works with and what each\n\
+        \x20                            needs. Needs no key; never opens the memory.\n\
         \x20 enrich                     run every understanding stage over an existing\n\
         \x20                            brain: extract entities, embed, segment episodes,\n\
         \x20                            resolve identities, link related episodes.\n\
@@ -2573,6 +2584,10 @@ async fn run_mcp_serve(db_path: PathBuf) -> Result<(), u8> {
 
 /// Read-only understanding commands: `day`, `model`, `searches`, `sessions`,
 /// `overview`, `ask` and `suggest`. JSON with `--json`, plain text otherwise.
+/// The window's own reads, `work`, `resume-plan` and `send-card`, open the
+/// memory the same way and hand it to their modules with their own flags
+/// ([`ReadCommand`]); `clients` needs neither the key nor the memory. Those
+/// four always answer in JSON: one line with `--json`, indented without.
 /// `None` when argv names some other command.
 #[allow(clippy::too_many_lines)] // one match arm per command, each a few lines
 fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
@@ -2582,7 +2597,17 @@ fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
     let command = argv.get(1)?.as_str();
     if !matches!(
         command,
-        "day" | "model" | "searches" | "sessions" | "overview" | "ask" | "suggest"
+        "day"
+            | "model"
+            | "searches"
+            | "sessions"
+            | "overview"
+            | "ask"
+            | "suggest"
+            | "work"
+            | "resume-plan"
+            | "send-card"
+            | "clients"
     ) {
         return None;
     }
@@ -2609,6 +2634,15 @@ fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
             other => positional.push(other.to_owned()),
         }
         i += 1;
+    }
+    // Each AI tool's own settings, never the memory: no key is resolved and
+    // nothing is opened.
+    if command == "clients" {
+        return Some(print_read_answer(
+            command,
+            mci_agent::client_status::run_cli(&positional),
+            json,
+        ));
     }
     let db_path = flags
         .get("--db-path")
@@ -2649,6 +2683,23 @@ fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
             .as_micros(),
     )
     .unwrap_or(u64::MAX);
+    if matches!(command, "work" | "resume-plan" | "send-card") {
+        let read = ReadCommand {
+            name: command,
+            store: &store,
+            key: &key,
+            db_path: &db_path,
+            args: &positional,
+            tz_offset_secs: tz,
+            now_us,
+        };
+        let answer = match command {
+            "work" => mci_agent::understanding::work::run_cli(&read),
+            "resume-plan" => mci_agent::understanding::resume::run_cli(&read),
+            _ => mci_agent::handoff_card::run_cli(&read),
+        };
+        return Some(print_read_answer(command, answer, json));
+    }
     let limit = flags.get("--limit").and_then(|v| v.parse().ok());
     let result: Result<serde_json::Value, String> = match command {
         "day" | "model" | "searches" | "sessions" => {
@@ -2762,6 +2813,34 @@ fn run_understanding_cli(argv: &[String]) -> Option<ExitCode> {
         Err(error) => {
             errln!("mci-agent {command}: {error}");
             Some(ExitCode::from(13))
+        }
+    }
+}
+
+/// Print one of the window's reads: one line of JSON with `--json`, indented
+/// JSON without. A usage error exits 2 and a failed read 13; the error names
+/// the command and never repeats a value or anything read.
+fn print_read_answer(
+    command: &str,
+    answer: Result<serde_json::Value, ReadError>,
+    json: bool,
+) -> ExitCode {
+    match answer {
+        Ok(value) => {
+            let text = if json {
+                serde_json::to_string(&value)
+            } else {
+                serde_json::to_string_pretty(&value)
+            };
+            outln!("{}", text.unwrap_or_else(|_| "{}".into()));
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            errln!("mci-agent {command}: {error}");
+            ExitCode::from(match error {
+                ReadError::Usage(_) => 2,
+                ReadError::Failed(_) => 13,
+            })
         }
     }
 }

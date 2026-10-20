@@ -74,6 +74,7 @@ use mci_brain::fts_sanitizer::{
 use mci_brain::reading::{
     audit_text, excerpt, passage, reading, reading_prefix, reading_start, ExcerptQuery,
 };
+use mci_brain::reading_blocks::{self, Block};
 use mci_brain::{
     BrainStore, DeletionOutcome, Embedder, EventId, EventSource, HybridRetriever, MomentReading,
     RetrievalDegradation, RetrievalMatch, RetrievalOutcome, RetrievalQuery, SqlCipherBrainStore,
@@ -1369,6 +1370,10 @@ pub struct EventReadingJson {
     /// One short plain line saying what the moment was about: the stored
     /// caption, or one made from the title now (see [`HitJson::caption`]).
     pub caption: Option<String>,
+    /// `main` as typed blocks ([`mci_brain::reading_blocks::blocks`]), for the
+    /// formatted reading view. Additive: each block holds only text of
+    /// `main`, and a reader that ignores them reads `main` as before.
+    pub blocks: Vec<Block>,
 }
 
 /// Read one admitted event's readable text: `main` and `rest`, never the
@@ -1459,6 +1464,17 @@ pub unsafe extern "C" fn mci_brain_ffi_event_reading(
                 None
             }
         });
+        let blocks = reading_blocks::blocks(
+            &read.main,
+            &reading_blocks::Window {
+                app: value.app_bundle_id.as_deref(),
+                title: head
+                    .as_ref()
+                    .and_then(|event| event.window_title.as_deref()),
+                url: head.as_ref().and_then(|event| event.url.as_deref()),
+            },
+            kind,
+        );
         EventReadingJson {
             event_id,
             ts_us: value.ts_us,
@@ -1469,6 +1485,7 @@ pub unsafe extern "C" fn mci_brain_ffi_event_reading(
             match_in,
             truncated,
             caption,
+            blocks,
         }
     }))
 }

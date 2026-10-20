@@ -134,6 +134,19 @@ pub mod chrome;
 /// moment's own text.
 pub mod caption;
 
+/// What a window is about (a code project, document, design, spreadsheet,
+/// page or search), from its title by the caption rules: the names Working
+/// On lists.
+pub mod subject;
+
+/// A reading's text as typed blocks (headings, paragraphs, lists, code, chat
+/// turns), made when a reading is shown.
+pub mod reading_blocks;
+
+/// Pictures of the windows beside the one in front: when they are kept, and
+/// how they are thinned out within their budget.
+pub mod side_pictures;
+
 /// A moment's cleaned text and caption, stored beside its text (migration
 /// 0015) and deleted with it.
 pub mod moment_readings;

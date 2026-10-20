@@ -104,7 +104,8 @@ char *mci_brain_ffi_event_text(McibrainHandle *h, uint64_t event_id);
 /* The readable text of one selected event, for the detail view. Returns
  *   {"event_id":N,"ts_us":N,"app_bundle_id":<string|null>,
  *    "source_kind":"screen_ocr","main":"...","rest":"...",
- *    "match_in":"main"|"rest"|null,"truncated":false,"caption":<string|null>}
+ *    "match_in":"main"|"rest"|null,"truncated":false,"caption":<string|null>,
+ *    "blocks":[{"kind":"paragraph","text":"..."}]}
  * or JSON null for a missing/deleted/suppressed/invalid id. main is what the
  * person was reading; rest is everything else in the window (tabs, sidebars,
  * menus, status bars), and for a browser page read both ways the text read
@@ -116,6 +117,9 @@ char *mci_brain_ffi_event_text(McibrainHandle *h, uint64_t event_id);
  * no other). Reads the same 128 KiB prefix as mci_brain_ffi_event_text;
  * main and rest together are at most 128 KiB + 1 KiB, cut after a whole
  * line, and truncated says when either the read or that bound left text out.
+ * blocks is main as typed blocks, in order (core/brain/src/reading_blocks.rs):
+ * each holds only text of main and names its kind, so a reader that ignores
+ * them reads main as before; empty when main holds no text.
  * NULL on error. Free non-NULL with mci_brain_ffi_string_free. */
 char *mci_brain_ffi_event_reading(McibrainHandle *h, uint64_t event_id,
                                   const char *query);
