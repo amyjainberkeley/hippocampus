@@ -1,307 +1,41 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// CalendarAttribution — EventKit-backed "what calendar event is
-// happening right now" attribution source for `WorkflowContext`.
+// CalendarAttribution — the capture helper's calendar source for
+// `WorkflowContext.currentCalendarEvent`. It reads nothing.
 //
-// Phase 6 PR 5 — SH Fork D1 (EventKit + Contacts +
-// MPNowPlayingInfoCenter cascade attribution; ratified at
-// AGENT_QUESTIONS.md F-RATIFICATION-2026-05-31).
+// Phase 6 PR 5 (SH Fork D1) had the helper read the event under way every
+// 30 seconds into `WorkflowContext.currentCalendarEvent`, and make an
+// `EKEventStore` at every launch, which can start the calendar's services
+// even when nothing is asked. Nothing reads that field or sends it anywhere,
+// so the helper no longer reads the calendar at all, whether or not the
+// person turned it on, and never makes a store.
 //
-// PROTECTED-SET per AGENT_PROTOCOL §5 (this PR adds the
-// `NSCalendarsUsageDescription` TCC surface; security sign-off
-// authored inline in the PR body, not via the `cso` sub-agent —
-// INFRA-001).
+// The calendar the person sees (SPEC-DELTA 5: Today's bars, meetings named
+// after their events) is the window's own: it reads EventKit itself, only
+// while the person has the calendar on (`ai.hippocampus.calendar.show`).
 //
-// # Scope binding
-//
-// PER-EVENT attribution enricher, NOT a deep-hook plugin. The
-// provider's tight contract:
-//   - Reads ONLY events whose `startDate <= now <= endDate` (the
-//     `EKEventStore.events(matching:)` predicate is constructed with
-//     this tight window — see `CalendarEventReader.eventNow`). Past
-//     events outside that window are never observed at this layer.
-//     The Phase 7 full deep-hook plugin (PR 21) will broaden the
-//     window; this attribution surface stays tight by construction.
-//   - Returns subject + start + end only (CalendarEventRef in
-//     `Suppression/SuppressionInputs.swift`). NO body, NO attendees,
-//     NO location. Phase 7 deep-hook owns the broader read.
-//   - Caches aggressively (default 30 s TTL — event durations are
-//     minutes-to-hours; a 1 Hz poll burns no EventKit calls in the
-//     steady state).
-//
-// # TCC denial path
-//
-// `start()` checks the access the person already gave the app; it never
-// asks macOS (only Preferences and Today's Show Calendar ask). On denial /
-// restricted / not-determined we record the denial state, emit ONE
-// `tracing`-style stderr line, and every subsequent `eventNow(...)`
-// returns `nil`. Graceful absence; never crashes. The state-change warn
-// fires only once per transition.
-//
-// # The person's switch
-//
-// Even when macOS allows it, nothing is read unless the person turned the
-// calendar on (`ai.hippocampus.calendar.show`, SPEC-DELTA 5).
-//
-// # Cascade-equivalent binding
-//
-// `CalendarEventRef.subject` MAY carry user content (calendar invites
-// can contain "Your verification code is 123456" in the subject).
-// The cascade-equivalent at the brain-ingest layer runs the
-// ADR-0030 §3(a) SMS-OTP regex bank on `subject` before persistence.
-// See `core/brain/src/redaction/calendar_attribution.rs`.
+// The type stays so the helper's wiring (`main.swift`) and the context tick
+// keep their shape: `start()` does nothing, and `eventNow(at:)` is `nil`.
 
-import Dispatch
 import Foundation
-import os
-#if canImport(EventKit)
-import EventKit
-#endif
 
-/// Protocol surface — production reads `EKEventStore`; tests inject
-/// a deterministic stub. Returns the calendar event whose time window
-/// covers `now`, or `nil` if there is none / TCC denied / no access /
-/// no calendars subscribed. Cheap on the hot path (internal cache).
+/// Protocol surface for the context tick: the calendar event whose time
+/// window covers `now`, or `nil`. Tests inject a deterministic stub.
 public protocol CalendarEventSource: Sendable {
-    /// Currently-active event at `now`. `nil` is the graceful
-    /// absence — TCC denied, no event, store empty.
+    /// Currently-active event at `now`. `nil` is the graceful absence.
     func eventNow(at now: Date) -> CalendarEventRef?
 }
 
-protocol CalendarAttributionStore: CalendarEventSource {
-    func requestAccess(completion: @escaping @Sendable (Bool) -> Void)
-}
-
-/// Authorization state of `EKEventStore` for the helper process.
-/// Exposed for observability; the only behaviour difference between
-/// denied / restricted / notDetermined is whether the
-/// state-change warn has already fired. Production code never
-/// distinguishes them — all three return `nil`.
-public enum CalendarAuthorizationState: Sendable, Equatable {
-    /// Not yet requested OR `requestFullAccessToEvents` returned
-    /// `false` with no error. Treated as denied for capture purposes.
-    case notDetermined
-    /// User explicitly denied OR system policy restricts access.
-    case denied
-    /// `EKAuthorizationStatus.fullAccess` (macOS 14+).
-    case granted
-}
-
-/// Production `CalendarEventSource` over `EKEventStore`. Holds a
-/// single store instance, a denial-state flag, and a small per-`now`
-/// cache (cache invalidates when the current event window
-/// progresses past `endDate` + a 30 s default refresh period).
-///
-/// `start()` triggers the TCC prompt asynchronously; until it
-/// resolves, `eventNow(...)` returns `nil` (the safe direction).
-/// Once granted, the source reads `events(matching:)` over the
-/// `[now, now]` window and returns the first match.
-///
-/// Lifetime discipline (SCSTREAM-LIVE-001 lesson): construct at
-/// process top level in `MCICaptureHelper/main.swift`; never let a
-/// detached `Task` be the sole owner.
+/// The capture helper's calendar source: never reads the calendar, never
+/// makes an `EKEventStore`, never asks macOS anything.
 public final class CalendarAttribution: CalendarEventSource, @unchecked Sendable {
-    /// Cache TTL — how long a non-nil current-event observation is
-    /// trusted before we re-read EventKit. Default 30 s. Event
-    /// durations are minutes-to-hours so 30 s gives us a tight
-    /// upper bound on staleness without burning per-tick reads.
-    private let cacheTtl: TimeInterval
+    public init() {}
 
-    /// Lock-guarded mutable state.
-    private let stateLock = NSLock()
-    private var authState: CalendarAuthorizationState
-    /// Last successful read. `nil` when we have not observed an
-    /// event yet OR the cached event is no longer current.
-    private var cachedEvent: CalendarEventRef?
-    /// Wall clock of the last EventKit read. The cache is trusted
-    /// for `cacheTtl` seconds after this timestamp.
-    private var cachedAt: Date?
-    /// Set once per state-transition so we do not flood stderr.
-    private var loggedDenialOnce: Bool = false
+    /// Nothing to start: the helper doesn't read the calendar.
+    public func start() {}
 
-    private let storeLock = NSLock()
-    private let storeFactory: @Sendable () -> any CalendarAttributionStore
-    private var store: (any CalendarAttributionStore)?
-    /// Whether the person turned their calendar on (SPEC-DELTA 5). Off,
-    /// nothing is read, even when macOS allows it.
-    private let isTurnedOn: @Sendable () -> Bool
-
-    /// The person's choice to show their calendar: the app's own defaults
-    /// key, which this helper shares because it runs inside the app's
-    /// bundle (the app's and the window's `CalendarSetting.key`).
-    public static let settingKey = "ai.hippocampus.calendar.show"
-
-    /// Whether the value stored under `settingKey` says the calendar is on.
-    /// Unset, or anything but `true`, is off.
-    public static func isTurnedOn(stored: Any?) -> Bool {
-        stored as? Bool == true
-    }
-
-    /// Initial state — `notDetermined`, no cached event. Reads only while
-    /// the person has the calendar on in Preferences or on Today.
-    public convenience init(cacheTtl: TimeInterval = 30.0) {
-        self.init(cacheTtl: cacheTtl, storeFactory: { SystemCalendarAttributionStore() },
-                  isTurnedOn: {
-                      CalendarAttribution.isTurnedOn(
-                          stored: UserDefaults.standard.object(forKey: CalendarAttribution.settingKey))
-                  })
-    }
-
-    init(
-        cacheTtl: TimeInterval = 30.0,
-        storeFactory: @escaping @Sendable () -> any CalendarAttributionStore,
-        isTurnedOn: @escaping @Sendable () -> Bool = { true }
-    ) {
-        self.cacheTtl = cacheTtl
-        self.storeFactory = storeFactory
-        self.isTurnedOn = isTurnedOn
-        self.authState = .notDetermined
-        self.cachedEvent = nil
-        self.cachedAt = nil
-    }
-
-    /// Explicitly request access, reusing the lazily-created store. Until
-    /// access resolves, `eventNow` returns `nil`.
-    public func start() {
-        // OS store construction can initialize services even without requesting
-        // permission. Keep it off construction and unauthorized read paths.
-        let store = storeLock.withLock {
-            if let existing = self.store { return existing }
-            let created = storeFactory()
-            self.store = created
-            return created
-        }
-        store.requestAccess { [weak self] granted in
-            guard let self else { return }
-            self.recordAuth(granted: granted)
-        }
-    }
-
-    /// Record the outcome of the auth callback. Idempotent; the
-    /// state-change warn fires only once per transition.
-    private func recordAuth(granted: Bool) {
-        stateLock.lock()
-        let prior = authState
-        authState = granted ? .granted : .denied
-        let shouldLog = !loggedDenialOnce && !granted && prior != authState
-        if shouldLog {
-            loggedDenialOnce = true
-        }
-        stateLock.unlock()
-        if shouldLog {
-            FileHandle.standardError.write(
-                ("mci-capture-helper: NSCalendarsUsageDescription "
-                 + "not granted — current-calendar-event attribution "
-                 + "off (optional; grant in System Settings → Privacy "
-                 + "& Security → Calendars).\n").data(using: .utf8) ?? Data()
-            )
-        }
-    }
-
-    public func eventNow(at now: Date) -> CalendarEventRef? {
-        // Snapshot all state under the lock; do the (potentially
-        // expensive) EventKit read OUTSIDE the lock. EventKit's
-        // `events(matching:)` is internally serialized but we never
-        // want the cascade hot path to block on it.
-        stateLock.lock()
-        let auth = authState
-        let cached = cachedEvent
-        let cachedAtCopy = cachedAt
-        let ttl = cacheTtl
-        stateLock.unlock()
-
-        guard auth == .granted else { return nil }
-        // The person's switch comes first: off, the calendar is not read and
-        // nothing read before is kept.
-        guard isTurnedOn() else {
-            stateLock.withLock {
-                cachedEvent = nil
-                cachedAt = nil
-            }
-            return nil
-        }
-
-        // Cache-hit fast path: cached event still covers `now` AND
-        // the read was within `cacheTtl`.
-        if let evt = cached, let at = cachedAtCopy {
-            let stillCurrent = Int64(now.timeIntervalSince1970) >= evt.startUnixSeconds
-                && Int64(now.timeIntervalSince1970) <= evt.endUnixSeconds
-            let withinTtl = now.timeIntervalSince(at) < ttl
-            if stillCurrent && withinTtl {
-                return evt
-            }
-        }
-
-        // Cache-miss: re-read from EventKit over the [now, now]
-        // window. The predicate's start/end MUST be tight — we
-        // explicitly do NOT read past events here.
-        let backing = storeLock.withLock { store }
-        let observed = backing?.eventNow(at: now)
-
-        stateLock.lock()
-        cachedEvent = observed
-        cachedAt = now
-        stateLock.unlock()
-
-        return observed
-    }
-}
-
-private final class SystemCalendarAttributionStore: CalendarAttributionStore, @unchecked Sendable {
-    #if canImport(EventKit)
-    private let store = EKEventStore()
-    #endif
-
-    /// Uses access the person already granted; never prompts. A background
-    /// helper asking for Calendars, unannounced, is not how a Mac app asks.
-    func requestAccess(completion: @escaping @Sendable (Bool) -> Void) {
-        #if canImport(EventKit)
-        completion(EKEventStore.authorizationStatus(for: .event) == .fullAccess)
-        #endif
-    }
-
-    /// Read EventKit for the calendar event whose window covers
-    /// `now`. Returns the first match (deterministic ordering across
-    /// overlapping events is out of scope for this PR — Phase 7
-    /// deep-hook owns multi-event semantics).
-    func eventNow(at now: Date) -> CalendarEventRef? {
-        #if canImport(EventKit)
-        // Tight window: exact `[now, now]`. EventKit
-        // `predicateForEvents(withStart:end:calendars:)` is
-        // documented to return events whose [startDate, endDate]
-        // overlaps the predicate window, which is exactly the
-        // "happening right now" semantics SH Fork D1 ratified.
-        let predicate = store.predicateForEvents(
-            withStart: now,
-            end: now,
-            calendars: nil  // search all subscribed calendars
-        )
-        let matches = store.events(matching: predicate)
-        // EKEvent.startDate / endDate are typed `Date!` (implicit
-        // optional). Belt-and-suspenders guard so a malformed event
-        // (start or end nil) is never observed as "current."
-        guard let event = matches.first(where: { e in
-            guard let start = e.startDate, let end = e.endDate else {
-                return false
-            }
-            return start <= now && now <= end
-        }),
-            let start = event.startDate,
-            let end = event.endDate
-        else {
-            return nil
-        }
-        // EKEvent.title is typed `String!`; treat nil as empty so
-        // the cascade-equivalent regex bank still runs on a
-        // zero-length input (cheap no-op).
-        let subject = event.title ?? ""
-        return CalendarEventRef(
-            subject: subject,
-            startUnixSeconds: Int64(start.timeIntervalSince1970),
-            endUnixSeconds: Int64(end.timeIntervalSince1970)
-        )
-        #else
-        return nil
-        #endif
+    /// Always `nil`: no moment carries a calendar event.
+    public func eventNow(at _: Date) -> CalendarEventRef? {
+        nil
     }
 }
