@@ -364,12 +364,16 @@ struct MemoryWorkspaceView: View {
         .onChange(of: fieldFocused) { _, focused in
             if WindowMenuState.shared.fieldFocused != focused { WindowMenuState.shared.fieldFocused = focused }
         }
+        .registerActionPanelCommands(goToItems, registry: .shared)
         .onAppear { publishMenuState() }
         .onChange(of: choices) { _, _ in publishMenuState() }
         .onChange(of: sidebarHidden) { _, _ in publishMenuState() }
         // Every place forgets through the shell's coordinator: the hold,
         // Undo, and a crash's leftover (SPEC 3.11).
         .environment(\.forgetCoordinator, forgetting)
+        // Whether Hippocampus is remembering, as the banner says: Today
+        // never shows "Now" while it isn't (SPEC 3.1).
+        .environment(\.windowStatus, status)
         // Outermost, so sheets and every place see it: in the synthetic
         // preview nothing opens the person's own data or deletes anything.
         .environment(\.isSyntheticPreview, isSyntheticPreview)
@@ -663,6 +667,8 @@ struct MemoryWorkspaceView: View {
             forgetSheet = ForgetRecentSheetItem(choice: choice, openedAt: now())
         case .undoForget:
             if forgetting.undo() { notes.dismiss() }
+        case .reloadSidebar:
+            reloadChoices(applyAtOnce: true)
         }
     }
 
@@ -694,6 +700,18 @@ struct MemoryWorkspaceView: View {
                                       sidebarHidden: sidebarHidden)
     }
 
+    /// ⌘K's Go To lists every Working On item in the sidebar by name
+    /// (SPEC 2.9); its places are the root's.
+    private var goToItems: [ActionPanelCommand] {
+        sidebar.shown.workingOn.compactMap { id in
+            sidebar.shown.items[id].map { item in
+                ActionPanelCommand(id: "go.item.\(id)", title: item.name, shortcut: "", category: .goTo) {
+                    go(to: .item(id))
+                }
+            }
+        }
+    }
+
     // MARK: Reading the sidebar and the status
 
     private func loadStatus() async {
@@ -715,7 +733,14 @@ struct MemoryWorkspaceView: View {
         let sawSearch = !(overview.overview?.searches.isEmpty ?? true)
         let kinds = LibraryKinds.kinds(apps: apps, snapshot: snapshot, sawSearch: sawSearch)
         let memory = isSyntheticPreview ? "synthetic" : ProcessInfo.processInfo.environment["MCI_DB_PATH"] ?? "default"
+        let before = hides.appearedKinds(memory: memory)
         let appeared = hides.noteAppeared(kinds, memory: memory)
+        // VoiceOver hears the first new row once, ever, not every one
+        // (SPEC 2.15).
+        if let first = SidebarPlace.libraryKinds.first(where: { appeared.contains($0) && !before.contains($0) }),
+           !isSyntheticPreview, hides.takeRowAnnouncement() {
+            AccessibilityNotification.Announcement(NavigationCopy.rowAdded(first.title)).post()
+        }
         let model = SidebarModel.make(snapshot: snapshot, kinds: appeared, hides: hides.choices)
         let first = sidebar.shown.workingOn.isEmpty && !model.workingOn.isEmpty
         withAnimation(MCI.Motion.standard) {
@@ -1002,6 +1027,9 @@ enum WindowShellCommand: Equatable {
     case toggleWorkingOn
     case forgetRecent(ForgetRecentChoice)
     case undoForget
+    /// Read Working On and the kinds again now: Show in Sidebar on Show
+    /// All, or anything else that changed what the sidebar lists.
+    case reloadSidebar
 
     @MainActor
     func post() {
@@ -1043,5 +1071,18 @@ extension EnvironmentValues {
     var forgetCoordinator: ForgetCoordinator? {
         get { self[ForgetCoordinatorKey.self] }
         set { self[ForgetCoordinatorKey.self] = newValue }
+    }
+}
+
+/// Whether Hippocampus is remembering, as the window shows it, for every
+/// place (the menu bar's own words over the pipe).
+private struct WindowStatusKey: EnvironmentKey {
+    static let defaultValue = WindowStatus.unknown
+}
+
+extension EnvironmentValues {
+    var windowStatus: WindowStatus {
+        get { self[WindowStatusKey.self] }
+        set { self[WindowStatusKey.self] = newValue }
     }
 }

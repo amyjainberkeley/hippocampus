@@ -120,10 +120,11 @@ struct SidebarView: View {
                 case .top:
                     ForEach(group.rows) { row in rowView(row).tag(row) }
                 case .workingOn:
-                    Section(isExpanded: Binding(get: { !choices.workingOnHidden },
-                                                set: { actions.setWorkingOnHidden(!$0) })) {
-                        ForEach(group.rows) { row in rowView(row).tag(row) }
-                        if showsFootnote {
+                    Section {
+                        if !choices.workingOnHidden {
+                            ForEach(group.rows) { row in rowView(row).tag(row) }
+                        }
+                        if showsFootnote, !choices.workingOnHidden {
                             Text(NavigationCopy.workingOnFootnote)
                                 .font(.system(size: 11))
                                 .foregroundStyle(MCI.Color.sidebarSecondary)
@@ -133,16 +134,21 @@ struct SidebarView: View {
                                 .transition(.opacity)
                         }
                     } header: {
-                        SectionHeader(title: NavigationCopy.workingOn)
-                            .contextMenu { sidebarMenu }
+                        SectionHeader(title: NavigationCopy.workingOn, collapsed: choices.workingOnHidden) {
+                            actions.setWorkingOnHidden(!choices.workingOnHidden)
+                        }
+                        .contextMenu { sidebarMenu }
                     }
                 case .library:
-                    Section(isExpanded: Binding(get: { !choices.libraryCollapsed },
-                                                set: { actions.setLibraryCollapsed(!$0) })) {
-                        ForEach(group.rows) { row in rowView(row).tag(row) }
+                    Section {
+                        if !choices.libraryCollapsed {
+                            ForEach(group.rows) { row in rowView(row).tag(row) }
+                        }
                     } header: {
-                        SectionHeader(title: NavigationCopy.library)
-                            .contextMenu { sidebarMenu }
+                        SectionHeader(title: NavigationCopy.library, collapsed: choices.libraryCollapsed) {
+                            actions.setLibraryCollapsed(!choices.libraryCollapsed)
+                        }
+                        .contextMenu { sidebarMenu }
                     }
                 case .pinned:
                     EmptyView()
@@ -259,15 +265,37 @@ struct SidebarView: View {
 }
 
 /// A section's header: the system's 11 pt semibold, in the secondary
-/// label colour (SPEC 2.4).
+/// label colour (SPEC 2.4). It collapses the section; its chevron shows
+/// while the pointer is over it, and stays while the section is collapsed.
 private struct SectionHeader: View {
     let title: String
+    let collapsed: Bool
+    let toggle: () -> Void
+    @State private var hovered = false
 
     var body: some View {
-        Text(title)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(MCI.Color.sidebarSecondary)
-            .accessibilityAddTraits(.isHeader)
+        Button(action: toggle) {
+            HStack(spacing: 0) {
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(MCI.Color.sidebarSecondary)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(MCI.Color.sidebarSecondary)
+                    .rotationEffect(.degrees(collapsed ? 0 : 90))
+                    .opacity(collapsed || hovered ? 1 : 0)
+                    .padding(.trailing, 12)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(MCI.Motion.snap, value: hovered)
+        .animation(MCI.Motion.snap, value: collapsed)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityValue(collapsed ? "collapsed" : "")
     }
 }
 

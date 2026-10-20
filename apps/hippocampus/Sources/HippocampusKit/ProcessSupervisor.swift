@@ -2145,8 +2145,13 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     /// The status row as the menu bar and the window show it: a timed
     /// pause says when it ends, and a hold says "Forgetting…".
     public func menuRow(setupFinished: Bool = OnboardingSentinel.isComplete) -> StatusRow {
+        menuRow(statusRow(setupFinished: setupFinished))
+    }
+
+    /// `row` as the menu bar and the window show it.
+    public func menuRow(_ row: StatusRow) -> StatusRow {
         if holdingForForget { return .forgetting }
-        return statusRow(setupFinished: setupFinished).pausedUntil(pausedUntil, now: clock())
+        return row.pausedUntil(pausedUntil, now: clock())
     }
 
     /// One request from the window: carried out only where the menu bar's

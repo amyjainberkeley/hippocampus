@@ -109,7 +109,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         supervisor.retryIfPermissionMayBeBack()
         let setupFinished = OnboardingSentinel.isComplete
         items = StatusMenuModel.items(
-            row: supervisor.menuRow(setupFinished: setupFinished),
+            // A timed pause says when it ends; a window's forget, Forgetting….
+            row: supervisor.menuRow(supervisor.statusRow(setupFinished: setupFinished)),
             setupComplete: supervisor.setup(finished: setupFinished) == .complete,
             askLabel: askKey.label,
             aiToolsConnected: aiToolsConnected,

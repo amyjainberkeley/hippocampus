@@ -46,6 +46,7 @@ public final class SidebarHides: @unchecked Sendable {
         static let footnoteSaid = "window.sidebar.workingOnFootnoteSaid"
         static let sidebarLineSaid = "window.sidebar.newSidebarLineSaid"
         static let firstForgetSaid = "window.forget.firstSaid"
+        static let rowAnnounced = "window.sidebar.rowAnnounced"
         static let appearedKinds = "window.sidebar.appearedKinds."
         static let all = [hiddenItems, hiddenKinds, shownKinds, workingOnHidden, libraryCollapsed]
     }
@@ -146,6 +147,12 @@ public final class SidebarHides: @unchecked Sendable {
     public var firstForgetDue: Bool { !bool(Key.firstForgetSaid) }
 
     public func firstForgetSaid() { set(true, for: Key.firstForgetSaid) }
+
+    /// VoiceOver says the first new sidebar row once, ever (SPEC 2.15).
+    /// True the first time it is asked for, false after.
+    public func takeRowAnnouncement() -> Bool {
+        takeOnce(Key.rowAnnounced)
+    }
 
     // MARK: Kinds that have appeared
 
