@@ -275,9 +275,14 @@ public enum MacFacts {
 
     /// Whether a connected keyboard has Fn: a Mac's built-in keyboard, or
     /// an Apple keyboard (Apple's USB and Bluetooth vendor ids). Many other
-    /// keyboards have no Fn the Mac can see.
+    /// keyboards have no Fn the Mac can see. An empty list means the
+    /// registry couldn't say: Fn isn't refused on a guess.
     public static func keyboardHasFn() -> Bool {
-        keyboards().contains(where: \.hasFn)
+        hasFn(keyboards())
+    }
+
+    public static func hasFn(_ keyboards: [Keyboard]) -> Bool {
+        keyboards.isEmpty || keyboards.contains(where: \.hasFn)
     }
 
     /// One keyboard as IOKit lists it.

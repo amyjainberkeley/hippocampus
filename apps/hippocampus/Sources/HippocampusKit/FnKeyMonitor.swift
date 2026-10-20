@@ -260,9 +260,16 @@ public enum FnKeyMacFacts {
         return (value as? NSNumber)?.intValue
     }
 
-    /// A Mac's built-in keyboard, or an Apple keyboard, is connected.
+    /// A Mac's built-in keyboard, or an Apple keyboard, is connected. An
+    /// empty list means the registry couldn't say, not that there is no
+    /// Fn: the key isn't refused on a guess.
     public static func keyboardHasFn() -> Bool {
-        keyboards().contains(where: \.hasFn)
+        hasFn(keyboards())
+    }
+
+    /// Whether these keyboards have Fn, as `keyboardHasFn` decides.
+    public static func hasFn(_ keyboards: [Keyboard]) -> Bool {
+        keyboards.isEmpty || keyboards.contains(where: \.hasFn)
     }
 
     /// One keyboard as the I/O Registry lists it.

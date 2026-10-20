@@ -146,6 +146,12 @@ final class SoloKeyMonitor {
     /// A modifier changed: its key code and the modifier bits held, nothing
     /// else. A `.flagsChanged` event carries no typed character.
     private func handle(_ event: NSEvent) {
+        // Fn went down while Shift twice stands in for it: a keyboard here
+        // has Fn after all.
+        if watch.key == .fn, watch.listeningKey != .fn, FnKeyMonitor.keyCodes.contains(event.keyCode),
+           event.modifierFlags.rawValue & FnKeyMonitor.functionMask != 0 {
+            watch.noticedFnKey()
+        }
         let fired = detector.modifiersChanged(
             keyCode: event.keyCode,
             flags: event.modifierFlags.rawValue,

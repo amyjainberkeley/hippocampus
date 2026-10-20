@@ -174,6 +174,9 @@ public final class AskKeyWatch: ObservableObject {
     /// A key setup chose since Preferences last looked, for Preferences to
     /// take as its own (`AskKeyPicker`).
     @Published public private(set) var chosenInSetup: SoloKey?
+    /// Fn was pressed on this Mac since the app started: whatever the
+    /// keyboard list said, a keyboard here has Fn.
+    @Published public private(set) var fnKeyNoticed = false
 
     private let hooks: Hooks
     private let defaults: UserDefaults?
@@ -213,7 +216,10 @@ public final class AskKeyWatch: ObservableObject {
 
     /// Fn's checks: the last ones read, or read now.
     public func currentFnCheck() -> FnKeyCheck {
-        fnCheck ?? hooks.fnCheck()
+        if let fnCheck { return fnCheck }
+        let check = hooks.fnCheck()
+        return fnKeyNoticed && !check.hasFnKey
+            ? FnKeyCheck(hasFnKey: true, appsUsingFn: check.appsUsingFn, globeAction: check.globeAction) : check
     }
 
     /// Listen for `key`, replacing any earlier choice.
@@ -263,6 +269,15 @@ public final class AskKeyWatch: ObservableObject {
         chosenInSetup = nil
     }
 
+    /// The monitor saw Fn go down (a modifier change; nothing typed). While
+    /// Fn is the key and Shift twice stood in because no keyboard seemed to
+    /// have Fn, Fn listens from now on.
+    public func noticedFnKey() {
+        guard !fnKeyNoticed else { return }
+        fnKeyNoticed = true
+        if key == .fn { recheck() }
+    }
+
     /// Look again whether Accessibility is allowed, and listen if it is.
     public func recheck() {
         let trusted = hooks.isTrusted()
@@ -296,7 +311,10 @@ public final class AskKeyWatch: ObservableObject {
             fnCheck = nil
             return key
         }
-        let check = hooks.fnCheck()
+        var check = hooks.fnCheck()
+        if fnKeyNoticed, !check.hasFnKey {
+            check = FnKeyCheck(hasFnKey: true, appsUsingFn: check.appsUsingFn, globeAction: check.globeAction)
+        }
         if check != fnCheck { fnCheck = check }
         return check.listeningKey(accepted: fnAccepted)
     }

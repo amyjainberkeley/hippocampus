@@ -246,5 +246,7 @@ final class AskKeyChoiceTests: XCTestCase {
         XCTAssertTrue(MacFacts.Keyboard(builtIn: false, vendorId: 0x004C).hasFn, "Apple, Bluetooth")
         XCTAssertFalse(MacFacts.Keyboard(builtIn: false, vendorId: 0x046D).hasFn, "another maker's")
         XCTAssertFalse(MacFacts.Keyboard(builtIn: false, vendorId: nil).hasFn)
+        XCTAssertFalse(MacFacts.hasFn([MacFacts.Keyboard(builtIn: false, vendorId: 0x046D)]))
+        XCTAssertTrue(MacFacts.hasFn([]), "an empty list can't say: Fn isn't refused on a guess")
     }
 }

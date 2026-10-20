@@ -269,6 +269,35 @@ final class FnKeyMonitorTests: XCTestCase {
     }
 
     @MainActor
+    func testAFnPressSeenTeachesThatAKeyboardHasFn() {
+        // The keyboard list said no Fn, but Fn went down: a keyboard here
+        // has it after all, and Fn listens from then on.
+        let rig = Rig()
+        rig.check = FnKeyCheck(hasFnKey: false, appsUsingFn: [], globeAction: .doNothing)
+        let watch = AskKeyWatch(hooks: rig.hooks)
+        watch.setFallbackRegistered(true)
+        watch.start(key: .fn)
+        XCTAssertEqual(watch.listeningKey, .shiftTwice)
+        watch.noticedFnKey()
+        XCTAssertTrue(watch.fnKeyNoticed)
+        XCTAssertEqual(watch.listeningKey, .fn)
+        XCTAssertEqual(rig.installs, [.shiftTwice, .fn])
+        XCTAssertEqual(watch.caption.text, "Tap Fn by itself. Fn with arrows and function keys keeps working.")
+        // Still never over another app without Use Fn.
+        rig.check = FnKeyCheck(hasFnKey: false, appsUsingFn: ["Wispr Flow"], globeAction: .doNothing)
+        watch.recheck()
+        XCTAssertEqual(watch.listeningKey, .shiftTwice)
+        XCTAssertTrue(watch.caption.offersUseFn)
+    }
+
+    @MainActor
+    func testTheMonitorLearnsFnFromAModifierChangeOnly() throws {
+        let monitor = try source("Sources/Hippocampus/SoloKeyMonitor.swift")
+        XCTAssertTrue(monitor.contains("FnKeyMonitor.keyCodes.contains(event.keyCode),"))
+        XCTAssertTrue(monitor.contains("event.modifierFlags.rawValue & FnKeyMonitor.functionMask != 0 {\n            watch.noticedFnKey()"))
+    }
+
+    @MainActor
     func testAnotherKeyNeverReadsFnsChecks() {
         let rig = Rig()
         var reads = 0
@@ -365,6 +394,10 @@ final class FnKeyMonitorTests: XCTestCase {
         XCTAssertTrue(FnKeyMacFacts.Keyboard(builtIn: false, vendorId: 0x05AC).hasFn)
         XCTAssertTrue(FnKeyMacFacts.Keyboard(builtIn: false, vendorId: 0x004C).hasFn)
         XCTAssertFalse(FnKeyMacFacts.Keyboard(builtIn: false, vendorId: 0x046D).hasFn)
+        let other = FnKeyMacFacts.Keyboard(builtIn: false, vendorId: 0x046D)
+        XCTAssertFalse(FnKeyMacFacts.hasFn([other]), "only another maker's keyboard")
+        XCTAssertTrue(FnKeyMacFacts.hasFn([other, FnKeyMacFacts.Keyboard(builtIn: true, vendorId: nil)]))
+        XCTAssertTrue(FnKeyMacFacts.hasFn([]), "an empty list can't say: Fn isn't refused on a guess")
     }
 
     // MARK: - Where it is kept, and Fn offered (moved from SeamWiringTests)
