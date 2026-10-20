@@ -118,8 +118,11 @@ public enum HandoffCopy {
     public static func startsWithSize(words: Int) -> String {
         "About \(words) words, written on this Mac from what you read on screen."
     }
+    /// Connecting asks two questions, looking things up and starting each
+    /// session with recent work (Share or Don't Share), so a session "can"
+    /// start with it, as setup's third card says.
     public static func notConnectedNote(_ tool: String) -> String {
-        "Once connected, it gets your recent work at each session start, and you can read every word here."
+        "Once connected, each session can start with your recent work, and you can read every word here."
     }
     public static let codexNotConnectedNote =
         "Codex in ChatGPT’s desktop app uses the same settings, so connecting Codex lets it look things up too."

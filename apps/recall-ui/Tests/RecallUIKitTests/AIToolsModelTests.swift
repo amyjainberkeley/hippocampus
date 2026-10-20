@@ -104,7 +104,7 @@ final class AIToolsModelTests: XCTestCase {
         let claudeOff = AIToolsModel.card(Self.status("claude-code", lookUps: "off", start: "off", kind: nil),
                                           chatGPTInstalled: true, appURL: claudeApp)
         XCTAssertEqual(claudeOff.lines,
-                       ["Once connected, it gets your recent work at each session start, and you can read every word here."])
+                       ["Once connected, each session can start with your recent work, and you can read every word here."])
     }
 
     func testTheSizeIsRoundedToTens() {
