@@ -88,6 +88,18 @@ final class ToolHistoryPrivacyTests: XCTestCase {
         XCTAssertEqual(privacy.openToOthers([.claudeCode, .codex]), [])
     }
 
+    /// A history kept outside the home folder (CODEX_HOME) is judged by its
+    /// own folders, not by the home folder's.
+    func testAHistoryOutsideAPrivateHomeIsStillChecked() throws {
+        let home = try folder("home", mode: 0o700)
+        let codex = try folder("tools/codex", mode: 0o755)
+        try file("tools/codex/history.jsonl", mode: 0o644)
+        let privacy = ToolHistoryPrivacy(environment: ["HOME": home.path, "CODEX_HOME": codex.path])
+        XCTAssertEqual(privacy.openToOthers([.codex, .claudeCode]), [.codex])
+        XCTAssertTrue(privacy.makePrivate(.codex))
+        XCTAssertEqual(privacy.openToOthers([.codex]), [])
+    }
+
     /// A folder others can enter but whose files are the owner's alone is
     /// not open.
     func testFoldersOthersCanEnterWithPrivateFilesAreNotOpen() throws {

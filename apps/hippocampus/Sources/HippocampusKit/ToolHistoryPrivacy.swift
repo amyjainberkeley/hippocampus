@@ -53,11 +53,16 @@ public struct ToolHistoryPrivacy: Sendable {
 
     /// The tools among `tools` whose history another account on this Mac can
     /// open: a file in it that group or others may read, inside folders they
-    /// may enter, in a home folder they may enter. Read from file modes only.
+    /// may enter, and, for a folder in the home folder, a home folder they
+    /// may enter. Read from file modes only.
     public func openToOthers(_ tools: [AITool]) -> [AITool] {
-        guard let homeMode = Self.mode(of: home.resolvingSymlinksInPath().path),
-              Self.isFolder(homeMode), homeMode & 0o011 != 0 else { return [] }
-        return tools.filter { Self.holdsOpenFile(folder(for: $0).resolvingSymlinksInPath()) }
+        let homeFolder = home.resolvingSymlinksInPath()
+        let homeIsOpen = Self.mode(of: homeFolder.path).map { Self.isFolder($0) && $0 & 0o011 != 0 } ?? false
+        return tools.filter { tool in
+            let folder = folder(for: tool).resolvingSymlinksInPath()
+            if folder.path.hasPrefix(homeFolder.path + "/"), !homeIsOpen { return false }
+            return Self.holdsOpenFile(folder)
+        }
     }
 
     /// Makes `tool`'s history private to you, as `chmod -R go-rwx` would: no
