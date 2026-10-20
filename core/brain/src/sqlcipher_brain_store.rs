@@ -499,10 +499,18 @@ impl SqlCipherBrainStore {
     /// Rows written before sources were recorded (older schemas) follow the
     /// same rule: being the window in the newest screenshot is shown by the
     /// screenshots themselves, not by guessing a source from app or text.
-    /// Windows beside the one in front, mail and messages, imports and MCP
-    /// resources never show another moment's screenshot. Only a stored,
-    /// admitted row's own `keyframe_blob` is ever returned, so nothing
-    /// becomes visible that its own moment does not already show.
+    /// Mail and messages, imports and MCP resources never show another
+    /// moment's screenshot. Only a stored, admitted row's own `keyframe_blob`
+    /// is ever returned, so nothing becomes visible that its own moment does
+    /// not already show.
+    ///
+    /// Pictures of the windows beside the one in front (SPEC 6.4) take no
+    /// part in the front window's borrowing: a front-window moment borrows
+    /// only front-window screenshots, so a side picture never changes which
+    /// screenshot it shows. A side moment shows its own picture, or the
+    /// newest side picture of the same app and title (and page, when both
+    /// name one) at most [`Self::SCREENSHOT_REUSE_US`] older; it never
+    /// borrows a front-window screenshot.
     ///
     /// # Errors
     /// Returns a content-free backend error when the lookup query fails.
@@ -523,13 +531,16 @@ impl SqlCipherBrainStore {
                 digest: digest.to_owned(),
             }));
         }
-        if !matches!(
-            source,
-            EventSource::ScreenOcr
-                | EventSource::BrowserPageWithOcr
-                | EventSource::BrowserPage
-                | EventSource::Unknown
-        ) {
+        let beside = source == EventSource::ScreenContext;
+        if !beside
+            && !matches!(
+                source,
+                EventSource::ScreenOcr
+                    | EventSource::BrowserPageWithOcr
+                    | EventSource::BrowserPage
+                    | EventSource::Unknown
+            )
+        {
             return Ok(None);
         }
         let (Some(app), Some(title)) = (
@@ -545,40 +556,90 @@ impl SqlCipherBrainStore {
         ) else {
             return Ok(None);
         };
-        // The newest screenshot kept up to this moment, of any window: the
-        // one the helper compared this moment's picture with.
+        let same_window =
+            |kept_app: Option<&str>, kept_title: Option<&str>, kept_url: Option<&str>| {
+                let kept_url = nonempty(kept_url);
+                nonempty(kept_app) == Some(app)
+                    && nonempty(kept_title) == Some(title)
+                    && (url.is_none() || kept_url.is_none() || kept_url == url)
+            };
         let guard = self.db.lock().expect("brain store mutex poisoned");
-        let newest = guard
-            .conn()
-            .prepare_cached(
+        let connection = guard.conn();
+        // A store from before sources were recorded holds no side pictures.
+        let sources_recorded = has_event_sources(connection)?;
+        let newest = if beside {
+            if !sources_recorded {
+                return Ok(None);
+            }
+            // The newest side picture of this window kept up to this moment.
+            // Other windows' pictures are skipped: many side windows are on
+            // screen at once, and each keeps its own.
+            let mut statement = connection
+                .prepare_cached(
+                    "SELECT e.id, e.ts_us, e.app_bundle_id, e.window_title, e.url, e.keyframe_blob
+                     FROM events e
+                     WHERE e.keyframe_blob IS NOT NULL AND e.ts_us <= ?1 AND e.ts_us >= ?2
+                       AND EXISTS (SELECT 1 FROM event_sources s
+                                   WHERE s.event_id = e.id AND s.source_kind = 'screen_context')
+                     ORDER BY e.ts_us DESC, e.id DESC",
+                )
+                .map_err(|e| StoreError::Backend(format!("read side picture: {e}")))?;
+            let mut rows = statement
+                .query(params![upper, lower])
+                .map_err(|e| StoreError::Backend(format!("read side picture: {e}")))?;
+            let mut found = None;
+            while let Some(row) = rows
+                .next()
+                .map_err(|e| StoreError::Backend(format!("read side picture: {e}")))?
+            {
+                let kept = kept_screenshot_row(row)
+                    .map_err(|e| StoreError::Backend(format!("read side picture: {e}")))?;
+                if same_window(
+                    kept.app.as_deref(),
+                    kept.title.as_deref(),
+                    kept.url.as_deref(),
+                ) {
+                    found = Some((kept.id_and_ts, true, kept.digest));
+                    break;
+                }
+            }
+            found
+        } else {
+            // The newest front-window screenshot kept up to this moment, of
+            // any window: the one the helper compared this moment's picture
+            // with. Side pictures are not part of that comparison.
+            let sql = if sources_recorded {
+                "SELECT id, ts_us, app_bundle_id, window_title, url, keyframe_blob
+                 FROM events
+                 WHERE keyframe_blob IS NOT NULL AND ts_us <= ?1 AND ts_us >= ?2
+                   AND NOT EXISTS (SELECT 1 FROM event_sources s
+                                   WHERE s.event_id = events.id AND s.source_kind = 'screen_context')
+                 ORDER BY ts_us DESC, id DESC
+                 LIMIT 1"
+            } else {
                 "SELECT id, ts_us, app_bundle_id, window_title, url, keyframe_blob
                  FROM events
                  WHERE keyframe_blob IS NOT NULL AND ts_us <= ?1 AND ts_us >= ?2
                  ORDER BY ts_us DESC, id DESC
-                 LIMIT 1",
-            )
-            .and_then(|mut statement| {
-                statement
-                    .query_row(params![upper, lower], |row| {
-                        let id: i64 = row.get(0)?;
-                        let ts_us: i64 = row.get(1)?;
-                        let kept_app: Option<String> = row.get(2)?;
-                        let kept_title: Option<String> = row.get(3)?;
-                        let kept_url: Option<String> = row.get(4)?;
-                        let digest: String = row.get(5)?;
-                        let kept_url = nonempty(kept_url.as_deref());
-                        let same_window = nonempty(kept_app.as_deref()) == Some(app)
-                            && nonempty(kept_title.as_deref()) == Some(title)
-                            && (url.is_none() || kept_url.is_none() || kept_url == url);
-                        Ok((
-                            u64::try_from(id).ok().zip(u64::try_from(ts_us).ok()),
-                            same_window,
-                            digest.trim().to_owned(),
-                        ))
-                    })
-                    .optional()
-            })
-            .map_err(|e| StoreError::Backend(format!("read moment screenshot: {e}")))?;
+                 LIMIT 1"
+            };
+            connection
+                .prepare_cached(sql)
+                .and_then(|mut statement| {
+                    statement
+                        .query_row(params![upper, lower], |row| {
+                            let kept = kept_screenshot_row(row)?;
+                            let same = same_window(
+                                kept.app.as_deref(),
+                                kept.title.as_deref(),
+                                kept.url.as_deref(),
+                            );
+                            Ok((kept.id_and_ts, same, kept.digest))
+                        })
+                        .optional()
+                })
+                .map_err(|e| StoreError::Backend(format!("read moment screenshot: {e}")))?
+        };
         drop(guard);
         Ok(match newest {
             Some((Some((id, ts_us)), true, digest)) if is_keyframe_digest(&digest) => {
@@ -2512,6 +2573,41 @@ fn blob_dir_for_brain(brain_path: &Path) -> PathBuf {
 /// `value` without surrounding whitespace, or `None` when nothing is left.
 fn nonempty(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+/// Whether this store records where each moment came from (migration 0009).
+/// Older read-only stores do not, and hold no pictures of side windows.
+pub(crate) fn has_event_sources(connection: &rusqlite::Connection) -> Result<bool, StoreError> {
+    connection
+        .prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_sources')",
+        )
+        .and_then(|mut statement| statement.query_row([], |row| row.get(0)))
+        .map_err(|e| StoreError::Backend(format!("probe event sources: {e}")))
+}
+
+/// One stored screenshot as the borrowing rule reads it: its moment, when
+/// it was kept, the window it shows and the digest that names it.
+struct KeptScreenshotRow {
+    id_and_ts: Option<(u64, u64)>,
+    app: Option<String>,
+    title: Option<String>,
+    url: Option<String>,
+    digest: String,
+}
+
+/// Reads `id, ts_us, app_bundle_id, window_title, url, keyframe_blob`.
+fn kept_screenshot_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<KeptScreenshotRow> {
+    let id: i64 = row.get(0)?;
+    let ts_us: i64 = row.get(1)?;
+    let digest: String = row.get(5)?;
+    Ok(KeptScreenshotRow {
+        id_and_ts: u64::try_from(id).ok().zip(u64::try_from(ts_us).ok()),
+        app: row.get(2)?,
+        title: row.get(3)?,
+        url: row.get(4)?,
+        digest: digest.trim().to_owned(),
+    })
 }
 
 pub(crate) fn is_keyframe_digest(value: &str) -> bool {

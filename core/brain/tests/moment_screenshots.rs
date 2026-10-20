@@ -348,3 +348,260 @@ fn deleting_the_moment_that_kept_a_screenshot_takes_it_from_its_window() {
     brain.store.delete_events_in_range(T0, T0).unwrap();
     assert_eq!(brain.shown(later), None);
 }
+
+// Pictures of the windows beside the front one (SPEC 6.4): a side picture
+// is kept on a side window's own moment, and borrowing keeps the two kinds
+// apart. Front-window moments borrow only front-window screenshots; a side
+// moment shows its own picture, or the newest side picture of the same
+// window at most five minutes older, and never a front-window screenshot.
+
+const SLACK: &str = "com.tinyspeck.slackmacgap";
+const LAUNCH: &str = "launch (Channel) - Northwind Studio - Slack";
+
+/// What every moment in `ids` shows, in order.
+fn shown_all(brain: &Brain, ids: &[EventId]) -> Vec<Option<(EventId, u64, String)>> {
+    ids.iter().map(|id| brain.shown(*id)).collect()
+}
+
+#[test]
+fn a_side_picture_never_changes_which_screenshot_a_front_moment_shows() {
+    // A front-window afternoon: the article kept a screenshot, then the
+    // editor, then the article again without one (the window changed).
+    let front = Brain::new();
+    let side = Brain::new();
+    let timeline: Vec<(Row<'_>, EventSource)> = vec![
+        (
+            Row::new(T0, CHROME, ARTICLE).kept(1),
+            EventSource::ScreenOcr,
+        ),
+        (
+            Row::new(T0 + 20 * SECOND, CHROME, ARTICLE),
+            EventSource::ScreenOcr,
+        ),
+        (
+            Row::new(T0 + 40 * SECOND, CHROME, ARTICLE),
+            EventSource::BrowserPageWithOcr,
+        ),
+        (
+            Row::new(T0 + 60 * SECOND, CODE, TAX).kept(2),
+            EventSource::ScreenOcr,
+        ),
+        (
+            Row::new(T0 + 90 * SECOND, CODE, TAX),
+            EventSource::ScreenOcr,
+        ),
+        (
+            Row::new(T0 + 2 * MINUTE, CHROME, ARTICLE),
+            EventSource::ScreenOcr,
+        ),
+        (Row::new(T0 + 3 * MINUTE, CODE, TAX), EventSource::ScreenOcr),
+        (Row::new(T0 + 9 * MINUTE, CODE, TAX), EventSource::ScreenOcr),
+    ];
+    let mut front_ids = Vec::new();
+    let mut side_ids = Vec::new();
+    for (row, source) in &timeline {
+        front_ids.push(front.put(row, *source));
+    }
+    // The same afternoon with pictures of the windows beside it kept in
+    // between, one of them of the very window that is in front elsewhere.
+    let beside: Vec<Row<'_>> = vec![
+        Row::new(T0 + 10 * SECOND, SLACK, LAUNCH).kept(11),
+        Row::new(T0 + 30 * SECOND, CODE, TAX).kept(12),
+        Row::new(T0 + 50 * SECOND, CHROME, ARTICLE).kept(13),
+        Row::new(T0 + 80 * SECOND, SLACK, LAUNCH).kept(14),
+        Row::new(T0 + 100 * SECOND, CHROME, ARTICLE).kept(15),
+        Row::new(T0 + 150 * SECOND, CODE, TAX).kept(16),
+        Row::new(T0 + 4 * MINUTE, SLACK, LAUNCH),
+    ];
+    let mut merged: Vec<(&Row<'_>, EventSource, bool)> = timeline
+        .iter()
+        .map(|(row, source)| (row, *source, true))
+        .chain(
+            beside
+                .iter()
+                .map(|row| (row, EventSource::ScreenContext, false)),
+        )
+        .collect();
+    merged.sort_by_key(|(row, _, _)| row.ts_us);
+    for (row, source, is_front) in merged {
+        let id = side.put(row, source);
+        if is_front {
+            side_ids.push(id);
+        }
+    }
+
+    let before = shown_all(&front, &front_ids);
+    let after = shown_all(&side, &side_ids);
+    // The ids differ between the two stores; what each moment shows does not.
+    let strip = |shown: Vec<Option<(EventId, u64, String)>>| {
+        shown
+            .into_iter()
+            .map(|shot| shot.map(|(_, ts, digest)| (ts, digest)))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(strip(before.clone()), strip(after));
+    // And the afternoon itself reads as it always did.
+    assert_eq!(
+        strip(before),
+        vec![
+            Some((T0, digest(1))),
+            Some((T0, digest(1))),
+            Some((T0, digest(1))),
+            Some((T0 + 60 * SECOND, digest(2))),
+            Some((T0 + 60 * SECOND, digest(2))),
+            None,
+            Some((T0 + 60 * SECOND, digest(2))),
+            None,
+        ]
+    );
+}
+
+#[test]
+fn a_side_moment_that_kept_a_picture_shows_its_own() {
+    let brain = Brain::new();
+    let id = brain.put(
+        &Row::new(T0, SLACK, LAUNCH).kept(21),
+        EventSource::ScreenContext,
+    );
+    assert_eq!(brain.shown(id), Some((id, T0, digest(21))));
+}
+
+#[test]
+fn a_side_moment_shows_the_newest_side_picture_of_its_window_up_to_five_minutes_older() {
+    let brain = Brain::new();
+    brain.put(
+        &Row::new(T0, SLACK, LAUNCH).kept(21),
+        EventSource::ScreenContext,
+    );
+    let newer = brain.put(
+        &Row::new(T0 + MINUTE, SLACK, LAUNCH).kept(22),
+        EventSource::ScreenContext,
+    );
+    // Another window's picture in between changes nothing for this one.
+    brain.put(
+        &Row::new(T0 + 90 * SECOND, CODE, TAX).kept(23),
+        EventSource::ScreenContext,
+    );
+    let later = brain.put(
+        &Row::new(T0 + 2 * MINUTE, SLACK, LAUNCH),
+        EventSource::ScreenContext,
+    );
+    let edge = brain.put(
+        &Row::new(
+            T0 + MINUTE + SqlCipherBrainStore::SCREENSHOT_REUSE_US,
+            SLACK,
+            LAUNCH,
+        ),
+        EventSource::ScreenContext,
+    );
+    let past = brain.put(
+        &Row::new(
+            T0 + MINUTE + SqlCipherBrainStore::SCREENSHOT_REUSE_US + 1,
+            SLACK,
+            LAUNCH,
+        ),
+        EventSource::ScreenContext,
+    );
+    assert_eq!(brain.shown(later), Some((newer, T0 + MINUTE, digest(22))));
+    assert_eq!(brain.shown(edge), Some((newer, T0 + MINUTE, digest(22))));
+    assert_eq!(brain.shown(past), None);
+}
+
+#[test]
+fn a_side_moment_never_borrows_a_front_window_screenshot() {
+    let brain = Brain::new();
+    // The window was in front a moment ago and kept a screenshot there.
+    brain.put(
+        &Row::new(T0, SLACK, LAUNCH).kept(31),
+        EventSource::ScreenOcr,
+    );
+    let beside = brain.put(
+        &Row::new(T0 + 30 * SECOND, SLACK, LAUNCH),
+        EventSource::ScreenContext,
+    );
+    assert_eq!(brain.shown(beside), None);
+    // A front moment never borrows the side picture of its own window either.
+    brain.put(
+        &Row::new(T0 + MINUTE, CHROME, ARTICLE).kept(32),
+        EventSource::ScreenContext,
+    );
+    let in_front = brain.put(
+        &Row::new(T0 + 70 * SECOND, CHROME, ARTICLE),
+        EventSource::ScreenOcr,
+    );
+    assert_eq!(brain.shown(in_front), None);
+}
+
+#[test]
+fn a_side_moment_never_borrows_another_windows_picture() {
+    let brain = Brain::new();
+    brain.put(
+        &Row::new(T0, SLACK, LAUNCH).kept(41),
+        EventSource::ScreenContext,
+    );
+    brain.put(
+        &Row::new(T0, CHROME, "New Tab")
+            .url("https://a.example/")
+            .kept(42),
+        EventSource::ScreenContext,
+    );
+    let other_title = brain.put(
+        &Row::new(
+            T0 + SECOND,
+            SLACK,
+            "general (Channel) - Northwind Studio - Slack",
+        ),
+        EventSource::ScreenContext,
+    );
+    let other_app = brain.put(
+        &Row::new(T0 + 2 * SECOND, CODE, LAUNCH),
+        EventSource::ScreenContext,
+    );
+    let other_page = brain.put(
+        &Row::new(T0 + 3 * SECOND, CHROME, "New Tab").url("https://b.example/"),
+        EventSource::ScreenContext,
+    );
+    let before = brain.put(
+        &Row::new(T0 - SECOND, SLACK, LAUNCH),
+        EventSource::ScreenContext,
+    );
+    assert_eq!(brain.shown(other_title), None);
+    assert_eq!(brain.shown(other_app), None);
+    assert_eq!(brain.shown(other_page), None);
+    assert_eq!(brain.shown(before), None);
+}
+
+#[test]
+fn a_malformed_side_picture_is_never_shown() {
+    let brain = Brain::new();
+    brain.put(
+        &Row::new(T0, SLACK, LAUNCH).kept(51),
+        EventSource::ScreenContext,
+    );
+    let mut bad = Row::new(T0 + SECOND, SLACK, LAUNCH);
+    bad.keyframe = Some("not-a-digest".into());
+    brain.put(&bad, EventSource::ScreenContext);
+    let after = brain.put(
+        &Row::new(T0 + 2 * SECOND, SLACK, LAUNCH),
+        EventSource::ScreenContext,
+    );
+    // The window's newest picture cannot be opened; the older one is
+    // another picture of it, so the moment shows none.
+    assert_eq!(brain.shown(after), None);
+}
+
+#[test]
+fn deleting_the_side_moment_that_kept_a_picture_takes_it_from_its_window() {
+    let brain = Brain::new();
+    let kept = brain.put(
+        &Row::new(T0, SLACK, LAUNCH).kept(61),
+        EventSource::ScreenContext,
+    );
+    let later = brain.put(
+        &Row::new(T0 + 30 * SECOND, SLACK, LAUNCH),
+        EventSource::ScreenContext,
+    );
+    assert_eq!(brain.shown(later), Some((kept, T0, digest(61))));
+    brain.store.delete_event(kept).unwrap();
+    assert_eq!(brain.shown(later), None);
+}
