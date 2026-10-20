@@ -190,7 +190,10 @@ final class StatusItemWiringTests: XCTestCase {
         }
         let connect = try source("ConnectAITools.swift")
         XCTAssertTrue(connect.contains("AIToolConnector(agentURL: agent, baseEnvironment: environment).connect()"))
-        XCTAssertTrue(connect.contains("AIToolsCopy.result(report, sessionErrors: sessionErrors)"))
+        // It ends on one result, with what went wrong in the session-start
+        // question and in making a tool's history private (storage review S6).
+        XCTAssertTrue(connect.contains("AIToolsCopy.result(report, sessionErrors: sessionErrors + privacyErrors)"))
+        XCTAssertTrue(connect.contains("self?.offerPrivateHistory(for: connected, environment: environment)"))
         XCTAssertTrue(connect.contains("NSApp.activate()"), "an alert from a menu-bar app comes to the front")
     }
 }
