@@ -414,6 +414,9 @@ struct MemoryWorkspaceView: View {
         .task {
             guard preset == nil, let channel else { return }
             for await pushed in channel.statuses() {
+                // A forget a failure kept is tried again when the app says
+                // a hold can be had (SPEC 3.11).
+                forgetting.statusArrived(pushed)
                 status = WindowStatus(pushed).forgetting(forgetting.phase)
             }
         }

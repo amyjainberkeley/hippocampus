@@ -391,6 +391,103 @@ final class ForgetPipelineTests: XCTestCase {
         XCTAssertEqual(NavigationCopy.couldNotForgetAll, "Couldn\u{2019}t forget all of it. Some of it is still saved.")
     }
 
+    // MARK: A forget a crash left, kept until it can be done
+
+    private static let remembering = WindowChannelStatus(state: .remembering, title: "Remembering", action: "pause")
+    private static let holding = WindowChannelStatus(state: .forgetting, title: "Forgetting\u{2026}")
+
+    /// SPEC 3.11: "the pending file is applied the next time the window
+    /// opens". When the app can't hold at that moment (it is still starting,
+    /// or the lease stayed busy), the leftover stays promised.
+    func testALeftoverForgetIsKeptWhenTheHoldCantBeHadOnOpen() async throws {
+        try store.save(ForgetRequest(momentIds: [41]))
+        let mutator = LeaseMutator()
+        let channel = AppLikeChannel()
+        channel.holdsAtAll = false
+        let outcome = await coordinator(mutator, channel).finishLeftover()
+        XCTAssertEqual(outcome, .failed)
+        XCTAssertTrue(mutator.deleted.isEmpty)
+        XCTAssertNotNil(store.load(), "a forget the person confirmed before a crash was dropped without being applied")
+    }
+
+    /// The kept leftover is tried again when the app's pushed status says a
+    /// hold can be had, never on one that says a hold is under way, and the
+    /// footer says "Finishing a forget…" until it's done.
+    func testAKeptLeftoverIsFinishedWhenTheAppSaysAHoldCanBeHad() async throws {
+        try store.save(ForgetRequest(momentIds: [41]))
+        let mutator = LeaseMutator()
+        let channel = AppLikeChannel()
+        channel.holdsAtAll = false
+        let forget = coordinator(mutator, channel)
+        _ = await forget.finishLeftover()
+        XCTAssertEqual(forget.phase, .finishing, "\(NavigationCopy.finishingForget) until it's done")
+
+        channel.holdsAtAll = true
+        forget.statusArrived(Self.holding)
+        await forget.idle()
+        XCTAssertEqual(channel.sent, [.hold], "no try while the app says a hold is under way")
+        forget.statusArrived(Self.remembering)
+        await eventually { mutator.deleted == [41] }
+        await forget.idle()
+        XCTAssertEqual(mutator.deleted, [41])
+        XCTAssertNil(store.load())
+        XCTAssertNil(forget.phase)
+        XCTAssertEqual(channel.sent, [.hold, .hold, .release])
+    }
+
+    /// A forget that keeps failing is tried again only a few times in a
+    /// window, so it never keeps stopping remembering; then the footer shows
+    /// the app's own status again, and the promise waits for the next open.
+    func testAForgetThatKeepsFailingIsTriedAgainOnlyAFewTimes() async throws {
+        try store.save(ForgetRequest(momentIds: [41]))
+        let mutator = LeaseMutator()
+        let channel = AppLikeChannel()
+        channel.holdsAtAll = false
+        let forget = coordinator(mutator, channel)
+        _ = await forget.finishLeftover()
+        for _ in 0..<10 {
+            forget.statusArrived(Self.remembering)
+            await Task.yield()
+            await forget.idle()
+        }
+        XCTAssertEqual(channel.sent.filter { $0 == .hold }.count, 1 + ForgetCoordinator.automaticTries)
+        XCTAssertNil(forget.phase, "the app's own status shows again")
+        XCTAssertNotNil(store.load(), "still promised for the next open")
+    }
+
+    /// A stop that failed: the app's banner and its Quit show, not "Finishing
+    /// a forget…", and nothing is tried until the app says a hold can be had.
+    func testAKeptForgetNeverHidesTheAppsCouldNotStop() async throws {
+        try store.save(ForgetRequest(momentIds: [41]))
+        let channel = AppLikeChannel()
+        channel.holdsAtAll = false
+        let forget = coordinator(LeaseMutator(), channel)
+        _ = await forget.finishLeftover()
+        forget.statusArrived(WindowChannelStatus(state: .couldNotStop, title: "Couldn\u{2019}t stop", action: "quit"))
+        await forget.idle()
+        XCTAssertNil(forget.phase)
+        XCTAssertEqual(channel.sent, [.hold])
+    }
+
+    /// A forget asked for now that fails goes back to the person (Try Again):
+    /// it is never tried again behind their back.
+    func testAForgetAskedForNowThatFailsIsNotTriedAgainOnItsOwn() async {
+        let mutator = LeaseMutator()
+        let channel = AppLikeChannel()
+        channel.holdsAtAll = false
+        let forget = coordinator(mutator, channel)
+        let outcome = await forget.forget(ForgetRequest(momentIds: [41]))
+        XCTAssertEqual(outcome, .failed)
+        channel.holdsAtAll = true
+        forget.statusArrived(Self.remembering)
+        await Task.yield()
+        await forget.idle()
+        XCTAssertEqual(channel.sent, [.hold])
+        XCTAssertTrue(mutator.deleted.isEmpty)
+        XCTAssertNil(forget.phase)
+        XCTAssertNil(store.load())
+    }
+
     // MARK: The pending file, as a list
 
     /// Each forget has its own entry: one finishing removes only its own,

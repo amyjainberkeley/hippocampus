@@ -269,13 +269,35 @@ public final class ForgetCoordinator: ObservableObject {
     /// The most moments one delete call takes (the FFI's
     /// `MAX_DELETE_EVENT_IDS`): a forget of more goes in a few calls.
     public static let idsPerDelete = 10_000
+    /// How many times one window tries a kept forget again on its own, when
+    /// the app's status says a hold can be had: a forget that keeps failing
+    /// never keeps stopping remembering. Try Again and the next open still
+    /// finish it.
+    public static let automaticTries = 3
+
+    /// Where a forget came from.
+    private enum Kind: Equatable {
+        /// Asked for now; its caller waits for the outcome.
+        case now
+        /// Its Undo note closed; nobody waits for it.
+        case afterUndo(count: Int)
+        /// Promised before and not finished: a crash left it, or a failure
+        /// kept it. The person isn't asked again, so a failure keeps it too.
+        case unfinished
+    }
 
     /// One forget on its way to the store: its promise's id in the pending
-    /// file, what it removes, and what the footer says while it runs.
+    /// file, what it removes, and where it came from.
     private struct Job {
         let id: UUID
         let request: ForgetRequest
-        let phase: ForgetPhase
+        let kind: Kind
+
+        /// "Finishing a forget…" for one promised before; "Forgetting…".
+        var phase: ForgetPhase { kind == .unfinished ? .finishing : .forgetting }
+        /// A failure keeps its promise, to be tried again, instead of
+        /// handing it back to the person with Try Again.
+        var keepsOnFailure: Bool { kind == .unfinished }
     }
 
     private let mutator: (any PrivacyMutator)?
@@ -290,9 +312,18 @@ public final class ForgetCoordinator: ObservableObject {
     private var queue: [Job] = []
     /// Every forget queued and not yet answered, by its promise's id.
     private var inFlight: [UUID: ForgetRequest] = [:]
+    /// Promises a failure kept in this window, by id: what is still saved
+    /// of each, tried again when the app's status says a hold can be had.
+    private var unfinished: [UUID: ForgetRequest] = [:]
+    /// Whether the app's last status lets it hold remembering now.
+    private var holdable = true
+    /// Tries made on the app's statuses since the last kept forget was done.
+    private var tries = 0
     private var worker: Task<Void, Never>?
     /// Who waits for each forget's outcome, by its promise's id.
     private var waiting: [UUID: [CheckedContinuation<Outcome, Never>]] = [:]
+    /// Who waits for nothing to be under way.
+    private var idleWaiters: [CheckedContinuation<Void, Never>] = []
 
     /// `channel` is the private pipe; nil for a window opened by hand,
     /// which deletes directly only while Hippocampus isn't running.
@@ -331,7 +362,7 @@ public final class ForgetCoordinator: ObservableObject {
         } catch {
             return .failed
         }
-        return await run(Job(id: id, request: request, phase: .forgetting))
+        return await run(Job(id: id, request: request, kind: .now))
     }
 
     // MARK: Forgetting after the Undo note
@@ -396,7 +427,7 @@ public final class ForgetCoordinator: ObservableObject {
         undoTask?.cancel()
         undoTask = nil
         undoable = nil
-        enqueue(Job(id: pending.id, request: pending.request, phase: .forgetting))
+        enqueue(Job(id: pending.id, request: pending.request, kind: .afterUndo(count: pending.count)))
         return pending.id
     }
 
@@ -408,10 +439,13 @@ public final class ForgetCoordinator: ObservableObject {
         return outcome
     }
 
-    // MARK: A forget a crash left
+    // MARK: A forget a crash left, or a failure kept
 
-    /// The window opened and found forgets it promised and didn't finish:
-    /// "Finishing a forget…" until they're done. Nil when there were none.
+    /// Finishes every forget promised and not finished: one a crash left
+    /// (the window opened and found it), or one a failure kept (Try Again,
+    /// or a status that lets the app hold). "Finishing a forget…" until
+    /// they're done; one that fails again stays promised. Nil when there
+    /// were none.
     @discardableResult
     public func finishLeftover() async -> Outcome? {
         guard mutator != nil else { return nil }
@@ -421,9 +455,50 @@ public final class ForgetCoordinator: ObservableObject {
         if channel == nil, appRunning() { return .needsApp }
         var outcomes: [Outcome] = []
         for entry in leftovers {
-            outcomes.append(await run(Job(id: entry.id, request: entry.request, phase: .finishing)))
+            unfinished[entry.id] = nil
+            outcomes.append(await run(Job(id: entry.id, request: entry.request, kind: .unfinished)))
         }
         return Self.together(outcomes)
+    }
+
+    /// The app's status, as it pushes it over the pipe. When it shows a hold
+    /// can be had and a failure kept a forget, that forget is tried again,
+    /// at most `automaticTries` times in a window: no timer, only what the
+    /// app says.
+    public func statusArrived(_ status: WindowChannelStatus) {
+        holdable = Self.letsTheAppHold(status.state)
+        guard worker == nil else { return }
+        refreshPhase()
+        guard holdable, !unfinished.isEmpty, tries < Self.automaticTries else { return }
+        tries += 1
+        // Queued at once, so a second status before it starts finds it
+        // under way rather than trying it twice.
+        let kept = unfinished.sorted { $0.key.uuidString < $1.key.uuidString }
+        unfinished.removeAll()
+        for (id, request) in kept {
+            enqueue(Job(id: id, request: request, kind: .unfinished))
+        }
+    }
+
+    /// Every state but a hold under way and a stop that failed lets the app
+    /// hold: paused or off it answers at once, remembering once it stops.
+    static func letsTheAppHold(_ state: WindowChannelStatus.State) -> Bool {
+        state != .forgetting && state != .couldNotStop
+    }
+
+    /// With nothing under way, the footer says "Finishing a forget…" while a
+    /// kept forget waits for a status to try it again on; once nothing will,
+    /// it shows the app's own status (its banner, its button) again.
+    private func refreshPhase() {
+        if unfinished.isEmpty { tries = 0 }
+        let waits = !unfinished.isEmpty && channel != nil && holdable && tries < Self.automaticTries
+        phase = waits ? .finishing : nil
+    }
+
+    /// Returns once nothing is under way.
+    func idle() async {
+        guard worker != nil else { return }
+        await withCheckedContinuation { idleWaiters.append($0) }
     }
 
     /// Several forgets' outcomes as one: every moment they deleted; partly
@@ -499,13 +574,18 @@ public final class ForgetCoordinator: ObservableObject {
                 held = await channel.send(WindowChannelRequest(op: .hold), timeout: Self.holdWait)
                 guard held else {
                     // The app didn't answer, or the lease stayed busy:
-                    // nothing is deleted, and the promises go, so the rows
-                    // come back.
+                    // nothing is deleted. A forget asked for now goes back
+                    // to the person (the rows come back, with Try Again);
+                    // one promised before stays promised.
                     let jobs = queue
                     queue.removeAll()
-                    if queue.isEmpty { phase = nil }
+                    phase = nil
                     for job in jobs {
-                        store.remove(job.id)
+                        if job.keepsOnFailure {
+                            unfinished[job.id] = job.request
+                        } else {
+                            store.remove(job.id)
+                        }
                         complete(job, .failed)
                     }
                     continue
@@ -528,8 +608,11 @@ public final class ForgetCoordinator: ObservableObject {
             if queue.isEmpty { phase = nil }
             for (job, outcome) in done { complete(job, outcome) }
         }
-        phase = nil
         worker = nil
+        refreshPhase()
+        let waiters = idleWaiters
+        idleWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
     }
 
     /// What a forget's deletes did: how many moments went, what is still
@@ -578,18 +661,26 @@ public final class ForgetCoordinator: ObservableObject {
 
     /// What becomes of a forget's promise once its deletes ran: done, it
     /// goes; partly done, it stays for what is still saved, never for what
-    /// went; not done at all, it goes, and the rows come back with the
-    /// note's Try Again.
+    /// went; not done at all, a forget asked for now goes back to the person
+    /// (the rows come back, with the note's Try Again), and one promised
+    /// before stays promised.
     private func conclude(_ job: Job, _ deletion: Deletion) -> Outcome {
         if deletion.remaining.isEmpty {
             store.remove(job.id)
+            unfinished[job.id] = nil
             return .forgotten(moments: deletion.deleted)
         }
         if deletion.progressed {
             store.update(job.id, to: deletion.remaining)
+            unfinished[job.id] = deletion.remaining
             return .partlyForgotten(moments: deletion.deleted)
         }
-        store.remove(job.id)
+        if job.keepsOnFailure {
+            unfinished[job.id] = job.request
+        } else {
+            store.remove(job.id)
+            unfinished[job.id] = nil
+        }
         return .failed
     }
 
