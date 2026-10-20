@@ -268,6 +268,12 @@ public final class ForgetCoordinator: ObservableObject {
     @Published public private(set) var undoable: Undoable?
     /// The newest forget that ended after its Undo note closed.
     @Published public private(set) var lateOutcome: LateOutcome?
+    /// The moments every list leaves out: forgotten and not deleted yet.
+    /// Hidden at the click, through the Undo note and the deletes, and while
+    /// a failure keeps them promised; they come back only on Undo, or when a
+    /// forget fails and goes back to the person (SPEC 3.11: "Rows that were
+    /// hidden at the click stay gone").
+    @Published public private(set) var hiddenMoments: Set<UInt64> = []
 
     /// How long the Undo note waits before the delete goes ahead.
     public static let undoWindow: Duration = .seconds(5)
@@ -399,6 +405,7 @@ public final class ForgetCoordinator: ObservableObject {
         }
         let pending = Undoable(id: id, request: request, count: count)
         undoable = pending
+        publishHidden()
         undoTask = Task { [weak self] in
             try? await Task.sleep(for: Self.undoWindow)
             guard !Task.isCancelled else { return }
@@ -415,6 +422,7 @@ public final class ForgetCoordinator: ObservableObject {
         undoTask = nil
         undoable = nil
         store.remove(pending.id)
+        publishHidden()
         return true
     }
 
@@ -559,6 +567,7 @@ public final class ForgetCoordinator: ObservableObject {
     private func enqueue(_ job: Job) {
         queue.append(job)
         inFlight[job.id] = job.request
+        publishHidden()
         guard worker == nil else { return }
         worker = Task { [weak self] in await self?.drain() }
     }
@@ -571,6 +580,20 @@ public final class ForgetCoordinator: ObservableObject {
         if case let .afterUndo(count) = job.kind {
             lateOutcome = LateOutcome(id: UUID(), outcome: outcome, request: job.request, count: count)
         }
+        publishHidden()
+    }
+
+    /// `hiddenMoments`, from what is waiting out its note, what is queued or
+    /// being deleted, and what a failure kept.
+    private func publishHidden() {
+        var ids = Set(undoable?.request.momentIds ?? [])
+        for request in inFlight.values {
+            ids.formUnion(request.momentIds)
+        }
+        for request in unfinished.values {
+            ids.formUnion(request.momentIds)
+        }
+        if ids != hiddenMoments { hiddenMoments = ids }
     }
 
     /// One hold for everything queued, and for what comes while it lasts:

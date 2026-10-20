@@ -485,7 +485,9 @@ struct MemoryWorkspaceView: View {
         .environment(\.askAI, AskAIAction { source, tool in
             fieldAsk = FieldAsk(source: source, tool: tool, sequence: (fieldAsk?.sequence ?? 0) + 1)
         })
-        .environment(\.forgottenMoments, Set(forgetting.undoable?.request.momentIds ?? []))
+        // Hidden at the click, and gone while they are deleted: they come
+        // back only on Undo or when a forget fails (SPEC 3.11).
+        .environment(\.forgottenMoments, forgetting.hiddenMoments)
         .environment(\.lensForget, LensForget(forget: { moments, title, kind in
             confirmLensForget(moments, title: title, kind: kind)
         }))

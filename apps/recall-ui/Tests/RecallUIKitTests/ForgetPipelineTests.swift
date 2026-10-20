@@ -545,6 +545,60 @@ final class ForgetPipelineTests: XCTestCase {
         XCTAssertTrue(source.contains("let outcome = await forgetting.forget(request)"))
     }
 
+    // MARK: Rows hidden at the click
+
+    /// SPEC 3.11: "Rows that were hidden at the click stay gone." Through
+    /// the Undo note, the wait for the hold and the deletes, and after.
+    func testRowsHiddenByUndoStayHiddenWhileTheDeleteRuns() async {
+        let mutator = LeaseMutator()
+        let channel = AppLikeChannel()
+        channel.gated = true
+        let forget = coordinator(mutator, channel)
+        _ = await forget.forgetAfterUndo(ForgetRequest(momentIds: [41, 42]), count: 2)
+        XCTAssertEqual(forget.hiddenMoments, [41, 42], "hidden at the click")
+        let deleting = Task { await forget.finishUndoable() }
+        await eventually { channel.sent == [.hold] }
+        XCTAssertNil(forget.undoable)
+        XCTAssertEqual(forget.hiddenMoments, [41, 42], "still hidden while the delete waits for its hold")
+        channel.openGate()
+        await deleting.value
+        XCTAssertEqual(mutator.deleted, [41, 42])
+        XCTAssertTrue(forget.hiddenMoments.isEmpty, "deleted, so there is nothing left to hide")
+    }
+
+    /// Undo, or a forget that fails and goes back to the person, brings the
+    /// rows back; a failure that keeps the promise keeps them hidden.
+    func testRowsComeBackOnlyOnUndoOrWhenTheForgetGoesBackToThePerson() async throws {
+        let mutator = LeaseMutator()
+        let channel = AppLikeChannel()
+        let forget = coordinator(mutator, channel)
+        _ = await forget.forgetAfterUndo(ForgetRequest(momentIds: [41]), count: 1)
+        XCTAssertTrue(forget.undo())
+        XCTAssertTrue(forget.hiddenMoments.isEmpty, "Undo brings the row back")
+
+        channel.holdsAtAll = false
+        _ = await forget.forgetAfterUndo(ForgetRequest(momentIds: [42]), count: 1)
+        await forget.finishUndoable()
+        XCTAssertEqual(forget.lateOutcome?.outcome, .failed)
+        XCTAssertTrue(forget.hiddenMoments.isEmpty, "the row comes back, with Try Again")
+
+        try store.save(ForgetRequest(momentIds: [43]))
+        _ = await forget.finishLeftover()
+        XCTAssertEqual(forget.hiddenMoments, [43], "kept to finish later: still hidden")
+
+        mutator.failing = [45]
+        channel.holdsAtAll = true
+        let outcome = await forget.forget(ForgetRequest(momentIds: [44, 45]))
+        XCTAssertEqual(outcome, .partlyForgotten(moments: 1))
+        XCTAssertTrue(forget.hiddenMoments.contains(45), "the rest of a forget that went partly stays hidden")
+        XCTAssertFalse(forget.hiddenMoments.contains(44))
+    }
+
+    func testEveryListLeavesOutWhatTheCoordinatorHides() throws {
+        let source = try Self.source("Sources/RecallUI/MemoryWorkspaceView.swift")
+        XCTAssertTrue(source.contains(".environment(\\.forgottenMoments, forgetting.hiddenMoments)"))
+    }
+
     static func source(_ path: String) throws -> String {
         let package = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
