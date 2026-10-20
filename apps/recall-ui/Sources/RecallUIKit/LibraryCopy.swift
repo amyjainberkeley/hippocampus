@@ -101,6 +101,64 @@ public enum LibraryCopy {
         public static let searchEverything = "Search Everything"
     }
 
+    // MARK: Privacy (SPEC 3.9, 3.11)
+
+    /// The Privacy page: what is kept on this Mac, and forgetting it. One
+    /// verb, Forget, for what a person removes; Delete only for everything.
+    public enum Privacy {
+        public static let lead = "What\u{2019}s kept on this Mac, and forgetting it."
+        /// "41,208 moments from 38 days".
+        public static func kept(moments: UInt64, days: UInt64, locale: Locale = .autoupdatingCurrent) -> String {
+            let count = moments.formatted(.number.locale(locale))
+            let what = moments == 1 ? "1 moment" : "\(count) moments"
+            return days == 1 ? "\(what) from 1 day" : "\(what) from \(days.formatted(.number.locale(locale))) days"
+        }
+
+        public static func screenshots(_ size: String) -> String { "Screenshots \(size)" }
+        public static func textAndSearch(_ size: String) -> String { "Text and search \(size)" }
+        /// How long moments are kept.
+        public static func keptFor(days: Int) -> String {
+            days == 1 ? "Kept for 1 day." : "Kept for \(days) days."
+        }
+
+        public static let keptUntilForgotten = "Kept until you forget it."
+        /// The side pictures' use, and the most they may use.
+        public static func sidePictures(_ used: String, of budget: String?) -> String {
+            let lead = "Pictures of windows beside the one you\u{2019}re using: \(used)"
+            return budget.map { "\(lead) of \($0)." } ?? "\(lead)."
+        }
+
+        public static let forgetRecent = "Forget Recent\u{2026}"
+        public static let forgetLast24Hours = "Forget the Last 24 Hours\u{2026}"
+        public static let exportEverything = "Export Everything\u{2026}"
+        public static let deleteEverything = "Delete Everything\u{2026}"
+        /// Export Everything's tooltip.
+        public static let exportHelp = "Saves a copy to Downloads. The copy is not encrypted."
+
+        // Forget the Last 24 Hours… asks for a typed word.
+        public static let forgetLast24Title = "Forget the last 24 hours?"
+        public static let forgetLast24Body = "Everything since this time yesterday is deleted from this Mac for good."
+        public static func typeToConfirm(_ phrase: String) -> String { "Type \(phrase) to confirm." }
+        public static let forget = "Forget"
+        public static let cancel = "Cancel"
+        /// While a forget or an export runs.
+        public static let working = "Working\u{2026}"
+
+        // Activity: what was forgotten or exported.
+        public static let activity = "Activity"
+        public static let activityEmpty = "Nothing forgotten or exported yet."
+        public static func forgotMoments(_ count: Int) -> String {
+            count == 1 ? "Forgot 1 moment" : "Forgot \(count) moments"
+        }
+
+        public static func forgotLastMinutes(_ minutes: Int) -> String { "Forgot the last \(minutes) minutes" }
+        public static let forgotLastHour = "Forgot the last hour"
+        public static func forgotLastHours(_ hours: Int) -> String { "Forgot the last \(hours) hours" }
+        public static let forgotToday = "Forgot today"
+        public static let deletedEverything = "Deleted everything"
+        public static let exportedEverything = "Exported everything"
+    }
+
     // MARK: History (SPEC 3.4)
 
     public enum History {

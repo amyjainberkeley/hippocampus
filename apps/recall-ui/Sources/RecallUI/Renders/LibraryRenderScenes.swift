@@ -5,7 +5,7 @@ extension WindowRenderer {
     /// History (`library-*`), About You (`nav-about-you*`) and Privacy
     /// (`nav-privacy*`). Drawn with every other scene by `--render-window`.
     static var libraryScenes: [Scene] {
-        todayScenes + historyScenes + lensScenes + searchScenes + aboutYouScenes
+        todayScenes + historyScenes + lensScenes + searchScenes + aboutYouScenes + privacyScenes
     }
 }
 #endif

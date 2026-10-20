@@ -15,11 +15,10 @@ public enum RetentionSetting: Equatable, Sendable {
     /// The worker's default when nothing was saved.
     public static let standard = RetentionSetting.days(90)
 
-    /// `~/Library/Application Support/MCI/retention.json`, beside the brain.
+    /// `retention.json` in the memory's folder, where setup and Preferences
+    /// write it and the agent reads it.
     public static var defaultURL: URL? {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("MCI", isDirectory: true)
-            .appendingPathComponent("retention.json")
+        MemoryFolder.url().appendingPathComponent("retention.json")
     }
 
     /// The setting saved at `url`. A missing file is the 90-day default. Nil
@@ -67,5 +66,20 @@ public enum RetentionSetting: Equatable, Sendable {
     public var days: Int? {
         if case let .days(days) = self { return days }
         return nil
+    }
+}
+
+/// The folder the memory's own small files sit in, beside the capture
+/// status: a development database's folder when one is set, so it never
+/// borrows the person's, else Application Support's.
+public enum MemoryFolder {
+    public static func url(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+        if let database = environment["MCI_DB_PATH"] {
+            return URL(fileURLWithPath: database).deletingLastPathComponent()
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("MCI", isDirectory: true)
     }
 }

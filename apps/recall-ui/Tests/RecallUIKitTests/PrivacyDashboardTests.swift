@@ -123,12 +123,16 @@ final class PrivacyDashboardTests: XCTestCase {
 
     // MARK: - DestructivePrivacyAction typed-word gate
 
-    func testDeleteLast24hRequiresExactDELETE() {
-        let a = DestructivePrivacyAction.deleteLast24h
-        XCTAssertTrue(a.matches("DELETE"))
-        XCTAssertTrue(a.matches("  DELETE  "))  // whitespace-trimmed
-        XCTAssertFalse(a.matches("delete"))     // case-sensitive
-        XCTAssertFalse(a.matches("DELETE!"))
+    /// One verb, Forget, for what a person removes (SPEC 3.9): the last 24
+    /// hours are forgotten by typing FORGET.
+    func testForgetLast24hRequiresExactFORGET() {
+        let a = DestructivePrivacyAction.forgetLast24h
+        XCTAssertEqual(a.requiredPhrase, "FORGET")
+        XCTAssertTrue(a.matches("FORGET"))
+        XCTAssertTrue(a.matches("  FORGET  "))  // whitespace-trimmed
+        XCTAssertFalse(a.matches("forget"))     // case-sensitive
+        XCTAssertFalse(a.matches("FORGET!"))
+        XCTAssertFalse(a.matches("DELETE"))
         XCTAssertFalse(a.matches(""))
     }
 
@@ -154,7 +158,7 @@ final class PrivacyDashboardTests: XCTestCase {
     /// The mutator surface is protocol-typed so headless tests can
     /// substitute a mock. This test pins the call sequence the SwiftUI
     /// dashboard emits for each destructive action:
-    ///   - `deleteLast24h` → `deleteEventsInRange(startTsUs, endTsUs)`
+    ///   - `forgetLast24h` → `deleteEventsInRange(startTsUs, endTsUs)`
     ///   - `deleteEverything` → `prepareWipe()` then `wipeBrain(token:)`
     /// (The dashboard view exercises this sequence in `runDestructive`.)
 

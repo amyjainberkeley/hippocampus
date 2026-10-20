@@ -1,27 +1,20 @@
-// PrivacyDashboard.swift — the ⌘7 in-app Privacy Dashboard (cycle 8.46).
-//
-// Amy's directive 2026-07-13: "show the full control, no collection".
-// This dashboard shows what MCI has captured and gives the user delete
-// and export controls.
-//
-// # Two-tier discipline (post cycle 8.47, PR #76 follow-up)
+// PrivacyDashboard.swift — the Privacy page (SPEC 3.9): what is kept on
+// this Mac, for how long, what the side pictures use, forgetting it, and
+// what was forgotten or exported.
 //
 // Every read path goes through `BrainReader` (read-only by construction;
 // see `FFIBrainReader.swift`). Destructive actions route through the
-// SEPARATE `PrivacyMutator` protocol — a passing-in `nil` (or a reader
-// that doesn't conform) disables the delete buttons entirely. This lets
-// stub / preview / test surfaces stay read-only-typed while the real
-// FFIBrainReader implements both.
+// SEPARATE `PrivacyMutator` protocol, or, for forgetting, through the
+// shell's forget coordinator (`EnvironmentValues.forget`), which holds
+// remembering while it deletes (SPEC 3.11). A `nil` mutator with no
+// coordinator says the action is unavailable instead of failing.
 //
 // The wipe path is two-step: `prepareWipe()` returns a 60s-TTL token,
 // then `wipeBrain(token:)` fires. Any wipe call — success, wrong token,
 // expired — consumes the pending token, so a wipe cannot be replayed.
-// This defends against a hostile programmatic caller trying to single-call
-// `wipeBrain` from outside the UI flow.
 //
-// The pure filter / summary / confirmation logic lives in
-// `RecallUIKit/PrivacyDashboardModel.swift` so it has a headless test
-// surface (`PrivacyDashboardTests`).
+// The pure summary, usage, activity and confirmation logic lives in
+// `RecallUIKit/PrivacyDashboardModel.swift` (`PrivacyDashboardTests`).
 
 import AppKit
 import RecallUIKit
@@ -29,28 +22,32 @@ import SwiftUI
 
 struct PrivacyDashboard: View {
     let reader: BrainReader
-    /// The mutator that actually performs deletes. When `nil`, the
-    /// destructive-action buttons stay visible but do nothing (preview /
-    /// stub surfaces). The executable target's launch path wires this
-    /// with the same `FFIBrainReader` instance the reader is backed by.
+    /// The mutator that actually performs deletes. When `nil`, forgetting
+    /// goes through the shell's coordinator, and without one the page says
+    /// it is unavailable (preview / stub surfaces).
     let mutator: PrivacyMutator?
+    /// How long moments are kept, and what the side pictures use. Read from
+    /// the files Preferences and the agent write; renders pass fixtures.
+    var retention: @Sendable () -> RetentionSetting? = { RetentionSetting.read(from: RetentionSetting.defaultURL) }
+    var picturesUsage: @Sendable () -> PicturesUsage? = { PicturesUsage.read() }
+    /// The audit log's newest lines; renders pass fixtures.
+    var activity: @Sendable () -> [AuditEntry] = { AuditLog.shared.readRecent(count: 50) }
+    var now: @Sendable () -> Date = { Date() }
+    var calendar: Calendar = .current
+
+    @Environment(\.forget) private var forget
+    @Environment(\.locale) private var locale
+    @Environment(\.isSyntheticPreview) private var isSyntheticPreview
 
     @State private var summary: SummaryStats? = nil
-    @State private var events: [Hit] = []
-    @State private var observedApps: [ObservedApp] = []
-    @State private var filter: PrivacyDashboardFilter = .empty
+    @State private var kept: RetentionSetting?
+    @State private var pictures: PicturesUsage?
+    @State private var entries: [AuditEntry] = []
     @State private var isLoading = false
-    @State private var measuredAt: Date?
     @State private var isMutating = false
     @State private var errorMessage: String? = nil
     @State private var confirmation: DestructiveConfirmationBox? = nil
     @State private var banner: String? = nil
-    /// Cycle 8.51: newest-first slice of the audit log for the "Recent
-    /// activity" section. Reloaded on tab open and after every
-    /// destructive action so the user sees their most recent action
-    /// reflected immediately.
-    @State private var auditEntries: [AuditEntry] = []
-    @State private var showAllAudit: Bool = false
 
     /// Convenience init for reader-only surfaces (preview / stub tests).
     init(reader: BrainReader, mutator: PrivacyMutator? = nil) {
@@ -58,63 +55,33 @@ struct PrivacyDashboard: View {
         self.mutator = mutator
     }
 
+    init(reader: BrainReader, mutator: PrivacyMutator?, retention: @escaping @Sendable () -> RetentionSetting?,
+         picturesUsage: @escaping @Sendable () -> PicturesUsage?, activity: @escaping @Sendable () -> [AuditEntry],
+         now: @escaping @Sendable () -> Date, calendar: Calendar) {
+        self.reader = reader
+        self.mutator = mutator
+        self.retention = retention
+        self.picturesUsage = picturesUsage
+        self.activity = activity
+        self.now = now
+        self.calendar = calendar
+    }
+
     var body: some View {
-        // Cycle 8.48 MCIDesignSystem: 24pt section rhythm, 24pt outer
-        // padding — Stripe-tuned airiness for a trust-projecting surface.
         ScrollView {
-            VStack(alignment: .leading, spacing: MCI.Spacing.xl) {
-                PrivacySummaryCard(
-                    summary: summary, isLoading: isLoading, measuredAt: measuredAt,
-                    onRefresh: { Task { await reloadAll(measureStorage: true) } }
-                )
-                FilterBar(filter: $filter, observedApps: observedApps)
-                EventList(
-                    events: filter.apply(to: events),
-                    isLoading: isLoading,
-                    hasActiveFilter: filter != .empty
-                )
-                DestructiveActions(
-                    onExport: { runExport() },
-                    onDeleteLast24h: {
-                        confirmation = DestructiveConfirmationBox(kind: .deleteLast24h)
-                    },
-                    onDeleteEverything: {
-                        confirmation = DestructiveConfirmationBox(kind: .deleteEverything)
-                    },
-                    isBusy: isMutating
-                )
-                if isMutating {
-                    HStack(spacing: MCI.Spacing.s) {
-                        ProgressView().controlSize(.small)
-                        Text("Working…").foregroundStyle(Color.brandFgMuted)
-                    }
-                }
-                if let banner {
-                    Text(banner)
-                        .mciFont(.body)
-                        .foregroundStyle(Color.brandMint)
-                        .padding(MCI.Spacing.s)
-                        .background(Color.brandMintSubtle)
-                        .cornerRadius(MCI.Radius.s)
-                }
-                if let err = errorMessage {
-                    Text(err).mciFont(.body).foregroundStyle(Color.brandError)
-                }
-                // The audit log's last 20 lines (or all of it after "Show
-                // all"), so the person sees what was done to their memory,
-                // and when.
-                RecentActivitySection(
-                    entries: showAllAudit
-                        ? AuditLog.shared.readRecent(count: 10_000)
-                        : auditEntries,
-                    showingAll: showAllAudit,
-                    onShowAll: { showAllAudit.toggle() },
-                    onExport: { runExportAuditLog() }
-                )
+            VStack(alignment: .leading, spacing: 24) {
+                header
+                keptCard
+                actions
+                status
+                activityList
             }
-            .padding(MCI.Spacing.xl)
+            .frame(maxWidth: 760, alignment: .leading)
+            .padding(.horizontal, 32)
+            .padding(.vertical, 28)
+            .frame(maxWidth: .infinity)
         }
-        .background(Color.brandBgPrimary)
+        .background(MCI.Color.background)
         .task { await reloadAll() }
         .sheet(item: $confirmation) { box in
             ConfirmDeleteSheet(kind: box.kind) { confirmed in
@@ -126,32 +93,157 @@ struct PrivacyDashboard: View {
         }
     }
 
-    /// Fire the destructive action for `kind`. Requires `mutator` to be
-    /// non-nil (the confirmation sheet only enables the Confirm button
-    /// when the mutator is present, but we guard here too as
-    /// defence-in-depth). Refreshes the dashboard on success.
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(verbatim: NavigationCopy.privacy)
+                .font(MCI.Font.title)
+                .foregroundStyle(MCI.Color.foreground)
+                .accessibilityAddTraits(.isHeader)
+            Text(verbatim: LibraryCopy.Privacy.lead)
+                .font(.system(size: 13))
+                .foregroundStyle(MCI.Color.foregroundSecondary)
+        }
+    }
+
+    // MARK: What is kept
+
+    private var keptCard: some View {
+        OverviewCard(padding: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                KeptRow(text: PrivacyKept.line(summary, locale: locale)
+                    ?? (isLoading ? UserFacingCopy.Overview.loading : PrivacyDashboardSummary.line(summary: nil)))
+                if let kept {
+                    Divider()
+                    KeptRow(text: kept.days.map { LibraryCopy.Privacy.keptFor(days: $0) }
+                        ?? LibraryCopy.Privacy.keptUntilForgotten) {
+                        openPreferences(.privacy)
+                    }
+                }
+                if let line = pictures?.line {
+                    Divider()
+                    KeptRow(text: line) { openPreferences(.capture) }
+                }
+            }
+        }
+    }
+
+    // MARK: Forgetting
+
+    private var actions: some View {
+        let busy = isMutating || isSyntheticPreview
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                if let forget {
+                    Button { forget(.recent) } label: {
+                        Text(verbatim: LibraryCopy.Privacy.forgetRecent).foregroundStyle(MCI.Color.error)
+                    }
+                    .disabled(busy)
+                }
+                Button { confirmation = DestructiveConfirmationBox(kind: .forgetLast24h) } label: {
+                    Text(verbatim: LibraryCopy.Privacy.forgetLast24Hours).foregroundStyle(MCI.Color.error)
+                }
+                .disabled(busy)
+                Button(LibraryCopy.Privacy.exportEverything) { runExport() }
+                    .help(LibraryCopy.Privacy.exportHelp)
+                    .disabled(busy)
+            }
+            Button { confirmation = DestructiveConfirmationBox(kind: .deleteEverything) } label: {
+                Text(verbatim: LibraryCopy.Privacy.deleteEverything).foregroundStyle(MCI.Color.error)
+            }
+            .disabled(busy)
+        }
+        .buttonStyle(.bordered)
+    }
+
+    @ViewBuilder
+    private var status: some View {
+        if isMutating {
+            HStack(spacing: MCI.Spacing.s) {
+                ProgressView().controlSize(.small)
+                Text(verbatim: LibraryCopy.Privacy.working).foregroundStyle(MCI.Color.foregroundSecondary)
+            }
+        }
+        if let banner {
+            Text(banner)
+                .font(MCI.Font.body)
+                .foregroundStyle(MCI.Color.foreground)
+        }
+        if let errorMessage {
+            Text(errorMessage)
+                .font(MCI.Font.body)
+                .foregroundStyle(MCI.Color.error)
+        }
+    }
+
+    // MARK: Activity
+
+    private var activityList: some View {
+        let rows = PrivacyActivity.rows(entries, now: now(), calendar: calendar, locale: locale)
+        return VStack(alignment: .leading, spacing: 10) {
+            Text(verbatim: LibraryCopy.Privacy.activity)
+                .font(MCI.Font.title2)
+                .foregroundStyle(MCI.Color.foreground)
+                .accessibilityAddTraits(.isHeader)
+            if rows.isEmpty {
+                Text(verbatim: LibraryCopy.Privacy.activityEmpty)
+                    .font(.system(size: 14))
+                    .foregroundStyle(MCI.Color.foregroundSecondary)
+            } else {
+                Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 8) {
+                    ForEach(rows.prefix(20)) { row in
+                        GridRow {
+                            Text(verbatim: row.when)
+                                .foregroundStyle(MCI.Color.foregroundSecondary)
+                                .monospacedDigit()
+                            Text(verbatim: row.what)
+                                .foregroundStyle(MCI.Color.foreground)
+                        }
+                        .font(.system(size: 14))
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Doing it
+
+    private func openPreferences(_ destination: WorkspacePreferencesDestination) {
+        guard !isSyntheticPreview else { return }
+        Task { _ = await WorkspacePreferencesRouter.shared.open(destination, bundleURL: Bundle.main.bundleURL) }
+    }
+
+    /// Forget the last 24 hours, or delete everything, once the typed word
+    /// matched. Forgetting goes through the shell's coordinator when there
+    /// is one, which holds remembering while it deletes; otherwise through
+    /// the mutator, as the wipe always does.
     @MainActor
     private func runDestructive(_ kind: DestructivePrivacyAction) async {
+        errorMessage = nil
+        banner = nil
+        if kind == .forgetLast24h, let forget {
+            let endUs = Int64(now().timeIntervalSince1970 * 1_000_000)
+            let startUs = max(0, endUs - 24 * 3_600 * 1_000_000)
+            forget(.range(startUs...endUs, label: LibraryCopy.Privacy.forgotLastHours(24), confirmed: true))
+            return
+        }
         guard let mutator else {
             banner = UserFacingCopy.deleteUnavailable
             return
         }
         isMutating = true
-        errorMessage = nil
-        banner = nil
+        defer { isMutating = false }
         do {
             let result: DeleteResult
             switch kind {
-            case .deleteLast24h:
-                let now = Date().timeIntervalSince1970
-                let startUs = UInt64(max(0, (now - 24 * 3600)) * 1_000_000)
-                let endUs = UInt64(now * 1_000_000)
-                result = try await mutator.deleteEventsInRange(
-                    startTsUs: startUs, endTsUs: endUs
-                )
+            case .forgetLast24h:
+                let current = now().timeIntervalSince1970
+                let startUs = UInt64(max(0, current - 24 * 3_600) * 1_000_000)
+                let endUs = UInt64(current * 1_000_000)
+                result = try await mutator.deleteEventsInRange(startTsUs: startUs, endTsUs: endUs)
                 // Every destructive action goes in the audit log, so the
                 // person has a plain-text trail. Details are counts and
-                // ranges only; NO brain content.
+                // ranges only; NO memory content.
                 AuditLog.shared.record(
                     action: .deleteEventsInRange,
                     details: [
@@ -178,291 +270,87 @@ struct PrivacyDashboard: View {
         } catch {
             errorMessage = DeletionPresentation.failureBanner(for: error)
         }
-        isMutating = false
     }
 
+    /// Counts, then the storage measurement (once, on opening the page and
+    /// after a change, never on a timer), how long moments are kept, the
+    /// side pictures' use and the activity.
     @MainActor
-    private func reloadAll(measureStorage: Bool = false) async {
+    private func reloadAll() async {
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
-        errorMessage = nil
+        let retention = retention
+        let picturesUsage = picturesUsage
+        let activity = activity
+        async let files = Task.detached { (retention(), picturesUsage(), activity()) }.value
         do {
-            async let s = reader.summaryStats()
-            async let e = reader.recentEvents(limit: 200)
-            async let a = reader.listObservedApps(limit: 32, timeFromUs: nil)
-            let counts = try await s
-            var storage = summary?.storage
-            if measureStorage {
-                storage = try await reader.storageUsage()
-                measuredAt = Date()
-            }
-            summary = SummaryStats(
-                totalEvents: counts.totalEvents, oldestTsUs: counts.oldestTsUs,
-                newestTsUs: counts.newestTsUs, diskBytes: counts.diskBytes,
-                storage: storage
-            )
-            events = try await e
-            observedApps = try await a
+            let counts = try await reader.summaryStats()
+            summary = counts
+            let storage = try? await reader.storageUsage()
+            summary = SummaryStats(totalEvents: counts.totalEvents, oldestTsUs: counts.oldestTsUs,
+                                   newestTsUs: counts.newestTsUs, diskBytes: counts.diskBytes,
+                                   storage: storage ?? counts.storage)
         } catch {
-            // Cycle 8.54 copy audit — plain-English, no raw error.
+            // Plain English, no raw error.
             errorMessage = UserFacingCopy.dashboardLoadFailedBanner
         }
-        // Refresh the audit slice too; every reload (initial + post-
-        // destructive-action) should reflect the newest recorded lines.
-        auditEntries = AuditLog.shared.readRecent(count: 20)
-    }
-
-    /// Write the current audit log to `~/Downloads/…` and surface the
-    /// destination in the banner. Failures are surfaced inline.
-    @MainActor
-    private func runExportAuditLog() {
-        do {
-            _ = try AuditLog.shared.exportToDownloads()
-            banner = UserFacingCopy.savedToDownloads
-        } catch {
-            errorMessage = UserFacingCopy.auditExportFailedBanner
-        }
+        let read = await files
+        kept = read.0
+        pictures = read.1
+        entries = read.2
     }
 
     @MainActor
     private func runExport() {
         let iso = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
-        let dl = NSSearchPathForDirectoriesInDomains(
-            .downloadsDirectory, .userDomainMask, true
-        ).first ?? NSTemporaryDirectory()
-        let out = (dl as NSString).appendingPathComponent(
-            "hippocampus-export-\(iso).json"
-        )
-        let payload = ExportPayload(
-            generatedAt: iso, summary: summary,
-            events: events, observedApps: observedApps
-        )
-        do {
-            let data = try JSONEncoder.pretty.encode(payload)
-            try data.write(to: URL(fileURLWithPath: out))
-            banner = UserFacingCopy.exportedMoments(events.count)
-            // Cycle 8.51 — audit-log the export. Only meta (count +
-            // destination path); brain content NEVER touches the log.
-            AuditLog.shared.record(
-                action: .exportJson,
-                details: ["events": "\(events.count)", "path": out]
-            )
-            Task { @MainActor in
-                auditEntries = AuditLog.shared.readRecent(count: 20)
+        let downloads = NSSearchPathForDirectoriesInDomains(.downloadsDirectory, .userDomainMask, true).first
+            ?? NSTemporaryDirectory()
+        let out = (downloads as NSString).appendingPathComponent("hippocampus-export-\(iso).json")
+        isMutating = true
+        Task { @MainActor in
+            defer { isMutating = false }
+            do {
+                async let events = reader.recentEvents(limit: 200)
+                async let apps = reader.listObservedApps(limit: 32, timeFromUs: nil)
+                let payload = ExportPayload(generatedAt: iso, summary: summary, events: try await events,
+                                            observedApps: try await apps)
+                let data = try JSONEncoder.pretty.encode(payload)
+                try data.write(to: URL(fileURLWithPath: out))
+                banner = UserFacingCopy.exportedMoments(payload.events.count)
+                // Only meta (count + destination path); memory content
+                // never touches the log.
+                AuditLog.shared.record(action: .exportJson,
+                                       details: ["events": "\(payload.events.count)", "path": out])
+                entries = activity()
+            } catch {
+                errorMessage = UserFacingCopy.exportFailedBanner
             }
-        } catch {
-            errorMessage = UserFacingCopy.exportFailedBanner
         }
     }
 }
 
-// MARK: - Summary card
-
-struct PrivacySummaryCard: View {
-    let summary: SummaryStats?
-    let isLoading: Bool
-    let measuredAt: Date?
-    let onRefresh: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "lock.shield.fill")
-                    .foregroundStyle(Color.brandMint)
-                // Cycle 8.54 copy audit — "Your brain" → "Your memory";
-                // matches the copy style guide (§3) product-noun ruling.
-                Text("Your memory")
-                    .font(.title2.bold())
-                    .foregroundStyle(Color.brandFgPrimary)
-                Spacer()
-                Button(action: onRefresh) {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.borderless)
-                .disabled(isLoading)
-                .help(UserFacingCopy.commandRefresh)
-                .accessibilityLabel(UserFacingCopy.commandRefresh)
-            }
-            Text(PrivacyDashboardSummary.line(summary: summary, isLoading: isLoading))
-                .font(.body)
-                .foregroundStyle(Color.brandFgSecondary)
-            if isLoading {
-                HStack(spacing: MCI.Spacing.s) {
-                    ProgressView().controlSize(.small)
-                    Text(UserFacingCopy.refreshingToast).mciFont(.caption)
-                }
-            }
-            Text(measuredAt == nil ? UserFacingCopy.momentTextLoading : PrivacyDashboardSummary.storageTotal(summary: summary))
-                .mciFont(.body)
-                .foregroundStyle(Color.brandFgPrimary)
-            if let storage = summary?.storage {
-                VStack(spacing: MCI.Spacing.s) {
-                    // The database and its two working files are one thing to a person: text.
-                    LabeledContent(UserFacingCopy.storageText,
-                                   value: PrivacyDashboardSummary.storageValue(storage.textMeasurement))
-                    LabeledContent(UserFacingCopy.storageScreenshots,
-                                   value: PrivacyDashboardSummary.storageValue(storage.managedBlobs))
-                }
-                .mciFont(.body)
-                .foregroundStyle(Color.brandFgSecondary)
-            }
-
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.brandCardBg)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.brandCardBorder, lineWidth: 1)
-        )
-        .cornerRadius(8)
-        .accessibilityElement(children: .contain)
-    }
-}
-
-// MARK: - Filter bar
-
-struct FilterBar: View {
-    @Binding var filter: PrivacyDashboardFilter
-    let observedApps: [ObservedApp]
+/// One row of what is kept, with [Change…] when it can be changed.
+private struct KeptRow: View {
+    let text: String
+    var change: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 12) {
-            Menu {
-                Button("All apps") { filter.appBundleId = nil }
-                Divider()
-                ForEach(observedApps) { app in
-                    Button("\(Formatters.appDisplayName(app.appBundleId)) (\(app.count))") {
-                        filter.appBundleId = app.appBundleId
-                    }
-                }
-            } label: {
-                Label(filter.appBundleId.map { Formatters.appDisplayName($0) } ?? "All apps", systemImage: "app.badge")
-                    .font(.callout)
-            }
-            Menu {
-                Button("All time") { filter.sinceHours = nil }
-                Button("Last hour") { filter.sinceHours = 1 }
-                Button("Last 24 hours") { filter.sinceHours = 24 }
-                Button("Last 7 days") { filter.sinceHours = 24 * 7 }
-            } label: {
-                Label(sinceLabel, systemImage: "clock").font(.callout)
-            }
-            Spacer()
-        }
-    }
-
-    private var sinceLabel: String {
-        switch filter.sinceHours {
-        case .some(1): return "Last hour"
-        case .some(24): return "Last 24 hours"
-        case .some(let h) where h == 24 * 7: return "Last 7 days"
-        case .some(let h): return "Last \(h) hours"
-        case .none: return "All time"
-        }
-    }
-}
-
-// MARK: - Event list + row
-
-struct EventList: View {
-    let events: [Hit]
-    let isLoading: Bool
-    /// `true` when the dashboard filter is narrowing the pool — used to
-    /// distinguish "filter hides everything" (offer widen guidance) from
-    /// "brain is empty" (reassure on-privacy tone). Cycle 8.49
-    /// polished-empty-state audit-gap fix.
-    var hasActiveFilter: Bool = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(UserFacingCopy.recentMoments(events.count))
-                .font(.headline)
-                .foregroundStyle(Color.brandFgPrimary)
-            if isLoading && events.isEmpty {
-                Text("Loading…").foregroundStyle(Color.brandFgMuted)
-            } else if events.isEmpty {
-                MCIEmptyState.noPrivacyEvents(hasActiveFilter: hasActiveFilter)
-                    .frame(minHeight: 220)
-            } else {
-                ForEach(events) { EventRow(hit: $0) }
-            }
-        }
-    }
-}
-
-struct EventRow: View {
-    let hit: Hit
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "app.dashed")
-                .foregroundStyle(Color.brandMintDim)
-                .frame(width: 20)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack {
-                    Text(Formatters.appDisplayName(hit.appBundleId))
-                        .font(.body)
-                        .foregroundStyle(Color.brandFgPrimary)
-                    Text("·").foregroundStyle(Color.brandFgMuted)
-                    Text(Formatters.relativeTime(usSinceEpoch: hit.tsUs))
-                        .font(.callout)
-                        .foregroundStyle(Color.brandFgMuted)
-                }
-                Text(Formatters.snippet(
-                    Formatters.stripContextHeader(hit.ocrTextSnippet), maxLen: 100
-                ))
-                .font(.callout)
-                .foregroundStyle(Color.brandFgSecondary)
-                .lineLimit(2)
-            }
-            Spacer()
-        }
-        .padding(10)
-        .background(Color.brandBgSecondary)
-        .cornerRadius(6)
-    }
-}
-
-// MARK: - Destructive actions + confirmation sheet
-
-struct DestructiveActions: View {
-    let onExport: () -> Void
-    let onDeleteLast24h: () -> Void
-    let onDeleteEverything: () -> Void
-    /// `true` while a delete/wipe is in flight — disables buttons so
-    /// a double-tap can't fire the confirmation sheet twice against
-    /// an in-progress mutation.
-    var isBusy: Bool = false
-    /// The synthetic preview never exports or deletes anything.
-    @Environment(\.isSyntheticPreview) private var isSyntheticPreview
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(UserFacingCopy.exportNotEncrypted)
-            .font(.caption)
-            .foregroundStyle(Color.brandWarning)
-            HStack(spacing: 10) {
-                Button(UserFacingCopy.exportEverythingAction) { onExport() }
+            Text(verbatim: text)
+                .font(.system(size: 14))
+                .foregroundStyle(MCI.Color.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            if let change {
+                Button(LibraryCopy.change, action: change)
                     .buttonStyle(.bordered)
-                    .tint(Color.brandMint)
-                    .disabled(isBusy || isSyntheticPreview)
-                Button(UserFacingCopy.deleteLast24hAction) { onDeleteLast24h() }
-                    .buttonStyle(.bordered)
-                    .tint(Color.brandWarning)
-                    .disabled(isBusy || isSyntheticPreview)
-                Button(UserFacingCopy.deleteEverythingAction) { onDeleteEverything() }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color.brandError)
-                    .disabled(isBusy || isSyntheticPreview)
             }
         }
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.vertical, change == nil ? 14 : 9)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.brandBgSecondary)
-        .cornerRadius(8)
     }
 }
 
@@ -473,28 +361,32 @@ struct DestructiveConfirmationBox: Identifiable {
     var id: String { kind.rawValue }
 }
 
-/// Display metadata for the confirmation sheet — kept here so the
-/// RecallUIKit `DestructivePrivacyAction` stays a pure logic + gate.
+/// The words of the typed-word question; the gate itself is the kit's.
 private extension DestructivePrivacyAction {
     var title: String {
         switch self {
-        case .deleteLast24h: return "Delete the last 24 hours?"
-        case .deleteEverything: return UserFacingCopy.deleteEverythingTitle
+        case .forgetLast24h: LibraryCopy.Privacy.forgetLast24Title
+        case .deleteEverything: UserFacingCopy.deleteEverythingTitle
         }
     }
 
     var explanation: String {
-        // Cycle 8.54 copy audit — "brain" → "your memory". Same
-        // referent; user-facing product noun matches the landing page.
         switch self {
-        case .deleteLast24h:
-            return UserFacingCopy.deleteLast24hExplanation
-        case .deleteEverything:
-            return UserFacingCopy.deleteEverythingExplanation
+        case .forgetLast24h: LibraryCopy.Privacy.forgetLast24Body
+        case .deleteEverything: UserFacingCopy.deleteEverythingExplanation
+        }
+    }
+
+    var action: String {
+        switch self {
+        case .forgetLast24h: LibraryCopy.Privacy.forget
+        case .deleteEverything: UserFacingCopy.deleteAction
         }
     }
 }
 
+/// Asks for the typed word before forgetting the last 24 hours or deleting
+/// everything. Cancel is the default; Return never forgets.
 struct ConfirmDeleteSheet: View {
     let kind: DestructivePrivacyAction
     let onFinish: (Bool) -> Void
@@ -502,29 +394,30 @@ struct ConfirmDeleteSheet: View {
     @State private var typed: String = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(kind.title)
-                .font(.title3.bold())
-                .foregroundStyle(Color.brandFgPrimary)
-            Text(kind.explanation).foregroundStyle(Color.brandFgSecondary)
-            Text("Type \"\(kind.requiredPhrase)\" to confirm:")
-                .font(.callout)
-                .foregroundStyle(Color.brandFgMuted)
+        VStack(alignment: .leading, spacing: 14) {
+            Text(verbatim: kind.title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(MCI.Color.foreground)
+            Text(verbatim: kind.explanation)
+                .font(.system(size: 13))
+                .foregroundStyle(MCI.Color.foregroundSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(verbatim: LibraryCopy.Privacy.typeToConfirm(kind.requiredPhrase))
+                .font(.system(size: 12))
+                .foregroundStyle(MCI.Color.foregroundSecondary)
             TextField(kind.requiredPhrase, text: $typed)
                 .textFieldStyle(.roundedBorder)
             HStack {
-                Button("Cancel") { onFinish(false) }
-                    .buttonStyle(.bordered)
                 Spacer()
-                Button(UserFacingCopy.deleteAction) { onFinish(true) }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color.brandError)
+                Button(LibraryCopy.Privacy.cancel) { onFinish(false) }
+                    .keyboardShortcut(.cancelAction)
+                Button(kind.action, role: .destructive) { onFinish(true) }
                     .disabled(!kind.matches(typed))
             }
         }
-        .padding(24)
-        .frame(width: 420)
-        .background(Color.brandBgPrimary)
+        .padding(20)
+        .frame(width: 400)
+        .background(MCI.Color.background)
     }
 }
 
@@ -543,74 +436,4 @@ extension JSONEncoder {
         e.outputFormatting = [.prettyPrinted, .sortedKeys]
         return e
     }()
-}
-
-// MARK: - Recent activity (audit log)
-
-/// The audit log's surface in the Privacy Dashboard.
-/// Renders a scrollable table of the most-recent `AuditEntry` values.
-/// Toggling "Show all" swaps in the whole log; "Export activity log"
-/// writes a plaintext copy to `~/Downloads/`. Uses `MCIDesignSystem`
-/// tokens for spacing / radius / color so the surface matches the rest
-/// of the dashboard.
-struct RecentActivitySection: View {
-    let entries: [AuditEntry]
-    let showingAll: Bool
-    let onShowAll: () -> Void
-    let onExport: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: MCI.Spacing.s) {
-            HStack {
-                Text(UserFacingCopy.auditTitle)
-                    .font(.headline)
-                    .foregroundStyle(Color.brandFgPrimary)
-                Spacer()
-                Button(showingAll ? "Show recent" : "Show all") { onShowAll() }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(Color.brandMint)
-                Button(UserFacingCopy.auditExportAction) { onExport() }
-                    .buttonStyle(.bordered)
-                    .tint(Color.brandMint)
-            }
-            Text(UserFacingCopy.auditCaption)
-            .font(.caption)
-            .foregroundStyle(Color.brandFgMuted)
-
-            if entries.isEmpty {
-                Text(UserFacingCopy.auditEmpty)
-                    .font(.callout)
-                    .foregroundStyle(Color.brandFgMuted)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(entries) { entry in
-                            Text(Self.line(entry))
-                                .foregroundStyle(Color.brandFgSecondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                                .font(.caption)
-                            // Combine so VoiceOver reads
-                            // "2026-07-13 14:32:11, deleteEventsInRange,
-                            //  count=47" as one row-line, not three.
-                            .accessibilityElement(children: .combine)
-                            .accessibilityLabel(Self.line(entry))
-                        }
-                    }
-                }
-                .frame(maxHeight: showingAll ? 400 : 240)
-            }
-        }
-        .padding(MCI.Spacing.l)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.brandBgSecondary)
-        .cornerRadius(MCI.Radius.m)
-    }
-
-    /// "Oct 12, 2:09 PM · Deleted the last 24 hours", in the person's locale.
-    private static func line(_ entry: AuditEntry) -> String {
-        entry.timestamp.formatted(date: .abbreviated, time: .shortened)
-            + " \u{00B7} " + UserFacingCopy.auditAction(entry.action, details: entry.details)
-    }
 }

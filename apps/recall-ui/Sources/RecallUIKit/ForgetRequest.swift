@@ -15,14 +15,18 @@ public enum ForgetRequest: Equatable, Hashable, Sendable {
     case moments([UInt64])
     /// Everything saved in a time, in every app: a session on Today
     /// ("2:12 to 2:36 PM"), an hour of History ("2 PM to 3 PM"). It is
-    /// asked about first, with how many moments it holds.
-    case range(ClosedRange<Int64>, label: String)
+    /// asked about first, with how many moments it holds, unless the page
+    /// already asked (`confirmed`: Privacy's typed FORGET).
+    case range(ClosedRange<Int64>, label: String, confirmed: Bool = false)
+    /// "Forget Recent…" from Privacy: the shell's sheet, the last 10
+    /// minutes, the last hour or today (SPEC 3.11).
+    case recent
 
     /// How many moments a list's request names.
     public var momentCount: Int {
         switch self {
         case let .moments(ids): ids.count
-        case .range: 0
+        case .range, .recent: 0
         }
     }
 }
