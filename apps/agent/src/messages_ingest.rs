@@ -137,6 +137,9 @@ pub struct MessagesIngestCounters {
     /// Cascade dropped because the body contained a sensitive URL or
     /// host.
     pub sensitive_url_in_body: AtomicU64,
+    /// Rows the agent's last check refused: the body or participant label
+    /// still held a secret after the cascade's redaction.
+    pub secret_in_body: AtomicU64,
     /// Errors during `list_recent_messages` (FDA revoked mid-session,
     /// chat.db corruption, etc.).
     pub read_errors: AtomicU64,
@@ -387,6 +390,18 @@ impl MessagesPluginPump {
         let participants = participant_handles(row);
         let who = participant_label(&participants, row.is_from_me);
 
+        // The agent's last check before the store (crate::secret_gate): the
+        // cascade redacts one-time codes and bank shapes in place, and this
+        // refuses whatever the shared checks still find (a card number, a
+        // key, a `password:` line) in the body or the participant label.
+        if crate::secret_gate::find_secret(&decision.redacted_body, who.as_deref(), None).is_some()
+        {
+            self.bump_drop_counter(Some(MessagesPluginDropReason::SecretInBody));
+            return Ok(MessagesIngestOutcome::Dropped {
+                reason: MessagesPluginDropReason::SecretInBody,
+            });
+        }
+
         let header = compose_context_header(Some(MESSAGES_BUNDLE_ID), who.as_deref(), None, ts_us);
         let mut text = String::with_capacity(header.len() + decision.redacted_body.len());
         text.push_str(&header);
@@ -488,6 +503,7 @@ impl MessagesPluginPump {
             Some(MessagesPluginDropReason::SensitiveUrlInBody) => {
                 &self.counter.sensitive_url_in_body
             }
+            Some(MessagesPluginDropReason::SecretInBody) => &self.counter.secret_in_body,
         };
         counter.fetch_add(1, Ordering::Relaxed);
     }
@@ -664,6 +680,47 @@ mod tests {
             plugin_enabled: true,
             ..MessagesPluginConfig::DEFAULT
         }
+    }
+
+    // ----- The agent's last check (crate::secret_gate) -----
+
+    /// The cascade redacts one-time codes and bank shapes; a card number, a
+    /// key or a `password:` line it leaves is refused before the store.
+    #[test]
+    fn a_secret_the_cascade_leaves_is_refused_before_the_store() {
+        let store = Arc::new(InMemoryBrainStore::new());
+        let pump = MessagesPluginPump::with_watermark(store.clone(), None, enabled_cfg(), 0);
+        let key = [
+            "sk-",
+            "ant-",
+            "api03-",
+            "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R",
+        ]
+        .concat();
+        for (rowid, body) in [
+            (200, "my card is 4111 1111 1111 1111, exp 12/29".to_owned()),
+            (201, format!("here's the key: {key}")),
+            (202, "wifi password: SYNTHhunter2".to_owned()),
+        ] {
+            let outcome = pump
+                .ingest_row(&row(rowid, Some(&body), Some("+15551234567"), false))
+                .expect("a refusal is not an error");
+            assert!(
+                matches!(
+                    outcome,
+                    MessagesIngestOutcome::Dropped {
+                        reason: MessagesPluginDropReason::SecretInBody
+                    }
+                ),
+                "{body}: {outcome:?}"
+            );
+        }
+        assert_eq!(pump.counters().secret_in_body.load(Ordering::Relaxed), 3);
+        assert_eq!(pump.counters().allowed.load(Ordering::Relaxed), 0);
+        assert!(
+            store.get_event(EventId(1)).unwrap().is_none(),
+            "nothing stored"
+        );
     }
 
     // ----- Decision routing (security audit rows 4 + 6) -----

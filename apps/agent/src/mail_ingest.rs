@@ -101,6 +101,9 @@ pub struct MailIngestCounters {
     /// Emlx files whose cascade returned `Refuse` (no `From:` header
     /// parseable). Surfaces as `mail_events_refused_count`.
     pub refused: AtomicU64,
+    /// Emlx files the agent's last check refused: the subject or body held
+    /// a secret (a card number, a one-time code, a key, a `password:` line).
+    pub secret_refused: AtomicU64,
     /// Emlx files whose `mci_mail_reader::read_message` returned an
     /// error (file vanished mid-FSEvents-deliver, EPERM-without-FDA,
     /// 3-segment-prefix corruption, etc.). Surfaces as
@@ -138,6 +141,9 @@ pub enum MailIngestOutcome {
         /// [`MailRedactionReason::UnparseableEnvelope`] in v1).
         reason: MailRedactionReason,
     },
+    /// The subject or body held a secret ([`crate::secret_gate`]); nothing
+    /// reached `put_event`.
+    SecretRefused,
 }
 
 /// Errors the mail-ingest pump surfaces.
@@ -230,6 +236,12 @@ impl MailIngestPump {
         } else {
             Some(headers.subject.clone())
         };
+        // The agent's last check before the store (crate::secret_gate): a
+        // secret in the subject or the body and nothing of the mail is kept.
+        if crate::secret_gate::find_secret(&body, subject.as_deref(), None).is_some() {
+            self.counter.secret_refused.fetch_add(1, Ordering::Relaxed);
+            return Ok(MailIngestOutcome::SecretRefused);
+        }
         // ADR-0010 §1.3 context header prepend. Mail has no URL —
         // the `url=?` placeholder is the documented missing-field
         // convention from `compose_context_header`.
@@ -534,6 +546,44 @@ mod tests {
         assert!(ev.text.contains("Meeting at 10."));
         assert_eq!(pump.counters().allowed.load(Ordering::Relaxed), 1);
         assert_eq!(pump.counters().header_only.load(Ordering::Relaxed), 0);
+    }
+
+    /// The agent's last check (crate::secret_gate): a mail the cascade
+    /// allows is still refused when its subject or body holds a secret.
+    #[test]
+    fn a_secret_in_an_allowed_mail_is_refused_before_the_store() {
+        let store = Arc::new(InMemoryBrainStore::new());
+        let pump = MailIngestPump::new(store.clone(), None);
+        let tmp = tempdir().unwrap();
+        let key = ["sk-", "proj-", "Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0Ya8Ue4Wi2R"].concat();
+        let mail = |subject: &str, text: &str| {
+            format!(
+                "From: alice@personal.example.com\r\nTo: bob@example.com\r\nSubject: {subject}\r\n\
+                 Date: Thu, 1 Jan 1970 00:00:00 +0000\r\nMessage-ID: <s-1@personal.invalid>\r\n\
+                 Mime-Version: 1.0\r\nContent-Type: text/plain; charset=us-ascii\r\n\r\n{text}\r\n"
+            )
+        };
+        for (name, raw) in [
+            (
+                "1.emlx",
+                mail("Card for the trip", "Use 4111 1111 1111 1111, exp 12/29."),
+            ),
+            ("2.emlx", mail("Key", &format!("The new key is {key}"))),
+            ("3.emlx", mail(&format!("Rotated {key}"), "See subject.")),
+        ] {
+            let path = write_emlx(tmp.path(), name, raw.as_bytes());
+            let outcome = pump.ingest_path(&path).expect("a refusal is not an error");
+            assert!(
+                matches!(outcome, MailIngestOutcome::SecretRefused),
+                "{name}: {outcome:?}"
+            );
+        }
+        assert_eq!(pump.counters().secret_refused.load(Ordering::Relaxed), 3);
+        assert_eq!(pump.counters().allowed.load(Ordering::Relaxed), 0);
+        assert!(
+            store.get_event(EventId(1)).unwrap().is_none(),
+            "nothing stored"
+        );
     }
 
     #[test]
