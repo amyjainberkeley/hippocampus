@@ -19,11 +19,7 @@
 
 ## Install
 
-```bash
-curl -fsSL https://github.com/amyjainberkeley/hippocampus/releases/latest/download/install.sh | sh
-```
-
-It downloads the latest release, checks its checksum, Apple’s notarization and the developer’s signature, and copies Hippocampus to Applications. It also puts the `mci-agent` command on your PATH. [scripts/install.sh](scripts/install.sh) says every step.
+[Download the disk image](https://github.com/amyjainberkeley/hippocampus/releases/latest/download/Hippocampus.dmg), open it and drag Hippocampus to Applications.
 
 Or with Homebrew:
 
@@ -31,7 +27,13 @@ Or with Homebrew:
 brew install --cask amyjainberkeley/tap/hippocampus
 ```
 
-Or [download the disk image](https://github.com/amyjainberkeley/hippocampus/releases/latest/download/Hippocampus.dmg) and drag Hippocampus to Applications.
+Or with the one-line installer. [scripts/install.sh](scripts/install.sh) is the script it runs, and says every step:
+
+```bash
+curl -fsSL https://github.com/amyjainberkeley/hippocampus/releases/latest/download/install.sh | sh
+```
+
+It downloads the latest release, checks its checksum, Apple’s notarization and the developer’s signature, and copies Hippocampus to Applications. The installer and the Homebrew cask also put the `mci-agent` command on your PATH.
 
 Setup is five short screens. It shows what you get first, then asks for two permissions, Screen Recording and Accessibility, and reads nothing until you click Start Remembering.
 
@@ -74,20 +76,49 @@ Answers and summaries need Apple Intelligence (macOS 26) or a model on your Mac.
 
 ## What it costs
 
-Reading the screen is the cost. The numbers below are measured, each with its source. A full day’s CPU, memory and battery use hasn’t been measured yet; [docs/STATUS.md](docs/STATUS.md) will carry it when it is.
+Reading the screen is the cost. The numbers below are measured, each with its source.
+
+A working hour hasn’t been measured yet: CPU, memory, energy and disk over an hour of real use. To measure one on your own Mac, run this from a source checkout while Hippocampus runs and you work:
+
+```bash
+./scripts/launch/footprint.sh 3600
+```
+
+For that hour it samples every process in Hippocampus.app every 5 seconds. It reads only the kernel’s counters for those processes and the size of the memory folder, never what is in them. It prints CPU as Activity Monitor counts it, where one core is 100%, and as a share of the whole Mac, then memory, the CPU’s energy, what Hippocampus wrote to disk, and how much the memory folder grew. [docs/STATUS.md](docs/STATUS.md) will carry the hour once it is measured.
 
 | | Measured | Source |
 | --- | --- | --- |
 | Reading one window | 3.7 to 4.8 CPU-seconds and about 4 J at the median; 1.3 to 1.7 GB peak memory while reading | [Reader bake-off](eval/ocr-bakeoff-2026-10-15.md), MacBook Air M3, made-up screens |
 | Lines read exactly, on the bench’s flat screens | 96.7% (Apple Vision, tuned: 93.9%) | The same bake-off |
-| Disk image | 180 MB | The same bake-off, a 0.3.0 candidate with this reader |
-| Installed app | 370 MiB, 243 MiB of it the reader | The same bake-off |
+| Disk image | 177 MB | [docs/STATUS.md](docs/STATUS.md#measured): the notarized 0.3.0 candidate of October 18 |
+| Installed app | 365 MB, 253 MB of it the reader | The same candidate, in Finder’s units |
+<!-- RELEASE: measure the published Hippocampus.dmg the same way (docs/STATUS.md, "Size") and update these two rows, docs/STATUS.md and docs/launch/claims.md together. -->
 
 How hard it may work is set in code, not measured: the window in front is read at most every 3 seconds, other windows at most every 30, and after each read the reader rests three times as long as the read took. On battery those rests are longer, and in Low Power Mode only the window in front is read ([PRIVACY.md](PRIVACY.md#what-is-stored)).
 
 The reader is PP-OCR, bundled. It reads code and small text more exactly than Apple Vision on the repo’s bench, and costs 8 to 10 times Vision’s CPU per read. To check the numbers yourself, run `tools/ocr/screens/bakeoff.py` with the capture helper’s `OCRQualityProbe`, as the bake-off’s Reproduce section shows.
 
 This is a beta. [docs/STATUS.md](docs/STATUS.md) says what works today and how it was checked.
+
+## Check it yourself
+
+Each of these runs from a source checkout, and none of them reads your memory.
+
+```bash
+./scripts/launch/no-egress.sh          # every line of shipping code that can open a network connection, and why
+./scripts/launch/no-listener.sh        # while Hippocampus runs: no Hippocampus process listens on a TCP port
+./scripts/launch/verify-encryption.sh  # a made-up memory can't be read without its key, and holds no plain text
+./scripts/launch/secret-matrix/run.sh  # made-up secrets through the same rules the app runs
+```
+
+`no-egress.sh` reads the shipping source and fails on any network call it can’t account for. The only ones it allows are the update check to GitHub and connections that stay on this Mac, to a model server or to an MCP server you list. `verify-encryption.sh` builds and runs tests on a throwaway memory in a temporary folder, never yours. [docs/launch/network-check.md](docs/launch/network-check.md) says how to watch the network while the app runs.
+
+The planted-secret test, `secret-matrix/run.sh`, builds made-up cases (an app, a window’s title and address, the text read from it and the signals macOS gives) and runs them through the rules the app uses to skip and refuse things before anything is stored. Its results from October 17 are in [eval/secret-matrix-2026-10-17.md](eval/secret-matrix-2026-10-17.md), where all 15 of its rows passed:
+
+- **Skipped or refused:** password fields, password managers and authenticator apps, private browser windows that show they are private, bank and sign-in pages by their address, keys and tokens in a terminal or an editor, card numbers that pass the Luhn check, and one-time codes next to words like “verification code”.
+- **Kept on purpose, and checked:** a number with no such word nearby, and a 16-digit number that fails the Luhn check, so phone numbers, order numbers and dates stay searchable.
+- **Missed, as the results say:** a one-time code worded in a way those words don’t name, a long random token with no label, and a card number read too poorly to form one run of digits.
+- **Needs a person:** a private Safari or Arc window that shows no word the reader knows, and whether a code or a card on a real screen is caught from end to end. The results file says how to check each one on a real Mac.
 
 ## Build from source
 

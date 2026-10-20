@@ -60,12 +60,13 @@ the checker will reject if it ever appears in public copy unregistered.
 | read-cpu | 3.7 to 4.8 CPU-seconds | README | eval:eval/ocr-bakeoff-2026-10-15.md | 3.69 to 4.78 | Y |
 | read-energy | 4 J | README | eval:eval/ocr-bakeoff-2026-10-15.md | 3.8 to 4.2 J | Y |
 | read-memory | 1.3 to 1.7 GB | README | eval:eval/ocr-bakeoff-2026-10-15.md | 1.3 to 1.7 GB | Y |
-| dmg-size | 180 MB | README | eval:eval/ocr-bakeoff-2026-10-15.md | 180.3 MB | Y |
-| installed-size | 370 MiB | README | eval:eval/ocr-bakeoff-2026-10-15.md | 370.2 MiB | Y |
-| reader-size | 243 MiB | README | eval:eval/ocr-bakeoff-2026-10-15.md | 243.1 MiB | Y |
+| dmg-size | 177 MB | README | doc:docs/STATUS.md | Disk image: 176,716,280 bytes (177 MB; 168.5 MiB) | Y |
+| installed-size | 365 MB | README | doc:docs/STATUS.md | 364,961,841 bytes (365 MB; | Y |
+| reader-size | 253 MB | README | doc:docs/STATUS.md | 253,475,703 bytes (253 MB) | Y |
 | side-pictures-budget | 2 GB | README, privacy | code:adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/SideWindowPicturePolicy.swift | defaultBudgetBytes: Int64 = 2_000_000_000 | Y |
 | side-pictures-disk-share | 2% | README, privacy | code:core/brain/src/side_pictures.rs | DEFAULT_BUDGET_DISK_PERCENT: u64 = 2 | Y |
 | side-pictures-choices | 5 GB | README, privacy | code:adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Capture/SideWindowPicturePolicy.swift | budgetChoicesMB = [1_000, 2_000, 5_000] | Y |
+| cpu-one-core | 100% | README | code:scripts/launch/footprint.sh | CPU in % of one core (Activity Monitor units) | Y |
 | interface-mixed-now | 21% | site how-it-works, site index | measure:tools/ocr/screens | - | Y |
 | interface-mixed-before | 94% | site index | measure:tools/ocr/screens | - | Y |
 | cpu-vs-vision | 8 to 10 times Vision's CPU | README, how-it-works | eval:eval/ocr-bakeoff-2026-10-15.md | 8 to 10 times | N |
