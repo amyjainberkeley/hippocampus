@@ -772,7 +772,7 @@ def telemetry_verdict(scan: dict, runtime: tuple[bool, str] | None) -> tuple[boo
 
 def check_network(report: Report, repo: Path, sampler: Path | None, real_home: Path, repo_root: Path,
                   binaries: list[Path], since: float | None, static: bool = True,
-                  launchers: list[Path] | None = None) -> None:
+                  launchers: list[Path] | None = None, tripwire: bool = False) -> None:
     if static:
         in_place_status, in_place_last, tracked_status, tracked_last = run_no_egress(repo)
         message = f"scripts/launch/no-egress.sh on the tracked sources: {tracked_last}"
@@ -810,33 +810,39 @@ def check_network(report: Report, repo: Path, sampler: Path | None, real_home: P
     # The complete record: every connection CFNetwork and Network.framework
     # made for the run's own processes, from the unified log.
     product_pids = sorted(pid for pid, names in programs.items() if names & PRODUCT_PROGRAMS)
+    real = str(real_home.resolve()) + os.sep
+    # The kernel's sandbox reports: a refused network operation is an attempt
+    # to reach the network (net.runtime-log); a refused path in the real home
+    # is a reach outside the throwaway home (net.isolation).
+    refused = sandbox_denials(product_pids, programs, since, real) if since is not None and product_pids else None
+    home_refusals, network_refusals = refused if refused is not None else ([], [])
     if since is None or not product_pids:
         report.add(False, "net.runtime-log", "no run start or no product processes to look up in the unified log")
     else:
         connections = unified_log_connections(product_pids, programs, since)
-        if connections is None:
+        if connections is None or refused is None:
             report.add(False, "net.runtime-log", "the unified log could not be read")
-        elif connections:
+        elif connections or network_refusals:
             report.add(False, "net.runtime-log",
-                       "outbound network traffic from the run's processes (unified log, hostnames redacted by macOS): " +
-                       "; ".join(connections[:6]))
+                       "the run's processes tried to reach the network (unified log, hostnames redacted by macOS): " +
+                       "; ".join((connections + network_refusals)[:6]))
         else:
+            fenced = (" Every one of them but the fixture feed ran inside the network tripwire, which refuses and logs "
+                      "any connection off this Mac, name lookup or background URL session, from any API; the kernel "
+                      "logged no refusal, and the feed's OCR worker ran in its own no-network sandbox." if tripwire else "")
             report.add(True, "net.runtime-log",
-                       f"the unified log shows no network connection by the run's {len(product_pids)} product processes "
-                       f"({', '.join(product_seen)})")
+                       f"the unified log shows no network connection, CFNetwork task or refused network attempt by the run's "
+                       f"{len(product_pids)} product processes ({', '.join(product_seen)}).{fenced}")
 
     outside = []
     if (sampler / "outside-files.log").is_file():
         outside = [line.split("\t") for line in (sampler / "outside-files.log").read_text().splitlines() if line]
-    real = str(real_home.resolve()) + os.sep
     repo_prefix = str(repo_root.resolve()) + os.sep
     in_real_home = sorted({f"{row[1]} -> {row[2]}" for row in outside
                            if len(row) == 3 and row[1] in PRODUCT_PROGRAMS
                            and row[2].startswith(real) and not row[2].startswith(repo_prefix)})
     product_outside = [row for row in outside if len(row) == 3 and row[1] in PRODUCT_PROGRAMS]
-    if since is not None and product_pids:
-        for denial in sandbox_denials(product_pids, programs, since, real):
-            in_real_home.append(denial)
+    in_real_home += home_refusals
     report.add(not in_real_home, "net.isolation",
                f"the product's processes opened nothing in the real home ({len(product_outside)} file(s) outside the throwaway "
                f"root, all in the per-user system cache and temp folders)" if not in_real_home else
@@ -908,17 +914,42 @@ def sandbox_refusals(entries: list[dict], pids: list[int]) -> list[tuple[str, in
     return found
 
 
-def sandbox_denials(pids: list[int], programs: dict[int, set[str]], since: float, real_home_prefix: str) -> list[str]:
-    """Real-home paths a run's process tried to open and the test sandbox refused."""
-    found = set()
-    for name, pid, operation, path in sandbox_refusals(read_unified_log(SANDBOX_DENIAL_PREDICATE, since) or [], pids):
-        if name not in programs.get(pid, set()):
+# Mach services that reach the network for a caller: name lookups and
+# background URL sessions. A refused lookup of one is a network attempt.
+NETWORK_MACH_SERVICES = ("com.apple.dnssd.service", "com.apple.nsurlsessiond", "com.apple.nsurlsessiond-launchondemand")
+
+
+def same_program(reported: str, names: set[str]) -> bool:
+    """The kernel's sandbox reports name a process by its first 16 or so
+    characters; a longer program name matches by that prefix."""
+    return reported in names or (len(reported) >= 15 and any(name.startswith(reported) for name in names))
+
+
+def classify_refusals(refusals: list[tuple[str, int, str, str]], programs: dict[int, set[str]],
+                      real_home_prefix: str) -> tuple[list[str], list[str]]:
+    """(real-home refusals, network refusals) among the sandbox refusals of
+    the run's own processes. A network refusal is any network operation, or
+    a lookup of a service that reaches the network for its caller."""
+    home, network = set(), set()
+    for name, pid, operation, target in refusals:
+        if not same_program(name, programs.get(pid, set())):
             continue
-        if path.startswith(real_home_prefix) or path.rstrip("/") + "/" == real_home_prefix + "Library/":
-            found.add(f"{name} -> {path} ({operation}, denied by the test sandbox)")
-        elif operation.startswith("network"):
-            found.add(f"{name} -> {path} ({operation}: a name lookup, denied by the test sandbox)")
-    return sorted(found)
+        if operation.startswith("network") or (operation == "mach-lookup" and target.strip() in NETWORK_MACH_SERVICES):
+            kind = "a name lookup" if ("mDNSResponder" in target or "dnssd" in target) else "a connection attempt"
+            network.add(f"{name} (pid {pid}) -> {target} ({operation}: {kind}, refused by the sandbox)")
+        elif target.startswith(real_home_prefix) or target.rstrip("/") + "/" == real_home_prefix + "Library/":
+            home.add(f"{name} -> {target} ({operation}, denied by the test sandbox)")
+    return sorted(home), sorted(network)
+
+
+def sandbox_denials(pids: list[int], programs: dict[int, set[str]], since: float,
+                    real_home_prefix: str) -> tuple[list[str], list[str]] | None:
+    """The run's real-home and network refusals from the kernel's sandbox
+    reports in the unified log, or None when the log can't be read."""
+    entries = read_unified_log(SANDBOX_DENIAL_PREDICATE, since)
+    if entries is None:
+        return None
+    return classify_refusals(sandbox_refusals(entries, pids), programs, real_home_prefix)
 
 
 def unified_log_connections(pids: list[int], programs: dict[int, set[str]], since: float) -> list[str] | None:
@@ -978,6 +1009,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="a shipped bundle or folder whose Mach-O files are scanned for telemetry endpoints")
     parser.add_argument("--launcher", action="append", default=[],
                         help="a program outside --binaries that started the OCR worker in this run")
+    parser.add_argument("--net-tripwire", action="store_true",
+                        help="the run's product programs ran inside e2e-full.sh's network tripwire")
     parser.add_argument("--telemetry-bundle",
                         help="only check this bundle's telemetry switches (no run): print one line, exit 0 when they hold")
     parser.add_argument("--skip", action="append", default=[], help="check groups to skip (self-test)")
@@ -1035,7 +1068,7 @@ def main(argv: list[str] | None = None) -> int:
     if "network" not in skip:
         check_network(report, repo, Path(args.sampler) if args.sampler else None, Path(args.real_home), repo,
                       [Path(b) for b in args.binaries], args.since, static="egress" not in skip,
-                      launchers=[Path(b) for b in args.launcher])
+                      launchers=[Path(b) for b in args.launcher], tripwire=args.net_tripwire)
     if "outputs" not in skip:
         check_outputs(report, Path(args.outputs) if args.outputs else None, markers, key_hex)
 

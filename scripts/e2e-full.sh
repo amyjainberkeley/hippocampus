@@ -49,6 +49,14 @@
 #                         test also closes the real ~/Library to it. With this
 #                         flag only the product's own sandbox applies, which
 #                         checks that it is enough on its own
+#   --no-net-tripwire     run the product's programs without the network
+#                         tripwire. By default every product program (but the
+#                         fixture feed, which starts the OCR worker inside its
+#                         own no-network sandbox) runs inside a sandbox that
+#                         refuses every connection that would leave this Mac,
+#                         name lookups and background URL sessions, from any
+#                         API. Nothing can get out, and the kernel logs each
+#                         refused attempt, which the audit counts as a failure
 #   --no-audit            do not run audit-storage-security.sh
 #   --keep                keep the throwaway root (default: only on failure)
 #   --evidence DIR        copy the results, logs and audit into DIR
@@ -69,6 +77,7 @@ REFERENCE_DMG=""
 HEADLESS=0
 OCR_CHOICE="auto"
 OCR_SANDBOX=1
+NET_TRIPWIRE=1
 AUDIT=1
 KEEP=0
 EVIDENCE_DIR=""
@@ -85,6 +94,7 @@ while [[ $# -gt 0 ]]; do
         --headless) HEADLESS=1; shift ;;
         --ocr) OCR_CHOICE="${2:-}"; shift 2 ;;
         --allow-ocr-network) OCR_SANDBOX=0; shift ;;
+        --no-net-tripwire) NET_TRIPWIRE=0; shift ;;
         --no-audit) AUDIT=0; shift ;;
         --keep) KEEP=1; shift ;;
         --evidence) EVIDENCE_DIR="${2:-}"; shift 2 ;;
@@ -183,8 +193,27 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 # ---- The product environment ------------------------------------------------
-# Every product program runs with this environment and nothing else.
+# The network tripwire: connections to this Mac's own addresses stay open
+# (a model server or MCP server on loopback); every other connection, name
+# lookups (mDNSResponder) and background URL sessions (nsurlsessiond) are
+# refused, whatever API asks, and the kernel logs each refusal.
+TRIPWIRE_PROFILE='(version 1) (allow default)
+(deny network-outbound (remote ip "*:*"))
+(allow network-outbound (remote ip "localhost:*"))
+(deny network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))
+(deny mach-lookup (global-name "com.apple.dnssd.service") (global-name "com.apple.nsurlsessiond")
+    (global-name "com.apple.nsurlsessiond-launchondemand"))'
+TRIPWIRE=()
+(( NET_TRIPWIRE == 1 )) && TRIPWIRE=(/usr/bin/sandbox-exec -p "$TRIPWIRE_PROFILE")
+# Every product program runs with this environment and nothing else, inside
+# the tripwire. The fixture feed is the exception: it starts the OCR worker
+# inside the product's own no-network sandbox, and sandboxes don't nest.
 product_env() {
+    local wrap=(${TRIPWIRE[@]+"${TRIPWIRE[@]}"})
+    local argument
+    for argument in "$@"; do
+        [[ "$argument" == "$FEED" ]] && wrap=()
+    done
     env -i \
         HOME="$E2E_HOME" CFFIXED_USER_HOME="$E2E_HOME" TMPDIR="$E2E_TMP/" \
         USER="${USER:-e2e}" LANG="${LANG:-en_US.UTF-8}" \
@@ -193,7 +222,7 @@ product_env() {
         MCI_DB_KEYCHAIN_SERVICE="ai.hippocampus.e2e.absent.$$" MCI_DB_KEYCHAIN_ACCOUNT="absent" \
         MCI_CLAUDE_BINARY=/usr/bin/true MCI_CODEX_BINARY=/usr/bin/true CODEX_HOME="$E2E_HOME/.codex" \
         "${E2E_EXTRA_ENV[@]+"${E2E_EXTRA_ENV[@]}"}" \
-        "$@"
+        ${wrap[@]+"${wrap[@]}"} "$@"
 }
 E2E_EXTRA_ENV=()
 
@@ -563,7 +592,7 @@ fi
 # frame, MCP, client registration, deletion and uninstall), in its own
 # throwaway home.
 if (cd "$REPO_ROOT" && env -i HOME="$HOME" USER="${USER:-e2e}" TMPDIR="$E2E_TMP/" LANG="${LANG:-en_US.UTF-8}" PATH="$PATH" \
-    "$SCRIPT_DIR/e2e-clean-home.sh") > "$H/e2e-clean-home.log" 2>&1; then
+    ${TRIPWIRE[@]+"${TRIPWIRE[@]}"} "$SCRIPT_DIR/e2e-clean-home.sh") > "$H/e2e-clean-home.log" 2>&1; then
     pass c0 "scripts/e2e-clean-home.sh: $(tail -n 1 "$H/e2e-clean-home.log" | sed 's/^PASS: //')"
 else
     fail c0 "scripts/e2e-clean-home.sh: $(grep FAIL "$H/e2e-clean-home.log" | tail -n 1)"
@@ -1153,7 +1182,7 @@ if (( AUDIT == 1 )); then
     if "$SCRIPT_DIR/audit-storage-security.sh" --home "$E2E_HOME" --tmpdir "$E2E_TMP" \
         --markers "$H/markers.txt" --key-file "$KEY_FILE" --wal-snapshots "$H/wal-snapshots" \
         --sampler "$H/sampler" --outputs "$H/outputs.txt" --keyframe-tool "$KEYFRAME_TOOL" \
-        --since "$START_EPOCH" "${BINARIES[@]}" > "$H/audit.log" 2>&1; then
+        --since "$START_EPOCH" "${BINARIES[@]}" ${TRIPWIRE[@]+--net-tripwire} > "$H/audit.log" 2>&1; then
         pass audit "storage-security audit: $(tail -n 1 "$H/audit.log")"
     else
         fail audit "storage-security audit: $(tail -n 1 "$H/audit.log")"

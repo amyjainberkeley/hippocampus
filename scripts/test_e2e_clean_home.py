@@ -221,6 +221,53 @@ class FullE2EContractTests(unittest.TestCase):
             states = sorted(line.split("\t")[1:] for line in log.read_text().splitlines())
             self.assertEqual(states, [["hippocampus-ocr", "0", "0", "0"], ["hippocampus-ocr", "1", "1", "1"]], states)
 
+    def test_full_run_fences_every_product_program_off_the_network_by_default(self):
+        source = FULL.read_text(encoding="utf-8")
+        for literal in (
+            "NET_TRIPWIRE=1",
+            '(deny network-outbound (remote ip "*:*"))',
+            '(allow network-outbound (remote ip "localhost:*"))',
+            '(path-literal "/private/var/run/mDNSResponder")',
+            '(global-name "com.apple.dnssd.service")',
+            '(global-name "com.apple.nsurlsessiond")',
+            '(( NET_TRIPWIRE == 1 )) && TRIPWIRE=(/usr/bin/sandbox-exec -p "$TRIPWIRE_PROFILE")',
+            '${wrap[@]+"${wrap[@]}"} "$@"',
+            '${TRIPWIRE[@]+"${TRIPWIRE[@]}"} "$SCRIPT_DIR/e2e-clean-home.sh"',
+            "${TRIPWIRE[@]+--net-tripwire}",
+        ):
+            self.assertIn(literal, source, literal)
+        # Only the fixture feed, which sandboxes the OCR worker itself, is left out.
+        body = source.split("product_env() {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn('[[ "$argument" == "$FEED" ]] && wrap=()', body)
+
+    def test_audit_counts_every_refused_network_attempt_and_real_home_reach(self):
+        sys.path.insert(0, str(SCRIPTS / "lib"))
+        try:
+            import storage_audit
+        finally:
+            sys.path.pop(0)
+        home = "/Users/someone/"
+        entries = [{"eventMessage": message} for message in (
+            "Sandbox: mci-agent(11) deny(1) network-outbound 93.184.216.34:443",
+            "Sandbox: hippocampus-ocr(12) deny(1) network-outbound /private/var/run/mDNSResponder",
+            "Sandbox: SyntheticCapture(13) deny(1) mach-lookup com.apple.nsurlsessiond",
+            "Sandbox: mci-agent(11) deny(1) mach-lookup com.apple.windowserver.active",
+            "Sandbox: hippocampus-ocr(12) deny(1) file-read-metadata /Users/someone/Library/Caches",
+            "Sandbox: Safari(14) deny(1) network-outbound 1.1.1.1:443",
+            "Sandbox: mci-agent(15) deny(1) network-outbound 1.1.1.1:443",
+        )]
+        programs = {11: {"mci-agent"}, 12: {"hippocampus-ocr"}, 13: {"SyntheticCaptureFeed"}, 14: {"Safari"},
+                    15: {"mci-brain"}}
+        refusals = storage_audit.sandbox_refusals(entries, [11, 12, 13, 15])
+        home_refusals, network = storage_audit.classify_refusals(refusals, programs, home)
+        self.assertEqual(len(network), 3, network)
+        self.assertTrue(any("mci-agent (pid 11) -> 93.184.216.34:443" in line and "connection attempt" in line
+                            for line in network), network)
+        self.assertTrue(any("mDNSResponder" in line and "name lookup" in line for line in network), network)
+        self.assertTrue(any("SyntheticCapture (pid 13)" in line and "nsurlsessiond" in line for line in network), network)
+        self.assertEqual(home_refusals, ["hippocampus-ocr -> /Users/someone/Library/Caches (file-read-metadata, "
+                                         "denied by the test sandbox)"])
+
     def test_full_run_puts_its_key_shaped_values_together_at_run_time(self):
         # The file holds no literal that looks like a GitHub token, an AWS key
         # ID or an Anthropic key; the synthetic day still shows all three.
