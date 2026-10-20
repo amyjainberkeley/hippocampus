@@ -19,7 +19,8 @@
 //!   what was read, byte for byte, and stays what search indexes.
 //! - Resumable: a row of the current version marks a moment done, so an
 //!   interrupted batch loses nothing and no moment is made twice; a moment
-//!   offered to the model is marked so, and not offered again.
+//!   offered to the model is marked so, and not offered again, also when a
+//!   new version changes only the reading's rules ([`CAPTION_RULES_SINCE`]).
 //! - Bounded: a batch does at most its limits and stops at its deadline; a
 //!   model request is given only the time left. When and how often batches
 //!   run is the caller's choice; the agent runs them only plugged in and
@@ -33,10 +34,12 @@ use std::time::{Duration, Instant};
 
 use crate::caption::{self, Moment};
 use crate::chrome::{title_key, Frame, RepeatedChrome};
-use crate::moment_readings::{MomentReading, StoredMoment, CAPTION_BY_TITLE, READING_VERSION};
+use crate::moment_readings::{
+    MomentReading, StoredMoment, CAPTION_BY_TITLE, CAPTION_RULES_SINCE, READING_VERSION,
+};
 use crate::reading::{body, reading, reading_with, Reading, TERMINAL_APPS, VISIBLE_OCR_SEPARATOR};
 use crate::redaction::ocr_secrets::contains_secret;
-use crate::{apps, EventSource, SqlCipherBrainStore, StoreError};
+use crate::{apps, EventId, EventSource, SqlCipherBrainStore, StoreError};
 
 /// The span of one app's moments the many-frame rule learns from: a local
 /// day.
@@ -150,12 +153,23 @@ pub fn run_batch(
     let moments = store.moments_to_read(READING_VERSION, limits.moments, today)?;
     let fewer_than_asked = moments.len() < limits.moments;
     let mut learned: HashMap<(String, u64), RepeatedChrome> = HashMap::new();
+    // Rows an earlier version made, whose model captions may carry over.
+    let ids: Vec<EventId> = moments.iter().map(|moment| moment.id).collect();
+    let earlier = store.moment_readings(&ids)?;
     for moment in &moments {
         if past(limits.deadline) {
             stats.deadline_hit = true;
             return Ok(stats);
         }
-        let row = read_moment(store, moment, &mut learned, limits.utc_offset_s, now_us)?;
+        let before = earlier.get(&moment.id.0);
+        let row = read_moment(
+            store,
+            moment,
+            before,
+            &mut learned,
+            limits.utc_offset_s,
+            now_us,
+        )?;
         let cleaned = row.reading.is_some();
         let by_title = row.caption.is_some();
         if store.put_moment_reading(&row, moment)? {
@@ -220,9 +234,12 @@ fn learned_for<'a>(
     Ok(learned.get(&key).filter(|chrome| !chrome.is_empty()))
 }
 
+/// The row for `moment` by the current rules. `before` is the row an
+/// earlier version made, when there is one.
 fn read_moment(
     store: &SqlCipherBrainStore,
     moment: &StoredMoment,
+    before: Option<&MomentReading>,
     learned: &mut HashMap<(String, u64), RepeatedChrome>,
     utc_offset_s: i32,
     now_us: u64,
@@ -251,15 +268,50 @@ fn read_moment(
     // the one in use.
     let not_work = app.is_none_or(|app| app.is_empty() || apps::is_noise(app));
     let not_for_the_model = not_work || shown.beside || caption::is_sensitive(&shown);
-    Ok(MomentReading {
+    let mut row = MomentReading {
         event_id: moment.id,
         version: READING_VERSION,
         caption_by: caption.as_ref().map(|_| CAPTION_BY_TITLE.to_owned()),
         caption,
-        reading: cleaned,
+        reading: None,
         model_tried: not_for_the_model,
         updated_us: now_us,
-    })
+    };
+    if let Some(before) = before {
+        keep_model_caption(&mut row, before, &shown);
+    }
+    row.reading = cleaned;
+    Ok(row)
+}
+
+/// When only the reading's rules changed since `before` was made (it is of
+/// [`CAPTION_RULES_SINCE`] or later), `row` keeps what the model gave it:
+/// that the model was asked, so it is not asked again, and the model's line,
+/// when it wrote one that is still grounded in the moment as it now reads
+/// (`shown`). A line that no longer is goes, and the moment is offered again.
+/// A moment that is now not for the model keeps its caption from the title.
+fn keep_model_caption(row: &mut MomentReading, before: &MomentReading, shown: &Moment<'_>) {
+    if before.version < CAPTION_RULES_SINCE
+        || before.version >= READING_VERSION
+        || !before.model_tried
+        || row.model_tried
+    {
+        return;
+    }
+    let by_model = before
+        .caption_by
+        .as_deref()
+        .filter(|by| *by != CAPTION_BY_TITLE);
+    let Some((line, by)) = before.caption.as_deref().zip(by_model) else {
+        // Asked, and no line of the model's was used.
+        row.model_tried = true;
+        return;
+    };
+    if let Some(line) = caption::accept(line, shown) {
+        row.caption = Some(line);
+        row.caption_by = Some(by.to_owned());
+        row.model_tried = true;
+    }
 }
 
 /// Offer the newest captions made from titles to the model. Returns whether

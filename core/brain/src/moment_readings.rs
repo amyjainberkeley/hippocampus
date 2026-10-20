@@ -35,6 +35,13 @@ use crate::{EventId, EventSource, SqlCipherBrainStore, StoreError};
 /// navigation bar and Gmail's label chips are chrome.
 pub const READING_VERSION: u32 = 3;
 
+/// The version the caption rules last changed in. When only the reading's
+/// rules change, a row made by this version or a later one keeps the fact
+/// that the model was asked, and the model's line while it is still grounded
+/// in the moment as it now reads: the model is not asked again about a moment
+/// it already answered for.
+pub const CAPTION_RULES_SINCE: u32 = 2;
+
 /// `caption_by` for a caption made from the title, without a model.
 pub const CAPTION_BY_TITLE: &str = "title";
 
