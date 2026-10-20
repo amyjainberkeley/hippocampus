@@ -1,7 +1,9 @@
 import Foundation
 
 public enum DetectedLanguage: String, Equatable, Sendable {
-    case swift, rust, python, shell, unknown
+    /// `javascript` is JavaScript or TypeScript: the same keywords and
+    /// comments color both.
+    case swift, rust, javascript, python, shell, unknown
 }
 
 public enum SyntaxTokenType: Equatable, Sendable {
@@ -40,6 +42,16 @@ public enum SyntaxHighlighter {
         "yield", "raise", "break", "continue",
     ]
 
+    private static let javaScriptKeywords: Set<String> = [
+        "import", "export", "from", "default", "as", "const", "let", "var",
+        "function", "return", "if", "else", "for", "while", "do", "switch",
+        "case", "break", "continue", "try", "catch", "finally", "throw", "new",
+        "class", "extends", "implements", "interface", "type", "enum", "async",
+        "await", "yield", "of", "in", "instanceof", "typeof", "void", "this",
+        "super", "null", "undefined", "true", "false", "public", "private",
+        "protected", "readonly", "static",
+    ]
+
     private static let shellKeywords: Set<String> = [
         "if", "then", "else", "elif", "fi", "for", "while", "do", "done",
         "case", "esac", "export", "echo", "cd", "exit", "return", "local",
@@ -60,13 +72,72 @@ public enum SyntaxHighlighter {
         if has("fn ") && (has("let ") || has("pub ") || has("use ")) {
             return .rust
         }
+        if text.hasPrefix("#!") {
+            return .shell
+        }
+        // Before Python: TypeScript's `import … from "…"` and its `:` types
+        // read as Python otherwise, and its `//` comments then don't.
+        if readsAsJavaScript(text) {
+            return .javascript
+        }
         if has("def ") || (has("import ") && has(":") && !has("func ")) {
             return .python
         }
-        if text.hasPrefix("#!") || has("export ") || has("echo ") {
+        if has("export ") || has("echo ") {
             return .shell
         }
         return .unknown
+    }
+
+    /// JavaScript or TypeScript: a line only they write. A declaration
+    /// (`const total = …`, `export async function …`, `interface Plan {`),
+    /// an import from a quoted module (`import { plans } from "./plans";`)
+    /// or an arrow (`(plan) => {`). Only a line's own start counts, so a
+    /// comment or a sentence that says "function" is not code, a shell's
+    /// `export NAME=…` is not a declaration, and Python's `from x import y`
+    /// names no quoted module. `let` and `var` say nothing: Swift and Rust
+    /// write them too.
+    static func readsAsJavaScript(_ text: String) -> Bool {
+        let has = { (word: String) in text.containsBytes(word) }
+        let words = ["const ", "function", "export ", "import ", "interface ", "type ", "=>", "console.", "require("]
+        guard words.contains(where: has) else { return false }
+        return text.split(separator: "\n", omittingEmptySubsequences: true).contains { line in
+            isJavaScriptLine(line.drop(while: { $0 == " " || $0 == "\t" }))
+        }
+    }
+
+    private static func isJavaScriptLine(_ line: Substring) -> Bool {
+        if line.hasPrefix("const ") {
+            return line.contains("=")
+        }
+        if line.hasPrefix("export ") {
+            let declared = line.dropFirst("export ".count)
+            return ["default", "const ", "let ", "var ", "function", "async ", "class ", "interface ", "type ",
+                    "enum ", "{", "*"].contains { declared.hasPrefix($0) }
+        }
+        if line.hasPrefix("import ") {
+            return line.contains(" from \"") || line.contains(" from '")
+                || line.hasSuffix("\";") || line.hasSuffix("';")
+        }
+        if line.hasPrefix("function") || line.hasPrefix("async function") {
+            return declaresFunction(line)
+        }
+        if line.hasPrefix("interface ") || line.hasPrefix("type ") {
+            return line.contains("{") || line.contains(" = ")
+        }
+        return line.contains(") =>") || line.hasSuffix("=> {") || line.contains("console.")
+            || line.contains("require(")
+    }
+
+    /// `function name(`, `function* name(` or `function(`, after an optional
+    /// `async `: a sentence that starts with "function" names no call.
+    private static func declaresFunction(_ line: Substring) -> Bool {
+        var rest = line.hasPrefix("async ") ? line.dropFirst("async ".count) : line
+        guard rest.hasPrefix("function") else { return false }
+        rest = rest.dropFirst("function".count)
+        rest = rest.drop(while: { $0 == " " || $0 == "*" })
+        rest = rest.drop(while: { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "$" })
+        return rest.drop(while: { $0 == " " }).hasPrefix("(")
     }
 
     public static func tokenize(_ text: String) -> [SyntaxToken] {
@@ -83,6 +154,7 @@ public enum SyntaxHighlighter {
         switch lang {
         case .swift: return swiftKeywords
         case .rust: return rustKeywords
+        case .javascript: return javaScriptKeywords
         case .python: return pythonKeywords
         case .shell: return shellKeywords
         case .unknown: return []
@@ -98,7 +170,7 @@ public enum SyntaxHighlighter {
             if i > 0 { tokens.append(SyntaxToken(text: "\n", type: .plain)) }
             let s = String(line)
             let trimmed = s.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix(commentPrefix) {
+            if trimmed.hasPrefix(commentPrefix) || commentPrefix == "//" && isBlockCommentLine(trimmed) {
                 tokens.append(SyntaxToken(text: s, type: .comment))
                 continue
             }
@@ -146,7 +218,7 @@ public enum SyntaxHighlighter {
             if index > 0 { tokens.append(SyntaxToken(text: "\n", type: .plain)) }
             let line = String(line)
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix(comment) || trimmed.hasPrefix("/*") || trimmed.hasPrefix("* ") || trimmed == "*/" {
+            if trimmed.hasPrefix(comment) || isBlockCommentLine(trimmed) {
                 tokens.append(SyntaxToken(text: line, type: .comment))
                 continue
             }
@@ -155,6 +227,12 @@ public enum SyntaxHighlighter {
             if let trailing { tokens.append(SyntaxToken(text: trailing, type: .comment)) }
         }
         return tokens
+    }
+
+    /// A line of a `/* … */` comment, as C-like code writes one: its start,
+    /// a ` * ` line inside it, or its end.
+    static func isBlockCommentLine(_ trimmed: String) -> Bool {
+        trimmed.hasPrefix("/*") || trimmed.hasPrefix("* ") || trimmed == "*" || trimmed.hasPrefix("*/")
     }
 
     /// `line` split where a comment starts after code: at the marker outside
