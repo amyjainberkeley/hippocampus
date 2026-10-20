@@ -119,6 +119,52 @@ impl Drop for SqlcipherPragmaValue {
     }
 }
 
+/// The domain every keyed id is made under, so an id for one use can
+/// never be another's.
+const KEYED_ID_CONTEXT: &[u8] = b"hippocampus keyed id v1";
+
+/// SHA-256's block size, the HMAC key block.
+const HMAC_BLOCK: usize = 64;
+
+impl DbKey {
+    /// An id for `message` in `domain`, keyed to this memory: HMAC-SHA256
+    /// with the master key over the context, the domain and the message.
+    /// The same message in the same domain gives the same id on this Mac,
+    /// and a meaningless one under any other key, so a link or a settings
+    /// file can carry the id and never the name. The key stays here: what
+    /// comes out is a one-way function of it, and the key's padded copies
+    /// are wiped before returning.
+    ///
+    /// For naming only: never a key, a password or anything secret.
+    #[must_use]
+    pub fn keyed_id(&self, domain: &str, message: &[u8]) -> [u8; 32] {
+        use sha2::{Digest, Sha256};
+
+        let mut inner_pad = [0x36u8; HMAC_BLOCK];
+        let mut outer_pad = [0x5cu8; HMAC_BLOCK];
+        for (index, byte) in self.bytes.iter().enumerate() {
+            inner_pad[index] ^= byte;
+            outer_pad[index] ^= byte;
+        }
+        let mut inner = Sha256::new();
+        inner.update(inner_pad);
+        inner.update(KEYED_ID_CONTEXT);
+        inner.update([0u8]);
+        inner.update(domain.as_bytes());
+        inner.update([0u8]);
+        inner.update(message);
+        let mut inner_digest: [u8; 32] = inner.finalize().into();
+        let mut outer = Sha256::new();
+        outer.update(outer_pad);
+        outer.update(inner_digest);
+        let id: [u8; 32] = outer.finalize().into();
+        inner_pad.zeroize();
+        outer_pad.zeroize();
+        inner_digest.zeroize();
+        id
+    }
+}
+
 /// Redacted `Debug` — never the bytes. A leaked log line that prints a
 /// `DbKey` must reveal nothing.
 impl core::fmt::Debug for DbKey {
@@ -187,6 +233,77 @@ mod tests {
         // First bytes 00 01 02 03 …
         assert!(p.as_str().starts_with("x'000102030405"));
         assert_eq!(p.as_str().len(), DB_KEY_LEN * 2 + 3); // x' + 64 + '
+    }
+
+    /// HMAC-SHA256 by the book (RFC 2104): the keyed id is HMAC over the
+    /// context, the domain and the message, checked against RFC 4231's
+    /// test case 2 shape with the same key padded the same way.
+    #[test]
+    fn keyed_ids_are_hmac_sha256_over_the_domain_and_message() {
+        use sha2::{Digest, Sha256};
+
+        let key = DbKey::from_bytes([0x5a; DB_KEY_LEN]);
+        let mut message = Vec::new();
+        message.extend_from_slice(KEYED_ID_CONTEXT);
+        message.push(0);
+        message.extend_from_slice(b"work-item");
+        message.push(0);
+        message.extend_from_slice(b"code:trailhead-shop");
+        // HMAC by hand, from its definition.
+        let mut block = [0u8; HMAC_BLOCK];
+        block[..DB_KEY_LEN].copy_from_slice(&[0x5a; DB_KEY_LEN]);
+        let inner: Vec<u8> = block.iter().map(|b| b ^ 0x36).chain(message).collect();
+        let inner = Sha256::digest(&inner);
+        let outer: Vec<u8> = block.iter().map(|b| b ^ 0x5c).chain(inner).collect();
+        let expected: [u8; 32] = Sha256::digest(&outer).into();
+        assert_eq!(key.keyed_id("work-item", b"code:trailhead-shop"), expected);
+    }
+
+    /// RFC 4231 test case 2 ("Jefe", "what do ya want for nothing?") with
+    /// the context and domain left out, so the HMAC itself is the standard
+    /// one.
+    #[test]
+    fn the_hmac_matches_rfc_4231() {
+        use sha2::{Digest, Sha256};
+
+        let mut block = [0u8; HMAC_BLOCK];
+        block[..4].copy_from_slice(b"Jefe");
+        let inner: Vec<u8> = block
+            .iter()
+            .map(|b| b ^ 0x36)
+            .chain(b"what do ya want for nothing?".iter().copied())
+            .collect();
+        let inner = Sha256::digest(&inner);
+        let outer: Vec<u8> = block.iter().map(|b| b ^ 0x5c).chain(inner).collect();
+        let mac = Sha256::digest(&outer);
+        let hex = mac.iter().fold(String::new(), |mut hex, byte| {
+            use std::fmt::Write as _;
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        });
+        assert_eq!(
+            hex,
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+    }
+
+    #[test]
+    fn keyed_ids_differ_by_key_domain_and_message() {
+        let a = DbKey::from_bytes([1u8; DB_KEY_LEN]);
+        let b = DbKey::from_bytes([2u8; DB_KEY_LEN]);
+        let id = a.keyed_id("work-item", b"code:trailhead-shop");
+        assert_eq!(
+            id,
+            a.keyed_id("work-item", b"code:trailhead-shop"),
+            "stable"
+        );
+        assert_ne!(id, b.keyed_id("work-item", b"code:trailhead-shop"), "keyed");
+        assert_ne!(id, a.keyed_id("hide", b"code:trailhead-shop"), "by domain");
+        assert_ne!(
+            id,
+            a.keyed_id("work-item", b"code:trailhead-shop2"),
+            "by message"
+        );
     }
 
     #[test]
