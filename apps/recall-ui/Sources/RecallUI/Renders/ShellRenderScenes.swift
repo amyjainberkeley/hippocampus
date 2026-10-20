@@ -74,6 +74,10 @@ extension WindowRenderer {
             Scene.picture("nav-keyboard-shortcuts-dark", size: CGSize(width: 620, height: 560), dark: true) {
                 AnyView(KeyboardShortcutsSheet(registry: ActionPanelRegistry()))
             },
+            // The sheet scrolled to its end: Actions and Help.
+            Scene.picture("nav-keyboard-shortcuts-end", size: CGSize(width: 620, height: 560)) {
+                AnyView(KeyboardShortcutsSheet(registry: ActionPanelRegistry(), opensAt: .bottom))
+            },
         ]
         return scenes
     }

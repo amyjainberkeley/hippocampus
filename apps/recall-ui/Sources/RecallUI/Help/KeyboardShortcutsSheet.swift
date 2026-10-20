@@ -31,6 +31,9 @@ import SwiftUI
 /// Moments, Actions and Help.
 struct KeyboardShortcutsSheet: View {
     @ObservedObject var registry: ActionPanelRegistry
+    /// Where the list opens: the top, or (for a picture of the last
+    /// groups) the bottom.
+    var opensAt: UnitPoint = .top
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -52,6 +55,7 @@ struct KeyboardShortcutsSheet: View {
                 }
                 .padding(MCI.Spacing.l)
             }
+            .defaultScrollAnchor(opensAt)
             Divider().background(MCI.Color.border)
             footer
         }
