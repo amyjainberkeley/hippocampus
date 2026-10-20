@@ -423,6 +423,40 @@ final class FormattersTests: XCTestCase {
         XCTAssertEqual(Formatters.rowPreview("Plans\n-Solo", title: nil), "Plans \u{00B7} -Solo")
     }
 
+    /// The FFI gives a row at most `rowTextCap` characters of a moment's
+    /// text, cut where they end, mid-word too. A preview that runs to that
+    /// cut ends at its last whole word with "…", as the prototype's rows do
+    /// (the demo's Looked Up: "…Show the monthly price on t").
+    func testARowCutByTheFFIEndsAtAWholeWordWithAnEllipsis() {
+        let lead = "Cohort tables for subscription businesses\nMETRICS WEEKLY\nToday 2:21 PM\n"
+        let body = "Cohort tables show how many customers stay each month after they signed up. Read them by row: "
+            + "each row is the month a group started, and each column is a later month. A falling row means people "
+            + "leave sooner than planned for."
+        let text = String((lead + body).prefix(Formatters.rowTextCap))
+        XCTAssertEqual(text.count, 280)
+        let title = "Cohort tables for subscription businesses \u{00B7} Metrics Weekly"
+        let preview = Formatters.rowPreview(text, title: title)
+        XCTAssertLessThanOrEqual(preview.count, 220)
+        XCTAssertTrue(preview.hasSuffix("\u{2026}"), preview)
+        let shown = String(preview.dropLast())
+        XCTAssertTrue(body.hasPrefix(shown + " "), "ends at a whole word: \(preview)")
+        XCTAssertTrue(text.hasSuffix("sooner th"), "the FFI's cut fell mid-word")
+        XCTAssertEqual(Formatters.rowTextCap, 280)
+    }
+
+    /// A shorter text was not cut, so it ends as it ends; a search's passage
+    /// is cut by bytes, and a chat's at its start, so it is left as it came.
+    func testOnlyAStartTheFFICutGetsTheEllipsis() {
+        XCTAssertEqual(Formatters.rowPreview("Cohort tables\nRead them by row.", title: nil),
+                       "Cohort tables \u{00B7} Read them by row.")
+        let passage = String(String(repeating: "pricing tier ", count: 30).prefix(Formatters.rowTextCap))
+        let found = Formatters.rowPreview(passage, title: nil, maxLen: 300, isPassage: true)
+        XCTAssertFalse(found.hasSuffix("\u{2026}"), found)
+        XCTAssertEqual(Formatters.endingAtAWholeWord("one \u{00B7} two thr"), "one \u{00B7} two\u{2026}")
+        XCTAssertEqual(Formatters.endingAtAWholeWord("one \u{00B7} tw"), "one\u{2026}")
+        XCTAssertEqual(Formatters.endingAtAWholeWord("unbroken"), "unbroken\u{2026}")
+    }
+
     func testAppsAPersonKnowsByNameAreNamedThatWay() {
         XCTAssertEqual(Formatters.appDisplayName("com.apple.MobileSMS"), "Messages")
         XCTAssertEqual(Formatters.appDisplayName("com.googlecode.iterm2"), "iTerm")

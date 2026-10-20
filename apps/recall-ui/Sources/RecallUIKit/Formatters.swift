@@ -79,13 +79,22 @@ public enum Formatters {
     /// break reads as " · ", so a heading or a name never runs into what
     /// follows it ("Maya Chen 10:42 AM · Pushed the new onboarding flow"),
     /// and a list's own mark never gets a second one.
+    ///
+    /// The start of a moment's text that the FFI cut at `rowTextCap` ends
+    /// mid-word: a preview that runs to that end stops at its last whole
+    /// word, with "…". (A search's passage is cut by bytes, and for a chat
+    /// or a terminal at its start, so it is left as it came.)
     public static func rowPreview(_ text: String, title: String?, maxLen: Int = 220,
                                   isPassage: Bool = false) -> String {
         let lines = isPassage ? passageLines(text, title: title) : previewLines(text, title: title)
         var joined = ""
         var previous = ""
+        var toTheEnd = true
         for line in lines {
-            if joined.count >= maxLen { break }
+            if joined.count >= maxLen {
+                toTheEnd = false
+                break
+            }
             if joined.isEmpty {
                 joined = line
                 previous = line
@@ -101,7 +110,26 @@ public enum Formatters {
             joined += (joins ? " " : " \u{00B7} ") + line
             previous = line
         }
+        if toTheEnd, !isPassage, joined.count <= maxLen, text.count >= rowTextCap {
+            return endingAtAWholeWord(joined)
+        }
         return snippet(joined, maxLen: maxLen)
+    }
+
+    /// The most characters of a moment's text the FFI gives a row:
+    /// `SNIPPET_CHAR_CAP` in adapters/macos/mci-brain-ffi/src/lib.rs. A text
+    /// this long was cut there, wherever that fell, mid-word too.
+    public static let rowTextCap = 280
+
+    /// `text` up to its last whole word, then "…": what a row shows of a
+    /// text cut short. A text of one word keeps it.
+    static func endingAtAWholeWord(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard let space = trimmed.lastIndex(where: \.isWhitespace) else { return trimmed + "\u{2026}" }
+        // No separator or comma left hanging before the "…".
+        let loose = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "\u{00B7},;:"))
+        let kept = trimmed[..<space].trimmingCharacters(in: loose)
+        return (kept.isEmpty ? trimmed : kept) + "\u{2026}"
     }
 
     /// A line a list's mark starts: "•", "◦", "▪", "‣", "-", "–" or "*" and
