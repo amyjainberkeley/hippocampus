@@ -73,6 +73,17 @@ public struct StatusRow: Equatable, Sendable {
     /// until it's done, in one to three seconds (SPEC 3.11).
     public static let forgetting = StatusRow(title: "Forgetting\u{2026}", detail: nil, action: nil)
 
+    /// While the window and Ask read Demo Memory (SPEC-DELTA 6), its pause
+    /// says so: the menu, Ask's footer and Preferences name it, as the
+    /// window's footer does. A pause with an end still says when it ends.
+    /// Its button still ends the pause, and with it Demo Memory
+    /// (`DemoMemoryController`). Any other row is unchanged.
+    public var inDemoMemory: StatusRow {
+        guard action == .resume else { return self }
+        return StatusRow(title: DemoCopy.statusTitle, detail: isTimedPause ? detail : DemoCopy.statusDetail,
+                         action: action, isTimedPause: isTimedPause)
+    }
+
     /// A pause with an end says when: "Until 3:41 PM." or "Until tomorrow
     /// at 6:00 AM." Any other row is unchanged.
     public func pausedUntil(_ end: Date?, now: Date, calendar: Calendar = .autoupdatingCurrent) -> StatusRow {

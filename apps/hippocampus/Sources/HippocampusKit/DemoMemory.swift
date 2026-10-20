@@ -59,6 +59,9 @@ public enum DemoMemory {
     ) {
         let host = SupervisorDemoMemoryHost(supervisor: supervisor, isConnectingAITools: isConnectingAITools)
         attach(DemoMemoryController(host: host, maker: BundledDemoMemoryMaker.bundled()))
+        // While it is in use, the menu, Ask's footer and Preferences name it
+        // (`ProcessSupervisor.menuRow`).
+        supervisor.demoMemoryInUse = { isActive }
     }
 
     /// Attaches `controller`, clearing whatever a run left behind.

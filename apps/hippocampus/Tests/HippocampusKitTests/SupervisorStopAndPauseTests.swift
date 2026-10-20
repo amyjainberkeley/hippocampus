@@ -337,6 +337,30 @@ final class SupervisorStopAndPauseTests: XCTestCase {
         try await supervisor.shutdownAndWait()
     }
 
+    /// While Demo Memory is in use its pause names it in the menu, Ask's
+    /// footer, Preferences and what the window is sent. Start Remembering
+    /// is still the pause's button, so the window's Leave Demo Memory, which
+    /// asks the app for it, still goes through (SPEC-DELTA 6).
+    func test_demo_memorys_pause_names_it_and_still_ends_with_start_remembering() async throws {
+        let (supervisor, _, topology) = make(config: FakeRuntimeConfig(captureEnabled: true))
+        topology.readinessResults = Array(repeating: .success(()), count: 4)
+        try await supervisor.startAndWaitForReadiness()
+        supervisor.setPaused(true)
+        await eventually { supervisor.state == .paused }
+        supervisor.demoMemoryInUse = { false }
+        XCTAssertEqual(supervisor.menuRow(setupFinished: true).title, "Paused")
+
+        supervisor.demoMemoryInUse = { true }
+        let row = supervisor.menuRow(setupFinished: true)
+        XCTAssertEqual(row.title, "Demo Memory")
+        XCTAssertEqual(row.detail, "Your own memory is paused until you leave.")
+        XCTAssertEqual(row.actionTitle, "Start Remembering")
+        XCTAssertEqual(supervisor.askPanelStatus(setupFinished: true).text, "Demo Memory")
+        XCTAssertEqual(supervisor.windowStatusMessage(setupFinished: true).title, "Demo Memory")
+        XCTAssertTrue(WindowChannelPolicy.allows(WindowChannelRequest(id: "1", op: .resume), row: row, holding: false))
+        try await supervisor.shutdownAndWait()
+    }
+
     /// "Starting… / Pause" shows while a resume starts. A Pause pressed then
     /// waited for the resume, and when that start failed the pause was
     /// dropped: "Not saving / Try Again" with the pause kept, and Try Again

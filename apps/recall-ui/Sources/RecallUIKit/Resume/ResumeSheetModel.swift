@@ -97,6 +97,9 @@ public final class ResumeSheetModel: ObservableObject {
     private let rules: ResumeRules
     private let asked: (any KeyValueStore)?
     private let appName: (String) -> String
+    /// The window reads Demo Memory: what the made-up week invented says
+    /// so, and never opens (`isMadeUp`).
+    private let madeUp: Bool
 
     public init(
         itemId: String,
@@ -105,7 +108,8 @@ public final class ResumeSheetModel: ObservableObject {
         tabs: any OpenTabsReading,
         rules: ResumeRules = .none,
         asked: (any KeyValueStore)? = nil,
-        appName: @escaping (String) -> String = { Formatters.appDisplayName($0) }
+        appName: @escaping (String) -> String = { Formatters.appDisplayName($0) },
+        madeUp: Bool = false
     ) {
         self.itemId = itemId
         self.planner = planner
@@ -114,6 +118,7 @@ public final class ResumeSheetModel: ObservableObject {
         self.rules = rules
         self.asked = asked
         self.appName = appName
+        self.madeUp = madeUp
     }
 
     /// Read the plan and make the rows.
@@ -134,7 +139,8 @@ public final class ResumeSheetModel: ObservableObject {
 
     /// The rows a plan becomes. Never-read apps and sites are left out
     /// whatever the plan says; an app not on this Mac can't be ticked and
-    /// says so; a folder that's gone says so.
+    /// says so; a folder that's gone says so. In Demo Memory, what the
+    /// made-up week invented says that, and can't be ticked.
     func makeRows(_ plan: ResumePlan) -> [ResumeRow] {
         plan.items.compactMap { target -> ResumeRow? in
             if let app = target.app, rules.isNeverReadApp(app) { return nil }
@@ -144,6 +150,8 @@ public final class ResumeSheetModel: ObservableObject {
             var blocked: String?
             if let note = target.note {
                 blocked = note
+            } else if madeUp, Self.isMadeUp(target) {
+                blocked = WorkCopy.resumeMadeUp
             } else if target.reason == "missing" {
                 blocked = WorkCopy.resumeMissing(Self.lastPart(of: target.path) ?? target.title)
             } else if target.reason == "no_address" {
@@ -168,6 +176,32 @@ public final class ResumeSheetModel: ObservableObject {
             return ResumeRow(target: target, group: group, ticked: available && target.checked,
                              available: available, detail: detail, appName: name)
         }
+    }
+
+    /// In Demo Memory, whether a target is the made-up week's own invention,
+    /// so nothing real can open it: every file, folder and document in the
+    /// week is made up (`mci_seed_brain/demo_week/story.rs`), and so is a
+    /// page with no address or on a made-up site (a name reserved for
+    /// examples, such as `foundernotes.example`). Its apps, and its pages on
+    /// real sites, are real, and open as they would anywhere.
+    static func isMadeUp(_ target: ResumePlan.Target) -> Bool {
+        if target.path != nil || target.kind == "folder" || target.kind == "document" { return true }
+        if target.reason == "missing" || target.reason == "no_address" { return true }
+        guard let address = target.url else { return false }
+        return isExampleSite(address)
+    }
+
+    /// A host under a name kept for examples and tests (RFC 2606 and 6761),
+    /// which never reaches a real site.
+    static func isExampleSite(_ address: String) -> Bool {
+        guard let host = URLComponents(string: address)?.host?.lowercased(), !host.isEmpty else { return false }
+        for suffix in ["example", "test", "invalid", "localhost"] where host == suffix || host.hasSuffix("." + suffix) {
+            return true
+        }
+        for name in ["example.com", "example.net", "example.org"] where host == name || host.hasSuffix("." + name) {
+            return true
+        }
+        return false
     }
 
     static func group(of target: ResumePlan.Target) -> ResumeRow.Group {

@@ -64,6 +64,9 @@ public enum WorkCopy {
         "\(app) opens without the folder; Hippocampus doesn’t know where it is"
     }
     public static let resumeNoAddress = "Hippocampus doesn’t know this page’s address"
+    /// In Demo Memory, a file, folder, document or page the made-up week
+    /// invented: there is nothing real to open (`ResumeSheetModel.isMadeUp`).
+    public static let resumeMadeUp = "Made up for the demo, so nothing opens."
     public static func resumeNotInstalled(_ app: String) -> String { "\(app) isn’t on this Mac" }
     /// A folder row's second line: what opens it.
     public static func resumeOpensIn(_ app: String) -> String { "Opens in \(app)" }

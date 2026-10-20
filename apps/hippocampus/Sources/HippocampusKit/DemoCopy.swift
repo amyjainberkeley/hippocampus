@@ -19,6 +19,15 @@ public enum DemoCopy {
     /// The small tag in the menu, as by the window's title.
     public static let tag = "Demo"
 
+    // MARK: While it is in use
+
+    /// The status row's first line, the menu's and Preferences', and Ask's
+    /// footer: what the window's footer says too (`NavigationCopy` in the
+    /// window), so a picture never shows "Paused" over the made-up week.
+    public static let statusTitle = "Demo Memory"
+    /// The status row's second line, as the window says it.
+    public static let statusDetail = "Your own memory is paused until you leave."
+
     // MARK: The question before it starts
 
     public static let confirmTitle = "Use Demo Memory?"
@@ -47,7 +56,7 @@ public enum DemoCopy {
 
     /// Every string above, for the copy tests.
     public static let all: [String] = [
-        use, making, leave, leaving, tag,
+        use, making, leave, leaving, tag, statusTitle, statusDetail,
         confirmTitle, confirmMessage, confirmButton, cancel,
         preferencesTitle, preferencesOff, preferencesMaking, preferencesOn, preferencesLeaving,
         couldntUseTitle, couldntMake, missing, couldntPause,

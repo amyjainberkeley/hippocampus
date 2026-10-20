@@ -450,7 +450,7 @@ final class DemoRenderWorld {
                     "com.google.Chrome", "com.microsoft.VSCode", "com.apple.Terminal", "com.tinyspeck.slackmacgap",
                     "us.zoom.xos", "notion.id", "com.figma.Desktop",
                 ]),
-                tabs: NoOpenTabs(), rules: { .none }, asked: nil),
+                tabs: NoOpenTabs(), rules: { .none }, asked: nil, madeUp: true),
             aiTools: AIToolsModel(client: client, detector: detector, understanding: understanding,
                                   choices: .ephemeral(), timeZone: calendar.timeZone, now: { now }),
             privacy: {
@@ -572,7 +572,7 @@ final class DemoRenderWorld {
         // Resume's sheet over the item's page, as macOS shows it at the
         // window's top: a picture can't capture a sheet's own window.
         let model = ResumeSheetModel(itemId: item, planner: resume.planner, workspace: resume.workspace,
-                                     tabs: resume.tabs)
+                                     tabs: resume.tabs, madeUp: resume.madeUp)
         await model.load()
         let sheet = ResumeSheetContent(model: model, notes: BottomNotes(), now: now, calendar: calendar,
                                        loads: false) {}

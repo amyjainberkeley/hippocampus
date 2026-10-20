@@ -26,7 +26,8 @@ struct ResumeSheet: View {
         let resolved = services ?? (isSyntheticPreview ? .none : environmentServices ?? .system)
         ResumeSheetContent(model: ResumeSheetModel(itemId: itemId, planner: resolved.planner,
                                                    workspace: resolved.workspace, tabs: resolved.tabs,
-                                                   rules: resolved.rules(), asked: resolved.asked),
+                                                   rules: resolved.rules(), asked: resolved.asked,
+                                                   madeUp: resolved.madeUp),
                            notes: notes, now: now(), calendar: calendar) { dismiss() }
     }
 }
