@@ -76,8 +76,8 @@ is skipped, or how much disk Hippocampus takes.
 
 The purger's one new change, `retention_purger::clear_side_pictures`,
 clears the screenshot reference of side moments that still hold exactly
-the chosen picture, in one transaction, then deletes blob files that no
-moment references. It inserts nothing, deletes no row, and never touches a
+the chosen picture, 256 to a transaction so ingest is never held for long,
+then deletes blob files that no moment references. It inserts nothing, deletes no row, and never touches a
 moment's text, caption or search, nor any front-window screenshot.
 Retention and every forget remove side pictures with their moments, as
 before.
