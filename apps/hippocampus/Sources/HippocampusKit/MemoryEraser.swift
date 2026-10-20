@@ -34,3 +34,9 @@ final class AgentMemoryEraser: MemoryErasing {
         }
     }
 }
+
+/// Whether Delete Everything may erase now: never while Demo Memory's
+/// window shows the made-up store, which is not the person's own.
+enum MemoryEraseGate {
+    static var allowed: Bool { !DemoMemory.isActive }
+}

@@ -2197,7 +2197,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     func eraseMemory() async -> Bool {
         // Demo Memory's window shows the made-up store; it never erases the
         // person's own.
-        guard !DemoMemory.isActive, let agentURL = locator.agentPath() else { return false }
+        guard MemoryEraseGate.allowed, let agentURL = locator.agentPath() else { return false }
         guard await forgetHold.hold() else { return false }
         let environment = ProcessSupervisorLaunchPlan.sanitizedEnvironment(
             baseEnvironment: ProcessInfo.processInfo.environment,

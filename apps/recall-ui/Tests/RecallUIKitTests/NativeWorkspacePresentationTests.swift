@@ -43,8 +43,9 @@ final class NativeWorkspacePresentationTests: XCTestCase {
             XCTAssertTrue(source.contains("@StateObject private var \(model)"),
                           "The shell owns every place's model, so each survives a change of place")
         }
-        XCTAssertTrue(source.contains("PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator)"),
-                      "Privacy is its own page")
+        XCTAssertTrue(source.contains(
+            "PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator, erase: eraseThroughApp)"),
+                      "Privacy is its own page, and Delete Everything goes through the app")
         XCTAssertTrue(source.contains("if isSyntheticPreview || drawsWindowControls {"),
                       "the preview and pictures never open Privacy's activity log")
         XCTAssertTrue(source.contains("UserDictionaryEditor()"), "The names page is pushed inside About You")

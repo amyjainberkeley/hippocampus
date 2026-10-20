@@ -107,7 +107,7 @@ Browsers are read like every other window, with no extension and no Automation p
 ## How to delete it
 
 - From the window: a moment or a few you picked (⌘⌫, with Undo for a few seconds), an hour of History, a session on Today, a web page or a search, or recent time with Forget Recent… (⇧⌘⌫): the last 10 minutes, the last hour or today. Larger ones ask you first. While Hippocampus is remembering, it holds still for the second or two a forget takes, then carries on.
-- The last 24 hours, or everything: on the window's Privacy page. Both ask you to confirm first, and what was learned from those moments goes too. The database file is then rewritten without them, and its log is emptied. Delete Everything also deletes the key, so copies of your memory in earlier backups or snapshots can't be read any more; a new key comes with the next start.
+- The last 24 hours, or everything: on the window's Privacy page. Both ask you to confirm first, and what was learned from those moments goes too. The database file is then rewritten without them, and its log is emptied. Delete Everything also deletes the key, so copies of your memory in earlier backups or snapshots can't be read any more; a new key is made for what comes next.
 - You can export every moment, in full, as JSON lines, on the same page. It asks where to save. The file isn't encrypted, only your account can open it, and in Desktop, Documents or iCloud Drive it may sync to iCloud.
 - Something it learned about you: Forget, on About You.
 - Pictures of other windows only: Forget Pictures of Other Windows…, in Preferences, under Remembering. Their text stays.

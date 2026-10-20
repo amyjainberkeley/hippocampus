@@ -1071,6 +1071,9 @@ fn rekey(
     if opens_with_bytes(ctx.db_path, old_key) {
         return Ok(Err("the old key still opens the database".to_owned()));
     }
+    // The journal never claims more than is on the disk: SQLite's own
+    // commit is not flushed through the drive's cache on macOS.
+    sync_database(ctx.db_path)?;
     journal.phase = Phase::Rekeyed;
     write_journal(&ctx.journal_path(), journal)?;
     ctx.reached(Step::Rekeyed)?;
@@ -1144,6 +1147,7 @@ fn reseal(
     }
     move_batch(ctx, &store, &blob_dir, &mut pending)?;
     drop(store);
+    sync_database(ctx.db_path)?;
     journal.phase = Phase::Resealed;
     write_journal(&ctx.journal_path(), journal)?;
     ctx.reached(Step::Resealed)?;
@@ -1452,6 +1456,11 @@ fn roll_back(ctx: &KeyChangeContext<'_>, journal: &Journal) -> Result<(), KeyCha
             remove_unnamed_copies(ctx, &new_key, &old_key)
                 .map_err(|e| rollback("remove re-sealed copies", &e))?;
         }
+    }
+    // The database is back under the old key on the disk itself before the
+    // new key, the only other one that could open it, goes.
+    if ctx.db_path.exists() {
+        sync_database(ctx.db_path).map_err(|e| rollback("sync memory", &e))?;
     }
     if new_key.is_some() {
         ctx.delete_item(&journal.to_account)
@@ -1780,6 +1789,17 @@ fn sync_file(path: &Path) -> Result<(), KeyChangeError> {
     std::fs::File::open(path)
         .and_then(|file| file.sync_all())
         .map_err(|e| io_error("sync file", e))
+}
+
+/// The database and its log, flushed through the drive's cache
+/// (`F_FULLFSYNC`): what a commit wrote is on the disk itself.
+fn sync_database(path: &Path) -> Result<(), KeyChangeError> {
+    sync_file(path)?;
+    let log = sidecar(path, "-wal");
+    if log.exists() {
+        sync_file(&log)?;
+    }
+    Ok(())
 }
 
 fn sync_dir(dir: &Path) -> Result<(), KeyChangeError> {
