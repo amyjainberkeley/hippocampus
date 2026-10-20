@@ -55,10 +55,4 @@ final class SeamWiringTests: XCTestCase {
         XCTAssertTrue(picker.contains("Picker(\"Open Ask with\", selection: $store.askKey)"))
         XCTAssertTrue(picker.contains(".onAppear { askKey.recheck() }"))
     }
-
-    func testFnIsNotOfferedYetAndItsMaskIsTheFunctionKeys() {
-        XCTAssertFalse(FnKeyMonitor.isOffered)
-        XCTAssertEqual(FnKeyMonitor.functionMask, 0x80_0000, "NSEvent.ModifierFlags.function")
-        XCTAssertFalse(SoloKey.allCases.map(\.rawValue).contains("fn"), "Fn joins the choices with its checks")
-    }
 }

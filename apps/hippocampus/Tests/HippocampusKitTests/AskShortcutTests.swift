@@ -12,6 +12,7 @@ final class AskShortcutTests: XCTestCase {
     func testAListeningKeyIsNamedByItself() {
         let expected: [(SoloKey, String, String)] = [
             (.shiftTwice, "⇧⇧", "Press Shift twice"),
+            (.fn, "fn", "Tap Fn"),
             (.rightShift, "right ⇧", "Tap right Shift"),
             (.rightCommand, "right ⌘", "Tap right ⌘"),
             (.rightOption, "right ⌥", "Tap right ⌥"),
@@ -53,6 +54,8 @@ final class AskShortcutTests: XCTestCase {
     func testEachKeysCaptionSaysHowToPressIt() {
         let expected: [(SoloKey, String)] = [
             (.shiftTwice, "Press either Shift twice. Capitals and shortcuts don’t count."),
+            // Fn's arrows and F-keys keep working (SPEC-DELTA 7).
+            (.fn, "Tap Fn by itself. Fn with arrows and function keys keeps working."),
             (.rightShift, "Tap right Shift by itself. Capitals and shortcuts don’t count."),
             (.rightCommand, "Tap right ⌘ by itself. Shortcuts like ⌘C never open Ask."),
             // Option types symbols, not capitals.

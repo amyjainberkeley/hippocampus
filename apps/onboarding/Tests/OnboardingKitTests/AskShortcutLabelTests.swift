@@ -159,7 +159,7 @@ final class AskShortcutLabelTests: XCTestCase {
             }
             .filter { !$0.isEmpty }
         XCTAssertFalse(cases.isEmpty)
-        let known: Set<String> = ["shiftTwice", "rightShift", "rightCommand", "rightOption", "off"]
+        let known: Set<String> = ["shiftTwice", "fn", "rightShift", "rightCommand", "rightOption", "off"]
         for stored in cases {
             XCTAssertTrue(known.contains(stored), "the app can store \(stored); onboarding must name it")
         }
