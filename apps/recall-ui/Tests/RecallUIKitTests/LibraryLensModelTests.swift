@@ -98,6 +98,84 @@ final class LibraryLensModelTests: XCTestCase {
         XCTAssertEqual(model.shownHits.map(\.id), [3])
     }
 
+    // MARK: "No email yet." only when there is none (the verifier's probe)
+
+    /// 30 Slack moments, then one email an hour and a half before them. The
+    /// lens's first page holds only Slack: the Email chip used to say "No
+    /// email yet." with no Show Earlier (the button lives in the list, which
+    /// isn't drawn), while an email was saved.
+    func testTheEmailChipSaysNoEmailOnlyWhenThereIsNone() async {
+        var moments: [Hit] = (0..<30).map { index in
+            MomentFactory.hit(UInt64(100 + index), "com.tinyspeck.slackmacgap", minutesAgo: Double(index + 1))
+        }
+        moments.append(MomentFactory.hit(7, "com.apple.mail", minutesAgo: 120))
+        let model = LibraryLensModel(lens: .conversations, reader: MomentsReader(moments), pageSize: 10,
+                                     deletions: MemoryDeletionSignal())
+        await model.reload()
+        XCTAssertTrue(model.hits.allSatisfy { $0.appBundleId == "com.tinyspeck.slackmacgap" }, "the first page: Slack")
+        await model.choose(.email)
+        XCTAssertFalse(model.shownHits.isEmpty && model.canLoadEarlier,
+                       "Email shows \"\(LibraryCopy.emptyConversations(.email))\" with no Show Earlier, while an email is saved")
+        XCTAssertEqual(model.shownHits.map(\.id), [7], "the chip reads on to the email")
+    }
+
+    /// Past the pages a chip reads on by itself, it says since when there
+    /// is none, never "No email yet.", and Show Earlier reads on.
+    func testAChipWithNoneReadYetSaysSinceWhenAndShowEarlierReadsOn() async throws {
+        var moments: [Hit] = (0..<200).map { index in
+            MomentFactory.hit(UInt64(1_000 + index), "com.tinyspeck.slackmacgap", minutesAgo: Double(index + 1))
+        }
+        moments.append(MomentFactory.hit(7, "com.apple.mail", minutesAgo: 400))
+        let model = LibraryLensModel(lens: .conversations, reader: MomentsReader(moments), pageSize: 10,
+                                     deletions: MemoryDeletionSignal())
+        await model.reload()
+        await model.choose(.email)
+        XCTAssertTrue(model.shownHits.isEmpty)
+        XCTAssertTrue(model.canLoadEarlier)
+        let since = try XCTUnwrap(model.readBackTo, "how far back it read")
+        let words = LibraryCopy.noneSince(.conversations, .email,
+                                          day: LibraryCopy.sinceDay(since, now: SampleDay.now, calendar: SampleDay.calendar,
+                                                                    locale: SampleDay.locale))
+        XCTAssertTrue(words.hasPrefix("No email since "), words)
+        XCTAssertNotEqual(words, LibraryCopy.emptyConversations(.email))
+        var clicks = 0
+        while model.shownHits.isEmpty, model.canLoadEarlier, clicks < 40 {
+            await model.loadEarlier()
+            clicks += 1
+        }
+        XCTAssertEqual(model.shownHits.map(\.id), [7], "Show Earlier reads on to it")
+        XCTAssertNil(model.readBackTo, "a chip with rows says nothing of the kind")
+    }
+
+    func testSinceSaysTheDayAsAPersonWould() throws {
+        let calendar = SampleDay.calendar
+        let now = SampleDay.now
+        func us(_ days: Int, _ hour: Int, _ minute: Int = 0) throws -> UInt64 {
+            let day = try XCTUnwrap(calendar.date(byAdding: .day, value: -days, to: calendar.startOfDay(for: now)))
+            return UInt64((day.timeIntervalSince1970 + Double(hour * 3_600 + minute * 60)) * 1_000_000)
+        }
+        func since(_ us: UInt64) -> String { LibraryCopy.sinceDay(us, now: now, calendar: calendar, locale: SampleDay.locale) }
+        let morning = since(try us(0, 9, 5))
+        XCTAssertTrue(morning.hasPrefix("9:05") && morning.hasSuffix("AM"), morning)
+        XCTAssertEqual(since(try us(1, 16)), "yesterday")
+        let weekday = since(try us(3, 10))
+        var english = Calendar(identifier: .gregorian)
+        english.locale = SampleDay.locale
+        XCTAssertTrue(english.weekdaySymbols.contains(weekday), weekday)
+        XCTAssertFalse(since(try us(20, 10)).contains(","), "the same year: no year")
+        XCTAssertTrue(since(try us(400, 10)).contains(","), "another year says it")
+        for lens in LibraryLens.allCases {
+            for chip in ConversationFilter.allCases {
+                let text = LibraryCopy.noneSince(lens, chip, day: "Tuesday")
+                XCTAssertTrue(text.hasSuffix(" since Tuesday."), text)
+                XCTAssertNil(CopyStyleValidator.containsJargon(text), text)
+                XCTAssertNil(CopyStyleValidator.containsMarketingSpeak(text), text)
+                XCTAssertFalse(CopyStyleValidator.containsExclamation(text), text)
+            }
+        }
+        XCTAssertEqual(LibraryCopy.noneSince(.conversations, .email, day: "Tuesday"), "No email since Tuesday.")
+    }
+
     func testRowsSitUnderAppleNotesDayHeadingsAndRunsOfOneWindowAreOneRow() {
         let now = SampleDay.now
         let day: UInt64 = 86_400_000_000

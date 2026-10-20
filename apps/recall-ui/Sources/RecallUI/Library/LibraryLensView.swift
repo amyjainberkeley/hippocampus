@@ -100,8 +100,10 @@ struct LibraryLensView: View {
                 .font(.system(size: 13))
                 .foregroundStyle(MCI.Color.foregroundSecondary)
             if lens == .conversations {
-                ConversationChips(filter: $model.filter)
-                    .padding(.top, MCI.Spacing.s)
+                ConversationChips(filter: model.filter) { chip in
+                    Task { await model.choose(chip) }
+                }
+                .padding(.top, MCI.Spacing.s)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -109,7 +111,19 @@ struct LibraryLensView: View {
 
     @ViewBuilder
     private var empty: some View {
-        if lens == .conversations, model.filter != .all, !model.hits.isEmpty {
+        if let since = model.readBackTo {
+            // Nothing in what was read, and older moments may remain.
+            VStack(spacing: MCI.Spacing.m) {
+                let day = LibraryCopy.sinceDay(since, now: now(), calendar: calendar, locale: locale)
+                ContentUnavailableView(LibraryCopy.noneSince(lens, model.filter, day: day), systemImage: lens.symbol)
+                if model.isLoadingEarlier {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button(LibraryCopy.showEarlier) { Task { await model.loadEarlier() } }
+                        .buttonStyle(.bordered)
+                }
+            }
+        } else if lens == .conversations, model.filter != .all, !model.hits.isEmpty {
             ContentUnavailableView(LibraryCopy.emptyConversations(model.filter), systemImage: lens.symbol)
         } else {
             let words = LibraryCopy.empty(lens)
@@ -248,12 +262,13 @@ struct LibraryLensView: View {
 
 /// Conversations' chips: All, Chat, Email and AI.
 struct ConversationChips: View {
-    @Binding var filter: ConversationFilter
+    let filter: ConversationFilter
+    let choose: (ConversationFilter) -> Void
 
     var body: some View {
         HStack(spacing: 6) {
             ForEach(ConversationFilter.allCases, id: \.self) { chip in
-                Button(chip.title) { filter = chip }
+                Button(chip.title) { choose(chip) }
                     .buttonStyle(ChipStyle(isOn: chip == filter))
                     .accessibilityAddTraits(chip == filter ? [.isButton, .isSelected] : .isButton)
             }

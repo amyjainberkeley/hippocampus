@@ -39,6 +39,9 @@ public final class LibraryLensModel: ObservableObject {
     /// Reads of the browsers that find nothing of the lens are read on, at
     /// most this many times per page.
     static let maxReadsPerPage = 6
+    /// A lens or chip that shows nothing of what was read reads on by
+    /// itself, at most this many pages; past them, Show Earlier does.
+    public static let pagesReadOnForRows = 4
     private var generation = 0
     /// The newest time the next page may hold, and how far down every part
     /// is known.
@@ -66,6 +69,31 @@ public final class LibraryLensModel: ObservableObject {
     /// The moments the chips let through, newest first.
     public var shownHits: [Hit] {
         lens == .conversations && filter != .all ? hits.filter(filter.includes) : hits
+    }
+
+    /// Everything newer than this is read: what "No email since …" names
+    /// while the lens or chip shows nothing and older moments may remain.
+    public var readBackTo: UInt64? {
+        shownHits.isEmpty && canLoadEarlier ? earlierUpperBound : nil
+    }
+
+    /// Choose a chip: Conversations' All, Chat, Email or AI. When nothing
+    /// read so far is of its kind, older moments are read until something
+    /// is, a few pages at most, so an email an hour back shows instead of
+    /// "No email yet."
+    public func choose(_ chip: ConversationFilter) async {
+        filter = chip
+        await readOnForRows()
+    }
+
+    /// Reads on while the lens or its chip shows nothing and older moments
+    /// may remain, `pagesReadOnForRows` pages at most.
+    private func readOnForRows() async {
+        var pages = 0
+        while shownHits.isEmpty, canLoadEarlier, !isLoading, !isLoadingEarlier, pages < Self.pagesReadOnForRows {
+            pages += 1
+            await loadEarlier()
+        }
     }
 
     /// The one row picked, when one is: its detail shows.
@@ -110,6 +138,8 @@ public final class LibraryLensModel: ObservableObject {
             earlierUpperBound = page.next
             selection = selection.filter { id in page.rows.contains { $0.id == id } }
             if selection.isEmpty { isDetailFocused = false }
+            isLoading = false
+            await readOnForRows()
         } catch {
             guard request == generation, !Task.isCancelled else { return }
             hits = []

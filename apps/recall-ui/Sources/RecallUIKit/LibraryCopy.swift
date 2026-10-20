@@ -66,6 +66,42 @@ public enum LibraryCopy {
         }
     }
 
+    /// A lens or chip with nothing in what was read, while older moments may
+    /// remain: "No email since Tuesday." Show Earlier reads on. "No email
+    /// yet." is only for when there is none at all.
+    public static func noneSince(_ lens: LibraryLens, _ filter: ConversationFilter, day: String) -> String {
+        let none = switch (lens, filter) {
+        case (.documents, _): "No documents"
+        case (.code, _): "No code"
+        case (.conversations, .all): "No conversations"
+        case (.conversations, .chat): "No chats"
+        case (.conversations, .email): "No email"
+        case (.conversations, .ai): "No AI chats"
+        }
+        return "\(none) since \(day)."
+    }
+
+    /// When "since" starts, as a person says it: "9:05 AM" today,
+    /// "yesterday", "Tuesday" within the week, else "Oct 2" ("Oct 2, 2025"
+    /// in another year).
+    public static func sinceDay(_ us: UInt64, now: Date, calendar: Calendar,
+                                locale: Locale = .autoupdatingCurrent) -> String {
+        let date = Date(timeIntervalSince1970: Double(us) / 1_000_000)
+        var calendar = calendar
+        calendar.locale = locale
+        let style = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date),
+                                           to: calendar.startOfDay(for: now)).day ?? 0
+        switch days {
+        case ...0: return date.formatted(style.hour().minute())
+        case 1: return "yesterday"
+        case 2...6: return date.formatted(style.weekday(.wide))
+        default:
+            let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: now)
+            return date.formatted(sameYear ? style.month(.abbreviated).day() : style.month(.abbreviated).day().year())
+        }
+    }
+
     // MARK: Days, as Apple Notes heads them
 
     public static let today = "Today"
