@@ -1,15 +1,16 @@
 import SwiftUI
 
-/// One key, drawn as a keycap: "⇧", "right ⌘", "Space". When `pressed`,
-/// it dips and takes the accent, which is how Welcome shows the press.
-/// Opacity and transform only, so Reduce Motion can switch it off.
+/// One key, drawn as a keycap: "⇧", "right ⌘", "Space", or "fn" with the
+/// globe beside it, as Apple's keyboards print the Fn (Globe) key. When
+/// `pressed`, it dips and takes the accent, which is how Welcome shows the
+/// press. Opacity and transform only, so Reduce Motion can switch it off.
 struct Keycap: View {
     let label: String
     var pressed = false
     var size: CGFloat = 15
 
     var body: some View {
-        Text(label)
+        face
             .font(.system(size: size, weight: .medium, design: .rounded))
             .foregroundStyle(OnboardingDesign.Palette.ink)
             .padding(.horizontal, label.count > 1 ? size * 0.6 : 0)
@@ -37,6 +38,19 @@ struct Keycap: View {
             }
             .scaleEffect(pressed ? 0.9 : 1)
             .fixedSize()
+    }
+
+    @ViewBuilder
+    private var face: some View {
+        if label == "fn" {
+            HStack(spacing: size * 0.25) {
+                Image(systemName: "globe")
+                    .font(.system(size: size * 0.82, weight: .regular))
+                Text(label)
+            }
+        } else {
+            Text(label)
+        }
     }
 }
 

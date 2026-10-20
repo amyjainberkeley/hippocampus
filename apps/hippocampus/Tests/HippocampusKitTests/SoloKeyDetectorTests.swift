@@ -105,18 +105,21 @@ final class SoloKeyDetectorTests: XCTestCase {
     }
 
     func testEveryKeyHasItsNamesInTheOrderTheyAreOffered() {
-        XCTAssertEqual(SoloKey.allCases, [.shiftTwice, .rightShift, .rightCommand, .rightOption, .off])
-        XCTAssertEqual(SoloKey.allCases.map(\.rawValue), ["shiftTwice", "rightShift", "rightCommand", "rightOption", "off"])
-        XCTAssertEqual(SoloKey.allCases.map(\.shortcutLabel), ["⇧⇧", "right ⇧", "right ⌘", "right ⌥", nil])
+        // Fn (Globe) is offered second, after the default (SPEC-DELTA 7); the
+        // raw values the app has stored for the others never change.
+        XCTAssertEqual(SoloKey.allCases, [.shiftTwice, .fn, .rightShift, .rightCommand, .rightOption, .off])
+        XCTAssertEqual(SoloKey.allCases.map(\.rawValue),
+                       ["shiftTwice", "fn", "rightShift", "rightCommand", "rightOption", "off"])
+        XCTAssertEqual(SoloKey.allCases.map(\.shortcutLabel), ["⇧⇧", "fn", "right ⇧", "right ⌘", "right ⌥", nil])
         XCTAssertEqual(
             SoloKey.allCases.map(\.phrase),
-            ["Press Shift twice", "Tap right Shift", "Tap right ⌘", "Tap right ⌥", nil]
+            ["Press Shift twice", "Tap Fn", "Tap right Shift", "Tap right ⌘", "Tap right ⌥", nil]
         )
     }
 
     @MainActor
     func testEveryChoiceHasALabelAndTheChoiceIsRemembered() throws {
-        XCTAssertEqual(SoloKey.allCases.map(\.label), ["Shift twice", "Right Shift", "Right ⌘", "Right ⌥", "Off"])
+        XCTAssertEqual(SoloKey.allCases.map(\.label), ["Shift twice", "Fn (Globe)", "Right Shift", "Right ⌘", "Right ⌥", "Off"])
         let suite = "solo-key-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -133,5 +136,8 @@ final class SoloKeyDetectorTests: XCTestCase {
         XCTAssertEqual(PreferencesStore(defaults: defaults, retentionURL: retention).askKey, .rightShift)
         defaults.set("capsLock", forKey: PreferencesStore.Keys.askKey)
         XCTAssertEqual(PreferencesStore(defaults: defaults, retentionURL: retention).askKey, .shiftTwice)
+        store.askKey = .fn
+        XCTAssertEqual(defaults.string(forKey: PreferencesStore.Keys.askKey), "fn")
+        XCTAssertEqual(PreferencesStore(defaults: defaults, retentionURL: retention).askKey, .fn)
     }
 }

@@ -40,6 +40,15 @@ public protocol OnboardingStateStore: Sendable {
     /// (the sentinel is the source of truth for "done"; the resume
     /// file is just a hint and should not outlive a successful flow).
     func clear()
+
+    /// The permissions setup asked macOS for and was waiting on, so that
+    /// after Quit & Reopen the row that came on can show its checkmark
+    /// appearing once (SPEC 7.7). Empty when none, and on any read failure.
+    func loadAsked() -> Set<PermissionSurface>
+
+    /// Keep the permissions setup is waiting on. Errors are swallowed, as
+    /// for the route: the checkmark is a nicety.
+    func saveAsked(_ surfaces: Set<PermissionSurface>)
 }
 
 extension OnboardingStateStore {
@@ -85,6 +94,32 @@ public struct FileOnboardingStateStore: OnboardingStateStore {
 
     public func clear() {
         try? FileManager.default.removeItem(at: path)
+        try? FileManager.default.removeItem(at: askedPath)
+    }
+
+    /// Beside the resume file, which keeps its one line: the permissions
+    /// asked for, one name a line ("screenRecording").
+    var askedPath: URL {
+        path.deletingLastPathComponent().appendingPathComponent(".onboarding-asked")
+    }
+
+    public func loadAsked() -> Set<PermissionSurface> {
+        guard let raw = try? String(contentsOf: askedPath, encoding: .utf8) else { return [] }
+        return Set(raw.split(whereSeparator: \.isNewline).compactMap {
+            PermissionSurface(rawValue: $0.trimmingCharacters(in: .whitespaces))
+        })
+    }
+
+    public func saveAsked(_ surfaces: Set<PermissionSurface>) {
+        guard !surfaces.isEmpty else {
+            try? FileManager.default.removeItem(at: askedPath)
+            return
+        }
+        try? FileManager.default.createDirectory(
+            at: askedPath.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        let lines = PermissionSurface.allCases.filter(surfaces.contains).map(\.rawValue)
+        try? (lines.joined(separator: "\n") + "\n").write(to: askedPath, atomically: true, encoding: .utf8)
     }
 
     /// A route is lowercase letters and dashes ("try-it"). Anything else,
@@ -102,14 +137,23 @@ public struct InMemoryOnboardingStateStore: OnboardingStateStore {
     private final class Box: @unchecked Sendable {
         let lock = NSLock()
         var route: String?
+        var asked: Set<PermissionSurface> = []
     }
     private let box = Box()
 
-    public init(route: String? = nil) {
+    public init(route: String? = nil, asked: Set<PermissionSurface> = []) {
         box.route = route
+        box.asked = asked
     }
 
     public func loadRoute() -> String? { box.lock.withLock { box.route } }
     public func saveRoute(_ route: String) { box.lock.withLock { box.route = route } }
-    public func clear() { box.lock.withLock { box.route = nil } }
+    public func clear() {
+        box.lock.withLock {
+            box.route = nil
+            box.asked = []
+        }
+    }
+    public func loadAsked() -> Set<PermissionSurface> { box.lock.withLock { box.asked } }
+    public func saveAsked(_ surfaces: Set<PermissionSurface>) { box.lock.withLock { box.asked = surfaces } }
 }

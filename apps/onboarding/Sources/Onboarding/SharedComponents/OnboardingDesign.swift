@@ -171,10 +171,12 @@ enum OnboardingDesign {
 
     /// Calm motion tokens. Opacity + transform only, ≤ 300 ms, ease-out,
     /// no bounce. Use `resolve(_:reduceMotion:)` at the call site so every
-    /// animation collapses to an instant change under Reduce Motion.
+    /// animation collapses to an instant change under Reduce Motion. The
+    /// numbers are `OnboardingKit`'s (`OnboardingMotion.swift`), so the
+    /// tests and the renderer hold the same ones.
     enum Motion {
         static let quick: Animation = .easeOut(duration: 0.18)
-        static let standard: Animation = .easeOut(duration: 0.28)
+        static let standard: Animation = .easeOut(duration: ScreenTransition.standardDuration)
         static let gentle: Animation = .easeOut(duration: 0.3)
 
         /// Returns `nil` (no animation) when the user has asked for
@@ -183,8 +185,25 @@ enum OnboardingDesign {
             reduceMotion ? nil : animation
         }
 
-        /// One shared entrance transition — a gentle fade + rise that
-        /// collapses to a plain fade (no offset) under Reduce Motion.
+        /// Moving between screens (SPEC 7.1): the old screen fades out and
+        /// drifts 12 pt the way setup is going while the new one fades in
+        /// from 12 pt the other side, overlapping. A crossfade under Reduce
+        /// Motion.
+        static func screen(_ move: ScreenMove, reduceMotion: Bool) -> AnyTransition {
+            let transition = ScreenTransition(move: move, reduceMotion: reduceMotion)
+            return .asymmetric(
+                insertion: .opacity.combined(with: .offset(x: transition.incomingOffset)),
+                removal: .opacity.combined(with: .offset(x: transition.outgoingOffset))
+            )
+        }
+
+        /// The timing of that move: 280 ms, or a 200 ms crossfade.
+        static func screenAnimation(reduceMotion: Bool) -> Animation {
+            .easeOut(duration: ScreenTransition(move: .forward, reduceMotion: reduceMotion).duration)
+        }
+
+        /// A card arriving inside a screen, such as Try it's proof: a fade
+        /// with a 6 pt rise, a plain fade under Reduce Motion.
         static func entrance(reduceMotion: Bool) -> AnyTransition {
             reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 6))
         }

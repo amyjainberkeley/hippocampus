@@ -22,6 +22,11 @@ public enum OnboardingPalette {
     public static let cardSurface: UInt32 = 0xFFFFFF
     public static let windowSurface: UInt32 = 0xF6F6F8
 
+    /// The day strip's kinds in Welcome's demo, in `OnboardingCopy.Demo.legend`'s
+    /// order (Documents, Code, Calls), as the window colours them in light
+    /// mode. No amber and no red (SPEC 2.14, 7.3).
+    public static let demoKinds: [UInt32] = [0xEB6834, 0x2A78D6, 0xE87BA4]
+
     /// Red, green and blue from 0 to 1.
     public static func components(_ hex: UInt32) -> (red: Double, green: Double, blue: Double) {
         (

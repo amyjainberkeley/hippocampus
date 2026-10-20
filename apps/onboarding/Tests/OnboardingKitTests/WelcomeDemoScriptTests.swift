@@ -6,12 +6,79 @@ import XCTest
 final class WelcomeDemoScriptTests: XCTestCase {
     private typealias Script = WelcomeDemoScript
 
+    func testTheTimingsAreUnchanged() {
+        // SPEC 7.3: the loop keeps its script and timings.
+        XCTAssertEqual(Script.length(of: .ask), 6)
+        XCTAssertEqual(Script.length(of: .today), 5.4)
+        XCTAssertEqual(Script.length(of: .ai), 6)
+        XCTAssertEqual(Script.fadeOut, 0.3)
+        XCTAssertEqual(Script.cycle, 17.4, accuracy: 0.0001)
+        XCTAssertEqual(Script.keyPresses, [0.7, 1.0])
+        XCTAssertEqual(Script.sessionTimes, [0.45, 0.65, 0.85, 1.05, 1.25])
+        XCTAssertEqual(Script.sessionCardAt, 1.75)
+    }
+
+    func testTheDayUsesTheLegendsThreeKindsInTheWindowsColours() {
+        // Documents, Code and Calls, coloured as the window colours them:
+        // no amber, no red, no second green (SPEC 2.14, 7.3).
+        XCTAssertEqual(OnboardingCopy.Demo.legend, ["Documents", "Code", "Calls"])
+        XCTAssertEqual(OnboardingPalette.demoKinds.count, OnboardingCopy.Demo.legend.count)
+        XCTAssertEqual(OnboardingPalette.demoKinds, [0xEB6834, 0x2A78D6, 0xE87BA4])
+        for retired: UInt32 in [0xEDA100, 0xE34948, 0x008300] {
+            XCTAssertFalse(OnboardingPalette.demoKinds.contains(retired), String(format: "%06X", retired))
+        }
+        XCTAssertEqual(Set(Script.day.map(\.kind)), Set(0..<OnboardingCopy.Demo.legend.count), "every kind shows")
+    }
+
+    func testUnderReduceMotionEachMomentShowsWholeForSixSecondsThenTheNext() {
+        XCTAssertEqual(Script.stillMomentLength, 6)
+        XCTAssertEqual(Script.stillFrame(at: 0), Script.finalFrame(.ask))
+        XCTAssertEqual(Script.stillFrame(at: 5.9), Script.finalFrame(.ask))
+        XCTAssertEqual(Script.stillFrame(at: 6), Script.finalFrame(.today))
+        XCTAssertEqual(Script.stillFrame(at: 12.5), Script.finalFrame(.ai))
+        XCTAssertEqual(Script.stillFrame(at: 18), Script.finalFrame(.ask), "it loops")
+        for second in 0..<40 {
+            let frame = Script.stillFrame(at: Double(second) / 2)
+            XCTAssertEqual(frame, Script.finalFrame(frame.moment), "nothing inside a moment moves")
+        }
+    }
+
+    func testTheDemoPausesWhileItIsReadOrUnseenAndPicksUpWhereItWas() {
+        var playback = WelcomeDemoPlayback()
+        XCTAssertTrue(playback.isPlaying)
+        playback.advance(by: 2)
+        XCTAssertEqual(playback.elapsed, 2)
+        // The pointer over it: it holds still so it can be read.
+        playback.hovering = true
+        XCTAssertFalse(playback.isPlaying)
+        playback.advance(by: 5)
+        XCTAssertEqual(playback.elapsed, 2, "paused time doesn't count")
+        playback.hovering = false
+        // Setup's window behind another: nothing runs.
+        playback.windowIsKey = false
+        XCTAssertFalse(playback.isPlaying)
+        playback.advance(by: 5)
+        playback.windowIsKey = true
+        // Past Welcome: stopped.
+        playback.onWelcome = false
+        XCTAssertFalse(playback.isPlaying)
+        playback.advance(by: 5)
+        playback.onWelcome = true
+        playback.advance(by: 0.5)
+        XCTAssertEqual(playback.elapsed, 2.5, accuracy: 0.0001)
+        XCTAssertEqual(playback.frame(presses: 2, reduceMotion: false), Script.frame(at: 2.5))
+        XCTAssertEqual(playback.frame(presses: 2, reduceMotion: true), Script.finalFrame(.ask))
+        // Time never runs backwards.
+        playback.advance(by: -3)
+        XCTAssertEqual(playback.elapsed, 2.5, accuracy: 0.0001)
+    }
+
     func testThreeMomentsPlayInOrderAndLoop() {
-        XCTAssertEqual(DemoMoment.allCases, [.ask, .overview, .ai])
-        XCTAssertEqual(Script.cycle, Script.length(of: .ask) + Script.length(of: .overview) + Script.length(of: .ai))
+        XCTAssertEqual(DemoMoment.allCases, [.ask, .today, .ai])
+        XCTAssertEqual(Script.cycle, Script.length(of: .ask) + Script.length(of: .today) + Script.length(of: .ai))
         XCTAssertEqual(Script.frame(at: 0).moment, .ask)
-        XCTAssertEqual(Script.frame(at: Script.length(of: .ask) + 0.1).moment, .overview)
-        XCTAssertEqual(Script.frame(at: Script.length(of: .ask) + Script.length(of: .overview) + 0.1).moment, .ai)
+        XCTAssertEqual(Script.frame(at: Script.length(of: .ask) + 0.1).moment, .today)
+        XCTAssertEqual(Script.frame(at: Script.length(of: .ask) + Script.length(of: .today) + 0.1).moment, .ai)
         XCTAssertEqual(Script.frame(at: Script.cycle + 1), Script.frame(at: 1), "it wraps")
         XCTAssertEqual(Script.frame(at: -1), Script.frame(at: Script.cycle - 1))
         for moment in DemoMoment.allCases {
@@ -54,11 +121,11 @@ final class WelcomeDemoScriptTests: XCTestCase {
         let fade = Script.fadeOut
         XCTAssertGreaterThanOrEqual(Script.length(of: .ask) - fade - Script.answerAt, 2.5)
         XCTAssertGreaterThanOrEqual(Script.length(of: .ask) - fade - Script.sourceAt, 2.5)
-        XCTAssertGreaterThanOrEqual(Script.length(of: .overview) - fade - Script.sessionCardAt, 2.5)
+        XCTAssertGreaterThanOrEqual(Script.length(of: .today) - fade - Script.sessionCardAt, 2.5)
         XCTAssertGreaterThanOrEqual(Script.length(of: .ai) - fade - Script.replyAt, 2.5)
     }
 
-    func testOverviewFillsInTheDayThenShowsTheSessionItEndsOn() {
+    func testTodayFillsInTheDayThenShowsWhatIsGoingOnNow() {
         let start = Script.length(of: .ask)
         XCTAssertEqual(Script.frame(at: start).sessionsShown, 0)
         var shown: [Int] = []
@@ -81,7 +148,7 @@ final class WelcomeDemoScriptTests: XCTestCase {
     }
 
     func testYourAIStartsWithWhatHippocampusSharesThenAnswers() {
-        let start = Script.length(of: .ask) + Script.length(of: .overview)
+        let start = Script.length(of: .ask) + Script.length(of: .today)
         XCTAssertEqual(Script.frame(at: start).contextLinesShown, 0)
         XCTAssertEqual(Script.frame(at: start + 1).contextLinesShown, OnboardingCopy.Demo.aiContextLines.count)
         XCTAssertEqual(Script.frame(at: start + 1).typedPrompt, 0, "the context comes first")

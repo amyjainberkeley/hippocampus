@@ -71,6 +71,7 @@ struct PromiseScreen: View {
                         }
                     }
                 }
+                .arrivesAfterTitle()
             }
         }
     }
@@ -85,11 +86,11 @@ struct PromiseLines: View {
     var body: some View {
         VStack(spacing: 0) {
             line("lock", lead: OnboardingCopy.promiseStaysLead, text: OnboardingCopy.promiseStays(kept: kept))
-            Divider().padding(.leading, 62)
+            Hairline().padding(.leading, 62)
             line("eye.slash", lead: OnboardingCopy.promiseNeverReadLead, text: OnboardingCopy.promiseNeverRead)
-            Divider().padding(.leading, 62)
+            Hairline().padding(.leading, 62)
             line("pause", lead: OnboardingCopy.promiseStopLead, text: OnboardingCopy.promiseStop)
-            Divider()
+            Hairline()
             DotLegend()
         }
         .glassCard(padding: 0)

@@ -1,17 +1,20 @@
 // SoloKeyTrigger.swift — the one key that opens Ask when tapped by itself.
 //
 // Carbon hotkeys (GlobalHotkeyManager) need a non-modifier key, so "tap
-// right ⌘" cannot be one. This watches modifier changes instead. It never
-// sees which keys are typed: a tap is "clean" when the system's own count of
-// key presses and clicks did not move while the key was down.
+// right ⌘" or "tap Fn" cannot be one. This watches modifier changes instead.
+// It never sees which keys are typed: a tap is "clean" when the system's own
+// count of key presses and clicks did not move while the key was down.
 
 import Foundation
 
 /// Which key opens Ask when tapped alone. The raw values are stored in
 /// `ai.hippocampus.prefs.askKey`, and onboarding and the window read them
-/// (RULINGS X2), so they never change.
+/// (RULINGS X2), so they never change. Fn (Globe) joined them second, the
+/// order Preferences offers them in (SPEC-DELTA 7).
 public enum SoloKey: String, CaseIterable, Sendable, Identifiable {
     case shiftTwice
+    /// Fn (Globe), tapped by itself, after its checks (`FnKeyMonitor`).
+    case fn
     case rightShift
     case rightCommand
     case rightOption
@@ -23,6 +26,7 @@ public enum SoloKey: String, CaseIterable, Sendable, Identifiable {
     public var label: String {
         switch self {
         case .shiftTwice: "Shift twice"
+        case .fn: "Fn (Globe)"
         case .rightShift: "Right Shift"
         case .rightCommand: "Right ⌘"
         case .rightOption: "Right ⌥"
@@ -34,6 +38,7 @@ public enum SoloKey: String, CaseIterable, Sendable, Identifiable {
     public var shortcutLabel: String? {
         switch self {
         case .shiftTwice: "⇧⇧"
+        case .fn: "fn"
         case .rightShift: "right ⇧"
         case .rightCommand: "right ⌘"
         case .rightOption: "right ⌥"
@@ -45,6 +50,7 @@ public enum SoloKey: String, CaseIterable, Sendable, Identifiable {
     public var phrase: String? {
         switch self {
         case .shiftTwice: "Press Shift twice"
+        case .fn: "Tap Fn"
         case .rightShift: "Tap right Shift"
         case .rightCommand: "Tap right ⌘"
         case .rightOption: "Tap right ⌥"
@@ -55,6 +61,7 @@ public enum SoloKey: String, CaseIterable, Sendable, Identifiable {
     var keyCodes: Set<UInt16> {
         switch self {
         case .shiftTwice: [56, 60]
+        case .fn: FnKeyMonitor.keyCodes
         case .rightShift: [60]
         case .rightCommand: [54]
         case .rightOption: [61]
@@ -62,10 +69,13 @@ public enum SoloKey: String, CaseIterable, Sendable, Identifiable {
         }
     }
 
-    /// Device-dependent modifier bits (IOKit NX_DEVICE…KEYMASK) for the key.
+    /// Device-dependent modifier bits (IOKit NX_DEVICE…KEYMASK) for the key,
+    /// and for Fn the device-independent function bit, which has no
+    /// device-dependent one.
     var mask: UInt {
         switch self {
         case .shiftTwice: SoloKeyDetector.leftShift | SoloKeyDetector.rightShift
+        case .fn: FnKeyMonitor.functionMask
         case .rightShift: SoloKeyDetector.rightShift
         case .rightCommand: SoloKeyDetector.rightCommand
         case .rightOption: SoloKeyDetector.rightOption
@@ -109,6 +119,13 @@ public struct SoloKeyDetector: Sendable, Equatable {
             && lhs.firstTap?.atMs == rhs.firstTap?.atMs && lhs.firstTap?.activity == rhs.firstTap?.activity
     }
 
+    /// The modifier bits that count for this key: the four modifiers
+    /// either side, and Fn's own bit when Fn is the key. Caps Lock never
+    /// counts.
+    var watchedModifiers: UInt {
+        key == .fn ? Self.everyModifier | FnKeyMonitor.functionMask : Self.everyModifier
+    }
+
     /// Feed every modifier change. Returns true when Ask should open.
     ///
     /// - Parameters:
@@ -119,7 +136,7 @@ public struct SoloKeyDetector: Sendable, Equatable {
     ///   - atMs: a monotonic time in milliseconds.
     public mutating func modifiersChanged(keyCode: UInt16, flags: UInt, activity: UInt64, atMs: UInt64) -> Bool {
         guard key != .off else { return false }
-        let held = flags & Self.everyModifier
+        let held = flags & watchedModifiers
         if held & ~key.mask != 0 {
             // Another modifier is involved: a shortcut, not a tap.
             downAtMs = nil

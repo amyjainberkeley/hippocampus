@@ -5,6 +5,9 @@ final class AskShortcutLabelTests: XCTestCase {
     func testEveryStoredKeyHasItsLabelPhraseAndKeycaps() {
         let expected: [(stored: String, hint: AskKeyHint, label: String, phrase: String, noun: String?, caps: [String])] = [
             ("shiftTwice", .shiftTwice, "⇧⇧", "Press Shift twice", "Shift twice", ["⇧", "⇧"]),
+            // Fn (Globe), tapped by itself (SPEC-DELTA 7): its keycap draws
+            // the globe beside "fn", as Apple's keyboards print it.
+            ("fn", .fn, "fn", "Tap Fn", "Fn", ["fn"]),
             ("rightShift", .rightShift, "right ⇧", "Tap right Shift", "right Shift", ["right ⇧"]),
             ("rightCommand", .rightCommand, "right ⌘", "Tap right Command", "right Command", ["right ⌘"]),
             ("rightOption", .rightOption, "right ⌥", "Tap right Option", "right Option", ["right ⌥"]),
@@ -31,7 +34,8 @@ final class AskShortcutLabelTests: XCTestCase {
     }
 
     func testShiftTwicePulsesTwiceAndEveryOtherKeyOnce() {
-        XCTAssertEqual(AskKeyHint.allCases.map(\.pulses), [2, 1, 1, 1, 1])
+        XCTAssertEqual(AskKeyHint.allCases, [.shiftTwice, .fn, .rightShift, .rightCommand, .rightOption, .chord])
+        XCTAssertEqual(AskKeyHint.allCases.map(\.pulses), [2, 1, 1, 1, 1, 1])
     }
 
     func testWelcomesKeycapsPressTheWayTheKeyIsPressed() {
@@ -72,6 +76,7 @@ final class AskShortcutLabelTests: XCTestCase {
     func testEveryPublishedLabelHasItsKeycaps() {
         let published: [(label: String, phrase: String, caps: [String], name: String)] = [
             ("⇧⇧", "Press Shift twice", ["⇧", "⇧"], "Shift twice"),
+            ("fn", "Tap Fn", ["fn"], "Fn"),
             ("right ⇧", "Tap right Shift", ["right ⇧"], "right Shift"),
             ("right ⌘", "Tap right ⌘", ["right ⌘"], "right ⌘"),
             ("right ⌥", "Tap right ⌥", ["right ⌥"], "right ⌥"),
@@ -159,7 +164,7 @@ final class AskShortcutLabelTests: XCTestCase {
             }
             .filter { !$0.isEmpty }
         XCTAssertFalse(cases.isEmpty)
-        let known: Set<String> = ["shiftTwice", "rightShift", "rightCommand", "rightOption", "off"]
+        let known: Set<String> = ["shiftTwice", "fn", "rightShift", "rightCommand", "rightOption", "off"]
         for stored in cases {
             XCTAssertTrue(known.contains(stored), "the app can store \(stored); onboarding must name it")
         }

@@ -5,10 +5,12 @@ import SwiftUI
 
 /// Debug only: `HIPPOCAMPUS_RENDER_ONBOARDING=<dir>` draws every screen of
 /// setup, Welcome's demo at each of its moments and on the way through them,
-/// each permission row state and the tallest pairs of them, each Promise
-/// button state, each Try it state, the never-read panel and the browser
-/// extension panel, from fixture state, to `<dir>/<name>.png` at 2x, then
-/// returns from `main` before setup starts.
+/// each permission row state and the tallest pairs of them, a permission
+/// turning on frame by frame, each Promise button state, each Try it state,
+/// a move forward and back frame by frame, setup on a short screen and with
+/// Increase Contrast, the key picker with what else uses Fn, the never-read
+/// panel and the browser extension panel, from fixture state, to
+/// `<dir>/<name>.png` at 2x, then returns from `main` before setup starts.
 ///
 /// Nothing reaches the screen. `OnboardingEntryPoint.main` calls this
 /// first, before the parent watch and `OnboardingApp.main()`, so no scene,
@@ -26,9 +28,9 @@ import SwiftUI
 ///
 /// Nothing is read from this Mac: the renderer draws the screens' pure
 /// views, never the ones that check permissions, read memory, list windows,
-/// read the retention file or ask about Apple Intelligence. The key, the
-/// clock, the locale, every window and every line of text are fixed below
-/// and made up.
+/// read the retention file, ask about Apple Intelligence or look for apps
+/// and keyboards. The key, the clock, the locale, every window, every app
+/// that uses Fn and every line of text are fixed below and made up.
 @MainActor
 enum OnboardingPreviewRenderer {
     static let environmentKey = "HIPPOCAMPUS_RENDER_ONBOARDING"
@@ -45,6 +47,11 @@ enum OnboardingPreviewRenderer {
         for (name, view) in states() {
             if let png = render(view) {
                 try? png.write(to: out.appendingPathComponent("\(name).png"))
+            }
+        }
+        for variant in variants() {
+            if let png = render(variant.view, height: variant.height, highContrast: variant.highContrast) {
+                try? png.write(to: out.appendingPathComponent("\(variant.name).png"))
             }
         }
         if let step = environment[demoStepKey].flatMap(Double.init), step >= 0.02 {
@@ -80,12 +87,17 @@ enum OnboardingPreviewRenderer {
         add("1-welcome-ask-writing", welcome(.shiftTwice, WelcomeDemoScript.frame(.ask, at: 0.4)))
         add("1-welcome-ask-key-down", welcome(.shiftTwice, WelcomeDemoScript.frame(.ask, at: 0.75)))
         add("1-welcome-ask-typing", welcome(.shiftTwice, WelcomeDemoScript.frame(.ask, at: 2)))
-        add("1-welcome-overview-filling", welcome(.shiftTwice, WelcomeDemoScript.frame(.overview, at: 0.9)))
-        add("1-welcome-overview", welcome(.shiftTwice, WelcomeDemoScript.finalFrame(.overview)))
+        add("1-welcome-today-filling", welcome(.shiftTwice, WelcomeDemoScript.frame(.today, at: 0.9)))
+        add("1-welcome-today", welcome(.shiftTwice, WelcomeDemoScript.finalFrame(.today)))
+        // The new Today on its way through (SPEC 7.3), frame by frame.
+        for ms in [0, 450, 850, 1_250, 1_750, 3_000] {
+            add("1-welcome-demo-today-\(ms)", welcome(.shiftTwice, WelcomeDemoScript.frame(.today, at: Double(ms) / 1000)))
+        }
         add("1-welcome-ai-starting", welcome(.shiftTwice, WelcomeDemoScript.frame(.ai, at: 1.9)))
         add("1-welcome-ai", welcome(.shiftTwice, WelcomeDemoScript.finalFrame(.ai)))
         add("1-welcome-right-command", welcome(.rightCommand, WelcomeDemoScript.finalFrame(.ask)))
         add("1-welcome-chord", welcome(.chord, WelcomeDemoScript.finalFrame(.ask)))
+        add("1-welcome-fn", welcome(.fn, WelcomeDemoScript.finalFrame(.ask)))
 
         // What you get
         add("2-what-you-get", OnboardingWindow {
@@ -120,7 +132,21 @@ enum OnboardingPreviewRenderer {
             row(.screenRecording, .needsHelp, offersAskAgain: true), row(.accessibility, .needsHelp, offersAskAgain: true),
         ]))
         add("3-permissions-both-on", permissions([srOn, axOn]))
+        // SPEC 7.2: the footer once both are on, which VoiceOver hears too.
+        add("3-permissions-both-on-line", permissions([srOn, axOn]))
         add("3-permissions-review", permissions([srOn, axOn], review: true))
+        // Accessibility turning on, 0, 100 and 220 ms in: the tile turns
+        // green and "On" fades in as it grows (SPEC 7.2).
+        for ms in [0, 100, 220] {
+            var turning = row(.accessibility, .granted)
+            turning.drawnMoment = Double(ms) / 1000
+            add("3-permissions-granted-moment-\(ms)", permissions([srOn, turning]))
+        }
+        // An old preview and this build both in System Settings (SPEC 7.7).
+        add("3-permissions-two-copies", permissions([
+            row(.screenRecording, .needsHelp, offersAskAgain: true, twoCopies: true), row(.accessibility, .idle),
+        ]))
+        add("3-permissions-fn", permissions([row(.screenRecording, .granted), row(.accessibility, .idle, key: .fn)]))
         add("3-permissions-macos-14", permissions([
             row(.screenRecording, .idle, macOS: 14), row(.accessibility, .idle),
         ]))
@@ -166,6 +192,37 @@ enum OnboardingPreviewRenderer {
         add("5-try-it-finished-for-them", tryIt(.finished(openedForThem: true)))
         add("5-try-it-paused", tryIt(.notRemembering(.paused)))
         add("5-try-it-off", tryIt(.notRemembering(.off)))
+        // Low Power Mode reads less often, and says so while it waits.
+        add("5-try-it-low-power", tryIt(.reading(pricing), lowPowerMode: true))
+        add("5-try-it-low-power-turning-on", tryIt(.starting, lowPowerMode: true))
+        add("5-try-it-fn", tryIt(.proof(read), keyNow: AskKeyNow(effectiveLabel: "fn", effectivePhrase: "Tap Fn", stored: "fn"),
+                                 understanding: .available))
+
+        // Moving on and back, 0, 140 and 280 ms in (SPEC 7.1), and the
+        // crossfade under Reduce Motion halfway.
+        for ms in [0, 140, 280] {
+            add("transition-forward-\(ms)", transition(from: .welcome, to: .whatYouGet, move: .forward, ms: ms))
+            add("transition-back-\(ms)", transition(from: .permissions, to: .whatYouGet, move: .back, ms: ms))
+        }
+        add("transition-reduce-motion-100", transition(from: .welcome, to: .whatYouGet, move: .forward, ms: 100,
+                                                       reduceMotion: true))
+
+        // The key picker (SPEC-DELTA 7): Shift twice, then Fn picked on a Mac
+        // where nothing else uses it, where Wispr Flow does, where macOS's
+        // Globe key setting does, and with a keyboard that has no Fn.
+        add("key-picker", keyPicker(stored: nil, pick: nil, facts: .clear))
+        add("key-picker-fn", keyPicker(stored: nil, pick: .fn, facts: .clear))
+        add("key-picker-fn-conflict-wispr", keyPicker(stored: nil, pick: .fn, facts: FnKeyFacts(
+            installedApps: { [InstalledApp(bundleId: "com.electron.wispr-flow", fileName: "Wispr Flow.app")] },
+            appleFnUsageType: { 0 }, keyboardHasFn: { true }
+        )))
+        add("key-picker-fn-globe-setting", keyPicker(stored: nil, pick: .fn, facts: FnKeyFacts(
+            installedApps: { [] }, appleFnUsageType: { 2 }, keyboardHasFn: { true }
+        )))
+        add("key-picker-fn-no-key", keyPicker(stored: nil, pick: .fn, facts: FnKeyFacts(
+            installedApps: { [] }, appleFnUsageType: { 0 }, keyboardHasFn: { false }
+        )))
+        add("key-picker-fn-chosen", keyPicker(stored: "fn", pick: nil, facts: .clear))
 
         // The panel Preferences opens for what is never read.
         add("panel-never-read", OnboardingPanelView(panel: .neverRead, keptForPreview: kept) {})
@@ -234,25 +291,32 @@ enum OnboardingPreviewRenderer {
         canAllow: Bool = true,
         offersAskAgain: Bool = false,
         key: AskKeyHint = .shiftTwice,
+        twoCopies: Bool = false,
         macOS: Int = 26
     ) -> PermissionRowModel {
         PermissionRowModel(
             surface: surface, key: key, state: state, canAllow: canAllow && state == .idle,
-            offersAskAgain: offersAskAgain, macOSMajorVersion: macOS
+            offersAskAgain: offersAskAgain, twoCopies: twoCopies, macOSMajorVersion: macOS
         )
     }
 
     private static func permissions(_ rows: [PermissionRowModel], review: Bool = false) -> some View {
         OnboardingWindow {
-            PermissionsScreen(
-                intro: OnboardingCopy.permissionsBody(isReview: review), rows: rows, perform: { _, _ in }
-            )
+            permissionsScreen(rows, review: review)
         } bar: {
             BottomBar(
                 screen: .permissions, back: {}, primaryLabel: OnboardingCopy.continueLabel,
+                primaryLabels: OnboardingCopy.primaryLabels(for: .permissions, isReview: review),
                 primaryEnabled: rows.allSatisfy { $0.state == .granted }, primary: {}
             )
         }
+    }
+
+    private static func permissionsScreen(_ rows: [PermissionRowModel], review: Bool = false) -> some View {
+        PermissionsScreen(
+            intro: OnboardingCopy.permissionsBody(isReview: review), rows: rows, perform: { _, _ in },
+            changeKey: {}
+        )
     }
 
     private static func promise(keyState: PrepareBrainViewModel.KeyState, review: Bool = false) -> some View {
@@ -277,12 +341,14 @@ enum OnboardingPreviewRenderer {
         _ card: TryItViewModel.Card,
         keyNow: AskKeyNow = shiftTwiceNow,
         understanding: UnderstandingAvailability? = nil,
+        lowPowerMode: Bool = false,
         macOS: Int = 26
     ) -> some View {
         OnboardingWindow {
             TryItScreen(
                 presentation: TryItPresentation(
-                    card: card, keyNow: keyNow, understanding: understanding, macOSMajorVersion: macOS
+                    card: card, keyNow: keyNow, understanding: understanding, lowPowerMode: lowPowerMode,
+                    macOSMajorVersion: macOS
                 ),
                 now: now,
                 locale: locale,
@@ -291,6 +357,106 @@ enum OnboardingPreviewRenderer {
         } bar: {
             BottomBar(screen: .tryIt, primaryLabel: OnboardingCopy.done, primary: {})
         }
+    }
+
+    // MARK: - Moving between screens
+
+    /// One screen's content as it shows in the flow, for the transitions.
+    @ViewBuilder
+    private static func screenContent(_ screen: OnboardingScreen) -> some View {
+        switch screen {
+        case .welcome:
+            WelcomeSlide(key: .shiftTwice, animates: false, demoFrame: WelcomeDemoScript.finalFrame(.ask))
+        case .whatYouGet:
+            WhatYouGetSlide()
+        case .permissions:
+            permissionsScreen([row(.screenRecording, .granted), row(.accessibility, .idle)])
+        case .promise:
+            PromiseScreen(title: OnboardingCopy.promiseTitle, intro: OnboardingCopy.promiseBody, kept: kept,
+                          openAtLogin: .constant(true))
+        case .tryIt:
+            TryItScreen(presentation: TryItPresentation(card: .starting, keyNow: shiftTwiceNow, understanding: nil),
+                        now: now, locale: locale, perform: { _ in })
+        }
+    }
+
+    /// `ms` milliseconds into a move: the screen leaving drifts and fades,
+    /// the one arriving comes in, its content 60 ms behind its title. The
+    /// bar shows where setup is going, as it does at once on screen.
+    private static func transition(
+        from old: OnboardingScreen, to new: OnboardingScreen, move: ScreenMove, ms: Int, reduceMotion: Bool = false
+    ) -> some View {
+        let state = ScreenTransition(move: move, reduceMotion: reduceMotion).state(at: Double(ms) / 1000)
+        return OnboardingWindow {
+            ZStack {
+                screenContent(old)
+                    .opacity(state.outgoingOpacity)
+                    .offset(x: state.outgoingOffset)
+                screenContent(new)
+                    .environment(\.onboardingContentArrival, state.contentOpacity)
+                    .opacity(state.incomingOpacity)
+                    .offset(x: state.incomingOffset)
+            }
+        } bar: {
+            BottomBar(
+                screen: new, back: new == .welcome ? nil : {},
+                primaryLabel: new == .welcome ? OnboardingCopy.getStarted : OnboardingCopy.continueLabel,
+                primary: {}
+            )
+        }
+    }
+
+    // MARK: - The key picker
+
+    /// Setup's key picker over Permissions, as a sheet hangs from the
+    /// window's top. `pick` is the card the person clicked.
+    private static func keyPicker(stored: String?, pick: SetupAskKey?, facts: FnKeyFacts) -> some View {
+        let model = AskKeyPickerModel(stored: stored, facts: facts, accepted: [])
+        if let pick { model.selection = pick }
+        let key = AskKeyHint(stored: stored)
+        return ZStack(alignment: .top) {
+            permissions([row(.screenRecording, .granted), row(.accessibility, .idle, key: key)])
+            // macOS dims the window under a sheet a little.
+            Color.black.opacity(0.08)
+            AskKeySheet(model: model, cancel: {}, confirm: {}, openKeyboardSettings: {})
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.black.opacity(0.12), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.22), radius: 18, y: 8)
+                .padding(.top, OnboardingTheme.titleBarInset)
+        }
+        .frame(width: OnboardingTheme.windowWidth, height: OnboardingTheme.windowHeight)
+    }
+
+    // MARK: - Short screens and Increase Contrast
+
+    private struct Variant {
+        let name: String
+        let view: AnyView
+        var height: CGFloat = OnboardingTheme.windowHeight
+        var highContrast = false
+    }
+
+    /// Setup on a short screen (a 13-inch MacBook Air at Larger Text, whose
+    /// visible frame is about 520 pt tall), and with Increase Contrast.
+    private static func variants() -> [Variant] {
+        let short = CGFloat(SetupWindowFit.height(visibleHeight: 520))
+        let tallest = permissions([row(.screenRecording, .needsHelp), row(.accessibility, .waiting)])
+        return [
+            Variant(name: "small-screen-1-welcome", view: AnyView(welcome(.shiftTwice, WelcomeDemoScript.finalFrame(.ask))),
+                    height: short),
+            Variant(name: "small-screen-3-permissions-tallest", view: AnyView(tallest), height: short),
+            Variant(name: "small-screen-4-promise", view: AnyView(promise(keyState: .ready)), height: short),
+            Variant(name: "contrast-3-permissions", view: AnyView(permissions([
+                row(.screenRecording, .granted), row(.accessibility, .idle),
+            ])), highContrast: true),
+            Variant(name: "contrast-4-promise", view: AnyView(promise(keyState: .ready)), highContrast: true),
+            Variant(name: "contrast-2-what-you-get", view: AnyView(OnboardingWindow {
+                WhatYouGetSlide()
+            } bar: {
+                BottomBar(screen: .whatYouGet, back: {}, primaryLabel: OnboardingCopy.continueLabel, primary: {})
+            }), highContrast: true),
+        ]
     }
 
     /// A pricing page read twelve seconds ago, as `ReadProof.choose` makes
@@ -326,14 +492,21 @@ enum OnboardingPreviewRenderer {
 
     // MARK: - Drawing
 
-    private static func render(_ view: AnyView, scale: CGFloat = 2) -> Data? {
+    private static func render(
+        _ view: AnyView, scale: CGFloat = 2, height: CGFloat = OnboardingTheme.windowHeight, highContrast: Bool = false
+    ) -> Data? {
         let root = view
             .environment(\.colorScheme, .light)
             .environment(\.locale, locale)
             .environment(\.onboardingSolidFills, true)
+            .environment(\.onboardingWindowHeight, height)
+            // A still: what arrives after the title has arrived. A
+            // transition's frames set their own share.
+            .environment(\.onboardingContentArrival, 1)
+            .environment(\.onboardingIncreasedContrast, highContrast)
         let hosting = NSHostingView(rootView: root)
-        hosting.appearance = NSAppearance(named: .aqua)
-        let size = NSSize(width: OnboardingTheme.windowWidth, height: OnboardingTheme.windowHeight)
+        hosting.appearance = NSAppearance(named: highContrast ? .accessibilityHighContrastAqua : .aqua)
+        let size = NSSize(width: OnboardingTheme.windowWidth, height: height)
         hosting.frame = NSRect(origin: .zero, size: size)
         hosting.layoutSubtreeIfNeeded()
         guard let rep = NSBitmapImageRep(

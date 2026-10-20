@@ -2,19 +2,25 @@
 //
 // Welcome's demo, as a script: three moments from the product, played in a
 // loop from made-up data (`OnboardingCopy.Demo`). Someone writing a message
-// needs a link they saw earlier: Ask finds it and shows its source; Overview
+// needs a link they saw earlier: Ask finds it and shows its source; Today
 // fills in the day; your AI starts a session with your recent work. The
-// view draws `frame(at:)` and animates between
-// frames; the script alone decides what shows when, so the tests and the
-// preview renderer see exactly what plays. Under Reduce Motion the view
-// shows each moment whole (`finalFrame`) and only fades between them.
+// view draws `frame(at:)` and animates between frames; the script alone
+// decides what shows when, so the tests and the preview renderer see
+// exactly what plays. Under Reduce Motion the view shows each moment whole
+// (`stillFrame(at:)`) and only crossfades between them, every 6 seconds.
+//
+// The demo plays only while it can be watched (`WelcomeDemoPlayback`): it
+// pauses while the pointer is over it, so it can be read, and while setup's
+// window is not the key window, and it stops when the person moves past
+// Welcome. Paused, nothing runs, so it costs nothing in the background.
 
 import Foundation
 
 /// The three moments, in the order they play.
 public enum DemoMoment: Int, CaseIterable, Sendable {
     case ask
-    case overview
+    /// The window on Today, its day filling in (SPEC 7.3).
+    case today
     case ai
 }
 
@@ -33,8 +39,8 @@ public struct DemoFrame: Equatable, Sendable {
     public var typedQuestion: Int
     public var showsAnswer: Bool
     public var showsSource: Bool
-    /// Overview: how many of the day's sessions are on the strip, and the
-    /// last session's card.
+    /// Today: how many of the day's sessions are on the strip, and the
+    /// card for what is going on now.
     public var sessionsShown: Int
     public var showsSessionCard: Bool
     /// Your AI: how many lines from Hippocampus have arrived, how much of
@@ -78,7 +84,7 @@ public enum WelcomeDemoScript {
     public static func length(of moment: DemoMoment) -> TimeInterval {
         switch moment {
         case .ask: 6
-        case .overview: 5.4
+        case .today: 5.4
         case .ai: 6
         }
     }
@@ -91,8 +97,9 @@ public enum WelcomeDemoScript {
         DemoMoment.allCases.reduce(0) { $0 + length(of: $1) }
     }
 
-    /// The day the Overview moment fills in, 9 AM to 3 PM: writing, code,
-    /// a meeting, code again, and the Team pricing session the card names.
+    /// The day the Today moment fills in, 9 AM to 3 PM, by the legend's
+    /// kinds: documents, code, a call, code again, and the Team pricing
+    /// session the card names.
     public static let day: [DemoSession] = [
         DemoSession(start: 9.1, end: 10.3, kind: 0),
         DemoSession(start: 10.5, end: 11.8, kind: 1),
@@ -134,6 +141,19 @@ public enum WelcomeDemoScript {
         return finalFrame(.ask)
     }
 
+    /// Under Reduce Motion each moment shows whole for this long, then the
+    /// next crossfades in (SPEC 7.3).
+    public static let stillMomentLength: TimeInterval = 6
+
+    /// The moment shown whole `time` seconds into the still loop, for
+    /// Reduce Motion: nothing inside a moment moves.
+    public static func stillFrame(at time: TimeInterval) -> DemoFrame {
+        let count = DemoMoment.allCases.count
+        var index = Int((time / stillMomentLength).rounded(.down)) % count
+        if index < 0 { index += count }
+        return finalFrame(DemoMoment.allCases[index])
+    }
+
     /// A moment whole, everything shown: Reduce Motion and the renders.
     public static func finalFrame(_ moment: DemoMoment) -> DemoFrame {
         DemoFrame(
@@ -155,7 +175,7 @@ public enum WelcomeDemoScript {
             frame.typedQuestion = typed(OnboardingCopy.Demo.askQuestion.count, during: questionTyping, at: t)
             frame.showsAnswer = t >= answerAt
             frame.showsSource = t >= sourceAt
-        case .overview:
+        case .today:
             frame.sessionsShown = sessionTimes.filter { t >= $0 }.count
             frame.showsSessionCard = t >= sessionCardAt
         case .ai:
@@ -172,5 +192,43 @@ public enum WelcomeDemoScript {
         guard t < span.upperBound else { return count }
         let share = (t - span.lowerBound) / (span.upperBound - span.lowerBound)
         return min(count, Int((share * Double(count)).rounded(.down)) + 1)
+    }
+}
+
+/// When Welcome's demo plays (SPEC 7.3). It pauses while the pointer is over
+/// it, so it can be read, and while setup's window is not the key window;
+/// it stops when the person moves past Welcome. Time only counts while it
+/// plays, so it picks up where it paused.
+public struct WelcomeDemoPlayback: Equatable, Sendable {
+    /// The pointer is over the demo.
+    public var hovering = false
+    /// Setup's window is the key window.
+    public var windowIsKey = true
+    /// Welcome is the screen showing.
+    public var onWelcome = true
+    /// Seconds into the loop, counting only the time it played.
+    public private(set) var elapsed: TimeInterval = 0
+
+    public init(hovering: Bool = false, windowIsKey: Bool = true, onWelcome: Bool = true) {
+        self.hovering = hovering
+        self.windowIsKey = windowIsKey
+        self.onWelcome = onWelcome
+    }
+
+    /// Whether the demo moves now. When it doesn't, nothing runs for it.
+    public var isPlaying: Bool { onWelcome && windowIsKey && !hovering }
+
+    /// `seconds` of wall time passed: counted only while it plays.
+    public mutating func advance(by seconds: TimeInterval) {
+        guard isPlaying, seconds > 0 else { return }
+        elapsed += seconds
+    }
+
+    /// What shows now: the script's frame, or the moment whole under
+    /// Reduce Motion.
+    public func frame(presses: Int, reduceMotion: Bool) -> DemoFrame {
+        reduceMotion
+            ? WelcomeDemoScript.stillFrame(at: elapsed)
+            : WelcomeDemoScript.frame(at: elapsed, presses: presses)
     }
 }

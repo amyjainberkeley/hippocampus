@@ -41,3 +41,17 @@ extension EnvironmentValues {
         set { self[SolidFillsKey.self] = newValue }
     }
 }
+
+private struct IncreasedContrastKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Draws Increase Contrast's look whatever the Mac's setting: the
+    /// renderer's pictures of it (SPEC 7.7). On screen it stays false and
+    /// macOS's own setting decides.
+    var onboardingIncreasedContrast: Bool {
+        get { self[IncreasedContrastKey.self] }
+        set { self[IncreasedContrastKey.self] = newValue }
+    }
+}

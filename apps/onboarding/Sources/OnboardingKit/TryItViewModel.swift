@@ -14,8 +14,10 @@
 //
 // Timeline, from consent: "Turning on…" for 3 s; the first read about 2 s
 // in, then every 2 s; a proof as soon as one with a sentence exists (a newer
-// one replaces it); "Still nothing read" after 45 s with none. Reading stops
-// 30 s after the first proof, or 3 minutes in, whichever comes first. When
+// one replaces it); "Still nothing read" after 45 s with none, or after 90 s
+// in Low Power Mode, which reads the window in front four times less often
+// and says so while it waits (SPEC 7.7). Reading stops 30 s after the first
+// proof, or 3 minutes in, whichever comes first. When
 // the app posts `ai.hippocampus.ask.didShow` the card ends on "That’s it.",
 // or on "That’s Ask." when Ask opened because the person clicked "Open it
 // for me", which proves nothing about the key.
@@ -83,6 +85,13 @@ public final class TryItViewModel: ObservableObject {
     public static let firstReadAfter: TimeInterval = 2
     public static let readEvery: TimeInterval = 2
     public static let stalledAfter: TimeInterval = 45
+    /// Low Power Mode reads four times less often, so it waits longer.
+    public static let stalledAfterInLowPower: TimeInterval = 90
+
+    /// When "Still nothing read" shows.
+    public static func stalledAfter(lowPowerMode: Bool) -> TimeInterval {
+        lowPowerMode ? stalledAfterInLowPower : stalledAfter
+    }
     public static let readingAfterProof: TimeInterval = 30
     public static let readingAtMost: TimeInterval = 180
     /// Review mode looks back this far for something to show.
@@ -102,6 +111,9 @@ public final class TryItViewModel: ObservableObject {
     @Published public private(set) var frontApp: (bundleId: String, name: String?)?
     /// The window Try it reads now: the window in front.
     @Published public private(set) var target: FrontWindow?
+    /// The Mac is in Low Power Mode: reading takes longer, and the screen
+    /// says so while it waits.
+    @Published public private(set) var lowPowerMode = false
     public private(set) var isReading = true
 
     private let probe: any LastReadProbe
@@ -118,6 +130,7 @@ public final class TryItViewModel: ObservableObject {
     private let rules: ReadRules
     private let passwordFieldInUse: @MainActor () -> Bool
     private let requestFreshRead: @MainActor () -> Void
+    private let isLowPowerMode: @MainActor () -> Bool
     private var lastReadAt: Date?
     private var firstProofAt: Date?
     private var openedForThemAt: Date?
@@ -139,6 +152,7 @@ public final class TryItViewModel: ObservableObject {
     ///   - passwordFieldInUse: secure text entry is on (`SecureTextEntry`).
     ///   - requestFreshRead: asks the app to read the window in front once,
     ///     now, as opening Ask does.
+    ///   - lowPowerMode: whether the Mac is in Low Power Mode now.
     public init(
         probe: any LastReadProbe,
         startedAt: Date,
@@ -151,7 +165,8 @@ public final class TryItViewModel: ObservableObject {
         frontWindow: @escaping @MainActor () -> FrontWindow? = { nil },
         rules: ReadRules = ReadRules(),
         passwordFieldInUse: @escaping @MainActor () -> Bool = { false },
-        requestFreshRead: @escaping @MainActor () -> Void = {}
+        requestFreshRead: @escaping @MainActor () -> Void = {},
+        lowPowerMode: @escaping @MainActor () -> Bool = { false }
     ) {
         self.probe = probe
         self.startedAt = startedAt
@@ -165,6 +180,8 @@ public final class TryItViewModel: ObservableObject {
         self.rules = rules
         self.passwordFieldInUse = passwordFieldInUse
         self.requestFreshRead = requestFreshRead
+        self.isLowPowerMode = lowPowerMode
+        self.lowPowerMode = lowPowerMode()
         if remembering != .on {
             card = .notRemembering(remembering)
             isReading = false
@@ -194,6 +211,8 @@ public final class TryItViewModel: ObservableObject {
         if case .notRemembering = card { return }
         let timeline = self.timeline
         let elapsed = now().timeIntervalSince(startedAt)
+        let lowPower = isLowPowerMode()
+        if lowPower != lowPowerMode { lowPowerMode = lowPower }
         let window = currentTarget()
         if window != target { target = window }
         if isReading, elapsed >= Self.firstReadAfter, readIsDue() {
@@ -346,7 +365,8 @@ public final class TryItViewModel: ObservableObject {
         if let latestProof, !latestProof.lines.isEmpty { return .proof(latestProof) }
         if turningOn, elapsed < Self.startingFor { return .starting }
         let window = target
-        if elapsed >= Self.stalledAfter {
+        let stalledAfter = Self.stalledAfter(lowPowerMode: lowPowerMode)
+        if elapsed >= stalledAfter {
             // Checked now, not taken from consent: a permission turned off
             // since is the cause most worth naming.
             let on = await permissionsOn()
@@ -357,7 +377,7 @@ public final class TryItViewModel: ObservableObject {
         if let window, let reason = rules.skipReason(for: window) { return .skipped(reason, window) }
         guard let window else { return .noWindow }
         if let latestProof, latestProof.appBundleId == window.bundleId { return .nothingToShow(window) }
-        if elapsed >= Self.stalledAfter { return .stalled(.unknown) }
+        if elapsed >= stalledAfter { return .stalled(.unknown) }
         return .reading(window)
     }
 }

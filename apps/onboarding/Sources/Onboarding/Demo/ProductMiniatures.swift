@@ -6,10 +6,10 @@ import UniformTypeIdentifiers
 
 // Small, faithful copies of Hippocampus's own surfaces, drawn from made-up
 // data (`OnboardingCopy.Demo`): Ask as it drops from the top of the screen,
-// the window's Overview, and an AI tool starting a session with what
+// the window on Today, and an AI tool starting a session with what
 // Hippocampus shares. Setup cannot link the window's code, so the colours,
-// type and shapes here copy its tokens (`MCI.Color`, `DayStripPalette`, the
-// Ask panel's layout). Nothing here reads this Mac.
+// type and shapes here copy its tokens (`MCI.Color`, the day strip's kind
+// colours, the Ask panel's layout). Nothing here reads this Mac.
 
 /// The window's own colours (RecallUIKit `MCI.Color`, light).
 enum MiniPalette {
@@ -26,9 +26,9 @@ enum MiniPalette {
     static let panel = rgb(0xF5F5F7)
     /// The desktop the demo plays on: the tile's cool grey.
     static let desktop = rgb(0xE6EBF3)
-    /// Kinds of work, as the day strip colours them (`DayStripPalette`):
-    /// writing, code, meetings.
-    static let kinds = [rgb(0xEB6834), rgb(0x2A78D6), rgb(0xE87BA4)]
+    /// Kinds of work, as the day strip colours them: documents, code,
+    /// calls (`OnboardingPalette.demoKinds`, held by a test).
+    static let kinds = OnboardingPalette.demoKinds.map(rgb)
 
     static func rgb(_ hex: UInt32) -> Color {
         Color(.sRGB, red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255,
@@ -285,7 +285,7 @@ struct MiniMessageBehind: View {
     }
 }
 
-// MARK: - Overview
+// MARK: - Today
 
 /// The day strip: sessions as blocks on the day's hours, coloured by kind.
 struct MiniDayStrip: View {
@@ -353,80 +353,127 @@ struct MiniLegend: View {
     }
 }
 
-/// The session the day ends on, as Overview's card shows it.
-struct MiniSessionCard: View {
+/// Today's card for the work going on now: "Now · since 2:12 PM" with its
+/// dot, what it is, one line about it, and its screenshot, drawn small.
+struct MiniNowCard: View {
     var compact = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: compact ? 2 : 3) {
-            Text(OnboardingCopy.Demo.sessionTitle)
-                .font(.system(size: compact ? 10.5 : 11.5, weight: .semibold))
-                .foregroundStyle(MiniPalette.ink)
-            Text(OnboardingCopy.Demo.sessionTime)
-                .font(.system(size: compact ? 8.5 : 9))
-                .foregroundStyle(MiniPalette.secondary)
-            Text(OnboardingCopy.Demo.sessionLine)
-                .font(.system(size: compact ? 9 : 10))
-                .foregroundStyle(MiniPalette.ink)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, compact ? 1 : 2)
+        HStack(alignment: .top, spacing: compact ? 7 : 10) {
+            VStack(alignment: .leading, spacing: compact ? 2 : 3) {
+                HStack(spacing: 3) {
+                    Circle().fill(OnboardingDesign.Palette.accent).frame(width: 4, height: 4)
+                    Text(OnboardingCopy.Demo.nowLine)
+                        .font(.system(size: compact ? 7.5 : 8))
+                        .foregroundStyle(MiniPalette.secondary)
+                }
+                Text(OnboardingCopy.Demo.sessionTitle)
+                    .font(.system(size: compact ? 10.5 : 11.5, weight: .semibold))
+                    .foregroundStyle(MiniPalette.ink)
+                Text(OnboardingCopy.Demo.sessionLine)
+                    .font(.system(size: compact ? 8.5 : 9.5))
+                    .foregroundStyle(MiniPalette.ink)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, compact ? 1 : 2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if !compact {
+                MiniPagePicture()
+                    .frame(width: 66, height: 42)
+            }
         }
-        .padding(compact ? 8 : 10)
+        .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(MiniPalette.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(MiniPalette.border, lineWidth: 0.75))
     }
 }
 
-/// The window on Overview: its sidebar, the day filling in, and the
-/// session the day ends on.
-struct MiniOverviewWindow: View {
+/// A pricing page as Today's card shows its screenshot: drawn, not a
+/// picture of anyone's screen. A heading and three plans.
+struct MiniPagePicture: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 2) {
+                ForEach(0..<3, id: \.self) { _ in
+                    Circle().fill(Color.black.opacity(0.14)).frame(width: 2.5, height: 2.5)
+                }
+                RoundedRectangle(cornerRadius: 1).fill(Color.black.opacity(0.06)).frame(height: 3)
+            }
+            RoundedRectangle(cornerRadius: 1).fill(MiniPalette.ink.opacity(0.75)).frame(width: 26, height: 3)
+            HStack(alignment: .top, spacing: 3) {
+                ForEach(0..<3, id: \.self) { plan in
+                    VStack(alignment: .leading, spacing: 2) {
+                        RoundedRectangle(cornerRadius: 0.5).fill(MiniPalette.ink.opacity(0.55)).frame(width: 9, height: 2)
+                        RoundedRectangle(cornerRadius: 0.5).fill(Color.black.opacity(0.12)).frame(height: 1.5)
+                        RoundedRectangle(cornerRadius: 0.5).fill(Color.black.opacity(0.12)).frame(width: 11, height: 1.5)
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(plan == 1 ? OnboardingDesign.Palette.accent : Color.black.opacity(0.1))
+                            .frame(height: 3)
+                            .padding(.top, 1)
+                    }
+                    .padding(2.5)
+                    .background(Color.black.opacity(0.03), in: RoundedRectangle(cornerRadius: 2, style: .continuous))
+                }
+            }
+        }
+        .padding(4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(MiniPalette.border, lineWidth: 0.75))
+    }
+}
+
+/// The window on Today: its sidebar (Today, the one thing being worked
+/// on, History), the card for what is going on now, and the day filling in
+/// on its strip.
+struct MiniTodayWindow: View {
     let frame: DemoFrame
 
     var body: some View {
         MiniWindow {
             HStack(spacing: 0) {
                 sidebar
-                VStack(alignment: .leading, spacing: 9) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(OnboardingCopy.Demo.today)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(MiniPalette.ink)
-                    MiniDayStrip(sessionsShown: frame.sessionsShown, highlightsLast: frame.showsSessionCard)
-                    MiniLegend()
-                        .opacity(frame.sessionsShown > 0 ? 1 : 0)
-                    MiniSessionCard()
+                    MiniNowCard()
                         .opacity(frame.showsSessionCard ? 1 : 0)
                         .offset(y: frame.showsSessionCard ? 0 : 4)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(OnboardingCopy.Demo.yourDay)
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundStyle(MiniPalette.ink)
+                        MiniDayStrip(sessionsShown: frame.sessionsShown, highlightsLast: frame.showsSessionCard,
+                                     height: 14, showsHours: false)
+                        MiniLegend(size: 7.5)
+                            .opacity(frame.sessionsShown > 0 ? 1 : 0)
+                    }
                 }
                 .padding(.horizontal, 14)
-                .padding(.vertical, 11)
+                .padding(.top, 9)
+                .padding(.bottom, 8)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .background(MiniPalette.canvas)
             }
         }
     }
 
+    /// Today, one Working On item and History under Library, as the
+    /// window's sidebar shows them on a first week.
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 2) {
             HiMarkGlyph(letters: MiniPalette.ink)
                 .frame(height: 13)
                 .padding(.leading, 6)
-                .padding(.bottom, 7)
-            ForEach(Array(OnboardingCopy.Demo.places.enumerated()), id: \.offset) { index, place in
-                HStack(spacing: 5) {
-                    Image(systemName: ["house", "magnifyingglass", "person.crop.circle"][index])
-                        .font(.system(size: 8.5))
-                        .frame(width: 11)
-                    Text(place).font(.system(size: 9.5))
-                    Spacer(minLength: 0)
-                }
-                .foregroundStyle(MiniPalette.ink)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3.5)
-                .background(index == 0 ? MiniPalette.selection : .clear,
-                            in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-            }
+                .padding(.bottom, 5)
+            row("sun.max", OnboardingCopy.Demo.places[0], selected: true)
+            header(OnboardingCopy.Demo.places[1])
+            row("chevron.left.forwardslash.chevron.right", OnboardingCopy.Demo.workingOnItem)
+            header(OnboardingCopy.Demo.library)
+            row("clock", OnboardingCopy.Demo.places[2])
             Spacer(minLength: 0)
             HStack(spacing: 4) {
                 Circle().fill(OnboardingDesign.Palette.accent).frame(width: 5, height: 5)
@@ -437,10 +484,35 @@ struct MiniOverviewWindow: View {
             .padding(.leading, 6)
         }
         .padding(8)
-        .frame(width: 100)
+        .frame(width: 108)
         .frame(maxHeight: .infinity)
         .background(MiniPalette.sidebar)
         .overlay(alignment: .trailing) { Rectangle().fill(MiniPalette.border).frame(width: 0.5) }
+    }
+
+    private func header(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 7.5, weight: .semibold))
+            .foregroundStyle(MiniPalette.secondary)
+            .padding(.leading, 6)
+            .padding(.top, 5)
+            .padding(.bottom, 1)
+    }
+
+    private func row(_ symbol: String, _ title: String, selected: Bool = false) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: symbol)
+                .font(.system(size: 8))
+                .foregroundStyle(selected ? OnboardingDesign.Palette.accent : MiniPalette.secondary)
+                .frame(width: 11)
+            Text(title).font(.system(size: 9.5)).lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(MiniPalette.ink)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(selected ? MiniPalette.selection : .clear,
+                    in: RoundedRectangle(cornerRadius: 5, style: .continuous))
     }
 }
 
