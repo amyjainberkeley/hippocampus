@@ -55,7 +55,8 @@ final class AgentUnderstandingReaderTests: XCTestCase {
     func testTheYouPageRunsTheAgentWithTheCurrentOffset() async throws {
         let runner = Self.samples()
         let page = try await reader(runner, environment: [:]).modelPage()
-        XCTAssertEqual(page.shared.count, 7)
+        XCTAssertEqual(page.shared.count, 4)
+        XCTAssertEqual(page.notSent.count, 5)
         XCTAssertEqual(runner.commands.first?.arguments, ["model", "--page", "--json", "--tz-offset-secs", "-25200"])
         XCTAssertEqual(runner.timeouts, [20])
     }
@@ -280,7 +281,7 @@ final class AgentUnderstandingReaderTests: XCTestCase {
         let after = try await reader.modelPage()
         XCTAssertEqual(runner.commands.count, 1, "the second read came from the cache")
         XCTAssertFalse(after.shared.contains { $0.id == 41 })
-        XCTAssertEqual(after.shared.first { $0.id == 45 }?.basis, .confirmed)
+        XCTAssertEqual(after.notSent.first { $0.id == 45 }?.basis, .confirmed)
         let overview = try await reader.overview(today)
         XCTAssertFalse(overview.aiKnows.aboutYou.contains { $0.id == 41 })
     }

@@ -49,7 +49,7 @@ struct YouItemRow: View {
                 }
             }
             HStack(spacing: 12) {
-                Text(UserFacingCopy.You.basis(item.basis, daysSeen: item.daysSeen))
+                Text(UserFacingCopy.You.basis(item))
                     .font(MCI.Font.caption)
                     .foregroundStyle(MCI.Color.foregroundSecondary)
                 if !item.reasoning.isEmpty || !item.evidenceSessions.isEmpty {

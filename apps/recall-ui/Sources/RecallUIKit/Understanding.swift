@@ -353,6 +353,11 @@ public struct ModelPage: Equatable, Sendable {
     public internal(set) var shared: [ModelItem]
     /// "Not sent unless your AI looks it up".
     public internal(set) var keptBack: [ModelItem]
+    /// Lines no AI tool is given yet, until they are seen more or the person
+    /// marks them Right (`not_sent`, the agent's `understanding/sending.rs`):
+    /// shown in their groups, each saying so, so they can still be marked
+    /// Right or forgotten (SPEC 3.7).
+    public internal(set) var notSent: [ModelItem]
     /// "Not seen lately": neither sent nor served.
     public internal(set) var notSeenLately: [ModelItem]
 }
@@ -391,6 +396,13 @@ public struct ModelItem: Equatable, Sendable, Identifiable {
     public let updatedUs: Int64
     /// One dated row per session the item rests on, newest first.
     public let evidenceSessions: [EvidenceSession]
+    /// The page lists it under `not_sent`: no AI tool is given it yet. Once
+    /// the person marks it Right it goes (`basis` is then `.confirmed`).
+    public internal(set) var notSentYet = false
+
+    /// Whether the page should say it isn't sent: listed so, and not since
+    /// marked Right.
+    public var waitsToBeSent: Bool { notSentYet && basis != .confirmed }
 }
 
 public struct EvidenceSession: Equatable, Sendable {
@@ -762,6 +774,12 @@ extension ModelPage: Decodable {
             recentWork: f.list("recent_work"),
             shared: f.list("shared"),
             keptBack: f.list("kept_back"),
+            // An older agent sends no `not_sent`: none.
+            notSent: f.list("not_sent", of: ModelItem.self).map { item in
+                var waiting = item
+                waiting.notSentYet = true
+                return waiting
+            },
             notSeenLately: f.list("not_seen_lately")
         )
     }

@@ -122,25 +122,6 @@
       ]
     },
     {
-      "id": 45,
-      "text": "Sam wants the new pricing page live before the October sale.",
-      "kind": "goal",
-      "group": "working_on",
-      "basis": "seen_once",
-      "days_seen": 1,
-      "reasoning": "The draft and the design review both mention launching before the October sale.",
-      "updated_us": 1791827080000000,
-      "evidence_sessions": [
-        {
-          "start_us": 1791825080000000,
-          "end_us": 1791826700000000,
-          "open_event_id": 90165,
-          "app_name": "Notes",
-          "window_title": "Pricing page draft"
-        }
-      ]
-    },
-    {
       "id": 29,
       "text": "Sam drafts copy in Notes before laying it out in Figma.",
       "kind": "habit",
@@ -181,25 +162,6 @@
       ]
     },
     {
-      "id": 33,
-      "text": "Sam prefers short plan names over descriptive ones.",
-      "kind": "preference",
-      "group": "how_you_work",
-      "basis": "seen_once",
-      "days_seen": 1,
-      "reasoning": "The plan names were rewritten twice, each time shorter.",
-      "updated_us": 1791825160000000,
-      "evidence_sessions": [
-        {
-          "start_us": 1791823265000000,
-          "end_us": 1791825055000000,
-          "open_event_id": 90141,
-          "app_name": "Notes",
-          "window_title": "Pricing page draft"
-        }
-      ]
-    },
-    {
       "id": 22,
       "text": "Sam writes Rust and runs tests from the terminal.",
       "kind": "skill",
@@ -231,28 +193,56 @@
           "window_title": "cart.rs — trailhead-shop"
         }
       ]
-    },
+    }
+  ],
+  "kept_back": [
     {
-      "id": 18,
-      "text": "Sam knows Figma auto layout well.",
-      "kind": "skill",
-      "group": "skills",
-      "basis": "seen_once",
-      "days_seen": 1,
-      "reasoning": "The pricing cards were rebuilt with auto layout in a few minutes.",
-      "updated_us": 1791582520000000,
+      "id": 31,
+      "text": "Sam spends long stretches on state sales tax rules.",
+      "kind": "struggle",
+      "group": "struggles",
+      "basis": "seen_on_days",
+      "days_seen": 2,
+      "reasoning": "Pages about sales tax by state were open for most of two sessions on different days.",
+      "updated_us": 1791829960000000,
       "evidence_sessions": [
         {
-          "start_us": 1791580440000000,
-          "end_us": 1791582190000000,
-          "open_event_id": 83311,
-          "app_name": "Figma",
-          "window_title": "Trailhead pricing v2"
+          "start_us": 1791828150000000,
+          "end_us": 1791829940000000,
+          "open_event_id": 90188,
+          "app_name": "VS Code",
+          "window_title": "tax.rs — trailhead-shop"
+        },
+        {
+          "start_us": 1791668400000000,
+          "end_us": 1791670190000000,
+          "open_event_id": 85733,
+          "app_name": "Safari",
+          "window_title": "Sales tax by state · Tax Guide"
         }
       ]
     }
   ],
-  "kept_back": [
+  "not_sent": [
+    {
+      "id": 45,
+      "text": "Sam wants the new pricing page live before the October sale.",
+      "kind": "goal",
+      "group": "working_on",
+      "basis": "seen_once",
+      "days_seen": 1,
+      "reasoning": "The draft and the design review both mention launching before the October sale.",
+      "updated_us": 1791827080000000,
+      "evidence_sessions": [
+        {
+          "start_us": 1791825080000000,
+          "end_us": 1791826700000000,
+          "open_event_id": 90165,
+          "app_name": "Notes",
+          "window_title": "Pricing page draft"
+        }
+      ]
+    },
     {
       "id": 51,
       "text": "Sam checks the shop channel in Slack between tasks.",
@@ -280,6 +270,44 @@
       ]
     },
     {
+      "id": 33,
+      "text": "Sam prefers short plan names over descriptive ones.",
+      "kind": "preference",
+      "group": "how_you_work",
+      "basis": "seen_once",
+      "days_seen": 1,
+      "reasoning": "The plan names were rewritten twice, each time shorter.",
+      "updated_us": 1791825160000000,
+      "evidence_sessions": [
+        {
+          "start_us": 1791823265000000,
+          "end_us": 1791825055000000,
+          "open_event_id": 90141,
+          "app_name": "Notes",
+          "window_title": "Pricing page draft"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "text": "Sam knows Figma auto layout well.",
+      "kind": "skill",
+      "group": "skills",
+      "basis": "seen_once",
+      "days_seen": 1,
+      "reasoning": "The pricing cards were rebuilt with auto layout in a few minutes.",
+      "updated_us": 1791582520000000,
+      "evidence_sessions": [
+        {
+          "start_us": 1791580440000000,
+          "end_us": 1791582190000000,
+          "open_event_id": 83311,
+          "app_name": "Figma",
+          "window_title": "Trailhead pricing v2"
+        }
+      ]
+    },
+    {
       "id": 27,
       "text": "Sam works with Priya on the pricing page design.",
       "kind": "relationship",
@@ -302,32 +330,6 @@
           "open_event_id": 85407,
           "app_name": "Slack",
           "window_title": "#design"
-        }
-      ]
-    },
-    {
-      "id": 31,
-      "text": "Sam spends long stretches on state sales tax rules.",
-      "kind": "struggle",
-      "group": "struggles",
-      "basis": "seen_on_days",
-      "days_seen": 2,
-      "reasoning": "Pages about sales tax by state were open for most of two sessions on different days.",
-      "updated_us": 1791829960000000,
-      "evidence_sessions": [
-        {
-          "start_us": 1791828150000000,
-          "end_us": 1791829940000000,
-          "open_event_id": 90188,
-          "app_name": "VS Code",
-          "window_title": "tax.rs — trailhead-shop"
-        },
-        {
-          "start_us": 1791668400000000,
-          "end_us": 1791670190000000,
-          "open_event_id": 85733,
-          "app_name": "Safari",
-          "window_title": "Sales tax by state · Tax Guide"
         }
       ]
     }

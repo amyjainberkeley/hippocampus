@@ -8,7 +8,9 @@ import SwiftUI
 /// The groups as headings ("Projects and goals", "How you work", Skills,
 /// People, "Where you got stuck"), each line with where it came from, Why,
 /// Right and Forget; a line that names a Working On item exactly links to
-/// it. At the bottom, one row: "Not sent unless your AI looks it up · Not
+/// it. A line no AI tool is given yet sits in its group after the ones that
+/// are, saying "Not sent yet", and one line under the lead says what that
+/// means. At the bottom, one row: "Not sent unless your AI looks it up · Not
 /// seen lately · Names You Use…", then who wrote it. "Recent work" moved to
 /// AI Tools; Privacy and AI Tools are rows of the sidebar now.
 ///
@@ -68,6 +70,14 @@ struct AboutYouPlace: View {
             Text(verbatim: UserFacingCopy.You.lead)
                 .font(.system(size: 13))
                 .foregroundStyle(MCI.Color.foregroundSecondary)
+            // Lines no AI tool is given yet are listed with the rest, each
+            // saying so; this says once what that means.
+            if model.state == .ready, model.hasLinesNotSentYet {
+                Text(verbatim: UserFacingCopy.You.notSentLine)
+                    .font(.system(size: 13))
+                    .foregroundStyle(MCI.Color.foregroundSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 

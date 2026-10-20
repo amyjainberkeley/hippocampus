@@ -3,7 +3,10 @@ import Foundation
 
 /// The three lists on You (contract model-page.md section 2, RULINGS I7).
 public enum ModelPageList: String, CaseIterable, Sendable {
-    /// "What your AI can be told about you"
+    /// The lines under the page's headings: what your AI can be told about
+    /// you, then in each group the lines no AI tool is given yet
+    /// (`ModelPage.notSent`), so they can still be marked Right or
+    /// forgotten (SPEC 3.7).
     case shared
     /// "Not sent unless your AI looks it up"
     case keptBack
@@ -160,8 +163,15 @@ public final class UserModelViewModel: ObservableObject {
         guard var page = feed.value else { return nil }
         page.shared = overlay(page.shared)
         page.keptBack = overlay(page.keptBack)
+        page.notSent = overlay(page.notSent)
         page.notSeenLately = overlay(page.notSeenLately)
         return page
+    }
+
+    /// Some line under the headings isn't sent yet: the page says once what
+    /// that means (`UserFacingCopy.You.notSentLine`).
+    public var hasLinesNotSentYet: Bool {
+        page?.notSent.contains(where: \.waitsToBeSent) ?? false
     }
 
     public var state: State {
@@ -170,8 +180,8 @@ public final class UserModelViewModel: ObservableObject {
         case .unavailable: return .unavailable
         case .ready:
             guard let page else { return .loading }
-            let empty = page.shared.isEmpty && page.keptBack.isEmpty && page.notSeenLately.isEmpty
-                && forgottenHere.isEmpty
+            let empty = page.shared.isEmpty && page.keptBack.isEmpty && page.notSent.isEmpty
+                && page.notSeenLately.isEmpty && forgottenHere.isEmpty
             guard empty else { return .ready }
             return page.modelStatus.state == .unavailable ? .needsModel : .nothingLearned
         }
@@ -259,9 +269,11 @@ public final class UserModelViewModel: ObservableObject {
         }
     }
 
+    /// A list's items in the page's order. Under each heading the lines
+    /// sent come first, then those not sent yet.
     private static func items(_ list: ModelPageList, of page: ModelPage) -> [ModelItem] {
         switch list {
-        case .shared: page.shared
+        case .shared: page.shared + page.notSent
         case .keptBack: page.keptBack
         case .notSeenLately: page.notSeenLately
         }

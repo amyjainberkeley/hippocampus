@@ -122,6 +122,7 @@ public struct OverviewPreviewUnderstanding: UnderstandingReader {
             return try Self.edited(PreviewUnderstandingFixtures.modelPage, as: ModelPage.self) { json in
                 json["shared"] = []
                 json["kept_back"] = []
+                json["not_sent"] = []
                 json["not_seen_lately"] = []
                 json["recent_work"] = []
             }
@@ -129,6 +130,7 @@ public struct OverviewPreviewUnderstanding: UnderstandingReader {
             return try Self.edited(PreviewUnderstandingFixtures.modelPage, as: ModelPage.self) { json in
                 json["shared"] = []
                 json["kept_back"] = []
+                json["not_sent"] = []
                 json["not_seen_lately"] = []
                 json["recent_work"] = []
                 json["model_status"] = Self.modelOffStatus
