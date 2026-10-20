@@ -34,6 +34,17 @@ public enum RecallTab: Int, Hashable, Sendable {
     /// You: what Hippocampus understands about the person, and their data
     /// (RULINGS G5, X9).
     case you = 9
+    /// The sidebar's new names (SPEC 2.16, SPEC-DELTA 1).
+    case webPages = 10
+    case lookedUp = 11
+    /// Working On, all of it (Show All); with an item, that item.
+    case work = 12
+    case aboutYou = 13
+    case aiTools = 14
+    case documents = 15
+    case code = 16
+    case conversations = 17
+
     /// Map a deep-link `?tab=…` query value (case-insensitive) to a
     /// `RecallTab`. Returns `nil` for unknown values so callers can
     /// ignore junk without crashing.
@@ -51,6 +62,14 @@ public enum RecallTab: Int, Hashable, Sendable {
         case "dashboard", "privacy-dashboard": return .privacyDashboard
         case "timeline-strip", "strip": return .timelineStrip
         case "you": return .you
+        case "web-pages", "pages": return .webPages
+        case "looked-up", "searches": return .lookedUp
+        case "work", "working-on": return .work
+        case "about-you": return .aboutYou
+        case "ai-tools": return .aiTools
+        case "documents": return .documents
+        case "code": return .code
+        case "conversations": return .conversations
         default:         return nil
         }
     }
@@ -70,39 +89,106 @@ public enum RecallTab: Int, Hashable, Sendable {
     }
 }
 
-/// The three places in the window (RULINGS G5).
+/// The window's pages (SPEC 2.2 with SPEC-DELTA 1): Today; History and its
+/// kinds; Working On (Show All); the pinned About You, AI Tools and
+/// Privacy. A Working On item's page is a route's `workItem`.
 public enum RecallPlace: String, CaseIterable, Sendable {
-    case overview, ask, you
+    case today
+    case history
+    case webPages
+    case documents
+    case code
+    case conversations
+    case lookedUp
+    /// Working On, all of it: Show All (SPEC 3.3).
+    case workingOn
+    case aboutYou
+    case aiTools
+    case privacy
+
+    /// The names the window's places had before the sidebar (SPEC 2.16):
+    /// Overview became Today, Ask became History with the field over every
+    /// page, You became About You.
+    public static let overview = RecallPlace.today
+    public static let ask = RecallPlace.history
+    public static let you = RecallPlace.aboutYou
+
+    /// The sidebar's row for this page; Show All is Working On's own row.
+    public var sidebarPlace: SidebarPlace? {
+        SidebarPlace(rawValue: rawValue)
+    }
+
+    public init(_ place: SidebarPlace) {
+        self = RecallPlace(rawValue: place.rawValue) ?? .today
+    }
+
+    /// The page has the field (SPEC 2.8): every memory page. About You,
+    /// AI Tools and Privacy have none; ⌘F there opens History's.
+    public var hasField: Bool {
+        ![.aboutYou, .aiTools, .privacy].contains(self)
+    }
 }
 
 public extension RecallTab {
-    /// The place every name opens (RULINGS X9). Names are an outside
-    /// contract: the app, links and old menus still send each of them.
-    var place: RecallPlace {
+    /// The place every name opens (RULINGS X9, SPEC 2.16). Names are an
+    /// outside contract: the app, links and old menus still send each of
+    /// them. Settings opens Preferences and leaves the window where it is.
+    var place: RecallPlace? {
         switch self {
-        case .now, .brief: .overview
-        case .search, .timeline, .timelineStrip, .episodes: .ask
-        case .you, .privacy, .privacyDashboard, .settings: .you
+        case .now, .brief, .episodes: .today
+        case .search, .timeline, .timelineStrip: .history
+        case .you, .aboutYou: .aboutYou
+        case .privacy, .privacyDashboard: .privacy
+        case .settings: nil
+        case .webPages: .webPages
+        case .lookedUp: .lookedUp
+        case .work: .workingOn
+        case .aiTools: .aiTools
+        case .documents: .documents
+        case .code: .code
+        case .conversations: .conversations
         }
     }
 
-    /// History, inside Ask: the field is emptied so it shows.
+    /// History with its field emptied, so the day shows.
     var opensHistory: Bool {
-        [.timeline, .timelineStrip, .episodes].contains(self)
+        [.timeline, .timelineStrip].contains(self)
     }
 
-    /// Inside You, what is remembered and the controls that delete it.
+    /// Privacy, the page that shows what is kept and forgets it.
     var opensPrivacy: Bool {
         [.privacy, .privacyDashboard].contains(self)
     }
 }
 
-/// A page pushed inside You.
+/// A page pushed inside About You.
 public enum RecallYouPage: String, Hashable, Sendable {
-    /// What is remembered, and deleting it.
+    /// What is remembered, and deleting it. Privacy is its own page now;
+    /// kept so an older route still reads.
     case privacy
     /// The names you use.
     case names
+}
+
+/// What Forget Recent… forgets (SPEC 3.11): its sheet opens with this
+/// chosen, and still needs the person's click.
+public enum ForgetRecentChoice: String, CaseIterable, Sendable {
+    case tenMinutes = "10m"
+    case hour = "1h"
+    case today
+
+    /// The moments it covers: the time it starts, fixed at the click, up to
+    /// that click.
+    public func start(at now: Date, calendar: Calendar) -> Date {
+        switch self {
+        case .tenMinutes: now.addingTimeInterval(-10 * 60)
+        case .hour: now.addingTimeInterval(-60 * 60)
+        case .today: calendar.startOfDay(for: now)
+        }
+    }
+
+    /// Today asks for the typed word; the others ask once.
+    public var needsTypedWord: Bool { self == .today }
 }
 
 /// Where the window goes, and what it shows there.
@@ -110,35 +196,40 @@ public enum RecallYouPage: String, Hashable, Sendable {
 /// One value for every way a request arrives: at launch (`MCI_INITIAL_TAB`
 /// and the other launch variables), from the app while the window is open
 /// (its command notification or a link), and from inside the window ("Show in
-/// History", a session on You). The window applies a route the same way in
-/// each case (critique-recall-engineering finding 5).
+/// History", a session on About You). The window applies a route the same way
+/// in each case (critique-recall-engineering finding 5).
 public struct RecallRoute: Equatable, Sendable {
     /// The place to show. Nil keeps the place on screen; a window that is
-    /// only opening shows Overview.
+    /// only opening shows Today, or the page it was left on.
     public var place: RecallPlace?
-    /// Pages pushed inside You, in order. Empty shows You itself.
+    /// Pages pushed inside About You, in order. Empty shows About You itself.
     public var youPath: [RecallYouPage]
-    /// Empty Ask's field, so History shows.
+    /// Empty the field, so the page shows.
     public var clearsField: Bool
-    /// Put the cursor in Ask's field.
+    /// Put the cursor in the field.
     public var focusesField: Bool
-    /// A memory to show. With no `timeRange` Ask shows it with its detail;
-    /// with one, History selects it inside that range.
+    /// A memory to show. With no `timeRange` it shows with its detail; with
+    /// one, History selects it inside that range.
     public var focusEventId: UInt64?
-    /// A moment in the day to show: Overview's day, or History's.
+    /// A moment in the day to show: Today's day, or History's.
     public var day: Date?
-    /// A session's own time, in microseconds since the epoch. Overview
+    /// A session's own time, in microseconds since the epoch. Today
     /// selects the session overlapping it; History loads it (RULINGS W8).
     public var timeRange: ClosedRange<Int64>?
     /// Open Ask from the menu bar rather than anything in the window: the
     /// window has no popup of its own (RULINGS W3).
     public var opensAskPanel: Bool
     /// A Working On item to show, by its id: ids, never names, travel in
-    /// routes and links.
+    /// routes and links. The window shows the item's page.
     public var workItem: String?
     /// Show Resume's sheet for `workItem` (SPEC-DELTA 3). The sheet only
     /// lists what would open: nothing opens until the person clicks in it.
     public var showsResume: Bool
+    /// Open the Preferences window; the window stays where it is.
+    public var opensPreferences: Bool
+    /// Open Forget Recent's sheet with this chosen. A link can open the
+    /// sheet but never confirm it (SPEC 2.6.4).
+    public var forgetRecent: ForgetRecentChoice?
 
     public init(
         place: RecallPlace? = nil,
@@ -150,7 +241,9 @@ public struct RecallRoute: Equatable, Sendable {
         timeRange: ClosedRange<Int64>? = nil,
         opensAskPanel: Bool = false,
         workItem: String? = nil,
-        showsResume: Bool = false
+        showsResume: Bool = false,
+        opensPreferences: Bool = false,
+        forgetRecent: ForgetRecentChoice? = nil
     ) {
         self.place = place
         self.youPath = youPath
@@ -162,6 +255,8 @@ public struct RecallRoute: Equatable, Sendable {
         self.opensAskPanel = opensAskPanel
         self.workItem = workItem.flatMap { RecallLaunchRequest.isWorkItemId($0) ? $0 : nil }
         self.showsResume = showsResume && self.workItem != nil
+        self.opensPreferences = opensPreferences
+        self.forgetRecent = forgetRecent
     }
 
     /// Ask, opened from the menu bar: where a request for the window's old
@@ -169,15 +264,22 @@ public struct RecallRoute: Equatable, Sendable {
     public static let askPanelURL = URL(string: "hippocampus://ask")!
 
     /// The place this route shows when `current` is on screen. A window that
-    /// is only opening passes `.overview`.
+    /// is only opening passes `.today`, or the page it was left on.
     public func place(keeping current: RecallPlace) -> RecallPlace {
         place ?? current
     }
 
-    /// The route for one of the window's names (RULINGS X9).
+    /// The route for one of the window's names (RULINGS X9, SPEC 2.16).
     public init(tab: RecallTab) {
-        self.init(place: tab.place, youPath: tab.opensPrivacy ? [.privacy] : [],
-                  clearsField: tab.opensHistory)
+        switch tab {
+        case .settings:
+            self.init(opensPreferences: true)
+        case .search:
+            // History, with the cursor in the field.
+            self.init(place: .history, focusesField: true)
+        default:
+            self.init(place: tab.place, clearsField: tab.opensHistory)
+        }
     }
 
     /// Nil for a name the window does not know, so junk is ignored.
@@ -189,14 +291,24 @@ public struct RecallRoute: Equatable, Sendable {
     }
 
     /// What a request from the app asks for, at launch or while the window is
-    /// open. A memory to show lands in Ask, whatever the name says. A name
-    /// opens its place. The old popup flag opens Ask from the menu bar and
-    /// leaves the window where it is.
+    /// open. A memory to show lands in History, or on Today when the name
+    /// says Today. A name opens its place. The old popup flag opens Ask from
+    /// the menu bar and leaves the window where it is.
     public init(_ request: RecallLaunchRequest) {
         if let eventId = request.focusEventId {
-            self.init(place: .ask, clearsField: true, focusEventId: eventId)
+            if request.tab == .now {
+                self.init(place: .today, focusEventId: eventId)
+            } else {
+                self.init(place: .history, clearsField: true, focusEventId: eventId)
+            }
         } else if let item = request.resumeItem {
             self = .resume(item: item)
+        } else if let item = request.workItem {
+            self = .item(item)
+        } else if let start = request.sessionStartUs {
+            self = .session(startUs: start)
+        } else if let choice = request.forgetRecent {
+            self.init(forgetRecent: choice)
         } else if let tab = request.tab {
             self.init(tab: tab)
         } else {
@@ -225,14 +337,21 @@ public struct RecallRoute: Equatable, Sendable {
 
     // MARK: Routes from inside the window
 
-    /// "Ask": an empty field with the cursor in it.
-    public static let newQuestion = RecallRoute(place: .ask, clearsField: true, focusesField: true)
-    /// "Show History": Ask with an empty field, so History shows.
-    public static let showHistory = RecallRoute(place: .ask, clearsField: true)
-    /// ⌘F: the cursor in Ask's field, keeping what is typed.
-    public static let findInAsk = RecallRoute(place: .ask, focusesField: true)
-    /// "Names You Use", inside You.
-    public static let names = RecallRoute(place: .you, youPath: [.names])
+    /// ⌘N, New Question: the field emptied with the cursor in it. A page
+    /// without a field goes to History's.
+    public static let newQuestion = RecallRoute(clearsField: true, focusesField: true)
+    /// "Show History": History with an empty field, so the day shows.
+    public static let showHistory = RecallRoute(place: .history, clearsField: true)
+    /// ⌘F: the cursor in this page's field, keeping what is typed. A page
+    /// without a field goes to History's.
+    public static let findInAsk = RecallRoute(focusesField: true)
+    /// "Names You Use", inside About You.
+    public static let names = RecallRoute(place: .aboutYou, youPath: [.names])
+
+    /// A Working On item's page, by its id.
+    public static func item(_ id: String) -> RecallRoute {
+        RecallRoute(workItem: id)
+    }
 
     /// Resume for a Working On item (SPEC-DELTA 3): the item, with Resume's
     /// sheet over it. From the item's Resume button, Today's card, Ask's ⌥↩
@@ -241,21 +360,27 @@ public struct RecallRoute: Equatable, Sendable {
         RecallRoute(workItem: item, showsResume: true)
     }
 
+    /// Today with the session starting at `startUs` selected (`session=` in
+    /// a link; the Ask panel's "Resume: …", SPEC 2.16).
+    public static func session(startUs: Int64) -> RecallRoute {
+        RecallRoute(place: .today, day: date(us: startUs), timeRange: startUs...startUs)
+    }
+
     /// "Show in History" for a session: History on the session's own time,
     /// with `eventId` (its newest moment) selected (RULINGS W8).
     public static func history(
         of timeRange: ClosedRange<Int64>,
         selecting eventId: Int64? = nil
     ) -> RecallRoute {
-        RecallRoute(place: .ask, clearsField: true,
+        RecallRoute(place: .history, clearsField: true,
                     focusEventId: eventId.flatMap { UInt64(exactly: $0) },
                     day: Self.date(us: timeRange.lowerBound), timeRange: timeRange)
     }
 
-    /// A session on Overview: its day, with the session overlapping
-    /// `timeRange` selected (a session row on You).
+    /// A session on Today: its day, with the session overlapping
+    /// `timeRange` selected (a session row on About You).
     public static func overview(showing timeRange: ClosedRange<Int64>) -> RecallRoute {
-        RecallRoute(place: .overview, day: Self.date(us: timeRange.lowerBound), timeRange: timeRange)
+        RecallRoute(place: .today, day: Self.date(us: timeRange.lowerBound), timeRange: timeRange)
     }
 
     private static func date(us: Int64) -> Date {
@@ -306,11 +431,26 @@ public struct RecallLaunchRequest: Equatable, Sendable {
     /// as the tab `resume:<id>` (`resumeTabPrefix`), so it travels the way
     /// every other request does, at launch and to a window that is open.
     public let resumeItem: String?
+    /// A Working On item to show (`work` with `item=<id>`, SPEC 2.16), as
+    /// the tab `work:<id>`.
+    public let workItem: String?
+    /// Today with the session starting then selected (`session=<start_us>`),
+    /// as the tab `session:<start_us>`.
+    public let sessionStartUs: Int64?
+    /// Forget Recent's sheet with a choice (`forget=10m|1h|today`), as the
+    /// tab `forget:<choice>`. It still needs the person's click.
+    public let forgetRecent: ForgetRecentChoice?
 
     /// How the app names Resume for an item where a tab goes:
     /// `resume:<id>` (`HippocampusURLRoute.resumeTab` in the app; the two
     /// apps share no code, so tests on both sides pin this form).
     public static let resumeTabPrefix = "resume:"
+    /// A Working On item's page: `work:<id>`.
+    public static let workTabPrefix = "work:"
+    /// A session on Today: `session:<start_us>`.
+    public static let sessionTabPrefix = "session:"
+    /// Forget Recent's sheet: `forget:10m`, `forget:1h`, `forget:today`.
+    public static let forgetTabPrefix = "forget:"
     /// The longest id a Working On item can have.
     public static let maxWorkItemIdLength = 64
 
@@ -324,24 +464,42 @@ public struct RecallLaunchRequest: Equatable, Sendable {
         return tab ?? (openPopup ? .search : RecallTab.defaultTab)
     }
 
-    public init(tab: RecallTab?, focusEventId: UInt64?, openPopup: Bool, resumeItem: String? = nil) {
+    public init(
+        tab: RecallTab?, focusEventId: UInt64?, openPopup: Bool, resumeItem: String? = nil,
+        workItem: String? = nil, sessionStartUs: Int64? = nil, forgetRecent: ForgetRecentChoice? = nil
+    ) {
         self.tab = tab
         self.focusEventId = focusEventId.flatMap { $0 == 0 ? nil : $0 }
         self.openPopup = openPopup
         self.resumeItem = resumeItem.flatMap { Self.isWorkItemId($0) ? $0 : nil }
+        self.workItem = workItem.flatMap { Self.isWorkItemId($0) ? $0 : nil }
+        self.sessionStartUs = sessionStartUs.flatMap { $0 > 0 ? $0 : nil }
+        self.forgetRecent = forgetRecent
+    }
+
+    /// A request named by the app's tab: a plain name, or one of the
+    /// prefixed forms the app writes for links that carry more.
+    private init(rawTab: String?, focusEventId: UInt64?, openPopup: Bool) {
+        let named = Self.prefixed(rawTab)
+        self.init(
+            tab: rawTab.flatMap(RecallTab.from),
+            focusEventId: focusEventId,
+            openPopup: openPopup,
+            resumeItem: named.resume,
+            workItem: named.work,
+            sessionStartUs: named.session,
+            forgetRecent: named.forget
+        )
     }
 
     public init(environment: [String: String]) {
-        let rawTab = environment[RecallTab.initialTabEnvVar]
-        let tab = rawTab.flatMap(RecallTab.from)
         let focus = environment[Self.focusEventEnvVar]
             .flatMap(UInt64.init)
             .flatMap { $0 == 0 ? nil : $0 }
         self.init(
-            tab: tab,
+            rawTab: environment[RecallTab.initialTabEnvVar],
             focusEventId: focus,
-            openPopup: environment[Self.openPopupEnvVar] == "1",
-            resumeItem: Self.resumeItem(tab: rawTab)
+            openPopup: environment[Self.openPopupEnvVar] == "1"
         )
     }
 
@@ -354,25 +512,29 @@ public struct RecallLaunchRequest: Equatable, Sendable {
         }
         guard url.host == "recall" else { return nil }
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-        let rawTab = items.first(where: { $0.name == "tab" })?.value
+        func value(_ name: String) -> String? { items.first(where: { $0.name == name })?.value }
+        let rawTab = value("tab")
         let tab = rawTab.flatMap(RecallTab.from)
-        let focus = items.first(where: { $0.name == "focus" })?.value
+        let focus = value("focus")
             .flatMap(UInt64.init)
             .flatMap { $0 == 0 ? nil : $0 }
+        let named = Self.prefixed(rawTab)
+        // A link names the rest in its own query: `item=` with `tab=work`,
+        // `session=` and `forget=` (SPEC 2.16).
         self.init(
             tab: tab,
             focusEventId: focus,
             openPopup: items.contains { $0.name == "popup" && $0.value == "1" },
-            resumeItem: Self.resumeItem(tab: rawTab)
+            resumeItem: named.resume,
+            workItem: named.work ?? (tab == .work ? value("item") : nil),
+            sessionStartUs: named.session ?? value("session").flatMap(Int64.init),
+            forgetRecent: named.forget ?? value("forget").flatMap(ForgetRecentChoice.init(rawValue:))
         )
     }
 
     public init?(userInfo: [AnyHashable: Any]?) {
         guard let userInfo else { return nil }
         let rawTab = userInfo["tab"] as? String
-        let tab = rawTab.flatMap {
-            RecallTab.from(deepLinkValue: $0)
-        }
         let focusNumber = userInfo["focus_event_id"] as? NSNumber
         let numericFocus = focusNumber.map(\.uint64Value)
         let focusString = userInfo["focus_event_id"] as? String
@@ -381,7 +543,7 @@ public struct RecallLaunchRequest: Equatable, Sendable {
         let focus = parsedFocus.flatMap { $0 == 0 ? nil : $0 }
         let openPopup = (userInfo["open_popup"] as? Bool) == true
             || (userInfo["open_popup"] as? NSNumber)?.boolValue == true
-        self.init(tab: tab, focusEventId: focus, openPopup: openPopup, resumeItem: Self.resumeItem(tab: rawTab))
+        self.init(rawTab: rawTab, focusEventId: focus, openPopup: openPopup)
     }
 
     /// Whether `id` has the shape of a Working On item's id: 1 to 64 ASCII
@@ -396,12 +558,24 @@ public struct RecallLaunchRequest: Equatable, Sendable {
             }
     }
 
+    /// What a prefixed tab names: `resume:<id>`, `work:<id>`,
+    /// `session:<start_us>` or `forget:<choice>`. Anything else names none.
+    static func prefixed(_ tab: String?) -> (resume: String?, work: String?, session: Int64?,
+                                             forget: ForgetRecentChoice?) {
+        guard let tab = tab?.trimmingCharacters(in: .whitespacesAndNewlines) else { return (nil, nil, nil, nil) }
+        func rest(_ prefix: String) -> String? {
+            tab.hasPrefix(prefix) ? String(tab.dropFirst(prefix.count)) : nil
+        }
+        let resume = rest(resumeTabPrefix).flatMap { isWorkItemId($0) ? $0 : nil }
+        let work = rest(workTabPrefix).flatMap { isWorkItemId($0) ? $0 : nil }
+        let session = rest(sessionTabPrefix).flatMap { $0.count <= 19 ? Int64($0) : nil }.flatMap { $0 > 0 ? $0 : nil }
+        let forget = rest(forgetTabPrefix).flatMap(ForgetRecentChoice.init(rawValue:))
+        return (resume, work, session, forget)
+    }
+
     /// The item in the app's `resume:<id>` tab; nil for any other tab.
     static func resumeItem(tab: String?) -> String? {
-        guard let tab = tab?.trimmingCharacters(in: .whitespacesAndNewlines), tab.hasPrefix(resumeTabPrefix)
-        else { return nil }
-        let item = String(tab.dropFirst(resumeTabPrefix.count))
-        return isWorkItemId(item) ? item : nil
+        prefixed(tab).resume
     }
 
     /// The item in exactly `hippocampus://resume?item=<id>`: one `item`, an

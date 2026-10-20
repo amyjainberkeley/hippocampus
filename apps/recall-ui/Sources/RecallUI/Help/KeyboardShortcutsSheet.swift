@@ -25,6 +25,10 @@ import SwiftUI
 
 /// Standalone sheet content. Presented via
 /// `RootView`'s `.sheet(isPresented: $registry.isHelpVisible)` binding.
+///
+/// Every key the window knows (`WindowKeys`, SPEC 2.10 with SPEC-DELTA 1:
+/// ⌘1 Today to ⌘9 AI Tools), under the ⌘K groups' headings: Go To,
+/// Moments, Actions and Help.
 struct KeyboardShortcutsSheet: View {
     @ObservedObject var registry: ActionPanelRegistry
 
@@ -34,8 +38,16 @@ struct KeyboardShortcutsSheet: View {
             Divider().background(MCI.Color.border)
             ScrollView {
                 VStack(alignment: .leading, spacing: MCI.Spacing.l) {
-                    ForEach(groupedCommands, id: \.category) { group in
-                        section(category: group.category, commands: group.commands)
+                    ForEach(WindowKeys.grouped, id: \.group) { section in
+                        VStack(alignment: .leading, spacing: MCI.Spacing.s) {
+                            Text(section.group.rawValue)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(MCI.Color.foreground)
+                                .accessibilityAddTraits(.isHeader)
+                            ForEach(section.keys) { key in
+                                row(key)
+                            }
+                        }
                     }
                 }
                 .padding(MCI.Spacing.l)
@@ -43,7 +55,7 @@ struct KeyboardShortcutsSheet: View {
             Divider().background(MCI.Color.border)
             footer
         }
-        .frame(width: 560, height: 520)
+        .frame(width: 620, height: 560)
         .background(MCI.Color.surface)
         .onKeyPress(.escape, phases: .down) { _ in
             registry.hideHelp()
@@ -52,76 +64,40 @@ struct KeyboardShortcutsSheet: View {
         .accessibilityLabel(UserFacingCopy.shortcutsSheetLabel)
     }
 
-    // MARK: - Sections
-
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: MCI.Spacing.xs) {
-                Text(UserFacingCopy.commandShortcuts)
-                    .mciFont(.title2)
-                    .foregroundStyle(MCI.Color.foreground)
-            }
+            Text(UserFacingCopy.commandShortcuts)
+                .mciFont(.title2)
+                .foregroundStyle(MCI.Color.foreground)
             Spacer()
-            Button("Close") { registry.hideHelp() }
+            Button(UserFacingCopy.closeAction) { registry.hideHelp() }
                 .keyboardShortcut("w", modifiers: .command)
-                .buttonStyle(.plain)
-                .foregroundStyle(MCI.Color.accent)
-                .mciFont(.bodyStrong)
         }
         .padding(.horizontal, MCI.Spacing.l)
         .padding(.vertical, MCI.Spacing.m)
     }
 
-    private func section(
-        category: ActionPanelCommand.Category,
-        commands: [ActionPanelCommand]
-    ) -> some View {
-        VStack(alignment: .leading, spacing: MCI.Spacing.s) {
-            Text(category.rawValue.uppercased())
-                .mciFont(.footnote)
-                .foregroundStyle(MCI.Color.foregroundSecondary)
-                .tracking(0.5)
-            VStack(spacing: 0) {
-                ForEach(Array(commands.enumerated()), id: \.element.id) { idx, cmd in
-                    row(cmd: cmd)
-                    if idx < commands.count - 1 {
-                        Divider().background(MCI.Color.border.opacity(0.5))
+    private func row(_ key: WindowKey) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+            HStack(spacing: 6) {
+                ForEach(Array(key.keys.enumerated()), id: \.offset) { index, chip in
+                    if key.isRange, index > 0 {
+                        Text(verbatim: "\u{2013}")
+                            .font(.system(size: 12))
+                            .foregroundStyle(MCI.Color.foregroundMuted)
                     }
+                    KeyChip(text: chip)
                 }
             }
-            .background(MCI.Color.surfaceElevated)
-            .clipShape(RoundedRectangle(cornerRadius: MCI.Radius.m))
-            .overlay(
-                RoundedRectangle(cornerRadius: MCI.Radius.m)
-                    .strokeBorder(MCI.Color.border, lineWidth: 1)
-            )
+            .frame(width: 150, alignment: .leading)
+            Text(verbatim: key.does)
+                .font(.system(size: 13))
+                .foregroundStyle(MCI.Color.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
         }
-    }
-
-    private func row(cmd: ActionPanelCommand) -> some View {
-        HStack(spacing: MCI.Spacing.m) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(cmd.title)
-                    .mciFont(.bodyStrong)
-                    .foregroundStyle(MCI.Color.foreground)
-                Text(cmd.description.isEmpty ? "—" : cmd.description)
-                    .mciFont(.caption)
-                    .foregroundStyle(MCI.Color.foregroundSecondary)
-                    .lineLimit(1)
-            }
-            Spacer()
-            Text(cmd.shortcut.isEmpty ? "—" : cmd.shortcut)
-                .font(MCI.Font.mono)
-                .foregroundStyle(MCI.Color.foregroundMuted)
-                .padding(.horizontal, MCI.Spacing.s)
-                .padding(.vertical, 2)
-                .background(MCI.Color.surface)
-                .clipShape(RoundedRectangle(cornerRadius: MCI.Radius.xs))
-        }
-        .padding(.horizontal, MCI.Spacing.m)
-        .padding(.vertical, MCI.Spacing.s)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(cmd.title), \(cmd.description), shortcut \(cmd.shortcut.isEmpty ? "none" : cmd.shortcut)")
+        .accessibilityLabel("\(key.does), \(key.keys.joined(separator: key.isRange ? " to " : " and "))")
     }
 
     private var footer: some View {
@@ -134,13 +110,25 @@ struct KeyboardShortcutsSheet: View {
         .padding(.horizontal, MCI.Spacing.l)
         .padding(.vertical, MCI.Spacing.m)
     }
+}
 
-    // MARK: - Grouping
+/// A key, drawn as a small chip.
+private struct KeyChip: View {
+    let text: String
 
-    /// Grouped-by-category snapshot of the live registry. Delegates to
-    /// `ActionPanelRegistry.groupedByCategory()` (the Single Source of
-    /// Truth) so headless tests can pin ordering without importing SwiftUI.
-    private var groupedCommands: [(category: ActionPanelCommand.Category, commands: [ActionPanelCommand])] {
-        registry.groupedByCategory()
+    var body: some View {
+        Text(verbatim: text)
+            .font(.system(size: 12))
+            .foregroundStyle(MCI.Color.foreground)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(MCI.Color.hover)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(MCI.Color.border, lineWidth: 0.5)
+            )
     }
 }

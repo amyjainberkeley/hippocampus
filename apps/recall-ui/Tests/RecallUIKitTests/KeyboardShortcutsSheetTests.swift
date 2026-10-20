@@ -6,8 +6,8 @@
 // — which is testable from `RecallUIKit` directly. We assert here that:
 //
 //   1. Every registered command surfaces in the grouped output.
-//   2. Groups appear in canonical order (Search → Hit → App → Debug),
-//      empty groups omitted.
+//   2. Groups appear in canonical order (Go To → Moments → Actions →
+//      Help, SPEC 2.9), empty groups omitted.
 //   3. Adding a new command to the registry at runtime is reflected in
 //      the next `groupedByCategory()` call — i.e., no hardcoded list.
 //   4. `showHelp()` / `hideHelp()` flip the observable sheet flag.
@@ -32,20 +32,53 @@ final class KeyboardShortcutsSheetTests: XCTestCase {
     func testGroupsInCanonicalOrder() {
         let r = ActionPanelRegistry()
         // Register in reverse order — canonical order should still hold.
-        r.register(.init(id: "d.a", title: "Debug", shortcut: "", category: .debug) {})
-        r.register(.init(id: "a.a", title: "App", shortcut: "", category: .app) {})
-        r.register(.init(id: "h.a", title: "Hit", shortcut: "", category: .hit) {})
-        r.register(.init(id: "s.a", title: "Search", shortcut: "", category: .search) {})
+        r.register(.init(id: "d.a", title: "Help", shortcut: "", category: .help) {})
+        r.register(.init(id: "a.a", title: "Actions", shortcut: "", category: .actions) {})
+        r.register(.init(id: "h.a", title: "Moments", shortcut: "", category: .moments) {})
+        r.register(.init(id: "s.a", title: "Go To", shortcut: "", category: .goTo) {})
 
         let cats = r.groupedByCategory().map(\.category)
-        XCTAssertEqual(cats, [.search, .hit, .app, .debug])
+        XCTAssertEqual(cats, [.goTo, .moments, .actions, .help])
+        XCTAssertEqual(cats.map(\.rawValue), ["Go To", "Moments", "Actions", "Help"])
+    }
+
+    /// The groups' old names ("Hit", "Debug") go; a command registered by
+    /// one lands in the group that holds it now.
+    func testOldGroupNamesLandInTheNewGroups() {
+        XCTAssertEqual(ActionPanelCommand.Category.search, .moments)
+        XCTAssertEqual(ActionPanelCommand.Category.hit, .actions)
+        XCTAssertEqual(ActionPanelCommand.Category.app, .actions)
+        XCTAssertEqual(ActionPanelCommand.Category.debug, .help)
+        for name in ActionPanelCommand.Category.allCases.map(\.rawValue) {
+            XCTAssertFalse(["Hit", "Debug", "Search", "App"].contains(name), name)
+        }
+    }
+
+    /// The sheet lists every key, under the ⌘K groups (SPEC 2.10 with
+    /// SPEC-DELTA 1): ⌘1 Today to ⌘9 AI Tools, and nothing for Privacy.
+    func testTheSheetListsTheNineKeysAndTheGroups() {
+        XCTAssertEqual(WindowKeys.grouped.map(\.group), [.goTo, .moments, .actions, .help])
+        let places = WindowKeys.all.first { $0.keys == ["\u{2318}1", "\u{2318}9"] }
+        XCTAssertEqual(places?.isRange, true)
+        XCTAssertEqual(places?.does,
+                       "Today, History, Web Pages, Documents, Code, Conversations, Looked Up, About You, AI Tools")
+        XCTAssertFalse(WindowKeys.all.contains { $0.does.contains("Privacy") })
+        for key in ["\u{2318}[", "\u{2318}F", "\u{2318}\u{21A9}", "\u{2325}\u{21A9}", "\u{2318}\u{232B}",
+                    "\u{21E7}\u{2318}\u{232B}", "\u{2318}/", "\u{2303}\u{2318}S"] {
+            XCTAssertTrue(WindowKeys.all.contains { $0.keys.contains(key) }, key)
+        }
+        for key in WindowKeys.all {
+            XCTAssertNil(CopyStyleValidator.containsMarketingSpeak(key.does), key.does)
+            XCTAssertNil(CopyStyleValidator.containsJargon(key.does), key.does)
+            XCTAssertFalse(CopyStyleValidator.containsExclamation(key.does), key.does)
+        }
     }
 
     func testEmptyCategoriesOmitted() {
         let r = ActionPanelRegistry()
         r.register(.init(id: "a.only", title: "Only App", shortcut: "", category: .app) {})
         let cats = r.groupedByCategory().map(\.category)
-        XCTAssertEqual(cats, [.app])
+        XCTAssertEqual(cats, [.actions])
     }
 
     func testCommandsInsideGroupSortedByTitle() {

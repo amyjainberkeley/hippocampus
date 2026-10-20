@@ -25,7 +25,7 @@ final class UserModelViewModelTests: XCTestCase {
         let page = try UnderstandingFixture.modelPage()
         let shared = UserModelGrouping.groups(page.shared)
         XCTAssertEqual(shared.map(\.group), [.workingOn, .howYouWork, .skills])
-        XCTAssertEqual(shared.map(\.title), ["Working on", "How you work", "Skills"])
+        XCTAssertEqual(shared.map(\.title), ["Projects and goals", "How you work", "Skills"])
         XCTAssertEqual(shared[0].rows.map(\.id), [41, 37, 45])
         XCTAssertEqual(shared[2].rows.map(\.id), [22, 18])
         let keptBack = UserModelGrouping.groups(page.keptBack)
