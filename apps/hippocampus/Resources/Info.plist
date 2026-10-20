@@ -40,7 +40,7 @@
 	<key>NSAccessibilityUsageDescription</key>
 	<string>Hippocampus uses Accessibility to detect password fields and secure input, so it can automatically stop capturing when you type sensitive information.</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Hippocampus reads your active browser tab's URL and checks whether the window is normal or private so it can exclude private windows from capture and save allowed browsing context to your local memory. When you click Resume, it checks which tabs are already open so it doesn't open them twice. Your memory stays on this Mac unless you choose to share it.</string>
+	<string>Hippocampus checks whether a browser window is normal or private, to exclude private windows from your memory. When you click Resume, it checks which tabs are already open so it doesn't open them twice: it compares their URLs locally and keeps none. In setup, it opens Safari's settings so you can turn on the extension. It doesn't save page URLs this way. Your memory stays on this Mac unless you choose to share it.</string>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>Hippocampus reads the title and artist of whatever is currently playing on this Mac so each captured moment is tagged with "what was I listening to." Only the currently-playing title and artist are read; no library, no playlists, no purchase history.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
