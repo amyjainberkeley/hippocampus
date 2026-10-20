@@ -73,10 +73,12 @@ public enum Formatters {
     /// A search's passage (`isPassage`) keeps its leading lines but a first
     /// one the title starts with: the words it was found by may be in them.
     ///
-    /// A line that ends a sentence, or one the next line goes on from (it
-    /// starts in lower case), is followed by a space; any other line break
-    /// reads as " · ", so a heading or a name never runs into what follows it
-    /// ("Maya Chen 10:42 AM · Pushed the new onboarding flow").
+    /// A line that ends a sentence, one the next line goes on from (it
+    /// starts in lower case), or one a list's item follows ("• Monthly
+    /// revenue …", "2. Ship it") is followed by a space; any other line
+    /// break reads as " · ", so a heading or a name never runs into what
+    /// follows it ("Maya Chen 10:42 AM · Pushed the new onboarding flow"),
+    /// and a list's own mark never gets a second one.
     public static func rowPreview(_ text: String, title: String?, maxLen: Int = 220,
                                   isPassage: Bool = false) -> String {
         let lines = isPassage ? passageLines(text, title: title) : previewLines(text, title: title)
@@ -95,10 +97,23 @@ public enum Formatters {
             // message before into them: "Sam Lee 2:02 PM · can you look at
             // the tax test? · Priya Shah 2:05 PM · on it".
             let speaker = endsWithClockTime(previous) || endsWithClockTime(line)
-            joined += (!speaker && (ended || goesOn) ? " " : " \u{00B7} ") + line
+            let joins = !speaker && (ended || goesOn || startsAListItem(line))
+            joined += (joins ? " " : " \u{00B7} ") + line
             previous = line
         }
         return snippet(joined, maxLen: maxLen)
+    }
+
+    /// A line a list's mark starts: "•", "◦", "▪", "‣", "-", "–" or "*" and
+    /// a space, or a number and "." or ")" and a space ("2. Ship it").
+    static func startsAListItem(_ line: String) -> Bool {
+        if let mark = line.first, "\u{2022}\u{25E6}\u{25AA}\u{2023}-\u{2013}*".contains(mark) {
+            return line.dropFirst().first == " "
+        }
+        let digits = line.prefix(while: \.isASCII).prefix(while: \.isNumber)
+        guard (1...3).contains(digits.count) else { return false }
+        let rest = line.dropFirst(digits.count)
+        return rest.hasPrefix(". ") || rest.hasPrefix(") ")
     }
 
     /// Whether a line ends in a clock time, as a chat's name over a message

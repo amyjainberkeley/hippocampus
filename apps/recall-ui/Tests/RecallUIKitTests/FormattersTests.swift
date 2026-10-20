@@ -398,6 +398,31 @@ final class FormattersTests: XCTestCase {
         XCTAssertFalse(gb.contains("UTC"), gb)
     }
 
+    // MARK: A row's preview (the demo week's Q4 update and Looked Up)
+
+    /// A bulleted list's own "•" is never given a "·" in front of it (the
+    /// verifier's probe: the demo's Q4 investor update).
+    func testBulletedTextHasNoDoubleSeparator() {
+        let text = "Pebblewick\nOctober 2026\nHighlights\n\u{2022} Monthly revenue reached $84,200, up 11% from last month."
+            + "\n\u{2022} 412 studios pay for Pebblewick."
+        let preview = Formatters.rowPreview(text, title: "Q4 investor update")
+        XCTAssertFalse(preview.contains("\u{00B7} \u{2022}"), "preview was: \(preview)")
+        XCTAssertTrue(preview.contains("Highlights \u{2022} Monthly revenue reached $84,200"), preview)
+        XCTAssertTrue(preview.contains("last month. \u{2022} 412 studios"), preview)
+    }
+
+    /// Any list's mark, or a number that numbers a list, joins with a plain
+    /// space; a line that only starts with a number, or a word, does not.
+    func testAListsItemsJoinWithASpace() {
+        XCTAssertEqual(Formatters.rowPreview("Next steps\n1. Ship the pricing page\n2) Tell the team", title: nil),
+                       "Next steps 1. Ship the pricing page 2) Tell the team")
+        XCTAssertEqual(Formatters.rowPreview("Steps\n- Design\n* Copy\n\u{2013} Launch", title: nil),
+                       "Steps - Design * Copy \u{2013} Launch")
+        XCTAssertEqual(Formatters.rowPreview("Highlights\n412 studios pay for Pebblewick", title: nil),
+                       "Highlights \u{00B7} 412 studios pay for Pebblewick")
+        XCTAssertEqual(Formatters.rowPreview("Plans\n-Solo", title: nil), "Plans \u{00B7} -Solo")
+    }
+
     func testAppsAPersonKnowsByNameAreNamedThatWay() {
         XCTAssertEqual(Formatters.appDisplayName("com.apple.MobileSMS"), "Messages")
         XCTAssertEqual(Formatters.appDisplayName("com.googlecode.iterm2"), "iTerm")
