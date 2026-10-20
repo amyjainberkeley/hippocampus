@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use super::story::{FOUNDER, PEOPLE, PROJECT_FOLDER, PROJECT_PATH};
+use super::story::{FOUNDER, OLDEST_DAY_BACK, PEOPLE, PROJECT_FOLDER, PROJECT_PATH};
 use super::*;
 
 /// Names from the maintainers' own lives that must never appear in the
@@ -132,7 +132,7 @@ fn the_week_moves_with_the_clock() {
 }
 
 #[test]
-fn every_moment_is_in_the_last_week_and_none_after_now() {
+fn every_moment_is_in_its_days_and_none_after_now() {
     for now in [
         MONDAY_AFTERNOON,
         at_local(MONDAY_AFTERNOON, 8, 0),
@@ -144,10 +144,17 @@ fn every_moment_is_in_the_last_week_and_none_after_now() {
         let week = world(now, TZ);
         let moments = week.moments();
         assert!(moments.len() > 150, "a busy week: {}", moments.len());
-        let first = day_start(now, TZ, 6);
-        for (ts, _, _) in &moments {
-            assert!(*ts >= first, "inside the week");
+        let first = day_start(now, TZ, OLDEST_DAY_BACK);
+        let week = day_start(now, TZ, 6);
+        for (ts, win, _) in &moments {
+            assert!(*ts >= first, "inside the days the memory holds");
             assert!(*ts + 30_000_000 <= now, "never after now");
+            if *ts < week {
+                assert_eq!(
+                    win.title, "Waitlist launch plan",
+                    "before the week, only last week's project"
+                );
+            }
         }
         let times: Vec<u64> = moments.iter().map(|(ts, _, _)| *ts).collect();
         let mut sorted = times.clone();
@@ -452,6 +459,8 @@ fn item_of(win: &Win) -> Option<&'static str> {
         Some("October changelog")
     } else if title == "Hiring plan" {
         Some("Hiring plan")
+    } else if title == "Waitlist launch plan" {
+        Some("Waitlist launch plan")
     } else {
         None
     }
@@ -467,22 +476,27 @@ fn working_on_ranks_as_the_story_says_on_every_day_of_the_week() {
 
 fn ranks_as_the_story_says(now: u64) {
     let week = world(now, TZ);
-    let mut minutes: BTreeMap<&str, u64> = BTreeMap::new();
+    // Minutes in front this week (the last seven days of use, each of the
+    // week's days) and in all, as Working On counts them.
+    let mut this_week: BTreeMap<&str, u64> = BTreeMap::new();
+    let mut in_all: BTreeMap<&str, u64> = BTreeMap::new();
     for day in &week.days {
         for session in &day.sessions {
             let mut at = session.start_us;
             for hold in &session.holds {
                 let held = hold.minutes.min(now.saturating_sub(at) / MIN);
                 if let Some(item) = item_of(&hold.win) {
-                    *minutes.entry(item).or_default() += held;
+                    *in_all.entry(item).or_default() += held;
+                    *this_week.entry(item).or_default() += if day.back <= 6 { held } else { 0 };
                 }
                 at += hold.minutes * MIN;
             }
         }
     }
-    let mut ranked: Vec<(&str, u64)> = minutes.into_iter().collect();
+    let mut ranked: Vec<(&str, u64)> = this_week.into_iter().collect();
     ranked.sort_by_key(|(_, minutes)| std::cmp::Reverse(*minutes));
     let names: Vec<&str> = ranked.iter().map(|(name, _)| *name).collect();
+    let when = Local::of(now, TZ).long_date();
     assert_eq!(
         names,
         [
@@ -491,15 +505,20 @@ fn ranks_as_the_story_says(now: u64) {
             "2027 budget",
             "Pricing page v2",
             "October changelog",
-            "Hiring plan"
+            "Hiring plan",
+            "Waitlist launch plan"
         ],
-        "{} {ranked:?}",
-        Local::of(now, TZ).long_date()
+        "{when} {ranked:?}"
     );
     assert!(
         ranked[..5].iter().all(|(_, m)| *m >= 30),
         "the five in the sidebar each have 30 minutes or more: {ranked:?}"
     );
+    // The hiring plan is too short to be an item; last week's waitlist plan
+    // is one, with nothing this week, so Show All lists it under Earlier.
+    assert!(in_all["Hiring plan"] < 30, "{when} {in_all:?}");
+    assert!(in_all["Waitlist launch plan"] >= 30, "{when} {in_all:?}");
+    assert_eq!(ranked[6], ("Waitlist launch plan", 0), "{when}");
 }
 
 #[test]
@@ -707,4 +726,53 @@ fn the_project_folder_is_made_only_inside_demo_memorys_own_folder() {
     std::fs::write(demo.join("pebblewick-app"), b"kept").unwrap();
     assert!(make_project_folder(&demo, third.path()).is_err());
     assert_eq!(std::fs::read(demo.join("pebblewick-app")).unwrap(), b"kept");
+}
+
+#[test]
+fn the_code_moments_read_the_part_of_the_file_on_screen() {
+    // History's rows lead with what each moment read: billing.ts reads
+    // differently as the day moves through the file.
+    let week = world(at_local(MONDAY_AFTERNOON, 21, 30), TZ);
+    let mut first_lines: HashMap<String, String> = HashMap::new();
+    for (_, win, _) in week.moments() {
+        if win.app != "com.microsoft.VSCode" {
+            continue;
+        }
+        let screen = win.screen.as_ref().unwrap();
+        assert!(
+            win.main.lines().count() <= 36,
+            "{} fits the window",
+            screen.id
+        );
+        let first = screen.meta["first_line"].as_u64().unwrap();
+        let cursor = screen.meta["cursor_line"].as_u64().unwrap();
+        let shown = u64::try_from(win.main.lines().count()).unwrap();
+        assert!(
+            first <= cursor && cursor < first + shown,
+            "{}: the cursor is on screen",
+            screen.id
+        );
+        assert!(
+            win.rest.contains(&format!("Ln {cursor},")),
+            "{}: the status bar says the cursor's line",
+            screen.id
+        );
+        if win.title.starts_with("billing.ts ") {
+            first_lines.insert(
+                screen.id.clone(),
+                win.main.lines().next().unwrap().to_owned(),
+            );
+        }
+    }
+    let distinct: HashSet<&String> = first_lines.values().collect();
+    assert_eq!(first_lines.len(), 3, "{first_lines:?}");
+    assert_eq!(
+        distinct.len(),
+        3,
+        "each place in billing.ts reads differently"
+    );
+    assert_eq!(
+        first_lines["code-billing-ts-credit"],
+        "// The credit for the days left this month, in cents."
+    );
 }
