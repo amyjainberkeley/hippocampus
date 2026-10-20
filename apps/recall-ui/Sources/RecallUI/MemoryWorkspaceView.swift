@@ -81,6 +81,9 @@ struct MemoryWorkspaceView: View {
     var contextExporter: @Sendable (String) async throws -> String = { try await ContextHandoffExporter.export(focus: $0) }
     var calendar: Calendar = .current
     var now: @Sendable () -> Date = { Date() }
+    /// The app opened the window on Demo Memory: the small Demo tag shows by
+    /// the title (`DemoTag`, SPEC-DELTA 6). Never set for the person's own.
+    var isDemoMemory = false
 
     @StateObject private var ask: AskViewModel
     @StateObject private var overview: OverviewViewModel
@@ -91,6 +94,8 @@ struct MemoryWorkspaceView: View {
     @State private var youPath: [RecallYouPage] = []
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var status = SidebarStatus(receipt: nil)
+    /// The Working On item whose Resume sheet a route asked for.
+    @State private var resumeSheet: ResumeSheetItem?
     @Environment(\.scenePhase) private var scenePhase
 
     init(
@@ -109,7 +114,8 @@ struct MemoryWorkspaceView: View {
         ask: AskViewModel? = nil,
         overview: OverviewViewModel? = nil,
         you: UserModelViewModel? = nil,
-        status: SidebarStatus? = nil
+        status: SidebarStatus? = nil,
+        isDemoMemory: Bool = false
     ) {
         self.reader = reader
         self.understanding = understanding
@@ -121,6 +127,7 @@ struct MemoryWorkspaceView: View {
         self.contextExporter = contextExporter
         self.calendar = calendar
         self.now = now
+        self.isDemoMemory = isDemoMemory
         _ask = StateObject(wrappedValue: ask ?? Self.makeAsk(
             reader: reader, understanding: understanding, calendar: calendar, now: now))
         _overview = StateObject(wrappedValue: overview ?? OverviewViewModel(
@@ -165,6 +172,10 @@ struct MemoryWorkspaceView: View {
         }
         .background(Color.brandBgPrimary)
         .navigationTitle(UserFacingCopy.windowTitle)
+        .modifier(DemoTagSlot(isDemoMemory: isDemoMemory))
+        .sheet(item: $resumeSheet) { item in
+            ResumeSheet(itemId: item.id)
+        }
         .task(id: routeRequest?.sequence) {
             guard let routeRequest else { return }
             await apply(routeRequest.route)
@@ -212,6 +223,11 @@ struct MemoryWorkspaceView: View {
             if route.place == .you {
                 youPath = isSyntheticPreview ? [] : route.youPath
             }
+        }
+        // Resume's sheet lists what it would open; nothing opens until the
+        // person clicks in it (SPEC-DELTA 3).
+        if route.showsResume, let item = route.workItem {
+            resumeSheet = ResumeSheetItem(id: item)
         }
     }
 
@@ -293,6 +309,9 @@ struct MemoryWorkspaceView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.brandBgPrimary)
+        // The newest note from any place (`BottomNotes.show`): nothing at
+        // all until there is one.
+        .overlay(alignment: .bottom) { BottomNoteHost() }
         .navigationTitle(UserFacingCopy.windowTitle)
     }
 

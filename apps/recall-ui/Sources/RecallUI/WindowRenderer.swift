@@ -56,7 +56,14 @@ enum WindowRenderer {
         var value = false
     }
 
-    private struct Scene {
+    /// One picture. The window's own scenes are listed in `scenes()`; every
+    /// other package adds its own in its `Renders/*.swift` file
+    /// (`WindowRenderer.workScenes`, …), which `scenes()` appends, so no
+    /// package edits this file to add a picture. A sheet, a note or a
+    /// reading drawn alone is a `Scene.picture`; a note in a picture comes
+    /// from its own `BottomNotes()`, never `.shared`, so it can't reach the
+    /// next scene.
+    struct Scene {
         let name: String
         var place: MemoryWorkspaceSelection = .ask
         var dark = false
@@ -76,10 +83,33 @@ enum WindowRenderer {
         /// chrome, read and captioned as the FFI reads them, some with the
         /// screenshot their window kept.
         var review = false
+        /// The window on Demo Memory, with its Demo tag by the title.
+        var demoMemory = false
         var prepare: @MainActor (AskViewModel) async -> Void = { _ in }
+        /// Draws this view in place of the window, at `size`, `scale` and in
+        /// `dark`, under the same locale and time zone as every scene: a
+        /// sheet, a note, a reading or a page drawn on its own. It is made
+        /// from fixtures only, like everything here.
+        var view: (@MainActor () async -> AnyView)?
+
+        /// A picture of `view` alone, made from fixtures.
+        static func picture(
+            _ name: String, size: CGSize = CGSize(width: 1100, height: 720), dark: Bool = false,
+            view: @escaping @MainActor () async -> AnyView
+        ) -> Scene {
+            var scene = Scene(name: name, dark: dark, size: size)
+            scene.view = view
+            return scene
+        }
     }
 
+    /// Every scene: the window's own, then each package's, in a fixed order.
     private static func scenes() -> [Scene] {
+        ownScenes() + workScenes + readingScenes + sidePictureScenes + handoffScenes + resumeScenes
+            + calendarScenes + demoScenes + libraryScenes
+    }
+
+    private static func ownScenes() -> [Scene] {
         [
             Scene(name: "ask-history") { await $0.history.reload() },
             Scene(name: "ask-matches") { ask in
@@ -274,6 +304,16 @@ enum WindowRenderer {
     }
 
     private static func render(_ scene: Scene, to directory: URL) async {
+        if let make = scene.view {
+            let view = await make()
+                .environment(\.controlActiveState, .key)
+                .environment(\.locale, Locale(identifier: "en_US"))
+                .environment(\.colorScheme, scene.dark ? .dark : .light)
+                .environment(\.timeZone, PreviewUnderstandingReader.sampleCalendar.timeZone)
+                .frame(width: scene.size.width, height: scene.size.height)
+            await draw(view, scene: scene, served: { 0 }, to: directory)
+            return
+        }
         let base = NativePreviewReader(date: PreviewUnderstandingReader.sampleNow,
                                        now: PreviewUnderstandingReader.sampleNow,
                                        calendar: PreviewUnderstandingReader.sampleCalendar)
@@ -338,7 +378,8 @@ enum WindowRenderer {
             ask: model,
             overview: overview,
             you: you,
-            status: remembering
+            status: remembering,
+            isDemoMemory: scene.demoMemory
         )
         .environment(\.controlActiveState, .key)
         .environment(\.overviewThumbnails, thumbnails)
@@ -348,6 +389,17 @@ enum WindowRenderer {
         .environment(\.timeZone, calendar.timeZone)
         .frame(width: scene.size.width, height: scene.size.height)
 
+        await draw(view, scene: scene, served: {
+            thumbnails.count + (history?.screenshots.count ?? 0) + (review?.screenshots.count ?? 0)
+        }, to: directory)
+    }
+
+    /// Lays `view` out off screen and writes it as `<name>.png`. `served`
+    /// counts the screenshots handed out so far: the picture is taken once
+    /// they have stopped arriving.
+    private static func draw(
+        _ view: some View, scene: Scene, served: () -> Int, to directory: URL
+    ) async {
         let size = NSSize(width: scene.size.width, height: scene.size.height)
         let hosting = NSHostingView(rootView: view)
         hosting.frame = NSRect(origin: .zero, size: size)
@@ -366,9 +418,9 @@ enum WindowRenderer {
         while Date().timeIntervalSince(started) < 8 {
             hosting.layoutSubtreeIfNeeded()
             try? await Task.sleep(for: .milliseconds(50))
-            let served = thumbnails.count + (history?.screenshots.count ?? 0) + (review?.screenshots.count ?? 0)
-            if served != drawn {
-                drawn = served
+            let count = served()
+            if count != drawn {
+                drawn = count
                 stableSince = Date()
             } else if Date().timeIntervalSince(started) >= 1, Date().timeIntervalSince(stableSince) >= 0.5 {
                 break

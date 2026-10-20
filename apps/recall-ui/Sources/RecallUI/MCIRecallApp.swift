@@ -157,7 +157,8 @@ struct MCIRecallApp: App {
             RootView(
                 reader: MCIRecallApp.reader,
                 understanding: MCIRecallApp.understanding,
-                launchRequest: launchRequest
+                launchRequest: launchRequest,
+                isDemoMemory: DemoMemoryMode.isOn(environment: ProcessInfo.processInfo.environment)
             )
             .preferredColorScheme(.light)
             .frame(minWidth: 760, minHeight: 480)
@@ -276,6 +277,8 @@ struct WindowCommands: Commands {
 struct RootView: View {
     let reader: BrainReader
     let understanding: UnderstandingReader
+    /// The app opened this window on Demo Memory (SPEC-DELTA 6).
+    var isDemoMemory = false
     @State private var selection: MemoryWorkspaceSelection
     @State private var routeRequest: RecallRouteRequest?
     @State private var nextRouteSequence: UInt64 = 2
@@ -293,10 +296,12 @@ struct RootView: View {
     init(
         reader: BrainReader,
         understanding: UnderstandingReader,
-        launchRequest: RecallLaunchRequest = RecallLaunchRequest(tab: nil, focusEventId: nil, openPopup: false)
+        launchRequest: RecallLaunchRequest = RecallLaunchRequest(tab: nil, focusEventId: nil, openPopup: false),
+        isDemoMemory: Bool = false
     ) {
         self.reader = reader
         self.understanding = understanding
+        self.isDemoMemory = isDemoMemory
         let route = RecallRoute(launchRequest)
         self._selection = State(initialValue: MemoryWorkspaceSelection(place: route.place(keeping: .overview)))
         self._routeRequest = State(initialValue: RecallRouteRequest(route: route, sequence: 1))
@@ -406,7 +411,8 @@ struct RootView: View {
             understanding: understanding,
             selection: $selection,
             routeRequest: routeRequest,
-            fieldFocusRequest: fieldFocusRequest
+            fieldFocusRequest: fieldFocusRequest,
+            isDemoMemory: isDemoMemory
         )
         .background(Color.brandBgPrimary)
         .onOpenURL { url in

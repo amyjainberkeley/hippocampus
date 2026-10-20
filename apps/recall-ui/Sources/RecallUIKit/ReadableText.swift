@@ -115,9 +115,12 @@ public struct EventReading: Sendable, Equatable {
 
     /// Both parts come from the same bounded read as `EventText`.
     public static let maxUTF8Bytes = EventText.maxUTF8Bytes + 1024
-    /// The two parts escaped at worst, the other fields, and a caption (at
-    /// most 200 characters on one line, so at most 2 KiB as JSON).
-    static let maxJSONBytes = (EventText.maxUTF8Bytes + 1024) * 6 + 512 + 2048
+    /// The two parts escaped at worst; `main` again as the reading's
+    /// `blocks`, which hold only text of `main`, with 64 KiB for their kinds
+    /// (one block today; more kinds of block need more room); the other
+    /// fields; and a caption (at most 200 characters on one line, so at most
+    /// 2 KiB as JSON).
+    static let maxJSONBytes = (EventText.maxUTF8Bytes + 1024) * 6 * 2 + 64 * 1024 + 512 + 2048
 
     public let eventId: UInt64
     public let tsUs: UInt64

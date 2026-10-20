@@ -133,6 +133,12 @@ public struct RecallRoute: Equatable, Sendable {
     /// Open Ask from the menu bar rather than anything in the window: the
     /// window has no popup of its own (RULINGS W3).
     public var opensAskPanel: Bool
+    /// A Working On item to show, by its id: ids, never names, travel in
+    /// routes and links.
+    public var workItem: String?
+    /// Show Resume's sheet for `workItem` (SPEC-DELTA 3). The sheet only
+    /// lists what would open: nothing opens until the person clicks in it.
+    public var showsResume: Bool
 
     public init(
         place: RecallPlace? = nil,
@@ -142,7 +148,9 @@ public struct RecallRoute: Equatable, Sendable {
         focusEventId: UInt64? = nil,
         day: Date? = nil,
         timeRange: ClosedRange<Int64>? = nil,
-        opensAskPanel: Bool = false
+        opensAskPanel: Bool = false,
+        workItem: String? = nil,
+        showsResume: Bool = false
     ) {
         self.place = place
         self.youPath = youPath
@@ -152,6 +160,8 @@ public struct RecallRoute: Equatable, Sendable {
         self.day = day
         self.timeRange = timeRange
         self.opensAskPanel = opensAskPanel
+        self.workItem = workItem.flatMap { RecallLaunchRequest.isWorkItemId($0) ? $0 : nil }
+        self.showsResume = showsResume && self.workItem != nil
     }
 
     /// Ask, opened from the menu bar: where a request for the window's old
@@ -185,6 +195,8 @@ public struct RecallRoute: Equatable, Sendable {
     public init(_ request: RecallLaunchRequest) {
         if let eventId = request.focusEventId {
             self.init(place: .ask, clearsField: true, focusEventId: eventId)
+        } else if let item = request.resumeItem {
+            self = .resume(item: item)
         } else if let tab = request.tab {
             self.init(tab: tab)
         } else {
@@ -221,6 +233,13 @@ public struct RecallRoute: Equatable, Sendable {
     public static let findInAsk = RecallRoute(place: .ask, focusesField: true)
     /// "Names You Use", inside You.
     public static let names = RecallRoute(place: .you, youPath: [.names])
+
+    /// Resume for a Working On item (SPEC-DELTA 3): the item, with Resume's
+    /// sheet over it. From the item's Resume button, Today's card, Ask's ⌥↩
+    /// and a `hippocampus://resume?item=<id>` link.
+    public static func resume(item: String) -> RecallRoute {
+        RecallRoute(workItem: item, showsResume: true)
+    }
 
     /// "Show in History" for a session: History on the session's own time,
     /// with `eventId` (its newest moment) selected (RULINGS W8).
@@ -282,6 +301,18 @@ public struct RecallLaunchRequest: Equatable, Sendable {
     public let tab: RecallTab?
     public let focusEventId: UInt64?
     public let openPopup: Bool
+    /// A Working On item whose Resume sheet to show, by its id
+    /// (`hippocampus://resume?item=<id>`, SPEC-DELTA 3). The app passes it
+    /// as the tab `resume:<id>` (`resumeTabPrefix`), so it travels the way
+    /// every other request does, at launch and to a window that is open.
+    public let resumeItem: String?
+
+    /// How the app names Resume for an item where a tab goes:
+    /// `resume:<id>` (`HippocampusURLRoute.resumeTab` in the app; the two
+    /// apps share no code, so tests on both sides pin this form).
+    public static let resumeTabPrefix = "resume:"
+    /// The longest id a Working On item can have.
+    public static let maxWorkItemIdLength = 64
 
     /// Running workspaces change only for an explicit destination or focused event.
     public var navigationTab: RecallTab? {
@@ -293,41 +324,53 @@ public struct RecallLaunchRequest: Equatable, Sendable {
         return tab ?? (openPopup ? .search : RecallTab.defaultTab)
     }
 
-    public init(tab: RecallTab?, focusEventId: UInt64?, openPopup: Bool) {
+    public init(tab: RecallTab?, focusEventId: UInt64?, openPopup: Bool, resumeItem: String? = nil) {
         self.tab = tab
         self.focusEventId = focusEventId.flatMap { $0 == 0 ? nil : $0 }
         self.openPopup = openPopup
+        self.resumeItem = resumeItem.flatMap { Self.isWorkItemId($0) ? $0 : nil }
     }
 
     public init(environment: [String: String]) {
-        let tab = environment[RecallTab.initialTabEnvVar].flatMap(RecallTab.from)
+        let rawTab = environment[RecallTab.initialTabEnvVar]
+        let tab = rawTab.flatMap(RecallTab.from)
         let focus = environment[Self.focusEventEnvVar]
             .flatMap(UInt64.init)
             .flatMap { $0 == 0 ? nil : $0 }
         self.init(
             tab: tab,
             focusEventId: focus,
-            openPopup: environment[Self.openPopupEnvVar] == "1"
+            openPopup: environment[Self.openPopupEnvVar] == "1",
+            resumeItem: Self.resumeItem(tab: rawTab)
         )
     }
 
     public init?(url: URL) {
-        guard url.scheme == "hippocampus", url.host == "recall" else { return nil }
+        guard url.scheme == "hippocampus" else { return nil }
+        if url.host == "resume" {
+            guard let item = Self.resumeItem(link: url) else { return nil }
+            self.init(tab: nil, focusEventId: nil, openPopup: false, resumeItem: item)
+            return
+        }
+        guard url.host == "recall" else { return nil }
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-        let tab = items.first(where: { $0.name == "tab" })?.value.flatMap(RecallTab.from)
+        let rawTab = items.first(where: { $0.name == "tab" })?.value
+        let tab = rawTab.flatMap(RecallTab.from)
         let focus = items.first(where: { $0.name == "focus" })?.value
             .flatMap(UInt64.init)
             .flatMap { $0 == 0 ? nil : $0 }
         self.init(
             tab: tab,
             focusEventId: focus,
-            openPopup: items.contains { $0.name == "popup" && $0.value == "1" }
+            openPopup: items.contains { $0.name == "popup" && $0.value == "1" },
+            resumeItem: Self.resumeItem(tab: rawTab)
         )
     }
 
     public init?(userInfo: [AnyHashable: Any]?) {
         guard let userInfo else { return nil }
-        let tab = (userInfo["tab"] as? String).flatMap {
+        let rawTab = userInfo["tab"] as? String
+        let tab = rawTab.flatMap {
             RecallTab.from(deepLinkValue: $0)
         }
         let focusNumber = userInfo["focus_event_id"] as? NSNumber
@@ -338,7 +381,40 @@ public struct RecallLaunchRequest: Equatable, Sendable {
         let focus = parsedFocus.flatMap { $0 == 0 ? nil : $0 }
         let openPopup = (userInfo["open_popup"] as? Bool) == true
             || (userInfo["open_popup"] as? NSNumber)?.boolValue == true
-        self.init(tab: tab, focusEventId: focus, openPopup: openPopup)
+        self.init(tab: tab, focusEventId: focus, openPopup: openPopup, resumeItem: Self.resumeItem(tab: rawTab))
+    }
+
+    /// Whether `id` has the shape of a Working On item's id: 1 to 64 ASCII
+    /// letters, digits, `_` and `-`, not starting with `-` (the agent's
+    /// `work::is_item_id`). A name never passes, so no route or link can
+    /// carry one in an id's place.
+    public static func isWorkItemId(_ id: String) -> Bool {
+        !id.isEmpty && id.utf8.count <= maxWorkItemIdLength && !id.hasPrefix("-")
+            && id.utf8.allSatisfy { byte in
+                (byte >= 0x30 && byte <= 0x39) || (byte >= 0x41 && byte <= 0x5A)
+                    || (byte >= 0x61 && byte <= 0x7A) || byte == 0x5F || byte == 0x2D
+            }
+    }
+
+    /// The item in the app's `resume:<id>` tab; nil for any other tab.
+    static func resumeItem(tab: String?) -> String? {
+        guard let tab = tab?.trimmingCharacters(in: .whitespacesAndNewlines), tab.hasPrefix(resumeTabPrefix)
+        else { return nil }
+        let item = String(tab.dropFirst(resumeTabPrefix.count))
+        return isWorkItemId(item) ? item : nil
+    }
+
+    /// The item in exactly `hippocampus://resume?item=<id>`: one `item`, an
+    /// id, and nothing else (no path, user, port, fragment or other query).
+    static func resumeItem(link url: URL) -> String? {
+        guard url.scheme == "hippocampus", url.host == "resume",
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.user == nil, components.password == nil, components.port == nil,
+              components.path.isEmpty, components.fragment == nil,
+              let items = components.queryItems, items.count == 1,
+              items[0].name == "item", let item = items[0].value, isWorkItemId(item)
+        else { return nil }
+        return item
     }
 }
 
