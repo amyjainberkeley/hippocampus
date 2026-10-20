@@ -27,10 +27,13 @@ enum SetupWindow {
     static func place(_ window: NSWindow) {
         window.collectionBehavior.insert([.moveToActiveSpace, .fullScreenAuxiliary])
         guard let visible = pointerDisplay() else { return }
-        // The window's own size: SwiftUI sized it to the content.
-        let size = window.frame.size
+        // The content's own size, 760 by 560 or less on a short screen,
+        // whether or not SwiftUI has sized the window yet.
+        let content = NSRect(x: 0, y: 0, width: OnboardingTheme.windowWidth,
+                             height: CGFloat(SetupWindowFit.height(visibleHeight: visible.height)))
+        let size = window.frameRect(forContentRect: content).size
         let origin = SetupWindowFit.origin(width: size.width, height: size.height, in: visible)
-        window.setFrameOrigin(NSPoint(x: origin.x, y: origin.y))
+        window.setFrame(NSRect(x: origin.x, y: origin.y, width: size.width, height: size.height), display: false)
     }
 
     /// Done: fade out over 200 ms, then quit. The app opens the window on

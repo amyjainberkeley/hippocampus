@@ -34,12 +34,14 @@ public enum SetupAskKey: String, CaseIterable, Sendable, Equatable {
     case shiftTwice
     case fn
 
-    /// The stored value's key, or nil when it is one setup doesn't offer.
+    /// The stored value's key, or nil when it is one only Preferences
+    /// offers. Nothing stored, or a value the app doesn't know, is Shift
+    /// twice, as the app reads it.
     public init?(stored: String?) {
         switch stored {
-        case nil, "shiftTwice": self = .shiftTwice
         case "fn": self = .fn
-        default: return nil
+        case "rightShift", "rightCommand", "rightOption", "off": return nil
+        default: self = .shiftTwice
         }
     }
 

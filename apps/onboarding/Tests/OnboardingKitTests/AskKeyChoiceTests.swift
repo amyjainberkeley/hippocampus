@@ -23,6 +23,8 @@ final class AskKeyChoiceTests: XCTestCase {
         XCTAssertEqual(SetupAskKey(stored: nil), .shiftTwice, "nothing stored is Shift twice")
         XCTAssertEqual(SetupAskKey(stored: "fn"), .fn)
         XCTAssertNil(SetupAskKey(stored: "rightCommand"), "a key only Preferences offers")
+        XCTAssertNil(SetupAskKey(stored: "off"))
+        XCTAssertEqual(SetupAskKey(stored: "capsLock"), .shiftTwice, "a value the app reads as Shift twice")
         XCTAssertEqual(SetupAskKey.shiftTwice.line, "Press either Shift twice. It works on every keyboard.")
         XCTAssertEqual(SetupAskKey.fn.line, "Tap Fn by itself. Fn with arrows and function keys keeps working.")
         XCTAssertEqual(SetupAskKey.fn.hint, .fn)

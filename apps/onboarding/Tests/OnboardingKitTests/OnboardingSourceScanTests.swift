@@ -117,6 +117,8 @@ final class OnboardingSourceScanTests: XCTestCase {
         XCTAssertTrue(window.contains("let pointer = NSEvent.mouseLocation"))
         XCTAssertTrue(window.contains("SetupWindowFit.display(pointer: (pointer.x, pointer.y), screens: screens)"))
         XCTAssertTrue(window.contains("SetupWindowFit.origin(width: size.width, height: size.height, in: visible)"))
+        XCTAssertTrue(window.contains("height: CGFloat(SetupWindowFit.height(visibleHeight: visible.height)))"),
+                      "the same height the window's content is given")
     }
 
     /// SPEC 7.4: Done fades setup out in 200 ms, then it quits and the app

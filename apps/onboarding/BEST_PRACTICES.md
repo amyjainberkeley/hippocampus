@@ -43,8 +43,15 @@ consent click, and how permissions are asked.
    permission it finds off sends the person back to Permissions.
 
 4. **Setup registers no key.** Onboarding never installs a hotkey or
-   key monitor; the app does, after consent. Setup only reads the
-   Ask key preference (`AskShortcutLabel`) to name the key.
+   key monitor; the app does. Setup reads the Ask key preference
+   (`AskShortcutLabel`) to name the key, and its key picker (Change…
+   on the Accessibility row, SPEC-DELTA 7) writes the person's choice
+   to the app's own preference and tells the app
+   (`SetupAskKeyWriter`); nothing else writes it. Fn (Globe) is taken
+   only after its checks, and over another app only on the person's
+   Use Fn click. The checks read apps' bundle ids, macOS's Globe key
+   setting and the I/O Registry's keyboard properties: no keyboard is
+   opened, so no Input Monitoring prompt can show.
 
 5. **Ask for Screen Recording from a child process only.** The
    onboarding window never calls `CGRequestScreenCaptureAccess()`:

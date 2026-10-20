@@ -172,13 +172,12 @@ struct PermissionRowModel: Identifiable {
         }
     }
 
-    /// What VoiceOver says the row's state is.
+    /// What VoiceOver says the row's state is (SPEC 7.7).
     var stateWords: String {
         switch state {
         case .granted: OnboardingCopy.permissionOn
         case .waiting: OnboardingCopy.waitingForSettings
-        case .needsHelp: OnboardingCopy.notOnYet
-        case .idle: OnboardingCopy.allow
+        case .needsHelp, .idle: OnboardingCopy.notOnYet
         }
     }
 }
