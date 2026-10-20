@@ -383,6 +383,33 @@ final class SideWindowPicturePolicyTests: XCTestCase {
         XCTAssertNil(candidate(panel))
     }
 
+    /// A whole-screen read stores each side window as its own moment; a
+    /// private browser window is dropped and never pictured, a call keeps its
+    /// text and gets no picture, an ordinary window may get one.
+    func testAPrivateBrowserWindowBesideIsDroppedAndACallKeepsOnlyItsText() {
+        let display = CGRect(x: 0, y: 0, width: 1000, height: 600)
+        let lines = [OCRLine(text: "hello", boundingBox: CGRect(x: 0.3, y: 0.5, width: 0.1, height: 0.02),
+                             confidence: 1)]
+        func read(_ window: VisibleWindow) -> CascadeTwiceOCREmitter.BackgroundWindow? {
+            BackgroundCapturePolicy.backgroundWindow(
+                window, lines: lines, displayBounds: display, pixelSize: CGSize(width: 2000, height: 1200),
+                pixelsPerPoint: 2, windows: [window], excludedBundleIds: [],
+                denylist: SensitiveCaptureDenylist(entries: []), tsUs: 1, privateWindows: PrivateBrowserWindows())
+        }
+        let bounds = CGRect(x: 100, y: 100, width: 600, height: 400)
+        XCTAssertNil(read(VisibleWindow(windowId: 1, bundleId: "com.google.Chrome", title: "New Incognito Tab",
+                                        bounds: bounds, layer: 0)))
+        let call = read(VisibleWindow(windowId: 2, bundleId: "us.zoom.xos", title: "Zoom Meeting", bounds: bounds,
+                                      layer: 0))
+        XCTAssertNotNil(call)
+        XCTAssertNil(call?.sidePicture)
+        let notes = read(VisibleWindow(windowId: 3, bundleId: "com.apple.Notes", title: "Launch checklist",
+                                       bounds: bounds, layer: 0))
+        XCTAssertEqual(notes?.context.appBundleId, "com.apple.Notes")
+        XCTAssertEqual(notes?.sidePicture?.windowId, 3)
+        XCTAssertEqual(notes?.sidePicture?.plan.crop, CGRect(x: 200, y: 200, width: 1200, height: 800))
+    }
+
     // MARK: The live environment's files
 
     func testOnlyAPrivateSettingsFileOwnedByThisUserTurnsThemOn() throws {

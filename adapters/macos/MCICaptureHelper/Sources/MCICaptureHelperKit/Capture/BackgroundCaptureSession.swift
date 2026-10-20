@@ -295,25 +295,10 @@ public final class BackgroundCaptureSession: NSObject, SCStreamOutput, SCStreamD
                 OCRTrace.emit("background-attribute", "lines=\(lines.count) windows=\(groups.count) "
                     + "kept=\(groups.reduce(0) { $0 + $1.lines.count }) changed_windows=\(changed.count)")
                 return changed.compactMap { group in
-                    // The window in the display frame (global top-left points to
-                    // the frame's normalized bottom-left space), which turns on roles.
-                    let placed = BackgroundCapturePolicy.geometry(
-                        of: group.window, displayBounds: bounds, pixelsPerPoint: pixelsPerPoint,
-                        windows: windows, excludedBundleIds: excluded)
-                    // A private browser window, or one showing a site that is
-                    // never read, is dropped before anything is stored.
-                    if BackgroundCapturePolicy.skipsBrowserWindow(
-                        group.window, lines: group.lines, geometry: placed.geometry,
-                        pixelSize: pixelSize, denylist: denylist) {
-                        return nil
-                    }
-                    return CascadeTwiceOCREmitter.BackgroundWindow(
-                        context: WorkflowContext(appBundleId: group.window.bundleId,
-                                                 windowTitle: group.window.title, url: nil, pageText: nil),
-                        lines: group.lines, geometry: placed.geometry, ownsSeparators: placed.ownsSeparators,
-                        sidePicture: BackgroundCapturePolicy.sidePictureCandidate(
-                            for: group.window, lines: group.lines, displayBounds: bounds, pixelSize: pixelSize,
-                            windows: windows, excludedBundleIds: excluded, tsUs: tsUs))
+                    BackgroundCapturePolicy.backgroundWindow(
+                        group.window, lines: group.lines, displayBounds: bounds, pixelSize: pixelSize,
+                        pixelsPerPoint: pixelsPerPoint, windows: windows, excludedBundleIds: excluded,
+                        denylist: denylist, tsUs: tsUs)
                 }
             }
         }
