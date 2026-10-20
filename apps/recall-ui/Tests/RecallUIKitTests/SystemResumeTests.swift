@@ -40,6 +40,17 @@ final class SystemResumeTests: XCTestCase {
         XCTAssertFalse(AppleScriptOpenTabs.browsers.contains("com.apple.Safari"))
     }
 
+    /// What macOS answers becomes allowed, refused, or "the browser is gone",
+    /// which asked nothing, so Resume's one question isn't used up by it.
+    func testMacOSsAnswerSaysWhetherItAskedAnything() {
+        XCTAssertEqual(AppleScriptOpenTabs.permission(status: OSStatus(noErr)), .allowed)
+        XCTAssertEqual(AppleScriptOpenTabs.permission(status: -600), .notRunning, "procNotFound")
+        XCTAssertEqual(AppleScriptOpenTabs.permission(status: -1743), .refused, "errAEEventNotPermitted")
+        XCTAssertEqual(AppleScriptOpenTabs.permission(status: -1744), .refused,
+                       "errAEEventWouldRequireUserConsent: not allowed yet, and not asked")
+        XCTAssertEqual(AppleScriptOpenTabs.permission(status: -50), .refused)
+    }
+
     func testEveryBrowserResumeChecksHasAScriptThatLeavesOutPrivateWindows() {
         XCTAssertEqual(AppleScriptOpenTabs.browsers, Set(chromium + ["company.thebrowser.Browser"]))
         for browser in AppleScriptOpenTabs.browsers {

@@ -55,9 +55,10 @@ public struct SystemResumeWorkspace: ResumeWorkspace {
 /// The addresses open in the Chrome family's and Arc's tabs, through
 /// AppleScript, only while that browser is running and only as far as macOS
 /// allows (SPEC-DELTA 3). It asks for Automation only when told it may (the
-/// first Resume that opens tabs in that browser); otherwise a browser
-/// Hippocampus may not ask answers nil and its tabs open again. Addresses
-/// are compared and dropped; nothing is kept.
+/// first Resume that opens tabs in that browser while it is running), and
+/// says whether macOS was asked; otherwise a browser Hippocampus may not ask
+/// can't tell and its tabs open again. Addresses are compared and dropped;
+/// nothing is kept.
 ///
 /// Private windows are never read (SPEC-DELTA 3, PRIVACY.md): each script
 /// asks only for the tabs of normal windows. Safari can't tell a script
@@ -80,20 +81,38 @@ public actor AppleScriptOpenTabs: OpenTabsReading {
 
     public init() {}
 
-    public func openTabs(browser: String, mayAsk: Bool) async -> [String]? {
-        guard let source = Self.script(for: browser) else { return nil }
+    public func openTabs(browser: String, mayAsk: Bool) async -> OpenTabsAnswer {
+        guard let source = Self.script(for: browser) else { return .unknown }
         let running = await MainActor.run {
             !NSRunningApplication.runningApplications(withBundleIdentifier: browser).isEmpty
         }
-        guard running else { return [] }
+        // A browser that isn't running can't be asked about: macOS answers
+        // without asking, so the one question waits for a Resume that finds
+        // it open.
+        guard running else { return .notRunning }
         // Asking may wait for the person's answer: never on the main thread.
-        let allowed = await Task.detached(priority: .userInitiated) {
-            Self.mayAutomate(browser, ask: mayAsk)
+        let permission = await Task.detached(priority: .userInitiated) {
+            Self.permission(browser, ask: mayAsk)
         }.value
-        guard allowed else { return nil }
-        return await Task.detached(priority: .userInitiated) {
-            Self.tabAddresses(source)
-        }.value
+        switch permission {
+        case .notRunning:
+            return .notRunning
+        case .refused:
+            return OpenTabsAnswer(addresses: nil, asked: mayAsk)
+        case .allowed:
+            let addresses = await Task.detached(priority: .userInitiated) {
+                Self.tabAddresses(source)
+            }.value
+            return OpenTabsAnswer(addresses: addresses, asked: mayAsk)
+        }
+    }
+
+    /// What macOS says about this app sending a browser Apple Events.
+    enum Permission: Equatable {
+        case allowed
+        case refused
+        /// The browser quit before macOS could ask: nothing was asked.
+        case notRunning
     }
 
     /// The script that lists the addresses in `browser`'s normal windows,
@@ -114,12 +133,22 @@ public actor AppleScriptOpenTabs: OpenTabsReading {
 
     /// Whether this app may send `browser` Apple Events, asking the person
     /// only when `ask`.
-    nonisolated static func mayAutomate(_ browser: String, ask: Bool) -> Bool {
+    nonisolated static func permission(_ browser: String, ask: Bool) -> Permission {
         let target = NSAppleEventDescriptor(bundleIdentifier: browser)
         // The address points into `target`: keep it alive while macOS reads it.
         return withExtendedLifetime(target) {
-            guard var address = target.aeDesc?.pointee else { return false }
-            return AEDeterminePermissionToAutomateTarget(&address, typeWildCard, typeWildCard, ask) == noErr
+            guard var address = target.aeDesc?.pointee else { return .refused }
+            return permission(status: AEDeterminePermissionToAutomateTarget(&address, typeWildCard, typeWildCard, ask))
+        }
+    }
+
+    /// What macOS's answer means: allowed, the browser gone (nothing was
+    /// asked), or anything else, which Resume treats as not allowed.
+    nonisolated static func permission(status: OSStatus) -> Permission {
+        switch status {
+        case OSStatus(noErr): .allowed
+        case OSStatus(procNotFound): .notRunning
+        default: .refused
         }
     }
 

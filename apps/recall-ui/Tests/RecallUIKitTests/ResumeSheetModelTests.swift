@@ -16,7 +16,7 @@ final class ResumeSheetModelTests: XCTestCase {
     private let slack = "com.tinyspeck.slackmacgap"
 
     private func model(_ items: [ResumePlan.Target], installed: Set<String>? = nil, missing: Set<String> = [],
-                       tabs: FakeTabs = FakeTabs(), asked: (any KeyValueStore)? = nil,
+                       tabs: any OpenTabsReading = FakeTabs(), asked: (any KeyValueStore)? = nil,
                        workspace: FakeWorkspace? = nil, rules: ResumeRules = .none) -> (ResumeSheetModel, FakeWorkspace) {
         let workspace = workspace ?? FakeWorkspace(
             installed: installed ?? [vscode, terminal, chrome, safari, notes, pages, slack], missing: missing)
@@ -218,6 +218,62 @@ final class ResumeSheetModelTests: XCTestCase {
         XCTAssertNotNil(store.data(forKey: "resume.automation.asked.\(chrome)"))
     }
 
+    /// SPEC-DELTA 3: "with Automation permission asked only on the first
+    /// Resume". A first Resume with Chrome closed can't ask (macOS has
+    /// nothing to ask about), so it must not use the question up: the next
+    /// Resume, with Chrome open and the page in a tab, asks and doesn't open
+    /// it twice (from the correctness verifier).
+    func testTheFirstResumeWithTheBrowserClosedDoesNotUseUpTheAutomationQuestion() async {
+        let store = MemoryKeyValueStore()
+        let tabs = FakeTabs(running: [], allowed: [])
+        let plan: [ResumePlan.Target] = [
+            .init(kind: "page", title: "Rounding half to even", app: chrome, url: "https://devnotes.example/rounding"),
+        ]
+        let (first, firstMac) = model(plan, installed: [chrome], tabs: tabs, asked: store)
+        await first.load()
+        let opened = await first.resume()
+        XCTAssertEqual(opened, "Opened 1 tab.")
+        XCTAssertEqual(firstMac.opened.count, 1, "with Chrome closed, the page opens")
+        XCTAssertTrue(tabs.prompts.isEmpty, "a closed browser is never asked about")
+        XCTAssertNil(store.data(forKey: "resume.automation.asked.\(chrome)"), "the question is still unused")
+
+        // The next day: Chrome is open, with the page already in a tab.
+        tabs.set(running: [chrome], open: [chrome: ["https://devnotes.example/rounding"]])
+        let (second, secondMac) = model(plan, installed: [chrome], tabs: tabs, asked: store)
+        await second.load()
+        let note = await second.resume()
+        XCTAssertEqual(tabs.prompts, [chrome], "Chrome was asked once, when it was open")
+        XCTAssertEqual(note, WorkCopy.resumeAlreadyOpen(1), "the open tab was opened a second time: \(note)")
+        XCTAssertTrue(secondMac.opened.isEmpty)
+        XCTAssertNotNil(store.data(forKey: "resume.automation.asked.\(chrome)"), "now the question is used")
+
+        // From then on Chrome is never asked again, and it can still tell.
+        let (third, _) = model(plan, installed: [chrome], tabs: tabs, asked: store)
+        await third.load()
+        _ = await third.resume()
+        XCTAssertEqual(tabs.asked.map(\.mayAsk), [true, true, false])
+        XCTAssertEqual(tabs.prompts, [chrome])
+    }
+
+    /// A browser that can't tell (refused, or no way to ask) says nothing
+    /// was asked unless macOS asked: a refusal uses the question, a browser
+    /// with no script doesn't.
+    func testARefusalUsesTheQuestionAndABrowserWithNoWayToAskDoesNot() async {
+        let store = MemoryKeyValueStore()
+        let refusing = RefusingTabs()
+        let plan: [ResumePlan.Target] = [
+            .init(kind: "page", title: "Rounding half to even", app: chrome, url: "https://devnotes.example/rounding"),
+            .init(kind: "page", title: "Plans and pricing", app: safari, url: "https://spokeandchain.example/plans"),
+        ]
+        let (model, mac) = model(plan, installed: [chrome, safari], tabs: refusing, asked: store)
+        await model.load()
+        let note = await model.resume()
+        XCTAssertEqual(note, "Opened 2 tabs.", "without an answer, both open")
+        XCTAssertEqual(mac.opened.count, 2)
+        XCTAssertNotNil(store.data(forKey: "resume.automation.asked.\(chrome)"), "Chrome's no is remembered")
+        XCTAssertNil(store.data(forKey: "resume.automation.asked.\(safari)"), "Safari was never asked")
+    }
+
     func testWhatCouldNotOpenIsNamedAndTheRestStillOpens() async {
         let workspace = FakeWorkspace(installed: [chrome, slack], missing: [], failing: [chrome])
         let (model, _) = model([
@@ -312,21 +368,56 @@ final class FakeWorkspace: ResumeWorkspace, @unchecked Sendable {
     }
 }
 
-/// Browsers' tabs from fixtures; it keeps whether it was allowed to ask.
+/// Browsers' tabs from fixtures, as AppleScriptOpenTabs answers on a Mac: a
+/// browser that isn't running answers no tabs and is never asked; one that
+/// was never allowed can't tell unless it may ask now, and is then asked
+/// once. By default every browser is running and allowed. It keeps whether
+/// it was allowed to ask, and every question that reached the person.
 final class FakeTabs: OpenTabsReading, @unchecked Sendable {
-    let open: [String: [String]]
     private let lock = NSLock()
+    private var open: [String: [String]]
+    /// Nil: every browser is running.
+    private var running: Set<String>?
+    /// Nil: every browser already allowed Hippocampus.
+    private var allowed: Set<String>?
     private var calls: [(browser: String, mayAsk: Bool)] = []
+    private var questions: [String] = []
 
-    init(open: [String: [String]] = [:]) {
+    init(open: [String: [String]] = [:], running: Set<String>? = nil, allowed: Set<String>? = nil) {
         self.open = open
+        self.running = running
+        self.allowed = allowed
     }
 
     var asked: [(browser: String, mayAsk: Bool)] { lock.withLock { calls } }
+    /// The browsers macOS asked the person about, in order.
+    var prompts: [String] { lock.withLock { questions } }
 
-    func openTabs(browser: String, mayAsk: Bool) async -> [String]? {
-        lock.withLock { calls.append((browser, mayAsk)) }
-        return open[browser]
+    func set(running: Set<String>, open: [String: [String]]) {
+        lock.withLock {
+            self.running = running
+            self.open = open
+        }
+    }
+
+    func openTabs(browser: String, mayAsk: Bool) async -> OpenTabsAnswer {
+        lock.withLock {
+            calls.append((browser, mayAsk))
+            if let running, !running.contains(browser) { return .notRunning }
+            if let allowed, !allowed.contains(browser) {
+                guard mayAsk else { return .unknown }
+                questions.append(browser)
+                self.allowed?.insert(browser)
+            }
+            return OpenTabsAnswer(addresses: open[browser], asked: mayAsk)
+        }
+    }
+}
+
+/// Chrome says no when asked, and Safari has no way to be asked.
+private struct RefusingTabs: OpenTabsReading {
+    func openTabs(browser: String, mayAsk: Bool) async -> OpenTabsAnswer {
+        browser == "com.apple.Safari" ? .unknown : OpenTabsAnswer(addresses: nil, asked: mayAsk)
     }
 }
 
