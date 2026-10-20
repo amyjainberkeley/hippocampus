@@ -173,8 +173,11 @@ final class AccessibilityCoverageTests: XCTestCase {
         // labels; never allow a decrease.
         // 39 after the window's three places: Ask's filter, clear and day
         // buttons are labelled; the retired Today, Brief and popup views go.
-        let minLabels = 39
-        let minGrouping = 8
+        // 90 and 46 when the October 19 round merged: the window's places,
+        // Working On, Resume, the calendar, Demo Memory, side pictures and
+        // the setup's key picker, each control named.
+        let minLabels = 90
+        let minGrouping = 46
         XCTAssertGreaterThanOrEqual(
             counts.labels, minLabels,
             "accessibilityLabel usage regressed: found \(counts.labels), "
