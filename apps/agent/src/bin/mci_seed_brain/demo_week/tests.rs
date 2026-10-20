@@ -1,8 +1,19 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write as _;
 
+use sha2::Digest as _;
+
 use super::story::{FOUNDER, PEOPLE};
 use super::*;
+
+/// Names from the maintainer's own life that must never appear in the made-up
+/// world, kept as SHA-256 digests of the lowercased word so this public file
+/// doesn't list them.
+const PRIVATE_NAMES: [&str; 3] = [
+    "ed6c58a3009a2b91b6b1374e3745762de7370bf1e40c1a6e66140d2942769da4",
+    "cdf2e21fa04b3c5e4793783192eb1bebb4574064d2f43853535d7e765aa3e8c9",
+    "d6c8dec6ccdd9eb13bc4f47d18b0c0b2c57dd96dbe51e913fe2030c024749f04",
+];
 
 /// Pacific daylight time.
 const TZ: i32 = -7 * 3600;
@@ -279,6 +290,16 @@ fn the_world_is_made_up() {
         "password",
     ] {
         assert!(!corpus.contains(never), "{never} is in the demo week");
+    }
+    for word in corpus.split(|c: char| !c.is_alphanumeric()) {
+        let mut hex = String::with_capacity(64);
+        for byte in sha2::Sha256::digest(word.to_lowercase().as_bytes()) {
+            let _ = write!(hex, "{byte:02x}");
+        }
+        assert!(
+            !PRIVATE_NAMES.contains(&hex.as_str()),
+            "a private name is in the demo week"
+        );
     }
     // Addresses are the real products' or `.example` ones.
     for (_, win, _) in week.moments() {
