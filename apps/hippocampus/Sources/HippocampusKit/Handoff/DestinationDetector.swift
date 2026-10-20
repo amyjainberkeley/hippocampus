@@ -86,7 +86,12 @@ public struct DestinationDetector: Sendable {
     public var appForBundle: @Sendable (String) -> URL?
     public var isExecutable: @Sendable (String) -> Bool
     public var environment: [String: String]
+    /// The bundle id of the app at a URL, to tell a tool's own app from
+    /// another that claims its link (`linkOwners`). Nil where the lookups
+    /// above are fixtures that name each tool's own app.
+    public var bundleIdentifier: (@Sendable (URL) -> String?)?
 
+    /// Lookups that name each tool's own app: tests and pictures.
     public init(
         appForScheme: @escaping @Sendable (String) -> URL?,
         appForBundle: @escaping @Sendable (String) -> URL?,
@@ -97,10 +102,25 @@ public struct DestinationDetector: Sendable {
         self.appForBundle = appForBundle
         self.isExecutable = isExecutable
         self.environment = environment
+        bundleIdentifier = nil
     }
 
-    /// This Mac: Launch Services for the apps, the file system for the
-    /// command line.
+    /// Lookups that may name any app: each link's app is checked by its
+    /// bundle id before its tool is offered with it.
+    public init(
+        appForScheme: @escaping @Sendable (String) -> URL?,
+        appForBundle: @escaping @Sendable (String) -> URL?,
+        isExecutable: @escaping @Sendable (String) -> Bool,
+        environment: [String: String],
+        bundleIdentifier: @escaping @Sendable (URL) -> String?
+    ) {
+        self.init(appForScheme: appForScheme, appForBundle: appForBundle, isExecutable: isExecutable,
+                  environment: environment)
+        self.bundleIdentifier = bundleIdentifier
+    }
+
+    /// This Mac: Launch Services for the apps, each link's app checked by
+    /// its bundle id, the file system for the command line.
     public static func live(environment: [String: String] = ProcessInfo.processInfo.environment) -> DestinationDetector {
         DestinationDetector(
             appForScheme: { scheme in
@@ -108,14 +128,39 @@ public struct DestinationDetector: Sendable {
             },
             appForBundle: { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) },
             isExecutable: { FileManager.default.isExecutableFile(atPath: $0) },
-            environment: environment
+            environment: environment,
+            bundleIdentifier: { Bundle(url: $0)?.bundleIdentifier }
         )
     }
 
     /// ChatGPT's desktop apps, newest first.
     public static let chatGPTBundles = ["com.openai.chat"]
 
-    /// The tools on this Mac, in the menu's order.
+    /// The apps each tool's link may open, by bundle id, as each app's own
+    /// Info.plist names itself and the scheme it handles (October 2026).
+    /// macOS gives a link to whichever app claims its scheme, so another
+    /// app that registers claude:// would be handed the question and what
+    /// was on screen in the link. Such an app is never opened: the tool is
+    /// offered without an app, and its message is copied (SPEC 5.3.5).
+    public static let linkOwners: [String: Set<String>] = [
+        "claude": ["com.anthropic.claudefordesktop"],
+        "codex": ["com.openai.codex"],
+        "cursor": ["com.todesktop.230313mzl4w4u92"],
+        "vscode": ["com.microsoft.VSCode"],
+    ]
+
+    /// The app that opens `scheme`'s links when it is the tool's own; nil
+    /// when no app does, or another app claims them.
+    func ownApp(for scheme: String) -> (app: URL?, claimed: Bool) {
+        guard let app = appForScheme(scheme) else { return (nil, false) }
+        guard let bundleIdentifier else { return (app, true) }
+        let owned = bundleIdentifier(app).map { Self.linkOwners[scheme]?.contains($0) == true } ?? false
+        return (owned ? app : nil, true)
+    }
+
+    /// The tools on this Mac, in the menu's order. A tool whose link another
+    /// app claims is offered without an app: its message is copied, never
+    /// sent in a link that app would open.
     public func installed() -> [InstalledTool] {
         AskTool.menuOrder.compactMap { tool in
             switch tool {
@@ -123,12 +168,15 @@ public struct DestinationDetector: Sendable {
                 return Self.chatGPTBundles.lazy.compactMap(appForBundle).first
                     .map { InstalledTool(tool: tool, appURL: $0) }
             case .claudeCode:
-                let app = appForScheme("claude")
+                let app = ownApp(for: "claude").app
                 let line = app == nil ? claudeCommandLine() : nil
                 guard app != nil || line != nil else { return nil }
                 return InstalledTool(tool: tool, appURL: app, commandLine: line)
             default:
-                return tool.scheme.flatMap(appForScheme).map { InstalledTool(tool: tool, appURL: $0) }
+                guard let scheme = tool.scheme else { return nil }
+                let found = ownApp(for: scheme)
+                guard found.claimed else { return nil }
+                return InstalledTool(tool: tool, appURL: found.app)
             }
         }
     }
