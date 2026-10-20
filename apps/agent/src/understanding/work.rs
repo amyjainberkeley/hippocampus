@@ -9,17 +9,50 @@
 //! of (`moment_items`). `--item <id>` reads one item, its moments 200 at a
 //! time, older than `--before <ts_us>`. Nothing is written.
 //!
-//! A seam for now: the answer is always empty, which the window shows as no
-//! Working On items and Web Pages' fallback. The subject rules
-//! (`mci_brain::subject`), membership, ranking and the item ids land with
-//! Working On.
+//! Membership follows SPEC 2.3: a code project, document, design or
+//! spreadsheet is an item once it was the window in front for 30 minutes in
+//! all, and the sidebar lists it while it has 30 minutes within the last 14
+//! days of use (a day of use is a day with anything saved). Items rank by
+//! their time in the last 7 days of use, then by the newest. A name that
+//! touches a sensitive area stays out of the sidebar (`hidden_reason`
+//! "personal"); hides the person chose are the window's own.
+//!
+//! It reads the session notes the understanding worker writes, with or
+//! without a model, and the moments after the last note, and only their
+//! window titles, hosts and moment ids ([`read`]). Deleting a moment deletes
+//! the notes around it, so an item rebuilds without it on the next read and
+//! leaves when nothing of it is left.
+
+pub(crate) mod read;
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
+use mci_brain::sensitive::sensitive_area;
 use mci_brain::subject::SubjectKind;
+use mci_brain::{SqlCipherBrainStore, StoreError};
+use mci_core::crypto::DbKey;
 use serde::Serialize;
 
 use super::{ReadCommand, ReadError};
+use read::{ItemAcc, Model, DAY_US, ITEM_US};
+
+/// How many days back the read looks unless asked.
+pub const DEFAULT_DAYS: u32 = 90;
+/// The most days back it looks.
+pub const MAX_DAYS: u32 = 400;
+/// An item's moments per answer: the newest, and one page with `--item`.
+pub const MOMENTS_PER_PAGE: usize = 200;
+/// A page's moments per answer.
+pub const PAGE_MOMENTS: usize = 50;
+/// The most pages an answer lists.
+pub const MAX_PAGES: usize = 1_000;
+/// The most files a code project lists.
+pub const MAX_FILES: usize = 30;
+/// Seen alongside and conversations: six rows at most.
+pub const MAX_ALONGSIDE: usize = 6;
+/// An item's sessions listed with `--item`, newest first.
+pub const MAX_SESSIONS: usize = 100;
 
 /// The longest id an item can have. Ids are keyed hashes, so they are short.
 pub const MAX_ITEM_ID_LEN: usize = 64;
@@ -47,8 +80,11 @@ pub struct WorkItem {
     pub kind: SubjectKind,
     /// Its name, as its windows' titles write it.
     pub name: String,
-    /// The bundle ids of the apps it was worked on in.
+    /// The bundle ids of the apps it was worked on in, most time first.
     pub apps: Vec<String>,
+    /// The sites it was worked on at, most time first: a document on the
+    /// web ("docs.google.com"). Empty for one in its own app.
+    pub hosts: Vec<String>,
     /// When it was last worked on.
     pub last_us: u64,
     /// Minutes in front in the last 7 days of use.
@@ -57,6 +93,10 @@ pub struct WorkItem {
     pub days_this_week: u32,
     /// Whether the sidebar lists it.
     pub in_sidebar: bool,
+    /// Whether it has the sidebar's time (30 minutes in front within the
+    /// last 14 days of use), whatever its name: a name that looks personal
+    /// has it and stays out until the person shows it (the window's list).
+    pub recent: bool,
     /// Why the sidebar does not, when it is the name's own: `"personal"`.
     pub hidden_reason: Option<String>,
     /// For code, the files its editors' titles named, newest first.
@@ -71,6 +111,38 @@ pub struct WorkItem {
     /// hover preview and Show All (SPEC-DELTA 2): its newest moment with a
     /// screenshot, when it has one.
     pub thumbnail_moment: Option<u64>,
+    /// Minutes in front over everything read: what Show All says for an
+    /// item from before this week.
+    pub total_minutes: u32,
+    /// Conversations open around the same time, by name only (SPEC-DELTA 4).
+    pub conversations: Vec<WorkConversation>,
+    /// With `--item`: its sessions' own times, newest first, so the window
+    /// can list the meetings that overlapped them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sessions: Vec<WorkSession>,
+}
+
+/// A conversation with people open around the same time as an item: its
+/// name, never what was said.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkConversation {
+    /// "#launch", "Jordan Lee", an email's subject.
+    pub name: String,
+    /// The bundle id of the app it was open in.
+    pub app: String,
+    /// Its newest moment.
+    pub moment: u64,
+    /// When it was last open.
+    pub last_us: u64,
+}
+
+/// One of an item's sessions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct WorkSession {
+    /// When it started, in microseconds since the epoch.
+    pub start_us: u64,
+    /// When its last moment was.
+    pub end_us: u64,
 }
 
 /// A file a code project's editor titles named.
@@ -203,17 +275,251 @@ pub fn is_item_id(id: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
+/// Where the person's home folder is, for "~" in folder guesses and for the
+/// subject rules (a terminal open there names nothing).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Home {
+    /// The whole path: "/Users/dev".
+    pub path: Option<String>,
+    /// Its last part: "dev".
+    pub name: Option<String>,
+}
+
+impl Home {
+    /// This process's `HOME`.
+    #[must_use]
+    pub fn from_env() -> Self {
+        std::env::var("HOME").map_or_else(|_| Self::default(), |path| Self::at(&path))
+    }
+
+    /// A home folder at `path`.
+    #[must_use]
+    pub fn at(path: &str) -> Self {
+        let name = Path::new(path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_lowercase)
+            .filter(|name| !name.is_empty());
+        Self {
+            path: Some(path.to_owned()).filter(|path| !path.is_empty()),
+            name,
+        }
+    }
+}
+
 /// `mci-agent work`: the answer as JSON.
 ///
 /// # Errors
-/// [`ReadError::Usage`] for a malformed flag; never anything read.
+/// [`ReadError::Usage`] for a malformed flag, [`ReadError::Failed`] when the
+/// memory can't be read; neither repeats a value or anything read.
 pub fn run_cli(command: &ReadCommand<'_>) -> Result<serde_json::Value, ReadError> {
-    WorkArgs::parse(command.args)?;
-    let work = Work {
-        generated_us: command.now_us,
+    let args = WorkArgs::parse(command.args)?;
+    let work = read_work(
+        command.store,
+        command.key,
+        &args,
+        command.tz_offset_secs,
+        command.now_us,
+        &Home::from_env(),
+    )
+    .map_err(|_| ReadError::Failed("work could not be read from the memory".into()))?;
+    serde_json::to_value(work).map_err(|_| ReadError::Failed("work could not be written".into()))
+}
+
+/// The `work` read: the whole answer, one item with a page of its moments
+/// (`--item`, `--before`), or the items some moments are part of
+/// (`--moments`).
+///
+/// # Errors
+/// Store failures.
+pub fn read_work(
+    store: &SqlCipherBrainStore,
+    key: &DbKey,
+    args: &WorkArgs,
+    tz: i32,
+    now_us: u64,
+    home: &Home,
+) -> Result<Work, StoreError> {
+    let model = model(store, key, args.days, tz, now_us, home)?;
+    let mut work = Work {
+        generated_us: now_us,
         ..Work::default()
     };
-    serde_json::to_value(work).map_err(|_| ReadError::Failed("work could not be written".into()))
+    if let Some(wanted) = &args.item {
+        if let Some((id, acc)) = model.items.iter().find(|(id, _)| id == wanted) {
+            let page = Moments::Page {
+                before_us: args.before_us,
+            };
+            work.items.push(item(store, &model, id, acc, home, page)?);
+        }
+    } else if !args.moments.is_empty() {
+        work.moment_items = read::moment_items(&model, &args.moments);
+    } else {
+        for (id, acc) in &model.items {
+            work.items
+                .push(item(store, &model, id, acc, home, Moments::Newest)?);
+        }
+        work.pages = read::pages(store, &model, tz, MAX_PAGES)?
+            .into_iter()
+            .map(|page| WorkPage {
+                title: page.title,
+                host: page.host,
+                path: page.path,
+                app: page.app,
+                days: u32::try_from(page.days.len()).unwrap_or(u32::MAX),
+                last_us: page.last_us,
+                moments: page
+                    .moments
+                    .iter()
+                    .take(PAGE_MOMENTS)
+                    .filter_map(|moment| u64::try_from(moment.1).ok())
+                    .collect(),
+            })
+            .collect();
+    }
+    Ok(work)
+}
+
+/// The sessions over `days` (90 unless asked) and what they were about.
+pub(crate) fn model(
+    store: &SqlCipherBrainStore,
+    key: &DbKey,
+    days: Option<u32>,
+    tz: i32,
+    now_us: u64,
+    home: &Home,
+) -> Result<Model, StoreError> {
+    let days = u64::from(days.unwrap_or(DEFAULT_DAYS).clamp(1, MAX_DAYS));
+    read::build(
+        store,
+        key,
+        now_us.saturating_sub(days * DAY_US),
+        now_us,
+        tz,
+        home.name.as_deref(),
+    )
+}
+
+/// Whole minutes in `us`, rounded.
+fn minutes(us: u64) -> u32 {
+    u32::try_from((us + 30_000_000) / 60_000_000).unwrap_or(u32::MAX)
+}
+
+/// Which of an item's moments an answer carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Moments {
+    /// Its newest, for Working On and the sidebar.
+    Newest,
+    /// One page of them for its own page: older than `before_us`, or the
+    /// newest without it, with its sessions.
+    Page { before_us: Option<u64> },
+}
+
+/// One item as the window reads it.
+fn item(
+    store: &SqlCipherBrainStore,
+    model: &Model,
+    id: &str,
+    acc: &ItemAcc,
+    home: &Home,
+    paging: Moments,
+) -> Result<WorkItem, StoreError> {
+    let kind = acc.kind.unwrap_or(SubjectKind::Document);
+    let newest: Vec<i64> = acc.moments.iter().map(|moment| moment.1).collect();
+    let (thumbnail, newest_us) = read::newest_with_screenshot(store, &newest, 256)?;
+    let mut apps: Vec<(&String, &u64)> = acc.apps.iter().collect();
+    apps.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    let mut files: Vec<&(String, u64, i64)> = acc.files.values().collect();
+    files.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    let personal = sensitive_area(&acc.name).is_some();
+    let moments: Vec<u64> = match paging {
+        Moments::Newest => newest
+            .iter()
+            .take(MOMENTS_PER_PAGE)
+            .filter_map(|id| u64::try_from(*id).ok())
+            .collect(),
+        Moments::Page { before_us } => {
+            let mut heads = Vec::new();
+            for batch in newest.chunks(500) {
+                heads.extend(store.event_heads(batch)?);
+            }
+            heads.sort_by(|a, b| b.ts_us.cmp(&a.ts_us).then(b.id.cmp(&a.id)));
+            heads
+                .into_iter()
+                .filter(|head| before_us.is_none_or(|before| head.ts_us < before))
+                .take(MOMENTS_PER_PAGE)
+                .filter_map(|head| u64::try_from(head.id).ok())
+                .collect()
+        }
+    };
+    let sessions = if paging == Moments::Newest {
+        Vec::new()
+    } else {
+        acc.sessions
+            .iter()
+            .rev()
+            .take(MAX_SESSIONS)
+            .map(|index| WorkSession {
+                start_us: model.sessions[*index].start_us,
+                end_us: model.sessions[*index].end_us,
+            })
+            .collect()
+    };
+    Ok(WorkItem {
+        id: id.to_owned(),
+        kind,
+        name: acc.name.clone(),
+        apps: apps.into_iter().map(|(app, _)| app.clone()).collect(),
+        hosts: {
+            let mut hosts: Vec<(&String, &u64)> = acc.hosts.iter().collect();
+            hosts.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+            hosts.into_iter().map(|(host, _)| host.clone()).collect()
+        },
+        last_us: newest_us.unwrap_or(acc.last_us),
+        week_minutes: minutes(acc.week_us),
+        days_this_week: u32::try_from(acc.week_days.len()).unwrap_or(u32::MAX),
+        in_sidebar: !personal && acc.fortnight_us >= ITEM_US,
+        recent: acc.fortnight_us >= ITEM_US,
+        hidden_reason: personal.then(|| "personal".to_owned()),
+        files: files
+            .into_iter()
+            .take(MAX_FILES)
+            .map(|(name, last_us, moment)| WorkFile {
+                name: name.clone(),
+                last_us: *last_us,
+                moment: u64::try_from(*moment).unwrap_or(0),
+            })
+            .collect(),
+        alongside: read::near(model, acc, false, MAX_ALONGSIDE)
+            .into_iter()
+            .map(|near| WorkAlongside {
+                kind: near.kind.to_owned(),
+                title: near.title,
+                host: near.host,
+                app: near.app,
+                moment: u64::try_from(near.moment).unwrap_or(0),
+                last_us: near.last_us,
+            })
+            .collect(),
+        folder_guess: if kind == SubjectKind::Code {
+            read::folder_guess(store, acc, home.path.as_deref())?
+        } else {
+            None
+        },
+        moments,
+        thumbnail_moment: thumbnail.and_then(|id| u64::try_from(id).ok()),
+        total_minutes: minutes(acc.total_us),
+        conversations: read::near(model, acc, true, MAX_ALONGSIDE)
+            .into_iter()
+            .map(|near| WorkConversation {
+                name: near.title,
+                app: near.app,
+                moment: u64::try_from(near.moment).unwrap_or(0),
+                last_us: near.last_us,
+            })
+            .collect(),
+        sessions,
+    })
 }
 
 #[cfg(test)]
@@ -298,10 +604,12 @@ mod tests {
             kind: SubjectKind::Code,
             name: "trailhead-shop".into(),
             apps: vec!["com.microsoft.VSCode".into()],
+            hosts: Vec::new(),
             last_us: 1_760_304_000_000_000,
             week_minutes: 160,
             days_this_week: 3,
             in_sidebar: true,
+            recent: true,
             hidden_reason: None,
             files: vec![WorkFile {
                 name: "tax.rs".into(),
@@ -312,11 +620,24 @@ mod tests {
             folder_guess: Some("~/dev/trailhead-shop".into()),
             moments: vec![4812, 4790],
             thumbnail_moment: Some(4790),
+            total_minutes: 160,
+            conversations: Vec::new(),
+            sessions: Vec::new(),
         };
         let value = serde_json::to_value(&item).unwrap();
         assert_eq!(value["kind"], "code");
         assert_eq!(value["thumbnail_moment"], 4790);
         assert_eq!(value["files"][0]["moment"], 4790);
         assert_eq!(value["hidden_reason"], serde_json::Value::Null);
+        assert_eq!(value["recent"], true);
+        assert!(value.get("sessions").is_none(), "only with --item");
+        assert_eq!(value["conversations"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn a_home_names_its_last_part() {
+        assert_eq!(Home::at("/Users/Dev").name.as_deref(), Some("dev"));
+        assert_eq!(Home::at("/Users/Dev").path.as_deref(), Some("/Users/Dev"));
+        assert_eq!(Home::at(""), Home::default());
     }
 }

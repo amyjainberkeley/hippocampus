@@ -32,4 +32,22 @@ public struct PreviewWorkReader: WorkReader {
     public func items(forMoments moments: [UInt64]) async throws -> [UInt64: String] {
         snapshot.momentItems.filter { moments.contains($0.key) }
     }
+
+    /// Sam's week (`WorkFixtures`): what the synthetic preview and the
+    /// renders read.
+    public static func sample(now: Date, calendar: Calendar) -> PreviewWorkReader {
+        PreviewWorkReader(snapshot: WorkFixtures.snapshot(now: now, calendar: calendar))
+    }
+}
+
+/// A work read that fails, as the agent does when it can't answer: what
+/// renders and tests use for "Couldn't load this. Nothing is lost."
+public struct UnavailableWorkReader: WorkReader {
+    public init() {}
+
+    public func work(days: Int) async throws -> WorkSnapshot { throw UnderstandingError.unavailable }
+    public func item(id: String, before: UInt64?) async throws -> WorkItem? { throw UnderstandingError.unavailable }
+    public func items(forMoments moments: [UInt64]) async throws -> [UInt64: String] {
+        throw UnderstandingError.unavailable
+    }
 }

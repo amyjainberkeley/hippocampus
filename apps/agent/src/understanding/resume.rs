@@ -7,19 +7,75 @@
 //! the window's Resume sheet lists. The person ticks what to open and
 //! clicks; only then does the window ask macOS to open each one.
 //!
-//! A seam for now: nothing is ever offered, so the sheet has nothing to
-//! open. The plan from the item's last session lands with Resume.
+//! What the plan holds, in the sheet's order:
+//! - **the code folder**, in the editor it was edited in, and a terminal in
+//!   that folder when one was used (a folder no longer there can't open);
+//! - **documents**: through their links on the web (Google Docs, Figma,
+//!   Notion), or the app for local ones (Notes, Pages, Numbers, Preview),
+//!   which opens the app, not one document;
+//! - **web pages**, in the browser they were read in, newest first, the
+//!   newest ten ticked; a page whose address isn't known can't open;
+//! - **other apps** that were in front.
+//!
+//! Search result pages, calls and Hippocampus are never offered, and only
+//! what is still in memory can be: forgotten moments take their sessions'
+//! notes with them. Private windows and the apps and sites Hippocampus never
+//! reads were never saved; the window also leaves out whatever the person's
+//! own never-read rules name today, and anything not installed.
+//!
+//! Every reason is a code (`reason`); the window says it in its own words.
 
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+
+use mci_brain::apps::{self, WorkKind};
+use mci_brain::chrome::is_browser;
+use mci_brain::reading::TERMINAL_APPS;
+use mci_brain::subject::SubjectKind;
+use mci_brain::{SqlCipherBrainStore, StoreError};
+use mci_core::crypto::DbKey;
 use serde::Serialize;
 
-use super::work::is_item_id;
+use super::work::read::{self, About, Held, ItemAcc};
+use super::work::{is_item_id, Home};
 use super::{ReadCommand, ReadError};
+
+/// How many web pages start ticked.
+pub const PAGES_TICKED: usize = 10;
+/// The most web pages a plan lists.
+pub const MAX_PAGES: usize = 30;
+/// An app counts as in use from this much time in front.
+const APP_MIN_US: u64 = 30 * 1_000_000;
 
 /// What Resume would open for one item, in the order the sheet lists it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ResumePlan {
+    /// The item, when it is known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item: Option<ResumeItem>,
+    /// Its last session's own time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session: Option<ResumeSession>,
     /// What was open in the item's last session.
     pub items: Vec<ResumeTarget>,
+}
+
+/// The item a plan is for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ResumeItem {
+    /// Its name, as its windows' titles write it.
+    pub name: String,
+    /// `code`, `document`, `design` or `spreadsheet`.
+    pub kind: SubjectKind,
+}
+
+/// The session a plan comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ResumeSession {
+    /// When it started, in microseconds since the epoch.
+    pub start_us: u64,
+    /// When its last moment was.
+    pub end_us: u64,
 }
 
 /// One thing Resume could open again.
@@ -42,15 +98,57 @@ pub struct ResumeTarget {
     /// Why it can't be opened again, when it can't (shown in place of a
     /// checkbox): "Couldn't find tax.rs".
     pub note: Option<String>,
+    /// What about it the sheet explains, as a code the window words:
+    /// `missing` (the folder or file is gone; it can't open), `no_address`
+    /// (a page whose address isn't known; it can't open), `single_note`
+    /// (Notes opens the app, never one note), `app_only` (the app opens,
+    /// not this document) and `no_folder` (the editor opens without the
+    /// folder).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl ResumeTarget {
+    fn new(kind: &str, title: &str, app: &str) -> Self {
+        Self {
+            kind: kind.to_owned(),
+            title: title.to_owned(),
+            app: Some(app.to_owned()),
+            url: None,
+            path: None,
+            checked: true,
+            note: None,
+            reason: None,
+        }
+    }
+
+    fn because(mut self, reason: &str) -> Self {
+        // Gone, or never known: nothing to open, so no tick.
+        if matches!(reason, "missing" | "no_address") {
+            self.checked = false;
+        }
+        self.reason = Some(reason.to_owned());
+        self
+    }
 }
 
 /// `mci-agent resume-plan`: the plan as JSON. `--item <id>` is required.
 ///
 /// # Errors
-/// [`ReadError::Usage`] without an item's id; never anything read.
+/// [`ReadError::Usage`] without an item's id; [`ReadError::Failed`] when the
+/// memory can't be read. Neither repeats what was given or anything read.
 pub fn run_cli(command: &ReadCommand<'_>) -> Result<serde_json::Value, ReadError> {
-    item_of(command.args)?;
-    serde_json::to_value(ResumePlan::default())
+    let item = item_of(command.args)?;
+    let plan = plan(
+        command.store,
+        command.key,
+        &item,
+        command.tz_offset_secs,
+        command.now_us,
+        &Home::from_env(),
+    )
+    .map_err(|_| ReadError::Failed("resume-plan could not be read from the memory".into()))?;
+    serde_json::to_value(plan)
         .map_err(|_| ReadError::Failed("resume-plan could not be written".into()))
 }
 
@@ -67,6 +165,287 @@ pub fn item_of(args: &[String]) -> Result<String, ReadError> {
         .filter(|id| is_item_id(id))
         .cloned()
         .ok_or_else(|| ReadError::Usage("--item requires an item's id".into()))
+}
+
+/// What Resume would open for the item with `id`: empty for an item that
+/// isn't there (forgotten, past retention, or never one).
+///
+/// # Errors
+/// Store failures.
+pub fn plan(
+    store: &SqlCipherBrainStore,
+    key: &DbKey,
+    id: &str,
+    tz: i32,
+    now_us: u64,
+    home: &Home,
+) -> Result<ResumePlan, StoreError> {
+    let model = super::work::model(store, key, None, tz, now_us, home)?;
+    let Some((_, acc)) = model.items.iter().find(|(item, _)| item == id) else {
+        return Ok(ResumePlan::default());
+    };
+    let Some(&last) = acc.sessions.iter().next_back() else {
+        return Ok(ResumePlan::default());
+    };
+    let session = &model.sessions[last];
+    let about = &model.about[last];
+    let kind = acc.kind.unwrap_or(SubjectKind::Document);
+    let urls = addresses(store, &session.held)?;
+
+    let mut targets = Vec::new();
+    if kind == SubjectKind::Code {
+        targets.extend(code_folder(store, acc, &session.held, about, home)?);
+    }
+    targets.extend(documents(acc, &session.held, about, &urls));
+    targets.extend(pages(&session.held, about, &urls));
+    targets.extend(other_apps(&session.held, about, &targets));
+    Ok(ResumePlan {
+        item: Some(ResumeItem {
+            name: acc.name.clone(),
+            kind,
+        }),
+        session: Some(ResumeSession {
+            start_us: session.start_us,
+            end_us: session.end_us,
+        }),
+        items: targets,
+    })
+}
+
+/// The address each browser window's newest moment had.
+fn addresses(
+    store: &SqlCipherBrainStore,
+    held: &[Held],
+) -> Result<HashMap<i64, String>, StoreError> {
+    let newest: Vec<i64> = held
+        .iter()
+        .filter(|held| is_browser(Some(&held.app)))
+        .filter_map(Held::newest)
+        .collect();
+    let mut urls = HashMap::new();
+    for batch in newest.chunks(500) {
+        for head in store.event_heads(batch)? {
+            if let Some(url) = head.url {
+                urls.insert(head.id, url);
+            }
+        }
+    }
+    Ok(urls)
+}
+
+/// The project's folder in the editor it was edited in, and a terminal in
+/// it when one was used. Without a folder, the editor alone.
+fn code_folder(
+    store: &SqlCipherBrainStore,
+    acc: &ItemAcc,
+    held: &[Held],
+    about: &[About],
+    home: &Home,
+) -> Result<Vec<ResumeTarget>, StoreError> {
+    let mut editors: HashMap<&str, u64> = HashMap::new();
+    let mut terminals: HashMap<&str, u64> = HashMap::new();
+    for (window, what) in held.iter().zip(about) {
+        let About::Item { identity, .. } = what else {
+            continue;
+        };
+        if *identity != acc.identity {
+            continue;
+        }
+        let time = if TERMINAL_APPS.contains(&window.app.as_str()) {
+            &mut terminals
+        } else {
+            &mut editors
+        };
+        *time.entry(window.app.as_str()).or_default() += window.held_us();
+    }
+    let longest = |time: &HashMap<&str, u64>| {
+        time.iter()
+            .max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0)))
+            .map(|(app, _)| (*app).to_owned())
+    };
+    let folder = read::folder_guess(store, acc, home.path.as_deref())?;
+    let missing = folder
+        .as_deref()
+        .is_some_and(|folder| !expand(folder, home).is_dir());
+    let mut out = Vec::new();
+    for app in [longest(&editors), longest(&terminals)]
+        .into_iter()
+        .flatten()
+    {
+        let mut target = ResumeTarget::new("folder", &acc.name, &app);
+        target.path.clone_from(&folder);
+        if folder.is_none() {
+            target = target.because("no_folder");
+            target.kind = "app".into();
+        } else if missing {
+            target = target.because("missing");
+        }
+        out.push(target);
+    }
+    Ok(out)
+}
+
+/// A path with `~` written out for the person's home folder.
+fn expand(path: &str, home: &Home) -> std::path::PathBuf {
+    match (path.strip_prefix('~'), home.path.as_deref()) {
+        (Some(rest), Some(home)) => Path::new(home).join(rest.trim_start_matches('/')),
+        _ => Path::new(path).to_path_buf(),
+    }
+}
+
+/// The documents, designs and spreadsheets open in the session, the item's
+/// own first: through their links on the web, or their app.
+fn documents(
+    acc: &ItemAcc,
+    held: &[Held],
+    about: &[About],
+    urls: &HashMap<i64, String>,
+) -> Vec<ResumeTarget> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut windows: Vec<(&Held, &str, &str)> = Vec::new();
+    for (window, what) in held.iter().zip(about).rev() {
+        let About::Item { identity, subject } = what else {
+            continue;
+        };
+        if subject.kind == SubjectKind::Code || !seen.insert(identity.clone()) {
+            continue;
+        }
+        windows.push((window, identity, &subject.name));
+    }
+    windows.sort_by_key(|(_, identity, _)| *identity != acc.identity);
+    windows
+        .into_iter()
+        .map(|(window, _, name)| {
+            if is_browser(Some(&window.app)) {
+                let url = window
+                    .newest()
+                    .and_then(|id| urls.get(&id))
+                    .and_then(|url| resume_url(url));
+                let mut target = ResumeTarget::new("document", name, &window.app);
+                if url.is_none() {
+                    return target.because("no_address");
+                }
+                target.url = url;
+                target
+            } else if window.app == "com.apple.Notes" {
+                ResumeTarget::new("document", name, &window.app).because("single_note")
+            } else {
+                ResumeTarget::new("document", name, &window.app).because("app_only")
+            }
+        })
+        .collect()
+}
+
+/// The web pages open in the session, newest first, one per address: the
+/// newest ten ticked. A search's results are never offered.
+fn pages(held: &[Held], about: &[About], urls: &HashMap<i64, String>) -> Vec<ResumeTarget> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out: Vec<ResumeTarget> = Vec::new();
+    for (window, what) in held.iter().zip(about).rev() {
+        let title = match what {
+            About::Page { name, .. } => name.clone(),
+            About::AiChat { title, .. } => title.clone(),
+            _ => continue,
+        };
+        if !is_browser(Some(&window.app)) {
+            continue;
+        }
+        let url = window
+            .newest()
+            .and_then(|id| urls.get(&id))
+            .and_then(|url| resume_url(url));
+        let key = url
+            .clone()
+            .unwrap_or_else(|| format!("{}|{title}", window.app));
+        if !seen.insert(key) {
+            continue;
+        }
+        let mut target = ResumeTarget::new("page", &title, &window.app);
+        match url {
+            Some(url) => target.url = Some(url),
+            None => target = target.because("no_address"),
+        }
+        out.push(target);
+        if out.len() == MAX_PAGES {
+            break;
+        }
+    }
+    let mut ticked = 0;
+    for target in &mut out {
+        if target.checked {
+            ticked += 1;
+            target.checked = ticked <= PAGES_TICKED;
+        }
+    }
+    out
+}
+
+/// Other apps in front during the session: not a browser, not the item's
+/// own editor or terminal, not a call, not Hippocampus, longest first.
+fn other_apps(held: &[Held], about: &[About], already: &[ResumeTarget]) -> Vec<ResumeTarget> {
+    let taken: HashSet<&str> = already.iter().filter_map(|t| t.app.as_deref()).collect();
+    let mut time: HashMap<&str, u64> = HashMap::new();
+    for (window, what) in held.iter().zip(about) {
+        let app = window.app.as_str();
+        let code = matches!(what, About::Item { subject, .. } if subject.kind == SubjectKind::Code);
+        if is_browser(Some(app))
+            || taken.contains(app)
+            || code
+            || TERMINAL_APPS.contains(&app)
+            || apps::is_noise(app)
+            || matches!(app, "com.apple.finder" | "com.apple.systempreferences")
+            || apps::kind(app) == WorkKind::Meetings
+        {
+            continue;
+        }
+        *time.entry(app).or_default() += window.held_us();
+    }
+    let mut apps_in_use: Vec<(&str, u64)> = time
+        .into_iter()
+        .filter(|(_, held)| *held >= APP_MIN_US)
+        .collect();
+    apps_in_use.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    apps_in_use
+        .into_iter()
+        .map(|(app, _)| ResumeTarget::new("app", &apps::name(app), app))
+        .collect()
+}
+
+/// A page's address as Resume opens it: the scheme, host and path, never
+/// the query or fragment, which can carry sign-in tokens. A video keeps its
+/// `v`, the one part of a query that names the page.
+#[must_use]
+pub fn resume_url(url: &str) -> Option<String> {
+    let (scheme, rest) = url
+        .split_once("://")
+        .filter(|(scheme, _)| matches!(*scheme, "https" | "http"))?;
+    let (place, query) = match rest.split_once('?') {
+        Some((place, query)) => (place, Some(query.split('#').next().unwrap_or_default())),
+        None => (rest.split('#').next().unwrap_or_default(), None),
+    };
+    let host = place.split('/').next().unwrap_or_default();
+    if host.is_empty() || host.contains('@') {
+        return None;
+    }
+    let mut out = format!("{scheme}://{place}");
+    let bare_host = host.to_ascii_lowercase();
+    let bare_host = bare_host.strip_prefix("www.").unwrap_or(&bare_host);
+    if (bare_host == "youtube.com" || bare_host == "m.youtube.com") && place.ends_with("/watch") {
+        if let Some(video) = query.and_then(|query| {
+            query
+                .split('&')
+                .find_map(|pair| pair.strip_prefix("v="))
+                .filter(|video| {
+                    video
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+                })
+        }) {
+            out.push_str("?v=");
+            out.push_str(video);
+        }
+    }
+    Some(out)
 }
 
 #[cfg(test)]
@@ -103,16 +482,56 @@ mod tests {
             path: None,
             checked: false,
             note: Some("Notes opens the app; Hippocampus can’t open a single note".into()),
+            reason: None,
         };
         let value = serde_json::to_value(ResumePlan {
             items: vec![target],
+            ..ResumePlan::default()
         })
         .unwrap();
         assert_eq!(value["items"][0]["kind"], "document");
         assert_eq!(value["items"][0]["checked"], false);
+        assert!(value.get("item").is_none());
         assert_eq!(
             serde_json::to_value(ResumePlan::default()).unwrap(),
             serde_json::json!({"items": []})
+        );
+    }
+
+    #[test]
+    fn a_reason_that_means_it_cant_open_leaves_it_unticked() {
+        let target = ResumeTarget::new("folder", "trailhead-shop", "com.microsoft.VSCode");
+        assert!(!target.clone().because("missing").checked);
+        assert!(!target.clone().because("no_address").checked);
+        assert!(target.clone().because("single_note").checked);
+        assert!(target.because("no_folder").checked);
+    }
+
+    #[test]
+    fn resume_opens_an_address_without_its_query_or_fragment() {
+        assert_eq!(
+            resume_url("https://devnotes.example/rounding?utm=x&token=secret#top").as_deref(),
+            Some("https://devnotes.example/rounding")
+        );
+        assert_eq!(
+            resume_url("https://docs.google.com/document/d/abc123/edit?tab=t.0#heading=h.1")
+                .as_deref(),
+            Some("https://docs.google.com/document/d/abc123/edit")
+        );
+        assert_eq!(
+            resume_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42").as_deref(),
+            Some("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        );
+        assert_eq!(
+            resume_url("http://localhost:3000/").as_deref(),
+            Some("http://localhost:3000/")
+        );
+        assert_eq!(resume_url("file:///Users/dev/notes.txt"), None);
+        assert_eq!(resume_url("javascript:alert(1)"), None);
+        assert_eq!(
+            resume_url("https://user:pass@example.com/"),
+            None,
+            "never credentials"
         );
     }
 }

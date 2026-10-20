@@ -141,7 +141,7 @@ const VERBS: &[&str] = &[
 ];
 
 /// General words for what is on a screen, which need no grounding.
-const GENERIC: &[&str] = &[
+pub(crate) const GENERIC: &[&str] = &[
     "page",
     "pages",
     "site",
@@ -277,7 +277,7 @@ const CALL_WORDS: &[&str] = &[
 
 /// Site and product names a window title often ends with; the fallback
 /// leaves them out of what it restates.
-const TITLE_SUFFIXES: &[&str] = &[
+pub(crate) const TITLE_SUFFIXES: &[&str] = &[
     "google chrome",
     "chrome",
     "safari",
@@ -316,7 +316,7 @@ const TITLE_SUFFIXES: &[&str] = &[
 ];
 
 /// Titles that name no page: a new tab, a start page, a site's home.
-const BLANK_PAGES: &[&str] = &[
+pub(crate) const BLANK_PAGES: &[&str] = &[
     "new tab",
     "new window",
     "new private tab",
@@ -398,7 +398,7 @@ const SEARCH_PAGES: &[(&str, &str)] = &[
 ];
 
 /// Title endings of search result pages.
-const SEARCH_TITLE_ENDS: &[&str] = &[
+pub(crate) const SEARCH_TITLE_ENDS: &[&str] = &[
     " - Google Search",
     " - Bing",
     " at DuckDuckGo",
@@ -535,7 +535,7 @@ fn beside(
 }
 
 /// Slack's channel ("#launch") or person ("Sam Lee") a title names.
-fn slack_place(raw: &str) -> Option<String> {
+pub(crate) fn slack_place(raw: &str) -> Option<String> {
     if let Some(channel) = raw
         .split(" (Channel)")
         .next()
@@ -723,7 +723,7 @@ fn without_issue_key(title: &str) -> &str {
 
 /// An email subject without its reply and forward marks: "Fwd: Re: Launch
 /// plan" is "Launch plan".
-fn without_reply_marks(subject: &str) -> &str {
+pub(crate) fn without_reply_marks(subject: &str) -> &str {
     let mut rest = subject.trim();
     loop {
         let lower = rest.to_lowercase();
@@ -737,13 +737,13 @@ fn without_reply_marks(subject: &str) -> &str {
     }
 }
 
-fn is_mailbox(subject: &str) -> bool {
+pub(crate) fn is_mailbox(subject: &str) -> bool {
     let lower = subject.trim().to_lowercase();
     let lower = lower.split(" (").next().unwrap_or(&lower).trim();
     MAILBOXES.contains(&lower)
 }
 
-fn is_slack_view(title: &str) -> bool {
+pub(crate) fn is_slack_view(title: &str) -> bool {
     let lower = title.trim().to_lowercase();
     let lower = lower.split(" (").next().unwrap_or(&lower).trim();
     SLACK_VIEWS.contains(&lower) || lower.starts_with("huddle") || lower.starts_with("search")
@@ -767,7 +767,7 @@ fn says_nothing(part: &str, app_name: &str) -> bool {
 
 /// The first line of a document's text, as its name: two to eight words, at
 /// most [`MAX_NAME_CHARS`] characters, not a sentence.
-fn first_heading(text: &str) -> Option<String> {
+pub(crate) fn first_heading(text: &str) -> Option<String> {
     let line = text.lines().map(str::trim).find(|line| !line.is_empty())?;
     let words = line.split_whitespace().count();
     ((1..=8).contains(&words)
@@ -838,7 +838,7 @@ fn percent_decode(text: &str) -> String {
 /// The parts of a window title worth restating: without the status mark an
 /// app puts before it, an unread count or "Edited", and without the app's or
 /// a site's name at the end. Split at " - ", " — ", " – ", " | " and " · ".
-fn title_segments(title: &str, app_name: &str) -> Vec<String> {
+pub(crate) fn title_segments(title: &str, app_name: &str) -> Vec<String> {
     let mut text = without_title_marks(title);
     if text.starts_with('(') {
         if let Some((count, rest)) = text[1..].split_once(')') {

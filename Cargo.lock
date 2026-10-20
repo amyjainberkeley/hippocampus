@@ -967,6 +967,7 @@ dependencies = [
  "getrandom 0.3.4",
  "rusqlite",
  "rustix",
+ "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",

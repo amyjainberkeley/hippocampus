@@ -89,6 +89,38 @@ final class WorkReaderDecodingTests: XCTestCase {
         XCTAssertEqual(work.momentItems.count, 2, "a key that reads as no id is dropped; two that read as one keep one")
     }
 
+    func testAnItemsPageReadsItsSitesTimeConversationsAndSessions() throws {
+        let item = try JSONDecoder().decode(WorkItem.self, from: Data(#"""
+            {"id": "w_0e6d2a9f8c3b7154de22", "kind": "document", "name": "Q4 planning",
+             "apps": ["com.google.Chrome"], "hosts": ["docs.google.com"], "last_us": 1791839940000000,
+             "week_minutes": 90, "days_this_week": 3, "total_minutes": 150,
+             "in_sidebar": true, "recent": true, "hidden_reason": null,
+             "conversations": [{"name": "#launch", "app": "com.tinyspeck.slackmacgap", "moment": 81228,
+                                "last_us": 1791841680000000}],
+             "sessions": [{"start_us": 1791839700000000, "end_us": 1791840600000000}]}
+            """#.utf8))
+        XCTAssertEqual(item.hosts, ["docs.google.com"])
+        XCTAssertEqual(item.totalMinutes, 150)
+        XCTAssertEqual(item.conversations, [WorkConversation(name: "#launch", app: "com.tinyspeck.slackmacgap",
+                                                             moment: 81_228, lastUs: 1_791_841_680_000_000)])
+        XCTAssertEqual(item.sessions, [WorkSession(startUs: 1_791_839_700_000_000, endUs: 1_791_840_600_000_000)])
+        XCTAssertTrue(item.recent)
+        XCTAssertEqual(WorkFormat.placesSentence(item, appName: { _ in "Chrome" }), "Google Docs in Chrome")
+    }
+
+    func testAnOlderAgentsItemReadsWithItsWeekAsItsTotal() throws {
+        let item = try JSONDecoder().decode(WorkItem.self, from: Data(#"""
+            {"id": "w_1", "kind": "spreadsheet", "name": "Mortgage refinance", "last_us": 5, "week_minutes": 40,
+             "in_sidebar": false, "hidden_reason": "personal"}
+            """#.utf8))
+        XCTAssertEqual(item.totalMinutes, 40)
+        XCTAssertFalse(item.recent, "without the field, it is what the sidebar says")
+        XCTAssertTrue(item.looksPersonal)
+        XCTAssertEqual(item.conversations, [])
+        XCTAssertEqual(item.sessions, [])
+        XCTAssertEqual(item.hosts, [])
+    }
+
     func testThePreviewReaderReadsNothingButItsFixtures() async throws {
         let empty = PreviewWorkReader()
         let snapshot = try await empty.work(days: 90)
