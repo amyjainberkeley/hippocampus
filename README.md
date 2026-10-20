@@ -65,6 +65,7 @@ Answers and summaries need Apple Intelligence (macOS 26) or a model on your Mac.
 - **You can tell.** A solid dot means it is remembering. No solid dot means it is not.
 - **It stays on your Mac.** Encrypted on disk. Hippocampus itself has no cloud service. There is no account and no telemetry, and it uploads nothing you saw.
 - **Some things are skipped.** Password fields, six password managers, private browser windows that show they are private, and a short list of bank and sign-in sites. They are rules, and [PRIVACY.md](PRIVACY.md#what-is-skipped) says what they miss.
+- **Screenshots are kept, encrypted.** Of the window you're in, and of other windows you can see when their text changes, up to 2 GB of those. Calls, video and private windows are never kept. Preferences turns off the pictures of other windows ([more](PRIVACY.md#what-is-stored)).
 - **Your AI tools get it only if you connect them, or send it yourself.** Ask Claude opens the tool with the message in its box, and nothing is sent until you press send. What a tool reads goes to the company that runs it. A connected tool can read your memory while Hippocampus is quit, until you [disconnect it](PRIVACY.md#disconnecting-an-ai-tool), which takes one click in Preferences.
 - **You can stop it.** Pause from the menu bar. Quit, or Stop Sharing in macOS, stops remembering.
 - **Forgetting is real.** Forget a moment, a session, the last 10 minutes, today or everything, and what was learned from it goes too.

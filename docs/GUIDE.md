@@ -1,11 +1,13 @@
 # Hippocampus guide
 
-The [README](../README.md) says what Hippocampus is. This is the reference: the window's keys, the command line, a made-up memory to try things on, Demo Memory, search by meaning in a source build, keeping an app out, your own MCP servers, and fixing things.
+The [README](../README.md) says what Hippocampus is. This is the reference: the window's keys, the command line, a made-up memory to try things on, Demo Memory, your calendar, pictures of other windows, search by meaning in a source build, keeping an app out, your own MCP servers, and fixing things.
 
 - [The window's keys](#the-windows-keys)
 - [The command line](#the-command-line)
 - [Try it on a made-up memory](#try-it-on-a-made-up-memory)
 - [Demo Memory](#demo-memory)
+- [Your calendar](#your-calendar)
+- [Pictures of other windows](#pictures-of-other-windows)
 - [Search by meaning in a source build](#search-by-meaning-in-a-source-build)
 - [Keep an app out](#keep-an-app-out)
 - [Pull in your other MCP servers](#pull-in-your-other-mcp-servers)
@@ -116,6 +118,16 @@ cargo build -p mci-agent --bin mci-seed-brain
 ```
 
 Before filming: AI tools you connected still read your own memory while Demo Memory is in use, so disconnect them first if you film one; and Resume and Open Link open the week's real sites in your own browser, so use a browser profile with no accounts signed in.
+
+## Your calendar
+
+Off until you turn it on: Today offers Show Calendar once, and Preferences has Show my calendar on Today, under General. macOS then asks to let Hippocampus read your calendars; it calls this full access, and Hippocampus only reads. Each event's title, time, calendar name and place are read on this Mac to draw today's meetings over your day, name a call after its meeting, list an item's meetings and answer "when did I last meet …" in Ask. Nothing from the calendar is stored or sent, and attendees are never read. Turn it off in Preferences, or in System Settings › Privacy & Security › Calendars; Today then drops the meetings ([ADR-0049](decisions/0049-calendar.md)).
+
+While Demo Memory is in use, the window shows the week's made-up calendar and Ask leaves yours out.
+
+## Pictures of other windows
+
+Hippocampus keeps a screenshot of the window you're in. It also keeps one of another window you can see when that window's text changes, so History shows the chat beside your editor as it looked. Calls, video, private windows and anything skipped are never kept, and anything covering the window is blanked out. These pictures use at most 2 GB, older ones thinned out first; Preferences, under Remembering, changes that, turns them off, or forgets them while keeping their text. On a Mac that used an earlier version, they stay off until you turn them on ([ADR-0047](decisions/0047-side-window-pictures.md)).
 
 ## Search by meaning in a source build
 
