@@ -49,6 +49,7 @@ public extension UserFacingCopy {
 
         /// Under the Right now card when no AI tool starts its sessions with
         /// what Hippocampus knows (RULINGS W5, onboarding product critique 4).
+        /// Today's first-day card says `connectRecentWork` (SPEC 9, row 52).
         public static let connectLine = "Claude Code and Codex can start with what you\u{2019}re working on."
         /// "What your AI starts with", with nothing to send yet.
         public static let aiKnowsNothingYet = "Nothing yet. A session is added a few minutes after it ends."
@@ -112,5 +113,101 @@ public extension UserFacingCopy {
         public static let stripLabel = "Sessions of the day"
         /// The legend's accessibility hint.
         public static let legendHint = "Shows only this kind of work"
+
+        // MARK: Today (SPEC 3.1, SPEC-DELTA 5)
+
+        /// The legend's words that aren't the sidebar's: the day strip's six
+        /// kinds are Code, Documents, Conversations, Web Pages, Calls and Other.
+        public static let calls = "Calls"
+        public static let other = "Other"
+
+        /// The card after a gap: "Where you left off · Yesterday at 6:12 PM".
+        public static func leftOff(_ when: String) -> String {
+            "Where you left off \u{00B7} \(when)"
+        }
+
+        /// When the card's session was: "Today at 2:35 PM", "Yesterday at
+        /// 6:12 PM", "Friday at 6:12 PM", "Oct 2 at 6:12 PM".
+        public static func at(_ day: String, _ time: String) -> String {
+            "\(day) at \(time)"
+        }
+
+        public static let yesterday = "Yesterday"
+
+        /// The day's section and, on the right, its span ("9:05 AM – 2:41 PM").
+        public static let yourDay = "Your day"
+        /// Today with nothing saved yet this morning.
+        public static let todayNothingYet = "Nothing saved yet today. Your day fills in here as you work."
+        public static let lookedUpToday = "Looked up today"
+        /// Opens Looked Up.
+        public static let all = "All"
+
+        /// Under the card on a morning: Working On items from the last day of
+        /// use not opened today. "Also from yesterday:", "Also from Friday:".
+        public static func alsoFrom(_ day: String) -> String {
+            "Also from \(day):"
+        }
+
+        /// The card's ⋯ menu, and its VoiceOver name.
+        public static let more = "More"
+        /// The card's ⋯ menu: everything saved in the session's time.
+        public static func forgetSession(_ range: String) -> String {
+            "Forget \(range)\u{2026}"
+        }
+
+        /// The card for VoiceOver: "Now, since 2:12 PM: Trailhead pricing v3, Figma and Notes".
+        public static func cardLabel(_ moment: String, title: String, apps: [String]) -> String {
+            let names = ListFormatter.localizedString(byJoining: apps)
+            return names.isEmpty ? "\(moment): \(title)" : "\(moment): \(title), \(names)"
+        }
+
+        /// A length on Today: "36 min", "1 hr, 5 min", as the system writes it.
+        public static func minutes(_ us: Int64, locale: Locale = .autoupdatingCurrent) -> String {
+            let minutes = max(1, Int((Double(max(0, us)) / 60_000_000).rounded()))
+            let formatter = DateComponentsFormatter()
+            formatter.allowedUnits = [.hour, .minute]
+            formatter.unitsStyle = .short
+            formatter.zeroFormattingBehavior = .dropAll
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.locale = locale
+            formatter.calendar = calendar
+            return formatter.string(from: TimeInterval(minutes * 60)) ?? "\(minutes) min"
+        }
+
+        /// An app and its time on a card: "VS Code 9 min".
+        public static func appMinutes(_ app: String, _ length: String) -> String {
+            "\(app) \(length)"
+        }
+
+        // The first day.
+
+        /// Paused on the first day.
+        public static let firstDayPausedBody = "Your day fills in here when you resume. It stays on this Mac."
+        /// A permission off on the first day; the banner above names it.
+        public static let firstDayPermissionBody =
+            "Your day fills in here once the permission is back on. It stays on this Mac."
+        /// Opens AI Tools in Preferences, where tools are connected.
+        public static let connect = "Connect\u{2026}"
+        public static let connectRecentWork = "Claude Code and Codex can start with your recent work."
+        /// "Saved so far: 6 moments." with the newest under it.
+        public static func savedSoFar(_ count: UInt64) -> String {
+            count == 1 ? "Saved so far: 1 moment." : "Saved so far: \(count.formatted()) moments."
+        }
+
+        public static let seeThemInHistory = "See Them in History"
+
+        // The calendar, offered once (SPEC-DELTA 5).
+
+        public static let showCalendarLine = "Show your calendar on Today."
+        public static let showCalendar = "Show Calendar"
+        /// A calendar bar over the strip, for VoiceOver and its tooltip.
+        public static func calendarItem(_ title: String, time: String) -> String {
+            "\(title), \(time), from your calendar"
+        }
+
+        /// A screenshot, for VoiceOver: "Screenshot: Checkout tax rounding, 2:31 PM".
+        public static func screenshotLabel(_ title: String, time: String) -> String {
+            "Screenshot: \(title), \(time)"
+        }
     }
 }

@@ -45,12 +45,18 @@ final class OverviewViewModelTests: XCTestCase {
         XCTAssertTrue(model.blocks.isEmpty)
     }
 
-    func testTheDaysLastSessionIsSelectedUntilAnotherIsPicked() async throws {
+    /// The card shows the session going on now, so the day's detail starts
+    /// on the one before it, as the approved Today does; another day, with no
+    /// card, starts on its last.
+    func testTheSessionBeforeTheCardsIsSelectedUntilAnotherIsPicked() async throws {
         let (model, _) = try await loaded()
-        XCTAssertEqual(model.selectedBlock?.id, 1_791_839_523_000_000)
+        XCTAssertEqual(model.rightNow?.blockId, 1_791_839_523_000_000)
+        XCTAssertEqual(model.selectedBlock?.id, 1_791_837_660_000_000)
         let morning = model.blocks[1]
         model.select(morning)
         XCTAssertEqual(model.selectedBlock, morning)
+        model.moveDay(-1)
+        XCTAssertNil(model.rightNow)
     }
 
     func testAPickedSessionIsFoundAgainByItsTimeWhenItsIdChanges() async throws {
@@ -91,14 +97,17 @@ final class OverviewViewModelTests: XCTestCase {
         model.select(overview.blocks[0])
         await understanding.setOverview(overview.with(blocks: Array(overview.blocks.dropFirst())))
         await model.feed.load(model.day)
-        XCTAssertEqual(model.selectedBlock?.id, overview.blocks.last?.id)
+        XCTAssertEqual(model.selectedBlock?.id, overview.blocks[overview.blocks.count - 2].id,
+                       "back to the session before the card's")
     }
 
     func testArrowsMoveBetweenSessionsAndStopAtTheEnds() async throws {
         let (model, _) = try await loaded()
         let ids = model.blocks.map(\.id)
-        model.moveSelection(by: -1)
         XCTAssertEqual(model.selectedBlock?.id, ids[ids.count - 2])
+        model.moveSelection(by: -1)
+        XCTAssertEqual(model.selectedBlock?.id, ids[ids.count - 3])
+        model.moveSelection(by: 1)
         model.moveSelection(by: 1)
         model.moveSelection(by: 1)
         XCTAssertEqual(model.selectedBlock?.id, ids.last)
@@ -144,7 +153,7 @@ final class OverviewViewModelTests: XCTestCase {
         XCTAssertTrue(model.blocks.filter { $0.kind == .code }.allSatisfy { !model.isDimmed($0) })
         model.toggleHighlight(.code)
         XCTAssertTrue(model.blocks.allSatisfy { !model.isDimmed($0) })
-        model.toggleHighlight(.media)
+        model.toggleHighlight(.other)
         XCTAssertTrue(model.blocks.allSatisfy { !model.isDimmed($0) }, "clicking a kind never dims everything")
     }
 
@@ -207,18 +216,23 @@ final class OverviewViewModelTests: XCTestCase {
 
     func testCopyForYourAICopiesTheTimeTheCaptionNames() throws {
         let overview = try UnderstandingFixture.overview()
-        let touching = RightNow(state: .inProgress, sinceUs: 1_000, startUs: 5_000, lastSavedUs: 9_000, blockId: 5_000,
-                                title: "Draft", writtenBy: "measured", appName: "Notes", openEventId: 7, reopen: nil)
+        let nowUs = Int64(SampleDay.now.timeIntervalSince1970 * 1_000_000)
+        let minute: Int64 = 60_000_000
+        let touching = RightNow(state: .inProgress, sinceUs: nowUs - 30 * minute, startUs: nowUs - 10 * minute,
+                                lastSavedUs: nowUs - minute, blockId: nowUs - 10 * minute, title: "Draft",
+                                writtenBy: "measured", appName: "Notes", openEventId: 7, reopen: nil)
         let card = try XCTUnwrap(RightNowCard(overview: overview.with(now: touching), receipt: nil, now: SampleDay.now))
-        XCTAssertEqual(card.moment, .now(sinceUs: 1_000))
-        XCTAssertEqual(card.copyRange, 1_000...9_000, "since the start of the run, as the caption says")
-        let stopped = RightNow(state: .lastSaved, sinceUs: nil, startUs: 5_000, lastSavedUs: 9_000, blockId: 5_000,
-                               title: "Draft", writtenBy: "measured", appName: "Notes", openEventId: 7, reopen: nil)
+        XCTAssertEqual(card.moment, .now(sinceUs: nowUs - 30 * minute))
+        XCTAssertEqual(card.copyRange, (nowUs - 30 * minute)...(nowUs - minute),
+                       "since the start of the run, as the caption says")
+        let stopped = RightNow(state: .lastSaved, sinceUs: nil, startUs: nowUs - 10 * minute,
+                               lastSavedUs: nowUs - minute, blockId: nowUs - 10 * minute, title: "Draft",
+                               writtenBy: "measured", appName: "Notes", openEventId: 7, reopen: nil)
         let last = try XCTUnwrap(RightNowCard(overview: overview.with(now: stopped), receipt: nil, now: SampleDay.now))
-        XCTAssertEqual(last.moment, .lastSaved(atUs: 9_000))
-        XCTAssertEqual(last.copyRange, 5_000...9_000)
+        XCTAssertEqual(last.moment, .leftOff(atUs: nowUs - minute))
+        XCTAssertEqual(last.copyRange, (nowUs - 10 * minute)...(nowUs - minute))
         XCTAssertEqual(spaced(last.caption(locale: SampleDay.locale, timeZone: TimeZone(identifier: "UTC")!)),
-                       "Last saved 12:00 AM")
+                       "Where you left off \u{00B7} Today at 9:36 PM")
     }
 
     func testTheCardNeverSaysNowWhileNothingIsBeingSaved() async throws {
@@ -229,8 +243,9 @@ final class OverviewViewModelTests: XCTestCase {
         ] {
             let (model, _) = try await loaded(receipt: receipt)
             let card = try XCTUnwrap(model.rightNow)
-            XCTAssertEqual(card.moment, .lastSaved(atUs: 1_791_841_000_000_000))
-            XCTAssertEqual(spaced(card.caption(locale: SampleDay.locale, timeZone: SampleDay.timeZone)), "Last saved 2:36 PM")
+            XCTAssertEqual(card.moment, .leftOff(atUs: 1_791_841_000_000_000))
+            XCTAssertEqual(spaced(card.caption(locale: SampleDay.locale, timeZone: SampleDay.timeZone)),
+                           "Where you left off \u{00B7} Today at 2:36 PM")
             XCTAssertEqual(card.copyRange, 1_791_839_523_000_000...1_791_841_000_000_000)
         }
         let (trusting, _) = try await loaded(receipt: nil)
@@ -250,6 +265,9 @@ final class OverviewViewModelTests: XCTestCase {
     func testTheCardsOwnSessionIsKnownSoItsDetailDoesNotRepeatTheCard() async throws {
         let (model, _) = try await loaded(receipt: SampleDay.receipt())
         XCTAssertEqual(model.rightNow?.blockId, 1_791_839_523_000_000)
+        XCTAssertEqual(model.selectedBlock?.id, 1_791_837_660_000_000, "the detail starts on the session before")
+        XCTAssertFalse(model.selectedIsRightNow)
+        model.moveSelection(by: 99)
         XCTAssertEqual(model.selectedBlock?.id, 1_791_839_523_000_000)
         XCTAssertTrue(model.selectedIsRightNow)
         model.select(model.blocks[1])

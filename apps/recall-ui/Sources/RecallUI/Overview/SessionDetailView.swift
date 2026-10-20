@@ -3,19 +3,19 @@ import RecallUIKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The selected session (contract overview.md section 17): title, time and
-/// length, kind, apps with their minutes, up to two sentences, what
-/// Hippocampus noticed with who wrote it, the screenshot, searches that search
-/// in Ask, then "Show in History", "Copy for your AI" and "Open Page" or
-/// "Open {App}".
+/// The selected session on Today (SPEC 3.1): its title (a call's or
+/// meeting's is its calendar event's), time and length, its kind in the
+/// sidebar's words, its apps with their minutes, what Hippocampus noticed
+/// with who wrote it, "You looked up", the Ask button and Show in History,
+/// and its screenshot. Nothing here counts what the person did (RULINGS W4).
 struct SessionDetailView: View {
     let detail: SessionDetail
     let reader: BrainReader
     let open: (RecallRoute) -> Void
     let search: (String) -> Void
     @Binding var noticedOpen: Bool
-    /// False for the session the Right now card already shows: its "Copy
-    /// for your AI" and "Open …" are on the card, so they are not repeated.
+    /// False for the session the card at the top already shows: its Ask
+    /// button is on the card, so it is not repeated.
     var showsCardActions = true
 
     var body: some View {
@@ -24,11 +24,7 @@ struct SessionDetailView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     header
                     if !detail.apps.isEmpty {
-                        HStack(spacing: 14) {
-                            ForEach(detail.apps) { app in
-                                AppTimeLabel(app: app)
-                            }
-                        }
+                        AppTimes(apps: detail.apps)
                     }
                     if !detail.sentences.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
@@ -67,10 +63,8 @@ struct SessionDetailView: View {
                     actions
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                if detail.screenshotEventId != nil {
-                    SessionScreenshot(eventId: detail.screenshotEventId, reader: reader,
-                                      size: CGSize(width: 240, height: 150))
-                }
+                SessionScreenshot(eventId: detail.screenshotEventId, reader: reader,
+                                  size: CGSize(width: 240, height: 150), fallbackApp: detail.apps.first?.bundleId)
             }
         }
     }
@@ -87,7 +81,7 @@ struct SessionDetailView: View {
                 .foregroundStyle(MCI.Color.foregroundSecondary)
             HStack(spacing: 6) {
                 Circle()
-                    .fill(DayStripPalette.color(for: detail.kind))
+                    .fill(DayStripPalette.color(for: detail.stripKind))
                     .frame(width: 8, height: 8)
                     .accessibilityHidden(true)
                 Text(detail.kindLine)
@@ -99,20 +93,17 @@ struct SessionDetailView: View {
 
     private var actions: some View {
         HStack(spacing: 8) {
+            if showsCardActions {
+                AskAIButton(source: .session(title: detail.title, range: detail.copyRange), reader: reader)
+            }
             Button(UserFacingCopy.showInHistory) { open(detail.history) }
                 .buttonStyle(.bordered)
-            if showsCardActions {
-                CopyForYourAIButton(title: detail.title, range: detail.copyRange, reader: reader)
-                if let reopen = detail.reopen {
-                    ReopenButton(action: reopen, prominent: true)
-                }
-            }
         }
         .padding(.top, 2)
     }
 }
 
-/// An app of a session with its minutes: icon, "Notes · 19m".
+/// An app of a session with its minutes: icon, "Notes 19 min".
 struct AppTimeLabel: View {
     let app: SessionDetail.AppTime
 
@@ -155,12 +146,24 @@ struct SearchChips: View {
             Text(UserFacingCopy.Overview.lookedUp)
                 .font(MCI.Font.caption)
                 .foregroundStyle(MCI.Color.foregroundMuted)
+            QueryChips(queries: queries, search: search)
+        }
+    }
+}
+
+/// Searches as chips, each in quotes as it was typed; clicking one opens it.
+struct QueryChips: View {
+    let queries: [String]
+    let search: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
             ChipFlow(spacing: 6) {
                 ForEach(queries, id: \.self) { query in
                     Button {
                         search(query)
                     } label: {
-                        Text(query)
+                        Text(verbatim: "\u{201C}\(query)\u{201D}")
                             .font(MCI.Font.caption)
                             .foregroundStyle(MCI.Color.foreground)
                             .lineLimit(1)

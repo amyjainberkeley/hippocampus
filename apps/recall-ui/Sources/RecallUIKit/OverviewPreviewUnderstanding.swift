@@ -31,7 +31,13 @@ public struct OverviewPreviewUnderstanding: UnderstandingReader {
         /// You, with nothing sure enough to send yet: every item is kept
         /// back or not seen lately.
         case nothingSentYet
+        /// The next morning, Tuesday at 8:43 AM: nothing saved yet today,
+        /// and Monday's day as an earlier one.
+        case nextMorning
     }
+
+    /// The next morning's clock: Tuesday, October 13, 2026, 8:43 AM in UTC−7.
+    public static let nextMorningNow = Date(timeIntervalSince1970: 1_791_841_025 + 18 * 3_600 + 3 * 60)
 
     public let state: State
 
@@ -41,6 +47,20 @@ public struct OverviewPreviewUnderstanding: UnderstandingReader {
 
     public func overview(_ day: UnderstandingDay) async throws -> DayOverview {
         switch state {
+        case .nextMorning:
+            if day == PreviewUnderstandingReader.sampleDay {
+                return try Self.edited(PreviewUnderstandingFixtures.overview) { json in
+                    Self.past(&json)
+                }
+            }
+            return try Self.edited(PreviewUnderstandingFixtures.overview) { json in
+                Self.empty(&json)
+                let start = (json["day_start_us"] as? Int64 ?? 0) + 86_400_000_000
+                json["date"] = "2026-10-13"
+                json["day_start_us"] = start
+                json["day_end_us"] = start + 86_400_000_000
+                json["now_us"] = Int64(Self.nextMorningNow.timeIntervalSince1970) * 1_000_000
+            }
         case .unavailable:
             throw UnderstandingError.unavailable
         case .todayEmpty, .nothingLearned, .nothingLearnedModelOff, .nothingSentYet:
@@ -121,7 +141,7 @@ public struct OverviewPreviewUnderstanding: UnderstandingReader {
             return try Self.edited(PreviewUnderstandingFixtures.modelPage, as: ModelPage.self) { json in
                 json["shared"] = []
             }
-        case .today, .pastDay, .noAITool:
+        case .today, .pastDay, .noAITool, .nextMorning:
             return try Self.decode(ModelPage.self, PreviewUnderstandingFixtures.modelPage)
         }
     }

@@ -8,6 +8,8 @@ public struct DayStripLayout: Equatable, Sendable {
     public struct Block: Equatable, Sendable, Identifiable {
         public let id: Int64
         public let kind: WorkKind
+        /// Its colour and legend word: the strip kind holding most of its time.
+        public let stripKind: StripKind
         public let x: Double
         public let width: Double
         /// Starts less than five minutes after the session before it: drawn
@@ -39,9 +41,12 @@ public struct DayStripLayout: Equatable, Sendable {
 
     /// Nil for a day with no sessions: no strip is drawn. `minimumWidth` is
     /// the narrowest a session may be drawn, as a fraction of the strip
-    /// (6 pt over the strip's width).
-    public init?(overview: DayOverview, minimumWidth: Double = 0, calendar: Calendar = .current) {
-        guard let strip = overview.strip, strip.endUs > strip.startUs, !overview.blocks.isEmpty else { return nil }
+    /// (6 pt over the strip's width). `span`, when given, is the time the
+    /// strip covers in place of the agent's: Today widens it to the day's
+    /// calendar (`TodayCalendar.span`).
+    public init?(overview: DayOverview, minimumWidth: Double = 0, calendar: Calendar = .current, span: DayStrip? = nil) {
+        guard let strip = span ?? overview.strip, strip.endUs > strip.startUs, !overview.blocks.isEmpty
+        else { return nil }
         startUs = strip.startUs
         endUs = strip.endUs
         let span = Double(strip.endUs - strip.startUs)
@@ -52,7 +57,8 @@ public struct DayStripLayout: Equatable, Sendable {
         blocks = overview.blocks.map { block in
             let x = fraction(block.startUs)
             let width = max(fraction(block.endUs) - x, minimum)
-            return Block(id: block.id, kind: block.kind, x: min(x, 1 - width), width: width,
+            return Block(id: block.id, kind: block.kind, stripKind: SessionDetail.stripKind(of: block),
+                         x: min(x, 1 - width), width: width,
                          touchesPrevious: block.touchesPrevious, inProgress: block.inProgress)
         }
         ticks = Self.ticks(from: strip.startUs, to: strip.endUs, calendar: calendar).map {
@@ -75,6 +81,24 @@ public struct DayStripLayout: Equatable, Sendable {
             spans.append(Span(startUs: cursor, endUs: end, x: fraction(cursor), width: fraction(end) - fraction(cursor)))
         }
         nothingSaved = spans
+    }
+
+    /// One word of the legend, with the time its sessions held.
+    public struct LegendEntry: Equatable, Sendable, Identifiable {
+        public let kind: StripKind
+        public let heldUs: Int64
+        public var id: StripKind { kind }
+    }
+
+    /// The legend under the strip, in the sidebar's words and a fixed order
+    /// (Code, Documents, Conversations, Web Pages, Calls, Other), each kind
+    /// that a session of the day is drawn in.
+    public static func legend(_ blocks: [DayBlock]) -> [LegendEntry] {
+        var held: [StripKind: Int64] = [:]
+        for block in blocks {
+            held[SessionDetail.stripKind(of: block), default: 0] += max(0, block.endUs - block.startUs)
+        }
+        return StripKind.allCases.compactMap { kind in held[kind].map { LegendEntry(kind: kind, heldUs: $0) } }
     }
 
     /// Local hour starts inside the span, every hour up to 8 hours, every two

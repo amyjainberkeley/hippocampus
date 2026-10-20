@@ -95,7 +95,7 @@ enum RecallPreviewRenderer {
                 model.perform(picked)
             }
             if let legend {
-                model.toggleHighlight(legend)
+                model.toggleHighlight(StripKind(legend))
             }
             let view = OverviewPlace(model: model, reader: brain, open: { _ in }, search: { _ in },
                                      hover: hover, noticedOpen: noticedOpen)

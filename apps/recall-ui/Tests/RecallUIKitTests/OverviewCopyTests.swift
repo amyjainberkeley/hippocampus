@@ -45,6 +45,23 @@ final class OverviewCopyTests: XCTestCase {
             ("firstDayOffTitle", Overview.firstDayOffTitle), ("firstDayOffBody", Overview.firstDayOffBody),
             ("openPreferences", Overview.openPreferences), ("now", Overview.now),
             ("firstDayAsk.none", Overview.firstDayAsk("")),
+            // Today (SPEC 3.1, SPEC-DELTA 5).
+            ("calls", Overview.calls), ("other", Overview.other),
+            ("leftOff", Overview.leftOff(Overview.at("Yesterday", "6:12 PM"))), ("yesterday", Overview.yesterday),
+            ("yourDay", Overview.yourDay), ("todayNothingYet", Overview.todayNothingYet),
+            ("lookedUpToday", Overview.lookedUpToday), ("all", Overview.all),
+            ("alsoFrom", Overview.alsoFrom("yesterday")), ("more", Overview.more),
+            ("forgetSession", Overview.forgetSession("2:12 to 2:36 PM")),
+            ("cardLabel", Overview.cardLabel("Now, since 2:12 PM", title: "Trailhead pricing v3",
+                                             apps: ["Figma", "Notes"])),
+            ("minutes", Overview.minutes(36 * 60_000_000)), ("appMinutes", Overview.appMinutes("Figma", "15 min")),
+            ("firstDayPausedBody", Overview.firstDayPausedBody),
+            ("firstDayPermissionBody", Overview.firstDayPermissionBody),
+            ("connect", Overview.connect), ("connectRecentWork", Overview.connectRecentWork),
+            ("savedSoFar", Overview.savedSoFar(6)), ("seeThemInHistory", Overview.seeThemInHistory),
+            ("showCalendarLine", Overview.showCalendarLine), ("showCalendar", Overview.showCalendar),
+            ("calendarItem", Overview.calendarItem("Team sync", time: "1:00 – 1:30 PM")),
+            ("screenshotLabel", Overview.screenshotLabel("Checkout tax rounding", time: "2:31 PM")),
         ]
         // Every Ask key the app can name, in the first day's line.
         for (key, names) in UserFacingCopy.askKeyNames.sorted(by: { $0.key < $1.key }) {

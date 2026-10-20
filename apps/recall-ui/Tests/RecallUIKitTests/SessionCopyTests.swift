@@ -152,11 +152,12 @@ final class SessionCopyTests: XCTestCase {
         XCTAssertEqual(detail.title, "Competitor pricing tables")
         XCTAssertTrue(detail.time.hasPrefix("1:41"), detail.time)
         XCTAssertTrue(detail.time.hasSuffix("2:05\u{202F}PM") || detail.time.hasSuffix("2:05 PM"), detail.time)
-        XCTAssertEqual(detail.length, "24m")
+        XCTAssertEqual(detail.length, "24 min")
         XCTAssertEqual(detail.kind, .research)
-        XCTAssertEqual(detail.kindLine, "Mostly Research, some Writing")
-        XCTAssertEqual(detail.apps.map(\.label), ["Safari \u{00B7} 12m", "Notes \u{00B7} 10m", "Slack \u{00B7} 3m"])
-        XCTAssertEqual(detail.sentences, ["You reworded a search twice."])
+        XCTAssertEqual(detail.stripKind, .webPages)
+        XCTAssertEqual(detail.kindLine, "Mostly Web Pages, some Documents", "the sidebar's words (SPEC 2.14)")
+        XCTAssertEqual(detail.apps.map(\.label), ["Safari 12 min", "Notes 10 min", "Slack 3 min"])
+        XCTAssertEqual(detail.sentences, [], "a sentence that counts rewordings never shows (RULINGS W4)")
         XCTAssertEqual(detail.noticed?.caption, "Written on this Mac by Apple Intelligence")
         XCTAssertEqual(detail.searches, ["bike shop pricing page examples", "bike shop pricing tiers examples",
                                          "bike rental pricing tiers"])
@@ -172,10 +173,10 @@ final class SessionCopyTests: XCTestCase {
         let now = try XCTUnwrap(overview.blocks.last)
         let detail = SessionDetail(block: now, locale: Locale(identifier: "en_US"),
                                    timeZone: TimeZone(secondsFromGMT: -25_200)!)
-        XCTAssertEqual(detail.kindLine, "Design")
+        XCTAssertEqual(detail.kindLine, "Documents", "design and writing are both Documents")
         XCTAssertNil(detail.noticed)
         XCTAssertEqual(detail.reopen?.label, "Open Notes")
-        XCTAssertEqual(detail.sentences, ["You switched between Figma and Notes five times."])
+        XCTAssertEqual(detail.sentences, [], "a sentence that counts switches never shows (RULINGS W4)")
     }
 
     func testAFinishedSessionOpensTheAppItSpentMostTimeIn() throws {

@@ -1,116 +1,228 @@
+import AppKit
 import RecallUIKit
 import SwiftUI
 
-/// The Right now card at the top of today's Overview (RULINGS W5): what you
-/// are working on or what was saved last, "Copy for your AI", "Open {App}" or
-/// "Open Page", and under it the exact lines a connected AI already has.
-struct RightNowCardView: View {
+/// The card at the top of Today (SPEC 3.1, SPEC-DELTA 3): "Now · since 2:12
+/// PM" or "Where you left off · Yesterday at 6:12 PM"; the session's title;
+/// its newest moment as History draws it; its apps with their minutes; its
+/// screenshot; "Part of trailhead-shop ›"; then Resume when the session is
+/// part of a Working On item, the Ask button, Open {App} or Open Page, Show
+/// in History, and the ⋯ menu.
+struct TodayCardView: View {
     let card: RightNowCard
+    @ObservedObject var model: OverviewViewModel
     let reader: BrainReader
-    /// Folded, the card shows this many lines of each kind; "Show All" shows
-    /// every line a connected AI is given.
-    static let foldedRecent = 2
-    static let foldedAbout = 2
-    @State private var showsAllLines = false
+    let open: (RecallRoute) -> Void
+
     @Environment(\.locale) private var locale
     @Environment(\.timeZone) private var timeZone
+    @Environment(\.forget) private var forget
+
+    private typealias Copy = UserFacingCopy.Overview
+
+    private var title: String { model.cardTitle ?? card.title }
+
+    private var apps: [SessionDetail.AppTime] {
+        SessionDetail.AppTime.of(card.block?.apps ?? [], locale: locale)
+    }
 
     var body: some View {
         OverviewCard {
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 6) {
-                        if case .now = card.moment {
-                            Circle()
-                                .fill(DayStripPalette.color(DayStripPalette.accent))
-                                .frame(width: 7, height: 7)
-                                .accessibilityHidden(true)
-                        }
-                        Text(card.caption(locale: locale, timeZone: timeZone))
-                            .font(MCI.Font.caption)
-                            .foregroundStyle(MCI.Color.foregroundSecondary)
-                    }
-                    Text(card.title)
-                        .font(MCI.Font.title)
-                        .foregroundStyle(MCI.Color.foreground)
-                        .lineLimit(2)
-                        .textSelection(.enabled)
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .top, spacing: 20) {
+                    info
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    SessionScreenshot(eventId: card.block?.screenshotEventId ?? card.openEventId, reader: reader,
+                                      size: CGSize(width: 240, height: 150),
+                                      fallbackApp: card.block?.apps.first?.bundleId)
+                        .accessibilityLabel(screenshotLabel)
                 }
-                HStack(spacing: 8) {
-                    CopyForYourAIButton(title: card.title, range: card.copyRange, reader: reader, prominent: true)
-                    if let reopen = card.reopen {
-                        ReopenButton(action: reopen)
-                    }
+                actions
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Copy.cardLabel(card.caption(locale: locale, timeZone: timeZone), title: title,
+                                           apps: apps.map(\.name)))
+    }
+
+    private var info: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                if case .now = card.moment {
+                    Circle()
+                        .fill(MCI.Color.accentFill)
+                        .frame(width: 7, height: 7)
+                        .accessibilityHidden(true)
                 }
-                Divider()
-                aiKnows
+                Text(card.caption(locale: locale, timeZone: timeZone))
+                    .font(MCI.Font.caption)
+                    .foregroundStyle(MCI.Color.foregroundSecondary)
+            }
+            Text(verbatim: title)
+                .font(MCI.Font.title)
+                .foregroundStyle(MCI.Color.foreground)
+                .lineLimit(2)
+                .textSelection(.enabled)
+                .padding(.top, 2)
+            if let moment = model.cardMoment {
+                MomentLine(hit: moment)
+                    .padding(.top, 8)
+            }
+            if !apps.isEmpty {
+                AppTimes(apps: apps)
+                    .padding(.top, 10)
+            }
+            if model.showsPartOf, let item = model.cardItem {
+                PartOfLink(name: item.name) { open(RecallRoute(workItem: item.id)) }
+                    .padding(.top, 6)
             }
         }
     }
 
-    @ViewBuilder
-    private var aiKnows: some View {
-        switch card.aiKnows {
-        case let .lines(recentWork, aboutYou):
-            let recent = recentWork.map { $0.text(locale: locale, timeZone: timeZone) }
-            let about = aboutYou.map(\.text)
-            let folds = recent.count + about.count > Self.foldedRecent + Self.foldedAbout
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(UserFacingCopy.aiStartsWith)
-                        .font(MCI.Font.bodyStrong)
-                        .foregroundStyle(MCI.Color.foreground)
-                    Spacer(minLength: 8)
-                    if folds {
-                        Button(showsAllLines ? UserFacingCopy.Overview.showLess : UserFacingCopy.Overview.showAll) {
-                            showsAllLines.toggle()
-                        }
-                        .buttonStyle(.borderless)
-                        .font(MCI.Font.caption)
-                    }
-                }
-                if recent.isEmpty, about.isEmpty {
-                    Text(UserFacingCopy.Overview.aiKnowsNothingYet)
-                        .font(MCI.Font.caption)
-                        .foregroundStyle(MCI.Color.foregroundSecondary)
-                } else {
-                    // Folded, each line is cut to one line on screen; the
-                    // lines themselves are exactly what is sent.
-                    let folded = folds && !showsAllLines
-                    let shownRecent = folded ? Array(recent.prefix(Self.foldedRecent)) : recent
-                    let shownAbout = folded
-                        ? Array(about.prefix(Self.foldedRecent + Self.foldedAbout - shownRecent.count)) : about
-                    VStack(alignment: .leading, spacing: 5) {
-                        ForEach(Array(shownRecent.enumerated()), id: \.offset) { _, line in
-                            SentLine(text: line, oneLine: folded)
-                        }
-                        if !shownRecent.isEmpty, !shownAbout.isEmpty {
-                            Spacer().frame(height: 4)
-                        }
-                        ForEach(Array(shownAbout.enumerated()), id: \.offset) { _, line in
-                            SentLine(text: line, oneLine: folded)
-                        }
-                    }
-                }
+    private var actions: some View {
+        HStack(spacing: 8) {
+            if let item = model.cardItem {
+                ResumeButton(itemId: item.id, open: open)
             }
-        case .connect:
-            ConnectAIToolsRow()
+            AskAIButton(source: .session(title: title, range: card.copyRange), reader: reader)
+            if let reopen = card.reopen {
+                ReopenButton(action: reopen)
+            }
+            Button(UserFacingCopy.showInHistory) {
+                open(.history(of: card.copyRange, selecting: card.openEventId))
+            }
+            .buttonStyle(.bordered)
+            Spacer(minLength: 8)
+            Menu {
+                Button(LibraryCopy.History.copyForYourAI) { copyForYourAI() }
+                if let forget {
+                    Divider()
+                    Button(Copy.forgetSession(range)) { forget(.range(card.copyRange, label: range)) }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .accessibilityLabel(Copy.more)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(Copy.more)
+        }
+    }
+
+    /// "2:12 to 2:36 PM": the session's own time, as its Forget names it.
+    private var range: String {
+        TodayFormat.span(card.copyRange, locale: locale, timeZone: timeZone)
+    }
+
+    private var screenshotLabel: String {
+        Copy.screenshotLabel(title, time: Formatters.clockTime(us: card.copyRange.upperBound,
+                                                              locale: locale, timeZone: timeZone))
+    }
+
+    private func copyForYourAI() {
+        let title = self.title
+        let range = card.copyRange
+        let reader = self.reader
+        Task { @MainActor in
+            guard let text = try? await SessionCopy.markdown(title: title, range: range, reader: reader) else { return }
+            let board = NSPasteboard.general
+            board.clearContents()
+            board.setString(text, forType: .string)
         }
     }
 }
 
-/// One line and "Connect", shown instead of "What your AI starts with" while
-/// no AI tool starts its sessions with Hippocampus (RULINGS W5).
+/// A moment drawn as History draws it, on a card: its caption and time,
+/// then two lines of what the window said.
+struct MomentLine: View {
+    let hit: Hit
+    @Environment(\.locale) private var locale
+    @Environment(\.timeZone) private var timeZone
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(verbatim: MomentRowText.headline(hit))
+                    .font(MCI.Font.bodyStrong)
+                    .foregroundStyle(MCI.Color.foreground)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(verbatim: Formatters.clockTime(us: Int64(clamping: hit.tsUs), locale: locale, timeZone: timeZone))
+                    .font(MCI.Font.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(MCI.Color.foregroundSecondary)
+            }
+            if let lines = MomentRowText.codeLines(hit) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(lines.prefix(2).enumerated()), id: \.offset) { _, line in
+                        Text(verbatim: line)
+                            .font(.system(size: 12.5, design: .monospaced))
+                            .foregroundStyle(MCI.Color.foregroundSecondary)
+                            .lineLimit(1)
+                    }
+                }
+            } else {
+                Text(verbatim: MomentRowText.preview(hit))
+                    .font(MCI.Font.body)
+                    .foregroundStyle(MCI.Color.foregroundSecondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// A session's apps with their minutes: "VS Code 9 min  Chrome 8 min".
+struct AppTimes: View {
+    let apps: [SessionDetail.AppTime]
+
+    var body: some View {
+        ChipFlow(spacing: 14) {
+            ForEach(apps) { app in
+                AppTimeLabel(app: app)
+            }
+        }
+    }
+}
+
+/// "Part of trailhead-shop ›": the Working On item a moment or a session
+/// belongs to, which it opens.
+struct PartOfLink: View {
+    let name: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 2) {
+                Text(verbatim: LibraryCopy.History.partOf(name))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .accessibilityHidden(true)
+            }
+            .font(.system(size: 13))
+            .foregroundStyle(MCI.Color.accent)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(LibraryCopy.History.partOf(name))
+        .accessibilityAddTraits(.isLink)
+    }
+}
+
+/// One line and "Connect…", where nothing yet starts an AI tool's sessions
+/// with Hippocampus (RULINGS W5).
 struct ConnectAIToolsRow: View {
     @Environment(\.isSyntheticPreview) private var isSyntheticPreview
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(UserFacingCopy.Overview.connectLine)
+            Text(UserFacingCopy.Overview.connectRecentWork)
                 .font(MCI.Font.body)
                 .foregroundStyle(MCI.Color.foregroundSecondary)
             Spacer(minLength: 8)
-            Button(UserFacingCopy.connectAction) { openAITools() }
+            Button(UserFacingCopy.Overview.connect) { openAITools() }
                 .buttonStyle(.bordered)
                 .disabled(isSyntheticPreview)
         }
@@ -144,5 +256,18 @@ struct SentLine: View {
                     .textSelection(.enabled)
             }
         }
+    }
+}
+
+/// Times on Today, in the person's format.
+enum TodayFormat {
+    /// "2:12 to 2:36 PM": a span as Forget names it.
+    static func span(_ range: ClosedRange<Int64>, locale: Locale, timeZone: TimeZone) -> String {
+        let text = SessionDetail.timeRange(startUs: range.lowerBound, endUs: range.upperBound,
+                                           locale: locale, timeZone: timeZone)
+        for dash in ["\u{2009}\u{2013}\u{2009}", " \u{2013} ", "\u{2013}"] where text.contains(dash) {
+            return text.replacingOccurrences(of: dash, with: " to ")
+        }
+        return text
     }
 }
