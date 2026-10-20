@@ -226,7 +226,7 @@ final class SidePicturesCopyTests: XCTestCase {
         XCTAssertEqual(SidePicturesCopy.toggle, "Keep screenshots of windows beside the one you’re using")
         XCTAssertEqual(SidePicturesCopy.explanation,
                        "When their text changes, Hippocampus keeps a picture of other windows you can see, "
-                           + "encrypted like the rest. Calls, video and private windows are never kept.")
+                           + "encrypted like the rest. None is kept of a call, a video or a private window it recognizes.")
         XCTAssertEqual(SidePicturesCopy.useAtMost, "Use at most:")
         XCTAssertEqual(SidePictureSettings.budgetChoicesMB.map { SidePicturesCopy.budget(megabytes: $0) },
                        ["1 GB", "2 GB", "5 GB"])
