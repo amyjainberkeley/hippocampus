@@ -68,7 +68,8 @@ struct WorkingOnItemPlace: View {
             await model.reload()
             while !Task.isCancelled {
                 do { try await Task.sleep(for: refreshEvery) } catch { return }
-                await model.reload()
+                // The days and pages already read stay; a forget reads all.
+                await model.reload(keepingRead: true)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: MemoryDeletionSignal.notification)) { _ in
@@ -397,9 +398,9 @@ struct WorkingOnItemPlace: View {
                 WorkSectionTitle(title: WorkCopy.history)
                 Spacer(minLength: 0)
                 HStack(spacing: 4) {
-                    ForEach(model.days.prefix(7)) { day in
+                    ForEach(model.dayButtons) { day in
                         let on = day.id == model.shownDay?.id
-                        Button(day.label) { model.selectedDay = day.id }
+                        Button(day.label) { show(day) }
                             .buttonStyle(.plain)
                             .font(.system(size: 12))
                             .foregroundStyle(on ? MCI.Color.foreground : MCI.Color.foregroundSecondary)
@@ -408,6 +409,9 @@ struct WorkingOnItemPlace: View {
                             .background(RoundedRectangle(cornerRadius: 5, style: .continuous)
                                 .fill(on ? Color.primary.opacity(0.065) : Color.clear))
                             .accessibilityAddTraits(on ? .isSelected : [])
+                    }
+                    if !model.olderDays.isEmpty {
+                        olderDaysMenu
                     }
                 }
             }
@@ -442,6 +446,33 @@ struct WorkingOnItemPlace: View {
                 .padding(.top, 10)
             }
         }
+    }
+
+    /// The days past the buttons: "Earlier", or the older day shown.
+    private var olderDaysMenu: some View {
+        let shown = model.olderDays.first { $0.id == model.shownDay?.id }
+        return Menu {
+            ForEach(model.olderDays) { day in
+                Toggle(day.label, isOn: Binding(get: { day.id == model.shownDay?.id }, set: { _ in show(day) }))
+            }
+        } label: {
+            Text(shown?.label ?? WorkCopy.earlier)
+                .font(.system(size: 12))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .foregroundStyle(shown != nil ? MCI.Color.foreground : MCI.Color.foregroundSecondary)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 1)
+        .background(RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(shown != nil ? Color.primary.opacity(0.065) : Color.clear))
+        .accessibilityLabel(shown?.label ?? WorkCopy.earlier)
+        .accessibilityAddTraits(shown != nil ? .isSelected : [])
+    }
+
+    /// A day's History: read first when it isn't yet.
+    private func show(_ day: ItemDay) {
+        Task { await model.show(day: day.id) }
     }
 
     private func hourHeading(_ section: HistorySection) -> some View {
