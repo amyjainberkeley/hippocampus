@@ -110,6 +110,10 @@ struct MemoryWorkspaceView: View {
     /// Pages pushed inside About You: the names you use.
     @State private var youPath: [RecallYouPage] = []
     @State private var status: WindowStatus
+    /// The status as the app last pushed it (or, in a window opened by
+    /// hand, as last read), before a forget's "Forgetting…" or "Finishing a
+    /// forget…" is laid over it: what shows again once the forget is done.
+    @State private var baseStatus: WindowStatus?
     @State private var sidebar = SidebarUpdates()
     @State private var choices: SidebarHides.Choices
     @State private var navigation = NavigationHistory()
@@ -419,7 +423,9 @@ struct MemoryWorkspaceView: View {
                 // A forget a failure kept is tried again when the app says
                 // a hold can be had (SPEC 3.11).
                 forgetting.statusArrived(pushed)
-                status = WindowStatus(pushed).forgetting(forgetting.phase)
+                let base = WindowStatus(pushed)
+                baseStatus = base
+                status = base.forgetting(forgetting.phase)
             }
         }
         .task {
@@ -432,7 +438,9 @@ struct MemoryWorkspaceView: View {
             await loadTools()
         }
         .onChange(of: forgetting.phase) { _, phase in
-            status = status.forgetting(phase)
+            // Laid over the app's own status, never over the last forget's:
+            // once it is done, the app's words, banner and button show again.
+            status = (baseStatus ?? status).forgetting(phase)
         }
         .onChange(of: fieldFocusRequest) { _, _ in focusField() }
         .onChange(of: ask.fieldFocusRequest) { _, _ in focusField() }
@@ -916,6 +924,7 @@ struct MemoryWorkspaceView: View {
         guard channel == nil, !isSyntheticPreview else { return }
         let receipt = await healthLoader()
         let current = WindowStatus(byHand: receipt, appRunning: appRunning(), now: now())
+        baseStatus = current
         status = current.forgetting(forgetting.phase)
     }
 

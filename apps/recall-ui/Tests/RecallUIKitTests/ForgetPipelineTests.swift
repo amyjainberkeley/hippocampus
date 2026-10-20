@@ -653,6 +653,17 @@ final class ForgetPipelineTests: XCTestCase {
         XCTAssertFalse(forget.hiddenMoments.contains(44))
     }
 
+    /// "Finishing a forget…" is laid over the app's own status, so once the
+    /// forget is done (or no try is left) the app's words, banner and button
+    /// show again, not the last phase's.
+    func testTheFooterShowsTheAppsOwnStatusOnceAForgetIsDone() throws {
+        let source = try Self.source("Sources/RecallUI/MemoryWorkspaceView.swift")
+        XCTAssertTrue(source.contains("status = (baseStatus ?? status).forgetting(phase)"))
+        XCTAssertTrue(source.contains("baseStatus = base"))
+        XCTAssertTrue(source.contains("baseStatus = current"))
+        XCTAssertFalse(source.contains("status = status.forgetting(phase)"))
+    }
+
     func testEveryListLeavesOutWhatTheCoordinatorHides() throws {
         let source = try Self.source("Sources/RecallUI/MemoryWorkspaceView.swift")
         XCTAssertTrue(source.contains(".environment(\\.forgottenMoments, forgetting.hiddenMoments)"))
