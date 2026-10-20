@@ -6,6 +6,9 @@ import SwiftUI
 enum HippocampusEntryPoint {
     @MainActor
     static func main() {
+        // Owner-only before anything is created: every file this process
+        // makes is 0600 and every folder 0700 (reports/e2e, finding 5).
+        umask(0o077)
         #if DEBUG
         // Draws Ask's states to PNGs and returns before any scene, menu-bar
         // item, window or activation exists.

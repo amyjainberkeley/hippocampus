@@ -270,6 +270,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // What an older version left, put right before anything starts: the
+        // old OCR worker's network folders go, and the data, log and
+        // settings folders an older install made 0755 become owner-only.
+        InstallRepair.runOnLaunch()
+
         configurePreferencesController()
         // Demo Memory (SPEC-DELTA 6): its menu items, and a week left by a
         // crash cleared with its pause undone, before the first start.
