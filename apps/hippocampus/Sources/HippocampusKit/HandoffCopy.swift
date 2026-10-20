@@ -126,15 +126,54 @@ public enum HandoffCopy {
         let lines = count == 1
             ? "It can search what you’ve seen and read your sessions, your day and what Hippocampus learned about you, "
                 + "when a question needs it. What it reads goes to the company that runs \(names). "
-                + "It can read while Hippocampus is quit."
+                + "It can read while Hippocampus is quit. " + keepsHistory(count: 1)
             : "They can search what you’ve seen and read your sessions, your day and what Hippocampus learned about you, "
                 + "when a question needs it. What they read goes to the companies that run them. "
-                + "They can read while Hippocampus is quit."
+                + "They can read while Hippocampus is quit. " + keepsHistory(count: count)
         return chatGPTInstalled ? lines + " " + chatGPTShares : lines
+    }
+
+    /// A connected tool keeps its own copy of what it reads (storage review
+    /// S6), and Hippocampus can't reach it.
+    public static func keepsHistory(count: Int) -> String {
+        count == 1
+            ? "It also keeps what it reads in its own history on this Mac, unencrypted. "
+                + "Forgetting something in Hippocampus doesn’t remove it there."
+            : "They also keep what they read in their own history on this Mac, unencrypted. "
+                + "Forgetting something in Hippocampus doesn’t remove it there."
     }
 
     public static let connect = "Connect"
     public static let notNow = "Not Now"
+
+    // A connected tool's history, when other accounts on this Mac can open
+    // it (storage review S6). Offered, never done without asking.
+
+    /// "Make Codex’s history private?"
+    public static func privateHistoryTitle(_ names: [String]) -> String {
+        let owners = names.map { $0 + "’s" }
+        let joined = owners.count > 1
+            ? owners.dropLast().joined(separator: ", ") + " and " + owners[owners.count - 1]
+            : owners.first ?? ""
+        return "Make \(joined) history private?"
+    }
+
+    /// Which folders, and what Make Private does to them.
+    public static func privateHistoryMessage(_ names: [String], folders: [String]) -> String {
+        let list = { (items: [String]) in
+            items.count > 1 ? items.dropLast().joined(separator: ", ") + " and " + items[items.count - 1] : items.first ?? ""
+        }
+        return names.count == 1
+            ? "\(list(names)) keeps its sessions in \(list(folders)), with what it reads from your memory, and other "
+                + "accounts on this Mac can open them. Make Private lets only you open that folder. "
+                + "\(list(names)) works as before."
+            : "\(list(names)) keep their sessions in \(list(folders)), with what they read from your memory, and other "
+                + "accounts on this Mac can open them. Make Private lets only you open those folders. "
+                + "They work as before."
+    }
+
+    public static let makePrivate = "Make Private"
+    public static func couldNotMakePrivate(_ tool: String) -> String { "Couldn’t make all of \(tool)’s history private." }
 
     public static let sessionTitle = "Start each session with your recent work?"
 
