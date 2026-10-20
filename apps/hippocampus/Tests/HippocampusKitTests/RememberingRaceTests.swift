@@ -511,6 +511,33 @@ final class RememberingRaceTests: XCTestCase {
         try await supervisor.shutdownAndWait()
     }
 
+    /// A forget right after Pause, while the pause still stops the helper
+    /// and agent: the hold waits for the pause to finish, then is granted
+    /// with the writer lease free, instead of "Couldn't forget it". The
+    /// person's pause stands after.
+    func testAForgetJustAfterPauseWaitsForThePauseToFinish() async throws {
+        let clock = Clock(start)
+        let pauses = UserPauseController(clock: { clock.now })
+        let topology = FakeSupervisorTopology()
+        let supervisor = supervisor(pauses: pauses, clock: clock, topology: topology)
+        try await supervisor.startAndWaitForReadiness()
+        topology.stopDelay = .milliseconds(400)
+        supervisor.setPaused(true)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(supervisor.state, .running, "the pause is still stopping")
+
+        let held = await supervisor.forgetHold.hold()
+
+        XCTAssertTrue(held, "the hold was refused while a pause was under way")
+        XCTAssertEqual(supervisor.state, .paused)
+        XCTAssertFalse(topology.isRunning, "the lease is free")
+        await supervisor.forgetHold.release()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(supervisor.state, .paused, "the person's pause stands")
+        XCTAssertTrue(pauses.isPaused)
+        try await supervisor.shutdownAndWait()
+    }
+
     // MARK: Forgetting pictures of other windows while Demo Memory is in use
 
     @MainActor

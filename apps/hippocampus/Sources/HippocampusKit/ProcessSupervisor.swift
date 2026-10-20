@@ -2494,23 +2494,27 @@ extension SpawnedWindowProcess: RecallWindowProcess {}
 /// Nothing starts while the hold is on: a start asked for then waits for its
 /// end (`startWaitingForHold`).
 extension ProcessSupervisor: CaptureHolding {
-    /// Remembering runs, or a start is under way that would take the writer
-    /// lease: the launch's sweep (which may still be ending a writer a crash
-    /// left) and the start after it, or a start or resume not at Starting…
-    /// yet. The hold stops it, or waits for it to settle.
+    /// Remembering runs, or a change is under way that may hold or take the
+    /// writer lease: the launch's sweep (which may still be ending a writer
+    /// a crash left) and the start after it, a start or resume not at
+    /// Starting… yet, or a stop still stopping. The hold stops it, or waits
+    /// for it to settle.
     public var isRememberingForHold: Bool {
-        state == .running || state == .starting || startUnderWay
+        state == .running || state == .starting || settling
     }
 
-    private var startUnderWay: Bool {
+    /// A change under way: the launch's sweep, a start, a pause or resume,
+    /// or any other transition.
+    private var settling: Bool {
         launchSweepRunning || startRunning || pauseTask != nil || !inFlightTransitions.isEmpty
     }
 
     public func stopForHold() async throws {
-        // A change under way settles first, within the hold's wait: one
-        // that reaches Starting… is stopped below, and a start asked for
-        // since the hold began waits for its end.
-        while holdingForForget, startUnderWay, state != .running, state != .starting {
+        // A change under way settles first, within the hold's wait: a pause
+        // (or a run a permission ended) finishes stopping, so the lease is
+        // free; a start that reaches Starting… is stopped below; and a start
+        // asked for since the hold began waits for its end.
+        while holdingForForget, settling, state != .starting {
             try await Task.sleep(for: .milliseconds(20))
         }
         // The hold ended while this waited (it took too long): stop nothing.
