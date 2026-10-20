@@ -25,6 +25,7 @@ final class PaddleOCRServer: @unchecked Sendable {
     static let maximumSilence: DispatchTimeInterval = .seconds(120)
 
     private let executableURL: URL
+    private let sandbox: OCRWorkerSandbox
     private let lock = NSLock()
     private var stopped = false
     private var session: Session?
@@ -54,8 +55,9 @@ final class PaddleOCRServer: @unchecked Sendable {
         }
     }
 
-    init(executableURL: URL) {
+    init(executableURL: URL, sandbox: OCRWorkerSandbox = .standard) {
         self.executableURL = executableURL
+        self.sandbox = sandbox
     }
 
     /// Start the worker now so its models load before the first frame.
@@ -111,15 +113,15 @@ final class PaddleOCRServer: @unchecked Sendable {
             exited = session
             session = nil
             let process = Process()
-            process.executableURL = executableURL
-            process.arguments = ["--serve"]
+            // No network, ONNX Runtime's telemetry off, and none of the
+            // caller's environment; never started without its sandbox.
+            guard sandbox.prepare(process, worker: executableURL, arguments: ["--serve"], threads: 2) else {
+                return nil
+            }
             // A child inherits the launching queue's QoS. From the OCR lane
             // (.utility) the worker ran throttled on efficiency cores: 23-30 s
             // for a frame it reads in about one second at this QoS.
             process.qualityOfService = .userInitiated
-            // Never inherit provider credentials, Python paths, or user model overrides.
-            process.environment = ["PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1",
-                                   "OMP_NUM_THREADS": "2", "OPENBLAS_NUM_THREADS": "1"]
             let inputPipe = Pipe(), outputPipe = Pipe()
             process.standardInput = inputPipe
             process.standardOutput = outputPipe

@@ -41,12 +41,14 @@
 #                         binaries and the Vision reader when no --app is given
 #   --ocr auto|paddle|vision  which reader the fixture uses (default auto:
 #                         the app's bundled PP-OCR worker when there is one)
-#   --allow-ocr-network   run the PP-OCR worker without the test's sandbox.
-#                         By default it runs under sandbox-exec with outbound
-#                         network, DNS and the real home's ONNX Runtime
-#                         telemetry folder denied, because the bundled ONNX
-#                         Runtime uploads telemetry to Microsoft (E2E-REPORT);
-#                         this flag lets that upload happen again
+#   --allow-ocr-network   run the PP-OCR worker without the test's own rules.
+#                         It always runs inside the product's sandbox, which
+#                         denies every network operation and name lookups
+#                         (the bundled ONNX Runtime once uploaded telemetry to
+#                         Microsoft: E2E-REPORT, finding 1); by default the
+#                         test also closes the real ~/Library to it. With this
+#                         flag only the product's own sandbox applies, which
+#                         checks that it is enough on its own
 #   --no-audit            do not run audit-storage-security.sh
 #   --keep                keep the throwaway root (default: only on failure)
 #   --evidence DIR        copy the results, logs and audit into DIR
@@ -644,24 +646,20 @@ case "$OCR_CHOICE" in
 esac
 FEED_ARGS=(--manifest "$H/frames.json" --report "$H/feed-report.json")
 if [[ -n "$OCR_WORKER" && "$OCR_SANDBOX" == "1" ]]; then
-    # The bundled ONNX Runtime posts telemetry to Microsoft and keeps its
-    # queue in the real home, whatever HOME says. The worker reads screens
-    # the same way inside this sandbox; it only cannot reach the network,
-    # DNS or that folder. Its attempts still show in the unified log.
-    # It also keeps its telemetry queue, URL cache and HTTP storage in the
-    # real ~/Library, so that is closed to it too; the attempts are in the
-    # kernel's sandbox reports, which the audit reads.
+    # The helper starts the worker inside the product's own sandbox, which
+    # denies every network operation and name lookups (OCRWorkerSandbox),
+    # with ONNX Runtime's telemetry turned off. A sandbox can't be applied
+    # inside another, so the test's rules are added to that profile rather
+    # than wrapping the worker: the real ~/Library is closed to it as well.
+    # Any attempt still shows in the unified log and the kernel's sandbox
+    # reports, which the audit reads.
     real_library="$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory 2>/dev/null | awk '{print $2}')/Library"
-    cat > "$H/ocr-sandboxed" <<SANDBOX
-#!/bin/bash
-exec /usr/bin/sandbox-exec -p '(version 1) (allow default) (deny network-outbound (remote ip)) (deny network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder"))) (deny mach-lookup (global-name "com.apple.dnssd.service")) (deny file-read* file-write* (subpath "$real_library"))' "$OCR_WORKER" "\$@"
-SANDBOX
-    chmod 700 "$H/ocr-sandboxed"
-    FEED_ARGS+=(--worker "$H/ocr-sandboxed")
-    READER="the bundled PP-OCR worker ($OCR_WORKER, inside the test's no-network sandbox)"
+    printf '(deny file-read* file-write* (subpath "%s"))\n' "$real_library" > "$H/ocr-sandbox-rules.sb"
+    FEED_ARGS+=(--worker "$OCR_WORKER" --worker-sandbox-rules "$H/ocr-sandbox-rules.sb")
+    READER="the bundled PP-OCR worker ($OCR_WORKER, inside the product's no-network sandbox, with the real ~/Library closed too)"
 elif [[ -n "$OCR_WORKER" ]]; then
     FEED_ARGS+=(--worker "$OCR_WORKER")
-    READER="the bundled PP-OCR worker ($OCR_WORKER, network allowed: --allow-ocr-network)"
+    READER="the bundled PP-OCR worker ($OCR_WORKER, inside the product's no-network sandbox only: --allow-ocr-network)"
 elif [[ "$OCR_CHOICE" == "paddle" ]]; then
     fail c2 "--ocr paddle: no PP-OCR worker in the app or tools/ocr/dist"
     READER=""

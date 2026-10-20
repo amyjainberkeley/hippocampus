@@ -18,17 +18,25 @@ public struct PaddleOCRRunner: OCREngine {
     }
 
     /// `persistent` keeps one warm worker for every frame (`--serve`); the
-    /// one-shot default starts a worker per reading.
+    /// one-shot default starts a worker per reading. Either way the worker
+    /// runs with no network and ONNX Runtime's telemetry off
+    /// (`OCRWorkerSandbox`).
     public init(executableURL: URL, persistent: Bool = false) {
+        self.init(executableURL: executableURL, persistent: persistent, sandbox: .standard)
+    }
+
+    /// The same, with test-only rules added to the sandbox.
+    package init(executableURL: URL, persistent: Bool = false, sandbox: OCRWorkerSandbox) {
         let control = PaddleOCRProcessControl()
-        let server = persistent ? PaddleOCRServer(executableURL: executableURL) : nil
+        let server = persistent ? PaddleOCRServer(executableURL: executableURL, sandbox: sandbox) : nil
         self.control = control
         self.server = server
         lane = VisionOCRExecutionLane(label: "com.hippocampus.capture.paddle-ocr") { input, _, deadline in
             if let server {
                 return Self.performPersistent(input: input, server: server, deadline: deadline)
             }
-            return Self.perform(input: input, executableURL: executableURL, deadline: deadline, control: control)
+            return Self.perform(input: input, executableURL: executableURL, sandbox: sandbox,
+                                deadline: deadline, control: control)
         }
     }
 
@@ -106,17 +114,17 @@ public struct PaddleOCRRunner: OCREngine {
         return OCRResult(recognizedLines: lines, durationMs: 0, timedOut: false, separators: separators)
     }
 
-    private static func perform(input: OCREngineInput, executableURL: URL, deadline: DispatchTime, control: PaddleOCRProcessControl) -> OCRResult {
+    private static func perform(input: OCREngineInput, executableURL: URL, sandbox: OCRWorkerSandbox,
+                                deadline: DispatchTime, control: PaddleOCRProcessControl) -> OCRResult {
         let empty = OCRResult(recognizedLines: [], durationMs: 0, timedOut: false)
         guard let image = PaddleOCRImage(input: input), DispatchTime.now() < deadline else { return empty }
         let process = Process()
-        process.executableURL = executableURL
+        // No network, ONNX Runtime's telemetry off, and none of the caller's
+        // environment; never started without its sandbox.
+        guard sandbox.prepare(process, worker: executableURL, arguments: [], threads: 1) else { return empty }
         // Not the lane's .utility QoS: inherited, it throttled the worker to
         // efficiency cores (see PaddleOCRServer).
         process.qualityOfService = .userInitiated
-        // Never inherit provider credentials, Python paths, or user model overrides.
-        process.environment = ["PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1",
-                               "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"]
         let inputPipe = Pipe(), outputPipe = Pipe()
         process.standardInput = inputPipe
         process.standardOutput = outputPipe
