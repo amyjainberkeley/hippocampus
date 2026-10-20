@@ -659,13 +659,130 @@ fn web_apps_open_on_what_was_read_not_their_navigation() {
             "[app={CHROME} | title={title} | url={url} | ts=2026-10-12T14:00:00.000Z]\n{text}"
         );
         let read = reading(&stored, SCREEN, Some(CHROME), None);
+        // Gmail's label chip after the subject is chrome too (SPEC-DELTA 9).
+        let content = content.replace(" Inbox \u{d7}", "");
         assert_eq!(read.main, content, "{site}");
         for line in navigation.lines() {
             assert!(read.rest.contains(line), "{site}: {line}");
         }
+        if site == "Gmail" {
+            assert!(read.rest.ends_with("Inbox \u{d7}"), "{site}: {:?}", read.rest);
+        }
         assert_no_word_lost(&text, &read);
         assert_rows_agree(&stored, CHROME, &read);
     }
+}
+
+/// A Gmail message as Chrome showed it before windows were classified: the
+/// tab strip, the address bar, Gmail's side bar, then the message.
+fn gmail(message: &str) -> String {
+    format!(
+        "[app={CHROME} | title=Invoice 1042 from Northwind Supplies - sam@northwind.example - Gmail | url=https://mail.google.com/mail/u/0/#inbox/FMfcgzQ | ts=2026-10-12T14:00:00.000Z]\n\
+         M Invoice 1042 from North\u{2026} \u{d7} D Rounding half to even \u{b7} Dev No \u{d7} +\n< > C mail.google.com \u{2606}\n\
+         Gmail Q Search mail\nCompose\nInbox 1,204\nStarred\nSent\nDrafts 3\nMore\n{message}"
+    )
+}
+
+#[test]
+fn gmails_label_chip_never_leads_a_mails_row() {
+    let message_body = "Dana Whitfield <dana@northwind.example>\nto me\nThanks for your order. The invoice for October is attached.";
+    for (message, chips) in [
+        // The chip read on the subject's line.
+        (
+            format!("Invoice 1042 from Northwind Supplies Inbox \u{d7}\n{message_body}"),
+            "Inbox \u{d7}",
+        ),
+        // Two chips, one of them the person's own label.
+        (
+            format!(
+                "Invoice 1042 from Northwind Supplies Inbox \u{d7} Invoices \u{d7}\n{message_body}"
+            ),
+            "Inbox \u{d7} Invoices \u{d7}",
+        ),
+        // A line of chips under the subject.
+        (
+            format!("Invoice 1042 from Northwind Supplies\nInbox \u{d7}\n{message_body}"),
+            "Inbox \u{d7}",
+        ),
+        // The close mark read as a letter, after a system label.
+        (
+            format!("Invoice 1042 from Northwind Supplies Inbox x\n{message_body}"),
+            "Inbox x",
+        ),
+    ] {
+        let stored = gmail(&message);
+        let read = reading(&stored, SCREEN, Some(CHROME), None);
+        assert_eq!(
+            read.main,
+            format!("Invoice 1042 from Northwind Supplies\n{message_body}"),
+            "{message}"
+        );
+        assert!(read.rest.ends_with(chips), "{:?}", read.rest);
+        assert_no_word_lost(body(&stored), &read);
+        assert_rows_agree(&stored, CHROME, &read);
+        // The row: past the subject, which its caption already says, the
+        // sender and the message; never the chip.
+        let row = reading_prefix(&stored, SCREEN, Some(CHROME), 280);
+        assert!(
+            row.starts_with("Invoice 1042 from Northwind Supplies\nDana Whitfield"),
+            "{row}"
+        );
+        assert!(!row.contains('\u{d7}'), "{row}");
+    }
+}
+
+#[test]
+fn a_times_sign_in_a_message_is_not_a_chip() {
+    for message in [
+        // Not at the end of the line, no space before it, or deep in the
+        // message.
+        "Order 4 \u{d7} 2 boxes of receipt paper\nDana Whitfield <dana@northwind.example>\nThanks.",
+        "Invoice 1042 for a 2\u{d7}\nDana Whitfield <dana@northwind.example>\nThanks.",
+        "Invoice 1042\nDana Whitfield <dana@northwind.example>\nto me\nThe shelves are 3 ft \u{d7}\nwide each.",
+        // A letter x after a word that is no label.
+        "Invoice 1042 for model x\nDana Whitfield <dana@northwind.example>\nThanks.",
+    ] {
+        let read = reading(&gmail(message), SCREEN, Some(CHROME), None);
+        assert_eq!(read.main, message);
+    }
+}
+
+#[test]
+fn zooms_navigation_bar_never_leads_its_row() {
+    let text = "Home Team Chat Meetings Contacts\nNew meeting\nJoin\nSchedule\nUpcoming\nDesign review 3:00 PM - 3:30 PM";
+    let window = stored("us.zoom.xos", "Zoom Workplace", text);
+    let read = reading(&window, SCREEN, Some("us.zoom.xos"), None);
+    assert_eq!(read.main, "Upcoming\nDesign review 3:00 PM - 3:30 PM");
+    assert_eq!(
+        lines_of(&read.rest),
+        vec![
+            "Home Team Chat Meetings Contacts",
+            "New meeting",
+            "Join",
+            "Schedule"
+        ]
+    );
+    assert_no_word_lost(text, &read);
+    assert_rows_agree(&window, "us.zoom.xos", &read);
+    assert!(reading_prefix(&window, SCREEN, Some("us.zoom.xos"), 280).starts_with("Upcoming"));
+    // The bar with Zoom's newer tabs, read with icons.
+    let newer = "\u{2302} Home Team Chat Meetings Mail Calendar Docs Whiteboards More\nDesign review\nStarts in 5 minutes";
+    let read = reading(
+        &stored("us.zoom.xos", "Zoom Workplace", newer),
+        SCREEN,
+        Some("us.zoom.xos"),
+        None,
+    );
+    assert_eq!(read.main, "Design review\nStarts in 5 minutes");
+    // Another app's line of the same words is its own.
+    let notes = "Home Team Chat Meetings Contacts\nTidy the sidebar names";
+    let read = reading(
+        &stored("com.apple.Notes", "Sidebar names", notes),
+        SCREEN,
+        Some("com.apple.Notes"),
+        None,
+    );
+    assert_eq!(read.main, notes);
 }
 
 #[test]
