@@ -25,9 +25,11 @@ final class RememberingRaceTests: XCTestCase {
         private(set) var readerRestarts: [Bool] = []
         init(real: SupervisorDemoMemoryHost) { self.real = real }
         var isPaused: Bool { real.isPaused }
+        var pausedUntil: Date? { real.pausedUntil }
         var isQuiet: Bool { real.isQuiet }
         var isConnectingAITools: Bool { false }
         func pauseRemembering() async throws { try await real.pauseRemembering() }
+        func pauseRemembering(until end: Date) { real.pauseRemembering(until: end) }
         func resumeRemembering() { real.resumeRemembering() }
         func restartReaders(openWindow: Bool) async { readerRestarts.append(openWindow) }
         func watchRemembering(_ change: @escaping @MainActor () -> Void) -> AnyCancellable {
@@ -164,6 +166,117 @@ final class RememberingRaceTests: XCTestCase {
         XCTAssertEqual(controller.phase, .off)
         XCTAssertEqual(supervisor.state, .running)
         XCTAssertFalse(pauses.isPaused)
+        try await supervisor.shutdownAndWait()
+    }
+
+    // MARK: A timed pause while Demo Memory is in use
+
+    /// SPEC-DELTA 6: "While in demo mode, remembering is off." The person
+    /// paused For 1 Hour (say, before filming), then chose Use Demo Memory.
+    /// When the hour ends, remembering must not start by itself: that would
+    /// end Demo Memory and reopen the window on the person's own memory,
+    /// mid-take.
+    func testATimedPauseEndingWhileDemoMemoryIsInUseKeepsDemoMemory() async throws {
+        let home = try makeHome()
+        let clock = Clock(start)
+        let pauses = UserPauseController(clock: { clock.now })
+        let supervisor = supervisor(pauses: pauses, clock: clock)
+        try await supervisor.startAndWaitForReadiness()
+        supervisor.pause(until: start.addingTimeInterval(3_600))
+        await eventually { supervisor.state == .paused }
+        XCTAssertEqual(supervisor.state, .paused)
+
+        let (controller, host) = demo(supervisor, home: home, clock: clock)
+        defer { DemoMemory.detach() }
+        let used = await controller.use()
+        XCTAssertTrue(used)
+        XCTAssertEqual(controller.phase, .on)
+        XCTAssertEqual(host.readerRestarts, [true], "the window opened on the made-up week")
+
+        // The hour runs out while the demo is on screen.
+        clock.now = start.addingTimeInterval(3_601)
+        try await Task.sleep(for: .milliseconds(600))
+
+        XCTAssertEqual(controller.phase, .on, "Demo Memory ended by itself when a pause made before it ran out")
+        XCTAssertEqual(host.readerRestarts, [true],
+                       "the window was reopened on the person's own memory: \(host.readerRestarts)")
+        XCTAssertEqual(supervisor.state, .paused, "remembering turned on while Demo Memory was in use")
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// Demo Memory's pause takes the place of a timed one: nothing is due to
+    /// resume on its own while the week is in use.
+    func testDemoMemorysPauseReplacesATimedPause() async throws {
+        let clock = Clock(start)
+        let pauses = UserPauseController(clock: { clock.now })
+        let supervisor = supervisor(pauses: pauses, clock: clock)
+        supervisor.showForPreview(state: .paused, captureEnabled: true, receipt: nil, startedAt: nil)
+        supervisor.pause(until: start.addingTimeInterval(3_600))
+        XCTAssertNotNil(supervisor.pausedUntil)
+        let host = SupervisorDemoMemoryHost(supervisor: supervisor, pauseWait: .seconds(1))
+        try await host.pauseRemembering()
+        XCTAssertNil(supervisor.pausedUntil,
+                     "while Demo Memory is in use remembering is still due to resume on its own at the hour's end")
+        XCTAssertEqual(supervisor.pausedSince, start, "the person's pause keeps its own time")
+    }
+
+    /// Leaving before the hour is up puts the person's timed pause back,
+    /// with its end, and remembering then resumes on time.
+    func testLeavingPutsBackATimedPauseWithItsEnd() async throws {
+        let home = try makeHome()
+        let clock = Clock(start)
+        let pauses = UserPauseController(clock: { clock.now })
+        let supervisor = supervisor(pauses: pauses, clock: clock)
+        try await supervisor.startAndWaitForReadiness()
+        let end = start.addingTimeInterval(3_600)
+        supervisor.pause(until: end)
+        await eventually { supervisor.state == .paused }
+        let (controller, _) = demo(supervisor, home: home, clock: clock)
+        defer { DemoMemory.detach() }
+        let used = await controller.use()
+        XCTAssertTrue(used)
+        XCTAssertEqual(DemoMemoryFolder.standard(home: home).readInUse()?.pausedUntil, end,
+                       "kept beside the week, so a relaunch after a crash puts it back too")
+
+        clock.now = start.addingTimeInterval(600)
+        let handled = await supervisor.handleWindowRequest(leave, setupFinished: true)
+        XCTAssertTrue(handled)
+        await eventually { controller.phase == .off }
+        XCTAssertEqual(supervisor.pausedUntil, end, "the person's own pause, with its own end")
+        XCTAssertEqual(pauses.pausedSince, start)
+        XCTAssertEqual(supervisor.state, .paused)
+
+        // The hour ends: remembering resumes by itself, as it would have.
+        clock.now = end.addingTimeInterval(1)
+        await eventually { supervisor.state == .running }
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertFalse(pauses.isPaused)
+        try await supervisor.shutdownAndWait()
+    }
+
+    /// Leaving after the hour would have ended turns remembering on, as the
+    /// timed pause would have.
+    func testLeavingAfterATimedPauseWouldHaveEndedTurnsRememberingOn() async throws {
+        let home = try makeHome()
+        let clock = Clock(start)
+        let pauses = UserPauseController(clock: { clock.now })
+        let supervisor = supervisor(pauses: pauses, clock: clock)
+        try await supervisor.startAndWaitForReadiness()
+        supervisor.pause(until: start.addingTimeInterval(3_600))
+        await eventually { supervisor.state == .paused }
+        let (controller, _) = demo(supervisor, home: home, clock: clock)
+        defer { DemoMemory.detach() }
+        let used = await controller.use()
+        XCTAssertTrue(used)
+
+        clock.now = start.addingTimeInterval(2 * 3_600)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(controller.phase, .on)
+        controller.requestLeave()
+        await eventually { controller.phase == .off && supervisor.state == .running }
+        XCTAssertEqual(supervisor.state, .running)
+        XCTAssertFalse(pauses.isPaused)
+        XCTAssertNil(supervisor.pausedUntil)
         try await supervisor.shutdownAndWait()
     }
 
