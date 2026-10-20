@@ -10,6 +10,7 @@ Each key, in the order it appears in the plist:
 | `com.apple.security.cs.allow-unsigned-executable-memory` | `false` | No unsigned executable memory is needed; all code is AOT-compiled. |
 | `com.apple.security.cs.allow-dyld-environment-variables` | `false` | No DYLD env overrides in production. |
 | `com.apple.security.automation.apple-events` | `true` | Allows the principal/responsible parent to request Automation consent for browser context queries made by its capture helper. Consent remains controlled by macOS and the user. |
+| `com.apple.security.personal-information.calendars` | `true` | Allows the app to ask macOS for Calendars access when the person turns on "Show my calendar on Today" (SPEC-DELTA 5). Without it, the hardened runtime refuses the request and macOS never asks. Read-only use; see "Calendars" below. |
 | `com.apple.security.application-groups` | rendered at assembly | **REQUIRED for the Safari Web Extension `.appex`** to relay page content events to the container app via a shared App Group container. The checked-in `group.ai.hippocampus` value is a template used by ad-hoc builds. Developer ID assembly replaces it in both host and `.appex` with `<TeamIdentifier>.ai.hippocampus`, then verifies the signed entitlements and bundle configuration agree. |
 
 The App Group is intentionally granted only to the host app and Safari
@@ -80,6 +81,42 @@ after assembly and installer re-signing. It also verifies the development
 ad-hoc path. No fixture is launched; these checks do not establish Developer ID
 trust, notarization, successful OS prompting, or ordinary browser capture.
 
+## Calendars
+
+`com.apple.security.personal-information.calendars` is the hardened
+runtime's Calendar resource entitlement. Apple's
+[Calendars entitlement reference](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.personal-information.calendars)
+describes it as allowing the app to request calendar access; the
+hardened runtime refuses a calendar request from an app without it, the same
+way it refused Automation before the Apple Events key was added. It permits a
+request only: it does not grant access, override a denial or skip the macOS
+dialog, and the person can take access back in System Settings › Privacy &
+Security › Calendars at any time.
+
+How Hippocampus uses it:
+
+- **Asked only on the person's click.** Turning on Preferences › General's
+  "Show my calendar on Today" (or Today's one-time Show Calendar) calls
+  `requestFullAccessToEvents()`, and only when macOS has never asked. No
+  launch, read, render or test asks. `NSCalendarsFullAccessUsageDescription`
+  in `Info.plist` gives the reason macOS shows.
+- **Read-only.** The key is read-write in Apple's terms; Hippocampus never
+  adds, changes or deletes an event, and never asks for write-only access.
+- **Only what is shown.** The window reads each event's title, time, calendar
+  name and location, and whether it lasts all day; Ask reads titles and times.
+  Who is invited, the organizer, notes and links are never read (tests in
+  `CalendarReaderTests`, `EventKitCalendarStoreTests` and
+  `CalendarCopyTests` hold the code to that). Events are never stored in the
+  memory and are never sent to an AI tool unless the person sends them.
+- **Who asks.** The key is on the app only. The window and the capture helper
+  run inside the bundle without their own entitlement files, so macOS
+  attributes their calendar reads to the app (the responsible process) and
+  its one grant. If a future macOS also checks the accessing executable, the
+  window would need this key too; verify on a signed build with a test
+  account before relying on reads from the window alone.
+- **When access is taken back,** reads return nothing: Today drops its bars,
+  and Preferences says how to allow it again.
+
 ## Why `com.apple.security.cs.disable-library-validation` was REMOVED
 
 Earlier revisions of this file set `disable-library-validation = true` on the grounds that Sparkle 2.x ships its own pre-signed binaries (XPC services + Updater.app + Autoupdate). The reasoning was: Sparkle's signatures don't match the host app's Team ID, so the hardened runtime's library-validation policy would reject them at load time.
@@ -113,4 +150,5 @@ Failed to parse entitlements: AMFIUnserializeXML: syntax error near line 5
 ## Review history
 
 - 2026-05-22 (PR #155): stripped 6 in-body XML comments that aborted the first Developer-ID-signed installer build. Functional entitlements unchanged. Added `application-groups` (already present pre-strip from PR #148) carried forward intact. No new entitlements granted.
-- 2026-05-26 (this commit): removed `com.apple.security.cs.disable-library-validation`. See section above for rationale. Reproduces the "developer cannot be verified" Gatekeeper dialog on stapled+notarized builds per Apple devforum 132908 / 711769; root cause for friend's tester 2026-05-26.
+- 2026-10-19: added `com.apple.security.personal-information.calendars` for the optional calendar on Today (SPEC-DELTA 5). Read-only use, asked only when the person turns it on. No other entitlement changed.
+- 2026-05-26: removed `com.apple.security.cs.disable-library-validation`. See section above for rationale. Reproduces the "developer cannot be verified" Gatekeeper dialog on stapled+notarized builds per Apple devforum 132908 / 711769; root cause for friend's tester 2026-05-26.
