@@ -1088,7 +1088,8 @@ private struct BarRowView: View {
         case .item(let item): item.name
         case .page(let page): page.title
         case .tool(let tool): tool.tool.name
-        case .hit(let hit): hit.windowTitle?.isEmpty == false ? hit.windowTitle! : (hit.body.isEmpty ? "Untitled" : hit.body)
+        // What History's row calls the moment, not its raw window title.
+        case .hit(let hit): hit.shownTitle
         case .thisWindow: "This window"
         case .source(let s): s.title?.isEmpty == false ? s.title! : s.app
         case .ask(let q): "Ask: “\(q)”"

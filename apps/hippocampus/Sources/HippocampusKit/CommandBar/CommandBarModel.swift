@@ -48,15 +48,37 @@ public struct BarHit: Decodable, Sendable, Equatable, Identifiable {
     public let windowTitle: String?
     public let url: String?
     public let textSnippet: String
+    /// The one short line History's row shows for this moment ("Working on
+    /// billing.ts in pebblewick-app", "Chatting in #team"), as the agent's
+    /// `recall` sends it. Nil from an agent without it, and for an app that
+    /// is not work.
+    public let caption: String?
     public var id: UInt64 { eventId }
 
     enum CodingKeys: String, CodingKey {
         case eventId = "event_id", tsUs = "ts_us", appBundleId = "app_bundle_id"
-        case windowTitle = "window_title", url, textSnippet = "text_snippet"
+        case windowTitle = "window_title", url, textSnippet = "text_snippet", caption
     }
 
     /// The snippet without the provenance header line the store prepends.
     public var body: String { MomentText.body(textSnippet) }
+
+    /// What its row is called: History's caption for the moment, else its
+    /// window's title tidied, else the start of what it said.
+    public var shownTitle: String {
+        if let caption = caption?.trimmingCharacters(in: .whitespacesAndNewlines), !caption.isEmpty {
+            return caption
+        }
+        if let title = windowTitle.map(Self.tidy), !title.isEmpty { return title }
+        return body.isEmpty ? "Untitled" : body
+    }
+
+    /// A window title as a row shows one: on one line, spaces run together,
+    /// and a site's " | " read as the " · " the panel's other rows use.
+    static func tidy(_ title: String) -> String {
+        title.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            .replacingOccurrences(of: " | ", with: " \u{00B7} ")
+    }
 }
 
 /// A moment's stored text as one line, without the header line the store
@@ -235,6 +257,10 @@ public final class CommandBarModel: ObservableObject {
 
     public static let keepAnswerFor: TimeInterval = 10 * 60
     public static let homeRowLimit = 3
+    /// The most rows under "From your memory". The search asks for twice as
+    /// many, since moments already listed above, and the same window read
+    /// more than once, are left out (`shownHits`).
+    public static let momentRowLimit = 8
     /// The rows offered before anything is typed: the window in front, the
     /// last session, more about this window. Never a past search, the day or
     /// what Hippocampus understands about you.
@@ -414,7 +440,8 @@ public final class CommandBarModel: ObservableObject {
             return homeRows.map(BarRow.suggestion)
         case .results:
             let ask = answersAvailable ? [BarRow.ask(query.trimmed)] : []
-            return ask + matchedItems.map(BarRow.item) + matchedPages.map(BarRow.page) + hits.map(BarRow.hit)
+            let moments = Self.shownHits(hits, items: matchedItems, pages: matchedPages)
+            return ask + matchedItems.map(BarRow.item) + matchedPages.map(BarRow.page) + moments.map(BarRow.hit)
         case .answer:
             return (answer?.sources ?? []).enumerated().map { index, source in
                 index == 0 && isThisWindow(source) ? .thisWindow(source) : .source(source)
@@ -450,6 +477,62 @@ public final class CommandBarModel: ObservableObject {
             .filter { $0.kind != "screen" || readsThisWindow }
             .filter { $0.action.ask == nil || answersAvailable }
             .prefix(homeRowLimit))
+    }
+
+    /// The moments "From your memory" lists under the items and pages that
+    /// hold what is typed, in the search's order:
+    /// - none that is already listed above it: one of a listed item's or
+    ///   page's own moments, the same page's address, or a listed item's own
+    ///   window (its name, in one of its apps);
+    /// - one row for the same window read more than once: the newest, where
+    ///   the first of them stood. The same window is the same app with the
+    ///   same row title, as History's caption names it;
+    /// - at most `momentRowLimit`.
+    public static func shownHits(_ hits: [BarHit], items: [PanelItem], pages: [PanelPage]) -> [BarHit] {
+        let listed = Set(items.flatMap(\.moments) + pages.flatMap(\.moments))
+        let addresses = Set(pages.compactMap { address(host: $0.host, path: $0.path) })
+        let itemWindows = Set(items.flatMap { item in item.apps.map { WindowKey(app: $0, title: fold(item.name)) } })
+        var order: [WindowKey] = []
+        var newest: [WindowKey: BarHit] = [:]
+        for hit in hits {
+            guard !listed.contains(hit.eventId) else { continue }
+            if let url = hit.url.flatMap(URL.init(string:)),
+               let address = address(host: url.host, path: url.path), addresses.contains(address) {
+                continue
+            }
+            let app = hit.appBundleId ?? ""
+            if let title = hit.windowTitle, itemWindows.contains(WindowKey(app: app, title: fold(title))) {
+                continue
+            }
+            let window = WindowKey(app: app, title: fold(hit.shownTitle))
+            if let kept = newest[window] {
+                if hit.tsUs > kept.tsUs { newest[window] = hit }
+            } else {
+                newest[window] = hit
+                order.append(window)
+            }
+        }
+        return order.prefix(momentRowLimit).compactMap { newest[$0] }
+    }
+
+    private struct WindowKey: Hashable {
+        let app: String
+        let title: String
+    }
+
+    /// A page's place on the web without its scheme, query or fragment:
+    /// "stripe.com/pricing". Nil without a host.
+    private static func address(host: String?, path: String?) -> String? {
+        guard var host = host?.lowercased(), !host.isEmpty else { return nil }
+        if host.hasPrefix("www.") { host.removeFirst(4) }
+        var path = path ?? ""
+        while path.hasSuffix("/") { path.removeLast() }
+        return host + path
+    }
+
+    private static func fold(_ text: String) -> String {
+        text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
     }
 
     // MARK: Opening and closing
@@ -688,7 +771,8 @@ public final class CommandBarModel: ObservableObject {
         defer { if token == searchToken { isSearching = false } }
         do {
             let data = try await memory.call(
-                .reads, "mci_recall", arguments: Self.json(["query": text, "limit": 8]), timeout: .seconds(10)
+                .reads, "mci_recall", arguments: Self.json(["query": text, "limit": 2 * Self.momentRowLimit]),
+                timeout: .seconds(10)
             )
             let reply = try JSONDecoder().decode(RecallReply.self, from: data)
             guard mode == .results, query.trimmed == text else { return }

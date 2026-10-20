@@ -9,6 +9,90 @@ final class CommandBarTests: XCTestCase {
         XCTAssertEqual(hit.body, "Beta ships Oct 21. Owner: Maya")
     }
 
+    // MARK: "From your memory" (the demo week's own `recall` for "pricing")
+
+    private static let chrome = "com.google.Chrome"
+    private static let figma = "com.figma.Desktop"
+
+    /// What the demo week's `recall` gave for "pricing" and "billing" (DEMO-SCRIPT
+    /// shot 0:52), with the captions History shows for the same moments.
+    private static let demoHits = #"""
+    [{"event_id":118,"ts_us":1792407660000000,"app_bundle_id":"com.google.Chrome","window_title":"Pricing · Classbook","url":"https://classbook.example/pricing","text_snippet":"Simple pricing for every studio","caption":"Reading “Pricing”"},
+     {"event_id":117,"ts_us":1792407600000000,"app_bundle_id":"com.google.Chrome","window_title":"Pricing · Classbook","url":"https://classbook.example/pricing","text_snippet":"Simple pricing for every studio","caption":"Reading “Pricing”"},
+     {"event_id":252,"ts_us":1792502940000000,"app_bundle_id":"com.google.Chrome","window_title":"Pricing & Fees | Stripe","url":"https://stripe.com/pricing","text_snippet":"Pricing built for businesses of all sizes","caption":"Reading “Pricing & Fees”"},
+     {"event_id":251,"ts_us":1792502760000000,"app_bundle_id":"com.google.Chrome","window_title":"Pricing & Fees | Stripe","url":"https://www.stripe.com/pricing/","text_snippet":"Pricing built for businesses of all sizes","caption":"Reading “Pricing & Fees”"},
+     {"event_id":301,"ts_us":1792500000000000,"app_bundle_id":"com.apple.Terminal","window_title":"pebblewick-app — -zsh — 160×40","url":null,"text_snippet":"$ npm test billing","caption":"Working in Terminal: pebblewick-app"},
+     {"event_id":255,"ts_us":1792503300000000,"app_bundle_id":"com.figma.Desktop","window_title":"Pricing page v2","url":null,"text_snippet":"Pricing that grows with your studio","caption":"Designing “Pricing page v2”"},
+     {"event_id":254,"ts_us":1792503240000000,"app_bundle_id":"com.figma.Desktop","window_title":"Pricing page v2","url":null,"text_snippet":"Pricing that grows with your studio","caption":"Designing “Pricing page v2”"},
+     {"event_id":302,"ts_us":1792500600000000,"app_bundle_id":"com.apple.Terminal","window_title":"pebblewick-app — -zsh — 120×40","url":null,"text_snippet":"$ git diff billing.ts","caption":"Working in Terminal: pebblewick-app"},
+     {"event_id":311,"ts_us":1792501000000000,"app_bundle_id":"com.microsoft.VSCode","window_title":"billing.ts — pebblewick-app","url":null,"text_snippet":"export async function switchToYearly","caption":"Working on billing.ts in pebblewick-app"},
+     {"event_id":312,"ts_us":1792501200000000,"app_bundle_id":"com.microsoft.VSCode","window_title":"billing.ts — pebblewick-app","url":null,"text_snippet":"export async function switchToYearly","caption":"Working on billing.ts in pebblewick-app"},
+     {"event_id":321,"ts_us":1792502000000000,"app_bundle_id":"com.tinyspeck.slackmacgap","window_title":"team (Channel) - Pebblewick - Slack","url":null,"text_snippet":"yearly billing by Thursday?","caption":"Chatting in #team"}]
+    """#
+
+    private static func hits(_ json: String) throws -> [BarHit] {
+        try JSONDecoder().decode([BarHit].self, from: Data(json.utf8))
+    }
+
+    /// Working On and Web Pages over the results, as the demo week lists them.
+    private static let pricingItem = PanelItem(id: "w_7ab2f0", kind: "design", name: "Pricing page v2",
+                                               apps: [figma], lastUs: 1_792_503_300_000_000, moments: [255])
+    private static let pricingPages = [
+        PanelPage(title: "Pricing & Fees \u{00B7} Stripe", host: "stripe.com", path: "/pricing", app: chrome, days: 1,
+                  lastUs: 1_792_502_940_000_000, moments: [252]),
+        PanelPage(title: "Pricing \u{00B7} Classbook", host: "classbook.example", path: "/pricing", app: chrome,
+                  days: 1, lastUs: 1_792_407_660_000_000, moments: []),
+    ]
+
+    /// Nothing listed above "From your memory" is listed again under it: an
+    /// item's or a page's own moment, the same page's address (with or
+    /// without "www." and a last "/"), or the item's own window by its name.
+    /// The same window read more than once is one row, the newest, where
+    /// the first of them stood.
+    @MainActor
+    func testFromYourMemoryListsEachWindowOnceAndNothingListedAboveIt() throws {
+        let shown = CommandBarModel.shownHits(try Self.hits(Self.demoHits), items: [Self.pricingItem],
+                                              pages: Self.pricingPages)
+        XCTAssertEqual(shown.map(\.eventId), [302, 312, 321])
+        XCTAssertEqual(shown.map(\.shownTitle), ["Working in Terminal: pebblewick-app",
+                                                 "Working on billing.ts in pebblewick-app", "Chatting in #team"])
+    }
+
+    /// With nothing listed above it, every page and window still shows once.
+    @MainActor
+    func testWithNothingAboveEachWindowShowsOnceInTheSearchesOrder() throws {
+        let shown = CommandBarModel.shownHits(try Self.hits(Self.demoHits), items: [], pages: [])
+        XCTAssertEqual(shown.map(\.eventId), [118, 252, 302, 255, 312, 321])
+        XCTAssertEqual(Set(shown.map(\.shownTitle)).count, shown.count, "no two rows say the same")
+    }
+
+    /// At most eight rows, and the search asks for twice as many.
+    @MainActor
+    func testFromYourMemoryShowsAtMostEightRows() throws {
+        let many = (1...20).map { index in
+            #"{"event_id":\#(index),"ts_us":\#(index),"app_bundle_id":"com.apple.Notes","window_title":"Note \#(index)","url":null,"text_snippet":"pricing"}"#
+        }
+        let shown = CommandBarModel.shownHits(try Self.hits("[" + many.joined(separator: ",") + "]"), items: [],
+                                              pages: [])
+        XCTAssertEqual(shown.map(\.eventId), Array(1...8))
+        XCTAssertEqual(CommandBarModel.momentRowLimit, 8)
+    }
+
+    /// A row is called what History calls the moment; without a caption
+    /// (an older agent), its window's title tidied; without a title, what it
+    /// said.
+    func testAHitIsCalledByItsCaptionThenItsTitle() throws {
+        let hits = try Self.hits(#"""
+        [{"event_id":1,"ts_us":1,"app_bundle_id":"com.apple.Terminal","window_title":"pebblewick-app — -zsh — 160×40","url":null,"text_snippet":"$ ls","caption":"Working in Terminal: pebblewick-app"},
+         {"event_id":2,"ts_us":2,"app_bundle_id":"com.google.Chrome","window_title":"Pricing & Fees  |  Stripe","url":null,"text_snippet":"Pay as you go"},
+         {"event_id":3,"ts_us":3,"app_bundle_id":"com.apple.Notes","window_title":null,"url":null,"text_snippet":"[app=com.apple.Notes]\nLaunch list","caption":"  "},
+         {"event_id":4,"ts_us":4,"app_bundle_id":"com.apple.Notes","window_title":"","url":null,"text_snippet":""}]
+        """#)
+        XCTAssertEqual(hits.map(\.shownTitle), ["Working in Terminal: pebblewick-app", "Pricing & Fees \u{00B7} Stripe",
+                                                "Launch list", "Untitled"])
+        XCTAssertNil(hits[1].caption, "an agent without captions still decodes")
+    }
+
     private func fakeAgent(_ script: String) throws -> MemorySessionLaunch {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

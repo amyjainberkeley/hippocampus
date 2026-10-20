@@ -718,6 +718,29 @@ final class AskPanelTests: XCTestCase {
         XCTAssertEqual(model.activate(), .openURL(URL(string: "https://stripe.com/docs/billing")!))
     }
 
+    /// "From your memory" lists a window read twice once, the newest read,
+    /// called what History calls it; the search asks for twice the rows it
+    /// shows, so leaving repeats out still fills it.
+    func testAWindowReadTwiceIsOneRowCalledWhatHistoryCallsIt() async {
+        let (model, memory, _) = rig()
+        memory.replies["mci_recall"] = .success("""
+        {"hits":[
+          {"event_id":21,"ts_us":1,"app_bundle_id":"com.apple.Safari","window_title":"Stripe Billing | Stripe Documentation","url":"https://stripe.com/docs/billing","text_snippet":"Per-seat pricing.","caption":"Reading \u{201C}Stripe Billing\u{201D}"},
+          {"event_id":11,"ts_us":2,"app_bundle_id":"com.tinyspeck.slackmacgap","window_title":"pricing (Channel) - Trailhead - Slack","url":null,"text_snippet":"$18 a seat.","caption":"Chatting in #pricing"},
+          {"event_id":22,"ts_us":3,"app_bundle_id":"com.apple.Safari","window_title":"Stripe Billing | Stripe Documentation","url":"https://stripe.com/docs/billing","text_snippet":"Per-seat pricing.","caption":"Reading \u{201C}Stripe Billing\u{201D}"}]}
+        """)
+        await open(model, over: safari)
+        model.query = "pricing"
+        await eventually { model.hits.count == 3 }
+        let shown = model.rows.compactMap { row -> BarHit? in
+            if case .hit(let hit) = row { return hit }
+            return nil
+        }
+        XCTAssertEqual(shown.map(\.eventId), [22, 11])
+        XCTAssertEqual(shown.map(\.shownTitle), ["Reading \u{201C}Stripe Billing\u{201D}", "Chatting in #pricing"])
+        XCTAssertEqual(memory.calls(to: "mci_recall").last?.arguments["limit"] as? Int, 16)
+    }
+
     /// "Resume: …" opens Today on that session's own day with the session
     /// selected (SPEC 2.16), not today's Today without it.
     func testTheResumeRowOpensItsSessionAndTheKeysOpenThePlaces() async {
