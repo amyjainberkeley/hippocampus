@@ -535,7 +535,7 @@ fn beside(
 }
 
 /// Slack's channel ("#launch") or person ("Sam Lee") a title names.
-fn slack_place(raw: &str) -> Option<String> {
+pub(crate) fn slack_place(raw: &str) -> Option<String> {
     if let Some(channel) = raw
         .split(" (Channel)")
         .next()
@@ -723,7 +723,7 @@ fn without_issue_key(title: &str) -> &str {
 
 /// An email subject without its reply and forward marks: "Fwd: Re: Launch
 /// plan" is "Launch plan".
-fn without_reply_marks(subject: &str) -> &str {
+pub(crate) fn without_reply_marks(subject: &str) -> &str {
     let mut rest = subject.trim();
     loop {
         let lower = rest.to_lowercase();
@@ -737,13 +737,13 @@ fn without_reply_marks(subject: &str) -> &str {
     }
 }
 
-fn is_mailbox(subject: &str) -> bool {
+pub(crate) fn is_mailbox(subject: &str) -> bool {
     let lower = subject.trim().to_lowercase();
     let lower = lower.split(" (").next().unwrap_or(&lower).trim();
     MAILBOXES.contains(&lower)
 }
 
-fn is_slack_view(title: &str) -> bool {
+pub(crate) fn is_slack_view(title: &str) -> bool {
     let lower = title.trim().to_lowercase();
     let lower = lower.split(" (").next().unwrap_or(&lower).trim();
     SLACK_VIEWS.contains(&lower) || lower.starts_with("huddle") || lower.starts_with("search")

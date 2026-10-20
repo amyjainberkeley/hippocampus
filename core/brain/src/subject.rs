@@ -31,11 +31,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::apps::{self, WorkKind};
 use crate::caption::{
-    first_heading, title_segments, BLANK_PAGES, GENERIC, SEARCH_TITLE_ENDS, TITLE_SUFFIXES,
+    first_heading, is_mailbox, is_slack_view, slack_place, title_segments, without_reply_marks,
+    BLANK_PAGES, GENERIC, SEARCH_TITLE_ENDS, TITLE_SUFFIXES,
 };
 use crate::chrome::{is_browser, without_title_marks};
 use crate::reading::TERMINAL_APPS;
 use crate::redaction::ocr_secrets::contains_secret;
+use crate::{SqlCipherBrainStore, StoreError};
 
 /// What kind of thing a window is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -486,6 +488,135 @@ pub fn terminal_folder_at(title: &str, home: Option<&str>) -> Option<TerminalFol
         name: text.to_owned(),
         sure: false,
     })
+}
+
+/// The name of the conversation a chat or mail window shows, and nothing it
+/// says: "#launch" or "Jordan Lee" in Slack, the person in Messages, an
+/// email's subject. A Working On page lists conversations by name only
+/// (SPEC-DELTA 4). `None` for a list, an inbox, a search or anything unsure.
+#[must_use]
+pub fn conversation_of(
+    app: Option<&str>,
+    title: Option<&str>,
+    host: Option<&str>,
+) -> Option<String> {
+    let app = app?.trim();
+    let raw = without_title_marks(title.unwrap_or_default()).trim();
+    if raw.is_empty() || is_hippocampus(app) {
+        return None;
+    }
+    let host = host.map(normalize_host).unwrap_or_default();
+    let name = if app == "com.tinyspeck.slackmacgap"
+        || is_site(&host, "app.slack.com")
+        || app == "com.hnc.Discord"
+    {
+        slack_place(raw).filter(|place| !is_slack_view(place))
+    } else if MAIL_APPS.contains(&app)
+        || is_site(&host, "mail.google.com")
+        || host.starts_with("outlook.")
+    {
+        let parts = title_segments(raw, &apps::name(app));
+        let subject = without_reply_marks(parts.first()?).trim().to_owned();
+        (!subject.is_empty() && !is_mailbox(&subject) && !subject.contains('@')).then_some(subject)
+    } else if app == "com.microsoft.teams2" || app == "com.microsoft.teams" {
+        // "Chat | Sam Lee | Microsoft Teams".
+        let parts: Vec<&str> = raw.split(" | ").map(str::trim).collect();
+        (parts.len() >= 3 && parts[0].eq_ignore_ascii_case("chat")).then(|| parts[1].to_owned())
+    } else if CHAT_APPS_BY_TITLE.contains(&app) {
+        title_segments(raw, &apps::name(app)).first().cloned()
+    } else {
+        None
+    }?;
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    let named = match name.strip_prefix('#') {
+        // A channel's name may be short: "#qa".
+        Some(channel) => channel.chars().filter(|ch| ch.is_alphanumeric()).count() >= 2,
+        None => !is_never_a_name(&name),
+    };
+    (named && !contains_secret(&name) && name.chars().count() <= MAX_NAME_CHARS).then_some(name)
+}
+
+/// Mail apps, whose title is a message's subject.
+const MAIL_APPS: &[&str] = &[
+    "com.apple.mail",
+    "com.microsoft.Outlook",
+    "com.superhuman.electron",
+    "com.readdle.smartemail-Mac",
+];
+
+/// Chat apps whose window title is the conversation's name.
+const CHAT_APPS_BY_TITLE: &[&str] = &[
+    "com.apple.MobileSMS",
+    "net.whatsapp.WhatsApp",
+    "desktop.WhatsApp",
+    "ru.keepcoder.Telegram",
+    "org.telegram.desktop",
+    "org.whispersystems.signal-desktop",
+];
+
+impl SqlCipherBrainStore {
+    /// The file paths the given moments showed, as Tier 1 read them off the
+    /// screen (`file_path` entities), each with how many of the moments
+    /// showed it, most shown first, at most `limit`: what a code project's
+    /// folder is guessed from (SPEC 3.12.4). Never anything else a moment
+    /// said.
+    ///
+    /// # Errors
+    /// Database failures.
+    pub fn file_paths_seen(
+        &self,
+        event_ids: &[i64],
+        limit: usize,
+    ) -> Result<Vec<(String, u32)>, StoreError> {
+        let mut wanted = event_ids.to_vec();
+        wanted.sort_unstable();
+        wanted.dedup();
+        if wanted.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        let backend = |context: &str, error: rusqlite::Error| {
+            StoreError::Backend(format!("{context}: {error}"))
+        };
+        let guard = self.db.lock().expect("brain store mutex poisoned");
+        let conn = guard.conn();
+        let has_entities: bool = conn
+            .query_row(
+                "SELECT COUNT(*) = 2 FROM sqlite_master WHERE type = 'table'
+                 AND name IN ('entities', 'entity_mentions')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| backend("probe entity tables", e))?;
+        if !has_entities {
+            return Ok(Vec::new());
+        }
+        let mut counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        for batch in wanted.chunks(500) {
+            let sql = format!(
+                "SELECT en.canonical_name, COUNT(DISTINCT m.event_id)
+                 FROM entity_mentions m JOIN entities en ON en.id = m.entity_id
+                 WHERE en.kind = 'file_path' AND m.event_id IN ({})
+                 GROUP BY en.canonical_name",
+                vec!["?"; batch.len()].join(", ")
+            );
+            let mut statement = conn
+                .prepare(&sql)
+                .map_err(|e| backend("prepare file paths seen", e))?;
+            let rows = statement
+                .query_map(rusqlite::params_from_iter(batch), |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })
+                .map_err(|e| backend("query file paths seen", e))?;
+            for row in rows {
+                let (path, count) = row.map_err(|e| backend("read file paths seen", e))?;
+                *counts.entry(path).or_default() += u32::try_from(count).unwrap_or(u32::MAX);
+            }
+        }
+        let mut paths: Vec<(String, u32)> = counts.into_iter().collect();
+        paths.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        paths.truncate(limit);
+        Ok(paths)
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -831,3 +831,163 @@ fn no_random_title_gives_a_short_or_never_name() {
         }
     }
 }
+
+#[test]
+fn conversations_are_named_and_nothing_more() {
+    use mci_brain::subject::conversation_of;
+    let name =
+        |app: &str, title: &str, host: Option<&str>| conversation_of(Some(app), Some(title), host);
+    let slack = "com.tinyspeck.slackmacgap";
+    assert_eq!(
+        name(slack, "launch (Channel) - Northwind Studio - Slack", None).as_deref(),
+        Some("#launch")
+    );
+    assert_eq!(
+        name(slack, "Jordan Lee (DM) - Northwind Studio - Slack", None).as_deref(),
+        Some("Jordan Lee")
+    );
+    assert_eq!(
+        name(slack, "qa (Channel) - Northwind Studio - Slack", None).as_deref(),
+        Some("#qa")
+    );
+    assert_eq!(
+        name(slack, "Threads - Northwind Studio - Slack", None),
+        None
+    );
+    assert_eq!(
+        name(
+            CHROME,
+            "launch (Channel) - Northwind Studio - Slack",
+            Some("app.slack.com")
+        )
+        .as_deref(),
+        Some("#launch")
+    );
+    assert_eq!(
+        name("com.apple.MobileSMS", "Sam Lee", None).as_deref(),
+        Some("Sam Lee")
+    );
+    assert_eq!(name("com.apple.MobileSMS", "Messages", None), None);
+    assert_eq!(
+        name(
+            "com.apple.mail",
+            "Re: Invoice 1042 from Northwind Supplies",
+            None
+        )
+        .as_deref(),
+        Some("Invoice 1042 from Northwind Supplies")
+    );
+    assert_eq!(name("com.apple.mail", "Inbox (12)", None), None);
+    assert_eq!(
+        name(
+            CHROME,
+            "Invoice 1042 - sam@trailhead.example - Gmail",
+            Some("mail.google.com")
+        )
+        .as_deref(),
+        Some("Invoice 1042")
+    );
+    assert_eq!(
+        name(
+            CHROME,
+            "Inbox (3) - sam@trailhead.example - Gmail",
+            Some("mail.google.com")
+        ),
+        None
+    );
+    assert_eq!(
+        name(
+            "com.microsoft.teams2",
+            "Chat | Sam Lee | Microsoft Teams",
+            None
+        )
+        .as_deref(),
+        Some("Sam Lee")
+    );
+    assert_eq!(
+        name(
+            VS_CODE,
+            "tax.rs \u{2014} trailhead-shop \u{2014} Visual Studio Code",
+            None
+        ),
+        None
+    );
+}
+
+/// The folder guess reads only the file paths moments showed (Tier 1's
+/// `file_path` entities), counted by moment, most shown first.
+#[test]
+fn file_paths_seen_are_counted_by_moment() {
+    use mci_brain::graph::{Entity, EntityMention};
+    use mci_brain::{BrainStore, Event, EventId, SqlCipherBrainStore};
+    use mci_core::crypto::DbKey;
+
+    let dir = tempfile::tempdir().unwrap();
+    let store =
+        SqlCipherBrainStore::new(&dir.path().join("mci.sqlite"), &DbKey::from_bytes([7; 32]))
+            .unwrap();
+    let event = |ts_us: u64| Event {
+        id: EventId(0),
+        ts_us,
+        app_bundle_id: Some(TERMINAL.to_owned()),
+        window_title: Some("trailhead-shop \u{2014} -zsh \u{2014} 80\u{00d7}24".to_owned()),
+        url: None,
+        text: "cargo test".into(),
+        summary: None,
+        entities: None,
+        episode_id: None,
+        cascade_reason: 0,
+        keyframe_blob: None,
+        tab_id: None,
+        embedding: None,
+    };
+    let ids: Vec<EventId> = (1..=3)
+        .map(|n| store.put_event(&event(1_760_000_000_000_000 + n)).unwrap())
+        .collect();
+    let entity = |kind: &str, name: &str| Entity {
+        id: Entity::derive_id(kind, name),
+        kind: kind.to_owned(),
+        canonical_name: name.to_owned(),
+        summary: None,
+        summary_embedding: None,
+        content_hash: Entity::derive_content_hash(kind, name),
+        created_ts_us: 1,
+        updated_ts_us: 1,
+    };
+    let src = entity("file_path", "/Users/dev/trailhead-shop/src/tax.rs");
+    let cargo = entity("file_path", "/Users/dev/trailhead-shop/Cargo.toml");
+    let site = entity("url", "https://devnotes.example/rounding");
+    for item in [&src, &cargo, &site] {
+        store.put_entity(item).unwrap();
+    }
+    let mention = |entity: &Entity, event: EventId| EntityMention {
+        id: EntityMention::derive_id(&entity.id, event, "regex", None),
+        entity_id: entity.id.clone(),
+        event_id: event,
+        mention_text: None,
+        confidence: 1.0,
+        extractor_kind: "regex".into(),
+        ts_us: 1,
+    };
+    for (item, event) in [
+        (&src, ids[0]),
+        (&src, ids[1]),
+        (&cargo, ids[2]),
+        (&site, ids[0]),
+    ] {
+        store.put_entity_mention(&mention(item, event)).unwrap();
+    }
+    let raw: Vec<i64> = ids.iter().map(|id| i64::try_from(id.0).unwrap()).collect();
+    let paths = store.file_paths_seen(&raw, 10).unwrap();
+    assert_eq!(
+        paths,
+        vec![
+            ("/Users/dev/trailhead-shop/src/tax.rs".to_owned(), 2),
+            ("/Users/dev/trailhead-shop/Cargo.toml".to_owned(), 1),
+        ],
+        "only file paths, never a page's address"
+    );
+    assert_eq!(store.file_paths_seen(&raw[..1], 10).unwrap().len(), 1);
+    assert!(store.file_paths_seen(&[], 10).unwrap().is_empty());
+    assert_eq!(store.file_paths_seen(&raw, 1).unwrap().len(), 1);
+}
