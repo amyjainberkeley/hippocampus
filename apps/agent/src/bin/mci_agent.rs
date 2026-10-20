@@ -677,8 +677,9 @@ fn print_usage() {
         \x20                            install the SessionStart handoff hooks in\n\
         \x20                            ~/.claude/settings.json and ~/.codex/hooks.json,\n\
         \x20                            and load the ai.hippocampus.refresh LaunchAgent\n\
-        \x20 disconnect --all           remove the Hippocampus SessionStart hooks and the\n\
-        \x20                            refresh LaunchAgent. MCP registrations stay.\n\
+        \x20 disconnect --all           remove what Hippocampus added to Claude Code and\n\
+        \x20                            Codex: the SessionStart hooks and the MCP\n\
+        \x20                            registration, and the refresh LaunchAgent\n\
         \x20 init                       one-command setup: make a key, import your\n\
         \x20                            Claude Code history, index it, and connect\n\
         \x20                            detected Claude Code and Codex clients\n\
@@ -2117,12 +2118,16 @@ fn run_register_clients_cmd(db_path: &Path) -> Result<(), u8> {
     }
 }
 
-/// Remove only what Hippocampus installed: both `SessionStart` hooks (including
-/// the group the Hippocampus.app installer wrote) and the refresh agent.
-/// MCP registrations are left alone; the registry has no removal path.
+/// Remove only what Hippocampus installed, in each tool: both `SessionStart`
+/// hooks (including the group the Hippocampus.app installer wrote), the
+/// `hippocampus` MCP registration (as Preferences' Disconnect All and
+/// `clients --disconnect all` take it out), and the refresh agent. Everything
+/// else in the tools' settings stays as it was.
 fn run_disconnect_all_cmd(refresh_agent: bool) -> Result<(), u8> {
     let (home, codex_home) = client_homes();
     let paths = HookPaths::for_home(&home, codex_home.as_deref());
+    let look_ups = ClientRegistry::discover()
+        .map(|registry| mci_agent::client_status::disconnect(&registry, &["claude-code", "codex"]));
     let mut failed = false;
     for (name, result) in [
         (
@@ -2131,14 +2136,30 @@ fn run_disconnect_all_cmd(refresh_agent: bool) -> Result<(), u8> {
         ),
         ("codex", client_hooks::remove_codex_hook(&paths.codex_hooks)),
     ] {
-        match result {
-            Ok(change) => outln!(
-                "  {name}: {}, MCP registration left in place",
-                hook_change_label(change)
+        let (registration, registration_failed) = match &look_ups {
+            Ok(done) => match done.iter().find(|entry| entry.id == name) {
+                Some(entry) if entry.look_ups == "removed" => ("MCP registration removed", false),
+                Some(entry) if entry.look_ups == "none" => ("no MCP registration", false),
+                _ => ("MCP registration removal failed", true),
+            },
+            Err(_) => (
+                "MCP registration not checked (this Mac's AI tools could not be found)",
+                true,
             ),
+        };
+        match result {
+            Ok(change) => {
+                let line = format!("  {name}: {}, {registration}", hook_change_label(change));
+                if registration_failed {
+                    failed = true;
+                    errln!("{line}");
+                } else {
+                    outln!("{line}");
+                }
+            }
             Err(error) => {
                 failed = true;
-                errln!("  {name}: SessionStart hook removal failed: {error}");
+                errln!("  {name}: SessionStart hook removal failed: {error}, {registration}");
             }
         }
     }
@@ -2147,9 +2168,6 @@ fn run_disconnect_all_cmd(refresh_agent: bool) -> Result<(), u8> {
     } else {
         outln!("  refresh: LaunchAgent skipped (--no-refresh-agent)");
     }
-    outln!(
-        "  To drop the MCP registrations too: `claude mcp remove hippocampus` and `codex mcp remove hippocampus`."
-    );
     if failed {
         Err(14)
     } else {

@@ -1172,16 +1172,35 @@ for path in re.findall(r'"(~/[^"]+)"', block):
     print(path)
 PY
 if [[ ! -s "$H/zap-paths.txt" ]]; then
-    # The cask lives in the local tap; without it, its list as of 0.3.0.
-    printf '%s\n' "~/.config/hippocampus" "~/.hippocampus" "~/Library/Application Support/MCI" \
-        "~/Library/Caches/ai.hippocampus" "~/Library/HTTPStorages/ai.hippocampus" "~/Library/Logs/MCI" \
+    # The cask lives in the local tap; without it, its home paths as of 0.3.1.
+    printf '%s\n' "~/..claude.json.hippocampus.lock" "~/.claude/.hippocampus-context.lock" \
+        "~/.codex/.config.toml.hippocampus.lock" "~/.codex/.hippocampus-context.lock" \
+        "~/.config/hippocampus" "~/.hippocampus" "~/.hippocampus-client-registry-journal-*" "~/.mci" \
+        "~/Library/Application Support/Hippocampus" "~/Library/Application Support/MCI" \
+        "~/Library/Caches/ai.hippocampus" "~/Library/Caches/hippocampus-ocr" \
+        "~/Library/Containers/ai.hippocampus.SafariExtension" "~/Library/Group Containers/group.ai.hippocampus" \
+        "~/Library/HTTPStorages/ai.hippocampus" "~/Library/HTTPStorages/hippocampus-ocr" "~/Library/Logs/MCI" \
         "~/Library/Preferences/ai.hippocampus.plist" "~/Library/Saved Application State/ai.hippocampus.savedState" \
         > "$H/zap-paths.txt"
 fi
-while IFS= read -r zap; do
-    [[ -n "$zap" ]] || continue
-    rm -rf "${E2E_HOME:?}/${zap#\~/}"
-done < "$H/zap-paths.txt"
+# Homebrew's zap expands globs (the AI-tool registry's lock files are one);
+# so does this, inside the throwaway home only.
+python3 - "$E2E_HOME" "$H/zap-paths.txt" <<'PY'
+import glob, os, shutil, sys
+home = os.path.realpath(sys.argv[1])
+for line in open(sys.argv[2]):
+    zap = line.strip()
+    if not zap.startswith("~/"):
+        continue
+    for path in glob.glob(os.path.join(glob.escape(home), zap[2:])):
+        parent = os.path.realpath(os.path.dirname(path))
+        if parent != home and not parent.startswith(home + os.sep):
+            continue
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+        else:
+            os.unlink(path)
+PY
 # What is left: any product file or folder, and any file that still names it.
 (cd "$E2E_HOME" && find . -mindepth 1 2>/dev/null | sort) > "$H/after-zap-files.txt"
 python3 - "$E2E_HOME" > "$H/residue.txt" 2>&1 <<'PY'
@@ -1211,7 +1230,7 @@ PY
 if [[ ! -s "$H/residue.txt" ]]; then
     pass e3 "after the cask's zap list nothing of Hippocampus is left in the home"
 else
-    fail e3 "left after uninstall (zap) and disconnect: $(sed 's/^PATH /path: /; s/^NAMES /mentions Hippocampus: /' "$H/residue.txt" | tr '\n' ';' | cut -c1-400) — the MCP server registrations stay in the AI tools' own config (PRIVACY.md: remove by hand)"
+    fail e3 "left after uninstall (zap) and disconnect: $(sed 's/^PATH /path: /; s/^NAMES /mentions Hippocampus: /' "$H/residue.txt" | tr '\n' ';' | cut -c1-400)"
 fi
 person e4 "The database key stays in the login Keychain as ai.hippocampus.brain after uninstall (docs/GUIDE.md); this run used a file key, so removing it in Keychain Access needs a person"
 
