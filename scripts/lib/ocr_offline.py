@@ -85,6 +85,8 @@ def probe(command: list[str], frames: list[bytes], *, hold_seconds: float = 15.0
     """Run `command` (a worker in --serve mode) under the check's sandbox,
     send `frames`, keep it running `hold_seconds` after the last reply, end
     it by closing its input, and say what it did."""
+    # The worker runs in a throwaway folder, so a relative path is resolved here.
+    command = [os.path.abspath(command[0]) if os.sep in command[0] else command[0], *command[1:]]
     scratch = Path(tempfile.mkdtemp(prefix="ocr-offline."))
     try:
         home = scratch / "home"

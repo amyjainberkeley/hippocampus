@@ -574,12 +574,17 @@ provision_installer_python() {
 rebuild_ocr_if_stale() {
     if ocr_is_fresh; then
         say "== OCR worker matches tools/ocr; not rebuilt"
-        return 0
+    else
+        require_disk "rebuild the OCR worker"
+        stage "rebuild the OCR worker from tools/ocr/worker.py" ocr-worker \
+            "$OCR_PYTHON" "$OCR_DIR/prepare.py"
+        ocr_is_fresh || stop "The rebuilt OCR worker still does not match tools/ocr. See $LOG_DIR/ocr-worker.log."
     fi
-    require_disk "rebuild the OCR worker"
-    stage "rebuild the OCR worker from tools/ocr/worker.py" ocr-worker \
-        "$OCR_PYTHON" "$OCR_DIR/prepare.py"
-    ocr_is_fresh || stop "The rebuilt OCR worker still does not match tools/ocr. See $LOG_DIR/ocr-worker.log."
+    # Its ONNX Runtime once sent telemetry to Microsoft (reports/e2e,
+    # finding S1). Run the worker that ships, with no network, and refuse
+    # it if the unified log shows it reaching for the network at all.
+    stage "the OCR worker reads a screen and sends nothing (no-network sandbox, unified log)" ocr-offline \
+        "$OCR_PYTHON" -B "$REPO_ROOT/scripts/lib/ocr_offline.py" --worker "$OCR_DIR/dist/hippocampus-ocr/hippocampus-ocr"
 }
 
 commit_status_stamp() {
