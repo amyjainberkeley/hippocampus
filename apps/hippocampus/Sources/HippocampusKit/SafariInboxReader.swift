@@ -446,9 +446,7 @@ public final class SafariInboxReader: Sendable {
     // MARK: - Helpers
 
     private func inboxURL() -> URL? {
-        AppGroupIdentity.identifier.flatMap {
-            FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0)
-        }?.appendingPathComponent(Self.inboxDir, isDirectory: true)
+        AppGroupIdentity.containerURL?.appendingPathComponent(Self.inboxDir, isDirectory: true)
     }
 
     private func removeFile(_ url: URL) {
