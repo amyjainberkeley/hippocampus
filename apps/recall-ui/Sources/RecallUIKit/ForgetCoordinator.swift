@@ -293,6 +293,9 @@ public final class ForgetCoordinator: ObservableObject {
     /// never keeps stopping remembering. Try Again and the next open still
     /// finish it.
     public static let automaticTries = 3
+    /// The longest the window waits, as it closes, for a forget waiting out
+    /// its note or under way: the hold's wait, the deletes and the release.
+    public static let quitWait: Duration = .seconds(20)
 
     /// Where a forget came from.
     private enum Kind: Equatable {
@@ -338,6 +341,9 @@ public final class ForgetCoordinator: ObservableObject {
     private var holdable = true
     /// Tries made on the app's statuses since the last kept forget was done.
     private var tries = 0
+    /// The window is closing: no note can say a forget failed, so every
+    /// failure keeps its promise for the next open.
+    private var quitting = false
     private var worker: Task<Void, Never>?
     /// Who waits for each forget's outcome, by its promise's id.
     private var waiting: [UUID: [CheckedContinuation<Outcome, Never>]] = [:]
@@ -488,7 +494,7 @@ public final class ForgetCoordinator: ObservableObject {
     /// app says.
     public func statusArrived(_ status: WindowChannelStatus) {
         holdable = Self.letsTheAppHold(status.state)
-        guard worker == nil else { return }
+        guard worker == nil, !quitting else { return }
         refreshPhase()
         guard holdable, !unfinished.isEmpty, tries < Self.automaticTries else { return }
         tries += 1
@@ -514,6 +520,30 @@ public final class ForgetCoordinator: ObservableObject {
         if unfinished.isEmpty { tries = 0 }
         let waits = !unfinished.isEmpty && channel != nil && holdable && tries < Self.automaticTries
         phase = waits ? .finishing : nil
+    }
+
+    // MARK: Closing the window
+
+    /// The window is closing, or quitting (SPEC 3.11): a forget waiting out
+    /// its Undo note goes now, and `reply` is called once every forget under
+    /// way is done, or after `bound`, whichever comes first. False when
+    /// nothing is under way: quit at once. A forget that fails, or isn't
+    /// done by then, keeps its promise, and the next open finishes it.
+    public func finishBeforeQuitting(within bound: Duration = ForgetCoordinator.quitWait,
+                                     reply: @escaping @MainActor () -> Void) -> Bool {
+        quitting = true
+        finishUndoableNow()
+        guard worker != nil else { return false }
+        let answer = QuitReply(reply)
+        Task {
+            await self.idle()
+            answer.give()
+        }
+        Task {
+            try? await Task.sleep(for: bound)
+            answer.give()
+        }
+        return true
     }
 
     /// Returns once nothing is under way.
@@ -620,7 +650,7 @@ public final class ForgetCoordinator: ObservableObject {
                     queue.removeAll()
                     phase = nil
                     for job in jobs {
-                        if job.keepsOnFailure {
+                        if job.keepsOnFailure || quitting {
                             unfinished[job.id] = job.request
                         } else {
                             store.remove(job.id)
@@ -714,7 +744,7 @@ public final class ForgetCoordinator: ObservableObject {
             unfinished[job.id] = deletion.remaining
             return .partlyForgotten(moments: deletion.deleted)
         }
-        if job.keepsOnFailure {
+        if job.keepsOnFailure || quitting {
             unfinished[job.id] = job.request
         } else {
             store.remove(job.id)
@@ -742,5 +772,22 @@ public final class ForgetCoordinator: ObservableObject {
         stride(from: 0, to: ids.count, by: idsPerDelete).map { start in
             Array(ids[start..<min(start + idsPerDelete, ids.count)])
         }
+    }
+}
+
+/// A quit's reply, given once: when the forgets are done, or when its time
+/// is up, whichever comes first.
+@MainActor
+private final class QuitReply {
+    private var reply: (@MainActor () -> Void)?
+
+    init(_ reply: @escaping @MainActor () -> Void) {
+        self.reply = reply
+    }
+
+    func give() {
+        let reply = self.reply
+        self.reply = nil
+        reply?()
     }
 }

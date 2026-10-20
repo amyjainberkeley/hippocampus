@@ -64,9 +64,23 @@ final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Se
         }
     }
 
+    /// Quitting, or the last window closing: a forget waiting out its Undo
+    /// note, or under way, is finished first, within a bound, so a moment
+    /// the person forgot never stays readable until the window next opens
+    /// (SPEC 3.11). Meanwhile the process stays, and a window still open
+    /// says "Forgetting…".
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         terminating = true
-        return .terminateNow
+        #if DEBUG
+        // The preview opens no memory, and touches none on its way out.
+        if NativePreviewConfiguration(arguments: CommandLine.arguments) != nil { return .terminateNow }
+        #endif
+        let waits = MainActor.assumeIsolated {
+            MCIRecallApp.forget.finishBeforeQuitting {
+                NSApp.reply(toApplicationShouldTerminate: true)
+            }
+        }
+        return waits ? .terminateLater : .terminateNow
     }
 
     func applicationWillTerminate(_ notification: Notification) {

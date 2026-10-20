@@ -599,6 +599,74 @@ final class ForgetPipelineTests: XCTestCase {
         XCTAssertTrue(source.contains(".environment(\\.forgottenMoments, forgetting.hiddenMoments)"))
     }
 
+    // MARK: Closing the window
+
+    /// History, ⌘⌫ ("Forgot 1 moment." with Undo), then ⌘W within the
+    /// note's five seconds. The window's process ends with its last window,
+    /// so the forget goes before the reply that lets it quit: never left in
+    /// the memory, where Ask and connected AI tools still find it, until the
+    /// window next opens.
+    func testClosingTheWindowDuringTheUndoNoteForgetsBeforeItQuits() async {
+        let mutator = LeaseMutator()
+        let channel = AppLikeChannel()
+        let forget = coordinator(mutator, channel)
+        _ = await forget.forgetAfterUndo(ForgetRequest(momentIds: [41]), count: 1)
+        var deletedAtReply: [UInt64]?
+        let replied = expectation(description: "the reply that lets the window quit")
+        let waits = forget.finishBeforeQuitting(within: .seconds(5)) {
+            deletedAtReply = mutator.deleted
+            replied.fulfill()
+        }
+        XCTAssertTrue(waits, "terminateLater: a forget is waiting out its note")
+        XCTAssertNil(forget.undoable, "the forget goes now, not when the note would have closed")
+        await fulfillment(of: [replied], timeout: 5)
+        XCTAssertEqual(deletedAtReply, [41], "deleted before the reply")
+        XCTAssertEqual(channel.sent, [.hold, .release])
+        XCTAssertNil(store.load())
+    }
+
+    /// Nothing waiting: the window quits at once.
+    func testWithNothingUnderWayTheWindowQuitsAtOnce() {
+        let forget = coordinator()
+        XCTAssertFalse(forget.finishBeforeQuitting(within: .seconds(5)) { XCTFail("nothing to wait for") })
+    }
+
+    /// An app that takes too long to answer the hold: the window quits once
+    /// its time is up, and the forget stays promised, since no note can say
+    /// it failed; the next open finishes it.
+    func testAQuitNeverWaitsPastItsBoundAndKeepsThePromise() async {
+        final class SlowApp: WindowChannelSending, @unchecked Sendable {
+            func send(_ request: WindowChannelRequest, timeout: Duration) async -> Bool {
+                guard request.op == .hold else { return true }
+                try? await Task.sleep(for: .milliseconds(600))
+                return false
+            }
+
+            func statuses() -> AsyncStream<WindowChannelStatus> { AsyncStream { $0.finish() } }
+        }
+        let forget = ForgetCoordinator(mutator: LeaseMutator(), channel: SlowApp(), store: store, appRunning: { true },
+                                       deletions: MemoryDeletionSignal(center: NotificationCenter()))
+        _ = await forget.forgetAfterUndo(ForgetRequest(momentIds: [41]), count: 1)
+        let started = ContinuousClock.now
+        let replied = expectation(description: "the reply")
+        XCTAssertTrue(forget.finishBeforeQuitting(within: .milliseconds(150)) { replied.fulfill() })
+        await fulfillment(of: [replied], timeout: 2)
+        XCTAssertLessThan(ContinuousClock.now - started, .milliseconds(550), "the bound, not the hold")
+        XCTAssertEqual(store.load(), ForgetRequest(momentIds: [41]))
+        await forget.idle()
+        XCTAssertEqual(store.load(), ForgetRequest(momentIds: [41]), "kept for the next open, not handed back")
+    }
+
+    /// The window's process asks before it quits, and waits for the reply.
+    func testTheWindowFinishesItsForgetsBeforeItQuits() throws {
+        let app = try Self.source("Sources/RecallUI/MCIRecallApp.swift")
+        XCTAssertTrue(app.contains("MCIRecallApp.forget.finishBeforeQuitting {"))
+        XCTAssertTrue(app.contains("NSApp.reply(toApplicationShouldTerminate: true)"))
+        XCTAssertTrue(app.contains("return waits ? .terminateLater : .terminateNow"))
+        XCTAssertTrue(app.contains("func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {\n        true"),
+                      "closing the last window quits, through applicationShouldTerminate")
+    }
+
     static func source(_ path: String) throws -> String {
         let package = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
