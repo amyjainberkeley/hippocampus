@@ -157,8 +157,13 @@ struct WorkingOnItemPlace: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 8) {
+                // Native, as the Ask button and ⋯ beside it are, so the row
+                // shares one height, top edge and corner.
                 Button(WorkCopy.resume) { open(.resume(item: item.id)) }
-                    .buttonStyle(WorkButtonStyle(prominent: true))
+                    .buttonStyle(.borderedProminent)
+                    .tint(MCI.Color.accentFill)
+                    // Blue in a window in the background too, as it was.
+                    .environment(\.controlActiveState, .key)
                     .help(WorkCopy.resume)
                 // A code project's button opens Claude Code (or Codex) in
                 // its folder (SPEC 5.3.1); ⌘↩ is this button.
@@ -173,15 +178,9 @@ struct WorkingOnItemPlace: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(MCI.Color.foreground)
-                        .frame(width: 30, height: 24)
-                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(MCI.Color.surfaceElevated))
-                        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .strokeBorder(Color.primary.opacity(0.16), lineWidth: 0.5))
                 }
                 .menuStyle(.button)
-                .buttonStyle(.plain)
+                .buttonStyle(.bordered)
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .accessibilityLabel(WorkCopy.more)

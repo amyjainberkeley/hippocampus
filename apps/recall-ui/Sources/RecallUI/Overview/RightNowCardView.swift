@@ -84,7 +84,14 @@ struct TodayCardView: View {
     private var actions: some View {
         HStack(spacing: 8) {
             if let item = model.cardItem {
-                ResumeButton(itemId: item.id, open: open)
+                // Native, as the buttons beside it are, so the row shares one
+                // height, top edge and corner.
+                Button(WorkCopy.resume) { open(.resume(item: item.id)) }
+                    .buttonStyle(.borderedProminent)
+                    .tint(MCI.Color.accentFill)
+                    // Blue in a window in the background too, as it was.
+                    .environment(\.controlActiveState, .key)
+                    .help(WorkCopy.resume)
             }
             askButton
             // An app that was removed from the Mac has no Open button.
