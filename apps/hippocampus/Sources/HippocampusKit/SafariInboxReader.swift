@@ -220,8 +220,8 @@ public final class SafariInboxReader: Sendable {
             return
         }
 
-        // The capture helper's six secret checks, on the text, the title
-        // and the page address alike (storage-security review S10).
+        // The capture helper's secret checks, on the text, the title and
+        // the page address alike (storage-security review S10).
         if Self.containsSecret(text) || Self.containsSecret(title) || Self.containsSecret(url) {
             droppedSecret += 1
             removeFile(fileURL)
