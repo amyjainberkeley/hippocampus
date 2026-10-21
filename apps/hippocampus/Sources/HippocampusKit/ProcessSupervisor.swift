@@ -879,6 +879,13 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             guard let self else { return }
             do {
                 try await self.revokeConsentAndStopTopology(timeout: timeout)
+                // The stop has landed and holds nothing back any more. It is
+                // let go in the same step that publishes Off, so the Turn On
+                // that Off offers after a restart that stayed open
+                // (`allowStartsAfterFailedRestart`) is never turned away by a
+                // stop that is already over. This is still `shutdownTask`:
+                // a second call joins it rather than starting another.
+                self.shutdownTask = nil
                 self.state = .stopped
             } catch {
                 self.stopRequestFailed = true
@@ -889,7 +896,9 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         shutdownTask = task
         // Quit intent survives a failed teardown. Only a new application
         // instance may start again; a wake event is not an explicit restart.
-        defer { shutdownTask = nil }
+        // A stop that landed let itself go already, and a call after that
+        // may have started its own, which stays.
+        defer { if shutdownTask == task { shutdownTask = nil } }
         do {
             try await task.value
         } catch {

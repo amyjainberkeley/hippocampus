@@ -9,6 +9,7 @@
 // D9). A login launch opens nothing (07fedaf). While setup is unfinished,
 // opening the app brings setup forward instead of starting a second one.
 
+import Combine
 import XCTest
 @testable import HippocampusKit
 
@@ -615,6 +616,45 @@ final class SupervisorWindowOpeningTests: XCTestCase {
         let places = await opened(h.windows)
         XCTAssertEqual(places, ["overview"], "opening Hippocampus showed nothing")
         try await h.supervisor.shutdownAndWait()
+    }
+
+    /// The same Restart, with Turn On pressed the moment Off is published,
+    /// ahead of anything else on the main actor. The stop has landed, so it
+    /// must not turn that press away. It used to be let go only after Off
+    /// was published, and a press in between did nothing at all; at a load
+    /// average over 100 the test above hit that gap.
+    func test_turn_on_pressed_the_moment_a_late_restart_stop_lands_starts_remembering() async throws {
+        let h = try make(captureEnabled: true)
+        try await h.supervisor.startAndWaitForReadiness()
+        let stopping = TestSuspension()
+        h.topology.stopSuspensionOnCall = h.topology.stopCalls + 1
+        h.topology.stopSuspension = stopping
+        let coordinator = ApplicationTerminationCoordinator(
+            supervisor: h.supervisor, restartLauncher: FakeApplicationRestartLauncher(),
+            shutdownTimeout: 0.05, extrasTimeout: 0.05, cleanup: {}, onFailure: { _ in }
+        )
+        let restarted = await coordinator.terminate(intent: .restart) { _ in }
+        XCTAssertFalse(restarted)
+
+        // Off is published inside the stop; the press is queued right then,
+        // before the stop's caller runs again.
+        let supervisor = h.supervisor
+        var pressed = false
+        let watching = supervisor.$state.sink { state in
+            guard state == .stopped, !pressed else { return }
+            pressed = true
+            Task { @MainActor in supervisor.performAskStatusAction(.turnOn, setupFinished: true) { _ in } }
+        }
+        defer { watching.cancel() }
+        // Remembering still reads as on until the stop lands.
+        stopping.resume()
+        await eventually { pressed }
+        XCTAssertTrue(pressed, "Off was published")
+        await eventually { supervisor.state == .running && h.topology.launchPlans.count == 2 }
+
+        XCTAssertEqual(supervisor.state, .running, "a Turn On pressed as Off showed was turned away")
+        XCTAssertEqual(h.topology.launchPlans.count, 2)
+        try await supervisor.shutdownAndWait()
     }
 
     /// The same Restart whose stop threw: "Couldn’t stop", with Quit, and
