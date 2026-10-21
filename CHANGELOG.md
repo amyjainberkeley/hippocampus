@@ -5,36 +5,56 @@ commits are intentionally omitted from release notes.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-20
+
+### A beta
+
+- Hippocampus 0.3.0 is a beta. [docs/STATUS.md](docs/STATUS.md) says what works today, how each part was checked, and what still needs a person to try on a real Mac.
+
 ### The window
 
-- A sidebar instead of three places: Today, then Working On, then Library with History, Web Pages, Documents, Code, Conversations and Looked Up, and at the bottom About You, AI Tools and Privacy. A row appears once it has something in it. ⌘1 to ⌘9 open them in that order.
+- A sidebar: Today, then Working On, then Library with History, Web Pages, Documents, Code, Conversations and Looked Up, and at the bottom About You, AI Tools and Privacy. A row appears once it has something in it. ⌘1 to ⌘9 open them in that order, and ⌘, opens Preferences.
 - The field, “Ask or search your memory”, sits at the top of every page, with Back and Forward (⌘[ and ⌘]). It searches by meaning, as Ask does, and words in quotes match exactly. ⌘F keeps it to the page you’re on; ⌘N searches everything.
 - The hi mark is a button: Pause for an hour, until tomorrow or until you start it again, Forget the last 10 minutes, the last hour or today, Privacy and Preferences. While remembering is paused or off, a line at the top of every page says so, with the button that turns it back on.
-- Forget from anywhere: a moment, a few you picked (⌘⌫, with Undo for a few seconds), an hour of History, a session, a page or a search, or recent time (⇧⌘⌫). Hippocampus holds still while it forgets, so you no longer need to pause first.
+- Forget from anywhere: a moment, a few you picked (⌘⌫, with Undo for a few seconds), an hour of History, a session, a page or a search, or recent time (⇧⌘⌫). Hippocampus holds still while it forgets, so you don’t need to pause first. If a forget can’t finish, the window says so and offers Try Again, and what is left is finished the next time it opens.
 - ⌘T goes to today. ⌘↩ asks your AI tool, and ⌥↩ asks on this Mac.
 - View › Hide Working On takes project names off the screen before you share it.
 - The window follows the Mac’s light or dark appearance.
-- People who used the earlier window see one line about the new sidebar, once.
+- Hippocampus opens its window only when you open it. A launch at login, after an update or after a restart stays in the menu bar.
+
+### Today and About You
+
+- Today shows where you left off, with its screenshot and Resume, and your day as a strip of sessions coloured by kind. Rest the pointer on a session to see its screenshot, and click it to see what it held.
+- The day’s summary, written on this Mac, says what you worked on, in order, and what you looked up when it knows the pages’ addresses. It never guesses how long something took, gives no advice, and never calls you distracted, stuck or productive. Today works without Apple Intelligence.
+- About You shows, in the exact words, what your AI tools can be told about you. Mark each line Right or Forget, with Undo, and open Why to see where it was learned.
 
 ### Working On and Resume
 
 - Working On lists your projects and documents by name, from their window titles, once you spend 30 minutes on one in two weeks of use. Each shows a small picture of where you left off, and a larger one when you rest the pointer on it.
 - A project’s page shows where you left off, its files, the pages, searches and AI chats you had open alongside it, its meetings and its History.
-- Resume, on a project’s page and on Today, lists what you had open for it last time, its pages in the browser you read them in, its documents, its code folder in your editor and Terminal, and opens only what you tick. Tabs already open aren’t opened twice. It sends nothing anywhere.
+- Resume, on a project’s page, on Today and in Ask, lists what you had open for that project last time: its pages in the browser you read them in, its documents, its code folder in your editor and Terminal, and its apps. It opens only what you tick, never a private window or a site Hippocampus doesn’t read, and sends nothing anywhere. Tabs already open in Chrome, Brave, Edge, Vivaldi, Chromium or Arc aren’t opened twice.
 - Show All shows every project as a card, with what isn’t in the sidebar and why.
 
 ### Ask and your AI tools
 
-- Ask works like Spotlight: as you type it finds projects, pages and moments. Return opens one, ⌘↩ asks your AI tool, ⌥↩ resumes a project. It never takes ⌘Space.
+- Press Shift twice anywhere and Ask drops from the menu bar, like Spotlight. ⌃⇧Space works too, and Preferences offers right Shift, right ⌘, right ⌥ or Fn (Globe) instead. If another app, or macOS, uses Fn, setup and Preferences say so and wait for you. Ask never takes ⌘Space.
+- As you type, Ask finds projects, pages and moments, by meaning and by exact words. Return opens one, ⌘↩ asks your AI tool, ⌥↩ resumes a project, and a question gets an answer with its sources, this window first.
 - Ask Claude, on History, Today, a project’s page and an answer, opens Claude with what you picked already in its message box, and you press send. The button remembers your last tool: Claude, ChatGPT, Codex or Cursor. On a code project it reads Open in Claude Code and opens a session in the project’s folder.
 - Copy for Your AI makes the same message. The copy stays on this Mac, clipboard history apps don’t keep it, and it clears after 2 minutes.
-- AI Tools shows what each connected tool can reach, and the exact words its sessions start with.
+- Connect AI Tools… connects Claude Code and Codex in one step. Each session can then start with your recent work and things learned about you, word for word as AI Tools shows them.
+- Connecting a tool says that the tool keeps its own history of what it reads, and if other accounts on this Mac can open that history, offers to make it private to yours.
 - Disconnect, in Preferences under AI Tools, takes Hippocampus out of a tool’s settings and leaves the rest as it was.
+- Context copied for your AI has no status lines, and each source says when and where it was seen. AI tools are no longer sent notes about pauses or input counts.
 
-### Reading
+### History and reading
 
-- A moment reads as it looked: headings, paragraphs, lists, code, terminal output and chat messages with their names. Copy Text keeps that shape. Older moments are made again in the background.
-- A Zoom window’s menu and Gmail’s label chips no longer lead a moment’s preview.
+- History shows every moment, newest first, with its screenshot. A moment saved as text only shows its app’s icon instead of an empty picture.
+- Each row says what the moment was about, in one short line: “Looking up how to type accents”, “Working on tax.rs in trailhead-shop”. It is written on this Mac by Apple Intelligence or your own model server, or made from the window’s title, and makes no guess about your work, health, money or relationships.
+- A moment reads as it looked: headings, paragraphs, lists, code, terminal output and chat messages with their names. Copy Text keeps that shape.
+- What you were reading comes first. Tabs, sidebars, menus and status bars come after it, under “Also in this window”, and search still finds them. Text from windows with side-by-side panes no longer runs across the panes.
+- Older moments are cleaned and captioned again in the background, newest first, only while the Mac is plugged in and no one is using it.
+- Browsers are read like every other window. No extension and no Automation prompt are needed.
+- A 3.2 GB writing model an earlier version downloaded, and no longer uses, is removed once.
 
 ### Calendar
 
@@ -43,134 +63,62 @@ commits are intentionally omitted from release notes.
 
 ### Pictures of other windows
 
-- Hippocampus can now keep pictures of the other windows you can see, not just the one you’re using, with every window in front of them blanked out. A new install keeps them from setup’s Start Remembering; on a Mac that used an earlier version they’re off until you turn them on, in Preferences under Remembering. None is kept of a call, a video or a private window it recognizes, they use at most 2 GB, or 2% of the disk if that is less, and older ones are thinned out first.
+- Hippocampus can keep pictures of the other windows you can see, not just the one you’re using, with every window in front of them blanked out. A new install keeps them from setup’s Start Remembering; on a Mac that used an earlier version they’re off until you turn them on, in Preferences under Remembering.
+- None is kept of a call, a video or a private window it recognizes. They use at most 2 GB, or 2% of the disk if that is less, and older ones are thinned out first. Forget Pictures of Other Windows… deletes them and keeps their text, even while remembering is paused or off.
+
+### Privacy and security
+
+- The text reader sends nothing: Hippocampus turns off the telemetry built into its ONNX Runtime library and runs the reader with no network access. Versions 0.2.0 and 0.2.1 sent ONNX Runtime’s usage events and a device ID to Microsoft; the folders they left in your Library are deleted when Hippocampus starts.
+- Everything is checked for secrets before it is stored, whatever it came from: the screen, the browser extensions, Mail and Messages, sessions imported from Claude Code or Codex, and MCP servers you list. The checks now catch API keys in the shapes Anthropic, OpenAI, GitHub, GitLab, Slack, Google, AWS and Stripe give them, private keys and tokens after `Bearer`, and look at a window’s title and a page’s address too. An address loses its sign-in parameters before it is kept.
+- What a connected AI tool reads, and the lines its sessions start with, have those shapes taken out on the way.
+- Delete Everything, on Privacy, also deletes your memory’s key, so copies in earlier backups and snapshots can’t be read. A new key is made at once.
+- Your memory is left out of Time Machine unless you turn on Include my memory in Time Machine backups, in Preferences under Privacy.
+- If your memory’s key was ever in a file, Hippocampus moves your memory to a new key once, at the next start, then deletes the old key and the file.
+- Hippocampus’s files and folders can be opened only by your account, and an earlier install’s are made so.
+- Export every moment, in full, from Privacy, to a file only your account can open. It isn’t encrypted.
+- Private browser windows are skipped when they show they are private: a private title, or the private badge in the window’s top bar. Sign-in and bank sites are skipped even when their address shows only in the address bar.
+- Every saved moment from the screen passes three checks for passwords and keys: the text as read, the page in reading order, and the exact text saved.
+- Page addresses come only from the browser extension. Remembering never asks for Automation; where you allowed it, Hippocampus uses it only to tell whether a window is private.
+
+### The menu bar
+
+- The menu-bar icon is the new hi mark. A solid dot means it is remembering. No solid dot means it is not.
+- The menu is short: Remembering, Paused, Off, Needs permission, Not saving or Couldn’t stop, each with one button that acts. While paused, that button is Start Remembering.
+- Under Remembering, the menu says when it last saved, for example “Last saved 8s ago”.
+- Skipping a window for privacy shows “Skipping this window” once the skip has held, not “Not saving”. Only a password field shows the hollow dot.
+- Quit stops everything Hippocampus started, including Ask and its windows, and waits until they have exited. ⌘Q quits whenever Hippocampus is in front.
+- Stop Sharing always turns remembering off. Hippocampus stays off, even after a restart, until you turn it on, and says when you stopped it.
+- A pause is kept across restarts and says since when. Turning remembering off shows Off only once it has really stopped.
+- When macOS has Screen Recording or Accessibility off for Hippocampus, remembering stops altogether and the menu says Needs permission. Once you allow it, opening the menu starts it again; Accessibility starts it again by itself. Clicking a permission notification opens the right pane in System Settings.
+- If Hippocampus is force quit or crashes, it stops reading the screen within about 10 seconds, and anything left reading is stopped at the next launch.
+- Reset Permissions… resets only Hippocampus’s permissions, not every app’s.
 
 ### Setup
 
-- Screens slide the way you go, and a permission that turns on shows a calm checkmark. The demo shows the new Today.
-- The key that opens Ask can be Fn (Globe). If another app, or macOS, uses Fn, setup and Preferences say so and wait for you.
+- Setup shows what Hippocampus does before it asks for anything. Welcome plays a short demo, made from Hippocampus’s own screens and made-up data, and What you get shows the three things it does.
+- Each permission says what it lets Hippocampus do, and shows a checkmark the moment it is on.
+- The promises before Start Remembering are short, one fact a line, with what the menu-bar mark shows.
+- Try it reads the window you were working in and shows what it read, in the window’s order. When that window is skipped, it says why and suggests another. Without Apple Intelligence or a model on this Mac, it suggests a search.
+- Before setup is finished, the menu says “Not set up yet” and offers Finish Setup…. Nothing else turns remembering on.
+- The browser extension panel, also from Add Browser Extension…, says what the extension adds: each page’s address and the text not on screen.
 
 ### Demo Memory
 
-- Option-click the hi in the menu bar, or open Preferences under About, to use Demo Memory: a made-up week for videos and screenshots. Remembering pauses while it is in use, and Leave Demo Memory goes back to your own memory, untouched.
+- Option-click the hi in the menu bar, or open Preferences under About, to use Demo Memory: a made-up week for videos and screenshots. Remembering pauses while it is in use, and the menu, Ask’s footer and the window’s footer say Demo Memory. Leave Demo Memory goes back to your own memory, untouched.
 
-### Remembering
+### Models
 
-- When macOS has Screen Recording or Accessibility off for Hippocampus, remembering stops altogether, whole-screen reading and Safari pages included, and the menu says Needs permission. Once you allow it, opening the menu starts it again; Accessibility starts it again by itself.
-- Clicking a permission notification opens the right pane in System Settings, and coming back tries again.
-- A Turn On that found a permission off is tried again when macOS quits and reopens Hippocampus after you allow it.
-- Opening Hippocampus while its window is closing, or minimized, shows the window. A minimized setup comes back too.
-- After a crash, the menu says Starting…, or Paused, while Hippocampus ends what the earlier run left, and the window opens without waiting for it.
-- Setup’s Try Again turns remembering on when Start Remembering did not take, and setup shown again knows whether remembering is on, paused or off.
-- A hippocampus://ask link that opens Hippocampus shows Ask with its question.
-- “Couldn’t stop” no longer shows when nothing is running: a permission found off while starting, Pause while starting, opening the app twice, or a turn-off whose setting could not be saved.
-- A Restart that could not finish leaves Turn On and opening the app working.
-
-### Setup
-
-- Setup shows what Hippocampus does before it asks for anything. Welcome plays a short demo, made from Hippocampus’s own screens and made-up data. While you write a message, Ask finds a link you read earlier, with its source. Today fills in the day, and an AI tool starts a session with your recent work.
-- A new screen, What you get, shows the three things it does, each with a small picture of the screen that does it.
-- Each permission says what it lets Hippocampus do, and shows a checkmark the moment it is on.
-- The promises before Start Remembering are shorter to scan, one fact a line, with what the menu-bar mark shows. They now say known password apps are never read.
-- Try it reads the window you were working in and shows what it just read, in the window’s order. When that window is skipped, a password app, an app you excluded, a private browser window or a password field in use, it says so and suggests another window. A window you bring forward is read at once.
-- Setup’s grey text is darker, so small lines read clearly.
-
-### Ask
-
-- History shows a screenshot for every moment that has one, including moments read after a screenshot was kept in the same window. The moment’s detail says when that screenshot was taken.
-- A moment saved as text only, or whose screenshot can no longer be opened, shows its app’s icon on a plain tile instead of an empty picture. An app that is not on this Mac shows its first letter.
-- Screenshots you have opened stay in memory while the window is open, so scrolling back shows them at once.
-- Each History row says what the moment was about, in one short line above its text: “Looking up how to type accents”, “Working on tax.rs in trailhead-shop”. It is written on this Mac by Apple Intelligence or your own model server when one is there, and otherwise made from the window’s title, with a window’s own name in quotes: Reading “Rounding half to even”. It makes no guess about your work, health, money or relationships, and a window that was only open beside the one you used says where it was: “#launch, open in Slack”.
-- A row’s screenshot is larger, so screens are easy to tell apart, and shows the top of a tall window. A terminal or code shows its first lines as they were read.
-- The line under a row names the app and what the caption does not already say. Rows keep one height, and a screenshot that did not open offers Try Again.
-
-### Reading
-
-- Memories saved before 0.3 no longer open on a browser’s tab strip and address bar, however the strip was read. A site’s menu, a web app’s menus and side bar, a search page’s tabs, Slack’s sidebar and Messages’ receipts move under “Also in this window”, and search still finds them. What you read stays where it was, even a line that looks like a menu.
-- Memories saved before 0.3 read in paragraphs, not in the lines a page was cut into.
-- Older memories are cleaned again in the background, newest first, only while the Mac is plugged in and no one is using it.
-- A 3.2 GB writing model an earlier version downloaded, and no longer uses, is removed once.
-
-## [0.3.0] - 2026-10-15
-
-### Ask
-
-- Press Shift twice anywhere and Ask drops from the menu bar. ⌃⇧Space works too, and Preferences offers right Shift, right ⌘ or right ⌥ instead.
-- Ask is one field. Type to find anything you have seen, by meaning and by exact words, or press Return for an answer with its sources, this window first.
-- History lives under Ask’s field, one day at a time, with clock times and Show Earlier.
-- The window no longer has a popup of its own, and the Go menu’s keys work.
-
-### Overview and You
-
-- The window has three places, Overview, Ask and You, with the hi mark at the top and, at the bottom, whether Hippocampus is remembering.
-- Overview shows your day as a strip of sessions coloured by kind. Hover to see a session’s screenshot, click to see what it held, and use the arrow keys to move between sessions.
-- The Right now card shows what you’re working on, with Copy for your AI and the exact lines a connected AI already has. With no AI tool connected, it offers Connect.
-- The day’s summary, written on this Mac, says what you worked on, in order, and what you looked up when it knows the pages’ addresses. It never guesses how long something took, gives no advice, and never calls you distracted, stuck or productive.
-- Overview works without Apple Intelligence.
-- You shows, in the exact words, what your AI can be told about you. Mark each item Right or Forget, with Undo, and open Why to see where it was learned.
-- Show in History opens a session in Ask, and a session listed under You opens on Overview.
-- Copy for your AI on a session copies that session’s own moments, and nothing learned about you.
-- A finished session’s button opens the app it was mostly in.
-- A moment saved without a screenshot shows its app’s icon instead of an empty picture.
-- The privacy page shows storage as Text and Screenshots, names apps by their names, and no longer has buttons that did nothing, or a price.
-- The old Today, Sessions, input chart, timeline strip and in-window Settings views are gone.
-
-### Reading
-
-- New moments keep what you were reading first. Tabs, sidebars, menus and status bars come after it, and nothing is dropped.
-- A moment opens the way the window read: code keeps its indentation and chats keep their order. Tabs, sidebars and menus sit under “Also in this window”.
-- Text from windows with side-by-side panes no longer runs across the panes.
-- Line numbers, toolbar icons read as letters, and a window’s bars no longer open its text.
-- When only part of a window was seen, nothing in it is set aside unless it sits at the window’s top or bottom edge.
-- Browsers are read like every other window. No extension and no Automation prompt are needed.
-
-### Privacy and control
-
-- The menu-bar icon is the new hi mark. A solid dot means it is remembering. No solid dot means it is not.
-- The menu is short: Remembering, Paused, Off, Needs permission, Not saving or Couldn’t stop, each with one button that acts.
-- Under Remembering, the menu says when it last saved, for example “Last saved 8s ago”.
-- Skipping a window for privacy shows “Skipping this window” once the skip has held, not “Not saving”. Only a password field shows the hollow dot.
-- Private browser windows are skipped when they show they are private: a private title, or the private badge in the window’s top bar.
-- Sign-in and bank sites are skipped even when their address shows only in the address bar.
-- Hippocampus doesn’t ask for Automation. It uses Automation only where you already allowed it.
-- Every saved moment passes three checks for passwords and keys: the text as read, the page in reading order, and the exact text saved.
-- Quit stops everything Hippocampus started, including Ask and its windows, and waits until they have exited.
-- Stop Sharing always turns remembering off. Hippocampus stays off, even after a restart, until you turn it on, and says when you stopped it.
-- A pause is kept across restarts and says since when.
-- Turning remembering off shows Off only once it has really stopped.
-- If Hippocampus is force quit or crashes, it stops reading the screen within about 10 seconds. Anything left reading is stopped at the next launch.
-- Reset Permissions… resets only Hippocampus’s permissions, not every app’s.
-- Hippocampus opens its window only when you open it. A launch at login, after an update or after a restart stays in the menu bar.
-- ⌘Q quits and ⌘, opens Preferences whenever Hippocampus is in front.
-
-### AI tools and models
-
-- Connect AI Tools… connects Claude Code and Codex in one step.
-- Your AI starts each session with the same recent work and things about you that the You page shows, word for word.
-- AI tools are no longer sent notes about pauses or input counts.
-- Context copied for your AI has no status lines, and each source says when and where it was seen.
-- Answers and summaries without Apple Intelligence (beta): Hippocampus uses a model you run on this Mac with Ollama or LM Studio, and finds it without setup.
-- Hippocampus talks only to a model server at 127.0.0.1, ::1 or localhost, follows no redirects, and skips Ollama’s cloud models.
+- Answers and summaries without Apple Intelligence: Hippocampus uses a model you run on this Mac with Ollama or LM Studio, and finds it without setup. It talks only to a model server at 127.0.0.1, ::1 or localhost, follows no redirects, and skips Ollama’s cloud models.
 - With your own model, summaries and what Hippocampus learns are written while your Mac is plugged in. Ask answers on battery too.
-- The part that writes answers is built to start on macOS 14 and later.
 - Apple Intelligence writes to you as “you”, in short plain sentences.
 - Quitting Hippocampus stops the model at once, even while it is writing an answer.
-- Unusual line breaks on screen no longer stall an answer until it times out.
 
 ### Download and updates
 
 - Install with one line: `curl -fsSL https://github.com/amyjainberkeley/hippocampus/releases/latest/download/install.sh | sh`. It checks the download’s checksum, Apple’s notarization and the developer’s signature before it copies the app.
 - Or with Homebrew: `brew install --cask amyjainberkeley/tap/hippocampus`.
 - Check for Updates reads the update feed of the newest GitHub release, and checks an update’s signature before installing it.
-- The download is smaller: the disk image uses LZMA, the programs leave out debugging symbols, and the text reader no longer carries video libraries it never used.
-- The disk image is called Hippocampus and shows only how to install, with no build numbers.
-
-### Setup
-
-- Before setup is finished, the menu says “Not set up yet” and offers Finish Setup…. Nothing else turns remembering on.
-- Setup no longer says browsers need the extension or a macOS prompt to be read. The Promise says private browser windows are skipped when they show they are private.
-- Try it knows answers can come from a model on this Mac. With neither that nor Apple Intelligence, it says what answers need.
-- The browser extension panel says what the extension adds: each page’s address and the text not on screen.
+- The download is smaller: the disk image uses LZMA, the programs leave out debugging symbols, and the text reader no longer carries video libraries it never used. The disk image shows only how to install.
 
 ## [0.2.1] - 2026-10-08
 
