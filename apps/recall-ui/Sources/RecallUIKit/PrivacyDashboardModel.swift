@@ -93,6 +93,24 @@ public enum DestructivePrivacyAction: String, Sendable {
     }
 }
 
+/// Who carries out Delete Everything (storage-security review S3).
+public enum DeleteEverythingRoute: Equatable, Sendable {
+    /// The app that opened the window: it stops remembering, erases the
+    /// person's memory and its key, and makes a new key.
+    case throughApp
+    /// The window, on the memory it has open: Demo Memory's made-up week,
+    /// which the app never erases, or a window opened by hand. It deletes
+    /// every moment there and leaves any key alone.
+    case inWindow
+
+    /// The route for a window with or without the app's pipe, reading
+    /// `environment`.
+    public static func route(hasAppPipe: Bool, environment: [String: String]) -> Self {
+        guard hasAppPipe, !DemoMemoryMode.isOn(environment: environment) else { return .inWindow }
+        return .throughApp
+    }
+}
+
 /// Pure presentation of counts, logical bytes, and measurement completeness.
 public enum PrivacyDashboardSummary {
     public static func line(

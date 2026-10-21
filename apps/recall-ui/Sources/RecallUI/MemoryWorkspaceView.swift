@@ -731,9 +731,13 @@ struct MemoryWorkspaceView: View {
 
     /// Delete Everything as a crypto-shred, carried out by the app that
     /// opened this window (storage-security review S3). Nil for a window
-    /// opened by hand, or a preview.
+    /// opened by hand, a preview, or Demo Memory, whose week the window
+    /// deletes itself: the app erases only the person's own memory.
     private var eraseThroughApp: (@Sendable () async -> Bool)? {
-        guard let channel, !isSyntheticPreview else { return nil }
+        guard let channel, !isSyntheticPreview,
+              DeleteEverythingRoute.route(hasAppPipe: true, environment: ProcessInfo.processInfo.environment)
+              == .throughApp
+        else { return nil }
         return { await channel.send(WindowChannelRequest(op: .erase), timeout: .seconds(180)) }
     }
 

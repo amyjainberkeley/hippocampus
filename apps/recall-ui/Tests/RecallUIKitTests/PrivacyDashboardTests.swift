@@ -7,6 +7,29 @@ import XCTest
 
 final class PrivacyDashboardTests: XCTestCase {
 
+    // MARK: - Delete Everything's route
+
+    /// The app erases only the person's own memory and its key. On Demo
+    /// Memory the app refuses an erase, so the window deletes the made-up
+    /// week itself instead of saying it couldn't; a window opened by hand
+    /// deletes what it has open, as before.
+    func testDeleteEverythingGoesThroughTheAppOnlyForThePersonsOwnMemory() throws {
+        let own = ["MCI_DB_PATH": "/Users/sam/Library/Application Support/MCI/mci.sqlite"]
+        let demo = ["MCI_DB_PATH": "/Users/sam/Library/Application Support/Hippocampus/Demo Memory/mci.sqlite",
+                    DemoMemoryMode.environmentKey: "1"]
+        XCTAssertEqual(DeleteEverythingRoute.route(hasAppPipe: true, environment: own), .throughApp)
+        XCTAssertEqual(DeleteEverythingRoute.route(hasAppPipe: true, environment: demo), .inWindow)
+        XCTAssertEqual(DeleteEverythingRoute.route(hasAppPipe: false, environment: own), .inWindow)
+        XCTAssertEqual(DeleteEverythingRoute.route(hasAppPipe: false, environment: demo), .inWindow)
+
+        let package = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let shell = try String(contentsOf: package.appendingPathComponent("Sources/RecallUI/MemoryWorkspaceView.swift"),
+                               encoding: .utf8)
+        XCTAssertTrue(shell.contains("DeleteEverythingRoute.route(hasAppPipe: true"),
+                      "the window asks the route before it sends an erase")
+    }
+
     // MARK: - SummaryStats.daysCovered
 
     func testDaysCoveredCeilForPartialDay() {
