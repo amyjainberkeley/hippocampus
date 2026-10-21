@@ -301,7 +301,8 @@ final class CaptureHoldTests: XCTestCase {
         await hold.windowEnded()
         await hold.release()
         XCTAssertTrue(hold.isHolding, "the window neither ends nor releases the app's pass")
-        XCTAssertFalse(await hold.hold(), "nor takes a hold of its own meanwhile")
+        let windowsOwn = await hold.hold()
+        XCTAssertFalse(windowsOwn, "nor takes a hold of its own meanwhile")
         XCTAssertEqual(target.restarts, 0)
 
         await hold.release(by: .app)
