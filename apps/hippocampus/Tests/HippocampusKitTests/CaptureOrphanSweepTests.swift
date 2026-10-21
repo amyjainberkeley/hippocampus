@@ -131,7 +131,11 @@ final class CaptureOrphanSweepTests: XCTestCase {
         let arguments = CaptureOrphanSweep.arguments(of: server.processIdentifier)
         XCTAssertEqual(arguments, ["-", "mcp-serve"])
 
-        let sweep = try XCTUnwrap(CaptureOrphanSweep(bundleURL: bundle))
+        // A Mac busy with other builds can take longer than the app's half
+        // second to tear a signalled process down, which isn't what this
+        // test is about: which processes the sweep ends and which it leaves.
+        // The wait ends as soon as they exit.
+        let sweep = try XCTUnwrap(CaptureOrphanSweep(bundleURL: bundle, captureGrace: .seconds(10)))
         let outcome = await sweep.run(.launch, liveChildren: { [] })
 
         XCTAssertEqual(outcome, CaptureOrphanSweep.Outcome(ended: 2, remaining: 0))

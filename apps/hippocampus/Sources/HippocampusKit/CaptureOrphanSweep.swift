@@ -102,13 +102,21 @@ public struct CaptureOrphanSweep: CaptureOrphanSweeping {
 
     private let targets: Targets
     private let writerGrace: Duration
+    /// How long a capture process has to exit after SIGTERM, and again
+    /// after SIGKILL, before the sweep stops waiting for it.
+    private let captureGrace: Duration
     private let logger = Logger(subsystem: "ai.hippocampus", category: "sweep")
 
     /// Nil when Hippocampus is not running from a `.app` bundle.
-    public init?(bundleURL: URL, writerGrace: Duration = .seconds(10)) {
+    public init?(
+        bundleURL: URL,
+        writerGrace: Duration = .seconds(10),
+        captureGrace: Duration = .milliseconds(500)
+    ) {
         guard let targets = Targets(bundleURL: bundleURL) else { return nil }
         self.targets = targets
         self.writerGrace = writerGrace
+        self.captureGrace = captureGrace
     }
 
     // MARK: Which processes
@@ -157,9 +165,9 @@ public struct CaptureOrphanSweep: CaptureOrphanSweeping {
         let capture = found.filter { $0.kind == .capture }.map(\.pid)
         var signalled = await send(capture, SIGTERM, kind: .capture, liveChildren: liveChildren)
         outcome.ended += signalled.count
-        await waitForExit(signalled, upTo: .milliseconds(500))
+        await waitForExit(signalled, upTo: captureGrace)
         let stubborn = await send(signalled.filter(Self.isAlive), SIGKILL, kind: .capture, liveChildren: liveChildren)
-        await waitForExit(stubborn, upTo: .milliseconds(500))
+        await waitForExit(stubborn, upTo: captureGrace)
         outcome.remaining += signalled.filter(Self.isAlive).count
 
         let writers = found.filter { $0.kind == .writer }.map(\.pid)
