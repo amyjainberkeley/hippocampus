@@ -4026,7 +4026,9 @@ fn run_forget_side_pictures_cmd(db_path: &Path) -> Result<(), u8> {
         return Err(11);
     };
     let store = open_command_writer(COMMAND, db_path, &DbKey::from_bytes(key_bytes), &lease)?;
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    // The settings file is the person's own, under their home; never a
+    // shared folder (storage-security review S12).
+    let home = mci_core::home::user_home_or_unwritable();
     let mut side = retention_worker::SidePictureMaintenance::for_home(
         &home,
         &db_path.with_file_name("retention.json"),
