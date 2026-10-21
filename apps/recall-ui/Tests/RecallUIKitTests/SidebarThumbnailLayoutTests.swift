@@ -43,6 +43,8 @@ final class SidebarThumbnailLayoutTests: XCTestCase {
     /// the row alone in a sidebar list, drawn offscreen as the window's
     /// pictures are (a window never ordered in), its ink found column by
     /// column. A symbol is the first run of ink, and the words the next.
+    /// Ink is anything clearly darker than the list behind it: a list in a
+    /// window that isn't key draws its words grey.
     @MainActor
     private func wordsStart(_ row: some View, afterSymbol: Bool) throws -> CGFloat {
         // As the window's renderer does: no Dock icon, nothing ever on screen.
@@ -67,19 +69,24 @@ final class SidebarThumbnailLayoutTests: XCTestCase {
             bytesPerRow: 0, bitsPerPixel: 0))
         rep.size = size
         hosting.cacheDisplay(in: hosting.bounds, to: rep)
+        // How light a pixel looks over white.
+        func lightness(_ x: Int, _ y: Int) -> CGFloat {
+            guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return 1 }
+            let alpha = color.alphaComponent
+            return (color.redComponent + color.greenComponent + color.blueComponent) / 3 * alpha + (1 - alpha)
+        }
+        let behind = lightness(2, 2)
         var starts: [Int] = []
         var inkBefore = false
         for x in 0..<rep.pixelsWide {
-            let ink = (0..<rep.pixelsHigh).contains { y in
-                guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return false }
-                return color.alphaComponent > 0.5
-                    && (color.redComponent + color.greenComponent + color.blueComponent) / 3 < 0.6
-            }
+            let ink = (0..<rep.pixelsHigh).contains { y in lightness(x, y) < behind - 0.15 }
             if ink, !inkBefore { starts.append(x) }
             inkBefore = ink
         }
+        guard !starts.isEmpty else { throw XCTSkip("nothing was drawn offscreen") }
         let index = afterSymbol ? 1 : 0
-        guard starts.count > index else { throw XCTSkip("nothing was drawn offscreen") }
+        XCTAssertGreaterThan(starts.count, index, "a symbol, then words")
+        guard starts.count > index else { return 0 }
         return CGFloat(starts[index]) / scale
     }
 }
