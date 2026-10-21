@@ -23,15 +23,15 @@ final class UserModelViewModelTests: XCTestCase {
 
     func testGroupsFollowThePagesOrderAndKeepTheAgentsOrderInside() throws {
         let page = try UnderstandingFixture.modelPage()
-        let shared = UserModelGrouping.groups(page.shared)
-        XCTAssertEqual(shared.map(\.group), [.workingOn, .howYouWork, .skills])
+        let shared = UserModelGrouping.groups(page.shared + page.notSent)
+        XCTAssertEqual(shared.map(\.group), [.workingOn, .howYouWork, .skills, .people])
         // "Working On" is the sidebar's; the agent's working_on group is "Projects and goals" (SPEC 3.7).
-        XCTAssertEqual(shared.map(\.title), ["Projects and goals", "How you work", "Skills"])
+        XCTAssertEqual(shared.map(\.title), ["Projects and goals", "How you work", "Skills", "People"])
         XCTAssertEqual(shared[0].rows.map(\.id), [41, 37, 45])
         XCTAssertEqual(shared[2].rows.map(\.id), [22, 18])
         let keptBack = UserModelGrouping.groups(page.keptBack)
-        XCTAssertEqual(keptBack.map(\.group), [.howYouWork, .people, .struggles])
-        XCTAssertEqual(keptBack.map(\.title), ["How you work", "People", "Where you got stuck"])
+        XCTAssertEqual(keptBack.map(\.group), [.struggles])
+        XCTAssertEqual(keptBack.map(\.title), ["Where you got stuck"])
         XCTAssertTrue(UserModelGrouping.groups([]).isEmpty)
     }
 
@@ -64,9 +64,95 @@ final class UserModelViewModelTests: XCTestCase {
         let (model, _) = try await loaded(verdicts)
         XCTAssertEqual(model.state, .ready)
         XCTAssertFalse(model.modelIsOff)
-        XCTAssertEqual(model.groups(.shared).flatMap(\.rows).count, 7)
-        XCTAssertEqual(model.groups(.keptBack).flatMap(\.rows).map(\.id), [51, 27, 31])
+        XCTAssertEqual(model.groups(.shared).flatMap(\.rows).count, 9, "four sent, five not sent yet")
+        XCTAssertEqual(model.groups(.keptBack).flatMap(\.rows).map(\.id), [31])
         XCTAssertEqual(model.groups(.notSeenLately).flatMap(\.rows).map(\.id), [12])
+    }
+
+    // MARK: Lines no AI tool is given yet (agent `not_sent`, SPEC 3.7)
+
+    /// Every line the agent hasn't sent yet shows under its heading, after
+    /// the lines that are, with its basis and "Not sent yet"; the page then
+    /// says once what that means.
+    func testLinesNotSentYetShowInTheirGroupsAfterTheSentOnes() async throws {
+        let (verdicts, _) = try inbox()
+        let (model, _) = try await loaded(verdicts)
+        let groups = model.groups(.shared)
+        XCTAssertEqual(groups.map(\.group), [.workingOn, .howYouWork, .skills, .people])
+        XCTAssertEqual(groups.map { $0.rows.map(\.id) }, [[41, 37, 45], [29, 51, 33], [22, 18], [27]])
+        let shown = Dictionary(uniqueKeysWithValues: groups.flatMap(\.rows).map { ($0.id, $0.item) })
+        XCTAssertEqual(UserFacingCopy.You.basis(try XCTUnwrap(shown[41])), "You confirmed this")
+        XCTAssertEqual(UserFacingCopy.You.basis(try XCTUnwrap(shown[37])), "Seen on 2 days")
+        XCTAssertEqual(UserFacingCopy.You.basis(try XCTUnwrap(shown[45])), "Seen once \u{00B7} Not sent yet")
+        XCTAssertEqual(UserFacingCopy.You.basis(try XCTUnwrap(shown[27])), "Seen on 2 days \u{00B7} Not sent yet")
+        XCTAssertTrue(model.hasLinesNotSentYet)
+    }
+
+    /// The probe that found it: a page whose only lines aren't sent yet is
+    /// not "Nothing learned yet".
+    func testAPageWhoseLinesAreAllNotSentYetIsNotEmpty() async throws {
+        let (verdicts, _) = try inbox()
+        var page = try UnderstandingFixture.modelPage()
+        page.shared = []
+        page.keptBack = []
+        page.notSeenLately = []
+        let (model, _) = try await loaded(verdicts, page: page)
+        XCTAssertEqual(model.state, .ready)
+        XCTAssertEqual(model.groups(.shared).flatMap(\.rows).map(\.id), [45, 51, 33, 18, 27])
+        XCTAssertTrue(model.hasLinesNotSentYet)
+
+        var sentOnly = try UnderstandingFixture.modelPage()
+        sentOnly.notSent = []
+        let (sent, _) = try await loaded(verdicts, page: sentOnly)
+        XCTAssertFalse(sent.hasLinesNotSentYet, "nothing to explain when every line is sent")
+    }
+
+    /// Right on a line not sent yet: written at once, "You confirmed this",
+    /// and it no longer says it isn't sent.
+    func testRightOnALineNotSentYetConfirmsIt() async throws {
+        let (verdicts, folder) = try inbox()
+        let (model, _) = try await loaded(verdicts)
+        let item = try XCTUnwrap(model.page?.notSent.first { $0.id == 45 })
+        XCTAssertTrue(item.waitsToBeSent)
+        model.confirm(item)
+        let confirmed = try XCTUnwrap(model.page?.notSent.first { $0.id == 45 })
+        XCTAssertEqual(confirmed.basis, .confirmed)
+        XCTAssertFalse(confirmed.waitsToBeSent)
+        XCTAssertEqual(UserFacingCopy.You.basis(confirmed), "You confirmed this")
+        let files = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+        XCTAssertEqual(files.count, 1)
+        let body = try String(contentsOf: folder.appendingPathComponent(files[0]), encoding: .utf8)
+        XCTAssertEqual(body, #"{"id":45,"verdict":"confirm"}"#)
+        // The line under the lead goes once no line waits.
+        for id in [51, 33, 18, 27] {
+            model.confirm(try XCTUnwrap(model.page?.notSent.first { $0.id == id }))
+        }
+        XCTAssertFalse(model.hasLinesNotSentYet)
+    }
+
+    /// Forget on a line not sent yet leaves "Forgotten. Undo" where it
+    /// stood among the lines that are sent, and Undo brings it back there.
+    func testForgetOnALineNotSentYetLeavesItsPlace() async throws {
+        let (verdicts, folder) = try inbox()
+        let (model, _) = try await loaded(verdicts)
+        let item = try XCTUnwrap(model.page?.notSent.first { $0.id == 51 })
+        model.forget(item)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: folder.path).first?.hasSuffix("-51.json") ?? false)
+        XCTAssertNil(model.page?.notSent.first { $0.id == 51 })
+        let howYouWork = try XCTUnwrap(model.groups(.shared).first { $0.group == .howYouWork })
+        XCTAssertEqual(howYouWork.rows.map(\.id), [29, 51, 33])
+        XCTAssertEqual(howYouWork.rows[1], .forgotten(item))
+        XCTAssertTrue(model.undo(item))
+        XCTAssertEqual(model.groups(.shared).first { $0.group == .howYouWork }?.rows.map(\.id), [29, 51, 33])
+        XCTAssertEqual(model.page?.notSent.first { $0.id == 51 }, item)
+    }
+
+    /// The line under the lead names the words each row shows and the
+    /// button that sends a line. `OverviewCopyTests` holds both to the
+    /// writing rules every string on About You follows.
+    func testTheNotSentLineNamesTheRowsWordsAndTheButton() {
+        XCTAssertTrue(UserFacingCopy.You.notSentLine.contains(UserFacingCopy.You.notSentYet))
+        XCTAssertTrue(UserFacingCopy.You.notSentLine.contains(UserFacingCopy.You.right))
     }
 
     func testRightIsWrittenAtOnceAndSaysYouConfirmedThis() async throws {
@@ -95,32 +181,32 @@ final class UserModelViewModelTests: XCTestCase {
         let workingOn = try XCTUnwrap(model.groups(.shared).first)
         XCTAssertEqual(workingOn.rows, [.item(try XCTUnwrap(model.page?.shared.first { $0.id == 41 })),
                                         .forgotten(item),
-                                        .item(try XCTUnwrap(model.page?.shared.first { $0.id == 45 }))])
+                                        .item(try XCTUnwrap(model.page?.notSent.first { $0.id == 45 }))])
         XCTAssertTrue(model.canUndo(item))
     }
 
     func testSeveralForgottenItemsStayInTheirOrder() async throws {
         let (verdicts, _) = try inbox()
         let (model, _) = try await loaded(verdicts)
-        let items = try XCTUnwrap(model.page?.shared.filter { $0.group == .workingOn })
+        let items = try XCTUnwrap(model.page.map { ($0.shared + $0.notSent).filter { $0.group == .workingOn } })
         XCTAssertEqual(items.map(\.id), [41, 37, 45])
         for id in [45, 41, 37] {
             model.forget(try XCTUnwrap(items.first { $0.id == id }))
         }
         XCTAssertEqual(model.groups(.shared).first?.rows.map(\.id), [41, 37, 45])
         XCTAssertEqual(model.groups(.shared).first?.rows, items.map(ModelItemRow.forgotten))
-        XCTAssertEqual(model.groups(.shared).map(\.group), [.workingOn, .howYouWork, .skills],
+        XCTAssertEqual(model.groups(.shared).map(\.group), [.workingOn, .howYouWork, .skills, .people],
                        "a group whose items were all forgotten keeps its place")
     }
 
     func testUndoBringsTheItemBackWhileTheAgentHasNotTakenIt() async throws {
         let (verdicts, folder) = try inbox()
         let (model, understanding) = try await loaded(verdicts)
-        let item = try XCTUnwrap(model.page?.shared.first { $0.id == 45 })
+        let item = try XCTUnwrap(model.page?.notSent.first { $0.id == 45 })
         model.forget(item)
         XCTAssertTrue(model.undo(item))
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: folder.path).isEmpty)
-        XCTAssertEqual(model.page?.shared.first { $0.id == 45 }, item)
+        XCTAssertEqual(model.page?.notSent.first { $0.id == 45 }, item)
         XCTAssertEqual(model.groups(.shared).first?.rows.map(\.id), [41, 37, 45])
         await assertEventually { await understanding.pageReads == 2 }
 
@@ -130,7 +216,7 @@ final class UserModelViewModelTests: XCTestCase {
                                          to: folder.appendingPathComponent(file.replacingOccurrences(of: ".json", with: ".taken")))
         XCTAssertFalse(model.canUndo(item), "the agent took it: it is being applied")
         XCTAssertFalse(model.undo(item))
-        XCTAssertNil(model.page?.shared.first { $0.id == 45 })
+        XCTAssertNil(model.page?.notSent.first { $0.id == 45 })
     }
 
     func testAVerdictThatCannotBeSavedChangesNothingAndSaysSo() async throws {
@@ -165,6 +251,7 @@ final class UserModelViewModelTests: XCTestCase {
         var empty = full
         empty.shared = []
         empty.keptBack = []
+        empty.notSent = []
         empty.notSeenLately = []
         let (learning, _) = try await loaded(verdicts, page: empty)
         XCTAssertEqual(learning.state, .nothingLearned)

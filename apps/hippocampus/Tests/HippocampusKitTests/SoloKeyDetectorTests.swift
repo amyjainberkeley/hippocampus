@@ -117,6 +117,43 @@ final class SoloKeyDetectorTests: XCTestCase {
         )
     }
 
+    // MARK: Fn+F-keys keep working (SPEC-DELTA 7)
+
+    /// With "Use F1, F2, etc. keys as standard function keys" on, Fn+F11
+    /// sends its volume change as a system-defined event, not a key press.
+    /// The count of what happens while the key is down holds that event, so
+    /// a quick Fn+F11 is not a tap of Fn alone and never opens Ask.
+    func testAFunctionKeysOwnActionWhileFnIsDownIsNotATap() {
+        XCTAssertTrue(SoloKeyDetector.activityEventTypes.contains(14), "a system-defined event (NX_SYSDEFINED) counts")
+        let fn: UInt16 = 63, fnBit: UInt = 0x80_0000
+        var detector = SoloKeyDetector(key: .fn)
+        // Fn down; F11 sends one system-defined event; Fn up, 90 ms later.
+        XCTAssertFalse(detector.modifiersChanged(keyCode: fn, flags: fnBit, activity: 40, atMs: 1_000))
+        XCTAssertFalse(detector.modifiersChanged(keyCode: fn, flags: 0, activity: 41, atMs: 1_090))
+        // Fn alone still opens Ask.
+        XCTAssertFalse(detector.modifiersChanged(keyCode: fn, flags: fnBit, activity: 41, atMs: 3_000))
+        XCTAssertTrue(detector.modifiersChanged(keyCode: fn, flags: 0, activity: 41, atMs: 3_080))
+    }
+
+    /// The no-keylogging promise holds for what is counted: only that an
+    /// event of one of these types happened, never which key or what it
+    /// typed. The list is of event types, and the monitor reads nothing but
+    /// the system's running count of each.
+    func testOnlyCountsOfEventTypesAreReadNeverKeysOrCharacters() throws {
+        XCTAssertEqual(SoloKeyDetector.activityEventTypes, [10, 1, 3, 25, 22, 14],
+                       "a key pressed, the three clicks, a scroll and a function key's own action")
+        let package = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let monitor = try String(contentsOf: package.appendingPathComponent("Sources/Hippocampus/SoloKeyMonitor.swift"),
+                                 encoding: .utf8)
+        XCTAssertTrue(monitor.contains("SoloKeyDetector.activityEventTypes.compactMap(CGEventType.init(rawValue:))"))
+        XCTAssertTrue(monitor.contains("CGEventSource.counterForEventType(.combinedSessionState, eventType: $1)"))
+        for reading in ["matching: .systemDefined", ".systemDefined)", "data1", "data2", "subtype", "keyCode: Int",
+                        "NSEvent.addGlobalMonitorForEvents(matching: .keyDown", "CGEvent.tapCreate"] {
+            XCTAssertFalse(monitor.contains(reading), reading)
+        }
+    }
+
     @MainActor
     func testEveryChoiceHasALabelAndTheChoiceIsRemembered() throws {
         XCTAssertEqual(SoloKey.allCases.map(\.label), ["Shift twice", "Fn (Globe)", "Right Shift", "Right ⌘", "Right ⌥", "Off"])

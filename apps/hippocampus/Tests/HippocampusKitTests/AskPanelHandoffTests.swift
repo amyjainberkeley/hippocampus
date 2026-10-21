@@ -207,7 +207,7 @@ final class AskPanelHandoffTests: XCTestCase {
         model.select(1)
         XCTAssertEqual(model.keyHints.map(\.keys), ["↩", "⌘↩", "⌥↩"])
         XCTAssertEqual(model.keyHints.map(\.label), ["Open", "Ask Your AI…", "Resume"])
-        XCTAssertEqual(model.activate(), .openWindow(tab: "item:w_9c41e2"), "↩ opens the item")
+        XCTAssertEqual(model.activate(), .openWindow(tab: "work:w_9c41e2"), "↩ opens the item")
         XCTAssertEqual(model.resumeSelected(), .openWindow(tab: "resume:w_9c41e2"), "⌥↩ resumes it")
 
         model.query = "rounding"

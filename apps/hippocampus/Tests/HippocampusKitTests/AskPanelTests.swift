@@ -253,6 +253,93 @@ final class AskPanelTests: XCTestCase {
         XCTAssertFalse(model.back(), "a second Esc closes")
     }
 
+    // MARK: One memory's answer never shows in the other (Demo Memory)
+
+    private static let demoStore = URL(fileURLWithPath: "/tmp/demo-memory/mci.sqlite")
+
+    /// An answer from the person's own memory, kept for ten minutes after
+    /// Ask closes, never shows once Demo Memory is in use: not on camera,
+    /// not its question, not its sources.
+    func testAKeptAnswerFromOneMemoryNeverShowsUnderTheOther() async throws {
+        let (model, _, _) = rig()
+        model.memoryInUse = { nil }
+        await open(model, over: safari)
+        model.ask("what did I decide about pricing?")
+        await eventually { model.answer != nil }
+        model.closed()
+        // Use Demo Memory… while the answer is still kept.
+        let demo = Self.demoStore
+        model.memoryInUse = { demo }
+        let id = model.opened()
+        XCTAssertNotEqual(model.mode, .answer, "the person's own answer shows under Demo Memory")
+        XCTAssertNil(model.answer, "the person's own answer shows under Demo Memory")
+        XCTAssertNil(model.askedQuestion, "the person's own question shows under Demo Memory")
+        XCTAssertEqual(model.query, "", "the person's own question stays out of the field")
+        model.contextArrived(safari, openID: id)
+        await settle()
+        XCTAssertFalse(model.rows.contains { if case .source = $0 { true } else { false } },
+                       "none of the person's own sources are listed")
+    }
+
+    /// The other way: the made-up week's answer never shows in the person's
+    /// own memory after leaving Demo Memory, and ⌘↩ has nothing of it to
+    /// build a message from.
+    func testADemoAnswerNeverShowsAfterLeavingDemoMemory() async throws {
+        let (model, _, _) = rig()
+        let demo = Self.demoStore
+        model.memoryInUse = { demo }
+        await open(model, over: safari)
+        model.ask("what did we decide about yearly billing?")
+        await eventually { model.answer != nil }
+        // The message ⌘↩ made from the made-up week's moments.
+        model.lastCard = SendCard(message: "what did we decide about yearly billing?", words: 7, open: nil,
+                                  copy: true, included: [7, 11])
+        model.closed()
+        // Leave Demo Memory.
+        model.memoryInUse = { nil }
+        model.opened()
+        XCTAssertNotEqual(model.mode, .answer, "the made-up week's answer shows in the person's own memory")
+        XCTAssertNil(model.answer)
+        XCTAssertNil(model.askedQuestion)
+        XCTAssertNil(model.lastCard, "the message made from the made-up week is gone")
+        XCTAssertNil(model.pendingAsk(), "⌘↩ has none of the made-up week's moments to send")
+    }
+
+    /// A question still being answered from one memory when the other is
+    /// opened never lands there.
+    func testAReplyFromTheOtherMemoryNeverLands() async {
+        let (model, memory, _) = rig()
+        model.memoryInUse = { nil }
+        memory.held = ["mci_ask"]
+        await open(model, over: safari)
+        model.ask("what did I decide about pricing?")
+        model.closed()
+        let demo = Self.demoStore
+        model.memoryInUse = { demo }
+        model.opened()
+        memory.release("mci_ask")
+        await settle()
+        XCTAssertNil(model.answer, "the person's own reply landed under Demo Memory")
+        XCTAssertNotEqual(model.mode, .answer)
+        XCTAssertFalse(model.isAsking)
+    }
+
+    /// In the memory it was asked of, a kept answer still comes back: the
+    /// person's own, and Demo Memory's while it stays in use.
+    func testAKeptAnswerStillComesBackInItsOwnMemory() async {
+        for store in [nil, Self.demoStore] {
+            let (model, _, _) = rig()
+            model.memoryInUse = { store }
+            await open(model, over: safari)
+            model.ask("what did we decide on team pricing?")
+            await eventually { model.answer != nil }
+            model.closed()
+            model.opened()
+            XCTAssertEqual(model.mode, .answer, "\(String(describing: store))")
+            XCTAssertEqual(model.answer?.answer, "Team is $18 a seat.")
+        }
+    }
+
     func testTypingReplacesAKeptQuestion() async {
         let (model, _, _) = rig()
         await open(model, over: safari)
@@ -631,15 +718,59 @@ final class AskPanelTests: XCTestCase {
         XCTAssertEqual(model.activate(), .openURL(URL(string: "https://stripe.com/docs/billing")!))
     }
 
-    func testTheResumeRowOpensOverviewAndTheKeysOpenThePlaces() async {
+    /// "From your memory" lists a window read twice once, the newest read,
+    /// called what History calls it; the search asks for twice the rows it
+    /// shows, so leaving repeats out still fills it.
+    func testAWindowReadTwiceIsOneRowCalledWhatHistoryCallsIt() async {
+        let (model, memory, _) = rig()
+        memory.replies["mci_recall"] = .success("""
+        {"hits":[
+          {"event_id":21,"ts_us":1,"app_bundle_id":"com.apple.Safari","window_title":"Stripe Billing | Stripe Documentation","url":"https://stripe.com/docs/billing","text_snippet":"Per-seat pricing.","caption":"Reading \u{201C}Stripe Billing\u{201D}"},
+          {"event_id":11,"ts_us":2,"app_bundle_id":"com.tinyspeck.slackmacgap","window_title":"pricing (Channel) - Trailhead - Slack","url":null,"text_snippet":"$18 a seat.","caption":"Chatting in #pricing"},
+          {"event_id":22,"ts_us":3,"app_bundle_id":"com.apple.Safari","window_title":"Stripe Billing | Stripe Documentation","url":"https://stripe.com/docs/billing","text_snippet":"Per-seat pricing.","caption":"Reading \u{201C}Stripe Billing\u{201D}"}]}
+        """)
+        await open(model, over: safari)
+        model.query = "pricing"
+        await eventually { model.hits.count == 3 }
+        let shown = model.rows.compactMap { row -> BarHit? in
+            if case .hit(let hit) = row { return hit }
+            return nil
+        }
+        XCTAssertEqual(shown.map(\.eventId), [22, 11])
+        XCTAssertEqual(shown.map(\.shownTitle), ["Reading \u{201C}Stripe Billing\u{201D}", "Chatting in #pricing"])
+        XCTAssertEqual(memory.calls(to: "mci_recall").last?.arguments["limit"] as? Int, 16)
+    }
+
+    /// "Resume: …" opens Today on that session's own day with the session
+    /// selected (SPEC 2.16), not today's Today without it.
+    func testTheResumeRowOpensItsSessionAndTheKeysOpenThePlaces() async {
         let (model, _, _) = rig()
         await open(model, over: safari)
         await eventually { !model.homeRows.isEmpty }
         model.moveSelection(1)
-        XCTAssertEqual(model.activate(), .openWindow(tab: "overview"))
+        XCTAssertEqual(model.activate(), .openWindow(tab: "session:5"))
         XCTAssertEqual(model.action(for: .openOverview), .openWindow(tab: "overview"))
         XCTAssertEqual(model.action(for: .openYou), .openWindow(tab: "you"))
         XCTAssertEqual(model.action(for: .copyForAI), .copyForAI)
+    }
+
+    /// Ask names a session the way the app's own `session=` link does,
+    /// which the window reads (`RecallLaunchRequest.sessionTabPrefix`).
+    func testTheSessionTabIsTheOneASessionLinkBecomes() {
+        XCTAssertEqual(CommandBarModel.sessionTab(1_791_839_523_000_000),
+                       HippocampusURLRoute.recallTab([URLQueryItem(name: "session", value: "1791839523000000")]))
+        XCTAssertEqual(CommandBarModel.sessionTab(5), "session:5")
+    }
+
+    /// Ask names a Working On item the way the app's own `tab=work&item=`
+    /// link does, which the window reads (`RecallLaunchRequest.workTabPrefix`).
+    /// "item:<id>" was a name the window never read, so ↩ on an item left the
+    /// window where it was.
+    func testTheItemTabIsTheOneAnItemLinkBecomes() {
+        XCTAssertEqual(CommandBarModel.itemTab("w_9c41e2"),
+                       HippocampusURLRoute.recallTab([URLQueryItem(name: "tab", value: "work"),
+                                                      URLQueryItem(name: "item", value: "w_9c41e2")]))
+        XCTAssertEqual(CommandBarModel.itemTab("w_9c41e2"), "work:w_9c41e2")
     }
 
     func testCommandKeysAreReadFromTheKeyAndItsModifiers() {

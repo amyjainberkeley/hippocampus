@@ -73,17 +73,30 @@ public enum Formatters {
     /// A search's passage (`isPassage`) keeps its leading lines but a first
     /// one the title starts with: the words it was found by may be in them.
     ///
-    /// A line that ends a sentence, or one the next line goes on from (it
-    /// starts in lower case), is followed by a space; any other line break
-    /// reads as " · ", so a heading or a name never runs into what follows it
-    /// ("Maya Chen 10:42 AM · Pushed the new onboarding flow").
+    /// A line that ends a sentence, one the next line goes on from (it
+    /// starts in lower case), or one a list's item follows ("• Monthly
+    /// revenue …", "2. Ship it") is followed by a space; any other line
+    /// break reads as " · ", so a heading or a name never runs into what
+    /// follows it ("Maya Chen 10:42 AM · Pushed the new onboarding flow"),
+    /// and a list's own mark never gets a second one.
+    ///
+    /// A preview longer than `maxLen` stops at its last whole word that
+    /// fits, with "…". The start of a moment's text that the FFI cut at
+    /// `rowTextCap` ends mid-word too: a preview that runs to that end stops
+    /// at its last whole word, with "…". (A search's passage is cut by
+    /// bytes, and for a chat or a terminal at its start, so its end is left
+    /// as it came.)
     public static func rowPreview(_ text: String, title: String?, maxLen: Int = 220,
                                   isPassage: Bool = false) -> String {
         let lines = isPassage ? passageLines(text, title: title) : previewLines(text, title: title)
         var joined = ""
         var previous = ""
+        var toTheEnd = true
         for line in lines {
-            if joined.count >= maxLen { break }
+            if joined.count >= maxLen {
+                toTheEnd = false
+                break
+            }
             if joined.isEmpty {
                 joined = line
                 previous = line
@@ -95,10 +108,73 @@ public enum Formatters {
             // message before into them: "Sam Lee 2:02 PM · can you look at
             // the tax test? · Priya Shah 2:05 PM · on it".
             let speaker = endsWithClockTime(previous) || endsWithClockTime(line)
-            joined += (!speaker && (ended || goesOn) ? " " : " \u{00B7} ") + line
+            let joins = !speaker && (ended || goesOn || startsAListItem(line))
+            joined += (joins ? " " : " \u{00B7} ") + line
             previous = line
         }
-        return snippet(joined, maxLen: maxLen)
+        if !toTheEnd || joined.count > maxLen {
+            return cutAtAWholeWord(joined, maxLen: maxLen)
+        }
+        // Counted as the FFI counts its cap: in Unicode scalars, Rust's
+        // `char`s. A rating's "⭐️" or a flag is two of them in one Character.
+        if !isPassage, text.unicodeScalars.count >= rowTextCap {
+            return endingAtAWholeWord(joined)
+        }
+        return joined
+    }
+
+    /// `text` cut to fit `maxLen`, "…" included: up to its last whole word
+    /// that fits, or at the limit when its first word alone is longer.
+    static func cutAtAWholeWord(_ text: String, maxLen: Int) -> String {
+        guard maxLen >= 4 else { return String(text.prefix(maxLen)) }
+        let head = String(text.prefix(maxLen - 1))
+        let next = text.dropFirst(head.count).first
+        if head.last?.isWhitespace ?? false || next?.isWhitespace ?? true {
+            // The cut fell between two words.
+            return withoutLooseEnd(head) + "\u{2026}"
+        }
+        return endingAtAWholeWord(head)
+    }
+
+    /// The most characters of a moment's text the FFI gives a row:
+    /// `SNIPPET_CHAR_CAP` in adapters/macos/mci-brain-ffi/src/lib.rs, counted
+    /// in Unicode scalars (Rust's `char`s). A text this long was cut there,
+    /// wherever that fell, mid-word too.
+    public static let rowTextCap = 280
+
+    /// `text` up to its last whole word, then "…": what a row shows of a
+    /// text cut short. A text of one word keeps it.
+    static func endingAtAWholeWord(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard let space = trimmed.lastIndex(where: \.isWhitespace) else { return trimmed + "\u{2026}" }
+        let kept = withoutLooseEnd(String(trimmed[..<space]))
+        return (kept.isEmpty ? trimmed : kept) + "\u{2026}"
+    }
+
+    /// What a cut never leaves hanging before its "…": spaces, a separator,
+    /// a comma, or a sentence's full stop ("billing.…" reads as four dots).
+    private static let looseEnd = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "\u{00B7},;:."))
+
+    /// `text` without the loose characters at its end. Only the end: a line
+    /// may start with one (".env.local").
+    private static func withoutLooseEnd(_ text: String) -> String {
+        var kept = Substring(text)
+        while let last = kept.last, last.unicodeScalars.allSatisfy({ looseEnd.contains($0) }) {
+            kept.removeLast()
+        }
+        return String(kept)
+    }
+
+    /// A line a list's mark starts: "•", "◦", "▪", "‣", "-", "–" or "*" and
+    /// a space, or a number and "." or ")" and a space ("2. Ship it").
+    static func startsAListItem(_ line: String) -> Bool {
+        if let mark = line.first, "\u{2022}\u{25E6}\u{25AA}\u{2023}-\u{2013}*".contains(mark) {
+            return line.dropFirst().first == " "
+        }
+        let digits = line.prefix(while: \.isASCII).prefix(while: \.isNumber)
+        guard (1...3).contains(digits.count) else { return false }
+        let rest = line.dropFirst(digits.count)
+        return rest.hasPrefix(". ") || rest.hasPrefix(") ")
     }
 
     /// Whether a line ends in a clock time, as a chat's name over a message

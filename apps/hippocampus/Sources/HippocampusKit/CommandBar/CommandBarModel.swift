@@ -48,24 +48,48 @@ public struct BarHit: Decodable, Sendable, Equatable, Identifiable {
     public let windowTitle: String?
     public let url: String?
     public let textSnippet: String
+    /// The one short line History's row shows for this moment ("Working on
+    /// billing.ts in pebblewick-app", "Chatting in #team"), as the agent's
+    /// `recall` sends it. Nil from an agent without it, and for an app that
+    /// is not work.
+    public let caption: String?
     public var id: UInt64 { eventId }
 
     enum CodingKeys: String, CodingKey {
         case eventId = "event_id", tsUs = "ts_us", appBundleId = "app_bundle_id"
-        case windowTitle = "window_title", url, textSnippet = "text_snippet"
+        case windowTitle = "window_title", url, textSnippet = "text_snippet", caption
     }
 
     /// The snippet without the provenance header line the store prepends.
     public var body: String { MomentText.body(textSnippet) }
+
+    /// What its row is called: History's caption for the moment, else its
+    /// window's title tidied, else the start of what it said.
+    public var shownTitle: String {
+        if let caption = caption?.trimmingCharacters(in: .whitespacesAndNewlines), !caption.isEmpty {
+            return caption
+        }
+        if let title = windowTitle.map(Self.tidy), !title.isEmpty { return title }
+        return body.isEmpty ? "Untitled" : body
+    }
+
+    /// A window title as a row shows one: on one line, spaces run together,
+    /// and a site's " | " read as the " · " the panel's other rows use.
+    static func tidy(_ title: String) -> String {
+        title.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            .replacingOccurrences(of: " | ", with: " \u{00B7} ")
+    }
 }
 
 /// A moment's stored text as one line, without the header line the store
-/// puts first (`[app=… | title=…]`) when there is one (RULINGS X8).
+/// puts first (`[app=… | title=…]`) when there is one (RULINGS X8), and
+/// with runs of spaces read as one, as a History row reads them: a table's
+/// cells and a page's columns leave several between their words.
 enum MomentText {
     static func body(_ text: String) -> String {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
         let kept = lines.first?.hasPrefix("[app=") == true ? lines.dropFirst() : lines[...]
-        return kept.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        return kept.joined(separator: " ").split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 }
 
@@ -235,6 +259,10 @@ public final class CommandBarModel: ObservableObject {
 
     public static let keepAnswerFor: TimeInterval = 10 * 60
     public static let homeRowLimit = 3
+    /// The most rows under "From your memory". The search asks for twice as
+    /// many, since moments already listed above, and the same window read
+    /// more than once, are left out (`shownHits`).
+    public static let momentRowLimit = 8
     /// The rows offered before anything is typed: the window in front, the
     /// last session, more about this window. Never a past search, the day or
     /// what Hippocampus understands about you.
@@ -299,6 +327,10 @@ public final class CommandBarModel: ObservableObject {
     /// The memory in use now. When it changes, what the panel kept from the
     /// other is dropped before anything is shown.
     var memoryInUse: @Sendable () -> URL? = { DemoMemory.storeURL }
+    /// The memory the shown question was asked of, as `memoryInUse` named
+    /// it then. A kept answer comes back only in that memory: never the
+    /// person's own under Demo Memory, nor the made-up week's in their own.
+    private var askedMemory: URL?
     /// "When did I last meet with …?" answered from the person's own
     /// calendar, on this Mac, while they have it on (SPEC-DELTA 5). Tests and
     /// pictures give it a fixed calendar, so nothing reads the real one.
@@ -411,7 +443,8 @@ public final class CommandBarModel: ObservableObject {
             return homeRows.map(BarRow.suggestion)
         case .results:
             let ask = answersAvailable ? [BarRow.ask(query.trimmed)] : []
-            return ask + matchedItems.map(BarRow.item) + matchedPages.map(BarRow.page) + hits.map(BarRow.hit)
+            let moments = Self.shownHits(hits, items: matchedItems, pages: matchedPages)
+            return ask + matchedItems.map(BarRow.item) + matchedPages.map(BarRow.page) + moments.map(BarRow.hit)
         case .answer:
             return (answer?.sources ?? []).enumerated().map { index, source in
                 index == 0 && isThisWindow(source) ? .thisWindow(source) : .source(source)
@@ -449,11 +482,68 @@ public final class CommandBarModel: ObservableObject {
             .prefix(homeRowLimit))
     }
 
+    /// The moments "From your memory" lists under the items and pages that
+    /// hold what is typed, in the search's order:
+    /// - none that is already listed above it: one of a listed item's or
+    ///   page's own moments, the same page's address, or a listed item's own
+    ///   window (its name, in one of its apps);
+    /// - one row for the same window read more than once: the newest, where
+    ///   the first of them stood. The same window is the same app with the
+    ///   same row title, as History's caption names it;
+    /// - at most `momentRowLimit`.
+    public static func shownHits(_ hits: [BarHit], items: [PanelItem], pages: [PanelPage]) -> [BarHit] {
+        let listed = Set(items.flatMap(\.moments) + pages.flatMap(\.moments))
+        let addresses = Set(pages.compactMap { address(host: $0.host, path: $0.path) })
+        let itemWindows = Set(items.flatMap { item in item.apps.map { WindowKey(app: $0, title: fold(item.name)) } })
+        var order: [WindowKey] = []
+        var newest: [WindowKey: BarHit] = [:]
+        for hit in hits {
+            guard !listed.contains(hit.eventId) else { continue }
+            if let url = hit.url.flatMap(URL.init(string:)),
+               let address = address(host: url.host, path: url.path), addresses.contains(address) {
+                continue
+            }
+            let app = hit.appBundleId ?? ""
+            if let title = hit.windowTitle, itemWindows.contains(WindowKey(app: app, title: fold(title))) {
+                continue
+            }
+            let window = WindowKey(app: app, title: fold(hit.shownTitle))
+            if let kept = newest[window] {
+                if hit.tsUs > kept.tsUs { newest[window] = hit }
+            } else {
+                newest[window] = hit
+                order.append(window)
+            }
+        }
+        return order.prefix(momentRowLimit).compactMap { newest[$0] }
+    }
+
+    private struct WindowKey: Hashable {
+        let app: String
+        let title: String
+    }
+
+    /// A page's place on the web without its scheme, query or fragment:
+    /// "stripe.com/pricing". Nil without a host.
+    private static func address(host: String?, path: String?) -> String? {
+        guard var host = host?.lowercased(), !host.isEmpty else { return nil }
+        if host.hasPrefix("www.") { host.removeFirst(4) }
+        var path = path ?? ""
+        while path.hasSuffix("/") { path.removeLast() }
+        return host + path
+    }
+
+    private static func fold(_ text: String) -> String {
+        text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+    }
+
     // MARK: Opening and closing
 
     /// Ask opened. Returns the id `contextArrived` must quote. An answer from
     /// the last 10 minutes comes back with its question selected and the
-    /// window it was asked over; anything else starts fresh.
+    /// window it was asked over, in the memory it was asked of; anything
+    /// else starts fresh.
     @discardableResult
     public func opened() -> Int {
         openID += 1
@@ -469,6 +559,17 @@ public final class CommandBarModel: ObservableObject {
         liveContext = nil
         liveContextKnown = false
         answersAvailable = availability.isAvailable(at: now())
+        if askedMemory != memoryInUse() {
+            // Demo Memory began or ended since the last question: its
+            // answer, sources and the message ⌘↩ made from them belong to
+            // the other memory. They go before anything is shown, and a
+            // reply still on its way is dropped (`askToken`, below).
+            askedQuestion = nil
+            answer = nil
+            lastCard = nil
+            lastRequest = nil
+            askedMemory = memoryInUse()
+        }
         if keepsAnswer {
             showingKeptAnswer = true
             selection = -1
@@ -673,7 +774,8 @@ public final class CommandBarModel: ObservableObject {
         defer { if token == searchToken { isSearching = false } }
         do {
             let data = try await memory.call(
-                .reads, "mci_recall", arguments: Self.json(["query": text, "limit": 8]), timeout: .seconds(10)
+                .reads, "mci_recall", arguments: Self.json(["query": text, "limit": 2 * Self.momentRowLimit]),
+                timeout: .seconds(10)
             )
             let reply = try JSONDecoder().decode(RecallReply.self, from: data)
             guard mode == .results, query.trimmed == text else { return }
@@ -708,6 +810,7 @@ public final class CommandBarModel: ObservableObject {
         setQuery(trimmed)
         askToken += 1
         askedQuestion = trimmed
+        askedMemory = memoryInUse()
         askedAt = nil
         answer = nil
         notice = nil
@@ -881,9 +984,17 @@ public final class CommandBarModel: ObservableObject {
         }
     }
 
-    /// Where a Working On item's page is in the window: `item:<id>` (ids,
-    /// never names).
-    public static func itemTab(_ id: String) -> String { "item:\(id)" }
+    /// Where a Working On item's page is in the window: `work:<id>` (ids,
+    /// never names), as a `tab=work&item=<id>` link becomes
+    /// (`HippocampusURLRoute.recallTab`) and the window reads it
+    /// (`RecallLaunchRequest.workTabPrefix`).
+    public static func itemTab(_ id: String) -> String { "work:\(id)" }
+
+    /// Today on the day of the session that started at `startUs`, with that
+    /// session selected: `session:<start_us>`, as a `session=` link becomes
+    /// (`HippocampusURLRoute.recallTab`, SPEC 2.16) and the window reads it
+    /// (`RecallLaunchRequest.sessionTabPrefix`).
+    public static func sessionTab(_ startUs: UInt64) -> String { "session:\(startUs)" }
 
     private func run(_ suggestion: BarSuggestion) -> BarAction? {
         if let question = suggestion.action.ask {
@@ -894,7 +1005,11 @@ public final class CommandBarModel: ObservableObject {
             query = text
             return nil
         }
-        if suggestion.action.openSession != nil || suggestion.action.view == "day" {
+        if let start = suggestion.action.openSession {
+            // "Resume: …": that session, on its own day (SPEC 2.16).
+            return .openWindow(tab: Self.sessionTab(start))
+        }
+        if suggestion.action.view == "day" {
             return .openWindow(tab: "overview")
         }
         if suggestion.action.view == "model" {

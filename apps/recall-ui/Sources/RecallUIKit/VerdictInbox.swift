@@ -190,6 +190,7 @@ public extension ModelPage {
         var page = self
         page.shared = Self.overlay(verdicts, on: shared)
         page.keptBack = Self.overlay(verdicts, on: keptBack)
+        page.notSent = Self.overlay(verdicts, on: notSent)
         page.notSeenLately = Self.overlay(verdicts, on: notSeenLately)
         return page
     }

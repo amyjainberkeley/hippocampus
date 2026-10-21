@@ -784,7 +784,12 @@ pub fn rows_within(
     (kept, truncated)
 }
 
+/// One recall hit as an AI tool and the Ask panel see it. **Additive:**
+/// `caption`, the one short line History's row shows for the moment
+/// ([`BrainReader::caption`]), which the Ask panel titles the hit with in
+/// place of its raw window title; `null` for an app that is not work.
 fn hit_json(hit: &McpHit, reader: &dyn BrainReader) -> serde_json::Value {
+    let source = reader.event_source(hit.record.event_id);
     serde_json::json!({
         "event_id": hit.record.event_id.0,
         "ts_us": hit.record.ts_us,
@@ -792,7 +797,8 @@ fn hit_json(hit: &McpHit, reader: &dyn BrainReader) -> serde_json::Value {
         "window_title": hit.record.window_title,
         "url": hit.record.url,
         "text_snippet": hit.record.text_snippet,
-        "source_kind": reader.event_source(hit.record.event_id).as_str(),
+        "caption": reader.caption(&hit.record, source),
+        "source_kind": source.as_str(),
         "score": hit.score,
         "entities": hit.entities,
         "linked_event_ids": hit.linked_event_ids,

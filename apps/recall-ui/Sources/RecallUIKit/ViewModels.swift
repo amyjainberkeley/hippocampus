@@ -228,6 +228,14 @@ public final class SearchViewModel: ObservableObject {
         }
     }
 
+    /// One moment by its id, read without showing it: nil when it is gone
+    /// or can't be read. Ask reads a moment's time this way to open History
+    /// on its day (`AskViewModel.open`).
+    public func moment(id: UInt64) async -> Hit? {
+        guard id > 0 else { return nil }
+        return try? await reader.fetchEventsByIds([id]).first { $0.eventId == id }
+    }
+
     /// Load one canonical event selected outside the main workspace (for
     /// example from the global Recall popup) and reveal its detail directly.
     public func focusEvent(id: UInt64) async {

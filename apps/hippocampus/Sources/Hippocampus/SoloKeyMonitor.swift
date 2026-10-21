@@ -161,10 +161,12 @@ final class SoloKeyMonitor {
         if fired { onTap?() }
     }
 
-    /// How many keys were pressed and buttons clicked since login, as the
-    /// system counts them. A count only; no permission is needed for it.
+    /// How many keys were pressed, buttons clicked, scrolls made and
+    /// function keys' own actions sent since login, as the system counts
+    /// them (`SoloKeyDetector.activityEventTypes`). A count only, never
+    /// which key; no permission is needed for it.
     private static func activityCount() -> UInt64 {
-        [CGEventType.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
+        SoloKeyDetector.activityEventTypes.compactMap(CGEventType.init(rawValue:))
             .reduce(UInt64(0)) { $0 &+ UInt64(CGEventSource.counterForEventType(.combinedSessionState, eventType: $1)) }
     }
 }

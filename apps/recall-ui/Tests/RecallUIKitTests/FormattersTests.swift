@@ -398,6 +398,129 @@ final class FormattersTests: XCTestCase {
         XCTAssertFalse(gb.contains("UTC"), gb)
     }
 
+    // MARK: A row's preview (the demo week's Q4 update and Looked Up)
+
+    /// A bulleted list's own "•" is never given a "·" in front of it (the
+    /// verifier's probe: the demo's Q4 investor update).
+    func testBulletedTextHasNoDoubleSeparator() {
+        let text = "Pebblewick\nOctober 2026\nHighlights\n\u{2022} Monthly revenue reached $84,200, up 11% from last month."
+            + "\n\u{2022} 412 studios pay for Pebblewick."
+        let preview = Formatters.rowPreview(text, title: "Q4 investor update")
+        XCTAssertFalse(preview.contains("\u{00B7} \u{2022}"), "preview was: \(preview)")
+        XCTAssertTrue(preview.contains("Highlights \u{2022} Monthly revenue reached $84,200"), preview)
+        XCTAssertTrue(preview.contains("last month. \u{2022} 412 studios"), preview)
+    }
+
+    /// Any list's mark, or a number that numbers a list, joins with a plain
+    /// space; a line that only starts with a number, or a word, does not.
+    func testAListsItemsJoinWithASpace() {
+        XCTAssertEqual(Formatters.rowPreview("Next steps\n1. Ship the pricing page\n2) Tell the team", title: nil),
+                       "Next steps 1. Ship the pricing page 2) Tell the team")
+        XCTAssertEqual(Formatters.rowPreview("Steps\n- Design\n* Copy\n\u{2013} Launch", title: nil),
+                       "Steps - Design * Copy \u{2013} Launch")
+        XCTAssertEqual(Formatters.rowPreview("Highlights\n412 studios pay for Pebblewick", title: nil),
+                       "Highlights \u{00B7} 412 studios pay for Pebblewick")
+        XCTAssertEqual(Formatters.rowPreview("Plans\n-Solo", title: nil), "Plans \u{00B7} -Solo")
+    }
+
+    /// The FFI gives a row at most `rowTextCap` characters of a moment's
+    /// text, cut where they end, mid-word too. A preview that runs to that
+    /// cut ends at its last whole word with "…", as the prototype's rows do
+    /// (the demo's Looked Up: "…Show the monthly price on t").
+    func testARowCutByTheFFIEndsAtAWholeWordWithAnEllipsis() {
+        let lead = "Cohort tables for subscription businesses\nMETRICS WEEKLY\nToday 2:21 PM\n"
+        let body = "Cohort tables show how many customers stay each month after they signed up. Read them by row: "
+            + "each row is the month a group started, and each column is a later month. A falling row means people "
+            + "leave sooner than planned for."
+        let text = String((lead + body).prefix(Formatters.rowTextCap))
+        XCTAssertEqual(text.count, 280)
+        let title = "Cohort tables for subscription businesses \u{00B7} Metrics Weekly"
+        let preview = Formatters.rowPreview(text, title: title)
+        XCTAssertLessThanOrEqual(preview.count, 220)
+        XCTAssertTrue(preview.hasSuffix("\u{2026}"), preview)
+        let shown = String(preview.dropLast())
+        XCTAssertTrue(body.hasPrefix(shown + " "), "ends at a whole word: \(preview)")
+        XCTAssertTrue(text.hasSuffix("sooner th"), "the FFI's cut fell mid-word")
+        XCTAssertEqual(Formatters.rowTextCap, 280)
+    }
+
+    /// The FFI counts its 280 as Rust does, in Unicode scalars, and a rating's
+    /// "⭐️" is two of them in one character a row shows. A text it cut that
+    /// holds some is still read as cut, and ends at a whole word with "…".
+    func testACutIsCountedAsTheFFICountsIt() {
+        let lead = "Cohort tables for subscription businesses\nMETRICS WEEKLY\nToday 2:21 PM\n"
+        let stars = String(repeating: "\u{2B50}\u{FE0F}", count: 5)
+        let body = "Rated 4.9 \(stars) by its readers. Cohort tables show how many customers stay each month after "
+            + "they signed up. Read them by row: each row is the month a group started, and each column is a later "
+            + "month. A falling row means people leave sooner than planned for."
+        // The FFI's cut: the first 280 Unicode scalars of the text.
+        var scalars = String.UnicodeScalarView()
+        scalars.append(contentsOf: (lead + body).unicodeScalars.prefix(Formatters.rowTextCap))
+        let text = String(scalars)
+        XCTAssertEqual(text.unicodeScalars.count, 280)
+        XCTAssertEqual(text.count, 275, "five stars are ten scalars")
+        XCTAssertTrue(text.hasSuffix("A fal"), "the FFI's cut fell mid-word")
+        let title = "Cohort tables for subscription businesses \u{00B7} Metrics Weekly"
+        let preview = Formatters.rowPreview(text, title: title)
+        XCTAssertLessThanOrEqual(preview.count, 220)
+        XCTAssertTrue(preview.hasSuffix("\u{2026}"), preview)
+        XCTAssertTrue(body.hasPrefix(String(preview.dropLast()) + " "), "ends at a whole word: \(preview)")
+    }
+
+    /// A cut that ends just after a sentence drops its full stop for the
+    /// "…": "with yearly billing…", never "billing.…", which reads as four
+    /// dots (the demo's Q4 investor update in Documents).
+    func testACutAfterASentenceEndsWithOneMark() {
+        let text = "Q4 investor update\nPebblewick \u{00B7} October 2026\nHighlights\n"
+            + "\u{2022} Monthly revenue reached $84,200, up 11% from last month.\n"
+            + "\u{2022} 412 studios pay for Pebblewick, 38 more than last month.\n"
+            + "\u{2022} The Studio plan launches Thursday, with yearly billing.\n"
+            + "Metrics\nNet revenue retention: 108%\nLogo churn: 1.9% a month"
+        let preview = Formatters.rowPreview(text, title: "Q4 investor update - Google Docs")
+        XCTAssertTrue(preview.hasPrefix("Pebblewick \u{00B7} October 2026 \u{00B7} Highlights \u{2022} Monthly"), preview)
+        XCTAssertTrue(preview.hasSuffix("launches Thursday, with yearly billing\u{2026}"), preview)
+        XCTAssertFalse(preview.contains(".\u{2026}"), preview)
+        XCTAssertEqual(Formatters.endingAtAWholeWord("with yearly billing. Th"), "with yearly billing\u{2026}")
+        XCTAssertEqual(Formatters.cutAtAWholeWord("with yearly billing. The price", maxLen: 21), "with yearly billing\u{2026}")
+        // A question keeps its mark, and only a cut's end is trimmed: a line
+        // may start with "." (".env.local").
+        XCTAssertEqual(Formatters.endingAtAWholeWord("Is it live? Nearl"), "Is it live?\u{2026}")
+        XCTAssertEqual(Formatters.endingAtAWholeWord(".env.local holds the k"), ".env.local holds the\u{2026}")
+        XCTAssertEqual(Formatters.cutAtAWholeWord(".env.local holds the key", maxLen: 21), ".env.local holds the\u{2026}")
+    }
+
+    /// A preview longer than a row shows stops at its last whole word that
+    /// fits, with "…", never mid-word ("Gift cards Cus…" on Web Pages); a
+    /// first word longer than the row is cut at the limit.
+    func testAPreviewLongerThanARowEndsAtAWholeWord() {
+        let text = String(repeating: "pricing tier ", count: 30)
+        let preview = Formatters.rowPreview(text, title: nil)
+        XCTAssertLessThanOrEqual(preview.count, 220)
+        XCTAssertTrue(preview.hasSuffix("tier\u{2026}") || preview.hasSuffix("pricing\u{2026}"), preview)
+        XCTAssertTrue(text.hasPrefix(String(preview.dropLast()) + " "), "ends at a whole word: \(preview)")
+        let found = Formatters.rowPreview(text, title: nil, isPassage: true)
+        XCTAssertTrue(text.hasPrefix(String(found.dropLast()) + " "), "a search's passage too: \(found)")
+        XCTAssertEqual(Formatters.rowPreview(String(repeating: "x", count: 300), title: nil),
+                       String(repeating: "x", count: 219) + "\u{2026}")
+        XCTAssertEqual(Formatters.cutAtAWholeWord("alpha beta gamma", maxLen: 12), "alpha beta\u{2026}")
+        XCTAssertEqual(Formatters.cutAtAWholeWord("alpha beta gamma", maxLen: 11), "alpha beta\u{2026}")
+        XCTAssertEqual(Formatters.cutAtAWholeWord("alpha beta gamma", maxLen: 10), "alpha\u{2026}")
+        XCTAssertEqual(Formatters.cutAtAWholeWord("alpha \u{00B7} beta", maxLen: 9), "alpha\u{2026}")
+    }
+
+    /// A shorter text was not cut, so it ends as it ends; a search's passage
+    /// is cut by bytes, and a chat's at its start, so it is left as it came.
+    func testOnlyAStartTheFFICutGetsTheEllipsis() {
+        XCTAssertEqual(Formatters.rowPreview("Cohort tables\nRead them by row.", title: nil),
+                       "Cohort tables \u{00B7} Read them by row.")
+        let passage = String(String(repeating: "pricing tier ", count: 30).prefix(Formatters.rowTextCap))
+        let found = Formatters.rowPreview(passage, title: nil, maxLen: 300, isPassage: true)
+        XCTAssertFalse(found.hasSuffix("\u{2026}"), found)
+        XCTAssertEqual(Formatters.endingAtAWholeWord("one \u{00B7} two thr"), "one \u{00B7} two\u{2026}")
+        XCTAssertEqual(Formatters.endingAtAWholeWord("one \u{00B7} tw"), "one\u{2026}")
+        XCTAssertEqual(Formatters.endingAtAWholeWord("unbroken"), "unbroken\u{2026}")
+    }
+
     func testAppsAPersonKnowsByNameAreNamedThatWay() {
         XCTAssertEqual(Formatters.appDisplayName("com.apple.MobileSMS"), "Messages")
         XCTAssertEqual(Formatters.appDisplayName("com.googlecode.iterm2"), "iTerm")

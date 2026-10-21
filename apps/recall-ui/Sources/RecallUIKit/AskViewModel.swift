@@ -273,8 +273,15 @@ public final class AskViewModel: ObservableObject {
         }
     }
 
-    /// Ask's part of a route: the field, a memory to show, or History on a
-    /// day or a session's own time.
+    /// Ask's part of a route: the field, History on a day or a session's own
+    /// time, or a moment.
+    ///
+    /// A moment alone (`focus=<moment>`: Show in History from Working On,
+    /// Web Pages and Looked Up, a moment opened from the Ask panel) opens
+    /// History on that moment's own day with the moment selected (SPEC
+    /// 2.16), the way Today's card and the sidebar show one: its time read
+    /// first, then History from it, as `.history(of:selecting:)` does. A
+    /// moment that can no longer be read leaves History where it is.
     public func open(_ route: RecallRoute) async {
         if route.clearsField { clear() }
         if route.focusesField { fieldFocusRequest += 1 }
@@ -283,11 +290,29 @@ public final class AskViewModel: ObservableObject {
             await history.show(day: MemoryDay(date: date, calendar: calendar),
                                around: UInt64(clamping: range.lowerBound)...UInt64(clamping: range.upperBound),
                                selecting: route.focusEventId)
+            keepPicked(route.focusEventId)
         } else if let date = route.day {
             await history.show(day: MemoryDay(date: date, calendar: calendar))
         } else if let eventId = route.focusEventId {
-            await search.focusEvent(id: eventId)
+            if !route.clearsField { clear() }
+            guard let moment = await search.moment(id: eventId) else { return }
+            let date = Date(timeIntervalSince1970: Double(moment.tsUs) / 1_000_000)
+            await history.show(day: MemoryDay(date: date, calendar: calendar), around: moment.tsUs...moment.tsUs,
+                               selecting: eventId)
+            keepPicked(eventId)
         }
+    }
+
+    /// History reads its rows again when it comes on screen without any,
+    /// which it can while a route's own read is under way: that read wins
+    /// and the route's pick is lost. A read keeps a pick it finds among its
+    /// rows, so the route's moment is picked once its own read is done too.
+    /// A moment History doesn't show, with no read under way, stays unpicked.
+    private func keepPicked(_ eventId: UInt64?) {
+        guard let eventId, history.selectedHitId != eventId,
+              history.isLoading || history.hits.contains(where: { $0.id == eventId })
+        else { return }
+        history.selectedHitId = eventId
     }
 
     private func finish(_ asked: Asking, with result: Result<AskAnswer, any Error>) {

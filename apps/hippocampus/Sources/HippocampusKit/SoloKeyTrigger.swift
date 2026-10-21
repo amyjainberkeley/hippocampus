@@ -95,6 +95,21 @@ public struct SoloKeyDetector: Sendable, Equatable {
     public static let longestTapMs: UInt64 = 350
     public static let doubleTapGapMs: UInt64 = 400
 
+    /// What counts as something else happening while the key is down: the
+    /// system's own running counts of these event types (Quartz's
+    /// `CGEventType` raw values), never which key it was or what it typed
+    /// (SPEC-DELTA 7). A key pressed, a click with any button, a scroll,
+    /// and a system-defined event: what a function key sends for its own
+    /// action (volume, brightness) when "Use F1, F2, etc. keys as standard
+    /// function keys" is on. Fn+F11 then sends no key press, and without it
+    /// a quick Fn+F11 read as a tap of Fn alone and opened Ask.
+    public static let activityEventTypes: [UInt32] = [
+        10, // a key pressed (kCGEventKeyDown)
+        1, 3, 25, // a click: left, right, other (kCGEvent…MouseDown)
+        22, // a scroll (kCGEventScrollWheel)
+        14, // a system-defined event (NX_SYSDEFINED): a function key's own action
+    ]
+
     static let leftControl: UInt = 0x0001
     static let leftShift: UInt = 0x0002
     static let rightShift: UInt = 0x0004
@@ -131,8 +146,8 @@ public struct SoloKeyDetector: Sendable, Equatable {
     /// - Parameters:
     ///   - keyCode: the modifier key that changed.
     ///   - flags: the device-dependent modifier bits now held.
-    ///   - activity: a running count of key presses and clicks. Only whether
-    ///     it moved matters.
+    ///   - activity: a running count of the events in `activityEventTypes`.
+    ///     Only whether it moved matters.
     ///   - atMs: a monotonic time in milliseconds.
     public mutating func modifiersChanged(keyCode: UInt16, flags: UInt, activity: UInt64, atMs: UInt64) -> Bool {
         guard key != .off else { return false }

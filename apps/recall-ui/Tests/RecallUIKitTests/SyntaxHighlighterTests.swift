@@ -40,6 +40,76 @@ final class SyntaxHighlighterTests: XCTestCase {
         XCTAssertEqual(SyntaxHighlighter.detectLanguage(code), .shell)
     }
 
+    // MARK: JavaScript and TypeScript (the demo week's billing.ts)
+
+    /// TypeScript, the demo week's own code: not read as Python, so an
+    /// English word inside a `//` comment is never colored as a keyword and
+    /// the comment line is a comment (the verifier's probe).
+    func testTypeScriptIsNotReadAsPython() {
+        let code = """
+        import Stripe from "stripe";
+        import { plans, type PlanId } from "./plans";
+
+        // Moves a studio to yearly billing and credits the unused part of the month.
+        export async function switchToYearly(studioId: string, plan: PlanId) {
+          const subscription = await findSubscription(studioId);
+        }
+        """
+        XCTAssertNotEqual(SyntaxHighlighter.detectLanguage(code), .python)
+        XCTAssertEqual(SyntaxHighlighter.detectLanguage(code), .javascript)
+        let tokens = SyntaxHighlighter.codeTokens(code)
+        XCTAssertTrue(tokens.filter { $0.type == .keyword && $0.text == "and" }.isEmpty,
+                      "\"and\" inside a // comment was colored as a keyword")
+        XCTAssertTrue(tokens.contains { $0.type == .comment && $0.text.contains("Moves a studio") },
+                      "the // comment line is not a comment token")
+        for word in ["import", "from", "export", "async", "function", "const", "await"] {
+            XCTAssertTrue(tokens.contains(SyntaxToken(text: word, type: .keyword)), word)
+        }
+        XCTAssertEqual(tokens.map(\.text).joined(), code, "every character, in order")
+    }
+
+    func testJavaScriptIsToldByWhatOnlyItWrites() {
+        for code in [
+            "const total = plans.reduce((sum, plan) => sum + plan.price, 0);",
+            "export default function Pricing() {\n  return <Plans />;\n}",
+            "function yearly(price) {\n  return price * 10;\n}",
+            "interface Plan {\n  id: string;\n  price: number;\n}",
+            "type PlanId = \"solo\" | \"team\";",
+            "plans.forEach((plan) => {\n  console.log(plan.id);\n});",
+            "const stripe = require(\"stripe\")(key);",
+        ] {
+            XCTAssertEqual(SyntaxHighlighter.detectLanguage(code), .javascript, code)
+        }
+    }
+
+    /// Python, a shell script and Rust keep their own words: a comment or a
+    /// sentence that says "function", a shell's `export NAME=`, Python's
+    /// `from x import y` and Rust's `const` are not JavaScript.
+    func testOtherLanguagesAreNotTakenForJavaScript() {
+        let python = "import os\n# call the function below\ndef main():\n    return os.getcwd()"
+        XCTAssertEqual(SyntaxHighlighter.detectLanguage(python), .python)
+        XCTAssertEqual(SyntaxHighlighter.detectLanguage("from billing import plans\nif plans.yearly:\n    print(plans)"),
+                       .python)
+        let docstring = "def yearly(price):\n    \"\"\"\n    function to call (later) for yearly plans\n    \"\"\"\n    return price"
+        XCTAssertEqual(SyntaxHighlighter.detectLanguage(docstring), .python)
+        XCTAssertEqual(SyntaxHighlighter.detectLanguage("export PATH=\"/usr/local/bin:$PATH\"\necho \"hello\""), .shell)
+        XCTAssertEqual(SyntaxHighlighter.detectLanguage("#!/bin/bash\nfunction greet() {\n  echo hi\n}"), .shell)
+        XCTAssertEqual(SyntaxHighlighter.detectLanguage("pub const MAX: usize = 3;\npub fn cap() -> usize { MAX }"), .rust)
+        XCTAssertEqual(SyntaxHighlighter.detectLanguage("hello world"), .unknown)
+    }
+
+    /// A `/* … */` comment's lines are comments in C-like code, and in a
+    /// block whose language isn't known.
+    func testABlockCommentsLinesAreComments() {
+        let code = "/*\n * Credits the unused part of the month.\n */\nconst credit = 0;"
+        for line in code.split(separator: "\n").prefix(3).map(String.init) {
+            XCTAssertEqual(SyntaxHighlighter.codeTokens(line, language: .javascript).first?.type, .comment, line)
+            XCTAssertEqual(SyntaxHighlighter.codeTokens(line, language: .unknown).first?.type, .comment, line)
+        }
+        let tokens = SyntaxHighlighter.tokenize(code)
+        XCTAssertTrue(tokens.contains { $0.type == .comment && $0.text.contains("Credits the unused") })
+    }
+
     func testUnknownLanguage() {
         XCTAssertEqual(SyntaxHighlighter.detectLanguage("hello world"), .unknown)
     }

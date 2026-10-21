@@ -64,6 +64,19 @@ public extension UserFacingCopy {
             }
         }
 
+        /// After the basis of a line no AI tool is given yet.
+        public static let notSentYet = "Not sent yet"
+        /// Once, over the lines, while any of them says `notSentYet`.
+        public static let notSentLine =
+            "Your AI tools aren\u{2019}t told the lines marked Not sent yet. Mark one Right to send it."
+
+        /// A line's basis, and for a line no AI tool is given yet, that it
+        /// isn't: "Seen once · Not sent yet".
+        public static func basis(_ item: ModelItem) -> String {
+            let said = basis(item.basis, daysSeen: item.daysSeen)
+            return item.waitsToBeSent ? "\(said) \u{00B7} \(notSentYet)" : said
+        }
+
         public static let nothingLearnedTitle = "Nothing learned yet."
         public static let nothingLearnedBody =
             "This fills in after a few sessions. It needs Apple Intelligence or a model on this Mac."

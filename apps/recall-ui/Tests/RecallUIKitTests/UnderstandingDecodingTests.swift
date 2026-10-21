@@ -66,9 +66,17 @@ final class UnderstandingDecodingTests: XCTestCase {
         XCTAssertEqual(page.version, 1)
         XCTAssertEqual(page.modelStatus.state, .available)
         XCTAssertEqual(page.recentWork.count, 4)
-        XCTAssertEqual(page.shared.map(\.id), [41, 37, 45, 29, 33, 22, 18])
-        XCTAssertEqual(page.keptBack.map(\.id), [51, 27, 31])
+        // The agent's four lists (query.rs `model_page`): a line seen once,
+        // or about who Sam works with, goes to no AI tool until it is seen
+        // more or Sam marks it Right.
+        XCTAssertEqual(page.shared.map(\.id), [41, 37, 29, 22])
+        XCTAssertEqual(page.keptBack.map(\.id), [31])
+        XCTAssertEqual(page.notSent.map(\.id), [45, 51, 33, 18, 27])
         XCTAssertEqual(page.notSeenLately.map(\.id), [12])
+        XCTAssertTrue(page.notSent.allSatisfy(\.notSentYet), "every line the agent lists so says it")
+        XCTAssertFalse((page.shared + page.keptBack + page.notSeenLately).contains(where: \.notSentYet))
+        XCTAssertEqual(page.notSent.first?.text, "Sam wants the new pricing page live before the October sale.")
+        XCTAssertEqual(page.notSent.first?.basis, .seenOnce)
 
         let item = try XCTUnwrap(page.shared.first)
         XCTAssertEqual(item.text, "Sam is redesigning the pricing page for Trailhead Bikes.")
@@ -79,9 +87,12 @@ final class UnderstandingDecodingTests: XCTestCase {
         XCTAssertEqual(item.evidenceSessions.count, 5)
         XCTAssertEqual(item.evidenceSessions.first?.windowTitle, "Pricing page draft")
         XCTAssertEqual(page.shared[1].basis, .seenOnDays)
-        XCTAssertEqual(page.shared[2].basis, .seenOnce)
-        XCTAssertEqual(page.keptBack.map(\.group), [.howYouWork, .people, .struggles])
-        XCTAssertEqual(page.keptBack.map(\.kind), [.habit, .relationship, .struggle])
+        XCTAssertEqual(page.shared[2].basis, .seenOnDays)
+        XCTAssertEqual(page.keptBack.map(\.group), [.struggles])
+        XCTAssertEqual(page.keptBack.map(\.kind), [.struggle])
+        XCTAssertEqual(page.notSent.map(\.group), [.workingOn, .howYouWork, .howYouWork, .skills, .people])
+        XCTAssertEqual(page.notSent.map(\.kind), [.goal, .habit, .preference, .skill, .relationship])
+        XCTAssertEqual(page.notSent.map(\.basis), [.seenOnce, .seenOnce, .seenOnce, .seenOnce, .seenOnDays])
     }
 
     func testSessionsSampleDecodesSegmentsAndTupleSearches() throws {
@@ -152,7 +163,32 @@ final class UnderstandingDecodingTests: XCTestCase {
         XCTAssertEqual(decoded.shared[0].group, .other)
         XCTAssertEqual(decoded.shared[0].kind, .other)
         XCTAssertEqual(decoded.shared[0].basis, .seenOnce)
-        XCTAssertEqual(decoded.shared.count, 7)
+        XCTAssertEqual(decoded.shared.count, 4)
+        XCTAssertEqual(decoded.notSent.count, 5)
+    }
+
+    /// `mci-agent model --page` lists the lines that go to no AI tool yet
+    /// under `not_sent` (query.rs `model_page`). The page keeps every one of
+    /// them, so the person can mark them Right or forget them.
+    func testAboutYouKeepsLinesNotSentYet() throws {
+        let json = """
+        {"version": 1, "now_us": 1792519200000000,
+         "recent_work": [],
+         "shared": [{"id": 1, "text": "Ren is hiring a finance lead.", "kind": "project", "group": "working_on",
+                     "basis": "confirmed", "days_seen": 1, "reasoning": "", "updated_us": 1792519000000000,
+                     "evidence_sessions": []}],
+         "kept_back": [],
+         "not_sent": [{"id": 2, "text": "Ren writes TypeScript and runs tests from the terminal.", "kind": "skill",
+                       "group": "skills", "basis": "seen_on_days", "days_seen": 3, "reasoning": "",
+                       "updated_us": 1792519000000000, "evidence_sessions": []}],
+         "not_seen_lately": []}
+        """
+        let page = try JSONDecoder().decode(ModelPage.self, from: Data(json.utf8))
+        let shown = page.shared.count + page.keptBack.count + page.notSent.count + page.notSeenLately.count
+        XCTAssertEqual(shown, 2, "About You shows \(shown) of the 2 lines the agent listed")
+        XCTAssertEqual(page.notSent.map(\.id), [2])
+        XCTAssertEqual(page.notSent.first?.waitsToBeSent, true)
+        XCTAssertEqual(page.shared.first?.waitsToBeSent, false)
     }
 
     func testOneMalformedElementDropsOnlyItself() throws {
@@ -190,6 +226,7 @@ final class UnderstandingDecodingTests: XCTestCase {
 
         let page = try JSONDecoder().decode(ModelPage.self, from: Data(#"{"now_us":1}"#.utf8))
         XCTAssertTrue(page.shared.isEmpty && page.keptBack.isEmpty && page.notSeenLately.isEmpty)
+        XCTAssertTrue(page.notSent.isEmpty, "an agent from before not_sent sends none")
         XCTAssertEqual(page.modelStatus.state, .unknown)
 
         XCTAssertThrowsError(try JSONDecoder().decode(DayOverview.self, from: Data(#"{"date":"2026-10-11"}"#.utf8)),
@@ -252,6 +289,7 @@ final class UnderstandingDecodingTests: XCTestCase {
         }
         texts += overview.aiKnows.aboutYou.map(\.text) + overview.facts.map(\.text.template)
         texts += page.shared.map(\.text) + page.shared.map(\.reasoning)
+        texts += page.notSent.map(\.text) + page.notSent.map(\.reasoning)
         for text in texts {
             XCTAssertFalse(text.contains("\u{1E}"), text)
             XCTAssertFalse(text.hasPrefix("[app="), text)

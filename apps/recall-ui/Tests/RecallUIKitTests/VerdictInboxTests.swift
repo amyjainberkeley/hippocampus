@@ -118,10 +118,13 @@ final class VerdictInboxTests: XCTestCase {
         try inbox.give(.confirm, id: 12)
         let page = try UnderstandingFixture.modelPage().overlaying(inbox.pending())
         XCTAssertFalse(page.shared.contains { $0.id == 41 })
-        XCTAssertFalse(page.keptBack.contains { $0.id == 27 })
-        XCTAssertEqual(page.shared.first { $0.id == 45 }?.basis, .confirmed)
+        // Lines no AI tool is given yet too (`not_sent`): forgotten, hidden;
+        // confirmed, they say so.
+        XCTAssertFalse(page.notSent.contains { $0.id == 27 })
+        XCTAssertEqual(page.notSent.first { $0.id == 45 }?.basis, .confirmed)
         XCTAssertEqual(page.notSeenLately.first { $0.id == 12 }?.basis, .confirmed)
-        XCTAssertEqual(page.shared.count, 6)
+        XCTAssertEqual(page.shared.count, 3)
+        XCTAssertEqual(page.notSent.count, 4)
         let overview = try UnderstandingFixture.overview().overlaying(inbox.pending())
         XCTAssertEqual(overview.aiKnows.aboutYou.map(\.id), [37, 29, 45, 22, 33])
         let untouched = try UnderstandingFixture.modelPage()

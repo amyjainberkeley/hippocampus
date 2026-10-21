@@ -211,22 +211,124 @@ final class AskViewModelTests: XCTestCase {
         XCTAssertEqual(ask.escape(), .ignored)
     }
 
-    func testAMemoryOpenedFromOutsideShowsWithAnEmptyField() async {
+    /// A moment opened from outside (`focus=<moment>`, a moment from the Ask
+    /// panel) shows in History on its own day, selected, with an empty
+    /// field (SPEC 2.16): not alone in the field's results.
+    func testAMomentOpenedFromOutsideShowsInHistoryOnItsOwnDay() async {
         let ask = model(ScriptedUnderstanding())
         ask.query = "something typed"
         await ask.open(RecallRoute(environment: ["MCI_INITIAL_FOCUS_EVENT_ID": "102"]))
         XCTAssertEqual(ask.query, "")
-        XCTAssertEqual(ask.search.focusedEventId, 102)
-        XCTAssertTrue(ask.showsMatches)
-        XCTAssertFalse(ask.showsHistory)
-        XCTAssertEqual(ask.search.hits.map(\.id), [102])
-        XCTAssertEqual(ask.search.selectedHitId, 102)
-        XCTAssertFalse(ask.showsNoMatches)
-        XCTAssertEqual(ask.escape(), .closedDetail)
-        XCTAssertEqual(ask.escape(), .clearedSelection)
-        XCTAssertEqual(ask.escape(), .clearedField)
-        XCTAssertNil(ask.search.focusedEventId)
+        XCTAssertNil(ask.search.focusedEventId, "not one moment alone in the field's results")
         XCTAssertTrue(ask.showsHistory)
+        XCTAssertEqual(ask.history.day, MemoryDay(date: Date(timeIntervalSince1970: 1_736_000_120), calendar: SampleDay.calendar))
+        XCTAssertEqual(ask.history.range, 1_736_000_120_000_000...1_736_000_120_000_000)
+        XCTAssertEqual(ask.history.hits.map(\.id), [102])
+        XCTAssertEqual(ask.history.selectedHitId, 102)
+        XCTAssertTrue(ask.history.canLoadEarlier, "the rest of its day is under it")
+        XCTAssertEqual(ask.escape(), .clearedSelection)
+        XCTAssertTrue(ask.showsHistory)
+    }
+
+    /// Show in History from Working On, Web Pages and Looked Up sends the
+    /// moment alone: it opens exactly as Today's card and the sidebar's Show
+    /// in History do (`.history(of:selecting:)` over the moment's time).
+    func testShowInHistoryWithAMomentAloneOpensWhatTheSessionsRouteOpens() async {
+        let alone = model(ScriptedUnderstanding())
+        alone.query = "tax"
+        await alone.open(RecallRoute(place: .ask, clearsField: true, focusEventId: 101))
+        let session = model(ScriptedUnderstanding())
+        let us: Int64 = 1_736_000_000_000_000
+        await session.open(.history(of: us...us, selecting: 101))
+        for ask in [alone, session] {
+            XCTAssertEqual(ask.query, "")
+            XCTAssertTrue(ask.showsHistory)
+        }
+        XCTAssertEqual(alone.history.day, session.history.day)
+        XCTAssertEqual(alone.history.range, session.history.range)
+        XCTAssertEqual(alone.history.hits.map(\.id), session.history.hits.map(\.id))
+        XCTAssertEqual(alone.history.selectedHitId, 101)
+        XCTAssertEqual(session.history.selectedHitId, 101)
+    }
+
+    private func model(_ reader: HeldHistoryReader) -> AskViewModel {
+        let deletions = MemoryDeletionSignal()
+        return AskViewModel(
+            search: SearchViewModel(reader: reader,
+                                    persistence: QueryPersistence(environment: ["MCI_EPHEMERAL_UI_STATE": "1"],
+                                                                  store: MemoryKeyValueStore()),
+                                    userDictionaryLoader: { .empty }),
+            history: TimelineViewModel(reader: reader, deletions: deletions),
+            understanding: ScriptedUnderstanding(), calendar: SampleDay.calendar, deletions: deletions)
+    }
+
+    /// History comes on screen with no rows while the route's own read is
+    /// under way, so it reads them again, and that read finishes first: the
+    /// moment is still picked, on its day (the demo's Show in History lost
+    /// its pick this way).
+    func testTheMomentStaysPickedWhenHistoryReadsItsRowsAgainMeanwhile() async throws {
+        let reader = HeldHistoryReader()
+        let ask = model(reader)
+        let opening = Task { await ask.open(RecallRoute(place: .ask, clearsField: true, focusEventId: 102)) }
+        await reader.untilHeld(1)
+        let again = Task { await ask.history.reload() }
+        await reader.untilHeld(2)
+        await reader.release(2)
+        await again.value
+        XCTAssertEqual(ask.history.hits.map(\.id), [102], "History's own read: the moment's time, nothing picked")
+        await reader.release(1)
+        await opening.value
+        XCTAssertEqual(ask.history.selectedHitId, 102)
+        XCTAssertEqual(ask.history.hits.map(\.id), [102])
+        XCTAssertEqual(ask.history.day, MemoryDay(date: Date(timeIntervalSince1970: 1_736_000_120), calendar: SampleDay.calendar))
+    }
+
+    /// The other order: the route's read is done while History's own read
+    /// is still under way. The moment is picked once that read is done.
+    func testTheMomentIsPickedWhenHistorysOwnReadFinishesLast() async throws {
+        let reader = HeldHistoryReader()
+        let ask = model(reader)
+        let opening = Task { await ask.open(RecallRoute(place: .ask, clearsField: true, focusEventId: 102)) }
+        await reader.untilHeld(1)
+        let again = Task { await ask.history.reload() }
+        await reader.untilHeld(2)
+        await reader.release(1)
+        await opening.value
+        await reader.release(2)
+        await again.value
+        XCTAssertEqual(ask.history.hits.map(\.id), [102])
+        XCTAssertEqual(ask.history.selectedHitId, 102)
+    }
+
+    /// A moment forgotten while History read its rows again is not among
+    /// them: nothing is picked, so no detail opens for a row that isn't
+    /// there.
+    func testAMomentHistoryNoLongerShowsIsNeverPicked() async throws {
+        let reader = HeldHistoryReader(forgottenAfterFirstRead: 102)
+        let ask = model(reader)
+        let opening = Task { await ask.open(RecallRoute(place: .ask, clearsField: true, focusEventId: 102)) }
+        await reader.untilHeld(1)
+        let again = Task { await ask.history.reload() }
+        await reader.untilHeld(2)
+        await reader.release(2)
+        await again.value
+        XCTAssertEqual(ask.history.hits.map(\.id), [], "the moment is gone from History's own read")
+        await reader.release(1)
+        await opening.value
+        XCTAssertNil(ask.history.selectedHitId)
+        XCTAssertNil(ask.history.selectedHit)
+    }
+
+    /// A moment that can no longer be read (forgotten since) leaves History
+    /// where it was, with nothing picked and the field empty.
+    func testAMomentThatIsGoneLeavesHistoryWhereItWas() async {
+        let ask = model(ScriptedUnderstanding())
+        let before = ask.history.day
+        await ask.open(RecallRoute(place: .ask, clearsField: true, focusEventId: 999))
+        XCTAssertTrue(ask.showsHistory)
+        XCTAssertNil(ask.search.focusedEventId)
+        XCTAssertEqual(ask.history.day, before)
+        XCTAssertNil(ask.history.selectedHitId)
     }
 
     func testShowInHistoryOpensHistoryOnTheSessionsOwnTime() async {
@@ -294,5 +396,60 @@ final class AskViewModelTests: XCTestCase {
         ask.disappear()
         XCTAssertEqual(ask.answerState, .none)
         await assertEventually { await understanding.cancelledQuestions == ["what did I do this morning"] }
+    }
+}
+
+/// The canned memory, whose first two searches wait until `release(_:)`
+/// lets each go: the route's own read of History's rows (1), and History
+/// reading them again meanwhile (2). Any later search is answered at once.
+/// `forgottenAfterFirstRead` is gone from every search after the first.
+private actor HeldHistoryReader: BrainReader {
+    private static let heldSearches = 2
+    private let stub = StubBrainReader()
+    private let forgottenAfterFirstRead: UInt64?
+    private var searches = 0
+    private var held: [Int: CheckedContinuation<Void, Never>] = [:]
+    private var released: Set<Int> = []
+    private var waiting: [Int: [CheckedContinuation<Void, Never>]] = [:]
+
+    init(forgottenAfterFirstRead: UInt64? = nil) {
+        self.forgottenAfterFirstRead = forgottenAfterFirstRead
+    }
+
+    func search(_ opts: SearchOptions) async throws -> [Hit] {
+        searches += 1
+        let number = searches
+        if number <= Self.heldSearches, !released.contains(number) {
+            await withCheckedContinuation { continuation in
+                held[number] = continuation
+                waiting.removeValue(forKey: number)?.forEach { $0.resume() }
+            }
+        }
+        let hits = try await stub.search(opts)
+        guard number > 1, let forgotten = forgottenAfterFirstRead else { return hits }
+        return hits.filter { $0.eventId != forgotten }
+    }
+
+    /// Returns once search `number` is waiting.
+    func untilHeld(_ number: Int) async {
+        guard held[number] == nil else { return }
+        await withCheckedContinuation { waiting[number, default: []].append($0) }
+    }
+
+    func release(_ number: Int) {
+        released.insert(number)
+        held.removeValue(forKey: number)?.resume()
+    }
+
+    func recentEvents(limit: Int) async throws -> [Hit] { try await stub.recentEvents(limit: limit) }
+    func recentPrivacyMoments(limit: Int) async throws -> [PrivacyMoment] { [] }
+    func listObservedApps(limit: Int, timeFromUs: UInt64?) async throws -> [ObservedApp] { [] }
+    func listEpisodes(limit: Int) async throws -> [Episode] { [] }
+    func briefForDate(_ dateLocal: String) async throws -> Brief? { nil }
+    func latestBrief() async throws -> Brief? { nil }
+    func briefDates(limit: Int) async throws -> [String] { [] }
+    func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] { try await stub.fetchEventsByIds(ids) }
+    func summaryStats() async throws -> SummaryStats {
+        SummaryStats(totalEvents: 0, oldestTsUs: nil, newestTsUs: nil, diskBytes: 0)
     }
 }
