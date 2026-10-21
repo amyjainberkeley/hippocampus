@@ -22,7 +22,7 @@ enum CommandBarPreviewRenderer {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let out = URL(fileURLWithPath: dir)
         try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
-        for state in states() + handoffStates() {
+        for state in states() + handoffStates() + demoStates() {
             // The tool ⌘↩ opens, kept in memory: never the app's own
             // defaults, and nothing written on this Mac.
             let choices = HandoffChoices.ephemeral()
@@ -68,16 +68,16 @@ enum CommandBarPreviewRenderer {
                       path: "/per-seat-or-tiered", app: "com.google.Chrome", days: 1, lastUs: minutesAgo(28), moments: [4399]),
         ]
         let pricingHits = decode([BarHit].self, """
-        [{"event_id":4410,"ts_us":\(minutesAgo(35)),"app_bundle_id":"com.figma.Desktop","window_title":"Trailhead pricing v3","url":null,"text_snippet":"Ride · Tour · Team. Tour is $18 a seat each month, billed annually."},
-         {"event_id":4395,"ts_us":\(minutesAgo(52)),"app_bundle_id":"com.tinyspeck.slackmacgap","window_title":"#launch","url":null,"text_snippet":"Priya Raman: the pricing page goes live before the October sale"}]
+        [{"event_id":4410,"ts_us":\(minutesAgo(35)),"app_bundle_id":"com.figma.Desktop","window_title":"Trailhead pricing v3","url":null,"text_snippet":"Ride · Tour · Team. Tour is $18 a seat each month, billed annually.","caption":"Designing “Trailhead pricing v3”"},
+         {"event_id":4395,"ts_us":\(minutesAgo(52)),"app_bundle_id":"com.tinyspeck.slackmacgap","window_title":"#launch","url":null,"text_snippet":"Priya Raman: the pricing page goes live before the October sale","caption":"Chatting in #launch"}]
         """)
         let trailhead = PanelItem(
             id: "w_9c41e2", kind: "code", name: "trailhead-shop", apps: ["com.microsoft.VSCode", "com.apple.Terminal"],
             lastUs: minutesAgo(15), folderGuess: "~/dev/trailhead-shop", moments: [4790, 4777]
         )
         let trailHits = decode([BarHit].self, """
-        [{"event_id":4790,"ts_us":\(minutesAgo(15)),"app_bundle_id":"com.microsoft.VSCode","window_title":"tax.rs — trailhead-shop","url":null,"text_snippet":"/// Rounds half to even, so totals never drift by a cent."},
-         {"event_id":4777,"ts_us":\(minutesAgo(23)),"app_bundle_id":"com.apple.Terminal","window_title":"trailhead-shop — zsh — 160×40","url":null,"text_snippet":"cargo test tax · test result: ok. 12 passed"}]
+        [{"event_id":4790,"ts_us":\(minutesAgo(15)),"app_bundle_id":"com.microsoft.VSCode","window_title":"tax.rs — trailhead-shop","url":null,"text_snippet":"/// Rounds half to even, so totals never drift by a cent.","caption":"Working on tax.rs in trailhead-shop"},
+         {"event_id":4777,"ts_us":\(minutesAgo(23)),"app_bundle_id":"com.apple.Terminal","window_title":"trailhead-shop — zsh — 160×40","url":null,"text_snippet":"cargo test tax · test result: ok. 12 passed","caption":"Working in Terminal: trailhead-shop"}]
         """)
         let tools = [
             InstalledTool(tool: .claude, appURL: URL(fileURLWithPath: "/Applications/Claude.app")),
@@ -114,8 +114,8 @@ enum CommandBarPreviewRenderer {
         let card = SendCard(message: message, words: 92, open: "claude://claude.ai/new", copy: false, included: [4812, 4790])
         let pending = PendingAsk(.question(question, [4812, 4790]))
         let roundingHits = decode([BarHit].self, """
-        [{"event_id":4812,"ts_us":\(minutesAgo(9)),"app_bundle_id":"com.google.Chrome","window_title":"Rounding half to even - Dev Notes","url":"https://devnotes.example/rounding","text_snippet":"Why banker’s rounding keeps order totals from drifting by a cent"},
-         {"event_id":4790,"ts_us":\(minutesAgo(15)),"app_bundle_id":"com.microsoft.VSCode","window_title":"tax.rs — trailhead-shop","url":null,"text_snippet":"/// Rounds half to even, so totals never drift by a cent."}]
+        [{"event_id":4812,"ts_us":\(minutesAgo(9)),"app_bundle_id":"com.google.Chrome","window_title":"Rounding half to even - Dev Notes","url":"https://devnotes.example/rounding","text_snippet":"Why banker’s rounding keeps order totals from drifting by a cent","caption":"Reading “Rounding half to even”"},
+         {"event_id":4790,"ts_us":\(minutesAgo(15)),"app_bundle_id":"com.microsoft.VSCode","window_title":"tax.rs — trailhead-shop","url":null,"text_snippet":"/// Rounds half to even, so totals never drift by a cent.","caption":"Working on tax.rs in trailhead-shop"}]
         """)
         let sources = """
           [{"n":1,"event_id":4790,"ts_us":\(minutesAgo(15)),"app":"VS Code","title":"tax.rs — trailhead-shop","url":null,"text":"pub fn order_total(lines: &[Line]) -> Money {"},
@@ -252,6 +252,39 @@ enum CommandBarPreviewRenderer {
                 )
             },
         ]
+    }
+
+    /// Ask over Demo Memory as the agent itself answers, not hand-picked
+    /// hits: `HIPPOCAMPUS_RENDER_BAR_DEMO=<dir>` names a folder of the
+    /// agent's own replies on the made-up week, written by a render script:
+    /// `work.json` (`mci-agent work --json --days 30`, as the panel reads
+    /// it) and `recall-<query>.json` (the `recall` tool's result, as the
+    /// panel asks for it). Each query is drawn as the panel shows it, light
+    /// and dark: the items and pages that hold it, then the moments under
+    /// them (`panel-demo-<query>.png`). Without the variable nothing is read.
+    private static func demoStates() -> [State] {
+        guard let path = ProcessInfo.processInfo.environment["HIPPOCAMPUS_RENDER_BAR_DEMO"] else { return [] }
+        let folder = URL(fileURLWithPath: path, isDirectory: true)
+        guard let data = try? Data(contentsOf: folder.appendingPathComponent("work.json")),
+              let work = try? JSONDecoder().decode(PanelWork.self, from: data)
+        else { return [] }
+        struct Recall: Decodable { let hits: [BarHit] }
+        let chrome = FrontmostContext(bundleId: "com.google.Chrome", appName: "Google Chrome", windowTitle: "New Tab")
+        var states: [State] = []
+        for query in ["pricing", "billing", "yearly billing"] {
+            let slug = query.replacingOccurrences(of: " ", with: "-")
+            guard let data = try? Data(contentsOf: folder.appendingPathComponent("recall-\(slug).json")),
+                  let recall = try? JSONDecoder().decode(Recall.self, from: data)
+            else { continue }
+            let found = CommandBarModel.matches(query, in: work)
+            for dark in [false, true] {
+                states.append(State(name: "demo-\(slug)\(dark ? "-dark" : "")", dark: dark, lastTool: .claude) {
+                    $0.preview(mode: .results, query: query, context: chrome, hits: recall.hits, items: found.items,
+                               pages: found.pages, selection: 0)
+                })
+            }
+        }
+        return states
     }
 
     private static func render(model: CommandBarModel, dark: Bool) -> Data? {
