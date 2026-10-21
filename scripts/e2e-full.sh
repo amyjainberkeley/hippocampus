@@ -1233,7 +1233,9 @@ rm -f "$H/.erase-stop"
 remembering_job=$!
 remembering_pid=""
 for _ in $(seq 1 90); do
-    candidate="$(tr -d '[:space:]' < "$RUNNING_MARKER" 2>/dev/null)"
+    # The group's 2>/dev/null also takes the shell's own "No such file"
+    # while the marker isn't there yet.
+    candidate="$({ tr -d '[:space:]' < "$RUNNING_MARKER"; } 2>/dev/null)"
     if [[ "$candidate" =~ ^[0-9]+$ ]] && ps -p "$candidate" -o comm= 2>/dev/null | grep -q 'mci-agent'; then
         remembering_pid="$candidate"
         break
