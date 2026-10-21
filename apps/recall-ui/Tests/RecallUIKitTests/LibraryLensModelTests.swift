@@ -1,4 +1,5 @@
 import Foundation
+import os
 import XCTest
 @testable import RecallUIKit
 
@@ -168,6 +169,40 @@ final class LibraryLensModelTests: XCTestCase {
         XCTAssertEqual(model.shownHits.map(\.id), [9], "opening the lens reads on to it")
     }
 
+    /// While a lens shows nothing, the window's ten-second tick used to read
+    /// it again from the top: what it had read on, by itself or with Show
+    /// Earlier, was dropped every ten seconds, and "No documents since …"
+    /// jumped back to the first page's time. The tick now reads on from the
+    /// newest moment read, and what turns up later still shows.
+    func testTheTickKeepsHowFarBackTheLensReadWhileItShowsNothing() async throws {
+        let reader = GrowingMomentsReader((0..<1_000).map { index in
+            MomentFactory.hit(UInt64(2_000 + index), "com.google.Chrome", title: "Page \(index)",
+                              url: "https://devnotes.example/\(index)", minutesAgo: Double(index + 1))
+        })
+        let model = LibraryLensModel(lens: .documents, reader: reader, pageSize: 10, deletions: MemoryDeletionSignal())
+        await model.reload()
+        let firstPage = try XCTUnwrap(model.readBackTo)
+        await model.readOnForRows()
+        await model.loadEarlier()
+        XCTAssertTrue(model.hits.isEmpty, "no document in reach")
+        let since = try XCTUnwrap(model.readBackTo)
+        XCTAssertLessThan(since, firstPage, "the lens read on below its first page")
+        let reads = reader.searchCount
+        await model.refresh()
+        XCTAssertEqual(model.readBackTo, since, "the tick keeps how far back it read")
+        XCTAssertEqual(reader.searchCount, reads, "nothing new: the tick reads nothing")
+        // A Google Doc opened just now.
+        reader.add(MomentFactory.hit(9, "com.google.Chrome", title: "Q4 planning",
+                                     url: "https://docs.google.com/document/d/q4", minutesAgo: 0))
+        await model.refresh()
+        XCTAssertEqual(model.shownHits.map(\.id), [9], "what's new still shows")
+        XCTAssertTrue(model.canLoadEarlier)
+        await model.loadEarlier()
+        XCTAssertEqual(model.hits.first?.id, 9)
+        XCTAssertLessThanOrEqual(try XCTUnwrap(reader.lastSearch?.timeToUs), since,
+                                 "Show Earlier goes on from where it was")
+    }
+
     func testSinceSaysTheDayAsAPersonWould() throws {
         let calendar = SampleDay.calendar
         let now = SampleDay.now
@@ -274,4 +309,34 @@ final class LibraryLensModelTests: XCTestCase {
         XCTAssertNil(model.selectedHit)
         XCTAssertNil(model.selectedHitId)
     }
+}
+
+/// Moments a test makes up that grow while a lens is open: a moment saved
+/// later. Read as `MomentsReader` reads them, and counting its searches.
+private final class GrowingMomentsReader: BrainReader, @unchecked Sendable {
+    private let lock: OSAllocatedUnfairLock<(moments: [Hit], searches: [SearchOptions])>
+
+    init(_ moments: [Hit]) {
+        lock = OSAllocatedUnfairLock(initialState: (moments, []))
+    }
+
+    func add(_ hit: Hit) { lock.withLock { $0.moments.append(hit) } }
+    var searchCount: Int { lock.withLock { $0.searches.count } }
+    var lastSearch: SearchOptions? { lock.withLock { $0.searches.last } }
+    private var now: MomentsReader { MomentsReader(lock.withLock { $0.moments }) }
+
+    func search(_ options: SearchOptions) async throws -> [Hit] {
+        lock.withLock { $0.searches.append(options) }
+        return try await now.search(options)
+    }
+
+    func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] { try await now.fetchEventsByIds(ids) }
+    func recentEvents(limit: Int) async throws -> [Hit] { try await now.recentEvents(limit: limit) }
+    func recentPrivacyMoments(limit: Int) async throws -> [PrivacyMoment] { [] }
+    func listObservedApps(limit: Int, timeFromUs: UInt64?) async throws -> [ObservedApp] { [] }
+    func listEpisodes(limit: Int) async throws -> [Episode] { [] }
+    func briefForDate(_ dateLocal: String) async throws -> Brief? { nil }
+    func latestBrief() async throws -> Brief? { nil }
+    func briefDates(limit: Int) async throws -> [String] { [] }
+    func summaryStats() async throws -> SummaryStats { try await now.summaryStats() }
 }

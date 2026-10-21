@@ -46,6 +46,10 @@ public final class LibraryLensModel: ObservableObject {
     /// The newest time the next page may hold, and how far down every part
     /// is known.
     private var earlierUpperBound: UInt64?
+    /// The newest moment of the lens's apps and the browsers read from the
+    /// top: where the tick reads on from while nothing read is of the lens,
+    /// so what was read below stays.
+    private var newestReadUs: UInt64?
     private var deletionObserver: AnyCancellable?
 
     public init(
@@ -137,6 +141,7 @@ public final class LibraryLensModel: ObservableObject {
             hits = page.rows
             canLoadEarlier = page.next != nil
             earlierUpperBound = page.next
+            newestReadUs = page.newest
             selection = selection.filter { id in page.rows.contains { $0.id == id } }
             if selection.isEmpty { isDetailFocused = false }
         } catch {
@@ -144,6 +149,7 @@ public final class LibraryLensModel: ObservableObject {
             hits = []
             canLoadEarlier = false
             earlierUpperBound = nil
+            newestReadUs = nil
             errorMessage = "\(error)"
         }
     }
@@ -168,23 +174,27 @@ public final class LibraryLensModel: ObservableObject {
 
     /// The window's ten-second tick: newer moments of the lens go on top,
     /// and the pages below stay. More than a page newer reads from the top.
+    /// While nothing read is of the lens, it reads on from the newest moment
+    /// read, so how far back the lens read, by itself or with Show Earlier,
+    /// stays ("No documents since Tuesday." doesn't jump back).
     public func refresh() async {
         guard !isLoading, !isLoadingEarlier else { return }
-        guard let top = hits.first else {
+        guard let top = hits.first?.tsUs ?? newestReadUs else {
             await reload()
             return
         }
         let request = generation
         do {
             guard let newest = try await reader.recentEvents(limit: 1).first,
-                  newest.tsUs > top.tsUs || (newest.tsUs == top.tsUs && !hits.contains { $0.id == newest.id })
+                  newest.tsUs > top
+                  || (newest.tsUs == top && !hits.isEmpty && !hits.contains { $0.id == newest.id })
             else { return }
             var fresh: [Hit] = []
             var complete = true
-            let edge = hits.prefix { $0.tsUs == top.tsUs }.count
+            let edge = hits.prefix { $0.tsUs == top }.count
             for apps in parts {
                 let found = try await reader.search(SearchOptions(
-                    text: "", limit: pageSize + 1 + edge, timeFromUs: top.tsUs, mode: .text, browse: true,
+                    text: "", limit: pageSize + 1 + edge, timeFromUs: top, mode: .text, browse: true,
                     appFilters: apps))
                 if found.count > pageSize + edge { complete = false }
                 fresh += found
@@ -194,9 +204,10 @@ public final class LibraryLensModel: ObservableObject {
                 await reload()
                 return
             }
+            if let read = fresh.map(\.tsUs).max() { newestReadUs = max(newestReadUs ?? 0, read) }
             var seen = Set(hits.map(\.id))
             let rows = fresh
-                .filter { $0.tsUs >= top.tsUs && lens.includes($0) && seen.insert($0.id).inserted }
+                .filter { $0.tsUs >= top && lens.includes($0) && seen.insert($0.id).inserted }
                 .sorted(by: Self.newestFirst)
             if !rows.isEmpty { hits = rows + hits }
         } catch {
@@ -209,8 +220,12 @@ public final class LibraryLensModel: ObservableObject {
     /// Everything at or above that time is then read, so the next read goes
     /// on from it, asking past the moments already read there. A page that
     /// keeps too little reads on, a few times at most.
-    private func readPage(below upper: UInt64?, after shown: [Hit]) async throws -> (rows: [Hit], next: UInt64?) {
+    /// `newest` is the newest moment of the parts read, of the lens or not.
+    private func readPage(
+        below upper: UInt64?, after shown: [Hit]
+    ) async throws -> (rows: [Hit], next: UInt64?, newest: UInt64?) {
         var rows: [Hit] = []
+        var newest: UInt64?
         var seen = Set(shown.map(\.id))
         var countAt: [UInt64: Int] = [:]
         for hit in shown { countAt[hit.tsUs, default: 0] += 1 }
@@ -224,6 +239,7 @@ public final class LibraryLensModel: ObservableObject {
                     text: "", limit: pageSize + 1 + edge, timeToUs: bound, mode: .text, browse: true,
                     appFilters: apps))
                     .filter { hit in bound.map { hit.tsUs <= $0 } ?? true }
+                if let top = part.map(\.tsUs).max() { newest = max(newest ?? 0, top) }
                 if part.count > pageSize + edge, let last = part.last {
                     floor = max(floor ?? 0, last.tsUs)
                 }
@@ -236,11 +252,11 @@ public final class LibraryLensModel: ObservableObject {
                 if lens.includes(hit) { kept.append(hit) }
             }
             rows += kept.sorted(by: Self.newestFirst)
-            guard let floor else { return (rows, nil) }
+            guard let floor else { return (rows, nil, newest) }
             bound = floor
-            if rows.count >= max(1, pageSize / 4) { return (rows, floor) }
+            if rows.count >= max(1, pageSize / 4) { return (rows, floor, newest) }
         }
-        return (rows, bound)
+        return (rows, bound, newest)
     }
 
     private static func newestFirst(_ a: Hit, _ b: Hit) -> Bool {
@@ -254,6 +270,7 @@ public final class LibraryLensModel: ObservableObject {
         hits = []
         canLoadEarlier = false
         earlierUpperBound = nil
+        newestReadUs = nil
         isLoadingEarlier = false
         Task { [weak self] in await self?.reload() }
     }
