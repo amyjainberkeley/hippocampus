@@ -68,10 +68,12 @@ final class SupervisorWindowOpeningTests: XCTestCase {
     }
 
     /// The places the window was opened on, once at least `count` launches
-    /// were seen or `seconds` passed. A stand-in's shell can take a while to
-    /// start on a busy machine, so the wait for one to show is generous; a
-    /// check that nothing opened passes its own short `seconds`.
-    private func opened(_ windows: URL, count: Int = 1, within seconds: TimeInterval = 5) async -> [String] {
+    /// were seen or `seconds` passed. A stand-in's shell can take seconds to
+    /// start on a Mac busy with other builds (five weren't enough while nine
+    /// jobs shared one), so the wait for one to show is generous, and it ends
+    /// as soon as it shows; a check that nothing opened passes its own short
+    /// `seconds`.
+    private func opened(_ windows: URL, count: Int = 1, within seconds: TimeInterval = 30) async -> [String] {
         let deadline = Date().addingTimeInterval(seconds)
         var lines: [String] = []
         repeat {
@@ -83,7 +85,9 @@ final class SupervisorWindowOpeningTests: XCTestCase {
         return lines
     }
 
-    private func eventually(_ condition: @MainActor () -> Bool, within seconds: TimeInterval = 3) async {
+    /// Waits until `condition` holds, or `seconds` passed; as generous as
+    /// `opened`, for the same reason, and over as soon as it holds.
+    private func eventually(_ condition: @MainActor () -> Bool, within seconds: TimeInterval = 30) async {
         let deadline = Date().addingTimeInterval(seconds)
         while !condition() && Date() < deadline {
             try? await Task.sleep(for: .milliseconds(10))
@@ -690,13 +694,18 @@ final class SupervisorWindowOpeningTests: XCTestCase {
         XCTAssertTrue(supervisor.showOnboarding())
 
         XCTAssertTrue(supervisor.onboardingIsRunning)
+        // A Mac busy with other builds can take seconds to start setup's
+        // shell: wait until the first setup says it started, then give a
+        // second one a full second to show up beside it.
+        let firstStart = await opened(started, count: 1, within: 30)
+        XCTAssertEqual(firstStart, ["started"], "the first setup started")
         let first = await opened(started, count: 2, within: 1)
         XCTAssertEqual(first, ["started"], "one setup, brought forward the second time")
 
         await supervisor.stopWindowsForQuit(timeout: 1)
         XCTAssertFalse(supervisor.onboardingIsRunning)
         XCTAssertTrue(supervisor.showOnboarding(), "once it is closed, opening the app starts setup again")
-        let again = await opened(started, count: 2)
+        let again = await opened(started, count: 2, within: 30)
         XCTAssertEqual(again, ["started", "started"])
         await supervisor.stopWindowsForQuit(timeout: 1)
     }

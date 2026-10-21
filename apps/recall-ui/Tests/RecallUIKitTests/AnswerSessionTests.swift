@@ -92,7 +92,9 @@ final class AnswerSessionTests: XCTestCase {
         let answers = session(folder, children: children)
         let question = self.question
         let ask = Task { try await answers.ask(question) }
-        await assertEventually { Self.lines(folder, "stdin.txt").count == 1 }
+        // A Mac busy with other builds can take seconds to start the fake
+        // agent; the wait ends as soon as it has read the question.
+        await assertEventually(timeout: 30) { Self.lines(folder, "stdin.txt").count == 1 }
         let pid = try XCTUnwrap(children.running.first)
         let cancelledAt = Date()
         ask.cancel()
@@ -103,7 +105,9 @@ final class AnswerSessionTests: XCTestCase {
             XCTAssertTrue(error is CancellationError, "\(error)")
         }
         XCTAssertLessThan(Date().timeIntervalSince(cancelledAt), 2)
-        await assertEventually("the request is stopped with its child") { !isAlive(pid) && children.running.isEmpty }
+        await assertEventually("the request is stopped with its child", timeout: 30) {
+            !isAlive(pid) && children.running.isEmpty
+        }
         let running = await answers.isRunning
         XCTAssertFalse(running)
     }
