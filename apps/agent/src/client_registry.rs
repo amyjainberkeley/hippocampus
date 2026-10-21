@@ -65,6 +65,10 @@ pub enum RegistrationRepair {
     AlreadyCurrent,
     /// No Hippocampus entry exists; repair mode made no registration.
     NotRegistered,
+    /// This copy of Hippocampus is not installed in Applications, so it
+    /// left the existing entry alone rather than point an AI tool at
+    /// itself (a backup, a build, or a copy on a disk image).
+    SkippedNotInstalled,
 }
 
 /// Stable reason a registration was refused.
@@ -163,6 +167,8 @@ pub struct ClientRegistry {
     claude_detected: bool,
     #[cfg(debug_assertions)]
     debug_hook: Option<ClientRegistryDebugHook>,
+    #[cfg(debug_assertions)]
+    enforce_installed_rule: bool,
 }
 
 impl fmt::Debug for ClientRegistry {
@@ -197,6 +203,8 @@ impl ClientRegistry {
             claude_detected: true,
             #[cfg(debug_assertions)]
             debug_hook: None,
+            #[cfg(debug_assertions)]
+            enforce_installed_rule: false,
         }
     }
 
@@ -260,6 +268,8 @@ impl ClientRegistry {
             claude_detected,
             #[cfg(debug_assertions)]
             debug_hook: None,
+            #[cfg(debug_assertions)]
+            enforce_installed_rule: false,
         })
     }
 
@@ -303,9 +313,37 @@ impl ClientRegistry {
     /// remain isolated so one malformed config cannot block repairing the other.
     #[must_use]
     pub fn repair_existing_registrations(&self, db_path: &Path) -> RepairReport {
+        if !self.may_repair_from_here() {
+            return RepairReport {
+                claude: Ok(RegistrationRepair::SkippedNotInstalled),
+                codex: Ok(RegistrationRepair::SkippedNotInstalled),
+            };
+        }
         let claude = self.repair_existing_claude(db_path);
         let codex = self.repair_existing_codex(db_path);
         RepairReport { claude, codex }
+    }
+
+    /// A repair may rewrite an entry only from an installed copy. Release
+    /// builds ask [`is_installed_bundle_agent`]; debug builds, whose tests
+    /// run from temporary folders, apply the same rule only when a test
+    /// asks ([`Self::with_installed_rule`]).
+    fn may_repair_from_here(&self) -> bool {
+        #[cfg(debug_assertions)]
+        if !self.enforce_installed_rule {
+            return true;
+        }
+        is_installed_bundle_agent(&self.agent_executable, &self.home)
+    }
+
+    /// Debug builds only: apply the installed-copy rule to repairs the way a
+    /// release build does.
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_installed_rule(mut self) -> Self {
+        self.enforce_installed_rule = true;
+        self
     }
 
     /// Return the canonical reference-only Codex argument vector for inspection.
@@ -441,7 +479,7 @@ impl ClientRegistry {
     }
 
     fn desired_entry(&self, db_path: &Path) -> Result<DesiredEntry, RegistrationError> {
-        let command = validate_agent_path(&self.agent_executable)?;
+        let command = validate_agent_path(&self.agent_executable, &self.home)?;
         let db_path = validate_database_path(db_path)?;
         Ok(DesiredEntry {
             command,
@@ -2447,7 +2485,7 @@ fn concurrent_change(detail: &str) -> RegistrationError {
     RegistrationError::new(RegistrationErrorKind::ConcurrentChange, detail)
 }
 
-fn validate_agent_path(path: &Path) -> Result<String, RegistrationError> {
+fn validate_agent_path(path: &Path, home: &Path) -> Result<String, RegistrationError> {
     if !path.is_absolute() {
         return Err(RegistrationError::new(
             RegistrationErrorKind::UnsafePath,
@@ -2469,29 +2507,64 @@ fn validate_agent_path(path: &Path) -> Result<String, RegistrationError> {
             "agent executable path is not valid UTF-8",
         )
     })?;
-    if !cfg!(debug_assertions)
-        && (rendered.contains("/AppTranslocation/") || !is_stable_bundle_agent(path))
-    {
+    if !cfg!(debug_assertions) && !is_installed_bundle_agent(path, home) {
         return Err(RegistrationError::new(
             RegistrationErrorKind::UnsafePath,
-            "install Hippocampus in a stable Applications location before connecting AI tools",
+            "install Hippocampus in Applications before connecting AI tools",
         ));
     }
     Ok(rendered.to_owned())
 }
 
-fn is_stable_bundle_agent(path: &Path) -> bool {
-    let components = path
-        .components()
-        .filter_map(|component| component.as_os_str().to_str())
-        .collect::<Vec<_>>();
-    components.len() >= 4
-        && components[components.len() - 1] == "mci-agent"
-        && components[components.len() - 2] == "MacOS"
-        && components[components.len() - 3] == "Contents"
-        && Path::new(components[components.len() - 4])
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("app"))
+/// Whether `path` is the `mci-agent` of a Hippocampus copy installed where
+/// it stays: a bundle directly in `/Applications` or in the person's
+/// `~/Applications`, the folders the app's own `ApplicationsFolder` treats as
+/// installed.
+///
+/// A backup copy, a build output, a copy on a disk image or another volume,
+/// a copy macOS translocated to a temporary folder, or a bundle nested any
+/// deeper is not installed. Registering an AI tool against such a copy, or
+/// repairing an existing registration to point at one, would hand the tool
+/// an old or vanishing program, so both refuse it.
+#[must_use]
+pub fn is_installed_bundle_agent(path: &Path, home: &Path) -> bool {
+    let rendered = path.to_string_lossy();
+    if rendered.contains("/AppTranslocation/") || rendered.starts_with("/Volumes/") {
+        return false;
+    }
+    let is_bundle_agent = path.file_name().is_some_and(|name| name == "mci-agent")
+        && path
+            .parent()
+            .and_then(Path::file_name)
+            .is_some_and(|name| name == "MacOS")
+        && path
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::file_name)
+            .is_some_and(|name| name == "Contents");
+    if !is_bundle_agent {
+        return false;
+    }
+    let Some(bundle) = path.ancestors().nth(3) else {
+        return false;
+    };
+    if !bundle
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("app"))
+    {
+        return false;
+    }
+    let Some(bundle_parent) = bundle.parent() else {
+        return false;
+    };
+    let installed_folders = [
+        PathBuf::from("/Applications"),
+        PathBuf::from("/System/Volumes/Data/Applications"),
+        home.join("Applications"),
+    ];
+    installed_folders
+        .iter()
+        .any(|folder| bundle_parent == folder.as_path())
 }
 
 fn validate_database_path(path: &Path) -> Result<String, RegistrationError> {

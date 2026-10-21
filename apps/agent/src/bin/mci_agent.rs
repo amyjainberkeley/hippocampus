@@ -2073,6 +2073,11 @@ fn repair_existing_client_registrations(db_path: &Path) {
             Ok(RegistrationRepair::Updated) => {
                 errln!("mci-agent: repaired existing {name} registration");
             }
+            Ok(RegistrationRepair::SkippedNotInstalled) => {
+                errln!(
+                    "mci-agent: {name} registration left alone: this copy of Hippocampus is not installed in Applications"
+                );
+            }
             Ok(RegistrationRepair::AlreadyCurrent | RegistrationRepair::NotRegistered) => {}
             Err(error) => {
                 errln!(

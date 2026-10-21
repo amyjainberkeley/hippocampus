@@ -237,6 +237,10 @@ What to know:
 
 The demo needs only Rust and openssl.
 
+## If you keep an older copy
+
+A backup or a build of Hippocampus that you open by mistake, from Spotlight for example, can't take over your AI tools: only a copy installed directly in /Applications or ~/Applications registers Claude Code or Codex, or repairs that entry. An older copy leaves it alone, and your tools keep using the installed one.
+
 ## Uninstall
 
 1. If you want your memory gone, delete everything first, on the window's Privacy page. That deletes its key too, so copies in earlier backups can't be read. With Hippocampus quit, `/Applications/Hippocampus.app/Contents/MacOS/mci-agent erase-memory` does the same.

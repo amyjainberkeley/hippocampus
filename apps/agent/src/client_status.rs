@@ -256,9 +256,11 @@ pub fn disconnect(registry: &ClientRegistry, ids: &[&str]) -> Vec<Disconnected> 
                 id: (*id).to_owned(),
                 look_ups: match result {
                     Ok(RegistrationRepair::Updated) => "removed",
-                    Ok(RegistrationRepair::AlreadyCurrent | RegistrationRepair::NotRegistered) => {
-                        "none"
-                    }
+                    Ok(
+                        RegistrationRepair::AlreadyCurrent
+                        | RegistrationRepair::NotRegistered
+                        | RegistrationRepair::SkippedNotInstalled,
+                    ) => "none",
                     Err(_) => "failed",
                 }
                 .to_owned(),

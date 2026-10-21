@@ -1312,3 +1312,111 @@ fn connect_all_cli_registers_claude_and_codex_without_a_database_key() {
     assert!(codex.contains("hippocampus"));
     assert!(!codex.contains("MCI_DB_KEY_HEX"));
 }
+
+// ---- Only an installed copy may register or repair (Oct 21) ------------
+//
+// A backup copy opened from Spotlight once repointed Claude Code's and
+// Codex's entries at itself, so new sessions ran old code against the live
+// memory. The rule: an AI tool is registered against, or repaired to, the
+// `mci-agent` of a bundle directly in /Applications or ~/Applications, and
+// nothing else.
+
+fn bundle_agent(root: &Path) -> std::path::PathBuf {
+    let dir = root.join("Hippocampus.app/Contents/MacOS");
+    std::fs::create_dir_all(&dir).unwrap();
+    let agent = dir.join("mci-agent");
+    executable(&agent);
+    agent
+}
+
+#[test]
+fn installed_bundle_rule_accepts_only_applications_folders() {
+    use mci_agent::client_registry::is_installed_bundle_agent;
+    let home = Path::new("/Users/sam");
+    let ok = [
+        "/Applications/Hippocampus.app/Contents/MacOS/mci-agent",
+        "/System/Volumes/Data/Applications/Hippocampus.app/Contents/MacOS/mci-agent",
+        "/Users/sam/Applications/Hippocampus.app/Contents/MacOS/mci-agent",
+    ];
+    for path in ok {
+        assert!(is_installed_bundle_agent(Path::new(path), home), "{path}");
+    }
+    let refused = [
+        // a backup, a build output, a verification copy
+        "/Users/sam/Hippocampus-app-backups/20261018-004800/Hippocampus.app/Contents/MacOS/mci-agent",
+        "/Users/sam/hippo-work/b-dry/apps/hippocampus/dist/Hippocampus.app/Contents/MacOS/mci-agent",
+        "/Users/sam/Applications/old/Hippocampus.app/Contents/MacOS/mci-agent",
+        // a disk image or another volume
+        "/Volumes/Hippocampus/Hippocampus.app/Contents/MacOS/mci-agent",
+        // translocated
+        "/private/var/folders/mh/x/T/AppTranslocation/ABCD/d/Hippocampus.app/Contents/MacOS/mci-agent",
+        // not a bundle's agent at all
+        "/Applications/mci-agent",
+        "/Applications/Hippocampus.app/Contents/MacOS/other",
+        "/Applications/Hippocampus/Contents/MacOS/mci-agent",
+        // another person's Applications folder
+        "/Users/other/Applications/Hippocampus.app/Contents/MacOS/mci-agent",
+    ];
+    for path in refused {
+        assert!(!is_installed_bundle_agent(Path::new(path), home), "{path}");
+    }
+}
+
+#[test]
+fn repair_from_a_copy_that_is_not_installed_leaves_both_entries_alone() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path();
+    let installed = bundle_agent(&home.join("Applications"));
+    let backup = bundle_agent(&home.join("Hippocampus-app-backups/20261018-004800"));
+    let brain = home.join("brain.sqlite");
+
+    // Register from the installed copy first.
+    let report = registry(home, &installed, None).connect_all(&brain);
+    assert_eq!(report.claude.status, RegistrationStatus::Registered);
+    let claude_before = std::fs::read(home.join(".claude.json")).unwrap();
+
+    // The backup copy starts and runs its launch repair.
+    let report = registry(home, &backup, None)
+        .with_installed_rule()
+        .repair_existing_registrations(&brain);
+    assert_eq!(
+        report.claude.unwrap(),
+        RegistrationRepair::SkippedNotInstalled
+    );
+    assert_eq!(
+        report.codex.unwrap(),
+        RegistrationRepair::SkippedNotInstalled
+    );
+    assert_eq!(
+        std::fs::read(home.join(".claude.json")).unwrap(),
+        claude_before,
+        "a copy that is not installed must not rewrite the entry"
+    );
+    assert!(
+        String::from_utf8_lossy(&claude_before).contains(installed.to_str().unwrap()),
+        "the entry still names the installed copy"
+    );
+}
+
+#[test]
+fn repair_from_the_installed_copy_still_repairs() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path();
+    let installed = bundle_agent(&home.join("Applications"));
+    let backup = bundle_agent(&home.join("Hippocampus-app-backups/20261018-004800"));
+    let brain = home.join("brain.sqlite");
+
+    // An entry that a stray copy once pointed at itself (the debug build's
+    // plain connect has no location rule, which stands in for the bug).
+    let report = registry(home, &backup, None).connect_all(&brain);
+    assert_eq!(report.claude.status, RegistrationStatus::Registered);
+
+    // The installed copy's launch repair takes the entry back.
+    let report = registry(home, &installed, None)
+        .with_installed_rule()
+        .repair_existing_registrations(&brain);
+    assert_eq!(report.claude.unwrap(), RegistrationRepair::Updated);
+    let claude = std::fs::read_to_string(home.join(".claude.json")).unwrap();
+    assert!(claude.contains(installed.to_str().unwrap()));
+    assert!(!claude.contains(backup.to_str().unwrap()));
+}
