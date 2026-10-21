@@ -31,14 +31,19 @@ struct ResumeServices {
     var tabs: any OpenTabsReading
     var rules: @MainActor () -> ResumeRules
     var asked: (any KeyValueStore)?
+    /// The window reads Demo Memory: what the made-up week invented says
+    /// so, and never opens (`ResumeSheetModel.isMadeUp`).
+    var madeUp = false
 
-    /// The app's: the bundled agent and macOS.
+    /// The app's: the bundled agent and macOS, on the person's memory or,
+    /// when the app opened the window on it, Demo Memory.
     @MainActor static let system = ResumeServices(
         planner: AgentWorkReader.shared,
         workspace: SystemResumeWorkspace(),
         tabs: AppleScriptOpenTabs.shared,
         rules: { ResumeRules.system() },
-        asked: UserDefaultsKeyValueStore()
+        asked: UserDefaultsKeyValueStore(),
+        madeUp: DemoMemoryMode.isOn(environment: ProcessInfo.processInfo.environment)
     )
 
     /// Nothing at all: no plan, nothing installed, no tabs.

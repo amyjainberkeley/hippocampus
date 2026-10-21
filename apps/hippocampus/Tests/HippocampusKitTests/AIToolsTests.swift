@@ -113,31 +113,37 @@ final class AIToolsTests: XCTestCase {
 
     // MARK: The words
 
-    /// SPEC 5.4: the question names what it sends, and says nothing read on
-    /// screen is in it; Codex's asks for its one step.
+    /// SPEC 5.4: the question names what it sends and what it is made
+    /// from: the screen, as the exact text says (`render_understanding_block`
+    /// opens "From the user's screen"); Codex's asks for its one step.
     func testTheSessionQuestion() {
         XCTAssertEqual(AIToolsCopy.questionTitle, "Start each session with your recent work?")
         XCTAssertEqual(AIToolsCopy.questionMessage([.claudeCode]),
-                       "At the start of each session, Claude Code gets your recent work and up to six things "
-                       + "Hippocampus learned about you, with sources. Nothing you read on screen is in it. "
-                       + "It can include other projects. The company that runs Claude Code receives it.")
+                       "At the start of each session, Claude Code gets up to four lines of your recent work and up to "
+                       + "six things Hippocampus learned about you, with sources. Both are written on this Mac from what "
+                       + "you read on screen, and can include other projects. The company that runs Claude Code receives them.")
         XCTAssertEqual(AIToolsCopy.questionMessage([.claudeCode, .codex]),
-                       "At the start of each session, Claude Code and Codex get your recent work and up to six things "
-                       + "Hippocampus learned about you, with sources. Nothing you read on screen is in it. "
-                       + "It can include other projects. The company that runs each tool receives it. "
+                       "At the start of each session, Claude Code and Codex get up to four lines of your recent work and up "
+                       + "to six things Hippocampus learned about you, with sources. Both are written on this Mac from what "
+                       + "you read on screen, and can include other projects. The company that runs each tool receives them. "
                        + "Codex asks you to allow new hooks once. Type /hooks in Codex and allow Hippocampus.")
+        for tools in [[AITool.claudeCode], [.claudeCode, .codex]] {
+            XCTAssertFalse(AIToolsCopy.questionMessage(tools).contains("Nothing you read"),
+                           "the recent work is written from the screen")
+        }
         XCTAssertEqual([AIToolsCopy.share, AIToolsCopy.dontShare], ["Share", "Don’t Share"])
         XCTAssertEqual(AIToolsCopy.shareTitle(.codex), AIToolsCopy.questionTitle)
         XCTAssertEqual(AIToolsCopy.shareMessage(.claudeCode), AIToolsCopy.questionMessage([.claudeCode]))
     }
 
-    /// SPEC 5.4: Connect asks first, naming the tools, and says ChatGPT's
-    /// desktop app reads Codex's settings when it is on this Mac.
+    /// SPEC 5.4: Connect asks first, naming the tools, and says Codex in
+    /// ChatGPT's desktop app reads the same settings when it is on this Mac;
+    /// never that ChatGPT's chats can.
     func testTheConnectQuestion() {
         XCTAssertEqual(AIToolsCopy.connectTitle([.claudeCode, .codex]),
                        "Let Claude Code and Codex look things up in your memory?")
         XCTAssertTrue(AIToolsCopy.connectMessage([.claudeCode, .codex], chatGPTInstalled: true)
-            .hasSuffix("ChatGPT’s desktop app uses Codex’s settings, so it can look things up too."))
+            .hasSuffix("Codex in ChatGPT’s desktop app uses the same settings, so it can look things up too."))
         XCTAssertFalse(AIToolsCopy.connectMessage([.claudeCode], chatGPTInstalled: true).contains("ChatGPT"),
                        "only when Codex is connected")
         XCTAssertFalse(AIToolsCopy.connectMessage([.codex], chatGPTInstalled: false).contains("ChatGPT"))
@@ -174,7 +180,7 @@ final class AIToolsTests: XCTestCase {
         XCTAssertEqual(AIToolsCopy.sessionToggle, "Start each session with my recent work")
         // SPEC 5.5: the contradiction is gone.
         XCTAssertEqual(AIToolsCopy.boundary,
-                       "Nothing leaves this Mac unless you send it, or a tool you connected asks for it.")
+                       "Your memory leaves this Mac only when you send it, or a tool you connected asks for it.")
         XCTAssertFalse(AIToolsCopy.boundary.contains("sends nothing on its own"))
         XCTAssertEqual(AIToolsCopy.turnedOn(.codex), "On. Restart Codex to start.")
         XCTAssertEqual(AIToolsCopy.turnedOff(.claudeCode), "Off. Restart Claude Code. What it already read stays in its history.")

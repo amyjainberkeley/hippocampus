@@ -93,7 +93,7 @@ public struct WindowStatus: Equatable, Sendable {
             switch self {
             case .pause: NavigationCopy.pause
             case .resume: NavigationCopy.resume
-            case .resumeNow: NavigationCopy.resumeNow
+            case .resumeNow: NavigationCopy.resume
             case .turnOn: NavigationCopy.turnOn
             case .turnOff: NavigationCopy.turnOff
             case .openSystemSettings: NavigationCopy.openSystemSettings
@@ -315,7 +315,7 @@ public enum WindowStatusMenu {
         /// A line under it: "Last saved 12s ago", the Low Power line.
         case line(String)
         case separator
-        /// Pause ▸ For 1 Hour, Until Tomorrow, Until I Resume.
+        /// Pause ▸ For 1 Hour, Until Tomorrow, Until I Start It Again.
         case pause
         case action(WindowStatus.Action)
         case forget(ForgetRecentChoice)
@@ -349,7 +349,7 @@ public enum WindowStatusMenu {
     }
 
     /// Pause's three choices, and when each ends: nil until the person
-    /// resumes. Until Tomorrow ends at 6:00 AM the next day (SPEC 2.6.2).
+    /// starts it again. Until Tomorrow ends at 6:00 AM the next day (SPEC 2.6.2).
     public enum PauseChoice: CaseIterable, Sendable {
         case hour, tomorrow, untilResume
 

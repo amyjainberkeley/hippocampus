@@ -17,14 +17,15 @@ final class ResumeSheetModelTests: XCTestCase {
 
     private func model(_ items: [ResumePlan.Target], installed: Set<String>? = nil, missing: Set<String> = [],
                        tabs: any OpenTabsReading = FakeTabs(), asked: (any KeyValueStore)? = nil,
-                       workspace: FakeWorkspace? = nil, rules: ResumeRules = .none) -> (ResumeSheetModel, FakeWorkspace) {
+                       workspace: FakeWorkspace? = nil, rules: ResumeRules = .none,
+                       madeUp: Bool = false) -> (ResumeSheetModel, FakeWorkspace) {
         let workspace = workspace ?? FakeWorkspace(
             installed: installed ?? [vscode, terminal, chrome, safari, notes, pages, slack], missing: missing)
         let plan = ResumePlan(items: items, item: .init(name: "trailhead-shop", kind: "code"),
                               session: .init(startUs: WorkClock.us(0, 14), endUs: WorkClock.us(0, 14, 35)))
         let model = ResumeSheetModel(itemId: "w_5c1e8a0d2f9b47e3a6d1", planner: PreviewResumePlans(plans: [
             "w_5c1e8a0d2f9b47e3a6d1": plan,
-        ]), workspace: workspace, tabs: tabs, rules: rules, asked: asked, appName: { Self.name($0) })
+        ]), workspace: workspace, tabs: tabs, rules: rules, asked: asked, appName: { Self.name($0) }, madeUp: madeUp)
         return (model, workspace)
     }
 
@@ -75,6 +76,50 @@ final class ResumeSheetModelTests: XCTestCase {
         XCTAssertEqual(model.willOpen.apps, 5)
         XCTAssertTrue(model.canResume)
         XCTAssertFalse(model.pagesBeyondTheCap)
+    }
+
+    /// Demo Memory (SPEC-DELTA 6, launch playbook 9): on camera, what the
+    /// made-up week invented says so instead of "Couldn't find", and can't
+    /// be ticked; its pages on real sites and its apps open as anywhere.
+    func testInDemoMemoryWhatTheWeekMadeUpSaysSoAndNothingOpensForIt() async {
+        let week: [ResumePlan.Target] = [
+            .init(kind: "folder", title: "pebblewick-app", app: vscode, path: "~/dev/pebblewick-app", reason: "missing"),
+            .init(kind: "folder", title: "pebblewick-app", app: terminal, path: "~/dev/pebblewick-app"),
+            .init(kind: "document", title: "Q4 investor update", app: chrome,
+                  url: "https://docs.google.com/document/d/1pW4q/edit"),
+            .init(kind: "page", title: "Investor updates", app: chrome, url: "https://foundernotes.example/investor-updates"),
+            .init(kind: "page", title: "Pricing", app: chrome, url: "https://stripe.com/pricing"),
+            .init(kind: "page", title: "A page read without its address", app: safari, checked: false,
+                  reason: "no_address"),
+            .init(kind: "app", title: "Slack", app: slack),
+            .init(kind: "app", title: "Sketchpad", app: "com.example.Sketchpad"),
+        ]
+        let (demo, _) = model(week, missing: ["~/dev/pebblewick-app"], madeUp: true)
+        await demo.load()
+        let madeUp = WorkCopy.resumeMadeUp
+        XCTAssertEqual(madeUp, "Made up for the demo, so nothing opens.")
+        XCTAssertEqual(demo.rows.map(\.detail), [madeUp, madeUp, madeUp, madeUp, "stripe.com/pricing", madeUp, nil,
+                                                 WorkCopy.resumeNotInstalled("Sketchpad")])
+        XCTAssertEqual(demo.rows.filter(\.available).map(\.target.title), ["Pricing", "Slack"])
+        XCTAssertEqual(demo.willOpen.tabs, 1)
+        XCTAssertEqual(demo.willOpen.apps, 1)
+        // The person's own memory says what it always did.
+        let (own, _) = model(week, missing: ["~/dev/pebblewick-app"])
+        await own.load()
+        XCTAssertEqual(own.rows.prefix(2).map(\.detail), [WorkCopy.resumeMissing("pebblewick-app"),
+                                                         WorkCopy.resumeMissing("pebblewick-app")])
+        XCTAssertFalse(own.rows.contains { $0.detail == madeUp })
+    }
+
+    func testOnlyNamesKeptForExamplesCountAsMadeUpSites() {
+        for address in ["https://foundernotes.example/a", "https://a.b.test/", "http://localhost/x",
+                        "https://example.com/", "https://www.example.org/x", "https://shop.invalid/"] {
+            XCTAssertTrue(ResumeSheetModel.isExampleSite(address), address)
+        }
+        for address in ["https://stripe.com/pricing", "https://docs.google.com/document/d/q4/edit",
+                        "https://examples.com/", "https://example.company/", "not an address"] {
+            XCTAssertFalse(ResumeSheetModel.isExampleSite(address), address)
+        }
     }
 
     func testAFolderThatIsGoneSaysSoAndCantBeTicked() async {
@@ -316,9 +361,9 @@ final class ResumeSheetModelTests: XCTestCase {
         XCTAssertEqual(ResumeSheetModel.note(tabs: 0, apps: 0, alreadyOpen: 0, failed: ["Slack", "Chrome"]),
                        "Nothing opened. Couldn\u{2019}t open Slack.")
         for text in [WorkCopy.resumeWillOpen(tabs: 3, apps: 1), WorkCopy.resumeOpened(tabs: 1, apps: 1),
-                     WorkCopy.resumeLead(name: "trailhead-shop", when: "today at 2:35 PM"), WorkCopy.resumeSingleNote,
+                     WorkCopy.resumeLead(when: "today at 2:35 PM"), WorkCopy.resumeSingleNote,
                      WorkCopy.resumeNoAddress, WorkCopy.resumeNewestTicked(10), WorkCopy.resumeMissing("bike-api"),
-                     WorkCopy.resumeAppOnly("Pages"), WorkCopy.resumeNoFolder("Cursor")] {
+                     WorkCopy.resumeAppOnly("Pages"), WorkCopy.resumeNoFolder("Cursor"), WorkCopy.resumeMadeUp] {
             XCTAssertNil(CopyStyleValidator.containsJargon(text), text)
             XCTAssertNil(CopyStyleValidator.containsMarketingSpeak(text), text)
             XCTAssertFalse(CopyStyleValidator.containsExclamation(text), text)

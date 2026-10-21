@@ -330,7 +330,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     /// When the person paused; nil when not paused. Kept across launches.
     public var pausedSince: Date? { pauses.pausedSince }
-    /// When a timed pause ends; nil for Until I Resume (SPEC 2.6.2). Kept
+    /// When a timed pause ends; nil for Until I Start It Again (SPEC 2.6.2). Kept
     /// across launches.
     public var pausedUntil: Date? { pauses.resumeAt }
     @Published public private(set) var captureEnabled: Bool
@@ -383,6 +383,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     private let pauses: UserPauseController
     private let orphanSweeper: (any CaptureOrphanSweeping)?
     private let clock: @MainActor @Sendable () -> Date
+    /// Whether the window and Ask read Demo Memory, so the status row names
+    /// it (`menuRow`). Demo Memory sets it when it is attached at launch;
+    /// tests set their own.
+    var demoMemoryInUse: @MainActor () -> Bool = { false }
     /// Whether macOS has a permission on for Hippocampus as this process can
     /// tell, nil when it cannot (`permissionVisibleHere`).
     private let permissionProbe: @MainActor @Sendable (TCCRevokedReason) -> Bool?
@@ -2218,10 +2222,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         menuRow(statusRow(setupFinished: setupFinished))
     }
 
-    /// `row` as the menu bar and the window show it.
+    /// `row` as the menu bar and the window show it: while Demo Memory is in
+    /// use, its pause names it (`StatusRow.inDemoMemory`).
     public func menuRow(_ row: StatusRow) -> StatusRow {
         if holdingForForget { return .forgetting }
-        return row.pausedUntil(pausedUntil, now: clock())
+        let shown = row.pausedUntil(pausedUntil, now: clock())
+        return demoMemoryInUse() ? shown.inDemoMemory : shown
     }
 
     /// One request from the window: carried out only where the menu bar's

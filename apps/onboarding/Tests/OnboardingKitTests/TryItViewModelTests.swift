@@ -570,11 +570,11 @@ final class TryItViewModelTests: XCTestCase {
         let shiftTwice = AskKeyNow(effectiveLabel: "⇧⇧", effectivePhrase: "Press Shift twice", stored: "shiftTwice")
         XCTAssertEqual(OnboardingCopy.tryItNext(shiftTwice, answersAvailable: true), "Press Shift twice and ask about it.")
         XCTAssertEqual(OnboardingCopy.tryItNext(shiftTwice, answersAvailable: false),
-                       "Press Shift twice and type a word from that window.")
+                       "Press Shift twice and search for a word from that window.")
         // Shift twice is chosen, but only the chord works yet.
         let chordOnly = AskKeyNow(effectiveLabel: "⌃⇧Space", effectivePhrase: "Press ⌃⇧Space", stored: "shiftTwice")
         XCTAssertEqual(OnboardingCopy.tryItNext(chordOnly, answersAvailable: false),
-                       "Press ⌃⇧Space and type a word from that window.")
+                       "Press ⌃⇧Space and search for a word from that window.")
         // Nothing works: no key sentence, only "Open it for me".
         XCTAssertNil(OnboardingCopy.tryItNext(AskKeyNow(effectiveLabel: "", effectivePhrase: nil, stored: "shiftTwice"),
                                               answersAvailable: true))

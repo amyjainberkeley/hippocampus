@@ -378,7 +378,8 @@ public final class CommandBarModel: ObservableObject {
     }
 
     public var footerAction: AskPanelStatus.Action? { flash == nil ? status.action : nil }
-    /// The footer button's words: Resume Now for a pause with an end.
+    /// The footer button's words: the status row's own, Start Remembering
+    /// for a pause.
     public var footerActionTitle: String? { footerAction.map { status.actionTitle ?? $0.title } }
 
     /// The written answer, for ⌘C.

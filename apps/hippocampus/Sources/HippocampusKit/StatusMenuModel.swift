@@ -52,7 +52,7 @@ public struct StatusRow: Equatable, Sendable {
     public let detail: String?
     /// Line 3: the one button.
     public let action: CaptureStatusAction?
-    /// A pause with an end: its button reads Resume Now (SPEC 2.6.2).
+    /// A pause with an end, which says when it ends (SPEC 2.6.2).
     public let isTimedPause: Bool
 
     public init(title: String, detail: String?, action: CaptureStatusAction?, isTimedPause: Bool = false) {
@@ -62,15 +62,27 @@ public struct StatusRow: Equatable, Sendable {
         self.isTimedPause = isTimedPause
     }
 
-    /// The button's words: Resume Now for a pause with an end.
+    /// The button's words. A pause with an end and one without both end
+    /// with Start Remembering, setup's own words, so there is one name for
+    /// turning remembering back on.
     public var actionTitle: String? {
-        guard let action else { return nil }
-        return action == .resume && isTimedPause ? "Resume Now" : action.title
+        action?.title
     }
 
     /// While the window forgets, remembering is held still: nothing to press
     /// until it's done, in one to three seconds (SPEC 3.11).
     public static let forgetting = StatusRow(title: "Forgetting\u{2026}", detail: nil, action: nil)
+
+    /// While the window and Ask read Demo Memory (SPEC-DELTA 6), its pause
+    /// says so: the menu, Ask's footer and Preferences name it, as the
+    /// window's footer does. A pause with an end still says when it ends.
+    /// Its button still ends the pause, and with it Demo Memory
+    /// (`DemoMemoryController`). Any other row is unchanged.
+    public var inDemoMemory: StatusRow {
+        guard action == .resume else { return self }
+        return StatusRow(title: DemoCopy.statusTitle, detail: isTimedPause ? detail : DemoCopy.statusDetail,
+                         action: action, isTimedPause: isTimedPause)
+    }
 
     /// A pause with an end says when: "Until 3:41 PM." or "Until tomorrow
     /// at 6:00 AM." Any other row is unchanged.
@@ -202,7 +214,7 @@ public enum StatusMenuModel {
             /// (`DemoMemory.menuItems`), by an id its owner carries out.
             case extra(String)
             /// One of Pause's choices: For 1 Hour, Until Tomorrow, Until I
-            /// Resume (SPEC 2.6.2).
+            /// Start It Again (SPEC 2.6.2).
             case pauseFor(PauseLength)
         }
 
@@ -282,7 +294,8 @@ public enum StatusMenuModel {
 }
 
 /// How long Pause lasts (SPEC 2.6.2): an hour, until 6:00 AM tomorrow, or
-/// until the person resumes. The same three in the window's status menu.
+/// until the person starts it again with Start Remembering. The same three
+/// in the window's status menu.
 public enum PauseLength: CaseIterable, Sendable {
     case hour
     case tomorrow
@@ -292,11 +305,11 @@ public enum PauseLength: CaseIterable, Sendable {
         switch self {
         case .hour: "For 1 Hour"
         case .tomorrow: "Until Tomorrow"
-        case .untilResume: "Until I Resume"
+        case .untilResume: "Until I Start It Again"
         }
     }
 
-    /// When it ends; nil until the person resumes.
+    /// When it ends; nil until the person starts it again.
     public func end(from now: Date, calendar: Calendar = .autoupdatingCurrent) -> Date? {
         switch self {
         case .hour:

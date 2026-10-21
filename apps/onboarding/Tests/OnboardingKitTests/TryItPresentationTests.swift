@@ -50,7 +50,7 @@ final class TryItPresentationTests: XCTestCase {
             let shown = TryItPresentation(
                 card: .proof(proof), keyNow: shiftTwice, understanding: understanding, macOSMajorVersion: macOS
             )
-            XCTAssertEqual(shown.next, "Press Shift twice and type a word from that window.")
+            XCTAssertEqual(shown.next, "Press Shift twice and search for a word from that window.")
             XCTAssertEqual(shown.answersNote, line)
         }
     }
@@ -69,7 +69,7 @@ final class TryItPresentationTests: XCTestCase {
 
     func testWhileTheCheckRunsTheWordIsOfferedAndNothingIsSaidAboutAnswers() {
         let shown = TryItPresentation(card: .proof(proof), keyNow: shiftTwice, understanding: nil)
-        XCTAssertEqual(shown.next, "Press Shift twice and type a word from that window.")
+        XCTAssertEqual(shown.next, "Press Shift twice and search for a word from that window.")
         XCTAssertNil(shown.answersNote)
     }
 
@@ -169,7 +169,8 @@ final class TryItPresentationTests: XCTestCase {
         XCTAssertEqual(off.detail, "Turn it on in System Settings.", "nothing is dropped")
         XCTAssertEqual(off.action, .openSettings(.accessibility))
         XCTAssertEqual(shown(.notRemembering(.paused)).heading, "Remembering is paused.")
-        XCTAssertEqual(shown(.notRemembering(.paused)).detail, "Resume it from the menu bar.")
+        // The menu's own words for ending a pause (launch playbook, decision 5).
+        XCTAssertEqual(shown(.notRemembering(.paused)).detail, "Choose Start Remembering from the menu bar.")
         XCTAssertEqual(shown(.notRemembering(.off)).heading, "Remembering is off.")
         XCTAssertEqual(shown(.notRemembering(.off)).detail, "Turn it on from the menu bar.")
         XCTAssertNil(shown(.notRemembering(.off)).action)

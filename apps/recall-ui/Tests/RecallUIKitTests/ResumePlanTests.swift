@@ -66,7 +66,13 @@ final class ResumePlanTests: XCTestCase {
     }
 
     func testResumesWordsAreCalm() {
-        for word in [WorkCopy.resume, WorkCopy.resumeTitle, WorkCopy.resumeNothing, WorkCopy.cancel] {
+        // The sheet names the project it reopens (launch playbook,
+        // decision 12).
+        XCTAssertEqual(WorkCopy.resumeTitle("Q4 investor update"), "Reopen Q4 investor update")
+        XCTAssertEqual(WorkCopy.resumeTitle(nil), "Reopen what was open")
+        XCTAssertEqual(WorkCopy.resumeTitle(""), "Reopen what was open")
+        for word in [WorkCopy.resume, WorkCopy.resumeTitle("trailhead-shop"), WorkCopy.resumeTitle(nil),
+                     WorkCopy.resumeNothing, WorkCopy.cancel] {
             XCTAssertNil(CopyStyleValidator.containsMarketingSpeak(word), word)
             XCTAssertNil(CopyStyleValidator.containsJargon(word), word)
             XCTAssertFalse(CopyStyleValidator.containsExclamation(word), word)

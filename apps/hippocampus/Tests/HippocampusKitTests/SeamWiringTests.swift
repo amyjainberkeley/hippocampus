@@ -41,6 +41,16 @@ final class SeamWiringTests: XCTestCase {
         XCTAssertNil(DemoMemory.storeURL, "every child reads the person's own memory")
     }
 
+    /// The status row names Demo Memory while it is in use: attaching it at
+    /// launch is what tells the supervisor, so the supervisor itself still
+    /// reaches Demo Memory only for its children (SPEC-DELTA 6).
+    func testTheStatusRowLearnsOfDemoMemoryWhenItIsAttached() throws {
+        let demo = try source("Sources/HippocampusKit/DemoMemory.swift")
+        XCTAssertEqual(count("supervisor.demoMemoryInUse = { isActive }", in: demo), 1)
+        let supervisor = try source("Sources/HippocampusKit/ProcessSupervisor.swift")
+        XCTAssertTrue(supervisor.contains("return demoMemoryInUse() ? shown.inDemoMemory : shown"))
+    }
+
     func testTheMenuAndPreferencesShowTheirSections() throws {
         let menu = try source("Sources/Hippocampus/StatusMenuView.swift")
         XCTAssertTrue(menu.contains("extraItems: DemoMemory.menuItems(optionHeld: NSEvent.modifierFlags.contains(.option))"))

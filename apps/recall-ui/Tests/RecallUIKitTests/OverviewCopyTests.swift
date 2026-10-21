@@ -146,6 +146,11 @@ final class OverviewCopyTests: XCTestCase {
         XCTAssertEqual(Overview.firstDayBody, "Your day fills in here as you work. It stays on this Mac.")
         XCTAssertEqual(Overview.firstDayOffTitle, "Hippocampus isn\u{2019}t remembering right now.")
         XCTAssertEqual(Overview.firstDayOffBody, "Your day fills in here once it is. It stays on this Mac.")
+        // A pause ends with Start Remembering, the banner's button; Resume
+        // reopens a project (launch playbook, decision 5).
+        XCTAssertEqual(Overview.firstDayPausedBody,
+                       "Your day fills in here once you start remembering again. It stays on this Mac.")
+        XCTAssertFalse(Overview.firstDayPausedBody.localizedCaseInsensitiveContains("resume"))
         XCTAssertEqual(Overview.firstDayAsk("Press Shift twice"),
                        "Press Shift twice in any app to ask about something you saw.")
         XCTAssertEqual(Overview.firstDayAsk(""), "Choose a key for Ask in Preferences.")

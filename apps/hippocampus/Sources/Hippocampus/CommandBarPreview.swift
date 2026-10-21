@@ -205,6 +205,9 @@ enum CommandBarPreviewRenderer {
         """)
         let question = "What did we decide on Team pricing?"
         let paused = AskPanelStatus(.paused)
+        // Demo Memory: its pause names it in the footer.
+        let demo = AskPanelStatus(.paused, row: StatusRow(StatusFacts(status: .paused), now: Date()).inDemoMemory,
+                                  setup: .complete)
         let permission = AskPanelStatus(.needsPermission(.screenRecording))
         let notSetUp = AskPanelStatus(.idle, setup: .notFinished)
         return [
@@ -213,6 +216,9 @@ enum CommandBarPreviewRenderer {
             State(name: "home-unread") { $0.preview(mode: .home, context: safari, savedRead: false, homeRows: unread) },
             State(name: "home-paused") {
                 $0.preview(mode: .home, context: safari, status: paused, homeRows: readButNotReading)
+            },
+            State(name: "home-demo-memory") {
+                $0.preview(mode: .home, context: safari, status: demo, homeRows: readButNotReading)
             },
             State(name: "home-needs-permission") {
                 $0.preview(mode: .home, context: safari, status: permission, homeRows: readButNotReading)

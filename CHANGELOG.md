@@ -9,7 +9,7 @@ commits are intentionally omitted from release notes.
 
 - A sidebar instead of three places: Today, then Working On, then Library with History, Web Pages, Documents, Code, Conversations and Looked Up, and at the bottom About You, AI Tools and Privacy. A row appears once it has something in it. ⌘1 to ⌘9 open them in that order.
 - The field, “Ask or search your memory”, sits at the top of every page, with Back and Forward (⌘[ and ⌘]). It searches by meaning, as Ask does, and words in quotes match exactly. ⌘F keeps it to the page you’re on; ⌘N searches everything.
-- The hi mark is a button: Pause for an hour, until tomorrow or until you resume, Forget the last 10 minutes, the last hour or today, Privacy and Preferences. While remembering is paused or off, a line at the top of every page says so, with the button that turns it back on.
+- The hi mark is a button: Pause for an hour, until tomorrow or until you start it again, Forget the last 10 minutes, the last hour or today, Privacy and Preferences. While remembering is paused or off, a line at the top of every page says so, with the button that turns it back on.
 - Forget from anywhere: a moment, a few you picked (⌘⌫, with Undo for a few seconds), an hour of History, a session, a page or a search, or recent time (⇧⌘⌫). Hippocampus holds still while it forgets, so you no longer need to pause first.
 - ⌘T goes to today. ⌘↩ asks your AI tool, and ⌥↩ asks on this Mac.
 - View › Hide Working On takes project names off the screen before you share it.
@@ -43,7 +43,7 @@ commits are intentionally omitted from release notes.
 
 ### Pictures of other windows
 
-- Hippocampus can now keep pictures of the other windows you can see, not just the one you’re using. It’s off until you turn it on, in Preferences under Remembering. Calls, video and private windows are never kept, pictures use at most 2 GB, and older ones are thinned out first.
+- Hippocampus can now keep pictures of the other windows you can see, not just the one you’re using, with every window in front of them blanked out. A new install keeps them from setup’s Start Remembering; on a Mac that used an earlier version they’re off until you turn them on, in Preferences under Remembering. None is kept of a call, a video or a private window it recognizes, they use at most 2 GB, or 2% of the disk if that is less, and older ones are thinned out first.
 
 ### Setup
 
@@ -68,7 +68,7 @@ commits are intentionally omitted from release notes.
 
 ### Setup
 
-- Setup shows what Hippocampus does before it asks for anything. Welcome plays a short demo, made from Hippocampus’s own screens and made-up data. While you write a message, Ask finds a link you read earlier, with its source. Overview fills in the day, and an AI tool starts a session with your recent work.
+- Setup shows what Hippocampus does before it asks for anything. Welcome plays a short demo, made from Hippocampus’s own screens and made-up data. While you write a message, Ask finds a link you read earlier, with its source. Today fills in the day, and an AI tool starts a session with your recent work.
 - A new screen, What you get, shows the three things it does, each with a small picture of the screen that does it.
 - Each permission says what it lets Hippocampus do, and shows a checkmark the moment it is on.
 - The promises before Start Remembering are shorter to scan, one fact a line, with what the menu-bar mark shows. They now say known password apps are never read.

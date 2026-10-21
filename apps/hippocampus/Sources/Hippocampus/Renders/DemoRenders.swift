@@ -28,8 +28,11 @@ extension StatusPreviewRenderer {
         func state(_ name: String, _ phase: DemoMemoryController.Phase, optionHeld: Bool,
                    paused: Bool, dark: Bool = false) -> MenuState {
             let status: MenuBarStatus = paused ? .paused : .recording
-            let row = StatusRow(StatusFacts(status: status, lastSavedAt: paused ? nil : saved,
+            let own = StatusRow(StatusFacts(status: status, lastSavedAt: paused ? nil : saved,
                                             pausedSince: paused ? pausedSince : nil), now: now)
+            // While it is in use, the status row names it, as the
+            // supervisor's `menuRow` does.
+            let row = phase == .on ? own.inDemoMemory : own
             let extra = DemoRenderFixture.controller(phase).menuItems(optionHeld: optionHeld)
             return MenuState(
                 name: name, status: status,

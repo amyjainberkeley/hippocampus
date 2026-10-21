@@ -5,9 +5,11 @@ import SwiftUI
 
 extension WindowRenderer {
     /// Resume: the sheet over trailhead-shop's page, listing what was open
-    /// in its last session, and the note after it opened (`resume-sheet*`,
-    /// `resume-note*`), light and dark. The plan, the Mac and the browsers'
-    /// tabs are fixtures: nothing opens and macOS is asked nothing.
+    /// in its last session, the same plan as Demo Memory shows a made-up
+    /// one (`resume-sheet-made-up*`), and the note after it opened
+    /// (`resume-sheet*`, `resume-note*`), light and dark. The plan, the Mac
+    /// and the browsers' tabs are fixtures: nothing opens and macOS is asked
+    /// nothing.
     static var resumeScenes: [Scene] {
         var scenes: [Scene] = []
         for dark in [false, true] {
@@ -18,6 +20,9 @@ extension WindowRenderer {
                 },
                 .picture("resume-sheet-many-pages\(suffix)", size: CGSize(width: 1100, height: 820), dark: dark) {
                     await ResumeRenders.sheetOverPage(manyPages: true)
+                },
+                .picture("resume-sheet-made-up\(suffix)", dark: dark) {
+                    await ResumeRenders.sheetOverPage(madeUp: true)
                 },
                 .picture("resume-note\(suffix)", dark: dark) {
                     await ResumeRenders.noteAfter()
@@ -37,7 +42,7 @@ enum ResumeRenders {
     ]
 
     /// The sheet as macOS shows it: over the page, at the window's top.
-    static func sheetOverPage(manyPages: Bool = false) async -> AnyView {
+    static func sheetOverPage(manyPages: Bool = false, madeUp: Bool = false) async -> AnyView {
         let page = await WorkRenders.window(.item(WorkFixtures.trailheadShop))
         var plans = WorkFixtures.plans(now: WorkRenders.now, calendar: WorkRenders.calendar)
         if manyPages, let shop = plans[WorkFixtures.trailheadShop] {
@@ -51,7 +56,8 @@ enum ResumeRenders {
             plans[WorkFixtures.trailheadShop] = ResumePlan(items: items, item: shop.item, session: shop.session)
         }
         let model = ResumeSheetModel(itemId: WorkFixtures.trailheadShop, planner: PreviewResumePlans(plans: plans),
-                                     workspace: FixtureResumeWorkspace(installed: installed), tabs: NoOpenTabs())
+                                     workspace: FixtureResumeWorkspace(installed: installed), tabs: NoOpenTabs(),
+                                     madeUp: madeUp)
         await model.load()
         let sheet = ResumeSheetContent(model: model, notes: BottomNotes(), now: WorkRenders.now,
                                        calendar: WorkRenders.calendar, loads: false) {}

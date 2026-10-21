@@ -2,7 +2,8 @@
 //
 // Pause for an hour, or until 6:00 AM tomorrow (SPEC 2.6.2): the end is kept
 // with the pause, so it survives a relaunch, and remembering resumes on time.
-// The menu says "Until 3:41 PM." and offers Resume Now.
+// The menu says "Until 3:41 PM." and offers Start Remembering, the words
+// that end any pause.
 
 import XCTest
 @testable import HippocampusKit
@@ -59,7 +60,7 @@ final class TimedPauseTests: XCTestCase {
     }
 
     func testPauseLengthsEndWhenTheySay() {
-        XCTAssertEqual(PauseLength.allCases.map(\.title), ["For 1 Hour", "Until Tomorrow", "Until I Resume"])
+        XCTAssertEqual(PauseLength.allCases.map(\.title), ["For 1 Hour", "Until Tomorrow", "Until I Start It Again"])
         XCTAssertEqual(PauseLength.hour.end(from: start, calendar: calendar), start.addingTimeInterval(3_600))
         XCTAssertNil(PauseLength.untilResume.end(from: start, calendar: calendar))
         let tomorrow = PauseLength.tomorrow.end(from: start, calendar: calendar)
@@ -67,19 +68,21 @@ final class TimedPauseTests: XCTestCase {
                        DateComponents(month: 10, day: 13, hour: 6, minute: 0))
     }
 
-    func testTheMenuSaysWhenATimedPauseEndsAndOffersResumeNow() {
+    func testTheMenuSaysWhenATimedPauseEndsAndOffersStartRemembering() {
         let paused = StatusRow(StatusFacts(status: .paused, pausedSince: start), now: start, calendar: calendar)
         let timed = paused.pausedUntil(start.addingTimeInterval(3_600), now: start, calendar: calendar)
         XCTAssertEqual(timed.detail?.replacingOccurrences(of: "\u{202F}", with: " "), "Until 3:41 PM.")
-        XCTAssertEqual(timed.actionTitle, "Resume Now")
+        // One name for turning remembering back on, setup's own: Resume is
+        // Working On's, and reopens a project.
+        XCTAssertEqual(timed.actionTitle, "Start Remembering")
         XCTAssertEqual(timed.action, .resume)
         let tomorrow = paused.pausedUntil(PauseLength.tomorrow.end(from: start, calendar: calendar), now: start,
                                           calendar: calendar)
         XCTAssertEqual(tomorrow.detail?.replacingOccurrences(of: "\u{202F}", with: " "), "Until tomorrow at 6:00 AM.")
-        XCTAssertEqual(paused.pausedUntil(nil, now: start), paused, "Until I Resume says since when")
-        XCTAssertEqual(paused.actionTitle, "Resume")
+        XCTAssertEqual(paused.pausedUntil(nil, now: start), paused, "Until I Start It Again says since when")
+        XCTAssertEqual(paused.actionTitle, "Start Remembering")
         let items = StatusMenuModel.items(row: timed, setupComplete: true, askLabel: "⇧⇧", aiToolsConnected: false)
-        XCTAssertTrue(items.contains { $0.role == .action(.resume) && $0.title == "Resume Now" })
+        XCTAssertTrue(items.contains { $0.role == .action(.resume) && $0.title == "Start Remembering" })
     }
 
     func testPauseOffersHowLong() {
@@ -88,7 +91,7 @@ final class TimedPauseTests: XCTestCase {
                                           aiToolsConnected: false)
         let pause = items.first { $0.role == .action(.pause) }
         XCTAssertEqual(pause?.title, "Pause")
-        XCTAssertEqual(pause?.submenu.map(\.title), ["For 1 Hour", "Until Tomorrow", "Until I Resume"])
+        XCTAssertEqual(pause?.submenu.map(\.title), ["For 1 Hour", "Until Tomorrow", "Until I Start It Again"])
         XCTAssertEqual(pause?.submenu.map(\.role), PauseLength.allCases.map { .pauseFor($0) })
         XCTAssertEqual(StatusRow.forgetting, StatusRow(title: "Forgetting\u{2026}", detail: nil, action: nil))
     }

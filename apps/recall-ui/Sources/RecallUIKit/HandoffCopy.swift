@@ -81,7 +81,11 @@ public enum HandoffCopy {
     // MARK: The AI Tools page (SPEC 3.8; SPEC 9, 90 to 100)
 
     public static let pageTitle = "AI Tools"
-    public static let lead = "Nothing leaves this Mac unless you send it, or a tool you connected asks for it."
+    /// What leaves this Mac, exactly: memory goes only when the person sends
+    /// it or a tool they connected asks for it. "Nothing leaves" was not
+    /// exact: the update check leaves too, carrying nothing from memory
+    /// (PRIVACY.md, "What leaves your Mac").
+    public static let lead = "Your memory leaves this Mac only when you send it, or a tool you connected asks for it."
     public static let onTheirOwn = "On their own"
     public static let withOneKey = "With one key"
     public static let alsoOnThisMac = "Also on this Mac"
@@ -91,7 +95,13 @@ public enum HandoffCopy {
     public static let looksThingsUp = "Looks things up when a question needs it."
     public static func turnedOffIn(_ tool: String) -> String { "Turned off in \(tool)’s own settings" }
     public static let codexAsked = "Asked to fetch your recent work when a task starts. Codex decides."
-    public static let chatGPTShares = "ChatGPT’s desktop app uses Codex’s settings, so it can look things up too."
+    /// Connect writes Hippocampus into Codex's settings file
+    /// (`~/.codex/config.toml`). OpenAI documents that the ChatGPT desktop
+    /// app shares that file with the Codex CLI and IDE extension, and that
+    /// ChatGPT on the web doesn't read it
+    /// (https://developers.openai.com/codex/mcp, read Oct 20, 2026). Chats
+    /// get memory only when the person sends it (`chatGPTUse`).
+    public static let chatGPTShares = "Codex in ChatGPT’s desktop app uses the same settings, so it can look things up too."
     public static let codexNeedsStep = "Needs a step in Codex"
     public static let codexStep = "Codex asks you to allow new hooks once. Type /hooks in Codex and allow Hippocampus."
     public static let overridden = "Overridden by your AGENTS.override.md file"
@@ -101,15 +111,21 @@ public enum HandoffCopy {
     public static let off = "Off"
     public static let whatItStartsWith = "What It Starts With"
     public static let showExactText = "Show the Exact Text"
-    /// "About 120 words. Nothing you read on screen is in it."
+    /// "About 120 words, written on this Mac from what you read on screen."
+    /// The exact text opens by saying it is from the screen: the session
+    /// titles and what a model wrote about them, and what was learned
+    /// about the person (`render_understanding_block` in apps/agent).
     public static func startsWithSize(words: Int) -> String {
-        "About \(words) words. Nothing you read on screen is in it."
+        "About \(words) words, written on this Mac from what you read on screen."
     }
+    /// Connecting asks two questions, looking things up and starting each
+    /// session with recent work (Share or Don't Share), so a session "can"
+    /// start with it, as setup's third card says.
     public static func notConnectedNote(_ tool: String) -> String {
-        "Once connected, it gets your recent work at each session start, and you can read every word here."
+        "Once connected, each session can start with your recent work, and you can read every word here."
     }
     public static let codexNotConnectedNote =
-        "ChatGPT’s desktop app uses Codex’s settings, so connecting Codex lets it look things up too."
+        "Codex in ChatGPT’s desktop app uses the same settings, so connecting Codex lets it look things up too."
     public static let connectButton = "Connect…"
     public static let opens = "opens"
     public static let oneKeyTail = "with what you picked in its message box. You press send."

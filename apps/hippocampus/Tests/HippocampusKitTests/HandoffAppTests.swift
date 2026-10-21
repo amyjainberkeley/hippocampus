@@ -333,7 +333,10 @@ final class HandoffCopyTests: XCTestCase {
         XCTAssertEqual(HandoffCopy.size(words: 151, moments: 1), "About 151 words · 1 moment")
         XCTAssertEqual(HandoffCopy.size(words: 218, moments: 7), "About 218 words · 7 moments")
         XCTAssertEqual(HandoffCopy.copyAndOpen("ChatGPT"), "Copy and Open ChatGPT")
-        XCTAssertEqual(HandoffCopy.lead, "Nothing leaves this Mac unless you send it, or a tool you connected asks for it.")
+        // Exact about what leaves: memory, only when sent or asked for. The
+        // update check leaves too, so "Nothing leaves this Mac" was not true.
+        XCTAssertEqual(HandoffCopy.lead, "Your memory leaves this Mac only when you send it, or a tool you connected asks for it.")
+        XCTAssertFalse(HandoffCopy.lead.hasPrefix("Nothing leaves"))
         XCTAssertEqual(HandoffCopy.disconnectTitle("Claude Code"), "Disconnect Claude Code?")
         XCTAssertEqual(HandoffCopy.disconnectMessage,
                        "It stops looking things up and starting sessions with your work. What it already read stays in its history.")
@@ -344,7 +347,7 @@ final class HandoffCopyTests: XCTestCase {
                        + "when a question needs it. What they read goes to the companies that run them. They can read while "
                        + "Hippocampus is quit. They also keep what they read in their own history on this Mac, unencrypted. "
                        + "Forgetting something in Hippocampus doesn’t remove it there. "
-                       + "ChatGPT’s desktop app uses Codex’s settings, so it can look things up too.")
+                       + "Codex in ChatGPT’s desktop app uses the same settings, so it can look things up too.")
         XCTAssertEqual(HandoffCopy.connectMessage("Claude Code", count: 1, chatGPTInstalled: false),
                        "It can search what you’ve seen and read your sessions, your day and what Hippocampus learned about you, "
                        + "when a question needs it. What it reads goes to the company that runs Claude Code. It can read while "

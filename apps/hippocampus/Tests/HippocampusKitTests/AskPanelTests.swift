@@ -867,7 +867,7 @@ final class AskPanelTests: XCTestCase {
         XCTAssertEqual(
             [AskPanelStatus.Action.resume, .turnOn, .openSystemSettings(.screenRecording), .tryAgain, .quit, .finishSetup]
                 .map(\.title),
-            ["Resume", "Turn On", "Open System Settings…", "Try Again", "Quit Hippocampus", "Finish Setup…"]
+            ["Start Remembering", "Turn On", "Open System Settings…", "Try Again", "Quit Hippocampus", "Finish Setup…"]
         )
         // Nothing is read in this window while it is skipped, stopped or off.
         XCTAssertFalse(AskPanelStatus(.skipping(reason: "private_browsing")).readsThisWindow)

@@ -9,9 +9,11 @@ import Foundation
 public enum SidePicturesCopy {
     /// Row 145: the switch.
     public static let toggle = "Keep screenshots of windows beside the one you’re using"
-    /// Row 146: under it.
+    /// Row 146: under it. Calls and video are told by app and by title, and
+    /// private windows by their markers (`SideWindowPicturePolicy`), so the
+    /// line says "it recognizes", not "never".
     public static let explanation = "When their text changes, Hippocampus keeps a picture of other windows you can "
-        + "see, encrypted like the rest. Calls, video and private windows are never kept."
+        + "see, encrypted like the rest. None is kept of a call, a video or a private window it recognizes."
     /// Row 147: the budget.
     public static let useAtMost = "Use at most:"
 

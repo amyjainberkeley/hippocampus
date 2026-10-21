@@ -100,9 +100,9 @@ final class StatusMenuModelTests: XCTestCase {
     }
 
     func testPausedSaysSinceWhenOnTheSameDayAndAnotherDay() {
-        XCTAssertEqual(titles(.paused, paused: sixMinutesAgo), ["Paused", "Since 3:04 PM.", "Resume"] + tail)
-        XCTAssertEqual(titles(.paused, paused: yesterday), ["Paused", "Since Oct 12.", "Resume"] + tail)
-        XCTAssertEqual(titles(.paused), ["Paused", "Resume"] + tail)
+        XCTAssertEqual(titles(.paused, paused: sixMinutesAgo), ["Paused", "Since 3:04 PM.", "Start Remembering"] + tail)
+        XCTAssertEqual(titles(.paused, paused: yesterday), ["Paused", "Since Oct 12.", "Start Remembering"] + tail)
+        XCTAssertEqual(titles(.paused), ["Paused", "Start Remembering"] + tail)
     }
 
     func testOffAfterStopSharingSaysWhenTheSameDayAndAnotherDay() {
@@ -223,15 +223,43 @@ final class StatusMenuModelTests: XCTestCase {
         }
     }
 
-    /// A timed pause's button reads Resume Now, and a forget's hold reads
-    /// "Forgetting…" with nothing to press, in Ask's footer as in the menu
-    /// (SPEC 2.6.2, 3.11).
-    func testTheFooterSaysResumeNowForATimedPauseAndForgettingDuringAHold() {
+    /// While Demo Memory is in use its pause names it, in the menu, Ask's
+    /// footer and Preferences, as the window's footer does (SPEC-DELTA 6):
+    /// a film never shows "Paused" over the made-up week. A pause with an
+    /// end still says when, and the button still ends the pause, and with
+    /// it Demo Memory. Every other row is as it was.
+    func testDemoMemorysPauseNamesIt() {
+        let paused = StatusRow(StatusFacts(status: .paused, pausedSince: now.addingTimeInterval(-360)),
+                               now: now, calendar: calendar)
+        let demo = paused.inDemoMemory
+        XCTAssertEqual(demo, StatusRow(title: "Demo Memory", detail: "Your own memory is paused until you leave.",
+                                       action: .resume))
+        XCTAssertEqual(demo.actionTitle, "Start Remembering")
+        let timed = paused.pausedUntil(now.addingTimeInterval(1_800), now: now, calendar: calendar)
+        XCTAssertEqual(timed.inDemoMemory.title, "Demo Memory")
+        XCTAssertEqual(timed.inDemoMemory.detail, timed.detail, "a pause with an end still says when")
+        for other in [StatusRow.forgetting, StatusRow(StatusFacts(status: .recording), now: now, calendar: calendar),
+                      StatusRow(StatusFacts(status: .idle), now: now, calendar: calendar)] {
+            XCTAssertEqual(other.inDemoMemory, other)
+        }
+        let footer = AskPanelStatus(.paused, row: demo, setup: .complete)
+        XCTAssertEqual(footer.text, "Demo Memory")
+        XCTAssertEqual(footer.action, .resume)
+        XCTAssertEqual(footer.actionTitle, "Start Remembering")
+        XCTAssertEqual(StatusMenuModel.items(row: demo, setupComplete: true, askLabel: "⇧⇧", aiToolsConnected: false)
+                           .prefix(3).map(\.title),
+                       ["Demo Memory", "Your own memory is paused until you leave.", "Start Remembering"])
+    }
+
+    /// A timed pause's button reads Start Remembering, as any pause's does,
+    /// and a forget's hold reads "Forgetting…" with nothing to press, in
+    /// Ask's footer as in the menu (SPEC 2.6.2, 3.11).
+    func testTheFooterSaysStartRememberingForATimedPauseAndForgettingDuringAHold() {
         let paused = StatusRow(StatusFacts(status: .paused), now: now, calendar: calendar)
         let timed = paused.pausedUntil(now.addingTimeInterval(1_800), now: now, calendar: calendar)
         let footer = AskPanelStatus(.paused, row: timed, setup: .complete)
         XCTAssertEqual(footer.action, .resume)
-        XCTAssertEqual(footer.actionTitle, "Resume Now")
+        XCTAssertEqual(footer.actionTitle, "Start Remembering")
         let untimed = AskPanelStatus(.paused, row: paused, setup: .complete)
         XCTAssertEqual(untimed.actionTitle, paused.actionTitle)
         let holding = AskPanelStatus(.paused, row: .forgetting, setup: .complete)

@@ -143,7 +143,9 @@ final class OnboardingCopyTests: XCTestCase {
     // MARK: - The other screens
 
     func testWelcomeAndPermissionsFollowTheKey() {
-        XCTAssertEqual(OnboardingCopy.welcomeTitle, "Your Mac, with a memory.")
+        // What Hippocampus does for the person, in their words (launch
+        // playbook, decision 4).
+        XCTAssertEqual(OnboardingCopy.welcomeTitle, "Your work, remembered.")
         XCTAssertEqual(OnboardingCopy.welcomeBody(.shiftTwice), "Press ⇧ ⇧ and ask about your screen, now or earlier.")
         XCTAssertEqual(OnboardingCopy.welcomeBody(.rightOption), "Tap right ⌥ and ask about your screen, now or earlier.")
         XCTAssertEqual(OnboardingCopy.welcomeBody(.chord), "Press ⌃ ⇧ Space and ask about your screen, now or earlier.")
@@ -158,6 +160,15 @@ final class OnboardingCopyTests: XCTestCase {
         XCTAssertEqual(OnboardingCopy.accessibilityBenefits(.chord), ["Knows the window you’re in", "Skips password fields"])
     }
 
+    /// Ending a pause has one name, the menu's Start Remembering, which is
+    /// also setup's own button (launch playbook, decision 5). Resume is
+    /// Working On's, and reopens a project.
+    func testTryItEndsAPauseWithStartRemembering() {
+        XCTAssertEqual(OnboardingCopy.tryItPaused, "Remembering is paused. Choose Start Remembering from the menu bar.")
+        XCTAssertTrue(OnboardingCopy.tryItPaused.contains(OnboardingCopy.startRemembering))
+        XCTAssertFalse(OnboardingCopy.tryItPaused.localizedCaseInsensitiveContains("resume"))
+    }
+
     func testWhatYouGetNamesThreeThingsTheAppDoes() {
         XCTAssertEqual(OnboardingCopy.whatYouGetTitle, "What you get")
         XCTAssertEqual(OnboardingCopy.findTitle, "Find anything you’ve seen.")
@@ -165,9 +176,12 @@ final class OnboardingCopyTests: XCTestCase {
         XCTAssertEqual(OnboardingCopy.dayTitle, "Your day, written for you.")
         // The window's first place is Today (SPEC 7.5).
         XCTAssertEqual(OnboardingCopy.dayLine, "Today shows where you left off and what you’re working on.")
-        XCTAssertEqual(OnboardingCopy.aiTitle, "Your AI starts with your context.")
+        XCTAssertEqual(OnboardingCopy.aiTitle, "Your AI tools start with what you’re working on.")
         // Setup connects no AI tool: the person does, later, from the menu.
-        XCTAssertEqual(OnboardingCopy.aiLine, "Connect it once, and each session opens with your recent work.")
+        // A session "can" start with recent work: Claude Code's when the
+        // person lets it, Codex's when Codex fetches it.
+        XCTAssertEqual(OnboardingCopy.aiLine,
+                       "Connect them from the menu bar. Each session can then start with your recent work.")
     }
 
     func testTheWelcomeDemoIsMadeUpAndTellsOneStory() {
@@ -198,7 +212,7 @@ final class OnboardingCopyTests: XCTestCase {
         // The legend in the sidebar's nouns.
         XCTAssertEqual(OnboardingCopy.Demo.legend, ["Documents", "Code", "Calls"])
         XCTAssertEqual(OnboardingCopy.welcomeDemoLabel,
-                       "A short demo. Ask finds a link for the message you’re writing, with its source. Today fills in your day. Your AI starts with your recent work.")
+                       "A short demo. Ask finds a link for the message you’re writing, with its source. Today fills in your day. Your AI tool starts with what you’re working on.")
     }
 
     func testTryItSaysWhatItReadAndWhyAWindowIsSkipped() {

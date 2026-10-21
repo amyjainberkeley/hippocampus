@@ -12,7 +12,9 @@ public enum OnboardingCopy {
 
     // Welcome
 
-    public static let welcomeTitle = "Your Mac, with a memory."
+    /// Says what Hippocampus does for the person, in their words (launch
+    /// playbook, decision 4): their work, not the Mac, is what it keeps.
+    public static let welcomeTitle = "Your work, remembered."
     /// Follows the keycaps: "Press ⇧ ⇧ and ask about your screen, now or earlier."
     public static let welcomeBodyAfterKeys = "and ask about your screen, now or earlier."
     public static let getStarted = "Get Started"
@@ -30,7 +32,7 @@ public enum OnboardingCopy {
     /// What VoiceOver says for the demo, which is drawn, not read: one
     /// described image (SPEC 7.3).
     public static let welcomeDemoLabel =
-        "A short demo. Ask finds a link for the message you’re writing, with its source. Today fills in your day. Your AI starts with your recent work."
+        "A short demo. Ask finds a link for the message you’re writing, with its source. Today fills in your day. Your AI tool starts with what you’re working on."
 
     /// The words inside Welcome's demo. Everything here is made up: no
     /// person's memory is ever shown in setup.
@@ -95,11 +97,13 @@ public enum OnboardingCopy {
     public static let findLine = "Ask in plain words. See where each answer came from."
     public static let dayTitle = "Your day, written for you."
     public static let dayLine = "Today shows where you left off and what you’re working on."
-    /// Setup connects no AI tool (RULINGS O10): the person connects one
-    /// later, from the menu's Connect AI Tools…, and then each session it
-    /// starts is given the last few sessions of work (`WhatIsSent`).
-    public static let aiTitle = "Your AI starts with your context."
-    public static let aiLine = "Connect it once, and each session opens with your recent work."
+    /// The decided line, the same in the README (launch decisions, Oct 15).
+    /// Setup connects no AI tool (RULINGS O10): the person connects them
+    /// later, from the menu's Connect AI Tools…. Then a session can start
+    /// with the last few sessions of work (`WhatIsSent`): Claude Code's when
+    /// the person lets it, and Codex's when Codex fetches them, so "can".
+    public static let aiTitle = "Your AI tools start with what you’re working on."
+    public static let aiLine = "Connect them from the menu bar. Each session can then start with your recent work."
 
     /// Every label the bottom bar's primary button can show on `screen`:
     /// the button keeps the width of the widest, so a label that changes in
@@ -384,7 +388,9 @@ public enum OnboardingCopy {
     /// screen starts over with it.
     public static let tryItStillNothing = "Still nothing read."
     public static let openItForMe = "Open it for me"
-    public static let tryItPaused = "Remembering is paused. Resume it from the menu bar."
+    /// The menu's own words for ending a pause, Start Remembering (launch
+    /// playbook, decision 5): Resume reopens a project.
+    public static let tryItPaused = "Remembering is paused. Choose Start Remembering from the menu bar."
     public static let tryItOff = "Remembering is off. Turn it on from the menu bar."
     /// Once a proof shows: where the indicator is, and what it does.
     public static let stopSharingNote = "macOS shows an icon in the menu bar while Hippocampus reads. Stop Sharing there ends it."
@@ -451,14 +457,14 @@ public enum OnboardingCopy {
 
     /// Under a proof: what to try now, with the key that opens Ask right
     /// now. When answers work (Apple Intelligence, or a model on this Mac)
-    /// a question works; otherwise a word from the window still finds it.
-    /// Nil when no key opens Ask now: the card then offers only "Open it
-    /// for me".
+    /// a question works; otherwise the first try is a search, which works on
+    /// every Mac, so the line asks for one in those words. Nil when no key
+    /// opens Ask now: the card then offers only "Open it for me".
     public static func tryItNext(_ key: AskKeyNow, answersAvailable: Bool) -> String? {
         guard let phrase = key.phrase else { return nil }
         return answersAvailable
             ? "\(phrase) and ask about it."
-            : "\(phrase) and type a word from that window."
+            : "\(phrase) and search for a word from that window."
     }
 
     /// When Ask opens. After the key: "That’s it. Shift twice works
