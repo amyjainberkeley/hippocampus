@@ -10,7 +10,11 @@
 //!   `<name>.rest.txt` are its reading.
 
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+#[path = "support/cpu_clock.rs"]
+mod cpu_clock;
+use cpu_clock::{cpu_since, thread_cpu_time};
 
 use mci_brain::reading::{
     audit_text, body, excerpt, passage, reading, reading_prefix, screen_reading, ExcerptQuery,
@@ -885,21 +889,23 @@ fn list_prefixes_of_a_thousand_64_kb_windows_stop_early() {
     // A full reading of these windows takes about fifteen times as long in a
     // debug build. A prefix reads only the blocks it shows, in pieces of at
     // most 64 lines, plus one count of letters when a lone CJK character
-    // appears. The best of three runs keeps a busy machine from failing it.
+    // appears. Timed on this thread's CPU clock, the best of three runs, so
+    // a busy machine (other builds, or the tests beside this one) doesn't
+    // fail it.
     // Notes, and the apps whose rules look at more than a window's edges:
     // Slack and a code editor (their sidebar headings and status bars can
     // sit anywhere) must stop as early.
     for app in [NOTES, SLACK, VSCODE] {
         let best = (0..3)
             .map(|_| {
-                let started = Instant::now();
+                let started = thread_cpu_time();
                 let mut total = 0;
                 for index in 0..1_000 {
                     total +=
                         reading_prefix(&windows[index % windows.len()], SCREEN, app, 280).len();
                 }
                 assert!(total > 0);
-                started.elapsed()
+                cpu_since(started)
             })
             .min()
             .unwrap();
@@ -1647,14 +1653,14 @@ fn search_and_list_passages_of_64_kb_windows_clean_only_what_they_show() {
     }
     // A full reading of one of these windows takes about 15 ms in a debug
     // build, so 200 of them take 3 s. Search results and list rows read only
-    // the blocks they show. The best of three runs keeps a busy machine from
-    // failing it.
+    // the blocks they show. Timed on this thread's CPU clock, the best of
+    // three runs, so a busy machine doesn't fail it.
     let best = |run: &dyn Fn() -> usize| {
         (0..3)
             .map(|_| {
-                let started = Instant::now();
+                let started = thread_cpu_time();
                 assert!(run() > 0);
-                started.elapsed()
+                cpu_since(started)
             })
             .min()
             .unwrap()
