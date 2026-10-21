@@ -248,10 +248,10 @@ public extension View {
     /// Resume in a row of native bordered buttons, on Today's card and a
     /// Working On page (SPEC 3.1, 3.2): the system's prominent bordered
     /// button in the accent colour, so the row shares one height, top edge
-    /// and corner. Blue in a window in the background too, as it always was.
+    /// and corner. Like every such button, macOS draws it without its colour
+    /// while the window is in the background.
     func resumeButtonStyle() -> some View {
         buttonStyle(.borderedProminent)
             .tint(MCI.Color.accentFill)
-            .environment(\.controlActiveState, .key)
     }
 }
