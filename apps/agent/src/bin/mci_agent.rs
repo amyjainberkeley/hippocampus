@@ -982,7 +982,7 @@ async fn run_agent(args: Args) -> ExitCode {
                             }
                         }
                         let key = DbKey::from_bytes(key_bytes);
-                        // An install from before 0.3.1 made these 0755 and
+                        // An install from before 0.3.0 made these 0755 and
                         // 0644. Take group and other access off the data
                         // folder, the store and its WAL and SHM, and the
                         // run-lock folder, before the store opens.

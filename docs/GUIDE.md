@@ -117,7 +117,7 @@ cargo build -p mci-agent --bin mci-seed-brain
 ./scripts/swift-package.sh build --package-path apps/demo-memory --product demo-screens
 ```
 
-Before filming: AI tools you connected still read your own memory while Demo Memory is in use, so disconnect them first if you film one; and Resume says "Made up for the demo, so nothing opens." for the week's files, folders, documents and made-up sites, but its pages on real sites, and Open Link, open in your own browser, so use a browser profile with no accounts signed in.
+Before filming: AI tools you connected still read your own memory while Demo Memory is in use, so disconnect them first if you film one; and Resume says "Made up for the demo, so nothing opens." for the week's files, documents, made-up sites and folders, except the project's own folder, which Demo Memory makes, empty, so Resume opens it in your editor and Terminal. Its pages on real sites, and Open Link, open in your own browser, so use a browser profile with no accounts signed in.
 
 ## Your calendar
 

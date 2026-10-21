@@ -1234,7 +1234,7 @@ for path in re.findall(r'"(~/[^"]+)"', block):
     print(path)
 PY
 if [[ ! -s "$H/zap-paths.txt" ]]; then
-    # The cask lives in the local tap; without it, its home paths as of 0.3.1.
+    # The cask lives in the local tap; without it, its home paths as of 0.3.0.
     printf '%s\n' "~/..claude.json.hippocampus.lock" "~/.claude/.hippocampus-context.lock" \
         "~/.codex/.config.toml.hippocampus.lock" "~/.codex/.hippocampus-context.lock" \
         "~/.config/hippocampus" "~/.hippocampus" "~/.hippocampus-client-registry-journal-*" "~/.mci" \

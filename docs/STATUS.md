@@ -1,6 +1,6 @@
 # Hippocampus Status
 
-_Updated October 20, 2026, for the next release after 0.3.0._
+_Updated October 20, 2026, for 0.3.0, a beta._
 
 Audited code baseline: `99bc8b7`
 
@@ -40,7 +40,7 @@ page is refreshed with each release. Each row names the tests that cover it.
 | Ask {your tool} | Ask Claude (or the last tool chosen) opens the tool with the message in its box; nothing is sent. One builder makes every message; the clipboard copy stays on this Mac, out of clipboard history, and clears after 2 minutes. | `apps/agent/tests/send_card.rs`, `AskAIButtonTests`, `SendCardClientTests`, `WindowHandoffDeliveryTests`, `AskPanelHandoffTests`. A real Claude, Codex, Cursor or ChatGPT opening with the text in its box: needs a person. |
 | Calendar | Off until turned on. Then today's meetings over Today's day strip, a call named after its meeting, a project's meetings, and Ask's "When did I last meet with …?". Titles, times, calendar names and places only. | `CalendarPrivacyTests` in both apps, `SystemCalendarTests`, `CalendarQuestionTests`, `CalendarAttributionTests`. macOS's prompt on a signed build: needs a person. |
 | Pictures of other windows | When a window beside the one in front changes its text, a picture of that window alone, with every window in front of it blanked out, sealed like the front window's screenshots; at most 30 an hour; none for a call or video app or page it recognizes, or a private window. At most 2 GB, or 2% of the disk if that is less (1, 2 or 5 GB in Preferences), thinned out as they age. Off for people upgrading until they turn it on. | `SideWindowPicturePolicyTests`, `WindowPictureCropTests`, `core/brain/tests/side_pictures.rs`, `moment_screenshots.rs`, `apps/agent/tests/side_pictures_retention.rs`, `brain_ingest_context.rs`. A working hour's disk and CPU: needs a person. |
-| Demo Memory | A made-up week in its own folder, from Option-click on the hi menu or Preferences, under About; remembering is paused while it is in use, and the menu, Ask's footer, Preferences and the window's footer say Demo Memory. Resume says "Made up for the demo, so nothing opens." for the week's files, folders, documents and made-up sites. | The seeder's `demo_week` tests, the `swift-test-demo-memory` lane, `DemoMemorySwitchingTests`, `DemoMemoryTests`, `StatusMenuModelTests`, `SupervisorStopAndPauseTests`, `ResumeSheetModelTests`. In the signed app: needs a person. |
+| Demo Memory | A made-up week in its own folder, from Option-click on the hi menu or Preferences, under About; remembering is paused while it is in use, and the menu, Ask's footer, Preferences and the window's footer say Demo Memory. Resume says "Made up for the demo, so nothing opens." for the week's files, documents, made-up sites and folders, except the project's own folder, which Demo Memory makes, empty, so Resume opens it in the editor and Terminal. Privacy shows the week's own activity, and its Delete Everything deletes only the week. | The seeder's `demo_week` tests, the `swift-test-demo-memory` lane, `DemoMemorySwitchingTests`, `DemoMemoryTests`, `StatusMenuModelTests`, `SupervisorStopAndPauseTests`, `ResumeSheetModelTests`, `PrivacyDashboardTests`. In the signed app: needs a person. |
 | AI tools | Connect AI Tools… registers the `hippocampus` MCP server with Claude Code and Codex. Each session can start with up to four lines of recent work and up to six things learned about you. Disconnect… and Disconnect All… in Preferences take out exactly what Connect added. | `mcp_server.rs`, `context_packet.rs`, `handoff.rs`, `what_is_sent.rs` and `client_registration_e2e.rs` in `apps/agent/tests`; the `menu-ai-connector`, `onboarding-ai-connector` and `session-context-behavior` lanes. A live Claude Code or Codex session on the 0.3.0 build: needs a person. |
 | Menu bar, Pause, Stop Sharing, Quit | Four menu-bar pictures. Quit stops every process Hippocampus started; Stop Sharing turns remembering off; a crash stops the helper within 10 s. | `MenuBarStatusTests`, `StatusMenuModelTests`, `UserPauseControllerTests`, `CaptureStreamStopPolicyTests`, and the `quit-verifier-contract` lane on a stand-in app. In the real app: needs a person. |
 | Setup | Five screens: Welcome with a live demo of Ask, Today and an AI tool from made-up data, What you get, two permissions, the promises, and Try it, which reads the window behind setup and shows what it read or why it was skipped. Screens slide the way you go; the key that opens Ask can be Fn. | The `apps/onboarding` tests and the off-screen renders (`HIPPOCAMPUS_RENDER_ONBOARDING`). A first run on a new account, and the demo's motion on screen: needs a person. |
@@ -146,7 +146,7 @@ CPU share.
   switches in the shipped worker and in the programs that start it, and the
   sandbox on the running worker. Taking the client out needs an ONNX Runtime
   built from source with `--no_telemetry`, which needs a build with network
-  access; that isn't done yet. Builds up to 0.3.0 did neither: their worker posted to a Microsoft collector over HTTPS (four
+  access; that isn't done yet. Earlier builds, from 0.2.0, did neither: their worker posted to a Microsoft collector over HTTPS (four
   requests, about 45 KB, in one test run). They left
   `~/Library/Caches/hippocampus-ocr` and `~/Library/HTTPStorages/hippocampus-ocr`,
   which the app now deletes when it starts, and ONNX Runtime's own
@@ -174,8 +174,8 @@ CPU share.
 - Copy for Your AI and Ask {your tool} send each moment's whole reading as
   Markdown, shortened evenly to fit the tool's message box.
 - Today and Looked Up list searches only when they know the pages'
-  addresses: where Automation was already allowed, or with the browser
-  extension.
+  addresses, which come from the browser extension. Automation is never
+  used to read an address.
 - Memories saved before 0.3 were read before windows were classified. Their
   tab strips, bars and side bars are set apart, but text the old reader ran
   together across columns is only partly separated. Read Again re-reads one
