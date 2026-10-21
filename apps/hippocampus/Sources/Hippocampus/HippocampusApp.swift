@@ -287,7 +287,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installPreferencesReceiver()
         installSetupReadReceiver()
         if let request = initialPreferencesRequest {
-            showRequested(request)
+            switch request.target {
+            case .preferences:
+                PreferencesWindowController.shared.show(section: request.section)
+            case .setupPanel(let panel):
+                // The window's Add Browser Extension… while the app was not
+                // running: setup's own panel (SPEC 3.5).
+                _ = supervisor.openOnboarding(initialStep: panel.rawValue)
+            }
         }
         installStatusItem()
         // The window's own Turn On, Try Again, Open System Settings… and
@@ -436,25 +443,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let executable = Bundle.main.executableURL,
               let request = PreferencesOpenRequest(notification: notification, executableURL: executable)
         else { return }
-        showRequested(request)
-        request.acknowledge(from: executable)
-    }
-
-    /// A typed request from the window, or from a second launch: a
-    /// Preferences pane, or setup's panel the window's Add Browser
-    /// Extension… asks for, which opens setup itself until setup is done, as
-    /// `hippocampus://setup/browser-extension` does.
-    private func showRequested(_ request: PreferencesOpenRequest) {
         switch request.target {
-        case .preferences(let section):
+        case .preferences:
             configurePreferencesController()
-            PreferencesWindowController.shared.show(section: section)
+            PreferencesWindowController.shared.show(section: request.section)
         case .setupPanel(let panel):
-            let supervisor = self.supervisor
-            Task { @MainActor in
-                _ = supervisor.openOnboarding(initialStep: panel.rawValue)
-            }
+            // The window's Add Browser Extension… (SPEC 3.5): setup's own
+            // panel, which opens the flow until setup is done, as
+            // hippocampus://setup/browser-extension does. It only shows.
+            _ = supervisor.openOnboarding(initialStep: panel.rawValue)
         }
+        request.acknowledge(from: executable)
     }
 
     @objc private func workspaceBecameAvailable(_ notification: Notification) {
