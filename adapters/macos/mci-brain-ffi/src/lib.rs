@@ -71,6 +71,7 @@ use mci_brain::caption::{self, Moment};
 use mci_brain::fts_sanitizer::{
     LexicalAlternative, MAX_LEXICAL_ALTERNATIVES, MAX_LEXICAL_ALTERNATIVE_BYTES,
 };
+use mci_brain::moment_readings::{CAPTION_BY_TITLE, CAPTION_RULES_SINCE};
 use mci_brain::reading::{
     audit_text, excerpt, passage, reading, reading_prefix, reading_start, ExcerptQuery,
 };
@@ -1033,8 +1034,10 @@ enum RowShape<'q> {
 /// The text is the stored cleaned reading when one of the current rules
 /// version is stored (the chrome learned from many frames set apart), else
 /// the live reading. The caption is the stored one when it was made by the
-/// current rules too, else one made from the title now: cheap, and the same
-/// rules the re-clean job uses.
+/// current rules too; else the model's line from a row made since the
+/// caption rules last changed, while it is still grounded in the moment as
+/// it reads now ([`kept_model_caption`]); else one made from the title now:
+/// cheap, and the same rules the re-clean job uses.
 fn row_text(
     event: &mci_brain::Event,
     kind: EventSource,
@@ -1061,15 +1064,57 @@ fn row_text(
             RowShape::Search(_) => list_snippet(&event.text, kind, app),
             RowShape::List | RowShape::Timeline => text.clone(),
         };
-        caption::fallback(&Moment {
+        let now = Moment {
             app,
             title: event.window_title.as_deref(),
             url: event.url.as_deref(),
             text: &start,
             beside: kind == EventSource::ScreenContext,
-        })
+        };
+        stored
+            .and_then(|row| {
+                kept_model_caption(row, now, || {
+                    reading(&event.text, kind, app, event.window_title.as_deref()).main
+                })
+            })
+            .or_else(|| caption::fallback(&now))
     };
     (text, caption)
+}
+
+/// The model's line from a row made by an earlier version whose caption
+/// rules are still today's ([`CAPTION_RULES_SINCE`] up to, not including,
+/// [`READING_VERSION`]): kept while it is still grounded in the moment as it
+/// reads now (`main`, the live reading's main text), as the re-clean job
+/// keeps it when it reaches the row. Only the reading's rules changed, so an
+/// upgrade shows the model's captions at once instead of captions from
+/// titles until the job, which runs only while the Mac is idle, gets there.
+///
+/// None for a row from before the caption rules last changed, one from a
+/// newer build (its caption rules may not be these), a caption made from the
+/// title, a moment the model was never asked about, and a line that
+/// `caption::accept` refuses for the moment now.
+fn kept_model_caption(
+    row: &MomentReading,
+    moment: Moment<'_>,
+    main: impl FnOnce() -> String,
+) -> Option<String> {
+    if !(CAPTION_RULES_SINCE..READING_VERSION).contains(&row.version) || !row.model_tried {
+        return None;
+    }
+    let by_model = row
+        .caption_by
+        .as_deref()
+        .is_some_and(|by| by != CAPTION_BY_TITLE);
+    let line = row.caption.as_deref().filter(|_| by_model)?;
+    let main = main();
+    caption::accept(
+        line,
+        &Moment {
+            text: &main,
+            ..moment
+        },
+    )
 }
 
 /// Fetch the N most recent events for the plain timeline view. Returns
@@ -1437,13 +1482,19 @@ pub unsafe extern "C" fn mci_brain_ffi_event_reading(
         let caption = match stored.as_ref().filter(|row| row.version == READING_VERSION) {
             Some(row) => row.caption.clone(),
             None => head.as_ref().and_then(|event| {
-                caption::fallback(&Moment {
+                let now = Moment {
                     app: event.app_bundle_id.as_deref(),
                     title: event.window_title.as_deref(),
                     url: event.url.as_deref(),
                     text: &read.main,
                     beside: kind == EventSource::ScreenContext,
-                })
+                };
+                // A model's line from before only the reading's rules
+                // changed, while it still holds for the moment as it reads.
+                stored
+                    .as_ref()
+                    .and_then(|row| kept_model_caption(row, now, || read.main.clone()))
+                    .or_else(|| caption::fallback(&now))
             }),
         };
         let mut truncated = value.truncated;
@@ -2115,16 +2166,26 @@ pub unsafe extern "C" fn mci_brain_ffi_storage_usage(h: *mut Handle) -> *mut c_c
 // violation and the test will fail.
 // ---------------------------------------------------------------------------
 
-/// Delete a single event by id. CASCADE removes `event_vectors`, `chunks`,
-/// `entity_mentions` rows referencing this event id (per the migration-0001
+/// The most moments one delete call takes (`{"event_ids":[…]}`): a page read
+/// on many days fits many times over, and a hostile payload stays small.
+pub const MAX_DELETE_EVENT_IDS: usize = 10_000;
+
+/// Delete events by id. CASCADE removes `event_vectors`, `chunks`,
+/// `entity_mentions` rows referencing these event ids (per the migration-0001
 /// / migration-0004 ON DELETE CASCADE clauses). The transient writer also
-/// removes the event's encrypted keyframe file when no surviving event shares
+/// removes each event's encrypted keyframe file when no surviving event shares
 /// its digest. Finally, it `VACUUM`s so freed database pages return to the OS.
 ///
-/// `event_id_json` is a UTF-8 JSON string of shape `{"event_id":<u64>}`.
+/// `event_id_json` is a UTF-8 JSON string of shape `{"event_id":<u64>}` for
+/// one event, or `{"event_ids":[<u64>, …]}` (1 to [`MAX_DELETE_EVENT_IDS`])
+/// for a whole forget: every id goes in one transaction, after one writer
+/// lease and one integrity check, with the cleanup once (SPEC 3.11). An id
+/// that isn't in the store deletes nothing; `events_deleted` counts the rows
+/// that went.
 ///
 /// Returns a JSON [`DeleteResultJson`] on success or null on failure
-/// (`mci_brain_ffi_last_error_message` carries the diagnostic).
+/// (`mci_brain_ffi_last_error_message` carries the diagnostic); on failure
+/// nothing was deleted.
 ///
 /// # Safety
 /// `h` must be a live handle; `event_id_json` must be a non-null,
@@ -2136,7 +2197,10 @@ pub unsafe extern "C" fn mci_brain_ffi_delete_event(
 ) -> *mut c_char {
     #[derive(Deserialize)]
     struct Query {
-        event_id: u64,
+        #[serde(default)]
+        event_id: Option<u64>,
+        #[serde(default)]
+        event_ids: Option<Vec<u64>>,
     }
 
     if h.is_null() {
@@ -2162,8 +2226,27 @@ pub unsafe extern "C" fn mci_brain_ffi_delete_event(
             return ptr::null_mut();
         }
     };
-    match with_writer(handle, |writer| {
-        writer.delete_event_with_outcome(EventId(q.event_id))
+    let ids = match (q.event_id, q.event_ids) {
+        (Some(id), None) => vec![EventId(id)],
+        (None, Some(ids)) if ids.is_empty() => {
+            set_last_error("mci_brain_ffi_delete_event: event_ids is empty");
+            return ptr::null_mut();
+        }
+        (None, Some(ids)) if ids.len() > MAX_DELETE_EVENT_IDS => {
+            set_last_error(&format!(
+                "mci_brain_ffi_delete_event: more than {MAX_DELETE_EVENT_IDS} event_ids"
+            ));
+            return ptr::null_mut();
+        }
+        (None, Some(ids)) => ids.into_iter().map(EventId).collect(),
+        _ => {
+            set_last_error("mci_brain_ffi_delete_event: give event_id or event_ids, not both");
+            return ptr::null_mut();
+        }
+    };
+    match with_writer(handle, |writer| match ids.as_slice() {
+        [id] => writer.delete_event_with_outcome(*id),
+        many => writer.delete_events_with_outcome(many),
     }) {
         Ok(outcome) => json_to_c_string(&delete_result_json(&outcome)),
         Err(e) => {

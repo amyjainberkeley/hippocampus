@@ -198,6 +198,9 @@ public enum NavigationCopy {
         "Forgetting removes it from this Mac. What you already sent to an AI tool stays in that tool."
     public static let forgotten = "Forgotten."
     public static let couldNotForget = "Couldn\u{2019}t forget it. It\u{2019}s still saved."
+    /// A forget that deleted only some of what it was asked to: the rest is
+    /// still promised, and Try Again finishes it.
+    public static let couldNotForgetAll = "Couldn\u{2019}t forget all of it. Some of it is still saved."
     public static let openHippocampusToForget = "To forget, open Hippocampus first."
     public static let undoAction = "Undo"
 

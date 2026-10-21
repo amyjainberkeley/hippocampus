@@ -64,9 +64,23 @@ final class MCIRecallAppDelegate: NSObject, NSApplicationDelegate, @unchecked Se
         }
     }
 
+    /// Quitting, or the last window closing: a forget waiting out its Undo
+    /// note, or under way, is finished first, within a bound, so a moment
+    /// the person forgot never stays readable until the window next opens
+    /// (SPEC 3.11). Meanwhile the process stays, and a window still open
+    /// says "Forgetting…".
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         terminating = true
-        return .terminateNow
+        #if DEBUG
+        // The preview opens no memory, and touches none on its way out.
+        if NativePreviewConfiguration(arguments: CommandLine.arguments) != nil { return .terminateNow }
+        #endif
+        let waits = MainActor.assumeIsolated {
+            MCIRecallApp.forget.finishBeforeQuitting {
+                NSApp.reply(toApplicationShouldTerminate: true)
+            }
+        }
+        return waits ? .terminateLater : .terminateNow
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -443,22 +457,8 @@ struct RootView: View {
             ) {
                 go(.newQuestion)
             },
-            .init(
-                id: "app.pause",
-                title: NavigationCopy.pause,
-                shortcut: "",
-                category: .actions
-            ) {
-                if let channel { Task { _ = await channel.send(WindowChannelRequest(op: .pause), timeout: .seconds(15)) } }
-            },
-            .init(
-                id: "app.resume",
-                title: NavigationCopy.resume,
-                shortcut: "",
-                category: .actions
-            ) {
-                if let channel { Task { _ = await channel.send(WindowChannelRequest(op: .resume), timeout: .seconds(15)) } }
-            },
+            // Pause, Resume and the rest: the window registers the one
+            // action its status offers now (`statusCommands`).
             .init(
                 id: "app.forgetRecent",
                 title: NavigationCopy.forgetLastTenMinutes,

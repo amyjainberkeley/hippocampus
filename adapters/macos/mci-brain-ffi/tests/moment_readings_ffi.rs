@@ -6,6 +6,7 @@
 use std::ffi::{c_char, CStr, CString};
 use std::ptr;
 
+use mci_brain::moment_readings::CAPTION_RULES_SINCE;
 use mci_brain::reading::Reading;
 use mci_brain::{
     BrainStore, Event, EventId, EventSource, MomentReading, SqlCipherBrainStore, READING_VERSION,
@@ -171,45 +172,101 @@ fn after_the_job_rows_and_the_detail_show_what_it_stored() {
     assert_eq!(detail["caption"], "Looking up how to type accents");
 }
 
+/// A model's line about the accent page that `caption::accept` takes for it
+/// as it reads now: grounded in the page, and naming more than its title.
+const GROUNDED_LINE: &str = "Reading how to press and hold a letter key";
+
+fn put_older_reading(writer: &SqlCipherBrainStore, id: EventId, version: u32, caption: &str) {
+    let read = writer.stored_moment(id).unwrap().unwrap();
+    writer
+        .put_moment_reading(
+            &MomentReading {
+                event_id: id,
+                version,
+                reading: Some(Reading {
+                    main: "made by rules this build does not know".into(),
+                    rest: String::new(),
+                }),
+                caption: Some(caption.into()),
+                caption_by: Some("apple-foundation-models".into()),
+                model_tried: true,
+                updated_us: 200,
+            },
+            &read,
+        )
+        .unwrap();
+}
+
 #[test]
 fn text_and_caption_stored_by_other_rules_are_not_shown() {
-    // A row made by rules this build does not know (a newer build, before a
-    // downgrade; an older one, before the job reaches it): the live reading
-    // and a caption made from the title now, never the two mixed.
+    // A row made by rules this build does not know or no longer keeps (a
+    // newer build's, before a downgrade: its caption rules may not be these;
+    // one from before the caption rules last changed; a model line that no
+    // longer holds for the moment as it reads now): the live reading and a
+    // caption made from the title now, never the two mixed.
     let brain = Brain::new();
     let writer = brain.writer();
-    for (n, version) in [READING_VERSION + 1, READING_VERSION - 1]
-        .into_iter()
-        .enumerate()
+    for (n, (version, line)) in [
+        (READING_VERSION + 1, GROUNDED_LINE),
+        (CAPTION_RULES_SINCE - 1, GROUNDED_LINE),
+        (READING_VERSION - 1, "Looking up the accent menu"),
+    ]
+    .into_iter()
+    .enumerate()
     {
         let id = put(&writer, 100 + n as u64, "Accent menu", PAGE);
-        let read = writer.stored_moment(id).unwrap().unwrap();
-        writer
-            .put_moment_reading(
-                &MomentReading {
-                    event_id: id,
-                    version,
-                    reading: Some(Reading {
-                        main: "made by rules this build does not know".into(),
-                        rest: String::new(),
-                    }),
-                    caption: Some("Looking up the accent menu".into()),
-                    caption_by: Some("apple-foundation-models".into()),
-                    model_tried: true,
-                    updated_us: 200,
-                },
-                &read,
-            )
-            .unwrap();
+        put_older_reading(&writer, id, version, line);
         let detail = brain.reading(id.0);
         assert_eq!(detail["main"], PAGE, "the live reading");
-        assert_eq!(detail["caption"], "Reading \u{201c}Accent menu\u{201d}");
+        assert_eq!(
+            detail["caption"], "Reading \u{201c}Accent menu\u{201d}",
+            "version {version}"
+        );
         let row = brain
             .history()
             .into_iter()
             .find(|row| row["event_id"] == id.0)
             .unwrap();
-        assert_eq!(row["caption"], "Reading \u{201c}Accent menu\u{201d}");
+        assert_eq!(
+            row["caption"], "Reading \u{201c}Accent menu\u{201d}",
+            "version {version}"
+        );
+    }
+}
+
+#[test]
+fn a_model_caption_kept_through_a_reading_change_shows_at_once_beside_the_live_text() {
+    // Only the reading's rules changed since the row was made (the caption
+    // rules are the same): the model's line shows while it still holds for
+    // the moment as it reads now, before the idle-only re-clean reaches the
+    // row. The text is still the live reading.
+    let brain = Brain::new();
+    let writer = brain.writer();
+    for (n, version) in (CAPTION_RULES_SINCE..READING_VERSION).enumerate() {
+        let id = put(&writer, 100 + n as u64, "Accent menu", PAGE);
+        put_older_reading(&writer, id, version, GROUNDED_LINE);
+        let detail = brain.reading(id.0);
+        assert_eq!(detail["main"], PAGE, "the live reading, not the stored one");
+        assert_eq!(detail["caption"], GROUNDED_LINE, "version {version}");
+        let row = brain
+            .history()
+            .into_iter()
+            .find(|row| row["event_id"] == id.0)
+            .unwrap();
+        assert_eq!(row["caption"], GROUNDED_LINE, "version {version}");
+        assert!(row["ocr_text_snippet"]
+            .as_str()
+            .unwrap()
+            .starts_with("How to type accents"));
+        let recent = take_json(unsafe { mci_brain_ffi_recent_events(brain.handle, 5) });
+        let recent = recent
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["event_id"] == id.0)
+            .unwrap()
+            .clone();
+        assert_eq!(recent["caption"], GROUNDED_LINE, "version {version}");
     }
 }
 

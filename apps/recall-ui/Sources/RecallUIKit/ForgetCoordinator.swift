@@ -35,21 +35,43 @@ public struct ForgetRequest: Equatable, Sendable, Codable {
     }
 }
 
-/// The forget the window has promised and not finished: written before
-/// anything is deleted, removed once it is done, and applied the next time
-/// the window opens if the window ended in between (SPEC 3.11). Moment ids
-/// and times only, never content. The file passes the writer lease's own
+/// The forgets the window has promised and not finished: each written
+/// before anything is deleted, removed once it is done, and applied the next
+/// time the window opens if the window ended in between (SPEC 3.11). Moment
+/// ids and times only, never content. The file passes the writer lease's own
 /// checks: a regular file owned by this user, mode 0600, never a symlink.
+///
+/// It is a list, so two forgets close together each keep their own promise:
+/// one finishing removes only its own entry, never the other's.
 public struct PendingForgetStore: Sendable {
-    /// What the file holds.
-    struct Record: Codable, Equatable {
+    /// One promised forget.
+    public struct Entry: Codable, Equatable, Sendable {
+        public let id: UUID
+        /// Which memory it is for, by a hash of its path, so a forget for
+        /// one memory is never applied to another.
+        let memory: String
+        public var request: ForgetRequest
+        public let createdUs: UInt64
+    }
+
+    /// What the file holds: every forget promised on this Mac and not yet
+    /// finished, for any memory, oldest first.
+    struct List: Codable, Equatable {
+        var version = 2
+        var forgets: [Entry]
+    }
+
+    /// The one forget the first build wrote. Still read, so a forget it left
+    /// behind is finished, not lost.
+    struct Single: Codable, Equatable {
         var version = 1
-        /// Which memory it is for, by a hash of its path, so a forget for one
-        /// memory is never applied to another.
         var memory: String
         var request: ForgetRequest
         var createdUs: UInt64
     }
+
+    /// The id a forget in the first form goes by.
+    static let singleID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
 
     /// The most the file may hold.
     static let maxBytes = 256 * 1_024
@@ -76,33 +98,66 @@ public struct PendingForgetStore: Sendable {
 
     private var memoryKey: String { SidebarHides.memoryKey(memory) }
 
-    /// Writes `request` atomically, mode 0600, in a folder only this user
-    /// can open. Throws when it can't, and then nothing is deleted.
-    public func save(_ request: ForgetRequest, now: Date = Date()) throws {
-        guard let directory, let file else { return }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
-                                                attributes: [.posixPermissions: 0o700])
-        let record = Record(memory: memoryKey, request: request, createdUs: ForgetRequest.microseconds(now))
-        let data = try JSONEncoder().encode(record)
-        guard data.count <= Self.maxBytes else { throw CocoaError(.fileWriteOutOfSpace) }
-        let temporary = directory.appendingPathComponent(".\(Self.fileName).\(UUID().uuidString)")
-        let descriptor = Darwin.open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        guard descriptor >= 0 else { throw CocoaError(.fileWriteNoPermission) }
-        let wrote = data.withUnsafeBytes { buffer in
-            Darwin.write(descriptor, buffer.baseAddress, buffer.count)
-        }
-        _ = fchmod(descriptor, 0o600)
-        _ = fsync(descriptor)
-        Darwin.close(descriptor)
-        guard wrote == data.count, Darwin.rename(temporary.path, file.path) == 0 else {
-            _ = Darwin.unlink(temporary.path)
-            throw CocoaError(.fileWriteUnknown)
-        }
+    /// This memory's promised forgets, oldest first. A file that fails a
+    /// check is never read, and none of it is applied.
+    public func entries() -> [Entry] {
+        (readAll() ?? []).filter { $0.memory == memoryKey }
     }
 
-    /// The pending forget for this memory, if the file is there and passes
-    /// every check. A file that fails one is never read, and never applied.
+    /// Promises `request`: added to the file before anything is deleted.
+    /// Throws when it can't be written, and then nothing is deleted.
+    @discardableResult
+    public func save(_ request: ForgetRequest, now: Date = Date()) throws -> UUID {
+        let entry = Entry(id: UUID(), memory: memoryKey, request: request, createdUs: ForgetRequest.microseconds(now))
+        guard directory != nil else { return entry.id }
+        try write((readAll() ?? []) + [entry])
+        return entry.id
+    }
+
+    /// What is still promised of `id` once part of it is done; when nothing
+    /// is left, its entry goes. Every other entry stays as it is.
+    public func update(_ id: UUID, to remaining: ForgetRequest) {
+        guard var all = readAll(),
+              let index = all.firstIndex(where: { $0.id == id && $0.memory == memoryKey })
+        else { return }
+        if remaining.isEmpty {
+            all.remove(at: index)
+        } else {
+            all[index].request = remaining
+        }
+        try? write(all)
+    }
+
+    /// `id` is done or undone: its own entry goes, and only its own.
+    public func remove(_ id: UUID) {
+        update(id, to: ForgetRequest())
+    }
+
+    /// Everything promised for this memory, as one request: every entry's
+    /// moments and spans. Nil when nothing is.
     public func load() -> ForgetRequest? {
+        let mine = entries()
+        guard !mine.isEmpty else { return nil }
+        var ids: [UInt64] = []
+        var seen = Set<UInt64>()
+        for id in mine.flatMap(\.request.momentIds) where seen.insert(id).inserted {
+            ids.append(id)
+        }
+        return ForgetRequest(momentIds: ids, spans: mine.flatMap(\.request.spans))
+    }
+
+    /// Every forget promised for this memory goes; other memories' stay.
+    public func remove() {
+        guard let all = readAll() else { return }
+        try? write(all.filter { $0.memory != memoryKey })
+    }
+
+    // MARK: The file
+
+    /// Every entry, for any memory; nil when there is no file or it fails a
+    /// check: not a regular file of this user's, readable by others, too
+    /// large, or not one of the two forms.
+    func readAll() -> [Entry]? {
         guard let file else { return nil }
         var info = stat()
         guard lstat(file.path, &info) == 0,
@@ -118,17 +173,43 @@ public struct PendingForgetStore: Sendable {
         let read = data.withUnsafeMutableBytes { buffer in
             Darwin.read(descriptor, buffer.baseAddress, buffer.count)
         }
-        guard read == Int(info.st_size),
-              let record = try? JSONDecoder().decode(Record.self, from: data),
-              record.version == 1, record.memory == memoryKey
-        else { return nil }
-        return record.request
+        guard read == Int(info.st_size) else { return nil }
+        let decoder = JSONDecoder()
+        if let list = try? decoder.decode(List.self, from: data), list.version == 2 {
+            return list.forgets
+        }
+        if let single = try? decoder.decode(Single.self, from: data), single.version == 1 {
+            return [Entry(id: Self.singleID, memory: single.memory, request: single.request,
+                          createdUs: single.createdUs)]
+        }
+        return nil
     }
 
-    /// Removes the file once the forget is done or undone.
-    public func remove() {
-        guard let file else { return }
-        _ = Darwin.unlink(file.path)
+    /// Writes `entries` atomically, mode 0600, in a folder only this user
+    /// can open; with none left, the file goes.
+    func write(_ entries: [Entry]) throws {
+        guard let directory, let file else { return }
+        guard !entries.isEmpty else {
+            _ = Darwin.unlink(file.path)
+            return
+        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        let data = try JSONEncoder().encode(List(forgets: entries))
+        guard data.count <= Self.maxBytes else { throw CocoaError(.fileWriteOutOfSpace) }
+        let temporary = directory.appendingPathComponent(".\(Self.fileName).\(UUID().uuidString)")
+        let descriptor = Darwin.open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else { throw CocoaError(.fileWriteNoPermission) }
+        let wrote = data.withUnsafeBytes { buffer in
+            Darwin.write(descriptor, buffer.baseAddress, buffer.count)
+        }
+        _ = fchmod(descriptor, 0o600)
+        _ = fsync(descriptor)
+        Darwin.close(descriptor)
+        guard wrote == data.count, Darwin.rename(temporary.path, file.path) == 0 else {
+            _ = Darwin.unlink(temporary.path)
+            throw CocoaError(.fileWriteUnknown)
+        }
     }
 }
 
@@ -141,11 +222,19 @@ public struct PendingForgetStore: Sendable {
 /// person's own pause, answers once the lease is free, and on `release`
 /// starts remembering again only if it was on. Paused or off, the app has
 /// nothing to stop and answers at once.
+///
+/// Forgets go one after another through one queue: a forget that comes
+/// while another is under way waits for it, inside the same hold, instead of
+/// asking the app for a second one (the app allows one at a time).
 @MainActor
 public final class ForgetCoordinator: ObservableObject {
     public enum Outcome: Equatable, Sendable {
         /// Deleted. `moments` is how many the deletes reported.
         case forgotten(moments: UInt64)
+        /// Some of it was deleted (`moments`) and the rest is still saved:
+        /// its promise stays for the rest, so Try Again, or the next time
+        /// the window opens, finishes it.
+        case partlyForgotten(moments: UInt64)
         /// Nothing was deleted; it's still saved.
         case failed
         /// A window opened by hand while Hippocampus runs: open it first.
@@ -162,15 +251,76 @@ public final class ForgetCoordinator: ObservableObject {
         public let count: Int
     }
 
+    /// How a forget ended after its Undo note closed: nobody waited for it,
+    /// so the window hears of it here, and says so when it didn't all go.
+    public struct LateOutcome: Equatable, Sendable {
+        public let id: UUID
+        public let outcome: Outcome
+        /// What the person picked, for Try Again.
+        public let request: ForgetRequest
+        /// How many moments the note counted.
+        public let count: Int
+    }
+
     /// What the footer says while a forget runs.
     @Published public private(set) var phase: ForgetPhase?
     /// The forget whose Undo note is up, if any.
     @Published public private(set) var undoable: Undoable?
+    /// The newest forget that ended after its Undo note closed.
+    @Published public private(set) var lateOutcome: LateOutcome?
+    /// The moments every list leaves out: forgotten and not deleted yet.
+    /// Hidden at the click, through the Undo note and the deletes, and while
+    /// a failure keeps them promised; they come back only on Undo, or when a
+    /// forget fails and goes back to the person (SPEC 3.11: "Rows that were
+    /// hidden at the click stay gone").
+    @Published public private(set) var hiddenMoments: Set<UInt64> = []
 
     /// How long the Undo note waits before the delete goes ahead.
     public static let undoWindow: Duration = .seconds(5)
     /// How long the app has to free the writer lease.
     public static let holdWait: Duration = .seconds(12)
+    /// While the deletes run, how often the window asks the app to keep its
+    /// hold, which otherwise ends on its own (SPEC 3.11).
+    public static let renewEvery: Duration = .seconds(10)
+    /// How long a renewal waits for its answer; it is never awaited by the
+    /// forget, and a refusal changes nothing.
+    public static let renewWait: Duration = .seconds(2)
+    /// The most moments one delete call takes (the FFI's
+    /// `MAX_DELETE_EVENT_IDS`): a forget of more goes in a few calls.
+    public static let idsPerDelete = 10_000
+    /// How many times one window tries a kept forget again on its own, when
+    /// the app's status says a hold can be had: a forget that keeps failing
+    /// never keeps stopping remembering. Try Again and the next open still
+    /// finish it.
+    public static let automaticTries = 3
+    /// The longest the window waits, as it closes, for a forget waiting out
+    /// its note or under way: the hold's wait, the deletes and the release.
+    public static let quitWait: Duration = .seconds(20)
+
+    /// Where a forget came from.
+    private enum Kind: Equatable {
+        /// Asked for now; its caller waits for the outcome.
+        case now
+        /// Its Undo note closed; nobody waits for it.
+        case afterUndo(count: Int)
+        /// Promised before and not finished: a crash left it, or a failure
+        /// kept it. The person isn't asked again, so a failure keeps it too.
+        case unfinished
+    }
+
+    /// One forget on its way to the store: its promise's id in the pending
+    /// file, what it removes, and where it came from.
+    private struct Job {
+        let id: UUID
+        let request: ForgetRequest
+        let kind: Kind
+
+        /// "Finishing a forget…" for one promised before; "Forgetting…".
+        var phase: ForgetPhase { kind == .unfinished ? .finishing : .forgetting }
+        /// A failure keeps its promise, to be tried again, instead of
+        /// handing it back to the person with Try Again.
+        var keepsOnFailure: Bool { kind == .unfinished }
+    }
 
     private let mutator: (any PrivacyMutator)?
     private let channel: (any WindowChannelSending)?
@@ -178,7 +328,30 @@ public final class ForgetCoordinator: ObservableObject {
     private let appRunning: @Sendable () -> Bool
     private let deletions: MemoryDeletionSignal
     private let now: @Sendable () -> Date
+    private let renewal: Duration
     private var undoTask: Task<Void, Never>?
+    /// Forgets waiting for the store, oldest first.
+    private var queue: [Job] = []
+    /// Every forget queued and not yet answered, by its promise's id.
+    private var inFlight: [UUID: ForgetRequest] = [:]
+    /// Promises a failure kept in this window, by id: what is still saved
+    /// of each, tried again when the app's status says a hold can be had.
+    private var unfinished: [UUID: ForgetRequest] = [:]
+    /// Whether the app's last status lets it hold remembering now.
+    private var holdable = true
+    /// Tries made on the app's statuses since the last kept forget was done.
+    private var tries = 0
+    /// A status that lets the app hold came while a forget was under way:
+    /// a forget that ends kept is tried again as soon as nothing else runs.
+    private var heardWhileBusy = false
+    /// The window is closing: no note can say a forget failed, so every
+    /// failure keeps its promise for the next open.
+    private var quitting = false
+    private var worker: Task<Void, Never>?
+    /// Who waits for each forget's outcome, by its promise's id.
+    private var waiting: [UUID: [CheckedContinuation<Outcome, Never>]] = [:]
+    /// Who waits for nothing to be under way.
+    private var idleWaiters: [CheckedContinuation<Void, Never>] = []
 
     /// `channel` is the private pipe; nil for a window opened by hand,
     /// which deletes directly only while Hippocampus isn't running.
@@ -188,7 +361,8 @@ public final class ForgetCoordinator: ObservableObject {
         store: PendingForgetStore,
         appRunning: @escaping @Sendable () -> Bool,
         deletions: MemoryDeletionSignal = .shared,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        renewEvery: Duration = ForgetCoordinator.renewEvery
     ) {
         self.mutator = mutator
         self.channel = channel
@@ -196,25 +370,27 @@ public final class ForgetCoordinator: ObservableObject {
         self.appRunning = appRunning
         self.deletions = deletions
         self.now = now
+        renewal = renewEvery
     }
 
     // MARK: Forgetting now
 
     /// Forgets `request` now: written down, held, deleted, released. For
     /// anything a confirmation asked about first (a session, an hour, a
-    /// page, recent time).
+    /// page, recent time). A forget waiting out its Undo note goes first.
     @discardableResult
     public func forget(_ request: ForgetRequest) async -> Outcome {
         guard !request.isEmpty else { return .forgotten(moments: 0) }
-        await finishUndoable()
+        finishUndoableNow()
         guard mutator != nil else { return .unavailable }
         if channel == nil, appRunning() { return .needsApp }
+        let id: UUID
         do {
-            try store.save(request, now: now())
+            id = try store.save(request, now: now())
         } catch {
             return .failed
         }
-        return await apply(request, phase: .forgetting)
+        return await run(Job(id: id, request: request, kind: .now))
     }
 
     // MARK: Forgetting after the Undo note
@@ -227,102 +403,411 @@ public final class ForgetCoordinator: ObservableObject {
     @discardableResult
     public func forgetAfterUndo(_ request: ForgetRequest, count: Int) async -> Outcome? {
         guard !request.isEmpty else { return nil }
-        await finishUndoable()
-        guard mutator != nil else { return .unavailable }
-        if channel == nil, appRunning() { return .needsApp }
+        let earlier = finishUndoableNow()
+        guard mutator != nil else { return await settle(earlier, then: .unavailable) }
+        if channel == nil, appRunning() { return await settle(earlier, then: .needsApp) }
+        let id: UUID
         do {
-            try store.save(request, now: now())
+            id = try store.save(request, now: now())
         } catch {
-            return .failed
+            return await settle(earlier, then: .failed)
         }
-        let pending = Undoable(id: UUID(), request: request, count: count)
+        let pending = Undoable(id: id, request: request, count: count)
         undoable = pending
+        publishHidden()
         undoTask = Task { [weak self] in
             try? await Task.sleep(for: Self.undoWindow)
             guard !Task.isCancelled else { return }
             await self?.finish(pending.id)
         }
-        return nil
+        return await settle(earlier, then: nil)
     }
 
     /// Undo: the note's button, or ⌘Z while it shows. Nothing was deleted.
     @discardableResult
     public func undo() -> Bool {
-        guard undoable != nil else { return false }
+        guard let pending = undoable else { return false }
         undoTask?.cancel()
         undoTask = nil
         undoable = nil
-        store.remove()
+        store.remove(pending.id)
+        publishHidden()
         return true
     }
 
-    /// The forget waiting out its note goes ahead now: a newer forget, or
-    /// the window closing.
+    /// The forget waiting out its note goes ahead now, and this returns once
+    /// it is done: a newer forget, or the window closing.
     public func finishUndoable() async {
-        guard let pending = undoable else { return }
-        await finish(pending.id)
+        guard let id = finishUndoableNow() else { return }
+        _ = await outcome(of: id)
     }
 
+    /// The note's time is up: the forget goes ahead, if it is still the one
+    /// waiting (Undo, or a newer forget, may have come first).
+    private func finish(_ id: UUID) async {
+        guard undoable?.id == id else { return }
+        finishUndoableNow()
+        _ = await outcome(of: id)
+    }
+
+    /// Moves the forget waiting out its note into the queue; its id.
     @discardableResult
-    private func finish(_ id: UUID) async -> Outcome? {
-        guard let pending = undoable, pending.id == id else { return nil }
+    private func finishUndoableNow() -> UUID? {
+        guard let pending = undoable else { return nil }
         undoTask?.cancel()
         undoTask = nil
         undoable = nil
-        return await apply(pending.request, phase: .forgetting)
+        enqueue(Job(id: pending.id, request: pending.request, kind: .afterUndo(count: pending.count)))
+        return pending.id
     }
 
-    // MARK: A forget a crash left
+    /// Waits for the earlier forget a newer one moved ahead, then answers
+    /// `outcome`: the newer one's note shows at once, and its caller hears
+    /// back once the earlier one is done.
+    private func settle(_ earlier: UUID?, then outcome: Outcome?) async -> Outcome? {
+        if let earlier { _ = await self.outcome(of: earlier) }
+        return outcome
+    }
 
-    /// The window opened and found a forget it promised and didn't finish:
-    /// "Finishing a forget…" until it's done. True when one was applied.
+    // MARK: A forget a crash left, or a failure kept
+
+    /// Finishes every forget promised and not finished: one a crash left
+    /// (the window opened and found it), or one a failure kept (Try Again,
+    /// or a status that lets the app hold). "Finishing a forget…" until
+    /// they're done; one that fails again stays promised. Nil when there
+    /// were none.
     @discardableResult
     public func finishLeftover() async -> Outcome? {
-        guard mutator != nil, let request = store.load() else { return nil }
+        guard mutator != nil else { return nil }
+        let known = Set(inFlight.keys).union([undoable?.id].compactMap { $0 })
+        let leftovers = store.entries().filter { !known.contains($0.id) && !$0.request.isEmpty }
+        guard !leftovers.isEmpty else { return nil }
         if channel == nil, appRunning() { return .needsApp }
-        return await apply(request, phase: .finishing)
+        var outcomes: [Outcome] = []
+        for entry in leftovers {
+            unfinished[entry.id] = nil
+            outcomes.append(await run(Job(id: entry.id, request: entry.request, kind: .unfinished)))
+        }
+        return Self.together(outcomes)
     }
 
-    // MARK: The hold, the deletes and the release
-
-    private func apply(_ request: ForgetRequest, phase: ForgetPhase) async -> Outcome {
-        guard let mutator else { return .unavailable }
-        self.phase = phase
-        defer { self.phase = nil }
-        var held = false
-        if let channel {
-            held = await channel.send(WindowChannelRequest(op: .hold), timeout: Self.holdWait)
-            guard held else {
-                // The app didn't answer, or the lease stayed busy: nothing
-                // is deleted, and the promise goes, so the rows come back.
-                store.remove()
-                return .failed
-            }
+    /// The app's status, as it pushes it over the pipe. When it shows a hold
+    /// can be had and a failure kept a forget, that forget is tried again,
+    /// at most `automaticTries` times in a window: no timer, only what the
+    /// app says.
+    public func statusArrived(_ status: WindowChannelStatus) {
+        holdable = Self.letsTheAppHold(status.state)
+        guard !quitting else { return }
+        guard worker == nil else {
+            // Heard mid-forget (the app's own release, say): not lost.
+            heardWhileBusy = heardWhileBusy || holdable
+            return
         }
-        var deleted: UInt64 = 0
+        refreshPhase()
+        tryKeptForgetsAgain()
+    }
+
+    /// The kept forgets go into the queue, when the app can hold and tries
+    /// are left. Queued at once, so a second status before they start finds
+    /// them under way rather than trying them twice.
+    private func tryKeptForgetsAgain() {
+        guard holdable, !unfinished.isEmpty, tries < Self.automaticTries else { return }
+        tries += 1
+        let kept = unfinished.sorted { $0.key.uuidString < $1.key.uuidString }
+        unfinished.removeAll()
+        for (id, request) in kept {
+            enqueue(Job(id: id, request: request, kind: .unfinished))
+        }
+    }
+
+    /// Every state but a hold under way and a stop that failed lets the app
+    /// hold: paused or off it answers at once, remembering once it stops.
+    static func letsTheAppHold(_ state: WindowChannelStatus.State) -> Bool {
+        state != .forgetting && state != .couldNotStop
+    }
+
+    /// With nothing under way, the footer says "Finishing a forget…" while a
+    /// kept forget waits for a status to try it again on; once nothing will,
+    /// it shows the app's own status (its banner, its button) again.
+    private func refreshPhase() {
+        if unfinished.isEmpty { tries = 0 }
+        let waits = !unfinished.isEmpty && channel != nil && holdable && tries < Self.automaticTries
+        phase = waits ? .finishing : nil
+    }
+
+    // MARK: Closing the window
+
+    /// The window is closing, or quitting (SPEC 3.11): a forget waiting out
+    /// its Undo note goes now, and `reply` is called once every forget under
+    /// way is done, or after `bound`, whichever comes first. False when
+    /// nothing is under way: quit at once. A forget that fails, or isn't
+    /// done by then, keeps its promise, and the next open finishes it.
+    public func finishBeforeQuitting(within bound: Duration = ForgetCoordinator.quitWait,
+                                     reply: @escaping @MainActor () -> Void) -> Bool {
+        quitting = true
+        finishUndoableNow()
+        guard worker != nil else { return false }
+        let answer = QuitReply(reply)
+        Task {
+            await self.idle()
+            answer.give()
+        }
+        Task {
+            try? await Task.sleep(for: bound)
+            answer.give()
+        }
+        return true
+    }
+
+    /// Returns once nothing is under way.
+    func idle() async {
+        guard worker != nil else { return }
+        await withCheckedContinuation { idleWaiters.append($0) }
+    }
+
+    /// Several forgets' outcomes as one: every moment they deleted; partly
+    /// when one didn't all go, `failed` when none of them deleted anything.
+    private static func together(_ outcomes: [Outcome]) -> Outcome {
+        var moments: UInt64 = 0
+        var progressed = false
         var failed = false
-        for id in request.momentIds {
-            do {
-                deleted += try await mutator.deleteEvent(id: id).eventsDeleted
-            } catch {
+        for outcome in outcomes {
+            switch outcome {
+            case let .forgotten(count):
+                moments += count
+                progressed = true
+            case let .partlyForgotten(count):
+                moments += count
+                progressed = true
+                failed = true
+            case .failed, .needsApp, .unavailable:
                 failed = true
             }
         }
+        guard failed else { return .forgotten(moments: moments) }
+        return progressed ? .partlyForgotten(moments: moments) : .failed
+    }
+
+    // MARK: The queue, the hold, the deletes and the release
+
+    /// Runs `job` through the queue and answers its outcome.
+    private func run(_ job: Job) async -> Outcome {
+        await withCheckedContinuation { continuation in
+            waiting[job.id, default: []].append(continuation)
+            enqueue(job)
+        }
+    }
+
+    /// The outcome of a forget already in the queue. Asked for at once
+    /// after it is queued, before anything can finish it.
+    private func outcome(of id: UUID) async -> Outcome {
+        guard inFlight[id] != nil else { return .failed }
+        return await withCheckedContinuation { continuation in
+            waiting[id, default: []].append(continuation)
+        }
+    }
+
+    private func enqueue(_ job: Job) {
+        queue.append(job)
+        inFlight[job.id] = job.request
+        publishHidden()
+        guard worker == nil else { return }
+        worker = Task { [weak self] in await self?.drain() }
+    }
+
+    private func complete(_ job: Job, _ outcome: Outcome) {
+        inFlight[job.id] = nil
+        for continuation in waiting.removeValue(forKey: job.id) ?? [] {
+            continuation.resume(returning: outcome)
+        }
+        if case let .afterUndo(count) = job.kind {
+            lateOutcome = LateOutcome(id: UUID(), outcome: outcome, request: job.request, count: count)
+        }
+        publishHidden()
+    }
+
+    /// `hiddenMoments`, from what is waiting out its note, what is queued or
+    /// being deleted, and what a failure kept.
+    private func publishHidden() {
+        var ids = Set(undoable?.request.momentIds ?? [])
+        for request in inFlight.values {
+            ids.formUnion(request.momentIds)
+        }
+        for request in unfinished.values {
+            ids.formUnion(request.momentIds)
+        }
+        if ids != hiddenMoments { hiddenMoments = ids }
+    }
+
+    /// One hold for everything queued, and for what comes while it lasts:
+    /// each forget's deletes and its promise, then the release. Each forget
+    /// is answered once the hold it ran in is released.
+    private func drain() async {
+        while let first = queue.first {
+            guard let mutator else {
+                let jobs = queue
+                queue.removeAll()
+                for job in jobs { complete(job, .unavailable) }
+                break
+            }
+            phase = first.phase
+            var held = false
+            if let channel {
+                held = await channel.send(WindowChannelRequest(op: .hold), timeout: Self.holdWait)
+                guard held else {
+                    // The app didn't answer, or the lease stayed busy:
+                    // nothing is deleted. A forget asked for now goes back
+                    // to the person (the rows come back, with Try Again);
+                    // one promised before stays promised.
+                    let jobs = queue
+                    queue.removeAll()
+                    phase = nil
+                    for job in jobs {
+                        if job.keepsOnFailure || quitting {
+                            unfinished[job.id] = job.request
+                        } else {
+                            store.remove(job.id)
+                        }
+                        complete(job, .failed)
+                    }
+                    continue
+                }
+            }
+            // The hold ends on its own unless the window asks for more while
+            // its deletes run.
+            let renewing = held ? renewals() : nil
+            var done: [(Job, Outcome)] = []
+            while !queue.isEmpty {
+                let job = queue.removeFirst()
+                phase = job.phase
+                let deletion = await delete(job.request, with: mutator)
+                done.append((job, conclude(job, deletion)))
+            }
+            renewing?.cancel()
+            if held, let channel {
+                _ = await channel.send(WindowChannelRequest(op: .release), timeout: .seconds(5))
+            }
+            if queue.isEmpty { phase = nil }
+            for (job, outcome) in done { complete(job, outcome) }
+        }
+        worker = nil
+        refreshPhase()
+        if heardWhileBusy, !quitting {
+            heardWhileBusy = false
+            tryKeptForgetsAgain()
+        }
+        // Idle only when nothing was queued again.
+        guard worker == nil else { return }
+        heardWhileBusy = false
+        let waiters = idleWaiters
+        idleWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+    }
+
+    /// What a forget's deletes did: how many moments went, what is still
+    /// saved of it, and whether any part went at all.
+    private struct Deletion {
+        var deleted: UInt64 = 0
+        var remaining: ForgetRequest
+        var progressed = false
+    }
+
+    /// The picked moments in one call (one transaction, one writer lease,
+    /// one integrity check and one cleanup for the whole forget), then each
+    /// span. What failed is kept in `remaining`, never dropped.
+    private func delete(_ request: ForgetRequest, with mutator: any PrivacyMutator) async -> Deletion {
+        var result = Deletion(remaining: request)
+        var gone = Set<UInt64>()
+        for ids in Self.chunks(of: request.momentIds) {
+            do {
+                result.deleted += try await mutator.deleteEvents(ids: ids).eventsDeleted
+                gone.formUnion(ids)
+                result.progressed = true
+            } catch let partial as PartialDeletion {
+                result.deleted += partial.result.eventsDeleted
+                gone.formUnion(partial.deleted)
+                result.progressed = true
+            } catch {
+                // Still saved: kept in `remaining`.
+            }
+        }
+        var spansLeft: [ForgetRequest.Span] = []
         for span in request.spans {
             do {
-                deleted += try await mutator.deleteEventsInRange(startTsUs: span.startUs, endTsUs: span.endUs)
+                result.deleted += try await mutator.deleteEventsInRange(startTsUs: span.startUs, endTsUs: span.endUs)
                     .eventsDeleted
+                result.progressed = true
             } catch {
-                failed = true
+                spansLeft.append(span)
             }
         }
-        store.remove()
-        if held, let channel {
-            _ = await channel.send(WindowChannelRequest(op: .release), timeout: .seconds(5))
-        }
-        if deleted > 0 || !failed {
+        result.remaining = ForgetRequest(momentIds: request.momentIds.filter { !gone.contains($0) }, spans: spansLeft)
+        if result.progressed {
             deletions.post()
         }
-        return failed && deleted == 0 ? .failed : .forgotten(moments: deleted)
+        return result
+    }
+
+    /// What becomes of a forget's promise once its deletes ran: done, it
+    /// goes; partly done, it stays for what is still saved, never for what
+    /// went; not done at all, a forget asked for now goes back to the person
+    /// (the rows come back, with the note's Try Again), and one promised
+    /// before stays promised.
+    private func conclude(_ job: Job, _ deletion: Deletion) -> Outcome {
+        if deletion.remaining.isEmpty {
+            store.remove(job.id)
+            unfinished[job.id] = nil
+            return .forgotten(moments: deletion.deleted)
+        }
+        if deletion.progressed {
+            store.update(job.id, to: deletion.remaining)
+            unfinished[job.id] = deletion.remaining
+            return .partlyForgotten(moments: deletion.deleted)
+        }
+        if job.keepsOnFailure || quitting {
+            unfinished[job.id] = job.request
+        } else {
+            store.remove(job.id)
+            unfinished[job.id] = nil
+        }
+        return .failed
+    }
+
+    /// `renew` every `renewal` until cancelled, fire-and-forget: an app that
+    /// doesn't answer, or doesn't know the op, never fails the forget.
+    private func renewals() -> Task<Void, Never>? {
+        guard let channel else { return nil }
+        let every = renewal
+        return Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: every)
+                guard !Task.isCancelled else { return }
+                _ = await channel.send(WindowChannelRequest(op: .renew), timeout: Self.renewWait)
+            }
+        }
+    }
+
+    /// The ids in calls of at most `idsPerDelete`, in order.
+    static func chunks(of ids: [UInt64]) -> [[UInt64]] {
+        stride(from: 0, to: ids.count, by: idsPerDelete).map { start in
+            Array(ids[start..<min(start + idsPerDelete, ids.count)])
+        }
+    }
+}
+
+/// A quit's reply, given once: when the forgets are done, or when its time
+/// is up, whichever comes first.
+@MainActor
+private final class QuitReply {
+    private var reply: (@MainActor () -> Void)?
+
+    init(_ reply: @escaping @MainActor () -> Void) {
+        self.reply = reply
+    }
+
+    func give() {
+        let reply = self.reply
+        self.reply = nil
+        reply?()
     }
 }

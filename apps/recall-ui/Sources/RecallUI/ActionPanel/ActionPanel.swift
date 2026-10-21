@@ -121,14 +121,28 @@ extension View {
         modifier(ActionPanelHost(registry: registry))
     }
 
-    /// Register commands while a view is on-screen; unregister on
-    /// disappear so contextual gating works naturally.
+    /// Register commands while a view is on-screen, again whenever the list
+    /// changes, and unregister on disappear, so contextual gating works
+    /// naturally and a list that loads later (Working On) still reaches ⌘K.
     func registerActionPanelCommands(
         _ commands: [ActionPanelCommand],
         registry: ActionPanelRegistry = .shared
     ) -> some View {
-        onAppear { for c in commands { registry.register(c) } }
-            .onDisappear { for c in commands { registry.unregister(id: c.id) } }
+        modifier(ActionPanelCommandGroup(commands: commands, registry: registry))
+    }
+}
+
+/// A view's ⌘K commands, kept in step with it as one group.
+private struct ActionPanelCommandGroup: ViewModifier {
+    let commands: [ActionPanelCommand]
+    let registry: ActionPanelRegistry
+    @State private var group = UUID().uuidString
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { registry.register(group: group, commands) }
+            .onChange(of: commands.panelSignature) { _, _ in registry.register(group: group, commands) }
+            .onDisappear { registry.unregister(group: group) }
     }
 }
 

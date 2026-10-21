@@ -110,6 +110,10 @@ struct MemoryWorkspaceView: View {
     /// Pages pushed inside About You: the names you use.
     @State private var youPath: [RecallYouPage] = []
     @State private var status: WindowStatus
+    /// The status as the app last pushed it (or, in a window opened by
+    /// hand, as last read), before a forget's "Forgetting…" or "Finishing a
+    /// forget…" is laid over it: what shows again once the forget is done.
+    @State private var baseStatus: WindowStatus?
     @State private var sidebar = SidebarUpdates()
     @State private var choices: SidebarHides.Choices
     @State private var navigation = NavigationHistory()
@@ -127,6 +131,8 @@ struct MemoryWorkspaceView: View {
     @State private var resumeSheet: ResumeSheetItem?
     /// A forget a page asked for that needs a yes first (SPEC 3.11).
     @State private var forgetConfirmation: ForgetConfirmation?
+    /// The Undo note showing, to take away the moment Undo stops working.
+    @State private var undoNote: UUID?
     /// Claude Code starts each session with recent work: a code project's
     /// page says so (SPEC 3.2).
     @State private var claudeCodeStarts = false
@@ -414,7 +420,12 @@ struct MemoryWorkspaceView: View {
         .task {
             guard preset == nil, let channel else { return }
             for await pushed in channel.statuses() {
-                status = WindowStatus(pushed).forgetting(forgetting.phase)
+                // A forget a failure kept is tried again when the app says
+                // a hold can be had (SPEC 3.11).
+                forgetting.statusArrived(pushed)
+                let base = WindowStatus(pushed)
+                baseStatus = base
+                status = base.forgetting(forgetting.phase)
             }
         }
         .task {
@@ -427,7 +438,9 @@ struct MemoryWorkspaceView: View {
             await loadTools()
         }
         .onChange(of: forgetting.phase) { _, phase in
-            status = status.forgetting(phase)
+            // Laid over the app's own status, never over the last forget's:
+            // once it is done, the app's words, banner and button show again.
+            status = (baseStatus ?? status).forgetting(phase)
         }
         .onChange(of: fieldFocusRequest) { _, _ in focusField() }
         .onChange(of: ask.fieldFocusRequest) { _, _ in focusField() }
@@ -450,11 +463,24 @@ struct MemoryWorkspaceView: View {
             guard let box = note.object as? WindowShellCommandBox else { return }
             perform(box.command)
         }
+        // A forget that ended after its Undo note closed: its Activity line,
+        // and a note with Try Again when it didn't all go (SPEC 3.11).
+        .onChange(of: forgetting.lateOutcome) { _, late in
+            guard let late else { return }
+            reportLate(late)
+        }
         .onChange(of: forgetting.undoable) { _, undoable in
+            // The Undo note shows exactly while Undo works: it goes when the
+            // forget goes ahead, is undone, or a newer one takes its place.
+            if let undoNote {
+                notes.dismiss(undoNote)
+                self.undoNote = nil
+            }
             guard let undoable else { return }
-            notes.show(NavigationCopy.forgotMoments(undoable.count),
-                       detail: hides.firstForgetDue ? NavigationCopy.firstForget : nil,
-                       action: BottomNote.Action(title: NavigationCopy.undoAction) { forgetting.undo() })
+            undoNote = notes.show(NavigationCopy.forgotMoments(undoable.count),
+                                  detail: hides.firstForgetDue ? NavigationCopy.firstForget : nil,
+                                  action: BottomNote.Action(title: NavigationCopy.undoAction) { forgetting.undo() },
+                                  for: ForgetCoordinator.undoWindow)
             hides.firstForgetSaid()
         }
         .onReceive(WindowDayMove.shared.$sequence.dropFirst()) { _ in
@@ -463,7 +489,7 @@ struct MemoryWorkspaceView: View {
         .onChange(of: fieldFocused) { _, focused in
             if WindowMenuState.shared.fieldFocused != focused { WindowMenuState.shared.fieldFocused = focused }
         }
-        .registerActionPanelCommands(goToItems, registry: .shared)
+        .registerActionPanelCommands(goToItems + statusCommands, registry: .shared)
         .onAppear { publishMenuState() }
         .onChange(of: choices) { _, _ in publishMenuState() }
         .onChange(of: sidebarHidden) { _, _ in publishMenuState() }
@@ -476,7 +502,9 @@ struct MemoryWorkspaceView: View {
         .environment(\.askAI, AskAIAction { source, tool in
             fieldAsk = FieldAsk(source: source, tool: tool, sequence: (fieldAsk?.sequence ?? 0) + 1)
         })
-        .environment(\.forgottenMoments, Set(forgetting.undoable?.request.momentIds ?? []))
+        // Hidden at the click, and gone while they are deleted: they come
+        // back only on Undo or when a forget fails (SPEC 3.11).
+        .environment(\.forgottenMoments, forgetting.hiddenMoments)
         .environment(\.lensForget, LensForget(forget: { moments, title, kind in
             confirmLensForget(moments, title: title, kind: kind)
         }))
@@ -756,26 +784,20 @@ struct MemoryWorkspaceView: View {
     // MARK: What the controls do
 
     /// The banner's button, and the menu's actions. Every change to
-    /// remembering goes over the private pipe; navigation never does.
+    /// remembering goes over the private pipe as the op the app carries out
+    /// for that click (`WindowStatusActions`); navigation never does. Leave
+    /// Demo Memory is the app's own Leave, which keeps a pause the person
+    /// made, never a Resume (SPEC-DELTA 6).
     private func perform(_ action: WindowStatus.Action) {
-        switch action {
-        case .pause: send(.pause)
-        case .resume, .resumeNow: send(.resume)
-        case .turnOn: send(.turnOn)
-        case .turnOff: send(.pause)
-        case let .openSystemSettings(permission): send(.openSystemSettings, permission: permission.rawValue)
-        case .tryAgain: send(.tryAgain)
-        case .quit: send(.quit)
+        switch WindowStatusActions.effect(of: action) {
+        case let .send(op, permission):
+            send(op, permission: permission)
         case .finishSetup:
             guard !isSyntheticPreview, let url = URL(string: "hippocampus://onboarding/show") else { return }
             NSWorkspace.shared.open(url)
         case .openHippocampus:
             guard !isSyntheticPreview else { return }
             NSWorkspace.shared.open(Bundle.main.bundleURL)
-        case .leaveDemoMemory:
-            // The app's Resume ends Demo Memory and reopens the window on
-            // the person's own memory (SPEC-DELTA 6).
-            send(.resume)
         }
     }
 
@@ -799,6 +821,12 @@ struct MemoryWorkspaceView: View {
                 // Privacy's Activity reads "Forgot the last 10 minutes".
                 ForgetAudit.recent(choice).record(count: moments, now: click)
                 notes.show(NavigationCopy.forgotten)
+            case let .partlyForgotten(moments):
+                ForgetAudit.recent(choice).record(count: moments, now: click)
+                notes.show(NavigationCopy.couldNotForgetAll,
+                           action: BottomNote.Action(title: NavigationCopy.tryAgain) {
+                               finishRest(audit: .recent(choice))
+                           })
             case .failed:
                 notes.show(NavigationCopy.couldNotForget,
                                  action: BottomNote.Action(title: NavigationCopy.tryAgain) {
@@ -877,12 +905,26 @@ struct MemoryWorkspaceView: View {
         }
     }
 
+    /// ⌘K's one status command: the action the status offers now (in Demo
+    /// Memory, Leave Demo Memory), as the status menu does. None in a
+    /// window opened by hand, which has no pipe, and none while a forget
+    /// holds remembering (SPEC 2.9).
+    private var statusCommands: [ActionPanelCommand] {
+        guard !isSyntheticPreview, preset == nil,
+              let action = WindowStatusActions.command(for: shownStatus, hasPipe: channel != nil)
+        else { return [] }
+        return [ActionPanelCommand(id: "app.status", title: action.title, shortcut: "", category: .actions) {
+            perform(action)
+        }]
+    }
+
     // MARK: Reading the sidebar and the status
 
     private func loadStatus() async {
         guard channel == nil, !isSyntheticPreview else { return }
         let receipt = await healthLoader()
         let current = WindowStatus(byHand: receipt, appRunning: appRunning(), now: now())
+        baseStatus = current
         status = current.forgetting(forgetting.phase)
     }
 
@@ -1214,6 +1256,12 @@ struct MemoryWorkspaceView: View {
         case let .forgotten(moments):
             audit.record(count: moments, now: now())
             notes.show(NavigationCopy.forgotten)
+        case let .partlyForgotten(moments):
+            // The rest is still promised: Try Again finishes it, and so does
+            // the next open.
+            audit.record(count: moments, now: now())
+            notes.show(NavigationCopy.couldNotForgetAll,
+                       action: BottomNote.Action(title: NavigationCopy.tryAgain) { finishRest(audit: audit) })
         case .failed:
             notes.show(NavigationCopy.couldNotForget,
                        action: BottomNote.Action(title: NavigationCopy.tryAgain) { retry() })
@@ -1224,6 +1272,36 @@ struct MemoryWorkspaceView: View {
                        })
         case .unavailable:
             notes.show(NavigationCopy.couldNotForget)
+        }
+    }
+
+    /// A forget that ended after its Undo note closed. The note already
+    /// said "Forgot 1 moment.", so one that went adds only its Activity
+    /// line; one that didn't all go says so, with Try Again.
+    private func reportLate(_ late: ForgetCoordinator.LateOutcome) {
+        let audit = ForgetAudit.moments(late.count)
+        if case let .forgotten(moments) = late.outcome {
+            audit.record(count: moments, now: now())
+            return
+        }
+        report(late.outcome, audit: audit) { forgetNow(late.request, count: late.count) }
+    }
+
+    /// Try Again after a forget that failed after its Undo note: it goes
+    /// now, without a second note to undo.
+    private func forgetNow(_ request: ForgetRequest, count: Int) {
+        Task { @MainActor in
+            let outcome = await forgetting.forget(request)
+            report(outcome, audit: .moments(count)) { forgetNow(request, count: count) }
+        }
+    }
+
+    /// Try Again after a forget that went only partly: what is still
+    /// promised goes now.
+    private func finishRest(audit: ForgetAudit) {
+        Task { @MainActor in
+            guard let outcome = await forgetting.finishLeftover() else { return }
+            report(outcome, audit: audit) { finishRest(audit: audit) }
         }
     }
 

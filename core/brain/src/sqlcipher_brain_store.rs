@@ -2341,6 +2341,76 @@ impl SqlCipherBrainStore {
         ))
     }
 
+    /// Delete several events by id in one transaction, and run the
+    /// post-commit maintenance once for all of them.
+    ///
+    /// The window forgets a selection, a page or a search this way: one
+    /// writer, one integrity check and one cleanup pass for the whole forget,
+    /// where one call per moment repeated all three and outlived the hold
+    /// remembering waits in (SPEC 3.11). An id that isn't in the store
+    /// deletes nothing and is not an error; a repeated id counts once.
+    ///
+    /// An `Ok` value proves every row went in one committed transaction; an
+    /// error means none did. Maintenance warnings are reported as for one
+    /// event.
+    ///
+    /// # Errors
+    /// [`StoreError::Backend`] when work fails before or during commit.
+    pub fn delete_events_with_outcome(
+        &self,
+        ids: &[EventId],
+    ) -> Result<DeletionOutcome, StoreError> {
+        let mut wanted = ids
+            .iter()
+            .filter_map(|id| i64::try_from(id.0).ok())
+            .collect::<Vec<_>>();
+        wanted.sort_unstable();
+        wanted.dedup();
+        let mut guard = self.db.lock().expect("brain store mutex poisoned");
+        let tx = guard
+            .conn_mut()
+            .transaction()
+            .map_err(|e| StoreError::Backend(format!("begin delete_events tx: {e}")))?;
+        let mut event_ids = Vec::with_capacity(wanted.len());
+        let mut blob_digests = Vec::new();
+        {
+            let mut select = tx
+                .prepare("SELECT keyframe_blob FROM events WHERE id = ?1")
+                .map_err(|e| StoreError::Backend(format!("prepare select delete events: {e}")))?;
+            for id in &wanted {
+                let found = select
+                    .query_row(params![id], |row| row.get::<_, Option<String>>(0))
+                    .optional()
+                    .map_err(|e| StoreError::Backend(format!("select delete events: {e}")))?;
+                if let Some(digest) = found {
+                    event_ids.push(*id);
+                    blob_digests.extend(digest);
+                }
+            }
+        }
+        delete_projected_memory_for_events(&tx, &event_ids)?;
+        let mut n = 0_u64;
+        {
+            let mut delete = tx
+                .prepare("DELETE FROM events WHERE id = ?1")
+                .map_err(|e| StoreError::Backend(format!("prepare DELETE events: {e}")))?;
+            for id in &event_ids {
+                n += delete
+                    .execute(params![id])
+                    .map_err(|e| StoreError::Backend(format!("DELETE events: {e}")))?
+                    as u64;
+            }
+        }
+        tx.commit()
+            .map_err(|e| StoreError::Backend(format!("commit delete_events tx: {e}")))?;
+        Ok(run_post_delete_cleanup(
+            guard.conn(),
+            &self.blob_dir,
+            &blob_digests,
+            n,
+        ))
+    }
+
     /// Delete every event whose `ts_us` falls in the inclusive range
     /// `[start_ts_us, end_ts_us]`. Returns the number of `events` rows
     /// deleted. `VACUUM`s after commit.

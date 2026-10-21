@@ -452,6 +452,13 @@ public protocol PrivacyMutator: Sendable {
     /// Delete one event by id.
     func deleteEvent(id: UInt64) async throws -> DeleteResult
 
+    /// Delete these events in one call: a whole forget in one transaction,
+    /// with one writer lease, one integrity check and one cleanup, so it
+    /// fits inside the hold remembering waits in (SPEC 3.11). An id that is
+    /// already gone deletes nothing and is no error. The default deletes one
+    /// at a time; when only some go it throws `PartialDeletion`, naming them.
+    func deleteEvents(ids: [UInt64]) async throws -> DeleteResult
+
     /// Delete every event with `ts_us` in `[startTsUs, endTsUs]`.
     func deleteEventsInRange(
         startTsUs: UInt64,
@@ -465,6 +472,49 @@ public protocol PrivacyMutator: Sendable {
     /// Wipe every user-content row. Requires the token returned by the
     /// most-recent `prepareWipe`.
     func wipeBrain(token: String) async throws -> DeleteResult
+}
+
+/// Some of a `deleteEvents(ids:)` went and some didn't: a store that can't
+/// delete them all in one transaction says which went, so a forget keeps its
+/// promise for the rest instead of calling it done.
+public struct PartialDeletion: Error, Equatable, Sendable {
+    /// The ids that were deleted.
+    public let deleted: [UInt64]
+    /// What their deletes reported, together.
+    public let result: DeleteResult
+
+    public init(deleted: [UInt64], result: DeleteResult) {
+        self.deleted = deleted
+        self.result = result
+    }
+}
+
+public extension PrivacyMutator {
+    /// One `deleteEvent` per id, for a store without a delete of its own for
+    /// many: every id is tried; nothing deleted throws the first error, some
+    /// deleted throws `PartialDeletion`.
+    func deleteEvents(ids: [UInt64]) async throws -> DeleteResult {
+        var deleted: [UInt64] = []
+        var events: UInt64 = 0
+        var vacuumOk = true
+        var blobCleanupOk = true
+        var firstError: Error?
+        for id in ids {
+            do {
+                let result = try await deleteEvent(id: id)
+                deleted.append(id)
+                events += result.eventsDeleted
+                vacuumOk = vacuumOk && result.vacuumOk
+                blobCleanupOk = blobCleanupOk && result.blobCleanupOk
+            } catch {
+                if firstError == nil { firstError = error }
+            }
+        }
+        let result = DeleteResult(eventsDeleted: events, vacuumOk: vacuumOk, blobCleanupOk: blobCleanupOk)
+        guard let firstError else { return result }
+        if deleted.isEmpty { throw firstError }
+        throw PartialDeletion(deleted: deleted, result: result)
+    }
 }
 
 /// The full read surface the recall-ui consumes. No mutating methods.

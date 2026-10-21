@@ -32,6 +32,9 @@ public enum WindowChannelProtocol {
         case pause
         case resume
         case turnOn
+        /// Turn Off, offered while a turn-on is under way: its own op,
+        /// never a pause, which the app takes only when it offers Pause.
+        case turnOff
         case tryAgain
         case openSystemSettings
         /// Quit Hippocampus, the one fix for "Couldn't stop", as in the
@@ -41,6 +44,14 @@ public enum WindowChannelProtocol {
         case hold
         /// The forget is done: remember again, if it was on.
         case release
+        /// The forget's deletes still run: keep the hold. Sent every 10
+        /// seconds while they do, and never awaited: an app that doesn't know
+        /// it ignores the line.
+        case renew
+        /// Leave Demo Memory: back to the person's own memory with
+        /// remembering as it was before, a pause they made included, as the
+        /// menu bar's Leave does. Never a Resume.
+        case leaveDemo
         /// The app pushes this; the window never sends it.
         case status
     }
