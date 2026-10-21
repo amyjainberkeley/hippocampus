@@ -9,6 +9,14 @@ final class CommandBarTests: XCTestCase {
         XCTAssertEqual(hit.body, "Beta ships Oct 21. Owner: Maya")
     }
 
+    /// A table's cells leave several spaces between words (the demo week's
+    /// Stripe product catalog): a row reads them as one, as History does.
+    func testAHitsTextReadsWithSingleSpaces() throws {
+        let json = #"{"event_id":262,"ts_us":5,"app_bundle_id":"com.google.Chrome","window_title":"Studio – Product catalog – Stripe","url":null,"text_snippet":"Pricing  $49.00 USD  Per month\n  Default\t$490.00 USD   Per year  "}"#
+        let hit = try JSONDecoder().decode(BarHit.self, from: Data(json.utf8))
+        XCTAssertEqual(hit.body, "Pricing $49.00 USD Per month Default $490.00 USD Per year")
+    }
+
     // MARK: "From your memory" (the demo week's own `recall` for "pricing")
 
     private static let chrome = "com.google.Chrome"

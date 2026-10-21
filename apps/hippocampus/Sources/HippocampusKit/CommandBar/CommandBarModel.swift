@@ -82,12 +82,14 @@ public struct BarHit: Decodable, Sendable, Equatable, Identifiable {
 }
 
 /// A moment's stored text as one line, without the header line the store
-/// puts first (`[app=… | title=…]`) when there is one (RULINGS X8).
+/// puts first (`[app=… | title=…]`) when there is one (RULINGS X8), and
+/// with runs of spaces read as one, as a History row reads them: a table's
+/// cells and a page's columns leave several between their words.
 enum MomentText {
     static func body(_ text: String) -> String {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
         let kept = lines.first?.hasPrefix("[app=") == true ? lines.dropFirst() : lines[...]
-        return kept.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        return kept.joined(separator: " ").split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 }
 
