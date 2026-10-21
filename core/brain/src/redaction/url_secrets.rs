@@ -211,7 +211,7 @@ mod tests {
             "https://app.larch.example/",
             "https://example.com/search?q=larch&page=2",
             "https://example.com/docs#section-2",
-            "https://example.com/?tokens=3&keyword=larch&author=amy&codec=h264",
+            "https://example.com/?tokens=3&keyword=larch&author=sam&codec=h264",
             "/Users/someone/src/project",
             "",
         ] {
@@ -246,8 +246,8 @@ mod tests {
             "https://app.example/cb?x=1"
         );
         assert_eq!(
-            strip_secret_params("https://amy:SYNTHpass@host.example/path?q=1"),
-            "https://amy@host.example/path?q=1"
+            strip_secret_params("https://sam:SYNTHpass@host.example/path?q=1"),
+            "https://sam@host.example/path?q=1"
         );
     }
 
