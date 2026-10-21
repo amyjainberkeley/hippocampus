@@ -28,10 +28,11 @@ async fn accept_ipv4_loopback_custom_port() {
 
 #[tokio::test]
 async fn accept_localhost_when_dns_resolves_loopback() {
-    // `localhost` MUST resolve to a loopback address on every system
-    // we support. A misconfigured /etc/hosts would correctly fail.
+    // `localhost` means this Mac (RFC 6761): accepted without a lookup,
+    // and dialed at 127.0.0.1.
     let h = LoopbackHost::parse("http://localhost/mcp").await.unwrap();
     assert!(h.host.contains("localhost") || h.host == "localhost");
+    assert!(h.resolve_now().await.unwrap().ip().is_loopback());
 }
 
 #[tokio::test]
@@ -56,12 +57,8 @@ async fn reject_non_loopback_dns() {
     let err = LoopbackHost::parse("http://example.com/mcp")
         .await
         .expect_err("example.com must be rejected");
-    assert!(matches!(
-        err,
-        LoopbackError::NonLoopbackDns
-            | LoopbackError::DnsResolutionFailed
-            | LoopbackError::DnsResolutionEmpty
-    ));
+    // Refused by name, before any lookup could send the name off the Mac.
+    assert_eq!(err, LoopbackError::NonLoopbackDns);
 }
 
 #[tokio::test]
@@ -130,10 +127,5 @@ async fn reject_dns_resolving_off_loopback() {
     let err = LoopbackHost::parse("http://localhost.example.com/mcp")
         .await
         .expect_err("localhost.example.com is not loopback");
-    assert!(matches!(
-        err,
-        LoopbackError::NonLoopbackDns
-            | LoopbackError::DnsResolutionFailed
-            | LoopbackError::DnsResolutionEmpty
-    ));
+    assert_eq!(err, LoopbackError::NonLoopbackDns);
 }

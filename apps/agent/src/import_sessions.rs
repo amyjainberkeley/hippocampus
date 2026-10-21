@@ -43,14 +43,14 @@ use mci_brain::SqlCipherBrainStore;
 
 use crate::transcript::{
     self, import_file, import_files, is_injected_user_text, is_mutating_shell, parse_ts_us,
-    tool_line, write_event, Agent, EventContext, FileOutcome, Role,
+    tool_line, write_turn, Agent, EventContext, FileOutcome, Role,
 };
 pub use crate::transcript::{ImportError, ImportStats};
 
 /// Default transcript root.
 #[must_use]
 pub fn default_transcript_root() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     home.join(".claude/projects")
 }
 
@@ -219,17 +219,12 @@ pub fn import_session_file(
             if role == Role::User && is_injected_user_text(&text) {
                 stats.skipped_injected += 1;
             } else {
-                write_event(store, &ctx.event(role, ts_us, &text), role, stats)?;
+                write_turn(store, &ctx, role, ts_us, &text, stats)?;
             }
         }
         if !tool_lines.is_empty() {
             let body = tool_lines.join("\n");
-            write_event(
-                store,
-                &ctx.event(Role::Tool, ts_us, &body),
-                Role::Tool,
-                stats,
-            )?;
+            write_turn(store, &ctx, Role::Tool, ts_us, &body, stats)?;
         }
         Ok(true)
     })

@@ -483,8 +483,8 @@ async fn cli_exits_zero_and_says_where_to_create_the_config() {
 
     assert_eq!(code, 0, "no config is not a failure. output: {out}");
     assert!(
-        out.contains("Library/Application Support/MCI/mcp-servers.toml"),
-        "must name the path to create: {out}"
+        out.contains("Library/Application Support/MCI/Config.noindex/mcp-servers.toml"),
+        "must name the path to create, in the folder Spotlight skips: {out}"
     );
     assert!(
         out.contains("chmod 600"),

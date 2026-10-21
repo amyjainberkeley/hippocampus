@@ -161,6 +161,7 @@ pub mod activity;
 pub mod apps;
 pub mod understanding;
 pub use activity::{ActivityInterval, ActivityState};
+pub mod key_change;
 pub mod memory_delta;
 pub mod memory_projector;
 pub mod retention_purger;

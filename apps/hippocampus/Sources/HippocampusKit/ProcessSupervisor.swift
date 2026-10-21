@@ -2266,6 +2266,60 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         case .release:
             await forgetHold.release()
             return true
+        case .erase:
+            return await eraseMemory()
+        }
+    }
+
+    /// What erases the memory and its key; tests replace it.
+    package var memoryEraser: any MemoryErasing = AgentMemoryEraser()
+
+    /// Delete Everything as a crypto-shred (storage-security review S3):
+    /// remembering stops as for a forget, the bundled agent deletes the
+    /// memory, its screenshots and its Keychain key, and remembering starts
+    /// again if it was on, with a new key and an empty memory. The window,
+    /// which still has the old memory open, is opened afresh on Privacy.
+    func eraseMemory() async -> Bool {
+        // Demo Memory's window shows the made-up store; it never erases the
+        // person's own.
+        guard MemoryEraseGate.allowed, let agentURL = locator.agentPath() else { return false }
+        guard await forgetHold.hold() else { return false }
+        let environment = ProcessSupervisorLaunchPlan.sanitizedEnvironment(
+            baseEnvironment: ProcessInfo.processInfo.environment,
+            dbPath: dbPath,
+            keyReference: keyReference,
+            developmentKeyMode: developmentKeyMode
+        )
+        let erased = await memoryEraser.erase(agentURL: agentURL, databaseURL: dbPath, environment: environment)
+        if erased {
+            // The key is gone: a new one is made now, and checked again
+            // before anything opens the new, empty memory.
+            memoryKeyChecked = false
+            do {
+                try await prepareKey(agentURL: agentURL, reference: keyReference)
+            } catch {
+                logger.error("supervisor: a new key after the erase: \(error.localizedDescription)")
+            }
+        }
+        await forgetHold.release()
+        if erased { reopenRecallUI(initialTab: "privacy") }
+        return erased
+    }
+
+    /// Ends the running window, which holds the erased memory open, and
+    /// opens a new one on `initialTab`.
+    private func reopenRecallUI(initialTab: String) {
+        guard !windowsRetired else { return }
+        guard let running = recallProcess, running.isRunning else {
+            openRecallUI(initialTab: initialTab)
+            return
+        }
+        Task { @MainActor [weak self] in
+            if NSRunningApplication(processIdentifier: running.processIdentifier)?.terminate() != true {
+                running.terminate()
+            }
+            _ = await Self.waitForExit(running, within: Self.windowExitWait)
+            self?.openRecallUI(initialTab: initialTab)
         }
     }
 

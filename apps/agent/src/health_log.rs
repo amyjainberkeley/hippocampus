@@ -260,7 +260,7 @@ impl HealthLogConfig {
     /// Default config — writes to the standard macOS user-log path.
     #[must_use]
     pub fn default_for_user() -> Self {
-        let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+        let home = mci_core::home::user_home_or_unwritable();
         Self {
             path: home.join("Library/Logs/MCI/helper-health.jsonl"),
             max_bytes: 10 * 1024 * 1024,

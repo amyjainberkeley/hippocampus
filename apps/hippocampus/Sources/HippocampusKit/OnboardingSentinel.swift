@@ -67,7 +67,7 @@ public enum OnboardingSentinel {
         // when debugging "why isn't onboarding showing".
         let stamp = ISO8601DateFormatter().string(from: Date())
         let body = "onboarding-completed-at \(stamp)\n"
-        return (try? body.write(to: url, atomically: true, encoding: .utf8)) != nil
+        return (try? PrivateFileWriter.write(body, to: url)) != nil
     }
 
     /// The "Open Hippocampus at login" choice setup wrote with consent: the

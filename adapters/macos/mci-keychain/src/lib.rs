@@ -1,11 +1,16 @@
-//! Native macOS file-Keychain operations for the Hippocampus database key.
+//! Native macOS file-Keychain operations for the Hippocampus database key,
+//! and the sealed-screenshot envelope a key change re-seals with
+//! ([`envelope`]).
 //!
-//! This adapter owns the narrow unsafe Security.framework boundary. Every
+//! This adapter owns the narrow unsafe Security.framework boundary, and the
+//! one OpenSSL AES-GCM call the envelope needs. Every
 //! query pins `kSecUseDataProtectionKeychain=false` and
 //! `kSecAttrSynchronizable=false`; creation additionally requires a non-empty
 //! `SecAccess` trusted-application list.
 
 use std::path::Path;
+
+pub mod envelope;
 
 /// A native Keychain operation failure.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -25,6 +30,15 @@ pub enum Error {
 /// Read a generic password from the non-sync file-based Keychain domain.
 pub fn read_file_generic_password(service: &str, account: &str) -> Result<Vec<u8>, Error> {
     imp::read_file_generic_password(service, account)
+}
+
+/// Delete a generic password from the non-sync file-based Keychain domain.
+///
+/// An item that does not exist is not an error: deleting is how a key is
+/// destroyed (Delete Everything, a finished key change), and a repeat after a
+/// crash must find nothing to do.
+pub fn delete_file_generic_password(service: &str, account: &str) -> Result<(), Error> {
+    imp::delete_file_generic_password(service, account)
 }
 
 /// Add a generic password with an explicit file-Keychain `SecAccess` ACL.
@@ -58,7 +72,7 @@ mod imp {
         kSecClassGenericPassword, kSecMatchLimit, kSecReturnData, kSecUseDataProtectionKeychain,
         kSecValueData,
     };
-    use security_framework_sys::keychain_item::{SecItemAdd, SecItemCopyMatching};
+    use security_framework_sys::keychain_item::{SecItemAdd, SecItemCopyMatching, SecItemDelete};
 
     use super::Error;
 
@@ -139,6 +153,19 @@ mod imp {
         Ok(data.bytes().to_vec())
     }
 
+    pub(super) fn delete_file_generic_password(service: &str, account: &str) -> Result<(), Error> {
+        // The same pinned file-Keychain, non-sync query as every read: it can
+        // only ever match this exact service and account.
+        let query = CFDictionary::from_CFType_pairs(&base_pairs(service, account));
+        let status = unsafe { SecItemDelete(query.as_concrete_TypeRef()) };
+        // errSecItemNotFound: nothing to delete, which is the goal.
+        if status == errSecSuccess || status == -25300 {
+            Ok(())
+        } else {
+            Err(Error::Status(status))
+        }
+    }
+
     pub(super) fn add_file_generic_password_with_acl(
         service: &str,
         account: &str,
@@ -208,6 +235,13 @@ mod imp {
         _service: &str,
         _account: &str,
     ) -> Result<Vec<u8>, Error> {
+        Err(Error::Status(-4))
+    }
+
+    pub(super) fn delete_file_generic_password(
+        _service: &str,
+        _account: &str,
+    ) -> Result<(), Error> {
         Err(Error::Status(-4))
     }
 

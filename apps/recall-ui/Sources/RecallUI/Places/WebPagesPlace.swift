@@ -270,7 +270,6 @@ struct WebPagesPlace: View {
     }
 
     private func copy(_ url: URL) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+        ClipboardHygiene.copyToKeep(url.absoluteString)
     }
 }

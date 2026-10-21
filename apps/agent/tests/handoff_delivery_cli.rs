@@ -252,7 +252,8 @@ fn connect_installs_both_hooks_and_disconnect_removes_only_ours() {
     assert_eq!(std::fs::read(&settings).unwrap(), settings_before);
     assert_eq!(std::fs::read(&hooks).unwrap(), hooks_before);
 
-    // Disconnect takes only ours.
+    // Disconnect takes only ours: the hooks and the MCP registrations
+    // (reports/e2e, finding 6), and nothing else of the tools' settings.
     let third = run(
         &home,
         &codex_home,
@@ -262,11 +263,11 @@ fn connect_installs_both_hooks_and_disconnect_removes_only_ours() {
     assert!(third.status.success(), "stderr: {}", stderr(&third));
     let out = stdout(&third);
     assert!(
-        out.contains("  claude-code: SessionStart hook removed, MCP registration left in place\n"),
+        out.contains("  claude-code: SessionStart hook removed, MCP registration removed\n"),
         "{out}"
     );
     assert!(
-        out.contains("  codex: SessionStart hook removed, MCP registration left in place\n"),
+        out.contains("  codex: SessionStart hook removed, MCP registration removed\n"),
         "{out}"
     );
     let value = json(&settings);
@@ -284,10 +285,18 @@ fn connect_installs_both_hooks_and_disconnect_removes_only_ours() {
         "echo theirs"
     );
     let claude_json = json(&home.join(".claude.json"));
-    assert!(claude_json["mcpServers"]["hippocampus"].is_object());
-    assert!(std::fs::read_to_string(&config)
-        .unwrap()
-        .contains("[mcp_servers.hippocampus]"));
+    assert!(
+        claude_json.get("mcpServers").is_none(),
+        "the registration Connect added is gone: {claude_json}"
+    );
+    let config_text = std::fs::read_to_string(&config).unwrap();
+    assert!(!config_text.contains("hippocampus"), "{config_text}");
+    assert!(config_text.contains("model = \"gpt-5\""), "{config_text}");
+    assert!(config_text.contains("hooks = false"), "{config_text}");
+    assert!(
+        !out.contains("mcp remove"),
+        "nothing is left to remove by hand: {out}"
+    );
 
     let fourth = run(
         &home,
@@ -296,9 +305,8 @@ fn connect_installs_both_hooks_and_disconnect_removes_only_ours() {
         &["disconnect", "--all", "--no-refresh-agent"],
     );
     assert!(fourth.status.success());
-    assert!(stdout(&fourth).contains(
-        "  claude-code: SessionStart hook not installed, MCP registration left in place\n"
-    ));
+    assert!(stdout(&fourth)
+        .contains("  claude-code: SessionStart hook not installed, no MCP registration\n"));
 }
 
 /// Detection also probes fixed install paths (`/usr/local/bin/claude`,

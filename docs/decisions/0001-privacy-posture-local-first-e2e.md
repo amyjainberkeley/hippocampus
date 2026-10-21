@@ -68,6 +68,7 @@ Loopback set (binding):
 - IPv4: any address in `127.0.0.0/8`.
 - IPv6: `::1` exactly.
 - DNS hostname: accepted ONLY if every A/AAAA resolution at validation time resolves to an address in the loopback set above. `localhost` is the canonical case; an attacker-controlled hostname that points at a non-loopback address is rejected.
+  - **Tightened 2026-10-20:** the only names accepted are `localhost` and names under it (RFC 6761 §6.3), and no name is ever resolved. Asking the system resolver about any other name sent that name to the DNS server, off the device, before the gate refused it (found by the network tripwire in `scripts/e2e-full.sh`). `localhost` is dialed at `127.0.0.1`, then `::1`, by the transport's own resolver (`core/mcp-client/src/transport/loopback.rs`, `http_sse.rs`).
 - All other forms — `0.0.0.0`, any non-loopback IPv4, any non-loopback IPv6, any non-`http`/`https` scheme, any URL carrying `userinfo` (a `user:password@` prefix) — are rejected with a typed error and never reach the transport's connect path.
 
 Operational rules:

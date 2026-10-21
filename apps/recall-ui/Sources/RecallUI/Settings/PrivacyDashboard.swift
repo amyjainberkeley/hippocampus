@@ -32,6 +32,10 @@ struct PrivacyDashboard: View {
     var picturesUsage: @Sendable () -> PicturesUsage? = { PicturesUsage.read() }
     /// The audit log's newest lines; renders pass fixtures.
     var activity: @Sendable () -> [AuditEntry] = { AuditLog.shared.readRecent(count: 50) }
+    /// Delete Everything through the app, which stops remembering and
+    /// erases the memory and its key (storage-security review S3). Nil for
+    /// a window opened by hand: it deletes every row instead.
+    var erase: (@Sendable () async -> Bool)? = nil
     var now: @Sendable () -> Date = { Date() }
     var calendar: Calendar = .current
 
@@ -50,9 +54,10 @@ struct PrivacyDashboard: View {
     @State private var banner: String? = nil
 
     /// Convenience init for reader-only surfaces (preview / stub tests).
-    init(reader: BrainReader, mutator: PrivacyMutator? = nil) {
+    init(reader: BrainReader, mutator: PrivacyMutator? = nil, erase: (@Sendable () async -> Bool)? = nil) {
         self.reader = reader
         self.mutator = mutator
+        self.erase = erase
     }
 
     init(reader: BrainReader, mutator: PrivacyMutator?, retention: @escaping @Sendable () -> RetentionSetting?,
@@ -235,6 +240,19 @@ struct PrivacyDashboard: View {
             forget(.range(startUs...endUs, label: LibraryCopy.Privacy.forgotLastHours(24), confirmed: true))
             return
         }
+        if kind == .deleteEverything, let erase {
+            // The memory and its key go; the app then opens a fresh window,
+            // since this one still has the erased memory open.
+            isMutating = true
+            defer { isMutating = false }
+            if await erase() {
+                AuditLog.shared.record(action: .wipeBrain, details: ["key_deleted": "true"])
+                banner = UserFacingCopy.erasedEverything
+            } else {
+                errorMessage = UserFacingCopy.eraseFailedBanner
+            }
+            return
+        }
         guard let mutator else {
             banner = UserFacingCopy.deleteUnavailable
             return
@@ -309,28 +327,29 @@ struct PrivacyDashboard: View {
         entries = read.2
     }
 
+    /// Export Everything (storage-security review S8): a save panel that
+    /// says the file isn't encrypted and where it may sync, then every
+    /// moment, in full, into a new file only this user can read.
     @MainActor
     private func runExport() {
-        let iso = ISO8601DateFormatter().string(from: Date())
-            .replacingOccurrences(of: ":", with: "-")
-        let downloads = NSSearchPathForDirectoriesInDomains(.downloadsDirectory, .userDomainMask, true).first
-            ?? NSTemporaryDirectory()
-        let out = (downloads as NSString).appendingPathComponent("hippocampus-export-\(iso).json")
+        let panel = NSSavePanel()
+        panel.message = ExportDestination.panelMessage
+        panel.nameFieldStringValue = ExportDestination.suggestedName(now: now())
+        panel.allowedContentTypes = [.init(filenameExtension: "jsonl") ?? .json]
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
         isMutating = true
         Task { @MainActor in
             defer { isMutating = false }
             do {
-                async let events = reader.recentEvents(limit: 200)
-                async let apps = reader.listObservedApps(limit: 32, timeFromUs: nil)
-                let payload = ExportPayload(generatedAt: iso, summary: summary, events: try await events,
-                                            observedApps: try await apps)
-                let data = try JSONEncoder.pretty.encode(payload)
-                try data.write(to: URL(fileURLWithPath: out))
-                banner = UserFacingCopy.exportedMoments(payload.events.count)
+                let count = try await MemoryExport.run(to: url)
+                banner = [UserFacingCopy.exportedMoments(count), ExportDestination.warning(for: url)]
+                    .compactMap { $0 }
+                    .joined(separator: " ")
                 // Only meta (count + destination path); memory content
                 // never touches the log.
                 AuditLog.shared.record(action: .exportJson,
-                                       details: ["events": "\(payload.events.count)", "path": out])
+                                       details: ["events": "\(count)", "path": url.path])
                 entries = activity()
             } catch {
                 errorMessage = UserFacingCopy.exportFailedBanner
@@ -427,21 +446,4 @@ struct ConfirmDeleteSheet: View {
         .frame(width: 400)
         .background(MCI.Color.background)
     }
-}
-
-// MARK: - Export payload
-
-struct ExportPayload: Encodable {
-    let generatedAt: String
-    let summary: SummaryStats?
-    let events: [Hit]
-    let observedApps: [ObservedApp]
-}
-
-extension JSONEncoder {
-    static let pretty: JSONEncoder = {
-        let e = JSONEncoder()
-        e.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return e
-    }()
 }

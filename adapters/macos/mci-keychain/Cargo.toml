@@ -10,7 +10,17 @@ description = "Native macOS file-Keychain query and SecAccess ACL adapter."
 [lints]
 workspace = true
 
+[dependencies]
+# Both already on the workspace lockfile (mci-core, mci-agent): HMAC/HKDF for
+# the screenshot envelope, and wiping its derived keys. No new crate.
+sha2 = "0.10"
+zeroize = "1.8.2"
+
 [target.'cfg(target_os = "macos")'.dependencies]
+# The OpenSSL SQLCipher already links (libsqlite3-sys's
+# bundled-sqlcipher-vendored-openssl), for the envelope's AES-256-GCM. Same
+# version and feature as that edge, so Cargo builds it once; no new crate.
+openssl-sys = { version = "0.9.116", features = ["vendored"] }
 core-foundation = "0.10"
 core-foundation-sys = "0.8"
 security-framework-sys = { version = "=2.15.0", default-features = false, features = ["OSX_10_15"] }

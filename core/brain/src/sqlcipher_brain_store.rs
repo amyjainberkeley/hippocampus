@@ -2574,6 +2574,12 @@ fn run_post_delete_cleanup(
             diagnostic: format!("VACUUM after committed deletion: {error}"),
         });
     }
+    if let Err(error) = checkpoint_and_truncate_wal(connection) {
+        cleanup_warnings.push(DeletionCleanupWarning {
+            stage: DeletionCleanupStage::Vacuum,
+            diagnostic: format!("WAL checkpoint after committed deletion: {error}"),
+        });
+    }
     if let Err(error) = remove_unreferenced_keyframe_blobs(connection, blob_dir, blob_digests) {
         cleanup_warnings.push(DeletionCleanupWarning {
             stage: DeletionCleanupStage::KeyframeBlobs,
@@ -2584,6 +2590,34 @@ fn run_post_delete_cleanup(
         events_deleted,
         cleanup_warnings,
     }
+}
+
+/// Fold the write-ahead log into the database file and truncate the log to
+/// zero bytes. `VACUUM` in WAL mode writes the whole rewritten database into
+/// `-wal`, and a plain checkpoint only marks those frames reusable: the file
+/// keeps frames that still hold deleted rows (encrypted, but under the same
+/// key) until they happen to be overwritten (storage-security review S3).
+///
+/// A reader still on an older snapshot keeps the log busy; the checkpoint is
+/// retried briefly, and a log that stays busy is reported, never hidden.
+/// Harmless on a database that isn't in WAL mode.
+///
+/// # Errors
+/// The checkpoint failed, or readers kept the log busy through every retry.
+pub(crate) fn checkpoint_and_truncate_wal(connection: &rusqlite::Connection) -> Result<(), String> {
+    const ATTEMPTS: u32 = 5;
+    for attempt in 0..ATTEMPTS {
+        let busy: i64 = connection
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))
+            .map_err(|error| error.to_string())?;
+        if busy == 0 {
+            return Ok(());
+        }
+        if attempt + 1 < ATTEMPTS {
+            std::thread::sleep(Duration::from_millis(25 << attempt));
+        }
+    }
+    Err("a reader kept the write-ahead log busy; it is truncated at the next deletion".to_owned())
 }
 
 fn event_ids_matching<P: rusqlite::Params>(

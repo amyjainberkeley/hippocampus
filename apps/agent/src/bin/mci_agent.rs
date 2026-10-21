@@ -144,6 +144,15 @@ enum Mode {
     ForgetSidePictures {
         db_path: PathBuf,
     },
+    /// Erase the memory and destroy its key (Delete Everything, uninstall).
+    EraseMemory {
+        db_path: PathBuf,
+    },
+    /// Every moment, in full, to one private file (Export Everything).
+    Export {
+        db_path: PathBuf,
+        out: Option<PathBuf>,
+    },
     /// Import Claude Code and Codex transcripts into the brain,
     /// incrementally over both roots.
     ImportSessions {
@@ -268,7 +277,7 @@ impl ContextOutputFormat {
 }
 
 fn default_device_id_path() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     home.join(".mci/device-id")
 }
 
@@ -277,7 +286,7 @@ fn default_log_path() -> PathBuf {
 }
 
 fn page_content_socket_path() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     home.join("Library/Application Support/MCI/page_content.sock")
 }
 
@@ -291,7 +300,7 @@ fn capture_ingestion_enabled(environment_value: Option<&str>) -> bool {
 fn default_db_path() -> PathBuf {
     // ~/Library/Application Support/MCI/mci.sqlite per ADR-0008 §1.4.
     // Expand $HOME at run-time (no glob-style ~ expansion in env vars).
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     home.join("Library/Application Support/MCI/mci.sqlite")
 }
 
@@ -323,6 +332,7 @@ fn parse_args(argv: &[String]) -> Args {
     let mut brief_date: Option<String> = None;
     let mut model_dir: Option<PathBuf> = None;
     let mut transcript_root: Option<PathBuf> = None;
+    let mut export_out: Option<PathBuf> = None;
     let mut codex_root: Option<PathBuf> = None;
     let mut import_full = false;
     let mut refresh_budget_ms: u64 = DEFAULT_REFRESH_BUDGET_MS;
@@ -425,6 +435,14 @@ fn parse_args(argv: &[String]) -> Args {
             "init" => mode_kind = ModeKind::Init,
             "ensure-key" => mode_kind = ModeKind::EnsureKey,
             "forget-side-pictures" => mode_kind = ModeKind::ForgetSidePictures,
+            "erase-memory" => mode_kind = ModeKind::EraseMemory,
+            "export" => mode_kind = ModeKind::Export,
+            "--out" => {
+                if let Some(v) = argv.get(i + 1) {
+                    export_out = Some(PathBuf::from(v));
+                    i += 1;
+                }
+            }
             "--transcript-root" | "--root" => {
                 if let Some(v) = argv.get(i + 1) {
                     transcript_root = Some(PathBuf::from(v));
@@ -609,6 +627,13 @@ fn parse_args(argv: &[String]) -> Args {
         ModeKind::ForgetSidePictures => Mode::ForgetSidePictures {
             db_path: resolved_db_path,
         },
+        ModeKind::EraseMemory => Mode::EraseMemory {
+            db_path: resolved_db_path,
+        },
+        ModeKind::Export => Mode::Export {
+            db_path: resolved_db_path,
+            out: export_out,
+        },
         ModeKind::ImportSessions => Mode::ImportSessions {
             db_path: resolved_db_path,
             root: transcript_root
@@ -655,6 +680,8 @@ enum ModeKind {
     Init,
     EnsureKey,
     ForgetSidePictures,
+    EraseMemory,
+    Export,
     UnknownCommand,
 }
 
@@ -687,8 +714,9 @@ fn print_usage() {
         \x20                            install the SessionStart handoff hooks in\n\
         \x20                            ~/.claude/settings.json and ~/.codex/hooks.json,\n\
         \x20                            and load the ai.hippocampus.refresh LaunchAgent\n\
-        \x20 disconnect --all           remove the Hippocampus SessionStart hooks and the\n\
-        \x20                            refresh LaunchAgent. MCP registrations stay.\n\
+        \x20 disconnect --all           remove what Hippocampus added to Claude Code and\n\
+        \x20                            Codex: the SessionStart hooks and the MCP\n\
+        \x20                            registration, and the refresh LaunchAgent\n\
         \x20 init                       one-command setup: make a key, import your\n\
         \x20                            Claude Code history, index it, and connect\n\
         \x20                            detected Claude Code and Codex clients\n\
@@ -697,6 +725,11 @@ fn print_usage() {
         \x20 forget-side-pictures       carry out Forget Pictures of Other Windows… now,\n\
         \x20                            under the writer lease, then exit. What the app\n\
         \x20                            runs while remembering is paused or off.\n\
+        \x20 export --out <file>        write every moment, in full, as JSON lines to a\n\
+        \x20                            new file only you can read. It isn't encrypted.\n\
+        \x20 erase-memory               delete the memory, its screenshots and its\n\
+        \x20                            Keychain key, so no earlier copy (a backup, a\n\
+        \x20                            snapshot) can be read again. Can't be undone.\n\
         \x20 import-sessions            import Claude Code (~/.claude/projects) and Codex\n\
         \x20                            (~/.codex/sessions) transcripts into the brain.\n\
         \x20                            Incremental: a file already imported is read only\n\
@@ -731,7 +764,8 @@ fn print_usage() {
         \x20                            approving one takes a human, per ADR-0018.\n\
         \x20                            Regenerating a date replaces that date's brief.\n\
         \x20 mcp-sync                   pull resources from every MCP server registered in\n\
-        \x20                            ~/Library/Application Support/MCI/mcp-servers.toml\n\
+        \x20                            ~/Library/Application Support/MCI/Config.noindex/\n\
+        \x20                            mcp-servers.toml\n\
         \x20                            into the brain, once, then exit. Safe to re-run:\n\
         \x20                            a resource already ingested is not written twice.\n\
         \x20 embed-backfill             embed every event that has no vector yet, so\n\
@@ -797,7 +831,30 @@ fn print_usage() {
     );
 }
 
+/// Owner-only modes for the writer's own files: the store and its
+/// siblings, and, in the product's layout, the `MCI` data folder and the
+/// `Hippocampus` run-lock folder beside it. Another folder named on the
+/// command line is never changed.
+fn repair_store_modes(db_path: &Path) {
+    use mci_agent::private_files::{make_owner_only, make_store_owner_only};
+    make_store_owner_only(db_path);
+    if let Some(folder) = db_path
+        .parent()
+        .filter(|parent| parent.file_name().is_some_and(|name| name == "MCI"))
+    {
+        let _ = make_owner_only(folder);
+    }
+    if let Some(folder) = lock_path_for_brain(db_path)
+        .parent()
+        .filter(|parent| parent.file_name().is_some_and(|name| name == "Hippocampus"))
+    {
+        let _ = make_owner_only(folder);
+    }
+}
+
 fn main() -> ExitCode {
+    // Owner-only before anything is created: 0600 files, 0700 folders.
+    mci_agent::private_files::restrict_new_files();
     mci_agent::panic_hook::install();
     let raw_argv: Vec<String> = std::env::args().collect();
     if let Some(code) = run_understanding_cli(&raw_argv) {
@@ -874,7 +931,7 @@ async fn run_agent(args: Args) -> ExitCode {
             let mut stdin = tokio::io::stdin();
 
             // V2-MCP-2 — boot the MCP-client registry from
-            // `~/Library/Application Support/MCI/mcp-servers.toml`.
+            // `~/Library/Application Support/MCI/Config.noindex/mcp-servers.toml`.
             // ADR-0001 §amendment 2026-05-31. The boot helper builds
             // the registry, the agent holds it for the rest of the
             // process lifetime, and the MCP aggregator picks it up.
@@ -925,6 +982,11 @@ async fn run_agent(args: Args) -> ExitCode {
                             }
                         }
                         let key = DbKey::from_bytes(key_bytes);
+                        // An install from before 0.3.1 made these 0755 and
+                        // 0644. Take group and other access off the data
+                        // folder, the store and its WAL and SHM, and the
+                        // run-lock folder, before the store opens.
+                        repair_store_modes(&db_path);
                         // Cycle 8.44 audit — breakage risk #3 wiring #3:
                         // acquire the run-lock BEFORE opening the store
                         // so a live sibling instance aborts us early
@@ -1515,6 +1577,14 @@ async fn run_agent(args: Args) -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => ExitCode::from(code),
         },
+        Mode::EraseMemory { db_path } => match run_erase_memory_cmd(&db_path) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
+        Mode::Export { db_path, out } => match run_export_cmd(&db_path, out.as_deref()) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(code) => ExitCode::from(code),
+        },
         Mode::ImportSessions {
             db_path,
             root,
@@ -1718,48 +1788,40 @@ fn run_stats(source: &str, since_seconds: u64, db_path: &std::path::Path) -> Exi
     ExitCode::SUCCESS
 }
 
-/// Read the development file key when the explicit development gate is set.
+/// Read the development file key when the explicit development gate is set
+/// and this build honours it (`key_resolver::DEVELOPMENT_FILE_KEY_COMPILED_IN`;
+/// a release build reads only Demo Memory's own key file, for its store).
 fn read_dev_key_hex() -> Option<String> {
     let home = std::env::var("HOME").ok().map(PathBuf::from);
     let explicit_key_file = std::env::var_os("MCI_DB_KEY_FILE").map(PathBuf::from);
-    development_key_hex_from(
-        std::env::var("MCI_DEVELOPMENT_FILE_KEY").ok().as_deref(),
-        std::env::var("MCI_DB_KEY_HEX").ok().as_deref(),
-        explicit_key_file.as_deref(),
-        home.as_deref(),
-    )
+    let db_path = std::env::var_os("MCI_DB_PATH").map(PathBuf::from);
+    let marker = std::env::var("MCI_DEVELOPMENT_FILE_KEY").ok();
+    let raw_key = std::env::var("MCI_DB_KEY_HEX").ok();
+    key_resolver::DevelopmentKeyEnvironment {
+        marker: marker.as_deref(),
+        raw_key: raw_key.as_deref(),
+        key_file: explicit_key_file.as_deref(),
+        db_path: db_path.as_deref(),
+        home: home.as_deref(),
+    }
+    .key()
 }
 
+#[cfg(test)]
 fn development_key_hex_from(
     marker: Option<&str>,
     raw_key: Option<&str>,
     explicit_key_file: Option<&Path>,
     home: Option<&Path>,
 ) -> Option<String> {
-    guard_development_marker(marker)?;
-    if let Some(path) = explicit_key_file {
-        return read_development_key_file(path);
+    key_resolver::DevelopmentKeyEnvironment {
+        marker,
+        raw_key,
+        key_file: explicit_key_file,
+        db_path: None,
+        home,
     }
-    raw_key
-        .filter(|key| key_resolver::is_valid_database_key(key))
-        .map(str::to_owned)
-        .or_else(|| {
-            let path = home?.join("Library/Application Support/MCI/dev.key");
-            read_development_key_file(&path)
-        })
-}
-
-fn read_development_key_file(path: &Path) -> Option<String> {
-    let contents = std::fs::read_to_string(path).ok()?;
-    let key = contents
-        .strip_suffix("\r\n")
-        .or_else(|| contents.strip_suffix('\n'))
-        .unwrap_or(&contents);
-    key_resolver::is_valid_database_key(key).then(|| key.to_owned())
-}
-
-fn guard_development_marker(marker: Option<&str>) -> Option<()> {
-    (marker == Some("1")).then_some(())
+    .key_for_build(true)
 }
 
 /// Resolve the brain key from Keychain. Raw/file keys are development-only
@@ -1798,11 +1860,13 @@ enum WriterCommand {
     EmbedBackfill,
     Handoff,
     ForgetSidePictures,
+    KeyChange,
+    Erase,
 }
 
 impl WriterCommand {
     #[cfg(test)]
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 10] = [
         Self::Init,
         Self::ImportSessions,
         Self::Enrich,
@@ -1811,6 +1875,8 @@ impl WriterCommand {
         Self::EmbedBackfill,
         Self::Handoff,
         Self::ForgetSidePictures,
+        Self::KeyChange,
+        Self::Erase,
     ];
 
     const fn label(self) -> &'static str {
@@ -1823,6 +1889,8 @@ impl WriterCommand {
             Self::EmbedBackfill => "embed-backfill",
             Self::Handoff => "handoff",
             Self::ForgetSidePictures => "forget-side-pictures",
+            Self::KeyChange => "ensure-key",
+            Self::Erase => "erase-memory",
         }
     }
 }
@@ -2019,7 +2087,7 @@ fn repair_existing_client_registrations(db_path: &Path) {
 /// Where the client files live. `CODEX_HOME` overrides `~/.codex`, as it
 /// does for Codex itself and for the MCP registry.
 fn client_homes() -> (PathBuf, Option<PathBuf>) {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     let codex_home = std::env::var_os("CODEX_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
@@ -2109,12 +2177,16 @@ fn run_register_clients_cmd(db_path: &Path) -> Result<(), u8> {
     }
 }
 
-/// Remove only what Hippocampus installed: both `SessionStart` hooks (including
-/// the group the Hippocampus.app installer wrote) and the refresh agent.
-/// MCP registrations are left alone; the registry has no removal path.
+/// Remove only what Hippocampus installed, in each tool: both `SessionStart`
+/// hooks (including the group the Hippocampus.app installer wrote), the
+/// `hippocampus` MCP registration (as Preferences' Disconnect All and
+/// `clients --disconnect all` take it out), and the refresh agent. Everything
+/// else in the tools' settings stays as it was.
 fn run_disconnect_all_cmd(refresh_agent: bool) -> Result<(), u8> {
     let (home, codex_home) = client_homes();
     let paths = HookPaths::for_home(&home, codex_home.as_deref());
+    let look_ups = ClientRegistry::discover()
+        .map(|registry| mci_agent::client_status::disconnect(&registry, &["claude-code", "codex"]));
     let mut failed = false;
     for (name, result) in [
         (
@@ -2123,14 +2195,30 @@ fn run_disconnect_all_cmd(refresh_agent: bool) -> Result<(), u8> {
         ),
         ("codex", client_hooks::remove_codex_hook(&paths.codex_hooks)),
     ] {
-        match result {
-            Ok(change) => outln!(
-                "  {name}: {}, MCP registration left in place",
-                hook_change_label(change)
+        let (registration, registration_failed) = match &look_ups {
+            Ok(done) => match done.iter().find(|entry| entry.id == name) {
+                Some(entry) if entry.look_ups == "removed" => ("MCP registration removed", false),
+                Some(entry) if entry.look_ups == "none" => ("no MCP registration", false),
+                _ => ("MCP registration removal failed", true),
+            },
+            Err(_) => (
+                "MCP registration not checked (this Mac's AI tools could not be found)",
+                true,
             ),
+        };
+        match result {
+            Ok(change) => {
+                let line = format!("  {name}: {}, {registration}", hook_change_label(change));
+                if registration_failed {
+                    failed = true;
+                    errln!("{line}");
+                } else {
+                    outln!("{line}");
+                }
+            }
             Err(error) => {
                 failed = true;
-                errln!("  {name}: SessionStart hook removal failed: {error}");
+                errln!("  {name}: SessionStart hook removal failed: {error}, {registration}");
             }
         }
     }
@@ -2139,9 +2227,6 @@ fn run_disconnect_all_cmd(refresh_agent: bool) -> Result<(), u8> {
     } else {
         outln!("  refresh: LaunchAgent skipped (--no-refresh-agent)");
     }
-    outln!(
-        "  To drop the MCP registrations too: `claude mcp remove hippocampus` and `codex mcp remove hippocampus`."
-    );
     if failed {
         Err(14)
     } else {
@@ -3243,7 +3328,8 @@ fn report_import_root(label: &str, stats: &mci_agent::import_sessions::ImportSta
     errln!(
         "mci-agent import-sessions: {label}: {} events written ({} tool) from {} file(s) read, \
          {} resumed, {} unchanged, {} rewound, {} subagent skipped; {} records, \
-         {} no text, {} injected, {} sidechain, {} meta, {} malformed{}",
+         {} no text, {} injected, {} sidechain, {} meta, {} malformed, \
+         {} Hippocampus output, {} with a secret{}",
         stats.events_written,
         stats.tool_events_written,
         stats.files_scanned,
@@ -3257,6 +3343,8 @@ fn report_import_root(label: &str, stats: &mci_agent::import_sessions::ImportSta
         stats.skipped_sidechain,
         stats.skipped_meta,
         stats.malformed_lines,
+        stats.skipped_hippocampus_output,
+        stats.skipped_secret,
         if stats.deadline_hit {
             " (stopped at deadline)"
         } else {
@@ -3493,6 +3581,306 @@ impl key_resolver::KeychainWriter for NativeKeychainWriter {
 }
 
 fn run_ensure_key_cmd(db_path: &Path) -> Result<(), u8> {
+    run_ensure_key_with_lease(db_path, None)
+}
+
+/// A new random key, 64 lowercase hex characters, from the OS CSPRNG.
+fn generate_database_key_hex() -> Result<String, key_resolver::KeyResolutionError> {
+    let mut bytes = zeroize::Zeroizing::new([0u8; 32]);
+    getrandom::fill(&mut bytes[..]).map_err(|error| {
+        key_resolver::KeyResolutionError::GenerationFailure {
+            reason: error.to_string(),
+        }
+    })?;
+    let mut encoded = String::with_capacity(64);
+    for byte in bytes.iter() {
+        write!(&mut encoded, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    Ok(encoded)
+}
+
+/// Before a legacy `dev.key` that holds the memory's key is removed, the
+/// marker that schedules the key change is written; the file itself is
+/// shredded, not just unlinked (storage-security review S4).
+#[cfg(target_os = "macos")]
+struct ShreddingLegacyKeyRemover<'a> {
+    support_dir: &'a Path,
+}
+
+#[cfg(target_os = "macos")]
+impl key_resolver::LegacyKeyRemover for ShreddingLegacyKeyRemover<'_> {
+    fn remove(&self, path: &Path) -> std::io::Result<()> {
+        mci_agent::key_change::mark_key_adopted_from_file(self.support_dir)?;
+        mci_agent::key_change::shred_file(path).map_err(std::io::Error::other)
+    }
+}
+
+#[cfg(target_os = "macos")]
+struct NativeKeychainDeleter;
+
+#[cfg(target_os = "macos")]
+impl mci_agent::key_change::KeychainDeleter for NativeKeychainDeleter {
+    fn delete_generic_password(
+        &self,
+        service: &str,
+        account: &str,
+    ) -> Result<(), key_resolver::KeyResolutionError> {
+        mci_keychain::delete_file_generic_password(service, account).map_err(|error| match error {
+            mci_keychain::Error::Status(status) => {
+                key_resolver::KeyResolutionError::WriteFailure { status }
+            }
+            _ => key_resolver::KeyResolutionError::WriteFailure { status: -50 },
+        })
+    }
+}
+
+/// The writer lease for `ensure-key`'s changes: the caller's, one taken
+/// earlier, or a new one. False when another writer holds it.
+fn take_writer_lease(
+    db_path: &Path,
+    held: Option<&CommandWriterLease>,
+    own: &mut Option<CommandWriterLease>,
+) -> bool {
+    if held.is_some() || own.is_some() {
+        return true;
+    }
+    match acquire_lock(&lock_path_for_brain(db_path)) {
+        Ok((_, lock)) => {
+            *own = Some(CommandWriterLease {
+                command: WriterCommand::KeyChange,
+                unclean_prior_shutdown: false,
+                lock: Some(lock),
+            });
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// Finish an erase a crash or a refusal left (storage-security review S3).
+#[cfg(target_os = "macos")]
+fn finish_pending_erase(
+    support: &Path,
+    db_path: &Path,
+    service: &str,
+    deleter: &dyn mci_agent::key_change::KeychainDeleter,
+) -> Result<(), u8> {
+    let erase = mci_agent::erase::EraseContext {
+        support_dir: support,
+        db_path,
+        service,
+        deleter,
+    };
+    match mci_agent::erase::erase_memory(&erase) {
+        Ok(_) => {
+            outln!("  key      an unfinished erase was finished; the old key is gone");
+            Ok(())
+        }
+        Err(error) => {
+            errln!("hippocampus ensure-key: finishing the erase: {error}");
+            Err(35)
+        }
+    }
+}
+
+/// Run the key change a key file or the adoption marker asks for, when
+/// `ensure-key` holds the writer lease; postpone it otherwise.
+#[cfg(target_os = "macos")]
+fn run_due_key_change(
+    ctx: &mci_agent::key_change::KeyChangeContext<'_>,
+    lease_held: bool,
+) -> Result<(), u8> {
+    if !lease_held {
+        outln!("  key      key change postponed: another writer holds the memory");
+        return Ok(());
+    }
+    match mci_agent::key_change::run_key_change(ctx) {
+        Ok(outcome) => {
+            report_key_change(&outcome);
+            Ok(())
+        }
+        Err(error) => {
+            errln!("hippocampus ensure-key: key change: {error}");
+            Err(34)
+        }
+    }
+}
+
+/// Print what `ensure-key` found or did to the usual item.
+fn report_key_initialization(outcome: key_resolver::KeyInitializationOutcome) {
+    match outcome {
+        key_resolver::KeyInitializationOutcome::AlreadyPresent => {
+            outln!("  key      existing Keychain item validated");
+        }
+        key_resolver::KeyInitializationOutcome::Created => {
+            outln!("  key      created in macOS Keychain with bundled-executable ACL");
+        }
+        key_resolver::KeyInitializationOutcome::MigratedLegacyKey => {
+            outln!("  key      legacy database key migrated and validated");
+        }
+        key_resolver::KeyInitializationOutcome::ConcurrentItemValidated => {
+            outln!("  key      concurrent Keychain item re-read and validated");
+        }
+        key_resolver::KeyInitializationOutcome::CompletedInterruptedMigration => {
+            outln!("  key      interrupted legacy migration completed and plaintext removed");
+        }
+    }
+}
+
+/// Print what a key change did, one content-free line.
+fn report_key_change(outcome: &mci_agent::key_change::KeyChangeOutcome) {
+    use mci_agent::key_change::KeyChangeOutcome;
+    match outcome {
+        KeyChangeOutcome::NotNeeded => {}
+        KeyChangeOutcome::Settled(note) => outln!("  key      Keychain put in order: {note}"),
+        KeyChangeOutcome::Deferred(reason) => {
+            outln!("  key      key change postponed, nothing changed: {reason}");
+        }
+        KeyChangeOutcome::RolledBack(reason) => {
+            outln!("  key      key change undone, the memory is as it was: {reason}");
+        }
+        KeyChangeOutcome::Changed(report) => {
+            outln!(
+                "  key      memory moved to a new key: {} moments, {} screenshots re-sealed, {} key file(s) deleted, {} ms",
+                report.moments,
+                report.screenshots_resealed,
+                report.key_files_deleted,
+                report.elapsed_ms
+            );
+            if let Some(pending) = &report.cleanup_pending {
+                outln!("  key      left for the next launch: {pending}");
+            }
+        }
+    }
+}
+
+/// Export Everything (storage-security review S8): every moment, in full,
+/// as JSON lines, into a new file only this user can read (mode 0600 from
+/// the moment it exists), renamed over `out` once it is complete. Read-only:
+/// it runs beside remembering. Prints how many moments it wrote.
+fn run_export_cmd(db_path: &Path, out: Option<&Path>) -> Result<(), u8> {
+    const BATCH: usize = 500;
+    let Some(out) = out else {
+        errln!("mci-agent export: --out <file> is required");
+        return Err(2);
+    };
+    let key_hex = resolve_key_for_command("export")?;
+    let Some(key_bytes) = decode_hex32(&key_hex) else {
+        errln!("mci-agent export: brain key is not a 32-byte hex string");
+        return Err(10);
+    };
+    let store = SqlCipherBrainStore::open_readonly(db_path, &DbKey::from_bytes(key_bytes))
+        .map_err(|error| {
+            errln!(
+                "mci-agent export: open_readonly {}: {error}",
+                db_path.display()
+            );
+            11
+        })?;
+    let written = mci_agent::export::write_private_jsonl(out, |sink| {
+        let mut cursor_ts = 0_u64;
+        let mut cursor_id = None;
+        let mut total = 0_u64;
+        loop {
+            let batch = store
+                .paged_events_since(cursor_ts, cursor_id, BATCH)
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            if batch.is_empty() {
+                return Ok(total);
+            }
+            for event in &batch {
+                cursor_ts = event.ts_us;
+                cursor_id = Some(event.id);
+                sink(&mci_agent::brain_cli::format_event_jsonl(event))?;
+                total += 1;
+            }
+        }
+    })
+    .map_err(|error| {
+        errln!("mci-agent export: write {}: {error}", out.display());
+        24
+    })?;
+    outln!("{written}");
+    Ok(())
+}
+
+/// The Keychain deleter `erase-memory` uses: none in development file-key
+/// mode, where the key is a file and the Keychain item, if there is one,
+/// belongs to another install on this Mac.
+#[cfg(target_os = "macos")]
+struct DevelopmentKeychainDeleter;
+
+#[cfg(target_os = "macos")]
+impl mci_agent::key_change::KeychainDeleter for DevelopmentKeychainDeleter {
+    fn delete_generic_password(
+        &self,
+        _service: &str,
+        _account: &str,
+    ) -> Result<(), key_resolver::KeyResolutionError> {
+        Ok(())
+    }
+}
+
+/// Erase the memory and destroy its key (storage-security review S3):
+/// Delete Everything, run by the app while nothing remembers, and uninstall.
+fn run_erase_memory_cmd(db_path: &Path) -> Result<(), u8> {
+    let _lease = acquire_command_writer_lease(WriterCommand::Erase, db_path)?;
+    let Some(support) = db_path.parent() else {
+        errln!("mci-agent erase-memory: the memory's path has no folder");
+        return Err(2);
+    };
+    #[cfg(target_os = "macos")]
+    {
+        let reference =
+            key_resolver::KeychainKeyReference::from_environment().map_err(|error| {
+                errln!("mci-agent erase-memory: {error}");
+                10
+            })?;
+        let development = read_dev_key_hex().is_some();
+        let native = NativeKeychainDeleter;
+        let skip = DevelopmentKeychainDeleter;
+        let deleter: &dyn mci_agent::key_change::KeychainDeleter =
+            if development { &skip } else { &native };
+        let ctx = mci_agent::erase::EraseContext {
+            support_dir: support,
+            db_path,
+            service: &reference.service,
+            deleter,
+        };
+        match mci_agent::erase::erase_memory(&ctx) {
+            Ok(report) => {
+                outln!(
+                    "  erased   {} database file(s), {} screenshot(s), {} key file(s); {}",
+                    report.database_files_deleted,
+                    report.screenshots_deleted,
+                    report.key_files_deleted,
+                    if development {
+                        "development key file shredded"
+                    } else {
+                        "Keychain key deleted"
+                    }
+                );
+                Ok(())
+            }
+            Err(error) => {
+                errln!("mci-agent erase-memory: {error}");
+                Err(35)
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = support;
+        errln!("mci-agent erase-memory: requires macOS");
+        Err(35)
+    }
+}
+
+/// Validate (or create) the memory's key, and run the one-time key change a
+/// key that once sat in a file needs (storage-security review S4). The
+/// change writes the memory, so it runs under the writer lease: the
+/// caller's when it holds one (`init`), else one taken here.
+fn run_ensure_key_with_lease(db_path: &Path, held: Option<&CommandWriterLease>) -> Result<(), u8> {
     let home = if let Ok(home) = std::env::var("HOME") {
         PathBuf::from(home)
     } else {
@@ -3510,61 +3898,102 @@ fn run_ensure_key_cmd(db_path: &Path) -> Result<(), u8> {
 
     #[cfg(target_os = "macos")]
     {
+        use mci_agent::key_change;
+
         let contract =
             key_resolver::KeychainAclContract::from_current_executable().map_err(|error| {
                 errln!("hippocampus ensure-key: {error}. Launch the bundled Hippocampus.app.");
                 33
             })?;
-        let outcome = key_resolver::initialize_database_key_with(
+        let reference = key_resolver::KeychainKeyReference::default();
+        let envelope = key_change::SealedScreenshotEnvelope;
+        let deleter = NativeKeychainDeleter;
+        let ctx = key_change::KeyChangeContext {
+            support_dir: &support,
+            db_path,
+            service: &reference.service,
+            reader: &key_resolver::SystemKeychainReader,
+            writer: &NativeKeychainWriter,
+            deleter: &deleter,
+            trusted_application_paths: &contract.trusted_application_paths,
+            envelope: &envelope,
+            space: &key_change::VolumeSpace,
+            generate: &generate_database_key_hex,
+            checkpoints: &key_change::NoCheckpoints,
+        };
+        let mut own_lease: Option<CommandWriterLease> = None;
+        let take_lease =
+            |own: &mut Option<CommandWriterLease>| take_writer_lease(db_path, held, own);
+
+        // 0. An erase left unfinished is finished first: its key must never
+        // be used for a new memory (storage-security review S3).
+        if mci_agent::erase::erase_pending(&support) {
+            if !take_lease(&mut own_lease) {
+                errln!(
+                    "hippocampus ensure-key: an erase is unfinished and another writer holds the memory."
+                );
+                return Err(35);
+            }
+            finish_pending_erase(&support, db_path, &reference.service, &deleter)?;
+        }
+
+        // 1. An unfinished key change goes on, or is undone, and a key left
+        // under the new account is put back, before the usual item is read:
+        // until then it may be missing or old.
+        // Settling runs under the writer lease: another ensure-key may be in
+        // the middle of a change, with its new key already stored.
+        let settle = key_change::settling_needed(&ctx).map_err(|error| {
+            errln!("hippocampus ensure-key: key change: {error}");
+            34
+        })?;
+        if settle {
+            if !take_lease(&mut own_lease) {
+                errln!(
+                    "hippocampus ensure-key: a key change is under way and another writer holds the memory; try again when it is done."
+                );
+                return Err(34);
+            }
+            match key_change::settle_key_change(&ctx) {
+                Ok(outcome) => report_key_change(&outcome),
+                Err(error) => {
+                    errln!("hippocampus ensure-key: key change: {error}");
+                    return Err(34);
+                }
+            }
+        }
+
+        // 2. The usual item: validated, created, or adopted from a legacy file.
+        let outcome = key_resolver::initialize_database_key_with_remover(
             &key_resolver::SystemKeychainReader,
             &NativeKeychainWriter,
             &key_resolver::SqlCipherDatabaseKeyValidator,
-            &key_resolver::KeychainKeyReference::default(),
+            &ShreddingLegacyKeyRemover {
+                support_dir: &support,
+            },
+            &reference,
             &contract.trusted_application_paths,
             db_path,
             &support.join("dev.key"),
-            || {
-                let mut bytes = [0u8; 32];
-                getrandom::fill(&mut bytes).map_err(|error| {
-                    key_resolver::KeyResolutionError::GenerationFailure {
-                        reason: error.to_string(),
-                    }
-                })?;
-                let mut encoded = String::with_capacity(bytes.len() * 2);
-                for byte in bytes {
-                    write!(&mut encoded, "{byte:02x}").expect("writing to String cannot fail");
-                }
-                Ok(encoded)
-            },
+            generate_database_key_hex,
         )
         .map_err(|error| {
             errln!("hippocampus ensure-key: database key unchanged: {error}");
             33
         })?;
 
-        match outcome {
-            key_resolver::KeyInitializationOutcome::AlreadyPresent => {
-                outln!("  key      existing Keychain item validated");
-            }
-            key_resolver::KeyInitializationOutcome::Created => {
-                outln!("  key      created in macOS Keychain with bundled-executable ACL");
-            }
-            key_resolver::KeyInitializationOutcome::MigratedLegacyKey => {
-                outln!("  key      legacy database key migrated and validated");
-            }
-            key_resolver::KeyInitializationOutcome::ConcurrentItemValidated => {
-                outln!("  key      concurrent Keychain item re-read and validated");
-            }
-            key_resolver::KeyInitializationOutcome::CompletedInterruptedMigration => {
-                outln!("  key      interrupted legacy migration completed and plaintext removed");
-            }
+        report_key_initialization(outcome);
+
+        // 3. A key that once sat in a file is replaced, once.
+        if key_change::key_change_due(&support).unwrap_or(false) {
+            run_due_key_change(&ctx, take_lease(&mut own_lease))?;
         }
+        drop(own_lease);
         Ok(())
     }
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = db_path;
+        let _ = (db_path, held);
         errln!("hippocampus ensure-key: production Keychain initialization requires macOS");
         Err(33)
     }
@@ -3646,7 +4075,7 @@ fn run_init_cmd(
 
     // 1. Key. This is the same migration/validation path the app runs before
     // starting capture, so CLI initialization cannot fork custody behavior.
-    run_ensure_key_cmd(db_path)?;
+    run_ensure_key_with_lease(db_path, Some(&lease))?;
 
     // 2. Import. Missing transcripts is not an error: plenty of people have
     // never run Claude Code, and they should still get a working install.
@@ -4898,6 +5327,8 @@ mod writer_command_lease_tests {
                 "embed-backfill",
                 "handoff",
                 "forget-side-pictures",
+                "ensure-key",
+                "erase-memory",
             ]
         );
     }

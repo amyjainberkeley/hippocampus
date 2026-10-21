@@ -4,9 +4,10 @@
 // (RULINGS S4, product critique 5, SPEC 5.4): it asks whether the AI tools it
 // finds may look things up in your memory, naming them (and ChatGPT's
 // desktop app, which reads Codex's settings), connects them only on
-// Connect, asks the session-start question, and ends on "Connected. Restart
-// {tool}." Every word is in `AIToolsCopy` and `HandoffCopy`, where tests pin
-// them.
+// Connect, asks the session-start question, offers to make a connected
+// tool's own history private when other accounts on this Mac can open it,
+// and ends on "Connected. Restart {tool}." Every word is in `AIToolsCopy` and
+// `HandoffCopy`, where tests pin them.
 
 import AppKit
 import HippocampusKit
@@ -58,7 +59,8 @@ final class ConnectAITools {
             }
             let connected = report.tools(.connected)
             let sessionErrors = self?.offerSessionStart(for: connected, dbURL: dbURL) ?? []
-            let result = AIToolsCopy.result(report, sessionErrors: sessionErrors)
+            let privacyErrors = self?.offerPrivateHistory(for: connected, environment: environment) ?? []
+            let result = AIToolsCopy.result(report, sessionErrors: sessionErrors + privacyErrors)
             self?.show(title: result.title, message: result.message)
             done(Set(connected))
         }
@@ -81,6 +83,24 @@ final class ConnectAITools {
                     ?? "Couldn’t change \(tool.name)’s settings. Try again."
             }
         }
+    }
+
+    /// A connected tool keeps its own history, with what it read from your
+    /// memory (storage review S6). When other accounts on this Mac can open
+    /// it, this offers to make it private; it changes nothing without Make
+    /// Private. Returns what went wrong.
+    private func offerPrivateHistory(for tools: [AITool], environment: [String: String]) -> [String] {
+        let privacy = ToolHistoryPrivacy(environment: environment)
+        let open = privacy.openToOthers(tools)
+        guard !open.isEmpty else { return [] }
+        NSApp.activate()
+        let alert = NSAlert()
+        alert.messageText = AIToolsCopy.privateHistoryTitle(open)
+        alert.informativeText = AIToolsCopy.privateHistoryMessage(open, privacy: privacy)
+        alert.addButton(withTitle: AIToolsCopy.makePrivate)
+        alert.addButton(withTitle: HandoffCopy.notNow)
+        guard alert.runModal() == .alertFirstButtonReturn else { return [] }
+        return open.compactMap { privacy.makePrivate($0) ? nil : AIToolsCopy.couldNotMakePrivate($0) }
     }
 
     /// "Let Claude Code and Codex look things up in your memory?" Nothing is

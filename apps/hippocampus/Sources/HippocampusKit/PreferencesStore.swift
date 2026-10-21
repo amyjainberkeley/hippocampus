@@ -118,6 +118,26 @@ public final class PreferencesStore: ObservableObject {
 
     // MARK: Privacy
 
+    /// Whether Time Machine backs up the memory's folder (storage-security
+    /// review S5). Off by default: the folder carries the sticky
+    /// excluded-from-backup mark. The app applies it at launch
+    /// (`applyMemoryBackupChoice`); changing it here applies it at once.
+    @Published public var memoryInTimeMachine: Bool {
+        didSet {
+            defaults.set(memoryInTimeMachine, forKey: Keys.memoryInTimeMachine)
+            applyMemoryBackupChoice()
+        }
+    }
+
+    /// The memory's folder, whose backup mark `memoryInTimeMachine` sets.
+    private let memoryFolder: URL
+
+    /// Marks the memory's folder as the setting says. True when it took.
+    @discardableResult
+    public func applyMemoryBackupChoice() -> Bool {
+        MemoryBackups.apply(include: memoryInTimeMachine, folder: memoryFolder)
+    }
+
     /// Finite legacy selections require review before the agent deletes data.
     @Published public private(set) var retentionPolicy: RetentionPolicy
     @Published public private(set) var retentionCustomDays: Int?
@@ -169,11 +189,15 @@ public final class PreferencesStore: ObservableObject {
     public init(
         defaults: UserDefaults = .standard,
         retentionURL: URL = PreferencesStore.defaultRetentionURL,
+        memoryFolder: URL = MemoryBackups.defaultFolder(),
         now: @escaping () -> Date = Date.init
     ) {
         self.defaults = defaults
         self.retentionURL = retentionURL
+        self.memoryFolder = memoryFolder
         self.now = now
+        // Off unless the person turned it on (storage-security review S5).
+        self.memoryInTimeMachine = defaults.object(forKey: Keys.memoryInTimeMachine) as? Bool ?? false
 
         // Read + coerce every property from the injected UserDefaults.
         // First-launch users see the default value; existing users see
@@ -349,6 +373,7 @@ public final class PreferencesStore: ObservableObject {
         static let askKey = "ai.hippocampus.prefs.askKey"
         static let retentionPolicy = "ai.hippocampus.prefs.retentionPolicy"
         static let customDatabasePath = "ai.hippocampus.prefs.customDatabasePath"
+        static let memoryInTimeMachine = "ai.hippocampus.prefs.memoryInTimeMachine"
     }
 }
 

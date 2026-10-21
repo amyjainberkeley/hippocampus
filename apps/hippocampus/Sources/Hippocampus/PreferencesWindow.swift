@@ -249,6 +249,14 @@ struct PreferencesRootView: View {
 
             Divider()
 
+            Toggle(MemoryBackups.toggleTitle, isOn: $store.memoryInTimeMachine)
+            Text(MemoryBackups.tradeoff)
+                .font(PreferencesStyle.captionFont)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
             Button("See or Delete What’s Remembered…") {
                 actions.openWindow("privacy")
             }

@@ -352,6 +352,20 @@ public enum AIToolsCopy {
         HandoffCopy.sessionMessage(names(tools), count: tools.count, codex: tools.contains(.codex))
     }
 
+    // Then, for the connected tools whose own history other accounts on this
+    // Mac can open, an offer to make it private (storage review S6).
+    public static func privateHistoryTitle(_ tools: [AITool]) -> String {
+        HandoffCopy.privateHistoryTitle(tools.map(\.name))
+    }
+
+    public static func privateHistoryMessage(_ tools: [AITool], privacy: ToolHistoryPrivacy) -> String {
+        HandoffCopy.privateHistoryMessage(tools.map(\.name), folders: tools.map(privacy.shownPath(for:)))
+    }
+
+    public static let makePrivate = HandoffCopy.makePrivate
+
+    public static func couldNotMakePrivate(_ tool: AITool) -> String { HandoffCopy.couldNotMakePrivate(tool.name) }
+
     // The pane's per-tool question: the same question, for one tool.
     public static func shareTitle(_ tool: AITool) -> String { HandoffCopy.sessionTitle }
 

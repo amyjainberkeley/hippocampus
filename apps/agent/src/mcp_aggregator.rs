@@ -212,6 +212,10 @@ pub struct AggregatorStats {
     /// `put_event` failures (BrainStore-side). Counter-only; the
     /// inner error is logged at the call site.
     pub put_event_errors: AtomicU64,
+    /// Resources the agent's last check refused ([`crate::secret_gate`]):
+    /// their text, title or address held a secret, so nothing of them was
+    /// stored.
+    pub resources_refused_secret: AtomicU64,
     /// V2-P4 Tier 1 entity mentions persisted from MCP-sourced
     /// events. Mirrors [`crate::brain_ingest::BrainPump`]'s
     /// `tier1_mentions_persisted` so research Telemetry-Gap analyst
@@ -235,6 +239,7 @@ impl AggregatorStats {
             resources_materialized: self.resources_materialized.load(Ordering::Relaxed),
             resources_catalog_only: self.resources_catalog_only.load(Ordering::Relaxed),
             put_event_errors: self.put_event_errors.load(Ordering::Relaxed),
+            resources_refused_secret: self.resources_refused_secret.load(Ordering::Relaxed),
             tier1_mentions_persisted: self.tier1_mentions_persisted.load(Ordering::Relaxed),
         }
     }
@@ -254,6 +259,7 @@ pub struct AggregatorStatsSnapshot {
     pub resources_materialized: u64,
     pub resources_catalog_only: u64,
     pub put_event_errors: u64,
+    pub resources_refused_secret: u64,
     pub tier1_mentions_persisted: u64,
 }
 
@@ -550,12 +556,33 @@ impl McpAggregator {
 
         for resource in resources.iter().take(self.max_resources_per_tick) {
             let ts_us = now_us();
+            // Revisions are kept under the address as it is stored (without
+            // sign-in parameters), the key a restart reads back from the store.
+            let key = crate::secret_gate::storable_url(Some(resource.uri.clone()))
+                .unwrap_or_else(|| resource.uri.clone());
             let read_outcome = client.resources_read(&resource.uri).await;
             if let Ok(read_result) = read_outcome {
                 let body = concat_text(&read_result.contents);
                 let revision = resource_revision(&body);
-                if prior_revisions.get(&resource.uri) == Some(&revision) {
-                    newly_readable.push(resource.uri.clone());
+                if prior_revisions.get(&key) == Some(&revision) {
+                    newly_readable.push(key.clone());
+                    continue;
+                }
+                // The agent's last check before the store (crate::secret_gate):
+                // a secret in the body, the title or the address and nothing of
+                // the resource is kept. The revision is still noted, so an
+                // unchanged resource is not read and refused on every tick.
+                let checked = if body.len() <= self.materialize_max_bytes {
+                    body.as_str()
+                } else {
+                    ""
+                };
+                if Self::holds_secret(resource, checked) {
+                    self.stats
+                        .resources_refused_secret
+                        .fetch_add(1, Ordering::Relaxed);
+                    new_revisions.push((key.clone(), revision));
+                    newly_readable.push(key.clone());
                     continue;
                 }
                 if body.len() <= self.materialize_max_bytes {
@@ -569,8 +596,8 @@ impl McpAggregator {
                             self.stats
                                 .resources_materialized
                                 .fetch_add(1, Ordering::Relaxed);
-                            new_revisions.push((resource.uri.clone(), revision));
-                            newly_readable.push(resource.uri.clone());
+                            new_revisions.push((key.clone(), revision));
+                            newly_readable.push(key.clone());
                             // V2-P4 Tier 1 entity extraction —
                             // mirror the
                             // `BrainPump::ingest_ocr_event` Allow-
@@ -610,17 +637,21 @@ impl McpAggregator {
                         ts_us,
                     );
                     if self.persist_catalog_event(server_name, &event) {
-                        new_revisions.push((resource.uri.clone(), revision));
-                        newly_readable.push(resource.uri.clone());
+                        new_revisions.push((key.clone(), revision));
+                        newly_readable.push(key.clone());
                     }
                 }
             } else {
                 // Keep read failures retryable, but persist at most one
                 // catalog row per URI while the resource remains unreadable.
-                if !prior_unreadable.contains(&resource.uri) {
+                if Self::holds_secret(resource, "") {
+                    self.stats
+                        .resources_refused_secret
+                        .fetch_add(1, Ordering::Relaxed);
+                } else if !prior_unreadable.contains(&key) {
                     let event = Self::catalog_only_event(server_name, resource, None, None, ts_us);
                     if self.persist_catalog_event(server_name, &event) {
-                        newly_unreadable.push(resource.uri.clone());
+                        newly_unreadable.push(key.clone());
                     }
                 }
             }
@@ -639,6 +670,15 @@ impl McpAggregator {
         }
 
         Ok(())
+    }
+
+    /// Whether a resource's `body` (empty for a catalog row), its title or
+    /// its address holds a secret ([`crate::secret_gate`]); the address is
+    /// checked without its sign-in parameters, as it is stored.
+    fn holds_secret(resource: &ResourceDef, body: &str) -> bool {
+        let title = resource_title(resource);
+        let url = crate::secret_gate::storable_url(Some(resource.uri.clone()));
+        crate::secret_gate::find_secret(body, title.as_deref(), url.as_deref()).is_some()
     }
 
     /// V2-P4 Tier 1 extraction over a materialized MCP event.
@@ -709,7 +749,7 @@ impl McpAggregator {
     ) -> Event {
         let app = source_tag(server_name);
         let title = resource_title(resource);
-        let url = Some(resource.uri.clone());
+        let url = crate::secret_gate::storable_url(Some(resource.uri.clone()));
         let header = compose_context_header(Some(&app), title.as_deref(), url.as_deref(), ts_us);
         let marker = revision_marker(revision);
         let mut text = String::with_capacity(marker.len() + header.len() + body.len() + 2);
@@ -747,7 +787,7 @@ impl McpAggregator {
     ) -> Event {
         let app = source_tag(server_name);
         let title = resource_title(resource);
-        let url = Some(resource.uri.clone());
+        let url = crate::secret_gate::storable_url(Some(resource.uri.clone()));
         let header = compose_context_header(Some(&app), title.as_deref(), url.as_deref(), ts_us);
         let mut text = String::with_capacity(header.len() + 224);
         if let Some(revision) = revision {

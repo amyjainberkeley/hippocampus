@@ -17,6 +17,10 @@
 import DemoScreensKit
 import Foundation
 
+// Owner-only before anything is created: Demo Memory's screenshots are 0600
+// in 0700 folders, like the real memory's (reports/e2e, finding 5).
+umask(0o077)
+
 func fail(_ message: String, _ code: Int32) -> Never {
     FileHandle.standardError.write(Data("demo-screens: \(message)\n".utf8))
     exit(code)

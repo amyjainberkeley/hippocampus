@@ -85,6 +85,10 @@ LANES=(
     "key-custody-runner|bash|test|scripts/test-agent-key-custody-runner.sh"
     "supervisor-stop-policy|bash|test|scripts/test-supervisor-stop-policy.sh"
     "clean-home-contract|bash|lint|scripts/test-e2e-clean-home-contract.sh"
+    "storage-audit-contract|bash|test|scripts/audit-storage-security.sh --self-test"
+    "owner-only-processes|bash|test|python3 -B scripts/test_owner_only_processes.py"
+    "no-egress-contract|bash|test|scripts/test-no-egress.sh"
+    "e2e-full-headless|bash|test|scripts/e2e-full.sh --headless"
     "development-app-contract|bash|lint|scripts/test-development-app-contract.sh"
     "development-file-key-contract|bash|test|scripts/test-development-file-key-contract.sh"
     "no-quarantine-bypass|bash|test|scripts/test-no-quarantine-bypass.sh"
@@ -178,6 +182,12 @@ LANES
     key-custody-runner    nonblocking bounded child-process diagnostic fixture
     supervisor-stop-policy bounded two-child shutdown fixture
     clean-home-contract     isolated install-to-uninstall product contract
+    storage-audit-contract  every storage-audit detector flags a dirty made-up home and passes a clean one
+    owner-only-processes    every process in the app bundle starts with umask 077, so its files are 0600
+    no-egress-contract      no-egress.sh passes a clean and a built checkout and fails real or hidden network code
+    e2e-full-headless       the full end-to-end test without a GUI (2 to 5 minutes): made-up screens through
+                            the helper's pipeline, the window's reads, search, Ask, handoff, secret checks,
+                            forgetting, retention and uninstall, then audit-storage-security.sh
     development-app-contract debug-only app assembly remains release-safe
     development-file-key-contract signed ad-hoc file-key capability remains release-safe
     no-quarantine-bypass runtime leaves Gatekeeper provenance enforcement to macOS

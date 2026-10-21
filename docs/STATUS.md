@@ -26,9 +26,9 @@ page is refreshed with each release. Each row names the tests that cover it.
 | Reading the window in front | Read when it changes: at most every 3 s plugged in, 6 s on battery and 12 s in Low Power Mode, and every 15 s or more while it keeps moving. Panes are read in order, and a window's tabs, sidebars and bars come after what you were reading. | `FocusedReadPacingTests`, `CapturePowerTests`, `OCRReadingOrderTests` and the reading-order parity fixtures (`tools/ocr/test_layout.py`), and the transcript bench below. On a real screen: needs a person. |
 | Reading other windows | Every display, when text changes outside the window in front: at most every 30 s plugged in and 60 s on battery, none in Low Power Mode. Each line is filed under the window it sits in. | `BackgroundCapturePolicyTests`, `CapturePowerTests`. Two displays on a real Mac: needs a person. |
 | The text reader | PP-OCR (RapidOCR 3.9.2, PP-OCRv6 small, ONNX Runtime 1.30), bundled, without FFmpeg, x264 or x265. | The OCR worker's tests (`ocr-worker` lane), including `test_prepare.py`, which loads the worker with the video libraries gone; the reader bake-off below. |
-| What is skipped | Password fields; six password managers, System Settings, sign-in dialogs, the lock screen and Hippocampus itself, by bundle ID; private browser windows that show it; 18 bank and sign-in addresses; four secret shapes, checked three times. | `SuppressionCascadeTests`, `BrowserPrivateWindowTests`, `BrowserWindowPrivacyTests`, `DenylistTests`, and the secret corpus `core/brain/fixtures/ocr-secret-corpus.json`, which the Swift and Rust checks both read. Real browsers' private windows: needs a person. |
-| Encrypted memory | One SQLCipher database with its key in the login Keychain; screenshots sealed with AES-GCM. | `mci-brain` store tests, `KeychainDatabaseKeyResolverTests`, the `keyframe-codec-behavior` lane, `keychain_packaging_contract`. |
-| Deleting | The last 24 hours or everything, with what was learned from it; the database is rewritten afterwards. | `delete_events_in_range_*` and `delete_event_*` in `core/brain/tests/sqlcipher_brain_store.rs`, `memory_projection.rs`, `understanding_store.rs`. In the app: needs a person. |
+| What is skipped | Password fields; six password managers, System Settings, sign-in dialogs, the lock screen and Hippocampus itself, by bundle ID; private browser windows that show it; 18 bank and sign-in addresses; secret shapes (labelled secrets, vendor API keys, tokens, card numbers, one-time codes) in a moment's text, title or address, checked three times on screen and again by the agent before it stores anything from any source, after an address loses its sign-in parameters. | `SuppressionCascadeTests`, `TitleAndAddressSecretTests`, `BrowserPrivateWindowTests`, `BrowserWindowPrivacyTests`, `DenylistTests`, the agent's `secret_gate`, ingest and import tests, and the corpora `core/brain/fixtures/ocr-secret-corpus.json` and `url-secret-params-corpus.json`, which the Swift and Rust checks both read. Real browsers' private windows: needs a person. |
+| Encrypted memory | One SQLCipher database with its key in the login Keychain; screenshots sealed with AES-GCM. A key that ever sat in a file (`dev.key*`) is changed once, at the next start: database re-encrypted, every screenshot re-sealed, verified, then the old key and files deleted; it resumes after a crash and is undone on a failure. The data folder is left out of Time Machine unless Preferences includes it. | `mci-brain` store tests, `KeychainDatabaseKeyResolverTests`, the `keyframe-codec-behavior` lane, `keychain_packaging_contract`, `apps/agent/tests/key_change.rs` (a stop at every step, 20 real kills, a full disk, a locked Keychain), `KeyChangeAccountTests`, `MemoryBackupsTests`. On a real install: needs a person. |
+| Deleting | The last 24 hours or everything, with what was learned from it; the database is rewritten afterwards and its log emptied. Delete Everything also deletes the key, so earlier backups and snapshots can't be read; a new key is made at once. | `delete_events_in_range_*` and `delete_event_*` in `core/brain/tests/sqlcipher_brain_store.rs`, `memory_projection.rs`, `understanding_store.rs`, `wal_truncated_after_deletion.rs`, the erase tests in `apps/agent/tests/key_change.rs`, `MemoryEraseTests`. In the app: needs a person. |
 | History | Each moment leads with one short line saying what it was about, written on this Mac by Apple Intelligence or a model server, or made from its title, then its text without the window's tabs, address bar, bookmarks and side bars, which stay under Also in this window and in search. Older moments are cleaned and captioned in the background, only on a power cable while the Mac is idle. | `core/brain/tests/chrome.rs`, `caption.rs`, `reclean.rs` and `reading.rs`; `moment_readings_ffi.rs`; the `reclean_worker` tests in `apps/agent`; `MomentCaptionTests`; the mind's caption tests; renders of made-up windows. On a real memory: needs a person. |
 | Search | Exact words (FTS5) and meaning (Arctic Embed S on Core ML). | `hybrid_retriever.rs`, `recall_fusion.rs` and `retrieval_outcomes.rs` in `core/brain/tests`; the evaluations in [`docs/eval/`](eval/); `scripts/try-it.sh` run on Oct 16 (words only). |
 | Ask | Shift twice (or Fn, if chosen) or ⌃⇧Space opens it over any app, like Spotlight: as you type it finds Working On items, pages and moments; ↩ opens, ⌘↩ asks your AI tool, ⌥↩ resumes an item. Return on a question asks for an answer with sources, this window first. It never takes ⌘Space. When a known Fn app or macOS's Globe key setting holds Fn, Hippocampus says which and waits; only a tap of Fn alone counts, and the key monitor watches modifier keys only. | `AskPanelTests`, `AskPanelHandoffTests`, `AskShortcutTests`, `SoloKeyDetectorTests`, `FnKeyMonitorTests`, `CommandBarTests`. With a real keyboard: needs a person. |
@@ -119,8 +119,45 @@ CPU share.
 
 - Six password managers are skipped by bundle ID. Others are read like any
   app; `denylist.toml` keeps one out ([GUIDE](GUIDE.md#keep-an-app-out)).
-- A one-time code or a bank alert shown in a window can be stored. The
-  secret checks look for passwords, keys and tokens.
+- A one-time code with no keyword near it ("verification code",
+  "passcode", "your code is" and the like) or a bank alert shown in a window
+  can be stored. Card numbers that pass the Luhn check and codes next to such
+  a keyword are dropped, as are labelled secrets, JSON web tokens, private
+  keys and the API keys of Anthropic, OpenAI, GitHub, GitLab, Slack, Google,
+  AWS and Stripe, wherever a moment comes from (`scripts/e2e-full.sh`, check
+  c8; `apps/agent/src/secret_gate.rs`).
+- A key in another shape, shown on its own with no label such as
+  `api_key =`, can be stored.
+- An address keeps every parameter whose name doesn't mark a credential
+  (`access_token`, `code`, `key`, `sig`, `password` and the like are
+  removed), so a token under another name can be stored with it.
+- The text reader's ONNX Runtime 1.30 is Microsoft's official build, and it
+  still contains Microsoft's telemetry client. Hippocampus turns the client
+  off three ways: the worker sets `ORT_DISABLE_TELEMETRY=1` before ONNX
+  Runtime loads and calls `disable_telemetry_events()`, and the capture
+  helper starts the worker with `ORT_DISABLE_TELEMETRY=1`. The worker also
+  runs with the network denied (`sandbox-exec`), and a release stops if its
+  worker starts any network request. The audit check `net.binary` checks the
+  switches in the shipped worker and in the programs that start it, and the
+  sandbox on the running worker. Taking the client out needs an ONNX Runtime
+  built from source with `--no_telemetry`, which needs a build with network
+  access; that isn't done yet. Builds up to 0.3.0 did neither: their worker posted to a Microsoft collector over HTTPS (four
+  requests, about 45 KB, in one test run). They left
+  `~/Library/Caches/hippocampus-ocr` and `~/Library/HTTPStorages/hippocampus-ocr`,
+  which the app now deletes when it starts, and ONNX Runtime's own
+  `~/Library/Application Support/Microsoft/DeveloperTools/.onnxruntime` (a
+  device ID), which apps that use ONNX Runtime share, so Hippocampus leaves
+  it.
+- The database key is a login-Keychain item that never syncs, but no
+  this-device-only class is set: it moves with a copied login keychain
+  (audit check `custody.this-device`).
+- A connected AI tool that was reading when you deleted everything keeps
+  the deleted files open, and can read them, until it quits. A window opened
+  by hand, not from the menu bar, deletes every moment but keeps the key.
+- A page the Safari extension stages waits as plain text for up to a minute
+  before it is forwarded or deleted.
+- The window can delete the last 24 hours or everything, but has no button
+  that forgets one moment; the reader it uses can.
 - A private browser window that shows no private marker is read.
 - In Low Power Mode only the window in front is read.
 - Connected AI tools can read your memory while Hippocampus is quit, until
@@ -150,6 +187,23 @@ CPU share.
   tiers and ruled-out claims out of the tree.
 - `scripts/verify-quit-leaves-nothing.sh <app>` checks a built app leaves
   nothing running after Quit.
+- `scripts/e2e-full.sh` is the full end-to-end test, a manual gate. It
+  builds the development app and its disk image and checks them (mounted
+  read-only: signatures, layout, architectures, usage strings), opens the
+  app from the build under a throwaway home through the launch gate, sends
+  made-up windows through the capture helper's pipeline into the agent, and
+  checks the window's reads, search, Ask, the handoff packet, Resume's
+  plan, the secret checks, forgetting, retention and uninstall. Then
+  `scripts/audit-storage-security.sh` audits the home: ciphertext brain,
+  WAL and screenshots, no plain text anywhere else, modes, key custody, the
+  clipboard and the network (no-egress, `lsof` samples and the unified
+  log). It needs an unlocked Mac and takes 20 to 40 minutes; every check
+  prints PASS, FAIL, SKIP or PERSON. `--reference-dmg` also inspects a
+  release-signed disk image. Without a GUI, `scripts/e2e-full.sh --headless`
+  runs in the `e2e-full-headless` lane, and the audit's detectors run on
+  made-up homes in `storage-audit-contract`. What only a person can check
+  (Screen Recording and Accessibility, Shift twice, a notarized first open,
+  a live Claude Code session) is the 10-minute check on a fresh account.
 - `apps/hippocampus/Resources/build-app.sh` refuses to assemble a Developer
   ID signed app when this page's baseline is more than three commits behind
   `HEAD`. An ad-hoc development build (`--debug --development-ad-hoc`) builds

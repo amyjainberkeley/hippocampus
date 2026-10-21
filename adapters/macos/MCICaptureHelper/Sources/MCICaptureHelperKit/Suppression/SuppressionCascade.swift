@@ -316,24 +316,33 @@ public struct SuppressionCascade: Sendable {
 
     // MARK: - ADR-0016 P3.6 — §6 OCR-time cascade (cascade-twice)
 
-    /// Run the §6 OCR-time secret/PII regex over `text` AFTER the
-    /// pixel-time cascade has returned `.allow`. Returns `.allow` iff
-    /// no regex in the SecretBench-tuned set matches; otherwise
-    /// `.suppress(reason: .ocrTimeSecret)`.
+    /// Run the §6 OCR-time secret/PII checks over `text`, the window's
+    /// title and its address AFTER the pixel-time cascade has returned
+    /// `.allow`. Returns `.allow` iff none of them holds a secret;
+    /// otherwise `.suppress(reason: .ocrTimeSecret)`.
+    ///
+    /// The address is checked as it will be stored: without the sign-in
+    /// parameters `urlWithoutSecretParams` removes (`access_token=…`,
+    /// `X-Amz-Signature=…`), so a page whose address only carries a token
+    /// is kept with a clean address, and a secret anywhere else in it
+    /// stops the frame. A browser can show only a site's name while its
+    /// address or title carries a token, so the text alone is not enough.
     ///
     /// LOAD-BEARING (ADR-0016 §4.2): this is the second cascade pass.
     /// `OCREvent`s that reach the IPC wire MUST have passed BOTH
     /// `decide(context:)` on pixels AND `decideOcr(text:context:)` on
     /// OCR'd text. ADR-0013 §6 defense-in-depth — SecretBench shows
     /// best detectors at ~52–88% recall, so §6 is a backstop, never a
-    /// primary guarantee.
-    ///
-    /// `context` is currently unused; carried so a future per-app
-    /// regex policy (e.g. relax patterns inside `1Password` if it ever
-    /// lands on the known-safe allowlist) can land without re-shaping
-    /// the call signature.
-    public func decideOcr(text: String, context _: WorkflowContext) -> SuppressionDecision {
+    /// primary guarantee. The agent runs the same checks again on every
+    /// moment from every source before it is stored.
+    public func decideOcr(text: String, context: WorkflowContext) -> SuppressionDecision {
         if Self.containsSecretOrPII(text) {
+            return .suppress(reason: .ocrTimeSecret)
+        }
+        if let title = context.windowTitle, Self.containsSecretOrPII(title) {
+            return .suppress(reason: .ocrTimeSecret)
+        }
+        if let url = context.url, Self.containsSecretOrPII(Self.urlWithoutSecretParams(url)) {
             return .suppress(reason: .ocrTimeSecret)
         }
         return .allow
@@ -350,17 +359,25 @@ public struct SuppressionCascade: Sendable {
     ///   1. `password|passwd|secret|api[_-]?key|token|bearer
     ///       |access[_-]?token` followed by `:` or `=` and a non-empty
     ///       value (covers `password: hunter2` shape).
-    ///   2. GitHub PAT (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_` prefix
-    ///       + 36 hex/alphanumeric chars).
+    ///   2. GitHub classic tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`)
+    ///       and fine-grained ones (`github_pat_`).
     ///   3. AWS access key id (20-char `AKIA` / `ASIA` prefix).
     ///   4. JWT shape `eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`.
-    ///   5. Credit-card number — 13–19 digits (single space/hyphen groups)
+    ///   5. Vendor API keys with no label: Anthropic (`sk-ant-`), OpenAI
+    ///       (`sk-proj-`, `sk-svcacct-`, `sk-admin-`, and `sk-` with 32 or
+    ///       more letters and digits), Slack (`xoxb-`, `xoxp-` and the other
+    ///       token kinds), GitLab (`glpat-`), Google (`AIza` + 35), Stripe
+    ///       secret and restricted keys, live and test (`sk_live_`,
+    ///       `rk_live_`, `sk_test_`, `rk_test_`; publishable `pk_` keys are
+    ///       public and don't count), a private key's `-----BEGIN … PRIVATE
+    ///       KEY-----` line, and `Bearer` with a long token.
+    ///   6. Credit-card number — 13–19 digits (single space/hyphen groups)
     ///       that pass the Luhn checksum (`containsCreditCard`).
-    ///   6. One-time code — a 4–8 digit run within ~40 bytes of an OTP
+    ///   7. One-time code — a 4–8 digit run within ~40 bytes of an OTP
     ///       keyword (`containsOTP`).
     ///
-    /// Shapes 1–4 are static regex (compiled once per process); 5 and 6 are
-    /// hand-rolled byte scans kept identical to the Rust reader
+    /// Shapes 1–5 are static regex (compiled once per process); 6 and 7 are
+    /// hand-rolled byte scans kept identical to the Rust checks
     /// (`core/brain/src/redaction/ocr_secrets.rs`), proven by the shared
     /// corpus. Credit card needs a checksum and OTP needs keyword context,
     /// so neither is a pure regex: a bare `RegexSet` would over-redact.
@@ -402,10 +419,11 @@ public struct SuppressionCascade: Sendable {
     static let otpWindowBytes = 40
 
     /// Whether `text` holds a credit-card number: a maximal run of 13–19 digits,
-    /// with single spaces or hyphens allowed between digits, that passes the
-    /// Luhn checksum. Precision-first — the run is maximal, so a 20-digit blob is
-    /// one over-long candidate, never a 16-digit card hidden inside it. Mirrors
-    /// Rust `ocr_secrets::contains_credit_card`.
+    /// with single spaces or hyphens allowed between digits, that stands on its
+    /// own (`standsAlone`) and passes the Luhn checksum. Precision-first — the
+    /// run is maximal, so a 20-digit blob is one over-long candidate, never a
+    /// 16-digit card hidden inside it, and a number inside a name is an id or a
+    /// timestamp, not a card. Mirrors Rust `ocr_secrets::contains_credit_card`.
     static func containsCreditCard(_ text: String) -> Bool {
         let bytes = Array(text.utf8)
         var i = 0
@@ -429,12 +447,36 @@ public struct SuppressionCascade: Sendable {
                     break
                 }
             }
-            if (13...19).contains(digits), luhnValid(bytes[start..<i]) {
+            if (13...19).contains(digits), standsAlone(bytes, start, i), luhnValid(bytes[start..<i]) {
                 return true
             }
             // `i` already sits past this run; the maximal run is never re-entered.
         }
         return false
+    }
+
+    /// Whether the digit run `bytes[start..<end]` stands on its own rather than
+    /// inside a name: no ASCII letter or `_` right before or right after it, and
+    /// no `-`, `.` or `/` joining it to a letter or digit on that side
+    /// (`zebrafish2026…`, `handoff-2026…`, `export_…831.json` are ids or
+    /// timestamps; one in ten passes Luhn). Only ASCII counts. Mirrors Rust
+    /// `ocr_secrets::stands_alone`.
+    static func standsAlone(_ bytes: [UInt8], _ start: Int, _ end: Int) -> Bool {
+        func glued(_ near: UInt8?, _ beyond: UInt8?) -> Bool {
+            guard let near else { return false }
+            if isASCIILetter(near) || near == 0x5F { return true }
+            guard near == 0x2D || near == 0x2E || near == 0x2F, let beyond else { return false }
+            return isASCIILetter(beyond) || isDigit(beyond)
+        }
+        let before: UInt8? = start > 0 ? bytes[start - 1] : nil
+        let beforeThat: UInt8? = start > 1 ? bytes[start - 2] : nil
+        let after: UInt8? = end < bytes.count ? bytes[end] : nil
+        let afterThat: UInt8? = end + 1 < bytes.count ? bytes[end + 1] : nil
+        return !glued(before, beforeThat) && !glued(after, afterThat)
+    }
+
+    private static func isASCIILetter(_ byte: UInt8) -> Bool {
+        (0x41...0x5A).contains(byte) || (0x61...0x7A).contains(byte)
     }
 
     /// The Luhn checksum over the ASCII digits in `run`; any other byte (a space
@@ -538,7 +580,159 @@ public struct SuppressionCascade: Sendable {
             (#"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"#, []),
             // (4) JWT three-segment shape.
             (#"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"#, []),
+            // (5) Anthropic API, admin and OAuth keys.
+            (#"\bsk-ant-[A-Za-z0-9_-]{20,}"#, []),
+            // (6) OpenAI project, service-account and admin keys.
+            (#"\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}"#, []),
+            // (7) OpenAI user keys and other `sk-` keys: 32+ letters and digits.
+            (#"\bsk-[A-Za-z0-9]{32,}"#, []),
+            // (8) Slack bot, user, app, refresh, session and export tokens.
+            (#"\bxox[abeprs]-[0-9]+-[A-Za-z0-9-]{8,}"#, []),
+            // (9) GitHub fine-grained personal access tokens.
+            (#"\bgithub_pat_[A-Za-z0-9_]{22,}"#, []),
+            // (10) GitLab personal access tokens.
+            (#"\bglpat-[A-Za-z0-9_-]{20,}"#, []),
+            // (11) Google API keys.
+            (#"\bAIza[0-9A-Za-z_-]{35}"#, []),
+            // (12) Stripe secret and restricted keys, live and test.
+            (#"\b[rs]k_(?:live|test)_[0-9A-Za-z]{20,}"#, []),
+            // (13) A private key's first line, any kind.
+            (#"-----BEGIN [A-Z ]*PRIVATE KEY-----"#, []),
+            // (14) `Bearer` and a long token with no label.
+            (#"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{20,}"#, []),
         ]
         return specs.compactMap { try? NSRegularExpression(pattern: $0.0, options: $0.1) }
     }()
+
+    // MARK: - Sign-in tokens in addresses
+
+    /// Parameter names that are a credential on their own, lower-case.
+    /// MUST stay identical to Rust `url_secrets::SECRET_PARAM_NAMES`; the
+    /// shared corpus (`core/brain/fixtures/url-secret-params-corpus.json`) is
+    /// the cross-language check.
+    static let secretURLParamNames: [[UInt8]] = [
+        "auth", "authorization", "code", "jwt", "key", "otp", "session", "session_id", "sessionid", "sig",
+    ].map { Array($0.utf8) }
+
+    /// Endings that make a parameter name a credential's (`access_token`,
+    /// `client_secret`, `X-Amz-Signature`). MUST stay identical to Rust
+    /// `url_secrets::SECRET_PARAM_ENDINGS`.
+    static let secretURLParamEndings: [[UInt8]] = [
+        "api-key", "api_key", "apikey", "bearer", "credential", "passwd", "password", "secret", "signature", "token",
+    ].map { Array($0.utf8) }
+
+    /// `url` without credential parameters in its query or fragment, and
+    /// without the password in `user:password@host`: the address as the
+    /// agent stores it. Mirrors Rust `url_secrets::strip_secret_params`
+    /// byte for byte (no URL parser on either side); a query or fragment
+    /// left empty goes with its `?` or `#`.
+    public static func urlWithoutSecretParams(_ url: String) -> String {
+        let bytes = Array(url.utf8)
+        let hash = bytes.firstIndex(of: 0x23)
+        let beforeFragment = hash.map { Array(bytes[..<$0]) } ?? bytes
+        let fragment = hash.map { Array(bytes[($0 + 1)...]) }
+        let question = beforeFragment.firstIndex(of: 0x3F)
+        let base = question.map { Array(beforeFragment[..<$0]) } ?? beforeFragment
+        let query = question.map { Array(beforeFragment[($0 + 1)...]) }
+
+        let keptBase = withoutUserinfoPassword(base)
+        let keptQuery = query.map(withoutSecretParams)
+        let keptFragment = fragment.map(fragmentWithoutSecretParams)
+        let changed = keptBase != base || keptQuery != query || keptFragment != fragment
+        guard changed else { return url }
+        var out = keptBase
+        if let keptQuery, !keptQuery.isEmpty {
+            out.append(0x3F)
+            out.append(contentsOf: keptQuery)
+        }
+        if let keptFragment, !keptFragment.isEmpty {
+            out.append(0x23)
+            out.append(contentsOf: keptFragment)
+        }
+        return String(decoding: out, as: UTF8.self)
+    }
+
+    /// Whether a query or fragment parameter called `name` carries a
+    /// credential: matched case-insensitively, after percent-decoding, with
+    /// an HTML-escaped `amp;` in front ignored.
+    static func isSecretURLParam(_ name: [UInt8]) -> Bool {
+        var decoded = percentDecodedLower(name)
+        let amp: [UInt8] = Array("amp;".utf8)
+        if decoded.starts(with: amp) { decoded.removeFirst(amp.count) }
+        return secretURLParamNames.contains(decoded)
+            || secretURLParamEndings.contains { decoded.count >= $0.count && Array(decoded.suffix($0.count)) == $0 }
+    }
+
+    /// `scheme://user:password@host/…` without `:password`.
+    private static func withoutUserinfoPassword(_ base: [UInt8]) -> [UInt8] {
+        let scheme: [UInt8] = Array("://".utf8)
+        guard base.count >= 3,
+              let schemeEnd = (0...(base.count - 3)).first(where: { Array(base[$0..<($0 + 3)]) == scheme })
+        else { return base }
+        let authorityStart = schemeEnd + 3
+        let authorityEnd = base[authorityStart...].firstIndex(of: 0x2F) ?? base.count
+        let authority = base[authorityStart..<authorityEnd]
+        guard let at = authority.lastIndex(of: 0x40),
+              let colon = authority[..<at].firstIndex(of: 0x3A)
+        else { return base }
+        return Array(base[..<colon]) + Array(base[at...])
+    }
+
+    /// A fragment without credential parameters: after a `?` when it has
+    /// one (`#/route?token=…`), else the whole fragment when it has an `=`.
+    private static func fragmentWithoutSecretParams(_ fragment: [UInt8]) -> [UInt8] {
+        if let question = fragment.firstIndex(of: 0x3F) {
+            let route = Array(fragment[..<question])
+            let params = Array(fragment[(question + 1)...])
+            let kept = withoutSecretParams(params)
+            if kept == params { return fragment }
+            return kept.isEmpty ? route : route + [0x3F] + kept
+        }
+        return fragment.contains(0x3D) ? withoutSecretParams(fragment) : fragment
+    }
+
+    /// `params` (`a=1&b=2`) without the pieces whose name is a credential's,
+    /// the rest joined with `&` as they were.
+    private static func withoutSecretParams(_ params: [UInt8]) -> [UInt8] {
+        let pieces = params.split(separator: 0x26, omittingEmptySubsequences: false)
+        let isSecret: (ArraySlice<UInt8>) -> Bool = { piece in
+            let name = piece.firstIndex(of: 0x3D).map { Array(piece[..<$0]) } ?? Array(piece)
+            return !name.isEmpty && isSecretURLParam(name)
+        }
+        guard pieces.contains(where: isSecret) else { return params }
+        let kept = pieces.filter { !isSecret($0) }
+        var out: [UInt8] = []
+        for (index, piece) in kept.enumerated() {
+            if index > 0 { out.append(0x26) }
+            out.append(contentsOf: piece)
+        }
+        return out
+    }
+
+    /// ASCII lower-case of `name` with `%XX` escapes decoded; a `%` not
+    /// followed by two hex digits stays as it is. Bytes, as Rust compares
+    /// them: no Unicode equivalence can make two names match here that
+    /// don't match there.
+    private static func percentDecodedLower(_ name: [UInt8]) -> [UInt8] {
+        func hex(_ byte: UInt8) -> UInt8? {
+            switch byte {
+            case 0x30...0x39: return byte - 0x30
+            case 0x61...0x66: return byte - 0x61 + 10
+            case 0x41...0x46: return byte - 0x41 + 10
+            default: return nil
+            }
+        }
+        var out: [UInt8] = []
+        var i = 0
+        while i < name.count {
+            if name[i] == 0x25, i + 2 < name.count, let high = hex(name[i + 1]), let low = hex(name[i + 2]) {
+                out.append(high * 16 + low)
+                i += 3
+                continue
+            }
+            out.append(name[i])
+            i += 1
+        }
+        return out.map { (0x41...0x5A).contains($0) ? $0 + 0x20 : $0 }
+    }
 }

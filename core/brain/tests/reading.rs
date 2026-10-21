@@ -16,7 +16,7 @@ use mci_brain::reading::{
     audit_text, body, excerpt, passage, reading, reading_prefix, screen_reading, ExcerptQuery,
     Reading, CHROME_SEPARATOR, VISIBLE_OCR_SEPARATOR,
 };
-use mci_brain::redaction::ocr_secrets::{contains_secret, PATTERNS};
+use mci_brain::redaction::ocr_secrets::{contains_secret, redact_secrets, PATTERNS};
 use mci_brain::EventSource;
 
 const SCREEN: EventSource = EventSource::ScreenOcr;
@@ -558,7 +558,7 @@ fn corpus() -> Vec<(String, bool, String)> {
         .iter()
         .map(|case| {
             (
-                case["text"].as_str().unwrap().to_owned(),
+                corpus_text(case),
                 case["secret"].as_bool().unwrap(),
                 case["why"].as_str().unwrap().to_owned(),
             )
@@ -566,17 +566,44 @@ fn corpus() -> Vec<(String, bool, String)> {
         .collect()
 }
 
+/// A corpus case's text: `text`, or its `parts` joined (key-shaped cases are
+/// kept in parts so no whole key sits in the repository).
+fn corpus_text(case: &serde_json::Value) -> String {
+    case["text"].as_str().map_or_else(
+        || {
+            case["parts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|part| part.as_str().unwrap())
+                .collect()
+        },
+        str::to_owned,
+    )
+}
+
 #[test]
 fn the_guard_answers_the_shared_corpus_like_the_capture_helper() {
     let cases = corpus();
-    assert!(cases.len() >= 60);
+    assert!(cases.len() >= 130);
     for (text, secret, why) in cases {
         assert_eq!(contains_secret(&text), secret, "{why}: {text:?}");
     }
 }
 
 #[test]
-fn the_guard_uses_the_capture_helpers_four_pattern_strings_verbatim() {
+fn redacting_the_shared_corpus_leaves_no_secret_and_keeps_clean_text_whole() {
+    for (text, secret, why) in corpus() {
+        let redacted = redact_secrets(&text);
+        assert!(!contains_secret(&redacted), "{why}: {redacted:?}");
+        if !secret {
+            assert_eq!(redacted, text, "{why}: clean text changed");
+        }
+    }
+}
+
+#[test]
+fn the_guard_uses_the_capture_helpers_pattern_strings_verbatim() {
     let swift = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../adapters/macos/MCICaptureHelper/Sources/MCICaptureHelperKit/Suppression/SuppressionCascade.swift");
     let source = std::fs::read_to_string(swift).unwrap();

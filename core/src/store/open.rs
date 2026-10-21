@@ -173,6 +173,27 @@ pub fn open(path: &Path, key: &DbKey) -> Result<Db, StoreError> {
     Ok(Db { conn })
 }
 
+/// Re-encrypt every page of the open store under `new_key` with
+/// `PRAGMA rekey` (storage-security review S4: a key that once sat in a
+/// file is replaced). The same raw-key literal as [`open`] is used, so the
+/// new key is never run through PBKDF2 either.
+///
+/// `SQLCipher`'s rekey reports no failure: it rolls back on an error and
+/// still returns `SQLITE_OK`, and it switches this connection's key in
+/// memory even when the commit failed. Callers must therefore close the
+/// connection and prove the result by opening the file again, first with
+/// `new_key` and, if that fails, with the old key.
+///
+/// # Errors
+/// [`StoreError::Open`] when the statement itself is rejected.
+pub fn rekey(db: &Db, new_key: &DbKey) -> Result<(), StoreError> {
+    let pragma = new_key.expose_sqlcipher_pragma_value();
+    db.conn
+        .pragma_update(None, "rekey", pragma.as_str())
+        .map_err(|e| StoreError::Open(format!("PRAGMA rekey: {e}")))
+    // `pragma` (and its zeroizing String) dropped here.
+}
+
 /// Open the encrypted store at `path` with `key` in **READ-ONLY** mode.
 ///
 /// Used by consumer surfaces that must never mutate the brain: the Phase 3

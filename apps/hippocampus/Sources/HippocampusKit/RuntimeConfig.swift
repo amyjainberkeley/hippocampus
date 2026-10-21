@@ -37,7 +37,9 @@ public enum RuntimeConfigError: LocalizedError, Equatable {
 
 /// Reads/writes `~/.config/hippocampus/runtime.toml`.
 ///
-/// Security review: mode 0644 — non-sensitive settings (capture gate, crash-report opt-in,
+/// Mode 0600, like every file Hippocampus writes (reports/e2e, finding 5; storage-security
+/// review S9: it was 0644, and the home folder lets other accounts in), although these
+/// are non-sensitive settings (capture gate, crash-report opt-in,
 /// and pictures of side windows: whether they are kept, their budget, and when Forget
 /// Pictures of Other Windows… was confirmed). Capture changes are enforced by the supervisor
 /// through a child restart; this value itself remains a simple atomic on-disk preference.
@@ -181,12 +183,7 @@ public struct RuntimeConfig: RuntimeConfiguring, Sendable {
         } catch {
             throw RuntimeConfigError.invalidEmittedDocument
         }
-        try content.write(to: path, atomically: true, encoding: .utf8)
-
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o644],
-            ofItemAtPath: path.path
-        )
+        try PrivateFileWriter.write(content, to: path)
     }
 
     private func existingText() throws -> String {

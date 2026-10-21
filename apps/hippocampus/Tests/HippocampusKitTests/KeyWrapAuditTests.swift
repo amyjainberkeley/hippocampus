@@ -14,6 +14,8 @@ final class KeyWrapAuditTests: XCTestCase {
 
         func readGenericPassword(query: KeychainItemQuery) -> KeychainReadResult {
             queries.append(query)
+            // No key change is under way: nothing under its account.
+            if query.account == KeychainKeyStore.rotatedAccount { return .failure(errSecItemNotFound) }
             return result
         }
 
@@ -41,12 +43,22 @@ final class KeyWrapAuditTests: XCTestCase {
         XCTAssertEqual(report.accessControlVerification, .unverified)
         XCTAssertEqual(report.severity, .production)
         XCTAssertEqual(report.implementationName, "macOS file-based Keychain")
-        XCTAssertEqual(client.queries, [KeychainItemQuery(
-            service: "ai.hippocampus.brain",
-            account: "database-key-v1",
-            useDataProtectionKeychain: false,
-            synchronizable: false
-        )])
+        // The key-change account is asked first (storage-security review
+        // S4), then the usual item; both in the file-based, non-sync domain.
+        XCTAssertEqual(client.queries, [
+            KeychainItemQuery(
+                service: "ai.hippocampus.brain",
+                account: "database-key-v2",
+                useDataProtectionKeychain: false,
+                synchronizable: false
+            ),
+            KeychainItemQuery(
+                service: "ai.hippocampus.brain",
+                account: "database-key-v1",
+                useDataProtectionKeychain: false,
+                synchronizable: false
+            ),
+        ])
         XCTAssertTrue(report.identifier.contains("ai.hippocampus.brain"))
         XCTAssertFalse(report.identifier.contains(key))
     }

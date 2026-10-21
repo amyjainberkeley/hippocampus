@@ -132,12 +132,33 @@ public struct KeychainDatabaseKeyResolver: Sendable {
         self.client = client
     }
 
+    /// The account a key change stores the new key under while the memory
+    /// moves to it (storage-security review S4). The app starts this helper
+    /// only once `mci-agent ensure-key` has finished or undone any change,
+    /// so when this item exists it holds the memory's key: screenshots are
+    /// sealed under it.
+    public static let rotatedAccount = "database-key-v2"
+
     public func resolveBytes(reference: KeychainDatabaseKeyReference) throws -> [UInt8] {
         guard reference.storageModel == KeychainDatabaseKeyReference.storageModel else {
             throw KeychainDatabaseKeyError.domainMismatch
         }
+        let accounts = reference == .defaultDatabaseKey
+            ? [Self.rotatedAccount, reference.account]
+            : [reference.account]
+        var result = KeychainDatabaseKeyReadResult.failure(errSecItemNotFound)
+        for account in accounts {
+            result = client.readGenericPassword(query: KeychainDatabaseKeyQuery(
+                service: reference.service,
+                account: account,
+                useDataProtectionKeychain: false,
+                synchronizable: false
+            ))
+            if case .failure(errSecItemNotFound) = result { continue }
+            break
+        }
         let data: Data
-        switch client.readGenericPassword(query: KeychainDatabaseKeyQuery(reference: reference)) {
+        switch result {
         case .success(let value): data = value
         case .failure(errSecItemNotFound): throw KeychainDatabaseKeyError.missing
         case .failure(errSecAuthFailed), .failure(errSecMissingEntitlement):
@@ -163,11 +184,34 @@ public struct KeychainDatabaseKeyResolver: Sendable {
     /// Resolve a development file only when the parent explicitly marks the
     /// child as development-only and names the fixed, user-owned key path.
     /// Every other launch remains Keychain-only, regardless of ambient env.
+    /// Whether this build can use a development file key at all: a debug
+    /// build, or one compiled with `-DMCI_DEVELOPMENT_FILE_KEY`. A release
+    /// build always reads the Keychain (storage-security review S11).
+    public static let developmentKeyCompiledIn: Bool = {
+        #if DEBUG || MCI_DEVELOPMENT_FILE_KEY
+        return true
+        #else
+        return false
+        #endif
+    }()
+
     public func resolveBytes(
         environment: [String: String],
         developmentKeyPath: URL
     ) throws -> [UInt8] {
-        guard environment["MCI_DEVELOPMENT_FILE_KEY"] == "1" else {
+        try resolveBytes(
+            environment: environment,
+            developmentKeyPath: developmentKeyPath,
+            developmentCompiledIn: Self.developmentKeyCompiledIn
+        )
+    }
+
+    func resolveBytes(
+        environment: [String: String],
+        developmentKeyPath: URL,
+        developmentCompiledIn: Bool
+    ) throws -> [UInt8] {
+        guard developmentCompiledIn, environment["MCI_DEVELOPMENT_FILE_KEY"] == "1" else {
             return try resolveBytes(reference: .from(environment: environment))
         }
         guard let rawPath = environment["MCI_DB_KEY_FILE"] else {

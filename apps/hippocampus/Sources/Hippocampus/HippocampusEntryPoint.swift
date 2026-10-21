@@ -6,6 +6,9 @@ import SwiftUI
 enum HippocampusEntryPoint {
     @MainActor
     static func main() {
+        // Owner-only before anything is created: every file this process
+        // makes is 0600 and every folder 0700 (reports/e2e, finding 5).
+        umask(0o077)
         #if DEBUG
         // Draws Ask's states to PNGs and returns before any scene, menu-bar
         // item, window or activation exists.
@@ -18,6 +21,9 @@ enum HippocampusEntryPoint {
         }
         if arguments.first == PreferencesOpenRequest.flag,
            PreferencesOpenRequest(arguments: arguments) == nil { return }
+        // Copies AppKit makes itself (⌘C on selected text in Ask or
+        // Preferences) stay on this Mac and out of clipboard history too.
+        ClipboardHygiene.ruleEveryCopy()
         // A direct Recall launch cannot use Launch Services' shared bundle-ID
         // reuse. Serialize GUI parents before constructing any supervisor.
         guard Bundle.main.bundleURL.pathExtension == "app", let executable = Bundle.main.executableURL else {

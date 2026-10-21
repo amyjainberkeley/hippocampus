@@ -5,8 +5,12 @@
 //!
 //! - IPv4: any address in `127.0.0.0/8`.
 //! - IPv6: `::1`.
-//! - DNS hostname: accepted only when every resolved A/AAAA address is
-//!   in the loopback set above.
+//! - DNS hostname: only `localhost` and names under it (RFC 6761 §6.3),
+//!   which mean this Mac by definition. No name is ever sent to a
+//!   resolver: asking one about any other name would itself send that
+//!   name off the Mac (a DNS query), before the gate could refuse it.
+//!   Until 2026-10-20 other names were resolved and accepted when every
+//!   address was loopback.
 //!
 //! Defense-in-depth: every URL flows through [`LoopbackHost::parse`] at
 //! registration time AND through [`LoopbackHost::resolve_now`] at
@@ -84,9 +88,8 @@ pub enum HostKind {
     Ipv4Literal(Ipv4Addr),
     /// The IPv6 loopback literal `::1`.
     Ipv6Literal(Ipv6Addr),
-    /// A DNS hostname (e.g., `localhost`). Resolution happens at the
-    /// registration-time gate via [`LoopbackHost::parse`] and again at
-    /// connect time via [`LoopbackHost::resolve_now`].
+    /// `localhost` or a name under it. Never resolved: it always means
+    /// this Mac, and is dialed at `127.0.0.1` (then `::1`).
     Dns(String),
 }
 
@@ -122,9 +125,9 @@ pub enum LoopbackError {
     /// `0.0.0.0`, `8.8.8.8`, `[2001:db8::1]`).
     #[error("URL host is a non-loopback IP literal")]
     NonLoopbackLiteral,
-    /// The host is a DNS name whose A/AAAA resolution does not stay
-    /// inside the loopback set.
-    #[error("URL host resolves to a non-loopback address")]
+    /// The host is a DNS name other than `localhost`. It is refused
+    /// without being resolved, so the name never leaves the Mac.
+    #[error("URL host is a name other than localhost; use 127.0.0.1, [::1] or localhost")]
     NonLoopbackDns,
     /// The DNS name resolved to zero addresses. Treated as a hard
     /// refusal: the validator never admits a URL it cannot verify.
@@ -140,51 +143,34 @@ impl LoopbackHost {
     /// Parse a user-provided URL and validate it against the loopback
     /// contract.
     ///
-    /// IP literals are validated synchronously by the literal's bits.
-    /// DNS hostnames are validated by resolving via
-    /// [`tokio::net::lookup_host`] and requiring every returned address
-    /// to be loopback. Empty resolutions are refused.
+    /// IP literals are validated by the literal's bits. The only names
+    /// accepted are `localhost` and names under it, and no name is ever
+    /// resolved: any other is refused as [`LoopbackError::NonLoopbackDns`].
     ///
     /// # Errors
     /// See [`LoopbackError`].
+    // Still async, as every caller awaits it: it no longer needs to, since
+    // no name is looked up any more.
+    #[allow(clippy::unused_async)]
     pub async fn parse(raw: &str) -> Result<Self, LoopbackError> {
         let parsed = parse_uri(raw)?;
-        match parsed.kind.clone() {
-            HostKind::Dns(name) => {
-                // DNS hostnames must resolve entirely inside the
-                // loopback set. `lookup_host` returns `SocketAddr`s so
-                // we attach the parsed port and re-check the IP half
-                // of each resolution.
-                let target = format!("{name}:{}", parsed.port);
-                let resolved = tokio::net::lookup_host(target.as_str())
-                    .await
-                    .map_err(|_| LoopbackError::DnsResolutionFailed)?;
-                let addrs: Vec<_> = resolved.collect();
-                if addrs.is_empty() {
-                    return Err(LoopbackError::DnsResolutionEmpty);
-                }
-                for addr in &addrs {
-                    if !is_loopback(&addr.ip()) {
-                        return Err(LoopbackError::NonLoopbackDns);
-                    }
-                }
-                Ok(parsed)
-            }
-            HostKind::Ipv4Literal(_) | HostKind::Ipv6Literal(_) => Ok(parsed),
+        match &parsed.kind {
+            HostKind::Dns(name) if !is_localhost_name(name) => Err(LoopbackError::NonLoopbackDns),
+            _ => Ok(parsed),
         }
     }
 
     /// Re-validate this host at per-call connect time and return the
     /// concrete socket address to dial.
     ///
-    /// IP literals always re-pass (the bits cannot change). DNS
-    /// hostnames are re-resolved and re-checked — defense-in-depth
-    /// against time-of-check / time-of-use (a hostname could have
-    /// resolved to `127.0.0.1` at registration and now resolve to a
-    /// public address; this gate refuses the call).
+    /// IP literals always re-pass (the bits cannot change). `localhost`
+    /// is `127.0.0.1` without asking a resolver; any other name is
+    /// refused again, so a host that slipped past [`Self::parse`] still
+    /// can't be looked up or dialed.
     ///
     /// # Errors
     /// Re-validation errors mirror those from [`Self::parse`].
+    #[allow(clippy::unused_async)] // as for `parse`
     pub async fn resolve_now(&self) -> Result<std::net::SocketAddr, LoopbackError> {
         match &self.kind {
             HostKind::Ipv4Literal(addr) => {
@@ -193,29 +179,11 @@ impl LoopbackHost {
             HostKind::Ipv6Literal(addr) => {
                 Ok(std::net::SocketAddr::new(IpAddr::V6(*addr), self.port))
             }
-            HostKind::Dns(name) => {
-                let target = format!("{name}:{}", self.port);
-                let resolved = tokio::net::lookup_host(target.as_str())
-                    .await
-                    .map_err(|_| LoopbackError::DnsResolutionFailed)?;
-                let addrs: Vec<_> = resolved.collect();
-                if addrs.is_empty() {
-                    return Err(LoopbackError::DnsResolutionEmpty);
-                }
-                let mut chosen: Option<std::net::SocketAddr> = None;
-                for addr in &addrs {
-                    if !is_loopback(&addr.ip()) {
-                        return Err(LoopbackError::NonLoopbackDns);
-                    }
-                    if chosen.is_none() {
-                        chosen = Some(*addr);
-                    }
-                }
-                // `chosen` is Some because addrs is non-empty and the
-                // first iteration set it (no iteration returned early
-                // because every address was loopback).
-                Ok(chosen.expect("non-empty + all-loopback ⇒ chosen set"))
-            }
+            HostKind::Dns(name) if is_localhost_name(name) => Ok(std::net::SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::LOCALHOST),
+                self.port,
+            )),
+            HostKind::Dns(_) => Err(LoopbackError::NonLoopbackDns),
         }
     }
 }
@@ -339,11 +307,12 @@ fn rebuild_url(scheme: Scheme, host: &str, port: u16, path_and_query: Option<&st
     )
 }
 
-fn is_loopback(addr: &IpAddr) -> bool {
-    match addr {
-        IpAddr::V4(v4) => is_ipv4_loopback(*v4),
-        IpAddr::V6(v6) => is_ipv6_loopback(v6),
-    }
+/// `localhost` or a name under it (RFC 6761 §6.3), in any case, with or
+/// without the root's trailing dot: names that mean this Mac without a
+/// resolver being asked.
+pub(crate) fn is_localhost_name(name: &str) -> bool {
+    let name = name.strip_suffix('.').unwrap_or(name).to_ascii_lowercase();
+    name == "localhost" || name.ends_with(".localhost")
 }
 
 fn is_ipv4_loopback(addr: Ipv4Addr) -> bool {
@@ -401,15 +370,62 @@ mod tests {
 
     #[tokio::test]
     async fn localhost_dns_accepted_when_loopback() {
-        // `localhost` typically resolves to 127.0.0.1 and / or ::1 on
-        // every supported dev environment. If for some reason this
-        // host resolves it elsewhere, this test would correctly fail —
-        // signaling a misconfigured /etc/hosts that the validator
-        // refuses on principle.
+        // `localhost` means this Mac by definition (RFC 6761), so it is
+        // accepted without asking a resolver, and dialed at 127.0.0.1.
         let h = LoopbackHost::parse("http://localhost/mcp").await;
-        assert!(h.is_ok(), "localhost must resolve to loopback: {h:?}");
+        assert!(h.is_ok(), "localhost must be accepted: {h:?}");
         let h = h.unwrap();
         assert!(matches!(h.kind, HostKind::Dns(_)));
+        let dial = h.resolve_now().await.unwrap();
+        assert_eq!(dial, "127.0.0.1:80".parse().unwrap());
+    }
+
+    #[tokio::test]
+    async fn names_under_localhost_accepted_in_any_case() {
+        for raw in [
+            "http://LOCALHOST./mcp",
+            "http://mcp.localhost:7890/sse",
+            "http://Mcp.LocalHost:7890/sse",
+        ] {
+            let h = LoopbackHost::parse(raw)
+                .await
+                .unwrap_or_else(|e| panic!("{raw}: {e:?}"));
+            assert!(h.resolve_now().await.unwrap().ip().is_loopback(), "{raw}");
+        }
+    }
+
+    #[tokio::test]
+    async fn other_names_refused_without_a_lookup() {
+        // `.invalid` never resolves (RFC 6761): had the gate asked a
+        // resolver, the answer would be a resolution failure. Getting
+        // NonLoopbackDns shows no lookup was made; the same holds for
+        // a real public name and for names that only look local.
+        for raw in [
+            "http://mcp.invalid/sse",
+            "http://example.com/mcp",
+            "http://localhost.example.com/mcp",
+            "http://notlocalhost/mcp",
+            "http://localhost-dev:8080/mcp",
+            "http://mcp.local/mcp",
+        ] {
+            assert_eq!(
+                LoopbackHost::parse(raw).await.unwrap_err(),
+                LoopbackError::NonLoopbackDns,
+                "{raw}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_name_that_slipped_past_parse_is_refused_at_dial_time() {
+        let mut h = LoopbackHost::parse("http://localhost:7890/sse")
+            .await
+            .unwrap();
+        h.kind = HostKind::Dns("example.com".to_owned());
+        assert_eq!(
+            h.resolve_now().await.unwrap_err(),
+            LoopbackError::NonLoopbackDns
+        );
     }
 
     #[tokio::test]
@@ -426,17 +442,8 @@ mod tests {
         let err = LoopbackHost::parse("http://example.com/mcp")
             .await
             .expect_err("example.com is not loopback");
-        // Either DNS resolves to a non-loopback address (most common)
-        // or DNS fails in CI sandboxes; both shapes are refusals.
-        assert!(
-            matches!(
-                err,
-                LoopbackError::NonLoopbackDns
-                    | LoopbackError::DnsResolutionFailed
-                    | LoopbackError::DnsResolutionEmpty
-            ),
-            "unexpected variant: {err:?}"
-        );
+        // Refused by name, before any lookup: the name never leaves.
+        assert_eq!(err, LoopbackError::NonLoopbackDns);
     }
 
     #[tokio::test]

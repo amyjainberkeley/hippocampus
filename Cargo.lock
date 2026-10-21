@@ -584,6 +584,7 @@ version = "0.0.1"
 dependencies = [
  "mci-core",
  "regex",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",
@@ -892,6 +893,7 @@ dependencies = [
  "tokio",
  "toml_edit",
  "tracing",
+ "zeroize",
 ]
 
 [[package]]
@@ -1010,7 +1012,10 @@ version = "0.0.1"
 dependencies = [
  "core-foundation",
  "core-foundation-sys",
+ "openssl-sys",
  "security-framework-sys",
+ "sha2",
+ "zeroize",
 ]
 
 [[package]]

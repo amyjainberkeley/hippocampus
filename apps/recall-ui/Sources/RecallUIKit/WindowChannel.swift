@@ -52,6 +52,9 @@ public enum WindowChannelProtocol {
         /// remembering as it was before, a pause they made included, as the
         /// menu bar's Leave does. Never a Resume.
         case leaveDemo
+        /// Delete Everything: the app stops remembering, erases the memory
+        /// and its key, and starts again (storage-security review S3).
+        case erase
         /// The app pushes this; the window never sends it.
         case status
     }

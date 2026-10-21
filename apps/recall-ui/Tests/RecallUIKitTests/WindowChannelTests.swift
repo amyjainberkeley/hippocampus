@@ -78,7 +78,7 @@ final class WindowChannelTests: XCTestCase {
             .line(), "nothing longer than 4 KB is sent")
         XCTAssertEqual(WindowChannelProtocol.Op.allCases.map(\.rawValue),
                        ["pause", "resume", "turnOn", "turnOff", "tryAgain", "openSystemSettings", "quit", "hold",
-                        "release", "renew", "leaveDemo", "status"])
+                        "release", "renew", "leaveDemo", "erase", "status"])
     }
 
     func testTheAppsAnswerIsHeard() async throws {

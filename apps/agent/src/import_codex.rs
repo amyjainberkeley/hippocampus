@@ -37,14 +37,14 @@ use mci_brain::SqlCipherBrainStore;
 
 use crate::transcript::{
     self, import_file, import_files, is_injected_user_text, is_mutating_shell, parse_ts_us,
-    read_first_line, tool_line, write_event, Agent, EventContext, FileOutcome, ImportError,
+    read_first_line, tool_line, write_turn, Agent, EventContext, FileOutcome, ImportError,
     ImportStats, Role,
 };
 
 /// Default rollout root.
 #[must_use]
 pub fn default_codex_root() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     home.join(".codex/sessions")
 }
 
@@ -363,7 +363,7 @@ pub fn import_rollout_file(
             src_path: &src_path,
             line_no,
         };
-        write_event(store, &ctx.event(role, ts_us, &body), role, stats)?;
+        write_turn(store, &ctx, role, ts_us, &body, stats)?;
         Ok(true)
     })
 }

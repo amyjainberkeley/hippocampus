@@ -49,10 +49,11 @@ public final class CaptureConsentAuthority: CaptureConsentControlling, @unchecke
     private let ownerProcessID: Int32
     private let ownerStartTimeUs: UInt64?
 
+    /// The app's own authority. A development build keeps its state under
+    /// its home (``AppGroupIdentity/containerURL``), so a test's throwaway
+    /// home holds it, not the real account's App Group container.
     public convenience init() {
-        let container = AppGroupIdentity.identifier.flatMap {
-            FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0)
-        }
+        let container = AppGroupIdentity.containerURL
         self.init(
             stateURL: container?.appendingPathComponent(Self.filename),
             ownerProcessID: ProcessInfo.processInfo.processIdentifier,
@@ -103,11 +104,8 @@ public final class CaptureConsentAuthority: CaptureConsentControlling, @unchecke
             at: stateURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        try data.write(to: stateURL, options: [.atomic])
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o600],
-            ofItemAtPath: stateURL.path
-        )
+        // Mode 0600 from the moment it exists (storage-security review S9).
+        try PrivateFileWriter.write(data, to: stateURL)
     }
 
     package static func readState(at url: URL) throws -> CaptureConsentState {

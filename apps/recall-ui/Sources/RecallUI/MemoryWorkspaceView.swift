@@ -724,9 +724,17 @@ struct MemoryWorkspaceView: View {
                 // and pictures without their own never open it.
                 Color.clear
             } else {
-                PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator)
+                PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator, erase: eraseThroughApp)
             }
         }
+    }
+
+    /// Delete Everything as a crypto-shred, carried out by the app that
+    /// opened this window (storage-security review S3). Nil for a window
+    /// opened by hand, or a preview.
+    private var eraseThroughApp: (@Sendable () async -> Bool)? {
+        guard let channel, !isSyntheticPreview else { return nil }
+        return { await channel.send(WindowChannelRequest(op: .erase), timeout: .seconds(180)) }
     }
 
     /// A page pushed inside About You. Never reached in the preview.
@@ -734,7 +742,7 @@ struct MemoryWorkspaceView: View {
     private func youPage(_ page: RecallYouPage) -> some View {
         switch page {
         case .privacy:
-            PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator)
+            PrivacyDashboard(reader: reader, mutator: reader as? PrivacyMutator, erase: eraseThroughApp)
         case .names:
             UserDictionaryEditor()
         }

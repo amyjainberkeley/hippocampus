@@ -133,7 +133,8 @@ final class ScreenshotInspectorTests: XCTestCase {
         XCTAssertTrue(export.contains("let generation = loadGeneration"))
         let dialog = try XCTUnwrap(export.range(of: "panel.runModal()"))
         let checked = try XCTUnwrap(export.range(of: "loadGeneration == generation"))
-        let written = try XCTUnwrap(export.range(of: "try text.write"))
+        // Written private (0600) from the moment it exists (storage-security review S8).
+        let written = try XCTUnwrap(export.range(of: "try PrivateFileWriter.write(text"))
         XCTAssertLessThan(dialog.upperBound, checked.lowerBound)
         XCTAssertLessThan(checked.upperBound, written.lowerBound)
         XCTAssertTrue(export.contains("current.id == hit.id"))

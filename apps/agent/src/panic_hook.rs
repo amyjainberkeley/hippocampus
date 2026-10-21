@@ -51,8 +51,9 @@ fn install_to(path: PathBuf) {
 }
 
 /// The default panic log path: `~/Library/Logs/MCI/panic.jsonl`.
+#[must_use]
 pub fn default_panic_log_path() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     home.join("Library/Logs/MCI/panic.jsonl")
 }
 
@@ -94,6 +95,24 @@ fn escape_json_string(s: &str) -> String {
     out
 }
 
+/// The most bytes of a panic message the record keeps.
+const MESSAGE_LIMIT_BYTES: usize = 512;
+
+/// `raw` cut to at most [`MESSAGE_LIMIT_BYTES`] at a character boundary, with
+/// `...` when anything was cut. Slicing at a fixed byte offset panicked inside
+/// the hook whenever that byte fell inside a character, which aborted the
+/// process with no record at all (storage-security review S12).
+fn bounded_message(raw: String) -> String {
+    if raw.len() <= MESSAGE_LIMIT_BYTES {
+        return raw;
+    }
+    let mut end = MESSAGE_LIMIT_BYTES;
+    while !raw.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &raw[..end])
+}
+
 fn write_panic_record(
     info: &std::panic::PanicHookInfo<'_>,
     path: &std::path::Path,
@@ -128,11 +147,7 @@ fn write_panic_record(
     } else {
         "non-string panic payload".to_string()
     };
-    let message = if raw_message.len() > 512 {
-        format!("{}...", &raw_message[..512])
-    } else {
-        raw_message
-    };
+    let message = bounded_message(raw_message);
 
     let record = PanicRecord {
         ts,
@@ -169,6 +184,39 @@ fn write_panic_record(
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn long_messages_are_cut_at_a_character_boundary() {
+        // One ASCII byte, then two-byte letters: byte 512 falls inside a
+        // letter, where a plain byte slice panics inside the hook.
+        let accented = format!("a{}", "é".repeat(400));
+        assert_eq!(accented.len(), 801);
+        let cut = bounded_message(accented.clone());
+        assert!(cut.ends_with("..."));
+        assert!(cut.len() <= MESSAGE_LIMIT_BYTES + 3);
+        assert!(accented.starts_with(cut.trim_end_matches("...")));
+
+        for filler in ["—", "🧠", "日本"] {
+            for lead in 0..4 {
+                let raw = format!("{}{}", "x".repeat(lead), filler.repeat(400));
+                let cut = bounded_message(raw.clone());
+                let kept = cut.trim_end_matches("...");
+                assert!(raw.starts_with(kept), "{filler} with {lead} lead bytes");
+                assert!(kept.len() <= MESSAGE_LIMIT_BYTES);
+                assert!(kept.len() > MESSAGE_LIMIT_BYTES - 4);
+            }
+        }
+        assert_eq!(bounded_message("short".to_owned()), "short");
+        let exact = "y".repeat(MESSAGE_LIMIT_BYTES);
+        assert_eq!(bounded_message(exact.clone()), exact);
+    }
+
+    #[test]
+    fn the_panic_log_never_falls_back_to_tmp() {
+        let path = default_panic_log_path();
+        assert!(path.ends_with("Library/Logs/MCI/panic.jsonl"));
+        assert!(!path.starts_with("/tmp"), "{}", path.display());
+    }
 
     #[test]
     fn panic_record_json_shape() {

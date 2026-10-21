@@ -48,10 +48,10 @@ public struct FileOnboardingConsentStore: OnboardingConsentStore {
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true
         )
-        // Written to a temporary file and renamed, so the app never reads
-        // half a file when the directory watch fires.
-        try Self.body(at: now(), openAtLogin: openAtLogin)
-            .write(to: url, atomically: true, encoding: .utf8)
+        // Written to a private temporary file and renamed, so the app never
+        // reads half a file when the directory watch fires, and the file is
+        // mode 0600 from the moment it exists (storage-security review S9).
+        try PrivateFileWriter.write(Data(Self.body(at: now(), openAtLogin: openAtLogin).utf8), to: url)
     }
 
     public static func body(at date: Date, openAtLogin: Bool) -> String {

@@ -41,7 +41,8 @@
 
 use std::sync::Arc;
 
-use mci_agent::brain_ingest::{BrainIngestor, BrainPump, IngestOutcome};
+use mci_agent::brain_ingest::{prepare_event_content, BrainIngestor, BrainPump, IngestOutcome};
+use mci_brain::extraction::tier1::persist_tier1_matches;
 use mci_brain::extraction::tier1::{
     KIND_EMAIL, KIND_REDACTED_TOKEN, KIND_URL, SUBKIND_CASCADE_REDACTED, SUBKIND_JWT,
 };
@@ -54,6 +55,7 @@ use mci_brain::{
     mark_event_tier2_processed, persist_tier2_matches, BrainStore, MockNerBackend,
     SqlCipherBrainStore, Tier2Extractor, Tier2RawMatch,
 };
+use mci_brain::{Event, EventChunker, EventId, EventSource, Tier1Extractor};
 use mci_core::crypto::DbKey;
 use mci_core::ipc::Message;
 use mci_core::store::open as mci_core_open;
@@ -100,19 +102,62 @@ fn full_pipeline_brain_pump_tier1_then_tier2_populates_entity_mentions() {
                 Email her at alice@anthropic.com or visit https://example.com/x. \
                 Auth: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c \
                 Code: [REDACTED:SMS_OTP] please confirm.";
-    let frame = make_event(1, 1_700_000_000_000_000, body);
+    let ts_us = 1_700_000_000_000_000;
+    let frame = make_event(1, ts_us, body);
 
-    let outcome = pump.ingest_ocr_event(&frame).expect("ingest ok");
-    let id = match outcome {
-        IngestOutcome::Stored { id, .. } => id,
-        IngestOutcome::NotOcrEvent => panic!("expected Stored"),
+    // The agent now refuses a frame carrying a JWT before the store
+    // (`mci_agent::secret_gate`): nothing is stored or extracted.
+    assert_eq!(
+        pump.ingest_ocr_event(&frame)
+            .expect("a refusal is not an error"),
+        IngestOutcome::Refused
+    );
+    assert_eq!(pump.tier1_mentions_persisted_count(), 0);
+
+    // Memory stored before that check can still hold one, and Tier 2 runs
+    // over stored events later. Store the event exactly as the pump did
+    // then (the production header and chunker, then Tier 1), so the
+    // filter chain below still faces a live JWT span.
+    let prepared = prepare_event_content(
+        &EventChunker::default(),
+        Some("com.apple.Terminal"),
+        Some("iTerm — v2p5 wiring"),
+        None,
+        ts_us,
+        body,
+    )
+    .expect("prepare");
+    let legacy = Event {
+        id: EventId(0),
+        ts_us,
+        app_bundle_id: Some("com.apple.Terminal".into()),
+        window_title: Some("iTerm — v2p5 wiring".into()),
+        url: None,
+        text: prepared.stored_text,
+        summary: None,
+        entities: None,
+        episode_id: None,
+        cascade_reason: 0,
+        keyframe_blob: None,
+        tab_id: None,
+        embedding: None,
     };
+    let id = store
+        .put_event_with_source(&legacy, EventSource::ScreenOcr)
+        .expect("store the earlier moment");
     assert!(id.0 > 0);
+    let tier1 = persist_tier1_matches(
+        &*store,
+        id,
+        ts_us,
+        &Tier1Extractor::new().extract(&legacy.text),
+    )
+    .expect("tier 1");
 
     // ----- V2-P4 wiring pin (regression guard) -----
     // V2-P4 Tier 1 wrote at least: url + email + cascade_redacted + jwt
-    // mentions. Pump's tier1 counter should reflect them.
-    assert!(pump.tier1_mentions_persisted_count() >= 4);
+    // mentions.
+    assert!(tier1.mentions_inserted >= 4);
 
     let db = mci_core_open(&path, &key).expect("raw_open");
     let conn = db.conn();
@@ -325,7 +370,7 @@ fn full_pipeline_is_idempotent_across_two_ingest_then_tier2_passes() {
 
     let id1 = match pump.ingest_ocr_event(&frame).expect("ingest 1") {
         IngestOutcome::Stored { id, .. } => id,
-        IngestOutcome::NotOcrEvent => panic!("expected Stored"),
+        IngestOutcome::NotOcrEvent | IngestOutcome::Refused => panic!("expected Stored"),
     };
 
     let stored = store.get_event(id1).expect("get").expect("event");

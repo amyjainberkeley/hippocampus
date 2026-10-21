@@ -74,6 +74,40 @@ final class ClipboardHygieneTests: XCTestCase {
         XCTAssertEqual(board.contents[NSPasteboard.PasteboardType("public.jpeg")], Data([0xFF, 0xD8]))
         XCTAssertNotNil(board.contents[ClipboardHygiene.concealed])
     }
+
+    /// Ask's own Copy: on this Mac only and concealed from clipboard-history
+    /// apps, but not transient and never cleared.
+    func testACopyToKeepStaysOnThisMacConcealedAndIsNeverCleared() {
+        let board = FakePasteboard()
+        XCTAssertTrue(ClipboardHygiene.copyToKeep("Thursday", to: board))
+        XCTAssertEqual(board.options, [.currentHostOnly], "never Universal Clipboard")
+        XCTAssertEqual(board.contents[.string], Data("Thursday".utf8))
+        XCTAssertNotNil(board.contents[ClipboardHygiene.concealed])
+        XCTAssertNil(board.contents[ClipboardHygiene.transient], "meant to stay")
+        XCTAssertEqual(board.cleared, 0)
+    }
+
+    /// Every clipboard write in the menu-bar app goes through
+    /// `ClipboardHygiene`: no other source file touches a pasteboard (Ask's
+    /// Copy wrote straight to it before; storage review S7).
+    func testNoOtherFileInTheMenuBarAppWritesToAPasteboard() throws {
+        let sources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources")
+        let writes = [".setString(", ".setData(", "writeObjects(", ".clearContents()", "declareTypes(",
+                      "prepareForNewContents(", "NSPasteboard.general", "NSPasteboard(name:"]
+        var checked = 0
+        let files = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)
+        while let file = files?.nextObject() as? URL {
+            guard file.pathExtension == "swift", file.lastPathComponent != "ClipboardHygiene.swift" else { continue }
+            let source = try String(contentsOf: file, encoding: .utf8)
+            checked += 1
+            for write in writes {
+                XCTAssertFalse(source.contains(write), "\(file.lastPathComponent) writes to a pasteboard: \(write)")
+            }
+        }
+        XCTAssertGreaterThan(checked, 50)
+    }
 }
 
 final class DestinationDetectorTests: XCTestCase {
@@ -308,11 +342,27 @@ final class HandoffCopyTests: XCTestCase {
         XCTAssertEqual(HandoffCopy.connectMessage("Claude Code and Codex", count: 2, chatGPTInstalled: true),
                        "They can search what you’ve seen and read your sessions, your day and what Hippocampus learned about you, "
                        + "when a question needs it. What they read goes to the companies that run them. They can read while "
-                       + "Hippocampus is quit. ChatGPT’s desktop app uses Codex’s settings, so it can look things up too.")
+                       + "Hippocampus is quit. They also keep what they read in their own history on this Mac, unencrypted. "
+                       + "Forgetting something in Hippocampus doesn’t remove it there. "
+                       + "ChatGPT’s desktop app uses Codex’s settings, so it can look things up too.")
         XCTAssertEqual(HandoffCopy.connectMessage("Claude Code", count: 1, chatGPTInstalled: false),
                        "It can search what you’ve seen and read your sessions, your day and what Hippocampus learned about you, "
                        + "when a question needs it. What it reads goes to the company that runs Claude Code. It can read while "
-                       + "Hippocampus is quit.")
+                       + "Hippocampus is quit. It also keeps what it reads in its own history on this Mac, unencrypted. "
+                       + "Forgetting something in Hippocampus doesn’t remove it there.")
+        // A connected tool's own history (storage review S6).
+        XCTAssertEqual(HandoffCopy.privateHistoryTitle(["Codex"]), "Make Codex’s history private?")
+        XCTAssertEqual(HandoffCopy.privateHistoryTitle(["Claude Code", "Codex"]),
+                       "Make Claude Code’s and Codex’s history private?")
+        XCTAssertEqual(HandoffCopy.privateHistoryMessage(["Codex"], folders: ["~/.codex"]),
+                       "Codex keeps its sessions in ~/.codex, with what it reads from your memory, and other accounts on "
+                       + "this Mac can open them. Make Private lets only you open that folder. Codex works as before.")
+        XCTAssertEqual(HandoffCopy.privateHistoryMessage(["Claude Code", "Codex"], folders: ["~/.claude", "~/.codex"]),
+                       "Claude Code and Codex keep their sessions in ~/.claude and ~/.codex, with what they read from your "
+                       + "memory, and other accounts on this Mac can open them. Make Private lets only you open those "
+                       + "folders. They work as before.")
+        XCTAssertEqual(HandoffCopy.makePrivate, "Make Private")
+        XCTAssertEqual(HandoffCopy.couldNotMakePrivate("Codex"), "Couldn’t make all of Codex’s history private.")
     }
 
     /// The same bar as the menu bar's words (MenuBarCopyStyleTests).
@@ -329,6 +379,11 @@ final class HandoffCopyTests: XCTestCase {
             HandoffCopy.codexStep, HandoffCopy.sessionTitle,
             HandoffCopy.sessionMessage("Claude Code and Codex", count: 2, codex: true),
             HandoffCopy.disconnectMessage, HandoffCopy.disconnectAllMessage, HandoffCopy.disconnected("Codex"),
+            HandoffCopy.keepsHistory(count: 1), HandoffCopy.keepsHistory(count: 2),
+            HandoffCopy.privateHistoryTitle(["Claude Code", "Codex"]),
+            HandoffCopy.privateHistoryMessage(["Codex"], folders: ["~/.codex"]),
+            HandoffCopy.privateHistoryMessage(["Claude Code", "Codex"], folders: ["~/.claude", "~/.codex"]),
+            HandoffCopy.makePrivate, HandoffCopy.couldNotMakePrivate("Codex"),
         ]
         let banned = ["seamless", "smart", "simply", "unlock", "powerful", "magic", "effortless", "mcp", "captured",
                       "provider", "packet", "nothing leaves your mac", "remembers everything", "!"]

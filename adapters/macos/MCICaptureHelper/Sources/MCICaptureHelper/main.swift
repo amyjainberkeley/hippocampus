@@ -13,6 +13,11 @@ import Foundation
 import Darwin
 import MCICaptureHelperKit
 
+// Owner-only before anything is created: every file this process makes is
+// 0600 and every folder 0700 (reports/e2e, finding 5). The OCR worker it
+// starts inherits the same mask.
+umask(0o077)
+
 // ---------------------------------------------------------------------------
 // CLI parse
 // ---------------------------------------------------------------------------

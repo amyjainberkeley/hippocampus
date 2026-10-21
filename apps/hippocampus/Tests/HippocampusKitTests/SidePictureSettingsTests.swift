@@ -83,7 +83,7 @@ final class SidePictureSettingsTests: XCTestCase {
         XCTAssertTrue(text.contains("side_pictures_budget_mb = 5000"), text)
         XCTAssertTrue(text.contains("delete_side_pictures_requested_at = 1792444800"), text)
         let mode = try FileManager.default.attributesOfItem(atPath: config.path.path)[.posixPermissions] as? Int
-        XCTAssertEqual(mode, 0o644)
+        XCTAssertEqual(mode, 0o600)
     }
 
     func testOnlyTheThreeBudgetsCanBeChosen() throws {

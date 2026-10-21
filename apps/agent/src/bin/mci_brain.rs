@@ -45,6 +45,11 @@ fn normalized_development_key(value: &str) -> Option<String> {
 }
 
 fn development_key_hex() -> Option<String> {
+    // A release build never reads a raw or file key (storage-security
+    // review S11); `mci-brain` never opens Demo Memory.
+    if !mci_agent::key_resolver::DEVELOPMENT_FILE_KEY_COMPILED_IN {
+        return None;
+    }
     if std::env::var("MCI_DEVELOPMENT_FILE_KEY").as_deref() != Ok("1") {
         return None;
     }
@@ -146,7 +151,7 @@ enum ParseOutcome {
 // ---------------------------------------------------------------------------
 
 fn default_db_path() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let home = mci_core::home::user_home_or_unwritable();
     home.join("Library/Application Support/MCI/mci.sqlite")
 }
 
@@ -579,6 +584,8 @@ fn run_export(
 // ---------------------------------------------------------------------------
 
 fn main() -> ExitCode {
+    // Owner-only before anything is created: exports and backups too.
+    mci_agent::private_files::restrict_new_files();
     mci_agent::panic_hook::install();
 
     let raw_args: Vec<String> = std::env::args().collect();

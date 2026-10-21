@@ -24,6 +24,9 @@ public struct WindowChannelRequest: Equatable, Sendable {
         /// Turn Off, which the row offers while a turn-on is under way: the
         /// newer word, as in the menu bar.
         case turnOff
+        /// Delete Everything: the memory and its key (storage-security
+        /// review S3). The app stops remembering, erases, starts again.
+        case erase
     }
 
     public let id: String
@@ -198,6 +201,8 @@ public enum WindowChannelPolicy {
             return permission == request.permission
         case .hold: return !holding
         case .release, .renew: return holding
+        // Never inside a forget's hold: the erase holds by itself.
+        case .erase: return !holding
         }
     }
 }

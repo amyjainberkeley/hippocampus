@@ -79,15 +79,11 @@ public final class FileUserAllowlistStore: UserAllowlistStore {
             at: dir, withIntermediateDirectories: true
         )
         let source = UserAllowlistTOMLDocument.emit(entries)
-        try source.write(to: url, atomically: true, encoding: .utf8)
-        // Re-tighten mode after the atomic-write replaces the file —
-        // NSData's atomic write resets the file's permissions to the
-        // umask default; the helper's `validatePermissions` gate refuses
-        // anything with group/world bits set, so we re-tighten here.
-        try FileManager.default.setAttributes(
-            [.posixPermissions: NSNumber(value: Int16(0o600))],
-            ofItemAtPath: url.path
-        )
+        // Mode 0600 from the moment the file exists (storage-security
+        // review S9): the helper's `validatePermissions` gate refuses
+        // anything with group/world bits set, and no other account may
+        // read the list in between.
+        try PrivateFileWriter.write(Data(source.utf8), to: url)
     }
 }
 

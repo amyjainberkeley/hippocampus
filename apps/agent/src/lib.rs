@@ -49,6 +49,8 @@ pub mod doctor;
 pub mod embedder_load;
 pub mod enrich;
 pub mod episode_worker;
+pub mod erase;
+pub mod export;
 /// Per-project handoff packet compiler (docs/handoff/CONTRACT.md section 5).
 pub mod handoff;
 /// `mci-agent send-card`: the one builder for Ask {Tool} and Copy for Your
@@ -64,6 +66,7 @@ pub mod idle_batch;
 /// [`import_sessions`]; both write through [`transcript`].
 pub mod import_codex;
 pub mod import_sessions;
+pub mod key_change;
 pub mod key_resolver;
 /// Mail.app reader pump. Only with the `deep-hooks` feature, off in every
 /// release.
@@ -79,7 +82,7 @@ pub mod mcp;
 /// Research Fork-6 = A.
 pub mod mcp_aggregator;
 /// V2-MCP-2 — boot-time MCP-client registry builder. Reads
-/// `~/Library/Application Support/MCI/mcp-servers.toml`, constructs a
+/// `~/Library/Application Support/MCI/Config.noindex/mcp-servers.toml`, constructs a
 /// `ServerRegistry`, and surfaces a log-friendly status struct. Held
 /// by the agent for the process lifetime; V2-MCP-3 aggregator (cycle
 /// 8.30, brain track) consumes the registry without a re-init.
@@ -94,8 +97,12 @@ pub mod mcp_sync;
 /// every release.
 #[cfg(all(target_os = "macos", feature = "deep-hooks"))]
 pub mod messages_ingest;
+/// A second net on the way out: MCP answers, context packets and handoffs
+/// are scrubbed of secrets even when memory holds one.
+pub mod outbound;
 pub mod page_content;
 pub mod panic_hook;
+pub mod private_files;
 /// Starts the Mail and Messages pumps. Only with the `deep-hooks` feature,
 /// off in every release.
 #[cfg(all(target_os = "macos", feature = "deep-hooks"))]
@@ -109,6 +116,10 @@ pub mod refresh;
 pub mod refresh_agent;
 pub mod retention_worker;
 pub mod runner;
+/// The last check before anything is stored, for every source: sign-in
+/// parameters out of the address, then no secret in the text, title or
+/// address.
+pub mod secret_gate;
 /// Lines to stdout and stderr that never panic when a reader goes away.
 pub mod stdio;
 pub mod supervisor;
