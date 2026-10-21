@@ -733,9 +733,11 @@ elif [[ "$OCR_CHOICE" == "paddle" ]]; then
     fail c2 "--ocr paddle: no PP-OCR worker in the app or tools/ocr/dist"
     READER=""
 else
-    # Vision under load can take longer than the helper's 1 s deadline.
-    FEED_ARGS+=(--timeout-ms 20000)
-    READER="Apple Vision (no bundled worker; deadline raised to 20 s)"
+    # Vision under load can take longer than the helper's 1 s deadline: at a
+    # load average near 100 its first, cold read took longer than 20 s and
+    # that window came back empty. Each read still ends when Vision answers.
+    FEED_ARGS+=(--timeout-ms 60000)
+    READER="Apple Vision (no bundled worker; deadline raised to 60 s)"
 fi
 
 # The helper's pipeline in fixture mode, into the agent exactly as the app
