@@ -100,6 +100,10 @@ tempfile  = "3.27.0"
 # release binary. Adds transitive deps to the lockfile but they are all
 # build/test-time. See PR body for ADR-0008 §1 dependency note.
 criterion = { version = "0.5", features = ["html_reports"] }
+# libc is already on the workspace lockfile (mci-mcp-client, the perf tools).
+# tests/tier2_footprint.rs reads this thread's CPU clock with it, so a busy
+# Mac that keeps the test waiting for a core doesn't count as filter cost.
+libc      = "0.2"
 
 [[bench]]
 name    = "hybrid_recall"

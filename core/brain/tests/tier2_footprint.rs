@@ -32,9 +32,22 @@
 //! The filter chain measured here runs at microsecond timescale on
 //! a 4 KB OCR-typical event, so it stays comfortably inside the
 //! per-event budget regardless of backend cost.
+//!
+//! # How it is timed
+//!
+//! Those are CPU budgets, so the per-call and steady-state ceilings
+//! below are checked against this thread's CPU time, not the wall
+//! clock: on a Mac busy with other builds the test waits for a core,
+//! and that wait is not the filter chain's cost. The work is the same
+//! text through the same backend every round, so any spread between
+//! rounds is the machine, not the code; each ceiling is checked
+//! against the best of five rounds, the way `reading_blocks_budget.rs`
+//! takes the best of ten. The 10-event burst ceiling is about latency,
+//! so it stays on the wall clock, also the best of five rounds. The
+//! ceilings themselves are unchanged.
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use mci_brain::extraction::tier2::{KIND_PERSON_NAME, KIND_TOPIC};
 use mci_brain::{MockNerBackend, Tier2Extractor, Tier2RawMatch};
@@ -51,6 +64,85 @@ fn synthetic_4k_event() -> String {
                  Phone: (415) 555-1234, file: /Users/me/project/notes.md. ";
     // ~360 chars per chunk; 12 chunks ≈ 4.3 KB.
     chunk.repeat(12)
+}
+
+/// How many identical rounds each CPU ceiling takes the best of.
+const ROUNDS: u32 = 5;
+
+/// The CPU time this thread has used so far.
+fn thread_cpu_time() -> Duration {
+    let mut now = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: clock_gettime only writes the timespec it is given, which
+    // lives on this stack frame for the whole call.
+    let rc = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &raw mut now) };
+    assert_eq!(rc, 0, "clock_gettime(CLOCK_THREAD_CPUTIME_ID) failed");
+    Duration::new(
+        u64::try_from(now.tv_sec).expect("CPU seconds are never negative"),
+        u32::try_from(now.tv_nsec).expect("nanoseconds fit in u32"),
+    )
+}
+
+/// The CPU time this thread has used since `start`, a reading of
+/// `thread_cpu_time`.
+fn cpu_since(start: Duration) -> Duration {
+    thread_cpu_time()
+        .checked_sub(start)
+        .expect("the CPU clock never runs backwards")
+}
+
+/// The least CPU time any of `ROUNDS` runs of `round` took, and the
+/// wall time of that same run, for the log.
+fn best_round(mut round: impl FnMut()) -> (Duration, Duration) {
+    (0..ROUNDS)
+        .map(|_| {
+            let wall = Instant::now();
+            let cpu = thread_cpu_time();
+            round();
+            (cpu_since(cpu), wall.elapsed())
+        })
+        .min_by_key(|(cpu, _)| *cpu)
+        .expect("ROUNDS is more than zero")
+}
+
+/// The least wall time any of `ROUNDS` runs of `round` took.
+fn best_wall(mut round: impl FnMut()) -> Duration {
+    (0..ROUNDS)
+        .map(|_| {
+            let wall = Instant::now();
+            round();
+            wall.elapsed()
+        })
+        .min()
+        .expect("ROUNDS is more than zero")
+}
+
+#[test]
+fn thread_cpu_time_counts_work_and_not_waiting() {
+    // The clock the ceilings use: it moves with work on this thread and
+    // stands still while the thread sleeps.
+    let before = thread_cpu_time();
+    std::thread::sleep(Duration::from_millis(50));
+    let slept = cpu_since(before);
+    assert!(
+        slept < Duration::from_millis(25),
+        "sleeping counted {slept:?} of CPU"
+    );
+
+    let before = thread_cpu_time();
+    let spin = Instant::now();
+    let mut x = 0_u64;
+    while cpu_since(before) < Duration::from_millis(20) {
+        assert!(
+            spin.elapsed() < Duration::from_secs(30),
+            "30 s of work never showed 20 ms on the CPU clock"
+        );
+        x = std::hint::black_box(x.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1));
+    }
+    // One thread can't use more CPU than the time that passed.
+    assert!(spin.elapsed() >= Duration::from_millis(20));
 }
 
 #[test]
@@ -83,21 +175,22 @@ fn filter_chain_completes_under_per_event_burst_budget() {
     // Warm up: first call pays the LazyLock<Regex> compilation.
     let _ = ex.extract(&text).expect("warmup");
 
-    // 1000 iterations to get a stable average.
-    let n: u32 = 1000;
-    let start = Instant::now();
-    for _ in 0..n {
-        let _ = ex.extract(&text).expect("iter");
-    }
-    let elapsed = start.elapsed();
-    let per_call_us = elapsed.as_micros() / u128::from(n);
+    // 1000 iterations in all, five rounds of 200, for a stable average.
+    let n: u32 = 200;
+    let (cpu, wall) = best_round(|| {
+        for _ in 0..n {
+            let _ = ex.extract(&text).expect("iter");
+        }
+    });
+    let per_call_us = cpu.as_micros() / u128::from(n);
 
     // Print for the PR body. cargo test --nocapture surfaces it.
     eprintln!(
-        "[tier2-footprint] {} iters over {}-byte event in {:?} → ~{} µs/call",
+        "[tier2-footprint] best of {ROUNDS}: {} iters over {}-byte event in {:?} CPU ({:?} wall) → ~{} µs/call",
         n,
         text.len(),
-        elapsed,
+        cpu,
+        wall,
         per_call_us
     );
 
@@ -127,12 +220,14 @@ fn filter_chain_sustained_load_holds_steady_state_budget() {
     let events_per_second = 1;
     let seconds = 60;
     let total_events = events_per_second * seconds;
-    let start = Instant::now();
-    for _ in 0..total_events {
-        let _ = ex.extract(&text).expect("iter");
-    }
-    let elapsed = start.elapsed();
-    eprintln!("[tier2-footprint] {total_events} events filter-chain in {elapsed:?} (steady-state)");
+    let (elapsed, wall) = best_round(|| {
+        for _ in 0..total_events {
+            let _ = ex.extract(&text).expect("iter");
+        }
+    });
+    eprintln!(
+        "[tier2-footprint] best of {ROUNDS}: {total_events} events filter-chain in {elapsed:?} CPU ({wall:?} wall) (steady-state)"
+    );
 
     // The whole 60-event filter chain must complete in <300 ms on
     // any reasonable hardware. The 60 s wall-clock budget at 15%
@@ -153,12 +248,12 @@ fn filter_chain_burst_load_holds_per_event_budget() {
     // Simulate a 10-event burst (one batch's worth at the worker's
     // default batch_size=8 + headroom).
     let burst = 10;
-    let start = Instant::now();
-    for _ in 0..burst {
-        let _ = ex.extract(&text).expect("iter");
-    }
-    let elapsed = start.elapsed();
-    eprintln!("[tier2-footprint] 10-event burst filter-chain in {elapsed:?}");
+    let elapsed = best_wall(|| {
+        for _ in 0..burst {
+            let _ = ex.extract(&text).expect("iter");
+        }
+    });
+    eprintln!("[tier2-footprint] best of {ROUNDS}: 10-event burst filter-chain in {elapsed:?}");
 
     // Burst budget: the whole 10-event sweep must complete in
     // <100 ms. G2 per-event burst is sub-second; this gives the
