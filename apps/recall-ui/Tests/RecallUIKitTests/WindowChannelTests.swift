@@ -49,7 +49,16 @@ final class WindowChannelTests: XCTestCase {
     private var descriptors: [Int32] = []
 
     override func tearDown() {
-        for descriptor in descriptors { Darwin.close(descriptor) }
+        // Only the write ends close: every reader on these pipes (the
+        // stand-in app's thread and the channel's) then reads end of file and
+        // stops. The read ends stay open for the life of the test process. A
+        // reader still on its way back into read(2) when a test ends would
+        // otherwise find its descriptor's number reused by the next test's
+        // pipe(2) and take that test's bytes: an answer read by the last
+        // test's channel never reaches this one's, and the request times out.
+        for descriptor in descriptors where fcntl(descriptor, F_GETFL) & O_ACCMODE != O_RDONLY {
+            Darwin.close(descriptor)
+        }
         descriptors = []
     }
 
