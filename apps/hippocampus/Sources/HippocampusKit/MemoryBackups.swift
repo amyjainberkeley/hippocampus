@@ -26,8 +26,34 @@ public enum MemoryBackups {
     /// there yet. The folder is left readable by this account only (mode
     /// 0700), as an earlier release didn't make it. True when the mark is
     /// set as asked.
+    ///
+    /// The system can make the change a moment after the call that asks for
+    /// it returns. On a loaded Mac, taking the mark away has shown up only at
+    /// a later check, and a switch turned on and off again quickly has ended
+    /// with the mark gone. So this waits, up to `settle`, until the mark
+    /// reads as asked before it returns: each change lands before the next
+    /// one starts.
     @discardableResult
-    public static func apply(include: Bool, folder: URL) -> Bool {
+    public static func apply(include: Bool, folder: URL, settle: Duration = .seconds(1)) -> Bool {
+        apply(include: include, folder: folder, settle: settle, mark: { url, excluded in
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = excluded
+            var target = url
+            // Ask afresh, not from this URL's cache of an earlier call.
+            target.removeAllCachedResourceValues()
+            try target.setResourceValues(values)
+        }, read: isExcluded)
+    }
+
+    /// `apply` with the mark's writer and reader passed in (tests stand in a
+    /// system that makes the change late, or never).
+    static func apply(
+        include: Bool,
+        folder: URL,
+        settle: Duration,
+        mark: (URL, Bool) throws -> Void,
+        read: (URL) -> Bool?
+    ) -> Bool {
         do {
             try FileManager.default.createDirectory(
                 at: folder,
@@ -35,14 +61,17 @@ public enum MemoryBackups {
                 attributes: [.posixPermissions: 0o700]
             )
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
-            var values = URLResourceValues()
-            values.isExcludedFromBackup = !include
-            var target = folder
-            try target.setResourceValues(values)
-            return isExcluded(folder) == !include
+            try mark(folder, !include)
         } catch {
             return false
         }
+        // While the mark reads as it was, wait for the change; a mark that
+        // can't be read at all (nil) ends the wait at once.
+        let deadline = ContinuousClock.now.advanced(by: settle)
+        while read(folder) == include, ContinuousClock.now < deadline {
+            usleep(10_000)
+        }
+        return read(folder) == !include
     }
 
     /// The extended attribute the sticky mark is kept in (what
