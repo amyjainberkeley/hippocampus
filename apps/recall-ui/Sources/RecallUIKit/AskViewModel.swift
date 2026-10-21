@@ -290,6 +290,7 @@ public final class AskViewModel: ObservableObject {
             await history.show(day: MemoryDay(date: date, calendar: calendar),
                                around: UInt64(clamping: range.lowerBound)...UInt64(clamping: range.upperBound),
                                selecting: route.focusEventId)
+            keepPicked(route.focusEventId)
         } else if let date = route.day {
             await history.show(day: MemoryDay(date: date, calendar: calendar))
         } else if let eventId = route.focusEventId {
@@ -298,7 +299,20 @@ public final class AskViewModel: ObservableObject {
             let date = Date(timeIntervalSince1970: Double(moment.tsUs) / 1_000_000)
             await history.show(day: MemoryDay(date: date, calendar: calendar), around: moment.tsUs...moment.tsUs,
                                selecting: eventId)
+            keepPicked(eventId)
         }
+    }
+
+    /// History reads its rows again when it comes on screen without any,
+    /// which it can while a route's own read is under way: that read wins
+    /// and the route's pick is lost. A read keeps a pick it finds among its
+    /// rows, so the route's moment is picked once its own read is done too.
+    /// A moment History doesn't show, with no read under way, stays unpicked.
+    private func keepPicked(_ eventId: UInt64?) {
+        guard let eventId, history.selectedHitId != eventId,
+              history.isLoading || history.hits.contains(where: { $0.id == eventId })
+        else { return }
+        history.selectedHitId = eventId
     }
 
     private func finish(_ asked: Asking, with result: Result<AskAnswer, any Error>) {
