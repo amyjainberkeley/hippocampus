@@ -42,5 +42,6 @@ It needs macOS 14 or later on Apple silicon. Answers and summaries need Apple In
 - A connected AI tool can read your memory while Hippocampus is quit, until you disconnect it in Preferences, under AI Tools ([how](https://github.com/amyjainberkeley/hippocampus/blob/main/PRIVACY.md#disconnecting-an-ai-tool)).
 - Copy for Your AI and Ask {your tool} send each moment’s whole reading, shortened evenly to fit the tool’s message box.
 - Moments saved before 0.3 were read by the old reader: text it ran together across columns is only partly separated.
+- Today and Looked Up list your searches only with the browser extension: reading page addresses through Automation is off by default.
 
 This is a beta. [docs/STATUS.md](https://github.com/amyjainberkeley/hippocampus/blob/main/docs/STATUS.md) says what was checked, and how.

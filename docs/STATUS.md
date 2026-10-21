@@ -153,9 +153,11 @@ CPU share.
   `~/Library/Application Support/Microsoft/DeveloperTools/.onnxruntime` (a
   device ID), which apps that use ONNX Runtime share, so Hippocampus leaves
   it.
-- The database key is a login-Keychain item that never syncs, but no
-  this-device-only class is set: it moves with a copied login keychain
-  (audit check `custody.this-device`).
+- In 0.3.0 the database key stays in the login Keychain without a
+  this-device-only setting, so it moves with a copied login keychain; the
+  next beta moves it to the data-protection keychain, and until then the
+  storage audit's `custody.this-device` check, and with it the end-to-end
+  test, fails on that one finding.
 - A connected AI tool that was reading when you deleted everything keeps
   the deleted files open, and can read them, until it quits. A window opened
   by hand, not from the menu bar, deletes every moment but keeps the key.
@@ -174,8 +176,9 @@ CPU share.
 - Copy for Your AI and Ask {your tool} send each moment's whole reading as
   Markdown, shortened evenly to fit the tool's message box.
 - Today and Looked Up list searches only when they know the pages'
-  addresses, which come from the browser extension. Automation is never
-  used to read an address.
+  addresses, which come from the browser extension. Reading addresses
+  through Automation is off by default and has no switch in Preferences
+  ([the setting](GUIDE.md#settings-without-a-switch)).
 - Memories saved before 0.3 were read before windows were classified. Their
   tab strips, bars and side bars are set apart, but text the old reader ran
   together across columns is only partly separated. Read Again re-reads one

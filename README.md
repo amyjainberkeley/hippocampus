@@ -43,7 +43,7 @@ Setup is five short screens. It shows what you get first, then asks for two perm
 
 **Working On.** Your projects and documents by name, from their window titles. Each has a page with where you left off, its files, the pages you read alongside it, its meetings and its history.
 
-**History.** Every moment, newest first, as it read on screen: headings, paragraphs, lists, code and chats. Web Pages, Documents, Code, Conversations and Looked Up show the same moments by kind.
+**History.** Every moment, newest first, as it read on screen: headings, paragraphs, lists, code and chats. Web Pages, Documents, Code, Conversations and Looked Up show the same moments by kind. Looked Up, like Today, lists your searches when the browser extension gives the page’s address; reading addresses through Automation is off by default.
 
 **Ask.** Press Shift twice (or Fn, if you choose it) and Ask drops from the menu bar over any app, like Spotlight. It finds projects, pages and moments as you type, and answers questions with sources, this window first. ⌃⇧Space works too.
 

@@ -25,7 +25,7 @@ commits are intentionally omitted from release notes.
 ### Today and About You
 
 - Today shows where you left off, with its screenshot and Resume, and your day as a strip of sessions coloured by kind. Rest the pointer on a session to see its screenshot, and click it to see what it held.
-- The day’s summary, written on this Mac, says what you worked on, in order, and what you looked up when it knows the pages’ addresses. It never guesses how long something took, gives no advice, and never calls you distracted, stuck or productive. Today works without Apple Intelligence.
+- The day’s summary, written on this Mac, says what you worked on, in order, and what you looked up when it knows the pages’ addresses, which come from the browser extension. It never guesses how long something took, gives no advice, and never calls you distracted, stuck or productive. Today works without Apple Intelligence.
 - About You shows, in the exact words, what your AI tools can be told about you. Mark each line Right or Forget, with Undo, and open Why to see where it was learned.
 
 ### Working On and Resume
@@ -78,7 +78,7 @@ commits are intentionally omitted from release notes.
 - Export every moment, in full, from Privacy, to a file only your account can open. It isn’t encrypted.
 - Private browser windows are skipped when they show they are private: a private title, or the private badge in the window’s top bar. Sign-in and bank sites are skipped even when their address shows only in the address bar.
 - Every saved moment from the screen passes three checks for passwords and keys: the text as read, the page in reading order, and the exact text saved.
-- Page addresses come only from the browser extension. Remembering never asks for Automation; where you allowed it, Hippocampus uses it only to tell whether a window is private.
+- Page addresses come from the browser extension. Remembering never asks for Automation; where you allowed it, Hippocampus uses it to tell whether a window is private. Reading addresses through Automation is off by default, and a yes to Resume’s Automation question doesn’t turn it on.
 
 ### The menu bar
 

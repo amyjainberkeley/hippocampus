@@ -217,6 +217,7 @@ What to know:
 | Setting | What it does |
 | --- | --- |
 | `defaults write ai.hippocampus WholeScreenCapture -bool NO` | Reads only the window in front. Restart Hippocampus afterwards. |
+| `defaults write ai.hippocampus ai.hippocampus.browser.readAddressesWithAutomation -bool YES` | Saves page addresses read through Automation, in browsers you allowed, so Today and Looked Up can list searches without the browser extension. Off unless set; a yes to Automation alone never turns it on. |
 | `MCI_DB_PATH` | The memory file the command line opens. Default: `~/Library/Application Support/MCI/mci.sqlite`. |
 | `MCI_ARCTIC_MODEL_PATH` | Where the command line finds the embedding model. |
 | `MCI_EMBEDDER_DISABLED=1` | `mcp-serve` searches by words only. |
