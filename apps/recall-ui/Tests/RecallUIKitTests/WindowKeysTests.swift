@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import XCTest
 @testable import RecallUIKit
@@ -45,5 +46,91 @@ final class WindowKeysTests: XCTestCase {
         XCTAssertEqual(key.group, .actions)
         XCTAssertTrue(key.does.contains("selection"))
         XCTAssertTrue(key.does.contains("typed question"))
+    }
+    /// The window draws the field row before every page, and of two ⌘↩
+    /// buttons the first drawn takes the key. With the field's ⌘↩ always on,
+    /// ⌘↩ on a picked History row, Today's card or a Working On page did
+    /// nothing. Hosted as the window lays them out (the field row, then the
+    /// page, or the results while the field holds text), in a window that is
+    /// never ordered in: an empty field leaves ⌘↩ to the page's Ask {Tool},
+    /// a typed question takes it.
+    @MainActor
+    func testCommandReturnReachesThePageWhileTheFieldIsEmpty() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let field = FieldText()
+        let log = KeyLog()
+        let size = NSSize(width: 320, height: 200)
+        let hosting = NSHostingView(rootView: FieldThenPage(field: field, log: log))
+        hosting.frame = NSRect(origin: .zero, size: size)
+        let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -20_000, y: -20_000), size: size),
+                              styleMask: [.borderless], backing: .buffered, defer: true)
+        window.contentView = hosting
+        defer { window.contentView = nil }
+        func settle() {
+            for _ in 0..<10 {
+                hosting.layoutSubtreeIfNeeded()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            }
+        }
+        func commandReturn() throws -> [String] {
+            log.fired = []
+            let event = try XCTUnwrap(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [.command],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36))
+            _ = window.performKeyEquivalent(with: event)
+            settle()
+            return log.fired
+        }
+        settle()
+        XCTAssertEqual(try commandReturn(), ["page"], "an empty field: the page's Ask {Tool}, with its selection")
+        field.query = "rounding half to even"
+        settle()
+        XCTAssertEqual(try commandReturn(), ["field"], "a typed question: the field's")
+        field.query = ""
+        settle()
+        XCTAssertEqual(try commandReturn(), ["page"], "cleared: the page's again")
+    }
+}
+
+private final class KeyLog {
+    var fired: [String] = []
+}
+
+private final class FieldText: ObservableObject {
+    @Published var query = ""
+}
+
+/// The window's two ⌘↩ buttons as it draws them: the field row's, on only
+/// while it holds a question (`WindowKeys.fieldTakesCommandReturn`), then
+/// the page's Ask {Tool}, which the results replace while the field holds
+/// something.
+private struct FieldThenPage: View {
+    @ObservedObject var field: FieldText
+    let log: KeyLog
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text(verbatim: "field")
+                .background {
+                    Button("") { log.fired.append("field") }
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .disabled(!WindowKeys.fieldTakesCommandReturn(field.query))
+                        .frame(width: 0, height: 0)
+                        .opacity(0)
+                }
+            if field.query.isEmpty {
+                Text(verbatim: "page")
+                    .background {
+                        Button("") { log.fired.append("page") }
+                            .keyboardShortcut(.return, modifiers: .command)
+                            .frame(width: 0, height: 0)
+                            .opacity(0)
+                    }
+            } else {
+                Text(verbatim: "results")
+            }
+        }
+        .frame(width: 320, height: 200)
     }
 }

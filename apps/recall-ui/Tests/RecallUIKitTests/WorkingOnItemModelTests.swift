@@ -283,20 +283,18 @@ final class WorkingOnItemModelTests: XCTestCase {
     /// Resume used a custom 24 pt style beside native bordered buttons (Ask
     /// {Tool}, Open {App}, Show in History, ⋯), so the row mixed heights,
     /// top edges and corners. It is the system's prominent bordered button
-    /// now, as tall as the buttons beside it.
-    func testResumeIsAsTallAsTheButtonsBesideIt() {
-        func height(_ view: some View) -> CGFloat {
-            NSHostingView(rootView: view.fixedSize()).fittingSize.height
+    /// now: the same push button as Show in History and Open {App}, at the
+    /// same size. (A menu button sizes itself differently offscreen, so Ask
+    /// {Tool} and ⋯ are checked in the window's pictures.)
+    func testResumeIsTheSamePushButtonAsTheButtonsBesideIt() {
+        func size(_ view: some View) -> CGSize {
+            NSHostingView(rootView: view.fixedSize()).fittingSize
         }
-        let resume = height(Button(WorkCopy.resume) {}.resumeButtonStyle())
-        XCTAssertGreaterThan(resume, 0)
-        XCTAssertEqual(resume, height(Button("Show in History") {}.buttonStyle(.bordered)), accuracy: 0.5,
-                       "as tall as Show in History and Open {App}")
-        let menu = Menu { Button("Copy for Your AI") {} } label: { Image(systemName: "ellipsis") }
-            .menuStyle(.button)
-            .buttonStyle(.bordered)
-            .menuIndicator(.hidden)
-        XCTAssertEqual(resume, height(menu), accuracy: 1, "as tall as Ask {Tool} and ⋯")
+        let resume = size(Button(WorkCopy.resume) {}.resumeButtonStyle())
+        let showInHistory = size(Button(WorkCopy.resume) {}.buttonStyle(.bordered))
+        XCTAssertGreaterThan(resume.height, 0)
+        XCTAssertEqual(resume.height, showInHistory.height, accuracy: 0.5, "as tall as Show in History and Open {App}")
+        XCTAssertEqual(resume.width, showInHistory.width, accuracy: 0.5, "the same bezel and padding for the same words")
     }
 
     /// AI Tools sat about 70 pt left of About You, Privacy and Working On,
