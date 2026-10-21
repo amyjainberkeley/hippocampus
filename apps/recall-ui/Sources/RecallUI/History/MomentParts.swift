@@ -146,16 +146,42 @@ struct HourHeading: View {
     var forgetHour: (() -> Void)?
 
     var body: some View {
-        Text(verbatim: title)
-            .mciFont(.caption)
-            .foregroundStyle(Color.brandFgSecondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        ListHeading(title: title)
             .contentShape(Rectangle())
             .contextMenu {
                 if let forgetTitle, let forgetHour {
                     Button(forgetTitle, role: .destructive, action: forgetHour)
                 }
             }
+    }
+}
+
+/// A heading over a list's rows, an hour in History or a day in a lens, as
+/// the prototype draws it: its words, and a line under them, on the page's
+/// own colour. A list's section heading sits on the list's band, white
+/// (grey in dark mode) on the page's colour, so the page's colour is drawn
+/// past the heading's edges, over the band, pinned or not.
+struct ListHeading: View {
+    let title: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(verbatim: title)
+                .mciFont(.caption)
+                .foregroundStyle(Color.brandFgSecondary)
+            Rectangle()
+                .fill(MCI.Color.borderStrong)
+                .frame(height: 1)
+                .accessibilityHidden(true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            MCI.Color.background
+                .padding(.horizontal, -48)
+                .padding(.vertical, -4)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -199,16 +225,9 @@ struct MomentMenu: View {
     var body: some View {
         if !picked.isEmpty {
             Button(LibraryCopy.History.open, action: open)
-            Button(LibraryCopy.History.copyText) {
-                let hits = picked.rows.map(\.hit)
-                Task {
-                    var texts: [String] = []
-                    for hit in hits { texts.append(await MomentActions.text(of: hit, reader: reader)) }
-                    MomentClipboard.put(texts.filter { !$0.isEmpty }.joined(separator: "\n\n"))
-                }
-            }
-            .keyboardShortcut("c", modifiers: .command)
-            if let row = single, let url = MomentActions.link(of: row.hit) {
+            Button(LibraryCopy.History.copyText) { MomentRowActions.copyText(picked, reader: reader) }
+                .keyboardShortcut("c", modifiers: .command)
+            if let url = MomentRowActions.link(picked) {
                 Button(LibraryCopy.History.openLink) { NSWorkspace.shared.open(url) }
                     .keyboardShortcut("o", modifiers: .command)
             }
@@ -223,11 +242,11 @@ struct MomentMenu: View {
                 AskAIMenu(source: .moments(ids))
                 Button(LibraryCopy.History.copyForYourAI) {
                     let services = HandoffServices.resolved(handoff, isSyntheticPreview: isSyntheticPreview)
-                    Task { await AskAIButton.copyForYourAI(.moments(ids), services: services) }
+                    MomentRowActions.copyForYourAI(ids, services: services)
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
-                if let row = single, !row.hit.linkedEventIds.isEmpty {
-                    Button(LibraryCopy.History.showRelated) { showRelated(row.hit) }
+                if let hit = MomentRowActions.related(picked) {
+                    Button(LibraryCopy.History.showRelated) { showRelated(hit) }
                         .keyboardShortcut("r", modifiers: [.command, .shift])
                 }
             }
@@ -238,5 +257,95 @@ struct MomentMenu: View {
                 }
             }
         }
+    }
+}
+
+/// What a row's menu does, so the list's own keys do exactly the same
+/// (SPEC 2.10): Copy Text, Open Link, Copy for Your AI and Show Related.
+@MainActor
+enum MomentRowActions {
+    /// Copy Text: each picked moment's text as the detail shows it, one
+    /// after another.
+    static func copyText(_ picked: MomentSelection, reader: BrainReader?) {
+        let hits = picked.rows.map(\.hit)
+        Task {
+            var texts: [String] = []
+            for hit in hits { texts.append(await MomentActions.text(of: hit, reader: reader)) }
+            MomentClipboard.put(texts.filter { !$0.isEmpty }.joined(separator: "\n\n"))
+        }
+    }
+
+    /// The page Open Link opens: the one picked moment's, when it has one.
+    static func link(_ picked: MomentSelection) -> URL? {
+        picked.rows.count == 1 ? MomentActions.link(of: picked.rows[0].hit) : nil
+    }
+
+    /// Copy for Your AI: the builder's message for the moments, by the
+    /// clipboard rules (SPEC 5.3.6).
+    static func copyForYourAI(_ ids: [UInt64], services: HandoffServices) {
+        Task { await AskAIButton.copyForYourAI(.moments(ids), services: services) }
+    }
+
+    /// The moment Show Related opens: the one picked, when it has related
+    /// moments.
+    static func related(_ picked: MomentSelection) -> Hit? {
+        guard picked.rows.count == 1, !picked.rows[0].hit.linkedEventIds.isEmpty else { return nil }
+        return picked.rows[0].hit
+    }
+}
+
+/// The row menu's keys on the list itself (SPEC 2.10): ⌘C Copy Text, ⇧⌘C
+/// Copy for Your AI, ⌘O Open Link and ⇧⌘R Show Related act on the rows
+/// picked while the list has the keyboard. ⌘C is the window's own key only
+/// then, ahead of Edit › Copy, so ⌘C in the field or in a detail's text
+/// still copies the words picked there.
+struct MomentRowKeys: ViewModifier {
+    let picked: MomentSelection
+    let reader: BrainReader?
+    let showRelated: (Hit) -> Void
+
+    @FocusState private var listFocused: Bool
+    @Environment(\.handoffServices) private var handoff
+    @Environment(\.isSyntheticPreview) private var isSyntheticPreview
+
+    func body(content: Content) -> some View {
+        content
+            .focused($listFocused)
+            .background {
+                if listFocused, !picked.isEmpty {
+                    Button("") { perform(.copyText) }
+                        .keyboardShortcut("c", modifiers: .command)
+                        .frame(width: 0, height: 0)
+                        .opacity(0)
+                        .accessibilityHidden(true)
+                }
+            }
+            .onKeyPress(phases: .down) { press in
+                guard let key = MomentKey(character: press.key.character, modifiers: press.modifiers),
+                      key != .copyText
+                else { return .ignored }
+                return perform(key) ? .handled : .ignored
+            }
+    }
+
+    /// What the row's menu item for `key` does; false when it offers none.
+    @discardableResult
+    private func perform(_ key: MomentKey) -> Bool {
+        guard !picked.isEmpty else { return false }
+        switch key {
+        case .copyText:
+            MomentRowActions.copyText(picked, reader: reader)
+        case .copyForYourAI:
+            guard reader != nil else { return false }
+            let services = HandoffServices.resolved(handoff, isSyntheticPreview: isSyntheticPreview)
+            MomentRowActions.copyForYourAI(picked.momentIds, services: services)
+        case .openLink:
+            guard let url = MomentRowActions.link(picked) else { return false }
+            NSWorkspace.shared.open(url)
+        case .showRelated:
+            guard reader != nil, let hit = MomentRowActions.related(picked) else { return false }
+            showRelated(hit)
+        }
+        return true
     }
 }

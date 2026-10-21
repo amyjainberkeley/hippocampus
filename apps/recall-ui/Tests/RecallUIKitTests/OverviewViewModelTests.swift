@@ -23,6 +23,46 @@ final class OverviewViewModelTests: XCTestCase {
         return (model, understanding)
     }
 
+    /// The calendar is offered once on Today (SPEC-DELTA 5), not only on the
+    /// first day: someone back from 0.2, or past their first session, sees
+    /// it too, under the card. Never before Today knows whether macOS was
+    /// asked, never on another day, and Not Now puts it aside for good. A
+    /// fake calendar answers; macOS is never asked.
+    func testTodayOffersTheCalendarOnceAfterTheFirstDayToo() async throws {
+        let understanding = ScriptedUnderstanding()
+        await understanding.setOverview(try UnderstandingFixture.overview())
+        let offers = MemoryKeyValueStore()
+        func model(_ access: CalendarAccess) -> OverviewViewModel {
+            OverviewViewModel(understanding: understanding, selectedDate: SampleDay.now, calendar: SampleDay.calendar,
+                              healthLoader: { SampleDay.receipt() }, now: { SampleDay.now },
+                              deletions: MemoryDeletionSignal(), savedBefore: { _ in true },
+                              calendarReader: FixtureCalendar(access: access), offers: offers)
+        }
+        let today = model(.notAsked)
+        XCTAssertFalse(today.showsCalendarOffer, "not before the day and the calendar are read")
+        await today.reload()
+        XCTAssertFalse(today.showsFirstDay)
+        XCTAssertNotNil(today.rightNow)
+        XCTAssertTrue(today.showsCalendarOffer, "a Today past the first day offers it under the card")
+        today.moveDay(-1)
+        XCTAssertFalse(today.showsCalendarOffer, "only on today")
+        today.goToToday()
+        await today.reload()
+        XCTAssertTrue(today.showsCalendarOffer)
+
+        for access in [CalendarAccess.allowed, .denied] {
+            let asked = model(access)
+            await asked.reload()
+            XCTAssertFalse(asked.showsCalendarOffer, "never once macOS was asked: \(access)")
+        }
+
+        today.calendarOffered()
+        XCTAssertFalse(today.showsCalendarOffer, "Not Now puts it aside")
+        let again = model(.notAsked)
+        await again.reload()
+        XCTAssertFalse(again.showsCalendarOffer, "offered once, never again")
+    }
+
     func testItReadsTheDayInThePersonsCalendarAndTheSavedStatus() async throws {
         let receipt = SampleDay.receipt()
         let (model, understanding) = try await loaded(receipt: receipt)
@@ -142,6 +182,27 @@ final class OverviewViewModelTests: XCTestCase {
         XCTAssertNil(model.rightNow, "the card is today's only")
         model.goToToday()
         XCTAssertEqual(model.day.dateLocal, SampleDay.date)
+    }
+
+    /// Today's › looked as clickable on today as on any other day: the
+    /// row's secondary colour kept the disabled arrow at full strength. It
+    /// is dimmed while it can't move, to the prototype's (203,203,206) on
+    /// the page's grey, and full strength again on an earlier day.
+    func testADayArrowThatCantMoveIsDimmed() async throws {
+        let (model, _) = try await loaded()
+        XCTAssertFalse(model.canMoveForward)
+        XCTAssertEqual(model.nextDayArrowOpacity, OverviewViewModel.stuckArrowOpacity, "› on today")
+        XCTAssertEqual(model.previousDayArrowOpacity, 1, "a day with sessions has a day before it")
+        model.moveDay(-1)
+        XCTAssertEqual(model.nextDayArrowOpacity, 1, "› on yesterday moves")
+        // The secondary colour (110,110,115) at that strength on the page's
+        // (247,248,250), as the prototype draws a disabled arrow.
+        let drawn = zip([110.0, 110, 115], [247.0, 248, 250]).map { ink, page in
+            page + (ink - page) * OverviewViewModel.stuckArrowOpacity
+        }
+        for (channel, wanted) in zip(drawn, [203.0, 203, 206]) {
+            XCTAssertEqual(channel, wanted, accuracy: 1.5)
+        }
     }
 
     func testTheLegendDimsOtherKindsAndAKindWithNoSessionDimsNothing() async throws {
@@ -310,6 +371,18 @@ final class OverviewViewModelTests: XCTestCase {
                        .app(bundleId: "com.microsoft.VSCode", name: "VS Code"))
         XCTAssertNil(ReopenAction(Reopen(url: nil, bundleId: "unknown", appName: "Unknown")))
         XCTAssertNil(ReopenAction(nil))
+    }
+
+    /// The card's app was removed from the Mac: no Open button (SPEC 3.1).
+    /// It used to show and do nothing when pressed.
+    func testOpenIsOfferedOnlyForAnAppStillOnThisMac() throws {
+        let removed = try XCTUnwrap(ReopenAction(Reopen(url: nil, bundleId: "com.example.gone-editor", appName: "Gone")))
+        XCTAssertFalse(removed.canOpen(appInstalled: { _ in false }))
+        XCTAssertTrue(removed.canOpen(appInstalled: { $0 == "com.example.gone-editor" }))
+        let page = try XCTUnwrap(ReopenAction(Reopen(url: "https://devnotes.example/rounding",
+                                                     bundleId: "com.example.gone-browser", appName: "Gone")))
+        XCTAssertTrue(page.canOpen(appInstalled: { _ in false }), "a page opens in whatever browser is here")
+        XCTAssertFalse(ReopenAction.isInstalled("com.example.no-such-app-\(UUID().uuidString)"))
     }
 
     func testThePreviewsCardRendersAndWhatItCopiesIsInThePreviewsMemory() async throws {

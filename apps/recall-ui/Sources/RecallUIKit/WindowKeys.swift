@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// One line of the Keyboard Shortcuts sheet: the keys, and what they do.
 public struct WindowKey: Equatable, Sendable, Identifiable {
@@ -50,11 +51,58 @@ public enum WindowKeys {
         WindowKey(["\u{2318},"], "Preferences", in: .help),
     ]
 
+    /// Whether the field takes ⌘↩ (SPEC 2.8, 2.10): only while it holds a
+    /// question. Otherwise the key is the page's Ask {Tool}, with what the
+    /// page has selected. Two ⌘↩ buttons in one window go to the one drawn
+    /// first, and the field is drawn before every page, so the field's
+    /// button is off while the field is empty.
+    public static func fieldTakesCommandReturn(_ query: String) -> Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// The sheet's sections, in the ⌘K groups' order.
     public static var grouped: [(group: ActionPanelCommand.Category, keys: [WindowKey])] {
         ActionPanelCommand.Category.allCases.compactMap { group in
             let keys = all.filter { $0.group == group }
             return keys.isEmpty ? nil : (group, keys)
+        }
+    }
+}
+
+/// A key on the rows picked in History or a lens (SPEC 2.10): what the
+/// row's menu does, from the list itself while it has the keyboard. The
+/// sheet lists them as "Copy Text, Copy for Your AI" and "Open Link, Show
+/// Related".
+public enum MomentKey: Equatable, Sendable, CaseIterable {
+    /// ⌘C: Copy Text.
+    case copyText
+    /// ⇧⌘C: Copy for Your AI.
+    case copyForYourAI
+    /// ⌘O: Open Link.
+    case openLink
+    /// ⇧⌘R: Show Related.
+    case showRelated
+
+    /// The key's action: its letter, either case, with exactly these
+    /// modifiers. Nil for any other key, so it goes on to the list.
+    public init?(character: Character, modifiers: EventModifiers) {
+        let held = modifiers.intersection([.command, .shift, .option, .control])
+        switch (String(character).lowercased(), held) {
+        case ("c", [.command]): self = .copyText
+        case ("c", [.command, .shift]): self = .copyForYourAI
+        case ("o", [.command]): self = .openLink
+        case ("r", [.command, .shift]): self = .showRelated
+        default: return nil
+        }
+    }
+
+    /// Its chip in the Keyboard Shortcuts sheet.
+    public var chip: String {
+        switch self {
+        case .copyText: "\u{2318}C"
+        case .copyForYourAI: "\u{21E7}\u{2318}C"
+        case .openLink: "\u{2318}O"
+        case .showRelated: "\u{21E7}\u{2318}R"
         }
     }
 }

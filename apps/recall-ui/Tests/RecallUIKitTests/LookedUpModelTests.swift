@@ -107,6 +107,62 @@ final class LookedUpModelTests: XCTestCase {
         XCTAssertEqual(failing.state, .failed)
     }
 
+    // MARK: A chip on Today opens the page on its search (SPEC 3.1, 3.6)
+
+    private func chipPage(_ focus: LookedUpFocus) -> LookedUpModel {
+        let moments = [
+            workMoment(21, WorkClock.us(0, 11, 18), title: "rust round half to even - Google Search",
+                       url: "https://www.google.com/search?q=rust+round+half+to+even"),
+            workMoment(31, WorkClock.us(1, 16, 2), title: "rust round half to even - Google Search",
+                       url: "https://www.google.com/search?q=rust+round+half+to+even"),
+            workMoment(10, WorkClock.us(0, 14, 6), title: "per seat vs tiered pricing - Google Search",
+                       url: "https://www.google.com/search?q=per+seat+vs+tiered+pricing"),
+        ]
+        return LookedUpModel(searches: PreviewSearchesReader(records: [
+            record("per seat vs tiered pricing", WorkClock.us(0, 14, 6), 10),
+            record("rust round half to even", WorkClock.us(0, 11, 18), 21),
+            record("rust round half to even", WorkClock.us(1, 16, 2), 31),
+        ]), reader: WorkMomentsReader(moments), calendar: WorkClock.calendar, now: { WorkClock.now }, focus: focus)
+    }
+
+    func testAChipsSearchIsPickedOnThePagesFirstReadOnly() async {
+        let clock = ChipClock()
+        let focus = LookedUpFocus(now: { clock.date })
+        focus.open(on: "  Rust round half  to even ")
+        let page = chipPage(focus)
+        await page.reload()
+        XCTAssertEqual(page.selected?.record.eventId, 21, "the newest time it was searched, today's")
+        XCTAssertEqual(page.selected?.page?.id, 21, "its detail shows")
+        await page.select(nil)
+        await page.reload()
+        XCTAssertNil(page.selectedId, "a later read doesn't pick it again")
+        let next = chipPage(focus)
+        await next.reload()
+        XCTAssertNil(next.selectedId, "the next visit opens on the list: the chip's search was taken")
+    }
+
+    func testAChipsSearchWaitsOnlyAFewSecondsAndOnlyForASearchThatIsThere() async {
+        let clock = ChipClock()
+        let focus = LookedUpFocus(now: { clock.date })
+        focus.open(on: "rust round half to even")
+        clock.date += LookedUpFocus.lifetime + 1
+        let late = chipPage(focus)
+        await late.reload()
+        XCTAssertNil(late.selectedId, "a chip whose page never opened can't steer a later visit")
+
+        focus.open(on: "bike fitting")
+        let missing = chipPage(focus)
+        await missing.reload()
+        XCTAssertNil(missing.selectedId, "a search the page doesn't list picks nothing")
+        XCTAssertEqual(missing.rows.count, 3)
+
+        focus.open(on: "per seat vs tiered pricing")
+        focus.open(on: nil)
+        let all = chipPage(focus)
+        await all.reload()
+        XCTAssertNil(all.selectedId, "All › opens the list")
+    }
+
     func testTheEmptyPageAndItsWordsAreCalm() {
         for text in [WorkCopy.lookedUpLead, WorkCopy.lookedUpEmptyTitle, WorkCopy.lookedUpEmptyBody,
                      WorkCopy.openedNext, WorkCopy.nothingOpenedNext, WorkCopy.searchAgain, WorkCopy.forgetThisSearch,
@@ -116,6 +172,12 @@ final class LookedUpModelTests: XCTestCase {
             XCTAssertFalse(CopyStyleValidator.containsExclamation(text), text)
         }
     }
+}
+
+/// A clock a test moves by hand.
+@MainActor
+private final class ChipClock {
+    var date = Date(timeIntervalSince1970: 1_791_900_000)
 }
 
 private struct FailingSearches: SearchesReading {

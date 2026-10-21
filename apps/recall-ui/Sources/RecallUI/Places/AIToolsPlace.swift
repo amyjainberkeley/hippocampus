@@ -42,10 +42,9 @@ struct AIToolsPlace: View {
                 }
                 content
             }
-            .frame(maxWidth: 820, alignment: .leading)
-            .padding(.horizontal, 32)
-            .padding(.vertical, 28)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // The column About You, Privacy and Working On use, so the page
+            // doesn't jump sideways between its neighbours.
+            .pageColumn()
         }
         .background(MCI.Color.background)
         .task {
@@ -303,13 +302,18 @@ struct AIToolsPlace: View {
                 .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(MCI.Color.borderStrong))
                 .accessibilityLabel("Command Return")
             Text(HandoffCopy.opens)
-            Picker(selection: Binding(
-                get: { model.askTool ?? model.installed.first?.tool ?? .claude },
-                set: { model.choose($0) }
+            // Choose… until a tool is chosen: before then ⌘↩ opens none, and
+            // the Ask buttons read Ask Your AI.
+            Picker(selection: Binding<AskTool?>(
+                get: { model.askTool },
+                set: { tool in if let tool { model.choose(tool) } }
             )) {
+                if model.askTool == nil {
+                    Text(AIToolsModel.chooseTool).tag(AskTool?.none)
+                }
                 ForEach(model.installed) { tool in
                     Label { Text(tool.tool.name) } icon: { Image(nsImage: ToolIcons.image(for: tool, size: 16)) }
-                        .tag(tool.tool)
+                        .tag(AskTool?.some(tool.tool))
                 }
             } label: {
                 EmptyView()

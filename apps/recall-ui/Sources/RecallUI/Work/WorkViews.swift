@@ -330,3 +330,16 @@ final class WorkMomentCache: ObservableObject {
         generation = current
     }
 }
+
+extension WorkItemMenuItem {
+    /// The item's words in its menus.
+    var title: String {
+        switch self {
+        case .showInSidebar: WorkCopy.showInSidebar
+        case .hideFromSidebar: WorkCopy.hideFromSidebar
+        case .showInHistory: WorkCopy.showInHistory
+        case .contextForThisFolder: NavigationCopy.contextForThisFolder
+        case .copyForYourAI: HandoffCopy.copyForYourAI
+        }
+    }
+}

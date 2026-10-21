@@ -56,6 +56,9 @@ struct SidebarView: View {
     @State private var hiMarkAnchor = MenuAnchor.Holder()
     @State private var footerAnchor = MenuAnchor.Holder()
     @State private var hiMarkHovered = false
+    /// Context for This Folder…, open in an item's folder.
+    @State private var folderSheet: FolderSheet?
+    @Environment(\.isSyntheticPreview) private var isSyntheticPreview
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -68,6 +71,9 @@ struct SidebarView: View {
         .frame(maxHeight: .infinity, alignment: .top)
         .onHover { actions.pointerInside($0) }
         .onChange(of: focusedList) { _, list in actions.focusInside(list != nil) }
+        .sheet(item: $folderSheet) { sheet in
+            ProjectHandoffView(folderGuess: sheet.guess)
+        }
     }
 
     enum SidebarList: Hashable {
@@ -250,15 +256,19 @@ struct SidebarView: View {
                         Button(NavigationCopy.hideFromSidebar) { actions.hideItem(id) }
                         Button(UserFacingCopy.showInHistory) { actions.showInHistory(id) }
                         if item.kind == .code {
-                            Button(NavigationCopy.contextForThisFolder) { actions.folderContext() }
+                            // Today's ⌘J sheet, in the project's folder (SPEC 3.2).
+                            Button(NavigationCopy.contextForThisFolder) {
+                                folderSheet = FolderSheet(guess: isSyntheticPreview ? nil : item.folderGuess)
+                            }
                         }
                         Button(NavigationCopy.copyForYourAI) { actions.copyForYourAI(id) }
                     }
             }
         case .showAll:
-            Text(NavigationCopy.showAll)
+            // No symbol, its words in line with every row's (SPEC 2.2).
+            SidebarTextRow(NavigationCopy.showAll)
                 .foregroundStyle(selection == row ? MCI.Color.foreground : MCI.Color.sidebarSecondary)
-                .padding(.leading, SidebarMetrics.labelInset)
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel(NavigationCopy.showAllAccessibility(count: model.allItemCount))
         }
     }
@@ -334,8 +344,6 @@ struct SidebarFootnote: View {
 enum SidebarMetrics {
     /// A row's height at the system's medium sidebar size.
     static let rowHeight: CGFloat = 28
-    /// From a row's leading edge to its label: the icon's slot and the gap.
-    static let labelInset: CGFloat = 25
     /// A Working On item's little screenshot (SPEC-DELTA 2: about 26 x 16).
     static let thumbnailSize = SidebarThumbnailLayout.size
     /// How far the little screenshot moves toward its name, so it never

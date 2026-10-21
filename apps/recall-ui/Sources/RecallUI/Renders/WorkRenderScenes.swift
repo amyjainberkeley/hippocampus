@@ -302,9 +302,10 @@ struct StandInSidebar: View {
                 }
                 if sidebar.showsAll {
                     rowFrame(on: selection == .showAll) {
-                        Text(NavigationCopy.showAll)
+                        // In line with the rows' names, as the window's sidebar draws it.
+                        SidebarTextRow(NavigationCopy.showAll)
+                            .labelStyle(StandInLabelStyle(on: selection == .showAll))
                             .foregroundStyle(selection == .showAll ? MCI.Color.foreground : MCI.Color.foregroundSecondary)
-                            .padding(.leading, 25)
                     }
                 }
                 header(NavigationCopy.library)

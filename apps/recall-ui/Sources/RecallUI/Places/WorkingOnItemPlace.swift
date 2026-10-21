@@ -19,6 +19,8 @@ struct WorkingOnItemPlace: View {
 
     @StateObject private var model: WorkingOnItemModel
     @State private var selected: Hit?
+    /// Context for This Folder…, open in the item's folder.
+    @State private var folderSheet: FolderSheet?
     @Environment(\.workItemHides) private var hides
     @Environment(\.claudeCodeStartsSessions) private var claudeCodeStarts
     @Environment(\.workNow) private var now
@@ -49,11 +51,7 @@ struct WorkingOnItemPlace: View {
                               onDismissDetail: { selected = nil }) {
             ScrollView {
                 page
-                    .padding(.horizontal, 32)
-                    .padding(.top, 24)
-                    .padding(.bottom, 48)
-                    .frame(maxWidth: 940, alignment: .leading)
-                    .frame(maxWidth: .infinity)
+                    .pageColumn()
             }
             .background(MCI.Color.background)
         } detail: {
@@ -66,12 +64,16 @@ struct WorkingOnItemPlace: View {
             await model.reload()
             while !Task.isCancelled {
                 do { try await Task.sleep(for: refreshEvery) } catch { return }
-                await model.reload()
+                // The days and pages already read stay; a forget reads all.
+                await model.reload(keepingRead: true)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: MemoryDeletionSignal.notification)) { _ in
             selected = nil
             Task { await model.reload() }
+        }
+        .sheet(item: $folderSheet) { sheet in
+            ProjectHandoffView(folderGuess: sheet.guess)
         }
     }
 
@@ -151,41 +153,24 @@ struct WorkingOnItemPlace: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 8) {
+                // Native, as the Ask button and ⋯ beside it are.
                 Button(WorkCopy.resume) { open(.resume(item: item.id)) }
-                    .buttonStyle(WorkButtonStyle(prominent: true))
+                    .resumeButtonStyle()
                     .help(WorkCopy.resume)
                 // A code project's button opens Claude Code (or Codex) in
                 // its folder (SPEC 5.3.1); ⌘↩ is this button.
-                // The size of Resume and ⋯ beside it, as the prototype draws
-                // the header's buttons.
                 AskAIButton(source: .item(item.id), reader: reader, handlesCommandReturn: true,
                             itemMoments: item.moments, codeProject: item.kind == .code ? item.name : nil)
                 Menu {
-                    if hides.keepsOut(item) {
-                        Button(WorkCopy.showInSidebar) { hides.show(item.id) }
-                    } else {
-                        Button(WorkCopy.hideFromSidebar) { hides.hide(item.id) }
-                    }
-                    Button(WorkCopy.showInHistory) { showInHistory(item.moments.first) }
-                    if item.kind == .code {
-                        // Today's ⌘J sheet (SPEC 3.2).
-                        Button(NavigationCopy.contextForThisFolder) { WindowCommand.folderContext.post() }
-                    }
-                    Button(HandoffCopy.copyForYourAI) {
-                        let services = HandoffServices.resolved(handoff, isSyntheticPreview: isSyntheticPreview)
-                        Task { await AskAIButton.copyForYourAI(.item(item.id), services: services) }
+                    ForEach(WorkItemMenuItem.items(kind: item.kind, keptOut: hides.keepsOut(item), in: .itemPage),
+                            id: \.self) { action in
+                        Button(action.title) { perform(action, on: item) }
                     }
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(MCI.Color.foreground)
-                        .frame(width: 30, height: 24)
-                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(MCI.Color.surfaceElevated))
-                        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .strokeBorder(Color.primary.opacity(0.16), lineWidth: 0.5))
                 }
                 .menuStyle(.button)
-                .buttonStyle(.plain)
+                .buttonStyle(.bordered)
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .accessibilityLabel(WorkCopy.more)
@@ -259,6 +244,21 @@ struct WorkingOnItemPlace: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .workCard(padding: 16)
+        }
+    }
+
+    /// The ⋯ menu's items (SPEC 3.2).
+    private func perform(_ action: WorkItemMenuItem, on item: WorkItem) {
+        switch action {
+        case .showInSidebar: hides.show(item.id)
+        case .hideFromSidebar: hides.hide(item.id)
+        case .showInHistory: showInHistory(item.moments.first)
+        case .contextForThisFolder:
+            // Today's ⌘J sheet, in the project's folder.
+            folderSheet = FolderSheet(guess: isSyntheticPreview ? nil : item.folderGuess)
+        case .copyForYourAI:
+            let services = HandoffServices.resolved(handoff, isSyntheticPreview: isSyntheticPreview)
+            Task { await AskAIButton.copyForYourAI(.item(item.id), services: services) }
         }
     }
 
@@ -390,9 +390,9 @@ struct WorkingOnItemPlace: View {
                 WorkSectionTitle(title: WorkCopy.history)
                 Spacer(minLength: 0)
                 HStack(spacing: 4) {
-                    ForEach(model.days.prefix(7)) { day in
+                    ForEach(model.dayButtons) { day in
                         let on = day.id == model.shownDay?.id
-                        Button(day.label) { model.selectedDay = day.id }
+                        Button(day.label) { show(day) }
                             .buttonStyle(.plain)
                             .font(.system(size: 12))
                             .foregroundStyle(on ? MCI.Color.foreground : MCI.Color.foregroundSecondary)
@@ -401,6 +401,9 @@ struct WorkingOnItemPlace: View {
                             .background(RoundedRectangle(cornerRadius: 5, style: .continuous)
                                 .fill(on ? Color.primary.opacity(0.065) : Color.clear))
                             .accessibilityAddTraits(on ? .isSelected : [])
+                    }
+                    if !model.olderDays.isEmpty {
+                        olderDaysMenu
                     }
                 }
             }
@@ -435,6 +438,33 @@ struct WorkingOnItemPlace: View {
                 .padding(.top, 10)
             }
         }
+    }
+
+    /// The days past the buttons: "Earlier", or the older day shown.
+    private var olderDaysMenu: some View {
+        let shown = model.olderDays.first { $0.id == model.shownDay?.id }
+        return Menu {
+            ForEach(model.olderDays) { day in
+                Toggle(day.label, isOn: Binding(get: { day.id == model.shownDay?.id }, set: { _ in show(day) }))
+            }
+        } label: {
+            Text(shown?.label ?? WorkCopy.earlier)
+                .font(.system(size: 12))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .foregroundStyle(shown != nil ? MCI.Color.foreground : MCI.Color.foregroundSecondary)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 1)
+        .background(RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(shown != nil ? Color.primary.opacity(0.065) : Color.clear))
+        .accessibilityLabel(shown?.label ?? WorkCopy.earlier)
+        .accessibilityAddTraits(shown != nil ? .isSelected : [])
+    }
+
+    /// A day's History: read first when it isn't yet.
+    private func show(_ day: ItemDay) {
+        Task { await model.show(day: day.id) }
     }
 
     private func hourHeading(_ section: HistorySection) -> some View {

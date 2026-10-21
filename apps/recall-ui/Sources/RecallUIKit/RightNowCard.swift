@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import SwiftUI
 
 /// What "Open {App}" or "Open Page" opens for a session or the Right now card
 /// (RULINGS W5). The agent names the moment's page and app (contract
@@ -29,6 +31,21 @@ public enum ReopenAction: Equatable, Sendable {
         case .page: UserFacingCopy.openPage
         case let .app(_, name): UserFacingCopy.openApp(name)
         }
+    }
+
+    /// Whether it can open on this Mac (SPEC 3.1): a page always; an app
+    /// only while it is installed, so a removed app gets no Open button
+    /// that would do nothing, as a Working On page already does.
+    public func canOpen(appInstalled: (String) -> Bool = ReopenAction.isInstalled) -> Bool {
+        switch self {
+        case .page: true
+        case let .app(bundleId, _): appInstalled(bundleId)
+        }
+    }
+
+    /// Whether an app with `bundleId` is on this Mac.
+    public static func isInstalled(_ bundleId: String) -> Bool {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) != nil
     }
 }
 
@@ -224,5 +241,17 @@ public enum SessionMatch {
             best = (block, overlap, distance)
         }
         return best?.block
+    }
+}
+
+public extension View {
+    /// Resume in a row of native bordered buttons, on Today's card and a
+    /// Working On page (SPEC 3.1, 3.2): the system's prominent bordered
+    /// button in the accent colour, so the row shares one height, top edge
+    /// and corner. Like every such button, macOS draws it without its colour
+    /// while the window is in the background.
+    func resumeButtonStyle() -> some View {
+        buttonStyle(.borderedProminent)
+            .tint(MCI.Color.accentFill)
     }
 }

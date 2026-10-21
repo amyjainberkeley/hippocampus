@@ -101,11 +101,18 @@ struct TodayPlace: View {
                     }
                     .transition(.opacity)
                 }
+                // The calendar, offered once (SPEC-DELTA 5): the first day's
+                // card makes the offer itself.
+                if model.showsCalendarOffer, !model.showsFirstDay {
+                    CalendarOfferLine(show: takeCalendarOffer, notNow: { model.calendarOffered() })
+                        .transition(.opacity)
+                }
                 yourDay
                 lookedUpToday
                 summary
             }
             .animation(reduceMotion ? MCI.Motion.snap : MCI.Motion.deliberate, value: model.showsFirstDay)
+            .animation(MCI.Motion.standard, value: model.showsCalendarOffer)
             .frame(maxWidth: Self.maxWidth, alignment: .leading)
             .padding(.horizontal, 32)
             .padding(.top, 24)
@@ -120,8 +127,17 @@ struct TodayPlace: View {
     }
 
     /// A search chip: Looked Up on that search, else the field searches it.
+    /// The page opens on the search the chip leaves for it (SPEC 3.1, 3.6).
     private func openSearch(_ query: String) {
-        if let lookedUp { lookedUp(query) } else { search(query) }
+        guard let lookedUp else { return search(query) }
+        LookedUpFocus.shared.open(on: query)
+        lookedUp(query)
+    }
+
+    /// "All ›": Looked Up on its list.
+    private func openLookedUp() {
+        LookedUpFocus.shared.open(on: nil)
+        lookedUp?(nil)
     }
 
     private func takeCalendarOffer() {
@@ -151,6 +167,9 @@ struct TodayPlace: View {
                 .help(UserFacingCopy.Overview.previousDay)
                 .accessibilityLabel(UserFacingCopy.Overview.previousDay)
                 .disabled(model.showsFirstDay)
+                // The colour the row sets would keep a disabled arrow at full
+                // strength: dimmed as the window's own ‹ › are.
+                .opacity(model.previousDayArrowOpacity)
                 // On today the control names the date; on another day the
                 // title does, so it offers Today, as Calendar does.
                 if model.isToday {
@@ -172,6 +191,7 @@ struct TodayPlace: View {
                 .help(UserFacingCopy.Overview.nextDay)
                 .accessibilityLabel(UserFacingCopy.Overview.nextDay)
                 .disabled(!model.canMoveForward)
+                .opacity(model.nextDayArrowOpacity)
             }
             .buttonStyle(.borderless)
             .foregroundStyle(MCI.Color.foregroundSecondary)
@@ -308,8 +328,8 @@ struct TodayPlace: View {
                         .foregroundStyle(MCI.Color.foreground)
                         .accessibilityAddTraits(.isHeader)
                     Spacer()
-                    if let lookedUp {
-                        LinkButton(title: UserFacingCopy.Overview.all) { lookedUp(nil) }
+                    if lookedUp != nil {
+                        LinkButton(title: UserFacingCopy.Overview.all) { openLookedUp() }
                     }
                 }
                 QueryChips(queries: searches.map(\.query), search: openSearch)
@@ -411,6 +431,42 @@ struct AlsoFromLine: View {
         }
         .font(.system(size: 13))
         .padding(.leading, 2)
+    }
+}
+
+/// Today's one-time offer of the calendar (SPEC-DELTA 5) on any day but the
+/// first, whose welcome card makes it: one line, Not Now and Show Calendar.
+/// Either answer is final: the offer isn't made again.
+struct CalendarOfferLine: View {
+    let show: () -> Void
+    let notNow: () -> Void
+    @Environment(\.isSyntheticPreview) private var isSyntheticPreview
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "calendar")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(MCI.Color.foregroundSecondary)
+                .accessibilityHidden(true)
+            Text(UserFacingCopy.Overview.showCalendarLine)
+                .font(MCI.Font.body)
+                .foregroundStyle(MCI.Color.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button(CalendarCopy.notNow, action: notNow)
+                .buttonStyle(.bordered)
+                .disabled(isSyntheticPreview)
+            Button(UserFacingCopy.Overview.showCalendar, action: show)
+                .buttonStyle(.bordered)
+                .disabled(isSyntheticPreview)
+        }
+        .padding(.vertical, 10)
+        .padding(.leading, 16)
+        .padding(.trailing, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(MCI.Color.surface))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(MCI.Color.border, lineWidth: 1))
+        .accessibilityElement(children: .contain)
     }
 }
 

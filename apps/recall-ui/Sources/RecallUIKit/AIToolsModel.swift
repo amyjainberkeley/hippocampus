@@ -143,11 +143,16 @@ public final class AIToolsModel: ObservableObject {
             }
         }
         self.installed = installed
+        // Only a tool the person chose and that is still here: before that,
+        // ⌘↩ opens nothing, and the page says Choose… (AskAIButtonRules).
         askTool = choices.lastTool.flatMap { last in installed.contains { $0.tool == last } ? last : nil }
-            ?? installed.first?.tool
         state = .ready
         startsWith = cards.contains(where: \.showsStartsWith) ? await readStartsWith() : nil
     }
+
+    /// What With One Key's menu says until a tool is chosen: ⌘↩ opens no
+    /// tool before then.
+    public static let chooseTool = "Choose\u{2026}"
 
     /// The tool ⌘↩ opens, chosen here.
     public func choose(_ tool: AskTool) {

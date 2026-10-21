@@ -172,7 +172,7 @@ final class AIToolsModelTests: XCTestCase {
         await model.reload()
         XCTAssertNil(model.startsWith)
         XCTAssertEqual(asked.all, [])
-        XCTAssertEqual(model.askTool, .codex, "with nothing chosen, the first tool here")
+        XCTAssertNil(model.askTool, "with nothing chosen, none: the page says Choose…, as the buttons say Ask Your AI")
     }
 
     func testNoToolsAtAll() async {
@@ -191,6 +191,37 @@ final class AIToolsModelTests: XCTestCase {
         await model.reload()
         XCTAssertEqual(model.state, .unavailable)
         XCTAssertFalse(model.isEmpty, "a page that couldn't read is never told there are no tools")
+    }
+
+    /// AI Tools used to say ⌘↩ opens the first tool here while none was
+    /// chosen, though the Ask buttons, which open the last tool chosen,
+    /// read Ask Your AI and only copy then. It says Choose… until a tool is
+    /// chosen, and a chosen tool that's gone from the Mac is no longer it.
+    func testWithOneKeySaysChooseUntilAToolIsChosenAndForgetsOneThatIsGone() async {
+        let choices = choices()
+        func page() -> AIToolsModel {
+            AIToolsModel(client: SendCardClient(card: { _ in throw SendCardError.failed },
+                                                clients: { [Self.status("codex", kind: "instruction")] }),
+                         detector: detector(schemes: ["codex": codexApp], chatGPT: true),
+                         understanding: PreviewUnderstandingReader(), choices: choices)
+        }
+        let fresh = page()
+        await fresh.reload()
+        XCTAssertFalse(fresh.installed.isEmpty)
+        XCTAssertNil(fresh.askTool, "nothing chosen: Choose…")
+        XCTAssertNil(AskAIButtonRules.primaryTool(in: fresh.installed, codeProject: nil, lastTool: choices.lastTool),
+                     "and the buttons agree: they open no tool yet")
+        fresh.choose(.chatgpt)
+        XCTAssertEqual(fresh.askTool, .chatgpt)
+        let again = page()
+        await again.reload()
+        XCTAssertEqual(again.askTool, .chatgpt, "the choice is kept")
+        choices.lastTool = .cursor
+        let gone = page()
+        await gone.reload()
+        XCTAssertNil(gone.askTool, "a chosen tool that isn't here any more: Choose…")
+        XCTAssertNil(CopyStyleValidator.containsJargon(AIToolsModel.chooseTool))
+        XCTAssertFalse(CopyStyleValidator.containsExclamation(AIToolsModel.chooseTool))
     }
 
     func testChoosingTheToolIsKeptForEveryButton() {

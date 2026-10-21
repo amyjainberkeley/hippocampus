@@ -30,6 +30,39 @@ public struct LookedUpRow: Identifiable, Equatable, Sendable {
     }
 }
 
+/// The search the next Looked Up page opens on (SPEC 3.1, 3.6): Today's
+/// "You looked up" and "Looked up today" chips leave it just before they
+/// open Looked Up, and the page's first read picks its newest row. One page
+/// takes it, once, and only within a few seconds of it being left, so a
+/// chip whose page never opened can't steer a later visit.
+@MainActor
+public final class LookedUpFocus {
+    public static let shared = LookedUpFocus()
+    /// How long a search waits for the page to take it.
+    public static let lifetime: TimeInterval = 10
+
+    private var pending: (query: String, at: Date)?
+    private let now: () -> Date
+
+    public init(now: @escaping () -> Date = { Date() }) {
+        self.now = now
+    }
+
+    /// The next Looked Up page opens on `query`; nil or blank, on its list.
+    public func open(on query: String?) {
+        let query = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        pending = query.isEmpty ? nil : (query, now())
+    }
+
+    /// The search left for the page, once; nil when none was, or it waited
+    /// too long.
+    public func take() -> String? {
+        defer { pending = nil }
+        guard let pending, now().timeIntervalSince(pending.at) <= Self.lifetime else { return nil }
+        return pending.query
+    }
+}
+
 /// Looked Up (SPEC 3.6): searches made on the sites the agent reads, newest
 /// first, by day; the same query on one day is one row, "searched 3 times".
 /// A lens over History: each row is its results page's moment, and its
@@ -52,6 +85,8 @@ public final class LookedUpModel: ObservableObject {
     private let reader: any BrainReader
     public let calendar: Calendar
     private let now: @Sendable () -> Date
+    private let focus: LookedUpFocus
+    private var hasRead = false
 
     /// 31 days, at most 500: what the agent keeps answering for.
     public static let hours = 744
@@ -60,15 +95,39 @@ public final class LookedUpModel: ObservableObject {
     static let nextWindowUs: UInt64 = 5 * 60 * 1_000_000
     static let nextLimit = 5
 
+    /// `focus` holds the search a chip on Today left for this page.
     public init(searches: any SearchesReading, reader: any BrainReader, calendar: Calendar = .current,
-                now: @escaping @Sendable () -> Date = { Date() }) {
+                now: @escaping @Sendable () -> Date = { Date() }, focus: LookedUpFocus = .shared) {
         self.searches = searches
         self.reader = reader
         self.calendar = calendar
         self.now = now
+        self.focus = focus
     }
 
     public func reload() async {
+        // A chip's search is the first read's to show, and no later one's.
+        let wanted = hasRead ? nil : focus.take()
+        hasRead = true
+        await read()
+        if let wanted, let row = Self.newestRow(for: wanted, in: rows) {
+            await select(row.id)
+        }
+    }
+
+    /// The newest row of `query`, as a chip names it: case and spacing
+    /// aside, the same words.
+    public static func newestRow(for query: String, in rows: [LookedUpRow]) -> LookedUpRow? {
+        let words = folded(query)
+        guard !words.isEmpty else { return nil }
+        return rows.first { folded($0.record.query) == words }
+    }
+
+    private static func folded(_ query: String) -> String {
+        query.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    private func read() async {
         do {
             let records = try await searches.searches(hours: Self.hours, limit: Self.limit)
             var rows = Self.rows(from: records, calendar: calendar)

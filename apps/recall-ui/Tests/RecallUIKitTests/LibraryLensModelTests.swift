@@ -1,4 +1,5 @@
 import Foundation
+import os
 import XCTest
 @testable import RecallUIKit
 
@@ -98,6 +99,139 @@ final class LibraryLensModelTests: XCTestCase {
         XCTAssertEqual(model.shownHits.map(\.id), [3])
     }
 
+    // MARK: "No email yet." only when there is none (the verifier's probe)
+
+    /// 30 Slack moments, then one email an hour and a half before them. The
+    /// lens's first page holds only Slack: the Email chip used to say "No
+    /// email yet." with no Show Earlier (the button lives in the list, which
+    /// isn't drawn), while an email was saved.
+    func testTheEmailChipSaysNoEmailOnlyWhenThereIsNone() async {
+        var moments: [Hit] = (0..<30).map { index in
+            MomentFactory.hit(UInt64(100 + index), "com.tinyspeck.slackmacgap", minutesAgo: Double(index + 1))
+        }
+        moments.append(MomentFactory.hit(7, "com.apple.mail", minutesAgo: 120))
+        let model = LibraryLensModel(lens: .conversations, reader: MomentsReader(moments), pageSize: 10,
+                                     deletions: MemoryDeletionSignal())
+        await model.reload()
+        XCTAssertTrue(model.hits.allSatisfy { $0.appBundleId == "com.tinyspeck.slackmacgap" }, "the first page: Slack")
+        await model.choose(.email)
+        XCTAssertFalse(model.shownHits.isEmpty && model.canLoadEarlier,
+                       "Email shows \"\(LibraryCopy.emptyConversations(.email))\" with no Show Earlier, while an email is saved")
+        XCTAssertEqual(model.shownHits.map(\.id), [7], "the chip reads on to the email")
+    }
+
+    /// Past the pages a chip reads on by itself, it says since when there
+    /// is none, never "No email yet.", and Show Earlier reads on.
+    func testAChipWithNoneReadYetSaysSinceWhenAndShowEarlierReadsOn() async throws {
+        var moments: [Hit] = (0..<200).map { index in
+            MomentFactory.hit(UInt64(1_000 + index), "com.tinyspeck.slackmacgap", minutesAgo: Double(index + 1))
+        }
+        moments.append(MomentFactory.hit(7, "com.apple.mail", minutesAgo: 400))
+        let model = LibraryLensModel(lens: .conversations, reader: MomentsReader(moments), pageSize: 10,
+                                     deletions: MemoryDeletionSignal())
+        await model.reload()
+        await model.choose(.email)
+        XCTAssertTrue(model.shownHits.isEmpty)
+        XCTAssertTrue(model.canLoadEarlier)
+        let since = try XCTUnwrap(model.readBackTo, "how far back it read")
+        let words = LibraryCopy.noneSince(.conversations, .email,
+                                          day: LibraryCopy.sinceDay(since, now: SampleDay.now, calendar: SampleDay.calendar,
+                                                                    locale: SampleDay.locale))
+        XCTAssertTrue(words.hasPrefix("No email since "), words)
+        XCTAssertNotEqual(words, LibraryCopy.emptyConversations(.email))
+        var clicks = 0
+        while model.shownHits.isEmpty, model.canLoadEarlier, clicks < 40 {
+            await model.loadEarlier()
+            clicks += 1
+        }
+        XCTAssertEqual(model.shownHits.map(\.id), [7], "Show Earlier reads on to it")
+        XCTAssertNil(model.readBackTo, "a chip with rows says nothing of the kind")
+    }
+
+    /// A lens reads on when it opens and when a chip is chosen, never on the
+    /// window's ten-second tick, which reads the first page again at most.
+    func testTheLensReadsOnWhenItOpensNotOnEveryTick() async {
+        // A browser full of other pages, and one Google Doc far below them.
+        var moments = (0..<300).map { index in
+            MomentFactory.hit(UInt64(2_000 + index), "com.google.Chrome", title: "Page \(index)",
+                              url: "https://devnotes.example/\(index)", minutesAgo: Double(index + 1))
+        }
+        moments.append(MomentFactory.hit(9, "com.google.Chrome", title: "Q4 planning",
+                                         url: "https://docs.google.com/document/d/q4", minutesAgo: 400))
+        let model = LibraryLensModel(lens: .documents, reader: MomentsReader(moments), pageSize: 10,
+                                     deletions: MemoryDeletionSignal())
+        await model.reload()
+        XCTAssertTrue(model.hits.isEmpty, "the first page holds no document")
+        XCTAssertTrue(model.canLoadEarlier)
+        await model.refresh()
+        XCTAssertTrue(model.hits.isEmpty, "the tick doesn't read on")
+        await model.readOnForRows()
+        XCTAssertEqual(model.shownHits.map(\.id), [9], "opening the lens reads on to it")
+    }
+
+    /// While a lens shows nothing, the window's ten-second tick used to read
+    /// it again from the top: what it had read on, by itself or with Show
+    /// Earlier, was dropped every ten seconds, and "No documents since …"
+    /// jumped back to the first page's time. The tick now reads on from the
+    /// newest moment read, and what turns up later still shows.
+    func testTheTickKeepsHowFarBackTheLensReadWhileItShowsNothing() async throws {
+        let reader = GrowingMomentsReader((0..<1_000).map { index in
+            MomentFactory.hit(UInt64(2_000 + index), "com.google.Chrome", title: "Page \(index)",
+                              url: "https://devnotes.example/\(index)", minutesAgo: Double(index + 1))
+        })
+        let model = LibraryLensModel(lens: .documents, reader: reader, pageSize: 10, deletions: MemoryDeletionSignal())
+        await model.reload()
+        let firstPage = try XCTUnwrap(model.readBackTo)
+        await model.readOnForRows()
+        await model.loadEarlier()
+        XCTAssertTrue(model.hits.isEmpty, "no document in reach")
+        let since = try XCTUnwrap(model.readBackTo)
+        XCTAssertLessThan(since, firstPage, "the lens read on below its first page")
+        let reads = reader.searchCount
+        await model.refresh()
+        XCTAssertEqual(model.readBackTo, since, "the tick keeps how far back it read")
+        XCTAssertEqual(reader.searchCount, reads, "nothing new: the tick reads nothing")
+        // A Google Doc opened just now.
+        reader.add(MomentFactory.hit(9, "com.google.Chrome", title: "Q4 planning",
+                                     url: "https://docs.google.com/document/d/q4", minutesAgo: 0))
+        await model.refresh()
+        XCTAssertEqual(model.shownHits.map(\.id), [9], "what's new still shows")
+        XCTAssertTrue(model.canLoadEarlier)
+        await model.loadEarlier()
+        XCTAssertEqual(model.hits.first?.id, 9)
+        XCTAssertLessThanOrEqual(try XCTUnwrap(reader.lastSearch?.timeToUs), since,
+                                 "Show Earlier goes on from where it was")
+    }
+
+    func testSinceSaysTheDayAsAPersonWould() throws {
+        let calendar = SampleDay.calendar
+        let now = SampleDay.now
+        func us(_ days: Int, _ hour: Int, _ minute: Int = 0) throws -> UInt64 {
+            let day = try XCTUnwrap(calendar.date(byAdding: .day, value: -days, to: calendar.startOfDay(for: now)))
+            return UInt64((day.timeIntervalSince1970 + Double(hour * 3_600 + minute * 60)) * 1_000_000)
+        }
+        func since(_ us: UInt64) -> String { LibraryCopy.sinceDay(us, now: now, calendar: calendar, locale: SampleDay.locale) }
+        let morning = since(try us(0, 9, 5))
+        XCTAssertTrue(morning.hasPrefix("9:05") && morning.hasSuffix("AM"), morning)
+        XCTAssertEqual(since(try us(1, 16)), "yesterday")
+        let weekday = since(try us(3, 10))
+        var english = Calendar(identifier: .gregorian)
+        english.locale = SampleDay.locale
+        XCTAssertTrue(english.weekdaySymbols.contains(weekday), weekday)
+        XCTAssertFalse(since(try us(20, 10)).contains(","), "the same year: no year")
+        XCTAssertTrue(since(try us(400, 10)).contains(","), "another year says it")
+        for lens in LibraryLens.allCases {
+            for chip in ConversationFilter.allCases {
+                let text = LibraryCopy.noneSince(lens, chip, day: "Tuesday")
+                XCTAssertTrue(text.hasSuffix(" since Tuesday."), text)
+                XCTAssertNil(CopyStyleValidator.containsJargon(text), text)
+                XCTAssertNil(CopyStyleValidator.containsMarketingSpeak(text), text)
+                XCTAssertFalse(CopyStyleValidator.containsExclamation(text), text)
+            }
+        }
+        XCTAssertEqual(LibraryCopy.noneSince(.conversations, .email, day: "Tuesday"), "No email since Tuesday.")
+    }
+
     func testRowsSitUnderAppleNotesDayHeadingsAndRunsOfOneWindowAreOneRow() {
         let now = SampleDay.now
         let day: UInt64 = 86_400_000_000
@@ -175,4 +309,34 @@ final class LibraryLensModelTests: XCTestCase {
         XCTAssertNil(model.selectedHit)
         XCTAssertNil(model.selectedHitId)
     }
+}
+
+/// Moments a test makes up that grow while a lens is open: a moment saved
+/// later. Read as `MomentsReader` reads them, and counting its searches.
+private final class GrowingMomentsReader: BrainReader, @unchecked Sendable {
+    private let lock: OSAllocatedUnfairLock<(moments: [Hit], searches: [SearchOptions])>
+
+    init(_ moments: [Hit]) {
+        lock = OSAllocatedUnfairLock(initialState: (moments, []))
+    }
+
+    func add(_ hit: Hit) { lock.withLock { $0.moments.append(hit) } }
+    var searchCount: Int { lock.withLock { $0.searches.count } }
+    var lastSearch: SearchOptions? { lock.withLock { $0.searches.last } }
+    private var now: MomentsReader { MomentsReader(lock.withLock { $0.moments }) }
+
+    func search(_ options: SearchOptions) async throws -> [Hit] {
+        lock.withLock { $0.searches.append(options) }
+        return try await now.search(options)
+    }
+
+    func fetchEventsByIds(_ ids: [UInt64]) async throws -> [Hit] { try await now.fetchEventsByIds(ids) }
+    func recentEvents(limit: Int) async throws -> [Hit] { try await now.recentEvents(limit: limit) }
+    func recentPrivacyMoments(limit: Int) async throws -> [PrivacyMoment] { [] }
+    func listObservedApps(limit: Int, timeFromUs: UInt64?) async throws -> [ObservedApp] { [] }
+    func listEpisodes(limit: Int) async throws -> [Episode] { [] }
+    func briefForDate(_ dateLocal: String) async throws -> Brief? { nil }
+    func latestBrief() async throws -> Brief? { nil }
+    func briefDates(limit: Int) async throws -> [String] { [] }
+    func summaryStats() async throws -> SummaryStats { try await now.summaryStats() }
 }

@@ -43,6 +43,10 @@ public final class OverviewViewModel: ObservableObject {
     /// Whether the calendar may be read, and the selected day's events when it may.
     @Published public private(set) var calendarAccess: CalendarAccess = .notAsked
     @Published public private(set) var events: [CalendarEvent] = []
+    /// `calendarAccess` was read from the calendar, not assumed: until then
+    /// nothing is offered, so the offer never flashes for someone who said
+    /// yes long ago.
+    @Published private var calendarAccessRead = false
     /// The last day with anything saved before today, when today has nothing yet.
     @Published public private(set) var earlierDay: DayOverview?
     /// The card's newest moment, as History draws it.
@@ -180,6 +184,21 @@ public final class OverviewViewModel: ObservableObject {
         return calendar.startOfDay(for: next) <= calendar.startOfDay(for: now())
     }
 
+    /// A day arrow that can't move is drawn this strong, the prototype's
+    /// (203,203,206) on the page's grey: the row's secondary colour would
+    /// otherwise keep it at full strength, as if it could be clicked.
+    public static let stuckArrowOpacity: Double = 0.32
+
+    /// How strong ‹ is drawn: dimmed on the first day, which has none before it.
+    public var previousDayArrowOpacity: Double {
+        showsFirstDay ? Self.stuckArrowOpacity : 1
+    }
+
+    /// How strong › is drawn: dimmed on today, which has none after it.
+    public var nextDayArrowOpacity: Double {
+        canMoveForward ? 1 : Self.stuckArrowOpacity
+    }
+
     /// Read the saved status and, for today, whether anything is saved from
     /// before it; then the day, then what goes around it. The first two are
     /// quick local reads, done first so the day is never drawn with an old
@@ -237,6 +256,7 @@ public final class OverviewViewModel: ObservableObject {
         let access = await calendarReader.access()
         guard day == self.day else { return }
         calendarAccess = access
+        calendarAccessRead = true
         guard access == .allowed, let interval = dayInterval(day) else {
             events = []
             return
@@ -590,11 +610,16 @@ public final class OverviewViewModel: ObservableObject {
         FirstDayStripLayout(now: now(), calendar: calendar)
     }
 
-    /// The first-day card offers the calendar once (SPEC-DELTA 5): while it
-    /// has never been offered and taken or put aside, and macOS hasn't been
-    /// asked.
+    /// Today offers the calendar once (SPEC-DELTA 5): "Show your calendar on
+    /// Today." with Show Calendar, while it has never been taken or put
+    /// aside and macOS hasn't been asked. On the first day the welcome card
+    /// makes the offer; on any other Today, a line under the card does, so
+    /// someone past their first session, or back from 0.2, sees it too. Only
+    /// on today, once the day is read and the calendar has said whether
+    /// macOS was asked.
     public var showsCalendarOffer: Bool {
-        showsFirstDay && calendarReader != nil && calendarAccess == .notAsked && !calendarOfferDone
+        isToday && overview != nil && calendarReader != nil && calendarAccessRead
+            && calendarAccess == .notAsked && !calendarOfferDone
     }
 
     /// The offer was taken or put aside: it isn't made again.

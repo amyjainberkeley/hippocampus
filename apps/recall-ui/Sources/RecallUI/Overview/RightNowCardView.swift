@@ -84,10 +84,14 @@ struct TodayCardView: View {
     private var actions: some View {
         HStack(spacing: 8) {
             if let item = model.cardItem {
-                ResumeButton(itemId: item.id, open: open)
+                // Native, as the buttons beside it are.
+                Button(WorkCopy.resume) { open(.resume(item: item.id)) }
+                    .resumeButtonStyle()
+                    .help(WorkCopy.resume)
             }
             askButton
-            if let reopen = card.reopen {
+            // An app that was removed from the Mac has no Open button.
+            if let reopen = card.reopen, reopen.canOpen() {
                 ReopenButton(action: reopen)
             }
             Button(UserFacingCopy.showInHistory) {
