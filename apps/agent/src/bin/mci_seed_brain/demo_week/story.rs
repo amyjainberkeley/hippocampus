@@ -46,6 +46,12 @@ const PROJECT: &str = "pebblewick-app";
 /// pictures don't carry the path.
 pub const PROJECT_FOLDER: &str =
     "~/Library/Application Support/Hippocampus/Demo Memory/pebblewick-app";
+/// Stripe's pricing page and docs, in the week's own words: Stripe is the
+/// site in use, and nothing on its pages is copied from the real ones.
+pub const STRIPE_PRICING_HEADLINE: &str = "What each product costs";
+pub const STRIPE_PRICING_SUBHEADLINE: &str =
+    "A fee comes out of each payment. Nothing to pay to start, and no monthly charge.";
+pub const STRIPE_DOCS_LEAD: &str = "When a plan changes partway through a billing period, part of the period was paid at the old price. A proration settles it: a credit for the days not used, and a charge for the days left at the new price.";
 const PROMPT: &str = "ren@studio pebblewick-app % ";
 /// The lines of code the editor's drawing has room for, at 1440 by 900.
 const EDITOR_LINES: usize = 36;
@@ -334,27 +340,30 @@ impl Story {
         )
     }
 
+    /// Stripe's pricing page, as the founder reads it. Stripe is the site in
+    /// use; the words are the week's own, never copied from the real page,
+    /// and the drawing has no logo.
     fn stripe_pricing() -> Win {
         let cards = [
             [
                 "Payments",
                 "2.9% + 30\u{00A2}",
-                "per successful card charge",
+                "for each card payment that goes through",
             ],
             [
                 "Billing",
                 "0.7%",
-                "of billing volume, for subscriptions and invoices",
+                "of what you bill with subscriptions and invoices",
             ],
             [
                 "Custom",
-                "Talk to sales",
-                "for large volumes and unique models",
+                "Ask for a quote",
+                "for high volumes or an unusual business",
             ],
         ];
         let mut lines = vec![
-            "Pricing built for businesses of all sizes".to_owned(),
-            "Pay as you go, with no setup fees or monthly fees.".to_owned(),
+            STRIPE_PRICING_HEADLINE.to_owned(),
+            STRIPE_PRICING_SUBHEADLINE.to_owned(),
         ];
         lines.extend(cards.iter().map(|card| card.join("  ")));
         Self::page(
@@ -365,24 +374,25 @@ impl Story {
             "stripe-pricing",
             json!({
                 "page": "stripe-pricing",
-                "headline": "Pricing built for businesses of all sizes",
-                "subheadline": "Pay as you go, with no setup fees or monthly fees.",
+                "headline": STRIPE_PRICING_HEADLINE,
+                "subheadline": STRIPE_PRICING_SUBHEADLINE,
                 "cards": cards,
             }),
         )
     }
 
+    /// A page of Stripe's docs, as the founder reads it. Stripe is the site
+    /// in use; the words are the week's own, never copied from Stripe's
+    /// docs, and the drawing has no logo.
     fn stripe_docs() -> Win {
         let blocks = vec![
             h1("Prorations"),
-            p("When a customer changes plans partway through a billing period, you can credit the unused time on the old price and charge for the time left on the new one."),
-            h2("How prorations work"),
-            p("A proration is an adjustment for the part of a period a customer spent on each price. By default, a change creates prorations that appear on the next invoice."),
-            h2("Switch to yearly billing"),
-            p("To start the yearly period right away, set the billing cycle anchor to now and invoice the difference immediately."),
+            p(STRIPE_DOCS_LEAD),
+            h2("Monthly to yearly"),
+            p("To begin the year on the day of the change, move the billing date to today and bill the difference at once, not on the next invoice."),
             code("billing_cycle_anchor: \"now\",\nproration_behavior: \"always_invoice\""),
-            h2("Preview the invoice"),
-            p("Before you make the change, retrieve the upcoming invoice to show the customer what they'll pay today and what they'll pay next year."),
+            h2("Check the amount first"),
+            p("Before the change, look at the next invoice. It shows what the customer pays today and what the year will cost."),
         ];
         Self::page(
             "Prorations | Stripe Documentation",
@@ -392,9 +402,9 @@ impl Story {
             "stripe-docs",
             json!({
                 "page": "docs",
-                "site": "Stripe Docs",
+                "site": "Docs",
                 "breadcrumb": "Billing \u{203A} Subscriptions \u{203A} Prorations",
-                "sidebar": ["Subscriptions", "How subscriptions work", "Change prices", "Prorations", "Billing cycle", "Trials", "Cancellations"],
+                "sidebar": ["Subscriptions", "Plans and prices", "Changing plans", "Prorations", "Billing dates", "Free trials", "Ending a subscription"],
                 "selected": "Prorations",
                 "blocks": blocks_json(&blocks),
             }),
@@ -431,8 +441,8 @@ impl Story {
         Self::search(
             "stripe prorate monthly to yearly",
             &[
-                ("Prorations | Stripe Documentation", "docs.stripe.com \u{203A} billing \u{203A} subscriptions \u{203A} prorations", "Credit the unused time on the old price and charge for the time left on the new one when a customer changes plans."),
-                ("Change a subscription's price", "docs.stripe.com \u{203A} billing \u{203A} subscriptions \u{203A} change-price", "Upgrade or downgrade a subscription, and choose whether to invoice the difference now or on the next invoice."),
+                ("Prorations | Stripe Documentation", "docs.stripe.com \u{203A} billing \u{203A} subscriptions \u{203A} prorations", STRIPE_DOCS_LEAD),
+                ("Changing plans | Stripe Documentation", "docs.stripe.com \u{203A} billing \u{203A} subscriptions \u{203A} change-price", "Move a customer to a bigger or smaller plan, and bill the difference now or with the next invoice."),
                 ("Moving customers to yearly plans without double charging", "billingnotes.example \u{203A} yearly-upgrades", "Credit what they already paid this month, then start the year today. Customers see one clear invoice."),
             ],
             "search-proration",

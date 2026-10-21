@@ -57,14 +57,14 @@ final class DemoScreensTests: XCTestCase {
           "tabs": ["Prorating yearly upgrades - Claude"], "active_tab": 0, "address": "claude.ai/chat/x"}},
          {"id": "stripe-docs", "template": "browser", "app": "com.google.Chrome",
           "title": "Prorations | Stripe Documentation", "url": "https://docs.stripe.com/billing/subscriptions/prorations",
-          "main": "Prorations", "rest": "", "meta": {"page": "docs", "site": "Stripe Docs", "breadcrumb": "Billing",
+          "main": "Prorations", "rest": "", "meta": {"page": "docs", "site": "Docs", "breadcrumb": "Billing",
           "sidebar": ["Subscriptions", "Prorations"], "selected": "Prorations",
           "blocks": [["h1", "Prorations"], ["p", "Credit the unused time."], ["code", "billing_cycle_anchor: \\"now\\""]],
           "tabs": ["Prorations | Stripe Documentation"], "active_tab": 0, "address": "docs.stripe.com/billing"}},
          {"id": "stripe-pricing", "template": "browser", "app": "com.google.Chrome",
           "title": "Pricing & Fees | Stripe", "url": "https://stripe.com/pricing",
-          "main": "Pricing", "rest": "", "meta": {"page": "stripe-pricing", "headline": "Pricing built for businesses of all sizes",
-          "subheadline": "Pay as you go.", "cards": [["Payments", "2.9% + 30\\u00a2", "per successful card charge"]],
+          "main": "Pricing", "rest": "", "meta": {"page": "stripe-pricing", "headline": "What each product costs",
+          "subheadline": "A fee comes out of each payment.", "cards": [["Payments", "2.9% + 30\\u00a2", "for each card payment"]],
           "tabs": ["Pricing & Fees | Stripe"], "active_tab": 0, "address": "stripe.com/pricing"}},
          {"id": "article-update", "template": "browser", "app": "com.google.Chrome",
           "title": "How to write a monthly investor update", "url": "https://foundernotes.example/investor-updates",
@@ -153,6 +153,39 @@ final class DemoScreensTests: XCTestCase {
             XCTAssertEqual(Array(jpeg.prefix(2)), [0xFF, 0xD8], "\(spec.id) is a JPEG")
             XCTAssertLessThan(jpeg.count, 10 * 1024 * 1024, "within the helper's limit")
         }
+    }
+
+    /// Stripe is the site in use, never imitated: its docs page draws
+    /// nothing in Stripe's purple, its tabs carry no Stripe mark, and no
+    /// page draws Stripe's wordmark.
+    func testStripesPagesDrawNoLogoAndDocsDoNotCopyItsLook() throws {
+        let screens = try list().screens
+        let docs = try XCTUnwrap(screens.first { $0.id == "stripe-docs" })
+        let pricing = try XCTUnwrap(screens.first { $0.id == "stripe-pricing" })
+        func isStripePurple(_ color: NSColor?) -> Bool {
+            guard let rgb = color?.usingColorSpace(.sRGB) else { return false }
+            return abs(rgb.redComponent * 255 - 0x63) < 28 && abs(rgb.greenComponent * 255 - 0x5B) < 28
+                && abs(rgb.blueComponent * 255 - 0xFF) < 28
+        }
+        func purplePixels(_ rep: NSBitmapImageRep, maxY: Int) -> Int {
+            var count = 0
+            for y in stride(from: 0, to: maxY, by: 2) {
+                for x in stride(from: 0, to: rep.pixelsWide, by: 2) where isStripePurple(rep.colorAt(x: x, y: y)) {
+                    count += 1
+                }
+            }
+            return count
+        }
+        let docsPicture = try DemoScreens.bitmap(docs)
+        XCTAssertEqual(purplePixels(docsPicture, maxY: docsPicture.pixelsHigh), 0, "the docs page uses its own look")
+        // The tab strip, 42 points tall: a Stripe tab gets a plain letter.
+        let pricingPicture = try DemoScreens.bitmap(pricing)
+        XCTAssertEqual(purplePixels(pricingPicture, maxY: 84), 0, "no Stripe mark in the tabs")
+        let package = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: package.appendingPathComponent(
+            "Sources/DemoScreensKit/Screens/BrowserScreen.swift"), encoding: .utf8)
+        XCTAssertFalse(source.lowercased().contains("c.text(\"stripe\""), "no page draws Stripe's wordmark")
     }
 
     func testTheSameListDrawsTheSamePictures() throws {

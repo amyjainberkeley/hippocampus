@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use super::story::{FOUNDER, OLDEST_DAY_BACK, PEOPLE, PROJECT_FOLDER};
+use super::story::{
+    FOUNDER, OLDEST_DAY_BACK, PEOPLE, PROJECT_FOLDER, STRIPE_DOCS_LEAD, STRIPE_PRICING_HEADLINE,
+};
 use super::*;
 
 /// Names from the maintainers' own lives that must never appear in the
@@ -442,6 +444,50 @@ fn the_world_is_made_up() {
 
 /// What lane C's subject rules would call each window: a rough stand-in
 /// for `mci_brain::subject`, enough to check the story's ranking.
+/// Stripe is the site in use, so its pages keep Stripe's addresses and tab
+/// titles, but what they say is the week's own: nothing copied from Stripe's
+/// pricing page or docs, and no logo for the drawing to show.
+#[test]
+fn stripes_pages_say_the_weeks_own_words() {
+    let week = world(MONDAY_AFTERNOON, TZ);
+    let mut pricing = None;
+    let mut docs = None;
+    for (screen, win) in week.screen_list() {
+        match screen.id.as_str() {
+            "stripe-pricing" => pricing = Some((screen, win)),
+            "stripe-docs" => docs = Some((screen, win)),
+            _ => {}
+        }
+    }
+    let (pricing_screen, pricing) = pricing.expect("the week reads Stripe's pricing page");
+    let (docs_screen, docs) = docs.expect("the week reads a page of Stripe's docs");
+    assert_eq!(pricing.url.as_deref(), Some("https://stripe.com/pricing"));
+    assert!(docs.url.as_deref().unwrap().starts_with("https://docs.stripe.com/"));
+    assert!(pricing.main.starts_with(STRIPE_PRICING_HEADLINE));
+    assert!(docs.main.contains(STRIPE_DOCS_LEAD));
+    // The docs page names its site in plain type, never Stripe's wordmark.
+    assert_eq!(docs_screen.meta["site"], "Docs");
+    // Wording from Stripe's own pages never comes back.
+    let said = format!(
+        "{} {} {} {}",
+        pricing.main, pricing_screen.meta, docs.main, docs_screen.meta
+    )
+    .to_lowercase();
+    for copied in [
+        "pricing built for businesses",
+        "pay as you go",
+        "no setup fees",
+        "per successful card charge",
+        "unique models",
+        "talk to sales",
+        "how prorations work",
+        "how subscriptions work",
+        "by default, a change creates prorations",
+    ] {
+        assert!(!said.contains(copied), "{copied:?} is Stripe's wording");
+    }
+}
+
 fn item_of(win: &Win) -> Option<&'static str> {
     let title = win.title.as_str();
     if title.ends_with("\u{2014} pebblewick-app")

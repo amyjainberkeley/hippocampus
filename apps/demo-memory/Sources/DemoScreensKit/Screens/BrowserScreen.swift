@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // BrowserScreen.swift — Chrome, with its tabs and address bar, and the page
-// it shows: Stripe's dashboard, pricing page and docs, a Google search,
+// it shows: Stripe's dashboard, pricing page and docs (no logo, and only
+// the week's own words), a Google search,
 // Google Docs and Sheets, a chat with Claude, an article and a pricing page.
 
 import AppKit
@@ -35,10 +36,7 @@ struct BrowserScreen {
     func favicon(_ title: String, _ rect: CGRect) {
         let c = canvas
         let lower = title.lowercased()
-        if lower.contains("stripe") {
-            c.round(rect, 3, hex(0x635BFF))
-            c.centered("S", rect.minX, rect.width, rect.minY + 0.5, Face.ui(rect.height * 0.75, .heavy), .white)
-        } else if lower.contains("google docs") {
+        if lower.contains("google docs") {
             c.round(rect.insetBy(dx: 1.5, dy: 0), 2, hex(0x4285F4))
             for line in 0..<3 {
                 c.fill(CGRect(x: rect.minX + 4, y: rect.minY + 4 + CGFloat(line) * 3, width: rect.width - 8, height: 1.2), .white)
@@ -270,21 +268,9 @@ struct StripePricing {
         c.fill(page, .white)
         // The page's colour band, behind the header.
         let band = CGRect(x: 0, y: page.minY, width: page.width, height: 420)
-        c.gradient(band, [hex(0xF6F9FC), hex(0xF3F4FF), hex(0xFDF6F3)], angle: 0)
-        let ribbon = NSBezierPath()
-        ribbon.move(to: CGPoint(x: page.width * 0.62, y: page.minY))
-        ribbon.line(to: CGPoint(x: page.width, y: page.minY))
-        ribbon.line(to: CGPoint(x: page.width, y: page.minY + 300))
-        ribbon.line(to: CGPoint(x: page.width * 0.78, y: page.minY + 380))
-        ribbon.close()
-        NSGraphicsContext.saveGraphicsState()
-        ribbon.addClip()
-        c.gradient(CGRect(x: page.width * 0.62, y: page.minY, width: page.width * 0.38, height: 380),
-                   [hex(0x80E9FF, alpha: 0.75), hex(0x7A73FF, alpha: 0.75), hex(0xFF7EB3, alpha: 0.7), hex(0xFFB86C, alpha: 0.6)],
-                   angle: -25)
-        NSGraphicsContext.restoreGraphicsState()
-        c.text("stripe", 120, page.minY + 28, Face.ui(30, .heavy), ink, kern: -1)
-        var navX: CGFloat = 300
+        // A plain band: no logo and no artwork of the real site's.
+        c.gradient(band, [hex(0xF6F9FC), hex(0xF2F4F8)], angle: 0)
+        var navX: CGFloat = 120
         for item in ["Products", "Solutions", "Developers", "Resources", "Pricing"] {
             navX += c.text(item, navX, page.minY + 38, Face.ui(15, .semibold), item == "Pricing" ? hex(0x635BFF) : ink) + 34
         }
@@ -319,26 +305,27 @@ struct DocsPage {
         let c = screen.canvas
         let meta = screen.meta
         let ink = hex(0x1A1F36)
+        // A neutral accent: the page is the site in use, never a copy of its
+        // look, and its header names it in plain type, with no logo.
+        let accent = hex(0x3B5B8C)
         c.fill(page, .white)
         c.hline(0, page.minY + 60, page.width, hex(0xE3E8EE))
-        c.text("stripe", 32, page.minY + 14, Face.ui(24, .heavy), hex(0x635BFF), kern: -0.8)
-        c.text("Docs", 112, page.minY + 21, Face.ui(17, .semibold), ink)
+        c.text(meta["site"]?.text ?? "", 32, page.minY + 19, Face.ui(17, .semibold), ink)
         let search = CGRect(x: 520, y: page.minY + 14, width: 400, height: 32)
         c.round(search, 8, hex(0xF6F8FA))
         c.stroke(search, 8, hex(0xE3E8EE))
         c.symbol("magnifyingglass", CGRect(x: search.minX + 12, y: search.minY + 9, width: 14, height: 14), hex(0x697386))
         c.text("Search the docs", search.minX + 34, search.minY + 7, Face.ui(14), hex(0x8792A2))
-        c.text("Ask AI", page.width - 230, page.minY + 21, Face.ui(14, .medium), hex(0x3C4257))
-        c.text("Sign in \u{2192}", page.width - 140, page.minY + 21, Face.ui(14, .semibold), hex(0x635BFF))
+        c.text("Sign in", page.width - 120, page.minY + 21, Face.ui(14, .semibold), accent)
         // Side list.
         let selected = meta["selected"]?.text
         for (index, item) in (meta["sidebar"]?.texts ?? []).enumerated() {
             let y = page.minY + 92 + CGFloat(index) * 32
             if item == selected {
-                c.fill(CGRect(x: 32, y: y - 4, width: 2, height: 26), hex(0x635BFF))
+                c.fill(CGRect(x: 32, y: y - 4, width: 2, height: 26), accent)
             }
             c.text(item, 48, y, Face.ui(14, item == selected ? .semibold : .regular),
-                   item == selected ? hex(0x635BFF) : hex(0x425466))
+                   item == selected ? accent : hex(0x425466))
         }
         // The article.
         let left: CGFloat = 340
@@ -358,14 +345,14 @@ struct DocsPage {
             case "code":
                 let lines = text.components(separatedBy: "\n")
                 let rect = CGRect(x: left, y: y, width: width, height: CGFloat(lines.count) * 24 + 32)
-                c.round(rect, 8, hex(0x0A2540))
+                c.round(rect, 8, hex(0x1F2933))
                 for (index, line) in lines.enumerated() {
                     let parts = line.components(separatedBy: ": ")
                     let key = parts.first ?? line
-                    let x = c.text(key, left + 20, y + 16 + CGFloat(index) * 24, Face.mono(14), hex(0x80E9FF))
+                    let x = c.text(key, left + 20, y + 16 + CGFloat(index) * 24, Face.mono(14), hex(0x9CCBF0))
                     if parts.count > 1 {
                         c.text(": " + parts.dropFirst().joined(separator: ": "), left + 20 + x,
-                               y + 16 + CGFloat(index) * 24, Face.mono(14), hex(0xFFD37E))
+                               y + 16 + CGFloat(index) * 24, Face.mono(14), hex(0xA8D8B9))
                     }
                 }
                 y += rect.height + 20
