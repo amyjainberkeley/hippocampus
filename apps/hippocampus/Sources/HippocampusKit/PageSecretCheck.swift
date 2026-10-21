@@ -2,15 +2,16 @@
 import Foundation
 
 /// The capture helper's secret checks, for pages a browser extension stages
-/// (storage-security review S10): its fourteen regex shapes (labelled
-/// secrets, vendor API keys, private keys, tokens after `Bearer`), a card
-/// number that stands on its own and passes the Luhn checksum, and a
+/// (storage-security review S10): the key-value, GitHub, AWS and JWT shapes,
+/// the vendor keys (Anthropic, OpenAI, Slack, GitHub fine-grained, GitLab,
+/// Google, Stripe), a private key's first line and a long `Bearer` token, a
+/// card number that stands on its own and passes the Luhn checksum, and a
 /// one-time code beside its keyword. A copy of
 /// `SuppressionCascade.containsSecretOrPII` (the helper is another package);
 /// the shared corpus `core/brain/fixtures/ocr-secret-corpus.json`, which the
 /// helper, the Rust reader and this copy all pass, keeps the three the same.
 package enum PageSecretCheck {
-    /// Whether `text` holds any of the helper's shapes.
+    /// Whether `text` holds any of the shapes.
     package static func containsSecret(_ text: String) -> Bool {
         let range = NSRange(text.startIndex..., in: text)
         for pattern in patterns where pattern.firstMatch(in: text, range: range) != nil {
@@ -19,22 +20,36 @@ package enum PageSecretCheck {
         return containsCreditCard(text) || containsOneTimeCode(text)
     }
 
-    /// The helper's regex shapes, as it compiles them
-    /// (`SuppressionCascade.ocrSecretPatterns`, Rust `ocr_secrets::PATTERNS`).
+    /// The regex shapes, as the helper compiles them
+    /// (`SuppressionCascade.ocrSecretPatterns`, in the same order).
     private static let patterns: [NSRegularExpression] = [
+        // Key-value secrets.
         #"(?i)(password|passwd|secret|api[_-]?key|token|bearer|access[_-]?token)\s*[:=]\s*\S+"#,
+        // GitHub personal access, OAuth and refresh tokens.
         #"\bgh[poursAS]_[A-Za-z0-9_]{20,}\b"#,
+        // AWS access key IDs.
         #"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"#,
+        // A JWT's three segments.
         #"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"#,
+        // Anthropic API, admin and OAuth keys.
         #"\bsk-ant-[A-Za-z0-9_-]{20,}"#,
+        // OpenAI project, service-account and admin keys.
         #"\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}"#,
+        // OpenAI user keys and other `sk-` keys: 32+ letters and digits.
         #"\bsk-[A-Za-z0-9]{32,}"#,
+        // Slack bot, user, app, refresh, session and export tokens.
         #"\bxox[abeprs]-[0-9]+-[A-Za-z0-9-]{8,}"#,
+        // GitHub fine-grained personal access tokens.
         #"\bgithub_pat_[A-Za-z0-9_]{22,}"#,
+        // GitLab personal access tokens.
         #"\bglpat-[A-Za-z0-9_-]{20,}"#,
+        // Google API keys.
         #"\bAIza[0-9A-Za-z_-]{35}"#,
+        // Stripe secret and restricted keys, live and test.
         #"\b[rs]k_(?:live|test)_[0-9A-Za-z]{20,}"#,
+        // A private key's first line, any kind.
         #"-----BEGIN [A-Z ]*PRIVATE KEY-----"#,
+        // `Bearer` and a long token with no label.
         #"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{20,}"#,
     ].compactMap { try? NSRegularExpression(pattern: $0) }
 
@@ -73,7 +88,9 @@ package enum PageSecretCheck {
                     break
                 }
             }
-            if (13...19).contains(digits), standsAlone(bytes, start, i), luhnValid(bytes[start..<i]) { return true }
+            if (13...19).contains(digits), standsAlone(bytes, start, i), luhnValid(bytes[start..<i]) {
+                return true
+            }
         }
         return false
     }
@@ -81,7 +98,8 @@ package enum PageSecretCheck {
     /// Whether the digit run `bytes[start..<end]` stands on its own rather
     /// than inside a name: no ASCII letter or `_` right before or after it,
     /// and no `-`, `.` or `/` joining it to a letter or digit on that side
-    /// (an id or a timestamp, not a card). The helper's `standsAlone`.
+    /// (`handoff-2026…` and `export_…831.json` are ids or timestamps; one in
+    /// ten passes Luhn). Mirrors the helper's `SuppressionCascade.standsAlone`.
     static func standsAlone(_ bytes: [UInt8], _ start: Int, _ end: Int) -> Bool {
         func glued(_ near: UInt8?, _ beyond: UInt8?) -> Bool {
             guard let near else { return false }
@@ -94,6 +112,10 @@ package enum PageSecretCheck {
         let after: UInt8? = end < bytes.count ? bytes[end] : nil
         let afterThat: UInt8? = end + 1 < bytes.count ? bytes[end + 1] : nil
         return !glued(before, beforeThat) && !glued(after, afterThat)
+    }
+
+    private static func isASCIILetter(_ byte: UInt8) -> Bool {
+        (0x41...0x5A).contains(byte) || (0x61...0x7A).contains(byte)
     }
 
     static func luhnValid(_ run: ArraySlice<UInt8>) -> Bool {
@@ -146,10 +168,6 @@ package enum PageSecretCheck {
     }
 
     private static func isDigit(_ byte: UInt8) -> Bool { (0x30...0x39).contains(byte) }
-
-    private static func isASCIILetter(_ byte: UInt8) -> Bool {
-        (0x41...0x5A).contains(byte) || (0x61...0x7A).contains(byte)
-    }
 
     private static func isWordByte(_ byte: UInt8) -> Bool {
         (0x30...0x39).contains(byte) || (0x41...0x5A).contains(byte) || (0x61...0x7A).contains(byte)
