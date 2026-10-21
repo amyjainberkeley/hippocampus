@@ -84,13 +84,9 @@ struct TodayCardView: View {
     private var actions: some View {
         HStack(spacing: 8) {
             if let item = model.cardItem {
-                // Native, as the buttons beside it are, so the row shares one
-                // height, top edge and corner.
+                // Native, as the buttons beside it are.
                 Button(WorkCopy.resume) { open(.resume(item: item.id)) }
-                    .buttonStyle(.borderedProminent)
-                    .tint(MCI.Color.accentFill)
-                    // Blue in a window in the background too, as it was.
-                    .environment(\.controlActiveState, .key)
+                    .resumeButtonStyle()
                     .help(WorkCopy.resume)
             }
             askButton

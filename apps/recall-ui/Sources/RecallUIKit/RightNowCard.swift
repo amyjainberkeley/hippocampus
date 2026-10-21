@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SwiftUI
 
 /// What "Open {App}" or "Open Page" opens for a session or the Right now card
 /// (RULINGS W5). The agent names the moment's page and app (contract
@@ -240,5 +241,17 @@ public enum SessionMatch {
             best = (block, overlap, distance)
         }
         return best?.block
+    }
+}
+
+public extension View {
+    /// Resume in a row of native bordered buttons, on Today's card and a
+    /// Working On page (SPEC 3.1, 3.2): the system's prominent bordered
+    /// button in the accent colour, so the row shares one height, top edge
+    /// and corner. Blue in a window in the background too, as it always was.
+    func resumeButtonStyle() -> some View {
+        buttonStyle(.borderedProminent)
+            .tint(MCI.Color.accentFill)
+            .environment(\.controlActiveState, .key)
     }
 }

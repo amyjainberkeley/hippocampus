@@ -51,11 +51,7 @@ struct WorkingOnItemPlace: View {
                               onDismissDetail: { selected = nil }) {
             ScrollView {
                 page
-                    .padding(.horizontal, 32)
-                    .padding(.top, 24)
-                    .padding(.bottom, 48)
-                    .frame(maxWidth: 940, alignment: .leading)
-                    .frame(maxWidth: .infinity)
+                    .pageColumn()
             }
             .background(MCI.Color.background)
         } detail: {
@@ -157,18 +153,12 @@ struct WorkingOnItemPlace: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 8) {
-                // Native, as the Ask button and ⋯ beside it are, so the row
-                // shares one height, top edge and corner.
+                // Native, as the Ask button and ⋯ beside it are.
                 Button(WorkCopy.resume) { open(.resume(item: item.id)) }
-                    .buttonStyle(.borderedProminent)
-                    .tint(MCI.Color.accentFill)
-                    // Blue in a window in the background too, as it was.
-                    .environment(\.controlActiveState, .key)
+                    .resumeButtonStyle()
                     .help(WorkCopy.resume)
                 // A code project's button opens Claude Code (or Codex) in
                 // its folder (SPEC 5.3.1); ⌘↩ is this button.
-                // The size of Resume and ⋯ beside it, as the prototype draws
-                // the header's buttons.
                 AskAIButton(source: .item(item.id), reader: reader, handlesCommandReturn: true,
                             itemMoments: item.moments, codeProject: item.kind == .code ? item.name : nil)
                 Menu {

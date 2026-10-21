@@ -54,11 +54,7 @@ struct WorkingOnPlace: View {
                 }
                 content
             }
-            .padding(.horizontal, 32)
-            .padding(.top, 24)
-            .padding(.bottom, 48)
-            .frame(maxWidth: 940, alignment: .leading)
-            .frame(maxWidth: .infinity)
+            .pageColumn()
         }
         .background(MCI.Color.background)
         .onChange(of: filter) { _, value in model.filter = value }

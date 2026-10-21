@@ -1,3 +1,5 @@
+import AppKit
+import SwiftUI
 import XCTest
 @testable import RecallUIKit
 
@@ -274,5 +276,51 @@ final class WorkingOnItemModelTests: XCTestCase {
         XCTAssertEqual(page.dayHits.count, 450)
         await page.reload()
         XCTAssertEqual(page.dayHits.count, 200, "after a forget, everything is read again")
+    }
+
+    // MARK: The header's buttons and the page's column
+
+    /// Resume used a custom 24 pt style beside native bordered buttons (Ask
+    /// {Tool}, Open {App}, Show in History, ⋯), so the row mixed heights,
+    /// top edges and corners. It is the system's prominent bordered button
+    /// now, as tall as the buttons beside it.
+    func testResumeIsAsTallAsTheButtonsBesideIt() {
+        func height(_ view: some View) -> CGFloat {
+            NSHostingView(rootView: view.fixedSize()).fittingSize.height
+        }
+        let resume = height(Button(WorkCopy.resume) {}.resumeButtonStyle())
+        XCTAssertGreaterThan(resume, 0)
+        XCTAssertEqual(resume, height(Button("Show in History") {}.buttonStyle(.bordered)), accuracy: 0.5,
+                       "as tall as Show in History and Open {App}")
+        let menu = Menu { Button("Copy for Your AI") {} } label: { Image(systemName: "ellipsis") }
+            .menuStyle(.button)
+            .buttonStyle(.bordered)
+            .menuIndicator(.hidden)
+        XCTAssertEqual(resume, height(menu), accuracy: 1, "as tall as Ask {Tool} and ⋯")
+    }
+
+    /// AI Tools sat about 70 pt left of About You, Privacy and Working On,
+    /// in a left-aligned column of its own, so the page jumped sideways
+    /// between them. The pages share one column, centred in the page.
+    func testThePagesShareOneCentredColumn() {
+        final class Start { var x: CGFloat = -1 }
+        func contentStart(inPageWidth width: CGFloat) -> CGFloat {
+            let start = Start()
+            let content = GeometryReader { proxy -> Color in
+                start.x = proxy.frame(in: .global).minX
+                return Color.clear
+            }
+            .frame(height: 20)
+            .pageColumn()
+            .frame(width: width)
+            let hosting = NSHostingView(rootView: content)
+            hosting.frame = NSRect(x: 0, y: 0, width: width, height: 120)
+            hosting.layoutSubtreeIfNeeded()
+            return start.x
+        }
+        XCTAssertEqual(contentStart(inPageWidth: 1_082), (1_082 - 940) / 2 + 32, accuracy: 0.5,
+                       "centred, at the width the demo window gives a page")
+        XCTAssertEqual(contentStart(inPageWidth: 1_082), PageColumn.contentStart(inPageWidth: 1_082), accuracy: 0.5)
+        XCTAssertEqual(contentStart(inPageWidth: 700), 32, accuracy: 0.5, "a narrow window: its margin")
     }
 }
