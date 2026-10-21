@@ -5,6 +5,14 @@ import XCTest
 @testable import MCICaptureHelperKit
 
 final class PaddleOCRRunnerTests: XCTestCase {
+    /// The deadline for a read the test needs answered. Each fixture worker
+    /// is a Python script, which a Mac busy with other builds can take
+    /// several seconds to start (4 s wasn't enough at a load average near
+    /// 100), and a read ends as soon as its reply arrives. Deadlines that are
+    /// what a test checks, a timeout or how long a wait lasts, are written
+    /// out where they are used.
+    private static let answeredMs = 30_000
+
     private func input(roi: CGRect = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)) throws -> OCREngineInput {
         var pixels: CVPixelBuffer?
         XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, 100, 80, kCVPixelFormatType_32BGRA, nil, &pixels), kCVReturnSuccess)
@@ -43,7 +51,7 @@ final class PaddleOCRRunnerTests: XCTestCase {
         print(json.dumps({'version':1,'lines':[{'text':'Synthetic chat','confidence':0.95,'box':[0.1,0.2,0.8,0.25]}]}))
         """)
         let runner = PaddleOCRRunner(executableURL: executable)
-        let result = await runner.recognize(input: try input(), timeoutMs: 4000)
+        let result = await runner.recognize(input: try input(), timeoutMs: Self.answeredMs)
         XCTAssertFalse(result.timedOut)
         let line = try XCTUnwrap(result.recognizedLines.first)
         XCTAssertEqual(line.text, "Synthetic chat")
@@ -63,10 +71,10 @@ final class PaddleOCRRunnerTests: XCTestCase {
         let plain = try input()
         let retina = OCREngineInput(pixelBuffer: plain.pixelBuffer, roi: plain.roi, pixelsPerPoint: 2)
         let runner = PaddleOCRRunner(executableURL: executable)
-        let read = await runner.recognize(input: retina, timeoutMs: 4000)
+        let read = await runner.recognize(input: retina, timeoutMs: Self.answeredMs)
         XCTAssertEqual(read.recognizedLines.first?.text, "Retina")
         // A frame that does not say is not declared Retina: the reader's assert fails.
-        let undeclared = await runner.recognize(input: plain, timeoutMs: 4000)
+        let undeclared = await runner.recognize(input: plain, timeoutMs: Self.answeredMs)
         XCTAssertTrue(undeclared.recognizedLines.isEmpty)
     }
 
@@ -97,12 +105,12 @@ final class PaddleOCRRunnerTests: XCTestCase {
             "{'version':1,'lines':[{'text':'bad','confidence':2,'box':[0,0,1,1]}]}"
         ] {
             let executable = try fixture("import sys,json\nsys.stdin.buffer.read()\nprint(json.dumps(\(reply)))\n")
-            let result = await PaddleOCRRunner(executableURL: executable).recognize(input: try input(), timeoutMs: 4000)
+            let result = await PaddleOCRRunner(executableURL: executable).recognize(input: try input(), timeoutMs: Self.answeredMs)
             XCTAssertFalse(result.timedOut)
             XCTAssertTrue(result.recognizedLines.isEmpty)
         }
         let executable = try fixture("import sys\nsys.stdin.buffer.read()\nprint('{\"version\":1,\"lines\":[]}')\nsys.exit(1)")
-        let result = await PaddleOCRRunner(executableURL: executable).recognize(input: try input(), timeoutMs: 4000)
+        let result = await PaddleOCRRunner(executableURL: executable).recognize(input: try input(), timeoutMs: Self.answeredMs)
         XCTAssertTrue(result.recognizedLines.isEmpty)
     }
 
@@ -183,7 +191,7 @@ final class PaddleOCRRunnerTests: XCTestCase {
         let runner = PaddleOCRRunner(executableURL: executable, persistent: true)
         addTeardownBlock { runner.stop() }
         for expected in ["frame 1", "frame 2", "frame 3"] {
-            let result = await runner.recognize(input: try input(), timeoutMs: 4000)
+            let result = await runner.recognize(input: try input(), timeoutMs: Self.answeredMs)
             XCTAssertFalse(result.timedOut)
             XCTAssertEqual(result.recognizedLines.map(\.text), [expected])
             XCTAssertEqual(try XCTUnwrap(result.recognizedLines.first).boundingBox.minX, 0.3, accuracy: 0.00001)
@@ -204,7 +212,7 @@ final class PaddleOCRRunnerTests: XCTestCase {
         """)
         let runner = PaddleOCRRunner(executableURL: executable, persistent: true)
         addTeardownBlock { runner.stop() }
-        let result = await runner.recognize(input: try input(), timeoutMs: 4000)
+        let result = await runner.recognize(input: try input(), timeoutMs: Self.answeredMs)
         XCTAssertFalse(result.timedOut)
         XCTAssertEqual(result.recognizedLines.map(\.text), ["Synthetic pane"])
         // The read region is the middle half of the frame. The malformed
@@ -233,7 +241,7 @@ final class PaddleOCRRunnerTests: XCTestCase {
         let first = await runner.recognize(input: try input(), timeoutMs: 150)
         XCTAssertTrue(first.timedOut, "a cold worker misses the first deadline")
         try await Task.sleep(for: .milliseconds(700))
-        let second = await runner.recognize(input: try input(), timeoutMs: 4000)
+        let second = await runner.recognize(input: try input(), timeoutMs: Self.answeredMs)
         XCTAssertEqual(second.recognizedLines.map(\.text), ["warm"])
         XCTAssertEqual(try String(contentsOf: marker, encoding: .utf8), "start\n",
                        "the warming worker must not be killed and restarted")
@@ -251,11 +259,11 @@ final class PaddleOCRRunnerTests: XCTestCase {
         """)
         let runner = PaddleOCRRunner(executableURL: executable, persistent: true)
         addTeardownBlock { runner.stop() }
-        let warm = await runner.recognize(input: try input(), timeoutMs: 4000)
+        let warm = await runner.recognize(input: try input(), timeoutMs: Self.answeredMs)
         XCTAssertEqual(warm.recognizedLines.map(\.text), ["frame 1"])
         let slow = await runner.recognize(input: try input(), timeoutMs: 200)
         XCTAssertTrue(slow.timedOut)
-        let next = await runner.recognize(input: try input(), timeoutMs: 4000)
+        let next = await runner.recognize(input: try input(), timeoutMs: Self.answeredMs)
         XCTAssertEqual(next.recognizedLines.map(\.text), ["frame 3"], "frame 2's late reply is drained, not reused")
     }
 
@@ -274,14 +282,14 @@ final class PaddleOCRRunnerTests: XCTestCase {
         """)
         let runner = PaddleOCRRunner(executableURL: executable, persistent: true)
         addTeardownBlock { runner.stop() }
-        let refused = await runner.recognize(input: try input(), timeoutMs: 4000)
+        let refused = await runner.recognize(input: try input(), timeoutMs: Self.answeredMs)
         XCTAssertFalse(refused.timedOut)
         XCTAssertTrue(refused.recognizedLines.isEmpty)
-        let ok = await runner.recognize(input: try input(), timeoutMs: 4000)
+        let ok = await runner.recognize(input: try input(), timeoutMs: Self.answeredMs)
         XCTAssertEqual(ok.recognizedLines.map(\.text), ["ok"])
-        let crashed = await runner.recognize(input: try input(), timeoutMs: 4000)
+        let crashed = await runner.recognize(input: try input(), timeoutMs: Self.answeredMs)
         XCTAssertTrue(crashed.recognizedLines.isEmpty)
-        let replaced = await runner.recognize(input: try input(), timeoutMs: 4000)
+        let replaced = await runner.recognize(input: try input(), timeoutMs: Self.answeredMs)
         XCTAssertTrue(replaced.recognizedLines.isEmpty, "the replacement refuses its first frame")
         XCTAssertEqual(try String(contentsOf: marker, encoding: .utf8), "start\nstart\n")
     }
@@ -308,7 +316,7 @@ final class PaddleOCRRunnerTests: XCTestCase {
             print(json.dumps({'version':1,'lines':[]}),flush=True)
         """)
         let runner = PaddleOCRRunner(executableURL: executable, persistent: true)
-        _ = await runner.recognize(input: try input(), timeoutMs: 4000)
+        _ = await runner.recognize(input: try input(), timeoutMs: Self.answeredMs)
         let pid = try XCTUnwrap(Int32(String(contentsOf: marker, encoding: .utf8)))
         runner.stop()
         let gone = ContinuousClock.now.advanced(by: .seconds(3))
