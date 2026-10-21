@@ -467,6 +467,28 @@ final class FormattersTests: XCTestCase {
         XCTAssertTrue(body.hasPrefix(String(preview.dropLast()) + " "), "ends at a whole word: \(preview)")
     }
 
+    /// A cut that ends just after a sentence drops its full stop for the
+    /// "…": "with yearly billing…", never "billing.…", which reads as four
+    /// dots (the demo's Q4 investor update in Documents).
+    func testACutAfterASentenceEndsWithOneMark() {
+        let text = "Q4 investor update\nPebblewick \u{00B7} October 2026\nHighlights\n"
+            + "\u{2022} Monthly revenue reached $84,200, up 11% from last month.\n"
+            + "\u{2022} 412 studios pay for Pebblewick, 38 more than last month.\n"
+            + "\u{2022} The Studio plan launches Thursday, with yearly billing.\n"
+            + "Metrics\nNet revenue retention: 108%\nLogo churn: 1.9% a month"
+        let preview = Formatters.rowPreview(text, title: "Q4 investor update - Google Docs")
+        XCTAssertTrue(preview.hasPrefix("Pebblewick \u{00B7} October 2026 \u{00B7} Highlights \u{2022} Monthly"), preview)
+        XCTAssertTrue(preview.hasSuffix("launches Thursday, with yearly billing\u{2026}"), preview)
+        XCTAssertFalse(preview.contains(".\u{2026}"), preview)
+        XCTAssertEqual(Formatters.endingAtAWholeWord("with yearly billing. Th"), "with yearly billing\u{2026}")
+        XCTAssertEqual(Formatters.cutAtAWholeWord("with yearly billing. The price", maxLen: 21), "with yearly billing\u{2026}")
+        // A question keeps its mark, and only a cut's end is trimmed: a line
+        // may start with "." (".env.local").
+        XCTAssertEqual(Formatters.endingAtAWholeWord("Is it live? Nearl"), "Is it live?\u{2026}")
+        XCTAssertEqual(Formatters.endingAtAWholeWord(".env.local holds the k"), ".env.local holds the\u{2026}")
+        XCTAssertEqual(Formatters.cutAtAWholeWord(".env.local holds the key", maxLen: 21), ".env.local holds the\u{2026}")
+    }
+
     /// A preview longer than a row shows stops at its last whole word that
     /// fits, with "…", never mid-word ("Gift cards Cus…" on Web Pages); a
     /// first word longer than the row is cut at the limit.

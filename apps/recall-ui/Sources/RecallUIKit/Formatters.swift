@@ -131,7 +131,7 @@ public enum Formatters {
         let next = text.dropFirst(head.count).first
         if head.last?.isWhitespace ?? false || next?.isWhitespace ?? true {
             // The cut fell between two words.
-            return head.trimmingCharacters(in: looseEnd) + "\u{2026}"
+            return withoutLooseEnd(head) + "\u{2026}"
         }
         return endingAtAWholeWord(head)
     }
@@ -147,13 +147,23 @@ public enum Formatters {
     static func endingAtAWholeWord(_ text: String) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         guard let space = trimmed.lastIndex(where: \.isWhitespace) else { return trimmed + "\u{2026}" }
-        let kept = trimmed[..<space].trimmingCharacters(in: looseEnd)
+        let kept = withoutLooseEnd(String(trimmed[..<space]))
         return (kept.isEmpty ? trimmed : kept) + "\u{2026}"
     }
 
-    /// What a cut never leaves hanging before its "…": spaces, a separator
-    /// or a comma.
-    private static let looseEnd = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "\u{00B7},;:"))
+    /// What a cut never leaves hanging before its "…": spaces, a separator,
+    /// a comma, or a sentence's full stop ("billing.…" reads as four dots).
+    private static let looseEnd = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "\u{00B7},;:."))
+
+    /// `text` without the loose characters at its end. Only the end: a line
+    /// may start with one (".env.local").
+    private static func withoutLooseEnd(_ text: String) -> String {
+        var kept = Substring(text)
+        while let last = kept.last, last.unicodeScalars.allSatisfy({ looseEnd.contains($0) }) {
+            kept.removeLast()
+        }
+        return String(kept)
+    }
 
     /// A line a list's mark starts: "•", "◦", "▪", "‣", "-", "–" or "*" and
     /// a space, or a number and "." or ")" and a space ("2. Ship it").
