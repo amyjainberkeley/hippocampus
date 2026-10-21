@@ -608,12 +608,15 @@ else
 fi
 
 # The synthetic day. Marker words name each moment; secrets carry their own.
-# The key-shaped ones are put together here, at run time, so this file holds
-# no literal a secret scanner or GitHub push protection would take for a
-# credential. None of them is, or ever was, a real key.
+# The key-shaped ones (a GitHub token, an AWS key ID, an Anthropic key and
+# two JWTs) are put together here, at run time, so this file holds no literal
+# a secret scanner or GitHub push protection would take for a credential.
+# None of them is, or ever was, a real key.
 SYNTH_GITHUB_TOKEN="$(printf '%s_%s' ghp R8nQ2vLx7Tz4Kp9Wm3Yc5Hb6Jd1Fs0Ag2Ue8)"
 SYNTH_AWS_KEY_ID="$(printf '%s%s' AKIA QZ7R4XW2N6M3JH5P)"
 SYNTH_ANTHROPIC_KEY="$(printf '%s-%s-%s' sk ant api03-Qm7Zp2Lr9Xw4Tn8Vb6Hc3Jk5Df1Gs0)"
+SYNTH_JWT_LARCH="$(printf '%s.%s.%s' eyJhbGciOiJIUzI1NiJ9 eyJzdWIiOiJsYXJjaCJ9 TGFyY2hTZWNyZXRTaWduYXR1cmU)"
+SYNTH_JWT_THISTLE="$(printf '%s.%s.%s' eyJhbGciOiJIUzI1NiJ9 eyJzdWIiOiJ0aGlzdGxlIn0 VGhpc3RsZVNpZ25hdHVyZQ)"
 with_synthetic_keys() {
     # Fill the @…@ placeholders of a file written from a quoted heredoc.
     local file="$1" text
@@ -621,6 +624,8 @@ with_synthetic_keys() {
     text="${text//@SYNTH_GITHUB_TOKEN@/$SYNTH_GITHUB_TOKEN}"
     text="${text//@SYNTH_AWS_KEY_ID@/$SYNTH_AWS_KEY_ID}"
     text="${text//@SYNTH_ANTHROPIC_KEY@/$SYNTH_ANTHROPIC_KEY}"
+    text="${text//@SYNTH_JWT_LARCH@/$SYNTH_JWT_LARCH}"
+    text="${text//@SYNTH_JWT_THISTLE@/$SYNTH_JWT_THISTLE}"
     printf '%s\n' "$text" > "$file"
 }
 cat > "$H/frames.json" <<'FRAMES'
@@ -642,7 +647,7 @@ cat > "$H/frames.json" <<'FRAMES'
  {"id": "retention-wombat", "app": "com.apple.Notes", "title": "Wombat archive notes", "offset_seconds": -1728000,
   "lines": ["Wombat archive notes", "Old reading list from last month."]},
  {"id": "url-token-larch", "app": "com.apple.Safari", "title": "Larch Workspace", "offset_seconds": -600,
-  "url": "https://app.larch.example/auth/callback?access_token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJsYXJjaCJ9.TGFyY2hTZWNyZXRTaWduYXR1cmU",
+  "url": "https://app.larch.example/auth/callback?access_token=@SYNTH_JWT_LARCH@",
   "lines": ["app.larch.example", "Larch workspace dashboard", "Welcome back. Three projects were updated today."]},
  {"id": "secret-card", "app": "com.apple.Preview", "title": "Saffron receipt.pdf", "offset_seconds": -500,
   "lines": ["Saffron order receipt", "Card number 4242 4242 4242 4242", "Expires 12/29"]},
@@ -653,7 +658,7 @@ cat > "$H/frames.json" <<'FRAMES'
  {"id": "secret-aws-key", "app": "com.apple.Terminal", "title": "zsh", "offset_seconds": -350,
   "lines": ["Juniper staging credentials", "@SYNTH_AWS_KEY_ID@"]},
  {"id": "secret-jwt", "app": "com.apple.TextEdit", "title": "Thistle notes.txt", "offset_seconds": -300,
-  "lines": ["Thistle session", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0aGlzdGxlIn0.VGhpc3RsZVNpZ25hdHVyZQ"]},
+  "lines": ["Thistle session", "@SYNTH_JWT_THISTLE@"]},
  {"id": "secret-password", "app": "com.apple.Notes", "title": "Bluebell house notes", "offset_seconds": -250,
   "lines": ["Bluebell house notes", "Wi-Fi password: Orbit-Lantern-77"]},
  {"id": "secret-bare-api-key", "app": "com.apple.Terminal", "title": "zsh", "offset_seconds": -200,

@@ -310,10 +310,11 @@ class FullE2EContractTests(unittest.TestCase):
 
     def test_full_run_puts_its_key_shaped_values_together_at_run_time(self):
         # The file holds no literal that looks like a GitHub token, an AWS key
-        # ID or an Anthropic key; the synthetic day still shows all three.
+        # ID, an Anthropic key or a JWT; the synthetic day still shows them all.
         source = FULL.read_text(encoding="utf-8")
         import re
-        for pattern in (r"ghp_[A-Za-z0-9]{20,}", r"AKIA[0-9A-Z]{16}", r"sk-ant-api0\d-[A-Za-z0-9_-]{8,}"):
+        jwt = r"eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"
+        for pattern in (r"ghp_[A-Za-z0-9]{20,}", r"AKIA[0-9A-Z]{16}", r"sk-ant-api0\d-[A-Za-z0-9_-]{8,}", jwt):
             self.assertIsNone(re.search(pattern, source), pattern)
         fragment = source.split("# The synthetic day.", 1)[1].split('OCR_WORKER=""', 1)[0]
         with tempfile.TemporaryDirectory(prefix="e2e-synthetic-day-") as temporary:
@@ -326,6 +327,10 @@ class FullE2EContractTests(unittest.TestCase):
         self.assertRegex(lines["secret-github-token"], r"^New token: ghp_[A-Za-z0-9]{36}$")
         self.assertRegex(lines["secret-aws-key"], r"^AKIA[0-9A-Z]{16}$")
         self.assertRegex(lines["secret-bare-api-key"], r"^sk-ant-api03-[A-Za-z0-9]{30}$")
+        self.assertRegex(lines["secret-jwt"], rf"^{jwt}$")
+        urls = {frame["id"]: frame.get("url", "") for frame in frames["frames"]}
+        self.assertRegex(urls["url-token-larch"], rf"^https://app\.larch\.example/auth/callback\?access_token={jwt}$")
+        self.assertNotIn("@SYNTH", json.dumps(frames))
         self.assertNotIn("@SYNTH", markers)
         for value in (lines["secret-github-token"].split(": ")[1], lines["secret-aws-key"], lines["secret-bare-api-key"]):
             self.assertIn(f"secret\t{value}\n", markers)
