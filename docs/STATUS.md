@@ -156,8 +156,6 @@ CPU share.
   by hand, not from the menu bar, deletes every moment but keeps the key.
 - A page the Safari extension stages waits as plain text for up to a minute
   before it is forwarded or deleted.
-- The window can delete the last 24 hours or everything, but has no button
-  that forgets one moment; the reader it uses can.
 - A private browser window that shows no private marker is read.
 - In Low Power Mode only the window in front is read.
 - Connected AI tools can read your memory while Hippocampus is quit, until
