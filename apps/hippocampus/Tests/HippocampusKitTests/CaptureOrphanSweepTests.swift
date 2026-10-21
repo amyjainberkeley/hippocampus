@@ -128,6 +128,10 @@ final class CaptureOrphanSweepTests: XCTestCase {
                 kill(process.processIdentifier, SIGKILL)
             }
         }
+        try await waitUntilEachRuns(
+            [(leftover, helper), (leftoverWorker, worker), (elsewhere, otherHelper), (server, agent)],
+            agent: agent
+        )
         let arguments = CaptureOrphanSweep.arguments(of: server.processIdentifier)
         XCTAssertEqual(arguments, ["-", "mcp-serve"])
 
@@ -228,6 +232,25 @@ final class CaptureOrphanSweepTests: XCTestCase {
         )
         try FileManager.default.copyItem(at: URL(fileURLWithPath: source), to: destination)
         return destination
+    }
+
+    /// Waits until each process runs its own executable. The sweep matches a
+    /// process by the path it runs, and on a Mac busy with other builds a
+    /// process can still be on its way into its copy when the next line runs
+    /// (the sweep then saw one of the two this bundle left).
+    private func waitUntilEachRuns(_ processes: [(Process, URL)], agent: URL) async throws {
+        let agentPath = CaptureOrphanSweep.realPath(agent.path) ?? agent.path
+        func eachRuns() -> Bool {
+            processes.allSatisfy { process, executable in
+                CaptureOrphanSweep.read(process.processIdentifier, agentPath: agentPath)?.path
+                    == CaptureOrphanSweep.realPath(executable.path)
+            }
+        }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(30))
+        while !eachRuns(), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(eachRuns(), "each process runs its own copy")
     }
 
     private func start(_ executable: URL, _ arguments: [String], input: Pipe? = nil) throws -> Process {
