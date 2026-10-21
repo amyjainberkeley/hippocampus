@@ -105,9 +105,7 @@ final class AnswerSessionTests: XCTestCase {
             XCTAssertTrue(error is CancellationError, "\(error)")
         }
         XCTAssertLessThan(Date().timeIntervalSince(cancelledAt), 2)
-        await assertEventually("the request is stopped with its child", timeout: 30) {
-            !isAlive(pid) && children.running.isEmpty
-        }
+        await assertEventually("the request is stopped with its child") { !isAlive(pid) && children.running.isEmpty }
         let running = await answers.isRunning
         XCTAssertFalse(running)
     }
