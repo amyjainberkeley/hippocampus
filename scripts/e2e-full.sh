@@ -16,6 +16,9 @@
 #       (e2e-handoff.sh --synthetic), Resume's plan, and secret redaction.
 #   (d) Forgetting and retention: one moment, a time range, and a retention
 #       window, checked in the memory, the screenshots and what was derived.
+#       Then Delete Everything with remembering on: refused while the agent
+#       holds the memory, then the memory, its screenshots and its key erased,
+#       and remembering again on a new, empty memory with a new key.
 #   (e) Uninstall: Quit leaves nothing running, AI tools disconnected, and the
 #       cask's zap list removed; anything left in the home is listed.
 #
@@ -1202,6 +1205,109 @@ if (( AUDIT == 1 )); then
         --out-dir "$H/sampler-uninstall" --stop-file "$H/.sampling" --allow "$REPO_ROOT" \
         ${APP:+--allow "$APP"} > /dev/null 2>&1 &
     SAMPLER_PID=$!
+fi
+
+# ---- (d) Delete Everything while remembering ------------------------------------
+# The app's Delete Everything with remembering on (storage review S3;
+# ProcessSupervisor.eraseMemory). While the agent remembers it holds the
+# memory's writer lease, so an erase then is refused and erases nothing; the
+# app's own hold stops the agent first. Then the bundled agent erases the
+# memory, its screenshots and its key, a new key is made, and remembering
+# starts again on a new, empty memory. The new key here is a new development
+# key file, standing in for the Keychain item the app's ensure-key makes:
+# this run never reaches the Keychain, so it never runs ensure-key, and it
+# erases only while the development key is there.
+section "(d) Delete Everything while remembering"
+RUNNING_MARKER="$E2E_HOME/Library/Application Support/Hippocampus/.running"
+rm -f "$H/.erase-stop"
+(
+    deadline=$((SECONDS + 180))
+    while (( SECONDS < deadline )) && [[ ! -f "$H/.erase-stop" ]]; do sleep 1; done
+) | product_env "${NO_MODEL[@]}" "$AGENT" --drain-stdin --strict --db-path "$DB" \
+    > "$H/agent-erase.stdout" 2> "$H/agent-erase.stderr" &
+remembering_job=$!
+remembering_pid=""
+for _ in $(seq 1 90); do
+    candidate="$(tr -d '[:space:]' < "$RUNNING_MARKER" 2>/dev/null)"
+    if [[ "$candidate" =~ ^[0-9]+$ ]] && ps -p "$candidate" -o comm= 2>/dev/null | grep -q 'mci-agent'; then
+        remembering_pid="$candidate"
+        break
+    fi
+    sleep 1
+done
+if [[ -n "$remembering_pid" ]]; then
+    pass d5.on "remembering: the agent holds the memory's writer lease (pid $remembering_pid)"
+    product_env "$AGENT" erase-memory --db-path "$DB" > "$H/erase-refused.stdout" 2> "$H/erase-refused.stderr"
+    refused_status=$?
+    if (( refused_status != 0 )) && [[ -f "$DB" && -f "$KEY_FILE" ]] \
+        && grep -q 'another writer owns the brain lease' "$H/erase-refused.stderr"; then
+        pass d5.refused "an erase while the agent remembers is refused (exit $refused_status) and erases nothing, so the app stops remembering first"
+    else
+        fail d5.refused "an erase while the agent remembered: exit $refused_status, database $([[ -f "$DB" ]] && echo kept || echo gone), key $([[ -f "$KEY_FILE" ]] && echo kept || echo gone)"
+    fi
+else
+    fail d5.on "the agent never took the memory's writer lease: $(tail -n 1 "$H/agent-erase.stderr")"
+fi
+# The app's hold: remembering stops, and the lease is free.
+: > "$H/.erase-stop"
+wait "$remembering_job" 2>/dev/null
+for _ in $(seq 1 30); do [[ -f "$RUNNING_MARKER" ]] || break; sleep 1; done
+erased=0
+if [[ ! -f "$KEY_FILE" ]]; then
+    fail d5 "no development key to erase with, so the erase was not run"
+elif [[ -f "$RUNNING_MARKER" ]]; then
+    fail d5 "the agent still held the memory after it was stopped, so the erase was not run"
+else
+    product_env "$AGENT" erase-memory --db-path "$DB" > "$H/erase.stdout" 2> "$H/erase.stderr"
+    erase_status=$?
+    left=""
+    for path in "$DB" "$DB-wal" "$DB-shm" "$KEY_FILE"; do
+        [[ -e "$path" ]] && left="$left $(basename "$path")"
+    done
+    [[ "$(blob_count)" == "0" ]] || left="$left $(blob_count) screenshot(s)"
+    if (( erase_status == 0 )) && [[ -z "$left" ]] && grep -q 'development key file shredded' "$H/erase.stdout"; then
+        erased=1
+        pass d5 "Delete Everything with remembering stopped by the hold: $(grep -o 'erased .*' "$H/erase.stdout" | head -n 1)"
+    else
+        fail d5 "Delete Everything: exit $erase_status, left:${left:- nothing}; $(tail -n 1 "$H/erase.stderr")"
+    fi
+fi
+# Remembering again, with a new key, on a new and empty memory.
+if (( erased == 1 )) && [[ -n "$READER" ]]; then
+    ( umask 077; openssl rand -hex 32 > "$KEY_FILE" )
+    cat > "$H/frames-after-erase.json" <<'FRAMES'
+{"frames": [
+ {"id": "after-erase-heron", "app": "com.apple.TextEdit", "title": "Heron field notes", "offset_seconds": -5,
+  "lines": ["Heron field notes", "The first moment in a new memory, after Delete Everything."]}
+]}
+FRAMES
+    AFTER_ERASE_ARGS=(--manifest "$H/frames-after-erase.json" --report "$H/feed-after-erase.json" "${FEED_ARGS[@]:4}")
+    product_env "${NO_MODEL[@]}" "$FEED" "${AFTER_ERASE_ARGS[@]}" 2> "$H/feed-after-erase.stderr" \
+        | product_env "${NO_MODEL[@]}" "$AGENT" --drain-stdin --strict --db-path "$DB" \
+            > "$H/agent-after-erase.stdout" 2> "$H/agent-after-erase.stderr"
+    product_env "$PROBE" history 200 > "$H/history-after-erase.json" 2> "$H/history-after-erase.stderr"
+    after_erase="$(python3 - "$H/history-after-erase.json" <<'PY'
+import json, sys
+try:
+    rows = json.load(open(sys.argv[1]))
+except Exception as error:
+    print(f"FAIL the new memory could not be read: {type(error).__name__}")
+    sys.exit()
+text = " ".join((r.get("title") or "") + " " + (r.get("snippet") or "") for r in rows).lower()
+before = [w for w in ("larkspur", "quillfeather", "kestrel", "pelican", "osprey", "wombat") if w in text]
+if len(rows) == 1 and "heron" in text and not before:
+    print("PASS 1 moment, the new one, and nothing from before the erase")
+else:
+    print(f"FAIL {len(rows)} moment(s), the new one {'there' if 'heron' in text else 'missing'}, from before: {before}")
+PY
+)"
+    if [[ "$after_erase" == PASS* ]]; then
+        pass d5.after "remembering again with a new key, on a new memory: ${after_erase#PASS }"
+    else
+        fail d5.after "after Delete Everything: ${after_erase#FAIL }"
+    fi
+elif (( erased == 1 )); then
+    skip d5.after "no reader for the fixture, so nothing new to remember"
 fi
 
 # ---- (e) Uninstall -------------------------------------------------------------

@@ -157,6 +157,23 @@ class FullE2EContractTests(unittest.TestCase):
         self.assertNotIn('"$HOME/.claude', source)
         self.assertNotIn('"$HOME/.codex', source)
 
+    def test_delete_everything_runs_on_the_development_key_and_never_makes_a_keychain_key(self):
+        source = FULL.read_text(encoding="utf-8")
+        step = source.split('section "(d) Delete Everything while remembering"', 1)[1]
+        step = step.split('section "(e) Uninstall"', 1)[0]
+        # Once while the agent remembers (refused), once after the hold stopped it.
+        self.assertEqual(step.count('product_env "$AGENT" erase-memory --db-path "$DB"'), 2)
+        self.assertIn('grep -q \'another writer owns the brain lease\'', step)
+        # The real erase runs only while the development key is there, so the
+        # agent's Keychain deleter is never the native one.
+        guard = step.index('if [[ ! -f "$KEY_FILE" ]]; then')
+        self.assertLess(guard, step.rindex('erase-memory --db-path'))
+        self.assertIn("grep -q 'development key file shredded'", step)
+        # The new key is a new development key file; ensure-key, which makes a
+        # Keychain item, never runs.
+        self.assertIn('openssl rand -hex 32 > "$KEY_FILE"', step)
+        self.assertNotIn('"$AGENT" ensure-key', source)
+
     def test_storage_audit_detectors_flag_dirty_and_pass_clean_fixtures(self):
         result = subprocess.run(["/bin/bash", str(AUDIT), "--self-test"], capture_output=True,
                                 text=True, timeout=240)
