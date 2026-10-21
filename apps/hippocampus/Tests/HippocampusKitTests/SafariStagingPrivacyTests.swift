@@ -85,7 +85,10 @@ final class SafariStagingPrivacyTests: XCTestCase {
         let cases = try XCTUnwrap(corpus["cases"] as? [[String: Any]])
         XCTAssertGreaterThan(cases.count, 20)
         for entry in cases {
-            let text = try XCTUnwrap(entry["text"] as? String)
+            // The case's text, or its `parts` joined: key-shaped cases are
+            // kept in parts so no whole key sits in the repository.
+            let text = try XCTUnwrap((entry["text"] as? String) ?? (entry["parts"] as? [String])?.joined(),
+                                     "\(entry["why"] ?? "")")
             let secret = try XCTUnwrap(entry["secret"] as? Bool)
             XCTAssertEqual(PageSecretCheck.containsSecret(text), secret, "\(entry["why"] ?? ""): \(text)")
             XCTAssertEqual(SafariInboxReader.containsSecret(text) || !secret, true, text)
