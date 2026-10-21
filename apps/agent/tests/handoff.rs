@@ -553,7 +553,22 @@ fn git_section_reports_branch_uncommitted_files_and_commits() {
         Some("/Users/t/.codex/sessions/g1.jsonl:1"),
         "Start the git evidence work in this repository please.",
     );
-    let packet = compile_handoff(&store, &sub, 4096, &clock(now_us())).unwrap();
+    // The packet gives each git command the hook's one second, to find the
+    // repo's root and to read its state. On a Mac busy with other builds git
+    // can miss that, and the packet then falls back to the folder it was
+    // asked about or leaves the section out, as it should. Compile again, up
+    // to three times in all, until git answered in time; a packet that
+    // never gets the root or the section right still fails below.
+    let answered = |packet: &mci_agent::handoff::HandoffPacket| {
+        packet.state.git.is_some() && packet.packet.contains("\n# repo (")
+    };
+    let mut packet = compile_handoff(&store, &sub, 4096, &clock(now_us())).unwrap();
+    for _ in 1..3 {
+        if answered(&packet) {
+            break;
+        }
+        packet = compile_handoff(&store, &sub, 4096, &clock(now_us())).unwrap();
+    }
     println!("{}", packet.packet);
     assert!(packet.packet.contains("\n# repo ("));
     let git_lines = section_lines(&packet.packet, "## Git");
