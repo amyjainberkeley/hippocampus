@@ -462,7 +462,11 @@ fn stripes_pages_say_the_weeks_own_words() {
     let (pricing_screen, pricing) = pricing.expect("the week reads Stripe's pricing page");
     let (docs_screen, docs) = docs.expect("the week reads a page of Stripe's docs");
     assert_eq!(pricing.url.as_deref(), Some("https://stripe.com/pricing"));
-    assert!(docs.url.as_deref().unwrap().starts_with("https://docs.stripe.com/"));
+    assert!(docs
+        .url
+        .as_deref()
+        .unwrap()
+        .starts_with("https://docs.stripe.com/"));
     assert!(pricing.main.starts_with(STRIPE_PRICING_HEADLINE));
     assert!(docs.main.contains(STRIPE_DOCS_LEAD));
     // The docs page names its site in plain type, never Stripe's wordmark.
