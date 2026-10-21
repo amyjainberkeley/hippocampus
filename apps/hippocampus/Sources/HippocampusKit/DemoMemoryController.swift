@@ -47,6 +47,10 @@ public final class DemoMemoryController: ObservableObject {
     /// Whether remembering was paused before Demo Memory, so leaving leaves
     /// it so.
     private var wasPaused = true
+    /// When the person's own timed pause would have ended: Demo Memory's
+    /// pause stands in for it while the week is in use, and leaving puts it
+    /// back.
+    private var pausedUntil: Date?
     private var week = DemoMemoryWeek(moments: 0, screenshots: 0)
     private var refresher: Task<Void, Never>?
     private var watch: AnyCancellable?
@@ -162,18 +166,22 @@ public final class DemoMemoryController: ObservableObject {
         }
     }
 
-    /// Leave Demo Memory.
-    public func requestLeave() {
+    /// Leave Demo Memory, from the menu bar or the window's footer. False
+    /// when it isn't in use, or a switch is under way.
+    @discardableResult
+    public func requestLeave() -> Bool {
         requestLeave(restoringRemembering: true)
     }
 
-    private func requestLeave(restoringRemembering: Bool) {
-        guard phase == .on, switching == nil else { return }
+    @discardableResult
+    private func requestLeave(restoringRemembering: Bool) -> Bool {
+        guard phase == .on, switching == nil else { return false }
         switching = Task { [weak self] in
             guard let self else { return }
             await self.leave(restoringRemembering: restoringRemembering)
             self.switching = nil
         }
+        return true
     }
 
     // MARK: Switching
@@ -199,19 +207,23 @@ public final class DemoMemoryController: ObservableObject {
         }
         // Read only now: the person may have paused while the week was made.
         let wasPaused = host.isPaused
+        // A pause that ends on its own would turn remembering on mid-take:
+        // Demo Memory's own pause takes its place until Leave.
+        let pausedUntil = wasPaused ? host.pausedUntil : nil
         do {
-            try folder.writeInUse(.init(enteredAt: now(), wasPaused: wasPaused))
-            if !wasPaused || !host.isQuiet {
+            try folder.writeInUse(.init(enteredAt: now(), wasPaused: wasPaused, pausedUntil: pausedUntil))
+            if !wasPaused || !host.isQuiet || pausedUntil != nil {
                 try await host.pauseRemembering()
             }
         } catch {
-            if !wasPaused { host.resumeRemembering() }
+            putBack(wasPaused: wasPaused, pausedUntil: pausedUntil)
             folder.remove()
             phase = .off
             host.report(DemoCopy.couldntPause)
             return false
         }
         self.wasPaused = wasPaused
+        self.pausedUntil = pausedUntil
         week = made
         phase = .on
         startRefreshing()
@@ -221,9 +233,11 @@ public final class DemoMemoryController: ObservableObject {
     }
 
     /// Back to the person's own memory: the window opens on it again if it
-    /// was open, the pause Demo Memory made is taken back, and the week is
-    /// removed. `restoringRemembering` is false when the person turned
-    /// remembering on themselves, which is what ended it.
+    /// was open, remembering goes back to what it was (the pause Demo Memory
+    /// made is taken back, and a timed pause of the person's comes back with
+    /// its end), and the week is removed. `restoringRemembering` is false
+    /// when the person turned remembering on themselves, which is what ended
+    /// it.
     public func leave(restoringRemembering: Bool = true) async {
         guard phase == .on else { return }
         // From here every child reads the person's own memory.
@@ -232,23 +246,41 @@ public final class DemoMemoryController: ObservableObject {
         refresher = nil
         watch = nil
         await host.restartReaders(openWindow: false)
-        if restoringRemembering, !wasPaused {
-            host.resumeRemembering()
+        if restoringRemembering {
+            putBack(wasPaused: wasPaused, pausedUntil: pausedUntil)
         }
         folder.remove()
         phase = .off
     }
 
     /// A week a run left behind, if the app ended while Demo Memory was in
-    /// use: the pause it made is taken back and the week removed, so a
-    /// relaunch is always on the person's own memory. Called on attach.
+    /// use: remembering goes back to what it was before, as on Leave, and the
+    /// week is removed, so a relaunch is always on the person's own memory.
+    /// Called on attach.
     public func finishLeftover() {
         guard phase == .off, switching == nil else { return }
         guard FileManager.default.fileExists(atPath: folder.url.path) else { return }
-        if let record = folder.readInUse(), !record.wasPaused {
-            host.resumeRemembering()
+        if let record = folder.readInUse() {
+            putBack(wasPaused: record.wasPaused, pausedUntil: record.pausedUntil)
         }
         folder.remove()
+    }
+
+    /// Remembering as it was before Demo Memory: on again if it was on, a
+    /// pause until the person resumes left as it is, and a timed pause put
+    /// back with its end, or over, as it would have been, if the end came
+    /// while the week was in use.
+    private func putBack(wasPaused: Bool, pausedUntil: Date?) {
+        guard wasPaused else {
+            host.resumeRemembering()
+            return
+        }
+        guard let pausedUntil else { return }
+        if pausedUntil > now() {
+            host.pauseRemembering(until: pausedUntil)
+        } else {
+            host.resumeRemembering()
+        }
     }
 
     /// Remembering changed: if it is starting or running while Demo Memory
@@ -285,4 +317,18 @@ public final class DemoMemoryController: ObservableObject {
         self.phase = phase
     }
     #endif
+}
+
+/// The window's Leave Demo Memory, for its private pipe (SPEC 2.6.4,
+/// SPEC-DELTA 6): the menu bar's own Leave, read and carried out here, so the
+/// supervisor reaches Demo Memory's store only through its children's
+/// environment (`ProcessSupervisorLaunchPlan.sanitizedEnvironment`).
+extension ProcessSupervisor {
+    /// Demo Memory is in use: the window may ask to leave it.
+    var windowMayLeaveDemoMemory: Bool { DemoMemory.controller?.phase == .on }
+
+    /// Leave Demo Memory, as the menu bar's item does. True when it began.
+    func leaveDemoMemoryForWindow() -> Bool {
+        DemoMemory.controller?.requestLeave() ?? false
+    }
 }

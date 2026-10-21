@@ -46,6 +46,27 @@ final class WindowContrastTests: XCTestCase {
         }
     }
 
+    /// Privacy's forget and delete buttons: their red words read at 4.5:1 on
+    /// the bordered button's own fill, light and dark. The window's error
+    /// red, on that dark grey, read at 2.7:1 (the demo window's Privacy).
+    func testPrivacysRedButtonWordsReadOnTheirFill() throws {
+        XCTAssertGreaterThanOrEqual(ratio(PrivacyButtonRed.light, PrivacyButtonRed.fillLight), 4.5, "light")
+        XCTAssertGreaterThanOrEqual(ratio(PrivacyButtonRed.dark, PrivacyButtonRed.fillDark), 4.5, "dark")
+        // Every dark fill the renders draw under them: Sam's page, the demo
+        // window's page, and the lightest, beside a card.
+        for fill: UInt32 in [0x515356, 0x606163, 0x656669] {
+            XCTAssertGreaterThanOrEqual(ratio(PrivacyButtonRed.dark, fill), 4.5, String(fill, radix: 16))
+        }
+        let error = try token("error")
+        XCTAssertLessThan(ratio(error.dark, 0x606163), 3, "why the page has a red of its own")
+        XCTAssertEqual(error.light, PrivacyButtonRed.light, "light mode keeps the window's red")
+        // Still a red: more red than green or blue.
+        for hex in [PrivacyButtonRed.light, PrivacyButtonRed.dark] {
+            let red = (hex >> 16) & 0xFF, green = (hex >> 8) & 0xFF, blue = hex & 0xFF
+            XCTAssertTrue(red > green && red > blue, String(hex, radix: 16))
+        }
+    }
+
     func testTheSelectedRowsSymbolStandsOutFromItsFill() throws {
         let accent = try token("accent")
         let selection = try token("sidebarSelection")

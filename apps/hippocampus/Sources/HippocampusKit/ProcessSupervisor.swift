@@ -18,6 +18,25 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
         keyReference: KeychainKeyReference,
         developmentKeyMode: DevelopmentFileKeyMode? = nil
     ) -> [String: String] {
+        let environment = ownEnvironment(
+            baseEnvironment: baseEnvironment, dbPath: dbPath, keyReference: keyReference,
+            developmentKeyMode: developmentKeyMode
+        )
+        // Demo Memory's store and flag while it is in use; the person's own
+        // memory, as above, while it is off (SPEC-DELTA 6).
+        return DemoMemory.childEnvironment(environment)
+    }
+
+    /// The person's own memory and key, whatever the window reads: for a
+    /// child that works on the person's memory even while Demo Memory is in
+    /// use, such as forgetting pictures of other windows. Never a window,
+    /// so the window's Demo flag means nothing to it.
+    static func ownEnvironment(
+        baseEnvironment: [String: String],
+        dbPath: URL,
+        keyReference: KeychainKeyReference,
+        developmentKeyMode: DevelopmentFileKeyMode? = nil
+    ) -> [String: String] {
         var environment = ChildProcessEnvironment.scrubbingReusableKeys(from: baseEnvironment)
         environment["MCI_DB_PATH"] = dbPath.path
         if let developmentKeyMode {
@@ -28,9 +47,7 @@ public struct ProcessSupervisorLaunchPlan: Sendable, Equatable {
             environment["MCI_DB_KEYCHAIN_ACCOUNT"] = keyReference.account
             environment["MCI_DB_KEYCHAIN_STORAGE_MODEL"] = KeychainKeyStore.storageModel
         }
-        // Demo Memory's store and flag while it is in use; the person's own
-        // memory, as above, while it is off (SPEC-DELTA 6).
-        return DemoMemory.childEnvironment(environment)
+        return environment
     }
 
     package static func onboardingEnvironment(
@@ -303,10 +320,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     /// The state the status is read from. Before the launch's first start,
     /// while its orphan sweep runs (up to about 15 s, waiting out a writer a
-    /// crash left) or that start is about to begin, nothing has started but
-    /// one is coming: Starting…, or Paused for a kept pause, never Off.
+    /// crash left), that start is about to begin or it waits for a forget's
+    /// hold, nothing has started but one is coming: Starting…, or Paused for
+    /// a kept pause, never Off.
     private var shownState: SupervisorState {
-        guard state == .idle, launchSweepRunning || startRunning else { return state }
+        guard state == .idle, launchSweepRunning || startRunning || startWaitingForHold else { return state }
         return requestedPauseState ? .paused : .starting
     }
 
@@ -412,9 +430,19 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     public private(set) lazy var forgetHold = CaptureHold(target: self)
     /// The hold is on: the status reads "Forgetting…".
     @Published public private(set) var holdingForForget = false
-    /// What the app does for the window's Turn On, Try Again, Open System
-    /// Settings… and Quit: the same as the status row's button.
+    /// A start came while the hold was on (a timed pause's end, the
+    /// launch's start, a retry, Try Again): nothing starts under a hold, so
+    /// it waits, and the hold's end carries it out (`restartAfterHold`).
+    @Published public private(set) var startWaitingForHold = false
+    /// What the app does for the window's Turn On, Turn Off, Try Again, Open
+    /// System Settings… and Quit: the same as the status row's button.
     public var windowStatusAction: (@MainActor (CaptureStatusAction) -> Void)?
+    /// Runs the agent's one-shot pass for Forget Pictures of Other Windows…
+    /// (`forgetSidePicturesNow`) and says whether it finished. Tests put a
+    /// stand-in here.
+    var sidePicturesPass: @MainActor @Sendable (URL, [String], [String: String]) async -> Bool = {
+        await ProcessSupervisor.runSidePicturesPass(agent: $0, arguments: $1, environment: $2)
+    }
     /// Ends a timed pause on time.
     private var timedResume: Task<Void, Never>?
     private let timedResumeSleep: @MainActor @Sendable (TimeInterval) async throws -> Void
@@ -699,6 +727,13 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         // is never cancelled for a start either; only a retry still waiting
         // out its backoff is replaced.
         guard !startRunning, inFlightTransitions.isEmpty, pauseTask == nil else { return }
+        // A forget holds the memory still (the window may open, and forget,
+        // during the launch's sweep): this start waits for the hold's end.
+        // A kept pause starts nothing, so it is entered now.
+        if holdingForForget, !requestedPauseState {
+            startWaitingForHold = true
+            return
+        }
         // A Turn On a permission refused just before this launch (System
         // Settings' Quit & Reopen, after the person allowed it) is pressed
         // again, once, with a fresh helper: it lands only if that helper
@@ -731,6 +766,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
         if requestedPauseState {
             try await enterKeptPause()
+            return
+        }
+        // A start asked for just before a forget's hold began waits for its
+        // end, as one asked for during it does.
+        if holdingForForget {
+            startWaitingForHold = true
             return
         }
         guard let transitionID = beginOwnedTransition() else {
@@ -1047,6 +1088,13 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
 
         guard state == .paused else { return }
+        // A resume during a forget's hold (a timed pause's end, Resume)
+        // waits for the hold's end: the agent would take the writer lease
+        // the window deletes under.
+        if holdingForForget {
+            startWaitingForHold = true
+            return
+        }
         cancelPendingRetry()
         guard let transitionID = beginOwnedTransition() else {
             throw SupervisorError.transitionInProgress
@@ -1090,6 +1138,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             throw SupervisorError.transitionInProgress
         }
         guard enabled != captureEnabled else { return }
+        // A forget holds remembering still: this turn-on is a press that
+        // waits for the hold's end, as the menu's Turn On does.
+        if holdingForForget {
+            turnOn()
+            return
+        }
         guard let transitionID = beginOwnedTransition() else {
             throw SupervisorError.transitionInProgress
         }
@@ -1245,8 +1299,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     private func carryOutTurnOn(_ press: UUID) async {
         defer { if pendingTurnOn == press { pendingTurnOn = nil } }
-        let giveUpAt = recoveryNow().advanced(by: Self.turnOnWait)
+        var giveUpAt = recoveryNow().advanced(by: Self.turnOnWait)
         while pendingTurnOn == press, !captureEnabled, !shutdownRequested, shutdownTask == nil {
+            // A forget's hold ends by itself, renewed only while the window
+            // deletes: the press waits it out, and its own wait starts after.
+            if holdingForForget { giveUpAt = recoveryNow().advanced(by: Self.turnOnWait) }
             if !changeUnderWay {
                 let tried = turnOnAttempts
                 do {
@@ -1269,9 +1326,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         }
     }
 
-    /// A start, a stop, a pause or a capture change holds the transition gate.
+    /// A start, a stop, a pause or a capture change holds the transition gate,
+    /// or a forget holds remembering still.
     private var changeUnderWay: Bool {
         !inFlightTransitions.isEmpty || captureStopTask != nil || pauseTask != nil || launchSweepRunning
+            || holdingForForget
     }
 
     private func beginTurnOnAttempt() -> UUID {
@@ -1728,6 +1787,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
               !requestedPauseState, pauseTask == nil,
               !shutdownRequested, shutdownTask == nil,
               inFlightTransitions.isEmpty else { return }
+        // During a forget's hold the restart waits for the hold's end.
+        if holdingForForget {
+            startWaitingForHold = true
+            return
+        }
         cancelPendingRetry()
         retryCount = 0
         tccRevokedSurface = nil
@@ -1855,6 +1919,12 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
     }
 
     private func restartTopology() async throws {
+        // A retry or a wake's recovery during a forget's hold waits for the
+        // hold's end, which restarts.
+        if holdingForForget {
+            startWaitingForHold = true
+            throw SupervisorError.transitionInProgress
+        }
         guard !captureStopLatched, !requestedPauseState, !shutdownRequested,
               tccRevokedSurface == nil,
               let transitionID = beginOwnedTransition() else {
@@ -2156,8 +2226,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
 
     /// One request from the window: carried out only where the menu bar's
     /// same click would be (`WindowChannelPolicy`).
-    func handleWindowRequest(_ request: WindowChannelRequest) async -> Bool {
-        guard WindowChannelPolicy.allows(request, row: menuRow(), holding: forgetHold.isHolding) else {
+    func handleWindowRequest(_ request: WindowChannelRequest,
+                             setupFinished: Bool = OnboardingSentinel.isComplete) async -> Bool {
+        guard WindowChannelPolicy.allows(request, row: menuRow(setupFinished: setupFinished),
+                                         holding: forgetHold.isHolding,
+                                         demoMemory: windowMayLeaveDemoMemory) else {
             return false
         }
         switch request.op {
@@ -2169,6 +2242,11 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             return true
         case .turnOn:
             return perform(.turnOn)
+        case .turnOff:
+            // The row's own Turn Off while a turn-on is under way, carried
+            // out as the menu's: the turn-on ends, and Off shows once what
+            // it started has stopped.
+            return perform(.turnOff)
         case .tryAgain:
             return perform(.tryAgain)
         case .openSystemSettings:
@@ -2176,8 +2254,15 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
             return perform(.openSystemSettings(permission))
         case .quit:
             return perform(.quit)
+        case .leaveDemo:
+            // The menu bar's own Leave: remembering goes back to what it was
+            // before Demo Memory. Never a Resume, which would end a pause the
+            // person made, or do nothing while remembering is off.
+            return leaveDemoMemoryForWindow()
         case .hold:
             return await forgetHold.hold()
+        case .renew:
+            return forgetHold.renew()
         case .release:
             await forgetHold.release()
             return true
@@ -2406,24 +2491,123 @@ extension SpawnedWindowProcess: RecallWindowProcess {}
 /// Remembering, held still for a window's forget (SPEC 3.11): stopped the way
 /// Pause stops it, never with the person's own pause, and started again only
 /// if it ran before and the person hasn't paused or turned it off since.
+/// Nothing starts while the hold is on: a start asked for then waits for its
+/// end (`startWaitingForHold`).
 extension ProcessSupervisor: CaptureHolding {
+    /// Remembering runs, or a change is under way that may hold or take the
+    /// writer lease: the launch's sweep (which may still be ending a writer
+    /// a crash left) and the start after it, a start or resume not at
+    /// Starting… yet, or a stop still stopping. The hold stops it, or waits
+    /// for it to settle.
     public var isRememberingForHold: Bool {
-        state == .running || state == .starting
+        state == .running || state == .starting || settling
+    }
+
+    /// A change under way: the launch's sweep, a start, a pause or resume,
+    /// or any other transition.
+    private var settling: Bool {
+        launchSweepRunning || startRunning || pauseTask != nil || !inFlightTransitions.isEmpty
     }
 
     public func stopForHold() async throws {
-        guard state == .running || state == .starting else { return }
+        // A change under way settles first, within the hold's wait: a pause
+        // (or a run a permission ended) finishes stopping, so the lease is
+        // free; a start that reaches Starting… is stopped below; and a start
+        // asked for since the hold began waits for its end.
+        while holdingForForget, settling, state != .starting {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        // The hold ended while this waited (it took too long): stop nothing.
+        guard holdingForForget, state == .running || state == .starting else { return }
         // The verified transition without `pauses`: the person's saved pause
         // is never written.
         try await setPausedAndWait(true)
     }
 
+    /// The hold ended: remembering runs again as the person and the setting
+    /// now ask, with the starts that waited for it, and never against a
+    /// pause the person made.
     public func restartAfterHold() async throws {
-        guard !requestedPauseState, state == .paused, !shutdownRequested else { return }
-        try await setPausedAndWait(false)
+        let waited = startWaitingForHold
+        startWaitingForHold = false
+        guard !shutdownRequested, shutdownTask == nil else { return }
+        switch state {
+        case .paused:
+            // The hold's own stop, or a resume that came during the hold (a
+            // timed pause's end): on again unless the person paused.
+            guard !requestedPauseState else { return }
+            try await setPausedAndWait(false)
+        case .idle, .stopped:
+            // The launch's start, or another, that waited.
+            if waited { start() }
+        case .crashed:
+            // A retry, Try Again or a wake's recovery that waited.
+            if waited { retryNow() }
+        case .starting, .running:
+            break
+        }
     }
 
     public func holdChanged(_ holding: Bool) {
         holdingForForget = holding
+    }
+}
+
+/// Forget Pictures of Other Windows… while nothing remembers (SPEC 6.7).
+extension ProcessSupervisor {
+    /// The longest the agent's one-shot pass may take.
+    static let sidePicturesPassLimit: Duration = .seconds(5 * 60)
+
+    /// Forget Pictures of Other Windows…, carried out now when no agent runs
+    /// to read the request Preferences saved: remembering paused, off, not
+    /// started or stopped on an error, when it could wait for good. One short
+    /// pass of the agent does what its retention worker would (the request,
+    /// thinning, the usage file) under the writer lease, and ends: it starts
+    /// no capture and no MCP server, and opens the person's own memory
+    /// whatever the window reads. It runs under a hold, as a forget does, so
+    /// nothing starts meanwhile. While remembering runs, the running agent
+    /// carries the request out within 10 seconds, and nothing happens here.
+    /// True when the pass ran and finished.
+    @discardableResult
+    public func forgetSidePicturesNow() async -> Bool {
+        guard !isRememberingForHold, !shutdownRequested, shutdownTask == nil, memoryOnDisk(),
+              let agent = locator.agentPath() else { return false }
+        guard await forgetHold.hold() else { return false }
+        let renewal = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(10))
+                guard !Task.isCancelled else { return }
+                self?.forgetHold.renew()
+            }
+        }
+        let pass = sidePicturesPass
+        let arguments = ["forget-side-pictures", "--db-path", dbPath.path]
+        let environment = ProcessSupervisorLaunchPlan.ownEnvironment(
+            baseEnvironment: ProcessInfo.processInfo.environment, dbPath: dbPath,
+            keyReference: keyReference, developmentKeyMode: developmentKeyMode
+        )
+        let run = Task { @MainActor in await pass(agent, arguments, environment) }
+        let limit = Task {
+            try? await Task.sleep(for: Self.sidePicturesPassLimit)
+            guard !Task.isCancelled else { return }
+            run.cancel()
+        }
+        let finished = await run.value
+        limit.cancel()
+        renewal.cancel()
+        await forgetHold.release()
+        if !finished {
+            logger.error("supervisor: forgetting pictures of other windows now did not finish; the agent does it next")
+        }
+        return finished
+    }
+
+    /// `mci-agent forget-side-pictures`, run once; cancelling ends it.
+    nonisolated static func runSidePicturesPass(agent: URL, arguments: [String],
+                                                environment: [String: String]) async -> Bool {
+        let result = try? await KeyCustodyCommandRunner.run(
+            executableURL: agent, arguments: arguments, environment: environment
+        )
+        return result?.terminationStatus == 0
     }
 }

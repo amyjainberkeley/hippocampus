@@ -3,7 +3,8 @@
 // Every user-triggered destructive action (delete / wipe / export) and
 // every privacy-sensitive state change (permissions granted/revoked,
 // settings change, app launch) is appended to a plaintext, append-only
-// log at `~/Library/Application Support/Hippocampus/audit.log`.
+// log at `~/Library/Application Support/Hippocampus/audit.log`. A window on
+// Demo Memory keeps its own beside the made-up week, gone with it.
 //
 // The person gets a plain-text, append-only log of what happened to
 // their data, kept on their own Mac.
@@ -85,14 +86,27 @@ public final class AuditLog: @unchecked Sendable {
     /// How many rotated files to keep (`audit.log.1` … `audit.log.5`).
     public static let maxRotatedFiles: Int = 5
 
-    /// Shared singleton wired to the canonical Hippocampus support dir.
-    public static let shared: AuditLog = {
+    /// Shared singleton wired to the canonical Hippocampus support dir, or,
+    /// while this window reads Demo Memory, to the made-up week's own folder
+    /// (`forWindow`).
+    public static let shared: AuditLog = forWindow()
+
+    /// The log this window keeps. Hippocampus's folder in Application
+    /// Support; while the window reads Demo Memory (SPEC-DELTA 6), the
+    /// week's own folder instead, so a forget, a wipe or an export in the
+    /// made-up week never lands in the person's own log, and Privacy on the
+    /// week never lists the person's. The week's folder goes when the week
+    /// does, and this log never makes it again.
+    public static func forWindow(environment: [String: String] = ProcessInfo.processInfo.environment) -> AuditLog {
+        if let demo = DemoMemoryMode.folder(environment: environment) {
+            return AuditLog(baseURL: demo, makesFolder: false)
+        }
         let supportDir = NSSearchPathForDirectoriesInDomains(
             .applicationSupportDirectory, .userDomainMask, true
         ).first ?? NSTemporaryDirectory()
         let dir = (supportDir as NSString).appendingPathComponent("Hippocampus")
         return AuditLog(baseURL: URL(fileURLWithPath: dir))
-    }()
+    }
 
     /// Directory the log + rotated files live in.
     public let baseURL: URL
@@ -106,8 +120,13 @@ public final class AuditLog: @unchecked Sendable {
     /// Test-injected clock. Production uses `Date()`.
     private let now: @Sendable () -> Date
 
-    public init(baseURL: URL, now: @escaping @Sendable () -> Date = { Date() }) {
+    /// Whether a write makes `baseURL` when it is missing. Demo Memory's
+    /// folder is never made again once the week is gone.
+    private let makesFolder: Bool
+
+    public init(baseURL: URL, makesFolder: Bool = true, now: @escaping @Sendable () -> Date = { Date() }) {
         self.baseURL = baseURL
+        self.makesFolder = makesFolder
         self.now = now
     }
 
@@ -185,6 +204,9 @@ public final class AuditLog: @unchecked Sendable {
     // MARK: - Internals
 
     private func ensureDirectory() throws {
+        guard makesFolder || FileManager.default.fileExists(atPath: baseURL.path) else {
+            throw AuditLogError.ioFailed("no folder at \(baseURL.lastPathComponent)")
+        }
         do {
             try FileManager.default.createDirectory(
                 at: baseURL, withIntermediateDirectories: true

@@ -111,14 +111,20 @@ public struct DemoMemoryFolder: Sendable, Equatable {
         public var enteredAt: Date
         /// Whether remembering was already paused, so leaving leaves it so.
         public var wasPaused: Bool
+        /// When that pause would have ended on its own (For 1 Hour, Until
+        /// Tomorrow): Demo Memory's pause stands in for it while in use, and
+        /// leaving, or a relaunch after a crash, puts it back. Nil for a
+        /// pause until the person resumes, or none.
+        public var pausedUntil: Date?
 
-        public init(enteredAt: Date, wasPaused: Bool) {
+        public init(enteredAt: Date, wasPaused: Bool, pausedUntil: Date? = nil) {
             self.enteredAt = enteredAt
             self.wasPaused = wasPaused
+            self.pausedUntil = pausedUntil
         }
 
         enum CodingKeys: String, CodingKey {
-            case version, enteredAt = "entered_at", wasPaused = "was_paused"
+            case version, enteredAt = "entered_at", wasPaused = "was_paused", pausedUntil = "paused_until"
         }
     }
 

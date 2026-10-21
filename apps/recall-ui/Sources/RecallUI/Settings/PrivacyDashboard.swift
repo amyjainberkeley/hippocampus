@@ -132,18 +132,23 @@ struct PrivacyDashboard: View {
 
     // MARK: Forgetting
 
+    /// The forget and delete buttons' red, readable on the bordered button's
+    /// own fill in light and dark (`PrivacyButtonRed`): in dark mode that
+    /// fill is a mid grey the window's error red is too dark for.
+    private static let destructive = MCI.Color.hex(light: PrivacyButtonRed.light, dark: PrivacyButtonRed.dark)
+
     private var actions: some View {
         let busy = isMutating || isSyntheticPreview
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 if let forget {
                     Button { forget(.recent) } label: {
-                        Text(verbatim: LibraryCopy.Privacy.forgetRecent).foregroundStyle(MCI.Color.error)
+                        Text(verbatim: LibraryCopy.Privacy.forgetRecent).foregroundStyle(Self.destructive)
                     }
                     .disabled(busy)
                 }
                 Button { confirmation = DestructiveConfirmationBox(kind: .forgetLast24h) } label: {
-                    Text(verbatim: LibraryCopy.Privacy.forgetLast24Hours).foregroundStyle(MCI.Color.error)
+                    Text(verbatim: LibraryCopy.Privacy.forgetLast24Hours).foregroundStyle(Self.destructive)
                 }
                 .disabled(busy)
                 Button(LibraryCopy.Privacy.exportEverything) { runExport() }
@@ -151,7 +156,7 @@ struct PrivacyDashboard: View {
                     .disabled(busy)
             }
             Button { confirmation = DestructiveConfirmationBox(kind: .deleteEverything) } label: {
-                Text(verbatim: LibraryCopy.Privacy.deleteEverything).foregroundStyle(MCI.Color.error)
+                Text(verbatim: LibraryCopy.Privacy.deleteEverything).foregroundStyle(Self.destructive)
             }
             .disabled(busy)
         }

@@ -174,6 +174,23 @@ public enum PrivacyKept {
     }
 }
 
+/// The words of Privacy's forget and delete buttons (Forget Recent…, Forget
+/// the Last 24 Hours…, Delete Everything…): red, as the approved page has
+/// them, and readable on the bordered button's own fill. In light mode that
+/// fill is white and the window's error red reads at 4.8:1. In dark mode it
+/// is a mid grey drawn over the page (96 to 101 in the renders), on which
+/// the error red reads at only 2.7:1, so the words take a paler red there,
+/// 4.5:1 or more on the lightest of those greys. The shared error red is
+/// unchanged.
+public enum PrivacyButtonRed {
+    public static let light: UInt32 = 0xC7473A
+    public static let dark: UInt32 = 0xFFE0DE
+    /// The bordered button's fill under the words: white in light mode, and
+    /// in dark mode the lightest grey the renders draw.
+    public static let fillLight: UInt32 = 0xFFFFFF
+    public static let fillDark: UInt32 = 0x656669
+}
+
 /// How much the pictures of windows beside the one in front use (SPEC 6.5),
 /// from the content-free file the agent's worker writes beside the capture
 /// status: sizes, a count and when, never what is in them.

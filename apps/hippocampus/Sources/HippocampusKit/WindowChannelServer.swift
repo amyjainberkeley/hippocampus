@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // WindowChannelServer.swift — the app's end of the window's private pipe
-// (SPEC 2.6.4). Pause, Resume, Turn On, Try Again and the forget hold never
-// travel over DistributedNotificationCenter, where any process on the Mac
-// can post; they come only from the window this app started, on the pipe it
-// gave it. The app decides: a request is carried out only in a state where
-// the same click in the menu bar would be, unknown ops and malformed lines
-// are ignored, and nothing about their content is logged.
+// (SPEC 2.6.4). Pause, Resume, Turn On, Turn Off, Try Again and the forget
+// hold never travel over DistributedNotificationCenter, where any process on
+// the Mac can post; they come only from the window this app started, on the
+// pipe it gave it. The app decides: a request is carried out only in a
+// state where the same click in the menu bar would be, unknown ops and
+// malformed lines are ignored, and nothing about their content is logged.
 
 import Foundation
 import os
@@ -15,6 +15,15 @@ import os
 public struct WindowChannelRequest: Equatable, Sendable {
     public enum Op: String, CaseIterable, Sendable {
         case pause, resume, turnOn, tryAgain, openSystemSettings, quit, hold, release
+        /// Leave Demo Memory: back to the person's own memory, with
+        /// remembering as it was before, as the menu bar's Leave does.
+        case leaveDemo
+        /// The window is still deleting under its hold: the hold's end moves
+        /// 30 seconds out (`CaptureHold.renew`).
+        case renew
+        /// Turn Off, which the row offers while a turn-on is under way: the
+        /// newer word, as in the menu bar.
+        case turnOff
     }
 
     public let id: String
@@ -167,20 +176,28 @@ public struct WindowStatusMessage: Equatable, Sendable {
 /// row: the window may do only what the person could click here (SPEC
 /// 2.6.4). Turn On only after setup (before it, the row offers Finish
 /// Setup…), Resume only when paused, and so on. The hold is always asked;
-/// the app answers it at once when nothing holds the memory.
+/// the app answers it at once when nothing holds the memory, and renews or
+/// releases it only while it holds. Leave Demo Memory is the menu's own item
+/// beside the row: it is there whenever Demo Memory is in use
+/// (`demoMemory`), whatever the row offers.
 public enum WindowChannelPolicy {
-    public static func allows(_ request: WindowChannelRequest, row: StatusRow, holding: Bool) -> Bool {
+    public static func allows(_ request: WindowChannelRequest, row: StatusRow, holding: Bool,
+                              demoMemory: Bool = false) -> Bool {
         switch request.op {
         case .pause: return row.action == .pause
         case .resume: return row.action == .resume
         case .turnOn: return row.action == .turnOn
+        case .turnOff: return row.action == .turnOff
         case .tryAgain: return row.action == .tryAgain
         case .quit: return row.action == .quit
+        // Never in the middle of a forget: the window it reopens is the
+        // one deleting.
+        case .leaveDemo: return demoMemory && !holding
         case .openSystemSettings:
             guard case let .openSystemSettings(permission) = row.action else { return false }
             return permission == request.permission
         case .hold: return !holding
-        case .release: return holding
+        case .release, .renew: return holding
         }
     }
 }

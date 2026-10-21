@@ -27,7 +27,7 @@ final class WindowChannelServerTests: XCTestCase {
             #"{"v":1,"id":"r3","op":"openSystemSettings","permission":"accessibility"}"#))?.permission, .accessibility)
         for text in [
             "not json", "{}", #"{"v":2,"id":"r","op":"pause"}"#, #"{"v":1,"op":"pause"}"#,
-            #"{"v":1,"id":"","op":"pause"}"#, #"{"v":1,"id":"r","op":"turnOff"}"#,
+            #"{"v":1,"id":"","op":"pause"}"#, #"{"v":1,"id":"r","op":"wipe"}"#,
             #"{"v":1,"id":"r","op":"status","state":"remembering","title":"Remembering"}"#,
             #"{"v":1,"id":"r","op":"resume","until":"2026-10-12T15:40:00-07:00"}"#,
             #"{"v":1,"id":"r","op":"pause","until":"tomorrow"}"#,
@@ -75,6 +75,100 @@ final class WindowChannelServerTests: XCTestCase {
         XCTAssertFalse(WindowChannelPolicy.allows(request(.hold), row: row(.pause), holding: true))
         XCTAssertFalse(WindowChannelPolicy.allows(request(.release), row: row(.pause), holding: false))
         XCTAssertTrue(WindowChannelPolicy.allows(request(.release), row: row(nil), holding: true))
+    }
+
+    /// Leave Demo Memory is the menu's own item beside the row: the window
+    /// may send it whenever Demo Memory is in use, whatever the row offers
+    /// (paused by the person, or Off with Turn On), and never otherwise.
+    func testLeaveDemoMemoryIsTakenOnlyWhileDemoMemoryIsInUse() {
+        XCTAssertEqual(WindowChannelRequest.parse(line(#"{"v":1,"id":"l1","op":"leaveDemo"}"#))?.op, .leaveDemo)
+        XCTAssertNil(WindowChannelRequest.parse(line(
+            #"{"v":1,"id":"l2","op":"leaveDemo","until":"2026-10-12T15:40:00-07:00"}"#)), "only a pause has an end")
+        for action in [CaptureStatusAction.resume, .turnOn, .pause, .tryAgain, nil] {
+            XCTAssertTrue(WindowChannelPolicy.allows(request(.leaveDemo), row: row(action), holding: false,
+                                                     demoMemory: true), "\(String(describing: action))")
+            XCTAssertFalse(WindowChannelPolicy.allows(request(.leaveDemo), row: row(action), holding: false,
+                                                      demoMemory: false), "\(String(describing: action))")
+        }
+        XCTAssertFalse(WindowChannelPolicy.allows(request(.leaveDemo), row: row(.resume), holding: false),
+                       "Demo Memory is not in use unless the app says so")
+        XCTAssertFalse(WindowChannelPolicy.allows(request(.leaveDemo), row: row(nil), holding: true, demoMemory: true),
+                       "never in the middle of a forget")
+        // Resume is still only the row's own Resume: the window's Leave is
+        // never carried out as one.
+        XCTAssertFalse(WindowChannelPolicy.allows(request(.resume), row: row(.turnOn), holding: false,
+                                                  demoMemory: true))
+    }
+
+    @MainActor
+    private final class Performed {
+        var actions: [CaptureStatusAction] = []
+    }
+
+    /// While a turn-on is under way the row offers Turn Off, and the window
+    /// shows it. The window's Turn Off is carried out as the menu's, and is
+    /// taken only while the row offers it; a Pause is still only the row's
+    /// own Pause.
+    func testTurnOffIsTakenOnlyWhileTheRowOffersIt() async {
+        XCTAssertEqual(WindowChannelRequest.parse(line(#"{"v":1,"id":"o1","op":"turnOff"}"#))?.op, .turnOff)
+        XCTAssertTrue(WindowChannelPolicy.allows(request(.turnOff), row: row(.turnOff), holding: false))
+        for action in [CaptureStatusAction.pause, .resume, .turnOn, .tryAgain, nil] {
+            XCTAssertFalse(WindowChannelPolicy.allows(request(.turnOff), row: row(action), holding: false),
+                           "\(String(describing: action))")
+        }
+        XCTAssertFalse(WindowChannelPolicy.allows(request(.pause), row: row(.turnOff), holding: false))
+
+        let locator = FakeBinaryLocator()
+        locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
+        locator.agentURL = URL(fileURLWithPath: "/bundle/mci-agent")
+        let supervisor = ProcessSupervisor(
+            locator: locator, keyStore: FakeKeyStore(), runtimeConfig: FakeRuntimeConfig(captureEnabled: false),
+            topology: FakeSupervisorTopology(), keyCustodyPreparer: FakeKeyCustodyPreparer(), readinessTimeout: 0.1,
+            captureStatusReader: { (nil, nil) }, pauses: UserPauseController())
+        // A turn-on pressed and not landed yet, as the menu shows it.
+        supervisor.showForPreview(state: .idle, captureEnabled: false, receipt: nil, startedAt: nil, turningOn: true)
+        XCTAssertEqual(supervisor.menuRow(setupFinished: true).action, .turnOff)
+        let performed = Performed()
+        supervisor.windowStatusAction = { performed.actions.append($0) }
+
+        let paused = await supervisor.handleWindowRequest(request(.pause), setupFinished: true)
+        XCTAssertFalse(paused, "the row offers Turn Off, not Pause")
+        let off = await supervisor.handleWindowRequest(request(.turnOff), setupFinished: true)
+        XCTAssertTrue(off)
+        XCTAssertEqual(performed.actions, [.turnOff], "the menu's own Turn Off")
+    }
+
+    /// While the window deletes under its hold it renews the hold, so a
+    /// long forget isn't cut off at 30 seconds. A renewal is taken only
+    /// while the app holds, and carried out as the hold's own.
+    func testRenewIsTakenOnlyWhileTheAppHolds() async throws {
+        XCTAssertEqual(WindowChannelRequest.parse(line(#"{"v":1,"id":"n1","op":"renew"}"#))?.op, .renew)
+        XCTAssertNil(WindowChannelRequest.parse(line(
+            #"{"v":1,"id":"n2","op":"renew","until":"2026-10-12T15:40:00-07:00"}"#)), "only a pause has an end")
+        XCTAssertTrue(WindowChannelPolicy.allows(request(.renew), row: row(nil), holding: true))
+        for action in [CaptureStatusAction.pause, .resume, .turnOn, nil] {
+            XCTAssertFalse(WindowChannelPolicy.allows(request(.renew), row: row(action), holding: false),
+                           "\(String(describing: action))")
+        }
+
+        let locator = FakeBinaryLocator()
+        locator.helperURL = URL(fileURLWithPath: "/bundle/MCICaptureHelper")
+        locator.agentURL = URL(fileURLWithPath: "/bundle/mci-agent")
+        let supervisor = ProcessSupervisor(
+            locator: locator, keyStore: FakeKeyStore(), runtimeConfig: FakeRuntimeConfig(captureEnabled: false),
+            topology: FakeSupervisorTopology(), keyCustodyPreparer: FakeKeyCustodyPreparer(), readinessTimeout: 0.1,
+            captureStatusReader: { (nil, nil) }, pauses: UserPauseController())
+        let early = await supervisor.handleWindowRequest(request(.renew), setupFinished: true)
+        XCTAssertFalse(early, "nothing is held yet")
+        let held = await supervisor.handleWindowRequest(request(.hold), setupFinished: true)
+        XCTAssertTrue(held)
+        let renewed = await supervisor.handleWindowRequest(request(.renew), setupFinished: true)
+        XCTAssertTrue(renewed)
+        XCTAssertTrue(supervisor.forgetHold.isHolding)
+        let released = await supervisor.handleWindowRequest(request(.release), setupFinished: true)
+        XCTAssertTrue(released)
+        let late = await supervisor.handleWindowRequest(request(.renew), setupFinished: true)
+        XCTAssertFalse(late, "a released hold isn't renewed")
     }
 
     // MARK: The pipe

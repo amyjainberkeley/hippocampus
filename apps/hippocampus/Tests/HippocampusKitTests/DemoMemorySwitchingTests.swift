@@ -231,6 +231,73 @@ final class DemoMemorySwitchingTests: XCTestCase {
 
     // MARK: Leaving takes back exactly what using changed
 
+    /// The window's footer, in Demo Memory, offers one action, Leave Demo
+    /// Memory, which it sends over the pipe as `leaveDemo`. The app carries
+    /// it out as the menu bar's Leave: a pause the person made before Demo
+    /// Memory is still there afterwards.
+    func testLeavingFromTheWindowKeepsAPauseThePersonMade() async throws {
+        let home = try makeHome()
+        let supervisor = ProcessSupervisor(
+            locator: FakeBinaryLocator(), keyStore: FakeKeyStore(),
+            runtimeConfig: FakeRuntimeConfig(captureEnabled: true), topology: FakeSupervisorTopology(),
+            keyCustodyPreparer: FakeKeyCustodyPreparer(), readinessTimeout: 0.1,
+            captureStatusReader: { (nil, nil) }
+        )
+        // The person paused, Until I Resume, before Use Demo Memory….
+        supervisor.showForPreview(state: .paused, captureEnabled: true, receipt: nil, startedAt: nil)
+        supervisor.pause(until: nil)
+        XCTAssertNotNil(supervisor.pausedSince)
+        let controller = DemoMemoryController(
+            host: SupervisorDemoMemoryHost(supervisor: supervisor,
+                                           locator: BundleBinaryLocator(bundle: Bundle(for: Self.self))),
+            maker: FakeDemoMaker(), folder: .standard(home: home), home: home
+        )
+        DemoMemory.attach(controller)
+        defer { DemoMemory.detach() }
+        let used = await controller.use()
+        XCTAssertTrue(used)
+        // The window's Leave Demo Memory, as the app receives it.
+        let leave = WindowChannelRequest(id: "leave-demo", op: .leaveDemo)
+        XCTAssertTrue(WindowChannelPolicy.allows(leave, row: supervisor.menuRow(setupFinished: true), holding: false,
+                                                 demoMemory: true))
+        let handled = await supervisor.handleWindowRequest(leave, setupFinished: true)
+        XCTAssertTrue(handled)
+        try await waitUntil { controller.phase == .off }
+        XCTAssertNotNil(supervisor.pausedSince,
+                        "Leave Demo Memory in the window ended the pause the person made before Demo Memory")
+    }
+
+    /// With remembering off before Demo Memory, the window's Leave Demo
+    /// Memory still leaves it.
+    func testLeavingFromTheWindowWorksWhenRememberingWasOff() async throws {
+        let home = try makeHome()
+        let supervisor = ProcessSupervisor(
+            locator: FakeBinaryLocator(), keyStore: FakeKeyStore(),
+            runtimeConfig: FakeRuntimeConfig(captureEnabled: false), topology: FakeSupervisorTopology(),
+            keyCustodyPreparer: FakeKeyCustodyPreparer(), readinessTimeout: 0.1,
+            captureStatusReader: { (nil, nil) }
+        )
+        supervisor.showForPreview(state: .idle, captureEnabled: false, receipt: nil, startedAt: nil)
+        let controller = DemoMemoryController(
+            host: SupervisorDemoMemoryHost(supervisor: supervisor,
+                                           locator: BundleBinaryLocator(bundle: Bundle(for: Self.self))),
+            maker: FakeDemoMaker(), folder: .standard(home: home), home: home
+        )
+        DemoMemory.attach(controller)
+        defer { DemoMemory.detach() }
+        let used = await controller.use()
+        XCTAssertTrue(used)
+        let leave = WindowChannelRequest(id: "leave-demo", op: .leaveDemo)
+        let row = supervisor.menuRow(setupFinished: true)
+        XCTAssertTrue(WindowChannelPolicy.allows(leave, row: row, holding: false, demoMemory: true),
+                      "the app refuses the window's Leave Demo Memory (the menu row offers \(String(describing: row.action)))")
+        let handled = await supervisor.handleWindowRequest(leave, setupFinished: true)
+        XCTAssertTrue(handled)
+        try await waitUntil { controller.phase == .off }
+        XCTAssertEqual(controller.phase, .off, "the window's Leave Demo Memory left nothing")
+        XCTAssertNil(supervisor.pausedSince, "remembering is off again, as it was, not paused")
+    }
+
     func testAPauseThePersonMadeStaysAfterLeaving() async throws {
         let home = try makeHome()
         let host = FakeDemoHost()
@@ -239,6 +306,56 @@ final class DemoMemorySwitchingTests: XCTestCase {
         _ = await controller.use()
         await controller.leave()
         XCTAssertEqual(host.calls, ["readers(open)", "readers(as-is)"], "already paused: nothing to pause or resume")
+    }
+
+    /// A pause of the person's that ends on its own (For 1 Hour) would turn
+    /// remembering on mid-take: Demo Memory's own pause takes its place, and
+    /// leaving puts it back with its end.
+    func testATimedPauseIsSetAsideWhileInUseAndPutBackOnLeaving() async throws {
+        let home = try makeHome()
+        let host = FakeDemoHost()
+        let end = now.addingTimeInterval(3_600)
+        host.isPaused = true
+        host.pausedUntil = end
+        let controller = makeController(home: home, host: host)
+        let used = await controller.use()
+        XCTAssertTrue(used)
+        XCTAssertEqual(host.calls, ["pause", "readers(open)"], "Demo Memory's pause stands in for the timed one")
+        XCTAssertNil(host.pausedUntil, "nothing is due to resume on its own while the week is in use")
+        XCTAssertEqual(DemoMemoryFolder.standard(home: home).readInUse(),
+                       .init(enteredAt: now, wasPaused: true, pausedUntil: end))
+        await controller.leave()
+        XCTAssertEqual(host.calls, ["pause", "readers(open)", "readers(as-is)", "pause(until)"])
+        XCTAssertEqual(host.pausedUntil, end, "the person's own pause, with its own end")
+    }
+
+    /// The end came while the week was in use: leaving turns remembering
+    /// on, as the timed pause would have.
+    func testATimedPauseWhoseEndCameWhileInUseIsOverOnLeaving() async throws {
+        let home = try makeHome()
+        let host = FakeDemoHost()
+        host.isPaused = true
+        host.pausedUntil = now.addingTimeInterval(-60)
+        let controller = makeController(home: home, host: host)
+        _ = await controller.use()
+        await controller.leave()
+        XCTAssertEqual(host.calls, ["pause", "readers(open)", "readers(as-is)", "resume"])
+        XCTAssertFalse(host.isPaused)
+    }
+
+    /// A pause that couldn't be made puts the person's timed pause back.
+    func testWhenRememberingWontPauseATimedPauseComesBack() async throws {
+        let home = try makeHome()
+        let host = FakeDemoHost()
+        let end = now.addingTimeInterval(3_600)
+        host.isPaused = true
+        host.pausedUntil = end
+        host.pauseError = DemoMemoryHostError.couldNotPause
+        let controller = makeController(home: home, host: host)
+        let used = await controller.use()
+        XCTAssertFalse(used)
+        XCTAssertEqual(host.calls, ["pause", "pause(until)"])
+        XCTAssertEqual(host.pausedUntil, end)
     }
 
     func testWhenTheWeekCantBeMadeNothingChanges() async throws {
@@ -295,6 +412,31 @@ final class DemoMemorySwitchingTests: XCTestCase {
         makeController(home: home, host: host).finishLeftover()
         XCTAssertEqual(host.calls, [])
         XCTAssertFalse(FileManager.default.fileExists(atPath: folder.url.path))
+    }
+
+    /// A relaunch after a crash puts a timed pause back with its end, or
+    /// turns remembering on if its end has passed, as Leave would have.
+    func testALeftoverWeekPutsBackATimedPause() throws {
+        let home = try makeHome()
+        let folder = DemoMemoryFolder.standard(home: home)
+        let later = now.addingTimeInterval(3_600)
+        let earlier = now.addingTimeInterval(-60)
+        for (end, expected) in [(later, ["pause(until)"]), (earlier, ["resume"])] {
+            try folder.prepareEmpty(home: home)
+            try folder.writeInUse(.init(enteredAt: now, wasPaused: true, pausedUntil: end))
+            let host = FakeDemoHost()
+            host.isPaused = true
+            makeController(home: home, host: host).finishLeftover()
+            XCTAssertEqual(host.calls, expected)
+            XCTAssertEqual(host.pausedUntil, end > now ? end : nil)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: folder.url.path))
+        }
+        // A record from before the end was kept still reads.
+        try folder.prepareEmpty(home: home)
+        try DemoMemoryFolder.replace(Data(#"{"version":1,"entered_at":"2026-10-19T21:01:00Z","was_paused":false}"#.utf8),
+                                     at: folder.inUse)
+        XCTAssertEqual(folder.readInUse()?.wasPaused, false)
+        XCTAssertNil(folder.readInUse()?.pausedUntil)
     }
 
     // MARK: Its folder
@@ -514,6 +656,7 @@ final class DemoMemorySwitchingTests: XCTestCase {
 @MainActor
 final class FakeDemoHost: DemoMemoryHost {
     var isPaused = false
+    var pausedUntil: Date?
     var isQuiet = true
     var isConnectingAITools = false
     var pauseError: Error?
@@ -526,12 +669,21 @@ final class FakeDemoHost: DemoMemoryHost {
         calls.append("pause")
         if let pauseError { throw pauseError }
         isPaused = true
+        // Until Leave: a timed pause's end is set aside.
+        pausedUntil = nil
         isQuiet = true
+    }
+
+    func pauseRemembering(until end: Date) {
+        calls.append("pause(until)")
+        isPaused = true
+        pausedUntil = end
     }
 
     func resumeRemembering() {
         calls.append("resume")
         isPaused = false
+        pausedUntil = nil
     }
 
     func restartReaders(openWindow: Bool) async {

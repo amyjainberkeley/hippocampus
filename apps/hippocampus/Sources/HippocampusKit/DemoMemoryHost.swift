@@ -14,15 +14,21 @@ import Foundation
 public protocol DemoMemoryHost: AnyObject {
     /// A pause is kept: the person's, or the one Demo Memory made.
     var isPaused: Bool { get }
+    /// When the pause kept now ends on its own (For 1 Hour, Until
+    /// Tomorrow); nil for one that waits for the person, or none.
+    var pausedUntil: Date? { get }
     /// Nothing reads the screen or is about to: no capture helper or agent
     /// runs or is starting, no turn-on is under way, and no stop failed.
     var isQuiet: Bool { get }
     /// Connect AI Tools… is writing the AI tools' settings now. They always
     /// name the person's own memory, never Demo Memory.
     var isConnectingAITools: Bool { get }
-    /// Pause remembering, and return once nothing reads the screen. Throws
-    /// when it couldn't.
+    /// Pause remembering until Leave Demo Memory, even over a pause of the
+    /// person's that would end on its own, and return once nothing reads
+    /// the screen. Throws when it couldn't.
     func pauseRemembering() async throws
+    /// Put back the person's own timed pause, ending at `end`.
+    func pauseRemembering(until end: Date)
     /// Take back the pause Demo Memory made.
     func resumeRemembering()
     /// End Ask's memory sessions and the window, then open the window on
@@ -35,6 +41,13 @@ public protocol DemoMemoryHost: AnyObject {
     func confirmUse() async -> Bool
     /// Tells the person why Demo Memory didn't start.
     func report(_ message: String)
+}
+
+public extension DemoMemoryHost {
+    /// A host whose pauses never end on their own: there is no timed pause
+    /// to set aside, so none is ever put back.
+    var pausedUntil: Date? { nil }
+    func pauseRemembering(until end: Date) {}
 }
 
 public enum DemoMemoryHostError: Error, Equatable {
@@ -68,6 +81,8 @@ public final class SupervisorDemoMemoryHost: DemoMemoryHost {
 
     public var isPaused: Bool { supervisor.pausedSince != nil }
 
+    public var pausedUntil: Date? { supervisor.pausedUntil }
+
     public var isQuiet: Bool {
         guard !supervisor.turningOn, !supervisor.stopFailed else { return false }
         switch supervisor.state {
@@ -79,7 +94,10 @@ public final class SupervisorDemoMemoryHost: DemoMemoryHost {
     public var isConnectingAITools: Bool { connectingAITools() }
 
     public func pauseRemembering() async throws {
-        supervisor.setPaused(true)
+        // Until the person resumes, which Leave Demo Memory stands in for: a
+        // timed pause's end would turn remembering on mid-take, and reopen
+        // the window on the person's own memory. Leave puts it back.
+        supervisor.pause(until: nil)
         let deadline = ContinuousClock.now.advanced(by: pauseWait)
         while !isQuiet {
             guard !supervisor.stopFailed, ContinuousClock.now < deadline else {
@@ -87,6 +105,10 @@ public final class SupervisorDemoMemoryHost: DemoMemoryHost {
             }
             try? await Task.sleep(for: .milliseconds(50))
         }
+    }
+
+    public func pauseRemembering(until end: Date) {
+        supervisor.pause(until: end)
     }
 
     public func resumeRemembering() {
