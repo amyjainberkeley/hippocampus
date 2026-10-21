@@ -89,6 +89,57 @@ final class MemoryEraseTests: XCTestCase {
         try await supervisor.shutdownAndWait()
     }
 
+    /// An erase that waits until the test lets it finish.
+    private final class GatedEraser: MemoryErasing {
+        private(set) var started = false
+        private var finished = false
+        private var gate: CheckedContinuation<Void, Never>?
+
+        func erase(agentURL: URL, databaseURL: URL, environment: [String: String]) async -> Bool {
+            started = true
+            if !finished { await withCheckedContinuation { gate = $0 } }
+            return true
+        }
+
+        func finish() {
+            finished = true
+            gate?.resume()
+            gate = nil
+        }
+    }
+
+    /// The erase is the app's own pass: the window that asked may close or
+    /// send a release, and the erase may outlast a forget's 30 seconds, yet
+    /// nothing remembers until the erase and the new key are done.
+    func testAWindowThatClosesMidEraseNeverStartsRememberingUnderIt() async throws {
+        let supervisor = supervisor()
+        let eraser = GatedEraser()
+        supervisor.memoryEraser = eraser
+        try await supervisor.startAndWaitForReadiness()
+        XCTAssertEqual(supervisor.state, .running)
+        let erasing = Task { @MainActor in
+            await supervisor.handleWindowRequest(WindowChannelRequest(id: "e3", op: .erase))
+        }
+        await eventually { eraser.started }
+        XCTAssertTrue(eraser.started)
+        XCTAssertEqual(supervisor.forgetHold.holder, .app)
+
+        _ = await supervisor.handleWindowRequest(WindowChannelRequest(id: "r3", op: .release))
+        await supervisor.forgetHold.windowEnded()
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertTrue(supervisor.forgetHold.isHolding, "the erase still holds")
+        XCTAssertTrue(supervisor.holdingForForget)
+        XCTAssertNotEqual(supervisor.state, .running, "nothing remembers while the memory is erased")
+
+        eraser.finish()
+        let erased = await erasing.value
+        XCTAssertTrue(erased)
+        await eventually { supervisor.state == .running }
+        XCTAssertEqual(supervisor.state, .running, "it was on, so it comes back once the erase is done")
+        XCTAssertFalse(supervisor.forgetHold.isHolding)
+        try await supervisor.shutdownAndWait()
+    }
+
     func testTheWindowMayAskForAnEraseOnlyOutsideAHold() {
         let row = StatusRow(title: "x", detail: nil, action: .pause)
         let erase = WindowChannelRequest(id: "r", op: .erase)

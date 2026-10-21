@@ -281,6 +281,58 @@ final class CaptureHoldTests: XCTestCase {
         sleeps.endAll()
     }
 
+    /// The app's own pass (Delete Everything, Forget Pictures of Other
+    /// Windows… now) holds by itself: no 30 seconds run out under it, the
+    /// window's end and the window's release don't end it, and only the
+    /// app's release, or the 10 minutes, do.
+    func testTheAppsOwnHoldEndsOnlyWithTheAppsReleaseOrTheTenMinutes() async throws {
+        let sleeps = Sleeps()
+        let target = Target()
+        let hold = CaptureHold(target: target, sleep: { await sleeps.sleep($0) })
+        let held = await hold.hold(by: .app)
+        XCTAssertTrue(held)
+        XCTAssertEqual(hold.holder, .app)
+        await until { sleeps.count(CaptureHold.longest) == 1 }
+        XCTAssertEqual(target.stops, 1, "remembering stopped")
+        XCTAssertTrue(hold.renew(), "a renewal is answered")
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(sleeps.count(CaptureHold.limit), 0, "no 30 seconds run, even after a renewal")
+
+        await hold.windowEnded()
+        await hold.release()
+        XCTAssertTrue(hold.isHolding, "the window neither ends nor releases the app's pass")
+        XCTAssertFalse(await hold.hold(), "nor takes a hold of its own meanwhile")
+        XCTAssertEqual(target.restarts, 0)
+
+        await hold.release(by: .app)
+        XCTAssertFalse(hold.isHolding)
+        XCTAssertEqual(target.restarts, 1, "remembering comes back once the app is done")
+
+        // The cap still holds for the app's own pass.
+        let capped = await hold.hold(by: .app)
+        XCTAssertTrue(capped)
+        await until { sleeps.count(CaptureHold.longest) == 2 }
+        sleeps.end(CaptureHold.longest, 1)
+        await until { !hold.isHolding }
+        XCTAssertFalse(hold.isHolding)
+        XCTAssertEqual(target.restarts, 2)
+        sleeps.endAll()
+    }
+
+    /// The app never releases a window's hold by mistake, and a window's hold
+    /// is the window's as before.
+    func testTheAppsReleaseNeverEndsTheWindowsHold() async {
+        let target = Target()
+        let hold = CaptureHold(target: target)
+        _ = await hold.hold()
+        XCTAssertEqual(hold.holder, .window)
+        await hold.release(by: .app)
+        XCTAssertTrue(hold.isHolding)
+        await hold.windowEnded()
+        XCTAssertFalse(hold.isHolding)
+        XCTAssertEqual(target.restarts, 1)
+    }
+
     // MARK: The supervisor's hold
 
     private func supervisor(pauses: UserPauseController) -> (ProcessSupervisor, FakeSupervisorTopology) {

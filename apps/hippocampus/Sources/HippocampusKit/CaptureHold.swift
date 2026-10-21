@@ -12,7 +12,9 @@
 // turned it off in the meantime. A hold also ends when the window's process
 // does, and on its own 30 seconds after the lease was free, or after the
 // window last said it is still deleting (`renew`), and never lasts more than
-// 10 minutes.
+// 10 minutes. The app holds by itself for its own passes (Delete Everything,
+// Forget Pictures of Other Windows… now): such a hold ends when the app
+// releases it, or at the 10 minutes, never with the window or its 30 seconds.
 
 import Foundation
 
@@ -39,6 +41,13 @@ public protocol CaptureHolding: AnyObject {
 
 @MainActor
 public final class CaptureHold {
+    /// Who holds: the window, for a forget it carries out, or the app, for a
+    /// pass of its own that the window only asked for.
+    public enum Holder: Sendable {
+        case window
+        case app
+    }
+
     /// How long the window may wait for the writer lease.
     public nonisolated static let stopWait: Duration = .seconds(10)
     /// A hold ends on its own this long after the writer lease is free, or
@@ -53,6 +62,8 @@ public final class CaptureHold {
     private let sleep: @Sendable (Duration) async throws -> Void
     /// The hold now, with whether remembering was on when it began.
     public private(set) var active: (wasOn: Bool, id: UUID)?
+    /// Who holds now; meaningful while `active` is set.
+    public private(set) var holder: Holder = .window
     private var expiry: Task<Void, Never>?
     private var cap: Task<Void, Never>?
 
@@ -67,11 +78,12 @@ public final class CaptureHold {
     /// Begins a hold. True once nothing holds the writer lease: at once when
     /// remembering wasn't on, after the stop when it was. False when it
     /// couldn't be had in time; then nothing is held.
-    public func hold() async -> Bool {
+    public func hold(by holder: Holder = .window) async -> Bool {
         guard active == nil else { return false }
         let wasOn = target.isRememberingForHold
         let id = UUID()
         active = (wasOn, id)
+        self.holder = holder
         target.holdChanged(true)
         cap = Task { [weak self, sleep] in
             try? await sleep(Self.longest)
@@ -86,8 +98,10 @@ public final class CaptureHold {
             }
         }
         guard active?.id == id else { return false }
-        // The window's 30 seconds start now, with the lease free.
-        armExpiry(id)
+        // The window's 30 seconds start now, with the lease free. The app's
+        // own pass ends its hold itself, however long it takes, up to
+        // `longest`.
+        if holder == .window { armExpiry(id) }
         return true
     }
 
@@ -97,19 +111,21 @@ public final class CaptureHold {
     @discardableResult
     public func renew() -> Bool {
         guard let id = active?.id else { return false }
-        armExpiry(id)
+        if holder == .window { armExpiry(id) }
         return true
     }
 
-    /// The window is done: remembering comes back if it was on.
-    public func release() async {
-        guard let id = active?.id else { return }
+    /// `holder` is done: remembering comes back if it was on. Only the one
+    /// who holds can release: the window never ends the app's own pass.
+    public func release(by holder: Holder = .window) async {
+        guard let id = active?.id, self.holder == holder else { return }
         await end(id)
     }
 
-    /// The window's process ended mid-hold: the same as a release.
+    /// The window's process ended mid-hold: the same as its release. The
+    /// app's own pass goes on, and the app releases it.
     public func windowEnded() async {
-        await release()
+        await release(by: .window)
     }
 
     private func armExpiry(_ id: UUID) {

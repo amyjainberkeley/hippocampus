@@ -2289,7 +2289,10 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
         // Demo Memory's window shows the made-up store; it never erases the
         // person's own.
         guard MemoryEraseGate.allowed, let agentURL = locator.agentPath() else { return false }
-        guard await forgetHold.hold() else { return false }
+        // The app's own hold: however long the erase and the new key take,
+        // and even if the window that asked closes, nothing starts until
+        // both are done.
+        guard await forgetHold.hold(by: .app) else { return false }
         let environment = ProcessSupervisorLaunchPlan.sanitizedEnvironment(
             baseEnvironment: ProcessInfo.processInfo.environment,
             dbPath: dbPath,
@@ -2307,7 +2310,7 @@ public final class ProcessSupervisor: ObservableObject, Sendable {
                 logger.error("supervisor: a new key after the erase: \(error.localizedDescription)")
             }
         }
-        await forgetHold.release()
+        await forgetHold.release(by: .app)
         if erased { reopenRecallUI(initialTab: "privacy") }
         return erased
     }
@@ -2632,14 +2635,8 @@ extension ProcessSupervisor {
     public func forgetSidePicturesNow() async -> Bool {
         guard !isRememberingForHold, !shutdownRequested, shutdownTask == nil, memoryOnDisk(),
               let agent = locator.agentPath() else { return false }
-        guard await forgetHold.hold() else { return false }
-        let renewal = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(10))
-                guard !Task.isCancelled else { return }
-                self?.forgetHold.renew()
-            }
-        }
+        // The app's own hold: it lasts the pass, whatever the window does.
+        guard await forgetHold.hold(by: .app) else { return false }
         let pass = sidePicturesPass
         let arguments = ["forget-side-pictures", "--db-path", dbPath.path]
         let environment = ProcessSupervisorLaunchPlan.ownEnvironment(
@@ -2654,8 +2651,7 @@ extension ProcessSupervisor {
         }
         let finished = await run.value
         limit.cancel()
-        renewal.cancel()
-        await forgetHold.release()
+        await forgetHold.release(by: .app)
         if !finished {
             logger.error("supervisor: forgetting pictures of other windows now did not finish; the agent does it next")
         }
