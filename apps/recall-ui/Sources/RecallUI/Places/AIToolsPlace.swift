@@ -42,10 +42,13 @@ struct AIToolsPlace: View {
                 }
                 content
             }
-            .frame(maxWidth: 820, alignment: .leading)
+            // The column About You, Privacy and Working On use, so the page
+            // doesn't jump sideways between its neighbours.
             .padding(.horizontal, 32)
-            .padding(.vertical, 28)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 24)
+            .padding(.bottom, 48)
+            .frame(maxWidth: 940, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
         .background(MCI.Color.background)
         .task {
