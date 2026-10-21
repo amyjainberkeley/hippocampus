@@ -265,9 +265,10 @@ struct SidebarView: View {
                     }
             }
         case .showAll:
-            Text(NavigationCopy.showAll)
+            // No symbol, its words in line with every row's (SPEC 2.2).
+            SidebarTextRow(NavigationCopy.showAll)
                 .foregroundStyle(selection == row ? MCI.Color.foreground : MCI.Color.sidebarSecondary)
-                .padding(.leading, SidebarMetrics.labelInset)
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel(NavigationCopy.showAllAccessibility(count: model.allItemCount))
         }
     }
@@ -343,8 +344,6 @@ struct SidebarFootnote: View {
 enum SidebarMetrics {
     /// A row's height at the system's medium sidebar size.
     static let rowHeight: CGFloat = 28
-    /// From a row's leading edge to its label: the icon's slot and the gap.
-    static let labelInset: CGFloat = 25
     /// A Working On item's little screenshot (SPEC-DELTA 2: about 26 x 16).
     static let thumbnailSize = SidebarThumbnailLayout.size
     /// How far the little screenshot moves toward its name, so it never
