@@ -58,6 +58,8 @@ struct LibraryLensView: View {
         .background(MCI.Color.background)
         .task {
             if model.hits.isEmpty { await model.reload() } else { await model.refresh() }
+            // A lens with nothing in its first page reads on a little.
+            await model.readOnForRows()
         }
         .task(id: [model.hits.first?.id ?? 0, UInt64(model.hits.count)]) {
             await items.load(model.hits.map(\.id))

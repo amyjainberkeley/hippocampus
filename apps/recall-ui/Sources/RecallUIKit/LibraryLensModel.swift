@@ -87,8 +87,9 @@ public final class LibraryLensModel: ObservableObject {
     }
 
     /// Reads on while the lens or its chip shows nothing and older moments
-    /// may remain, `pagesReadOnForRows` pages at most.
-    private func readOnForRows() async {
+    /// may remain, `pagesReadOnForRows` pages at most: when the lens opens
+    /// and when a chip is chosen, never on the window's ten-second tick.
+    public func readOnForRows() async {
         var pages = 0
         while shownHits.isEmpty, canLoadEarlier, !isLoading, !isLoadingEarlier, pages < Self.pagesReadOnForRows {
             pages += 1
@@ -138,8 +139,6 @@ public final class LibraryLensModel: ObservableObject {
             earlierUpperBound = page.next
             selection = selection.filter { id in page.rows.contains { $0.id == id } }
             if selection.isEmpty { isDetailFocused = false }
-            isLoading = false
-            await readOnForRows()
         } catch {
             guard request == generation, !Task.isCancelled else { return }
             hits = []

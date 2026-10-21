@@ -147,6 +147,27 @@ final class LibraryLensModelTests: XCTestCase {
         XCTAssertNil(model.readBackTo, "a chip with rows says nothing of the kind")
     }
 
+    /// A lens reads on when it opens and when a chip is chosen, never on the
+    /// window's ten-second tick, which reads the first page again at most.
+    func testTheLensReadsOnWhenItOpensNotOnEveryTick() async {
+        // A browser full of other pages, and one Google Doc far below them.
+        var moments = (0..<300).map { index in
+            MomentFactory.hit(UInt64(2_000 + index), "com.google.Chrome", title: "Page \(index)",
+                              url: "https://devnotes.example/\(index)", minutesAgo: Double(index + 1))
+        }
+        moments.append(MomentFactory.hit(9, "com.google.Chrome", title: "Q4 planning",
+                                         url: "https://docs.google.com/document/d/q4", minutesAgo: 400))
+        let model = LibraryLensModel(lens: .documents, reader: MomentsReader(moments), pageSize: 10,
+                                     deletions: MemoryDeletionSignal())
+        await model.reload()
+        XCTAssertTrue(model.hits.isEmpty, "the first page holds no document")
+        XCTAssertTrue(model.canLoadEarlier)
+        await model.refresh()
+        XCTAssertTrue(model.hits.isEmpty, "the tick doesn't read on")
+        await model.readOnForRows()
+        XCTAssertEqual(model.shownHits.map(\.id), [9], "opening the lens reads on to it")
+    }
+
     func testSinceSaysTheDayAsAPersonWould() throws {
         let calendar = SampleDay.calendar
         let now = SampleDay.now
