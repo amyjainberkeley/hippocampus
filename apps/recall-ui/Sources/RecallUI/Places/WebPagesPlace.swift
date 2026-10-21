@@ -3,17 +3,14 @@ import RecallUIKit
 import SwiftUI
 
 /// Setup's browser extension panel (SPEC 3.5): Add Browser Extension… on Web
-/// Pages and Looked Up. The app opens it, through this window's own app, so
-/// another copy that knows the link never answers it.
+/// Pages and Looked Up. The app that started this window opens it, asked
+/// through the typed route Preferences uses (`.browserExtension`), so neither
+/// another copy that knows the link nor this window, which shares the app's
+/// bundle, ever answers it.
 enum BrowserExtensionSetup {
-    static let url = URL(string: "hippocampus://setup/browser-extension")!
-
     @MainActor
     static func open() {
-        guard let app = WorkspacePreferencesDestination.hostApplication(bundleURL: Bundle.main.bundleURL) else { return }
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        NSWorkspace.shared.open([url], withApplicationAt: app, configuration: configuration)
+        Task { _ = await WorkspacePreferencesRouter.shared.open(.browserExtension, bundleURL: Bundle.main.bundleURL) }
     }
 }
 

@@ -36,13 +36,37 @@ final class PreferencesOpenRequestTests: XCTestCase {
             userInfo: request.userInfo), executableURL: executable))
     }
 
+    /// The window's Add Browser Extension… asks for setup's panel on the same
+    /// typed channel (SPEC 3.5): only the panel's exact name is a setup
+    /// request, it carries no pane, and nothing else changes.
+    func testSetupsBrowserExtensionPanelIsATypedTargetAndNothingLooser() {
+        let fromLaunch = PreferencesOpenRequest(arguments: ["--open-preferences", "browser-extension"])
+        XCTAssertEqual(fromLaunch?.target, .setupPanel(.browserExtension))
+        XCTAssertNil(fromLaunch?.section)
+        let request = PreferencesOpenRequest(target: .setupPanel(.browserExtension))
+        XCTAssertEqual(request.userInfo, ["section": "browser-extension", "request_id": request.id.uuidString])
+        let good = Notification(name: PreferencesOpenRequest.notificationName,
+                                object: executable.path, userInfo: request.userInfo)
+        XCTAssertEqual(PreferencesOpenRequest(notification: good, executableURL: executable), request)
+        for value in ["Browser-Extension", "browser-extension/", "setup/browser-extension",
+                      "hippocampus://setup/browser-extension", "browser_extension", "app-access", "never-read"] {
+            XCTAssertNil(PreferencesOpenRequest(arguments: ["--open-preferences", value]), value)
+            XCTAssertNil(PreferencesOpenRequest(notification: Notification(
+                name: good.name, object: executable.path,
+                userInfo: ["section": value, "request_id": request.id.uuidString]), executableURL: executable), value)
+        }
+        // A pane is still a pane.
+        XCTAssertEqual(PreferencesOpenRequest(arguments: ["--open-preferences", "privacy"])?.target, .preferences(.privacy))
+    }
+
     func testWireContractMatchesRecallWithoutLinkingItsDatabaseLibrary() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let recall = try String(contentsOf: root.appendingPathComponent(
             "recall-ui/Sources/RecallUIKit/WorkspacePreferences.swift"), encoding: .utf8)
         for value in [PreferencesOpenRequest.flag, PreferencesOpenRequest.notificationName.rawValue,
-                      PreferencesOpenRequest.acknowledgementName.rawValue, "request_id", "section"] {
+                      PreferencesOpenRequest.acknowledgementName.rawValue, "request_id", "section"]
+            + SetupPanelRoute.allCases.map(\.rawValue) {
             XCTAssertTrue(recall.contains("\"\(value)\""), value)
         }
     }

@@ -28,7 +28,24 @@ final class WorkspacePreferencesTests: XCTestCase {
             "hippocampus://preferences/privacy",
             "hippocampus://preferences/advanced",
             "hippocampus://preferences/about",
+            "hippocampus://setup/browser-extension",
         ])
+    }
+
+    /// Add Browser Extension… (SPEC 3.5) asks the exact app that started the
+    /// window for setup's panel through the same typed route as a pane: a
+    /// notification to that app's own executable while it runs, else that
+    /// executable launched with the panel's name. Never a link.
+    func testSetupsBrowserExtensionPanelGoesThroughTheTypedRoute() {
+        let bundle = URL(fileURLWithPath: "/Applications/Hippocampus.app")
+        let parent = bundle.appendingPathComponent("Contents/MacOS/Hippocampus").resolvingSymlinksInPath()
+        let destination = WorkspacePreferencesDestination.browserExtension
+        XCTAssertEqual(destination.routingPlan(bundleURL: bundle, runningExecutableURLs: [parent]),
+                       .notify(executable: parent))
+        XCTAssertEqual(destination.routingPlan(bundleURL: bundle, runningExecutableURLs: []),
+                       .launch(executable: parent, arguments: ["--open-preferences", "browser-extension"]))
+        let id = UUID()
+        XCTAssertEqual(destination.notificationInfo(id: id), ["section": "browser-extension", "request_id": id.uuidString])
     }
 
     func testOnlyTheRunningApplicationBundleIsEligibleForPreferences() {

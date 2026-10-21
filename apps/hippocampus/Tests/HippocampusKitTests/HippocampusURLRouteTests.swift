@@ -78,22 +78,28 @@ final class HippocampusURLRouteTests: XCTestCase {
         }
     }
 
-    /// Web Pages' note and Looked Up's empty state open that panel through
-    /// the window's own app, not Preferences › AI Tools, which says nothing
-    /// about browsers.
+    /// Web Pages' note and Looked Up's empty state open that panel, not
+    /// Preferences › AI Tools, which says nothing about browsers. They ask
+    /// the app that started the window on the typed route a pane takes
+    /// (`.browserExtension`), whose link is this exact route.
     func testTheWindowsAddBrowserExtensionButtonsOpenSetupsExtensionPanel() throws {
-        let places = URL(fileURLWithPath: #filePath)
+        let recall = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent()
-            .appendingPathComponent("recall-ui/Sources/RecallUI/Places", isDirectory: true)
+            .appendingPathComponent("recall-ui/Sources", isDirectory: true)
+        let places = recall.appendingPathComponent("RecallUI/Places", isDirectory: true)
         let webPages = try String(contentsOf: places.appendingPathComponent("WebPagesPlace.swift"), encoding: .utf8)
         let lookedUp = try String(contentsOf: places.appendingPathComponent("LookedUpPlace.swift"), encoding: .utf8)
-        let link = try XCTUnwrap(webPages.range(of: #"hippocampus://setup/[a-z-]+"#, options: .regularExpression))
-        XCTAssertEqual(HippocampusURLRoute.parse(try XCTUnwrap(URL(string: String(webPages[link])))),
+        let destinations = try String(contentsOf: recall.appendingPathComponent("RecallUIKit/WorkspacePreferences.swift"),
+                                      encoding: .utf8)
+        let link = try XCTUnwrap(destinations.range(of: #"hippocampus://setup/[a-z-]+"#, options: .regularExpression))
+        XCTAssertEqual(HippocampusURLRoute.parse(try XCTUnwrap(URL(string: String(destinations[link])))),
                        .showSetupPanel(.browserExtension))
+        XCTAssertTrue(webPages.contains("WorkspacePreferencesRouter.shared.open(.browserExtension"))
         for (name, source) in [("WebPagesPlace", webPages), ("LookedUpPlace", lookedUp)] {
             XCTAssertTrue(source.contains("BrowserExtensionSetup.open()"), name)
             XCTAssertFalse(source.contains("open(.sources"), "\(name) still opens Preferences › AI Tools")
+            XCTAssertFalse(source.contains("withApplicationAt:"), "\(name) opens a link Launch Services may give the window")
         }
     }
 
