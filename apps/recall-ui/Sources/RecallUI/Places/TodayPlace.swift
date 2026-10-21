@@ -39,9 +39,6 @@ struct TodayPlace: View {
 
     /// The content's widest, as the prototype's page: 900 pt with its margins.
     static let maxWidth: CGFloat = 836
-    /// A day arrow that can't move, as the window's ‹ › and the prototype
-    /// draw it.
-    static let disabledArrowOpacity: CGFloat = 0.32
 
     init(
         model: OverviewViewModel,
@@ -172,7 +169,7 @@ struct TodayPlace: View {
                 .disabled(model.showsFirstDay)
                 // The colour the row sets would keep a disabled arrow at full
                 // strength: dimmed as the window's own ‹ › are.
-                .opacity(model.showsFirstDay ? Self.disabledArrowOpacity : 1)
+                .opacity(model.previousDayArrowOpacity)
                 // On today the control names the date; on another day the
                 // title does, so it offers Today, as Calendar does.
                 if model.isToday {
@@ -194,7 +191,7 @@ struct TodayPlace: View {
                 .help(UserFacingCopy.Overview.nextDay)
                 .accessibilityLabel(UserFacingCopy.Overview.nextDay)
                 .disabled(!model.canMoveForward)
-                .opacity(model.canMoveForward ? 1 : Self.disabledArrowOpacity)
+                .opacity(model.nextDayArrowOpacity)
             }
             .buttonStyle(.borderless)
             .foregroundStyle(MCI.Color.foregroundSecondary)

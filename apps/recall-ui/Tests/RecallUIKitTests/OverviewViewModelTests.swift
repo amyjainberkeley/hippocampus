@@ -184,6 +184,27 @@ final class OverviewViewModelTests: XCTestCase {
         XCTAssertEqual(model.day.dateLocal, SampleDay.date)
     }
 
+    /// Today's › looked as clickable on today as on any other day: the
+    /// row's secondary colour kept the disabled arrow at full strength. It
+    /// is dimmed while it can't move, to the prototype's (203,203,206) on
+    /// the page's grey, and full strength again on an earlier day.
+    func testADayArrowThatCantMoveIsDimmed() async throws {
+        let (model, _) = try await loaded()
+        XCTAssertFalse(model.canMoveForward)
+        XCTAssertEqual(model.nextDayArrowOpacity, OverviewViewModel.stuckArrowOpacity, "› on today")
+        XCTAssertEqual(model.previousDayArrowOpacity, 1, "a day with sessions has a day before it")
+        model.moveDay(-1)
+        XCTAssertEqual(model.nextDayArrowOpacity, 1, "› on yesterday moves")
+        // The secondary colour (110,110,115) at that strength on the page's
+        // (247,248,250), as the prototype draws a disabled arrow.
+        let drawn = zip([110.0, 110, 115], [247.0, 248, 250]).map { ink, page in
+            page + (ink - page) * OverviewViewModel.stuckArrowOpacity
+        }
+        for (channel, wanted) in zip(drawn, [203.0, 203, 206]) {
+            XCTAssertEqual(channel, wanted, accuracy: 1.5)
+        }
+    }
+
     func testTheLegendDimsOtherKindsAndAKindWithNoSessionDimsNothing() async throws {
         let (model, _) = try await loaded()
         model.toggleHighlight(.code)

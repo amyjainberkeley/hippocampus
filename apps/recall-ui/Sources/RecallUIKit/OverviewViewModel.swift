@@ -184,6 +184,21 @@ public final class OverviewViewModel: ObservableObject {
         return calendar.startOfDay(for: next) <= calendar.startOfDay(for: now())
     }
 
+    /// A day arrow that can't move is drawn this strong, the prototype's
+    /// (203,203,206) on the page's grey: the row's secondary colour would
+    /// otherwise keep it at full strength, as if it could be clicked.
+    public static let stuckArrowOpacity: Double = 0.32
+
+    /// How strong ‹ is drawn: dimmed on the first day, which has none before it.
+    public var previousDayArrowOpacity: Double {
+        showsFirstDay ? Self.stuckArrowOpacity : 1
+    }
+
+    /// How strong › is drawn: dimmed on today, which has none after it.
+    public var nextDayArrowOpacity: Double {
+        canMoveForward ? 1 : Self.stuckArrowOpacity
+    }
+
     /// Read the saved status and, for today, whether anything is saved from
     /// before it; then the day, then what goes around it. The first two are
     /// quick local reads, done first so the day is never drawn with an old
