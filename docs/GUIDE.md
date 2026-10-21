@@ -13,6 +13,7 @@ The [README](../README.md) says what Hippocampus is. This is the reference: the 
 - [Pull in your other MCP servers](#pull-in-your-other-mcp-servers)
 - [Settings without a switch](#settings-without-a-switch)
 - [Build requirements](#build-requirements)
+- [If you keep an older copy](#if-you-keep-an-older-copy)
 - [Uninstall](#uninstall)
 - [Troubleshooting](#troubleshooting)
 
