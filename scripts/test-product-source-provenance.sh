@@ -145,6 +145,26 @@ fi
 python3 "$PROVENANCE_TOOL" create --app "$FAKE_APP" \
     --source-head 0123456789abcdef --source-digest "$first" \
     --current-source-qualification
+for tool in mci-seed-brain demo-screens; do
+    printf 'demo memory tool\n' > "$FAKE_MACOS/$tool"
+done
+python3 "$PROVENANCE_TOOL" create --app "$FAKE_APP" \
+    --source-head 0123456789abcdef --source-digest "$first" \
+    --current-source-qualification
+python3 "$PROVENANCE_TOOL" verify --app "$FAKE_APP" \
+    --expected-source-head 0123456789abcdef --expected-source-digest "$first" \
+    --require-current-source > /dev/null 2>&1 \
+    || fail "Demo Memory's tools were refused by build provenance"
+printf 'changed\n' >> "$FAKE_MACOS/demo-screens"
+if python3 "$PROVENANCE_TOOL" verify --app "$FAKE_APP" \
+    --expected-source-head 0123456789abcdef --expected-source-digest "$first" \
+    --require-current-source > /dev/null 2>&1; then
+    fail "a modified Demo Memory tool still matched build provenance"
+fi
+rm -f "$FAKE_MACOS/mci-seed-brain" "$FAKE_MACOS/demo-screens"
+python3 "$PROVENANCE_TOOL" create --app "$FAKE_APP" \
+    --source-head 0123456789abcdef --source-digest "$first" \
+    --current-source-qualification
 printf 'unexpected executable\n' > "$FAKE_MACOS/unexpected.dylib"
 if python3 "$PROVENANCE_TOOL" verify --app "$FAKE_APP" \
     --expected-source-head 0123456789abcdef --expected-source-digest "$first" \

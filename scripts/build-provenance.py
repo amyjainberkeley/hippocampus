@@ -26,8 +26,10 @@ BINARY_NAMES = (
     "onboarding",
     "hippocampus-native-host",
 )
-# Shipped when built (it needs the macOS 26 SDK); hashed whenever present.
-OPTIONAL_BINARY_NAMES = ("hippocampus-mind",)
+# Shipped when built, hashed whenever present: the model process (it needs
+# the macOS 26 SDK) and Demo Memory's seeder and screen drawer, which
+# build-app.sh signs and ships with the app when they were built.
+OPTIONAL_BINARY_NAMES = ("hippocampus-mind", "mci-seed-brain", "demo-screens")
 MACHO_MAGICS = {
     b"\xca\xfe\xba\xbe",
     b"\xbe\xba\xfe\xca",
