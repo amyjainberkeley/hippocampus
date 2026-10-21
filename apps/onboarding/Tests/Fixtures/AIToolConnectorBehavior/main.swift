@@ -25,28 +25,43 @@ struct AIToolConnectorBehavior {
             ofItemAtPath: slowAgent.path
         )
 
-        let started = Date()
-        do {
-            _ = try await DefaultClaudeCodeRegistrar(
-                agentURL: slowAgent,
-                timeoutSeconds: 0.5
-            ).register()
-            fatalError("slow connector unexpectedly succeeded")
-        } catch let error as ClaudeCodeRegistrarError {
-            guard case .timedOut = error else {
-                fatalError("expected timedOut, got \(error)")
+        // The check that the timed-out agent is gone needs the agent to have
+        // started and written its pid before the half second ended it. On a
+        // Mac busy with other builds perl can take longer than that to start,
+        // so the agent is tried up to three times until it got that far.
+        // Every try must time out within its bound.
+        var timedOutAgent: Int32?
+        for _ in 0..<3 where timedOutAgent == nil {
+            try? FileManager.default.removeItem(at: childPID)
+            let started = Date()
+            do {
+                _ = try await DefaultClaudeCodeRegistrar(
+                    agentURL: slowAgent,
+                    timeoutSeconds: 0.5
+                ).register()
+                fatalError("slow connector unexpectedly succeeded")
+            } catch let error as ClaudeCodeRegistrarError {
+                guard case .timedOut = error else {
+                    fatalError("expected timedOut, got \(error)")
+                }
             }
-        }
-        precondition(Date().timeIntervalSince(started) < 2, "connector timeout was not bounded")
+            precondition(Date().timeIntervalSince(started) < 2, "connector timeout was not bounded")
 
-        let receiptDeadline = Date().addingTimeInterval(0.5)
-        while !FileManager.default.fileExists(atPath: childPID.path), Date() < receiptDeadline {
-            try? await Task<Never, Never>.sleep(nanoseconds: 25_000_000)
+            let receiptDeadline = Date().addingTimeInterval(0.5)
+            while !FileManager.default.fileExists(atPath: childPID.path), Date() < receiptDeadline {
+                try? await Task<Never, Never>.sleep(nanoseconds: 25_000_000)
+            }
+            // Ended before it wrote its pid, or while writing it: try again.
+            let pid = ((try? String(contentsOf: childPID, encoding: .utf8)) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if pid.isEmpty { continue }
+            guard let processIdentifier = Int32(pid) else {
+                fatalError("connector did not publish a child pid")
+            }
+            timedOutAgent = processIdentifier
         }
-        let pid = try String(contentsOf: childPID, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let processIdentifier = Int32(pid) else {
-            fatalError("connector did not publish a child pid")
+        guard let processIdentifier = timedOutAgent else {
+            fatalError("the slow agent never started in three tries")
         }
         precondition(kill(processIdentifier, 0) == -1 && errno == ESRCH, "timed-out connector is still alive")
 
