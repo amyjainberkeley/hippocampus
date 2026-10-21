@@ -87,6 +87,7 @@ the checker will reject if it ever appears in public copy unregistered.
 | no-ffmpeg | NOTICE: does not ship FFmpeg, x264 or x265 | NOTICE | code:tools/ocr/bundle.py | NEVER_SHIPPED | N |
 | license | Apache 2.0, open source | README, FAQ, site, privacy | file:LICENSE | Apache License | N |
 | min-os | macOS 14 or later, Apple silicon | README, site, how-it-works | file:apps/hippocampus/Resources/Info.plist | 14.0 | N |
+| test-mac-memory | 16 GB | how-it-works | eval:eval/ocr-bakeoff-2026-10-15.md | 16 GB | Y |
 
 <!-- REGISTRY:END -->
 
@@ -100,15 +101,14 @@ the checker will reject if it ever appears in public copy unregistered.
   shares, consider committing the bench's scored output as a small results
   file, or have `bakeoff.py score` write one. Until then the site's reading
   figures are "reproducible", not "pinned". **Needs a person** to decide.
-- **The site is not yet safe to publish.** As of this writing
-  `public/index.html` still carries the ruled-out line "Your AI already
-  knows …" in four places (the `<meta name="description">`, the
-  `og:description`, the hero paragraph, and the "Your AI" section heading),
-  and the home-page `<meta name="description">` still reads "on your Mac
-  only" plus that line. `claims-check.sh` fails on this. The README and FAQ
-  already use the agreed line. **Needs a person** (the site lives in a
-  separate repo): replace those four with "Your AI tools start with what
-  you're working on." and refresh the two meta descriptions.
+- **The site is not yet safe to publish.** As of October 20, `claims-check.sh`
+  with the site present fails on the Footprint table in
+  `public/how-it-works.html`: its download and install sizes come from
+  earlier, unstripped builds (the figures above are the notarized October 18
+  candidate's), its ranges are written with a dash rather than "to", and its
+  idle memory and idle CPU figures have no measurement in this repo. The
+  ruled-out line is gone from the site. **Needs a person** (the site lives in
+  a separate checkout).
 - Sample-data figures in the screenshots and alt text (a "$18" seat price, an
   invoice number, a "41 ms" latency, a clock time) are not product claims and
   are labelled "Sample data" on the page. The checker only enforces
