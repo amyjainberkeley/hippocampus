@@ -111,6 +111,45 @@ final class ResumeSheetModelTests: XCTestCase {
         XCTAssertFalse(own.rows.contains { $0.detail == madeUp })
     }
 
+    /// The take films Resume on the made-up project: Demo Memory makes its
+    /// folder, empty, inside its own folder, so the sheet offers the editor
+    /// and Terminal, ticked, and opens that folder. Nothing else in the
+    /// week's folders is real, and a folder that is gone says so.
+    func testInDemoMemoryTheProjectFolderDemoMemoryMadeOpensInTheEditorAndTerminal() async {
+        let folder = "~/Library/Application Support/Hippocampus/Demo Memory/pebblewick-app"
+        let take: [ResumePlan.Target] = [
+            .init(kind: "folder", title: "pebblewick-app", app: vscode, path: folder),
+            .init(kind: "folder", title: "pebblewick-app", app: terminal, path: folder),
+            .init(kind: "app", title: "Slack", app: slack),
+        ]
+        let (demo, workspace) = model(take, madeUp: true)
+        await demo.load()
+        XCTAssertEqual(demo.rows.map(\.detail), [WorkCopy.resumeOpensIn("VS Code"), WorkCopy.resumeOpensIn("Terminal"), nil])
+        XCTAssertTrue(demo.rows.allSatisfy { $0.available && $0.ticked })
+        XCTAssertEqual(demo.willOpen.apps, 3)
+        await demo.resume()
+        let projectURL = URL(fileURLWithPath: "/Users/sam/Library/Application Support/Hippocampus/Demo Memory/pebblewick-app",
+                             isDirectory: true)
+        XCTAssertEqual(workspace.opened.map(\.urls), [[projectURL], [projectURL]])
+
+        // Gone (Demo Memory was left and its folder deleted): it says so.
+        let (gone, _) = model(take, missing: [folder], madeUp: true)
+        await gone.load()
+        XCTAssertEqual(gone.rows.prefix(2).map(\.detail), [WorkCopy.resumeMissing("pebblewick-app"),
+                                                          WorkCopy.resumeMissing("pebblewick-app")])
+        XCTAssertFalse(gone.rows.prefix(2).contains(where: \.available))
+
+        // Only a folder directly inside Demo Memory's folder is real.
+        for path in [folder + "/src", "~/Library/Application Support/Hippocampus/Demo Memory/../../../dev/x",
+                     "~/Library/Application Support/Hippocampus/Demo Memory/", "~/dev/pebblewick-app"] {
+            XCTAssertTrue(ResumeSheetModel.isMadeUp(.init(kind: "folder", title: "x", app: vscode, path: path)), path)
+        }
+        XCTAssertTrue(ResumeSheetModel.isMadeUp(.init(kind: "document", title: "notes.md", app: vscode,
+                                                      path: folder + "/notes.md")))
+        XCTAssertFalse(ResumeSheetModel.isMadeUp(.init(kind: "folder", title: "pebblewick-app", app: vscode,
+                                                       path: folder + "/")))
+    }
+
     func testOnlyNamesKeptForExamplesCountAsMadeUpSites() {
         for address in ["https://foundernotes.example/a", "https://a.b.test/", "http://localhost/x",
                         "https://example.com/", "https://www.example.org/x", "https://shop.invalid/"] {

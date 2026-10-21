@@ -206,15 +206,35 @@ public final class ResumeSheetModel: ObservableObject {
 
     /// In Demo Memory, whether a target is the made-up week's own invention,
     /// so nothing real can open it: every file, folder and document in the
-    /// week is made up (`mci_seed_brain/demo_week/story.rs`), and so is a
+    /// week is made up (`mci_seed_brain/demo_week/story.rs`), except the
+    /// project's folder Demo Memory makes (`isDemoProjectFolder`), and so is a
     /// page with no address or on a made-up site (a name reserved for
     /// examples, such as `foundernotes.example`). Its apps, and its pages on
     /// real sites, are real, and open as they would anywhere.
     static func isMadeUp(_ target: ResumePlan.Target) -> Bool {
+        if isDemoProjectFolder(target) { return false }
         if target.path != nil || target.kind == "folder" || target.kind == "document" { return true }
         if target.reason == "missing" || target.reason == "no_address" { return true }
         guard let address = target.url else { return false }
         return isExampleSite(address)
+    }
+
+    /// Demo Memory's own folder, as the made-up week's Terminal titles write
+    /// it (`PROJECT_FOLDER` in `mci_seed_brain/demo_week/story.rs`).
+    static let demoMemoryFolder = "~/Library/Application Support/Hippocampus/Demo Memory/"
+
+    /// The one real thing in the made-up week: the project's folder, which
+    /// Demo Memory makes, empty, inside its own folder, so Resume can reopen
+    /// it in the editor and Terminal. Only a folder directly inside Demo
+    /// Memory's folder counts; whether it is still there is checked as for
+    /// any folder.
+    static func isDemoProjectFolder(_ target: ResumePlan.Target) -> Bool {
+        guard target.kind == "folder", let path = target.path, path.hasPrefix(demoMemoryFolder) else {
+            return false
+        }
+        var name = Substring(path.dropFirst(demoMemoryFolder.count))
+        if name.hasSuffix("/") { name = name.dropLast() }
+        return !name.isEmpty && !name.contains("/") && name != "." && name != ".."
     }
 
     /// A host under a name kept for examples and tests (RFC 2606 and 6761),
