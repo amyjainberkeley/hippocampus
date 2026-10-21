@@ -167,9 +167,7 @@ struct LibraryLensView: View {
                                     ? Color.brandMintSubtle : Color.clear)
                         }
                     } header: {
-                        Text(verbatim: section.title(now: now(), calendar: calendar, locale: locale))
-                            .mciFont(.caption)
-                            .foregroundStyle(Color.brandFgSecondary)
+                        ListHeading(title: section.title(now: now(), calendar: calendar, locale: locale))
                     }
                 }
                 if model.canLoadEarlier || model.isLoadingEarlier {

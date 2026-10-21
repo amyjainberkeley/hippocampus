@@ -147,16 +147,42 @@ struct HourHeading: View {
     var forgetHour: (() -> Void)?
 
     var body: some View {
-        Text(verbatim: title)
-            .mciFont(.caption)
-            .foregroundStyle(Color.brandFgSecondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        ListHeading(title: title)
             .contentShape(Rectangle())
             .contextMenu {
                 if let forgetTitle, let forgetHour {
                     Button(forgetTitle, role: .destructive, action: forgetHour)
                 }
             }
+    }
+}
+
+/// A heading over a list's rows, an hour in History or a day in a lens, as
+/// the prototype draws it: its words, and a line under them, on the page's
+/// own colour. A list's section heading sits on the list's band, white
+/// (grey in dark mode) on the page's colour, so the page's colour is drawn
+/// past the heading's edges, over the band, pinned or not.
+struct ListHeading: View {
+    let title: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(verbatim: title)
+                .mciFont(.caption)
+                .foregroundStyle(Color.brandFgSecondary)
+            Rectangle()
+                .fill(MCI.Color.borderStrong)
+                .frame(height: 1)
+                .accessibilityHidden(true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            MCI.Color.background
+                .padding(.horizontal, -48)
+                .padding(.vertical, -4)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 
