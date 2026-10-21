@@ -444,6 +444,29 @@ final class FormattersTests: XCTestCase {
         XCTAssertEqual(Formatters.rowTextCap, 280)
     }
 
+    /// The FFI counts its 280 as Rust does, in Unicode scalars, and a rating's
+    /// "⭐️" is two of them in one character a row shows. A text it cut that
+    /// holds some is still read as cut, and ends at a whole word with "…".
+    func testACutIsCountedAsTheFFICountsIt() {
+        let lead = "Cohort tables for subscription businesses\nMETRICS WEEKLY\nToday 2:21 PM\n"
+        let stars = String(repeating: "\u{2B50}\u{FE0F}", count: 5)
+        let body = "Rated 4.9 \(stars) by its readers. Cohort tables show how many customers stay each month after "
+            + "they signed up. Read them by row: each row is the month a group started, and each column is a later "
+            + "month. A falling row means people leave sooner than planned for."
+        // The FFI's cut: the first 280 Unicode scalars of the text.
+        var scalars = String.UnicodeScalarView()
+        scalars.append(contentsOf: (lead + body).unicodeScalars.prefix(Formatters.rowTextCap))
+        let text = String(scalars)
+        XCTAssertEqual(text.unicodeScalars.count, 280)
+        XCTAssertEqual(text.count, 275, "five stars are ten scalars")
+        XCTAssertTrue(text.hasSuffix("A fal"), "the FFI's cut fell mid-word")
+        let title = "Cohort tables for subscription businesses \u{00B7} Metrics Weekly"
+        let preview = Formatters.rowPreview(text, title: title)
+        XCTAssertLessThanOrEqual(preview.count, 220)
+        XCTAssertTrue(preview.hasSuffix("\u{2026}"), preview)
+        XCTAssertTrue(body.hasPrefix(String(preview.dropLast()) + " "), "ends at a whole word: \(preview)")
+    }
+
     /// A preview longer than a row shows stops at its last whole word that
     /// fits, with "…", never mid-word ("Gift cards Cus…" on Web Pages); a
     /// first word longer than the row is cut at the limit.

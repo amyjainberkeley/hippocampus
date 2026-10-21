@@ -115,7 +115,9 @@ public enum Formatters {
         if !toTheEnd || joined.count > maxLen {
             return cutAtAWholeWord(joined, maxLen: maxLen)
         }
-        if !isPassage, text.count >= rowTextCap {
+        // Counted as the FFI counts its cap: in Unicode scalars, Rust's
+        // `char`s. A rating's "⭐️" or a flag is two of them in one Character.
+        if !isPassage, text.unicodeScalars.count >= rowTextCap {
             return endingAtAWholeWord(joined)
         }
         return joined
@@ -135,8 +137,9 @@ public enum Formatters {
     }
 
     /// The most characters of a moment's text the FFI gives a row:
-    /// `SNIPPET_CHAR_CAP` in adapters/macos/mci-brain-ffi/src/lib.rs. A text
-    /// this long was cut there, wherever that fell, mid-word too.
+    /// `SNIPPET_CHAR_CAP` in adapters/macos/mci-brain-ffi/src/lib.rs, counted
+    /// in Unicode scalars (Rust's `char`s). A text this long was cut there,
+    /// wherever that fell, mid-word too.
     public static let rowTextCap = 280
 
     /// `text` up to its last whole word, then "…": what a row shows of a
